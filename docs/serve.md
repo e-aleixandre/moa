@@ -14,7 +14,11 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Streaming output over WebSocket. Current web clients negotiate a single
   multiplexed socket for all visible sessions (`/api/ws`, advertised as
   `ws_mux: 1` by `/api/capabilities`); older cached clients continue using the
-  compatible per-session socket route.
+  compatible per-session socket route. Live output is delivered in full on
+  either rail. Reconnect snapshots intentionally contain only the most recent
+  150 messages and at most 1 MiB of display history (`history_truncated` marks
+  this); full persisted tool output is available from
+  `GET /api/sessions/:id/messages?detail=full&item_id=:itemID`.
 - Permission prompts and cancel
 - Plan mode, subagents, MCP
 - Model and thinking reconfiguration per session, with pinned-model shortcuts and provider drill-down

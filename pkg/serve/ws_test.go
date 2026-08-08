@@ -253,10 +253,9 @@ func TestWsEventFromBus_MessageEnded_InputIncludesCache(t *testing.T) {
 	}
 }
 
-func TestWsEventFromBus_ToolResultIsBoundedForEveryWebSocketRail(t *testing.T) {
-	ev, ok := wsEventFromBus(bus.ToolExecEnded{
-		SessionID: "s1", ToolCallID: "tool-1", ToolName: "bash", Result: strings.Repeat("x", 4*historyContentMaxBytes),
-	})
+func TestWsEventFromBus_ToolResultIsWholeForEveryWebSocketRail(t *testing.T) {
+	resultWant := strings.Repeat("x", 4*historyContentMaxBytes)
+	ev, ok := wsEventFromBus(bus.ToolExecEnded{SessionID: "s1", ToolCallID: "tool-1", ToolName: "bash", Result: resultWant})
 	if !ok || ev.Type != "tool_end" {
 		t.Fatalf("Type = %q ok=%v, want tool_end", ev.Type, ok)
 	}
@@ -264,8 +263,8 @@ func TestWsEventFromBus_ToolResultIsBoundedForEveryWebSocketRail(t *testing.T) {
 	if !ok {
 		t.Fatalf("Data type = %T, want ToolEndData", ev.Data)
 	}
-	if len(data.Result) <= historyContentMaxBytes || !strings.Contains(data.Result, "truncated on this device") {
-		t.Fatalf("bounded tool result = %q", data.Result)
+	if data.Result != resultWant {
+		t.Fatalf("tool result length = %d, want %d", len(data.Result), len(resultWant))
 	}
 }
 

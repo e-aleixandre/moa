@@ -3,7 +3,6 @@ package serve
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"time"
 
@@ -14,16 +13,7 @@ import (
 const (
 	muxProtocolVersion = 1
 	muxEventsPerCycle  = 32
-	// A shared socket must never spend the legacy 30-second write timeout on
-	// one session. All normal live projections are bounded below; this is the
-	// final mux-only guard for a future projection that accidentally is not.
-	muxEventMaxBytes       = 128 << 10
-	muxSessionWriteTimeout = time.Second
 )
-
-// Kept as a seam so the session-isolation behavior can be tested with the
-// same failure class wsjson returns for an unencodable projection.
-var muxWriteJSON = wsWriteJSON
 
 // Kept as a seam for failures while producing a per-session init snapshot.
 // The mux must release a newly-created reactor even when this panics.
@@ -213,7 +203,7 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 			registered = true
 			order = append(order, request.Session)
 			watchReactor(reactor)
-			if muxWriteSessionJSON(ctx, conn, muxServerFrame{Type: "init", Session: request.Session, Seq: cut, Data: init}) != nil {
+			if muxWriteJSON(ctx, conn, muxServerFrame{Type: "init", Session: request.Session, Seq: cut, Data: init}) != nil {
 				return degrade(request.Session, "init_failed")
 			}
 			return true
@@ -245,7 +235,7 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 			sub.reactor, sub.cut = reactor, cut
 			replaced = true
 			watchReactor(reactor)
-			if muxWriteSessionJSON(ctx, conn, muxServerFrame{Type: "init", Session: id, Seq: cut, Data: init}) != nil {
+			if muxWriteJSON(ctx, conn, muxServerFrame{Type: "init", Session: id, Seq: cut, Data: init}) != nil {
 				return degrade(id, "init_failed")
 			}
 			return true
@@ -360,18 +350,12 @@ func writeMuxSession(ctx context.Context, conn *websocket.Conn, id string, sub *
 			if err != nil {
 				return "encoding_failed"
 			}
-			if len(encoded) > muxEventMaxBytes {
-				return "payload_too_large"
-			}
-			// The writer is shared, but this deadline is deliberately per session:
-			// one stalled projection gets an explicit resync while other queues
-			// resume on the next scheduler turn. A failed resync still proves that
-			// the transport itself is dead and tears the mux down.
-			err = muxWriteSessionJSON(ctx, conn, frame)
-			if err != nil {
-				if errors.Is(err, context.DeadlineExceeded) {
-					return "write_timeout"
-				}
+			// Marshal before acquiring the shared connection writer. In particular,
+			// a large tool result must not be discarded merely to manufacture a
+			// per-session write deadline: nhooyr closes the whole connection when
+			// any write context expires. The only write deadline is the transport's
+			// shared failure deadline in muxWriteEncodedJSON.
+			if err = muxWriteEncodedJSON(ctx, conn, encoded); err != nil {
 				return "write_failed"
 			}
 			if isPriorityWsEvent(event) {
@@ -387,12 +371,23 @@ func writeMuxSession(ctx context.Context, conn *websocket.Conn, id string, sub *
 	return ""
 }
 
-// muxWriteSessionJSON prevents an init or live event from monopolizing the
-// shared mux writer. Control writes are deliberately not routed through this:
-// after a session write failure, their result tells the caller whether the
-// connection itself is dead or only that subscription needs a fresh snapshot.
-func muxWriteSessionJSON(ctx context.Context, conn *websocket.Conn, v any) error { //nolint:staticcheck // existing Serve WebSocket transport
-	writeCtx, cancel := context.WithTimeout(ctx, muxSessionWriteTimeout)
+// muxWriteJSON serializes a frame before taking the shared WebSocket writer.
+// Encoding failures belong to the affected subscription; an actual write
+// failure is transport-wide and the caller's failed resync tears the mux down.
+func muxWriteJSON(ctx context.Context, conn *websocket.Conn, v any) error { //nolint:staticcheck // existing Serve WebSocket transport
+	encoded, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return muxWriteEncodedJSON(ctx, conn, encoded)
+}
+
+// muxWriteEncodedJSON deliberately uses one socket-wide deadline. nhooyr's
+// timeout loop closes Conn when a write context expires, so a shorter deadline
+// cannot provide per-session isolation. A timeout here means this transport is
+// dead and every subscription is released together.
+func muxWriteEncodedJSON(ctx context.Context, conn *websocket.Conn, encoded []byte) error { //nolint:staticcheck // existing Serve WebSocket transport
+	writeCtx, cancel := context.WithTimeout(ctx, wsWriteTimeout)
 	defer cancel()
-	return muxWriteJSON(writeCtx, conn, v)
+	return conn.Write(writeCtx, websocket.MessageText, encoded) //nolint:staticcheck // existing Serve WebSocket transport
 }
