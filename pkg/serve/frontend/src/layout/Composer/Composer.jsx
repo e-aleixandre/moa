@@ -18,6 +18,15 @@ import { loadDraft, saveDraft } from "../../data/composer-draft.js";
 import { classifyCommand, POLICY_QUEUE, POLICY_REJECT } from "../../data/util/command-policy.js";
 import { processFile } from "../../data/util/attachments.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
+import {
+  SEND_BUTTON_INITIAL, sendButtonEvent, usesVoiceSendButton,
+  reduceContentSendActivation,
+} from "../../data/composer-send-button.js";
+import {
+  compositionEnded, compositionInputDiscarded, compositionStarted,
+  compositionSubmitted, newCompositionState, shouldDiscardLateCompositionInput,
+  valueBeforeLateCompositionInput,
+} from "../../data/composer-composition.js";
 import "./Composer.css";
 
 // Composer — the conversation input: send a message, steer/queue while the
@@ -69,6 +78,17 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   // queue note). It always shows a Send button that fires a steer.
   const busy = sessionState === "running" && !steer;
   const [hasText, setHasText] = useState(false);
+  // Safari may emit pointercancel instead of the click that completes a touch
+  // activation. The reducer records pointer identity and latches the terminal
+  // event before invoking send, so stale attachments cannot be submitted twice.
+  const contentSendActivationRef = useRef(SEND_BUTTON_INITIAL);
+  const dispatchContentSendRef = useRef(null);
+  const [contentSendPending, setContentSendPending] = useState(false);
+  const sendOperationRef = useRef(null);
+  const compositionRef = useRef(newCompositionState());
+  // The last normal DOM value lets us remove precisely one stale IME insertion
+  // without erasing text typed for the next message after a successful send.
+  const inputValueRef = useRef("");
   // Guards a recall (chip click / Alt+↑) against double-activation before the
   // WS steers_canceled round-trip clears the chips: without it, a second click
   // (or click + Alt+↑) would see the same pendingSteers and combine the texts
@@ -119,10 +139,12 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     const el = textareaRef.current;
     if (!el) return;
     el.value = loadDraft(sessionId);
+    inputValueRef.current = el.value;
     setHasText(!!el.value.trim());
     setCmdSuggestions(null);
     setFileSuggestions(null);
     setAttachments([]);
+    sendOperationRef.current = null;
     autoResize();
   }, [sessionId, autoResize]);
 
@@ -270,7 +292,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     } else {
       el.value = '/' + cmd.name;
       setCmdSuggestions(null);
-      handleSendInnerRef.current(el);
+      dispatchContentSendRef.current?.(sendButtonEvent.keyActivate());
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -305,10 +327,14 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     } finally {
       attachInFlightRef.current -= toProcess.length;
     }
-    if (results.length > 0) setAttachments((prev) => [...prev, ...results]);
+    if (results.length > 0) {
+      sendOperationRef.current = null;
+      setAttachments((prev) => [...prev, ...results]);
+    }
   }, [attachments.length]);
 
   const removeAttachment = useCallback((idx) => {
+    sendOperationRef.current = null;
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
   }, []);
 
@@ -407,16 +433,16 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     // feedback / rebounds to the parent if the subagent already finished.
     if (steer && steer.jobId) {
       if (!text) return;
-      pushHistory(text);
-      el.value = '';
-      saveDraft(sessionId, '');
-      setHasText(false);
-      setCmdSuggestions(null);
-      setFileSuggestions(null);
-      setAttachments([]);
-      autoResize();
       try {
         await steerSubagent(sessionId, steer.jobId, text);
+        pushHistory(text);
+        el.value = '';
+        saveDraft(sessionId, '');
+        setHasText(false);
+        setCmdSuggestions(null);
+        setFileSuggestions(null);
+        setAttachments([]);
+        autoResize();
       } catch (e) {
         console.error('Steer failed:', e);
         if (steer.onRebound) steer.onRebound();
@@ -430,14 +456,29 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       return;
     }
 
-    if (text) pushHistory(text);
-    el.value = '';
-    saveDraft(sessionId, ''); // sent — drop the persisted draft
-    setHasText(false);
-    setCmdSuggestions(null);
-    setFileSuggestions(null);
-    setAttachments([]);
-    autoResize();
+    const clearSentComposer = () => {
+      // Safari can deliver a composition input after the Enter that submitted
+      // it. Its epoch identifies it as stale without rejecting a later, new
+      // composition.
+      compositionRef.current = compositionSubmitted(compositionRef.current);
+      el.value = '';
+      inputValueRef.current = '';
+      saveDraft(sessionId, '');
+      setHasText(false);
+      setCmdSuggestions(null);
+      setFileSuggestions(null);
+      setAttachments([]);
+      sendOperationRef.current = null;
+      autoResize();
+    };
+
+    // Commands and shell escapes retain their established immediate-clear
+    // semantics. Ordinary content waits for the server response below, so a
+    // rejected attachment send remains a real retry rather than empty text.
+    if (text.startsWith('/') || text.startsWith('!')) {
+      if (text) pushHistory(text);
+      clearSentComposer();
+    }
 
     // Detect slash commands.
     if (text.startsWith('/')) {
@@ -547,23 +588,69 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     }
 
     try {
-      await sendMessage(sessionId, text, atts);
+      const previous = sendOperationRef.current;
+      const operation = previous && previous.text === text && previous.attachments === atts && previous.serverInstance === session?.serverInstance
+        ? previous
+        : { text, attachments: atts, steerId: newSteerId(), msgId: newSteerId(), serverInstance: session?.serverInstance || '' };
+      sendOperationRef.current = operation;
+      await sendMessage(sessionId, text, atts, operation);
+      if (text) pushHistory(text);
+      clearSentComposer();
     } catch (e) {
       console.error('Send failed:', e);
+      // A half-pair collision was explicitly refused, so retaining those IDs
+      // would make every unchanged retry fail forever. The request was not
+      // accepted; release only that operation and keep all user content.
+      if (e?.status === 409 && String(e.message || e).includes('send IDs conflict')) {
+        sendOperationRef.current = null;
+      }
       // sendMessage already rolled back the optimistic echo/chip; surface the
       // reason (e.g. a 400) so it's not silent.
-      addToast({ sessionId, title: 'Message not sent', detail: String(e.message || e), type: 'error' });
+      addToast({ sessionId, title: 'Message not sent', detail: `${String(e.message || e)} Your text and attachments are still here; you can retry.`, type: 'error' });
     }
   }, [sessionId, sessionState, attachments, pushHistory, autoResize, steer, onSecret]);
 
   const handleSend = useCallback(() => handleSendInner(textareaRef.current), [handleSendInner]);
-  // acceptSuggestion (below) is defined before handleSendInner and has an
-  // intentionally-empty dep array (it's only invoked from event handlers, well
-  // after mount) — this ref keeps it calling the latest handleSendInner
-  // (fresh sessionId/attachments) instead of one closed over at first render.
-  const handleSendInnerRef = useRef(handleSendInner);
-  handleSendInnerRef.current = handleSendInner;
-
+  const finishContentSend = useCallback(() => {
+    const { state } = reduceContentSendActivation(
+      contentSendActivationRef.current,
+      sendButtonEvent.sendFinished(),
+    );
+    contentSendActivationRef.current = state;
+    setContentSendPending(false);
+  }, []);
+  const dispatchContentSendActivation = useCallback((event) => {
+    const { state, actions } = reduceContentSendActivation(contentSendActivationRef.current, event);
+    contentSendActivationRef.current = state;
+    if (actions.some((action) => action.type === "send")) {
+      // The reducer sets sendInFlight synchronously above, before this async
+      // handler can observe the current attachments. Every later DOM event is
+      // inert until this exact invocation has completed.
+      setContentSendPending(true);
+      void Promise.resolve(handleSend()).finally(finishContentSend);
+    } else if (contentSendActivationRef.current.sendInFlight) {
+      addToast({ sessionId, title: 'Message is still sending', detail: 'Wait for the request to finish before sending again.', type: 'attention' });
+    }
+  }, [handleSend, finishContentSend, sessionId]);
+  dispatchContentSendRef.current = dispatchContentSendActivation;
+  const handleContentSendPointerDown = useCallback((e) => {
+    if (e.button != null && e.button !== 0) return;
+    dispatchContentSendActivation(sendButtonEvent.pointerDown(e.pointerId));
+  }, [dispatchContentSendActivation]);
+  const handleContentSendPointerUp = useCallback((e) => {
+    dispatchContentSendActivation(sendButtonEvent.pointerUp(e.pointerId));
+  }, [dispatchContentSendActivation]);
+  const handleContentSendPointerCancel = useCallback((e) => {
+    dispatchContentSendActivation(sendButtonEvent.pointerCancel(e.pointerId));
+  }, [dispatchContentSendActivation]);
+  const handleContentSendClick = useCallback(() => {
+    dispatchContentSendActivation(sendButtonEvent.click());
+  }, [dispatchContentSendActivation]);
+  const handleContentSendKeyDown = useCallback((e) => {
+    if (e.repeat || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    dispatchContentSendActivation(sendButtonEvent.keyActivate());
+  }, [dispatchContentSendActivation]);
   // --- Voice / push-to-talk ---
   // insertAtCursor drops transcribed text at the textarea caret (with a space
   // separator when needed), then fires input so drafts/hasText/autoResize/
@@ -590,7 +677,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   const {
     handlers: voiceHandlers, recording, transcribing, locked: voiceLocked,
     showSlideHint, supported: voiceSupported, toggleFromShortcut,
-  } = useVoiceGesture({ onTranscript: insertAtCursor, onError: onVoiceError, onSend: handleSend });
+  } = useVoiceGesture({ onTranscript: insertAtCursor, onError: onVoiceError, onSend: () => dispatchContentSendActivation(sendButtonEvent.keyActivate()) });
 
   // Voice is usable only when the backend can transcribe AND the browser has a
   // MediaRecorder + mic (needs a secure context). Steer mode never records — it
@@ -740,14 +827,16 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     // sendMessage still routes to a steer whenever the session is busy, so this
     // is only meaningful for an idle session the user wants to queue against.
     if (e.key === "Enter" && (e.altKey || e.metaKey)) {
+      if (e.isComposing || compositionRef.current.composing) return;
       e.preventDefault();
-      handleSend();
+      dispatchContentSendActivation(sendButtonEvent.keyActivate());
       return;
     }
 
     if (e.key === "Enter" && !e.shiftKey) {
+      if (e.isComposing || compositionRef.current.composing) return;
       e.preventDefault();
-      handleSend();
+      dispatchContentSendActivation(sendButtonEvent.keyActivate());
       return;
     }
 
@@ -790,11 +879,28 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     }
   }, [
     sessionId, busy, fileSuggestions, fileCursor, cmdSuggestions, cmdCursor,
-    handleDequeueSteers, handleStop, handleSend, acceptFileMention, acceptSuggestion,
+    handleDequeueSteers, handleStop, dispatchContentSendActivation, acceptFileMention, acceptSuggestion,
     cursorRow, totalRows, autoResize, updateSuggestions,
   ]);
 
   const handleInput = useCallback((e) => {
+    const inputType = e.inputType || e.nativeEvent?.inputType;
+    if (shouldDiscardLateCompositionInput(compositionRef.current, {
+      inputType, isComposing: e.isComposing || e.nativeEvent?.isComposing,
+    })) {
+      compositionRef.current = compositionInputDiscarded(compositionRef.current);
+      const restored = valueBeforeLateCompositionInput(inputValueRef.current, e.target.value, e.data || e.nativeEvent?.data);
+      if (restored != null) {
+        e.target.value = restored;
+        inputValueRef.current = restored;
+        saveDraft(sessionId, restored);
+        setHasText(!!restored.trim());
+      }
+      autoResize();
+      return;
+    }
+    inputValueRef.current = e.target.value;
+    sendOperationRef.current = null;
     autoResize();
     updateSuggestions();
     // saveDraft recognizes /secret from its first line and removes any prior
@@ -805,6 +911,13 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     clearTimeout(fileDebounceRef.current);
     fileDebounceRef.current = setTimeout(updateFileSuggestions, 100);
   }, [sessionId, autoResize, updateSuggestions, updateFileSuggestions]);
+
+  const handleCompositionStart = useCallback(() => {
+    compositionRef.current = compositionStarted(compositionRef.current);
+  }, []);
+  const handleCompositionEnd = useCallback(() => {
+    compositionRef.current = compositionEnded(compositionRef.current);
+  }, []);
 
   // Cache-expiry warning: the prompt cache goes cold `cacheExpiresAt` ms after
   // the last run. We tick a clock while idle so the warning appears on its own
@@ -853,7 +966,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
                 ? <img src={`data:${a.mime};base64,${a.data}`} alt={a.name} />
                 : <span class="attach-chip-name">📎 {a.name} <span class="attach-chip-size">({Math.max(1, Math.round(a.size / 1024))} kB)</span></span>
               }
-              <button type="button" class="attach-chip-remove" onClick={() => removeAttachment(i)} title="Remove">
+              <button type="button" class="attach-chip-remove" onClick={() => removeAttachment(i)} title="Remove" disabled={contentSendPending}>
                 <X size={12} />
               </button>
             </div>
@@ -901,13 +1014,16 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
           placeholder={placeholder}
           onInput={handleInput}
           onKeyDown={handleKey}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
           onPaste={handlePaste}
+          readOnly={contentSendPending}
         />
         <div class="composer-bar">
-          <button type="button" class="composer-btn composer-btn-attach" title="Attach files" aria-label="Attach" onClick={handleAttachClick}>
+          <button type="button" class="composer-btn composer-btn-attach" title="Attach files" aria-label="Attach" onClick={handleAttachClick} disabled={contentSendPending}>
             <Plus size={15} />
           </button>
-          <button type="button" class="composer-btn composer-btn-slash" title="Slash commands" aria-label="Slash commands" onClick={handleSlashButton}>
+          <button type="button" class="composer-btn composer-btn-slash" title="Slash commands" aria-label="Slash commands" onClick={handleSlashButton} disabled={contentSendPending}>
             <Slash size={14} />
           </button>
           {summary && (
@@ -956,26 +1072,31 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
             </button>
           )}
           {(() => {
-            // The send button doubles as push-to-talk: tap = send/steer,
-            // hold = record, slide up while holding = lock hands-free. The
-            // pointer GESTURE is attached whenever voice is usable — in every
-            // state, including with text to send and while the agent is busy
-            // (parity with the old InputBar, where gesture = canVoice). The
-            // input being empty only decides the ICON (mic vs arrow): a hold
-            // still records even when there's text to send, and the transcript
-            // is inserted at the caret. Steer-to-subagent mode disables voice
-            // (canVoice already excludes it) so it stays a plain send.
-            const micMode = canVoice && !hasText;
+            // Push-to-talk owns this button only when there is nothing to send.
+            // With typed text or an attachment it is an ordinary Send button:
+            // a tap sends through its normal click (or the pointercancel
+            // fallback), and it never starts recording. Recording with text is
+            // still available through ⌘. / Alt+.; this makes the text+hold transition explicit
+            // and prevents an iOS pointercancel from swallowing a message.
+            const voiceButtonMode = usesVoiceSendButton({
+              canVoice, hasText, attachmentCount: attachments.length,
+            });
+            // A shortcut recording can begin while there is text or an
+            // attachment. It must take over the button until it is stopped:
+            // showing Send here would make a live mic invisible and let a tap
+            // submit the unrelated text instead of stopping the recording.
+            const voiceOwnsButton = voiceButtonMode || recording || transcribing;
+            const micMode = voiceButtonMode;
 
             let icon = <ArrowUp size={16} />;
-            if (transcribing) icon = <Loader2 size={16} class="spin" />;
+            if (contentSendPending || transcribing) icon = <Loader2 size={16} class="spin" />;
             else if (recording && voiceLocked) icon = <Square size={14} />;
             else if (recording) icon = <Mic size={16} />;
             else if (micMode) icon = <Mic size={16} />;
 
             const cls = [
               "composer-send",
-              canVoice ? "gesture" : "",
+              voiceOwnsButton ? "gesture" : "",
               recording ? "recording" : "",
               voiceLocked ? "locked" : "",
               transcribing ? "transcribing" : "",
@@ -983,17 +1104,28 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
             ].filter(Boolean).join(" ");
 
             const sendTitle = busy ? "Send — steers the agent, doesn't stop it" : "Send";
-            const title = transcribing ? "Transcribing…"
+            const title = contentSendPending ? "Sending…"
+              : transcribing ? "Transcribing…"
               : recording ? (voiceLocked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
               : micMode ? `Hold to talk · tap to send (${formatShortcut(".", { mod: true })} for mic)`
               : sendTitle;
 
-            // Attach the push-to-talk pointer gesture whenever voice is usable;
-            // the reducer routes a quick tap to send and a hold to record, so a
-            // plain send still works. Without voice it's a plain send button.
-            const gestureProps = canVoice ? voiceHandlers : { onClick: handleSend };
+            const gestureProps = voiceOwnsButton
+              ? voiceHandlers
+              : {
+                onPointerDown: handleContentSendPointerDown,
+                onPointerUp: handleContentSendPointerUp,
+                onPointerCancel: handleContentSendPointerCancel,
+                onClick: handleContentSendClick,
+                onKeyDown: handleContentSendKeyDown,
+              };
 
-            const sendLabel = micMode ? "Record" : busy ? "Send steer" : "Send";
+            const sendLabel = contentSendPending ? "Sending"
+              : transcribing ? "Transcribing"
+              : recording ? "Stop recording"
+              : micMode ? "Record"
+              : busy ? "Send steer"
+              : "Send";
 
             return (
               <div class="composer-send-wrap">

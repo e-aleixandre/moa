@@ -51,7 +51,10 @@ test("hold past HOLD_MS starts recording; release stops and transcribes", () => 
   expect(isTranscribingPhase(state)).toBe(true);
 });
 
-test("cancel before the hold fires records nothing", () => {
+test("empty-composer cancel before the hold fires records nothing and sends nothing", () => {
+  // Content is routed to the ordinary Composer send button. This reducer owns
+  // only the empty-composer mic gesture, where a cancelled pre-threshold touch
+  // must remain inert so it cannot create a phantom empty send.
   const { state, actions } = drive([ev.pointerDown(100), ev.pointerCancel()]);
   expect(actions).toEqual([]);
   expect(state.phase).toBe("idle");

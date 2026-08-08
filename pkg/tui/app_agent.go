@@ -120,6 +120,7 @@ func (m appModel) submitBusy(text string) (tea.Model, tea.Cmd) {
 		case bus.PolicyQueue:
 			id := core.NewSteerID()
 			if err := m.runtime.Bus.Execute(bus.QueueCommand{ID: id, Raw: cmd}); err != nil {
+				m.input.Restore(text)
 				m.status.SetText("Queue full — command not queued")
 				return m, nil
 			}
@@ -153,6 +154,7 @@ func (m appModel) submitBusy(text string) (tea.Model, tea.Cmd) {
 	// queue returns ErrSteerQueueFull, and showing an accepted chip that will
 	// never be delivered would be a lie (parity with the web 503 path).
 	if err := m.runtime.Bus.Execute(steer); err != nil {
+		m.input.Restore(text)
 		m.status.SetText("Queue full — message not sent")
 		return m, nil
 	}
@@ -247,8 +249,17 @@ func (m appModel) checkClipboardImage() tea.Cmd {
 
 // startAgentRun sends a prompt to the agent and starts streaming.
 func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
+	// Submit clears the textarea before dispatch. Keep a complete rollback
+	// snapshot until bus admission succeeds so a transient rejection retains
+	// both text and the pending clipboard image.
+	m.s.failedSendText = text
+	m.s.failedSendImage = m.s.pendingImage
+	m.s.failedSendImageMime = m.s.pendingImageMime
+	m.s.failedSendBlockIdx = len(m.s.blocks)
+	m.s.failedSendBlockN = 0
 	if err := m.commitPendingTimelineEvent(); err != nil {
 		m.s.pendingStatus = "✗ " + err.Error()
+		m.restoreFailedSend()
 		return m, nil
 	}
 
@@ -261,6 +272,7 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 	}
 
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: text})
+	m.s.failedSendBlockN++
 
 	// Consume pending image if any.
 	hasImage := m.s.pendingImage != nil
@@ -276,6 +288,7 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 			Type: "status",
 			Raw:  fmt.Sprintf("📎 Image attached (%d KB, %s)", kb, imageMime),
 		})
+		m.s.failedSendBlockN++
 	}
 
 	// Set session title from the first user message.
@@ -295,6 +308,23 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 		return m, m.launchAgentSendWithContent(content)
 	}
 	return m, m.launchAgentSend(text)
+}
+
+func (m *appModel) restoreFailedSend() {
+	if m.s.failedSendText == "" {
+		return
+	}
+	start, count := m.s.failedSendBlockIdx, m.s.failedSendBlockN
+	if start >= 0 && count > 0 && start+count <= len(m.s.blocks) {
+		m.s.blocks = append(m.s.blocks[:start], m.s.blocks[start+count:]...)
+	}
+	m.input.Restore(m.s.failedSendText)
+	m.s.pendingImage = m.s.failedSendImage
+	m.s.pendingImageMime = m.s.failedSendImageMime
+	m.s.failedSendText = ""
+	m.s.failedSendImage = nil
+	m.s.failedSendImageMime = ""
+	m.s.failedSendBlockN = 0
 }
 
 // --- Reconciliation ---

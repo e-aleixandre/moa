@@ -74,6 +74,11 @@ type state struct {
 	runStartBlockIdx   int                            // block index at start of current run (patch boundary)
 	pendingImage       []byte                         // raw image bytes waiting to be sent with next message
 	pendingImageMime   string                         // mime type of pending image
+	failedSendText      string                // input retained until direct bus admission succeeds
+	failedSendImage     []byte
+	failedSendImageMime string
+	failedSendBlockIdx  int
+	failedSendBlockN    int
 	queuedSteers       []core.SteerItem               // steer messages waiting to be processed by the agent
 	chromeCache        string                         // cached bottom chrome string (built once per frame)
 	chromeCacheDirty   bool                           // chrome needs rebuild
@@ -644,6 +649,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(allCmds...)
 
 	case agentSendErrorMsg:
+		m.restoreFailedSend()
 		m.s.running = false
 		m.s.streamState = stateIdle
 		m.input.SetEnabled(true)

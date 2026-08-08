@@ -528,7 +528,11 @@ function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRunSt
   updateSession(id, patch);
 }
 
-export async function sendMessage(id, text, attachments = []) {
+// operation is retained by the composer while its text/attachments remain
+// untouched after a failed request. Reusing both IDs is the client half of
+// /send's idempotency contract: an abort can lose only the response, never
+// make retry mean a second message.
+export async function sendMessage(id, text, attachments = [], operation = null) {
   const state = store.get();
   const sess = state.sessions[id];
   if (!sess) return;
@@ -541,8 +545,9 @@ export async function sendMessage(id, text, attachments = []) {
   // message starts a run or joins the queue. It picks the identity for the rail
   // it actually used and reports it back, so either outcome lands under an ID
   // this client already knows.
-  const steerId = newSteerId();
-  const msgId = newSteerId();
+  const steerId = operation?.steerId || newSteerId();
+  const msgId = operation?.msgId || newSteerId();
+  const serverInstance = operation?.serverInstance || sess.serverInstance || '';
   // Remember the live per-run token tally so a rejected send can restore it
   // (the optimistic patch below resets it to start the new run at zero).
   const prevTokensUp = sess.runTokensUp;
