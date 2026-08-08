@@ -39,7 +39,42 @@
 
 .history-hydration .skel-block:last-of-type { margin-bottom: 0; }
 
-.history-hydration--empty {
+.history-hydration--empty:not(.history-hydration--stale) {
+  margin-top: var(--space-5);
+}
+
+.history-hydration--skeleton {
+  display: block;
+}
+
+.history-hydration-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.history-hydration-skeleton .skel-block {
+  max-width: none;
+  margin-bottom: var(--space-4);
+}
+
+.history-hydration-skeleton-user {
+  padding: var(--space-3);
+  border-left: var(--space-1) solid color-mix(in srgb, var(--peach) 45%, transparent);
+  border-radius: var(--radius-sm) var(--radius-md) var(--radius-md) var(--radius-sm);
+  background: var(--mantle);
+}
+
+.history-hydration-skeleton-tool {
+  padding: var(--space-3);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  background: var(--mantle);
+}
+
+.history-hydration-skeleton-tool .skel-line { height: var(--text-base); }
+
+.history-hydration--empty.history-hydration--stale {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);

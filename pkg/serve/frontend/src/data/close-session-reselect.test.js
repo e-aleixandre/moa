@@ -78,3 +78,18 @@ test('closing a tiled session on desktop refills the tile with another open one'
   expect(assigned).toEqual(['s2']);
   expect(store.get().focusedTile).toBe(tile.id);
 });
+
+test('closing drops a retained resolved-prompt receipt before the session can reopen', async () => {
+  seed(true);
+  setState({ sessions: {
+    ...store.get().sessions,
+    s1: {
+      ...store.get().sessions.s1,
+      resolvedPendingAttention: { id: 'ask-1', unseenGen: 7, serverInstance: 'server-a' },
+    },
+  } });
+
+  await closeSession('s1');
+
+  expect(store.get().sessions.s1.resolvedPendingAttention).toBeNull();
+});

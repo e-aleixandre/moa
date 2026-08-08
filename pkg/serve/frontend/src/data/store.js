@@ -105,6 +105,10 @@ let state = {
   // it (see data/drawer.js). drawerStep is 'list' | 'new'.
   drawerOpen: false,
   drawerStep: 'list',
+
+  // Generic and mobile modal sheets keep this balanced while their scrim is
+  // visually present. The palette and drawer have explicit state above.
+  conversationObscuringOverlayCount: 0,
 };
 
 let listeners = new Set();
@@ -145,6 +149,29 @@ export function updateSession(id, patch) {
   });
 }
 
+// A closing mobile sheet remains registered through its leave animation, so a
+// fading scrim cannot race an acknowledgement.
+export function registerConversationObscuringOverlay() {
+  let released = false;
+  setState((current) => ({
+    conversationObscuringOverlayCount: current.conversationObscuringOverlayCount + 1,
+  }));
+  return () => {
+    if (released) return;
+    released = true;
+    setState((current) => ({
+      conversationObscuringOverlayCount: Math.max(0, current.conversationObscuringOverlayCount - 1),
+    }));
+  };
+}
+
+// Only surfaces that intercept the whole conversation belong here: the global
+// palette, mobile session drawer, and modal sheets. Header/status popovers and
+// menus leave a prompt visible and intentionally do not suppress a receipt.
+export function conversationVisibilityKey(s) {
+  return `${s.paletteOpen ? 1 : 0}:${s.isMobile && s.drawerOpen ? 1 : 0}:${s.conversationObscuringOverlayCount || 0}`;
+}
+
 // --- Derived selectors ---
 
 export function visibleSessionIds(s) {
@@ -152,6 +179,16 @@ export function visibleSessionIds(s) {
     return s.activeSession ? [s.activeSession] : [];
   }
   return allSessionIds(s.tileTree);
+}
+
+// A parent session can retain its tile/mobile selection while one of its
+// detail views replaces the conversation. Attention addressed to the parent
+// is only presented when the parent conversation surface itself is showing.
+export function isParentConversationVisible(s, sessionId) {
+  const session = s.sessions[sessionId];
+  return !!session && visibleSessionIds(s).includes(sessionId) &&
+    !session.viewingSubagent && !session.viewingBashJob &&
+    conversationVisibilityKey(s) === '0:0:0';
 }
 
 export function isSessionInTile(s, sessionId) {

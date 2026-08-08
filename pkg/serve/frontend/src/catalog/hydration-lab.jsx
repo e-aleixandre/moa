@@ -209,14 +209,6 @@ function Screen({ variant, resolved }) {
           {resolved && <FreshTail />}
         </div>
 
-        {/* A · a plain status line under the skeleton — the only words on an
-            otherwise contentless screen. */}
-        {variant === "skeleton" && waiting && (
-          <p class="hydra-status" role="status">
-            <Spinner size={11} color="blue" /> Loading conversation…
-          </p>
-        )}
-
         {/* B · the veil's own indicator, centred over the dimmed transcript. */}
         {variant === "veil" && waiting && (
           <div class="hydra-veil-note" role="status">
@@ -270,7 +262,7 @@ const VARIANTS = [
   {
     id: "skeleton",
     label: "A · Full skeleton",
-    note: "Trade-off: perfectly honest — nothing on screen can be mistaken for current — but the user pays for it with the loss of place, and a session they have visited fifty times greets them as a blank grey screen every time.",
+    note: "Shipped for sessions with no cached transcript: several conversation-shaped blocks make it clear that content belongs here. It would still be wasteful for a session with a useful last view, which is why cached sessions use D.",
   },
   {
     id: "veil",

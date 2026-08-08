@@ -3,13 +3,14 @@ import { StreamingSkeleton } from "../StreamingSkeleton/StreamingSkeleton.jsx";
 import "./HistoryHydrationTail.css";
 
 export function historyHydrationTailVisible(session) {
-  return !!(session?.historyPending || session?.historyStale);
+  return !!(session?.historyStale || (
+    session?.historyPending && session.historyTailNeeded && session.historyTailReady
+  ));
 }
 
 // HistoryHydrationTail reserves a visible tail while the socket's init snapshot
-// replaces a cached transcript. A session with no cache gets a compact loading
-// line instead: a labelled tail after no conversation reads as a missing
-// message rather than an authority boundary.
+// replaces a cached transcript. A session with no cache gets a full stream
+// skeleton, so the empty surface reads as a conversation loading in place.
 export function HistoryHydrationTail({ hasCachedTranscript, stale = false, onRetry }) {
   if (stale) {
     return (
@@ -29,8 +30,14 @@ export function HistoryHydrationTail({ hasCachedTranscript, stale = false, onRet
 
   if (!hasCachedTranscript) {
     return (
-      <div class="history-hydration history-hydration--empty" role="status">
-        <Spinner size={11} color="blue" /> Loading conversation…
+      <div class="history-hydration history-hydration--empty history-hydration--skeleton" role="status">
+        <div class="history-hydration-skeleton" aria-hidden="true">
+          <StreamingSkeleton className="history-hydration-skeleton-user" widths={["86%", "54%"]} />
+          <StreamingSkeleton widths={["94%", "88%", "61%"]} />
+          <StreamingSkeleton className="history-hydration-skeleton-tool" widths={["100%", "100%"]} />
+          <StreamingSkeleton widths={["90%", "72%", "43%"]} />
+        </div>
+        <span class="history-hydration-sr">Loading conversation</span>
       </div>
     );
   }

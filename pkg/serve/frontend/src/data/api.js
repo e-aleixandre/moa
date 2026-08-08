@@ -22,7 +22,7 @@ import {
   handleWsAutoVerifyStart, handleWsAutoVerifyEnd, handleWsRateLimit,
   handleWsCompactionStart, handleWsCompactionEnd,
 } from './ws-handlers.js';
-import { store, updateSession, visibleSessionIds } from './store.js';
+import { store, updateSession, isParentConversationVisible } from './store.js';
 import { beginHistoryHydration, finishHistoryHydration } from './history-hydration.js';
 
 export const REQUEST_HEADERS = Object.freeze({ 'Content-Type': 'application/json', 'X-Moa-Request': '1' });
@@ -37,6 +37,27 @@ export const MCP_RESTART_TIMEOUT_MS = 30000;
 // transport swallows it, keep the cached transcript legible but explicitly
 // marked stale. Only an authoritative init may acknowledge its attention.
 export const HISTORY_HYDRATION_TIMEOUT_MS = 12000;
+
+export class ApiError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+// This is deliberately narrower than a generic HTTP 409: other endpoints use
+// 409 for their own domain conflicts. A /read fence conflict means only that
+// this client must rediscover the server process before it can acknowledge.
+export class StaleServerInstanceError extends Error {
+  constructor(sessionId, generation, instance) {
+    super(`Stale server instance while acknowledging ${sessionId}`);
+    this.name = 'StaleServerInstanceError';
+    this.sessionId = sessionId;
+    this.generation = generation;
+    this.instance = instance;
+  }
+}
 
 export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_MS, cache } = {}) {
   const controller = timeoutMs > 0 ? new AbortController() : null;
@@ -57,7 +78,7 @@ export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_
   try {
     const r = await fetch(path, opts);
     if (timedOut) throw new Error('request aborted');
-    if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+    if (!r.ok) throw new ApiError(r.status, `${r.status}: ${await r.text()}`);
     if (r.status === 204) return null;
     const text = await r.text();
     if (!text) return null;
@@ -84,7 +105,21 @@ const connections = new Map();    // sessionId → { ws, backoff, timer }
 const pendingTimers = new Map();  // sessionId → timeoutId (for reconnects awaiting retry)
 const hydrationTimers = new Map(); // sessionId → timeoutId (waiting for WS init)
 const wantedIds = new Set();      // sessions that should have a connection
+const attentionAcknowledgements = new Map(); // occurrence → confirmed POST
+let attentionInstanceRefresh = null;
 const MAX_BACKOFF = 16000;
+
+// Several visible prompts can discover the same restart at once. Share one
+// roster round-trip; loadSessions replaces affected sockets, whose fresh init
+// supplies the new prompt/instance before a receipt can retry. Dynamic import
+// avoids making api.js and session-actions.js a static import cycle.
+export function refreshAttentionInstances() {
+  if (attentionInstanceRefresh) return attentionInstanceRefresh;
+  attentionInstanceRefresh = import('./session-actions.js')
+    .then(({ loadSessions }) => loadSessions())
+    .finally(() => { attentionInstanceRefresh = null; });
+  return attentionInstanceRefresh;
+}
 
 export function syncConnections(visibleIds) {
   wantedIds.clear();
@@ -121,8 +156,16 @@ export function syncConnections(visibleIds) {
 // the session would sit frozen until a manual reload.
 export function reconnectAll() {
   const ids = [...wantedIds];
-  for (const [, entry] of connections) entry.ws.close();
-  connections.clear();
+  for (const [id, entry] of connections) {
+    // Remove ownership before close so its asynchronous onclose cannot schedule
+    // a competing retry. Explicitly settle first: a superseded socket's close
+    // handler deliberately bails out, but its hydration/timer must not leak
+    // into the replacement socket's fresh grace window.
+    connections.delete(id);
+    clearHistoryHydrationTimer(id);
+    finishHistoryHydration(id);
+    try { entry.ws.close(); } catch (_) { /* replacement below is sufficient */ }
+  }
   for (const [, timer] of pendingTimers) clearTimeout(timer);
   pendingTimers.clear();
   for (const id of ids) openWs(id, 1000);
@@ -132,35 +175,79 @@ export function reconnectAll() {
 // roster dot and POSTs /read for an already-known occurrence. Its generation
 // is the one rendered by this init snapshot, not the session's current roster
 // value: MarkSessionRead accepts gen >= current, so borrowing a newer value
-// here could acknowledge content the snapshot never showed. Live events have
-// their own immediate acknowledgement path because their content is rendered
-// incrementally; cached history must wait for init.
+// here could acknowledge content the snapshot never showed. Live events use
+// their own acknowledgement path only after their actual UI has rendered;
+// cached history must wait for init.
+function acknowledgementKey(sessionId, generation, instance) {
+  return `${sessionId}:${generation}:${instance}`;
+}
+
+function commitAttentionAcknowledgement(sessionId, generation, instance) {
+  const session = store.get().sessions[sessionId];
+  if (!session || (instance && session.serverInstance && session.serverInstance !== instance)) return;
+  const sameOccurrence = session.unseenGen === generation;
+  updateSession(sessionId, {
+    // A roster poll may have restored this exact occurrence while /read was in
+    // flight. Clear it only after the server accepted the fenced request.
+    unseen: sameOccurrence ? false : session.unseen,
+    lastAckedUnseenGen: Math.max(session.lastAckedUnseenGen || 0, generation),
+    lastAckedUnseenInstance: instance,
+  });
+}
+
+// Resolves true only when this occurrence is already known confirmed or the
+// server has accepted its fenced POST. Callers deliberately keep their visible
+// receipt alive on rejection: scheduling fetch is not a read acknowledgement.
 export function acknowledgeVisibleAttention(sessionId, shownGeneration, shownInstance = '', { renderedLive = false } = {}) {
   const state = store.get();
   const session = state.sessions[sessionId];
   const acknowledgementInstance = shownInstance || session?.serverInstance || '';
   const hidden = typeof document !== 'undefined' && document.hidden;
-  if (!session || hidden || !visibleSessionIds(state).includes(sessionId)) return false;
-  if (!renderedLive && (!session.unseen || !session.historyHydrated)) return false;
-  if (!shownGeneration || (!renderedLive && (session.unseenGen || 0) > shownGeneration)) return false;
-  if (shownInstance && session.serverInstance && shownInstance !== session.serverInstance) return false;
-  // A roster response captured before this POST can restore unseen:true for
-  // the same occurrence. Keep the acknowledgement with the session rather
-  // than trusting that optimistic clear, while still allowing a newer
-  // generation from this server instance through.
+  if (!session || hidden || !isParentConversationVisible(state, sessionId)) return Promise.resolve(false);
+  if (!renderedLive && (!session.unseen || !session.historyHydrated || !session.historyAckProven)) return Promise.resolve(false);
+  if (!shownGeneration || (!renderedLive && (session.unseenGen || 0) > shownGeneration)) return Promise.resolve(false);
+  if (shownInstance && session.serverInstance && shownInstance !== session.serverInstance) return Promise.resolve(false);
   if (session.lastAckedUnseenInstance === acknowledgementInstance &&
-      (session.lastAckedUnseenGen || 0) >= shownGeneration) return false;
-  updateSession(sessionId, {
-    unseen: false,
-    unseenGen: shownGeneration,
-    lastAckedUnseenGen: shownGeneration,
-    lastAckedUnseenInstance: acknowledgementInstance,
-  });
+      (session.lastAckedUnseenGen || 0) >= shownGeneration) {
+    commitAttentionAcknowledgement(sessionId, shownGeneration, acknowledgementInstance);
+    return Promise.resolve(true);
+  }
+  if (!session.unseen) return Promise.resolve(true);
+  const key = acknowledgementKey(sessionId, shownGeneration, acknowledgementInstance);
+  const inFlight = attentionAcknowledgements.get(key);
+  if (inFlight) return inFlight;
   const instanceQuery = acknowledgementInstance
     ? `&server_instance=${encodeURIComponent(acknowledgementInstance)}`
     : '';
-  api('POST', `/api/sessions/${sessionId}/read?unseen_gen=${shownGeneration}${instanceQuery}`).catch(() => {});
-  return true;
+  const acknowledgement = api('POST', `/api/sessions/${sessionId}/read?unseen_gen=${shownGeneration}${instanceQuery}`)
+    .then(() => {
+      commitAttentionAcknowledgement(sessionId, shownGeneration, acknowledgementInstance);
+      return true;
+    })
+    .catch((error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        throw new StaleServerInstanceError(sessionId, shownGeneration, acknowledgementInstance);
+      }
+      throw error;
+    })
+    .finally(() => attentionAcknowledgements.delete(key));
+  attentionAcknowledgements.set(key, acknowledgement);
+  return acknowledgement;
+}
+
+// Called by the pending-prompt components after they commit. A live request is
+// safe to acknowledge only from the UI that actually rendered that request,
+// and only for its own occurrence (never a later roster generation).
+export function acknowledgeRenderedPendingAttention(sessionId, pending) {
+  const generation = pending?.unseen_gen ?? pending?.unseenGen ?? 0;
+  const session = store.get().sessions[sessionId];
+  const pendingInstance = pending?.server_instance ?? pending?.serverInstance ?? '';
+  if (!generation || !session || (session.unseen && session.unseenGen !== generation)) return Promise.resolve(false);
+  // A server process owns its generation namespace. In particular, a retained
+  // receipt from a resolved prompt must never consume generation N from a
+  // replacement process which also happens to be at N.
+  if (pendingInstance && pendingInstance !== (session.serverInstance || '')) return Promise.resolve(false);
+  return acknowledgeVisibleAttention(sessionId, generation, session.serverInstance || '', { renderedLive: true });
 }
 
 function clearHistoryHydrationTimer(sessionId) {
@@ -201,6 +288,9 @@ export function retryHistoryHydration(sessionId) {
   if (entry) {
     connections.delete(sessionId);
     clearHistoryHydrationTimer(sessionId);
+    // This close is intentionally superseded, so it cannot settle hydration
+    // through onclose. Clear its boundary before opening the replacement.
+    finishHistoryHydration(sessionId);
     try { entry.ws.close(); } catch (_) { /* a fresh connection below is enough */ }
   }
   openWs(sessionId, 1000);
@@ -245,6 +335,10 @@ function openWs(sessionId, initialBackoff) {
       const initMatchesCurrent = !!initInstance && !!currentInstance && initInstance === currentInstance;
       const initMatchesOpen = !!entry.serverInstanceAtOpen && initInstance === entry.serverInstanceAtOpen;
       const trustedForAck = initMatchesCurrent || (!currentInstance && initMatchesOpen);
+      // This must be decided before routing the init: handleWsInit renders the
+      // snapshot and may acknowledge it synchronously.
+      const attentionBounded = evt.data?.attention_bound !== false;
+      const ackProven = trustedForAck && attentionBounded;
       if (currentInstance && !initMatchesCurrent) {
         // The roster has already moved us to another server process. Do not
         // render or acknowledge this old socket's snapshot; reconnect for an
@@ -257,13 +351,20 @@ function openWs(sessionId, initialBackoff) {
       }
       entry.lastSeq = evt.data?.last_seq ?? evt.seq ?? 0;
       clearHistoryHydrationTimer(sessionId);
-      routeEvent(sessionId, evt, { trustedForAck });
+      routeEvent(sessionId, evt, { ackProven });
       // A missing bound is intentionally not acknowledged: it means the server
       // could not prove which attention occurrence this snapshot contains.
       // Keep the rendered snapshot, close this socket, and retry through the
       // normal bounded backoff until a fenced init can clear the roster dot.
       if (evt.data?.attention_bound === false) {
         entry.attentionBoundRecovery = true;
+        ws.close();
+      } else if (!trustedForAck) {
+        // The snapshot remains useful to render, but a socket opened before
+        // its server instance was known has no acknowledgement provenance.
+        // Reconnect now that this init supplied the instance; the next init is
+        // proven against it and converges the still-lit dot.
+        entry.attentionProofRecovery = true;
         ws.close();
       } else {
         // Only a safely bounded snapshot is a successful recovery. Resetting
@@ -294,8 +395,9 @@ function openWs(sessionId, initialBackoff) {
     if (connections.get(sessionId)?.ws !== ws) return; // superseded
     connections.delete(sessionId);
     if (!wantedIds.has(sessionId)) return; // intentionally removed
-    if (entry.attentionBoundRecovery) {
+    if (entry.attentionBoundRecovery || entry.attentionProofRecovery) {
       entry.attentionBoundRecovery = false;
+      entry.attentionProofRecovery = false;
       // This was a valid transcript with only its acknowledgement boundary
       // unavailable, not a failed hydration. Do not mark it stale while the
       // retry obtains a safe bound.
@@ -314,10 +416,10 @@ function openWs(sessionId, initialBackoff) {
   };
 }
 
-function routeEvent(sessionId, evt, { trustedForAck = true } = {}) {
+function routeEvent(sessionId, evt, { ackProven = true } = {}) {
   switch (evt.type) {
     case 'init':
-      handleWsInit(sessionId, evt.data, { trustedForAck });
+      handleWsInit(sessionId, evt.data, { ackProven });
       break;
     case 'text_delta':
       handleWsTextDelta(sessionId, evt.data.delta);

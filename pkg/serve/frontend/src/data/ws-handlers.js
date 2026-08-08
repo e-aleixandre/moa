@@ -2,8 +2,9 @@
 
 import { triggerAttention, triggerDone, addToast } from './notifications.js';
 import { api, acknowledgeVisibleAttention } from './api.js';
-import { store, setState, updateSession, visibleSessionIds } from './store.js';
+import { store, setState, updateSession, visibleSessionIds, isParentConversationVisible } from './store.js';
 import { finishHistoryHydration } from './history-hydration.js';
+import { forgetPendingAttention, rememberedPendingAttention, rememberPendingAttention } from './attention-receipt-store.js';
 import { newBuffers, applyNestedEvent } from './conversation-reducer.js';
 import { truncateText } from './util/format.js';
 import { attentionArrival } from './attention-arrivals.js';
@@ -408,7 +409,7 @@ function nextRunEpoch(id) {
   return (store.get().sessions[id]?.runEpoch || 0) + 1;
 }
 
-export function handleWsInit(id, data, { trustedForAck = true } = {}) {
+export function handleWsInit(id, data, { ackProven = true } = {}) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
@@ -420,6 +421,11 @@ export function handleWsInit(id, data, { trustedForAck = true } = {}) {
   // delete the very transcript being read and bounce the reader back to the
   // parent — which is what happens on mobile every time the screen sleeps.
   const prev = store.get().sessions[id] || {};
+  const initPending = data.pending_permission || data.pending_ask;
+  // Only the receipt store is evidence that a request was displayed. A live
+  // pending object merely arrived over WS and must not become a persisted read
+  // candidate before its card crosses the visibility gate.
+  const priorPending = rememberedPendingAttention(id);
   // Attention generations restart from zero with the server process. Reset the
   // per-session server high water at the WS boundary too (polling covers hidden
   // sessions) so the first lower-generation live occurrence is never hidden.
@@ -448,6 +454,27 @@ export function handleWsInit(id, data, { trustedForAck = true } = {}) {
       task: outcome.task || '', accentIndex: outcome.accent_index,
     }, outcome);
   }
+  // An init that no longer has the request must not turn the request's
+  // occurrence into an ordinary transcript acknowledgement. If this client
+  // previously saw that fenced request (including before a reload), preserve a
+  // receipt that the parent tail can visibly acknowledge instead. The exact
+  // generation and process instance make this fail closed for a newer event.
+  const priorGeneration = priorPending?.unseen_gen ?? priorPending?.unseenGen ?? 0;
+  const initGeneration = data.unseen_gen || 0;
+  const priorInstance = priorPending?.server_instance ?? priorPending?.serverInstance ?? '';
+  const retainedGeneration = prev.resolvedPendingAttention?.unseen_gen ?? prev.resolvedPendingAttention?.unseenGen ?? 0;
+  const retainedInstance = prev.resolvedPendingAttention?.server_instance ?? prev.resolvedPendingAttention?.serverInstance ?? '';
+  const retainedSuperseded = !!retainedGeneration && initGeneration > retainedGeneration &&
+    (!retainedInstance || retainedInstance === serverInstance);
+  const disappearedPendingReceipt = !serverRestarted && !initPending && !prev.resolvedPendingAttention &&
+    !!priorPending && !!priorGeneration && priorGeneration === initGeneration &&
+    (!priorInstance || priorInstance === serverInstance) && prev.unseen
+    ? { ...priorPending, unseenGen: priorGeneration, serverInstance: priorInstance || serverInstance }
+    : null;
+  const resolvedPendingAttention = (serverRestarted || retainedSuperseded) ? null
+    : (prev.resolvedPendingAttention || disappearedPendingReceipt || null);
+  if (serverRestarted || retainedSuperseded || (priorPending && !initPending && !resolvedPendingAttention)) forgetPendingAttention(id);
+
   updateSession(id, {
     serverInstance,
     serverUnseenInstance: serverRestarted ? serverInstance : (prev.serverUnseenInstance || serverInstance),
@@ -464,8 +491,16 @@ export function handleWsInit(id, data, { trustedForAck = true } = {}) {
     compactAt: data.compact_at || 0,
     compactAtMin: data.compact_at_min || 0,
     permissionMode: data.permission_mode || 'yolo',
-    pendingPerm: data.pending_permission || null,
-    pendingAsk: data.pending_ask || null,
+    pendingPerm: data.pending_permission ? { ...data.pending_permission, serverInstance } : null,
+    pendingAsk: data.pending_ask ? { ...data.pending_ask, serverInstance } : null,
+    // A replacement process may reuse its generation numbers, so this local
+    // receipt cannot safely survive an init from a different instance.
+    resolvedPendingAttention,
+    // A pending occurrence in an init is authoritative even though its prompt
+    // has not mounted yet. Keep its generation with the stored prompt so that
+    // only that prompt's later post-commit receipt can acknowledge it.
+    unseen: initPending ? true : prev.unseen,
+    unseenGen: (data.pending_permission?.unseen_gen ?? data.pending_ask?.unseen_gen ?? prev.unseenGen),
     // The server's steer queue is authoritative and shared across all of this
     // session's clients. The snapshot replaces the queue; a local chip is kept
     // only if its client-minted ID is not yet in the snapshot (its POST was
@@ -514,19 +549,33 @@ export function handleWsInit(id, data, { trustedForAck = true } = {}) {
     goalVerifying: !!data.goal_verifying,
     lastSeq: data.last_seq || 0,
   });
-  acknowledgeVisiblePendingInit(id, data, { trustedForAck });
+  acknowledgeVisiblePendingInit(id, data, { ackProven });
 }
 
-function acknowledgeVisiblePendingInit(id, data, { trustedForAck }) {
+function acknowledgeVisiblePendingInit(id, data, { ackProven }) {
   const generation = data.unseen_gen || 0;
   const serverInstance = data.server_instance || '';
+  // Keep this local guard too: direct callers of handleWsInit must never turn
+  // an explicit unbounded payload into an acknowledgement.
+  const provenBounded = ackProven && data.attention_bound !== false;
   // init has replaced the cached transcript with the authoritative snapshot,
   // so this is the first safe point to acknowledge roster attention. The
   // snapshot's generation is retained with that proof; a roster response that
   // lands before this queued handler runs cannot be mistaken for rendered
   // history.
-  finishHistoryHydration(id, { shown: true, shownGeneration: generation, shownInstance: serverInstance });
-  if (trustedForAck) acknowledgeVisibleAttention(id, generation, serverInstance);
+  finishHistoryHydration(id, {
+    shown: true,
+    ackProven: provenBounded,
+    shownGeneration: generation,
+    shownInstance: serverInstance,
+  });
+  // A pending ask/permission is rendered by its own post-commit receipt. Init
+  // has only updated the store at this point, so acknowledging it here would
+  // mark an off-screen prompt read before Preact commits it.
+  if (provenBounded && !data.pending_permission && !data.pending_ask &&
+      !store.get().sessions[id]?.resolvedPendingAttention) {
+    void acknowledgeVisibleAttention(id, generation, serverInstance).catch(() => {});
+  }
 }
 
 // withLiveTools appends the tool calls that were in flight when the snapshot
@@ -995,21 +1044,25 @@ export function handleWsStateChange(id, data) {
 }
 
 export function handleWsAskUser(id, data) {
+  const serverInstance = store.get().sessions[id]?.serverInstance || '';
   updateSession(id, {
-    pendingAsk: { id: data.id, questions: data.questions },
+    pendingAsk: { id: data.id, questions: data.questions, unseenGen: data.unseen_gen, serverInstance },
+    resolvedPendingAttention: null,
   });
   const state = store.get();
-  const visible = visibleSessionIds(state);
-  if (!visible.includes(id)) {
+  if (!isParentConversationVisible(state, id)) {
     flashSession(id, 'attention');
     const sess = state.sessions[id];
     if (sess) triggerAttention(sess, 'ask_user', state.soundEnabled);
   }
-  markUnseen(id, data.unseen_gen, true);
-  acknowledgeVisibleLiveAttention(id, data.unseen_gen);
+  // Keep this occurrence locally until the prompt component commits. Unlike
+  // ordinary activity, an on-screen prompt needs that state for its
+  // post-render acknowledgement too.
+  markUnseen(id, data.unseen_gen, true, true);
 }
 
 export function handleWsPermissionRequest(id, data) {
+  const serverInstance = store.get().sessions[id]?.serverInstance || '';
   updateSession(id, {
     state: 'permission',
     pendingPerm: {
@@ -1017,22 +1070,23 @@ export function handleWsPermissionRequest(id, data) {
       tool_name: data.tool_name,
       args: data.args,
       allow_pattern: data.allow_pattern || '',
+      unseenGen: data.unseen_gen,
+      serverInstance,
     },
+    resolvedPendingAttention: null,
   });
   flashSession(id, 'attention');
   const state = store.get();
-  const visible = visibleSessionIds(state);
-  if (!visible.includes(id)) {
+  if (!isParentConversationVisible(state, id)) {
     const sess = state.sessions[id];
     if (sess) triggerAttention(sess, data.tool_name, state.soundEnabled);
   }
-  markUnseen(id, data.unseen_gen, true);
-  acknowledgeVisibleLiveAttention(id, data.unseen_gen);
+  markUnseen(id, data.unseen_gen, true, true);
 }
 
 function acknowledgeVisibleLiveAttention(id, runGen) {
   const serverInstance = store.get().sessions[id]?.serverInstance || '';
-  acknowledgeVisibleAttention(id, runGen, serverInstance, { renderedLive: true });
+  void acknowledgeVisibleAttention(id, runGen, serverInstance, { renderedLive: true }).catch(() => {});
 }
 
 // Another client (or a run abort) resolved the permission — clear the modal
@@ -1041,14 +1095,31 @@ export function handleWsPermissionResolved(id, data) {
   const sess = store.get().sessions[id];
   if (!sess || !sess.pendingPerm) return;
   if (data && data.id && sess.pendingPerm.id !== data.id) return;
-  updateSession(id, { pendingPerm: null });
+  const pending = sess.pendingPerm;
+  const generation = pending.unseen_gen ?? pending.unseenGen ?? 0;
+  const displayed = rememberedPendingAttention(id);
+  const displayedGeneration = displayed?.unseen_gen ?? displayed?.unseenGen ?? 0;
+  const wasDisplayed = !!displayed && displayed.id === pending.id && displayedGeneration === generation;
+  // A visible prompt can be replaced by this resolution before its failed
+  // acknowledgement retries. Preserve the proof and mount the explicit notice
+  // on every parent surface, not only subagent/bash detail views.
+  const resolvedPendingAttention = wasDisplayed
+    ? { ...pending, serverInstance: pending.serverInstance || sess.serverInstance || '' } : null;
+  updateSession(id, { pendingPerm: null, resolvedPendingAttention });
 }
 
 export function handleWsAskResolved(id, data) {
   const sess = store.get().sessions[id];
   if (!sess || !sess.pendingAsk) return;
   if (data && data.id && sess.pendingAsk.id !== data.id) return;
-  updateSession(id, { pendingAsk: null });
+  const pending = sess.pendingAsk;
+  const generation = pending.unseen_gen ?? pending.unseenGen ?? 0;
+  const displayed = rememberedPendingAttention(id);
+  const displayedGeneration = displayed?.unseen_gen ?? displayed?.unseenGen ?? 0;
+  const wasDisplayed = !!displayed && displayed.id === pending.id && displayedGeneration === generation;
+  const resolvedPendingAttention = wasDisplayed
+    ? { ...pending, serverInstance: pending.serverInstance || sess.serverInstance || '' } : null;
+  updateSession(id, { pendingAsk: null, resolvedPendingAttention });
 }
 
 function flashSession(id, type) {
@@ -1061,11 +1132,10 @@ function flashSession(id, type) {
 // markUnseen flags a session as having unread activity when the user isn't
 // currently looking at it (not visible, or the tab is backgrounded), so a badge
 // can nudge them back. Cleared by afterVisibilityChange when it comes into view.
-function markUnseen(id, generation = 0, isNewOccurrence = false) {
+function markUnseen(id, generation = 0, isNewOccurrence = false, retainWhenPresented = false) {
   const state = store.get();
-  const visible = visibleSessionIds(state);
   const hidden = typeof document !== 'undefined' && document.hidden;
-  if (visible.includes(id) && !hidden) return;
+  if (isParentConversationVisible(state, id) && !hidden && !retainWhenPresented) return;
   const sess = state.sessions[id];
   if (!sess) return;
   const serverInstance = sess.serverInstance || '';

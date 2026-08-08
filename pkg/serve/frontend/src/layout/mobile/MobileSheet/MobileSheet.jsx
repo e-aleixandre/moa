@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useSheetDismiss } from "../../../hooks/useSheetDismiss.js";
 import { openOverlay } from "../../../data/overlay-history.js";
+import { registerConversationObscuringOverlay } from "../../../data/store.js";
 import "./MobileSheet.css";
 
 const FOCUSABLE_SELECTOR =
@@ -36,6 +37,13 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, children })
   const wasOpenRef = useRef(open);
   const [visible, setVisible] = useState(open);
   const [entered, setEntered] = useState(open);
+
+  // `visible`, rather than `open`, owns this lifetime: the scrim remains over
+  // the conversation for the leave animation after open becomes false.
+  useLayoutEffect(() => {
+    if (!visible) return undefined;
+    return registerConversationObscuringOverlay();
+  }, [visible]);
 
   // Register with overlay-history whenever open toggles so the back gesture
   // closes the sheet instead of navigating away (same contract as <Sheet>).

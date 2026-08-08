@@ -8,6 +8,7 @@ export { PermissionPrompt } from "./PermissionCard/PermissionPrompt.jsx";
 export { PermissionControl } from "./PermissionControl/PermissionControl.jsx";
 export { AskUserCard } from "./AskUserCard/AskUserCard.jsx";
 export { AskUserPrompt } from "./AskUserCard/AskUserPrompt.jsx";
+export { ResolvedAttentionReceipt } from "./AttentionReceipt/AttentionReceipt.jsx";
 export { McpBanner } from "./McpBanner/McpBanner.jsx";
 export { Card } from "./Card/Card.jsx";
 export { Sheet } from "./Sheet/Sheet.jsx";

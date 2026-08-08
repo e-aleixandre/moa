@@ -21,8 +21,10 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Rename (`/rename <title>`) and delete sessions from the overview
 - Group the mobile drawer and desktop session spine by recency or folder; the choice is saved locally
 - Unread result badges on sessions whose successful run finished while you were
-  away; they are held only in Moa's process memory, clear when you open the
-  session, and appear first under **New results** in the mobile drawer
+  away; they are held only in Moa's process memory and appear first under **New
+  results** in the mobile drawer. Opening a transcript marks ordinary results
+  read; permission and question badges wait until their card (or a clear
+  resolved notice) is actually visible in the foreground.
 - Multi-pane tiled layouts
 - Keyboard-first navigation
 - Voice input

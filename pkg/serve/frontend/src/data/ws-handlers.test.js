@@ -2,21 +2,37 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
 import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
+import { acknowledgeRenderedPendingAttention } from './api.js';
+import { rememberPendingAttention } from './attention-receipt-store.js';
+
+let receiptStorage;
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, subagents: {} } } });
 }
 
 beforeEach(() => {
-  setState({ sessions: {} });
+  receiptStorage = new Map();
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    get length() { return receiptStorage.size; },
+    key: index => [...receiptStorage.keys()][index] || null,
+    getItem: key => receiptStorage.get(key) || null,
+    setItem: (key, value) => receiptStorage.set(key, value),
+    removeItem: key => receiptStorage.delete(key),
+  } });
+  globalThis.fetch = () => Promise.resolve(new Response('', { status: 204 }));
+  setState({
+    sessions: {}, isMobile: false, activeSession: null,
+    drawerOpen: false, paletteOpen: false, conversationObscuringOverlayCount: 0,
+  });
   __resetAttentionArrivalsForTests();
 });
 
-test('normalizeConversationProjection preserves persisted tool activity', () => {
+test('normalizeConversationProjection preserves persisted tool activity', async () => {
   const [tool] = normalizeConversationProjection([{
     id: 'tool:child:0', role: 'tool', tool: 'bash', action: 'bash',
     target: '{"command":"go test ./pkg/serve --token complete"}', status: 'ok',
@@ -32,7 +48,7 @@ test('normalizeConversationProjection preserves persisted tool activity', () => 
   });
 });
 
-test('handleWsSubagentStart creates a running entry with async flag, thinking level, and origin tool call ID', () => {
+test('handleWsSubagentStart creates a running entry with async flag, thinking level, and origin tool call ID', async () => {
   seedSession('s1');
   handleWsSubagentStart('s1', { job_id: 'j1', origin_tool_call_id: 'toolu_1', task: 't', model: 'm', thinking: 'high', async: false });
   const sa = store.get().sessions.s1.subagents.j1;
@@ -42,7 +58,7 @@ test('handleWsSubagentStart creates a running entry with async flag, thinking le
   expect(sa.originToolCallId).toBe('toolu_1');
 });
 
-test('handleWsInit retains a subagent thinking level and origin tool call ID', () => {
+test('handleWsInit retains a subagent thinking level and origin tool call ID', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [],
@@ -52,7 +68,7 @@ test('handleWsInit retains a subagent thinking level and origin tool call ID', (
   expect(store.get().sessions.s1.subagents.j1.originToolCallId).toBe('toolu_init');
 });
 
-test('handleWsInit acknowledges a visible pending request from its attention occurrence', () => {
+test('handleWsInit leaves a visible pending request unread until its prompt commits', async () => {
   setState({
     isMobile: true,
     activeSession: 's1',
@@ -63,12 +79,263 @@ test('handleWsInit acknowledges a visible pending request from its attention occ
     unseen_gen: 9,
     pending_permission: { id: 'p1', unseen_gen: 9, tool_name: 'bash', args: {} },
   });
-  expect(store.get().sessions.s1.unseen).toBe(false);
+  const pending = store.get().sessions.s1.pendingPerm;
+  expect(store.get().sessions.s1.unseen).toBe(true);
   expect(store.get().sessions.s1.unseenGen).toBe(9);
+  // This represents the prompt component's post-commit receipt.
+  expect(await acknowledgeRenderedPendingAttention('s1', pending)).toBe(true);
+  expect(store.get().sessions.s1.unseen).toBe(false);
   setState({ isMobile: false, activeSession: null });
 });
 
-test('subagents without a thinking level normalize to off', () => {
+test('a retained resolved receipt cannot acknowledge the same generation from a new server instance', async () => {
+  setState({
+    isMobile: true,
+    activeSession: 's1',
+    sessions: { s1: {
+      id: 's1', unseen: true, unseenGen: 7, serverInstance: 'server-a',
+      viewingSubagent: 'child', subagents: {},
+      pendingAsk: { id: 'ask-1', unseenGen: 7, questions: [], serverInstance: 'server-a' },
+    } },
+  });
+  expect(rememberPendingAttention('s1', store.get().sessions.s1.pendingAsk)).toBe(true);
+  handleWsAskResolved('s1', { id: 'ask-1' });
+  const receipt = store.get().sessions.s1.resolvedPendingAttention;
+  expect(receipt).toMatchObject({ id: 'ask-1', unseenGen: 7, serverInstance: 'server-a' });
+
+  // The replacement server has independently reached generation 7. Returning
+  // to the parent must not let the old receipt consume this new occurrence.
+  setState({ sessions: { s1: {
+    ...store.get().sessions.s1, viewingSubagent: null, serverInstance: 'server-b',
+    unseen: true, unseenGen: 7,
+  } } });
+  expect(await acknowledgeRenderedPendingAttention('s1', receipt)).toBe(false);
+  expect(store.get().sessions.s1.unseen).toBe(true);
+});
+
+test('an init from a replacement server clears a retained resolved receipt', async () => {
+  seedSession('s1');
+  setState({ sessions: { s1: {
+    ...store.get().sessions.s1, serverInstance: 'server-a',
+    resolvedPendingAttention: { id: 'ask-1', unseenGen: 7, serverInstance: 'server-a' },
+  } } });
+  handleWsInit('s1', { messages: [], subagents: [], server_instance: 'server-b' });
+  expect(store.get().sessions.s1.resolvedPendingAttention).toBeNull();
+});
+
+test('an init synthesizes a receipt when a previously seen pending request vanished', () => {
+  setState({
+    isMobile: true, activeSession: 's1',
+    sessions: { s1: {
+      id: 's1', unseen: true, unseenGen: 7, serverInstance: 'server-a', subagents: {},
+      pendingAsk: { id: 'ask-1', unseenGen: 7, questions: [], serverInstance: 'server-a' },
+    } },
+  });
+	// The prompt card was displayed before its resolution event was missed.
+	const pending = store.get().sessions.s1.pendingAsk;
+	const originalStorage = globalThis.localStorage;
+	const values = new Map();
+	Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+		getItem: key => values.get(key) || null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key),
+	} });
+	expect(rememberPendingAttention('s1', pending)).toBe(true);
+
+  // The resolved WS event was missed. This authoritative init must retain a
+  // visible receipt, not treat the now-absent prompt as ordinary history.
+  handleWsInit('s1', { messages: [], subagents: [], unseen_gen: 7, server_instance: 'server-a' });
+
+  const session = store.get().sessions.s1;
+  expect(session.pendingAsk).toBeNull();
+  expect(session.resolvedPendingAttention).toMatchObject({ id: 'ask-1', unseenGen: 7, serverInstance: 'server-a' });
+  expect(session.unseen).toBe(true);
+	if (originalStorage === undefined) delete globalThis.localStorage;
+	else Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalStorage });
+});
+
+test('a remembered pending occurrence survives reload and becomes a receipt when its init omits it', () => {
+  const originalStorage = globalThis.localStorage;
+  const values = new Map();
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key) => values.get(key) || null,
+      setItem: (key, value) => values.set(key, value),
+      removeItem: (key) => values.delete(key),
+    },
+  });
+  try {
+    setState({
+      isMobile: true, activeSession: 's1',
+      sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'server-a', subagents: {} } },
+    });
+    handleWsInit('s1', {
+      messages: [], subagents: [], unseen_gen: 7, server_instance: 'server-a',
+      pending_ask: { id: 'ask-1', unseen_gen: 7, questions: [] },
+    });
+	    expect(rememberPendingAttention('s1', store.get().sessions.s1.pendingAsk)).toBe(true);
+    // Simulate the post-reload roster: it knows the unread occurrence, but
+    // in-memory pending UI state is gone and the resolved WS event was missed.
+    setState({
+      sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'server-a', subagents: {} } },
+    });
+    handleWsInit('s1', { messages: [], subagents: [], unseen_gen: 7, server_instance: 'server-a' });
+    expect(store.get().sessions.s1.resolvedPendingAttention).toMatchObject({ id: 'ask-1', unseenGen: 7 });
+  } finally {
+    if (originalStorage === undefined) delete globalThis.localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalStorage });
+  }
+});
+
+test('an init never acknowledges while a retained resolution receipt is waiting to mount', async () => {
+  let reads = 0;
+  globalThis.fetch = (url) => {
+    if (String(url).includes('/read?')) reads++;
+    return Promise.resolve(new Response('', { status: 204 }));
+  };
+  setState({
+    isMobile: true, activeSession: 's1',
+    sessions: { s1: {
+      id: 's1', unseen: true, unseenGen: 7, serverInstance: 'server-a', subagents: {},
+      resolvedPendingAttention: { id: 'ask-1', unseenGen: 7, serverInstance: 'server-a' },
+    } },
+  });
+
+  handleWsInit('s1', { messages: [], subagents: [], unseen_gen: 7, server_instance: 'server-a' });
+  await Promise.resolve();
+  expect(reads).toBe(0);
+  expect(store.get().sessions.s1.unseen).toBe(true);
+});
+
+for (const overlay of [
+  { name: 'mobile drawer', state: { isMobile: true, drawerOpen: true } },
+  { name: 'command palette', state: { paletteOpen: true } },
+  { name: 'modal sheet', state: { conversationObscuringOverlayCount: 1 } },
+]) {
+  test(`${overlay.name} keeps a committed prompt unread until it closes`, async () => {
+    setState({
+      isMobile: true, activeSession: 's1', drawerOpen: false, paletteOpen: false,
+      conversationObscuringOverlayCount: 0,
+      ...overlay.state,
+      sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, subagents: {} } },
+    });
+    const pending = { id: 'p1', unseenGen: 7 };
+    expect(await acknowledgeRenderedPendingAttention('s1', pending)).toBe(false);
+    setState({ drawerOpen: false, paletteOpen: false, conversationObscuringOverlayCount: 0 });
+    expect(await acknowledgeRenderedPendingAttention('s1', pending)).toBe(true);
+  });
+}
+
+for (const request of [
+  { name: 'ask', field: 'pendingAsk', resolve: handleWsAskResolved, value: { id: 'ask-1', unseenGen: 7, questions: [] } },
+  { name: 'permission', field: 'pendingPerm', resolve: handleWsPermissionResolved, value: { id: 'perm-1', unseenGen: 7, tool_name: 'bash', args: {} } },
+]) {
+  for (const detail of ['viewingSubagent', 'viewingBashJob']) {
+    test(`remote ${request.name} resolution in ${detail} retains attention until the parent commits`, async () => {
+    setState({
+      isMobile: true, activeSession: 's1', drawerOpen: false, paletteOpen: false,
+      conversationObscuringOverlayCount: 0,
+      sessions: { s1: {
+        id: 's1', unseen: true, unseenGen: 7, subagents: {}, [detail]: 'detail-1',
+        [request.field]: request.value,
+      } },
+    });
+    expect(rememberPendingAttention('s1', request.value)).toBe(true);
+    request.resolve('s1', { id: request.value.id });
+    const session = store.get().sessions.s1;
+    expect(session.unseen).toBe(true);
+    expect(session.resolvedPendingAttention).toMatchObject({ id: request.value.id, unseenGen: 7 });
+    setState({ sessions: { s1: { ...session, [detail]: null } } });
+    expect(await acknowledgeRenderedPendingAttention('s1', session.resolvedPendingAttention)).toBe(true);
+    });
+  }
+}
+
+for (const layout of [
+  { name: 'mobile', state: { isMobile: true, activeSession: 's1' } },
+  { name: 'desktop', state: { isMobile: false, activeSession: null, tileTree: { type: 'tile', id: 1, sessionId: 's1' } } },
+]) {
+  for (const request of [
+    {
+      name: 'ask', pending: 'pendingAsk',
+      deliver: () => handleWsAskUser('s1', { id: 'ask-1', unseen_gen: 7, questions: [] }),
+    },
+    {
+      name: 'permission', pending: 'pendingPerm',
+      deliver: () => handleWsPermissionRequest('s1', {
+        id: 'perm-1', unseen_gen: 7, tool_name: 'bash', args: {},
+      }),
+    },
+  ]) {
+    for (const detail of ['viewingSubagent', 'viewingBashJob']) {
+      test(`${layout.name} ${request.name} ${detail} detail does not acknowledge until its parent prompt renders`, async () => {
+        const originalDocument = globalThis.document;
+        const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+        const originalLayout = store.get();
+        globalThis.document = { hidden: false };
+        Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { vibrate() {} } });
+        try {
+          setState({
+            ...layout.state,
+            sessions: { s1: { id: 's1', subagents: {}, [detail]: 'detail-1' } },
+          });
+
+          request.deliver();
+          const pending = store.get().sessions.s1[request.pending];
+          // This is the prompt's post-commit effect. It cannot clear attention
+          // while a detail view is the rendered parent surface.
+          expect(await acknowledgeRenderedPendingAttention('s1', pending)).toBe(false);
+          expect(store.get().sessions.s1.unseen).toBe(true);
+
+          // Returning mounts the still-pending prompt; its same post-commit
+          // effect now has a parent conversation surface to acknowledge from.
+          setState({ sessions: {
+            s1: { ...store.get().sessions.s1, [detail]: null },
+          } });
+          expect(await acknowledgeRenderedPendingAttention('s1', pending)).toBe(true);
+          expect(store.get().sessions.s1).toMatchObject({
+            unseen: false, lastAckedUnseenGen: 7,
+          });
+        } finally {
+          globalThis.document = originalDocument;
+          if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+          else delete globalThis.navigator;
+          setState({
+            isMobile: originalLayout.isMobile,
+            activeSession: originalLayout.activeSession,
+            tileTree: originalLayout.tileTree,
+          });
+        }
+      });
+    }
+
+    test(`${layout.name} ${request.name} acknowledges after it renders in the parent conversation`, async () => {
+      const originalLayout = store.get();
+      try {
+        setState({
+          ...layout.state,
+          sessions: { s1: { id: 's1', subagents: {} } },
+        });
+
+        request.deliver();
+        const pending = store.get().sessions.s1[request.pending];
+        // The handler itself no longer takes the rendered-live shortcut; this
+        // call represents the prompt component's post-commit effect.
+        expect(await acknowledgeRenderedPendingAttention('s1', pending)).toBe(true);
+        expect(store.get().sessions.s1).toMatchObject({
+          unseen: false, lastAckedUnseenGen: 7,
+        });
+      } finally {
+        setState({
+          isMobile: originalLayout.isMobile,
+          activeSession: originalLayout.activeSession,
+          tileTree: originalLayout.tileTree,
+        });
+      }
+    });
+  }
+}
+
+test('subagents without a thinking level normalize to off', async () => {
   seedSession('s1');
   handleWsSubagentStart('s1', { job_id: 'j1', task: 't', model: 'm', async: false });
   expect(store.get().sessions.s1.subagents.j1.thinking).toBe('off');
@@ -80,7 +347,7 @@ test('subagents without a thinking level normalize to off', () => {
   expect(store.get().sessions.s1.subagents.j1.thinking).toBe('off');
 });
 
-test('handleWsSubagentStart flips async without touching a running status', () => {
+test('handleWsSubagentStart flips async without touching a running status', async () => {
   seedSession('s1');
   handleWsSubagentStart('s1', { job_id: 'j1', task: 't', model: 'm', async: false });
   handleWsSubagentStart('s1', { job_id: 'j1', async: true });
@@ -93,7 +360,7 @@ test('handleWsSubagentStart flips async without touching a running status', () =
 // right as it completes can deliver the subagent_start echo (async:true)
 // AFTER the subagent_end that already marked it terminal. The stale
 // subagent_start must not resurrect it as 'running' forever.
-test('handleWsSubagentStart does not downgrade a terminal status back to running', () => {
+test('handleWsSubagentStart does not downgrade a terminal status back to running', async () => {
   seedSession('s1');
   handleWsSubagentStart('s1', { job_id: 'j1', task: 't', model: 'm', async: false });
   handleWsSubagentEnd('s1', { job_id: 'j1', status: 'completed' });
@@ -104,7 +371,7 @@ test('handleWsSubagentStart does not downgrade a terminal status back to running
   expect(sa.async).toBe(true);
 });
 
-test('terminal subagent outcome is keyed by job ID and preserves result/error semantics', () => {
+test('terminal subagent outcome is keyed by job ID and preserves result/error semantics', async () => {
   let messages = upsertTerminalSubagentOutcome([], { task: 'inspect', accentIndex: 2 }, {
     job_id: 'j1', status: 'completed', result: 'the actual child result', finished_at_ms: 10,
   });
@@ -126,7 +393,7 @@ test('terminal subagent outcome is keyed by job ID and preserves result/error se
   expect(cancelled).toMatchObject({ status: 'cancelled', result: '', error: '' });
 });
 
-test('terminal upsert keeps legacy parent outcome when old persisted fields are absent', () => {
+test('terminal upsert keeps legacy parent outcome when old persisted fields are absent', async () => {
   const messages = upsertTerminalSubagentOutcome([{
     _type: 'tool_start', tool_call_id: 'subagent-old', tool_name: 'subagent',
     status: 'error', result: 'legacy failure detail', args: { task: 'old work' },
@@ -137,7 +404,7 @@ test('terminal upsert keeps legacy parent outcome when old persisted fields are 
   expect(messages[0]).toMatchObject({ result: '', error: 'legacy failure detail' });
 });
 
-test('subagent_end creates the terminal card when a waiter owns model delivery', () => {
+test('subagent_end creates the terminal card when a waiter owns model delivery', async () => {
   seedSession('s1');
   handleWsSubagentStart('s1', { job_id: 'waited', task: 'waiter path', model: 'm', async: true });
   // No subagent_complete event: subagent_wait claimed delivery to the model.
@@ -149,7 +416,7 @@ test('subagent_end creates the terminal card when a waiter owns model delivery',
   expect(cards[0].result).toBe('wait-owned result');
 });
 
-test('init restores persisted waiter-owned terminal outcomes without reviving the Live Dock', () => {
+test('init restores persisted waiter-owned terminal outcomes without reviving the Live Dock', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [], subagents: [],
@@ -160,7 +427,7 @@ test('init restores persisted waiter-owned terminal outcomes without reviving th
   expect(liveTrayAgents(session)).toHaveLength(0);
 });
 
-test('handleWsInit dedups restored subagent cards against a running snapshot entry', () => {
+test('handleWsInit dedups restored subagent cards against a running snapshot entry', async () => {
   const cases = [
     {
       name: 'a card with its persisted job ID',
@@ -192,7 +459,7 @@ test('handleWsInit dedups restored subagent cards against a running snapshot ent
   }
 });
 
-test('handleWsInit suppresses a canonicalized async legacy card in both stream and dock', () => {
+test('handleWsInit suppresses a canonicalized async legacy card in both stream and dock', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [{
@@ -213,7 +480,7 @@ test('handleWsInit suppresses a canonicalized async legacy card in both stream a
   expect(liveTrayAgents(session)).toEqual([]);
 });
 
-test('handleWsInit only correlates legacy cards to a unique live job', () => {
+test('handleWsInit only correlates legacy cards to a unique live job', async () => {
   seedSession('terminal');
   handleWsInit('terminal', {
     messages: [{
@@ -243,7 +510,7 @@ test('handleWsInit only correlates legacy cards to a unique live job', () => {
   expect(store.get().sessions.persisted.messages[0].tool_call_id).toBe('subagent-persisted-job');
 });
 
-test('handleWsInit does not conflate a legacy card with multiple live jobs sharing its task', () => {
+test('handleWsInit does not conflate a legacy card with multiple live jobs sharing its task', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [{
@@ -266,7 +533,7 @@ test('handleWsInit does not conflate a legacy card with multiple live jobs shari
   expect(agents.filter(agent => agent.state === 'running').map(agent => agent.id).sort()).toEqual(['j1', 'j2']);
 });
 
-test('handleWsInit keeps a distinct live subagent when a legacy card has another task', () => {
+test('handleWsInit keeps a distinct live subagent when a legacy card has another task', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [{
@@ -286,7 +553,7 @@ test('handleWsInit keeps a distinct live subagent when a legacy card has another
   expect(agents.map(agent => agent.state).sort()).toEqual(['done', 'running']);
 });
 
-test('handleWsInit preserves the bounded-history marker', () => {
+test('handleWsInit preserves the bounded-history marker', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [{ role: 'assistant', msg_id: 'latest', content: [{ type: 'text', text: 'latest' }] }],
@@ -297,7 +564,7 @@ test('handleWsInit preserves the bounded-history marker', () => {
   expect(session.messages).toHaveLength(1);
 });
 
-test('handleWsInit clears a stuck subagentCount when no live jobs remain', () => {
+test('handleWsInit clears a stuck subagentCount when no live jobs remain', async () => {
   seedSession('s1');
   // An async job finished while this pane had no WS, so the terminal count=0
   // event was missed and the badge/dot stayed stuck at 1.
@@ -306,7 +573,7 @@ test('handleWsInit clears a stuck subagentCount when no live jobs remain', () =>
   expect(store.get().sessions.s1.subagentCount).toBe(0);
 });
 
-test('handleWsInit recomputes subagentCount from live async jobs in the snapshot', () => {
+test('handleWsInit recomputes subagentCount from live async jobs in the snapshot', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [],
@@ -320,7 +587,7 @@ test('handleWsInit recomputes subagentCount from live async jobs in the snapshot
   expect(store.get().sessions.s1.subagentCount).toBe(2);
 });
 
-test('handleWsInit replaces server-ID steers with the authoritative snapshot', () => {
+test('handleWsInit replaces server-ID steers with the authoritative snapshot', async () => {
   seedSession('s1');
   // A chip that already carries a server ID and was confirmed by its POST: the
   // snapshot is authoritative.
@@ -337,7 +604,7 @@ test('handleWsInit replaces server-ID steers with the authoritative snapshot', (
   expect(session.messages).toHaveLength(1);
 });
 
-test('handleWsInit keeps an in-flight local chip (ID not yet in snapshot) but adopts snapshot steers', () => {
+test('handleWsInit keeps an in-flight local chip (ID not yet in snapshot) but adopts snapshot steers', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [{ id: 'c-local1', text: 'just typed' }] } } });
 
@@ -352,7 +619,7 @@ test('handleWsInit keeps an in-flight local chip (ID not yet in snapshot) but ad
   expect(steers[1]).toEqual({ id: 'c-local1', text: 'just typed' });
 });
 
-test('handleWsInit drops a confirmed local chip whose ID the server already dropped', () => {
+test('handleWsInit drops a confirmed local chip whose ID the server already dropped', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [{ id: 'c-gone', text: 'delivered already', confirmed: true }] } } });
 
@@ -363,7 +630,7 @@ test('handleWsInit drops a confirmed local chip whose ID the server already drop
   expect(store.get().sessions.s1.pendingSteers).toBeNull();
 });
 
-test('handleWsInit keeps an unconfirmed in-flight chip absent from the snapshot', () => {
+test('handleWsInit keeps an unconfirmed in-flight chip absent from the snapshot', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [{ id: 'c-inflight', text: 'just sent' }] } } });
 
@@ -376,7 +643,7 @@ test('handleWsInit keeps an unconfirmed in-flight chip absent from the snapshot'
   expect(steers[0].id).toBe('c-inflight');
 });
 
-test('handleWsSteer removes the queued chip by ID, not by text', () => {
+test('handleWsSteer removes the queued chip by ID, not by text', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [], pendingSteers: [
     { id: 'a', text: 'same text' },
@@ -390,7 +657,7 @@ test('handleWsSteer removes the queued chip by ID, not by text', () => {
   expect(steers[0].id).toBe('a');
 });
 
-test('handleWsSteer dedups the injected user message by MsgID', () => {
+test('handleWsSteer dedups the injected user message by MsgID', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [
     { role: 'user', _msg_id: 'm1', content: [{ type: 'text', text: 'already here' }] },
@@ -405,7 +672,7 @@ test('handleWsSteer dedups the injected user message by MsgID', () => {
   expect(sess.pendingSteers).toBeNull();
 });
 
-test('handleWsSteer keeps the content blocks of a queued send with attachments', () => {
+test('handleWsSteer keeps the content blocks of a queued send with attachments', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [], pendingSteers: [{ id: 'q1', text: 'mira esto' }] } } });
 
@@ -422,7 +689,7 @@ test('handleWsSteer keeps the content blocks of a queued send with attachments',
   expect(sess.pendingSteers).toBeNull();
 });
 
-test('handleWsUserMessage appends a prompt sent from another client', () => {
+test('handleWsUserMessage appends a prompt sent from another client', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
 
@@ -435,7 +702,7 @@ test('handleWsUserMessage appends a prompt sent from another client', () => {
   expect(messages[0].content).toEqual([{ type: 'text', text: 'dictado desde el móvil' }]);
 });
 
-test('secret batch delivery uses trusted metadata and never renders the backend note text', () => {
+test('secret batch delivery uses trusted metadata and never renders the backend note text', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
   const text = 'A secret batch is available in /tmp/moa-secrets-42/batch-a (aliases: db-produccion, api-key). Install each secret where its relevant client expects it, then delete these files. Never print a value or copy one into the repository or into a command that would echo it.';
@@ -450,7 +717,7 @@ test('secret batch delivery uses trusted metadata and never renders the backend 
   expect(JSON.stringify(store.get().sessions.s1.messages)).not.toContain('/tmp/moa-secrets');
 });
 
-test('ordinary text that resembles a secret note stays a user message', () => {
+test('ordinary text that resembles a secret note stays a user message', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
   const text = 'A secret batch is available in /tmp with space (aliases: db). Install each secret where its relevant client expects it, then delete these files. Never print a value or copy one into the repository or into a command that would echo it.';
@@ -460,7 +727,7 @@ test('ordinary text that resembles a secret note stays a user message', () => {
   expect(store.get().sessions.s1.messages[0]).toMatchObject({ role: 'user', _msg_id: 'ordinary' });
 });
 
-test('handleWsUserMessage dedups against the optimistic echo by MsgID', () => {
+test('handleWsUserMessage dedups against the optimistic echo by MsgID', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [
     { role: 'user', _msg_id: 'm1', content: [{ type: 'text', text: 'ya pintado' }] },
@@ -471,7 +738,7 @@ test('handleWsUserMessage dedups against the optimistic echo by MsgID', () => {
   expect(store.get().sessions.s1.messages).toHaveLength(1);
 });
 
-test('handleWsUserMessage keeps the content blocks of a send with attachments', () => {
+test('handleWsUserMessage keeps the content blocks of a send with attachments', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
 
@@ -484,7 +751,7 @@ test('handleWsUserMessage keeps the content blocks of a send with attachments', 
   expect(store.get().sessions.s1.messages[0].content).toEqual(content);
 });
 
-test('model-facing subagent completion user/steer notifications are hidden while structured lifecycle owns presentation', () => {
+test('model-facing subagent completion user/steer notifications are hidden while structured lifecycle owns presentation', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
   handleWsSubagentStart('s1', { job_id: 'live', task: 'inspect', model: 'm', async: true });
@@ -502,7 +769,7 @@ test('model-facing subagent completion user/steer notifications are hidden while
   expect(store.get().sessions.s1.messages[0]).toMatchObject({ tool_call_id: 'subagent-live', result: 'structured result' });
 });
 
-test('persisted terminal outcomes restore chronologically by finished_at_ms', () => {
+test('persisted terminal outcomes restore chronologically by finished_at_ms', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [], subagents: [],
@@ -515,7 +782,7 @@ test('persisted terminal outcomes restore chronologically by finished_at_ms', ()
   expect(store.get().sessions.s1.messages.map(m => m.tool_call_id)).toEqual(['subagent-early', 'subagent-late']);
 });
 
-test('persisted terminal outcomes insert before parent messages written after completion', () => {
+test('persisted terminal outcomes insert before parent messages written after completion', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [
@@ -529,7 +796,7 @@ test('persisted terminal outcomes insert before parent messages written after co
   expect(messages.map(m => m.tool_call_id || m._msg_id)).toEqual(['before', 'subagent-waited', 'after']);
 });
 
-test('async notification outcome uses the same completion position live and after reload', () => {
+test('async notification outcome uses the same completion position live and after reload', async () => {
   const rawHistory = [
     { role: 'user', msg_id: 'before', timestamp: 10, content: [{ type: 'text', text: 'before' }] },
     { role: 'user', msg_id: 'notification', timestamp: 30, custom: {
@@ -554,7 +821,7 @@ test('async notification outcome uses the same completion position live and afte
   expect(reloadOrder).toEqual(liveOrder);
 });
 
-test('handleWsSteersCanceled clears the shared queue on every client', () => {
+test('handleWsSteersCanceled clears the shared queue on every client', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [
     { id: 'srv', text: 'queued' },
@@ -566,7 +833,7 @@ test('handleWsSteersCanceled clears the shared queue on every client', () => {
   expect(store.get().sessions.s1.pendingSteers).toBeNull();
 });
 
-test('handleWsCommandQueued appends a command chip and confirms an optimistic one by ID', () => {
+test('handleWsCommandQueued appends a command chip and confirms an optimistic one by ID', async () => {
   seedSession('s1');
   // From another device: no local chip yet — append it.
   handleWsCommandQueued('s1', { id: 'cmd-1', raw: '/compact' });
@@ -585,7 +852,7 @@ test('handleWsCommandQueued appends a command chip and confirms an optimistic on
   expect(steers[0].confirmed).toBe(true);
 });
 
-test('handleWsCommandDequeued removes the command chip; a failure surfaces a toast', () => {
+test('handleWsCommandDequeued removes the command chip; a failure surfaces a toast', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [
     { id: 'cmd-1', text: '/compact', command: true, confirmed: true },
@@ -606,7 +873,7 @@ test('handleWsCommandDequeued removes the command chip; a failure surfaces a toa
   expect(getToasts().length).toBe(before + 1);
 });
 
-test('mergeSteers carries command/images through a reconnect snapshot', () => {
+test('mergeSteers carries command/images through a reconnect snapshot', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     state: 'running',
@@ -621,7 +888,7 @@ test('mergeSteers carries command/images through a reconnect snapshot', () => {
   expect(steers[1]).toMatchObject({ id: 'm1', images: 2, command: false, confirmed: true });
 });
 
-test('handleWsRunEnd keeps genuinely queued steers (mostrar la verdad)', () => {
+test('handleWsRunEnd keeps genuinely queued steers (mostrar la verdad)', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [], state: 'running', pendingSteers: [{ id: 'q1', text: 'do this next' }] } } });
 
@@ -632,7 +899,7 @@ test('handleWsRunEnd keeps genuinely queued steers (mostrar la verdad)', () => {
   expect(steers[0].id).toBe('q1');
 });
 
-test('a server occurrence is counted once locally even when its poll snapshot follows', () => {
+test('a server occurrence is counted once locally even when its poll snapshot follows', async () => {
   setState({ sessions: {
     s1: { id: 's1', state: 'idle', unseen: true, unseenGen: 4, serverUnseenGen: 4, attentionArrival: 4, messages: [], subagents: {} },
   } });
@@ -646,7 +913,7 @@ test('a server occurrence is counted once locally even when its poll snapshot fo
   expect(store.get().sessions.s1.attentionArrival).toBeGreaterThan(firstArrival);
 });
 
-test('a restarted WS server accepts a lower attention generation once', () => {
+test('a restarted WS server accepts a lower attention generation once', async () => {
   setState({ sessions: {
     s1: { id: 's1', state: 'idle', serverInstance: 'server-a', messages: [], subagents: {} },
   } });
@@ -663,7 +930,7 @@ test('a restarted WS server accepts a lower attention generation once', () => {
   expect(afterRestart.serverUnseenInstance).toBe('server-b');
 });
 
-test('the first unseen occurrence in another session gets a later global arrival', () => {
+test('the first unseen occurrence in another session gets a later global arrival', async () => {
   setState({ sessions: {
     a: { id: 'a', state: 'idle', messages: [], subagents: {} },
     b: { id: 'b', state: 'idle', messages: [], subagents: {} },
@@ -675,7 +942,7 @@ test('the first unseen occurrence in another session gets a later global arrival
   expect(store.get().sessions.b.attentionArrival).toBe(2);
 });
 
-test('terminal state changes defer attention to their authoritative occurrence', () => {
+test('terminal state changes defer attention to their authoritative occurrence', async () => {
   const originalDocument = globalThis.document;
   const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   globalThis.document = { hidden: false };
@@ -704,7 +971,7 @@ test('terminal state changes defer attention to their authoritative occurrence',
 
 // Regression: a stale "compacting" spinner must be cleared by the
 // authoritative snapshot when the compaction finished while the pane had no WS.
-test('handleWsInit clears a stale compacting spinner from the snapshot', () => {
+test('handleWsInit clears a stale compacting spinner from the snapshot', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, compacting: true } } });
 
@@ -716,7 +983,7 @@ test('handleWsInit clears a stale compacting spinner from the snapshot', () => {
 
 // Regression: a compaction still running at reconnect must restore
 // the spinner from the snapshot.
-test('handleWsInit restores an in-progress compacting spinner from the snapshot', () => {
+test('handleWsInit restores an in-progress compacting spinner from the snapshot', async () => {
   seedSession('s1');
   handleWsInit('s1', { messages: [], compacting: true });
 
@@ -725,7 +992,7 @@ test('handleWsInit restores an in-progress compacting spinner from the snapshot'
 
 // Regression: a reconnect during generation must restore the whole
 // streamed-so-far reply from the snapshot, not start from the next delta.
-test('handleWsInit restores the in-flight streamed reply from the snapshot', () => {
+test('handleWsInit restores the in-flight streamed reply from the snapshot', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [],
@@ -739,7 +1006,7 @@ test('handleWsInit restores the in-flight streamed reply from the snapshot', () 
 
 // A reconnect when nothing is streaming must leave the buffers empty (null),
 // not carry stale streaming text over from a previous connection.
-test('handleWsInit clears streaming buffers when nothing is in flight', () => {
+test('handleWsInit clears streaming buffers when nothing is in flight', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, streamingText: 'stale', thinkingText: 'stale' } } });
 
@@ -751,7 +1018,7 @@ test('handleWsInit clears streaming buffers when nothing is in flight', () => {
 
 // Regression: persisted goal-lifecycle markers (role "goal") must
 // rebuild as system lines so a reopened conversation shows the goal record.
-test('normalizeHistory renders role "goal" markers as system lines', () => {
+test('normalizeHistory renders role "goal" markers as system lines', async () => {
   const out = normalizeHistory([
     { role: 'goal', custom: { goal: true, phase: 'start' }, content: [{ type: 'text', text: '🎯 Goal started: ship it' }] },
     { role: 'assistant', msg_id: 'a1', content: [{ type: 'text', text: 'working' }] },
@@ -767,7 +1034,7 @@ test('normalizeHistory renders role "goal" markers as system lines', () => {
 
 // Bug #7 parity: a fresh goal activation shows a live "start" line (matching the
 // persisted marker rendered on reopen); a re-announcement must not duplicate it.
-test('handleWsGoalChange adds a live start line once on fresh activation', () => {
+test('handleWsGoalChange adds a live start line once on fresh activation', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
 
@@ -785,7 +1052,7 @@ test('handleWsGoalChange adds a live start line once on fresh activation', () =>
 
 // Parity with the TUI "verifying…" status: goal_verify toggles a flag the
 // TaskBar pill reads, and it's cleared when the goal ends.
-test('handleWsGoalVerify toggles goalVerifying', () => {
+test('handleWsGoalVerify toggles goalVerifying', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, goalActive: true } } });
 
@@ -802,7 +1069,7 @@ import { getToasts } from './notifications.js';
 // must surface the reason (parity with the TUI's run-end error block), not stay
 // silent. The session is kept visible so the focused-tile path runs (no
 // navigator-dependent attention notification).
-test('handleWsStateChange surfaces a quota error as a toast', () => {
+test('handleWsStateChange surfaces a quota error as a toast', async () => {
   setState({ sessions: { s1: { id: 's1', state: 'running', subagents: {} } }, isMobile: true, activeSession: 's1' });
   const before = getToasts().length;
 
@@ -816,14 +1083,14 @@ test('handleWsStateChange surfaces a quota error as a toast', () => {
 });
 
 // A clean idle end must NOT produce an error toast.
-test('handleWsStateChange does not toast on a normal idle end', () => {
+test('handleWsStateChange does not toast on a normal idle end', async () => {
   setState({ sessions: { s1: { id: 's1', state: 'running', subagents: {} } }, isMobile: true, activeSession: 's1' });
   const before = getToasts().length;
   handleWsStateChange('s1', { state: 'idle' });
   expect(getToasts().length).toBe(before);
 });
 
-test('handleWsBashComplete adds a bash card to the chat', () => {
+test('handleWsBashComplete adds a bash card to the chat', async () => {
   setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [] } } });
   handleWsBashComplete('s1', { job_id: 'bash-1', command: 'sleep 5; echo done', status: 'completed', text: '[bash job completed] Job bash-1 finished.\nCommand: sleep 5; echo done\n\nOutput:\ndone' });
   const msgs = store.get().sessions.s1.messages;
@@ -834,7 +1101,7 @@ test('handleWsBashComplete adds a bash card to the chat', () => {
   expect(card.args.command).toBe('sleep 5; echo done');
 });
 
-test('owned async bash stays in its subagent transcript, not the root dock or ledger', () => {
+test('owned async bash stays in its subagent transcript, not the root dock or ledger', async () => {
   seedSession('s1');
   handleWsSubagentStart('s1', { job_id: 'child-1', task: 'Inspect', model: 'm', async: true });
   handleWsBashJobStart('s1', {
@@ -856,7 +1123,7 @@ test('owned async bash stays in its subagent transcript, not the root dock or le
   expect(liveTrayAgents(session).filter(chip => chip.kind === 'bash')).toEqual([]);
 });
 
-test('root async bash remains a root dock job and completion ledger card', () => {
+test('root async bash remains a root dock job and completion ledger card', async () => {
   seedSession('s1');
   handleWsBashJobStart('s1', { job_id: 'bash-1', command: 'go test ./...', cwd: '/work', status: 'running' });
   let session = store.get().sessions.s1;
@@ -868,7 +1135,7 @@ test('root async bash remains a root dock job and completion ledger card', () =>
   expect(session.messages).toContainEqual(expect.objectContaining({ tool_call_id: 'bash-complete-bash-1', tool_name: 'bash' }));
 });
 
-test('init routes an owned bash snapshot into its subagent transcript', () => {
+test('init routes an owned bash snapshot into its subagent transcript', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [],
@@ -883,7 +1150,7 @@ test('init routes an owned bash snapshot into its subagent transcript', () => {
   expect(liveTrayAgents(session).filter(chip => chip.kind === 'bash')).toEqual([]);
 });
 
-test('init retains a terminal bash owner so its result stays under that child', () => {
+test('init retains a terminal bash owner so its result stays under that child', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [],
@@ -913,7 +1180,7 @@ test('init retains a terminal bash owner so its result stays under that child', 
   expect(liveTrayAgents(session)).toEqual([]);
 });
 
-test('a start-before-subagent placeholder becomes terminal when its bash ends', () => {
+test('a start-before-subagent placeholder becomes terminal when its bash ends', async () => {
   seedSession('s1');
   handleWsBashJobStart('s1', {
     job_id: 'bash-1', owner_agent_id: 'child-1', command: 'go test ./...', status: 'running',
@@ -931,7 +1198,7 @@ test('a start-before-subagent placeholder becomes terminal when its bash ends', 
   expect(liveTrayAgents(store.get().sessions.s1)).toEqual([]);
 });
 
-test('normalizeHistory carries the job ID the subagent tool recorded on its result', () => {
+test('normalizeHistory carries the job ID the subagent tool recorded on its result', async () => {
   const raw = [
     { role: 'assistant', msg_id: 'a1', content: [{ type: 'tool_call', tool_call_id: 'toolu_1', tool_name: 'subagent', arguments: { task: 'work' } }] },
     { role: 'tool_result', tool_call_id: 'toolu_1', custom: { subagent_job_id: 'sa-1' }, content: [{ type: 'text', text: 'done' }] },
@@ -940,7 +1207,7 @@ test('normalizeHistory carries the job ID the subagent tool recorded on its resu
   expect(out[0]).toEqual(expect.objectContaining({ tool_name: 'subagent', subagentJobId: 'sa-1' }));
 });
 
-test('normalizeHistory recovers a completed subagent job ID from its notification', () => {
+test('normalizeHistory recovers a completed subagent job ID from its notification', async () => {
   const raw = [{
     role: 'user',
     content: [{ type: 'text', text: '[subagent completed] Job sa-9 finished.\nTask: review\nwith reproduction steps\n\nResult (truncated — use subagent_status for full output):\nlast line' }],
@@ -952,7 +1219,7 @@ test('normalizeHistory recovers a completed subagent job ID from its notificatio
   }));
 });
 
-test('normalizeHistory reloads a bash_job custom notification as a bash card', () => {
+test('normalizeHistory reloads a bash_job custom notification as a bash card', async () => {
   const raw = [{
     role: 'user',
     custom: { source: 'bash_job', bash_command: 'make build', bash_status: 'completed' },
@@ -966,7 +1233,7 @@ test('normalizeHistory reloads a bash_job custom notification as a bash card', (
   expect(out[0].status).toBe('done');
 });
 
-test('normalizeHistory reloads a prefix-based bash notification (no custom)', () => {
+test('normalizeHistory reloads a prefix-based bash notification (no custom)', async () => {
   const raw = [{
     role: 'user',
     content: [{ type: 'text', text: '[bash job failed] Job bash-2 failed.\nCommand: false\nOutput:\nboom' }],
@@ -980,7 +1247,7 @@ test('normalizeHistory reloads a prefix-based bash notification (no custom)', ()
 
 import { handleWsRateLimit } from './ws-handlers.js';
 
-test('handleWsRateLimit stores OpenAI usage globally without touching Anthropic', () => {
+test('handleWsRateLimit stores OpenAI usage globally without touching Anthropic', async () => {
   setState({
     sessions: { s1: { id: 's1', provider: 'openai', subagents: {} } },
     usage: { available: true, five_hour: { utilization: 10 }, seven_day: { utilization: 20 } },
@@ -998,7 +1265,7 @@ test('handleWsRateLimit stores OpenAI usage globally without touching Anthropic'
   expect(store.get().usage.seven_day.utilization).toBe(20);
 });
 
-test('handleWsRateLimit patches the global snapshot for Anthropic sessions', () => {
+test('handleWsRateLimit patches the global snapshot for Anthropic sessions', async () => {
   setState({
     sessions: { s1: { id: 's1', provider: 'anthropic', subagents: {} } },
     usage: { available: true, five_hour: { utilization: 10 }, seven_day: { utilization: 20 } },
@@ -1011,7 +1278,7 @@ test('handleWsRateLimit patches the global snapshot for Anthropic sessions', () 
   expect(store.get().sessions.s1.rlFiveHourPct).toBe(40);
 });
 
-test('handleWsRateLimit ignores unknown windows (pct < 0)', () => {
+test('handleWsRateLimit ignores unknown windows (pct < 0)', async () => {
   setState({
     sessions: { s1: { id: 's1', provider: 'openai', subagents: {} } },
     usage: null,
@@ -1026,7 +1293,7 @@ test('handleWsRateLimit ignores unknown windows (pct < 0)', () => {
   expect(store.get().usage.providers.openai.seven_day).toBeUndefined();
 });
 
-test('handleWsRateLimit isolates providers in a mixed layout', () => {
+test('handleWsRateLimit isolates providers in a mixed layout', async () => {
   setState({
     sessions: {
       a: { id: 'a', provider: 'anthropic', subagents: {} },
@@ -1050,14 +1317,14 @@ test('handleWsRateLimit isolates providers in a mixed layout', () => {
 });
 
 // --- Per-run logical token tally ---
-test('handleWsRunTokens sets authoritative logical traffic totals', () => {
+test('handleWsRunTokens sets authoritative logical traffic totals', async () => {
   setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [] } } });
   handleWsRunTokens('s1', { up: 1200, down: 300 });
   expect(store.get().sessions.s1.runTokensUp).toBe(1200);
   expect(store.get().sessions.s1.runTokensDown).toBe(300);
 });
 
-test('handleWsInit rehydrates run token totals', () => {
+test('handleWsInit rehydrates run token totals', async () => {
   setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [], runTokensUp: 99, runTokensDown: 88 } } });
   handleWsInit('s1', { messages: [], run_tokens_up: 1200, run_tokens_down: 300 });
   expect(store.get().sessions.s1.runTokensUp).toBe(1200);
@@ -1067,7 +1334,7 @@ test('handleWsInit rehydrates run token totals', () => {
 // --- Live MCP summary + panel re-fetch tick ---
 import { handleWsMcpChange } from './ws-handlers.js';
 
-test('handleWsMcpChange updates the summary and bumps mcpTick', () => {
+test('handleWsMcpChange updates the summary and bumps mcpTick', async () => {
   setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [] } } });
   handleWsMcpChange('s1', { total: 3, ready: 1, disabled: 1, unhealthy: 1, pending: 1 });
   const s = store.get().sessions.s1;
@@ -1079,7 +1346,7 @@ test('handleWsMcpChange updates the summary and bumps mcpTick', () => {
   expect(store.get().sessions.s1.mcp.unhealthy).toBe(0);
 });
 
-test('handleWsInit keeps the finished subagent being viewed', () => {
+test('handleWsInit keeps the finished subagent being viewed', async () => {
   // The init snapshot lists live jobs only. Reconnecting (screen sleep, network
   // change) must not delete a finished transcript the reader has open, or the
   // subagent view bounces back to the parent mid-read.
@@ -1093,7 +1360,7 @@ test('handleWsInit keeps the finished subagent being viewed', () => {
   expect(subs['sa-live']).toBeTruthy();
 });
 
-test('handleWsInit does not resurrect finished subagents nobody is viewing', () => {
+test('handleWsInit does not resurrect finished subagents nobody is viewing', async () => {
   setState({ sessions: { s1: { id: 's1', messages: [], viewingSubagent: null,
     subagents: { 'sa-old': { jobId: 'sa-old', status: 'completed', messages: [] } } } } });
 
@@ -1102,7 +1369,7 @@ test('handleWsInit does not resurrect finished subagents nobody is viewing', () 
   expect(store.get().sessions.s1.subagents['sa-old']).toBeUndefined();
 });
 
-test('handleWsInit prefers the server copy when the viewed job is still live', () => {
+test('handleWsInit prefers the server copy when the viewed job is still live', async () => {
   setState({ sessions: { s1: { id: 's1', messages: [], viewingSubagent: 'sa-1',
     subagents: { 'sa-1': { jobId: 'sa-1', status: 'running', task: 'stale' } } } } });
 
@@ -1111,7 +1378,7 @@ test('handleWsInit prefers the server copy when the viewed job is still live', (
   expect(store.get().sessions.s1.subagents['sa-1'].task).toBe('fresh');
 });
 
-test('handleWsInit keeps the finished bash job being read in its detail view', () => {
+test('handleWsInit keeps the finished bash job being read in its detail view', async () => {
   // A reconnect (mobile screen sleep) happens constantly while watching a long
   // job. Once the job ends the server stops listing it, and dropping its entry
   // would eject the reader back to the conversation mid-read.
@@ -1123,7 +1390,7 @@ test('handleWsInit keeps the finished bash job being read in its detail view', (
   expect(store.get().sessions.s1.subagents['bash-1']).toBeTruthy();
 });
 
-test('handleWsInit rebuilds a live bash job being read from the snapshot output', () => {
+test('handleWsInit rebuilds a live bash job being read from the snapshot output', async () => {
   // The accumulated output travels in the snapshot, so the detail view repaints
   // itself after a reconnect without any special casing in the component.
   setState({ sessions: { s1: { id: 's1', messages: [], viewingBashJob: 'bash-1',
@@ -1140,7 +1407,7 @@ test('handleWsInit rebuilds a live bash job being read from the snapshot output'
   expect(view.canCancel).toBe(true);
 });
 
-test('a bash job ending while it is being read settles terminal instead of vanishing', () => {
+test('a bash job ending while it is being read settles terminal instead of vanishing', async () => {
   seedSession('s1');
   handleWsBashJobStart('s1', { job_id: 'bash-1', command: 'go test ./...', cwd: '/work', status: 'running' });
   setState({ sessions: { ...store.get().sessions, s1: { ...store.get().sessions.s1, viewingBashJob: 'bash-1' } } });
@@ -1159,7 +1426,7 @@ test('a bash job ending while it is being read settles terminal instead of vanis
 // a generic 'Calling'": a tool call still generating args or still executing is
 // in no message history, so the snapshot carries it separately.
 
-test('handleWsInit rebuilds a live row for a tool that is still executing', () => {
+test('handleWsInit rebuilds a live row for a tool that is still executing', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [],
@@ -1178,7 +1445,7 @@ test('handleWsInit rebuilds a live row for a tool that is still executing', () =
   expect(liveVerb(rows[0].tool_name)).toBe('Running');
 });
 
-test('handleWsInit restores a tool call whose arguments are still streaming', () => {
+test('handleWsInit restores a tool call whose arguments are still streaming', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [],
@@ -1189,7 +1456,7 @@ test('handleWsInit restores a tool call whose arguments are still streaming', ()
   expect(liveVerb(row.tool_name)).toBe('Editing');
 });
 
-test('handleWsInit does not duplicate a live tool already present in history', () => {
+test('handleWsInit does not duplicate a live tool already present in history', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [{
@@ -1204,7 +1471,7 @@ test('handleWsInit does not duplicate a live tool already present in history', (
   expect(rows[0]).toMatchObject({ tool_call_id: 'tc1', status: 'running', startedAt: 42 });
 });
 
-test('a live event arriving after the snapshot updates the restored row instead of duplicating it', () => {
+test('a live event arriving after the snapshot updates the restored row instead of duplicating it', async () => {
   seedSession('s1');
   handleWsInit('s1', {
     messages: [],
@@ -1221,7 +1488,7 @@ test('a live event arriving after the snapshot updates the restored row instead 
   expect(after[0].status).toBe('done');
 });
 
-test('handleWsInit without live tools leaves history untouched', () => {
+test('handleWsInit without live tools leaves history untouched', async () => {
   seedSession('s1');
   handleWsInit('s1', { messages: [], subagents: [] });
   expect(store.get().sessions.s1.messages).toHaveLength(0);

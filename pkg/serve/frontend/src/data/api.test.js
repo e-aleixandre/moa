@@ -1,6 +1,9 @@
 import { test, expect } from 'bun:test';
+import { setState } from './store.js';
 
-const { api, getVersion } = await import('./api.js?timeout-test');
+const {
+  api, getVersion, acknowledgeRenderedPendingAttention, StaleServerInstanceError,
+} = await import('./api.js?timeout-test');
 
 test('getVersion bypasses the HTTP cache', async () => {
   const originalFetch = globalThis.fetch;
@@ -83,5 +86,24 @@ test('api clears its timeout after a successful response', async () => {
     globalThis.fetch = originalFetch;
     globalThis.setTimeout = originalSetTimeout;
     globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
+test('a stale /read fence reports a typed stale-server-instance outcome', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response('stale instance', { status: 409 }));
+  setState({
+    isMobile: true,
+    activeSession: 's1',
+    sessions: {
+      s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'instance-a', subagents: {} },
+    },
+  });
+  try {
+    await expect(acknowledgeRenderedPendingAttention('s1', {
+      id: 'ask', unseenGen: 7, serverInstance: 'instance-a',
+    })).rejects.toBeInstanceOf(StaleServerInstanceError);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });

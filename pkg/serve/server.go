@@ -422,10 +422,11 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limitBody(w, r, maxSendBodySize)
 		var body struct {
-			Text        string       `json:"text"`
-			Attachments []Attachment `json:"attachments"`
-			SteerID     string       `json:"steer_id"`
-			MsgID       string       `json:"msg_id"`
+			Text           string       `json:"text"`
+			Attachments    []Attachment `json:"attachments"`
+			SteerID        string       `json:"steer_id"`
+			MsgID          string       `json:"msg_id"`
+			ServerInstance string       `json:"server_instance"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -436,7 +437,7 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		sessionID := r.PathValue("id")
-		action, acceptedID, descriptors, err := mgr.Send(sessionID, body.Text, body.Attachments, body.SteerID, body.MsgID)
+		action, acceptedID, descriptors, err := mgr.SendForInstance(sessionID, body.Text, body.Attachments, body.SteerID, body.MsgID, body.ServerInstance)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -444,6 +445,8 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		case errors.Is(err, bus.ErrSteerQueueFull):
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		case errors.Is(err, ErrStaleServerInstance), errors.Is(err, ErrSendIDCollision):
+			http.Error(w, err.Error(), http.StatusConflict)
 		case err != nil:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		default:
@@ -1017,6 +1020,13 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 
 func handleReadSession(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// A successful response must mean this server accepted the occurrence.
+		// Silently accepting a stale process fence made the client believe a read
+		// had landed even though this process retained the unread marker.
+		if instance := r.URL.Query().Get("server_instance"); instance != "" && instance != mgr.serverInstance {
+			http.Error(w, "stale server instance", http.StatusConflict)
+			return
+		}
 		gen, _ := strconv.ParseUint(r.URL.Query().Get("unseen_gen"), 10, 64)
 		if err := mgr.MarkSessionRead(r.PathValue("id"), gen, r.URL.Query().Get("server_instance")); err != nil {
 			if errors.Is(err, ErrNotFound) {

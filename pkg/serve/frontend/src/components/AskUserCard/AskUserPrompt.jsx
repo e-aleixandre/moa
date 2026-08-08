@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import { AskUserCard } from "./AskUserCard.jsx";
 import { resolveAskUser } from "../../data/session-actions.js";
+import { usePendingPromptAttentionReceipt } from "../AttentionReceipt/AttentionReceipt.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import { useCanTranscribe } from "../../hooks/useCanTranscribe.js";
 import {
@@ -53,6 +54,7 @@ export function AskUserPrompt({ session }) {
   const submitFreeRef = useRef(null);
   // Scopes the keyboard shortcut to this card (see the effect below).
   const rootRef = useRef(null);
+  usePendingPromptAttentionReceipt(rootRef, session.id, ask);
 
   // The ask batch a recording belongs to. A transcription resolves
   // asynchronously, so one started under a previous batch (or after the answer

@@ -1,11 +1,19 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
-import { beginHistoryHydration } from './history-hydration.js';
+import {
+  beginHistoryHydration, finishHistoryHydration, HISTORY_HYDRATION_GRACE_MS,
+} from './history-hydration.js';
 import { handleWsInit } from './ws-handlers.js';
-import { HISTORY_HYDRATION_TIMEOUT_MS, acknowledgeVisibleAttention, syncConnections } from './api.js';
-import { loadSessions } from './session-actions.js';
-import { __resetBootForTests } from './tile-actions.js';
-import { historyHydrationTailVisible } from '../components/HistoryHydrationTail/HistoryHydrationTail.jsx';
+import {
+  HISTORY_HYDRATION_TIMEOUT_MS, acknowledgeVisibleAttention, reconnectAll, syncConnections,
+} from './api.js';
+import { deleteSession, loadSessions } from './session-actions.js';
+import { __resetBootForTests, afterVisibilityChange } from './tile-actions.js';
+import {
+  HistoryHydrationTail, historyHydrationTailVisible,
+} from '../components/HistoryHydrationTail/HistoryHydrationTail.jsx';
+import { StreamingSkeleton } from '../components/StreamingSkeleton/StreamingSkeleton.jsx';
+import { Spinner } from '../primitives/index.js';
 
 beforeEach(() => {
   setState({ sessions: {}, activeSession: null, isMobile: false });
@@ -68,6 +76,62 @@ test('socket close and init timeout settle hydration', () => {
   }
 });
 
+test('reconnectAll starts a clean hydration grace window', () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers = [];
+  class TestWebSocket {
+    constructor() { TestWebSocket.instances.push(this); }
+    close() { this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  globalThis.setTimeout = (callback, delay) => {
+    const timer = { callback, delay };
+    timers.push(timer);
+    return timer;
+  };
+  globalThis.clearTimeout = (timer) => {
+    const index = timers.indexOf(timer);
+    if (index >= 0) timers.splice(index, 1);
+  };
+  try {
+    setState({ sessions: { s1: {
+      id: 's1', messages: [{ role: 'assistant' }], subagents: {},
+      serverInstance: 'instance-a', historyCacheInstance: 'instance-a', historyCacheGen: 7,
+    } } });
+    syncConnections(['s1']);
+    const abandonedTimeout = timers.find(timer => timer.delay === HISTORY_HYDRATION_TIMEOUT_MS);
+
+    // The previous socket saw an up-to-date cache; the replacement must
+    // recompute risk after the roster learns of a newer occurrence.
+    setState({ sessions: { s1: {
+      ...store.get().sessions.s1,
+      unseen: true, unseenGen: 8, serverUnseenInstance: 'instance-a',
+    } } });
+    reconnectAll();
+
+    expect(TestWebSocket.instances).toHaveLength(2);
+    expect(timers).not.toContain(abandonedTimeout);
+    expect(store.get().sessions.s1).toMatchObject({
+      historyPending: true, historyTailNeeded: true, historyTailReady: false,
+    });
+    const grace = timers.find(timer => timer.delay === HISTORY_HYDRATION_GRACE_MS);
+    expect(grace).toBeDefined();
+    grace.callback();
+    expect(historyHydrationTailVisible(store.get().sessions.s1)).toBe(true);
+    syncConnections([]);
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+    globalThis.location = originalLocation;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
 test('a close after init revokes transcript authority', () => {
   const originalWebSocket = globalThis.WebSocket;
   const originalLocation = globalThis.location;
@@ -79,7 +143,7 @@ test('a close after init revokes transcript authority', () => {
   globalThis.WebSocket = TestWebSocket;
   globalThis.location = { protocol: 'http:', host: 'localhost' };
   try {
-    setState({ sessions: { s1: { id: 's1', messages: [], subagents: {} } } });
+    setState({ sessions: { s1: { id: 's1', messages: [], subagents: {}, serverInstance: 'instance-a' } } });
     syncConnections(['s1']);
     TestWebSocket.instances[0].onmessage({ data: JSON.stringify({
       type: 'init', data: { messages: [], subagents: [], server_instance: 'instance-a' },
@@ -139,12 +203,14 @@ test('an init without an attention bound retries instead of stranding its dot', 
     syncConnections(['s1']);
     TestWebSocket.instances[0].onmessage({ data: JSON.stringify({
       type: 'init', data: {
-        messages: [], subagents: [], server_instance: 'instance-a', attention_bound: false,
+        messages: [], subagents: [], server_instance: 'instance-a', attention_bound: false, unseen_gen: 7,
       },
     }) });
 
     expect(calls.some(path => String(path).includes('/read?'))).toBe(false);
-    expect(store.get().sessions.s1).toMatchObject({ historyHydrated: true, historyStale: false, unseen: true });
+    expect(store.get().sessions.s1).toMatchObject({
+      historyHydrated: true, historyAckProven: false, historyStale: false, unseen: true,
+    });
     const retry = timers.find(timer => timer.delay === 1000);
     expect(retry).toBeDefined();
     retry.callback();
@@ -155,6 +221,7 @@ test('an init without an attention bound retries instead of stranding its dot', 
         messages: [], subagents: [], server_instance: 'instance-a', attention_bound: true, unseen_gen: 7,
       },
     }) });
+    await Promise.resolve();
     await Promise.resolve();
     expect(calls.some(path => String(path).includes('/read?unseen_gen=7'))).toBe(true);
     syncConnections([]);
@@ -356,7 +423,7 @@ test('a WebSocket constructor failure leaves an explicit stale boundary and retr
   }
 });
 
-test('attention remains until init has shown authoritative history, then acknowledges once', () => {
+test('attention remains until init has shown authoritative history, then acknowledges once', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = (path) => {
@@ -374,18 +441,19 @@ test('attention remains until init has shown authoritative history, then acknowl
     expect(store.get().sessions.s1.unseen).toBe(true);
     expect(calls).toHaveLength(0);
 
-    handleWsInit('s1', { messages: [], subagents: [], unseen_gen: 7 });
+    handleWsInit('s1', { messages: [], subagents: [], unseen_gen: 7 }, { ackProven: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(store.get().sessions.s1.unseen).toBe(false);
     expect(calls).toEqual(['/api/sessions/s1/read?unseen_gen=7']);
 
-    handleWsInit('s1', { messages: [], subagents: [], unseen_gen: 7 });
+    handleWsInit('s1', { messages: [], subagents: [], unseen_gen: 7 }, { ackProven: true });
     expect(calls).toHaveLength(1);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test('a stale roster restoration does not repeat an acknowledgement, but a newer generation does', () => {
+test('a stale roster restoration does not repeat an acknowledgement, but a newer generation does', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = (path) => {
@@ -398,19 +466,19 @@ test('a stale roster restoration does not repeat an acknowledgement, but a newer
       activeSession: 's1',
       sessions: { s1: {
         id: 's1', messages: [], subagents: {}, unseen: true, unseenGen: 7,
-        historyHydrated: true, historyShownGen: 7, serverInstance: 'instance-a',
+        historyHydrated: true, historyAckProven: true, historyShownGen: 7, serverInstance: 'instance-a',
       } },
     });
 
-    expect(acknowledgeVisibleAttention('s1', 7, 'instance-a')).toBe(true);
+    expect(await acknowledgeVisibleAttention('s1', 7, 'instance-a')).toBe(true);
     // A poll which began before POST /read can put this same occurrence back.
     setState({ sessions: { s1: { ...store.get().sessions.s1, unseen: true, unseenGen: 7 } } });
-    expect(acknowledgeVisibleAttention('s1', 7, 'instance-a')).toBe(false);
+    expect(await acknowledgeVisibleAttention('s1', 7, 'instance-a')).toBe(true);
 
     setState({ sessions: { s1: {
       ...store.get().sessions.s1, unseen: true, unseenGen: 8, historyShownGen: 8,
     } } });
-    expect(acknowledgeVisibleAttention('s1', 8, 'instance-a')).toBe(true);
+    expect(await acknowledgeVisibleAttention('s1', 8, 'instance-a')).toBe(true);
     expect(calls).toEqual([
       '/api/sessions/s1/read?unseen_gen=7&server_instance=instance-a',
       '/api/sessions/s1/read?unseen_gen=8&server_instance=instance-a',
@@ -574,11 +642,14 @@ test('an unknown-at-open socket cannot acknowledge or overwrite a roster-learned
   }
 });
 
-test('an unknown-at-open init renders history but withholds its acknowledgement', () => {
+test('an unknown-at-open init cannot be acknowledged by a deferred visibility pass and converges on a proven init', async () => {
   const originalFetch = globalThis.fetch;
   const originalWebSocket = globalThis.WebSocket;
   const originalLocation = globalThis.location;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
   const calls = [];
+  const timers = [];
   class TestWebSocket {
     constructor() { TestWebSocket.instances.push(this); }
     close() { this.onclose?.(); }
@@ -586,6 +657,15 @@ test('an unknown-at-open init renders history but withholds its acknowledgement'
   TestWebSocket.instances = [];
   globalThis.WebSocket = TestWebSocket;
   globalThis.location = { protocol: 'http:', host: 'localhost' };
+  globalThis.setTimeout = (callback, delay) => {
+    const timer = { callback, delay };
+    timers.push(timer);
+    return timer;
+  };
+  globalThis.clearTimeout = (timer) => {
+    const index = timers.indexOf(timer);
+    if (index >= 0) timers.splice(index, 1);
+  };
   globalThis.fetch = (path) => {
     calls.push(path);
     return Promise.resolve(new Response('', { status: 204 }));
@@ -602,20 +682,216 @@ test('an unknown-at-open init renders history but withholds its acknowledgement'
     }) });
 
     expect(store.get().sessions.s1).toMatchObject({
-      serverInstance: 'instance-a', historyHydrated: true, unseen: true, unseenGen: 7,
+      serverInstance: 'instance-a', historyHydrated: true, historyAckProven: false, unseen: true, unseenGen: 7,
     });
     expect(calls.filter((path) => path.includes('/read?'))).toEqual([]);
+
+    // The common deferred path (triggered after a roster poll) must obey the
+    // same proof fence as the immediate init acknowledgement.
+    afterVisibilityChange();
+    expect(calls.filter((path) => path.includes('/read?'))).toEqual([]);
+
+    // The unproven socket was closed after rendering. Its retry opens against
+    // the now-known instance, and that proven bounded init clears the dot.
+    const retry = timers.find(timer => timer.delay === 1000);
+    expect(retry).toBeDefined();
+    retry.callback();
+    expect(TestWebSocket.instances).toHaveLength(2);
+    TestWebSocket.instances[1].onmessage({ data: JSON.stringify({
+      type: 'init', data: {
+        messages: [], subagents: [], server_instance: 'instance-a', attention_bound: true, unseen_gen: 7,
+      },
+    }) });
+    await Promise.resolve();
+    expect(calls.filter((path) => path.includes('/read?'))).toEqual([
+      '/api/sessions/s1/read?unseen_gen=7&server_instance=instance-a',
+    ]);
     syncConnections([]);
   } finally {
     globalThis.fetch = originalFetch;
     globalThis.WebSocket = originalWebSocket;
     globalThis.location = originalLocation;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
   }
 });
 
-test('ordinary live sessions never render a hydration tail', () => {
+test('deleting a session during the hydration grace clears its tail timer', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers = [];
+  class TestWebSocket {
+    constructor() { TestWebSocket.instances.push(this); }
+    close() { this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  globalThis.fetch = () => Promise.resolve(new Response('', { status: 204 }));
+  globalThis.setTimeout = (callback, delay) => {
+    const timer = { callback, delay };
+    timers.push(timer);
+    return timer;
+  };
+  globalThis.clearTimeout = (timer) => {
+    const index = timers.indexOf(timer);
+    if (index >= 0) timers.splice(index, 1);
+  };
+  try {
+    setState({
+      isMobile: true,
+      activeSession: 's1',
+      sessions: { s1: { id: 's1', state: 'idle', messages: [], subagents: {}, unseen: true, unseenGen: 7 } },
+    });
+    syncConnections(['s1']);
+    const grace = timers.find(timer => timer.delay === HISTORY_HYDRATION_GRACE_MS);
+    expect(grace).toBeDefined();
+
+    await deleteSession('s1');
+
+    expect(store.get().sessions.s1).toBeUndefined();
+    expect(timers).not.toContain(grace);
+  } finally {
+    syncConnections([]);
+    globalThis.fetch = originalFetch;
+    globalThis.WebSocket = originalWebSocket;
+    globalThis.location = originalLocation;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
+test('an ordinary up-to-date session open never renders a hydration tail', () => {
+  setState({ sessions: { s1: {
+    id: 's1', messages: [{ role: 'assistant' }], subagents: {},
+    serverInstance: 'instance-a', historyCacheInstance: 'instance-a', historyCacheGen: 7,
+  } } });
+
+  beginHistoryHydration('s1');
+
+  expect(store.get().sessions.s1.historyTailNeeded).toBe(false);
+  expect(historyHydrationTailVisible(store.get().sessions.s1)).toBe(false);
+  finishHistoryHydration('s1');
+});
+
+test('an init landing within the grace delay never flashes a hydration tail', () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers = [];
+  globalThis.setTimeout = (callback, delay) => {
+    const timer = { callback, delay };
+    timers.push(timer);
+    return timer;
+  };
+  globalThis.clearTimeout = (timer) => {
+    const index = timers.indexOf(timer);
+    if (index >= 0) timers.splice(index, 1);
+  };
+  try {
+    setState({ sessions: { s1: { id: 's1', messages: [], subagents: {} } } });
+    beginHistoryHydration('s1');
+    expect(historyHydrationTailVisible(store.get().sessions.s1)).toBe(false);
+    expect(timers.some(timer => timer.delay === HISTORY_HYDRATION_GRACE_MS)).toBe(true);
+
+    finishHistoryHydration('s1', { shown: true, shownInstance: 'instance-a' });
+
+    expect(timers.some(timer => timer.delay === HISTORY_HYDRATION_GRACE_MS)).toBe(false);
+    expect(historyHydrationTailVisible(store.get().sessions.s1)).toBe(false);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
+test('a transcript behind an unseen occurrence appears after the grace delay', () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers = [];
+  globalThis.setTimeout = (callback, delay) => {
+    const timer = { callback, delay };
+    timers.push(timer);
+    return timer;
+  };
+  globalThis.clearTimeout = (timer) => {
+    const index = timers.indexOf(timer);
+    if (index >= 0) timers.splice(index, 1);
+  };
+  try {
+    setState({ sessions: { s1: {
+      id: 's1', messages: [{ role: 'assistant' }], subagents: {},
+      unseen: true, unseenGen: 8, serverInstance: 'instance-a', serverUnseenInstance: 'instance-a',
+      historyCacheInstance: 'instance-a', historyCacheGen: 7,
+    } } });
+    beginHistoryHydration('s1');
+    expect(historyHydrationTailVisible(store.get().sessions.s1)).toBe(false);
+
+    timers.find(timer => timer.delay === HISTORY_HYDRATION_GRACE_MS).callback();
+
+    expect(historyHydrationTailVisible(store.get().sessions.s1)).toBe(true);
+    finishHistoryHydration('s1');
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
+test('an unseen occurrence with unknown provenance shows the cached-history tail', () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers = [];
+  globalThis.setTimeout = (callback, delay) => {
+    const timer = { callback, delay };
+    timers.push(timer);
+    return timer;
+  };
+  globalThis.clearTimeout = (timer) => {
+    const index = timers.indexOf(timer);
+    if (index >= 0) timers.splice(index, 1);
+  };
+  try {
+    setState({ sessions: { s1: {
+      id: 's1', messages: [{ role: 'assistant' }], subagents: {},
+      unseen: true, unseenGen: 7, serverInstance: 'instance-a', serverUnseenInstance: '',
+      historyCacheInstance: 'instance-a', historyCacheGen: 7,
+    } } });
+    beginHistoryHydration('s1');
+
+    expect(store.get().sessions.s1.historyTailNeeded).toBe(true);
+    timers.find(timer => timer.delay === HISTORY_HYDRATION_GRACE_MS).callback();
+    expect(historyHydrationTailVisible(store.get().sessions.s1)).toBe(true);
+    finishHistoryHydration('s1');
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
+test('a session without cached history renders conversation skeleton blocks, not a loading line', () => {
+  const view = HistoryHydrationTail({ hasCachedTranscript: false });
+  const skeletons = [];
+  const spinners = [];
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === StreamingSkeleton) skeletons.push(node);
+    if (node.type === Spinner) spinners.push(node);
+    const children = node.props?.children;
+    if (Array.isArray(children)) children.forEach(walk);
+    else walk(children);
+  };
+  walk(view);
+
+  expect(skeletons).toHaveLength(4);
+  expect(spinners).toHaveLength(0);
+});
+
+test('ordinary live sessions without a hydration boundary never render a tail', () => {
   expect(historyHydrationTailVisible({ historyPending: false })).toBe(false);
   expect(historyHydrationTailVisible({})).toBe(false);
-  expect(historyHydrationTailVisible({ historyPending: true })).toBe(true);
+  expect(historyHydrationTailVisible({ historyPending: true })).toBe(false);
+  expect(historyHydrationTailVisible({ historyPending: true, historyTailNeeded: true })).toBe(false);
+  expect(historyHydrationTailVisible({ historyPending: true, historyTailNeeded: true, historyTailReady: true })).toBe(true);
   expect(historyHydrationTailVisible({ historyStale: true })).toBe(true);
 });

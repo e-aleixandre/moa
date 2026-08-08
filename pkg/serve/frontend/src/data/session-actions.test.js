@@ -18,6 +18,7 @@ mock.module('./api.js', () => ({
 const { store, setState } = await import('./store.js');
 const { loadSessions, openPersistedSubagent, openBashJob, sendMessage } = await import('./session-actions.js');
 const { handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
+const { rememberPendingAttention, rememberedPendingAttention } = await import('./attention-receipt-store.js');
 
 beforeEach(() => {
   setState({ sessions: {}, tileTree: null, activeSession: null });
@@ -59,6 +60,47 @@ test('loadSessions restores an unread result from the serve snapshot', async () 
   await loadSessions();
 
   expect(store.get().sessions.s3.unseen).toBe(true);
+});
+
+test('roster-driven deletion forgets the durable attention receipt', async () => {
+  const originalStorage = globalThis.localStorage;
+  const values = new Map();
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      get length() { return values.size; }, key: (i) => [...values.keys()][i] || null,
+      getItem: (key) => values.get(key) || null, setItem: (key, value) => values.set(key, value),
+      removeItem: (key) => values.delete(key),
+    },
+  });
+  try {
+    setState({ sessions: { gone: { id: 'gone', state: 'idle', subagents: {} } } });
+    expect(rememberPendingAttention('gone', { id: 'ask', unseenGen: 1, serverInstance: 'server-a' })).toBe(true);
+    apiResponse = [];
+    await loadSessions();
+    expect(rememberedPendingAttention('gone')).toBeNull();
+  } finally {
+    if (originalStorage === undefined) delete globalThis.localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalStorage });
+  }
+});
+
+test('reopening against a replacement server discards an old resolved-prompt receipt', async () => {
+  setState({
+    sessions: { s1: {
+      id: 's1', state: 'saved', provider: 'openai', cwd: '/x', subagents: {},
+      serverInstance: 'server-a',
+      resolvedPendingAttention: { id: 'ask-1', unseenGen: 7, serverInstance: 'server-a' },
+    } },
+  });
+  apiResponse = [{
+    id: 's1', title: 'S1', state: 'idle', provider: 'openai', cwd: '/x',
+    server_instance: 'server-b', unseen: true, unseen_gen: 7,
+  }];
+
+  await loadSessions();
+
+  expect(store.get().sessions.s1.resolvedPendingAttention).toBeNull();
 });
 
 test('loadSessions adopts the server state for a visible-but-saved session (just resumed)', async () => {

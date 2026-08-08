@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,38 @@ import (
 func newTestServer(t *testing.T) (*httptest.Server, *Manager, context.CancelFunc) {
 	t.Helper()
 	return newTestServerWithRoot(t, "/tmp")
+}
+
+func TestReadSessionRejectsStaleServerInstanceFence(t *testing.T) {
+	ts, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer ts.Close()
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "fenced-read", RunGen: 1})
+	pollUntil(t, time.Second, "unseen attention", func() bool { return mgr.sessionInfo(sess).Unseen })
+	gen := mgr.sessionInfo(sess).UnseenGen
+
+	stale := apiReq(t, ts, http.MethodPost, "/api/sessions/"+sess.ID+"/read?unseen_gen="+strconv.FormatUint(gen, 10)+"&server_instance=previous", "")
+	stale.Body.Close() //nolint:errcheck
+	if stale.StatusCode != http.StatusConflict {
+		t.Fatalf("stale fence status = %d, want %d", stale.StatusCode, http.StatusConflict)
+	}
+	if !mgr.sessionInfo(sess).Unseen {
+		t.Fatal("stale fence cleared unseen attention")
+	}
+
+	accepted := apiReq(t, ts, http.MethodPost, "/api/sessions/"+sess.ID+"/read?unseen_gen="+strconv.FormatUint(gen, 10)+"&server_instance="+url.QueryEscape(mgr.serverInstance), "")
+	accepted.Body.Close() //nolint:errcheck
+	if accepted.StatusCode != http.StatusNoContent {
+		t.Fatalf("matching fence status = %d, want %d", accepted.StatusCode, http.StatusNoContent)
+	}
+	if mgr.sessionInfo(sess).Unseen {
+		t.Fatal("matching fence did not clear unseen attention")
+	}
 }
 
 func TestAttentionEndpointReturnsCrossSessionBlockingPermissionMetadata(t *testing.T) {
@@ -1613,7 +1646,7 @@ func TestHandleSend_ReturnsEffectiveMsgID(t *testing.T) {
 		return got.MsgID, got.SteerID
 	}
 
-	msgID, steerID := send(`{"text":"hola","msg_id":"c-valid_1"}`)
+	msgID, steerID := send(`{"text":"hola","msg_id":"c-valid_1","steer_id":"c-valid-steer_1"}`)
 	if msgID != "c-valid_1" {
 		t.Fatalf("msg_id = %q, want the client-supplied one", msgID)
 	}
@@ -1621,9 +1654,9 @@ func TestHandleSend_ReturnsEffectiveMsgID(t *testing.T) {
 		t.Fatalf("steer_id = %q, want empty for a direct send", steerID)
 	}
 
-	// Same ID again: re-minted, and the response tells the client which one won.
-	reused, _ := send(`{"text":"otra vez","msg_id":"c-valid_1"}`)
-	if reused == "" || reused == "c-valid_1" {
-		t.Fatalf("msg_id = %q, want a freshly minted ID", reused)
+	// Same ID again is a retry: return the original result without another run.
+	reused, _ := send(`{"text":"otra vez","msg_id":"c-valid_1","steer_id":"c-valid-steer_1"}`)
+	if reused != "c-valid_1" {
+		t.Fatalf("msg_id = %q, want original ID", reused)
 	}
 }

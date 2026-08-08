@@ -277,8 +277,12 @@ export function afterVisibilityChange() {
     const current = store.get();
     for (const id of visibleSessionIds(current)) {
       const sess = current.sessions[id];
-      if (sess?.unseen && sess.historyHydrated) {
-        acknowledgeVisibleAttention(id, sess.historyShownGen, sess.historyShownInstance);
+      // Pending prompts have their own post-render receipt. An init proves the
+      // transcript but not that a prompt below this pane's scrollport was seen;
+      // the roster poll must not bypass that observer.
+      if (sess?.unseen && !sess.pendingAsk && !sess.pendingPerm &&
+          !sess.resolvedPendingAttention && sess.historyHydrated && sess.historyAckProven) {
+        void acknowledgeVisibleAttention(id, sess.historyShownGen, sess.historyShownInstance).catch(() => {});
       }
     }
   }
