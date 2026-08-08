@@ -23,7 +23,9 @@ import {
   handleWsCompactionStart, handleWsCompactionEnd,
 } from './ws-handlers.js';
 import { store, updateSession, isParentConversationVisible } from './store.js';
-import { beginHistoryHydration, finishHistoryHydration } from './history-hydration.js';
+import {
+  beginHistoryHydration, confirmHistoryHydrationInit, finishHistoryHydration,
+} from './history-hydration.js';
 
 export const REQUEST_HEADERS = Object.freeze({ 'Content-Type': 'application/json', 'X-Moa-Request': '1' });
 export const DEFAULT_API_TIMEOUT_MS = 15000;
@@ -403,6 +405,7 @@ function openWs(sessionId, initialBackoff) {
       }
       entry.lastSeq = evt.data?.last_seq ?? evt.seq ?? 0;
       clearHistoryHydrationTimer(sessionId);
+      confirmHistoryHydrationInit(sessionId, { deltaBase: !!evt.data?.delta_base });
       routeEvent(sessionId, evt, { ackProven });
 		  switchMark(sessionId, 'handled');
 		  if (switchDebugEnabled) {

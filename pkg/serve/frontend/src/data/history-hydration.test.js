@@ -1,7 +1,8 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import {
-  beginHistoryHydration, finishHistoryHydration, HISTORY_HYDRATION_GRACE_MS,
+  beginHistoryHydration, confirmHistoryHydrationInit, finishHistoryHydration,
+  HISTORY_DELTA_HYDRATION_GRACE_MS, HISTORY_HYDRATION_GRACE_MS,
 } from './history-hydration.js';
 import { handleWsInit } from './ws-handlers.js';
 import {
@@ -29,19 +30,17 @@ test('history hydration starts on socket open and ends at init', () => {
   expect(store.get().sessions.s1.historyPending).toBe(false);
 });
 
-test('a proven delta resume keeps its hydration boundary without showing a tail', () => {
+test('a delta resume keeps an uncertain cached transcript behind its boundary', () => {
   setState({ sessions: { s1: {
     id: 's1', messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
   } } });
 
   beginHistoryHydration('s1', { deltaResume: true });
 
-  expect(store.get().sessions.s1).toMatchObject({
-    historyPending: true, historyTailNeeded: false, historyHydrated: false,
-  });
+  expect(store.get().sessions.s1).toMatchObject({ historyPending: true, historyHydrated: false });
 });
 
-test('a full-init hydration still reserves the catching-up tail', () => {
+test('a settled session opens without a catching-up tail', () => {
   setState({ sessions: { s1: {
     id: 's1', messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
   } } });
@@ -49,8 +48,51 @@ test('a full-init hydration still reserves the catching-up tail', () => {
   beginHistoryHydration('s1');
 
   expect(store.get().sessions.s1).toMatchObject({
-    historyPending: true, historyTailNeeded: true,
+    historyPending: true, historyTailNeeded: false,
   });
+});
+
+test('a delta resume gives uncertain cached history extra grace', () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers = [];
+  globalThis.setTimeout = (callback, delay) => {
+    const timer = { callback, delay };
+    timers.push(timer);
+    return timer;
+  };
+  globalThis.clearTimeout = (timer) => {
+    const index = timers.indexOf(timer);
+    if (index >= 0) timers.splice(index, 1);
+  };
+  try {
+    setState({ sessions: { s1: {
+      id: 's1', unseen: true, messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
+    } } });
+
+    beginHistoryHydration('s1', { deltaResume: true });
+
+    expect(timers[0].delay).toBe(HISTORY_DELTA_HYDRATION_GRACE_MS);
+    expect(store.get().sessions.s1.historyTailReady).toBe(false);
+    confirmHistoryHydrationInit('s1', { deltaBase: true });
+    expect(store.get().sessions.s1).toMatchObject({
+      historyTailNeeded: false, historyTailReady: false,
+    });
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
+test('a full-init fallback releases a required catching-up tail immediately', () => {
+  setState({ sessions: { s1: {
+    id: 's1', unseen: true, messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
+  } } });
+
+  beginHistoryHydration('s1', { deltaResume: true });
+  confirmHistoryHydrationInit('s1');
+
+  expect(store.get().sessions.s1.historyTailReady).toBe(true);
 });
 
 test('socket resume token is sent only for a cached durable transcript', () => {

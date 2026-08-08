@@ -6,6 +6,10 @@ import { store, updateSession } from './store.js';
 // distracting mount/unmount flash while still making a genuinely slow snapshot
 // apparent before it feels stalled.
 export const HISTORY_HYDRATION_GRACE_MS = 300;
+// A resumed delta normally arrives in one fast round trip. Give it a longer
+// chance to confirm its cached base before exposing the stale-history tail;
+// a full-init fallback explicitly releases this wait below.
+export const HISTORY_DELTA_HYDRATION_GRACE_MS = 1500;
 
 const tailTimers = new Map();
 
@@ -42,10 +46,11 @@ export function beginHistoryHydration(id, { deltaResume = false } = {}) {
   const session = store.get().sessions[id];
   if (!session || session.historyPending) return false;
   clearTailTimer(id);
-  // A validated delta resume can only append after the durable row we already
-  // render. Keep the authority boundary exactly as strict, but do not flash a
-  // speculative visual tail for the normally one-frame suffix path.
-  const historyTailNeeded = !deltaResume && cachedTranscriptMayBeBehind(session);
+  // since_msg is only a request. A server may reject its base and send a full
+  // init, so hiding a possibly missing tail before init confirms delta_base
+  // would present stale cached history as current. A successful delta init
+  // settles before the longer resume grace period in the usual case.
+  const historyTailNeeded = cachedTranscriptMayBeBehind(session);
   updateSession(id, {
     historyPending: true,
     historyStale: false,
@@ -65,7 +70,23 @@ export function beginHistoryHydration(id, { deltaResume = false } = {}) {
       if (current?.historyPending && current.historyTailNeeded) {
         updateSession(id, { historyTailReady: true });
       }
-    }, HISTORY_HYDRATION_GRACE_MS));
+    }, deltaResume ? HISTORY_DELTA_HYDRATION_GRACE_MS : HISTORY_HYDRATION_GRACE_MS));
+  }
+  return true;
+}
+
+// The init envelope is authoritative about whether the server accepted a
+// requested delta base. A confirmed delta makes the retained transcript
+// current before its rows are appended; a full fallback releases the normal
+// stale-tail presentation immediately rather than waiting out delta's grace.
+export function confirmHistoryHydrationInit(id, { deltaBase = false } = {}) {
+  const session = store.get().sessions[id];
+  if (!session?.historyPending) return false;
+  clearTailTimer(id);
+  if (deltaBase) {
+    updateSession(id, { historyTailNeeded: false, historyTailReady: false });
+  } else if (session.historyTailNeeded) {
+    updateSession(id, { historyTailReady: true });
   }
   return true;
 }
