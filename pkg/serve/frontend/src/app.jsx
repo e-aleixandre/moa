@@ -13,7 +13,7 @@ import {
   loadSessions, startPolling, stopPolling,
   startUsagePolling, stopUsagePolling,
 } from "./data/session-actions.js";
-import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
+import { getCapabilities, getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
 import { refreshPushState } from "./data/push-client.js";
@@ -222,7 +222,11 @@ function useBootstrap() {
   // Initial session load + selection, polling.
   useEffect(() => {
     let mounted = true;
-    loadSessions()
+    // Discover transport support before visibility opens any session socket:
+    // on a current server this makes the first N visible conversations one
+    // multiplexed subscription rather than N handshakes; an old server simply
+    // leaves the legacy rail selected.
+    getCapabilities().catch(() => null).then(() => loadSessions())
       .then(() => {
         if (!mounted) return; // unmounted mid-flight: don't touch the store/view
         const wanted = new URLSearchParams(location.search).get("session");

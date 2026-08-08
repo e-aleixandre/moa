@@ -11,7 +11,10 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 
 - Multiple concurrent sessions with per-session working directory
 - Session persistence and resume
-- Streaming output over WebSocket
+- Streaming output over WebSocket. Current web clients negotiate a single
+  multiplexed socket for all visible sessions (`/api/ws`, advertised as
+  `ws_mux: 1` by `/api/capabilities`); older cached clients continue using the
+  compatible per-session socket route.
 - Permission prompts and cancel
 - Plan mode, subagents, MCP
 - Model and thinking reconfiguration per session, with pinned-model shortcuts and provider drill-down

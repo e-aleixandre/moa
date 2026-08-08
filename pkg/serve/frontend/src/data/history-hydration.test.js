@@ -5,7 +5,7 @@ import {
 } from './history-hydration.js';
 import { handleWsInit } from './ws-handlers.js';
 import {
-  HISTORY_HYDRATION_TIMEOUT_MS, acknowledgeVisibleAttention, reconnectAll, syncConnections,
+  __resetMuxForTests, HISTORY_HYDRATION_TIMEOUT_MS, acknowledgeVisibleAttention, reconnectAll, setMuxSupport, syncConnections,
 } from './api.js';
 import { deleteSession, loadSessions } from './session-actions.js';
 import { __resetBootForTests, afterVisibilityChange } from './tile-actions.js';
@@ -16,6 +16,7 @@ import { StreamingSkeleton } from '../components/StreamingSkeleton/StreamingSkel
 import { Spinner } from '../primitives/index.js';
 
 beforeEach(() => {
+  __resetMuxForTests();
   setState({ sessions: {}, activeSession: null, isMobile: false });
 });
 
@@ -32,6 +33,8 @@ test('history hydration starts on socket open and ends at init', () => {
 test('a proven delta resume keeps its hydration boundary without showing a tail', () => {
   setState({ sessions: { s1: {
     id: 's1', messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
+    unseen: true, unseenGen: 2, historyCacheGen: 1,
+    serverInstance: 'instance-a', historyCacheInstance: 'instance-a', serverUnseenInstance: 'instance-a',
   } } });
 
   beginHistoryHydration('s1', { deltaResume: true });
@@ -44,6 +47,8 @@ test('a proven delta resume keeps its hydration boundary without showing a tail'
 test('a full-init hydration still reserves the catching-up tail', () => {
   setState({ sessions: { s1: {
     id: 's1', messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
+    unseen: true, unseenGen: 2, historyCacheGen: 1,
+    serverInstance: 'instance-a', historyCacheInstance: 'instance-a', serverUnseenInstance: 'instance-a',
   } } });
 
   beginHistoryHydration('s1');
@@ -51,6 +56,41 @@ test('a full-init hydration still reserves the catching-up tail', () => {
   expect(store.get().sessions.s1).toMatchObject({
     historyPending: true, historyTailNeeded: true,
   });
+});
+
+test('a mux delta subscription keeps the cached transcript authoritative without a visual tail', () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  class TestWebSocket {
+    constructor(url) { this.url = url; this.sent = []; TestWebSocket.instances.push(this); }
+    send(message) { this.sent.push(JSON.parse(message)); }
+    close() { this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  try {
+    setState({ sessions: { s1: {
+      id: 's1', messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
+    } } });
+    setMuxSupport(true);
+    syncConnections(['s1']);
+    const ws = TestWebSocket.instances[0];
+    expect(ws.url).toBe('ws://localhost/api/ws');
+    expect(store.get().sessions.s1).toMatchObject({ historyPending: true, historyTailNeeded: false });
+    ws.onopen();
+    expect(ws.sent[0]).toEqual({ type: 'sub', subs: [{ session: 's1', mode: 'visible', since_msg: 'durable-base' }] });
+    ws.onmessage({ data: JSON.stringify({ type: 'hello', proto: 1, server_instance: 'instance-a' }) });
+    ws.onmessage({ data: JSON.stringify({
+      type: 'init', session: 's1', seq: 4,
+      data: { messages: [], subagents: [], server_instance: 'instance-a', attention_bound: true, last_seq: 4, delta_base: 'durable-base' },
+    }) });
+    expect(store.get().sessions.s1).toMatchObject({ historyPending: false, historyHydrated: true, historyStale: false });
+    syncConnections([]);
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+    globalThis.location = originalLocation;
+  }
 });
 
 test('socket resume token is sent only for a cached durable transcript', () => {

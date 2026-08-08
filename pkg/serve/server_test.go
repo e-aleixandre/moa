@@ -476,6 +476,45 @@ func TestWebSocket_Init(t *testing.T) {
 	}
 }
 
+func TestMuxWebSocket_HelloThenVisibleSubscriptions(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	first, _ := mgr.CreateSession(CreateOpts{Title: "mux-first"})
+	second, _ := mgr.CreateSession(CreateOpts{Title: "mux-second"})
+
+	ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var hello muxServerFrame
+	if err := wsjson.Read(ctx, conn, &hello); err != nil {
+		t.Fatal(err)
+	}
+	if hello.Type != "hello" || hello.Proto != muxProtocolVersion || hello.ServerInstance != mgr.serverInstance {
+		t.Fatalf("hello = %#v", hello)
+	}
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "sub", Subs: []muxSubscription{
+		{Session: first.ID, Mode: "visible"}, {Session: second.ID, Mode: "visible"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{first.ID, second.ID} {
+		var init muxServerFrame
+		if err := wsjson.Read(ctx, conn, &init); err != nil {
+			t.Fatal(err)
+		}
+		if init.Type != "init" || init.Session != want {
+			t.Fatalf("init = %#v, want session %q", init, want)
+		}
+	}
+	if got := first.wsConns.Load() + second.wsConns.Load(); got != 2 {
+		t.Fatalf("visible mux viewers = %d, want 2", got)
+	}
+}
+
 func TestWebSocket_InitDeltaSinceMessage(t *testing.T) {
 	srv, mgr, cancel := newTestServer(t)
 	defer cancel()

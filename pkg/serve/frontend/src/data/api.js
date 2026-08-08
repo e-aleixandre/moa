@@ -99,6 +99,13 @@ export function getVersion() {
   return api('GET', '/api/version', null, { cache: 'no-store' });
 }
 
+export function getCapabilities() {
+  return api('GET', '/api/capabilities', null, { cache: 'no-store' }).then((caps) => {
+    setMuxSupport(caps?.ws_mux === 1);
+    return caps;
+  });
+}
+
 // --- Centralized WS Manager ---
 
 const connections = new Map();    // sessionId → { ws, backoff, timer }
@@ -109,6 +116,46 @@ const forceFullInit = new Set();  // session IDs whose cached delta base was abs
 const attentionAcknowledgements = new Map(); // occurrence → confirmed POST
 let attentionInstanceRefresh = null;
 const MAX_BACKOFF = 16000;
+
+// A new client optimistically uses the mux endpoint: old servers reject that
+// upgrade and immediately fall back to the long-standing per-session rail.
+// capabilities advertises the feature for intermediaries and future clients,
+// but an upgrade failure remains the authoritative compatibility check.
+let muxSupported = false;
+let muxConnection = null;
+let muxBackoff = 1000;
+let muxRetryTimer = null;
+const muxLastSeq = new Map();
+
+// Called by the shared capabilities probe once it has positively identified a
+// mux-capable server. Keeping the legacy rail until that response arrives is
+// the compatibility fallback for a fresh PWA against an older server.
+export function setMuxSupport(supported) {
+  if (!supported || muxSupported) return;
+  muxSupported = true;
+  const ids = [...wantedIds];
+  for (const [id, entry] of connections) {
+    clearHistoryHydrationTimer(id);
+    finishHistoryHydration(id);
+    try { entry.ws.close(); } catch (_) { /* mux replacement below is enough */ }
+  }
+  connections.clear();
+  openMux(ids);
+}
+
+// Test isolation for the transport manager. Production code deliberately has
+// no way to downgrade a positively negotiated server.
+export function __resetMuxForTests() {
+  if (muxRetryTimer) clearTimeout(muxRetryTimer);
+  muxRetryTimer = null;
+  if (muxConnection) {
+    try { muxConnection.ws.close(); } catch (_) { /* test reset */ }
+  }
+  muxConnection = null;
+  muxSupported = false;
+  muxBackoff = 1000;
+  muxLastSeq.clear();
+}
 
 // Set localStorage.moaDebugSessionSwitch = '1' and reconnect a session to
 // inspect its complete init path. This remains outside normal UI chrome and
@@ -155,6 +202,10 @@ export function refreshAttentionInstances() {
 }
 
 export function syncConnections(visibleIds) {
+  if (muxSupported) {
+    syncMuxConnections(visibleIds);
+    return;
+  }
   wantedIds.clear();
   for (const id of visibleIds) wantedIds.add(id);
 
@@ -188,6 +239,18 @@ export function syncConnections(visibleIds) {
 // event ever fired), so the normal onclose→backoff path would never trigger and
 // the session would sit frozen until a manual reload.
 export function reconnectAll() {
+  if (muxSupported) {
+    const ids = [...wantedIds];
+    if (muxRetryTimer) clearTimeout(muxRetryTimer);
+    muxRetryTimer = null;
+    if (muxConnection) {
+      const ws = muxConnection.ws;
+      muxConnection = null;
+      try { ws.close(); } catch (_) { /* replacement below is sufficient */ }
+    }
+    openMux(ids);
+    return;
+  }
   const ids = [...wantedIds];
   for (const [id, entry] of connections) {
     // Remove ownership before close so its asynchronous onclose cannot schedule
@@ -202,6 +265,160 @@ export function reconnectAll() {
   for (const [, timer] of pendingTimers) clearTimeout(timer);
   pendingTimers.clear();
   for (const id of ids) openWs(id, 1000);
+}
+
+function muxResumeSubscription(sessionId) {
+  const cached = store.get().sessions[sessionId]?.messages || [];
+  const base = cached.at(-1)?._msg_id;
+  const useDeltaResume = !forceFullInit.has(sessionId) && !!base;
+  return { session: sessionId, mode: 'visible', ...(useDeltaResume ? { since_msg: base } : {}) };
+}
+
+function syncMuxConnections(visibleIds) {
+  const previouslyWanted = [...wantedIds];
+  wantedIds.clear();
+  for (const id of visibleIds) wantedIds.add(id);
+  const entry = muxConnection;
+  if (!entry) {
+    if (visibleIds.length === 0) return;
+    if (!muxRetryTimer) openMux(visibleIds);
+    return;
+  }
+  if (wantedIds.size === 0) {
+    for (const id of previouslyWanted) {
+      clearHistoryHydrationTimer(id);
+      finishHistoryHydration(id);
+    }
+    muxConnection = null;
+    try { entry.ws.close(); } catch (_) { /* nothing remains to hydrate */ }
+    return;
+  }
+  const previous = entry.subscribed;
+  const removed = [...previous].filter(id => !wantedIds.has(id));
+  if (removed.length) entry.ws.send(JSON.stringify({ type: 'unsub', sessions: removed }));
+  const added = visibleIds.filter(id => !previous.has(id));
+  for (const id of removed) {
+    previous.delete(id);
+    clearHistoryHydrationTimer(id);
+    finishHistoryHydration(id);
+  }
+  if (added.length) {
+    for (const id of added) {
+      beginHistoryHydration(id, { deltaResume: !!muxResumeSubscription(id).since_msg });
+      previous.add(id);
+    }
+    entry.ws.send(JSON.stringify({ type: 'sub', subs: added.map(muxResumeSubscription) }));
+  }
+}
+
+function scheduleMuxReconnect() {
+  if (muxRetryTimer || wantedIds.size === 0) return;
+  const delay = muxBackoff;
+  muxBackoff = Math.min(muxBackoff * 2, MAX_BACKOFF);
+  muxRetryTimer = setTimeout(() => {
+    muxRetryTimer = null;
+    openMux([...wantedIds]);
+  }, delay);
+}
+
+function openMux(ids) {
+  if (!muxSupported || muxConnection) return;
+  wantedIds.clear();
+  for (const id of ids) wantedIds.add(id);
+  if (wantedIds.size === 0) return;
+  for (const sub of [...wantedIds].map(muxResumeSubscription)) {
+    beginHistoryHydration(sub.session, { deltaResume: !!sub.since_msg });
+  }
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  let ws;
+  try {
+    ws = new WebSocket(`${proto}//${location.host}/api/ws`);
+  } catch (_) {
+    muxSupported = false;
+    syncConnections([...wantedIds]);
+    return;
+  }
+  const entry = { ws, subscribed: new Set(), hello: false };
+  muxConnection = entry;
+  ws.onopen = () => {
+    const subs = [...wantedIds].map(muxResumeSubscription);
+    for (const sub of subs) {
+      entry.subscribed.add(sub.session);
+    }
+    ws.send(JSON.stringify({ type: 'sub', subs }));
+  };
+  ws.onmessage = (e) => {
+    if (muxConnection !== entry) return;
+    const frame = JSON.parse(e.data);
+    if (frame.type === 'hello') {
+      entry.hello = true;
+      // The server instance scopes every session sequence namespace.
+      if (entry.serverInstance && entry.serverInstance !== frame.server_instance) muxLastSeq.clear();
+      entry.serverInstance = frame.server_instance || '';
+      return;
+    }
+    const id = frame.session;
+    if (!id || !wantedIds.has(id)) return;
+    if (frame.type === 'init') {
+      handleMuxInit(entry, id, frame, ws);
+      return;
+    }
+    if (frame.type === 'event') {
+      const evt = frame.data || {};
+      if (frame.seq === 0 || evt.seq === 0) { ws.close(); return; }
+      const seq = frame.seq || evt.seq;
+      const last = muxLastSeq.get(id) || 0;
+      if (seq <= last) return;
+      muxLastSeq.set(id, seq);
+      routeEvent(id, evt);
+      return;
+    }
+    if (frame.type === 'resync' || frame.type === 'sub_err') {
+      failHistoryHydration(id);
+      entry.subscribed.delete(id);
+    }
+  };
+  ws.onclose = () => {
+    if (muxConnection !== entry) return;
+    muxConnection = null;
+    // A pre-hello close is an old server (or proxy) which has no mux route.
+    if (!entry.hello) {
+      muxSupported = false;
+      syncConnections([...wantedIds]);
+      return;
+    }
+    for (const id of entry.subscribed) failHistoryHydration(id);
+    scheduleMuxReconnect();
+  };
+  ws.onerror = () => ws.close();
+}
+
+function handleMuxInit(entry, sessionId, frame, ws) {
+  const data = frame.data || {};
+  if (data.delta_base && store.get().sessions[sessionId]?.messages?.at(-1)?._msg_id !== data.delta_base) {
+    forceFullInit.add(sessionId);
+    ws.send(JSON.stringify({ type: 'mode', session: sessionId, mode: 'visible' }));
+    return;
+  }
+  const currentInstance = store.get().sessions[sessionId]?.serverInstance || '';
+  const initInstance = data.server_instance || '';
+  const trustedForAck = !!initInstance && (!currentInstance || initInstance === currentInstance);
+  if (currentInstance && initInstance !== currentInstance) {
+    failHistoryHydration(sessionId);
+    return;
+  }
+  muxLastSeq.set(sessionId, data.last_seq ?? frame.seq ?? 0);
+  clearHistoryHydrationTimer(sessionId);
+  routeEvent(sessionId, { type: 'init', data }, {
+    ackProven: trustedForAck && data.attention_bound !== false,
+  });
+  if (data.attention_bound === false || !trustedForAck) {
+    // Preserve the rendered authority boundary, but request a fresh cut for
+    // the acknowledgement proof without paying another TCP/WebSocket setup.
+    ws.send(JSON.stringify({ type: 'mode', session: sessionId, mode: 'visible' }));
+  } else {
+    muxBackoff = 1000;
+  }
 }
 
 // acknowledgeVisibleAttention is intentionally the single path that clears a

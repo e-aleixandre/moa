@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -23,10 +24,11 @@ import (
 // important for streaming UI state: text_delta, tool_call_start, message_end,
 // tool_end, state_change, and run_end must not overtake one another.
 type wsReactor struct {
-	ch     chan Event
-	done   chan struct{} // closed on cleanup; guards sends to ch
-	once   sync.Once
-	unsubs []func()
+	ch       chan Event
+	done     chan struct{} // closed on cleanup; guards sends to ch
+	once     sync.Once
+	unsubs   []func()
+	priority atomic.Bool
 }
 
 const wsReactorBuffer = 512 // per-WS event channel capacity
@@ -92,7 +94,11 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attent
 		}
 		if wsEvent, ok := wsEventFromBus(event, attentionGen); ok {
 			wsEvent.Seq = seq
-			send(enrichEditToolStart(wsEvent, cwd))
+			wsEvent = enrichEditToolStart(wsEvent, cwd)
+			if isPriorityWsEvent(wsEvent) {
+				r.priority.Store(true)
+			}
+			send(wsEvent)
 		}
 	}))
 
@@ -122,6 +128,18 @@ func isAttentionEvent(event any) bool {
 		return false
 	}
 }
+
+func isPriorityWsEvent(e Event) bool {
+	switch e.Type {
+	case "permission_request", "ask_user", "permission_resolved", "ask_resolved", "state_change", "run_end":
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *wsReactor) hasPriority() bool { return r.priority.Load() }
+func (r *wsReactor) clearPriority()    { r.priority.Store(false) }
 
 // enrichEditToolStart adds the real 1-based starting line number to edit
 // tool_start events, so the frontend diff preview numbers lines like the
