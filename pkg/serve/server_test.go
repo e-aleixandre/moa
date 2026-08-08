@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -680,6 +681,142 @@ func TestMuxWebSocket_SchedulerPreservesPerSessionEventOrdering(t *testing.T) {
 			t.Fatalf("session %s reordered sequence %d after %d", frame.Session, frame.Seq, last[frame.Session])
 		}
 		last[frame.Session] = frame.Seq
+	}
+}
+
+func TestMuxWebSocket_SchedulerDrainsPastCoalescedWakeupBudget(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer srv.Close()
+	sess, err := mgr.CreateSession(CreateOpts{Title: "mux-many-events"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var frame muxServerFrame
+	if err := wsjson.Read(ctx, conn, &frame); err != nil { // hello
+		t.Fatal(err)
+	}
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "sub", Subs: []muxSubscription{{Session: sess.ID, Mode: "visible"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, conn, &frame); err != nil || frame.Type != "init" {
+		t.Fatalf("init = %#v, err=%v", frame, err)
+	}
+	for i := 0; i < 200; i++ {
+		sess.runtime.Bus.Publish(bus.TextDelta{SessionID: sess.ID, Delta: strconv.Itoa(i)})
+	}
+	sess.runtime.Bus.Drain(time.Second)
+	var previous uint64
+	for i := 0; i < 200; i++ {
+		if err := wsjson.Read(ctx, conn, &frame); err != nil {
+			t.Fatalf("event %d: %v", i, err)
+		}
+		if frame.Type != "event" || frame.Session != sess.ID || frame.Seq <= previous {
+			t.Fatalf("event %d = %#v after seq %d", i, frame, previous)
+		}
+		previous = frame.Seq
+	}
+}
+
+func TestMuxWebSocket_ClosedOverflowReleasesViewerAndResyncs(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer srv.Close()
+	sess, err := mgr.CreateSession(CreateOpts{Title: "mux-overflow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var frame muxServerFrame
+	if err := wsjson.Read(ctx, conn, &frame); err != nil { // hello
+		t.Fatal(err)
+	}
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "sub", Subs: []muxSubscription{{Session: sess.ID, Mode: "visible"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, conn, &frame); err != nil || frame.Type != "init" {
+		t.Fatalf("init = %#v, err=%v", frame, err)
+	}
+
+	originalWrite := muxWriteJSON
+	blockFirstEvent := make(chan struct{})
+	var block sync.Once
+	muxWriteJSON = func(writeCtx context.Context, writeConn *websocket.Conn, value any) error { //nolint:staticcheck // test stalls one session writer to fill its isolated reactor
+		if event, ok := value.(muxServerFrame); ok && event.Type == "event" && event.Session == sess.ID {
+			block.Do(func() { <-blockFirstEvent })
+		}
+		return originalWrite(writeCtx, writeConn, value)
+	}
+	defer func() { muxWriteJSON = originalWrite }()
+	for i := 0; i <= wsReactorBuffer+1; i++ {
+		// message_start is structural, so the event after the 512-slot queue
+		// closes only this reactor rather than being dropped like a text delta.
+		sess.runtime.Bus.Publish(bus.MessageStarted{SessionID: sess.ID})
+	}
+	sess.runtime.Bus.Drain(time.Second)
+	close(blockFirstEvent)
+	for {
+		if err := wsjson.Read(ctx, conn, &frame); err != nil {
+			t.Fatal(err)
+		}
+		if frame.Type == "resync" {
+			if frame.Session != sess.ID || frame.Reason != "overflow" {
+				t.Fatalf("resync = %#v", frame)
+			}
+			break
+		}
+	}
+	pollUntil(t, time.Second, "overflowed mux viewer release", func() bool { return sess.wsConns.Load() == 0 })
+}
+
+func TestMuxWebSocket_InitPanicCleansProvisionalReactor(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer srv.Close()
+	sess, err := mgr.CreateSession(CreateOpts{Title: "mux-init-panic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var frame muxServerFrame
+	if err := wsjson.Read(ctx, conn, &frame); err != nil { // hello
+		t.Fatal(err)
+	}
+	originalBuild := muxBuildWebSocketInit
+	muxBuildWebSocketInit = func(context.Context, *Manager, *ManagedSession, string) (InitData, uint64) {
+		panic("test init failure")
+	}
+	defer func() { muxBuildWebSocketInit = originalBuild }()
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "sub", Subs: []muxSubscription{{Session: sess.ID, Mode: "visible"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, conn, &frame); err != nil {
+		t.Fatal(err)
+	}
+	if frame.Type != "resync" || frame.Session != sess.ID || frame.Reason != "session_failure" {
+		t.Fatalf("panic recovery = %#v", frame)
+	}
+	if got := sess.wsConns.Load(); got != 0 {
+		t.Fatalf("panic left viewer accounting held: %d", got)
 	}
 }
 

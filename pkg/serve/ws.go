@@ -147,6 +147,7 @@ func isPriorityWsEvent(e Event) bool {
 func (r *wsReactor) hasPriority() bool      { return r.priority.Load() }
 func (r *wsReactor) clearPriority()         { r.priority.Store(false) }
 func (r *wsReactor) Ready() <-chan struct{} { return r.ready }
+func (r *wsReactor) hasEvents() bool        { return len(r.ch) > 0 }
 
 // enrichEditToolStart adds the real 1-based starting line number to edit
 // tool_start events, so the frontend diff preview numbers lines like the

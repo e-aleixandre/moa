@@ -300,6 +300,30 @@ function muxResumeSubscription(sessionId) {
   return { session: sessionId, mode: 'visible', ...(useDeltaResume ? { since_msg: base } : {}) };
 }
 
+// A mux socket can exist while CONNECTING. Rebuild subscription frames from
+// wantedIds in onopen instead of retaining a stale frame queue: visibility may
+// change several times before the handshake completes. A send only commits
+// local subscription state after the browser accepted it.
+function sendMuxFrame(entry, frame) {
+  const open = typeof WebSocket !== 'undefined' && typeof WebSocket.OPEN === 'number' ? WebSocket.OPEN : 1;
+  if (muxConnection !== entry || !entry.open ||
+      (entry.ws.readyState !== undefined && entry.ws.readyState !== open)) return false;
+  try {
+    entry.ws.send(JSON.stringify(frame));
+    return true;
+  } catch (_) {
+    entry.open = false;
+    try { entry.ws.close(); } catch (_) { /* close wakes the normal reconnect path */ }
+    return false;
+  }
+}
+
+function settleMuxRemoved(sessionId) {
+  clearMuxResync(sessionId);
+  clearHistoryHydrationTimer(sessionId);
+  finishHistoryHydration(sessionId);
+}
+
 function syncMuxConnections(visibleIds) {
   const previouslyWanted = [...wantedIds];
   wantedIds.clear();
@@ -323,23 +347,38 @@ function syncMuxConnections(visibleIds) {
     try { entry.ws.close(); } catch (_) { /* nothing remains to hydrate */ }
     return;
   }
+  // A CONNECTING socket has received no frames. Treat wantedIds as the durable
+  // desired set and let onopen send exactly its latest value.
+  for (const id of previouslyWanted) {
+    if (!wantedIds.has(id)) settleMuxRemoved(id);
+  }
+  if (!entry.open) {
+    for (const id of visibleIds) {
+      if (!previouslyWanted.includes(id)) {
+        beginHistoryHydration(id, { deltaResume: !!muxResumeSubscription(id).since_msg });
+      }
+    }
+    return;
+  }
+
   const previous = entry.subscribed;
   const removed = [...previous].filter(id => !wantedIds.has(id));
-  if (removed.length) entry.ws.send(JSON.stringify({ type: 'unsub', sessions: removed }));
-  const added = visibleIds.filter(id => !previous.has(id));
-  for (const id of removed) {
-    previous.delete(id);
-    entry.initialized.delete(id);
-    clearMuxResync(id);
-    clearHistoryHydrationTimer(id);
-    finishHistoryHydration(id);
-  }
-  if (added.length) {
-    for (const id of added) {
-      beginHistoryHydration(id, { deltaResume: !!muxResumeSubscription(id).since_msg });
-      previous.add(id);
+  if (removed.length) {
+    if (!sendMuxFrame(entry, { type: 'unsub', sessions: removed })) return;
+    for (const id of removed) {
+      previous.delete(id);
+      entry.initialized.delete(id);
     }
-    entry.ws.send(JSON.stringify({ type: 'sub', subs: added.map(muxResumeSubscription) }));
+  }
+  const added = visibleIds.filter(id => !previous.has(id));
+  if (added.length) {
+    const subs = added.map(muxResumeSubscription);
+    if (!sendMuxFrame(entry, { type: 'sub', subs })) return;
+    for (const sub of subs) {
+      beginHistoryHydration(sub.session, { deltaResume: !!sub.since_msg });
+      previous.add(sub.session);
+      entry.initialized.delete(sub.session);
+    }
   }
 }
 
@@ -358,9 +397,6 @@ function openMux(ids) {
   wantedIds.clear();
   for (const id of ids) wantedIds.add(id);
   if (wantedIds.size === 0) return;
-  for (const sub of [...wantedIds].map(muxResumeSubscription)) {
-    beginHistoryHydration(sub.session, { deltaResume: !!sub.since_msg });
-  }
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   let ws;
   try {
@@ -370,14 +406,15 @@ function openMux(ids) {
     syncConnections([...wantedIds]);
     return;
   }
-  const entry = { ws, subscribed: new Set(), initialized: new Set(), hello: false };
+  const entry = { ws, subscribed: new Set(), initialized: new Set(), hello: false, open: false };
   muxConnection = entry;
+  for (const sub of [...wantedIds].map(muxResumeSubscription)) {
+    beginHistoryHydration(sub.session, { deltaResume: !!sub.since_msg });
+  }
   ws.onopen = () => {
-    const subs = [...wantedIds].map(muxResumeSubscription);
-    for (const sub of subs) {
-      entry.subscribed.add(sub.session);
-    }
-    ws.send(JSON.stringify({ type: 'sub', subs }));
+    if (muxConnection !== entry) return;
+    entry.open = true;
+    syncMuxConnections([...wantedIds]);
   };
   ws.onmessage = (e) => {
     if (muxConnection !== entry) return;
@@ -392,7 +429,7 @@ function openMux(ids) {
     const id = frame.session;
     if (!id || !wantedIds.has(id)) return;
     if (frame.type === 'init') {
-      handleMuxInit(entry, id, frame, ws);
+      handleMuxInit(entry, id, frame);
       return;
     }
     if (frame.type === 'event') {
@@ -415,6 +452,7 @@ function openMux(ids) {
   };
   ws.onclose = () => {
     if (muxConnection !== entry) return;
+    entry.open = false;
     muxConnection = null;
     for (const id of new Set([...muxResyncTimers.keys(), ...muxResyncBackoffs.keys(), ...muxRecovering])) clearMuxResync(id);
     // A pre-hello close is an old server (or proxy) which has no mux route.
@@ -429,12 +467,12 @@ function openMux(ids) {
   ws.onerror = () => ws.close();
 }
 
-function handleMuxInit(entry, sessionId, frame, ws) {
+function handleMuxInit(entry, sessionId, frame) {
   const data = frame.data || {};
   if (data.delta_base && store.get().sessions[sessionId]?.messages?.at(-1)?._msg_id !== data.delta_base) {
     forceFullInit.add(sessionId);
     entry.initialized.delete(sessionId);
-    ws.send(JSON.stringify({ type: 'mode', session: sessionId, mode: 'visible' }));
+    sendMuxFrame(entry, { type: 'mode', session: sessionId, mode: 'visible' });
     return;
   }
   const currentInstance = store.get().sessions[sessionId]?.serverInstance || '';
@@ -459,7 +497,7 @@ function handleMuxInit(entry, sessionId, frame, ws) {
   if (data.attention_bound === false || !trustedForAck) {
     // Preserve the rendered authority boundary, but request a fresh cut for
     // the acknowledgement proof without paying another TCP/WebSocket setup.
-    ws.send(JSON.stringify({ type: 'mode', session: sessionId, mode: 'visible' }));
+    sendMuxFrame(entry, { type: 'mode', session: sessionId, mode: 'visible' });
   } else {
     muxBackoff = 1000;
   }
@@ -468,16 +506,11 @@ function handleMuxInit(entry, sessionId, frame, ws) {
 function sendMuxSubscription(entry, sessionId) {
   if (muxConnection !== entry || !wantedIds.has(sessionId)) return false;
   const sub = muxResumeSubscription(sessionId);
+  if (!sendMuxFrame(entry, { type: 'sub', subs: [sub] })) return false;
   beginHistoryHydration(sessionId, { deltaResume: !!sub.since_msg });
   entry.subscribed.add(sessionId);
   entry.initialized.delete(sessionId);
-  try {
-    entry.ws.send(JSON.stringify({ type: 'sub', subs: [sub] }));
-    return true;
-  } catch (_) {
-    entry.ws.close();
-    return false;
-  }
+  return true;
 }
 
 // The first resync is immediate: a visible conversation must not wait for the
@@ -625,11 +658,7 @@ export function retryHistoryHydration(sessionId) {
     if (entry.subscribed.has(sessionId)) {
       entry.initialized.delete(sessionId);
       beginHistoryHydration(sessionId, { deltaResume: !!muxResumeSubscription(sessionId).since_msg });
-      try {
-        entry.ws.send(JSON.stringify({ type: 'mode', session: sessionId, mode: 'visible' }));
-      } catch (_) {
-        entry.ws.close();
-      }
+      sendMuxFrame(entry, { type: 'mode', session: sessionId, mode: 'visible' });
     } else {
       sendMuxSubscription(entry, sessionId);
     }

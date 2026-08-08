@@ -93,6 +93,48 @@ test('a mux delta subscription keeps the cached transcript authoritative without
   }
 });
 
+test('mux uses the latest visibility set when it opens after rapid switching', () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  class TestWebSocket {
+    static OPEN = 1;
+    constructor(url) {
+      this.url = url;
+      this.readyState = 0; // CONNECTING
+      this.sent = [];
+      TestWebSocket.instances.push(this);
+    }
+    send(message) {
+      if (this.readyState !== TestWebSocket.OPEN) throw new Error('sent before open');
+      this.sent.push(JSON.parse(message));
+    }
+    close() { this.closed = true; this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  try {
+    setState({ sessions: {
+      first: { id: 'first', messages: [], subagents: {} },
+      second: { id: 'second', messages: [], subagents: {} },
+    } });
+    setMuxSupport(true);
+    syncConnections(['first']);
+    const ws = TestWebSocket.instances[0];
+    // A phone can change tile visibility before the handshake completes. No
+    // frame is sent while CONNECTING, so first cannot become a ghost sub.
+    syncConnections(['second']);
+    expect(ws.sent).toEqual([]);
+    ws.readyState = TestWebSocket.OPEN;
+    ws.onopen();
+    expect(ws.sent).toEqual([{ type: 'sub', subs: [{ session: 'second', mode: 'visible' }] }]);
+    syncConnections([]);
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+    globalThis.location = originalLocation;
+  }
+});
+
 test('mux resync immediately re-subscribes the visible session without opening a legacy rail', () => {
   const originalWebSocket = globalThis.WebSocket;
   const originalLocation = globalThis.location;
