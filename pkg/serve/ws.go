@@ -25,6 +25,7 @@ import (
 // tool_end, state_change, and run_end must not overtake one another.
 type wsReactor struct {
 	ch       chan Event
+	ready    chan struct{} // coalesced wakeup for schedulers which do not poll
 	done     chan struct{} // closed on cleanup; guards sends to ch
 	once     sync.Once
 	unsubs   []func()
@@ -48,8 +49,9 @@ const (
 // Returns the reactor and a read-only channel for the WS writer loop.
 func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attentionGeneration ...func(uint64) uint64) *wsReactor {
 	r := &wsReactor{
-		ch:   make(chan Event, wsReactorBuffer),
-		done: make(chan struct{}),
+		ch:    make(chan Event, wsReactorBuffer),
+		ready: make(chan struct{}, 1),
+		done:  make(chan struct{}),
 	}
 
 	// Helper: try-send with done-channel guard (prevents send-on-closed panic).
@@ -64,6 +66,10 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attent
 		}
 		select {
 		case r.ch <- e:
+			select {
+			case r.ready <- struct{}{}:
+			default:
+			}
 		case <-r.done:
 			return
 		default:
@@ -138,8 +144,9 @@ func isPriorityWsEvent(e Event) bool {
 	}
 }
 
-func (r *wsReactor) hasPriority() bool { return r.priority.Load() }
-func (r *wsReactor) clearPriority()    { r.priority.Store(false) }
+func (r *wsReactor) hasPriority() bool      { return r.priority.Load() }
+func (r *wsReactor) clearPriority()         { r.priority.Store(false) }
+func (r *wsReactor) Ready() <-chan struct{} { return r.ready }
 
 // enrichEditToolStart adds the real 1-based starting line number to edit
 // tool_start events, so the frontend diff preview numbers lines like the

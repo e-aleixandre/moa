@@ -14,6 +14,10 @@ const (
 	muxEventsPerCycle  = 32
 )
 
+// Kept as a seam so the session-isolation behavior can be tested with the
+// same failure class wsjson returns for an unencodable projection.
+var muxWriteJSON = wsWriteJSON
+
 type muxClientFrame struct {
 	Type     string            `json:"type"`
 	Subs     []muxSubscription `json:"subs,omitempty"`
@@ -71,7 +75,7 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 		// Unlike the legacy server-push rail, mux receives subscription frames,
 		// so CloseRead would reject the first client message as a policy error.
 		ctx := r.Context()
-		if wsWriteJSON(ctx, conn, muxServerFrame{Type: "hello", Proto: muxProtocolVersion, ServerInstance: mgr.serverInstance}) != nil {
+		if muxWriteJSON(ctx, conn, muxServerFrame{Type: "hello", Proto: muxProtocolVersion, ServerInstance: mgr.serverInstance}) != nil {
 			return
 		}
 
@@ -94,6 +98,10 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 
 		subs := make(map[string]*muxSessionSubscription)
 		var order []string
+		// Reactors signal only when they actually enqueue an event. This avoids a
+		// 5ms polling wakeup for every idle mux connection while retaining the
+		// scheduler's per-session fairness once work exists.
+		ready := make(chan struct{}, 1)
 		defer func() {
 			for _, sub := range subs {
 				sub.reactor.cleanup()
@@ -116,9 +124,39 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 				}
 			}
 		}
-		subscribe := func(request muxSubscription) bool {
+		watchReactor := func(reactor *wsReactor) {
+			go func() {
+				for {
+					select {
+					case <-reactor.Ready():
+						select {
+						case ready <- struct{}{}:
+						default:
+						}
+					case <-reactor.Done():
+						return
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+		}
+		degrade := func(id, reason string) bool {
+			unsubscribe(id)
+			// A simple control frame can still be written after a JSON encoding
+			// failure for this session. Only its failure proves the shared transport
+			// is unusable.
+			return muxWriteJSON(ctx, conn, muxServerFrame{Type: "resync", Session: id, Reason: reason}) == nil
+		}
+		subscribe := func(request muxSubscription) (alive bool) {
+			alive = true
+			defer func() {
+				if recover() != nil {
+					alive = degrade(request.Session, "session_failure")
+				}
+			}()
 			if request.Mode != "visible" {
-				_ = wsWriteJSON(ctx, conn, muxServerFrame{Type: "sub_err", Session: request.Session, Code: "unsupported_mode"})
+				_ = muxWriteJSON(ctx, conn, muxServerFrame{Type: "sub_err", Session: request.Session, Code: "unsupported_mode"})
 				return true
 			}
 			if request.Session == "" {
@@ -129,7 +167,7 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 			}
 			sess, ok := mgr.Get(request.Session)
 			if !ok {
-				_ = wsWriteJSON(ctx, conn, muxServerFrame{Type: "sub_err", Session: request.Session, Code: "not_found"})
+				_ = muxWriteJSON(ctx, conn, muxServerFrame{Type: "sub_err", Session: request.Session, Code: "not_found"})
 				return true
 			}
 			reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD, func(seq uint64) uint64 {
@@ -139,12 +177,22 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 			sess.wsConns.Add(1)
 			subs[request.Session] = &muxSessionSubscription{sess: sess, reactor: reactor, cut: cut}
 			order = append(order, request.Session)
-			return wsWriteJSON(ctx, conn, muxServerFrame{Type: "init", Session: request.Session, Seq: cut, Data: init}) == nil
+			watchReactor(reactor)
+			if muxWriteJSON(ctx, conn, muxServerFrame{Type: "init", Session: request.Session, Seq: cut, Data: init}) != nil {
+				return degrade(request.Session, "init_failed")
+			}
+			return true
 		}
-		resnapshot := func(id, sinceMsg string) bool {
+		resnapshot := func(id, sinceMsg string) (alive bool) {
+			alive = true
+			defer func() {
+				if recover() != nil {
+					alive = degrade(id, "session_failure")
+				}
+			}()
 			sub, ok := subs[id]
 			if !ok {
-				_ = wsWriteJSON(ctx, conn, muxServerFrame{Type: "sub_err", Session: id, Code: "not_subscribed"})
+				_ = muxWriteJSON(ctx, conn, muxServerFrame{Type: "sub_err", Session: id, Code: "not_subscribed"})
 				return true
 			}
 			// Subscribe the replacement before releasing the old reactor so the
@@ -155,13 +203,15 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 			init, cut := buildWebSocketInit(ctx, mgr, sub.sess, sinceMsg)
 			sub.reactor.cleanup()
 			sub.reactor, sub.cut = reactor, cut
-			return wsWriteJSON(ctx, conn, muxServerFrame{Type: "init", Session: id, Seq: cut, Data: init}) == nil
+			watchReactor(reactor)
+			if muxWriteJSON(ctx, conn, muxServerFrame{Type: "init", Session: id, Seq: cut, Data: init}) != nil {
+				return degrade(id, "init_failed")
+			}
+			return true
 		}
 
 		pingTicker := time.NewTicker(30 * time.Second)
 		defer pingTicker.Stop()
-		cycle := time.NewTicker(5 * time.Millisecond)
-		defer cycle.Stop()
 		cursor := 0
 		for {
 			select {
@@ -179,12 +229,12 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 					}
 				case "mode":
 					if frame.Mode != "visible" {
-						_ = wsWriteJSON(ctx, conn, muxServerFrame{Type: "sub_err", Session: frame.Session, Code: "unsupported_mode"})
+						_ = muxWriteJSON(ctx, conn, muxServerFrame{Type: "sub_err", Session: frame.Session, Code: "unsupported_mode"})
 					} else if !resnapshot(frame.Session, frame.SinceMsg) {
 						return
 					}
 				}
-			case <-cycle.C:
+			case <-ready:
 				if len(order) == 0 {
 					continue
 				}
@@ -195,7 +245,7 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 					sub := subs[id]
 					if sub != nil && sub.reactor.hasPriority() && !writeMuxSession(ctx, conn, id, sub, true) {
 						unsubscribe(id)
-						if wsWriteJSON(ctx, conn, muxServerFrame{Type: "resync", Session: id, Reason: "overflow"}) != nil {
+						if muxWriteJSON(ctx, conn, muxServerFrame{Type: "resync", Session: id, Reason: "overflow"}) != nil {
 							return
 						}
 					}
@@ -209,7 +259,7 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 					sub := subs[id]
 					if sub != nil && !writeMuxSession(ctx, conn, id, sub, false) {
 						unsubscribe(id)
-						if wsWriteJSON(ctx, conn, muxServerFrame{Type: "resync", Session: id, Reason: "overflow"}) != nil {
+						if muxWriteJSON(ctx, conn, muxServerFrame{Type: "resync", Session: id, Reason: "overflow"}) != nil {
 							return
 						}
 					}
@@ -237,7 +287,16 @@ func handleMuxWebSocket(mgr *Manager) http.HandlerFunc {
 // consumes from another reactor, so a stream's 512-slot loss policy remains
 // isolated. priority drains through the queued attention event, even if that
 // requires exceeding the ordinary budget.
-func writeMuxSession(ctx context.Context, conn *websocket.Conn, id string, sub *muxSessionSubscription, priority bool) bool { //nolint:staticcheck // existing Serve WebSocket transport
+func writeMuxSession(ctx context.Context, conn *websocket.Conn, id string, sub *muxSessionSubscription, priority bool) (ok bool) { //nolint:staticcheck // existing Serve WebSocket transport
+	ok = true
+	defer func() {
+		// A session's projection may contain an unexpected value supplied by a
+		// tool/provider. It must be degraded like an encoding failure, never take
+		// every other subscription down with the shared mux writer.
+		if recover() != nil {
+			ok = false
+		}
+	}()
 	for sent := 0; sent < muxEventsPerCycle || priority; sent++ {
 		select {
 		case <-sub.reactor.Done():
@@ -249,7 +308,7 @@ func writeMuxSession(ctx context.Context, conn *websocket.Conn, id string, sub *
 			if event.Seq <= sub.cut {
 				continue
 			}
-			if wsWriteJSON(ctx, conn, muxServerFrame{Type: "event", Session: id, Seq: event.Seq, Data: event}) != nil {
+			if muxWriteJSON(ctx, conn, muxServerFrame{Type: "event", Session: id, Seq: event.Seq, Data: event}) != nil {
 				return false
 			}
 			if isPriorityWsEvent(event) {

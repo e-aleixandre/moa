@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -512,6 +513,173 @@ func TestMuxWebSocket_HelloThenVisibleSubscriptions(t *testing.T) {
 	}
 	if got := first.wsConns.Load() + second.wsConns.Load(); got != 2 {
 		t.Fatalf("visible mux viewers = %d, want 2", got)
+	}
+}
+
+func TestMuxWebSocket_VisibleSubscriptionAccountingAcrossModeUnsubAndClose(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer srv.Close()
+	sess, err := mgr.CreateSession(CreateOpts{Title: "mux-accounting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var hello muxServerFrame
+	if err := wsjson.Read(ctx, conn, &hello); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "sub", Subs: []muxSubscription{{Session: sess.ID, Mode: "visible"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var init muxServerFrame
+	if err := wsjson.Read(ctx, conn, &init); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "mux viewer", func() bool { return sess.wsConns.Load() == 1 })
+
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "mode", Session: sess.ID, Mode: "visible"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, conn, &init); err != nil {
+		t.Fatal(err)
+	}
+	if got := sess.wsConns.Load(); got != 1 {
+		t.Fatalf("mode resnapshot viewers = %d, want 1", got)
+	}
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "unsub", Sessions: []string{sess.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "unsubscribed mux viewer", func() bool { return sess.wsConns.Load() == 0 })
+
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "sub", Subs: []muxSubscription{{Session: sess.ID, Mode: "visible"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, conn, &init); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "resubscribed mux viewer", func() bool { return sess.wsConns.Load() == 1 })
+	if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil { //nolint:staticcheck // test closes the nhooyr client connection
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "closed mux viewer", func() bool { return sess.wsConns.Load() == 0 })
+}
+
+func TestMuxWebSocket_InitEncodingFailureDegradesOnlyThatSubscription(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer srv.Close()
+	broken, err := mgr.CreateSession(CreateOpts{Title: "broken-init"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthy, err := mgr.CreateSession(CreateOpts{Title: "healthy-init"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var hello muxServerFrame
+	if err := wsjson.Read(ctx, conn, &hello); err != nil {
+		t.Fatal(err)
+	}
+	originalWrite := muxWriteJSON
+	muxWriteJSON = func(writeCtx context.Context, writeConn *websocket.Conn, v any) error { //nolint:staticcheck // test seam for an unencodable session projection
+		if frame, ok := v.(muxServerFrame); ok && frame.Type == "init" && frame.Session == broken.ID {
+			return errors.New("json: unsupported value")
+		}
+		return originalWrite(writeCtx, writeConn, v)
+	}
+	defer func() { muxWriteJSON = originalWrite }()
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "sub", Subs: []muxSubscription{
+		{Session: broken.ID, Mode: "visible"}, {Session: healthy.ID, Mode: "visible"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var degraded muxServerFrame
+	if err := wsjson.Read(ctx, conn, &degraded); err != nil {
+		t.Fatal(err)
+	}
+	if degraded.Type != "resync" || degraded.Session != broken.ID {
+		t.Fatalf("failure frame = %#v, want broken resync", degraded)
+	}
+	var init muxServerFrame
+	if err := wsjson.Read(ctx, conn, &init); err != nil {
+		t.Fatal(err)
+	}
+	if init.Type != "init" || init.Session != healthy.ID {
+		t.Fatalf("healthy subscription did not survive broken init: %#v", init)
+	}
+	if got := broken.wsConns.Load(); got != 0 {
+		t.Fatalf("broken subscription viewers = %d, want 0", got)
+	}
+	if got := healthy.wsConns.Load(); got != 1 {
+		t.Fatalf("healthy subscription viewers = %d, want 1", got)
+	}
+}
+
+func TestMuxWebSocket_SchedulerPreservesPerSessionEventOrdering(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer srv.Close()
+	first, err := mgr.CreateSession(CreateOpts{Title: "mux-order-first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := mgr.CreateSession(CreateOpts{Title: "mux-order-second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var frame muxServerFrame
+	if err := wsjson.Read(ctx, conn, &frame); err != nil { // hello
+		t.Fatal(err)
+	}
+	if err := wsjson.Write(ctx, conn, muxClientFrame{Type: "sub", Subs: []muxSubscription{
+		{Session: first.ID, Mode: "visible"}, {Session: second.ID, Mode: "visible"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := wsjson.Read(ctx, conn, &frame); err != nil { // inits
+			t.Fatal(err)
+		}
+	}
+	for i := range 3 {
+		first.runtime.Bus.Publish(bus.TextDelta{SessionID: first.ID, Delta: strconv.Itoa(i)})
+		second.runtime.Bus.Publish(bus.TextDelta{SessionID: second.ID, Delta: strconv.Itoa(i)})
+	}
+	first.runtime.Bus.Drain(time.Second)
+	second.runtime.Bus.Drain(time.Second)
+	last := map[string]uint64{}
+	for range 6 {
+		if err := wsjson.Read(ctx, conn, &frame); err != nil {
+			t.Fatal(err)
+		}
+		if frame.Type != "event" || (frame.Session != first.ID && frame.Session != second.ID) {
+			t.Fatalf("scheduler frame = %#v", frame)
+		}
+		if frame.Seq <= last[frame.Session] {
+			t.Fatalf("session %s reordered sequence %d after %d", frame.Session, frame.Seq, last[frame.Session])
+		}
+		last[frame.Session] = frame.Seq
 	}
 }
 

@@ -5,7 +5,7 @@ import {
 } from './history-hydration.js';
 import { handleWsInit } from './ws-handlers.js';
 import {
-  __resetMuxForTests, HISTORY_HYDRATION_TIMEOUT_MS, acknowledgeVisibleAttention, reconnectAll, setMuxSupport, syncConnections,
+  __resetMuxForTests, HISTORY_HYDRATION_TIMEOUT_MS, acknowledgeVisibleAttention, reconnectAll, retryHistoryHydration, setMuxSupport, syncConnections,
 } from './api.js';
 import { deleteSession, loadSessions } from './session-actions.js';
 import { __resetBootForTests, afterVisibilityChange } from './tile-actions.js';
@@ -30,7 +30,7 @@ test('history hydration starts on socket open and ends at init', () => {
   expect(store.get().sessions.s1.historyPending).toBe(false);
 });
 
-test('a proven delta resume keeps its hydration boundary without showing a tail', () => {
+test('a requested delta resume keeps the tail until the server confirms its base', () => {
   setState({ sessions: { s1: {
     id: 's1', messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
     unseen: true, unseenGen: 2, historyCacheGen: 1,
@@ -40,7 +40,7 @@ test('a proven delta resume keeps its hydration boundary without showing a tail'
   beginHistoryHydration('s1', { deltaResume: true });
 
   expect(store.get().sessions.s1).toMatchObject({
-    historyPending: true, historyTailNeeded: false, historyHydrated: false,
+    historyPending: true, historyTailNeeded: true, historyHydrated: false,
   });
 });
 
@@ -86,6 +86,67 @@ test('a mux delta subscription keeps the cached transcript authoritative without
       data: { messages: [], subagents: [], server_instance: 'instance-a', attention_bound: true, last_seq: 4, delta_base: 'durable-base' },
     }) });
     expect(store.get().sessions.s1).toMatchObject({ historyPending: false, historyHydrated: true, historyStale: false });
+    syncConnections([]);
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+    globalThis.location = originalLocation;
+  }
+});
+
+test('mux resync immediately re-subscribes the visible session without opening a legacy rail', () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  class TestWebSocket {
+    constructor(url) { this.url = url; this.sent = []; TestWebSocket.instances.push(this); }
+    send(message) { this.sent.push(JSON.parse(message)); }
+    close() { this.closed = true; this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  try {
+    setState({ sessions: { s1: { id: 's1', messages: [], subagents: {} } } });
+    setMuxSupport(true);
+    syncConnections(['s1']);
+    const ws = TestWebSocket.instances[0];
+    ws.onopen();
+    ws.onmessage({ data: JSON.stringify({ type: 'hello', proto: 1, server_instance: 'instance-a' }) });
+    ws.onmessage({ data: JSON.stringify({
+      type: 'resync', session: 's1', reason: 'overflow',
+    }) });
+    expect(ws.sent.at(-1)).toEqual({ type: 'sub', subs: [{ session: 's1', mode: 'visible' }] });
+    expect(TestWebSocket.instances).toHaveLength(1);
+    syncConnections([]);
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+    globalThis.location = originalLocation;
+  }
+});
+
+test('mux owns restart hydration and never leaves a legacy session socket behind', () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  class TestWebSocket {
+    constructor(url) { this.url = url; this.sent = []; TestWebSocket.instances.push(this); }
+    send(message) { this.sent.push(JSON.parse(message)); }
+    close() { this.closed = true; this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  try {
+    setState({ sessions: { s1: { id: 's1', messages: [], subagents: {} } } });
+    // Start on the compatibility rail, then negotiate mux while it is live.
+    syncConnections(['s1']);
+    const legacy = TestWebSocket.instances[0];
+    setMuxSupport(true);
+    const mux = TestWebSocket.instances[1];
+    expect(legacy.url).toContain('/api/sessions/s1/ws');
+    expect(legacy.closed).toBe(true);
+    mux.onopen();
+    retryHistoryHydration('s1');
+    expect(mux.sent.at(-1)).toEqual({ type: 'mode', session: 's1', mode: 'visible' });
+    expect(TestWebSocket.instances).toHaveLength(2);
     syncConnections([]);
   } finally {
     globalThis.WebSocket = originalWebSocket;
