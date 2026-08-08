@@ -145,7 +145,7 @@ export function SubagentView({ session, jobId, onBack }) {
 
       <div class="sa-body">
         <Stream
-          session={{ id: `${session.id}:${jobId}`, messages: [] }}
+          session={{ id: session.id, messages: [] }}
           blocks={view.blocks}
           lead={
             <UserWaypoint className="sa-task" time={undefined}>

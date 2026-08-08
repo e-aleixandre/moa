@@ -559,7 +559,7 @@ function toLedgerRow(msg) {
   // Diffs and answered questions have dedicated detail renderers, so neither
   // becomes a generic code-block row body.
   const body = preview && preview.kind !== 'diff' && preview.kind !== 'ask-user'
-    ? truncateText(preview.text)
+    ? preview.text
     : undefined;
   const row = {
     tool: toolToken(name),

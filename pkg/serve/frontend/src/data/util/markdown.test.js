@@ -80,3 +80,10 @@ test('a streaming caret is passed through DOMPurify sanitization', () => {
     DOMPurify.sanitize = sanitize;
   }
 });
+
+test('large fenced code skips synchronous highlighting', () => {
+  const source = `\`\`\`javascript\n${'const x = 1;\n'.repeat(6000)}\`\`\``;
+  const html = parseMarkdown(source);
+  expect(html).toContain('const x = 1;');
+  expect(html).not.toContain('hljs-keyword');
+});
