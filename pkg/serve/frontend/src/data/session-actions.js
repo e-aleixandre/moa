@@ -528,11 +528,7 @@ function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRunSt
   updateSession(id, patch);
 }
 
-// operation is retained by the composer while its text/attachments remain
-// untouched after a failed request. Reusing both IDs is the client half of
-// /send's idempotency contract: an abort can lose only the response, never
-// make retry mean a second message.
-export async function sendMessage(id, text, attachments = [], operation = null) {
+export async function sendMessage(id, text, attachments = []) {
   const state = store.get();
   const sess = state.sessions[id];
   if (!sess) return;
@@ -545,9 +541,8 @@ export async function sendMessage(id, text, attachments = [], operation = null) 
   // message starts a run or joins the queue. It picks the identity for the rail
   // it actually used and reports it back, so either outcome lands under an ID
   // this client already knows.
-  const steerId = operation?.steerId || newSteerId();
-  const msgId = operation?.msgId || newSteerId();
-  const serverInstance = operation?.serverInstance || sess.serverInstance || '';
+  const steerId = newSteerId();
+  const msgId = newSteerId();
   // Remember the live per-run token tally so a rejected send can restore it
   // (the optimistic patch below resets it to start the new run at zero).
   const prevTokensUp = sess.runTokensUp;
@@ -594,19 +589,12 @@ export async function sendMessage(id, text, attachments = [], operation = null) 
   }
 
   try {
-    // A 64 MiB decoded attachment can legitimately take minutes on a weak
-    // mobile uplink. Keep a bounded watchdog, but budget a conservative
-    // 128 KiB/s plus setup time (capped at twelve minutes); retries are safe
-    // because the stable IDs above converge on the server's first outcome.
-    const attachmentBytes = attachments.reduce((total, a) => total + Math.floor((a.data?.length || 0) * 3 / 4), 0);
-    const timeoutMs = Math.min(12 * 60_000, Math.max(120_000, 30_000 + Math.ceil(attachmentBytes / (128 * 1024)) * 1000));
     const res = await api('POST', `/api/sessions/${id}/send`, {
       text,
       attachments: attachments.map((a) => ({ name: a.name, mime: a.mime, data: a.data })),
       steer_id: steerId,
       msg_id: msgId,
-      server_instance: serverInstance,
-    }, { timeoutMs });
+    }, { timeoutMs: 0 });
     // The response is authoritative about WHICH rail took the message: our
     // local prediction can be wrong in both directions (a run started between
     // our snapshot and the request, or the run we thought was live had ended).
@@ -646,11 +634,6 @@ export async function sendMessage(id, text, attachments = [], operation = null) 
     }
     return action;
   } catch (e) {
-    // A process fence rejects a retry that belongs to an older runtime. Refresh
-    // so the next user retry mints a pair for the current server instance.
-    if (String(e?.message || e).startsWith('409') && serverInstance) {
-      void loadSessions();
-    }
     // Roll back the optimistic echo so a rejected send (e.g. 400 on a bad
     // attachment) doesn't leave a phantom message stuck in "running". Remove
     // exactly the message we appended (by reference), leaving any events that

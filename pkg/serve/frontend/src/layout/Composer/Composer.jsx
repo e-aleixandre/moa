@@ -84,7 +84,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   const contentSendActivationRef = useRef(SEND_BUTTON_INITIAL);
   const dispatchContentSendRef = useRef(null);
   const [contentSendPending, setContentSendPending] = useState(false);
-  const sendOperationRef = useRef(null);
   const compositionRef = useRef(newCompositionState());
   // The last normal DOM value lets us remove precisely one stale IME insertion
   // without erasing text typed for the next message after a successful send.
@@ -144,7 +143,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     setCmdSuggestions(null);
     setFileSuggestions(null);
     setAttachments([]);
-    sendOperationRef.current = null;
     autoResize();
   }, [sessionId, autoResize]);
 
@@ -327,14 +325,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     } finally {
       attachInFlightRef.current -= toProcess.length;
     }
-    if (results.length > 0) {
-      sendOperationRef.current = null;
-      setAttachments((prev) => [...prev, ...results]);
-    }
+    if (results.length > 0) setAttachments((prev) => [...prev, ...results]);
   }, [attachments.length]);
 
   const removeAttachment = useCallback((idx) => {
-    sendOperationRef.current = null;
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
   }, []);
 
@@ -468,7 +462,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       setCmdSuggestions(null);
       setFileSuggestions(null);
       setAttachments([]);
-      sendOperationRef.current = null;
       autoResize();
     };
 
@@ -588,22 +581,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     }
 
     try {
-      const previous = sendOperationRef.current;
-      const operation = previous && previous.text === text && previous.attachments === atts && previous.serverInstance === session?.serverInstance
-        ? previous
-        : { text, attachments: atts, steerId: newSteerId(), msgId: newSteerId(), serverInstance: session?.serverInstance || '' };
-      sendOperationRef.current = operation;
-      await sendMessage(sessionId, text, atts, operation);
+      await sendMessage(sessionId, text, atts);
       if (text) pushHistory(text);
       clearSentComposer();
     } catch (e) {
       console.error('Send failed:', e);
-      // A half-pair collision was explicitly refused, so retaining those IDs
-      // would make every unchanged retry fail forever. The request was not
-      // accepted; release only that operation and keep all user content.
-      if (e?.status === 409 && String(e.message || e).includes('send IDs conflict')) {
-        sendOperationRef.current = null;
-      }
       // sendMessage already rolled back the optimistic echo/chip; surface the
       // reason (e.g. a 400) so it's not silent.
       addToast({ sessionId, title: 'Message not sent', detail: `${String(e.message || e)} Your text and attachments are still here; you can retry.`, type: 'error' });
@@ -900,7 +882,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       return;
     }
     inputValueRef.current = e.target.value;
-    sendOperationRef.current = null;
     autoResize();
     updateSuggestions();
     // saveDraft recognizes /secret from its first line and removes any prior

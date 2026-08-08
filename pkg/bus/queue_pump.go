@@ -182,20 +182,15 @@ func launchQueuedSteers(sctx *SessionContext, items []core.SteerItem) {
 	if len(items) == 0 {
 		return
 	}
-	// A browser-minted MsgID is retained from queue admission to history. Other
-	// producers mint one here. The announcement itself is deferred to the append
-	// point: publishing it here, before the run goroutine appends, leaves a
-	// window where a reconnecting client snapshots history without the item
-	// while its sequence cut already covers the event.
+	// Pre-mint a stable MsgID per item so each chip is announced under the
+	// identity the message lands in state with (reconnect snapshots dedup by
+	// it). The announcement itself is deferred to the append point: publishing
+	// it here, before the run goroutine appends, leaves a window where a
+	// reconnecting client snapshots history without the item while its sequence
+	// cut already covers the event — the steer would vanish until a reload.
 	msgIDs := make([]string, len(items))
 	for i := range items {
-		msgIDs[i] = items[i].MsgID
-		if msgIDs[i] == "" {
-			msgIDs[i] = core.NewMsgID()
-		}
-		if items[i].MsgID != "" && items[i].Custom == nil {
-			items[i].Custom = map[string]any{"client_steer_id": items[i].ID}
-		}
+		msgIDs[i] = core.NewMsgID()
 	}
 	announce := func() {
 		gen := sctx.RunGenAtomic.Load()

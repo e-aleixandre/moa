@@ -27,7 +27,6 @@ mock.module("../../data/session-actions.js", () => ({
   cancelSteers: async () => {},
   execCommand: async () => ({ ok: true }),
   execShell: async () => {},
-  newSteerId: (() => { let n = 0; return () => `c-test-${++n}`; })(),
   steerSubagent: async () => {},
 }));
 
@@ -44,7 +43,7 @@ function descendants(node, result = []) {
 test("ordinary textarea Enter sends through the Composer component", async () => {
   refs.length = 0;
   sent.length = 0;
-  const tree = Composer({ sessionId: "s1", session: { state: "idle", serverInstance: "instance-a" } });
+  const tree = Composer({ sessionId: "s1", session: { state: "idle" } });
   const textarea = descendants(tree).find((node) => node.type === "textarea");
   expect(textarea).toBeDefined();
   // Composer's first ref is its textarea ref. Supplying the DOM-shaped value
@@ -60,6 +59,5 @@ test("ordinary textarea Enter sends through the Composer component", async () =>
   await Promise.resolve();
   expect(prevented).toBe(true);
   expect(sent).toHaveLength(1);
-  expect(sent[0].slice(0, 3)).toEqual(["s1", "ship this", []]);
-  expect(sent[0][3]).toMatchObject({ serverInstance: "instance-a" });
+  expect(sent[0]).toEqual(["s1", "ship this", []]);
 });

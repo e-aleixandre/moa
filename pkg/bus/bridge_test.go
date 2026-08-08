@@ -376,7 +376,7 @@ func (f *fakeAgent) SendPrepareCompact(ctx context.Context, prompt string, _ *se
 	return f.Send(ctx, prompt)
 }
 
-func (f *fakeAgent) SendWithMsgID(ctx context.Context, prompt, msgID string, _ ...string) ([]core.AgentMessage, error) {
+func (f *fakeAgent) SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error) {
 	f.mu.Lock()
 	f.sendMsgID = msgID
 	announce := f.announce
@@ -491,7 +491,7 @@ func (f *fakeAgent) SendWithContentMsgID(ctx context.Context, content []core.Con
 	return f.SendWithContent(ctx, content)
 }
 
-func (f *fakeAgent) SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string, _ ...string) ([]core.AgentMessage, error) {
+func (f *fakeAgent) SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error) {
 	f.mu.Lock()
 	announce := f.announce
 	f.mu.Unlock()

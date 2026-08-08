@@ -1678,7 +1678,7 @@ func TestHandleSend_ReturnsEffectiveMsgID(t *testing.T) {
 		return got.MsgID, got.SteerID
 	}
 
-	msgID, steerID := send(`{"text":"hola","msg_id":"c-valid_1","steer_id":"c-valid-steer_1"}`)
+	msgID, steerID := send(`{"text":"hola","msg_id":"c-valid_1"}`)
 	if msgID != "c-valid_1" {
 		t.Fatalf("msg_id = %q, want the client-supplied one", msgID)
 	}
@@ -1686,9 +1686,9 @@ func TestHandleSend_ReturnsEffectiveMsgID(t *testing.T) {
 		t.Fatalf("steer_id = %q, want empty for a direct send", steerID)
 	}
 
-	// Same ID again is a retry: return the original result without another run.
-	reused, _ := send(`{"text":"otra vez","msg_id":"c-valid_1","steer_id":"c-valid-steer_1"}`)
-	if reused != "c-valid_1" {
-		t.Fatalf("msg_id = %q, want original ID", reused)
+	// Same ID again: re-minted, and the response tells the client which one won.
+	reused, _ := send(`{"text":"otra vez","msg_id":"c-valid_1"}`)
+	if reused == "" || reused == "c-valid_1" {
+		t.Fatalf("msg_id = %q, want a freshly minted ID", reused)
 	}
 }

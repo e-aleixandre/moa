@@ -234,22 +234,6 @@ type MsgIDInUse struct {
 	MsgID     string
 }
 
-// GetClientSend reports the durable (history/queue) or handoff-reserved state
-// of a browser-minted send pair. It is the idempotency authority for ingress;
-// unlike a retry cache it expires only when the protected item is cancelled.
-type GetClientSend struct {
-	SteerID string
-	MsgID   string
-}
-
-type ClientSendState struct {
-	Action    string
-	ID        string
-	Found     bool
-	Collision bool
-	Content   []core.Content
-}
-
 // GetBranchPoints returns branch points for the branch picker UI.
 // Handler returns: []BranchPoint
 type GetBranchPoints struct{ SessionID string }

@@ -48,7 +48,7 @@ type AgentController interface {
 	Reset() error
 	Compact(ctx context.Context, focus string) (*core.CompactionPayload, error)
 	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
-	SendWithMsgID(ctx context.Context, prompt, msgID string, clientSteerID ...string) ([]core.AgentMessage, error)
+	SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error)
 	SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithCustomAnnounced(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)
@@ -56,7 +56,7 @@ type AgentController interface {
 	// SendWithContentAnnounced is SendWithContentMsgID that also announces the
 	// appended user message (core.AgentEventUserMessage) from the append point,
 	// so the announcement can never race a concurrent history snapshot.
-	SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string, clientSteerID ...string) ([]core.AgentMessage, error)
+	SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error)
 	AppendMessage(msg core.AgentMessage) error
 	SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error
 	LoadState(msgs []core.AgentMessage, compactionEpoch int) error
@@ -253,16 +253,7 @@ type SessionContext struct {
 	// check and the append that makes the ID visible in history. See
 	// reserveMsgID.
 	msgIDMu       sync.Mutex
-	reservedMsgID map[string]clientSendReservation
-}
-
-// clientSendReservation bridges the short interval between accepting a send
-// and materializing its durable message/queue entry. It has no TTL or capacity:
-// it is removed only when that durable state appears or the send is cancelled.
-type clientSendReservation struct {
-	steerID string
-	action  string
-	content []core.Content
+	reservedMsgID map[string]struct{}
 }
 
 // reserveMsgID returns the message ID a send must land under, claiming it for
@@ -289,31 +280,20 @@ func (sctx *SessionContext) reserveMsgID(msgID string) string {
 	sctx.msgIDMu.Lock()
 	defer sctx.msgIDMu.Unlock()
 	if sctx.reservedMsgID == nil {
-		sctx.reservedMsgID = make(map[string]clientSendReservation)
+		sctx.reservedMsgID = make(map[string]struct{})
 	}
 	if msgID != "" {
 		_, claimed := sctx.reservedMsgID[msgID]
 		if !claimed && !sctx.msgIDInHistory(msgID) {
-			sctx.reservedMsgID[msgID] = clientSendReservation{}
+			sctx.reservedMsgID[msgID] = struct{}{}
 			return msgID
 		}
 	}
 	// Minted IDs are random, so a collision here would mean a repeat of
 	// core.NewMsgID; claim it anyway to keep the map the single authority.
 	fresh := core.NewMsgID()
-	sctx.reservedMsgID[fresh] = clientSendReservation{}
+	sctx.reservedMsgID[fresh] = struct{}{}
 	return fresh
-}
-
-func (sctx *SessionContext) setReservedClientSend(msgID, steerID, action string, content []core.Content) {
-	if msgID == "" {
-		return
-	}
-	sctx.msgIDMu.Lock()
-	if _, ok := sctx.reservedMsgID[msgID]; ok {
-		sctx.reservedMsgID[msgID] = clientSendReservation{steerID: steerID, action: action, content: core.CloneContent(content)}
-	}
-	sctx.msgIDMu.Unlock()
 }
 
 // releaseMsgID drops a claim taken by reserveMsgID. Called both when the send

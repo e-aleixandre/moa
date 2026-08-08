@@ -422,11 +422,10 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limitBody(w, r, maxSendBodySize)
 		var body struct {
-			Text           string       `json:"text"`
-			Attachments    []Attachment `json:"attachments"`
-			SteerID        string       `json:"steer_id"`
-			MsgID          string       `json:"msg_id"`
-			ServerInstance string       `json:"server_instance"`
+			Text        string       `json:"text"`
+			Attachments []Attachment `json:"attachments"`
+			SteerID     string       `json:"steer_id"`
+			MsgID       string       `json:"msg_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -437,7 +436,7 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		sessionID := r.PathValue("id")
-		action, acceptedID, descriptors, err := mgr.SendForInstance(sessionID, body.Text, body.Attachments, body.SteerID, body.MsgID, body.ServerInstance)
+		action, acceptedID, descriptors, err := mgr.Send(sessionID, body.Text, body.Attachments, body.SteerID, body.MsgID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -445,8 +444,6 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		case errors.Is(err, bus.ErrSteerQueueFull):
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		case errors.Is(err, ErrStaleServerInstance), errors.Is(err, ErrSendIDCollision):
-			http.Error(w, err.Error(), http.StatusConflict)
 		case err != nil:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		default:

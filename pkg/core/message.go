@@ -197,10 +197,6 @@ func (m *Message) EnsureMsgID() {
 type SteerItem struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
-	// MsgID is the stable identity the eventual user message must retain when
-	// this queued steer is delivered. Keeping it on the queue closes the
-	// queue-to-history handoff for client retries.
-	MsgID string `json:"msg_id,omitempty"`
 	// Custom is persisted with the eventual conversation message. It lets
 	// internal ingress retain its rendering/source metadata when it has to wait
 	// on the queue rail instead of starting a direct run.
