@@ -555,6 +555,7 @@ func handlePermissionDecision(mgr *Manager) http.HandlerFunc {
 			Allow    string `json:"allow"`
 			Rule     string `json:"rule"`
 			Action   string `json:"action"`
+			ClientID string `json:"client_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -579,6 +580,8 @@ func handlePermissionDecision(mgr *Manager) http.HandlerFunc {
 			Approved:     body.Approved,
 			Feedback:     body.Feedback,
 			AllowPattern: body.Allow,
+			Origin:       "web",
+			ResolverID:   body.ClientID,
 		}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -596,15 +599,16 @@ func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
 		}
 		limitBody(w, r, maxJSONBodySize)
 		var body struct {
-			ID      string   `json:"id"`
-			Answers []string `json:"answers"`
+			ID       string   `json:"id"`
+			Answers  []string `json:"answers"`
+			ClientID string   `json:"client_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
 		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{
-			AskID: body.ID, Answers: body.Answers,
+			AskID: body.ID, Answers: body.Answers, Origin: "web", ResolverID: body.ClientID,
 		}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -710,11 +714,15 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		defer sess.wsConns.Add(-1)
 
 		ctx := conn.CloseRead(r.Context()) //nolint:staticcheck
+		query := r.URL.Query()
+		clientID := query.Get("client_id")
+		pendingPermissionID := query.Get("pending_permission")
+		pendingAskID := query.Get("pending_ask")
 
 		// Subscribe before taking the init snapshot. Events published while the
 		// snapshot is assembled are queued by the reactor and sent immediately
 		// after init, rather than being lost in the old snapshot→subscribe gap.
-		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD, func(seq uint64) uint64 {
+		reactor := newWsReactorForClient(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD, clientID, func(seq uint64) uint64 {
 			return mgr.attentionGenerationForSequenceContext(ctx, sess, seq)
 		})
 		defer reactor.cleanup()
@@ -756,7 +764,6 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		var sinceMsg string
 		debugInit := false
 		if r.URL.RawQuery != "" {
-			query := r.URL.Query()
 			sinceMsg = query.Get("since_msg")
 			debugInit = query.Get("debug_init") == "1"
 		}
@@ -764,7 +771,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		if debugInit {
 			initStarted = time.Now()
 		}
-		initData := buildInitDataAtAttentionGen(sess, streaming, liveTools, unseenGen, sinceMsg)
+		initData := buildInitDataForPromptCandidates(sess, streaming, liveTools, unseenGen, sinceMsg, pendingPermissionID, pendingAskID, clientID)
 		initData.AttentionBound = attentionBound
 		if !attentionBound {
 			initData.UnseenGen = 0

@@ -40,6 +40,15 @@ export const MCP_RESTART_TIMEOUT_MS = 30000;
 // marked stale. Only an authoritative init may acknowledge its attention.
 export const HISTORY_HYDRATION_TIMEOUT_MS = 12000;
 
+// Ephemeral per-tab identity lets the server project a resolution as
+// "this_client" without browser-side attribution guesses or durable storage.
+export const webClientId = (() => {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return `web-${crypto.randomUUID()}`;
+  } catch (_) { /* fall through */ }
+  return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+})();
+
 export class ApiError extends Error {
   constructor(status, message) {
     super(message);
@@ -288,6 +297,10 @@ function openWs(sessionId, initialBackoff) {
   let ws;
   try {
     const params = new URLSearchParams();
+	params.set('client_id', webClientId);
+    const pending = store.get().sessions[sessionId];
+    if (pending?.pendingPerm?.id) params.set('pending_permission', pending.pendingPerm.id);
+    if (pending?.pendingAsk?.id) params.set('pending_ask', pending.pendingAsk.id);
     if (switchDebugEnabled) params.set('debug_init', '1');
     if (!forceFullInit.delete(sessionId) && cachedBase) params.set('since_msg', cachedBase);
     const query = params.size > 0 ? `?${params}` : '';

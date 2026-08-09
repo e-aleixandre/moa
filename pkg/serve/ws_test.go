@@ -69,6 +69,25 @@ func TestWsAttentionEventsCarryOccurrenceGeneration(t *testing.T) {
 	}
 }
 
+func TestWsPromptResolutionProjectsServerAttributionPerClient(t *testing.T) {
+	event := bus.PermissionResolved{ID: "p1", Origin: "web", ResolverID: "web-a", Reason: "resolved", Outcome: "approved"}
+	self, ok := wsEventFromBusForClient(event, 0, "web-a")
+	if !ok {
+		t.Fatal("resolution event not translated")
+	}
+	if got := self.Data.(PromptResolutionData); got.Origin != "this_client" || got.Reason != "resolved" || got.Outcome != "approved" {
+		t.Fatalf("self resolution = %+v", got)
+	}
+	remote, _ := wsEventFromBusForClient(event, 0, "web-b")
+	if got := remote.Data.(PromptResolutionData); got.Origin != "web" || got.Reason != "resolved" || got.Outcome != "approved" {
+		t.Fatalf("remote resolution = %+v", got)
+	}
+	cancelled, _ := wsEventFromBusForClient(bus.AskUserResolved{ID: "a1", Origin: "system", Reason: "cancelled"}, 0, "web-b")
+	if got := cancelled.Data.(PromptResolutionData); got.Origin != "system" || got.Reason != "cancelled" {
+		t.Fatalf("cancelled resolution = %+v", got)
+	}
+}
+
 func TestBuildInitData_SubagentThinking(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

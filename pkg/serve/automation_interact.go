@@ -243,7 +243,7 @@ func handleAutomationAskResponse(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{
-			AskID: body.ID, Answers: body.Answers,
+			AskID: body.ID, Answers: body.Answers, Origin: "automation",
 		}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -299,6 +299,7 @@ func handleAutomationPermission(mgr *Manager) http.HandlerFunc {
 			Approved:     *body.Approved,
 			Feedback:     body.Feedback,
 			AllowPattern: body.Allow,
+			Origin:       "automation",
 		}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

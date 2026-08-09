@@ -143,10 +143,10 @@ test('remote prompt resolutions replace the prompt with a presentational notice 
   } });
 
   handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {}, unseen_gen: 7 });
-  handleWsPermissionResolved('s1', { id: 'perm-1', outcome: 'approved' });
+  handleWsPermissionResolved('s1', { id: 'perm-1', kind: 'permission', origin: 'web', reason: 'resolved', outcome: 'approved' });
   expect(store.get().sessions.s1).toMatchObject({
     pendingPerm: null,
-    resolvedPromptNotice: { id: 'perm-1', kind: 'permission', outcome: 'approved' },
+    resolvedPromptNotice: { id: 'perm-1', kind: 'permission', origin: 'web', reason: 'resolved', outcome: 'approved' },
     unseen: true,
     unseenGen: 7,
   });
@@ -154,27 +154,63 @@ test('remote prompt resolutions replace the prompt with a presentational notice 
   handleWsAskUser('s1', { id: 'ask-1', questions: [], unseen_gen: 7 });
   expect(store.get().sessions.s1).toMatchObject({ pendingAsk: { id: 'ask-1' } });
   expect(store.get().sessions.s1.resolvedPromptNotice).toBeNull();
-  handleWsAskResolved('s1', { id: 'ask-1', outcome: 'answered' });
+  handleWsAskResolved('s1', { id: 'ask-1', kind: 'ask', origin: 'web', reason: 'resolved', outcome: 'answered' });
   expect(store.get().sessions.s1).toMatchObject({
     pendingAsk: null,
-    resolvedPromptNotice: { id: 'ask-1', kind: 'ask', outcome: 'answered' },
+    resolvedPromptNotice: { id: 'ask-1', kind: 'ask', origin: 'web', reason: 'resolved', outcome: 'answered' },
     unseen: true,
     unseenGen: 7,
   });
 });
 
-test('locally resolving a prompt does not leave a remote-resolution notice', () => {
+test('a server-projected local resolution does not leave a notice', () => {
   seedSession('s1');
   setState({ isMobile: true, activeSession: 's1' });
   handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {} });
-  setState({ sessions: { s1: { ...store.get().sessions.s1, localPermResolution: 'perm-1' } } });
-  handleWsPermissionResolved('s1', { id: 'perm-1' });
+  handleWsPermissionResolved('s1', { id: 'perm-1', origin: 'this_client', reason: 'resolved', outcome: 'approved' });
   expect(store.get().sessions.s1).toMatchObject({ pendingPerm: null, resolvedPromptNotice: null });
 
   handleWsAskUser('s1', { id: 'ask-1', questions: [] });
-  setState({ sessions: { s1: { ...store.get().sessions.s1, localAskResolution: 'ask-1' } } });
-  handleWsAskResolved('s1', { id: 'ask-1' });
+  handleWsAskResolved('s1', { id: 'ask-1', origin: 'this_client', reason: 'resolved', outcome: 'answered' });
   expect(store.get().sessions.s1).toMatchObject({ pendingAsk: null, resolvedPromptNotice: null });
+});
+
+test('init restores a server-recorded resolution when a disconnected client lost the event', () => {
+  seedSession('s1');
+  setState({ isMobile: true, activeSession: 's1' });
+  handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {} });
+  handleWsInit('s1', {
+    messages: [], subagents: [], server_instance: 'instance-a',
+    resolved_prompt: { id: 'perm-1', kind: 'permission', origin: 'tui', reason: 'resolved', outcome: 'approved' },
+  });
+  expect(store.get().sessions.s1).toMatchObject({
+    pendingPerm: null,
+    resolvedPromptNotice: { id: 'perm-1', kind: 'permission', origin: 'tui', reason: 'resolved', outcome: 'approved' },
+  });
+});
+
+test('a remote resolution wins a stalled local POST without client-side attribution state', () => {
+  seedSession('s1');
+  setState({ isMobile: true, activeSession: 's1' });
+  handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {} });
+  // The request may be in flight locally, but no intent marker is stored. The
+  // server's event remains the sole authority when another client wins first.
+  handleWsPermissionResolved('s1', { id: 'perm-1', kind: 'permission', origin: 'web', reason: 'resolved', outcome: 'denied' });
+  expect(store.get().sessions.s1).toMatchObject({
+    pendingPerm: null,
+    resolvedPromptNotice: { id: 'perm-1', kind: 'permission', origin: 'web', reason: 'resolved', outcome: 'denied' },
+  });
+  expect(store.get().sessions.s1.localPermResolution).toBeUndefined();
+});
+
+test('a cancelled run is explained as cancellation, not another client', () => {
+  seedSession('s1');
+  setState({ isMobile: true, activeSession: 's1' });
+  handleWsAskUser('s1', { id: 'ask-1', questions: [] });
+  handleWsAskResolved('s1', { id: 'ask-1', kind: 'ask', origin: 'system', reason: 'cancelled' });
+  expect(store.get().sessions.s1.resolvedPromptNotice).toMatchObject({
+    id: 'ask-1', origin: 'system', reason: 'cancelled',
+  });
 });
 
 test('delta init appends while preserving the cached prefix array and rows', () => {

@@ -201,6 +201,13 @@ type GetSessionError struct{ SessionID string }
 // Handler returns: PendingApprovalInfo
 type GetPendingApproval struct{ SessionID string }
 
+// GetPromptResolution returns the process-local record for a prompt that may
+// have been resolved while a web client was disconnected.
+type GetPromptResolution struct {
+	SessionID string
+	ID        string
+}
+
 // GetPermissionDecisionSnapshot returns the safe exact identity of the one
 // current pending permission. It fails when there are none or more than one.
 type GetPermissionDecisionSnapshot struct{ SessionID string }

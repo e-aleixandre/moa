@@ -5,7 +5,7 @@ import { Stream } from "../Stream/Stream.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { LiveDock } from "../LiveDock/LiveDock.jsx";
-import { McpBanner, PermissionPrompt, AskUserPrompt } from "../../components/index.js";
+import { McpBanner, PermissionPrompt, AskUserPrompt, PromptResolutionNotice } from "../../components/index.js";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { snapToRatio } from "../../data/snap.js";
@@ -95,7 +95,7 @@ function ResizeHandle({ path, direction }) {
 // ConnectedPane — a leaf tile bound to a real session (or empty). Wires the
 // Pane's optional connected props to the tile actions and mounts the live Stream +
 // Composer (+ blocking) when a session is assigned.
-function ConnectedPane({ node, state, tileIndex, onSecret }) {
+export function ConnectedPane({ node, state, tileIndex, onSecret }) {
   const tileId = node.id;
   const session = node.sessionId ? state.sessions[node.sessionId] : null;
   const [nowMs, setNowMs] = useState(Date.now());
@@ -291,7 +291,11 @@ function ConnectedPane({ node, state, tileIndex, onSecret }) {
         />
       )}
     >
-      <Stream session={session} blocks={blocks} />
+      <Stream
+        session={session}
+        blocks={blocks}
+        tail={<PromptResolutionNotice notice={session.resolvedPromptNotice} />}
+      />
     </Pane>
   );
 }

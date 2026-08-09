@@ -84,7 +84,7 @@ func TestApprovalManager_ResolvePermission(t *testing.T) {
 	gotResolved := make(chan PermissionResolved, 1)
 	b.Subscribe(func(e PermissionResolved) { gotResolved <- e })
 
-	err := am.ResolvePermission("p1", true, "ok", "write(*)")
+	err := am.ResolvePermission("p1", true, "ok", "write(*)", PromptResolutionInfo{Origin: "web", ResolverID: "web-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,8 +109,8 @@ func TestApprovalManager_ResolvePermission(t *testing.T) {
 	b.Drain(time.Second)
 	select {
 	case e := <-gotResolved:
-		if e.ID != "p1" {
-			t.Fatalf("ID = %q", e.ID)
+		if e.ID != "p1" || e.Origin != "web" || e.ResolverID != "web-a" || e.Reason != "resolved" || e.Outcome != "approved" {
+			t.Fatalf("resolution event = %+v", e)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for PermissionResolved")
@@ -199,7 +199,7 @@ func TestApprovalManager_ClearPending_AutoDeniesAndResolves(t *testing.T) {
 	b.Subscribe(func(e PermissionResolved) { gotPermResolved <- e })
 	b.Subscribe(func(e AskUserResolved) { gotAskResolved <- e })
 
-	am.ClearPending(1)
+	am.ClearPending(1, "cancelled")
 
 	// Both pending requests must be auto-denied so the agent goroutines unblock.
 	select {
@@ -221,12 +221,18 @@ func TestApprovalManager_ClearPending_AutoDeniesAndResolves(t *testing.T) {
 
 	// Resolved events must fire so reconnecting clients clear the modal.
 	select {
-	case <-gotPermResolved:
+	case e := <-gotPermResolved:
+		if e.Origin != "system" || e.Reason != "cancelled" || e.Outcome != "denied" {
+			t.Fatalf("permission cancellation = %+v", e)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("no PermissionResolved published")
 	}
 	select {
-	case <-gotAskResolved:
+	case e := <-gotAskResolved:
+		if e.Origin != "system" || e.Reason != "cancelled" {
+			t.Fatalf("ask cancellation = %+v", e)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("no AskUserResolved published")
 	}

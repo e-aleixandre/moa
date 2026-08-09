@@ -925,7 +925,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.Approvals == nil {
 			return fmt.Errorf("approvals not available")
 		}
-		if err := sctx.Approvals.ResolvePermission(cmd.PermissionID, cmd.Approved, cmd.Feedback, cmd.AllowPattern); err != nil {
+		if err := sctx.Approvals.ResolvePermission(cmd.PermissionID, cmd.Approved, cmd.Feedback, cmd.AllowPattern, PromptResolutionInfo{Origin: cmd.Origin, ResolverID: cmd.ResolverID}); err != nil {
 			return err
 		}
 		// Persist "always allow" patterns so they survive a restart. They are
@@ -972,7 +972,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.Approvals == nil {
 			return fmt.Errorf("approvals not available")
 		}
-		return sctx.Approvals.ResolveAskUser(cmd.AskID, cmd.Answers)
+		return sctx.Approvals.ResolveAskUser(cmd.AskID, cmd.Answers, PromptResolutionInfo{Origin: cmd.Origin, ResolverID: cmd.ResolverID})
 	})
 
 	// -------------------------------------------------------------------
@@ -1239,6 +1239,13 @@ func RegisterHandlers(sctx *SessionContext) {
 			return PendingApprovalInfo{}, nil
 		}
 		return sctx.Approvals.PendingInfo(), nil
+	})
+
+	b.OnQuery(func(q GetPromptResolution) (PromptResolutionInfo, error) {
+		if sctx.Approvals == nil {
+			return PromptResolutionInfo{}, nil
+		}
+		return sctx.Approvals.ResolutionInfo(q.ID), nil
 	})
 
 	b.OnQuery(func(q GetPermissionDecisionSnapshot) (PermissionDecisionSnapshot, error) {
@@ -1519,7 +1526,11 @@ func RegisterHandlers(sctx *SessionContext) {
 	// immediately re-sent prompt) is spared.
 	b.Subscribe(func(e RunEnded) {
 		if sctx.Approvals != nil {
-			sctx.Approvals.ClearPending(e.RunGen)
+			reason := "aborted"
+			if e.Cancelled {
+				reason = "cancelled"
+			}
+			sctx.Approvals.ClearPending(e.RunGen, reason)
 		}
 	})
 

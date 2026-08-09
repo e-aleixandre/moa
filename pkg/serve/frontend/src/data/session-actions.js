@@ -1,6 +1,6 @@
 // session-actions.js — API-backed session operations
 
-import { api, retryHistoryHydration } from './api.js';
+import { api, retryHistoryHydration, webClientId } from './api.js';
 import { normalizeConversationProjection, normalizeHistory } from './ws-handlers.js';
 import { triggerAttention, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
@@ -134,8 +134,6 @@ export async function loadSessions() {
         // The roster does not carry this display state, so polling must not
         // erase it before the user can read it.
         resolvedPromptNotice: existing ? existing.resolvedPromptNotice : null,
-        localPermResolution: existing ? existing.localPermResolution : null,
-        localAskResolution: existing ? existing.localAskResolution : null,
         pendingSteers: existing ? existing.pendingSteers : null,
         streamingText: existing ? existing.streamingText : null,
         thinkingText: existing ? existing.thinkingText : null,
@@ -735,19 +733,14 @@ export async function openPersistedSubagent(id, jobId) {
 }
 
 export async function resolvePermission(sessionId, permId, approved, opts = {}) {
-  updateSession(sessionId, { localPermResolution: permId });
-  try {
-    await api('POST', `/api/sessions/${sessionId}/permission`, {
-      id: permId,
-      approved,
-      feedback: opts.feedback || '',
-      allow: opts.allow || '',
-    });
-    updateSession(sessionId, { pendingPerm: null, localPermResolution: null });
-  } catch (err) {
-    updateSession(sessionId, { localPermResolution: null });
-    throw err;
-  }
+  await api('POST', `/api/sessions/${sessionId}/permission`, {
+    id: permId,
+    approved,
+    feedback: opts.feedback || '',
+    allow: opts.allow || '',
+    client_id: webClientId,
+  });
+  updateSession(sessionId, { pendingPerm: null });
 }
 
 export async function addPermissionRule(sessionId, permId, rule) {
@@ -759,16 +752,10 @@ export async function addPermissionRule(sessionId, permId, rule) {
 }
 
 export async function resolveAskUser(sessionId, askId, answers) {
-  updateSession(sessionId, { localAskResolution: askId });
-  try {
-    await api('POST', `/api/sessions/${sessionId}/ask`, {
-      id: askId, answers,
-    });
-    updateSession(sessionId, { pendingAsk: null, localAskResolution: null });
-  } catch (err) {
-    updateSession(sessionId, { localAskResolution: null });
-    throw err;
-  }
+  await api('POST', `/api/sessions/${sessionId}/ask`, {
+    id: askId, answers, client_id: webClientId,
+  });
+  updateSession(sessionId, { pendingAsk: null });
 }
 
 export async function resumeSession(id) {

@@ -45,6 +45,10 @@ const (
 // when enriching edit tool_start events with real line numbers.
 // Returns the reactor and a read-only channel for the WS writer loop.
 func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attentionGeneration ...func(uint64) uint64) *wsReactor {
+	return newWsReactorForClient(b, sessionCtx, cwd, "", attentionGeneration...)
+}
+
+func newWsReactorForClient(b bus.EventBus, sessionCtx context.Context, cwd, clientID string, attentionGeneration ...func(uint64) uint64) *wsReactor {
 	r := &wsReactor{
 		ch:   make(chan Event, wsReactorBuffer),
 		done: make(chan struct{}),
@@ -90,7 +94,7 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attent
 				return
 			}
 		}
-		if wsEvent, ok := wsEventFromBus(event, attentionGen); ok {
+		if wsEvent, ok := wsEventFromBusForClient(event, attentionGen, clientID); ok {
 			wsEvent.Seq = seq
 			send(enrichEditToolStart(wsEvent, cwd))
 		}
@@ -154,6 +158,10 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 	if len(attentionGeneration) > 0 {
 		attentionGen = attentionGeneration[0]
 	}
+	return wsEventFromBusForClient(event, attentionGen, "")
+}
+
+func wsEventFromBusForClient(event any, attentionGen uint64, clientID string) (Event, bool) {
 	switch e := event.(type) {
 	case bus.StateChanged:
 		return Event{Type: "state_change", Data: StateChangeData{
@@ -302,13 +310,13 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 			AllowPattern: e.AllowPattern,
 		}}, true
 	case bus.PermissionResolved:
-		return Event{Type: "permission_resolved", Data: map[string]any{"id": e.ID}}, true
+		return Event{Type: "permission_resolved", Data: promptResolutionData(e.ID, "permission", e.Origin, e.ResolverID, e.Reason, e.Outcome, clientID)}, true
 	case bus.AskUserRequested:
 		return Event{Type: "ask_user", Data: map[string]any{
 			"id": e.ID, "run_gen": e.RunGen, "unseen_gen": attentionGen, "questions": e.Questions,
 		}}, true
 	case bus.AskUserResolved:
-		return Event{Type: "ask_resolved", Data: map[string]any{"id": e.ID}}, true
+		return Event{Type: "ask_resolved", Data: promptResolutionData(e.ID, "ask", e.Origin, e.ResolverID, e.Reason, e.Outcome, clientID)}, true
 	case bus.SubagentCountChanged:
 		return Event{Type: "subagent_count", Data: SubagentCountData{Count: e.Count}}, true
 	case bus.SubagentCompleted:
@@ -350,7 +358,7 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 		}
 		return Event{Type: "subagent_end", Data: data}, true
 	case bus.SubagentEvent:
-		inner, ok := wsEventFromBus(e.Inner, attentionGen)
+		inner, ok := wsEventFromBusForClient(e.Inner, attentionGen, clientID)
 		if !ok {
 			return Event{}, false
 		}
@@ -374,6 +382,13 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 	default:
 		return Event{}, false
 	}
+}
+
+func promptResolutionData(id, kind, origin, resolverID, reason, outcome, clientID string) PromptResolutionData {
+	if origin == "web" && resolverID != "" && resolverID == clientID {
+		origin = "this_client"
+	}
+	return PromptResolutionData{ID: id, Kind: kind, Origin: origin, Reason: reason, Outcome: outcome}
 }
 
 // projectWSMessageCustom is a second transport boundary for callers that
@@ -471,6 +486,14 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 }
 
 func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, unseenGen uint64, sinceMsg ...string) InitData {
+	base := ""
+	if len(sinceMsg) > 0 {
+		base = sinceMsg[0]
+	}
+	return buildInitDataForPromptCandidates(sess, streaming, liveTools, unseenGen, base, "", "", "")
+}
+
+func buildInitDataForPromptCandidates(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, unseenGen uint64, sinceMsg, permissionID, askID, clientID string) InitData {
 	b := sess.runtime.Bus
 
 	// Use display messages (full history from tree) instead of agent messages.
@@ -479,10 +502,10 @@ func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAg
 	// the cached transcript, so it deliberately fails closed to a full snapshot.
 	msgs := []core.AgentMessage(nil)
 	deltaBase := ""
-	if len(sinceMsg) > 0 && sinceMsg[0] != "" {
-		if delta, err := bus.QueryTyped[bus.GetDisplayMessagesSince, bus.DisplayMessagesSince](b, bus.GetDisplayMessagesSince{EntryID: sinceMsg[0]}); err == nil && delta.Valid {
+	if sinceMsg != "" {
+		if delta, err := bus.QueryTyped[bus.GetDisplayMessagesSince, bus.DisplayMessagesSince](b, bus.GetDisplayMessagesSince{EntryID: sinceMsg}); err == nil && delta.Valid {
 			if bounded, truncated := limitInitHistory(delta.Messages); !truncated {
-				msgs, deltaBase = bounded, sinceMsg[0]
+				msgs, deltaBase = bounded, sinceMsg
 			}
 		}
 	}
@@ -621,6 +644,7 @@ func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAg
 	}
 
 	data.PendingPermission, data.PendingAsk = pendingAttentionData(pending, unseenGen)
+	data.ResolvedPrompt = reconnectPromptResolution(b, pending, permissionID, askID, clientID)
 	if planInfo.Mode != "off" {
 		data.PlanMode = planInfo.Mode
 		data.PlanFile = planInfo.PlanFile
@@ -635,6 +659,27 @@ func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAg
 	}
 
 	return data
+}
+
+func reconnectPromptResolution(b bus.EventBus, pending bus.PendingApprovalInfo, permissionID, askID, clientID string) *PromptResolutionData {
+	for _, candidate := range []struct{ id, kind string }{{permissionID, "permission"}, {askID, "ask"}} {
+		if candidate.id == "" {
+			continue
+		}
+		if candidate.kind == "permission" && pending.Permission != nil && pending.Permission.ID == candidate.id {
+			continue
+		}
+		if candidate.kind == "ask" && pending.Ask != nil && pending.Ask.ID == candidate.id {
+			continue
+		}
+		resolution, _ := bus.QueryTyped[bus.GetPromptResolution, bus.PromptResolutionInfo](b, bus.GetPromptResolution{ID: candidate.id})
+		if resolution.ID != "" {
+			data := promptResolutionData(resolution.ID, resolution.Kind, resolution.Origin, resolution.ResolverID, resolution.Reason, resolution.Outcome, clientID)
+			return &data
+		}
+		return &PromptResolutionData{ID: candidate.id, Kind: candidate.kind, Origin: "unknown", Reason: "no_longer_pending"}
+	}
+	return nil
 }
 
 func pendingAttentionData(pending bus.PendingApprovalInfo, attentionGen uint64) (*PermissionData, *AskData) {

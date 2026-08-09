@@ -609,8 +609,12 @@ type PermissionRequested struct {
 
 // PermissionResolved is published when a pending permission is resolved.
 type PermissionResolved struct {
-	SessionID string
-	ID        string
+	SessionID  string
+	ID         string
+	Origin     string // web, tui, automation, or system
+	ResolverID string // web client ID when Origin is web
+	Reason     string // resolved, cancelled, or aborted
+	Outcome    string // approved or denied
 }
 
 // ---------------------------------------------------------------------------
@@ -627,8 +631,12 @@ type AskUserRequested struct {
 
 // AskUserResolved is published when a pending ask-user prompt is answered.
 type AskUserResolved struct {
-	SessionID string
-	ID        string
+	SessionID  string
+	ID         string
+	Origin     string // web, tui, automation, or system
+	ResolverID string // web client ID when Origin is web
+	Reason     string // resolved, cancelled, or aborted
+	Outcome    string // answered
 }
 
 // AskQuestion is a user-facing question with optional predefined answers.

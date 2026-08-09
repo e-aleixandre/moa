@@ -123,7 +123,7 @@ test("a persisted document file chip downloads from its attachment endpoint", ()
 
   expect(link).toBeDefined();
   expect(link.props.href).toBe("/api/sessions/session%2F1/attachments/att_file");
-  expect(link.props.download).toBe(true);
+  expect('download' in link.props).toBe(true);
 });
 
 test("a text-only waypoint has no attachments strip", () => {

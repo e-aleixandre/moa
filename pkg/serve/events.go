@@ -29,36 +29,37 @@ type InitData struct {
 	// AttentionBound says whether UnseenGen is safe to use. A false value is an
 	// explicit retry signal: UnseenGen is omitted rather than risking an ack
 	// outside the snapshot's causal boundary.
-	AttentionBound    bool                `json:"attention_bound"`
-	Messages          []core.AgentMessage `json:"messages"`
-	State             string              `json:"state"`
-	ContextPercent    int                 `json:"context_percent"`
-	ContextWindow     int                 `json:"context_window,omitempty"`
-	CompactAt         int                 `json:"compact_at,omitempty"`
-	CompactAtMin      int                 `json:"compact_at_min,omitempty"`
-	PermissionMode    string              `json:"permission_mode"`
-	PathScope         string              `json:"path_scope,omitempty"`
-	PendingPermission *PermissionData     `json:"pending_permission,omitempty"`
-	PendingAsk        *AskData            `json:"pending_ask,omitempty"`
-	Tasks             any                 `json:"tasks,omitempty"`
-	PlanMode          string              `json:"plan_mode,omitempty"`
-	PlanFile          string              `json:"plan_file,omitempty"`
-	GoalActive        bool                `json:"goal_active,omitempty"`
-	GoalObjective     string              `json:"goal_objective,omitempty"`
-	GoalWorkDir       string              `json:"goal_work_dir,omitempty"`
-	GoalIteration     int                 `json:"goal_iteration,omitempty"`
-	GoalStalled       int                 `json:"goal_stalled,omitempty"`
-	GoalVerifying     bool                `json:"goal_verifying,omitempty"`
-	Compacting        bool                `json:"compacting,omitempty"`
-	StreamingText     string              `json:"streaming_text,omitempty"`
-	StreamingThinking string              `json:"streaming_thinking,omitempty"`
-	LiveTools         []LiveToolInitData  `json:"live_tools,omitempty"`
-	RunTokensUp       int                 `json:"run_tokens_up"`
-	RunTokensDown     int                 `json:"run_tokens_down"`
-	RunStartedAtMs    int64               `json:"run_started_at_ms,omitempty"`
-	PendingSteers     []PendingSteerData  `json:"pending_steers,omitempty"`
-	CostUSD           float64             `json:"cost_usd,omitempty"`
-	Subagents         []SubagentInitData  `json:"subagents,omitempty"`
+	AttentionBound    bool                  `json:"attention_bound"`
+	Messages          []core.AgentMessage   `json:"messages"`
+	State             string                `json:"state"`
+	ContextPercent    int                   `json:"context_percent"`
+	ContextWindow     int                   `json:"context_window,omitempty"`
+	CompactAt         int                   `json:"compact_at,omitempty"`
+	CompactAtMin      int                   `json:"compact_at_min,omitempty"`
+	PermissionMode    string                `json:"permission_mode"`
+	PathScope         string                `json:"path_scope,omitempty"`
+	PendingPermission *PermissionData       `json:"pending_permission,omitempty"`
+	PendingAsk        *AskData              `json:"pending_ask,omitempty"`
+	ResolvedPrompt    *PromptResolutionData `json:"resolved_prompt,omitempty"`
+	Tasks             any                   `json:"tasks,omitempty"`
+	PlanMode          string                `json:"plan_mode,omitempty"`
+	PlanFile          string                `json:"plan_file,omitempty"`
+	GoalActive        bool                  `json:"goal_active,omitempty"`
+	GoalObjective     string                `json:"goal_objective,omitempty"`
+	GoalWorkDir       string                `json:"goal_work_dir,omitempty"`
+	GoalIteration     int                   `json:"goal_iteration,omitempty"`
+	GoalStalled       int                   `json:"goal_stalled,omitempty"`
+	GoalVerifying     bool                  `json:"goal_verifying,omitempty"`
+	Compacting        bool                  `json:"compacting,omitempty"`
+	StreamingText     string                `json:"streaming_text,omitempty"`
+	StreamingThinking string                `json:"streaming_thinking,omitempty"`
+	LiveTools         []LiveToolInitData    `json:"live_tools,omitempty"`
+	RunTokensUp       int                   `json:"run_tokens_up"`
+	RunTokensDown     int                   `json:"run_tokens_down"`
+	RunStartedAtMs    int64                 `json:"run_started_at_ms,omitempty"`
+	PendingSteers     []PendingSteerData    `json:"pending_steers,omitempty"`
+	CostUSD           float64               `json:"cost_usd,omitempty"`
+	Subagents         []SubagentInitData    `json:"subagents,omitempty"`
 	// SubagentOutcomes restores terminal child cards after reconnect/restart.
 	// It is separate from live Subagents because terminal jobs do not belong in
 	// the Live Dock.
@@ -72,6 +73,17 @@ type InitData struct {
 	// InitMetrics is emitted only when the client requests debug_init=1. It is
 	// intentionally diagnostic-only, so it never participates in client state.
 	InitMetrics *InitMetrics `json:"init_metrics,omitempty"`
+}
+
+// PromptResolutionData explains a prompt's terminal transition. Origin is
+// projected per recipient: "this_client" is only sent to the web client that
+// submitted the decision; other values identify the actual resolver.
+type PromptResolutionData struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Origin  string `json:"origin"`
+	Reason  string `json:"reason"`
+	Outcome string `json:"outcome,omitempty"`
 }
 
 // InitMetrics attributes the server side of a reconnect snapshot. PayloadBytes
