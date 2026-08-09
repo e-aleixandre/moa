@@ -205,7 +205,10 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 	case bus.TasksUpdated:
 		return Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}}, true
 	case bus.RunEnded:
-		return Event{Type: "run_end", Data: RunEndData{Text: e.FinalText, RunGen: e.RunGen, UnseenGen: attentionGen}}, true
+		return Event{Type: "run_end", Data: RunEndData{
+			Text: e.FinalText, RunGen: e.RunGen, UnseenGen: attentionGen,
+			Cancelled: e.Cancelled, HasError: e.Err != nil,
+		}}, true
 	case bus.ContextUpdated:
 		return Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}}, true
 	case bus.MCPChanged:
@@ -517,26 +520,27 @@ func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAg
 	pendingSteers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](b, bus.GetPendingSteers{})
 
 	data := InitData{
-		ServerInstance:    sess.serverInstance,
-		UnseenGen:         unseenGen,
-		Messages:          msgs,
-		HistoryTruncated:  historyTruncated,
-		DeltaBase:         deltaBase,
-		State:             state,
-		ContextPercent:    ctxPct,
-		ContextWindow:     initModel.MaxInput,
-		CompactAt:         compactAt,
-		CompactAtMin:      compactAtMin,
-		PermissionMode:    permMode,
-		Tasks:             taskList,
-		PathScope:         pathInfo.Scope,
-		CostUSD:           cost,
-		RunTokensUp:       runTokens.Up,
-		RunTokensDown:     runTokens.Down,
-		Compacting:        compacting,
-		StreamingText:     truncateHistoryString(streaming.Text),
-		StreamingThinking: truncateHistoryString(streaming.Thinking),
-		LiveTools:         liveToolInitData(liveTools),
+		ServerInstance:     sess.serverInstance,
+		AttentionNamespace: sess.attentionNamespace,
+		UnseenGen:          unseenGen,
+		Messages:           msgs,
+		HistoryTruncated:   historyTruncated,
+		DeltaBase:          deltaBase,
+		State:              state,
+		ContextPercent:     ctxPct,
+		ContextWindow:      initModel.MaxInput,
+		CompactAt:          compactAt,
+		CompactAtMin:       compactAtMin,
+		PermissionMode:     permMode,
+		Tasks:              taskList,
+		PathScope:          pathInfo.Scope,
+		CostUSD:            cost,
+		RunTokensUp:        runTokens.Up,
+		RunTokensDown:      runTokens.Down,
+		Compacting:         compacting,
+		StreamingText:      truncateHistoryString(streaming.Text),
+		StreamingThinking:  truncateHistoryString(streaming.Thinking),
+		LiveTools:          liveToolInitData(liveTools),
 	}
 
 	// Read the run anchor from the runtime's synchronous state. The cache-clock

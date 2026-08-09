@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,6 +68,14 @@ func TestWsAttentionEventsCarryOccurrenceGeneration(t *testing.T) {
 	if got := completion.Data.(RunEndData).UnseenGen; got != 13 {
 		t.Fatalf("completion unseen_gen = %d, want 13", got)
 	}
+	cancelled, _ := wsEventFromBus(bus.RunEnded{Cancelled: true})
+	if data := cancelled.Data.(RunEndData); !data.Cancelled || data.HasError {
+		t.Fatalf("cancelled run end = %+v", data)
+	}
+	failed, _ := wsEventFromBus(bus.RunEnded{Err: errors.New("boom")})
+	if data := failed.Data.(RunEndData); data.Cancelled || !data.HasError {
+		t.Fatalf("failed run end = %+v", data)
+	}
 }
 
 func TestWsPromptResolutionProjectsOnlyPromptIdentity(t *testing.T) {
@@ -115,6 +124,18 @@ func TestBuildInitData_SubagentThinking(t *testing.T) {
 	}
 	if got := data.Subagents[0].OriginToolCallID; got != "toolu_init" {
 		t.Fatalf("OriginToolCallID = %q, want toolu_init", got)
+	}
+}
+
+func TestBuildInitDataCarriesAttentionNamespace(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil)
+	if data.AttentionNamespace != sess.attentionNamespace || data.AttentionNamespace == "" {
+		t.Fatalf("attention namespace = %q, want %q", data.AttentionNamespace, sess.attentionNamespace)
 	}
 }
 

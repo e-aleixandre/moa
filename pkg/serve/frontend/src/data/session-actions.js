@@ -1,7 +1,7 @@
 // session-actions.js — API-backed session operations
 
 import { api, retryHistoryHydration } from './api.js';
-import { normalizeConversationProjection, normalizeHistory } from './ws-handlers.js';
+import { attentionNamespaceTransition, normalizeConversationProjection, normalizeHistory } from './ws-handlers.js';
 import { triggerAttention, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
@@ -57,6 +57,8 @@ export async function loadSessions() {
 	let sessionsChanged = Object.keys(prev).length !== list.length;
     for (const info of list) {
       const existing = prev[info.id];
+		const cursorTransition = attentionNamespaceTransition(existing, info.attention_namespace || '');
+		const staleCursorRoster = !!existing && !!info.attention_namespace && !cursorTransition.accepted;
 		const serverRestarted = !!existing?.serverInstance && !!info.server_instance
 			&& existing.serverInstance !== info.server_instance;
 		// /api/sessions is a snapshot taken before its response reaches us. Once
@@ -64,10 +66,17 @@ export async function loadSessions() {
 		// relight the exact same occurrence locally. A larger generation (or a
 		// different server namespace) remains a genuinely new occurrence.
 		const pollGeneration = info.unseen_gen || 0;
-		const staleAcknowledgedOccurrence = !!info.unseen && !serverRestarted && !!existing &&
+		const pollUnseenSeq = info.unseen_seq || 0;
+		const staleAcknowledgedOccurrence = !!info.attention_namespace && !!info.unseen && !cursorTransition.reset && !staleCursorRoster && !!existing &&
+			(cursorTransition.namespace === (info.attention_namespace || '')
+				? pollUnseenSeq <= (existing.ackedThroughSeq || 0)
+				: false);
+		const legacyStaleAcknowledgedOccurrence = !info.attention_namespace && !!info.unseen && !serverRestarted && !!existing &&
 			existing.lastAckedUnseenInstance === (info.server_instance || '') &&
 			(existing.lastAckedUnseenGen || 0) >= pollGeneration;
-		const polledUnseen = !!info.unseen && !staleAcknowledgedOccurrence;
+		const polledUnseen = staleCursorRoster
+			? !!existing.unseen
+			: !!info.unseen && !staleAcknowledgedOccurrence && !legacyStaleAcknowledgedOccurrence;
       // A visible session has a live WS connection that owns its live-tracked
       // fields (state, config, context, plan). This poll response may already
       // be stale relative to WS events that arrived while the request was in
@@ -187,6 +196,12 @@ export async function loadSessions() {
         costUSD: wsOwns ? existing.costUSD : (info.cost_usd ?? (existing ? existing.costUSD : 0)),
         unseen: polledUnseen,
         unseenGen: pollGeneration,
+		attentionNamespace: cursorTransition.namespace,
+		unseenSeq: cursorTransition.reset ? pollUnseenSeq : staleCursorRoster ? (existing.unseenSeq || 0) : pollUnseenSeq,
+		ackedThroughSeq: cursorTransition.reset ? 0 : (existing ? existing.ackedThroughSeq || 0 : 0),
+		// Only an authoritative WS init proves a rendered transcript boundary.
+		// A roster response, including a fresh incarnation, must never set this.
+		readCandidateSeq: cursorTransition.reset ? 0 : (existing ? existing.readCandidateSeq || 0 : 0),
         serverUnseenGen: pollGeneration,
         serverUnseenInstance: info.server_instance || '',
         serverInstance: info.server_instance || (existing ? existing.serverInstance : ''),
@@ -197,8 +212,8 @@ export async function loadSessions() {
 		lastAckedUnseenInstance: serverRestarted ? '' : (existing ? existing.lastAckedUnseenInstance || '' : ''),
         // One global client arrival sequence covers every session. Repeating
         // the same server-instance occurrence after a poll returns its original value.
-        attentionArrival: polledUnseen
-          ? attentionArrival(info.id, pollGeneration, info.server_instance || '')
+		attentionArrival: staleCursorRoster ? (existing.attentionArrival || 0) : polledUnseen
+			? attentionArrival(info.id, pollUnseenSeq || pollGeneration, info.attention_namespace || info.server_instance || '')
           : (existing ? existing.attentionArrival || 0 : 0),
         // Server-owned session brief (cheap LLM status summary): attempting /
         // progress prose + freshness stamp. No WS event tracks it, so the poll

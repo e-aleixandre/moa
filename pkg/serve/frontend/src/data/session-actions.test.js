@@ -84,6 +84,61 @@ test('a stale roster cannot relight an acknowledged occurrence, but a newer gene
   expect(store.get().sessions.s3).toMatchObject({ unseen: true, unseenGen: 8 });
 });
 
+test('a roster poll never sets a read candidate or revives its acknowledged cursor occurrence', async () => {
+  setState({ sessions: { s3: {
+    id: 's3', state: 'idle', provider: 'openai', cwd: '/z', subagents: {},
+    attentionNamespace: 'server-a:2', unseen: false, unseenSeq: 8,
+    ackedThroughSeq: 8, readCandidateSeq: 5,
+  } } });
+  apiResponse = [{
+    id: 's3', title: 'S3', state: 'idle', provider: 'openai', cwd: '/z',
+    server_instance: 'server-a', attention_namespace: 'server-a:2', unseen: true, unseen_seq: 8,
+  }];
+  await loadSessions();
+  expect(store.get().sessions.s3).toMatchObject({ unseen: false, unseenSeq: 8, ackedThroughSeq: 8, readCandidateSeq: 5 });
+});
+
+test('loadSessions ignores a stale namespace and atomically resets for a newer incarnation', async () => {
+  setState({ sessions: { s3: {
+    id: 's3', state: 'idle', provider: 'openai', cwd: '/z', subagents: {},
+    attentionNamespace: 'server-a:2', unseen: true, unseenSeq: 9,
+    ackedThroughSeq: 5, readCandidateSeq: 5,
+  } } });
+  apiResponse = [{
+    id: 's3', title: 'S3', state: 'idle', provider: 'openai', cwd: '/z',
+    attention_namespace: 'server-a:1', unseen: false, unseen_seq: 0,
+  }];
+  await loadSessions();
+  expect(store.get().sessions.s3).toMatchObject({
+    attentionNamespace: 'server-a:2', unseen: true, unseenSeq: 9, ackedThroughSeq: 5, readCandidateSeq: 5,
+  });
+
+  apiResponse = [{
+    id: 's3', title: 'S3', state: 'idle', provider: 'openai', cwd: '/z',
+    attention_namespace: 'server-a:3', unseen: false, unseen_seq: 0,
+  }];
+  await loadSessions();
+  expect(store.get().sessions.s3).toMatchObject({
+    attentionNamespace: 'server-a:3', unseen: false, unseenSeq: 0, ackedThroughSeq: 0, readCandidateSeq: 0,
+  });
+});
+
+test('loadSessions accepts a namespace from a different server process', async () => {
+  setState({ sessions: { s3: {
+    id: 's3', state: 'idle', provider: 'openai', cwd: '/z', subagents: {},
+    attentionNamespace: 'server-a:99', unseen: true, unseenSeq: 99,
+    ackedThroughSeq: 99, readCandidateSeq: 99,
+  } } });
+  apiResponse = [{
+    id: 's3', title: 'S3', state: 'idle', provider: 'openai', cwd: '/z',
+    attention_namespace: 'server-b:1', unseen: true, unseen_seq: 1,
+  }];
+  await loadSessions();
+  expect(store.get().sessions.s3).toMatchObject({
+    attentionNamespace: 'server-b:1', unseen: true, unseenSeq: 1, ackedThroughSeq: 0, readCandidateSeq: 0,
+  });
+});
+
 test('loadSessions adopts the server state for a visible-but-saved session (just resumed)', async () => {
   // Regression: tapping a saved session makes it visible (activeSession) while
   // still 'saved'. resumeSession POSTs /resume (server flips it to idle) then

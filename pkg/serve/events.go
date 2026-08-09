@@ -22,6 +22,10 @@ type InitData struct {
 	// Reconnecting to the same process preserves client deduplication; a restart
 	// starts a new generation namespace.
 	ServerInstance string `json:"server_instance"`
+	// AttentionNamespace identifies the ordered runtime incarnation that owns
+	// bus-sequence read cursors. It changes on a close/resume even within one
+	// server process, whose bus sequence then starts again at zero.
+	AttentionNamespace string `json:"attention_namespace,omitempty"`
 	// UnseenGen is the latest attention generation represented by this init
 	// snapshot. Clients bind a read acknowledgement to it rather than borrowing
 	// a potentially newer roster generation.
@@ -245,6 +249,8 @@ type RunEndData struct {
 	Text      string `json:"text"`
 	RunGen    uint64 `json:"run_gen"`
 	UnseenGen uint64 `json:"unseen_gen,omitempty"`
+	Cancelled bool   `json:"cancelled,omitempty"`
+	HasError  bool   `json:"has_error,omitempty"`
 }
 
 // ContextUpdateData carries the current context usage percentage.

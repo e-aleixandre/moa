@@ -1,7 +1,7 @@
 // ws-handlers.js — WebSocket event handlers and streaming delta batching
 
 import { triggerAttention, triggerDone, addToast } from './notifications.js';
-import { api, acknowledgeVisibleAttention } from './api.js';
+import { api, acknowledgeVisibleAttention, acknowledgeVisibleAttentionThrough } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import { finishHistoryHydration } from './history-hydration.js';
 import { newBuffers, applyNestedEvent } from './conversation-reducer.js';
@@ -416,6 +416,29 @@ function flushDeltas() {
 
 // --- WS event handlers ---
 
+function parseAttentionNamespace(namespace) {
+  const separator = typeof namespace === 'string' ? namespace.lastIndexOf(':') : -1;
+  if (separator <= 0) return null;
+  const incarnation = Number(namespace.slice(separator + 1));
+  if (!Number.isSafeInteger(incarnation) || incarnation < 1) return null;
+  return { serverInstance: namespace.slice(0, separator), incarnation };
+}
+
+// The namespace is an ordered runtime incarnation, not an opaque token: a
+// delayed roster response for A must not reset state after the client accepted
+// B. A different server process has its own ordering and is always newer.
+export function attentionNamespaceTransition(session, namespace) {
+  const current = session?.attentionNamespace || '';
+  if (!namespace) return { accepted: false, reset: false, namespace: current };
+  if (!current || current === namespace) return { accepted: true, reset: false, namespace };
+  const previous = parseAttentionNamespace(current);
+  const next = parseAttentionNamespace(namespace);
+  if (!previous || !next) return { accepted: false, reset: false, namespace: current };
+  if (previous.serverInstance !== next.serverInstance) return { accepted: true, reset: true, namespace };
+  if (next.incarnation > previous.incarnation) return { accepted: true, reset: true, namespace };
+  return { accepted: false, reset: false, namespace: current };
+}
+
 // mergeSteers reconciles the authoritative server queue from an init snapshot
 // with any local optimistic chips. The snapshot (each item carrying its
 // client-minted ID) is authoritative. A local chip is kept only if it is still
@@ -462,6 +485,7 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
   // delete the very transcript being read and bounce the reader back to the
   // parent — which is what happens on mobile every time the screen sleeps.
   const prev = store.get().sessions[id] || {};
+  const cursorTransition = attentionNamespaceTransition(prev, data.attention_namespace || '');
   // Attention generations restart from zero with the server process. Reset the
   // per-session server high water at the WS boundary too (polling covers hidden
   // sessions) so the first lower-generation live occurrence is never hidden.
@@ -505,6 +529,14 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
 	// local acknowledgements must not suppress the new process's first event.
 	lastAckedUnseenGen: serverRestarted ? 0 : (prev.lastAckedUnseenGen || 0),
 	lastAckedUnseenInstance: serverRestarted ? '' : (prev.lastAckedUnseenInstance || ''),
+		// Cursor state is reset as one unit only when the ordered namespace moves
+		// forward. A stale init is still useful for its transcript fields, but it
+		// must not roll attention state back from a newer runtime incarnation.
+		attentionNamespace: cursorTransition.namespace,
+		unseen: cursorTransition.reset ? false : prev.unseen,
+		unseenSeq: cursorTransition.reset ? 0 : (prev.unseenSeq || 0),
+		ackedThroughSeq: cursorTransition.reset ? 0 : (prev.ackedThroughSeq || 0),
+		readCandidateSeq: cursorTransition.reset ? 0 : (prev.readCandidateSeq || 0),
     messages,
     historyTruncated: !!data.history_truncated,
     state: data.state || 'idle',
@@ -564,6 +596,9 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
     goalVerifying: !!data.goal_verifying,
     lastSeq: data.last_seq || 0,
   });
+	if (ackProven && cursorTransition.accepted) {
+		updateSession(id, { readCandidateSeq: data.last_seq || 0 });
+	}
   acknowledgeInitAttention(id, data, { ackProven });
 }
 
@@ -588,7 +623,14 @@ function acknowledgeInitAttention(id, data, { ackProven }) {
     shownGeneration: generation,
     shownInstance: serverInstance,
   });
-  if (provenBounded && visibleSessionIds(store.get()).includes(id)) {
+  const cursorHandled = ackProven && !!data.attention_namespace &&
+    visibleSessionIds(store.get()).includes(id);
+  if (cursorHandled) {
+		acknowledgeVisibleAttentionThrough(id, data.last_seq || 0, data.attention_namespace).catch(() => {});
+	}
+  // New clients use the cursor POST above. Leaving this generation path in
+  // place only for payloads without a cursor keeps pre-deploy tabs compatible.
+  if (!cursorHandled && provenBounded && visibleSessionIds(store.get()).includes(id)) {
     acknowledgeVisibleAttention(id, generation, serverInstance).catch(() => {});
   }
 }
@@ -1008,7 +1050,7 @@ export function handleWsToolEnd(id, data) {
   updateSession(id, { messages, runningTool: null });
 }
 
-export function handleWsStateChange(id, data) {
+export function handleWsStateChange(id, data, seq = 0) {
   const state = store.get();
   const prev = state.sessions[id];
   const wasRunning = prev && (prev.state === 'running' || prev.state === 'permission');
@@ -1031,15 +1073,15 @@ export function handleWsStateChange(id, data) {
     // Keep pendingSteers: a steer queued during the last turn stays genuinely
     // queued (mostrar la verdad). It's cleared only by Steered or a snapshot.
     if (sess) updateSession(id, { streamingText: null, thinkingText: null, compacting: false, runStartedAtMs: null });
+		if (data.state === 'error' && (seq > 0 || data.unseen_gen)) {
+			markUnseen(id, seq > 0 ? 0 : data.unseen_gen, seq, true);
+			acknowledgeVisibleLiveAttention(id, seq, data.unseen_gen);
+		}
     if (wasRunning) {
       flashSession(id, data.state === 'error' ? 'error' : 'done');
       // A successful/cancelled terminal state is followed by run_end, which
       // owns its authoritative occurrence. Only error state_change is itself
       // the terminal attention event (its run_end reuses that same ID).
-      if (data.state === 'error' && data.unseen_gen) {
-        markUnseen(id, data.unseen_gen, true);
-        acknowledgeVisibleLiveAttention(id, data.unseen_gen);
-      }
       // Surface the reason for an error end so it's visible even when the tile
       // isn't focused — parity with the TUI's run-end error block. A usage/quota
       // limit reads as an actionable "resets in X" line rather than a fault.
@@ -1064,11 +1106,13 @@ export function handleWsStateChange(id, data) {
   }
 }
 
-export function handleWsAskUser(id, data) {
+export function handleWsAskUser(id, data, seq = 0) {
   updateSession(id, {
     pendingAsk: { id: data.id, questions: data.questions },
     resolvedPromptNotice: null,
   });
+	markUnseen(id, seq > 0 ? 0 : data.unseen_gen, seq, true);
+	acknowledgeVisibleLiveAttention(id, seq, data.unseen_gen);
   const state = store.get();
   if (!visibleSessionIds(state).includes(id)) {
     flashSession(id, 'attention');
@@ -1077,7 +1121,7 @@ export function handleWsAskUser(id, data) {
   }
 }
 
-export function handleWsPermissionRequest(id, data) {
+export function handleWsPermissionRequest(id, data, seq = 0) {
   updateSession(id, {
     state: 'permission',
     pendingPerm: {
@@ -1088,6 +1132,8 @@ export function handleWsPermissionRequest(id, data) {
     },
     resolvedPromptNotice: null,
   });
+	markUnseen(id, seq > 0 ? 0 : data.unseen_gen, seq, true);
+	acknowledgeVisibleLiveAttention(id, seq, data.unseen_gen);
   flashSession(id, 'attention');
   const state = store.get();
   if (!visibleSessionIds(state).includes(id)) {
@@ -1100,11 +1146,16 @@ export function handleWsPermissionRequest(id, data) {
 // the user was watching that run finish. It must POST /read rather than only
 // clearing local state, or the next roster poll surfaces a dot for a result
 // this client just showed.
-function acknowledgeVisibleLiveAttention(id, runGen) {
+function acknowledgeVisibleLiveAttention(id, seq, generation) {
   const state = store.get();
   if (!visibleSessionIds(state).includes(id)) return;
-  const serverInstance = state.sessions[id]?.serverInstance || '';
-  acknowledgeVisibleAttention(id, runGen, serverInstance).catch(() => {});
+  const session = state.sessions[id];
+  if (seq > 0 && session?.attentionNamespace) {
+		acknowledgeVisibleAttentionThrough(id, seq, session.attentionNamespace).catch(() => {});
+		return;
+	}
+  const serverInstance = session?.serverInstance || '';
+  acknowledgeVisibleAttention(id, generation, serverInstance).catch(() => {});
 }
 
 export function handleWsPermissionResolved(id, data) {
@@ -1149,12 +1200,20 @@ function flashSession(id, type) {
 // markUnseen flags a session as having unread activity when the user isn't
 // currently looking at it (not visible, or the tab is backgrounded), so a badge
 // can nudge them back. Cleared by afterVisibilityChange when it comes into view.
-function markUnseen(id, generation = 0, isNewOccurrence = false) {
+function markUnseen(id, generation = 0, seq = 0, isNewOccurrence = false) {
   const state = store.get();
   const hidden = typeof document !== 'undefined' && document.hidden;
-  if (visibleSessionIds(state).includes(id) && !hidden) return;
   const sess = state.sessions[id];
   if (!sess) return;
+	const visible = visibleSessionIds(state).includes(id) && !hidden;
+	const unseenSeq = seq > 0 ? Math.max(sess.unseenSeq || 0, seq) : (sess.unseenSeq || 0);
+	if (seq > 0 && visible) {
+		// A rendered occurrence still advances the local high-water so a delayed
+		// acknowledgement cannot erase a newer event. Its cursor POST owns the
+		// server-side read boundary; no local dot is needed while it is visible.
+		if (unseenSeq !== (sess.unseenSeq || 0)) updateSession(id, { unseenSeq });
+		return;
+	}
   const serverInstance = sess.serverInstance || '';
   const sameServerInstance = (sess.serverUnseenInstance || serverInstance) === serverInstance;
   const serverUnseenGen = sameServerInstance
@@ -1163,10 +1222,11 @@ function markUnseen(id, generation = 0, isNewOccurrence = false) {
   const arrival = generation
     ? attentionArrival(id, generation, serverInstance)
     : ((isNewOccurrence || !sess.unseen) ? (sess.attentionArrival || 0) + 1 : sess.attentionArrival || 0);
-  if (!sess.unseen || serverUnseenGen !== sess.serverUnseenGen || arrival !== sess.attentionArrival) {
+  if (!sess.unseen || serverUnseenGen !== sess.serverUnseenGen || arrival !== sess.attentionArrival || unseenSeq !== (sess.unseenSeq || 0)) {
     updateSession(id, {
       unseen: true,
       unseenGen: serverUnseenGen || sess.unseenGen,
+		unseenSeq,
       serverUnseenGen,
       serverUnseenInstance: serverInstance,
       attentionArrival: arrival,
@@ -1653,7 +1713,7 @@ export function handleWsBashJobEnd(id, data) {
   });
 }
 
-export function handleWsRunEnd(id, data = {}) {
+export function handleWsRunEnd(id, data = {}, seq = 0) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
@@ -1686,12 +1746,20 @@ export function handleWsRunEnd(id, data = {}) {
   } else {
     updateSession(id, { streamingText: null, thinkingText: null, runningTool: null, compacting: false });
   }
+  if (seq > 0) {
+		// The backend tracker marks only a non-cancelled, non-error RunEnded.
+		// Errors were already marked by their StateChanged(error) event.
+		if (data.cancelled || data.has_error) return;
+		markUnseen(id, 0, seq, sess?.state !== 'error');
+		acknowledgeVisibleLiveAttention(id, seq, 0);
+		return;
+	}
   if (!data.unseen_gen) return; // cancelled/non-attention terminal run
   // Error state_change already announced this terminal occurrence. A normal
   // completion after a permission/ask is a new occurrence and must restart
   // the title-chip arrival treatment even though the session was already unseen.
-  markUnseen(id, data.unseen_gen, sess?.state !== 'error');
-  acknowledgeVisibleLiveAttention(id, data.unseen_gen);
+	markUnseen(id, data.unseen_gen, 0, sess?.state !== 'error');
+	acknowledgeVisibleLiveAttention(id, 0, data.unseen_gen);
 }
 
 // handleWsUserMessage renders a user prompt that started a new run on EVERY

@@ -53,6 +53,117 @@ test('opening an unread session acknowledges once its init is confirmed, even mi
   });
 });
 
+test('a confirmed foreground init records its last sequence as the cursor candidate', async () => {
+  setState({
+    isMobile: true, activeSession: 'cursor-init',
+    sessions: { 'cursor-init': {
+      id: 'cursor-init', unseen: true, unseenSeq: 7,
+      attentionNamespace: 'server-a:1', serverInstance: 'server-a', messages: [], subagents: {},
+    } },
+  });
+  foreground(() => handleWsInit('cursor-init', {
+    messages: [], subagents: [], server_instance: 'server-a', attention_namespace: 'server-a:1', last_seq: 42,
+  }));
+  await settleAcknowledgement();
+  expect(store.get().sessions['cursor-init']).toMatchObject({ readCandidateSeq: 42, ackedThroughSeq: 42 });
+});
+
+test('a hidden tab never acknowledges a confirmed init cursor', async () => {
+  const originalDocument = globalThis.document;
+  const reads = [];
+  globalThis.fetch = (path) => {
+    reads.push(path);
+    return Promise.resolve(new Response('', { status: 204 }));
+  };
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { hidden: true } });
+  try {
+    setState({
+      isMobile: true, activeSession: 'cursor-hidden',
+      sessions: { 'cursor-hidden': {
+        id: 'cursor-hidden', attentionNamespace: 'server-a:1', serverInstance: 'server-a', messages: [], subagents: {},
+      } },
+    });
+    handleWsInit('cursor-hidden', {
+      messages: [], subagents: [], server_instance: 'server-a', attention_namespace: 'server-a:1', last_seq: 42,
+    });
+    await settleAcknowledgement();
+    expect(reads).toEqual([]);
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document;
+    else Object.defineProperty(globalThis, 'document', { configurable: true, value: originalDocument });
+  }
+});
+
+test('an init acknowledgement cannot clear a newer cursor occurrence', async () => {
+  setState({
+    isMobile: true, activeSession: 'cursor-newer',
+    sessions: { 'cursor-newer': {
+      id: 'cursor-newer', attentionNamespace: 'server-a:1', serverInstance: 'server-a', messages: [], subagents: {},
+    } },
+  });
+  foreground(() => handleWsInit('cursor-newer', {
+    messages: [], subagents: [], server_instance: 'server-a', attention_namespace: 'server-a:1', last_seq: 100,
+  }));
+  await settleAcknowledgement();
+  setState({ activeSession: null });
+  handleWsRunEnd('cursor-newer', { text: 'new result' }, 101);
+  expect(store.get().sessions['cursor-newer']).toMatchObject({ unseen: true, unseenSeq: 101, ackedThroughSeq: 100 });
+});
+
+test('a visible live attention event acknowledges its event sequence', async () => {
+  setState({
+    isMobile: true, activeSession: 'cursor-live',
+    sessions: { 'cursor-live': {
+      id: 'cursor-live', attentionNamespace: 'server-a:1', serverInstance: 'server-a', messages: [], subagents: {},
+    } },
+  });
+  foreground(() => handleWsPermissionRequest('cursor-live', { id: 'p1', tool_name: 'bash', args: {} }, 57));
+  await settleAcknowledgement();
+  expect(store.get().sessions['cursor-live']).toMatchObject({ unseenSeq: 57, ackedThroughSeq: 57 });
+});
+
+test('a hidden live attention event never acknowledges its event sequence', async () => {
+  const originalDocument = globalThis.document;
+  const reads = [];
+  globalThis.fetch = (path) => {
+    reads.push(path);
+    return Promise.resolve(new Response('', { status: 204 }));
+  };
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { hidden: true } });
+  try {
+    setState({
+      isMobile: true, activeSession: 'cursor-live-hidden',
+      sessions: { 'cursor-live-hidden': {
+        id: 'cursor-live-hidden', attentionNamespace: 'server-a:1', serverInstance: 'server-a', messages: [], subagents: {},
+      } },
+    });
+    handleWsPermissionRequest('cursor-live-hidden', { id: 'p1', tool_name: 'bash', args: {} }, 57);
+    await settleAcknowledgement();
+    expect(reads).toEqual([]);
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document;
+    else Object.defineProperty(globalThis, 'document', { configurable: true, value: originalDocument });
+  }
+});
+
+test('cursor live classification ignores cancelled and error run ends', async () => {
+  setState({
+    isMobile: true, activeSession: 'cursor-classification',
+    sessions: { 'cursor-classification': {
+      id: 'cursor-classification', state: 'running', attentionNamespace: 'server-a:1', serverInstance: 'server-a', messages: [], subagents: {},
+    } },
+  });
+  foreground(() => handleWsRunEnd('cursor-classification', { cancelled: true }, 11));
+  await settleAcknowledgement();
+  expect(store.get().sessions['cursor-classification'].ackedThroughSeq || 0).toBe(0);
+
+  handleWsStateChange('cursor-classification', { state: 'running' }, 12);
+  foreground(() => handleWsStateChange('cursor-classification', { state: 'error', error: 'boom' }, 13));
+  foreground(() => handleWsRunEnd('cursor-classification', { has_error: true }, 14));
+  await settleAcknowledgement();
+  expect(store.get().sessions['cursor-classification']).toMatchObject({ unseenSeq: 13, ackedThroughSeq: 13 });
+});
+
 test('repeated opens of the same occurrence converge without a sticky dot', async () => {
   const init = () => foreground(() => handleWsInit('ack-repeat', {
     messages: [], subagents: [], server_instance: 'ack-repeat-a', unseen_gen: 4, attention_bound: true,

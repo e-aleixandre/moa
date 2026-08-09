@@ -134,7 +134,11 @@ export function reconnectAll() {
 // selection and init proof; this boundary only owns foreground, fencing and
 // duplicate POST handling.
 function acknowledgementKey(sessionId, generation, instance) {
-  return `${sessionId}:${generation}:${instance}`;
+	return `generation:${sessionId}:${generation}:${instance}`;
+}
+
+function cursorAcknowledgementKey(sessionId, seq, namespace) {
+	return `cursor:${sessionId}:${seq}:${namespace}`;
 }
 
 function commitAttentionAcknowledgement(sessionId, generation, instance) {
@@ -178,6 +182,46 @@ export function acknowledgeVisibleAttention(sessionId, shownGeneration, shownIns
     .finally(() => attentionAcknowledgements.delete(key));
   attentionAcknowledgements.set(key, acknowledgement);
   return acknowledgement;
+}
+
+// acknowledgeVisibleAttentionThrough is the cursor counterpart of the legacy
+// generation acknowledgement above. Keep the latter for pre-deploy tabs until
+// Phase 4, but do not send both for a new init: the cursor POST is authoritative.
+export function acknowledgeVisibleAttentionThrough(sessionId, throughSeq, namespace = '') {
+	const session = store.get().sessions[sessionId];
+	const hidden = typeof document !== 'undefined' && document.hidden;
+	if (!session || hidden || !namespace) return Promise.resolve(false);
+	if (session.attentionNamespace && session.attentionNamespace !== namespace) return Promise.resolve(false);
+	if ((session.ackedThroughSeq || 0) >= throughSeq) {
+		commitCursorAcknowledgement(sessionId, throughSeq, namespace);
+		return Promise.resolve(true);
+	}
+	const key = cursorAcknowledgementKey(sessionId, throughSeq, namespace);
+	const inFlight = attentionAcknowledgements.get(key);
+	if (inFlight) return inFlight;
+	const acknowledgement = api(
+		'POST',
+		`/api/sessions/${sessionId}/read?through_seq=${throughSeq}&attention_namespace=${encodeURIComponent(namespace)}`,
+	)
+		.then(() => {
+			commitCursorAcknowledgement(sessionId, throughSeq, namespace);
+			return true;
+		})
+		.finally(() => attentionAcknowledgements.delete(key));
+	attentionAcknowledgements.set(key, acknowledgement);
+	return acknowledgement;
+}
+
+function commitCursorAcknowledgement(sessionId, throughSeq, namespace) {
+	const session = store.get().sessions[sessionId];
+	if (!session || session.attentionNamespace !== namespace) return;
+	const ackedThroughSeq = Math.max(session.ackedThroughSeq || 0, throughSeq);
+	updateSession(sessionId, {
+		ackedThroughSeq,
+		// A later occurrence remains lit while a delayed acknowledgement for an
+		// earlier cursor arrives (the init-cut race).
+		unseen: (session.unseenSeq || 0) > ackedThroughSeq ? session.unseen : false,
+	});
 }
 
 function clearHistoryHydrationTimer(sessionId) {
@@ -409,14 +453,14 @@ function routeEvent(sessionId, evt) {
     case 'tool_end':
       handleWsToolEnd(sessionId, evt.data);
       break;
-    case 'state_change':
-      handleWsStateChange(sessionId, evt.data);
-      break;
-    case 'permission_request':
-      handleWsPermissionRequest(sessionId, evt.data);
-      break;
-    case 'ask_user':
-      handleWsAskUser(sessionId, evt.data);
+	case 'state_change':
+		handleWsStateChange(sessionId, evt.data, evt.seq);
+		break;
+	case 'permission_request':
+		handleWsPermissionRequest(sessionId, evt.data, evt.seq);
+		break;
+	case 'ask_user':
+		handleWsAskUser(sessionId, evt.data, evt.seq);
       break;
     case 'permission_resolved':
       handleWsPermissionResolved(sessionId, evt.data);
@@ -457,8 +501,8 @@ function routeEvent(sessionId, evt) {
     case 'bash_complete':
       handleWsBashComplete(sessionId, evt.data);
       break;
-    case 'run_end':
-      handleWsRunEnd(sessionId, evt.data);
+	case 'run_end':
+		handleWsRunEnd(sessionId, evt.data, evt.seq);
       break;
     case 'command':
       handleWsCommand(sessionId, evt.data);

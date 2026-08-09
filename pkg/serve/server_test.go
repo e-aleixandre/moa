@@ -512,6 +512,9 @@ func TestWebSocket_Init(t *testing.T) {
 	if data["unseen_gen"] != float64(1) {
 		t.Fatalf("init unseen_gen = %v, want 1", data["unseen_gen"])
 	}
+	if data["attention_namespace"] != sess.attentionNamespace {
+		t.Fatalf("init attention_namespace = %v, want %q", data["attention_namespace"], sess.attentionNamespace)
+	}
 }
 
 func TestWebSocket_InitDeltaSinceMessage(t *testing.T) {

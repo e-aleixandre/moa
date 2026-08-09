@@ -1,7 +1,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 
-const { api, getVersion, acknowledgeVisibleAttention } = await import('./api.js?timeout-test');
+const { api, getVersion, acknowledgeVisibleAttention, acknowledgeVisibleAttentionThrough } = await import('./api.js?timeout-test');
 
 beforeEach(() => {
   setState({ sessions: {}, activeSession: null, isMobile: true });
@@ -143,6 +143,42 @@ test('a background tab never acknowledges an occurrence', async () => {
     if (originalDocument === undefined) delete globalThis.document;
     else Object.defineProperty(globalThis, 'document', { configurable: true, value: originalDocument });
     await expect(acknowledgement).resolves.toBe(false);
+    expect(calls).toBe(0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalDocument === undefined) delete globalThis.document;
+    else Object.defineProperty(globalThis, 'document', { configurable: true, value: originalDocument });
+  }
+});
+
+test('a cursor acknowledgement posts its selected init boundary', async () => {
+  const originalFetch = globalThis.fetch;
+  const reads = [];
+  globalThis.fetch = (path) => {
+    reads.push(path);
+    return Promise.resolve(new Response('', { status: 204 }));
+  };
+  setState({ sessions: { s1: {
+    id: 's1', unseen: true, unseenSeq: 7, attentionNamespace: 'instance-a:1', subagents: {},
+  } } });
+  try {
+    await expect(acknowledgeVisibleAttentionThrough('s1', 42, 'instance-a:1')).resolves.toBe(true);
+    expect(reads).toEqual(['/api/sessions/s1/read?through_seq=42&attention_namespace=instance-a%3A1']);
+    expect(store.get().sessions.s1).toMatchObject({ ackedThroughSeq: 42, unseen: false });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a hidden tab never posts a cursor acknowledgement', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = globalThis.document;
+  let calls = 0;
+  globalThis.fetch = () => { calls += 1; return Promise.resolve(new Response('', { status: 204 })); };
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { hidden: true } });
+  setState({ sessions: { s1: { id: 's1', attentionNamespace: 'instance-a:1', subagents: {} } } });
+  try {
+    await expect(acknowledgeVisibleAttentionThrough('s1', 42, 'instance-a:1')).resolves.toBe(false);
     expect(calls).toBe(0);
   } finally {
     globalThis.fetch = originalFetch;
