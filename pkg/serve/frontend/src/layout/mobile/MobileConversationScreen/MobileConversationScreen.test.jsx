@@ -11,6 +11,17 @@ test('drawerSessions puts a running session with an unread result in New results
   expect(newResults.map((session) => session.id)).toEqual(['s1']);
 });
 
+test('the selected session keeps its unread row in New results', () => {
+  // Opening it is what clears the dot (server-confirmed); the list must not
+  // hide the row just because the session happens to be the active one.
+  const sessions = [
+    { id: 'active', state: 'idle', unseen: true },
+    { id: 'other', state: 'idle', unseen: true },
+  ];
+
+  expect(newResultSessions(sessions).map((s) => s.id)).toEqual(['active', 'other']);
+});
+
 test('aggregateAttention gives urgent sessions priority over unread results', () => {
   const attention = aggregateAttention({
     result: { id: 'result', state: 'running', unseen: true },
@@ -22,30 +33,28 @@ test('aggregateAttention gives urgent sessions priority over unread results', ()
   expect(attentionTone(attention)).toBe('permission');
 });
 
-test('aggregateAttention ignores errors and requests already seen by the user', () => {
+test('pending permission and ask badges derive from state, not unseen', () => {
   const attention = aggregateAttention({
     error: { id: 'error', state: 'error', unseen: false },
     permission: { id: 'permission', state: 'permission', unseen: false },
     ask: { id: 'ask', state: 'running', pendingAsk: { id: 'a1' }, unseen: false },
   }, 'active');
 
-  expect(attention.urgent).toBe(0);
-  expect(attention.unseen).toBe(0);
-  expect(attentionTone(attention)).toBeNull();
-});
-
-test('aggregateAttention counts unseen errors and requests as urgent', () => {
-  const attention = aggregateAttention({
-    error: { id: 'error', state: 'error', unseen: true },
-    permission: { id: 'permission', state: 'permission', unseen: true },
-    ask: { id: 'ask', state: 'running', pendingAsk: { id: 'a1' }, unseen: true },
-  }, 'active');
-
   expect(attention.urgent).toBe(3);
   expect(attention.unseen).toBe(0);
-  expect(attention.error).toBe(1);
-  expect(attention.permission).toBe(2);
   expect(attentionTone(attention)).toBe('error');
+});
+
+test('resolving pending requests clears their state-derived badges', () => {
+  const attention = aggregateAttention({
+    permission: { id: 'permission', state: 'idle', unseen: false },
+    ask: { id: 'ask', state: 'running', unseen: false },
+  }, 'active');
+
+  expect(attention.urgent).toBe(0);
+  expect(attention.unseen).toBe(0);
+  expect(attention.permission).toBe(0);
+  expect(attentionTone(attention)).toBeNull();
 });
 
 test('mobile title presentation uses the winning state and arrival sequence', () => {

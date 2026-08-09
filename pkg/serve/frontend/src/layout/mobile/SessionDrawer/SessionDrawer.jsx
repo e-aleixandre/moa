@@ -1,8 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight } from "lucide-preact";
 import { SessionRow } from "../../../components/index.js";
 import { openOverlay } from "../../../data/overlay-history.js";
-import { registerConversationObscuringOverlay } from "../../../data/store.js";
 import { filterProjectSections, groupProjectSessions, hiddenProjectSavedCount, projectCollapsed, sessionSearchMatch, visibleProjectSessions } from "../../../data/util/project-sessions.js";
 import { useMenuKeyboard } from "../../../hooks/useMenuKeyboard.js";
 import { NewSessionView } from "./NewSessionView.jsx";
@@ -292,13 +291,6 @@ export function SessionDrawer({
   useEffect(() => {
     if (open) setView(step);
   }, [step, open]);
-
-  // drawerOpen flips before the leave transition finishes; retain the
-  // obstruction until this component actually disappears.
-  useLayoutEffect(() => {
-    if (!visible) return undefined;
-    return registerConversationObscuringOverlay();
-  }, [visible]);
 
   // Register with the shared overlay-history stack whenever open toggles, so
   // the browser/PWA back gesture closes the drawer instead of navigating away

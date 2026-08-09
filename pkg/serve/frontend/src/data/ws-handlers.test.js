@@ -1,35 +1,149 @@
 // ws-handlers.test.js — run with `bun test`
 import { test, expect, beforeEach } from 'bun:test';
-import { store, setState, isParentConversationVisible } from './store.js';
+import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
 import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
 import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
-import { acknowledgeRenderedPendingAttention } from './api.js';
-import { rememberPendingAttention } from './attention-receipt-store.js';
-
-let receiptStorage;
 
 function seedSession(id) {
-  setState({ sessions: { [id]: { id, subagents: {} } } });
+  setState({ sessions: { [id]: { id, messages: [], subagents: {} } } });
 }
 
 beforeEach(() => {
-  receiptStorage = new Map();
-  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-    get length() { return receiptStorage.size; },
-    key: index => [...receiptStorage.keys()][index] || null,
-    getItem: key => receiptStorage.get(key) || null,
-    setItem: (key, value) => receiptStorage.set(key, value),
-    removeItem: key => receiptStorage.delete(key),
-  } });
   globalThis.fetch = () => Promise.resolve(new Response('', { status: 204 }));
-  setState({
-    sessions: {}, isMobile: false, activeSession: null,
-    drawerOpen: false, paletteOpen: false, conversationObscuringOverlayCount: 0,
-  });
+  setState({ sessions: {}, isMobile: false, activeSession: null, drawerOpen: false, paletteOpen: false });
   __resetAttentionArrivalsForTests();
+});
+
+
+// These assert the committed acknowledgement fence (lastAckedUnseenGen +
+// cleared dot) rather than the request URL: another suite in this run installs
+// a module mock over api.js's `api`, so the wire call is not observable here.
+// api.test.js covers the exact /read URL against the unmocked module.
+// Foregroundedness is part of the read contract, so these state it explicitly
+// instead of inheriting whatever `document` another suite left behind.
+function foreground(run) {
+  const saved = globalThis.document;
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { hidden: false } });
+  try {
+    return run();
+  } finally {
+    if (saved === undefined) delete globalThis.document;
+    else Object.defineProperty(globalThis, 'document', { configurable: true, value: saved });
+  }
+}
+
+async function settleAcknowledgement() {
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+}
+
+test('opening an unread session acknowledges once its init is confirmed, even mid drawer-close animation', async () => {
+  setState({
+    isMobile: true, activeSession: 'ack-init', drawerOpen: true,
+    sessions: { 'ack-init': { id: 'ack-init', unseen: true, unseenGen: 7, serverInstance: 'ack-init-a', subagents: {} } },
+  });
+  foreground(() => handleWsInit('ack-init', {
+    messages: [], subagents: [], server_instance: 'ack-init-a', unseen_gen: 7, attention_bound: true,
+  }));
+  await settleAcknowledgement();
+  expect(store.get().sessions['ack-init']).toMatchObject({
+    unseen: false, lastAckedUnseenGen: 7, lastAckedUnseenInstance: 'ack-init-a',
+  });
+});
+
+test('repeated opens of the same occurrence converge without a sticky dot', async () => {
+  const init = () => foreground(() => handleWsInit('ack-repeat', {
+    messages: [], subagents: [], server_instance: 'ack-repeat-a', unseen_gen: 4, attention_bound: true,
+  }));
+  setState({
+    isMobile: true, activeSession: 'ack-repeat',
+    sessions: { 'ack-repeat': { id: 'ack-repeat', unseen: true, unseenGen: 4, serverInstance: 'ack-repeat-a', subagents: {} } },
+  });
+  init();
+  await settleAcknowledgement();
+  init();
+  await settleAcknowledgement();
+  expect(store.get().sessions['ack-repeat']).toMatchObject({ unseen: false, lastAckedUnseenGen: 4 });
+});
+
+test('a live run_end on the selected session acknowledges to the server', async () => {
+  setState({
+    isMobile: true, activeSession: 'ack-live',
+    sessions: { 'ack-live': { id: 'ack-live', state: 'running', serverInstance: 'ack-live-a', messages: [], subagents: {} } },
+  });
+  foreground(() => handleWsRunEnd('ack-live', { text: 'done', unseen_gen: 9 }));
+  await settleAcknowledgement();
+  // Without the server-side acknowledgement the next roster poll would relight
+  // a dot for a result this client just rendered live.
+  expect(store.get().sessions['ack-live']).toMatchObject({
+    unseen: false, lastAckedUnseenGen: 9, lastAckedUnseenInstance: 'ack-live-a',
+  });
+});
+
+test('a newer generation after an acknowledgement still lights the dot', async () => {
+  setState({
+    isMobile: true, activeSession: 'ack-newer',
+    sessions: { 'ack-newer': { id: 'ack-newer', state: 'running', serverInstance: 'ack-newer-a', messages: [], subagents: {} } },
+  });
+  foreground(() => handleWsRunEnd('ack-newer', { text: 'first', unseen_gen: 3 }));
+  await settleAcknowledgement();
+  // The user leaves; a later occurrence in the same process must not be
+  // swallowed by the acknowledgement of the previous one.
+  setState({ activeSession: null });
+  handleWsRunEnd('ack-newer', { text: 'second', unseen_gen: 4 });
+  expect(store.get().sessions['ack-newer']).toMatchObject({ unseen: true, unseenGen: 4 });
+});
+
+test('a subscribed but unselected session is never marked seen by its own init', async () => {
+  setState({
+    isMobile: true, activeSession: 'ack-other',
+    sessions: {
+      'ack-other': { id: 'ack-other', messages: [], subagents: {} },
+      // Has a live socket (it is receiving init) but is not on screen. Push
+      // suppression is the server's wsConns gate and is deliberately unrelated
+      // to this: subscribed is not seen.
+      'ack-bg': { id: 'ack-bg', unseen: true, unseenGen: 5, serverInstance: 'ack-bg-a', messages: [], subagents: {} },
+    },
+  });
+  foreground(() => handleWsInit('ack-bg', {
+    messages: [], subagents: [], server_instance: 'ack-bg-a', unseen_gen: 5, attention_bound: true,
+  }));
+  await settleAcknowledgement();
+  expect(store.get().sessions['ack-bg'].unseen).toBe(true);
+  expect(store.get().sessions['ack-bg'].lastAckedUnseenGen).toBeFalsy();
+});
+
+test('an unbounded or unarrived init never acknowledges', async () => {
+  const reads = [];
+  globalThis.fetch = (path) => {
+    reads.push(path);
+    return Promise.resolve(new Response('', { status: 204 }));
+  };
+  setState({
+    isMobile: true, activeSession: 's1',
+    sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'instance-a', subagents: {} } },
+  });
+  // No init leaves the occurrence untouched; an explicit unbounded init cannot
+  // turn a cached transcript into a read acknowledgement either.
+  expect(reads).toEqual([]);
+  handleWsInit('s1', {
+    messages: [], subagents: [], server_instance: 'instance-a', unseen_gen: 7, attention_bound: false,
+  });
+  await Promise.resolve();
+  expect(reads).toEqual([]);
+  expect(store.get().sessions.s1.unseen).toBe(true);
+});
+
+test('pending prompt badges come from pending state and clear on resolution', () => {
+  seedSession('s1');
+  setState({ isMobile: true, activeSession: 's1' });
+  handleWsAskUser('s1', { id: 'ask-1', questions: [], unseen_gen: 7 });
+  expect(store.get().sessions.s1).toMatchObject({ pendingAsk: { id: 'ask-1' } });
+  expect(store.get().sessions.s1.unseen).not.toBe(true);
+  handleWsAskResolved('s1', { id: 'ask-1' });
+  expect(store.get().sessions.s1.pendingAsk).toBeNull();
 });
 
 test('delta init appends while preserving the cached prefix array and rows', () => {
@@ -125,273 +239,6 @@ test('handleWsInit retains a subagent thinking level and origin tool call ID', a
   expect(store.get().sessions.s1.subagents.j1.thinking).toBe('medium');
   expect(store.get().sessions.s1.subagents.j1.originToolCallId).toBe('toolu_init');
 });
-
-test('handleWsInit leaves a visible pending request unread until its prompt commits', async () => {
-  setState({
-    isMobile: true,
-    activeSession: 's1',
-    sessions: { s1: { id: 's1', unseen: true, unseenGen: 4, subagents: {} } },
-  });
-  handleWsInit('s1', {
-    messages: [],
-    unseen_gen: 9,
-    pending_permission: { id: 'p1', unseen_gen: 9, tool_name: 'bash', args: {} },
-  });
-  const pending = store.get().sessions.s1.pendingPerm;
-  expect(store.get().sessions.s1.unseen).toBe(true);
-  expect(store.get().sessions.s1.unseenGen).toBe(9);
-  // This represents the prompt component's post-commit receipt.
-  expect(await acknowledgeRenderedPendingAttention('s1', pending)).toBe(true);
-  expect(store.get().sessions.s1.unseen).toBe(false);
-  setState({ isMobile: false, activeSession: null });
-});
-
-test('a retained resolved receipt cannot acknowledge the same generation from a new server instance', async () => {
-  setState({
-    isMobile: true,
-    activeSession: 's1',
-    sessions: { s1: {
-      id: 's1', unseen: true, unseenGen: 7, serverInstance: 'server-a',
-      viewingSubagent: 'child', subagents: {},
-      pendingAsk: { id: 'ask-1', unseenGen: 7, questions: [], serverInstance: 'server-a' },
-    } },
-  });
-  expect(rememberPendingAttention('s1', store.get().sessions.s1.pendingAsk)).toBe(true);
-  handleWsAskResolved('s1', { id: 'ask-1' });
-  const receipt = store.get().sessions.s1.resolvedPendingAttention;
-  expect(receipt).toMatchObject({ id: 'ask-1', unseenGen: 7, serverInstance: 'server-a' });
-
-  // The replacement server has independently reached generation 7. Returning
-  // to the parent must not let the old receipt consume this new occurrence.
-  setState({ sessions: { s1: {
-    ...store.get().sessions.s1, viewingSubagent: null, serverInstance: 'server-b',
-    unseen: true, unseenGen: 7,
-  } } });
-  expect(await acknowledgeRenderedPendingAttention('s1', receipt)).toBe(false);
-  expect(store.get().sessions.s1.unseen).toBe(true);
-});
-
-test('an init from a replacement server clears a retained resolved receipt', async () => {
-  seedSession('s1');
-  setState({ sessions: { s1: {
-    ...store.get().sessions.s1, serverInstance: 'server-a',
-    resolvedPendingAttention: { id: 'ask-1', unseenGen: 7, serverInstance: 'server-a' },
-  } } });
-  handleWsInit('s1', { messages: [], subagents: [], server_instance: 'server-b' });
-  expect(store.get().sessions.s1.resolvedPendingAttention).toBeNull();
-});
-
-test('an init synthesizes a receipt when a previously seen pending request vanished', () => {
-  setState({
-    isMobile: true, activeSession: 's1',
-    sessions: { s1: {
-      id: 's1', unseen: true, unseenGen: 7, serverInstance: 'server-a', subagents: {},
-      pendingAsk: { id: 'ask-1', unseenGen: 7, questions: [], serverInstance: 'server-a' },
-    } },
-  });
-	// The prompt card was displayed before its resolution event was missed.
-	const pending = store.get().sessions.s1.pendingAsk;
-	const originalStorage = globalThis.localStorage;
-	const values = new Map();
-	Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-		getItem: key => values.get(key) || null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key),
-	} });
-	expect(rememberPendingAttention('s1', pending)).toBe(true);
-
-  // The resolved WS event was missed. This authoritative init must retain a
-  // visible receipt, not treat the now-absent prompt as ordinary history.
-  handleWsInit('s1', { messages: [], subagents: [], unseen_gen: 7, server_instance: 'server-a' });
-
-  const session = store.get().sessions.s1;
-  expect(session.pendingAsk).toBeNull();
-  expect(session.resolvedPendingAttention).toMatchObject({ id: 'ask-1', unseenGen: 7, serverInstance: 'server-a' });
-  expect(session.unseen).toBe(true);
-	if (originalStorage === undefined) delete globalThis.localStorage;
-	else Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalStorage });
-});
-
-test('a remembered pending occurrence survives reload and becomes a receipt when its init omits it', () => {
-  const originalStorage = globalThis.localStorage;
-  const values = new Map();
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: (key) => values.get(key) || null,
-      setItem: (key, value) => values.set(key, value),
-      removeItem: (key) => values.delete(key),
-    },
-  });
-  try {
-    setState({
-      isMobile: true, activeSession: 's1',
-      sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'server-a', subagents: {} } },
-    });
-    handleWsInit('s1', {
-      messages: [], subagents: [], unseen_gen: 7, server_instance: 'server-a',
-      pending_ask: { id: 'ask-1', unseen_gen: 7, questions: [] },
-    });
-	    expect(rememberPendingAttention('s1', store.get().sessions.s1.pendingAsk)).toBe(true);
-    // Simulate the post-reload roster: it knows the unread occurrence, but
-    // in-memory pending UI state is gone and the resolved WS event was missed.
-    setState({
-      sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'server-a', subagents: {} } },
-    });
-    handleWsInit('s1', { messages: [], subagents: [], unseen_gen: 7, server_instance: 'server-a' });
-    expect(store.get().sessions.s1.resolvedPendingAttention).toMatchObject({ id: 'ask-1', unseenGen: 7 });
-  } finally {
-    if (originalStorage === undefined) delete globalThis.localStorage;
-    else Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalStorage });
-  }
-});
-
-test('an init never acknowledges while a retained resolution receipt is waiting to mount', async () => {
-  let reads = 0;
-  globalThis.fetch = (url) => {
-    if (String(url).includes('/read?')) reads++;
-    return Promise.resolve(new Response('', { status: 204 }));
-  };
-  setState({
-    isMobile: true, activeSession: 's1',
-    sessions: { s1: {
-      id: 's1', unseen: true, unseenGen: 7, serverInstance: 'server-a', subagents: {},
-      resolvedPendingAttention: { id: 'ask-1', unseenGen: 7, serverInstance: 'server-a' },
-    } },
-  });
-
-  handleWsInit('s1', { messages: [], subagents: [], unseen_gen: 7, server_instance: 'server-a' });
-  await Promise.resolve();
-  expect(reads).toBe(0);
-  expect(store.get().sessions.s1.unseen).toBe(true);
-});
-
-for (const overlay of [
-  { name: 'mobile drawer', state: { isMobile: true, drawerOpen: true } },
-  { name: 'command palette', state: { paletteOpen: true } },
-  { name: 'modal sheet', state: { conversationObscuringOverlayCount: 1 } },
-]) {
-  test(`${overlay.name} keeps a committed prompt unread until it closes`, async () => {
-    setState({
-      isMobile: true, activeSession: 's1', drawerOpen: false, paletteOpen: false,
-      conversationObscuringOverlayCount: 0,
-      ...overlay.state,
-      sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, subagents: {} } },
-    });
-    const pending = { id: 'p1', unseenGen: 7 };
-    expect(await acknowledgeRenderedPendingAttention('s1', pending)).toBe(false);
-    setState({ drawerOpen: false, paletteOpen: false, conversationObscuringOverlayCount: 0 });
-    expect(await acknowledgeRenderedPendingAttention('s1', pending)).toBe(true);
-  });
-}
-
-for (const request of [
-  { name: 'ask', field: 'pendingAsk', resolve: handleWsAskResolved, value: { id: 'ask-1', unseenGen: 7, questions: [] } },
-  { name: 'permission', field: 'pendingPerm', resolve: handleWsPermissionResolved, value: { id: 'perm-1', unseenGen: 7, tool_name: 'bash', args: {} } },
-]) {
-  for (const detail of ['viewingSubagent', 'viewingBashJob']) {
-    test(`remote ${request.name} resolution in ${detail} retains attention until the parent commits`, async () => {
-    setState({
-      isMobile: true, activeSession: 's1', drawerOpen: false, paletteOpen: false,
-      conversationObscuringOverlayCount: 0,
-      sessions: { s1: {
-        id: 's1', unseen: true, unseenGen: 7, subagents: {}, [detail]: 'detail-1',
-        [request.field]: request.value,
-      } },
-    });
-    expect(rememberPendingAttention('s1', request.value)).toBe(true);
-    request.resolve('s1', { id: request.value.id });
-    const session = store.get().sessions.s1;
-    expect(session.unseen).toBe(true);
-    expect(session.resolvedPendingAttention).toMatchObject({ id: request.value.id, unseenGen: 7 });
-    setState({ sessions: { s1: { ...session, [detail]: null } } });
-    expect(await acknowledgeRenderedPendingAttention('s1', session.resolvedPendingAttention)).toBe(true);
-    });
-  }
-}
-
-for (const layout of [
-  { name: 'mobile', state: { isMobile: true, activeSession: 's1' } },
-  { name: 'desktop', state: { isMobile: false, activeSession: null, tileTree: { type: 'tile', id: 1, sessionId: 's1' } } },
-]) {
-  for (const request of [
-    {
-      name: 'ask', pending: 'pendingAsk',
-      deliver: () => handleWsAskUser('s1', { id: 'ask-1', unseen_gen: 7, questions: [] }),
-    },
-    {
-      name: 'permission', pending: 'pendingPerm',
-      deliver: () => handleWsPermissionRequest('s1', {
-        id: 'perm-1', unseen_gen: 7, tool_name: 'bash', args: {},
-      }),
-    },
-  ]) {
-    for (const detail of ['viewingSubagent', 'viewingBashJob']) {
-      test(`${layout.name} ${request.name} ${detail} detail does not acknowledge until its parent prompt renders`, async () => {
-        const originalDocument = globalThis.document;
-        const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
-        const originalLayout = store.get();
-        globalThis.document = { hidden: false };
-        Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { vibrate() {} } });
-        try {
-          setState({
-            ...layout.state,
-            sessions: { s1: { id: 's1', subagents: {}, [detail]: 'detail-1' } },
-          });
-
-          request.deliver();
-          const pending = store.get().sessions.s1[request.pending];
-          // This is the prompt's post-commit effect. It cannot clear attention
-          // while a detail view is the rendered parent surface.
-          expect(await acknowledgeRenderedPendingAttention('s1', pending)).toBe(false);
-          expect(store.get().sessions.s1.unseen).toBe(true);
-
-          // Returning mounts the still-pending prompt; its same post-commit
-          // effect now has a parent conversation surface to acknowledge from.
-          setState({ sessions: {
-            s1: { ...store.get().sessions.s1, [detail]: null },
-          } });
-          expect(await acknowledgeRenderedPendingAttention('s1', pending)).toBe(true);
-          expect(store.get().sessions.s1).toMatchObject({
-            unseen: false, lastAckedUnseenGen: 7,
-          });
-        } finally {
-          globalThis.document = originalDocument;
-          if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
-          else delete globalThis.navigator;
-          setState({
-            isMobile: originalLayout.isMobile,
-            activeSession: originalLayout.activeSession,
-            tileTree: originalLayout.tileTree,
-          });
-        }
-      });
-    }
-
-    test(`${layout.name} ${request.name} acknowledges after it renders in the parent conversation`, async () => {
-      const originalLayout = store.get();
-      try {
-        setState({
-          ...layout.state,
-          sessions: { s1: { id: 's1', subagents: {} } },
-        });
-
-        request.deliver();
-        const pending = store.get().sessions.s1[request.pending];
-        // The handler itself no longer takes the rendered-live shortcut; this
-        // call represents the prompt component's post-commit effect.
-        expect(await acknowledgeRenderedPendingAttention('s1', pending)).toBe(true);
-        expect(store.get().sessions.s1).toMatchObject({
-          unseen: false, lastAckedUnseenGen: 7,
-        });
-      } finally {
-        setState({
-          isMobile: originalLayout.isMobile,
-          activeSession: originalLayout.activeSession,
-          tileTree: originalLayout.tileTree,
-        });
-      }
-    });
-  }
-}
 
 test('subagents without a thinking level normalize to off', async () => {
   seedSession('s1');
@@ -955,35 +802,6 @@ test('handleWsRunEnd keeps genuinely queued steers (mostrar la verdad)', async (
   const steers = store.get().sessions.s1.pendingSteers;
   expect(steers).toHaveLength(1);
   expect(steers[0].id).toBe('q1');
-});
-
-test('a live-rendered run end acknowledges the server before a roster can relight it', async () => {
-  setState({
-    isMobile: true, activeSession: 's1', drawerOpen: false, paletteOpen: false,
-    conversationObscuringOverlayCount: 0,
-    sessions: { s1: {
-      id: 's1', state: 'running', serverInstance: 'server-a', messages: [], subagents: {},
-    } },
-  });
-  expect(isParentConversationVisible(store.get(), 's1')).toBe(true);
-  handleWsRunEnd('s1', { unseen_gen: 71 });
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(store.get().sessions.s1).toMatchObject({ unseen: false, lastAckedUnseenGen: 71 });
-});
-
-test('a server occurrence is counted once locally even when its poll snapshot follows', async () => {
-  setState({ sessions: {
-    s1: { id: 's1', state: 'idle', unseen: true, unseenGen: 4, serverUnseenGen: 4, attentionArrival: 4, messages: [], subagents: {} },
-  } });
-  handleWsRunEnd('s1', { run_gen: 1, unseen_gen: 5 });
-  const firstArrival = store.get().sessions.s1.attentionArrival;
-  // The same occurrence can arrive again through the poll/reconnect path; it
-  // must not restart the title-chip ripple.
-  handleWsRunEnd('s1', { run_gen: 1, unseen_gen: 5 });
-  expect(store.get().sessions.s1.attentionArrival).toBe(firstArrival);
-  handleWsRunEnd('s1', { run_gen: 2, unseen_gen: 6 });
-  expect(store.get().sessions.s1.attentionArrival).toBeGreaterThan(firstArrival);
 });
 
 test('a restarted WS server accepts a lower attention generation once', async () => {

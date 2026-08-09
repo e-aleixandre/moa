@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { PermissionCard } from "./PermissionCard.jsx";
 import { resolvePermission, addPermissionRule } from "../../data/session-actions.js";
-import { usePendingPromptAttentionReceipt } from "../AttentionReceipt/AttentionReceipt.jsx";
 import { formatArgs } from "../../data/util/format.js";
 
 // PermissionPrompt — stateful container around the presentational PermissionCard
@@ -32,7 +31,6 @@ export function PermissionPrompt({ session }) {
   // the next render could both fire a resolve. This ref latches immediately and
   // is only released on error / new perm.id, guaranteeing a single resolution.
   const resolvingRef = useRef(false);
-  const rootRef = useRef(null);
 
   useEffect(() => {
     setBusy(false);
@@ -43,8 +41,6 @@ export function PermissionPrompt({ session }) {
     setRule("");
     resolvingRef.current = false;
   }, [perm?.id]);
-
-  usePendingPromptAttentionReceipt(rootRef, session.id, perm);
 
   if (!perm) return null;
 
@@ -93,7 +89,7 @@ export function PermissionPrompt({ session }) {
   const title = perm.tool_name ? `moa wants to run ${perm.tool_name}` : "moa wants to run";
 
   return (
-    <div ref={rootRef}>
+    <div>
     <PermissionCard
       title={title}
       command={formatArgs(perm.args)}

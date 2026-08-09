@@ -1,9 +1,0 @@
-.attention-resolved-receipt {
-  margin: var(--space-5) 0;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-md);
-  background: var(--surface0);
-  color: var(--subtext0);
-  font-size: var(--text-sm);
-}

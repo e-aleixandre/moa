@@ -22,7 +22,7 @@ import {
   handleWsAutoVerifyStart, handleWsAutoVerifyEnd, handleWsRateLimit,
   handleWsCompactionStart, handleWsCompactionEnd,
 } from './ws-handlers.js';
-import { store, updateSession, isParentConversationVisible } from './store.js';
+import { store, updateSession } from './store.js';
 import {
   beginHistoryHydration, confirmHistoryHydrationInit, finishHistoryHydration,
 } from './history-hydration.js';
@@ -45,19 +45,6 @@ export class ApiError extends Error {
     super(message);
     this.name = 'ApiError';
     this.status = status;
-  }
-}
-
-// This is deliberately narrower than a generic HTTP 409: other endpoints use
-// 409 for their own domain conflicts. A /read fence conflict means only that
-// this client must rediscover the server process before it can acknowledge.
-export class StaleServerInstanceError extends Error {
-  constructor(sessionId, generation, instance) {
-    super(`Stale server instance while acknowledging ${sessionId}`);
-    this.name = 'StaleServerInstanceError';
-    this.sessionId = sessionId;
-    this.generation = generation;
-    this.instance = instance;
   }
 }
 
@@ -109,11 +96,7 @@ const hydrationTimers = new Map(); // sessionId → timeoutId (waiting for WS in
 const wantedIds = new Set();      // sessions that should have a connection
 const forceFullInit = new Set();  // session IDs whose cached delta base was absent
 const attentionAcknowledgements = new Map(); // occurrence → confirmed POST
-const attentionObservers = new Map(); // occurrence → bounded visible receipt retry
-let attentionInstanceRefresh = null;
 const MAX_BACKOFF = 16000;
-const ATTENTION_RETRY_INITIAL_MS = 500;
-const ATTENTION_RETRY_MAX_MS = 16000;
 
 // Set localStorage.moaDebugSessionSwitch = '1' and reconnect a session to
 // inspect its complete init path. This remains outside normal UI chrome and
@@ -147,18 +130,6 @@ function reportSwitchTiming(sessionId, metrics) {
   console.groupEnd();
 }
 
-// Several visible prompts can discover the same restart at once. Share one
-// roster round-trip; loadSessions replaces affected sockets, whose fresh init
-// supplies the new prompt/instance before a receipt can retry. Dynamic import
-// avoids making api.js and session-actions.js a static import cycle.
-export function refreshAttentionInstances() {
-  if (attentionInstanceRefresh) return attentionInstanceRefresh;
-  attentionInstanceRefresh = import('./session-actions.js')
-    .then(({ loadSessions }) => loadSessions())
-    .finally(() => { attentionInstanceRefresh = null; });
-  return attentionInstanceRefresh;
-}
-
 export function syncConnections(visibleIds) {
   wantedIds.clear();
   for (const id of visibleIds) wantedIds.add(id);
@@ -178,7 +149,6 @@ export function syncConnections(visibleIds) {
       pendingTimers.delete(id);
     }
   }
-
   // Open connections for newly visible sessions (that aren't already connecting/pending)
   for (const id of visibleIds) {
     if (!connections.has(id) && !pendingTimers.has(id)) {
@@ -209,13 +179,10 @@ export function reconnectAll() {
   for (const id of ids) openWs(id, 1000);
 }
 
-// acknowledgeVisibleAttention is intentionally the single path that clears a
-// roster dot and POSTs /read for an already-known occurrence. Its generation
-// is the one rendered by this init snapshot, not the session's current roster
-// value: MarkSessionRead accepts gen >= current, so borrowing a newer value
-// here could acknowledge content the snapshot never showed. Live events use
-// their own acknowledgement path only after their actual UI has rendered;
-// cached history must wait for init.
+// acknowledgeVisibleAttention clears a roster dot for the fenced occurrence
+// carried by an authoritative init or live terminal event. Callers establish
+// selection and init proof; this boundary only owns foreground, fencing and
+// duplicate POST handling.
 function acknowledgementKey(sessionId, generation, instance) {
   return `${sessionId}:${generation}:${instance}`;
 }
@@ -236,127 +203,30 @@ function commitAttentionAcknowledgement(sessionId, generation, instance) {
 // Resolves true only when this occurrence is already known confirmed or the
 // server has accepted its fenced POST. Callers deliberately keep their visible
 // receipt alive on rejection: scheduling fetch is not a read acknowledgement.
-export function acknowledgeVisibleAttention(sessionId, shownGeneration, shownInstance = '', { renderedLive = false } = {}) {
-  const state = store.get();
-  const session = state.sessions[sessionId];
-  const acknowledgementInstance = shownInstance || session?.serverInstance || '';
+export function acknowledgeVisibleAttention(sessionId, shownGeneration, shownInstance = '') {
+  const session = store.get().sessions[sessionId];
   const hidden = typeof document !== 'undefined' && document.hidden;
-  if (!session || hidden || !isParentConversationVisible(state, sessionId)) return Promise.resolve(false);
-  if (!renderedLive && (!session.unseen || !session.historyHydrated || !session.historyAckProven)) return Promise.resolve(false);
-  if (!shownGeneration || (!renderedLive && (session.unseenGen || 0) > shownGeneration)) return Promise.resolve(false);
+  if (!session || hidden || !shownGeneration) return Promise.resolve(false);
   if (shownInstance && session.serverInstance && shownInstance !== session.serverInstance) return Promise.resolve(false);
-  if (session.lastAckedUnseenInstance === acknowledgementInstance &&
+  if (session.lastAckedUnseenInstance === shownInstance &&
       (session.lastAckedUnseenGen || 0) >= shownGeneration) {
-    commitAttentionAcknowledgement(sessionId, shownGeneration, acknowledgementInstance);
+    commitAttentionAcknowledgement(sessionId, shownGeneration, shownInstance);
     return Promise.resolve(true);
   }
-  // A visible run_end is itself the authoritative presentation of a new
-  // occurrence. It can arrive before markUnseen projects that occurrence into
-  // the local roster, but the server has already made it unread; do not turn
-  // that ordering into a fake local success which skips /read entirely.
-  if (!renderedLive && !session.unseen) return Promise.resolve(true);
-  const key = acknowledgementKey(sessionId, shownGeneration, acknowledgementInstance);
+  const key = acknowledgementKey(sessionId, shownGeneration, shownInstance);
   const inFlight = attentionAcknowledgements.get(key);
   if (inFlight) return inFlight;
-  const instanceQuery = acknowledgementInstance
-    ? `&server_instance=${encodeURIComponent(acknowledgementInstance)}`
+  const instanceQuery = shownInstance
+    ? `&server_instance=${encodeURIComponent(shownInstance)}`
     : '';
   const acknowledgement = api('POST', `/api/sessions/${sessionId}/read?unseen_gen=${shownGeneration}${instanceQuery}`)
     .then(() => {
-      commitAttentionAcknowledgement(sessionId, shownGeneration, acknowledgementInstance);
+      commitAttentionAcknowledgement(sessionId, shownGeneration, shownInstance);
       return true;
-    })
-    .catch((error) => {
-      if (error instanceof ApiError && error.status === 409) {
-        throw new StaleServerInstanceError(sessionId, shownGeneration, acknowledgementInstance);
-      }
-      throw error;
     })
     .finally(() => attentionAcknowledgements.delete(key));
   attentionAcknowledgements.set(key, acknowledgement);
   return acknowledgement;
-}
-
-// Ordinary transcript attention has no card geometry to observe: an
-// authoritative init proves the committed conversation surface showed its
-// bounded occurrence. This observer retains that proof and retries the same
-// fenced POST while the parent surface remains unobscured. Pending/resolved
-// prompts feed the same acknowledgement fence from their stricter card
-// geometry receipt in AttentionReceipt.
-export function observeVisibleAttention(sessionId, generation, instance = '', { renderedLive = false } = {}) {
-  if (!generation) return;
-  const key = acknowledgementKey(sessionId, generation, instance);
-  let observer = attentionObservers.get(key);
-  if (!observer) {
-    observer = { sessionId, generation, instance, renderedLive, delay: ATTENTION_RETRY_INITIAL_MS, timer: null };
-    attentionObservers.set(key, observer);
-  } else if (renderedLive) {
-    // The same fenced occurrence can first be retained by a transcript init
-    // and later be proven by its live terminal row. Keep the stronger proof.
-    observer.renderedLive = true;
-  }
-
-  const stop = () => {
-    if (observer.timer) clearTimeout(observer.timer);
-    attentionObservers.delete(key);
-  };
-  const retry = () => {
-    if (observer.timer) return;
-    const delay = observer.delay;
-    observer.delay = Math.min(delay * 2, ATTENTION_RETRY_MAX_MS);
-    observer.timer = setTimeout(() => {
-      observer.timer = null;
-      attempt();
-    }, delay);
-  };
-  const attempt = () => {
-    const session = store.get().sessions[sessionId];
-    const hidden = typeof document !== 'undefined' && document.hidden;
-    // A newer generation, a new process or a removed session supersedes the
-    // proof retained by this observer. An obscured/hidden parent is not proof;
-    // leave the occurrence registered for the next visibility transition.
-    if (!session || (instance && session.serverInstance && instance !== session.serverInstance) ||
-        (session.unseenGen || 0) > generation) return stop();
-    if (!observer.renderedLive && (!session.unseen || !session.historyHydrated || !session.historyAckProven ||
-        (session.historyShownGen || 0) !== generation ||
-        (instance && session.historyShownInstance && session.historyShownInstance !== instance))) return stop();
-    if (hidden || !isParentConversationVisible(store.get(), sessionId)) return;
-    acknowledgeVisibleAttention(sessionId, generation, instance, { renderedLive: observer.renderedLive })
-      .then((confirmed) => {
-        if (confirmed) stop();
-        else retry();
-      })
-      .catch((error) => {
-        if (error instanceof StaleServerInstanceError) {
-          refreshAttentionInstances().finally(() => retry());
-          return;
-        }
-        retry();
-      });
-  };
-  // A close/foreground transition may call this repeatedly. Reset a pending
-  // backoff then make the presented occurrence prompt immediately.
-  if (observer.timer) {
-    clearTimeout(observer.timer);
-    observer.timer = null;
-    observer.delay = ATTENTION_RETRY_INITIAL_MS;
-  }
-  attempt();
-}
-
-// Called by the pending-prompt components after they commit. A live request is
-// safe to acknowledge only from the UI that actually rendered that request,
-// and only for its own occurrence (never a later roster generation).
-export function acknowledgeRenderedPendingAttention(sessionId, pending) {
-  const generation = pending?.unseen_gen ?? pending?.unseenGen ?? 0;
-  const session = store.get().sessions[sessionId];
-  const pendingInstance = pending?.server_instance ?? pending?.serverInstance ?? '';
-  if (!generation || !session || (session.unseen && session.unseenGen !== generation)) return Promise.resolve(false);
-  // A server process owns its generation namespace. In particular, a retained
-  // receipt from a resolved prompt must never consume generation N from a
-  // replacement process which also happens to be at N.
-  if (pendingInstance && pendingInstance !== (session.serverInstance || '')) return Promise.resolve(false);
-  return acknowledgeVisibleAttention(sessionId, generation, session.serverInstance || '', { renderedLive: true });
 }
 
 function clearHistoryHydrationTimer(sessionId) {

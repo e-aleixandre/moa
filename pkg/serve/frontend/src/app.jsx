@@ -262,9 +262,6 @@ function useBootstrap() {
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
-        // A previous visible receipt may have been waiting only for the app to
-        // return. Feed the acknowledgement observer before the refresh too;
-        // the refresh below will feed it again if it replaces the occurrence.
         afterVisibilityChange();
         reconnectAll();
         loadSessions();

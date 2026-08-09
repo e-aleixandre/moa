@@ -1,7 +1,7 @@
 // tile-actions.js — tile tree manipulation and visibility management
 
-import { observeVisibleAttention, syncConnections } from './api.js';
-import { observeConversationVisibility, store, setState, updateSession, visibleSessionIds } from './store.js';
+import { acknowledgeVisibleAttention, syncConnections } from './api.js';
+import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
   splitTileNode, removeTileNode, setTileSession, swapSessions,
@@ -280,18 +280,12 @@ export function afterVisibilityChange() {
     const current = store.get();
     for (const id of visibleSessionIds(current)) {
       const sess = current.sessions[id];
-      // Pending prompts have their own post-render receipt. An init proves the
-      // transcript but not that a prompt below this pane's scrollport was seen;
-      // the roster poll must not bypass that observer.
-      if (sess?.unseen && !sess.pendingAsk && !sess.pendingPerm &&
-          !sess.resolvedPendingAttention && sess.historyHydrated && sess.historyAckProven) {
-        observeVisibleAttention(id, sess.historyShownGen, sess.historyShownInstance);
+      // Only a confirmed authoritative init makes a selected transcript read.
+      // A cached or stale one leaves the occurrence alone until its own init
+      // lands, so a badge is never cleared for content this client never got.
+      if (sess?.historyHydrated && sess.historyAckProven) {
+        acknowledgeVisibleAttention(id, sess.historyShownGen, sess.historyShownInstance).catch(() => {});
       }
     }
   }
 }
-
-// Overlay leave animations and detail exits mutate store state outside these
-// action helpers. Re-run the common visibility pass when any such transition
-// finally presents a parent conversation.
-observeConversationVisibility(afterVisibilityChange);

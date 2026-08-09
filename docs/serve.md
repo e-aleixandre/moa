@@ -22,9 +22,10 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Group the mobile drawer and desktop session spine by recency or folder; the choice is saved locally
 - Unread result badges on sessions whose successful run finished while you were
   away; they are held only in Moa's process memory and appear first under **New
-  results** in the mobile drawer. Opening a transcript marks ordinary results
-  read; permission and question badges wait until their card (or a clear
-  resolved notice) is actually visible in the foreground.
+  results** in the mobile drawer. Selecting a session marks the result read
+  after its authoritative transcript snapshot arrives while the tab is in the
+  foreground. Permission and question badges instead reflect pending session
+  state and disappear when the request is resolved.
 - Multi-pane tiled layouts
 - Keyboard-first navigation
 - Voice input

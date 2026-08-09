@@ -10,7 +10,6 @@ export function aggregateAttention(sessions, activeId) {
   let arrival = 0;
   for (const session of Object.values(sessions)) {
     if (session.id === activeId) continue;
-    if (!session.unseen) continue;
     const dotState = sessionDisplayDotState(session);
     if (dotState === 'error') {
       urgent += 1;
@@ -19,7 +18,7 @@ export function aggregateAttention(sessions, activeId) {
     } else if (dotState === 'permission') {
       urgent += 1;
       permission += 1;
-      arrival = Math.max(arrival, session.attentionArrival || session.unseenGen || 0);
+      arrival = Math.max(arrival, session.attentionArrival || 0);
     } else if (dotState === 'unseen') {
       unseen += 1;
       arrival = Math.max(arrival, session.attentionArrival || session.unseenGen || 0);

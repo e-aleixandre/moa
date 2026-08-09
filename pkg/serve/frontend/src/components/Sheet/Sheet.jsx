@@ -1,9 +1,8 @@
-import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import { createPortal } from "preact/compat";
 import { X } from "lucide-preact";
 import { IconButton } from "../../primitives/index.js";
 import { openOverlay } from "../../data/overlay-history.js";
-import { registerConversationObscuringOverlay } from "../../data/store.js";
 import "./Sheet.css";
 
 const FOCUSABLE_SELECTOR =
@@ -35,13 +34,6 @@ export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabel
   onCloseRef.current = onClose;
   const label = ariaLabel ?? ariaLabelAttr ?? title;
   if (idRef.current === null) idRef.current = `sheet-${++sheetIdCounter}`;
-
-  // Register in a layout effect so a pending prompt's passive receipt sees the
-  // fixed, full-viewport scrim in this same commit.
-  useLayoutEffect(() => {
-    if (!open) return undefined;
-    return registerConversationObscuringOverlay();
-  }, [open]);
 
   // Register/unregister with overlay-history whenever `open` toggles. Closing
   // via popstate (back gesture) calls onClose the same as any other close

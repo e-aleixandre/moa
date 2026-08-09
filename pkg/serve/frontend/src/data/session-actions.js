@@ -10,7 +10,6 @@ import {
 } from './tile-actions.js';
 import { allSessionIds, clearSession } from './tileTree.js';
 import { attentionArrival, forgetAttentionArrival, retainAttentionArrivals } from './attention-arrivals.js';
-import { forgetPendingAttention } from './attention-receipt-store.js';
 
 let pollTimer = null;
 
@@ -80,14 +79,6 @@ export async function loadSessions() {
       // just-resumed session stays stuck 'saved' (grey dot, empty stream) until
       // the app is reopened.
       const wsOwns = existing && visible.has(info.id) && existing.state !== 'saved';
-      const retainedGen = existing?.resolvedPendingAttention?.unseenGen ?? existing?.resolvedPendingAttention?.unseen_gen ?? 0;
-      const retainedInstance = existing?.resolvedPendingAttention?.serverInstance ?? existing?.resolvedPendingAttention?.server_instance ?? '';
-      // A tail receipt is fenced to one occurrence. Once the roster advances
-      // past it, retaining its doomed retry would suppress the ordinary init
-      // acknowledgement for the newer dot forever.
-      const retainedSuperseded = !!retainedGen && !!info.unseen && (info.unseen_gen || 0) > retainedGen &&
-        (!retainedInstance || retainedInstance === (info.server_instance || ''));
-      if (retainedSuperseded) forgetPendingAttention(info.id);
       const next = {
         id: info.id,
         title: info.title,
@@ -139,13 +130,6 @@ export async function loadSessions() {
         permissionMode: wsOwns ? existing.permissionMode : (info.permission_mode || (existing ? existing.permissionMode : 'yolo')),
         pendingPerm: existing ? existing.pendingPerm : null,
         pendingAsk: existing ? existing.pendingAsk : null,
-        // A remote resolution that arrived while a detail view replaced the
-        // parent has no pending prompt left to mount. Preserve its one-shot
-        // parent-surface receipt through roster polling until the user returns.
-        // A retained receipt has the same generation namespace as its server.
-        // Discard it with an instance transition; a fresh server may already
-        // have reused that generation for a different unread occurrence.
-        resolvedPendingAttention: (serverRestarted || retainedSuperseded) ? null : (existing ? existing.resolvedPendingAttention : null),
         pendingSteers: existing ? existing.pendingSteers : null,
         streamingText: existing ? existing.streamingText : null,
         thinkingText: existing ? existing.thinkingText : null,
@@ -251,12 +235,6 @@ export async function loadSessions() {
     // Clean deleted sessions from tile tree
     const validIds = new Set(Object.keys(sessions));
     retainAttentionArrivals(validIds);
-    // Poll-driven deletion is just as terminal as an explicit DELETE. Leaving
-    // its durable visible receipt behind could acknowledge an unrelated future
-    // session occurrence after a reload.
-    for (const id of Object.keys(prev)) {
-      if (!validIds.has(id)) forgetPendingAttention(id);
-    }
     const currentState = store.get();
     let tree = currentState.tileTree;
     let changed = false;
@@ -333,7 +311,6 @@ export async function deleteSession(id) {
   const tileTree = clearSession(state.tileTree, id);
   const activeSession = state.activeSession === id ? null : state.activeSession;
   forgetAttentionArrival(id);
-  forgetPendingAttention(id);
   setState({ sessions, tileTree, activeSession });
   afterVisibilityChange();
 }
@@ -370,7 +347,6 @@ export async function closeSession(id) {
     historyAckProven: false,
     lastAckedUnseenGen: 0,
     lastAckedUnseenInstance: '',
-    resolvedPendingAttention: null,
   });
   const state = store.get();
   const tileTree = clearSession(state.tileTree, id);
@@ -759,7 +735,6 @@ export async function resolvePermission(sessionId, permId, approved, opts = {}) 
     feedback: opts.feedback || '',
     allow: opts.allow || '',
   });
-  forgetPendingAttention(sessionId);
   updateSession(sessionId, { pendingPerm: null });
 }
 
@@ -775,7 +750,6 @@ export async function resolveAskUser(sessionId, askId, answers) {
   await api('POST', `/api/sessions/${sessionId}/ask`, {
     id: askId, answers,
   });
-  forgetPendingAttention(sessionId);
   updateSession(sessionId, { pendingAsk: null });
 }
 

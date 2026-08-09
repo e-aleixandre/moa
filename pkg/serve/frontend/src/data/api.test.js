@@ -1,9 +1,11 @@
-import { test, expect } from 'bun:test';
+import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 
-const {
-  api, getVersion, acknowledgeRenderedPendingAttention, acknowledgeVisibleAttention, StaleServerInstanceError,
-} = await import('./api.js?timeout-test');
+const { api, getVersion, acknowledgeVisibleAttention } = await import('./api.js?timeout-test');
+
+beforeEach(() => {
+  setState({ sessions: {}, activeSession: null, isMobile: true });
+});
 
 test('getVersion bypasses the HTTP cache', async () => {
   const originalFetch = globalThis.fetch;
@@ -12,7 +14,6 @@ test('getVersion bypasses the HTTP cache', async () => {
     options = nextOptions;
     return Promise.resolve(new Response('{"current":"dev"}'));
   };
-
   try {
     await getVersion();
     expect(options.cache).toBe('no-store');
@@ -28,7 +29,6 @@ test('api aborts a request that exceeds its timeout', async () => {
     signal = options.signal;
     signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
   });
-
   try {
     await expect(api('GET', '/api/sessions', undefined, { timeoutMs: 5 }))
       .rejects.toThrow('Request timed out after 5ms: GET /api/sessions');
@@ -46,18 +46,15 @@ test('api leaves requests without a timeout pending and un-aborted', async () =>
     options = nextOptions;
     return new Promise((resolve) => { resolveFetch = resolve; });
   };
-
   try {
     const request = api('POST', '/api/sessions', {}, { timeoutMs: 0 });
     await Promise.resolve();
     expect(options.signal).toBeUndefined();
-
     const result = await Promise.race([
       request.then(() => 'settled', () => 'rejected'),
       new Promise((resolve) => setTimeout(() => resolve('pending'), 10)),
     ]);
     expect(result).toBe('pending');
-
     resolveFetch(new Response('', { status: 204 }));
     await expect(request).resolves.toBeNull();
   } finally {
@@ -77,10 +74,8 @@ test('api clears its timeout after a successful response', async () => {
     return timer;
   };
   globalThis.clearTimeout = (timer) => timers.delete(timer);
-
   try {
-    await expect(api('GET', '/api/sessions', undefined, { timeoutMs: 5 }))
-      .resolves.toEqual({ ok: true });
+    await expect(api('GET', '/api/sessions', undefined, { timeoutMs: 5 })).resolves.toEqual({ ok: true });
     expect(timers.size).toBe(0);
   } finally {
     globalThis.fetch = originalFetch;
@@ -89,42 +84,44 @@ test('api clears its timeout after a successful response', async () => {
   }
 });
 
-test('a stale /read fence reports a typed stale-server-instance outcome', async () => {
+test('repeated acknowledgements converge on one fenced occurrence', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = () => Promise.resolve(new Response('stale instance', { status: 409 }));
-  setState({
-    isMobile: true,
-    activeSession: 's1',
-    sessions: {
-      s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'instance-a', subagents: {} },
-    },
-  });
+  const reads = [];
+  let resolveRead;
+  globalThis.fetch = (path) => {
+    reads.push(path);
+    return new Promise((resolve) => { resolveRead = resolve; });
+  };
+  setState({ sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'instance-a', subagents: {} } } });
   try {
-    await expect(acknowledgeRenderedPendingAttention('s1', {
-      id: 'ask', unseenGen: 7, serverInstance: 'instance-a',
-    })).rejects.toBeInstanceOf(StaleServerInstanceError);
+    const first = acknowledgeVisibleAttention('s1', 7, 'instance-a');
+    const second = acknowledgeVisibleAttention('s1', 7, 'instance-a');
+    expect(reads).toEqual(['/api/sessions/s1/read?unseen_gen=7&server_instance=instance-a']);
+    resolveRead(new Response('', { status: 204 }));
+    await expect(first).resolves.toBe(true);
+    await expect(second).resolves.toBe(true);
+    expect(store.get().sessions.s1).toMatchObject({ unseen: false, lastAckedUnseenGen: 7 });
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test('a rendered live completion posts its fenced receipt before local unseen exists', async () => {
+test('a background tab never acknowledges an occurrence', async () => {
   const originalFetch = globalThis.fetch;
-  const reads = [];
-  globalThis.fetch = (path) => {
-    reads.push(path);
-    return Promise.resolve(new Response('', { status: 204 }));
-  };
-  setState({
-    isMobile: true, activeSession: 's1', drawerOpen: false, paletteOpen: false,
-    conversationObscuringOverlayCount: 0,
-    sessions: { s1: { id: 's1', serverInstance: 'instance-a', unseen: false, subagents: {} } },
-  });
+  const originalDocument = globalThis.document;
+  let calls = 0;
+  globalThis.fetch = () => { calls += 1; return Promise.resolve(new Response('', { status: 204 })); };
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { hidden: true } });
+  setState({ sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'instance-a', subagents: {} } } });
   try {
-    await expect(acknowledgeVisibleAttention('s1', 7, 'instance-a', { renderedLive: true })).resolves.toBe(true);
-    expect(reads).toEqual(['/api/sessions/s1/read?unseen_gen=7&server_instance=instance-a']);
-    expect(store.get().sessions.s1).toMatchObject({ unseen: false, lastAckedUnseenGen: 7 });
+    const acknowledgement = acknowledgeVisibleAttention('s1', 7, 'instance-a');
+    if (originalDocument === undefined) delete globalThis.document;
+    else Object.defineProperty(globalThis, 'document', { configurable: true, value: originalDocument });
+    await expect(acknowledgement).resolves.toBe(false);
+    expect(calls).toBe(0);
   } finally {
     globalThis.fetch = originalFetch;
+    if (originalDocument === undefined) delete globalThis.document;
+    else Object.defineProperty(globalThis, 'document', { configurable: true, value: originalDocument });
   }
 });
