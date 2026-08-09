@@ -243,6 +243,53 @@ func TestApprovalManager_ClearPending_AutoDeniesAndResolves(t *testing.T) {
 	}
 }
 
+func TestApprovalManager_ClearPending_PreservesResolutionForEveryPrompt(t *testing.T) {
+	am, b := newTestApprovalManager(t)
+
+	am.mu.Lock()
+	for _, id := range []string{"p1", "p2"} {
+		am.perms[id] = &PendingPermission{ID: id, ToolName: "write", RunGen: 1, response: make(chan permission.Response, 1)}
+	}
+	for _, id := range []string{"a1", "a2"} {
+		am.asks[id] = &PendingAsk{ID: id, Questions: []AskQuestion{{Text: "Name?"}}, RunGen: 1, response: make(chan []string, 1)}
+	}
+	am.mu.Unlock()
+
+	permissions := make(chan PermissionResolved, 2)
+	asks := make(chan AskUserResolved, 2)
+	b.Subscribe(func(e PermissionResolved) { permissions <- e })
+	b.Subscribe(func(e AskUserResolved) { asks <- e })
+
+	am.ClearPending(1, "aborted")
+
+	for range 2 {
+		select {
+		case event := <-permissions:
+			if event.Origin != "system" || event.Reason != "aborted" || event.Outcome != "denied" {
+				t.Fatalf("permission resolution = %+v", event)
+			}
+			if got := am.ResolutionInfo(event.ID); got != (PromptResolutionInfo{ID: event.ID, Kind: "permission", Origin: "system", Reason: "aborted", Outcome: "denied"}) {
+				t.Fatalf("permission %q resolution = %+v", event.ID, got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("missing permission resolution")
+		}
+	}
+	for range 2 {
+		select {
+		case event := <-asks:
+			if event.Origin != "system" || event.Reason != "aborted" {
+				t.Fatalf("ask resolution = %+v", event)
+			}
+			if got := am.ResolutionInfo(event.ID); got != (PromptResolutionInfo{ID: event.ID, Kind: "ask", Origin: "system", Reason: "aborted"}) {
+				t.Fatalf("ask %q resolution = %+v", event.ID, got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("missing ask resolution")
+		}
+	}
+}
+
 func TestApprovalManager_ClearPending_SparesNewerRun(t *testing.T) {
 	// A delayed RunEnded of an aborted run must not auto-deny a live approval
 	// that a newer, already-started run registered in the meantime.

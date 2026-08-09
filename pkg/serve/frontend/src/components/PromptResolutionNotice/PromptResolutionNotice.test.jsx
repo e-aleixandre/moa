@@ -17,6 +17,6 @@ test("uses server-provided attribution and reason", () => {
     .toBe("This request was resolved in the terminal.");
 });
 
-test("does not render a server-projected local resolution", () => {
-  expect(PromptResolutionNotice({ notice: { origin: "this_client" } })).toBeNull();
+test("renders every server-attributed resolution", () => {
+  expect(PromptResolutionNotice({ notice: { origin: "web" } })).not.toBeNull();
 });

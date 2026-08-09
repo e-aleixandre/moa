@@ -75,9 +75,7 @@ type InitData struct {
 	InitMetrics *InitMetrics `json:"init_metrics,omitempty"`
 }
 
-// PromptResolutionData explains a prompt's terminal transition. Origin is
-// projected per recipient: "this_client" is only sent to the web client that
-// submitted the decision; other values identify the actual resolver.
+// PromptResolutionData explains a prompt's terminal transition.
 type PromptResolutionData struct {
 	ID      string `json:"id"`
 	Kind    string `json:"kind"`

@@ -21,7 +21,7 @@ export function promptResolutionText(notice) {
 // prompt vanished without participating in attention acknowledgement or read
 // state.
 export function PromptResolutionNotice({ notice }) {
-  if (!notice || notice.origin === "this_client") return null;
+  if (!notice) return null;
   return (
     <div class="prompt-resolution-notice" role="status">
       <Info size={14} strokeWidth={1.8} aria-hidden="true" />

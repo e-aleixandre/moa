@@ -517,7 +517,7 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
     pendingAsk: data.pending_ask ? { ...data.pending_ask, serverInstance } : null,
     resolvedPromptNotice: data.pending_permission || data.pending_ask
       ? null
-      : data.resolved_prompt?.origin === 'this_client' ? null : (data.resolved_prompt || prev.resolvedPromptNotice || null),
+      : (data.resolved_prompt || prev.resolvedPromptNotice || null),
     // The server's steer queue is authoritative and shared across all of this
     // session's clients. The snapshot replaces the queue; a local chip is kept
     // only if its client-minted ID is not yet in the snapshot (its POST was
@@ -1119,7 +1119,7 @@ export function handleWsPermissionResolved(id, data) {
   if (data && data.id && sess.pendingPerm.id !== data.id) return;
   updateSession(id, {
     pendingPerm: null,
-    resolvedPromptNotice: data?.origin === 'this_client' ? null : {
+    resolvedPromptNotice: {
       id: data?.id || sess.pendingPerm.id,
       kind: data?.kind || 'permission', origin: data?.origin || 'unknown',
       reason: data?.reason || 'no_longer_pending', outcome: data?.outcome || '',
@@ -1133,7 +1133,7 @@ export function handleWsAskResolved(id, data) {
   if (data && data.id && sess.pendingAsk.id !== data.id) return;
   updateSession(id, {
     pendingAsk: null,
-    resolvedPromptNotice: data?.origin === 'this_client' ? null : {
+    resolvedPromptNotice: {
       id: data?.id || sess.pendingAsk.id,
       kind: data?.kind || 'ask', origin: data?.origin || 'unknown',
       reason: data?.reason || 'no_longer_pending', outcome: data?.outcome || '',

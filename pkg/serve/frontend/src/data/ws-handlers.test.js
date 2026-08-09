@@ -163,16 +163,22 @@ test('remote prompt resolutions replace the prompt with a presentational notice 
   });
 });
 
-test('a server-projected local resolution does not leave a notice', () => {
+test('web resolutions always retain their server attribution', () => {
   seedSession('s1');
   setState({ isMobile: true, activeSession: 's1' });
   handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {} });
-  handleWsPermissionResolved('s1', { id: 'perm-1', origin: 'this_client', reason: 'resolved', outcome: 'approved' });
-  expect(store.get().sessions.s1).toMatchObject({ pendingPerm: null, resolvedPromptNotice: null });
+  handleWsPermissionResolved('s1', { id: 'perm-1', origin: 'web', reason: 'resolved', outcome: 'approved' });
+  expect(store.get().sessions.s1).toMatchObject({
+    pendingPerm: null,
+    resolvedPromptNotice: { id: 'perm-1', kind: 'permission', origin: 'web', reason: 'resolved', outcome: 'approved' },
+  });
 
   handleWsAskUser('s1', { id: 'ask-1', questions: [] });
-  handleWsAskResolved('s1', { id: 'ask-1', origin: 'this_client', reason: 'resolved', outcome: 'answered' });
-  expect(store.get().sessions.s1).toMatchObject({ pendingAsk: null, resolvedPromptNotice: null });
+  handleWsAskResolved('s1', { id: 'ask-1', origin: 'web', reason: 'resolved', outcome: 'answered' });
+  expect(store.get().sessions.s1).toMatchObject({
+    pendingAsk: null,
+    resolvedPromptNotice: { id: 'ask-1', kind: 'ask', origin: 'web', reason: 'resolved', outcome: 'answered' },
+  });
 });
 
 test('init restores a server-recorded resolution when a disconnected client lost the event', () => {

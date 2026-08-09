@@ -1,6 +1,6 @@
 // session-actions.js — API-backed session operations
 
-import { api, retryHistoryHydration, webClientId } from './api.js';
+import { api, retryHistoryHydration } from './api.js';
 import { normalizeConversationProjection, normalizeHistory } from './ws-handlers.js';
 import { triggerAttention, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
@@ -738,7 +738,6 @@ export async function resolvePermission(sessionId, permId, approved, opts = {}) 
     approved,
     feedback: opts.feedback || '',
     allow: opts.allow || '',
-    client_id: webClientId,
   });
   updateSession(sessionId, { pendingPerm: null });
 }
@@ -753,7 +752,7 @@ export async function addPermissionRule(sessionId, permId, rule) {
 
 export async function resolveAskUser(sessionId, askId, answers) {
   await api('POST', `/api/sessions/${sessionId}/ask`, {
-    id: askId, answers, client_id: webClientId,
+    id: askId, answers,
   });
   updateSession(sessionId, { pendingAsk: null });
 }

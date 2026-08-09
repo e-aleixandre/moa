@@ -34,11 +34,11 @@ var (
 // pattern is therefore safe — the send always succeeds because the buffer
 // guarantees space for exactly one response (the contract).
 type ApprovalManager struct {
-	mu                       sync.Mutex
-	perms                    map[string]*PendingPermission
-	asks                     map[string]*PendingAsk
-	lastPermissionResolution PromptResolutionInfo
-	lastAskResolution        PromptResolutionInfo
+	mu                    sync.Mutex
+	perms                 map[string]*PendingPermission
+	asks                  map[string]*PendingAsk
+	permissionResolutions map[string]PromptResolutionInfo
+	askResolutions        map[string]PromptResolutionInfo
 
 	permBridgeCancel context.CancelFunc // nil when no perm bridge running
 	askBridgeCancel  context.CancelFunc // nil when no ask bridge running
@@ -108,11 +108,13 @@ type PromptResolutionInfo struct {
 // NewApprovalManager creates an ApprovalManager.
 func NewApprovalManager(bus EventBus, state *StateMachine, sid string) *ApprovalManager {
 	return &ApprovalManager{
-		perms: make(map[string]*PendingPermission),
-		asks:  make(map[string]*PendingAsk),
-		bus:   bus,
-		state: state,
-		sid:   sid,
+		perms:                 make(map[string]*PendingPermission),
+		asks:                  make(map[string]*PendingAsk),
+		permissionResolutions: make(map[string]PromptResolutionInfo),
+		askResolutions:        make(map[string]PromptResolutionInfo),
+		bus:                   bus,
+		state:                 state,
+		sid:                   sid,
 	}
 }
 
@@ -589,21 +591,21 @@ func (am *ApprovalManager) PendingInfo() PendingApprovalInfo {
 func (am *ApprovalManager) ResolutionInfo(id string) PromptResolutionInfo {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	if am.lastPermissionResolution.ID == id {
-		return am.lastPermissionResolution
+	if resolution, ok := am.permissionResolutions[id]; ok {
+		return resolution
 	}
-	if am.lastAskResolution.ID == id {
-		return am.lastAskResolution
+	if resolution, ok := am.askResolutions[id]; ok {
+		return resolution
 	}
 	return PromptResolutionInfo{}
 }
 
 func (am *ApprovalManager) setResolutionLocked(info PromptResolutionInfo) {
 	if info.Kind == "permission" {
-		am.lastPermissionResolution = info
+		am.permissionResolutions[info.ID] = info
 		return
 	}
-	am.lastAskResolution = info
+	am.askResolutions[info.ID] = info
 }
 
 // ---------------------------------------------------------------------------

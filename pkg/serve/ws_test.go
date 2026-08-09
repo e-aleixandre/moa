@@ -69,20 +69,26 @@ func TestWsAttentionEventsCarryOccurrenceGeneration(t *testing.T) {
 	}
 }
 
-func TestWsPromptResolutionProjectsServerAttributionPerClient(t *testing.T) {
+func TestWsPromptResolutionNeverTrustsClientSuppliedResolverID(t *testing.T) {
 	event := bus.PermissionResolved{ID: "p1", Origin: "web", ResolverID: "web-a", Reason: "resolved", Outcome: "approved"}
-	self, ok := wsEventFromBusForClient(event, 0, "web-a")
+	projected, ok := wsEventFromBus(event, 0)
 	if !ok {
 		t.Fatal("resolution event not translated")
 	}
-	if got := self.Data.(PromptResolutionData); got.Origin != "this_client" || got.Reason != "resolved" || got.Outcome != "approved" {
-		t.Fatalf("self resolution = %+v", got)
+	if got := projected.Data.(PromptResolutionData); got.Origin != "web" || got.Reason != "resolved" || got.Outcome != "approved" {
+		t.Fatalf("resolution = %+v", got)
 	}
-	remote, _ := wsEventFromBusForClient(event, 0, "web-b")
-	if got := remote.Data.(PromptResolutionData); got.Origin != "web" || got.Reason != "resolved" || got.Outcome != "approved" {
-		t.Fatalf("remote resolution = %+v", got)
+	// ResolverID was historically copied from a client-controlled POST body
+	// and compared with a client-controlled WebSocket query parameter. It must
+	// not cause this or any other connection to suppress the notice.
+	for _, resolverID := range []string{"web-a", "web-b"} {
+		event.ResolverID = resolverID
+		projected, _ := wsEventFromBus(event, 0)
+		if got := projected.Data.(PromptResolutionData); got.Origin != "web" {
+			t.Fatalf("resolver %q projected origin %q, want web", resolverID, got.Origin)
+		}
 	}
-	cancelled, _ := wsEventFromBusForClient(bus.AskUserResolved{ID: "a1", Origin: "system", Reason: "cancelled"}, 0, "web-b")
+	cancelled, _ := wsEventFromBus(bus.AskUserResolved{ID: "a1", Origin: "system", Reason: "cancelled"}, 0)
 	if got := cancelled.Data.(PromptResolutionData); got.Origin != "system" || got.Reason != "cancelled" {
 		t.Fatalf("cancelled resolution = %+v", got)
 	}
