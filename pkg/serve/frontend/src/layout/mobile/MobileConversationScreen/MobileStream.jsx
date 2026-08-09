@@ -173,6 +173,7 @@ export function MobileStream({ session, blocks = [], lead = null, tail = null, o
     session?.streamingText,
     session?.thinkingText,
     session?.historyPending,
+    session?.resolvedPromptNotice?.id,
     liveToolTailLen,
   ]);
 

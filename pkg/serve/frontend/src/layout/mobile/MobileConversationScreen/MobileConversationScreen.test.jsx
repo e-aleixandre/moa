@@ -22,6 +22,8 @@ mock.module('preact/hooks', () => ({
 mock.module('../../../util/sanitize.js', () => ({ sanitizeHtml(html) { return html; } }));
 
 const { MobileConversationScreen } = await import('./MobileConversationScreen.jsx');
+const { setState } = await import('../../../data/store.js');
+const { ConversationScreen } = await import('../../ConversationScreen/ConversationScreen.jsx');
 
 function componentNode(node, name) {
   if (Array.isArray(node)) {
@@ -163,4 +165,35 @@ test('the closed mobile screen mounts its sheet and an opened drawer without ren
   const cardMenu = componentNode(cardTree, 'SessionCardMenu');
   expect(() => cardMenu.type(cardMenu.props)).not.toThrow();
   expect(layoutEffects).toBeGreaterThanOrEqual(3);
+});
+
+test('a remote prompt resolution is passed to the mobile transcript tail', () => {
+  const notice = { id: 'perm-1', kind: 'permission' };
+  setState({
+    isMobile: true,
+    sessionsLoaded: true,
+    activeSession: 's1',
+    sessions: { s1: { id: 's1', title: 'Session', state: 'running', messages: [], subagents: {}, resolvedPromptNotice: notice } },
+  });
+
+  const screen = MobileConversationScreen({});
+  const stream = componentNode(screen, 'MobileStream');
+  expect(stream.props.tail.type.name).toBe('PromptResolutionNotice');
+  expect(stream.props.tail.props.notice).toBe(notice);
+});
+
+test('a remote prompt resolution is passed to the desktop transcript tail', () => {
+  const notice = { id: 'ask-1', kind: 'ask' };
+  setState({
+    isMobile: false,
+    sessionsLoaded: true,
+    focusedTile: 1,
+    tileTree: { type: 'tile', id: 1, sessionId: 's1' },
+    sessions: { s1: { id: 's1', title: 'Session', state: 'running', messages: [], subagents: {}, resolvedPromptNotice: notice } },
+  });
+
+  const screen = ConversationScreen({});
+  const stream = componentNode(screen, 'Stream');
+  expect(stream.props.tail.type.name).toBe('PromptResolutionNotice');
+  expect(stream.props.tail.props.notice).toBe(notice);
 });

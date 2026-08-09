@@ -515,6 +515,9 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
     permissionMode: data.permission_mode || 'yolo',
     pendingPerm: data.pending_permission ? { ...data.pending_permission, serverInstance } : null,
     pendingAsk: data.pending_ask ? { ...data.pending_ask, serverInstance } : null,
+    resolvedPromptNotice: data.pending_permission || data.pending_ask ? null : prev.resolvedPromptNotice || null,
+    localPermResolution: data.pending_permission?.id === prev.localPermResolution ? prev.localPermResolution : null,
+    localAskResolution: data.pending_ask?.id === prev.localAskResolution ? prev.localAskResolution : null,
     // The server's steer queue is authoritative and shared across all of this
     // session's clients. The snapshot replaces the queue; a local chip is kept
     // only if its client-minted ID is not yet in the snapshot (its POST was
@@ -1067,6 +1070,8 @@ export function handleWsAskUser(id, data) {
   const serverInstance = store.get().sessions[id]?.serverInstance || '';
   updateSession(id, {
     pendingAsk: { id: data.id, questions: data.questions, unseenGen: data.unseen_gen, serverInstance },
+    resolvedPromptNotice: null,
+    localAskResolution: null,
   });
   const state = store.get();
   if (!visibleSessionIds(state).includes(id)) {
@@ -1088,6 +1093,8 @@ export function handleWsPermissionRequest(id, data) {
       unseenGen: data.unseen_gen,
       serverInstance,
     },
+    resolvedPromptNotice: null,
+    localPermResolution: null,
   });
   flashSession(id, 'attention');
   const state = store.get();
@@ -1108,20 +1115,39 @@ function acknowledgeVisibleLiveAttention(id, runGen) {
   acknowledgeVisibleAttention(id, runGen, serverInstance).catch(() => {});
 }
 
-// Another client (or a run abort) resolved the permission — clear the modal
-// so it doesn't hang on this client. Guard by id so a newer request survives.
+// A resolution from another client replaces the active prompt with a quiet,
+// transcript-tail explanation. Local submissions set a short-lived marker so
+// their own echoed WS event retains the existing no-receipt behaviour.
 export function handleWsPermissionResolved(id, data) {
   const sess = store.get().sessions[id];
   if (!sess || !sess.pendingPerm) return;
   if (data && data.id && sess.pendingPerm.id !== data.id) return;
-  updateSession(id, { pendingPerm: null });
+  const local = sess.localPermResolution === sess.pendingPerm.id;
+  updateSession(id, {
+    pendingPerm: null,
+    localPermResolution: null,
+    resolvedPromptNotice: local ? null : {
+      id: sess.pendingPerm.id,
+      kind: 'permission',
+      outcome: data?.outcome || '',
+    },
+  });
 }
 
 export function handleWsAskResolved(id, data) {
   const sess = store.get().sessions[id];
   if (!sess || !sess.pendingAsk) return;
   if (data && data.id && sess.pendingAsk.id !== data.id) return;
-  updateSession(id, { pendingAsk: null });
+  const local = sess.localAskResolution === sess.pendingAsk.id;
+  updateSession(id, {
+    pendingAsk: null,
+    localAskResolution: null,
+    resolvedPromptNotice: local ? null : {
+      id: sess.pendingAsk.id,
+      kind: 'ask',
+      outcome: data?.outcome || '',
+    },
+  });
 }
 
 function flashSession(id, type) {

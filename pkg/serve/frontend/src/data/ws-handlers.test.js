@@ -136,14 +136,45 @@ test('an unbounded or unarrived init never acknowledges', async () => {
   expect(store.get().sessions.s1.unseen).toBe(true);
 });
 
-test('pending prompt badges come from pending state and clear on resolution', () => {
+test('remote prompt resolutions replace the prompt with a presentational notice without touching unread state', () => {
   seedSession('s1');
-  setState({ isMobile: true, activeSession: 's1' });
+  setState({ isMobile: true, activeSession: 's1', sessions: {
+    s1: { id: 's1', messages: [], subagents: {}, unseen: true, unseenGen: 7 },
+  } });
+
+  handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {}, unseen_gen: 7 });
+  handleWsPermissionResolved('s1', { id: 'perm-1', outcome: 'approved' });
+  expect(store.get().sessions.s1).toMatchObject({
+    pendingPerm: null,
+    resolvedPromptNotice: { id: 'perm-1', kind: 'permission', outcome: 'approved' },
+    unseen: true,
+    unseenGen: 7,
+  });
+
   handleWsAskUser('s1', { id: 'ask-1', questions: [], unseen_gen: 7 });
   expect(store.get().sessions.s1).toMatchObject({ pendingAsk: { id: 'ask-1' } });
-  expect(store.get().sessions.s1.unseen).not.toBe(true);
+  expect(store.get().sessions.s1.resolvedPromptNotice).toBeNull();
+  handleWsAskResolved('s1', { id: 'ask-1', outcome: 'answered' });
+  expect(store.get().sessions.s1).toMatchObject({
+    pendingAsk: null,
+    resolvedPromptNotice: { id: 'ask-1', kind: 'ask', outcome: 'answered' },
+    unseen: true,
+    unseenGen: 7,
+  });
+});
+
+test('locally resolving a prompt does not leave a remote-resolution notice', () => {
+  seedSession('s1');
+  setState({ isMobile: true, activeSession: 's1' });
+  handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {} });
+  setState({ sessions: { s1: { ...store.get().sessions.s1, localPermResolution: 'perm-1' } } });
+  handleWsPermissionResolved('s1', { id: 'perm-1' });
+  expect(store.get().sessions.s1).toMatchObject({ pendingPerm: null, resolvedPromptNotice: null });
+
+  handleWsAskUser('s1', { id: 'ask-1', questions: [] });
+  setState({ sessions: { s1: { ...store.get().sessions.s1, localAskResolution: 'ask-1' } } });
   handleWsAskResolved('s1', { id: 'ask-1' });
-  expect(store.get().sessions.s1.pendingAsk).toBeNull();
+  expect(store.get().sessions.s1).toMatchObject({ pendingAsk: null, resolvedPromptNotice: null });
 });
 
 test('delta init appends while preserving the cached prefix array and rows', () => {

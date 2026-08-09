@@ -182,6 +182,7 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
     session?.streamingText,
     session?.thinkingText,
     session?.historyPending,
+    session?.resolvedPromptNotice?.id,
     liveToolTailLen,
   ]);
 
