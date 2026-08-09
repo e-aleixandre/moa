@@ -113,6 +113,126 @@ test('loadSessions accepts a namespace from a different server process', async (
   });
 });
 
+test('an older roster response is fully ignored after a newer process namespace is applied', async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  let resolveOlderRoster;
+  let rosterCalls = 0;
+  class TestWebSocket {
+    constructor() { TestWebSocket.instances.push(this); }
+    close() { this.closeCount = (this.closeCount || 0) + 1; this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  globalThis.fetch = (path) => {
+    if (String(path).includes('/read?')) return Promise.resolve(new Response('', { status: 204 }));
+    rosterCalls += 1;
+    if (rosterCalls === 1) return new Promise(resolve => { resolveOlderRoster = resolve; });
+    return Promise.resolve(new Response(JSON.stringify([{
+      id: 's3', title: 'S3 from B', state: 'idle', provider: 'openai', cwd: '/z',
+      server_instance: 'server-b', attention_namespace: 'server-b:1', unseen: true, unseen_seq: 7,
+    }]), { status: 200 }));
+  };
+  setState({
+    sessions: { s3: {
+      id: 's3', state: 'idle', provider: 'openai', cwd: '/z', subagents: {}, messages: [],
+      attentionNamespace: 'server-a:1', serverInstance: 'server-a', unseen: true, unseenSeq: 9,
+      ackedThroughSeq: 5, readCandidateSeq: 5,
+    } },
+    activeSession: 's3', isMobile: true,
+  });
+
+  try {
+    syncConnections(['s3']);
+    const oldSocket = TestWebSocket.instances[0];
+    const older = loadSessions();
+    await Promise.resolve();
+    await loadSessions();
+
+    const socketB = TestWebSocket.instances[1];
+    expect(oldSocket.closeCount).toBe(1);
+    expect(store.get().sessions.s3).toMatchObject({
+      title: 'S3 from B', attentionNamespace: 'server-b:1', unseenSeq: 7,
+      ackedThroughSeq: 0, readCandidateSeq: 0,
+    });
+
+    resolveOlderRoster(new Response(JSON.stringify([{
+      id: 's3', title: 'S3 from A', state: 'idle', provider: 'openai', cwd: '/z',
+      server_instance: 'server-a', attention_namespace: 'server-a:1', unseen: false, unseen_seq: 0,
+    }]), { status: 200 }));
+    await older;
+
+    expect(TestWebSocket.instances).toHaveLength(2);
+    expect(socketB.closeCount || 0).toBe(0);
+    expect(store.get().sessions.s3).toMatchObject({
+      title: 'S3 from B', attentionNamespace: 'server-b:1', unseen: true, unseenSeq: 7,
+      ackedThroughSeq: 0, readCandidateSeq: 0,
+    });
+  } finally {
+    syncConnections([]);
+    globalThis.WebSocket = originalWebSocket;
+    if (originalLocation === undefined) delete globalThis.location;
+    else globalThis.location = originalLocation;
+    setState({ isMobile: false });
+  }
+});
+
+test('a restart roster converges on its new socket and resumes acknowledgement', async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  const reads = [];
+  class TestWebSocket {
+    constructor() { TestWebSocket.instances.push(this); }
+    close() { this.closeCount = (this.closeCount || 0) + 1; this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  globalThis.fetch = (path) => {
+    if (String(path).includes('/read?')) {
+      reads.push(path);
+      return Promise.resolve(new Response('', { status: 204 }));
+    }
+    return Promise.resolve(new Response(JSON.stringify([{
+      id: 's3', title: 'S3', state: 'idle', provider: 'openai', cwd: '/z',
+      server_instance: 'server-b', attention_namespace: 'server-b:1', unseen: true, unseen_seq: 7,
+    }]), { status: 200 }));
+  };
+  setState({
+    sessions: { s3: {
+      id: 's3', state: 'idle', provider: 'openai', cwd: '/z', subagents: {}, messages: [],
+      attentionNamespace: 'server-a:1', serverInstance: 'server-a', unseen: true, unseenSeq: 9,
+      ackedThroughSeq: 5, readCandidateSeq: 5,
+    } },
+    activeSession: 's3', isMobile: true,
+  });
+
+  try {
+    syncConnections(['s3']);
+    await loadSessions();
+    const socketB = TestWebSocket.instances[1];
+    socketB.onmessage({ data: JSON.stringify({ type: 'init', data: {
+      messages: [], subagents: [], state: 'idle', server_instance: 'server-b',
+      attention_namespace: 'server-b:1', last_seq: 7,
+    } }) });
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(socketB.closeCount || 0).toBe(0);
+    expect(store.get().sessions.s3).toMatchObject({
+      attentionNamespace: 'server-b:1', unseen: false, unseenSeq: 7,
+      ackedThroughSeq: 7, readCandidateSeq: 7,
+    });
+    expect(reads).toEqual(['/api/sessions/s3/read?through_seq=7&attention_namespace=server-b%3A1']);
+  } finally {
+    syncConnections([]);
+    globalThis.WebSocket = originalWebSocket;
+    if (originalLocation === undefined) delete globalThis.location;
+    else globalThis.location = originalLocation;
+    setState({ isMobile: false });
+  }
+});
+
 test('a late frame from a superseded attention incarnation cannot acknowledge the new cursor', async () => {
   const originalWebSocket = globalThis.WebSocket;
   const originalLocation = globalThis.location;

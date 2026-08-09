@@ -12,6 +12,8 @@ import { allSessionIds, clearSession } from './tileTree.js';
 import { attentionArrival, forgetAttentionArrival, retainAttentionArrivals } from './attention-arrivals.js';
 
 let pollTimer = null;
+let nextRosterRequest = 0;
+let lastAppliedRosterRequest = 0;
 
 // newSteerId mints a client-side stable ID for an optimistic steer chip. The
 // same ID is sent to the server and echoed back on the Steered event, so the
@@ -44,8 +46,14 @@ function samePolledSession(existing, next) {
 }
 
 export async function loadSessions() {
+  const request = ++nextRosterRequest;
   try {
     const list = await api('GET', '/api/sessions');
+    // Polls are allowed to overlap. Once a newer response has updated the
+    // roster, an older snapshot is stale in every field, including the
+    // process-scoped attention namespace.
+    if (request < lastAppliedRosterRequest) return;
+    lastAppliedRosterRequest = request;
     // Read the store AFTER the round-trip: WS handlers may have updated
     // sessions while the request was in flight, and rebuilding from a
     // pre-await snapshot would silently revert those (lost messages, perms).
