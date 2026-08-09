@@ -4,24 +4,18 @@
 // the /api/sessions response doesn't carry — in particular the OpenAI usage
 // percents, which have no poller to restore them (regression: they flickered
 // away every poll tick).
-import { test, expect, beforeEach, mock } from 'bun:test';
+import { test, expect, beforeEach } from 'bun:test';
 
-// Mock only the network call, keeping api.js's other exports intact (other
-// modules transitively import syncConnections/reconnectAll/etc. from it).
 let apiResponse = [];
-const realApi = await import('./api.js');
-mock.module('./api.js', () => ({
-  ...realApi,
-  api: async () => apiResponse,
-}));
 
 const { store, setState } = await import('./store.js');
-const { syncConnections } = realApi;
+const { syncConnections } = await import('./api.js');
 const { loadSessions, openPersistedSubagent, openBashJob, sendMessage } = await import('./session-actions.js');
 const { handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
 
 beforeEach(() => {
   apiResponse = [];
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify(apiResponse), { status: 200 }));
   setState({ sessions: {}, tileTree: null, activeSession: null });
 });
 

@@ -59,6 +59,8 @@ export async function loadSessions() {
       const existing = prev[info.id];
 		const cursorTransition = attentionNamespaceTransition(existing, info.attention_namespace || '');
 		const staleCursorRoster = !!existing && !!info.attention_namespace && !cursorTransition.accepted;
+		const sameCursorNamespace = !!existing && !!info.attention_namespace && !cursorTransition.reset
+			&& cursorTransition.namespace === info.attention_namespace;
 		const serverRestarted = !!existing?.serverInstance && !!info.server_instance
 			&& existing.serverInstance !== info.server_instance;
 		// /api/sessions is a snapshot taken before its response reaches us. Once
@@ -67,16 +69,22 @@ export async function loadSessions() {
 		// different server namespace) remains a genuinely new occurrence.
 		const pollGeneration = info.unseen_gen || 0;
 		const pollUnseenSeq = info.unseen_seq || 0;
-		const staleAcknowledgedOccurrence = !!info.attention_namespace && !!info.unseen && !cursorTransition.reset && !staleCursorRoster && !!existing &&
-			(cursorTransition.namespace === (info.attention_namespace || '')
-				? pollUnseenSeq <= (existing.ackedThroughSeq || 0)
-				: false);
+		const localUnseenSeq = existing ? existing.unseenSeq || 0 : 0;
+		const staleAcknowledgedOccurrence = sameCursorNamespace && !!info.unseen
+			&& pollUnseenSeq <= (existing.ackedThroughSeq || 0);
 		const legacyStaleAcknowledgedOccurrence = !info.attention_namespace && !!info.unseen && !serverRestarted && !!existing &&
 			existing.lastAckedUnseenInstance === (info.server_instance || '') &&
 			(existing.lastAckedUnseenGen || 0) >= pollGeneration;
-		const polledUnseen = staleCursorRoster
+		const rosterCursorOlderThanLocal = sameCursorNamespace && pollUnseenSeq < localUnseenSeq;
+		// A roster snapshot can arrive behind a live WS occurrence. Within one
+		// namespace it may only advance the occurrence high-water; an older
+		// snapshot must also leave the newer local dot untouched.
+		const polledUnseen = staleCursorRoster || rosterCursorOlderThanLocal
 			? !!existing.unseen
 			: !!info.unseen && !staleAcknowledgedOccurrence && !legacyStaleAcknowledgedOccurrence;
+		const polledUnseenSeq = sameCursorNamespace
+			? Math.max(localUnseenSeq, pollUnseenSeq)
+			: pollUnseenSeq;
       // A visible session has a live WS connection that owns its live-tracked
       // fields (state, config, context, plan). This poll response may already
       // be stale relative to WS events that arrived while the request was in
@@ -194,10 +202,10 @@ export async function loadSessions() {
         planMode: wsOwns ? existing.planMode : (info.plan_mode || (existing ? existing.planMode : 'off')),
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
         costUSD: wsOwns ? existing.costUSD : (info.cost_usd ?? (existing ? existing.costUSD : 0)),
-        unseen: polledUnseen,
-        unseenGen: pollGeneration,
+		unseen: polledUnseen,
+		unseenGen: pollGeneration,
 		attentionNamespace: cursorTransition.namespace,
-		unseenSeq: cursorTransition.reset ? pollUnseenSeq : staleCursorRoster ? (existing.unseenSeq || 0) : pollUnseenSeq,
+		unseenSeq: cursorTransition.reset ? pollUnseenSeq : staleCursorRoster ? (existing.unseenSeq || 0) : polledUnseenSeq,
 		ackedThroughSeq: cursorTransition.reset ? 0 : (existing ? existing.ackedThroughSeq || 0 : 0),
 		// Only an authoritative WS init proves a rendered transcript boundary.
 		// A roster response, including a fresh incarnation, must never set this.

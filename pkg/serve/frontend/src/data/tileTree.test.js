@@ -2,9 +2,8 @@
 //
 // Covers the pane-grid engine: the pure snap math (snapToRatio), the binary
 // split-tree operations (swapSessions), and the store-backed tile actions
-// (applyPreset / splitTile / closeTile). api.js is mocked so the actions'
-// syncConnections side effect doesn't touch the network.
-import { test, expect, describe, beforeEach, mock } from 'bun:test';
+// (applyPreset / splitTile / closeTile).
+import { test, expect, describe, beforeEach } from 'bun:test';
 
 import { snapToRatio, SNAPS } from './snap.js';
 import {
@@ -97,10 +96,6 @@ describe('presetTree / treeShape', () => {
 });
 
 // --- Store-backed tile actions ---
-// Mock api.js (syncConnections is called by afterVisibilityChange). Keep the
-// other exports intact so the module graph still resolves.
-const realApi = await import('./api.js');
-mock.module('./api.js', () => ({ ...realApi, syncConnections: () => {} }));
 
 const { store, setState } = await import('./store.js');
 const {

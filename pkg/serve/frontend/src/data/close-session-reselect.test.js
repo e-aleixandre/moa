@@ -5,14 +5,7 @@
 // store (as `saved`), so the app-level effect that re-fills on a session-COUNT
 // change never fired — the mobile screen showed "No open sessions" while the
 // drawer, reading the store directly, still listed three active ones.
-import { test, expect, beforeEach, mock } from 'bun:test';
-
-const realApi = await import('./api.js');
-mock.module('./api.js', () => ({
-  ...realApi,
-  api: async () => ({}),
-  syncConnections: () => {},
-}));
+import { test, expect, beforeEach } from 'bun:test';
 
 const { store, setState } = await import('./store.js');
 const { createTile, initIds, allSessionIds } = await import('./tileTree.js');
@@ -37,7 +30,10 @@ function seed(isMobile) {
   return tile;
 }
 
-beforeEach(() => setState({ sessions: {}, activeSession: null, isMobile: false }));
+beforeEach(() => {
+  globalThis.fetch = () => Promise.resolve(new Response('{}', { status: 200 }));
+  setState({ sessions: {}, activeSession: null, isMobile: false });
+});
 
 test('closing the active session on mobile selects the next open one', async () => {
   seed(true);

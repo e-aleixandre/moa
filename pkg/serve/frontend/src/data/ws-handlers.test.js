@@ -6,6 +6,7 @@ import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTermina
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
 import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
+import { loadSessions } from './session-actions.js';
 
 function seedSession(id) {
   setState({ sessions: { [id]: { id, messages: [], subagents: {} } } });
@@ -94,19 +95,39 @@ test('a hidden tab never acknowledges a confirmed init cursor', async () => {
   }
 });
 
-test('an init acknowledgement cannot clear a newer cursor occurrence', async () => {
+test('an init acknowledgement cannot clear a newer cursor occurrence after a stale roster response', async () => {
+  const reads = [];
+  let resolveRead;
+  globalThis.fetch = (path) => {
+    if (path.startsWith('/api/sessions/cursor-newer/read?')) {
+      reads.push(path);
+      return new Promise(resolve => { resolveRead = resolve; });
+    }
+    if (path === '/api/sessions') {
+      return Promise.resolve(new Response(JSON.stringify([{
+        id: 'cursor-newer', title: 'Cursor newer', state: 'idle', provider: 'openai', cwd: '/x',
+        server_instance: 'server-a', attention_namespace: 'server-a:1', unseen: true, unseen_seq: 100,
+      }]), { status: 200 }));
+    }
+    return Promise.resolve(new Response('', { status: 204 }));
+  };
   setState({
     isMobile: true, activeSession: 'cursor-newer',
     sessions: { 'cursor-newer': {
-      id: 'cursor-newer', attentionNamespace: 'server-a:1', serverInstance: 'server-a', messages: [], subagents: {},
+      id: 'cursor-newer', unseen: true, unseenSeq: 100,
+      attentionNamespace: 'server-a:1', serverInstance: 'server-a', messages: [], subagents: {},
     } },
   });
   foreground(() => handleWsInit('cursor-newer', {
     messages: [], subagents: [], server_instance: 'server-a', attention_namespace: 'server-a:1', last_seq: 100,
   }));
-  await settleAcknowledgement();
+  await Promise.resolve();
+  expect(reads).toEqual(['/api/sessions/cursor-newer/read?through_seq=100&attention_namespace=server-a%3A1']);
   setState({ activeSession: null });
   handleWsRunEnd('cursor-newer', { text: 'new result' }, 101);
+  await loadSessions();
+  resolveRead(new Response('', { status: 204 }));
+  await settleAcknowledgement();
   expect(store.get().sessions['cursor-newer']).toMatchObject({ unseen: true, unseenSeq: 101, ackedThroughSeq: 100 });
 });
 
