@@ -158,8 +158,53 @@ test('a late frame from a superseded attention incarnation cannot acknowledge th
 
     expect(store.get().sessions.s3).toMatchObject({
       attentionNamespace: 'server-a:2', unseen: false, unseenSeq: 0, ackedThroughSeq: 0,
+      state: 'idle', pendingPerm: null,
     });
     expect(reads).toEqual([]);
+  } finally {
+    syncConnections([]);
+    globalThis.WebSocket = originalWebSocket;
+    if (originalLocation === undefined) delete globalThis.location;
+    else globalThis.location = originalLocation;
+    setState({ isMobile: false });
+  }
+});
+
+test('a newer socket init adopts its incarnation before the roster catches up', () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  class TestWebSocket {
+    constructor() { TestWebSocket.instances.push(this); }
+    close() { this.closeCount = (this.closeCount || 0) + 1; this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  setState({
+    sessions: { s3: {
+      id: 's3', state: 'idle', provider: 'openai', cwd: '/z', subagents: {}, messages: [],
+      attentionNamespace: 'server-a:1', serverInstance: 'server-a', unseen: true, unseenSeq: 9,
+      ackedThroughSeq: 9, readCandidateSeq: 9,
+    } },
+    activeSession: null, isMobile: true,
+  });
+
+  try {
+    syncConnections(['s3']);
+    const socket = TestWebSocket.instances[0];
+    socket.onmessage({ data: JSON.stringify({
+      type: 'init', data: {
+        messages: [], subagents: [], state: 'idle', server_instance: 'server-a',
+        attention_namespace: 'server-a:2', last_seq: 4,
+      },
+    }) });
+
+    expect(socket.closeCount || 0).toBe(0);
+    expect(TestWebSocket.instances).toHaveLength(1);
+    expect(store.get().sessions.s3).toMatchObject({
+      attentionNamespace: 'server-a:2', unseen: false, unseenSeq: 0,
+      ackedThroughSeq: 0, readCandidateSeq: 4,
+    });
   } finally {
     syncConnections([]);
     globalThis.WebSocket = originalWebSocket;

@@ -439,6 +439,27 @@ export function attentionNamespaceTransition(session, namespace) {
   return { accepted: false, reset: false, namespace: current };
 }
 
+// Apply an accepted socket namespace transition before its init or frames use
+// the cursor. An init is fresher than the roster, but follows the same ordered
+// incarnation rule.
+export function adoptAttentionNamespace(id, namespace) {
+  const session = store.get().sessions[id];
+  const transition = attentionNamespaceTransition(session, namespace);
+  if (!transition.accepted) return transition;
+  if (transition.reset) {
+    updateSession(id, {
+      attentionNamespace: transition.namespace,
+      unseen: false,
+      unseenSeq: 0,
+      ackedThroughSeq: 0,
+      readCandidateSeq: 0,
+    });
+  } else if (session?.attentionNamespace !== transition.namespace) {
+    updateSession(id, { attentionNamespace: transition.namespace });
+  }
+  return transition;
+}
+
 // mergeSteers reconciles the authoritative server queue from an init snapshot
 // with any local optimistic chips. The snapshot (each item carrying its
 // client-minted ID) is authoritative. A local chip is kept only if it is still
@@ -484,8 +505,8 @@ export function handleWsInit(id, data) {
   // init snapshot lists live jobs only, so replacing the map outright would
   // delete the very transcript being read and bounce the reader back to the
   // parent — which is what happens on mobile every time the screen sleeps.
+  const cursorTransition = adoptAttentionNamespace(id, data.attention_namespace || '');
   const prev = store.get().sessions[id] || {};
-  const cursorTransition = attentionNamespaceTransition(prev, data.attention_namespace || '');
   const serverInstance = data.server_instance || prev.serverInstance || '';
   const viewing = prev.viewingSubagent;
   const keptLocal = viewing && prev.subagents && prev.subagents[viewing]
@@ -519,14 +540,6 @@ export function handleWsInit(id, data) {
   }
   updateSession(id, {
     serverInstance,
-		// Cursor state is reset as one unit only when the ordered namespace moves
-		// forward. A stale init is still useful for its transcript fields, but it
-		// must not roll attention state back from a newer runtime incarnation.
-		attentionNamespace: cursorTransition.namespace,
-		unseen: cursorTransition.reset ? false : prev.unseen,
-		unseenSeq: cursorTransition.reset ? 0 : (prev.unseenSeq || 0),
-		ackedThroughSeq: cursorTransition.reset ? 0 : (prev.ackedThroughSeq || 0),
-		readCandidateSeq: cursorTransition.reset ? 0 : (prev.readCandidateSeq || 0),
     messages,
     historyTruncated: !!data.history_truncated,
     state: data.state || 'idle',

@@ -21,6 +21,7 @@ import {
   handleWsRunTokens,
   handleWsAutoVerifyStart, handleWsAutoVerifyEnd, handleWsRateLimit,
   handleWsCompactionStart, handleWsCompactionEnd,
+  attentionNamespaceTransition, adoptAttentionNamespace,
 } from './ws-handlers.js';
 import { store, updateSession } from './store.js';
 import {
@@ -269,11 +270,15 @@ function openWs(sessionId, initialBackoff) {
     const evt = JSON.parse(e.data);
     if (evt.type === 'init') {
       const namespace = evt.data?.attention_namespace || '';
-      const currentNamespace = store.get().sessions[sessionId]?.attentionNamespace || '';
-      if (namespace && currentNamespace && namespace !== currentNamespace) {
+      const namespaceTransition = attentionNamespaceTransition(store.get().sessions[sessionId], namespace);
+      if (namespace && !namespaceTransition.accepted) {
         ws.close();
         return;
       }
+      // An init is newer evidence than the roster. Adopt a newer incarnation
+      // before any retry path can close this socket, resetting its cursor just
+      // as loadSessions would; only an older incarnation is rejected above.
+      adoptAttentionNamespace(sessionId, namespace);
       // A server only emits delta_base after validating its tree path, but a
       // client may have evicted or locally rewritten that prefix. Never append
       // a suffix to a different transcript: retry once without a resume token.
@@ -293,11 +298,14 @@ function openWs(sessionId, initialBackoff) {
     // A socket's init stamps every later frame with the runtime incarnation
     // that emitted it. Never let an old socket's bus sequence be interpreted
     // against a cursor namespace adopted from a newer roster snapshot.
-    const currentNamespace = store.get().sessions[sessionId]?.attentionNamespace || '';
-    if (entry.attentionNamespace && currentNamespace && entry.attentionNamespace !== currentNamespace) {
+    const namespaceTransition = attentionNamespaceTransition(
+      store.get().sessions[sessionId], entry.attentionNamespace,
+    );
+    if (entry.attentionNamespace && !namespaceTransition.accepted) {
       ws.close();
       return;
     }
+    adoptAttentionNamespace(sessionId, entry.attentionNamespace);
     // Bus sequences intentionally retain ordinary numeric ordering here. A
     // uint64 wrap cannot occur in a plausible server-process lifetime, and
     // JSON Numbers lose integer precision far before it, so a modular client
