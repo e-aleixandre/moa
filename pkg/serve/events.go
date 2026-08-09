@@ -75,13 +75,10 @@ type InitData struct {
 	InitMetrics *InitMetrics `json:"init_metrics,omitempty"`
 }
 
-// PromptResolutionData explains a prompt's terminal transition.
+// PromptResolutionData identifies a prompt that is no longer pending.
 type PromptResolutionData struct {
-	ID      string `json:"id"`
-	Kind    string `json:"kind"`
-	Origin  string `json:"origin"`
-	Reason  string `json:"reason"`
-	Outcome string `json:"outcome,omitempty"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
 }
 
 // InitMetrics attributes the server side of a reconnect snapshot. PayloadBytes

@@ -416,7 +416,6 @@ func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if err := m.runtime.Bus.Execute(bus.ResolveAskUser{
 				AskID:   m.askPrompt.askID,
 				Answers: m.askPrompt.CollectAnswers(),
-				Origin:  "tui",
 			}); err != nil {
 				m.askPrompt.active = true
 				m.askPrompt.current = len(m.askPrompt.questions) - 1
@@ -446,7 +445,6 @@ func (m appModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := m.runtime.Bus.Execute(bus.ResolveAskUser{
 			AskID:   askID,
 			Answers: emptyAnswers,
-			Origin:  "tui",
 		}); err != nil {
 			if !errors.Is(err, bus.ErrNoHandler) {
 				m.askPrompt.active = true
@@ -518,7 +516,6 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				Approved:     opt.approved,
 				Feedback:     strings.TrimSpace(m.permPrompt.amendBuf),
 				AllowPattern: opt.allow,
-				Origin:       "tui",
 			}); err != nil {
 				m.s.pendingStatus = "✗ " + err.Error()
 				return m, nil
@@ -568,7 +565,6 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			Approved:     opt.approved,
 			Feedback:     strings.TrimSpace(m.permPrompt.amendBuf),
 			AllowPattern: opt.allow,
-			Origin:       "tui",
 		}); err != nil {
 			m.s.pendingStatus = "✗ " + err.Error()
 			return m, nil
@@ -589,7 +585,6 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := m.runtime.Bus.Execute(bus.ResolvePermission{
 			PermissionID: m.permPrompt.permID,
 			Approved:     false,
-			Origin:       "tui",
 		}); err != nil {
 			m.s.pendingStatus = "✗ " + err.Error()
 			return m, nil
@@ -614,7 +609,6 @@ func (m appModel) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					PermissionID: m.permPrompt.permID,
 					Approved:     opt.approved,
 					AllowPattern: opt.allow,
-					Origin:       "tui",
 				}); err != nil {
 					m.s.pendingStatus = "✗ " + err.Error()
 					return m, nil

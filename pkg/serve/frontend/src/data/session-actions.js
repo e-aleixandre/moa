@@ -130,8 +130,8 @@ export async function loadSessions() {
         permissionMode: wsOwns ? existing.permissionMode : (info.permission_mode || (existing ? existing.permissionMode : 'yolo')),
         pendingPerm: existing ? existing.pendingPerm : null,
         pendingAsk: existing ? existing.pendingAsk : null,
-        // A remote resolution leaves a client-only transcript-tail explanation.
-        // The roster does not carry this display state, so polling must not
+        // A resolution leaves a client-only transcript-tail notice. The roster
+        // does not carry this display state, so polling must not
         // erase it before the user can read it.
         resolvedPromptNotice: existing ? existing.resolvedPromptNotice : null,
         pendingSteers: existing ? existing.pendingSteers : null,
@@ -751,9 +751,7 @@ export async function addPermissionRule(sessionId, permId, rule) {
 }
 
 export async function resolveAskUser(sessionId, askId, answers) {
-  await api('POST', `/api/sessions/${sessionId}/ask`, {
-    id: askId, answers,
-  });
+  await api('POST', `/api/sessions/${sessionId}/ask`, { id: askId, answers });
   updateSession(sessionId, { pendingAsk: null });
 }
 

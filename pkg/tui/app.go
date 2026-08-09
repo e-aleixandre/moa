@@ -1852,7 +1852,7 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 	case bus.PermissionResolved:
 		if m.permPrompt.active && m.permPrompt.permID == e.ID {
 			m.permPrompt.Cancel()
-			m.status.SetText(promptResolutionStatus("permission", e.Origin, e.Reason, e.Outcome))
+			m.status.SetText(promptResolutionStatus())
 		}
 
 	// --- Ask user ---
@@ -1862,7 +1862,7 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 	case bus.AskUserResolved:
 		if m.askPrompt.active && m.askPrompt.askID == e.ID {
 			m.askPrompt.Cancel()
-			m.status.SetText(promptResolutionStatus("ask", e.Origin, e.Reason, e.Outcome))
+			m.status.SetText(promptResolutionStatus())
 		}
 
 	// --- Config ---
@@ -2026,34 +2026,8 @@ func (m *appModel) handleAskUserRequested(e bus.AskUserRequested) []tea.Cmd {
 	return cmds
 }
 
-func promptResolutionStatus(kind, origin, reason, outcome string) string {
-	switch reason {
-	case "cancelled":
-		return "⊘ request closed because the run was cancelled"
-	case "aborted":
-		return "⊘ request closed because the run was aborted"
-	}
-	switch origin {
-	case "web":
-		if kind == "permission" {
-			if outcome == "approved" {
-				return "✓ permission approved from the web"
-			}
-			if outcome == "denied" {
-				return "✗ permission denied from the web"
-			}
-		}
-		if kind == "ask" && outcome == "answered" {
-			return "✓ request answered from the web"
-		}
-		return "ℹ request resolved from the web"
-	case "tui":
-		return "ℹ request resolved in the terminal"
-	case "automation":
-		return "ℹ request resolved by automation"
-	default:
-		return "ℹ request resolved elsewhere"
-	}
+func promptResolutionStatus() string {
+	return "This request is no longer pending."
 }
 
 func (m *appModel) handlePlanModeChanged(e bus.PlanModeChanged) []tea.Cmd {

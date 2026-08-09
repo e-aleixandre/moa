@@ -19,8 +19,8 @@ function componentNode(node, name) {
   return componentNode(node.props?.children, name);
 }
 
-test('pane grid renders the server-provided resolution notice in its transcript tail', () => {
-  const notice = { id: 'ask-1', kind: 'ask', origin: 'tui', reason: 'resolved', outcome: 'answered' };
+test('pane grid renders the generic resolution notice in its transcript tail', () => {
+  const notice = { id: 'ask-1', kind: 'ask' };
   const pane = ConnectedPane({
     node: { id: 1, sessionId: 's1' }, tileIndex: 0, onSecret() {},
     state: { focusedTile: 1, sessions: { s1: { id: 's1', title: 'Session', state: 'idle', messages: [], subagents: {}, resolvedPromptNotice: notice } } },
@@ -29,5 +29,5 @@ test('pane grid renders the server-provided resolution notice in its transcript 
   expect(stream.props.tail.type.name).toBe('PromptResolutionNotice');
   expect(stream.props.tail.props.notice).toBe(notice);
   const rendered = stream.props.tail.type(stream.props.tail.props);
-  expect(rendered.props.children[1].props.children).toBe('This request was resolved in the terminal.');
+  expect(rendered.props.children[1].props.children).toBe('This request is no longer pending.');
 });

@@ -21,6 +21,7 @@ const { loadSessions, openPersistedSubagent, openBashJob, sendMessage } = await 
 const { handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
 
 beforeEach(() => {
+  apiResponse = [];
   setState({ sessions: {}, tileTree: null, activeSession: null });
 });
 

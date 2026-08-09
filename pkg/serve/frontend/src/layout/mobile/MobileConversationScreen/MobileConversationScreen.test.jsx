@@ -167,8 +167,8 @@ test('the closed mobile screen mounts its sheet and an opened drawer without ren
   expect(layoutEffects).toBeGreaterThanOrEqual(3);
 });
 
-test('a remote prompt resolution renders in the mobile transcript tail', () => {
-  const notice = { id: 'perm-1', kind: 'permission', origin: 'web', reason: 'resolved', outcome: 'approved' };
+test('a resolved permission renders a generic notice in the mobile transcript tail', () => {
+  const notice = { id: 'perm-1', kind: 'permission' };
   setState({
     isMobile: true,
     sessionsLoaded: true,
@@ -181,11 +181,11 @@ test('a remote prompt resolution renders in the mobile transcript tail', () => {
   expect(stream.props.tail.type.name).toBe('PromptResolutionNotice');
   expect(stream.props.tail.props.notice).toBe(notice);
   const rendered = stream.props.tail.type(stream.props.tail.props);
-  expect(rendered.props.children[1].props.children).toBe('This permission was approved in another client.');
+  expect(rendered.props.children[1].props.children).toBe('This request is no longer pending.');
 });
 
-test('a remote prompt resolution renders in the desktop transcript tail', () => {
-  const notice = { id: 'ask-1', kind: 'ask', origin: 'web', reason: 'resolved', outcome: 'answered' };
+test('a resolved ask renders a generic notice in the desktop transcript tail', () => {
+  const notice = { id: 'ask-1', kind: 'ask' };
   setState({
     isMobile: false,
     sessionsLoaded: true,
@@ -199,5 +199,5 @@ test('a remote prompt resolution renders in the desktop transcript tail', () => 
   expect(stream.props.tail.type.name).toBe('PromptResolutionNotice');
   expect(stream.props.tail.props.notice).toBe(notice);
   const rendered = stream.props.tail.type(stream.props.tail.props);
-  expect(rendered.props.children[1].props.children).toBe('This request was answered in another client.');
+  expect(rendered.props.children[1].props.children).toBe('This request is no longer pending.');
 });

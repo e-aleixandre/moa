@@ -515,9 +515,7 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
     permissionMode: data.permission_mode || 'yolo',
     pendingPerm: data.pending_permission ? { ...data.pending_permission, serverInstance } : null,
     pendingAsk: data.pending_ask ? { ...data.pending_ask, serverInstance } : null,
-    resolvedPromptNotice: data.pending_permission || data.pending_ask
-      ? null
-      : (data.resolved_prompt || prev.resolvedPromptNotice || null),
+    resolvedPromptNotice: resolvedPromptNoticeFromInit(id, data, prev),
     // The server's steer queue is authoritative and shared across all of this
     // session's clients. The snapshot replaces the queue; a local chip is kept
     // only if its client-minted ID is not yet in the snapshot (its POST was
@@ -1115,30 +1113,39 @@ function acknowledgeVisibleLiveAttention(id, runGen) {
 
 export function handleWsPermissionResolved(id, data) {
   const sess = store.get().sessions[id];
-  if (!sess || !sess.pendingPerm) return;
-  if (data && data.id && sess.pendingPerm.id !== data.id) return;
+  if (!sess) return;
+  const promptID = data?.id || sess.pendingPerm?.id;
+  if (!promptID) return;
+  if (sess.pendingPerm && sess.pendingPerm.id !== promptID) return;
+  if (!sess.pendingPerm) return;
   updateSession(id, {
     pendingPerm: null,
-    resolvedPromptNotice: {
-      id: data?.id || sess.pendingPerm.id,
-      kind: data?.kind || 'permission', origin: data?.origin || 'unknown',
-      reason: data?.reason || 'no_longer_pending', outcome: data?.outcome || '',
-    },
+    resolvedPromptNotice: promptResolutionNotice(promptID, 'permission'),
   });
 }
 
 export function handleWsAskResolved(id, data) {
   const sess = store.get().sessions[id];
-  if (!sess || !sess.pendingAsk) return;
-  if (data && data.id && sess.pendingAsk.id !== data.id) return;
+  if (!sess) return;
+  const promptID = data?.id || sess.pendingAsk?.id;
+  if (!promptID) return;
+  if (sess.pendingAsk && sess.pendingAsk.id !== promptID) return;
+  if (!sess.pendingAsk) return;
   updateSession(id, {
     pendingAsk: null,
-    resolvedPromptNotice: {
-      id: data?.id || sess.pendingAsk.id,
-      kind: data?.kind || 'ask', origin: data?.origin || 'unknown',
-      reason: data?.reason || 'no_longer_pending', outcome: data?.outcome || '',
-    },
+    resolvedPromptNotice: promptResolutionNotice(promptID, 'ask'),
   });
+}
+
+function promptResolutionNotice(id, kind) {
+  return { id, kind };
+}
+
+function resolvedPromptNoticeFromInit(id, data, prev) {
+  if (data.pending_permission || data.pending_ask || !data.resolved_prompt) {
+    return data.pending_permission || data.pending_ask ? null : (prev.resolvedPromptNotice || null);
+  }
+  return promptResolutionNotice(data.resolved_prompt.id, data.resolved_prompt.kind);
 }
 
 function flashSession(id, type) {

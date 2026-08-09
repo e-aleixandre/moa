@@ -136,17 +136,17 @@ test('an unbounded or unarrived init never acknowledges', async () => {
   expect(store.get().sessions.s1.unseen).toBe(true);
 });
 
-test('remote prompt resolutions replace the prompt with a presentational notice without touching unread state', () => {
+test('prompt resolutions leave a generic presentational notice without touching unread state', () => {
   seedSession('s1');
   setState({ isMobile: true, activeSession: 's1', sessions: {
     s1: { id: 's1', messages: [], subagents: {}, unseen: true, unseenGen: 7 },
   } });
 
   handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {}, unseen_gen: 7 });
-  handleWsPermissionResolved('s1', { id: 'perm-1', kind: 'permission', origin: 'web', reason: 'resolved', outcome: 'approved' });
+  handleWsPermissionResolved('s1', { id: 'perm-1' });
   expect(store.get().sessions.s1).toMatchObject({
     pendingPerm: null,
-    resolvedPromptNotice: { id: 'perm-1', kind: 'permission', origin: 'web', reason: 'resolved', outcome: 'approved' },
+    resolvedPromptNotice: { id: 'perm-1', kind: 'permission' },
     unseen: true,
     unseenGen: 7,
   });
@@ -154,69 +154,49 @@ test('remote prompt resolutions replace the prompt with a presentational notice 
   handleWsAskUser('s1', { id: 'ask-1', questions: [], unseen_gen: 7 });
   expect(store.get().sessions.s1).toMatchObject({ pendingAsk: { id: 'ask-1' } });
   expect(store.get().sessions.s1.resolvedPromptNotice).toBeNull();
-  handleWsAskResolved('s1', { id: 'ask-1', kind: 'ask', origin: 'web', reason: 'resolved', outcome: 'answered' });
+  handleWsAskResolved('s1', { id: 'ask-1' });
   expect(store.get().sessions.s1).toMatchObject({
     pendingAsk: null,
-    resolvedPromptNotice: { id: 'ask-1', kind: 'ask', origin: 'web', reason: 'resolved', outcome: 'answered' },
+    resolvedPromptNotice: { id: 'ask-1', kind: 'ask' },
     unseen: true,
     unseenGen: 7,
   });
 });
 
-test('web resolutions always retain their server attribution', () => {
-  seedSession('s1');
-  setState({ isMobile: true, activeSession: 's1' });
-  handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {} });
-  handleWsPermissionResolved('s1', { id: 'perm-1', origin: 'web', reason: 'resolved', outcome: 'approved' });
-  expect(store.get().sessions.s1).toMatchObject({
-    pendingPerm: null,
-    resolvedPromptNotice: { id: 'perm-1', kind: 'permission', origin: 'web', reason: 'resolved', outcome: 'approved' },
-  });
-
-  handleWsAskUser('s1', { id: 'ask-1', questions: [] });
-  handleWsAskResolved('s1', { id: 'ask-1', origin: 'web', reason: 'resolved', outcome: 'answered' });
-  expect(store.get().sessions.s1).toMatchObject({
-    pendingAsk: null,
-    resolvedPromptNotice: { id: 'ask-1', kind: 'ask', origin: 'web', reason: 'resolved', outcome: 'answered' },
-  });
-});
-
-test('init restores a server-recorded resolution when a disconnected client lost the event', () => {
+test('init restores a generic notice when a disconnected client lost the resolution', () => {
   seedSession('s1');
   setState({ isMobile: true, activeSession: 's1' });
   handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {} });
   handleWsInit('s1', {
     messages: [], subagents: [], server_instance: 'instance-a',
-    resolved_prompt: { id: 'perm-1', kind: 'permission', origin: 'tui', reason: 'resolved', outcome: 'approved' },
+    resolved_prompt: { id: 'perm-1', kind: 'permission' },
   });
   expect(store.get().sessions.s1).toMatchObject({
     pendingPerm: null,
-    resolvedPromptNotice: { id: 'perm-1', kind: 'permission', origin: 'tui', reason: 'resolved', outcome: 'approved' },
+    resolvedPromptNotice: { id: 'perm-1', kind: 'permission' },
   });
 });
 
-test('a remote resolution wins a stalled local POST without client-side attribution state', () => {
+test('a resolved prompt never carries attribution metadata', () => {
   seedSession('s1');
   setState({ isMobile: true, activeSession: 's1' });
   handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {} });
-  // The request may be in flight locally, but no intent marker is stored. The
-  // server's event remains the sole authority when another client wins first.
-  handleWsPermissionResolved('s1', { id: 'perm-1', kind: 'permission', origin: 'web', reason: 'resolved', outcome: 'denied' });
+  handleWsPermissionResolved('s1', { id: 'perm-1' });
   expect(store.get().sessions.s1).toMatchObject({
     pendingPerm: null,
-    resolvedPromptNotice: { id: 'perm-1', kind: 'permission', origin: 'web', reason: 'resolved', outcome: 'denied' },
+    resolvedPromptNotice: { id: 'perm-1', kind: 'permission' },
   });
   expect(store.get().sessions.s1.localPermResolution).toBeUndefined();
 });
 
-test('a cancelled run is explained as cancellation, not another client', () => {
+test('cancelled and aborted prompts use the same generic notice', () => {
   seedSession('s1');
   setState({ isMobile: true, activeSession: 's1' });
-  handleWsAskUser('s1', { id: 'ask-1', questions: [] });
-  handleWsAskResolved('s1', { id: 'ask-1', kind: 'ask', origin: 'system', reason: 'cancelled' });
-  expect(store.get().sessions.s1.resolvedPromptNotice).toMatchObject({
-    id: 'ask-1', origin: 'system', reason: 'cancelled',
-  });
+  for (const id of ['cancelled', 'aborted']) {
+    handleWsAskUser('s1', { id, questions: [] });
+    handleWsAskResolved('s1', { id });
+    expect(store.get().sessions.s1.resolvedPromptNotice).toEqual({ id, kind: 'ask' });
+  }
 });
 
 test('delta init appends while preserving the cached prefix array and rows', () => {

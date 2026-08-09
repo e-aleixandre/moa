@@ -310,13 +310,13 @@ func wsEventFromBusForClient(event any, attentionGen uint64) (Event, bool) {
 			AllowPattern: e.AllowPattern,
 		}}, true
 	case bus.PermissionResolved:
-		return Event{Type: "permission_resolved", Data: promptResolutionData(e.ID, "permission", e.Origin, e.Reason, e.Outcome)}, true
+		return Event{Type: "permission_resolved", Data: PromptResolutionData{ID: e.ID, Kind: "permission"}}, true
 	case bus.AskUserRequested:
 		return Event{Type: "ask_user", Data: map[string]any{
 			"id": e.ID, "run_gen": e.RunGen, "unseen_gen": attentionGen, "questions": e.Questions,
 		}}, true
 	case bus.AskUserResolved:
-		return Event{Type: "ask_resolved", Data: promptResolutionData(e.ID, "ask", e.Origin, e.Reason, e.Outcome)}, true
+		return Event{Type: "ask_resolved", Data: PromptResolutionData{ID: e.ID, Kind: "ask"}}, true
 	case bus.SubagentCountChanged:
 		return Event{Type: "subagent_count", Data: SubagentCountData{Count: e.Count}}, true
 	case bus.SubagentCompleted:
@@ -382,10 +382,6 @@ func wsEventFromBusForClient(event any, attentionGen uint64) (Event, bool) {
 	default:
 		return Event{}, false
 	}
-}
-
-func promptResolutionData(id, kind, origin, reason, outcome string) PromptResolutionData {
-	return PromptResolutionData{ID: id, Kind: kind, Origin: origin, Reason: reason, Outcome: outcome}
 }
 
 // projectWSMessageCustom is a second transport boundary for callers that
@@ -641,7 +637,7 @@ func buildInitDataForPromptCandidates(sess *ManagedSession, streaming bus.Stream
 	}
 
 	data.PendingPermission, data.PendingAsk = pendingAttentionData(pending, unseenGen)
-	data.ResolvedPrompt = reconnectPromptResolution(b, pending, permissionID, askID)
+	data.ResolvedPrompt = reconnectPromptResolution(pending, permissionID, askID)
 	if planInfo.Mode != "off" {
 		data.PlanMode = planInfo.Mode
 		data.PlanFile = planInfo.PlanFile
@@ -658,7 +654,7 @@ func buildInitDataForPromptCandidates(sess *ManagedSession, streaming bus.Stream
 	return data
 }
 
-func reconnectPromptResolution(b bus.EventBus, pending bus.PendingApprovalInfo, permissionID, askID string) *PromptResolutionData {
+func reconnectPromptResolution(pending bus.PendingApprovalInfo, permissionID, askID string) *PromptResolutionData {
 	for _, candidate := range []struct{ id, kind string }{{permissionID, "permission"}, {askID, "ask"}} {
 		if candidate.id == "" {
 			continue
@@ -669,12 +665,7 @@ func reconnectPromptResolution(b bus.EventBus, pending bus.PendingApprovalInfo, 
 		if candidate.kind == "ask" && pending.Ask != nil && pending.Ask.ID == candidate.id {
 			continue
 		}
-		resolution, _ := bus.QueryTyped[bus.GetPromptResolution, bus.PromptResolutionInfo](b, bus.GetPromptResolution{ID: candidate.id})
-		if resolution.ID != "" {
-			data := promptResolutionData(resolution.ID, resolution.Kind, resolution.Origin, resolution.Reason, resolution.Outcome)
-			return &data
-		}
-		return &PromptResolutionData{ID: candidate.id, Kind: candidate.kind, Origin: "unknown", Reason: "no_longer_pending"}
+		return &PromptResolutionData{ID: candidate.id, Kind: candidate.kind}
 	}
 	return nil
 }

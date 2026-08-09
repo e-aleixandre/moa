@@ -34,11 +34,9 @@ var (
 // pattern is therefore safe — the send always succeeds because the buffer
 // guarantees space for exactly one response (the contract).
 type ApprovalManager struct {
-	mu                    sync.Mutex
-	perms                 map[string]*PendingPermission
-	asks                  map[string]*PendingAsk
-	permissionResolutions map[string]PromptResolutionInfo
-	askResolutions        map[string]PromptResolutionInfo
+	mu    sync.Mutex
+	perms map[string]*PendingPermission
+	asks  map[string]*PendingAsk
 
 	permBridgeCancel context.CancelFunc // nil when no perm bridge running
 	askBridgeCancel  context.CancelFunc // nil when no ask bridge running
@@ -94,27 +92,14 @@ type PendingAsk struct {
 	resolved  bool
 }
 
-// PromptResolutionInfo records the server-known cause of a prompt leaving the
-// pending set. It is kept only for reconnect snapshots, never persisted.
-type PromptResolutionInfo struct {
-	ID         string
-	Kind       string
-	Origin     string
-	ResolverID string
-	Reason     string
-	Outcome    string
-}
-
 // NewApprovalManager creates an ApprovalManager.
 func NewApprovalManager(bus EventBus, state *StateMachine, sid string) *ApprovalManager {
 	return &ApprovalManager{
-		perms:                 make(map[string]*PendingPermission),
-		asks:                  make(map[string]*PendingAsk),
-		permissionResolutions: make(map[string]PromptResolutionInfo),
-		askResolutions:        make(map[string]PromptResolutionInfo),
-		bus:                   bus,
-		state:                 state,
-		sid:                   sid,
+		perms: make(map[string]*PendingPermission),
+		asks:  make(map[string]*PendingAsk),
+		bus:   bus,
+		state: state,
+		sid:   sid,
 	}
 }
 
@@ -180,10 +165,12 @@ func (am *ApprovalManager) StopPermissionBridge() {
 	}
 	// Collect pending responses to send outside lock.
 	var pendingResponses []chan<- permission.Response
+	var pendingIDs []string
 	for id, p := range am.perms {
 		if !p.resolved {
 			p.resolved = true
 			pendingResponses = append(pendingResponses, p.response)
+			pendingIDs = append(pendingIDs, id)
 		}
 		delete(am.perms, id)
 	}
@@ -196,6 +183,9 @@ func (am *ApprovalManager) StopPermissionBridge() {
 		default:
 		}
 	}
+	for _, id := range pendingIDs {
+		am.bus.Publish(PermissionResolved{SessionID: am.sid, ID: id})
+	}
 
 	// Transition back from permission if we were there.
 	if am.state != nil && am.state.Current() == StatePermission {
@@ -204,7 +194,7 @@ func (am *ApprovalManager) StopPermissionBridge() {
 }
 
 // ResolvePermission resolves a pending permission request.
-func (am *ApprovalManager) ResolvePermission(id string, approved bool, feedback, allow string, resolutions ...PromptResolutionInfo) error {
+func (am *ApprovalManager) ResolvePermission(id string, approved bool, feedback, allow string) error {
 	am.mu.Lock()
 	p, ok := am.perms[id]
 	if !ok {
@@ -218,8 +208,6 @@ func (am *ApprovalManager) ResolvePermission(id string, approved bool, feedback,
 	p.resolved = true
 	resp := p.response
 	delete(am.perms, id)
-	resolution := resolutionInfo(id, "permission", approved, resolutions...)
-	am.setResolutionLocked(resolution)
 	am.mu.Unlock()
 
 	// Send response outside lock. Channel is buffered(1) — guaranteed to succeed.
@@ -236,7 +224,7 @@ func (am *ApprovalManager) ResolvePermission(id string, approved bool, feedback,
 	if am.state.Current() == StatePermission {
 		_ = am.state.Transition(StateRunning)
 	}
-	am.bus.Publish(PermissionResolved{SessionID: am.sid, ID: id, Origin: resolution.Origin, ResolverID: resolution.ResolverID, Reason: resolution.Reason, Outcome: resolution.Outcome})
+	am.bus.Publish(PermissionResolved{SessionID: am.sid, ID: id})
 	return nil
 }
 
@@ -284,8 +272,6 @@ func (am *ApprovalManager) ResolvePermissionExact(snapshot PermissionDecisionSna
 	p.resolved = true
 	resp := p.response
 	delete(am.perms, p.ID)
-	resolution := resolutionInfo(p.ID, "permission", approved, PromptResolutionInfo{Origin: "automation"})
-	am.setResolutionLocked(resolution)
 	am.mu.Unlock()
 
 	select {
@@ -296,7 +282,7 @@ func (am *ApprovalManager) ResolvePermissionExact(snapshot PermissionDecisionSna
 	if am.state.Current() == StatePermission {
 		_ = am.state.Transition(StateRunning)
 	}
-	am.bus.Publish(PermissionResolved{SessionID: am.sid, ID: p.ID, Origin: resolution.Origin, ResolverID: resolution.ResolverID, Reason: resolution.Reason, Outcome: resolution.Outcome})
+	am.bus.Publish(PermissionResolved{SessionID: am.sid, ID: p.ID})
 	return nil
 }
 
@@ -401,7 +387,7 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 }
 
 // ResolveAskUser resolves a pending ask_user request.
-func (am *ApprovalManager) ResolveAskUser(id string, answers []string, resolutions ...PromptResolutionInfo) error {
+func (am *ApprovalManager) ResolveAskUser(id string, answers []string) error {
 	am.mu.Lock()
 	p, ok := am.asks[id]
 	if !ok {
@@ -419,8 +405,6 @@ func (am *ApprovalManager) ResolveAskUser(id string, answers []string, resolutio
 	p.resolved = true
 	resp := p.response
 	delete(am.asks, id)
-	resolution := resolutionInfo(id, "ask", false, resolutions...)
-	am.setResolutionLocked(resolution)
 	am.mu.Unlock()
 
 	// Send response outside lock. Channel is buffered(1).
@@ -434,7 +418,7 @@ func (am *ApprovalManager) ResolveAskUser(id string, answers []string, resolutio
 	if am.state != nil && am.state.Current() == StatePermission {
 		_ = am.state.Transition(StateRunning)
 	}
-	am.bus.Publish(AskUserResolved{SessionID: am.sid, ID: id, Origin: resolution.Origin, ResolverID: resolution.ResolverID, Reason: resolution.Reason, Outcome: resolution.Outcome})
+	am.bus.Publish(AskUserResolved{SessionID: am.sid, ID: id})
 	return nil
 }
 
@@ -448,11 +432,7 @@ func (am *ApprovalManager) ResolveAskUser(id string, answers []string, resolutio
 // earlier one (RunGen <= gen) are cleared: if the user immediately re-sent a
 // prompt, a newer run may already have a live approval, and a delayed RunEnded
 // of the old run must not auto-deny it.
-func (am *ApprovalManager) ClearPending(gen uint64, reasons ...string) {
-	reason := "aborted"
-	if len(reasons) > 0 && reasons[0] != "" {
-		reason = reasons[0]
-	}
+func (am *ApprovalManager) ClearPending(gen uint64) {
 	am.mu.Lock()
 	var permResponses []chan<- permission.Response
 	var permIDs []string
@@ -466,7 +446,6 @@ func (am *ApprovalManager) ClearPending(gen uint64, reasons ...string) {
 			permIDs = append(permIDs, id)
 		}
 		delete(am.perms, id)
-		am.setResolutionLocked(PromptResolutionInfo{ID: id, Kind: "permission", Origin: "system", Reason: reason, Outcome: "denied"})
 	}
 	var askResponses []chan<- []string
 	var askIDs []string
@@ -480,7 +459,6 @@ func (am *ApprovalManager) ClearPending(gen uint64, reasons ...string) {
 			askIDs = append(askIDs, id)
 		}
 		delete(am.asks, id)
-		am.setResolutionLocked(PromptResolutionInfo{ID: id, Kind: "ask", Origin: "system", Reason: reason})
 	}
 	am.mu.Unlock()
 
@@ -499,39 +477,11 @@ func (am *ApprovalManager) ClearPending(gen uint64, reasons ...string) {
 		}
 	}
 	for _, id := range permIDs {
-		resolution := am.ResolutionInfo(id)
-		am.bus.Publish(PermissionResolved{SessionID: am.sid, ID: id, Origin: resolution.Origin, ResolverID: resolution.ResolverID, Reason: resolution.Reason, Outcome: resolution.Outcome})
+		am.bus.Publish(PermissionResolved{SessionID: am.sid, ID: id})
 	}
 	for _, id := range askIDs {
-		resolution := am.ResolutionInfo(id)
-		am.bus.Publish(AskUserResolved{SessionID: am.sid, ID: id, Origin: resolution.Origin, ResolverID: resolution.ResolverID, Reason: resolution.Reason, Outcome: resolution.Outcome})
+		am.bus.Publish(AskUserResolved{SessionID: am.sid, ID: id})
 	}
-}
-
-func resolutionInfo(id, kind string, approved bool, resolutions ...PromptResolutionInfo) PromptResolutionInfo {
-	info := PromptResolutionInfo{ID: id, Kind: kind, Origin: "unknown", Reason: "resolved"}
-	if kind == "permission" {
-		if approved {
-			info.Outcome = "approved"
-		} else {
-			info.Outcome = "denied"
-		}
-	} else {
-		info.Outcome = "answered"
-	}
-	if len(resolutions) > 0 {
-		provided := resolutions[0]
-		if provided.Origin != "" {
-			info.Origin = provided.Origin
-		}
-		if provided.ResolverID != "" {
-			info.ResolverID = provided.ResolverID
-		}
-		if provided.Reason != "" {
-			info.Reason = provided.Reason
-		}
-	}
-	return info
 }
 
 // ---------------------------------------------------------------------------
@@ -584,28 +534,6 @@ func (am *ApprovalManager) PendingInfo() PendingApprovalInfo {
 		}
 	}
 	return info
-}
-
-// ResolutionInfo returns the process-local record explaining why a prompt
-// stopped being pending. It is used solely by reconnect snapshots.
-func (am *ApprovalManager) ResolutionInfo(id string) PromptResolutionInfo {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-	if resolution, ok := am.permissionResolutions[id]; ok {
-		return resolution
-	}
-	if resolution, ok := am.askResolutions[id]; ok {
-		return resolution
-	}
-	return PromptResolutionInfo{}
-}
-
-func (am *ApprovalManager) setResolutionLocked(info PromptResolutionInfo) {
-	if info.Kind == "permission" {
-		am.permissionResolutions[info.ID] = info
-		return
-	}
-	am.askResolutions[info.ID] = info
 }
 
 // ---------------------------------------------------------------------------

@@ -327,8 +327,6 @@ type ResolvePermission struct {
 	Approved     bool
 	Feedback     string
 	AllowPattern string
-	Origin       string
-	ResolverID   string
 }
 
 // ResolvePermissionExact resolves a reviewed one-off permission only when the
@@ -352,9 +350,7 @@ type AddPermissionRule struct {
 
 // ResolveAskUser resolves a pending ask_user prompt.
 type ResolveAskUser struct {
-	SessionID  string
-	AskID      string
-	Answers    []string
-	Origin     string
-	ResolverID string
+	SessionID string
+	AskID     string
+	Answers   []string
 }

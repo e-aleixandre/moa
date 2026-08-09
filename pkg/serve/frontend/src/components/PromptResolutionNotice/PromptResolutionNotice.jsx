@@ -2,19 +2,7 @@ import { Info } from "lucide-preact";
 import "./PromptResolutionNotice.css";
 
 export function promptResolutionText(notice) {
-  if (notice?.reason === "cancelled") return "This request was closed because the run was cancelled.";
-  if (notice?.reason === "aborted") return "This request was closed because the run was aborted.";
-  if (notice?.reason === "no_longer_pending") return "This request is no longer pending.";
-  if (notice?.origin === "tui") return "This request was resolved in the terminal.";
-  if (notice?.origin === "automation") return "This request was resolved by automation.";
-  if (notice?.kind === "permission") {
-    if (notice.outcome === "approved") return "This permission was approved in another client.";
-    if (notice.outcome === "denied") return "This permission was denied in another client.";
-  }
-  if (notice?.kind === "ask" && notice.outcome === "answered") {
-    return "This request was answered in another client.";
-  }
-  return "This request was resolved elsewhere.";
+  return notice ? "This request is no longer pending." : "";
 }
 
 // PromptResolutionNotice is deliberately transcript-only: it explains why a

@@ -579,7 +579,6 @@ func handlePermissionDecision(mgr *Manager) http.HandlerFunc {
 			Approved:     body.Approved,
 			Feedback:     body.Feedback,
 			AllowPattern: body.Allow,
-			Origin:       "web",
 		}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -604,9 +603,7 @@ func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{
-			AskID: body.ID, Answers: body.Answers, Origin: "web",
-		}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: body.ID, Answers: body.Answers}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

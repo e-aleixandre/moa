@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -84,7 +85,7 @@ func TestApprovalManager_ResolvePermission(t *testing.T) {
 	gotResolved := make(chan PermissionResolved, 1)
 	b.Subscribe(func(e PermissionResolved) { gotResolved <- e })
 
-	err := am.ResolvePermission("p1", true, "ok", "write(*)", PromptResolutionInfo{Origin: "web", ResolverID: "web-a"})
+	err := am.ResolvePermission("p1", true, "ok", "write(*)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestApprovalManager_ResolvePermission(t *testing.T) {
 	b.Drain(time.Second)
 	select {
 	case e := <-gotResolved:
-		if e.ID != "p1" || e.Origin != "web" || e.ResolverID != "web-a" || e.Reason != "resolved" || e.Outcome != "approved" {
+		if e.ID != "p1" {
 			t.Fatalf("resolution event = %+v", e)
 		}
 	case <-time.After(time.Second):
@@ -154,8 +155,8 @@ func TestApprovalManager_ResolvePermission_UnknownID(t *testing.T) {
 	}
 }
 
-func TestApprovalManager_StopBridge_AutoDenies(t *testing.T) {
-	am, _ := newTestApprovalManager(t)
+func TestApprovalManager_StopBridge_AutoDeniesAndResolves(t *testing.T) {
+	am, b := newTestApprovalManager(t)
 
 	respCh := make(chan permission.Response, 1)
 	am.mu.Lock()
@@ -165,6 +166,8 @@ func TestApprovalManager_StopBridge_AutoDenies(t *testing.T) {
 	am.mu.Unlock()
 
 	am.state.ForceState(StatePermission)
+	resolved := make(chan PermissionResolved, 1)
+	b.Subscribe(func(e PermissionResolved) { resolved <- e })
 
 	am.StopPermissionBridge()
 
@@ -176,6 +179,14 @@ func TestApprovalManager_StopBridge_AutoDenies(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout — agent blocked forever")
+	}
+	select {
+	case event := <-resolved:
+		if event.ID != "p1" {
+			t.Fatalf("resolved ID = %q, want p1", event.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for PermissionResolved")
 	}
 
 	// State should transition back to running.
@@ -199,7 +210,7 @@ func TestApprovalManager_ClearPending_AutoDeniesAndResolves(t *testing.T) {
 	b.Subscribe(func(e PermissionResolved) { gotPermResolved <- e })
 	b.Subscribe(func(e AskUserResolved) { gotAskResolved <- e })
 
-	am.ClearPending(1, "cancelled")
+	am.ClearPending(1)
 
 	// Both pending requests must be auto-denied so the agent goroutines unblock.
 	select {
@@ -222,7 +233,7 @@ func TestApprovalManager_ClearPending_AutoDeniesAndResolves(t *testing.T) {
 	// Resolved events must fire so reconnecting clients clear the modal.
 	select {
 	case e := <-gotPermResolved:
-		if e.Origin != "system" || e.Reason != "cancelled" || e.Outcome != "denied" {
+		if e.ID != "p1" {
 			t.Fatalf("permission cancellation = %+v", e)
 		}
 	case <-time.After(time.Second):
@@ -230,7 +241,7 @@ func TestApprovalManager_ClearPending_AutoDeniesAndResolves(t *testing.T) {
 	}
 	select {
 	case e := <-gotAskResolved:
-		if e.Origin != "system" || e.Reason != "cancelled" {
+		if e.ID != "a1" {
 			t.Fatalf("ask cancellation = %+v", e)
 		}
 	case <-time.After(time.Second):
@@ -243,7 +254,7 @@ func TestApprovalManager_ClearPending_AutoDeniesAndResolves(t *testing.T) {
 	}
 }
 
-func TestApprovalManager_ClearPending_PreservesResolutionForEveryPrompt(t *testing.T) {
+func TestApprovalManager_ClearPending_PublishesEveryPrompt(t *testing.T) {
 	am, b := newTestApprovalManager(t)
 
 	am.mu.Lock()
@@ -260,16 +271,13 @@ func TestApprovalManager_ClearPending_PreservesResolutionForEveryPrompt(t *testi
 	b.Subscribe(func(e PermissionResolved) { permissions <- e })
 	b.Subscribe(func(e AskUserResolved) { asks <- e })
 
-	am.ClearPending(1, "aborted")
+	am.ClearPending(1)
 
 	for range 2 {
 		select {
 		case event := <-permissions:
-			if event.Origin != "system" || event.Reason != "aborted" || event.Outcome != "denied" {
+			if event.ID == "" {
 				t.Fatalf("permission resolution = %+v", event)
-			}
-			if got := am.ResolutionInfo(event.ID); got != (PromptResolutionInfo{ID: event.ID, Kind: "permission", Origin: "system", Reason: "aborted", Outcome: "denied"}) {
-				t.Fatalf("permission %q resolution = %+v", event.ID, got)
 			}
 		case <-time.After(time.Second):
 			t.Fatal("missing permission resolution")
@@ -278,15 +286,44 @@ func TestApprovalManager_ClearPending_PreservesResolutionForEveryPrompt(t *testi
 	for range 2 {
 		select {
 		case event := <-asks:
-			if event.Origin != "system" || event.Reason != "aborted" {
+			if event.ID == "" {
 				t.Fatalf("ask resolution = %+v", event)
-			}
-			if got := am.ResolutionInfo(event.ID); got != (PromptResolutionInfo{ID: event.ID, Kind: "ask", Origin: "system", Reason: "aborted"}) {
-				t.Fatalf("ask %q resolution = %+v", event.ID, got)
 			}
 		case <-time.After(time.Second):
 			t.Fatal("missing ask resolution")
 		}
+	}
+}
+
+func TestApprovalManager_ClearPendingPublishesEveryPromptBeyondFormerRetentionBound(t *testing.T) {
+	am, b := newTestApprovalManager(t)
+	const prompts = 72
+	am.mu.Lock()
+	for i := range prompts {
+		id := fmt.Sprintf("p%d", i)
+		am.perms[id] = &PendingPermission{ID: id, ToolName: "write", RunGen: 1, response: make(chan permission.Response, 1)}
+	}
+	am.mu.Unlock()
+
+	resolved := make(chan PermissionResolved, prompts)
+	b.Subscribe(func(e PermissionResolved) { resolved <- e })
+	am.ClearPending(1)
+	b.Drain(time.Second)
+
+	seen := make(map[string]bool, prompts)
+	for range prompts {
+		select {
+		case event := <-resolved:
+			if event.ID == "" {
+				t.Fatalf("resolution = %+v", event)
+			}
+			seen[event.ID] = true
+		case <-time.After(time.Second):
+			t.Fatal("missing resolved event")
+		}
+	}
+	if len(seen) != prompts {
+		t.Fatalf("resolved %d prompts, want %d", len(seen), prompts)
 	}
 }
 
