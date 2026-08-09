@@ -106,6 +106,31 @@ test('repeated acknowledgements converge on one fenced occurrence', async () => 
   }
 });
 
+test('a confirmed newer acknowledgement clears an older local occurrence only', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response('', { status: 204 }));
+  try {
+    setState({ sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'instance-a', subagents: {} } } });
+
+    await expect(acknowledgeVisibleAttention('s1', 8, 'instance-a')).resolves.toBe(true);
+    expect(store.get().sessions.s1).toMatchObject({ unseen: false, lastAckedUnseenGen: 8 });
+
+    setState({ sessions: { s1: { ...store.get().sessions.s1, unseen: true, unseenGen: 9 } } });
+    await expect(acknowledgeVisibleAttention('s1', 8, 'instance-a')).resolves.toBe(true);
+    expect(store.get().sessions.s1).toMatchObject({ unseen: true, unseenGen: 9 });
+
+    setState({ sessions: { s1: { ...store.get().sessions.s1, unseen: true, unseenGen: 0 } } });
+    await expect(acknowledgeVisibleAttention('s1', 8, 'instance-a')).resolves.toBe(true);
+    expect(store.get().sessions.s1).toMatchObject({ unseen: false, unseenGen: 0 });
+
+    setState({ sessions: { s1: { ...store.get().sessions.s1, serverInstance: 'instance-b', unseen: true, unseenGen: 7 } } });
+    await expect(acknowledgeVisibleAttention('s1', 8, 'instance-a')).resolves.toBe(false);
+    expect(store.get().sessions.s1).toMatchObject({ unseen: true, serverInstance: 'instance-b' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('a background tab never acknowledges an occurrence', async () => {
   const originalFetch = globalThis.fetch;
   const originalDocument = globalThis.document;

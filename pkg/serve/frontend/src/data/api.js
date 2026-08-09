@@ -190,11 +190,12 @@ function acknowledgementKey(sessionId, generation, instance) {
 function commitAttentionAcknowledgement(sessionId, generation, instance) {
   const session = store.get().sessions[sessionId];
   if (!session || (instance && session.serverInstance && session.serverInstance !== instance)) return;
-  const sameOccurrence = session.unseenGen === generation;
+  const heldGeneration = session.unseenGen || 0;
   updateSession(sessionId, {
-    // A roster poll may have restored this exact occurrence while /read was in
-    // flight. Clear it only after the server accepted the fenced request.
-    unseen: (sameOccurrence || !(session.unseenGen || 0)) ? false : session.unseen,
+    // A roster poll may have restored an older occurrence while /read was in
+    // flight. The server accepted this generation's fence, so it also proved
+    // every occurrence through it read. A later generation remains lit.
+    unseen: heldGeneration <= generation ? false : session.unseen,
     lastAckedUnseenGen: Math.max(session.lastAckedUnseenGen || 0, generation),
     lastAckedUnseenInstance: instance,
   });

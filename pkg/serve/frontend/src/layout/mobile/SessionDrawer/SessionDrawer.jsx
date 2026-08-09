@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight } from "lucide-preact";
 import { SessionRow } from "../../../components/index.js";
 import { openOverlay } from "../../../data/overlay-history.js";

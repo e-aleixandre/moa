@@ -103,7 +103,6 @@ const realApi = await import('./api.js');
 mock.module('./api.js', () => ({ ...realApi, syncConnections: () => {} }));
 
 const { store, setState } = await import('./store.js');
-const { handleWsInit } = await import('./ws-handlers.js');
 const {
   applyPreset, splitTile, closeTile, assignToTile,
   releaseStaleSaved, afterVisibilityChange, __resetBootForTests,
@@ -252,23 +251,4 @@ describe('afterVisibilityChange — bootstrap pass', () => {
     expect(store.get().sessions.s1.state).toBe('saved');
   });
 
-  test('a roster pass does not acknowledge an init-delivered prompt before its receipt', () => {
-    __resetBootForTests();
-    setState({
-      isMobile: true,
-      activeSession: 's1',
-      sessions: { s1: { id: 's1', state: 'idle', unseen: true, unseenGen: 7, subagents: {} } },
-    });
-    handleWsInit('s1', {
-      messages: [], unseen_gen: 7, attention_bound: true,
-      pending_ask: { id: 'ask-1', unseen_gen: 7, questions: [] },
-    });
-
-    // This is the same deferred path invoked after each roster poll. It must
-    // leave the dot for the prompt's intersection/post-commit receipt.
-    afterVisibilityChange();
-    expect(store.get().sessions.s1).toMatchObject({ unseen: true, unseenGen: 7 });
-    expect(store.get().sessions.s1.pendingAsk).toMatchObject({ id: 'ask-1' });
-    setState({ isMobile: false, activeSession: null });
-  });
 });

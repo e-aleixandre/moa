@@ -1,6 +1,40 @@
-import { test, expect } from 'bun:test';
+import { test, expect, mock } from 'bun:test';
 import { aggregateAttention, attentionTone, mobileTitleChipPresentation, newResultSessions, nextMobileTitleRipple } from './attention-model.js';
 import { sessionDisplayDotState } from '../../../data/util/format.js';
+
+let layoutEffects = 0;
+mock.module('preact/hooks', () => ({
+  useState(initial) {
+    return [typeof initial === 'function' ? initial() : initial, () => {}];
+  },
+  useEffect() {},
+  useLayoutEffect() { layoutEffects += 1; },
+  useRef(initial) { return { current: initial }; },
+  useCallback(callback) { return callback; },
+  useMemo(factory) { return factory(); },
+  useDebugValue() {},
+  useImperativeHandle() {},
+  useContext(context) { return context?._defaultValue; },
+  useReducer(reducer, initial) { return [initial, () => {}]; },
+  useErrorBoundary() { return [undefined, () => {}]; },
+  useId() { return 'test-id'; },
+}));
+mock.module('../../../util/sanitize.js', () => ({ sanitizeHtml(html) { return html; } }));
+
+const { MobileConversationScreen } = await import('./MobileConversationScreen.jsx');
+
+function componentNode(node, name) {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = componentNode(child, name);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!node || typeof node !== 'object') return null;
+  if (node.type?.name === name) return node;
+  return componentNode(node.props?.children, name);
+}
 
 test('drawerSessions puts a running session with an unread result in New results', () => {
   const sessions = {
@@ -105,4 +139,28 @@ test('session display colours remain urgent after their attention was seen', () 
   expect(sessionDisplayDotState({ state: 'error', unseen: false })).toBe('error');
   expect(sessionDisplayDotState({ state: 'permission', unseen: false })).toBe('permission');
   expect(sessionDisplayDotState({ state: 'running', pendingAsk: { id: 'a1' }, unseen: false })).toBe('permission');
+});
+
+test('the closed mobile screen mounts its sheet and an opened drawer without render-time errors', () => {
+  // Exercise the always-mounted sheet from the screen root, then the drawer's
+  // menu-bearing rows. The hook shim is enough here because this regression is
+  // an undefined render-time binding, not an effect lifecycle behavior.
+  const screen = MobileConversationScreen({});
+  const sheet = componentNode(screen, 'MobileSheet');
+  const drawer = componentNode(screen, 'SessionDrawer');
+  expect(sheet.props.open).toBe(false);
+  expect(() => sheet.type(sheet.props)).not.toThrow();
+
+  const session = { id: 's1', title: 'Session', state: 'idle', subagents: {} };
+  let drawerTree;
+  expect(() => {
+    drawerTree = drawer.type({ ...drawer.props, open: true, active: [session], activeCount: 1 });
+  }).not.toThrow();
+  const groupMenu = componentNode(drawerTree, 'DrawerGroupMenu');
+  const card = componentNode(drawerTree, 'SessionDrawerCard');
+  expect(() => groupMenu.type(groupMenu.props)).not.toThrow();
+  const cardTree = card.type(card.props);
+  const cardMenu = componentNode(cardTree, 'SessionCardMenu');
+  expect(() => cardMenu.type(cardMenu.props)).not.toThrow();
+  expect(layoutEffects).toBeGreaterThanOrEqual(3);
 });
