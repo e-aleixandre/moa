@@ -13,6 +13,14 @@ func (m *Manager) subscribeUnreadResults(sess *ManagedSession) {
 	// bounded queue can retain it.
 	sess.attentionSeqSub = b.SubscribeAttentionSeq(
 		func(seq uint64, occurrence bus.AttentionSequenceEvent) {
+			defer func() {
+				if m.afterAttentionMark != nil {
+					m.afterAttentionMark()
+				}
+			}()
+			if m.beforeAttentionMark != nil {
+				m.beforeAttentionMark()
+			}
 			var gen uint64
 			record := true
 			switch occurrence.Kind {
@@ -23,16 +31,16 @@ func (m *Manager) subscribeUnreadResults(sess *ManagedSession) {
 					// notification/ripple for one failure.
 					gen = sess.attentionGen.Load()
 				} else if !occurrence.Cancelled && !sess.deleted.Load() {
-					gen = m.markUnseen(sess)
+					gen = m.markUnseen(sess, seq)
 				} else {
 					record = false
 				}
 			case bus.AttentionPermissionRequested:
-				gen = m.markUnseen(sess)
+				gen = m.markUnseen(sess, seq)
 			case bus.AttentionAskUserRequested:
-				gen = m.markUnseen(sess)
+				gen = m.markUnseen(sess, seq)
 			case bus.AttentionStateError:
-				gen = m.markUnseen(sess)
+				gen = m.markUnseen(sess, seq)
 			}
 			if !record {
 				return

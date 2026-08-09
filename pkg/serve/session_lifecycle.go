@@ -140,6 +140,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	sess.runtime.AttachPersister(sp)
 
 	m.mu.Lock()
+	m.initializeAttentionRuntimeLocked(sess)
 	m.sessions[sess.ID] = sess
 	m.mu.Unlock()
 	m.invalidateSavedCache()
@@ -597,13 +598,15 @@ func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInf
 }
 
 var (
-	ErrNotFound              = errors.New("session not found")
-	ErrBusy                  = errors.New("session is busy")
-	ErrInvalidCWD            = errors.New("invalid working directory")
-	ErrInvalidModel          = errors.New("invalid model")
-	ErrInvalidThinking       = errors.New("invalid thinking level")
-	ErrInvalidPermissionMode = errors.New("invalid permission mode")
-	ErrNoMCP                 = errors.New("session has no MCP servers")
+	ErrNotFound                = errors.New("session not found")
+	ErrBusy                    = errors.New("session is busy")
+	ErrInvalidCWD              = errors.New("invalid working directory")
+	ErrInvalidModel            = errors.New("invalid model")
+	ErrInvalidThinking         = errors.New("invalid thinking level")
+	ErrInvalidPermissionMode   = errors.New("invalid permission mode")
+	ErrNoMCP                   = errors.New("session has no MCP servers")
+	ErrInvalidAttentionCursor  = errors.New("invalid attention cursor")
+	ErrStaleAttentionNamespace = errors.New("stale attention namespace")
 )
 
 // Delete aborts any running agent, closes resources, and removes the session.
@@ -652,6 +655,7 @@ func (m *Manager) deleteSession(id string) error {
 		return nil
 	}
 	delete(m.sessions, id)
+	m.deactivateAttentionRuntime(sess)
 	m.mu.Unlock()
 	sess.deleted.Store(true)
 	m.forgetUnseen(id)
@@ -823,6 +827,7 @@ func (m *Manager) CloseSession(id string) error {
 	admitted := sess.runtime.DoIfQuiescent(func() {
 		sess.closing.Store(true)
 		delete(m.sessions, id)
+		m.deactivateAttentionRuntime(sess)
 		m.resuming[id] = struct{}{}
 	})
 	m.mu.Unlock()
@@ -991,11 +996,6 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 	}
 	sess.Origin = saved.Origin()
 	sess.automationCreated = automationCreatedMeta(saved.Metadata)
-	// A resumed runtime starts its run and attention counters afresh. The old
-	// process-local acknowledgement cursor must not suppress this runtime's
-	// first attention occurrence.
-	m.forgetUnseen(id)
-
 	// 3. Restore permission mode and the context limit.
 	if savedPermMode != "" {
 		if err := sess.runtime.Bus.Execute(bus.SetPermissionMode{Mode: savedPermMode}); err != nil {
@@ -1043,6 +1043,7 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 	sess.Created = saved.Created
 	m.mu.Lock()
 	delete(m.resuming, id)
+	m.initializeAttentionRuntimeLocked(sess)
 	m.sessions[id] = sess
 	m.mu.Unlock()
 	return sess, nil

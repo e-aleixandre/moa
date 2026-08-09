@@ -62,6 +62,44 @@ func TestReadSessionRejectsStaleServerInstanceFence(t *testing.T) {
 	}
 }
 
+func TestReadSessionCursorRejectsStaleNamespaceAndEmitsRosterFields(t *testing.T) {
+	ts, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer ts.Close()
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed := make(chan struct{})
+	mgr.afterAttentionMark = func() { close(processed) }
+	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "cursor-roster", RunGen: 1})
+	<-processed
+
+	stale := apiReq(t, ts, http.MethodPost, "/api/sessions/"+sess.ID+"/read?through_seq="+strconv.FormatUint(sess.runtime.Bus.LastSeq(), 10)+"&attention_namespace=old", "")
+	stale.Body.Close() //nolint:errcheck
+	if stale.StatusCode != http.StatusConflict {
+		t.Fatalf("stale cursor namespace status = %d, want %d", stale.StatusCode, http.StatusConflict)
+	}
+	if !mgr.sessionInfo(sess).Unseen {
+		t.Fatal("stale cursor namespace cleared attention")
+	}
+
+	resp := apiReq(t, ts, http.MethodGet, "/api/sessions", "")
+	defer resp.Body.Close() //nolint:errcheck
+	var list []struct {
+		ID                 string `json:"id"`
+		UnseenSeq          uint64 `json:"unseen_seq"`
+		AttentionNamespace string `json:"attention_namespace"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != sess.ID || list[0].UnseenSeq != sess.runtime.Bus.LastSeq() || list[0].AttentionNamespace != sess.attentionNamespace {
+		t.Fatalf("roster cursor fields = %+v, want seq %d namespace %q", list, sess.runtime.Bus.LastSeq(), sess.attentionNamespace)
+	}
+}
+
 func TestAttentionEndpointReturnsCrossSessionBlockingPermissionMetadata(t *testing.T) {
 	ts, mgr, cancel := newTestServer(t)
 	defer cancel()

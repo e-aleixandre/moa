@@ -1019,6 +1019,25 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 
 func handleReadSession(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if _, present := r.URL.Query()["through_seq"]; present {
+			throughSeq, err := strconv.ParseUint(r.URL.Query().Get("through_seq"), 10, 64)
+			if err != nil {
+				http.Error(w, "invalid through_seq", http.StatusBadRequest)
+				return
+			}
+			err = mgr.MarkSessionReadThrough(r.PathValue("id"), throughSeq, r.URL.Query().Get("attention_namespace"))
+			switch {
+			case errors.Is(err, ErrNotFound):
+				http.Error(w, "not found", http.StatusNotFound)
+			case errors.Is(err, ErrStaleAttentionNamespace):
+				http.Error(w, "stale attention namespace", http.StatusConflict)
+			case err != nil:
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			default:
+				w.WriteHeader(http.StatusNoContent)
+			}
+			return
+		}
 		// A successful response must mean this server accepted the occurrence.
 		// Silently accepting a stale process fence made the client believe a read
 		// had landed even though this process retained the unread marker.

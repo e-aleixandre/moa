@@ -60,6 +60,10 @@ type ManagedSession struct {
 	// runtime's process-local attention generations. It is sent with snapshots
 	// and session info so clients do not compare generations across a restart.
 	serverInstance string
+	// attentionNamespace identifies this runtime incarnation for read cursors.
+	// It changes when a saved session is resumed because bus sequence numbers
+	// begin again at zero in the new runtime.
+	attentionNamespace string
 
 	// pathPolicy is the runtime-mutable path access policy shared with the
 	// session's tools; attachments-to-disk add the session's attachment dir
@@ -241,21 +245,23 @@ type MCPSummary struct {
 
 // SessionInfo is the public representation returned by List/Get endpoints.
 type SessionInfo struct {
-	ID             string       `json:"id"`
-	Title          string       `json:"title"`
-	State          SessionState `json:"state"`
-	Model          string       `json:"model"`
-	Provider       string       `json:"provider"`
-	Thinking       string       `json:"thinking"`
-	CWD            string       `json:"cwd"`
-	Created        time.Time    `json:"created"`
-	Updated        time.Time    `json:"updated"`
-	Origin         string       `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
-	Error          string       `json:"error,omitempty"`
-	Unseen         bool         `json:"unseen"`
-	UnseenGen      uint64       `json:"unseen_gen,omitempty"`
-	ServerInstance string       `json:"server_instance"`
-	UntrustedMCP   bool         `json:"untrusted_mcp,omitempty"`
+	ID                 string       `json:"id"`
+	Title              string       `json:"title"`
+	State              SessionState `json:"state"`
+	Model              string       `json:"model"`
+	Provider           string       `json:"provider"`
+	Thinking           string       `json:"thinking"`
+	CWD                string       `json:"cwd"`
+	Created            time.Time    `json:"created"`
+	Updated            time.Time    `json:"updated"`
+	Origin             string       `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
+	Error              string       `json:"error,omitempty"`
+	Unseen             bool         `json:"unseen"`
+	UnseenGen          uint64       `json:"unseen_gen,omitempty"`
+	UnseenSeq          uint64       `json:"unseen_seq,omitempty"`
+	ServerInstance     string       `json:"server_instance"`
+	AttentionNamespace string       `json:"attention_namespace,omitempty"`
+	UntrustedMCP       bool         `json:"untrusted_mcp,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
 	// whether any is unhealthy, so the indicator can appear only when servers
 	// exist and turn red when one has failed or exited. The full per-server
@@ -447,8 +453,7 @@ func nonUserOrigin(origin string) string {
 // second, potentially divergent event tracker in ManagedSession.
 func (m *Manager) sessionInfo(s *ManagedSession) SessionInfo {
 	info := s.info()
-	info.Unseen = m.isUnseen(s.ID)
-	info.UnseenGen = m.unseenGeneration(s.ID)
+	info.Unseen, info.UnseenGen, info.UnseenSeq, info.AttentionNamespace = m.attentionState(s)
 	if m.attention == nil {
 		return info
 	}
@@ -473,9 +478,27 @@ func (m *Manager) unseenGeneration(id string) uint64 {
 	return m.unseenGen[id]
 }
 
-func (m *Manager) markUnseen(sess *ManagedSession) uint64 {
+func (m *Manager) readThroughSequence(id string) uint64 {
+	m.unseenMu.RLock()
+	defer m.unseenMu.RUnlock()
+	return m.readThroughSeq[id]
+}
+
+func (m *Manager) attentionState(sess *ManagedSession) (bool, uint64, uint64, string) {
+	m.unseenMu.RLock()
+	defer m.unseenMu.RUnlock()
+	if m.attentionRuntime[sess.ID] != sess {
+		return false, 0, 0, ""
+	}
+	return m.unseen[sess.ID], m.unseenGen[sess.ID], m.unseenSeq[sess.ID], sess.attentionNamespace
+}
+
+func (m *Manager) markUnseen(sess *ManagedSession, seq uint64) uint64 {
 	m.unseenMu.Lock()
 	defer m.unseenMu.Unlock()
+	if m.attentionRuntime[sess.ID] != sess {
+		return 0
+	}
 	if sess.deleted.Load() {
 		return 0
 	}
@@ -485,13 +508,21 @@ func (m *Manager) markUnseen(sess *ManagedSession) uint64 {
 	if m.unseenGen == nil {
 		m.unseenGen = make(map[string]uint64)
 	}
+	if m.unseenSeq == nil {
+		m.unseenSeq = make(map[string]uint64)
+	}
 	// This is an attention-occurrence generation, not the runtime's run
 	// generation. One run can request permission and later end; reading the
 	// first must never suppress the second.
 	m.attentionGen++
 	gen := m.attentionGen
-	m.unseen[sess.ID] = true
 	m.unseenGen[sess.ID] = gen
+	if seq > m.readThroughSeq[sess.ID] {
+		m.unseen[sess.ID] = true
+		if seq > m.unseenSeq[sess.ID] {
+			m.unseenSeq[sess.ID] = seq
+		}
+	}
 	sess.attentionGen.Store(gen)
 	return gen
 }
@@ -500,6 +531,8 @@ func (m *Manager) forgetUnseen(id string) {
 	m.unseenMu.Lock()
 	delete(m.unseen, id)
 	delete(m.unseenGen, id)
+	delete(m.unseenSeq, id)
+	delete(m.readThroughSeq, id)
 	m.unseenMu.Unlock()
 }
 
@@ -519,8 +552,49 @@ func (m *Manager) MarkSessionRead(id string, gen uint64, instances ...string) er
 	if gen == 0 || gen >= m.unseenGen[id] {
 		delete(m.unseen, id)
 		delete(m.unseenGen, id)
+		delete(m.unseenSeq, id)
 	}
 	m.unseenMu.Unlock()
+	return nil
+}
+
+// MarkSessionReadThrough advances a runtime's process-local bus read cursor.
+// Runtime identity, namespace, the bus sequence cap, and the cursor mutation
+// share unseenMu so a close/resume cannot redirect a request from an old
+// runtime onto its replacement.
+func (m *Manager) MarkSessionReadThrough(id string, throughSeq uint64, namespace string) error {
+	m.unseenMu.Lock()
+	defer m.unseenMu.Unlock()
+	sess := m.attentionRuntime[id]
+	if sess == nil {
+		return ErrNotFound
+	}
+	if namespace != sess.attentionNamespace {
+		return ErrStaleAttentionNamespace
+	}
+	if m.beforeReadThroughAdvance != nil {
+		m.beforeReadThroughAdvance()
+	}
+	if throughSeq > sess.runtime.Bus.LastSeq() {
+		return ErrInvalidAttentionCursor
+	}
+	if throughSeq == 0 {
+		delete(m.unseen, id)
+		delete(m.unseenGen, id)
+		delete(m.unseenSeq, id)
+		return nil
+	}
+	if throughSeq > m.readThroughSeq[id] {
+		if m.readThroughSeq == nil {
+			m.readThroughSeq = make(map[string]uint64)
+		}
+		m.readThroughSeq[id] = throughSeq
+	}
+	if m.unseenSeq[id] <= m.readThroughSeq[id] {
+		delete(m.unseen, id)
+		delete(m.unseenGen, id)
+		delete(m.unseenSeq, id)
+	}
 	return nil
 }
 
@@ -542,23 +616,27 @@ func (m *Manager) activityIndex() map[string]*attention.SessionActivity {
 
 // Manager owns all active sessions.
 type Manager struct {
-	mu                 sync.RWMutex
-	sessions           map[string]*ManagedSession
-	resuming           map[string]struct{}
-	unseenMu           sync.RWMutex
-	unseen             map[string]bool // process-local; never persisted with a session
-	unseenGen          map[string]uint64
-	attentionGen       uint64
-	attentionSeqMu     sync.Mutex
-	attentionSeq       map[attentionSequenceKey]uint64
-	attentionSeqOrder  map[*ManagedSession][]attentionSequenceKey
-	attentionSeqLatest map[*ManagedSession]uint64
-	attentionSeqPruned map[*ManagedSession]uint64
-	attentionSeqWake   chan struct{}
-	serverInstance     string
-	baseCtx            context.Context
-	secretReaperCancel context.CancelFunc
-	secretReaperDone   <-chan struct{}
+	mu                   sync.RWMutex
+	sessions             map[string]*ManagedSession
+	resuming             map[string]struct{}
+	unseenMu             sync.RWMutex
+	unseen               map[string]bool // process-local; never persisted with a session
+	unseenGen            map[string]uint64
+	unseenSeq            map[string]uint64
+	readThroughSeq       map[string]uint64
+	attentionRuntime     map[string]*ManagedSession
+	attentionIncarnation map[string]uint64
+	attentionGen         uint64
+	attentionSeqMu       sync.Mutex
+	attentionSeq         map[attentionSequenceKey]uint64
+	attentionSeqOrder    map[*ManagedSession][]attentionSequenceKey
+	attentionSeqLatest   map[*ManagedSession]uint64
+	attentionSeqPruned   map[*ManagedSession]uint64
+	attentionSeqWake     chan struct{}
+	serverInstance       string
+	baseCtx              context.Context
+	secretReaperCancel   context.CancelFunc
+	secretReaperDone     <-chan struct{}
 
 	conversationKey []byte // process-local HMAC key for read cursors
 
@@ -609,6 +687,37 @@ type Manager struct {
 	// create a session.
 	automation   *automationIndex
 	automationMu sync.Mutex
+
+	// Test hooks coordinate deterministic attention tracker and cursor races.
+	beforeAttentionMark      func()
+	afterAttentionMark       func()
+	beforeReadThroughAdvance func()
+}
+
+func (m *Manager) initializeAttentionRuntimeLocked(sess *ManagedSession) {
+	if m.attentionIncarnation == nil {
+		m.attentionIncarnation = make(map[string]uint64)
+	}
+	m.attentionIncarnation[sess.ID]++
+	sess.attentionNamespace = fmt.Sprintf("%s:%d", m.serverInstance, m.attentionIncarnation[sess.ID])
+	m.unseenMu.Lock()
+	if m.attentionRuntime == nil {
+		m.attentionRuntime = make(map[string]*ManagedSession)
+	}
+	m.attentionRuntime[sess.ID] = sess
+	delete(m.unseen, sess.ID)
+	delete(m.unseenGen, sess.ID)
+	delete(m.unseenSeq, sess.ID)
+	delete(m.readThroughSeq, sess.ID)
+	m.unseenMu.Unlock()
+}
+
+func (m *Manager) deactivateAttentionRuntime(sess *ManagedSession) {
+	m.unseenMu.Lock()
+	if m.attentionRuntime[sess.ID] == sess {
+		delete(m.attentionRuntime, sess.ID)
+	}
+	m.unseenMu.Unlock()
 }
 
 const (
@@ -1356,8 +1465,7 @@ func (m *Manager) List() []SessionInfo {
 			continue // nil placeholder during ResumeSession
 		}
 		info := s.info()
-		info.Unseen = m.isUnseen(s.ID)
-		info.UnseenGen = m.unseenGeneration(s.ID)
+		info.Unseen, info.UnseenGen, info.UnseenSeq, info.AttentionNamespace = m.attentionState(s)
 		info.Activity = activity[s.ID]
 		list = append(list, info)
 	}

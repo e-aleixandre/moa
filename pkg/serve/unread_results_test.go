@@ -3,6 +3,8 @@ package serve
 import (
 	"context"
 	"errors"
+	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -365,6 +367,202 @@ func TestMarkSessionReadScopesGenerationToServerInstance(t *testing.T) {
 	}
 	if mgr.sessionInfo(sess).Unseen {
 		t.Fatal("matching server instance did not clear unseen attention")
+	}
+}
+
+func TestReadThroughDoesNotClearNewerAttention(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(simpleResponseHandler("done")), t.TempDir())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed := make(chan struct{})
+	mgr.afterAttentionMark = func() { close(processed) }
+
+	for i := 0; i < 10; i++ {
+		sess.runtime.Bus.Publish(bus.TextDelta{SessionID: sess.ID, Delta: "x"})
+	}
+	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "seq-11"})
+	<-processed
+
+	if err := mgr.MarkSessionReadThrough(sess.ID, 10, sess.attentionNamespace); err != nil {
+		t.Fatal(err)
+	}
+	info := mgr.sessionInfo(sess)
+	if !info.Unseen || info.UnseenSeq != 11 {
+		t.Fatalf("read through seq 10 left attention = (unseen:%v seq:%d), want (true, 11)", info.Unseen, info.UnseenSeq)
+	}
+}
+
+func TestReadThroughBeforeTrackerSuppressesOccurrence(t *testing.T) {
+	ts, mgr, cancel := newTestServerWithRoot(t, t.TempDir())
+	defer cancel()
+	defer ts.Close()
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	processed := make(chan struct{})
+	mgr.afterAttentionMark = func() { close(processed) }
+	mgr.beforeAttentionMark = func() {
+		close(entered)
+		<-release
+	}
+	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "delayed"})
+	<-entered
+	seq := sess.runtime.Bus.LastSeq()
+	resp := apiReq(t, ts, http.MethodPost, "/api/sessions/"+sess.ID+"/read?through_seq="+strconv.FormatUint(seq, 10)+"&attention_namespace="+sess.attentionNamespace, "")
+	resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("read through status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+	close(release)
+	<-processed
+
+	info := mgr.sessionInfo(sess)
+	if info.Unseen || info.UnseenSeq != 0 {
+		t.Fatalf("attention after prior read = (unseen:%v seq:%d), want cleared", info.Unseen, info.UnseenSeq)
+	}
+}
+
+func TestReadThroughRejectsFutureSequenceWithoutSuppressingAttention(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(simpleResponseHandler("done")), t.TempDir())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed := make(chan struct{})
+	mgr.afterAttentionMark = func() { close(processed) }
+
+	if err := mgr.MarkSessionReadThrough(sess.ID, 1, sess.attentionNamespace); !errors.Is(err, ErrInvalidAttentionCursor) {
+		t.Fatalf("future read error = %v, want %v", err, ErrInvalidAttentionCursor)
+	}
+	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "after-future-read"})
+	<-processed
+	if !mgr.sessionInfo(sess).Unseen {
+		t.Fatal("rejected future cursor suppressed later attention")
+	}
+}
+
+func TestReadThroughHoldsRuntimeIdentityAcrossResume(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	root := t.TempDir()
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(simpleResponseHandler("done")), root)
+	sess, err := mgr.CreateSession(CreateOpts{CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.runtime.Bus.Publish(bus.TextDelta{SessionID: sess.ID, Delta: "x"})
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	closeStarted := make(chan struct{})
+	resumed := make(chan *ManagedSession, 1)
+	resumeErr := make(chan error, 1)
+	mgr.beforeReadThroughAdvance = func() {
+		close(entered)
+		<-release
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- mgr.MarkSessionReadThrough(sess.ID, sess.runtime.Bus.LastSeq(), sess.attentionNamespace)
+	}()
+	<-entered
+	go func() {
+		close(closeStarted)
+		if err := mgr.CloseSession(sess.ID); err != nil {
+			resumeErr <- err
+			return
+		}
+		fresh, err := mgr.ResumeSession(sess.ID)
+		if err != nil {
+			resumeErr <- err
+			return
+		}
+		resumed <- fresh
+	}()
+	<-closeStarted
+	close(release)
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	var fresh *ManagedSession
+	select {
+	case err := <-resumeErr:
+		t.Fatal(err)
+	case fresh = <-resumed:
+	}
+	if got := mgr.readThroughSequence(fresh.ID); got != 0 {
+		t.Fatalf("new runtime cursor = %d, want 0", got)
+	}
+}
+
+func TestReadThroughNamespaceRejectsStaleRuntime(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(simpleResponseHandler("done")), t.TempDir())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed := make(chan struct{})
+	mgr.afterAttentionMark = func() { close(processed) }
+	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "stale-namespace"})
+	<-processed
+
+	if err := mgr.MarkSessionReadThrough(sess.ID, sess.runtime.Bus.LastSeq(), "old-namespace"); !errors.Is(err, ErrStaleAttentionNamespace) {
+		t.Fatalf("stale namespace error = %v, want %v", err, ErrStaleAttentionNamespace)
+	}
+	if !mgr.sessionInfo(sess).Unseen {
+		t.Fatal("stale namespace changed attention state")
+	}
+}
+
+func TestReadThroughResetsForResumedRuntime(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	root := t.TempDir()
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(simpleResponseHandler("done")), root)
+	sess, err := mgr.CreateSession(CreateOpts{CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldProcessed := make(chan struct{})
+	mgr.afterAttentionMark = func() { close(oldProcessed) }
+	for i := 0; i < 20; i++ {
+		sess.runtime.Bus.Publish(bus.TextDelta{SessionID: sess.ID, Delta: "x"})
+	}
+	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "old-runtime"})
+	<-oldProcessed
+	if err := mgr.MarkSessionReadThrough(sess.ID, sess.runtime.Bus.LastSeq(), sess.attentionNamespace); err != nil {
+		t.Fatal(err)
+	}
+	oldNamespace := sess.attentionNamespace
+	oldCursor := sess.runtime.Bus.LastSeq()
+	if err := mgr.CloseSession(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := mgr.ResumeSession(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.attentionNamespace == oldNamespace {
+		t.Fatalf("resumed namespace = %q, want a new incarnation", fresh.attentionNamespace)
+	}
+	newProcessed := make(chan struct{})
+	mgr.afterAttentionMark = func() { close(newProcessed) }
+	fresh.runtime.Bus.Publish(bus.PermissionRequested{SessionID: fresh.ID, ID: "new-runtime"})
+	<-newProcessed
+	if info := mgr.sessionInfo(fresh); !info.Unseen || info.UnseenSeq == 0 || info.UnseenSeq >= oldCursor {
+		t.Fatalf("first resumed attention = (unseen:%v seq:%d), want new low seq below old cursor %d", info.Unseen, info.UnseenSeq, oldCursor)
 	}
 }
 
