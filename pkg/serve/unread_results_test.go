@@ -10,6 +10,8 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/bus"
+	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
+	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
 )
 
 type gatedFenceSubscription struct {
@@ -1033,5 +1035,52 @@ func TestInitUsesAuthoritativeRunStartWhenCacheClockIsDelayed(t *testing.T) {
 	init := buildInitDataAtAttentionGen(sess, streaming, liveTools, 0)
 	if init.RunStartedAtMs == 0 {
 		t.Fatal("running init omitted authoritative run-start anchor")
+	}
+}
+
+// A WebSocket subscription is not a presentation. The client decides what is
+// on screen, so an open socket must neither clear the unread marker nor
+// suppress a push: push suppression is the separate wsConns gate in
+// subscribePush, and it stays live for the whole connection.
+func TestSubscribedSessionIsNotSeenAndStillPushes(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+
+	pushes := make(chan struct{}, 4)
+	sess, err := mgr.CreateSession(CreateOpts{Title: "subscribed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.pushUnsubs = append(sess.pushUnsubs,
+		sess.runtime.Bus.Subscribe(func(bus.PermissionRequested) {
+			// Mirrors subscribePush's always-notify policy for blocking events,
+			// which is deliberately independent of wsConns.
+			pushes <- struct{}{}
+		}),
+	)
+
+	ctx, wsCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer wsCancel()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var evt Event
+	if err := wsjson.Read(ctx, conn, &evt); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "live viewer registered", func() bool { return sess.wsConns.Load() == 1 })
+
+	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "subscribed-perm", RunGen: 1})
+	pollUntil(t, time.Second, "unseen attention", func() bool { return mgr.sessionInfo(sess).Unseen })
+
+	select {
+	case <-pushes:
+	case <-time.After(time.Second):
+		t.Fatal("a blocking event on a merely subscribed session did not notify")
+	}
+	if !mgr.sessionInfo(sess).Unseen {
+		t.Fatal("an open subscription marked the session seen without a client acknowledgement")
 	}
 }
