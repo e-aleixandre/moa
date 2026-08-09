@@ -464,20 +464,22 @@ func TestReadThroughHoldsRuntimeIdentityAcrossResume(t *testing.T) {
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	closeStarted := make(chan struct{})
+	closeBlocked := make(chan struct{})
 	resumed := make(chan *ManagedSession, 1)
 	resumeErr := make(chan error, 1)
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
 	mgr.beforeReadThroughAdvance = func() {
 		close(entered)
 		<-release
 	}
+	mgr.attentionRuntimeDeactivateBlocked = func() { close(closeBlocked) }
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- mgr.MarkSessionReadThrough(sess.ID, sess.runtime.Bus.LastSeq(), sess.attentionNamespace)
 	}()
 	<-entered
 	go func() {
-		close(closeStarted)
 		if err := mgr.CloseSession(sess.ID); err != nil {
 			resumeErr <- err
 			return
@@ -489,8 +491,16 @@ func TestReadThroughHoldsRuntimeIdentityAcrossResume(t *testing.T) {
 		}
 		resumed <- fresh
 	}()
-	<-closeStarted
-	close(release)
+	// Close has tried and failed to take the attention-state lock while the
+	// acknowledgement holds it. Releasing the acknowledgement must complete
+	// its cursor advance before Close can deactivate this runtime and resume
+	// its replacement.
+	select {
+	case <-closeBlocked:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not block on the attention-state lock")
+	}
+	releaseOnce.Do(func() { close(release) })
 	if err := <-errCh; err != nil {
 		t.Fatal(err)
 	}

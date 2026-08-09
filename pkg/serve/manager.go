@@ -689,9 +689,10 @@ type Manager struct {
 	automationMu sync.Mutex
 
 	// Test hooks coordinate deterministic attention tracker and cursor races.
-	beforeAttentionMark      func()
-	afterAttentionMark       func()
-	beforeReadThroughAdvance func()
+	beforeAttentionMark               func()
+	afterAttentionMark                func()
+	beforeReadThroughAdvance          func()
+	attentionRuntimeDeactivateBlocked func()
 }
 
 func (m *Manager) initializeAttentionRuntimeLocked(sess *ManagedSession) {
@@ -713,6 +714,13 @@ func (m *Manager) initializeAttentionRuntimeLocked(sess *ManagedSession) {
 }
 
 func (m *Manager) deactivateAttentionRuntime(sess *ManagedSession) {
+	if m.attentionRuntimeDeactivateBlocked != nil {
+		if !m.unseenMu.TryLock() {
+			m.attentionRuntimeDeactivateBlocked()
+		} else {
+			m.unseenMu.Unlock()
+		}
+	}
 	m.unseenMu.Lock()
 	if m.attentionRuntime[sess.ID] == sess {
 		delete(m.attentionRuntime, sess.ID)
