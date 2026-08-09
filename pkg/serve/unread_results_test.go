@@ -273,7 +273,7 @@ func TestSnapshotCutCapturesAttentionGenerationExcludingLaterAttention(t *testin
 	if stale != 0 {
 		t.Fatalf("stale generation = %d, want 0", stale)
 	}
-	init := buildInitDataAtAttentionGen(sess, streaming, liveTools, bound)
+	init := buildInitDataAtAttentionGen(sess, streaming, liveTools, bound, "", "", "")
 	if init.PendingAsk == nil {
 		t.Fatal("init did not render the pending ask")
 	}
@@ -1032,7 +1032,7 @@ func TestInitUsesAuthoritativeRunStartWhenCacheClockIsDelayed(t *testing.T) {
 	sess.runStartedAt = time.Time{}
 	sess.mu.Unlock()
 	streaming, liveTools, _ := sess.runtime.Context().SnapshotInFlightWithCut()
-	init := buildInitDataAtAttentionGen(sess, streaming, liveTools, 0)
+	init := buildInitDataAtAttentionGen(sess, streaming, liveTools, 0, "", "", "")
 	if init.RunStartedAtMs == 0 {
 		t.Fatal("running init omitted authoritative run-start anchor")
 	}

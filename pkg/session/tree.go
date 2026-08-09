@@ -377,29 +377,7 @@ func (t *Tree) AllMessages() []core.AgentMessage {
 	}
 	t.mu.RUnlock()
 
-	if len(path) == 0 {
-		return nil
-	}
-
-	var msgs []core.AgentMessage
-	for _, e := range path {
-		switch e.Type {
-		case EntryMessage:
-			msgs = append(msgs, e.Message)
-		case EntryCompaction:
-			// Synthetic status message for display
-			text := fmt.Sprintf("✂ Context compacted (%dK tokens summarized)", e.Compaction.TokensBefore/1000)
-			msgs = append(msgs, core.AgentMessage{
-				Message: core.Message{
-					Role:      "session_event",
-					Content:   []core.Content{core.TextContent(text)},
-					Timestamp: e.Timestamp.Unix(),
-				},
-				Custom: map[string]any{"type": "compaction_marker"},
-			})
-		}
-	}
-	return msgs
+	return displayMessages(path)
 }
 
 // DisplayMessagesSince returns the display projection strictly after entryID
@@ -431,6 +409,8 @@ func (t *Tree) DisplayMessagesSince(entryID string) ([]core.AgentMessage, bool) 
 	return displayMessages(path[start:]), true
 }
 
+// displayMessages projects tree entries for display: messages pass through and
+// compactions become synthetic status markers.
 func displayMessages(entries []Entry) []core.AgentMessage {
 	var msgs []core.AgentMessage
 	for _, e := range entries {

@@ -648,6 +648,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		allCmds = append(allCmds, cmds...)
 		return m, tea.Batch(allCmds...)
 
+	case agentSendAdmittedMsg:
+		m.clearFailedSendSnapshot()
+		return m, nil
+
 	case agentSendErrorMsg:
 		m.restoreFailedSend()
 		m.s.running = false
@@ -1852,7 +1856,7 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 	case bus.PermissionResolved:
 		if m.permPrompt.active && m.permPrompt.permID == e.ID {
 			m.permPrompt.Cancel()
-			m.status.SetText(promptResolutionStatus())
+			m.status.SetText(promptResolutionStatus)
 		}
 
 	// --- Ask user ---
@@ -1862,7 +1866,7 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 	case bus.AskUserResolved:
 		if m.askPrompt.active && m.askPrompt.askID == e.ID {
 			m.askPrompt.Cancel()
-			m.status.SetText(promptResolutionStatus())
+			m.status.SetText(promptResolutionStatus)
 		}
 
 	// --- Config ---
@@ -2026,9 +2030,9 @@ func (m *appModel) handleAskUserRequested(e bus.AskUserRequested) []tea.Cmd {
 	return cmds
 }
 
-func promptResolutionStatus() string {
-	return "This request is no longer pending."
-}
+// promptResolutionStatus is shown when a pending permission or ask prompt was
+// resolved elsewhere (e.g. from the web client) while this TUI displayed it.
+const promptResolutionStatus = "This request is no longer pending."
 
 func (m *appModel) handlePlanModeChanged(e bus.PlanModeChanged) []tea.Cmd {
 	if e.Mode == "" || e.Mode == "off" {

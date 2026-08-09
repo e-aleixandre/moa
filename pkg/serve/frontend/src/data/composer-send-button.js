@@ -55,11 +55,9 @@ export function reduceContentSendActivation(state = SEND_BUTTON_INITIAL, event) 
       };
 
     case "POINTER_UP":
-      // Keep the matching identity until the browser delivers its normal click.
-      // This also prevents a second concurrent pointer from claiming the send.
-      if (state.activePointerId !== event.pointerId) {
-        return { state, actions: [] };
-      }
+      // No-op: keep the matching identity until the browser delivers its
+      // normal click. This also prevents a second concurrent pointer from
+      // claiming the send.
       return { state, actions: [] };
 
     case "POINTER_CANCEL":

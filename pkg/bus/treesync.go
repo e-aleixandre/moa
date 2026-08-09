@@ -103,20 +103,7 @@ func (ts *TreeSyncer) DisplayMessages() []core.AgentMessage {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
-	treeMsgs := ts.tree.AllMessages()
-	agentMsgs := ts.sctx.Agent.Messages()
-
-	out := make([]core.AgentMessage, 0, len(treeMsgs)+len(agentMsgs))
-	out = append(out, treeMsgs...)
-	for i, msg := range agentMsgs {
-		if _, ok := ts.synced[messageSyncID(msg, i)]; !ok {
-			if isHiddenInternalPrompt(msg) {
-				continue
-			}
-			out = append(out, msg)
-		}
-	}
-	return out
+	return ts.appendInFlightTail(ts.tree.AllMessages())
 }
 
 // DisplayMessagesSince returns the durable tree suffix after entryID plus the
@@ -130,13 +117,19 @@ func (ts *TreeSyncer) DisplayMessagesSince(entryID string) ([]core.AgentMessage,
 	if !valid {
 		return nil, false
 	}
+	return ts.appendInFlightTail(msgs), true
+}
+
+// appendInFlightTail appends the agent messages not yet synced to the tree
+// (the in-flight turn), skipping hidden internal prompts. Caller holds ts.mu.
+func (ts *TreeSyncer) appendInFlightTail(msgs []core.AgentMessage) []core.AgentMessage {
 	for i, msg := range ts.sctx.Agent.Messages() {
 		if _, ok := ts.synced[messageSyncID(msg, i)]; ok || isHiddenInternalPrompt(msg) {
 			continue
 		}
 		msgs = append(msgs, msg)
 	}
-	return msgs, true
+	return msgs
 }
 
 // HasMsgID reports whether this ID belongs to a message that exists anywhere in

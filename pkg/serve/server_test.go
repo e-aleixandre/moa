@@ -1531,7 +1531,7 @@ func TestSubagentTranscriptEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close() //nolint:errcheck
-	if detail.Output != "private tool output" || detail.Truncated {
+	if detail.Output != "private tool output" {
 		t.Fatalf("read item detail = %+v, want read output only", detail)
 	}
 

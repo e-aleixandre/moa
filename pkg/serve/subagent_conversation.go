@@ -102,7 +102,7 @@ func handleSubagentConversation(m *Manager) http.HandlerFunc {
 				http.Error(w, "tool item not found", http.StatusNotFound)
 				return
 			}
-			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output, Truncated: toolDetail.truncated})
+			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output})
 			return
 		}
 		beforeID := ""

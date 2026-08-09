@@ -70,23 +70,12 @@ type InitData struct {
 	// DeltaBase is the validated tree entry requested by since_msg. When set,
 	// Messages is a complete suffix after this entry and clients append it.
 	DeltaBase string `json:"delta_base,omitempty"`
-	// InitMetrics is emitted only when the client requests debug_init=1. It is
-	// intentionally diagnostic-only, so it never participates in client state.
-	InitMetrics *InitMetrics `json:"init_metrics,omitempty"`
 }
 
 // PromptResolutionData identifies a prompt that is no longer pending.
 type PromptResolutionData struct {
 	ID   string `json:"id"`
 	Kind string `json:"kind"`
-}
-
-// InitMetrics attributes the server side of a reconnect snapshot. PayloadBytes
-// is the encoded WebSocket event size, including its envelope.
-type InitMetrics struct {
-	AssemblyMS   float64 `json:"assembly_ms"`
-	PayloadBytes int     `json:"payload_bytes"`
-	MessageCount int     `json:"message_count"`
 }
 
 // PendingSteerData is one queued (not yet delivered) item in the unified queue

@@ -45,10 +45,6 @@ const (
 // when enriching edit tool_start events with real line numbers.
 // Returns the reactor and a read-only channel for the WS writer loop.
 func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attentionGeneration ...func(uint64) uint64) *wsReactor {
-	return newWsReactorForClient(b, sessionCtx, cwd, attentionGeneration...)
-}
-
-func newWsReactorForClient(b bus.EventBus, sessionCtx context.Context, cwd string, attentionGeneration ...func(uint64) uint64) *wsReactor {
 	r := &wsReactor{
 		ch:   make(chan Event, wsReactorBuffer),
 		done: make(chan struct{}),
@@ -158,10 +154,6 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 	if len(attentionGeneration) > 0 {
 		attentionGen = attentionGeneration[0]
 	}
-	return wsEventFromBusForClient(event, attentionGen)
-}
-
-func wsEventFromBusForClient(event any, attentionGen uint64) (Event, bool) {
 	switch e := event.(type) {
 	case bus.StateChanged:
 		return Event{Type: "state_change", Data: StateChangeData{
@@ -358,7 +350,7 @@ func wsEventFromBusForClient(event any, attentionGen uint64) (Event, bool) {
 		}
 		return Event{Type: "subagent_end", Data: data}, true
 	case bus.SubagentEvent:
-		inner, ok := wsEventFromBusForClient(e.Inner, attentionGen)
+		inner, ok := wsEventFromBus(e.Inner, attentionGen)
 		if !ok {
 			return Event{}, false
 		}
@@ -475,25 +467,22 @@ func (r *wsReactor) cleanup() {
 // here, so in-flight state can't be both seeded into the snapshot and replayed
 // live after the cut.
 func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall) InitData {
-	return buildInitDataAtAttentionGen(sess, streaming, liveTools, sess.attentionGen.Load())
+	return buildInitDataAtAttentionGen(sess, streaming, liveTools, sess.attentionGen.Load(), "", "", "")
 }
 
-func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, unseenGen uint64, sinceMsg ...string) InitData {
-	base := ""
-	if len(sinceMsg) > 0 {
-		base = sinceMsg[0]
-	}
-	return buildInitDataForPromptCandidates(sess, streaming, liveTools, unseenGen, base, "", "")
-}
-
-func buildInitDataForPromptCandidates(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, unseenGen uint64, sinceMsg, permissionID, askID string) InitData {
+// buildInitDataAtAttentionGen assembles the full init snapshot. sinceMsg, when
+// non-empty, requests a validated delta resume from that entry; permissionID
+// and askID are the client's pending prompt IDs, used to emit a resolution
+// notice when a prompt was answered elsewhere while the client was away.
+func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, unseenGen uint64, sinceMsg, permissionID, askID string) InitData {
 	b := sess.runtime.Bus
 
 	// Use display messages (full history from tree) instead of agent messages.
 	// A validated delta is used only when its entire suffix fits the same mobile
 	// bounds as a normal init. Truncating a suffix would silently leave a hole in
 	// the cached transcript, so it deliberately fails closed to a full snapshot.
-	msgs := []core.AgentMessage(nil)
+	var msgs []core.AgentMessage
+	var historyTruncated bool
 	deltaBase := ""
 	if sinceMsg != "" {
 		if delta, err := bus.QueryTyped[bus.GetDisplayMessagesSince, bus.DisplayMessagesSince](b, bus.GetDisplayMessagesSince{EntryID: sinceMsg}); err == nil && delta.Valid {
@@ -503,7 +492,8 @@ func buildInitDataForPromptCandidates(sess *ManagedSession, streaming bus.Stream
 		}
 	}
 	if deltaBase == "" {
-		msgs, _ = bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](b, bus.GetDisplayMessages{})
+		full, _ := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](b, bus.GetDisplayMessages{})
+		msgs, historyTruncated = limitInitHistory(full)
 	}
 	state, _ := bus.QueryTyped[bus.GetSessionState, string](b, bus.GetSessionState{})
 	ctxPct, _ := bus.QueryTyped[bus.GetContextUsage, int](b, bus.GetContextUsage{})
@@ -526,7 +516,6 @@ func buildInitDataForPromptCandidates(sess *ManagedSession, streaming bus.Stream
 	compacting, _ := bus.QueryTyped[bus.GetCompacting, bool](b, bus.GetCompacting{})
 	pendingSteers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](b, bus.GetPendingSteers{})
 
-	msgs, historyTruncated := limitInitHistory(msgs)
 	data := InitData{
 		ServerInstance:    sess.serverInstance,
 		UnseenGen:         unseenGen,
@@ -654,18 +643,15 @@ func buildInitDataForPromptCandidates(sess *ManagedSession, streaming bus.Stream
 	return data
 }
 
+// reconnectPromptResolution reports whether a prompt the client still shows as
+// pending was resolved while it was disconnected. Permission wins over ask so
+// at most one notice is emitted per reconnect.
 func reconnectPromptResolution(pending bus.PendingApprovalInfo, permissionID, askID string) *PromptResolutionData {
-	for _, candidate := range []struct{ id, kind string }{{permissionID, "permission"}, {askID, "ask"}} {
-		if candidate.id == "" {
-			continue
-		}
-		if candidate.kind == "permission" && pending.Permission != nil && pending.Permission.ID == candidate.id {
-			continue
-		}
-		if candidate.kind == "ask" && pending.Ask != nil && pending.Ask.ID == candidate.id {
-			continue
-		}
-		return &PromptResolutionData{ID: candidate.id, Kind: candidate.kind}
+	if permissionID != "" && (pending.Permission == nil || pending.Permission.ID != permissionID) {
+		return &PromptResolutionData{ID: permissionID, Kind: "permission"}
+	}
+	if askID != "" && (pending.Ask == nil || pending.Ask.ID != askID) {
+		return &PromptResolutionData{ID: askID, Kind: "ask"}
 	}
 	return nil
 }

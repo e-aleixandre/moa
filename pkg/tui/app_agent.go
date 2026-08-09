@@ -74,7 +74,7 @@ func (m appModel) launchAgentSend(text string) tea.Cmd {
 			if err != nil {
 				return agentSendErrorMsg{Err: err}
 			}
-			return nil
+			return agentSendAdmittedMsg{}
 		},
 		renderTick(),
 		m.status.spinner.Tick,
@@ -90,7 +90,7 @@ func (m appModel) launchAgentSendWithContent(content []core.Content) tea.Cmd {
 			if err != nil {
 				return agentSendErrorMsg{Err: err}
 			}
-			return nil
+			return agentSendAdmittedMsg{}
 		},
 		renderTick(),
 		m.status.spinner.Tick,
@@ -321,6 +321,16 @@ func (m *appModel) restoreFailedSend() {
 	m.input.Restore(m.s.failedSendText)
 	m.s.pendingImage = m.s.failedSendImage
 	m.s.pendingImageMime = m.s.failedSendImageMime
+	m.clearFailedSendSnapshot()
+}
+
+// clearFailedSendSnapshot drops the rollback snapshot once it can no longer
+// roll anything back: either this send's bus admission succeeded or the
+// snapshot was just restored. Without this, a later agentSendErrorMsg from an
+// unrelated path (handoff, subagent/bash notification run) would restore a
+// stale snapshot — reinjecting an already-delivered prompt into the composer
+// and removing legitimate transcript blocks.
+func (m *appModel) clearFailedSendSnapshot() {
 	m.s.failedSendText = ""
 	m.s.failedSendImage = nil
 	m.s.failedSendImageMime = ""

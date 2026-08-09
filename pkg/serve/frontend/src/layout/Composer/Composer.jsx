@@ -1067,13 +1067,12 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
             // showing Send here would make a live mic invisible and let a tap
             // submit the unrelated text instead of stopping the recording.
             const voiceOwnsButton = voiceButtonMode || recording || transcribing;
-            const micMode = voiceButtonMode;
 
             let icon = <ArrowUp size={16} />;
             if (contentSendPending || transcribing) icon = <Loader2 size={16} class="spin" />;
             else if (recording && voiceLocked) icon = <Square size={14} />;
             else if (recording) icon = <Mic size={16} />;
-            else if (micMode) icon = <Mic size={16} />;
+            else if (voiceButtonMode) icon = <Mic size={16} />;
 
             const cls = [
               "composer-send",
@@ -1081,14 +1080,14 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
               recording ? "recording" : "",
               voiceLocked ? "locked" : "",
               transcribing ? "transcribing" : "",
-              micMode ? "mic-mode" : "",
+              voiceButtonMode ? "mic-mode" : "",
             ].filter(Boolean).join(" ");
 
             const sendTitle = busy ? "Send — steers the agent, doesn't stop it" : "Send";
             const title = contentSendPending ? "Sending…"
               : transcribing ? "Transcribing…"
               : recording ? (voiceLocked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
-              : micMode ? `Hold to talk · tap to send (${formatShortcut(".", { mod: true })} for mic)`
+              : voiceButtonMode ? `Hold to talk · tap to send (${formatShortcut(".", { mod: true })} for mic)`
               : sendTitle;
 
             const gestureProps = voiceOwnsButton
@@ -1104,7 +1103,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
             const sendLabel = contentSendPending ? "Sending"
               : transcribing ? "Transcribing"
               : recording ? "Stop recording"
-              : micMode ? "Record"
+              : voiceButtonMode ? "Record"
               : busy ? "Send steer"
               : "Send";
 

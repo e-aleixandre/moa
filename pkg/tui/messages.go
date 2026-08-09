@@ -18,6 +18,12 @@ type agentSendErrorMsg struct {
 	Err error
 }
 
+// agentSendAdmittedMsg confirms this TUI's own SendPrompt was admitted by the
+// bus, so the send rollback snapshot has nothing left to roll back. It is
+// correlated with the local Execute call — unlike bus.RunStarted, which any
+// producer (web client, goal driver, notification run) may have triggered.
+type agentSendAdmittedMsg struct{}
+
 // renderTickMsg triggers a stream cache refresh during streaming (renderInterval).
 type renderTickMsg struct{}
 

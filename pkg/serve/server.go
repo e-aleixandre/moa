@@ -715,7 +715,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		// Subscribe before taking the init snapshot. Events published while the
 		// snapshot is assembled are queued by the reactor and sent immediately
 		// after init, rather than being lost in the old snapshot→subscribe gap.
-		reactor := newWsReactorForClient(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD, func(seq uint64) uint64 {
+		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD, func(seq uint64) uint64 {
 			return mgr.attentionGenerationForSequenceContext(ctx, sess, seq)
 		})
 		defer reactor.cleanup()
@@ -754,39 +754,13 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		if captured {
 			unseenGen, attentionBound = mgr.attentionGenerationAtCutWithOverflowBefore(ctx, sess, cut, overflowAtCut, clearedAtCut, initialAttentionCut, attentionDeadline)
 		}
-		var sinceMsg string
-		debugInit := false
-		if r.URL.RawQuery != "" {
-			sinceMsg = query.Get("since_msg")
-			debugInit = query.Get("debug_init") == "1"
-		}
-		var initStarted time.Time
-		if debugInit {
-			initStarted = time.Now()
-		}
-		initData := buildInitDataForPromptCandidates(sess, streaming, liveTools, unseenGen, sinceMsg, pendingPermissionID, pendingAskID)
+		sinceMsg := query.Get("since_msg")
+		initData := buildInitDataAtAttentionGen(sess, streaming, liveTools, unseenGen, sinceMsg, pendingPermissionID, pendingAskID)
 		initData.AttentionBound = attentionBound
 		if !attentionBound {
 			initData.UnseenGen = 0
 		}
 		initData.LastSeq = cut
-		if debugInit {
-			metrics := &InitMetrics{
-				AssemblyMS:   float64(time.Since(initStarted).Microseconds()) / 1000,
-				MessageCount: len(initData.Messages),
-			}
-			initData.InitMetrics = metrics
-			// payload_bytes is part of the envelope it describes, so serialize
-			// until its decimal width stabilizes (normally two passes).
-			for range 3 {
-				encoded, err := json.Marshal(Event{Type: "init", Data: initData, Seq: cut})
-				if err != nil || metrics.PayloadBytes == len(encoded) {
-					break
-				}
-				metrics.PayloadBytes = len(encoded)
-			}
-			slog.Debug("websocket init", "session", sess.ID, "assembly_ms", metrics.AssemblyMS, "payload_bytes", metrics.PayloadBytes, "messages", metrics.MessageCount)
-		}
 		if deviceLeaseClosed(lease) || wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}) != nil {
 			return
 		}

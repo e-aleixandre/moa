@@ -45,7 +45,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           }
           result.push({
             _type: 'tool_start',
-			_msg_id: msg.msg_id,
+            _msg_id: msg.msg_id,
             tool_call_id: c.tool_call_id,
             tool_name: c.tool_name,
             args: c.arguments || {},
@@ -68,7 +68,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
       const { command, output } = parseShellBody(text);
       result.push({
         _type: 'tool_start',
-		_msg_id: msg.msg_id,
+        _msg_id: msg.msg_id,
         tool_call_id: 'shell_' + result.length,
         tool_name: 'bash',
         args: { command },
@@ -79,7 +79,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
       // Persistent goal-lifecycle marker (start / iteration verdict / end).
       // Rendered as a system line, matching the live goal event styling.
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
-		result.push({ _type: 'system', _msg_id: msg.msg_id, text });
+      result.push({ _type: 'system', _msg_id: msg.msg_id, text });
     } else if (msg.role === 'user') {
       if (msg.custom?.source === 'secret_batch') {
         result.push({
@@ -98,7 +98,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           legacySubagentJobIds.get(subagentTaskIdentity(msg.custom.subagent_task));
         result.push({
           _type: 'tool_start',
-			_msg_id: msg.msg_id,
+            _msg_id: msg.msg_id,
           tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + result.length,
           tool_name: 'subagent',
           args: { task: msg.custom.subagent_task || '' },
@@ -114,7 +114,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
         const bashText = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
         result.push({
           _type: 'tool_start',
-			_msg_id: msg.msg_id,
+            _msg_id: msg.msg_id,
           tool_call_id: 'bash_complete_' + result.length,
           tool_name: 'bash',
           args: { command: msg.custom.bash_command || '' },
@@ -130,7 +130,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           const jobId = subagent.jobId || legacySubagentJobIds.get(subagentTaskIdentity(subagent.task));
           result.push({
             _type: 'tool_start',
-			_msg_id: msg.msg_id,
+            _msg_id: msg.msg_id,
             tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + result.length,
             subagentJobId: jobId || undefined,
             tool_name: 'subagent',
@@ -143,7 +143,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           if (bash) {
             result.push({
               _type: 'tool_start',
-			_msg_id: msg.msg_id,
+            _msg_id: msg.msg_id,
               tool_call_id: 'bash_complete_' + result.length,
               tool_name: 'bash',
               args: { command: bash.command },
@@ -481,14 +481,14 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
     && !(data.bash_jobs || []).some(bj => bj && bj.job_id === viewingBash)
     ? { [viewingBash]: prev.subagents[viewingBash] }
     : null;
-	// A delta token only proves the cached history when it names its durable
-	// tail. Finding it earlier in the array would retain local rows after the
-	// token (for example a compaction marker) that may no longer be on the
-	// server's current branch.
-	const canAppendDelta = !!data.delta_base && prev.messages?.at(-1)?._msg_id === data.delta_base;
-	let messages = canAppendDelta
-	  ? withLiveToolsInPlace(appendNormalizedHistoryDelta(prev.messages, data.messages || [], data.subagents), data.live_tools)
-	  : withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools);
+  // A delta token only proves the cached history when it names its durable
+  // tail. Finding it earlier in the array would retain local rows after the
+  // token (for example a compaction marker) that may no longer be on the
+  // server's current branch.
+  const canAppendDelta = !!data.delta_base && prev.messages?.at(-1)?._msg_id === data.delta_base;
+  let messages = canAppendDelta
+    ? withLiveToolsInPlace(appendNormalizedHistoryDelta(prev.messages, data.messages || [], data.subagents), data.live_tools)
+    : withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools);
   // The live init snapshot cannot contain terminal jobs, so restore their
   // persisted lifecycle cards separately. Upserting by job ID also upgrades
   // old notification-derived cards to the real terminal result/error.
@@ -513,8 +513,8 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
     compactAt: data.compact_at || 0,
     compactAtMin: data.compact_at_min || 0,
     permissionMode: data.permission_mode || 'yolo',
-    pendingPerm: data.pending_permission ? { ...data.pending_permission, serverInstance } : null,
-    pendingAsk: data.pending_ask ? { ...data.pending_ask, serverInstance } : null,
+    pendingPerm: data.pending_permission || null,
+    pendingAsk: data.pending_ask || null,
     resolvedPromptNotice: resolvedPromptNoticeFromInit(id, data, prev),
     // The server's steer queue is authoritative and shared across all of this
     // session's clients. The snapshot replaces the queue; a local chip is kept
@@ -626,9 +626,9 @@ function withLiveTools(messages, liveTools) {
 }
 
 function withLiveToolsInPlace(messages, liveTools) {
-	const reconciled = withLiveTools(messages, liveTools);
-	if (reconciled !== messages) messages.splice(0, messages.length, ...reconciled);
-	return messages;
+  const reconciled = withLiveTools(messages, liveTools);
+  if (reconciled !== messages) messages.splice(0, messages.length, ...reconciled);
+  return messages;
 }
 
 function liveToolRow(t) {
@@ -1065,9 +1065,8 @@ export function handleWsStateChange(id, data) {
 }
 
 export function handleWsAskUser(id, data) {
-  const serverInstance = store.get().sessions[id]?.serverInstance || '';
   updateSession(id, {
-    pendingAsk: { id: data.id, questions: data.questions, unseenGen: data.unseen_gen, serverInstance },
+    pendingAsk: { id: data.id, questions: data.questions },
     resolvedPromptNotice: null,
   });
   const state = store.get();
@@ -1079,7 +1078,6 @@ export function handleWsAskUser(id, data) {
 }
 
 export function handleWsPermissionRequest(id, data) {
-  const serverInstance = store.get().sessions[id]?.serverInstance || '';
   updateSession(id, {
     state: 'permission',
     pendingPerm: {
@@ -1087,8 +1085,6 @@ export function handleWsPermissionRequest(id, data) {
       tool_name: data.tool_name,
       args: data.args,
       allow_pattern: data.allow_pattern || '',
-      unseenGen: data.unseen_gen,
-      serverInstance,
     },
     resolvedPromptNotice: null,
   });
@@ -1112,28 +1108,22 @@ function acknowledgeVisibleLiveAttention(id, runGen) {
 }
 
 export function handleWsPermissionResolved(id, data) {
-  const sess = store.get().sessions[id];
-  if (!sess) return;
-  const promptID = data?.id || sess.pendingPerm?.id;
-  if (!promptID) return;
-  if (sess.pendingPerm && sess.pendingPerm.id !== promptID) return;
-  if (!sess.pendingPerm) return;
+  const perm = store.get().sessions[id]?.pendingPerm;
+  if (!perm) return;
+  if (data?.id && data.id !== perm.id) return;
   updateSession(id, {
     pendingPerm: null,
-    resolvedPromptNotice: promptResolutionNotice(promptID, 'permission'),
+    resolvedPromptNotice: promptResolutionNotice(data?.id || perm.id, 'permission'),
   });
 }
 
 export function handleWsAskResolved(id, data) {
-  const sess = store.get().sessions[id];
-  if (!sess) return;
-  const promptID = data?.id || sess.pendingAsk?.id;
-  if (!promptID) return;
-  if (sess.pendingAsk && sess.pendingAsk.id !== promptID) return;
-  if (!sess.pendingAsk) return;
+  const ask = store.get().sessions[id]?.pendingAsk;
+  if (!ask) return;
+  if (data?.id && data.id !== ask.id) return;
   updateSession(id, {
     pendingAsk: null,
-    resolvedPromptNotice: promptResolutionNotice(promptID, 'ask'),
+    resolvedPromptNotice: promptResolutionNotice(data?.id || ask.id, 'ask'),
   });
 }
 
@@ -1142,10 +1132,11 @@ function promptResolutionNotice(id, kind) {
 }
 
 function resolvedPromptNoticeFromInit(id, data, prev) {
-  if (data.pending_permission || data.pending_ask || !data.resolved_prompt) {
-    return data.pending_permission || data.pending_ask ? null : (prev.resolvedPromptNotice || null);
+  if (data.pending_permission || data.pending_ask) return null;
+  if (data.resolved_prompt) {
+    return promptResolutionNotice(data.resolved_prompt.id, data.resolved_prompt.kind);
   }
-  return promptResolutionNotice(data.resolved_prompt.id, data.resolved_prompt.kind);
+  return prev.resolvedPromptNotice || null;
 }
 
 function flashSession(id, type) {

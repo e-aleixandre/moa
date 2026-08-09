@@ -69,13 +69,11 @@ type conversationSnapshot struct {
 }
 
 type conversationToolDetail struct {
-	output    string
-	truncated bool
+	output string
 }
 
 type conversationToolDetailResponse struct {
-	Output    string `json:"output"`
-	Truncated bool   `json:"truncated,omitempty"`
+	Output string `json:"output"`
 }
 
 type conversationProjection struct {
@@ -127,7 +125,7 @@ func handleConversationMessages(m *Manager) http.HandlerFunc {
 				http.Error(w, "tool item not found", http.StatusNotFound)
 				return
 			}
-			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output, Truncated: toolDetail.truncated})
+			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output})
 			return
 		}
 		beforeID := ""

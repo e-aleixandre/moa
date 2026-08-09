@@ -250,5 +250,4 @@ describe('afterVisibilityChange — bootstrap pass', () => {
     expect(findTile(store.get().tileTree, tileId).sessionId).toBe(null);
     expect(store.get().sessions.s1.state).toBe('saved');
   });
-
 });

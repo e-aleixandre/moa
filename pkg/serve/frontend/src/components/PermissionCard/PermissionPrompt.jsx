@@ -16,7 +16,7 @@ import { formatArgs } from "../../data/util/format.js";
 //     the old bar).
 // permBusy disables every action while a request is in flight; permError
 // shows inline on failure. State resets whenever the pending permission's id
-// changes (new prompt) or it disappears after resolution/reconnect).
+// changes (new prompt) or it disappears (resolved elsewhere/reconnect).
 export function PermissionPrompt({ session }) {
   const perm = session.pendingPerm;
   const permissionMode = session.permissionMode || "yolo";
@@ -89,7 +89,6 @@ export function PermissionPrompt({ session }) {
   const title = perm.tool_name ? `moa wants to run ${perm.tool_name}` : "moa wants to run";
 
   return (
-    <div>
     <PermissionCard
       title={title}
       command={formatArgs(perm.args)}
@@ -135,6 +134,5 @@ export function PermissionPrompt({ session }) {
         </div>
       )}
     </PermissionCard>
-    </div>
   );
 }

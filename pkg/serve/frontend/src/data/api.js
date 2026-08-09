@@ -40,14 +40,6 @@ export const MCP_RESTART_TIMEOUT_MS = 30000;
 // marked stale. Only an authoritative init may acknowledge its attention.
 export const HISTORY_HYDRATION_TIMEOUT_MS = 12000;
 
-export class ApiError extends Error {
-  constructor(status, message) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-  }
-}
-
 export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_MS, cache } = {}) {
   const controller = timeoutMs > 0 ? new AbortController() : null;
   const opts = { method, headers: REQUEST_HEADERS };
@@ -67,7 +59,7 @@ export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_
   try {
     const r = await fetch(path, opts);
     if (timedOut) throw new Error('request aborted');
-    if (!r.ok) throw new ApiError(r.status, `${r.status}: ${await r.text()}`);
+    if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
     if (r.status === 204) return null;
     const text = await r.text();
     if (!text) return null;
@@ -98,50 +90,13 @@ const forceFullInit = new Set();  // session IDs whose cached delta base was abs
 const attentionAcknowledgements = new Map(); // occurrence → confirmed POST
 const MAX_BACKOFF = 16000;
 
-// Set localStorage.moaDebugSessionSwitch = '1' and reconnect a session to
-// inspect its complete init path. This remains outside normal UI chrome and
-// costs nothing unless explicitly enabled.
-const switchDebugEnabled = (() => {
-  try { return localStorage.getItem('moaDebugSessionSwitch') === '1'; } catch (_) { return false; }
-})();
-
-function switchMark(sessionId, phase) {
-  if (!switchDebugEnabled || typeof performance === 'undefined') return;
-  performance.mark(`moa:session-switch:${sessionId}:${phase}`);
-}
-
-function switchMeasure(sessionId, from, to) {
-  if (!switchDebugEnabled || typeof performance === 'undefined') return null;
-  const name = `moa:session-switch:${sessionId}:${from}→${to}`;
-  performance.measure(name, `moa:session-switch:${sessionId}:${from}`, `moa:session-switch:${sessionId}:${to}`);
-  const entries = performance.getEntriesByName(name);
-  return entries[entries.length - 1]?.duration;
-}
-
-function reportSwitchTiming(sessionId, metrics) {
-  if (!switchDebugEnabled) return;
-  const phases = [
-    ['tap', 'constructed'], ['constructed', 'open'], ['open', 'first-init'],
-    ['first-init', 'parsed'], ['parsed', 'handled'], ['handled', 'paint'],
-  ].map(([from, to]) => ({ phase: `${from} → ${to}`, ms: switchMeasure(sessionId, from, to)?.toFixed(1) }));
-  console.groupCollapsed(`[moa] session init ${sessionId}`);
-  console.table(phases);
-  console.log('init payload', metrics);
-  console.groupEnd();
-}
-
 export function syncConnections(visibleIds) {
   wantedIds.clear();
   for (const id of visibleIds) wantedIds.add(id);
 
   // Close connections and cancel pending reconnects for sessions no longer visible
   for (const [id, entry] of connections) {
-    if (!wantedIds.has(id)) {
-      entry.ws.close();
-      connections.delete(id);
-      clearHistoryHydrationTimer(id);
-      finishHistoryHydration(id);
-    }
+    if (!wantedIds.has(id)) settleAndClose(id, entry);
   }
   for (const [id, timer] of pendingTimers) {
     if (!wantedIds.has(id)) {
@@ -164,16 +119,11 @@ export function syncConnections(visibleIds) {
 // the session would sit frozen until a manual reload.
 export function reconnectAll() {
   const ids = [...wantedIds];
-  for (const [id, entry] of connections) {
-    // Remove ownership before close so its asynchronous onclose cannot schedule
-    // a competing retry. Explicitly settle first: a superseded socket's close
-    // handler deliberately bails out, but its hydration/timer must not leak
-    // into the replacement socket's fresh grace window.
-    connections.delete(id);
-    clearHistoryHydrationTimer(id);
-    finishHistoryHydration(id);
-    try { entry.ws.close(); } catch (_) { /* replacement below is sufficient */ }
-  }
+  // Remove ownership before close so an asynchronous onclose cannot schedule
+  // a competing retry. Explicitly settle first: a superseded socket's close
+  // handler deliberately bails out, but its hydration/timer must not leak
+  // into the replacement socket's fresh grace window.
+  for (const [id, entry] of connections) settleAndClose(id, entry);
   for (const [, timer] of pendingTimers) clearTimeout(timer);
   pendingTimers.clear();
   for (const id of ids) openWs(id, 1000);
@@ -265,38 +215,46 @@ export function retryHistoryHydration(sessionId) {
     pendingTimers.delete(sessionId);
   }
   const entry = connections.get(sessionId);
-  if (entry) {
-    connections.delete(sessionId);
-    clearHistoryHydrationTimer(sessionId);
-    // This close is intentionally superseded, so it cannot settle hydration
-    // through onclose. Clear its boundary before opening the replacement.
-    finishHistoryHydration(sessionId);
-    try { entry.ws.close(); } catch (_) { /* a fresh connection below is enough */ }
-  }
+  // This close is intentionally superseded, so it cannot settle hydration
+  // through onclose. Clear its boundary before opening the replacement.
+  if (entry) settleAndClose(sessionId, entry);
   openWs(sessionId, 1000);
   return true;
+}
+
+// settleAndClose removes a socket's ownership, settles its hydration boundary
+// and timer, and closes it. Once ownership is removed the socket's own
+// onclose/onmessage handlers bail out, so nothing from it can leak into a
+// replacement connection.
+function settleAndClose(sessionId, entry) {
+  connections.delete(sessionId);
+  clearHistoryHydrationTimer(sessionId);
+  finishHistoryHydration(sessionId);
+  try { entry.ws.close(); } catch (_) { /* a replacement or absence is fine */ }
 }
 
 function openWs(sessionId, initialBackoff) {
   pendingTimers.delete(sessionId);
   const cached = store.get().sessions[sessionId]?.messages || [];
   const cachedBase = cached.at(-1)?._msg_id;
-  const useDeltaResume = !forceFullInit.has(sessionId) && !!cachedBase;
+  // delete() reports whether a full init was forced, consuming the flag.
+  const skipDelta = forceFullInit.delete(sessionId);
+  const useDeltaResume = !skipDelta && !!cachedBase;
   beginHistoryHydration(sessionId, { deltaResume: useDeltaResume });
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-	  switchMark(sessionId, 'tap');
   let ws;
   try {
     const params = new URLSearchParams();
     const pending = store.get().sessions[sessionId];
     if (pending?.pendingPerm?.id) params.set('pending_permission', pending.pendingPerm.id);
     if (pending?.pendingAsk?.id) params.set('pending_ask', pending.pendingAsk.id);
-    if (switchDebugEnabled) params.set('debug_init', '1');
-    if (!forceFullInit.delete(sessionId) && cachedBase) params.set('since_msg', cachedBase);
+    if (useDeltaResume) params.set('since_msg', cachedBase);
     const query = params.size > 0 ? `?${params}` : '';
     ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws${query}`);
-    switchMark(sessionId, 'constructed');
   } catch (_) {
+    // Preserve the forced-full decision for the retry: the flag was consumed
+    // above but this attempt never reached the server.
+    if (skipDelta) forceFullInit.add(sessionId);
     failHistoryHydration(sessionId);
     scheduleReconnect(sessionId, { backoff: initialBackoff });
     return;
@@ -320,27 +278,24 @@ function openWs(sessionId, initialBackoff) {
 
   ws.onmessage = (e) => {
     if (connections.get(sessionId)?.ws !== ws) return;
-    switchMark(sessionId, 'first-init');
     const evt = JSON.parse(e.data);
-    switchMark(sessionId, 'parsed');
     if (evt.type === 'init') {
-		  // A server only emits delta_base after validating its tree path, but a
-		  // client may have evicted or locally rewritten that prefix. Never append
-		  // a suffix to a different transcript: retry once without a resume token.
-		  if (evt.data?.delta_base && store.get().sessions[sessionId]?.messages?.at(-1)?._msg_id !== evt.data.delta_base) {
-			  forceFullInit.add(sessionId);
-			  ws.close();
-			  return;
-		  }
+      // A server only emits delta_base after validating its tree path, but a
+      // client may have evicted or locally rewritten that prefix. Never append
+      // a suffix to a different transcript: retry once without a resume token.
+      if (evt.data?.delta_base && store.get().sessions[sessionId]?.messages?.at(-1)?._msg_id !== evt.data.delta_base) {
+        forceFullInit.add(sessionId);
+        ws.close();
+        return;
+      }
       const currentInstance = store.get().sessions[sessionId]?.serverInstance || '';
       const initInstance = evt.data?.server_instance || '';
       const initMatchesCurrent = !!initInstance && !!currentInstance && initInstance === currentInstance;
       const initMatchesOpen = !!entry.serverInstanceAtOpen && initInstance === entry.serverInstanceAtOpen;
-      const trustedForAck = initMatchesCurrent || (!currentInstance && initMatchesOpen);
-      // This must be decided before routing the init: handleWsInit renders the
-      // snapshot and may acknowledge it synchronously.
-      const attentionBounded = evt.data?.attention_bound !== false;
-      const ackProven = trustedForAck && attentionBounded;
+      // Whether this init may acknowledge attention; handleWsInit re-checks
+      // attention_bound itself. This must be decided before routing the init:
+      // handleWsInit renders the snapshot and may acknowledge it synchronously.
+      const ackProven = initMatchesCurrent || (!currentInstance && initMatchesOpen);
       if (currentInstance && !initMatchesCurrent) {
         // The roster has already moved us to another server process. Do not
         // render or acknowledge this old socket's snapshot; reconnect for an
@@ -354,20 +309,7 @@ function openWs(sessionId, initialBackoff) {
       entry.lastSeq = evt.data?.last_seq ?? evt.seq ?? 0;
       clearHistoryHydrationTimer(sessionId);
       confirmHistoryHydrationInit(sessionId, { deltaBase: !!evt.data?.delta_base });
-      routeEvent(sessionId, evt, { ackProven });
-		  switchMark(sessionId, 'handled');
-		  if (switchDebugEnabled) {
-			  requestAnimationFrame(() => requestAnimationFrame(() => {
-				  switchMark(sessionId, 'paint');
-				  const payloadBytes = typeof e.data === 'string'
-					  ? new TextEncoder().encode(e.data).byteLength : e.data?.size;
-				  reportSwitchTiming(sessionId, {
-					  payloadBytes,
-					  messageCount: evt.data?.messages?.length || 0,
-					  server: evt.data?.init_metrics,
-				  });
-			  }));
-		  }
+      handleWsInit(sessionId, evt.data, { ackProven });
       // A missing bound is intentionally not acknowledged: it means the server
       // could not prove which attention occurrence this snapshot contains.
       // Keep the rendered snapshot, close this socket, and retry through the
@@ -375,7 +317,7 @@ function openWs(sessionId, initialBackoff) {
       if (evt.data?.attention_bound === false) {
         entry.attentionBoundRecovery = true;
         ws.close();
-      } else if (!trustedForAck) {
+      } else if (!ackProven) {
         // The snapshot remains useful to render, but a socket opened before
         // its server instance was known has no acknowledgement provenance.
         // Reconnect now that this init supplied the instance; the next init is
@@ -430,14 +372,12 @@ function openWs(sessionId, initialBackoff) {
   ws.onerror = () => {
     ws.close(); // triggers onclose → reconnect
   };
-
-  ws.onopen = () => switchMark(sessionId, 'open');
 }
 
-function routeEvent(sessionId, evt, { ackProven = true } = {}) {
+function routeEvent(sessionId, evt) {
   switch (evt.type) {
     case 'init':
-      handleWsInit(sessionId, evt.data, { ackProven });
+      handleWsInit(sessionId, evt.data, { ackProven: true });
       break;
     case 'text_delta':
       handleWsTextDelta(sessionId, evt.data.delta);

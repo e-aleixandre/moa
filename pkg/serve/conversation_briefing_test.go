@@ -277,7 +277,7 @@ func TestConversationMessagesToolDetailRequiresItemAndReturnsCompleteUTF8Output(
 	if err := json.NewDecoder(rec.Body).Decode(&detail); err != nil {
 		t.Fatal(err)
 	}
-	if detail.Truncated || detail.Output != output || !utf8.ValidString(detail.Output) {
+	if detail.Output != output || !utf8.ValidString(detail.Output) {
 		t.Fatalf("detail = %#v", detail)
 	}
 }
