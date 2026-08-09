@@ -1,7 +1,7 @@
 // tile-actions.js — tile tree manipulation and visibility management
 
-import { acknowledgeVisibleAttention, syncConnections } from './api.js';
-import { store, setState, updateSession, visibleSessionIds } from './store.js';
+import { observeVisibleAttention, syncConnections } from './api.js';
+import { observeConversationVisibility, store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
   splitTileNode, removeTileNode, setTileSession, swapSessions,
@@ -271,7 +271,10 @@ export function afterVisibilityChange() {
   // Opening a socket synchronously marks its retained history pending. Do that
   // before considering an unread badge: tapping a stale transcript must not
   // acknowledge the result until init makes the history authoritative.
-  syncConnections(connectable);
+  // Store-level presentation transitions are also exercised by non-DOM unit
+  // tests. There is no socket endpoint in that environment; the acknowledgement
+  // pass below remains meaningful, while connection ownership is browser-only.
+  if (typeof location !== 'undefined') syncConnections(connectable);
 
   if (typeof document === 'undefined' || !document.hidden) {
     const current = store.get();
@@ -282,8 +285,13 @@ export function afterVisibilityChange() {
       // the roster poll must not bypass that observer.
       if (sess?.unseen && !sess.pendingAsk && !sess.pendingPerm &&
           !sess.resolvedPendingAttention && sess.historyHydrated && sess.historyAckProven) {
-        void acknowledgeVisibleAttention(id, sess.historyShownGen, sess.historyShownInstance).catch(() => {});
+        observeVisibleAttention(id, sess.historyShownGen, sess.historyShownInstance);
       }
     }
   }
 }
+
+// Overlay leave animations and detail exits mutate store state outside these
+// action helpers. Re-run the common visibility pass when any such transition
+// finally presents a parent conversation.
+observeConversationVisibility(afterVisibilityChange);

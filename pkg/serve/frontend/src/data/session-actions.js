@@ -60,6 +60,15 @@ export async function loadSessions() {
       const existing = prev[info.id];
 		const serverRestarted = !!existing?.serverInstance && !!info.server_instance
 			&& existing.serverInstance !== info.server_instance;
+		// /api/sessions is a snapshot taken before its response reaches us. Once
+		// this client has a fenced /read confirmation, that old snapshot must not
+		// relight the exact same occurrence locally. A larger generation (or a
+		// different server namespace) remains a genuinely new occurrence.
+		const pollGeneration = info.unseen_gen || 0;
+		const staleAcknowledgedOccurrence = !!info.unseen && !serverRestarted && !!existing &&
+			existing.lastAckedUnseenInstance === (info.server_instance || '') &&
+			(existing.lastAckedUnseenGen || 0) >= pollGeneration;
+		const polledUnseen = !!info.unseen && !staleAcknowledgedOccurrence;
       // A visible session has a live WS connection that owns its live-tracked
       // fields (state, config, context, plan). This poll response may already
       // be stale relative to WS events that arrived while the request was in
@@ -188,9 +197,9 @@ export async function loadSessions() {
         planMode: wsOwns ? existing.planMode : (info.plan_mode || (existing ? existing.planMode : 'off')),
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
         costUSD: wsOwns ? existing.costUSD : (info.cost_usd ?? (existing ? existing.costUSD : 0)),
-        unseen: info.unseen ?? false,
-        unseenGen: info.unseen_gen || 0,
-        serverUnseenGen: info.unseen_gen || 0,
+        unseen: polledUnseen,
+        unseenGen: pollGeneration,
+        serverUnseenGen: pollGeneration,
         serverUnseenInstance: info.server_instance || '',
         serverInstance: info.server_instance || (existing ? existing.serverInstance : ''),
 		// A generation namespace belongs to one server process. Keep the local
@@ -200,8 +209,8 @@ export async function loadSessions() {
 		lastAckedUnseenInstance: serverRestarted ? '' : (existing ? existing.lastAckedUnseenInstance || '' : ''),
         // One global client arrival sequence covers every session. Repeating
         // the same server-instance occurrence after a poll returns its original value.
-        attentionArrival: info.unseen
-          ? attentionArrival(info.id, info.unseen_gen || 0, info.server_instance || '')
+        attentionArrival: polledUnseen
+          ? attentionArrival(info.id, pollGeneration, info.server_instance || '')
           : (existing ? existing.attentionArrival || 0 : 0),
         // Server-owned session brief (cheap LLM status summary): attempting /
         // progress prose + freshness stamp. No WS event tracks it, so the poll

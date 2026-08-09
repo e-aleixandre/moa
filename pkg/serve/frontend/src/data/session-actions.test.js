@@ -62,6 +62,27 @@ test('loadSessions restores an unread result from the serve snapshot', async () 
   expect(store.get().sessions.s3.unseen).toBe(true);
 });
 
+test('a stale roster cannot relight an acknowledged occurrence, but a newer generation can', async () => {
+  setState({ sessions: { s3: {
+    id: 's3', state: 'idle', provider: 'openai', cwd: '/z', subagents: {},
+    serverInstance: 'server-a', unseen: false,
+    lastAckedUnseenGen: 7, lastAckedUnseenInstance: 'server-a',
+  } } });
+  apiResponse = [{
+    id: 's3', title: 'S3', state: 'idle', provider: 'openai', cwd: '/z',
+    server_instance: 'server-a', unseen: true, unseen_gen: 7,
+  }];
+  await loadSessions();
+  expect(store.get().sessions.s3.unseen).toBe(false);
+
+  apiResponse = [{
+    id: 's3', title: 'S3', state: 'idle', provider: 'openai', cwd: '/z',
+    server_instance: 'server-a', unseen: true, unseen_gen: 8,
+  }];
+  await loadSessions();
+  expect(store.get().sessions.s3).toMatchObject({ unseen: true, unseenGen: 8 });
+});
+
 test('roster-driven deletion forgets the durable attention receipt', async () => {
   const originalStorage = globalThis.localStorage;
   const values = new Map();

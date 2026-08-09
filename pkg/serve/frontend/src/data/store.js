@@ -112,6 +112,7 @@ let state = {
 };
 
 let listeners = new Set();
+let conversationVisibilityObserver = null;
 
 export const store = {
   get() { return state; },
@@ -139,6 +140,39 @@ export function setState(patch) {
     persistState(state);
   }
   listeners.forEach(fn => fn(state));
+  // A selection can become genuinely presented only after a leave animation
+  // releases its drawer/sheet registration. Keep this at the store boundary
+  // so every surface which restores the parent conversation feeds the same
+  // attention observer (rather than relying on each close button to remember
+  // to do so).
+  if (conversationVisibilityObserver && (
+      conversationVisibilityKey(previous) !== conversationVisibilityKey(state) ||
+      parentVisibilityChanged(previous, state))) {
+    conversationVisibilityObserver();
+  }
+}
+
+function parentVisibilityChanged(previous, next) {
+  const ids = new Set([...Object.keys(previous.sessions), ...Object.keys(next.sessions)]);
+  for (const id of ids) {
+    // Initial roster insertion is not a presentation transition. The
+    // authoritative init supplies its own proof after that row commits; this
+    // bridge is specifically for an already-known surface becoming visible
+    // after selection, an overlay leave animation, or a detail exit.
+    if (previous.sessions[id] &&
+        !isParentConversationVisible(previous, id) && isParentConversationVisible(next, id)) return true;
+  }
+  return false;
+}
+
+// tile-actions owns the connection and acknowledgement side effects. The
+// store owns all visibility transitions, including animation-delayed overlay
+// releases, so it exposes this single bridge rather than importing that layer.
+export function observeConversationVisibility(fn) {
+  conversationVisibilityObserver = fn;
+  return () => {
+    if (conversationVisibilityObserver === fn) conversationVisibilityObserver = null;
+  };
 }
 
 export function updateSession(id, patch) {

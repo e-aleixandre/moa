@@ -1,8 +1,8 @@
 import { test, expect } from 'bun:test';
-import { setState } from './store.js';
+import { store, setState } from './store.js';
 
 const {
-  api, getVersion, acknowledgeRenderedPendingAttention, StaleServerInstanceError,
+  api, getVersion, acknowledgeRenderedPendingAttention, acknowledgeVisibleAttention, StaleServerInstanceError,
 } = await import('./api.js?timeout-test');
 
 test('getVersion bypasses the HTTP cache', async () => {
@@ -103,6 +103,27 @@ test('a stale /read fence reports a typed stale-server-instance outcome', async 
     await expect(acknowledgeRenderedPendingAttention('s1', {
       id: 'ask', unseenGen: 7, serverInstance: 'instance-a',
     })).rejects.toBeInstanceOf(StaleServerInstanceError);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a rendered live completion posts its fenced receipt before local unseen exists', async () => {
+  const originalFetch = globalThis.fetch;
+  const reads = [];
+  globalThis.fetch = (path) => {
+    reads.push(path);
+    return Promise.resolve(new Response('', { status: 204 }));
+  };
+  setState({
+    isMobile: true, activeSession: 's1', drawerOpen: false, paletteOpen: false,
+    conversationObscuringOverlayCount: 0,
+    sessions: { s1: { id: 's1', serverInstance: 'instance-a', unseen: false, subagents: {} } },
+  });
+  try {
+    await expect(acknowledgeVisibleAttention('s1', 7, 'instance-a', { renderedLive: true })).resolves.toBe(true);
+    expect(reads).toEqual(['/api/sessions/s1/read?unseen_gen=7&server_instance=instance-a']);
+    expect(store.get().sessions.s1).toMatchObject({ unseen: false, lastAckedUnseenGen: 7 });
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -1,7 +1,7 @@
 // ws-handlers.js — WebSocket event handlers and streaming delta batching
 
 import { triggerAttention, triggerDone, addToast } from './notifications.js';
-import { api, acknowledgeVisibleAttention } from './api.js';
+import { api, observeVisibleAttention } from './api.js';
 import { store, setState, updateSession, visibleSessionIds, isParentConversationVisible } from './store.js';
 import { finishHistoryHydration } from './history-hydration.js';
 import { forgetPendingAttention, rememberedPendingAttention, rememberPendingAttention } from './attention-receipt-store.js';
@@ -623,7 +623,7 @@ function acknowledgeVisiblePendingInit(id, data, { ackProven }) {
   // mark an off-screen prompt read before Preact commits it.
   if (provenBounded && !data.pending_permission && !data.pending_ask &&
       !store.get().sessions[id]?.resolvedPendingAttention) {
-    void acknowledgeVisibleAttention(id, generation, serverInstance).catch(() => {});
+    observeVisibleAttention(id, generation, serverInstance);
   }
 }
 
@@ -1141,7 +1141,7 @@ export function handleWsPermissionRequest(id, data) {
 
 function acknowledgeVisibleLiveAttention(id, runGen) {
   const serverInstance = store.get().sessions[id]?.serverInstance || '';
-  void acknowledgeVisibleAttention(id, runGen, serverInstance, { renderedLive: true }).catch(() => {});
+  observeVisibleAttention(id, runGen, serverInstance, { renderedLive: true });
 }
 
 // Another client (or a run abort) resolved the permission — clear the modal
@@ -1725,11 +1725,11 @@ export function handleWsRunEnd(id, data = {}) {
     updateSession(id, { streamingText: null, thinkingText: null, runningTool: null, compacting: false });
   }
   if (!data.unseen_gen) return; // cancelled/non-attention terminal run
-  acknowledgeVisibleLiveAttention(id, data.unseen_gen);
   // Error state_change already announced this terminal occurrence. A normal
   // completion after a permission/ask is a new occurrence and must restart
   // the title-chip arrival treatment even though the session was already unseen.
   markUnseen(id, data.unseen_gen, sess?.state !== 'error');
+  acknowledgeVisibleLiveAttention(id, data.unseen_gen);
 }
 
 // handleWsUserMessage renders a user prompt that started a new run on EVERY

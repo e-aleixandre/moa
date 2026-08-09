@@ -557,6 +557,51 @@ test('attention remains until init has shown authoritative history, then acknowl
   }
 });
 
+for (const obscurer of [
+  { name: 'mobile drawer leave animation', closed: { drawerOpen: false }, open: { drawerOpen: true } },
+  { name: 'command palette', closed: { paletteOpen: false }, open: { paletteOpen: true } },
+  { name: 'modal sheet', closed: { conversationObscuringOverlayCount: 0 }, open: { conversationObscuringOverlayCount: 1 } },
+  { name: 'subagent detail', scope: 'session', closed: { viewingSubagent: null }, open: { viewingSubagent: 'child' } },
+  { name: 'bash detail', scope: 'session', closed: { viewingBashJob: null }, open: { viewingBashJob: 'job' } },
+]) {
+  test(`an ordinary receipt waits for ${obscurer.name} then retries its exact occurrence`, async () => {
+    const originalFetch = globalThis.fetch;
+    const reads = [];
+    globalThis.fetch = (path) => {
+      if (String(path).includes('/read?')) reads.push(path);
+      return Promise.resolve(new Response('', { status: 204 }));
+    };
+    try {
+      setState({
+        isMobile: true, activeSession: 's1', drawerOpen: false, paletteOpen: false,
+        conversationObscuringOverlayCount: 0,
+        ...(obscurer.scope ? {} : obscurer.open),
+        sessions: { s1: {
+          id: 's1', messages: [], subagents: {}, unseen: true, unseenGen: 7,
+          serverInstance: 'instance-a', ...(obscurer.scope ? obscurer.open : {}),
+        } },
+      });
+      beginHistoryHydration('s1');
+      handleWsInit('s1', {
+        messages: [], subagents: [], unseen_gen: 7, server_instance: 'instance-a', attention_bound: true,
+      }, { ackProven: true });
+      await Promise.resolve();
+      expect(reads).toEqual([]);
+
+      setState({
+        drawerOpen: false, paletteOpen: false, conversationObscuringOverlayCount: 0,
+        sessions: { s1: { ...store.get().sessions.s1, ...obscurer.closed } },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(reads).toEqual(['/api/sessions/s1/read?unseen_gen=7&server_instance=instance-a']);
+      expect(store.get().sessions.s1.unseen).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+}
+
 test('a stale roster restoration does not repeat an acknowledgement, but a newer generation does', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];

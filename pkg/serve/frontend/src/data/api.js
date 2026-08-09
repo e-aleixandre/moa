@@ -109,8 +109,11 @@ const hydrationTimers = new Map(); // sessionId → timeoutId (waiting for WS in
 const wantedIds = new Set();      // sessions that should have a connection
 const forceFullInit = new Set();  // session IDs whose cached delta base was absent
 const attentionAcknowledgements = new Map(); // occurrence → confirmed POST
+const attentionObservers = new Map(); // occurrence → bounded visible receipt retry
 let attentionInstanceRefresh = null;
 const MAX_BACKOFF = 16000;
+const ATTENTION_RETRY_INITIAL_MS = 500;
+const ATTENTION_RETRY_MAX_MS = 16000;
 
 // Set localStorage.moaDebugSessionSwitch = '1' and reconnect a session to
 // inspect its complete init path. This remains outside normal UI chrome and
@@ -224,7 +227,7 @@ function commitAttentionAcknowledgement(sessionId, generation, instance) {
   updateSession(sessionId, {
     // A roster poll may have restored this exact occurrence while /read was in
     // flight. Clear it only after the server accepted the fenced request.
-    unseen: sameOccurrence ? false : session.unseen,
+    unseen: (sameOccurrence || !(session.unseenGen || 0)) ? false : session.unseen,
     lastAckedUnseenGen: Math.max(session.lastAckedUnseenGen || 0, generation),
     lastAckedUnseenInstance: instance,
   });
@@ -247,7 +250,11 @@ export function acknowledgeVisibleAttention(sessionId, shownGeneration, shownIns
     commitAttentionAcknowledgement(sessionId, shownGeneration, acknowledgementInstance);
     return Promise.resolve(true);
   }
-  if (!session.unseen) return Promise.resolve(true);
+  // A visible run_end is itself the authoritative presentation of a new
+  // occurrence. It can arrive before markUnseen projects that occurrence into
+  // the local roster, but the server has already made it unread; do not turn
+  // that ordering into a fake local success which skips /read entirely.
+  if (!renderedLive && !session.unseen) return Promise.resolve(true);
   const key = acknowledgementKey(sessionId, shownGeneration, acknowledgementInstance);
   const inFlight = attentionAcknowledgements.get(key);
   if (inFlight) return inFlight;
@@ -268,6 +275,73 @@ export function acknowledgeVisibleAttention(sessionId, shownGeneration, shownIns
     .finally(() => attentionAcknowledgements.delete(key));
   attentionAcknowledgements.set(key, acknowledgement);
   return acknowledgement;
+}
+
+// Ordinary transcript attention has no card geometry to observe: an
+// authoritative init proves the committed conversation surface showed its
+// bounded occurrence. This observer retains that proof and retries the same
+// fenced POST while the parent surface remains unobscured. Pending/resolved
+// prompts feed the same acknowledgement fence from their stricter card
+// geometry receipt in AttentionReceipt.
+export function observeVisibleAttention(sessionId, generation, instance = '', { renderedLive = false } = {}) {
+  if (!generation) return;
+  const key = acknowledgementKey(sessionId, generation, instance);
+  let observer = attentionObservers.get(key);
+  if (!observer) {
+    observer = { sessionId, generation, instance, renderedLive, delay: ATTENTION_RETRY_INITIAL_MS, timer: null };
+    attentionObservers.set(key, observer);
+  } else if (renderedLive) {
+    // The same fenced occurrence can first be retained by a transcript init
+    // and later be proven by its live terminal row. Keep the stronger proof.
+    observer.renderedLive = true;
+  }
+
+  const stop = () => {
+    if (observer.timer) clearTimeout(observer.timer);
+    attentionObservers.delete(key);
+  };
+  const retry = () => {
+    if (observer.timer) return;
+    const delay = observer.delay;
+    observer.delay = Math.min(delay * 2, ATTENTION_RETRY_MAX_MS);
+    observer.timer = setTimeout(() => {
+      observer.timer = null;
+      attempt();
+    }, delay);
+  };
+  const attempt = () => {
+    const session = store.get().sessions[sessionId];
+    const hidden = typeof document !== 'undefined' && document.hidden;
+    // A newer generation, a new process or a removed session supersedes the
+    // proof retained by this observer. An obscured/hidden parent is not proof;
+    // leave the occurrence registered for the next visibility transition.
+    if (!session || (instance && session.serverInstance && instance !== session.serverInstance) ||
+        (session.unseenGen || 0) > generation) return stop();
+    if (!observer.renderedLive && (!session.unseen || !session.historyHydrated || !session.historyAckProven ||
+        (session.historyShownGen || 0) !== generation ||
+        (instance && session.historyShownInstance && session.historyShownInstance !== instance))) return stop();
+    if (hidden || !isParentConversationVisible(store.get(), sessionId)) return;
+    acknowledgeVisibleAttention(sessionId, generation, instance, { renderedLive: observer.renderedLive })
+      .then((confirmed) => {
+        if (confirmed) stop();
+        else retry();
+      })
+      .catch((error) => {
+        if (error instanceof StaleServerInstanceError) {
+          refreshAttentionInstances().finally(() => retry());
+          return;
+        }
+        retry();
+      });
+  };
+  // A close/foreground transition may call this repeatedly. Reset a pending
+  // backoff then make the presented occurrence prompt immediately.
+  if (observer.timer) {
+    clearTimeout(observer.timer);
+    observer.timer = null;
+    observer.delay = ATTENTION_RETRY_INITIAL_MS;
+  }
+  attempt();
 }
 
 // Called by the pending-prompt components after they commit. A live request is

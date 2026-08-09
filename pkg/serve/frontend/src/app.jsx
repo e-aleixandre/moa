@@ -19,7 +19,7 @@ import { addToast } from "./data/notifications.js";
 import { refreshPushState } from "./data/push-client.js";
 import { installOpenSessionNavigation } from "./data/push-navigation.js";
 import {
-  setMobile, autoFillTiles, autoSelectMobile, openSession,
+  setMobile, autoFillTiles, autoSelectMobile, openSession, afterVisibilityChange,
 } from "./data/tile-actions.js";
 
 // Galleries are development/reference surfaces, never part of the production
@@ -262,6 +262,10 @@ function useBootstrap() {
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
+        // A previous visible receipt may have been waiting only for the app to
+        // return. Feed the acknowledgement observer before the refresh too;
+        // the refresh below will feed it again if it replaces the occurrence.
+        afterVisibilityChange();
         reconnectAll();
         loadSessions();
         startPolling();

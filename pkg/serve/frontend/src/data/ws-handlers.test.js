@@ -1,6 +1,6 @@
 // ws-handlers.test.js — run with `bun test`
 import { test, expect, beforeEach } from 'bun:test';
-import { store, setState } from './store.js';
+import { store, setState, isParentConversationVisible } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
 import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
@@ -955,6 +955,21 @@ test('handleWsRunEnd keeps genuinely queued steers (mostrar la verdad)', async (
   const steers = store.get().sessions.s1.pendingSteers;
   expect(steers).toHaveLength(1);
   expect(steers[0].id).toBe('q1');
+});
+
+test('a live-rendered run end acknowledges the server before a roster can relight it', async () => {
+  setState({
+    isMobile: true, activeSession: 's1', drawerOpen: false, paletteOpen: false,
+    conversationObscuringOverlayCount: 0,
+    sessions: { s1: {
+      id: 's1', state: 'running', serverInstance: 'server-a', messages: [], subagents: {},
+    } },
+  });
+  expect(isParentConversationVisible(store.get(), 's1')).toBe(true);
+  handleWsRunEnd('s1', { unseen_gen: 71 });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(store.get().sessions.s1).toMatchObject({ unseen: false, lastAckedUnseenGen: 71 });
 });
 
 test('a server occurrence is counted once locally even when its poll snapshot follows', async () => {
