@@ -472,49 +472,6 @@ func (sctx *SessionContext) SnapshotInFlightWithCut() (StreamingAggregate, []Liv
 	return aggregate, liveTools, cut
 }
 
-// SnapshotInFlightWithAttentionCut additionally captures the attention
-// tracker's overflow watermarks at the same publication cut. This is the only
-// safe way to decide whether an init snapshot can acknowledge attention:
-// another init may clear a later-observed overflow while this snapshot waits
-// on its fence.
-func (sctx *SessionContext) SnapshotInFlightWithAttentionCut(sub SeqFenceSubscription) (StreamingAggregate, []LiveToolCall, uint64, uint64, uint64, bool, bool) {
-	return sctx.snapshotInFlightWithAttentionCut(sub, time.Time{})
-}
-
-// SnapshotInFlightWithAttentionCutBefore is the init form. Its deadline is
-// established before it can acquire publishMu, so publication contention
-// produces an explicitly unbound attention snapshot instead of extending the
-// attention-bound attempt.
-func (sctx *SessionContext) SnapshotInFlightWithAttentionCutBefore(sub SeqFenceSubscription, deadline time.Time) (StreamingAggregate, []LiveToolCall, uint64, uint64, uint64, bool, bool) {
-	return sctx.snapshotInFlightWithAttentionCut(sub, deadline)
-}
-
-func (sctx *SessionContext) snapshotInFlightWithAttentionCut(sub SeqFenceSubscription, deadline time.Time) (StreamingAggregate, []LiveToolCall, uint64, uint64, uint64, bool, bool) {
-	sctx.streamMu.Lock()
-	defer sctx.streamMu.Unlock()
-	aggregate := StreamingAggregate{
-		Text:     sctx.streamText,
-		Thinking: sctx.streamThinking,
-		MsgID:    sctx.streamMsgID,
-	}
-	liveTools := sctx.liveToolsSnapshotLocked()
-	initialCut, supportsInitialCut := sub.(initialCutCapturer)
-	if deadline.IsZero() {
-		if supportsInitialCut {
-			cut, overflow, cleared, initial, ok := initialCut.CaptureCutWithInitial()
-			return aggregate, liveTools, cut, overflow, cleared, initial, ok
-		}
-		cut, overflow, cleared, ok := sub.CaptureCut()
-		return aggregate, liveTools, cut, overflow, cleared, false, ok
-	}
-	if supportsInitialCut {
-		cut, overflow, cleared, initial, ok := initialCut.CaptureCutWithInitialBefore(deadline)
-		return aggregate, liveTools, cut, overflow, cleared, initial, ok
-	}
-	cut, overflow, cleared, ok := sub.CaptureCutBefore(deadline)
-	return aggregate, liveTools, cut, overflow, cleared, false, ok
-}
-
 // LiveTools returns the tool calls currently generating arguments or executing.
 func (sctx *SessionContext) LiveTools() []LiveToolCall {
 	sctx.streamMu.Lock()

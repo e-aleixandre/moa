@@ -90,6 +90,10 @@ const forceFullInit = new Set();  // session IDs whose cached delta base was abs
 const attentionAcknowledgements = new Map(); // occurrence → confirmed POST
 const MAX_BACKOFF = 16000;
 
+function cursorAcknowledgementKey(sessionId, seq, namespace) {
+  return `cursor:${sessionId}:${seq}:${namespace}`;
+}
+
 export function syncConnections(visibleIds) {
   wantedIds.clear();
   for (const id of visibleIds) wantedIds.add(id);
@@ -129,64 +133,6 @@ export function reconnectAll() {
   for (const id of ids) openWs(id, 1000);
 }
 
-// acknowledgeVisibleAttention clears a roster dot for the fenced occurrence
-// carried by an authoritative init or live terminal event. Callers establish
-// selection and init proof; this boundary only owns foreground, fencing and
-// duplicate POST handling.
-function acknowledgementKey(sessionId, generation, instance) {
-	return `generation:${sessionId}:${generation}:${instance}`;
-}
-
-function cursorAcknowledgementKey(sessionId, seq, namespace) {
-	return `cursor:${sessionId}:${seq}:${namespace}`;
-}
-
-function commitAttentionAcknowledgement(sessionId, generation, instance) {
-  const session = store.get().sessions[sessionId];
-  if (!session || (instance && session.serverInstance && session.serverInstance !== instance)) return;
-  const heldGeneration = session.unseenGen || 0;
-  updateSession(sessionId, {
-    // A roster poll may have restored an older occurrence while /read was in
-    // flight. The server accepted this generation's fence, so it also proved
-    // every occurrence through it read. A later generation remains lit.
-    unseen: heldGeneration <= generation ? false : session.unseen,
-    lastAckedUnseenGen: Math.max(session.lastAckedUnseenGen || 0, generation),
-    lastAckedUnseenInstance: instance,
-  });
-}
-
-// Resolves true only when this occurrence is already known confirmed or the
-// server has accepted its fenced POST. Callers deliberately keep their visible
-// receipt alive on rejection: scheduling fetch is not a read acknowledgement.
-export function acknowledgeVisibleAttention(sessionId, shownGeneration, shownInstance = '') {
-  const session = store.get().sessions[sessionId];
-  const hidden = typeof document !== 'undefined' && document.hidden;
-  if (!session || hidden || !shownGeneration) return Promise.resolve(false);
-  if (shownInstance && session.serverInstance && shownInstance !== session.serverInstance) return Promise.resolve(false);
-  if (session.lastAckedUnseenInstance === shownInstance &&
-      (session.lastAckedUnseenGen || 0) >= shownGeneration) {
-    commitAttentionAcknowledgement(sessionId, shownGeneration, shownInstance);
-    return Promise.resolve(true);
-  }
-  const key = acknowledgementKey(sessionId, shownGeneration, shownInstance);
-  const inFlight = attentionAcknowledgements.get(key);
-  if (inFlight) return inFlight;
-  const instanceQuery = shownInstance
-    ? `&server_instance=${encodeURIComponent(shownInstance)}`
-    : '';
-  const acknowledgement = api('POST', `/api/sessions/${sessionId}/read?unseen_gen=${shownGeneration}${instanceQuery}`)
-    .then(() => {
-      commitAttentionAcknowledgement(sessionId, shownGeneration, shownInstance);
-      return true;
-    })
-    .finally(() => attentionAcknowledgements.delete(key));
-  attentionAcknowledgements.set(key, acknowledgement);
-  return acknowledgement;
-}
-
-// acknowledgeVisibleAttentionThrough is the cursor counterpart of the legacy
-// generation acknowledgement above. Keep the latter for pre-deploy tabs until
-// Phase 4, but do not send both for a new init: the cursor POST is authoritative.
 export function acknowledgeVisibleAttentionThrough(sessionId, throughSeq, namespace = '') {
 	const session = store.get().sessions[sessionId];
 	const hidden = typeof document !== 'undefined' && document.hidden;
@@ -307,9 +253,6 @@ function openWs(sessionId, initialBackoff) {
     ws,
     backoff: initialBackoff,
     lastSeq: 0,
-    // A known roster identity is the only proof an init belongs to this socket
-    // after a process transition. An empty value is deliberately not a match.
-    serverInstanceAtOpen: store.get().sessions[sessionId]?.serverInstance || '',
   };
   connections.set(sessionId, entry);
   clearHistoryHydrationTimer(sessionId);
@@ -332,48 +275,11 @@ function openWs(sessionId, initialBackoff) {
         ws.close();
         return;
       }
-      const currentInstance = store.get().sessions[sessionId]?.serverInstance || '';
-      const initInstance = evt.data?.server_instance || '';
-      const initMatchesCurrent = !!initInstance && !!currentInstance && initInstance === currentInstance;
-      const initMatchesOpen = !!entry.serverInstanceAtOpen && initInstance === entry.serverInstanceAtOpen;
-      // Whether this init may acknowledge attention; handleWsInit re-checks
-      // attention_bound itself. This must be decided before routing the init:
-      // handleWsInit renders the snapshot and may acknowledge it synchronously.
-      const ackProven = initMatchesCurrent || (!currentInstance && initMatchesOpen);
-      if (currentInstance && !initMatchesCurrent) {
-        // The roster has already moved us to another server process. Do not
-        // render or acknowledge this old socket's snapshot; reconnect for an
-        // init from the process the roster named.
-        connections.delete(sessionId);
-        failHistoryHydration(sessionId);
-        try { ws.close(); } catch (_) { /* reconnect below is sufficient */ }
-        scheduleReconnect(sessionId, entry);
-        return;
-      }
       entry.lastSeq = evt.data?.last_seq ?? evt.seq ?? 0;
       clearHistoryHydrationTimer(sessionId);
       confirmHistoryHydrationInit(sessionId, { deltaBase: !!evt.data?.delta_base });
-      handleWsInit(sessionId, evt.data, { ackProven });
-      // A missing bound is intentionally not acknowledged: it means the server
-      // could not prove which attention occurrence this snapshot contains.
-      // Keep the rendered snapshot, close this socket, and retry through the
-      // normal bounded backoff until a fenced init can clear the roster dot.
-      if (evt.data?.attention_bound === false) {
-        entry.attentionBoundRecovery = true;
-        ws.close();
-      } else if (!ackProven) {
-        // The snapshot remains useful to render, but a socket opened before
-        // its server instance was known has no acknowledgement provenance.
-        // Reconnect now that this init supplied the instance; the next init is
-        // proven against it and converges the still-lit dot.
-        entry.attentionProofRecovery = true;
-        ws.close();
-      } else {
-        // Only a safely bounded snapshot is a successful recovery. Resetting
-        // here on an unbounded init would reconnect every visible client once
-        // a second while the server is contended.
-        entry.backoff = 1000;
-      }
+      handleWsInit(sessionId, evt.data, { ackProven: true });
+      entry.backoff = 1000;
       return;
     }
     // Bus sequences intentionally retain ordinary numeric ordering here. A
@@ -397,17 +303,6 @@ function openWs(sessionId, initialBackoff) {
     if (connections.get(sessionId)?.ws !== ws) return; // superseded
     connections.delete(sessionId);
     if (!wantedIds.has(sessionId)) return; // intentionally removed
-    if (entry.attentionBoundRecovery || entry.attentionProofRecovery) {
-      entry.attentionBoundRecovery = false;
-      entry.attentionProofRecovery = false;
-      // This was a valid transcript with only its acknowledgement boundary
-      // unavailable, not a failed hydration. Do not mark it stale while the
-      // retry obtains a safe bound.
-      clearHistoryHydrationTimer(sessionId);
-      finishHistoryHydration(sessionId, { shown: true });
-      scheduleReconnect(sessionId, entry);
-      return;
-    }
     failHistoryHydration(sessionId);
     // Reconnect with exponential backoff (read from entry — may have been reset by init).
     scheduleReconnect(sessionId, entry);

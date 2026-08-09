@@ -140,11 +140,7 @@ type ManagedSession struct {
 	// non-blocking notifications), a "deleted" guard against late pushes, and
 	// the bus unsubscribe funcs registered by subscribePush.
 	wsConns atomic.Int32
-	// attentionGen is the latest process-local attention occurrence assigned to
-	// this runtime. It lets a reconnect snapshot acknowledge a pending request.
-	attentionGen    atomic.Uint64
-	attentionClosed atomic.Bool
-	deleted         atomic.Bool
+	deleted atomic.Bool
 	// closing marks a session whose runtime is being torn down by CloseSession.
 	// Set atomically with respect to run-start (under the state lock) so a /send
 	// admitted just before cannot begin a run into a runtime that is going away,
@@ -167,21 +163,12 @@ type ManagedSession struct {
 	// briefGen serializes brief regeneration (see brief.go): briefPending marks
 	// a coalesced regeneration request; briefRunning is the one-flight guard so
 	// two generations for the same session never overlap.
-	briefPending    atomic.Bool
-	briefRunning    atomic.Bool
-	pushUnsubs      []func()
-	usageUnsub      func()
-	unreadUnsub     func()
-	attentionSeqSub bus.SeqFenceSubscription
-	// overflowClear coalesces deadline-missed overflow acknowledgements into
-	// one cancellable worker per session. It is separate from attentionSeqMu:
-	// the worker may wait on bus publication without blocking sequence records.
-	overflowClearMu      sync.Mutex
-	overflowClearPending uint64
-	overflowClearSet     bool
-	overflowClearRunning bool
-	overflowClearDone    chan struct{}
-	runProvider          string
+	briefPending atomic.Bool
+	briefRunning atomic.Bool
+	pushUnsubs   []func()
+	usageUnsub   func()
+	unreadUnsub  func()
+	runProvider  string
 
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
 	// must not run verify.Execute at once and interleave AutoVerify events.
@@ -257,7 +244,6 @@ type SessionInfo struct {
 	Origin             string       `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
 	Error              string       `json:"error,omitempty"`
 	Unseen             bool         `json:"unseen"`
-	UnseenGen          uint64       `json:"unseen_gen,omitempty"`
 	UnseenSeq          uint64       `json:"unseen_seq,omitempty"`
 	ServerInstance     string       `json:"server_instance"`
 	AttentionNamespace string       `json:"attention_namespace,omitempty"`
@@ -453,7 +439,7 @@ func nonUserOrigin(origin string) string {
 // second, potentially divergent event tracker in ManagedSession.
 func (m *Manager) sessionInfo(s *ManagedSession) SessionInfo {
 	info := s.info()
-	info.Unseen, info.UnseenGen, info.UnseenSeq, info.AttentionNamespace = m.attentionState(s)
+	info.Unseen, info.UnseenSeq, info.AttentionNamespace = m.attentionState(s)
 	if m.attention == nil {
 		return info
 	}
@@ -472,97 +458,52 @@ func (m *Manager) isUnseen(id string) bool {
 	return m.unseen[id]
 }
 
-func (m *Manager) unseenGeneration(id string) uint64 {
-	m.unseenMu.RLock()
-	defer m.unseenMu.RUnlock()
-	return m.unseenGen[id]
-}
-
-func (m *Manager) readThroughSequence(id string) uint64 {
-	m.unseenMu.RLock()
-	defer m.unseenMu.RUnlock()
-	return m.readThroughSeq[id]
-}
-
-func (m *Manager) attentionState(sess *ManagedSession) (bool, uint64, uint64, string) {
+func (m *Manager) attentionState(sess *ManagedSession) (bool, uint64, string) {
 	m.unseenMu.RLock()
 	defer m.unseenMu.RUnlock()
 	if m.attentionRuntime[sess.ID] != sess {
-		return false, 0, 0, ""
+		return false, 0, ""
 	}
-	return m.unseen[sess.ID], m.unseenGen[sess.ID], m.unseenSeq[sess.ID], sess.attentionNamespace
+	return m.unseen[sess.ID], m.unseenSeq[sess.ID], sess.attentionNamespace
 }
 
-func (m *Manager) markUnseen(sess *ManagedSession, seq uint64) uint64 {
+func (m *Manager) markAttention(sess *ManagedSession, seq uint64) {
 	m.unseenMu.Lock()
 	defer m.unseenMu.Unlock()
 	if m.attentionRuntime[sess.ID] != sess {
-		return 0
+		return
 	}
 	if sess.deleted.Load() {
-		return 0
+		return
+	}
+	if seq <= m.readThroughSeq[sess.ID] {
+		return
 	}
 	if m.unseen == nil {
 		m.unseen = make(map[string]bool)
 	}
-	if m.unseenGen == nil {
-		m.unseenGen = make(map[string]uint64)
-	}
 	if m.unseenSeq == nil {
 		m.unseenSeq = make(map[string]uint64)
 	}
-	// This is an attention-occurrence generation, not the runtime's run
-	// generation. One run can request permission and later end; reading the
-	// first must never suppress the second.
-	m.attentionGen++
-	gen := m.attentionGen
-	m.unseenGen[sess.ID] = gen
-	if seq > m.readThroughSeq[sess.ID] {
-		m.unseen[sess.ID] = true
-		if seq > m.unseenSeq[sess.ID] {
-			m.unseenSeq[sess.ID] = seq
-		}
+	m.unseen[sess.ID] = true
+	if seq > m.unseenSeq[sess.ID] {
+		m.unseenSeq[sess.ID] = seq
 	}
-	sess.attentionGen.Store(gen)
-	return gen
 }
 
 func (m *Manager) forgetUnseen(id string) {
 	m.unseenMu.Lock()
 	delete(m.unseen, id)
-	delete(m.unseenGen, id)
 	delete(m.unseenSeq, id)
 	delete(m.readThroughSeq, id)
 	m.unseenMu.Unlock()
 }
 
-// MarkSessionRead clears a process-local attention marker when the caller has
-// observed that occurrence or a newer one. A supplied server instance scopes
-// the acknowledgement to its generation namespace. Omitting it preserves the
-// legacy unscoped endpoint contract. It intentionally does not save the
-// session: a Moa restart resets this transient UI state.
-func (m *Manager) MarkSessionRead(id string, gen uint64, instances ...string) error {
-	if _, ok := m.Get(id); !ok {
-		return ErrNotFound
-	}
-	if len(instances) > 0 && instances[0] != "" && instances[0] != m.serverInstance {
-		return nil
-	}
-	m.unseenMu.Lock()
-	if gen == 0 || gen >= m.unseenGen[id] {
-		delete(m.unseen, id)
-		delete(m.unseenGen, id)
-		delete(m.unseenSeq, id)
-	}
-	m.unseenMu.Unlock()
-	return nil
-}
-
-// MarkSessionReadThrough advances a runtime's process-local bus read cursor.
+// MarkSessionRead advances a runtime's process-local bus read cursor.
 // Runtime identity, namespace, the bus sequence cap, and the cursor mutation
 // share unseenMu so a close/resume cannot redirect a request from an old
 // runtime onto its replacement.
-func (m *Manager) MarkSessionReadThrough(id string, throughSeq uint64, namespace string) error {
+func (m *Manager) MarkSessionRead(id string, throughSeq uint64, namespace string) error {
 	m.unseenMu.Lock()
 	defer m.unseenMu.Unlock()
 	sess := m.attentionRuntime[id]
@@ -578,12 +519,6 @@ func (m *Manager) MarkSessionReadThrough(id string, throughSeq uint64, namespace
 	if throughSeq > sess.runtime.Bus.LastSeq() {
 		return ErrInvalidAttentionCursor
 	}
-	if throughSeq == 0 {
-		delete(m.unseen, id)
-		delete(m.unseenGen, id)
-		delete(m.unseenSeq, id)
-		return nil
-	}
 	if throughSeq > m.readThroughSeq[id] {
 		if m.readThroughSeq == nil {
 			m.readThroughSeq = make(map[string]uint64)
@@ -592,7 +527,6 @@ func (m *Manager) MarkSessionReadThrough(id string, throughSeq uint64, namespace
 	}
 	if m.unseenSeq[id] <= m.readThroughSeq[id] {
 		delete(m.unseen, id)
-		delete(m.unseenGen, id)
 		delete(m.unseenSeq, id)
 	}
 	return nil
@@ -621,18 +555,10 @@ type Manager struct {
 	resuming             map[string]struct{}
 	unseenMu             sync.RWMutex
 	unseen               map[string]bool // process-local; never persisted with a session
-	unseenGen            map[string]uint64
 	unseenSeq            map[string]uint64
 	readThroughSeq       map[string]uint64
 	attentionRuntime     map[string]*ManagedSession
 	attentionIncarnation map[string]uint64
-	attentionGen         uint64
-	attentionSeqMu       sync.Mutex
-	attentionSeq         map[attentionSequenceKey]uint64
-	attentionSeqOrder    map[*ManagedSession][]attentionSequenceKey
-	attentionSeqLatest   map[*ManagedSession]uint64
-	attentionSeqPruned   map[*ManagedSession]uint64
-	attentionSeqWake     chan struct{}
 	serverInstance       string
 	baseCtx              context.Context
 	secretReaperCancel   context.CancelFunc
@@ -707,7 +633,6 @@ func (m *Manager) initializeAttentionRuntimeLocked(sess *ManagedSession) {
 	}
 	m.attentionRuntime[sess.ID] = sess
 	delete(m.unseen, sess.ID)
-	delete(m.unseenGen, sess.ID)
 	delete(m.unseenSeq, sess.ID)
 	delete(m.readThroughSeq, sess.ID)
 	m.unseenMu.Unlock()
@@ -726,333 +651,6 @@ func (m *Manager) deactivateAttentionRuntime(sess *ManagedSession) {
 		delete(m.attentionRuntime, sess.ID)
 	}
 	m.unseenMu.Unlock()
-}
-
-const (
-	maxAttentionSequenceRecords = 512 // per active session; released on session teardown
-	attentionSequenceWait       = 100 * time.Millisecond
-)
-
-type attentionSequenceKey struct {
-	session *ManagedSession
-	seq     uint64
-}
-
-func (m *Manager) recordAttentionSequence(sess *ManagedSession, seq, gen uint64) {
-	m.attentionSeqMu.Lock()
-	if sess.attentionClosed.Load() {
-		m.attentionSeqMu.Unlock()
-		return
-	}
-	if m.attentionSeq == nil {
-		m.attentionSeq = make(map[attentionSequenceKey]uint64)
-	}
-	if m.attentionSeqOrder == nil {
-		m.attentionSeqOrder = make(map[*ManagedSession][]attentionSequenceKey)
-	}
-	key := attentionSequenceKey{session: sess, seq: seq}
-	m.attentionSeq[key] = gen
-	if m.attentionSeqLatest == nil {
-		m.attentionSeqLatest = make(map[*ManagedSession]uint64)
-	}
-	m.attentionSeqLatest[sess] = seq
-	order := append(m.attentionSeqOrder[sess], key)
-	if len(order) > maxAttentionSequenceRecords {
-		old := order[0]
-		order = order[1:]
-		delete(m.attentionSeq, old)
-		if m.attentionSeqPruned == nil {
-			m.attentionSeqPruned = make(map[*ManagedSession]uint64)
-		}
-		m.attentionSeqPruned[sess] = old.seq
-	}
-	m.attentionSeqOrder[sess] = order
-	if m.attentionSeqWake != nil {
-		close(m.attentionSeqWake)
-	}
-	m.attentionSeqWake = make(chan struct{})
-	m.attentionSeqMu.Unlock()
-}
-
-// attentionGenerationForSequence resolves an attention event's occurrence ID.
-// The tracker only queues attention events, so streaming deltas cannot starve
-// it. Its wait remains bounded as a last-resort safety net for teardown races.
-func (m *Manager) attentionGenerationForSequence(sess *ManagedSession, seq uint64) uint64 {
-	return m.attentionGenerationForSequenceContext(sess.infra.sessionCtx, sess, seq)
-}
-
-func (m *Manager) attentionGenerationForSequenceContext(ctx context.Context, sess *ManagedSession, seq uint64) uint64 {
-	if seq == 0 {
-		// Bus sequences are ordinary uint64 counters. Wrapping is not plausible
-		// in a process lifetime (and JSON numbers stop being exact much earlier),
-		// so the zero wrap value fails closed: the reactor reconnects rather than
-		// publishing an acknowledgement with an unprovable occurrence ID.
-		return 0
-	}
-	timer := time.NewTimer(attentionSequenceWait)
-	defer timer.Stop()
-	retry := time.NewTicker(time.Millisecond)
-	defer retry.Stop()
-	var ctxDone <-chan struct{}
-	if ctx != nil {
-		ctxDone = ctx.Done()
-	}
-	var trackerDone <-chan struct{}
-	if sess.attentionSeqSub != nil {
-		trackerDone = sess.attentionSeqSub.Done()
-	}
-	for {
-		var wake <-chan struct{}
-		// A contended recorder lock used to defeat the 100ms deadline because
-		// Lock itself was unbounded. Poll TryLock under the same deadline: a
-		// live frame that cannot obtain its occurrence ID must reconnect rather
-		// than serializing a generation 0.
-		if m.attentionSeqMu.TryLock() {
-			gen, ok := m.attentionSeq[attentionSequenceKey{session: sess, seq: seq}]
-			latest := m.attentionSeqLatest[sess]
-			wake = m.attentionSeqWake
-			m.attentionSeqMu.Unlock()
-			if ok {
-				return gen
-			}
-			if sess.attentionClosed.Load() {
-				return 0
-			}
-			// See the seq==0 guard above: ordinary ordering intentionally relies
-			// on the process-lifetime no-wrap assumption shared by every bus-seq
-			// consumer. Overflow versions are different serial numbers and do use
-			// modular ordering in pkg/bus.
-			if latest >= seq {
-				return 0 // pruned stale event; do not wait forever
-			}
-			// A recorded occurrence is always authoritative. Only an unrecorded
-			// one is abandoned early when the bounded rare-event queue overflowed:
-			// waiting for a record that was dropped can only end in the same zero,
-			// and the reactor turns that into an explicit reconnect.
-			if sess.attentionSeqSub != nil && sess.attentionSeqSub.Overflowed() {
-				return 0
-			}
-		}
-		select {
-		case <-wake:
-		case <-retry.C:
-		case <-ctxDone:
-			return 0
-		case <-trackerDone:
-			return 0
-		case <-timer.C:
-			return 0
-		}
-	}
-}
-
-// attentionGenerationAtCut returns the newest attention occurrence represented
-// by cut. A fence is queued after the cut's publication boundary, so every
-// earlier attention event has run before the sequence history is inspected.
-// A missing bound is explicit: callers must omit unseen_gen rather than risk
-// acknowledging content outside (or inside but beyond) the snapshot.
-func (m *Manager) attentionGenerationAtCut(ctx context.Context, sess *ManagedSession, cut uint64) (uint64, bool) {
-	sub := sess.attentionSeqSub
-	if sub == nil {
-		return 0, false
-	}
-	// This compatibility helper is used by tests and non-init callers. The WS
-	// init path uses attentionGenerationAtCutWithOverflow with the watermarks
-	// captured atomically alongside its snapshot cut.
-	_, overflow, cleared, ok := sub.CaptureCut()
-	if !ok {
-		return 0, false
-	}
-	return m.attentionGenerationAtCutWithOverflow(ctx, sess, cut, overflow, cleared)
-}
-
-func (m *Manager) attentionGenerationAtCutWithOverflow(ctx context.Context, sess *ManagedSession, cut, overflowAtCut, clearedAtCut uint64) (uint64, bool) {
-	return m.attentionGenerationAtCutWithOverflowBefore(ctx, sess, cut, overflowAtCut, clearedAtCut, false, time.Now().Add(attentionSequenceWait))
-}
-
-// attentionGenerationAtCutWithOverflowBefore uses one deadline from the
-// snapshot's publication cut through the final lookup. The hard bound applies
-// to waits on publishMu, the tracker fence, tracker mutex, and overflow clear;
-// it does not claim to bound scheduling, JSON/socket writes, or streamMu while
-// assembling the independently consistent transcript snapshot.
-func (m *Manager) attentionGenerationAtCutWithOverflowBefore(ctx context.Context, sess *ManagedSession, cut, overflowAtCut, clearedAtCut uint64, initialCut bool, deadline time.Time) (uint64, bool) {
-	if cut == 0 && !initialCut {
-		// Zero after sequence wrap is ambiguous. Only LocalBus's atomically
-		// captured pristine state can establish that this is the initial empty
-		// bus, where generation zero means there is nothing to acknowledge.
-		return 0, false
-	}
-	sub := sess.attentionSeqSub
-	if sub == nil {
-		return 0, false
-	}
-	// One deadline covers capture through waiting for the FIFO fence and
-	// acquiring the recorder after it. No init can wait a second unbounded
-	// interval merely because the recorder became contended just after its fence
-	// completed.
-	timer := time.NewTimer(time.Until(deadline))
-	defer timer.Stop()
-	fence, _, ok := sub.FenceBefore(deadline)
-	if !ok {
-		return 0, false
-	}
-	if !time.Now().Before(deadline) {
-		return 0, false
-	}
-	var requestDone, sessionDone <-chan struct{}
-	if ctx != nil {
-		requestDone = ctx.Done()
-	}
-	if sess.infra.sessionCtx != nil {
-		sessionDone = sess.infra.sessionCtx.Done()
-	}
-	select {
-	case <-fence:
-	case <-requestDone:
-		return 0, false
-	case <-sessionDone:
-		return 0, false
-	case <-sub.Done():
-		select {
-		case <-fence:
-		default:
-			return 0, false
-		}
-	case <-timer.C:
-		return 0, false
-	}
-	if !time.Now().Before(deadline) {
-		return 0, false
-	}
-	// The overflow watermark belongs to the snapshot cut, not to this later
-	// fence. Clearing only what this cut already contained means a concurrent
-	// init whose cut includes a newly dropped occurrence keeps seeing it even if
-	// this init reaches its fence first.
-	if overflowAtCut != clearedAtCut {
-		// Init may not wait past its deadline to acknowledge this overflow. If
-		// the bounded clear misses it, an independent worker clears exactly this
-		// captured watermark after publication contention subsides. This lets the
-		// next reconnect converge without relying on another lucky bounded try.
-		if !sub.ClearOverflowThroughBefore(overflowAtCut, deadline) {
-			m.scheduleOverflowClear(sess, sub, overflowAtCut)
-		}
-		return 0, false
-	}
-
-	// Fence completion is not the end of the deadline: the final history lookup
-	// must not turn a bounded init into an unbounded lock wait.
-	retry := time.NewTicker(time.Millisecond)
-	defer retry.Stop()
-	for {
-		if m.attentionSeqMu.TryLock() {
-			if !time.Now().Before(deadline) {
-				m.attentionSeqMu.Unlock()
-				return 0, false
-			}
-			break
-		}
-		select {
-		case <-requestDone:
-			return 0, false
-		case <-sessionDone:
-			return 0, false
-		case <-sub.Done():
-			return 0, false
-		case <-timer.C:
-			return 0, false
-		case <-retry.C:
-		}
-	}
-	defer m.attentionSeqMu.Unlock()
-	if sess.attentionClosed.Load() {
-		return 0, false
-	}
-	for order := m.attentionSeqOrder[sess]; len(order) > 0; order = order[:len(order)-1] {
-		key := order[len(order)-1]
-		// Bus sequence ordering intentionally assumes no process-lifetime wrap;
-		// the ambiguous cut==0 case failed closed above.
-		if key.seq <= cut {
-			return m.attentionSeq[key], true
-		}
-	}
-	if m.attentionSeqPruned[sess] != 0 && m.attentionSeqPruned[sess] <= cut {
-		return 0, false
-	}
-	return 0, true
-}
-
-func (m *Manager) scheduleOverflowClear(sess *ManagedSession, sub bus.SeqFenceSubscription, watermark uint64) {
-	sess.overflowClearMu.Lock()
-	if !sess.overflowClearSet || int64(watermark-sess.overflowClearPending) >= 0 {
-		sess.overflowClearPending = watermark
-		sess.overflowClearSet = true
-	}
-	if sess.overflowClearRunning {
-		sess.overflowClearMu.Unlock()
-		return
-	}
-	sess.overflowClearRunning = true
-	sess.overflowClearDone = make(chan struct{})
-	done := sess.overflowClearDone
-	sess.overflowClearMu.Unlock()
-
-	go func() {
-		ctx := sess.infra.sessionCtx
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		for {
-			sess.overflowClearMu.Lock()
-			if !sess.overflowClearSet {
-				sess.overflowClearRunning = false
-				close(done)
-				sess.overflowClearMu.Unlock()
-				return
-			}
-			watermark := sess.overflowClearPending
-			sess.overflowClearSet = false
-			sess.overflowClearMu.Unlock()
-			if !sub.ClearOverflowThroughContext(ctx, watermark) {
-				sess.finishOverflowClear(done)
-				return
-			}
-		}
-	}()
-}
-
-func (s *ManagedSession) finishOverflowClear(done chan struct{}) {
-	s.overflowClearMu.Lock()
-	s.overflowClearRunning = false
-	close(done)
-	s.overflowClearMu.Unlock()
-}
-
-func (s *ManagedSession) waitOverflowClear() {
-	s.overflowClearMu.Lock()
-	done := s.overflowClearDone
-	running := s.overflowClearRunning
-	s.overflowClearMu.Unlock()
-	if running && done != nil {
-		<-done
-	}
-}
-
-func (m *Manager) forgetAttentionSequences(sess *ManagedSession) {
-	m.attentionSeqMu.Lock()
-	sess.attentionClosed.Store(true)
-	for key := range m.attentionSeq {
-		if key.session == sess {
-			delete(m.attentionSeq, key)
-		}
-	}
-	delete(m.attentionSeqOrder, sess)
-	delete(m.attentionSeqLatest, sess)
-	delete(m.attentionSeqPruned, sess)
-	if m.attentionSeqWake != nil {
-		close(m.attentionSeqWake)
-	}
-	m.attentionSeqWake = make(chan struct{})
-	m.attentionSeqMu.Unlock()
 }
 
 // ManagerConfig configures a Manager.
@@ -1142,7 +740,6 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	m := &Manager{
 		sessions:               make(map[string]*ManagedSession),
 		resuming:               make(map[string]struct{}),
-		attentionSeqWake:       make(chan struct{}),
 		serverInstance:         newServerInstanceID(),
 		baseCtx:                ctx,
 		providerFactory:        cfg.ProviderFactory,
@@ -1473,7 +1070,7 @@ func (m *Manager) List() []SessionInfo {
 			continue // nil placeholder during ResumeSession
 		}
 		info := s.info()
-		info.Unseen, info.UnseenGen, info.UnseenSeq, info.AttentionNamespace = m.attentionState(s)
+		info.Unseen, info.UnseenSeq, info.AttentionNamespace = m.attentionState(s)
 		info.Activity = activity[s.ID]
 		list = append(list, info)
 	}
@@ -1497,7 +1094,6 @@ func (m *Manager) List() []SessionInfo {
 			Created:        sum.Created,
 			Updated:        sum.Updated,
 			Unseen:         m.isUnseen(sum.ID),
-			UnseenGen:      m.unseenGeneration(sum.ID),
 			ServerInstance: m.serverInstance,
 		})
 	}

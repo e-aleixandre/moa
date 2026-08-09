@@ -660,7 +660,6 @@ func (m *Manager) deleteSession(id string) error {
 	sess.deleted.Store(true)
 	m.forgetUnseen(id)
 	m.forgetSecretBatches(id)
-	m.forgetAttentionSequences(sess)
 	// Mark closing and drain the runtime's users before tearing it down, so a
 	// /send or /command already holding this pointer can't start a run into a
 	// runtime that is going away. Delete does NOT refuse a busy session (unlike
@@ -689,7 +688,6 @@ func (m *Manager) deleteSession(id string) error {
 	if sess.unreadUnsub != nil {
 		sess.unreadUnsub()
 	}
-	m.forgetAttentionSequences(sess)
 	// Delete removed the first snapshot before it waited for in-flight users.
 	// Sweep again so a secret request that had already passed that boundary
 	// cannot leave a newly registered batch behind.
@@ -702,7 +700,6 @@ func (m *Manager) deleteSession(id string) error {
 
 	// Cancel session context — stops bridges, subagent jobs, and in-flight runs.
 	sess.infra.sessionCancel()
-	sess.waitOverflowClear()
 
 	// Close runtime — stops bridges, aborts agent, closes bus.
 	sess.runtime.Close()
@@ -868,13 +865,11 @@ func (m *Manager) CloseSession(id string) error {
 	if sess.unreadUnsub != nil {
 		sess.unreadUnsub()
 	}
-	m.forgetAttentionSequences(sess)
 	m.forgetSecretBatches(id)
 	if sess.infra.mcpMgr != nil {
 		sess.infra.mcpMgr.Close()
 	}
 	sess.infra.sessionCancel()
-	sess.waitOverflowClear()
 	// Close drains the bus's async persistence reactor, so no delayed save can
 	// still be writing when the deferred unreserve lets a resume rebuild this
 	// session from the same files.
@@ -1102,8 +1097,6 @@ func (m *Manager) Shutdown() {
 		// callback waits for quiescence and then POSTs. The cancelled context is
 		// what makes that work give up instead of outliving the shutdown.
 		s.infra.sessionCancel()
-		s.waitOverflowClear()
-		m.forgetAttentionSequences(s)
 		// Close the runtime after flushing: this drains the bus's async
 		// persistence reactor (Bus.Close waits for subscriber goroutines to
 		// finish their queued events) so no delayed save can still be writing

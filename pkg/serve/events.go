@@ -25,45 +25,37 @@ type InitData struct {
 	// AttentionNamespace identifies the ordered runtime incarnation that owns
 	// bus-sequence read cursors. It changes on a close/resume even within one
 	// server process, whose bus sequence then starts again at zero.
-	AttentionNamespace string `json:"attention_namespace,omitempty"`
-	// UnseenGen is the latest attention generation represented by this init
-	// snapshot. Clients bind a read acknowledgement to it rather than borrowing
-	// a potentially newer roster generation.
-	UnseenGen uint64 `json:"unseen_gen,omitempty"`
-	// AttentionBound says whether UnseenGen is safe to use. A false value is an
-	// explicit retry signal: UnseenGen is omitted rather than risking an ack
-	// outside the snapshot's causal boundary.
-	AttentionBound    bool                  `json:"attention_bound"`
-	Messages          []core.AgentMessage   `json:"messages"`
-	State             string                `json:"state"`
-	ContextPercent    int                   `json:"context_percent"`
-	ContextWindow     int                   `json:"context_window,omitempty"`
-	CompactAt         int                   `json:"compact_at,omitempty"`
-	CompactAtMin      int                   `json:"compact_at_min,omitempty"`
-	PermissionMode    string                `json:"permission_mode"`
-	PathScope         string                `json:"path_scope,omitempty"`
-	PendingPermission *PermissionData       `json:"pending_permission,omitempty"`
-	PendingAsk        *AskData              `json:"pending_ask,omitempty"`
-	ResolvedPrompt    *PromptResolutionData `json:"resolved_prompt,omitempty"`
-	Tasks             any                   `json:"tasks,omitempty"`
-	PlanMode          string                `json:"plan_mode,omitempty"`
-	PlanFile          string                `json:"plan_file,omitempty"`
-	GoalActive        bool                  `json:"goal_active,omitempty"`
-	GoalObjective     string                `json:"goal_objective,omitempty"`
-	GoalWorkDir       string                `json:"goal_work_dir,omitempty"`
-	GoalIteration     int                   `json:"goal_iteration,omitempty"`
-	GoalStalled       int                   `json:"goal_stalled,omitempty"`
-	GoalVerifying     bool                  `json:"goal_verifying,omitempty"`
-	Compacting        bool                  `json:"compacting,omitempty"`
-	StreamingText     string                `json:"streaming_text,omitempty"`
-	StreamingThinking string                `json:"streaming_thinking,omitempty"`
-	LiveTools         []LiveToolInitData    `json:"live_tools,omitempty"`
-	RunTokensUp       int                   `json:"run_tokens_up"`
-	RunTokensDown     int                   `json:"run_tokens_down"`
-	RunStartedAtMs    int64                 `json:"run_started_at_ms,omitempty"`
-	PendingSteers     []PendingSteerData    `json:"pending_steers,omitempty"`
-	CostUSD           float64               `json:"cost_usd,omitempty"`
-	Subagents         []SubagentInitData    `json:"subagents,omitempty"`
+	AttentionNamespace string                `json:"attention_namespace,omitempty"`
+	Messages           []core.AgentMessage   `json:"messages"`
+	State              string                `json:"state"`
+	ContextPercent     int                   `json:"context_percent"`
+	ContextWindow      int                   `json:"context_window,omitempty"`
+	CompactAt          int                   `json:"compact_at,omitempty"`
+	CompactAtMin       int                   `json:"compact_at_min,omitempty"`
+	PermissionMode     string                `json:"permission_mode"`
+	PathScope          string                `json:"path_scope,omitempty"`
+	PendingPermission  *PermissionData       `json:"pending_permission,omitempty"`
+	PendingAsk         *AskData              `json:"pending_ask,omitempty"`
+	ResolvedPrompt     *PromptResolutionData `json:"resolved_prompt,omitempty"`
+	Tasks              any                   `json:"tasks,omitempty"`
+	PlanMode           string                `json:"plan_mode,omitempty"`
+	PlanFile           string                `json:"plan_file,omitempty"`
+	GoalActive         bool                  `json:"goal_active,omitempty"`
+	GoalObjective      string                `json:"goal_objective,omitempty"`
+	GoalWorkDir        string                `json:"goal_work_dir,omitempty"`
+	GoalIteration      int                   `json:"goal_iteration,omitempty"`
+	GoalStalled        int                   `json:"goal_stalled,omitempty"`
+	GoalVerifying      bool                  `json:"goal_verifying,omitempty"`
+	Compacting         bool                  `json:"compacting,omitempty"`
+	StreamingText      string                `json:"streaming_text,omitempty"`
+	StreamingThinking  string                `json:"streaming_thinking,omitempty"`
+	LiveTools          []LiveToolInitData    `json:"live_tools,omitempty"`
+	RunTokensUp        int                   `json:"run_tokens_up"`
+	RunTokensDown      int                   `json:"run_tokens_down"`
+	RunStartedAtMs     int64                 `json:"run_started_at_ms,omitempty"`
+	PendingSteers      []PendingSteerData    `json:"pending_steers,omitempty"`
+	CostUSD            float64               `json:"cost_usd,omitempty"`
+	Subagents          []SubagentInitData    `json:"subagents,omitempty"`
 	// SubagentOutcomes restores terminal child cards after reconnect/restart.
 	// It is separate from live Subagents because terminal jobs do not belong in
 	// the Live Dock.
@@ -166,7 +158,6 @@ type BashJobInitData struct {
 type PermissionData struct {
 	ID           string         `json:"id"`
 	RunGen       uint64         `json:"run_gen,omitempty"`
-	UnseenGen    uint64         `json:"unseen_gen,omitempty"`
 	ToolName     string         `json:"tool_name"`
 	Args         map[string]any `json:"args"`
 	AllowPattern string         `json:"allow_pattern,omitempty"`
@@ -176,15 +167,13 @@ type PermissionData struct {
 type AskData struct {
 	ID        string            `json:"id"`
 	RunGen    uint64            `json:"run_gen,omitempty"`
-	UnseenGen uint64            `json:"unseen_gen,omitempty"`
 	Questions []bus.AskQuestion `json:"questions"`
 }
 
 // StateChangeData is sent when the session state changes.
 type StateChangeData struct {
-	State     string `json:"state"`
-	Error     string `json:"error,omitempty"`
-	UnseenGen uint64 `json:"unseen_gen,omitempty"`
+	State string `json:"state"`
+	Error string `json:"error,omitempty"`
 }
 
 // DeltaData carries a streaming text delta.
@@ -248,7 +237,6 @@ type TasksUpdateData struct {
 type RunEndData struct {
 	Text      string `json:"text"`
 	RunGen    uint64 `json:"run_gen"`
-	UnseenGen uint64 `json:"unseen_gen,omitempty"`
 	Cancelled bool   `json:"cancelled,omitempty"`
 	HasError  bool   `json:"has_error,omitempty"`
 }

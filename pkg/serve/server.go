@@ -715,9 +715,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		// Subscribe before taking the init snapshot. Events published while the
 		// snapshot is assembled are queued by the reactor and sent immediately
 		// after init, rather than being lost in the old snapshot→subscribe gap.
-		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD, func(seq uint64) uint64 {
-			return mgr.attentionGenerationForSequenceContext(ctx, sess, seq)
-		})
+		reactor := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD)
 		defer reactor.cleanup()
 
 		// The sequence cut and the in-flight state (streaming aggregate + live
@@ -731,35 +729,9 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		// at or before the cut are represented by init and must not be replayed;
 		// events after it are already queued in the reactor, even during a slow
 		// write.
-		// Fence serve's lossless attention-only tracker at this cut. Unlike the
-		// ordinary lossy all-events subscriber, deltas cannot make this wait lose
-		// a record. One 100ms budget starts before the publication cut and covers
-		// every publishMu acquisition in this attention-bound attempt. Expiry
-		// deliberately omits unseen_gen; the client retries rather than making an
-		// unsafe acknowledgement. This is not a wall-clock bound on assembling or
-		// writing the rest of init (streamMu, scheduling, and socket I/O remain
-		// outside that narrow guarantee).
-		var streaming bus.StreamingAggregate
-		var liveTools []bus.LiveToolCall
-		var cut, overflowAtCut, clearedAtCut uint64
-		initialAttentionCut := false
-		captured := false
-		attentionDeadline := time.Now().Add(attentionSequenceWait)
-		if sess.attentionSeqSub != nil {
-			streaming, liveTools, cut, overflowAtCut, clearedAtCut, initialAttentionCut, captured = sess.runtime.Context().SnapshotInFlightWithAttentionCutBefore(sess.attentionSeqSub, attentionDeadline)
-		} else {
-			streaming, liveTools, cut = sess.runtime.Context().SnapshotInFlightWithCut()
-		}
-		unseenGen, attentionBound := uint64(0), false
-		if captured {
-			unseenGen, attentionBound = mgr.attentionGenerationAtCutWithOverflowBefore(ctx, sess, cut, overflowAtCut, clearedAtCut, initialAttentionCut, attentionDeadline)
-		}
+		streaming, liveTools, cut := sess.runtime.Context().SnapshotInFlightWithCut()
 		sinceMsg := query.Get("since_msg")
-		initData := buildInitDataAtAttentionGen(sess, streaming, liveTools, unseenGen, sinceMsg, pendingPermissionID, pendingAskID)
-		initData.AttentionBound = attentionBound
-		if !attentionBound {
-			initData.UnseenGen = 0
-		}
+		initData := buildInitData(sess, streaming, liveTools, sinceMsg, pendingPermissionID, pendingAskID)
 		initData.LastSeq = cut
 		if deviceLeaseClosed(lease) || wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}) != nil {
 			return
@@ -1019,36 +991,18 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 
 func handleReadSession(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, present := r.URL.Query()["through_seq"]; present {
-			throughSeq, err := strconv.ParseUint(r.URL.Query().Get("through_seq"), 10, 64)
-			if err != nil {
-				http.Error(w, "invalid through_seq", http.StatusBadRequest)
-				return
-			}
-			err = mgr.MarkSessionReadThrough(r.PathValue("id"), throughSeq, r.URL.Query().Get("attention_namespace"))
-			switch {
-			case errors.Is(err, ErrNotFound):
-				http.Error(w, "not found", http.StatusNotFound)
-			case errors.Is(err, ErrStaleAttentionNamespace):
-				http.Error(w, "stale attention namespace", http.StatusConflict)
-			case err != nil:
-				http.Error(w, err.Error(), http.StatusBadRequest)
-			default:
-				w.WriteHeader(http.StatusNoContent)
-			}
+		throughSeq, err := strconv.ParseUint(r.URL.Query().Get("through_seq"), 10, 64)
+		if err != nil {
+			http.Error(w, "invalid through_seq", http.StatusBadRequest)
 			return
 		}
-		// A successful response must mean this server accepted the occurrence.
-		// Silently accepting a stale process fence made the client believe a read
-		// had landed even though this process retained the unread marker.
-		if instance := r.URL.Query().Get("server_instance"); instance != "" && instance != mgr.serverInstance {
-			http.Error(w, "stale server instance", http.StatusConflict)
-			return
-		}
-		gen, _ := strconv.ParseUint(r.URL.Query().Get("unseen_gen"), 10, 64)
-		if err := mgr.MarkSessionRead(r.PathValue("id"), gen, r.URL.Query().Get("server_instance")); err != nil {
+		if err := mgr.MarkSessionRead(r.PathValue("id"), throughSeq, r.URL.Query().Get("attention_namespace")); err != nil {
 			if errors.Is(err, ErrNotFound) {
 				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			if errors.Is(err, ErrStaleAttentionNamespace) {
+				http.Error(w, "stale attention namespace", http.StatusConflict)
 				return
 			}
 			http.Error(w, err.Error(), http.StatusBadRequest)

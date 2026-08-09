@@ -250,8 +250,8 @@ The server falls back to the ordinary full, bounded history snapshot when the
 token is absent, stale, from another branch, removed by `/clear`, or when the
 suffix itself cannot fit the reconnect history limit. A resume token is an
 optimization, not an event replay cursor: clients must continue using the
-normal `server_instance`, `last_seq`, `unseen_gen`, and `attention_bound`
-semantics from every init. Unknown query parameters are ignored, so clients and
+normal `server_instance`, `last_seq`, and `attention_namespace` semantics from
+every init. Unknown query parameters are ignored, so clients and
 servers can be upgraded independently.
 
 ## REST endpoints

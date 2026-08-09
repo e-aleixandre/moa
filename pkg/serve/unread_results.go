@@ -8,10 +8,7 @@ import "github.com/e-aleixandre/moa/pkg/bus"
 // store.
 func (m *Manager) subscribeUnreadResults(sess *ManagedSession) {
 	b := sess.runtime.Bus
-	// The bus owns this fixed compact projection so no caller callback executes
-	// while publication locks are held. It drops RunEnded.FinalText before a
-	// bounded queue can retain it.
-	sess.attentionSeqSub = b.SubscribeAttentionSeq(
+	sess.unreadUnsub = b.SubscribeAttentionSeq(
 		func(seq uint64, occurrence bus.AttentionSequenceEvent) {
 			defer func() {
 				if m.afterAttentionMark != nil {
@@ -21,35 +18,23 @@ func (m *Manager) subscribeUnreadResults(sess *ManagedSession) {
 			if m.beforeAttentionMark != nil {
 				m.beforeAttentionMark()
 			}
-			var gen uint64
-			record := true
-			switch occurrence.Kind {
-			case bus.AttentionRunEnded:
-				if occurrence.Errored {
-					// StateChanged(error) is the error occurrence. RunEnded carries
-					// that same ID so every terminal WS event agrees without a second
-					// notification/ripple for one failure.
-					gen = sess.attentionGen.Load()
-				} else if !occurrence.Cancelled && !sess.deleted.Load() {
-					gen = m.markUnseen(sess, seq)
-				} else {
-					record = false
-				}
-			case bus.AttentionPermissionRequested:
-				gen = m.markUnseen(sess, seq)
-			case bus.AttentionAskUserRequested:
-				gen = m.markUnseen(sess, seq)
-			case bus.AttentionStateError:
-				gen = m.markUnseen(sess, seq)
+			if attentionEvent(occurrence) {
+				m.markAttention(sess, seq)
 			}
-			if !record {
-				return
-			}
-			if gen == 0 {
-				gen = sess.attentionGen.Load()
-			}
-			m.recordAttentionSequence(sess, seq, gen)
 		},
 	)
-	sess.unreadUnsub = sess.attentionSeqSub.Unsubscribe
+}
+
+// attentionEvent is the shared attention classifier for the cursor tracker
+// and the WebSocket reactor. A failed run is represented by StateChanged(error),
+// while cancelled runs do not require attention.
+func attentionEvent(event any) bool {
+	if occurrence, ok := event.(bus.AttentionSequenceEvent); ok {
+		return occurrence.Kind != bus.AttentionRunEnded || (!occurrence.Cancelled && !occurrence.Errored)
+	}
+	occurrence, ok := bus.AttentionSequenceEventFor(event)
+	if !ok {
+		return false
+	}
+	return occurrence.Kind != bus.AttentionRunEnded || (!occurrence.Cancelled && !occurrence.Errored)
 }

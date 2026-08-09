@@ -3,7 +3,6 @@ package serve
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -46,48 +45,16 @@ func TestWsEventFromBus_SubagentStarted(t *testing.T) {
 	})
 }
 
-func TestWsAttentionEventsCarryOccurrenceGeneration(t *testing.T) {
-	permission, ok := wsEventFromBus(bus.PermissionRequested{SessionID: "s1", ID: "p1"}, 11)
-	if !ok {
-		t.Fatal("permission event not translated")
-	}
-	if got := permission.Data.(PermissionData).UnseenGen; got != 11 {
-		t.Fatalf("permission unseen_gen = %d, want 11", got)
-	}
-	errorEvent, ok := wsEventFromBus(bus.StateChanged{SessionID: "s1", State: string(bus.StateError)}, 12)
-	if !ok {
-		t.Fatal("error event not translated")
-	}
-	if got := errorEvent.Data.(StateChangeData).UnseenGen; got != 12 {
-		t.Fatalf("error unseen_gen = %d, want 12", got)
-	}
-	completion, ok := wsEventFromBus(bus.RunEnded{SessionID: "s1", RunGen: 1}, 13)
-	if !ok {
-		t.Fatal("completion event not translated")
-	}
-	if got := completion.Data.(RunEndData).UnseenGen; got != 13 {
-		t.Fatalf("completion unseen_gen = %d, want 13", got)
-	}
-	cancelled, _ := wsEventFromBus(bus.RunEnded{Cancelled: true})
-	if data := cancelled.Data.(RunEndData); !data.Cancelled || data.HasError {
-		t.Fatalf("cancelled run end = %+v", data)
-	}
-	failed, _ := wsEventFromBus(bus.RunEnded{Err: errors.New("boom")})
-	if data := failed.Data.(RunEndData); data.Cancelled || !data.HasError {
-		t.Fatalf("failed run end = %+v", data)
-	}
-}
-
 func TestWsPromptResolutionProjectsOnlyPromptIdentity(t *testing.T) {
 	event := bus.PermissionResolved{ID: "p1"}
-	projected, ok := wsEventFromBus(event, 0)
+	projected, ok := wsEventFromBus(event)
 	if !ok {
 		t.Fatal("resolution event not translated")
 	}
 	if got := projected.Data.(PromptResolutionData); got.ID != "p1" || got.Kind != "permission" {
 		t.Fatalf("resolution = %+v", got)
 	}
-	ask, _ := wsEventFromBus(bus.AskUserResolved{ID: "a1"}, 0)
+	ask, _ := wsEventFromBus(bus.AskUserResolved{ID: "a1"})
 	if got := ask.Data.(PromptResolutionData); got.ID != "a1" || got.Kind != "ask" {
 		t.Fatalf("ask resolution = %+v", got)
 	}
@@ -115,7 +82,7 @@ func TestBuildInitData_SubagentThinking(t *testing.T) {
 		return len(sess.subagents.Snapshot()) == 1
 	})
 
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil)
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "", "", "")
 	if len(data.Subagents) != 1 {
 		t.Fatalf("Subagents = %+v, want one job", data.Subagents)
 	}
@@ -133,7 +100,7 @@ func TestBuildInitDataCarriesAttentionNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil)
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "", "", "")
 	if data.AttentionNamespace != sess.attentionNamespace || data.AttentionNamespace == "" {
 		t.Fatalf("attention namespace = %q, want %q", data.AttentionNamespace, sess.attentionNamespace)
 	}
@@ -151,12 +118,12 @@ func TestBuildInitData_DeltaMessages(t *testing.T) {
 	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", MsgID: "one", Content: []core.Content{core.TextContent("one")}})})
 	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "assistant", MsgID: "two", Content: []core.Content{core.TextContent("two")}})})
 
-	data := buildInitDataAtAttentionGen(sess, bus.StreamingAggregate{}, nil, 0, "one", "", "")
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "one", "", "")
 	if data.DeltaBase != "one" || len(data.Messages) != 1 || data.Messages[0].MsgID != "two" {
 		t.Fatalf("delta init = %+v", data)
 	}
 
-	data = buildInitDataAtAttentionGen(sess, bus.StreamingAggregate{}, nil, 0, "two", "", "")
+	data = buildInitData(sess, bus.StreamingAggregate{}, nil, "two", "", "")
 	if data.DeltaBase != "two" || len(data.Messages) != 0 {
 		t.Fatalf("empty delta init = %+v", data)
 	}
@@ -178,12 +145,12 @@ func TestBuildInitData_InvalidDeltaFallsBackToFull(t *testing.T) {
 	}
 	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "assistant", MsgID: "new", Content: []core.Content{core.TextContent("new")}})})
 
-	data := buildInitDataAtAttentionGen(sess, bus.StreamingAggregate{}, nil, 0, offPath, "", "")
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, offPath, "", "")
 	if data.DeltaBase != "" || len(data.Messages) != 2 || data.Messages[1].MsgID != "new" {
 		t.Fatalf("off-path fallback = %+v", data)
 	}
 	tree.Clear()
-	data = buildInitDataAtAttentionGen(sess, bus.StreamingAggregate{}, nil, 0, base, "", "")
+	data = buildInitData(sess, bus.StreamingAggregate{}, nil, base, "", "")
 	if data.DeltaBase != "" || len(data.Messages) != 0 {
 		t.Fatalf("clear fallback = %+v", data)
 	}
@@ -200,7 +167,7 @@ func TestBuildInitData_DeltaIncludesCompactionMarker(t *testing.T) {
 	tree := sess.runtime.Context().Tree
 	base := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", MsgID: "base", Content: []core.Content{core.TextContent("base")}})})
 	tree.Append(session.Entry{Type: session.EntryCompaction, Compaction: session.CompactionData{Summary: "summary", FirstKeptEntryID: base, TokensBefore: 4000}})
-	data := buildInitDataAtAttentionGen(sess, bus.StreamingAggregate{}, nil, 0, base, "", "")
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, base, "", "")
 	if data.DeltaBase != base || len(data.Messages) != 1 || data.Messages[0].Role != "session_event" {
 		t.Fatalf("compaction delta = %+v", data)
 	}
@@ -329,7 +296,7 @@ func TestBuildInitData_IncludesRunTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil)
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "", "", "")
 	if data.RunTokensUp != 0 || data.RunTokensDown != 0 {
 		t.Fatalf("initial run tokens = up=%d down=%d, want zero", data.RunTokensUp, data.RunTokensDown)
 	}
@@ -566,7 +533,7 @@ func TestBuildInitData_ReconnectProjectsSecretCustom(t *testing.T) {
 		"internal":       true,
 	})
 
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil)
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "", "", "")
 	if len(data.Messages) != 1 {
 		t.Fatalf("init messages = %#v", data.Messages)
 	}
@@ -795,43 +762,6 @@ func TestWSReactor_CleanupStopsWatcher(t *testing.T) {
 	}
 }
 
-func TestWSReactorUnresolvedLiveAttentionForcesReconnectInsteadOfGenerationZero(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("done")))
-	sess, err := mgr.CreateSession(CreateOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := newWsReactor(sess.runtime.Bus, sess.infra.sessionCtx, sess.CWD, func(seq uint64) uint64 {
-		return mgr.attentionGenerationForSequence(sess, seq)
-	})
-	defer r.cleanup()
-
-	// The tracker cannot acquire its recorder lock before its bounded wait. The
-	// old path sent unseen_gen:0; the reactor must instead close so the next init
-	// uses the explicit attention_bound:false recovery protocol.
-	mgr.attentionSeqMu.Lock()
-	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "p1"})
-	select {
-	case <-r.Done():
-	case <-time.After(attentionSequenceWait + time.Second):
-		mgr.attentionSeqMu.Unlock()
-		t.Fatal("unresolved live attention did not force reconnect")
-	}
-	mgr.attentionSeqMu.Unlock()
-	select {
-	case event := <-r.Events():
-		if event.Type == "permission_request" {
-			data := event.Data.(PermissionData)
-			if data.UnseenGen == 0 {
-				t.Fatal("serialized permission carried silent generation zero")
-			}
-		}
-	default:
-	}
-}
-
 func TestEnrichEditToolStart(t *testing.T) {
 	dir := t.TempDir()
 	var sb strings.Builder
@@ -940,7 +870,7 @@ func TestUserMessage_AnnouncedOnlyOnceInHistory(t *testing.T) {
 		}
 		// Read history exactly as a reconnecting client's snapshot does.
 		found := 0
-		for _, m := range buildInitData(sess, bus.StreamingAggregate{}, nil).Messages {
+		for _, m := range buildInitData(sess, bus.StreamingAggregate{}, nil, "", "", "").Messages {
 			if m.MsgID == msgID {
 				found++
 			}
@@ -1031,7 +961,7 @@ func TestBuildInitDataCarriesLiveTools(t *testing.T) {
 
 	data := buildInitData(sess, bus.StreamingAggregate{}, []bus.LiveToolCall{
 		{ToolCallID: "tc1", ToolName: "bash", Phase: bus.LiveToolPhaseRunning, StartedAt: time.Now()},
-	})
+	}, "", "", "")
 	if len(data.LiveTools) != 1 || data.LiveTools[0].ToolName != "bash" {
 		t.Fatalf("InitData.LiveTools = %+v, want the live bash call", data.LiveTools)
 	}

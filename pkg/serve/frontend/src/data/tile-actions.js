@@ -1,6 +1,6 @@
 // tile-actions.js — tile tree manipulation and visibility management
 
-import { acknowledgeVisibleAttention, acknowledgeVisibleAttentionThrough, syncConnections } from './api.js';
+import { acknowledgeVisibleAttentionThrough, syncConnections } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
@@ -291,9 +291,7 @@ export function afterVisibilityChange() {
           if (throughSeq) {
             acknowledgeVisibleAttentionThrough(id, throughSeq, sess.attentionNamespace).catch(() => {});
           }
-        } else {
-          acknowledgeVisibleAttention(id, sess.historyShownGen, sess.historyShownInstance).catch(() => {});
-        }
+		}
       }
     }
   }

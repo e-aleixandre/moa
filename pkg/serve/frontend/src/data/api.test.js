@@ -1,7 +1,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 
-const { api, getVersion, acknowledgeVisibleAttention, acknowledgeVisibleAttentionThrough } = await import('./api.js?timeout-test');
+const { api, getVersion, acknowledgeVisibleAttentionThrough } = await import('./api.js?timeout-test');
 
 beforeEach(() => {
   setState({ sessions: {}, activeSession: null, isMobile: true });
@@ -84,72 +84,8 @@ test('api clears its timeout after a successful response', async () => {
   }
 });
 
-test('repeated acknowledgements converge on one fenced occurrence', async () => {
-  const originalFetch = globalThis.fetch;
-  const reads = [];
-  let resolveRead;
-  globalThis.fetch = (path) => {
-    reads.push(path);
-    return new Promise((resolve) => { resolveRead = resolve; });
-  };
-  setState({ sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'instance-a', subagents: {} } } });
-  try {
-    const first = acknowledgeVisibleAttention('s1', 7, 'instance-a');
-    const second = acknowledgeVisibleAttention('s1', 7, 'instance-a');
-    expect(reads).toEqual(['/api/sessions/s1/read?unseen_gen=7&server_instance=instance-a']);
-    resolveRead(new Response('', { status: 204 }));
-    await expect(first).resolves.toBe(true);
-    await expect(second).resolves.toBe(true);
-    expect(store.get().sessions.s1).toMatchObject({ unseen: false, lastAckedUnseenGen: 7 });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
 
-test('a confirmed newer acknowledgement clears an older local occurrence only', async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = () => Promise.resolve(new Response('', { status: 204 }));
-  try {
-    setState({ sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'instance-a', subagents: {} } } });
 
-    await expect(acknowledgeVisibleAttention('s1', 8, 'instance-a')).resolves.toBe(true);
-    expect(store.get().sessions.s1).toMatchObject({ unseen: false, lastAckedUnseenGen: 8 });
-
-    setState({ sessions: { s1: { ...store.get().sessions.s1, unseen: true, unseenGen: 9 } } });
-    await expect(acknowledgeVisibleAttention('s1', 8, 'instance-a')).resolves.toBe(true);
-    expect(store.get().sessions.s1).toMatchObject({ unseen: true, unseenGen: 9 });
-
-    setState({ sessions: { s1: { ...store.get().sessions.s1, unseen: true, unseenGen: 0 } } });
-    await expect(acknowledgeVisibleAttention('s1', 8, 'instance-a')).resolves.toBe(true);
-    expect(store.get().sessions.s1).toMatchObject({ unseen: false, unseenGen: 0 });
-
-    setState({ sessions: { s1: { ...store.get().sessions.s1, serverInstance: 'instance-b', unseen: true, unseenGen: 7 } } });
-    await expect(acknowledgeVisibleAttention('s1', 8, 'instance-a')).resolves.toBe(false);
-    expect(store.get().sessions.s1).toMatchObject({ unseen: true, serverInstance: 'instance-b' });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test('a background tab never acknowledges an occurrence', async () => {
-  const originalFetch = globalThis.fetch;
-  const originalDocument = globalThis.document;
-  let calls = 0;
-  globalThis.fetch = () => { calls += 1; return Promise.resolve(new Response('', { status: 204 })); };
-  Object.defineProperty(globalThis, 'document', { configurable: true, value: { hidden: true } });
-  setState({ sessions: { s1: { id: 's1', unseen: true, unseenGen: 7, serverInstance: 'instance-a', subagents: {} } } });
-  try {
-    const acknowledgement = acknowledgeVisibleAttention('s1', 7, 'instance-a');
-    if (originalDocument === undefined) delete globalThis.document;
-    else Object.defineProperty(globalThis, 'document', { configurable: true, value: originalDocument });
-    await expect(acknowledgement).resolves.toBe(false);
-    expect(calls).toBe(0);
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalDocument === undefined) delete globalThis.document;
-    else Object.defineProperty(globalThis, 'document', { configurable: true, value: originalDocument });
-  }
-});
 
 test('a cursor acknowledgement posts its selected init boundary', async () => {
   const originalFetch = globalThis.fetch;

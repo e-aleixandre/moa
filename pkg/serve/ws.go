@@ -44,7 +44,7 @@ const (
 // cwd is the session working directory, used to resolve relative file paths
 // when enriching edit tool_start events with real line numbers.
 // Returns the reactor and a read-only channel for the WS writer loop.
-func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attentionGeneration ...func(uint64) uint64) *wsReactor {
+func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string) *wsReactor {
 	r := &wsReactor{
 		ch:   make(chan Event, wsReactorBuffer),
 		done: make(chan struct{}),
@@ -73,24 +73,8 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attent
 		}
 	}
 
-	hasAttentionResolver := len(attentionGeneration) > 0 && attentionGeneration[0] != nil
-	resolver := func(uint64) uint64 { return 0 }
-	if hasAttentionResolver {
-		resolver = attentionGeneration[0]
-	}
 	r.unsubs = append(r.unsubs, b.SubscribeAllSeq(func(seq uint64, event any) {
-		attentionGen := uint64(0)
-		if isAttentionEvent(event) {
-			attentionGen = resolver(seq)
-			if hasAttentionResolver && attentionGen == 0 {
-				// Never serialize an attention occurrence with generation 0: the
-				// client cannot acknowledge it, which would strand its roster dot.
-				// Closing forces the explicit init attention_bound recovery path.
-				r.cleanup()
-				return
-			}
-		}
-		if wsEvent, ok := wsEventFromBus(event, attentionGen); ok {
+		if wsEvent, ok := wsEventFromBus(event); ok {
 			wsEvent.Seq = seq
 			send(enrichEditToolStart(wsEvent, cwd))
 		}
@@ -110,17 +94,6 @@ func newWsReactor(b bus.EventBus, sessionCtx context.Context, cwd string, attent
 	}()
 
 	return r
-}
-
-func isAttentionEvent(event any) bool {
-	switch event := event.(type) {
-	case bus.RunEnded, bus.PermissionRequested, bus.AskUserRequested:
-		return true
-	case bus.StateChanged:
-		return event.State == string(bus.StateError)
-	default:
-		return false
-	}
 }
 
 // enrichEditToolStart adds the real 1-based starting line number to edit
@@ -149,15 +122,11 @@ func enrichEditToolStart(e Event, cwd string) Event {
 	return e
 }
 
-func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
-	attentionGen := uint64(0)
-	if len(attentionGeneration) > 0 {
-		attentionGen = attentionGeneration[0]
-	}
+func wsEventFromBus(event any) (Event, bool) {
 	switch e := event.(type) {
 	case bus.StateChanged:
 		return Event{Type: "state_change", Data: StateChangeData{
-			State: e.State, Error: e.Error, UnseenGen: attentionGen,
+			State: e.State, Error: e.Error,
 		}}, true
 	case bus.TurnStarted:
 		return Event{Type: "turn_start"}, true
@@ -205,9 +174,13 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 	case bus.TasksUpdated:
 		return Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}}, true
 	case bus.RunEnded:
+		// The same classifier as the tracker decides whether this terminal event
+		// is an attention occurrence. Failed and cancelled runs still travel to
+		// the client, but must not be treated as a second occurrence.
+		attention := attentionEvent(e)
 		return Event{Type: "run_end", Data: RunEndData{
-			Text: e.FinalText, RunGen: e.RunGen, UnseenGen: attentionGen,
-			Cancelled: e.Cancelled, HasError: e.Err != nil,
+			Text: e.FinalText, RunGen: e.RunGen,
+			Cancelled: e.Cancelled, HasError: !attention && e.Err != nil,
 		}}, true
 	case bus.ContextUpdated:
 		return Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}}, true
@@ -301,14 +274,14 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 		return Event{Type: "auto_verify_end", Data: data}, true
 	case bus.PermissionRequested:
 		return Event{Type: "permission_request", Data: PermissionData{
-			ID: e.ID, RunGen: e.RunGen, UnseenGen: attentionGen, ToolName: e.ToolName, Args: e.Args,
+			ID: e.ID, RunGen: e.RunGen, ToolName: e.ToolName, Args: e.Args,
 			AllowPattern: e.AllowPattern,
 		}}, true
 	case bus.PermissionResolved:
 		return Event{Type: "permission_resolved", Data: PromptResolutionData{ID: e.ID, Kind: "permission"}}, true
 	case bus.AskUserRequested:
 		return Event{Type: "ask_user", Data: map[string]any{
-			"id": e.ID, "run_gen": e.RunGen, "unseen_gen": attentionGen, "questions": e.Questions,
+			"id": e.ID, "run_gen": e.RunGen, "questions": e.Questions,
 		}}, true
 	case bus.AskUserResolved:
 		return Event{Type: "ask_resolved", Data: PromptResolutionData{ID: e.ID, Kind: "ask"}}, true
@@ -353,7 +326,7 @@ func wsEventFromBus(event any, attentionGeneration ...uint64) (Event, bool) {
 		}
 		return Event{Type: "subagent_end", Data: data}, true
 	case bus.SubagentEvent:
-		inner, ok := wsEventFromBus(e.Inner, attentionGen)
+		inner, ok := wsEventFromBus(e.Inner)
 		if !ok {
 			return Event{}, false
 		}
@@ -465,19 +438,12 @@ func (r *wsReactor) cleanup() {
 }
 
 // buildInitData constructs the WS init payload from bus queries. The streaming
-// aggregate and the live tool calls are passed in (captured atomically with the
-// sequence cut by the caller via SnapshotInFlightWithCut) rather than queried
-// here, so in-flight state can't be both seeded into the snapshot and replayed
-// live after the cut.
-func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall) InitData {
-	return buildInitDataAtAttentionGen(sess, streaming, liveTools, sess.attentionGen.Load(), "", "", "")
-}
-
-// buildInitDataAtAttentionGen assembles the full init snapshot. sinceMsg, when
+// aggregate and live tool calls are captured atomically with the sequence cut.
+// sinceMsg, when
 // non-empty, requests a validated delta resume from that entry; permissionID
 // and askID are the client's pending prompt IDs, used to emit a resolution
 // notice when a prompt was answered elsewhere while the client was away.
-func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, unseenGen uint64, sinceMsg, permissionID, askID string) InitData {
+func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, sinceMsg, permissionID, askID string) InitData {
 	b := sess.runtime.Bus
 
 	// Use display messages (full history from tree) instead of agent messages.
@@ -522,7 +488,6 @@ func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAg
 	data := InitData{
 		ServerInstance:     sess.serverInstance,
 		AttentionNamespace: sess.attentionNamespace,
-		UnseenGen:          unseenGen,
 		Messages:           msgs,
 		HistoryTruncated:   historyTruncated,
 		DeltaBase:          deltaBase,
@@ -629,7 +594,7 @@ func buildInitDataAtAttentionGen(sess *ManagedSession, streaming bus.StreamingAg
 		}
 	}
 
-	data.PendingPermission, data.PendingAsk = pendingAttentionData(pending, unseenGen)
+	data.PendingPermission, data.PendingAsk = pendingAttentionData(pending)
 	data.ResolvedPrompt = reconnectPromptResolution(pending, permissionID, askID)
 	if planInfo.Mode != "off" {
 		data.PlanMode = planInfo.Mode
@@ -660,12 +625,11 @@ func reconnectPromptResolution(pending bus.PendingApprovalInfo, permissionID, as
 	return nil
 }
 
-func pendingAttentionData(pending bus.PendingApprovalInfo, attentionGen uint64) (*PermissionData, *AskData) {
+func pendingAttentionData(pending bus.PendingApprovalInfo) (*PermissionData, *AskData) {
 	var permissionData *PermissionData
 	if pending.Permission != nil {
 		permissionData = &PermissionData{
 			ID:           pending.Permission.ID,
-			UnseenGen:    attentionGen,
 			ToolName:     pending.Permission.ToolName,
 			Args:         pending.Permission.Args,
 			AllowPattern: pending.Permission.AllowPattern,
@@ -675,7 +639,6 @@ func pendingAttentionData(pending bus.PendingApprovalInfo, attentionGen uint64) 
 	if pending.Ask != nil {
 		askData = &AskData{
 			ID:        pending.Ask.ID,
-			UnseenGen: attentionGen,
 			Questions: pending.Ask.Questions,
 		}
 	}
