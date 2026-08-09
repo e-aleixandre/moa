@@ -66,7 +66,7 @@
 }
 
 /* Attention — another session has unseen work. The finite ripple is re-keyed
-   by its arrival generation in MobileTitleChip; the wash remains static. */
+   by its arrival sequence in MobileTitleChip; the wash remains static. */
 .mtchip-attn {
   position: absolute;
   z-index: 2;

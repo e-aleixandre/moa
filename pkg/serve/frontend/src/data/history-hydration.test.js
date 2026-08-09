@@ -67,7 +67,8 @@ test('a delta resume gives uncertain cached history extra grace', () => {
   };
   try {
     setState({ sessions: { s1: {
-      id: 's1', unseen: true, messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
+      id: 's1', unseen: true, unseenSeq: 2, historyCacheSeq: 1,
+      messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
     } } });
 
     beginHistoryHydration('s1', { deltaResume: true });
@@ -86,7 +87,8 @@ test('a delta resume gives uncertain cached history extra grace', () => {
 
 test('a full-init fallback releases a required catching-up tail immediately', () => {
   setState({ sessions: { s1: {
-    id: 's1', unseen: true, messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
+    id: 's1', unseen: true, unseenSeq: 2, historyCacheSeq: 1,
+    messages: [{ role: 'user', _msg_id: 'durable-base' }], subagents: {},
   } } });
 
   beginHistoryHydration('s1', { deltaResume: true });
@@ -205,7 +207,7 @@ test('reconnectAll starts a clean hydration grace window', () => {
   try {
     setState({ sessions: { s1: {
       id: 's1', messages: [{ role: 'assistant' }], subagents: {},
-      serverInstance: 'instance-a', historyCacheInstance: 'instance-a', historyCacheGen: 7,
+      historyCacheSeq: 7,
     } } });
     syncConnections(['s1']);
     const abandonedTimeout = timers.find(timer => timer.delay === HISTORY_HYDRATION_TIMEOUT_MS);
@@ -214,7 +216,7 @@ test('reconnectAll starts a clean hydration grace window', () => {
     // recompute risk after the roster learns of a newer occurrence.
     setState({ sessions: { s1: {
       ...store.get().sessions.s1,
-      unseen: true, unseenGen: 8, serverUnseenInstance: 'instance-a',
+      unseen: true, unseenSeq: 8,
     } } });
     reconnectAll();
 
@@ -306,7 +308,7 @@ test('a poll does not restore stale history after a successful hydration', async
 test('an ordinary up-to-date session open never renders a hydration tail', () => {
   setState({ sessions: { s1: {
     id: 's1', messages: [{ role: 'assistant' }], subagents: {},
-    serverInstance: 'instance-a', historyCacheInstance: 'instance-a', historyCacheGen: 7,
+    historyCacheSeq: 7,
   } } });
 
   beginHistoryHydration('s1');
@@ -335,7 +337,7 @@ test('an init landing within the grace delay never flashes a hydration tail', ()
     expect(historyHydrationTailVisible(store.get().sessions.s1)).toBe(false);
     expect(timers.some(timer => timer.delay === HISTORY_HYDRATION_GRACE_MS)).toBe(true);
 
-    finishHistoryHydration('s1', { shown: true, shownInstance: 'instance-a' });
+    finishHistoryHydration('s1', { shown: true });
 
     expect(timers.some(timer => timer.delay === HISTORY_HYDRATION_GRACE_MS)).toBe(false);
     expect(historyHydrationTailVisible(store.get().sessions.s1)).toBe(false);
@@ -361,45 +363,13 @@ test('a transcript behind an unseen occurrence appears after the grace delay', (
   try {
     setState({ sessions: { s1: {
       id: 's1', messages: [{ role: 'assistant' }], subagents: {},
-      unseen: true, unseenGen: 8, serverInstance: 'instance-a', serverUnseenInstance: 'instance-a',
-      historyCacheInstance: 'instance-a', historyCacheGen: 7,
+      unseen: true, unseenSeq: 8, historyCacheSeq: 7,
     } } });
     beginHistoryHydration('s1');
     expect(historyHydrationTailVisible(store.get().sessions.s1)).toBe(false);
 
     timers.find(timer => timer.delay === HISTORY_HYDRATION_GRACE_MS).callback();
 
-    expect(historyHydrationTailVisible(store.get().sessions.s1)).toBe(true);
-    finishHistoryHydration('s1');
-  } finally {
-    globalThis.setTimeout = originalSetTimeout;
-    globalThis.clearTimeout = originalClearTimeout;
-  }
-});
-
-test('an unseen occurrence with unknown provenance shows the cached-history tail', () => {
-  const originalSetTimeout = globalThis.setTimeout;
-  const originalClearTimeout = globalThis.clearTimeout;
-  const timers = [];
-  globalThis.setTimeout = (callback, delay) => {
-    const timer = { callback, delay };
-    timers.push(timer);
-    return timer;
-  };
-  globalThis.clearTimeout = (timer) => {
-    const index = timers.indexOf(timer);
-    if (index >= 0) timers.splice(index, 1);
-  };
-  try {
-    setState({ sessions: { s1: {
-      id: 's1', messages: [{ role: 'assistant' }], subagents: {},
-      unseen: true, unseenGen: 7, serverInstance: 'instance-a', serverUnseenInstance: '',
-      historyCacheInstance: 'instance-a', historyCacheGen: 7,
-    } } });
-    beginHistoryHydration('s1');
-
-    expect(store.get().sessions.s1.historyTailNeeded).toBe(true);
-    timers.find(timer => timer.delay === HISTORY_HYDRATION_GRACE_MS).callback();
     expect(historyHydrationTailVisible(store.get().sessions.s1)).toBe(true);
     finishHistoryHydration('s1');
   } finally {

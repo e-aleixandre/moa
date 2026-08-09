@@ -25,7 +25,7 @@ test('per-session high water never replays historical occurrences', () => {
   expect(attentionArrival('a', 1)).toBeGreaterThan(newest);
 });
 
-test('a restarted server makes a lower generation a fresh arrival', () => {
+test('a restarted namespace makes a lower sequence a fresh arrival', () => {
   __resetAttentionArrivalsForTests();
   const beforeRestart = attentionArrival('a', 5000, 'server-a');
   const afterRestart = attentionArrival('a', 1, 'server-b');
@@ -33,7 +33,7 @@ test('a restarted server makes a lower generation a fresh arrival', () => {
   expect(attentionArrival('a', 1, 'server-b')).toBe(afterRestart);
 });
 
-test('a plain reconnect in the same server instance does not replay arrivals', () => {
+test('a plain reconnect in the same namespace does not replay arrivals', () => {
   __resetAttentionArrivalsForTests();
   const first = attentionArrival('a', 7, 'server-a');
   expect(attentionArrival('a', 7, 'server-a')).toBe(first);

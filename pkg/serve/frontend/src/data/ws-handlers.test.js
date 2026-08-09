@@ -19,8 +19,8 @@ beforeEach(() => {
 });
 
 
-// These assert the committed acknowledgement fence (lastAckedUnseenGen +
-// cleared dot) rather than the request URL: another suite in this run installs
+// These assert the committed acknowledgement cursor and cleared dot rather than
+// the request URL: another suite in this run installs
 // a module mock over api.js's `api`, so the wire call is not observable here.
 // api.test.js covers the exact /read URL against the unmocked module.
 // Foregroundedness is part of the read contract, so these state it explicitly
@@ -183,7 +183,7 @@ test('a subscribed but unselected session is never marked seen by its own init',
       // Has a live socket (it is receiving init) but is not on screen. Push
       // suppression is the server's wsConns gate and is deliberately unrelated
       // to this: subscribed is not seen.
-      'ack-bg': { id: 'ack-bg', unseen: true, unseenGen: 5, serverInstance: 'ack-bg-a', messages: [], subagents: {} },
+      'ack-bg': { id: 'ack-bg', unseen: true, unseenSeq: 5, serverInstance: 'ack-bg-a', messages: [], subagents: {} },
     },
   });
   foreground(() => handleWsInit('ack-bg', {
@@ -191,14 +191,14 @@ test('a subscribed but unselected session is never marked seen by its own init',
   }));
   await settleAcknowledgement();
   expect(store.get().sessions['ack-bg'].unseen).toBe(true);
-  expect(store.get().sessions['ack-bg'].lastAckedUnseenGen).toBeFalsy();
+  expect(store.get().sessions['ack-bg'].ackedThroughSeq || 0).toBe(0);
 });
 
 
 test('prompt resolutions leave a generic presentational notice without touching unread state', () => {
   seedSession('s1');
   setState({ isMobile: true, activeSession: 's1', sessions: {
-    s1: { id: 's1', messages: [], subagents: {}, unseen: true, unseenGen: 7 },
+    s1: { id: 's1', messages: [], subagents: {}, unseen: true, unseenSeq: 7 },
   } });
 
   handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {},});
@@ -207,7 +207,7 @@ test('prompt resolutions leave a generic presentational notice without touching 
     pendingPerm: null,
     resolvedPromptNotice: { id: 'perm-1', kind: 'permission' },
     unseen: true,
-    unseenGen: 7,
+    unseenSeq: 7,
   });
 
   handleWsAskUser('s1', { id: 'ask-1', questions: [],});
@@ -218,7 +218,7 @@ test('prompt resolutions leave a generic presentational notice without touching 
     pendingAsk: null,
     resolvedPromptNotice: { id: 'ask-1', kind: 'ask' },
     unseen: true,
-    unseenGen: 7,
+    unseenSeq: 7,
   });
 });
 

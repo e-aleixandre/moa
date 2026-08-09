@@ -22,21 +22,8 @@ function clearTailTimer(id) {
 function cachedTranscriptMayBeBehind(session) {
   const hasCachedTranscript = (session.messages || []).length > 0;
   if (!hasCachedTranscript) return true;
-
-  const currentInstance = session.serverInstance || '';
-  const cachedInstance = session.historyCacheInstance || '';
-  if (currentInstance && cachedInstance && currentInstance !== cachedInstance) return true;
-
   if (!session.unseen) return false;
-  const unseenInstance = session.serverUnseenInstance || '';
-  // A generation is meaningful only within a server instance. The current
-  // roster instance cannot prove an occurrence with missing provenance belongs
-  // to this cache, even when their generation numbers happen to be equal.
-  // Visibility therefore fails open here; acknowledgement remains separately
-  // fenced on the authoritative init below.
-  if (!cachedInstance || !(session.unseenGen || 0)) return true;
-  if (!unseenInstance || unseenInstance !== cachedInstance) return true;
-  return (session.historyCacheGen || 0) < session.unseenGen;
+  return (session.historyCacheSeq || 0) < (session.unseenSeq || 0);
 }
 
 // A roster entry retains its last rendered messages while its socket is away.
@@ -54,14 +41,12 @@ export function beginHistoryHydration(id, { deltaResume = false } = {}) {
   updateSession(id, {
     historyPending: true,
     historyStale: false,
-    // These are display-only. Keep the acknowledgement fence below separate:
-    // historyHydrated/historyShown* still mean exactly "this init was shown".
+    // These are display-only. Keep the acknowledgement cursor below separate:
+    // historyHydrated still means exactly "this init was shown".
     historyTailNeeded,
     historyTailReady: false,
     historyHydrated: false,
-    historyAckProven: false,
-    historyShownGen: 0,
-    historyShownInstance: '',
+    readCandidateSeq: 0,
   });
   if (historyTailNeeded) {
     tailTimers.set(id, setTimeout(() => {
@@ -99,9 +84,6 @@ export function confirmHistoryHydrationInit(id, { deltaBase = false } = {}) {
 export function finishHistoryHydration(id, {
   stale = false,
   shown = false,
-  ackProven = false,
-  shownGeneration = 0,
-  shownInstance = '',
 } = {}) {
   // A session can be deleted while its grace timer is pending. The store entry
   // is already gone by the time syncConnections settles that socket, but its
@@ -114,23 +96,10 @@ export function finishHistoryHydration(id, {
     historyStale: stale,
     historyTailNeeded: false,
     historyTailReady: false,
-    // Cache provenance is deliberately distinct from historyShown*. The latter
-    // is reset for every init to protect acknowledgement; this only tells the
-    // visual tail whether retained rows could belong to another occurrence.
-    historyCacheGen: shown ? shownGeneration : (session.historyCacheGen || 0),
-    historyCacheInstance: shown
-      ? (shownInstance || session.serverInstance || session.historyCacheInstance || '')
-      : (session.historyCacheInstance || ''),
-    // Only init's authoritative snapshot may make an occurrence eligible for
-    // acknowledgement. Closing a pending socket is not evidence the cached
-    // transcript was shown authoritatively.
+    // The cache sequence is visual provenance only. readCandidateSeq is reset
+    // when hydration begins, so it is nonzero here only for this init.
+    historyCacheSeq: shown ? (session.readCandidateSeq || 0) : (session.historyCacheSeq || 0),
     historyHydrated: shown,
-    // This is deliberately stricter than historyHydrated: an unproven or
-    // unbounded init is still rendered, but can never clear attention.
-    historyAckProven: shown && ackProven,
-    // These must come from this init snapshot, never a newer roster response.
-    historyShownGen: shown ? shownGeneration : 0,
-    historyShownInstance: shown ? shownInstance : '',
   });
   return true;
 }

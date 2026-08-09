@@ -473,7 +473,7 @@ function nextRunEpoch(id) {
   return (store.get().sessions[id]?.runEpoch || 0) + 1;
 }
 
-export function handleWsInit(id, data, { ackProven = true } = {}) {
+export function handleWsInit(id, data) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
@@ -486,11 +486,7 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
   // parent — which is what happens on mobile every time the screen sleeps.
   const prev = store.get().sessions[id] || {};
   const cursorTransition = attentionNamespaceTransition(prev, data.attention_namespace || '');
-  // Attention generations restart from zero with the server process. Reset the
-  // per-session server high water at the WS boundary too (polling covers hidden
-  // sessions) so the first lower-generation live occurrence is never hidden.
   const serverInstance = data.server_instance || prev.serverInstance || '';
-  const serverRestarted = !!data.server_instance && !!prev.serverInstance && data.server_instance !== prev.serverInstance;
   const viewing = prev.viewingSubagent;
   const keptLocal = viewing && prev.subagents && prev.subagents[viewing]
     && !(data.subagents || []).some(sa => sa && sa.job_id === viewing)
@@ -523,12 +519,6 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
   }
   updateSession(id, {
     serverInstance,
-    serverUnseenInstance: serverRestarted ? serverInstance : (prev.serverUnseenInstance || serverInstance),
-    serverUnseenGen: serverRestarted ? 0 : (prev.serverUnseenGen || 0),
-	// A restarted server restarts the attention-generation namespace, so old
-	// local acknowledgements must not suppress the new process's first event.
-	lastAckedUnseenGen: serverRestarted ? 0 : (prev.lastAckedUnseenGen || 0),
-	lastAckedUnseenInstance: serverRestarted ? '' : (prev.lastAckedUnseenInstance || ''),
 		// Cursor state is reset as one unit only when the ordered namespace moves
 		// forward. A stale init is still useful for its transcript fields, but it
 		// must not roll attention state back from a newer runtime incarnation.
@@ -596,19 +586,19 @@ export function handleWsInit(id, data, { ackProven = true } = {}) {
     goalVerifying: !!data.goal_verifying,
     lastSeq: data.last_seq || 0,
   });
-	if (ackProven && cursorTransition.accepted) {
+	if (cursorTransition.accepted) {
 		updateSession(id, { readCandidateSeq: data.last_seq || 0 });
 	}
-  acknowledgeInitAttention(id, data, { ackProven });
+  acknowledgeInitAttention(id, data);
 }
 
 // An authoritative init is the read boundary: the selected session showed the
-// snapshot this generation belongs to. No presentation proof beyond that —
+// snapshot this cursor belongs to. No presentation proof beyond that —
 // selection plus a confirmed init plus a foregrounded tab is the whole
 // contract.
-function acknowledgeInitAttention(id, data, { ackProven }) {
-  finishHistoryHydration(id, { shown: true, ackProven });
-  if (ackProven && data.attention_namespace && visibleSessionIds(store.get()).includes(id)) {
+function acknowledgeInitAttention(id, data) {
+  finishHistoryHydration(id, { shown: true });
+  if (data.attention_namespace && visibleSessionIds(store.get()).includes(id)) {
     acknowledgeVisibleAttentionThrough(id, data.last_seq || 0, data.attention_namespace).catch(() => {});
   }
 }

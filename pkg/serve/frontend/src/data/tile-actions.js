@@ -283,11 +283,11 @@ export function afterVisibilityChange() {
       // Only a confirmed authoritative init makes a selected transcript read.
       // A cached or stale one leaves the occurrence alone until its own init
       // lands, so a badge is never cleared for content this client never got.
-      if (sess?.historyHydrated && sess.historyAckProven) {
+      if (sess?.historyHydrated) {
         if (sess.attentionNamespace) {
           const throughSeq = sess.readCandidateSeq || sess.ackedThroughSeq || 0;
-          // Cursor runtimes must stay behind the sequence gate: a generation
-          // retry would clear newer attention that the init did not render.
+          // Stay behind the sequence gate: a retry must not clear attention
+          // that the init did not render.
           if (throughSeq) {
             acknowledgeVisibleAttentionThrough(id, throughSeq, sess.attentionNamespace).catch(() => {});
           }

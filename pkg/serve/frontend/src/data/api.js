@@ -278,7 +278,7 @@ function openWs(sessionId, initialBackoff) {
       entry.lastSeq = evt.data?.last_seq ?? evt.seq ?? 0;
       clearHistoryHydrationTimer(sessionId);
       confirmHistoryHydrationInit(sessionId, { deltaBase: !!evt.data?.delta_base });
-      handleWsInit(sessionId, evt.data, { ackProven: true });
+      handleWsInit(sessionId, evt.data);
       entry.backoff = 1000;
       return;
     }
@@ -316,7 +316,7 @@ function openWs(sessionId, initialBackoff) {
 function routeEvent(sessionId, evt) {
   switch (evt.type) {
     case 'init':
-      handleWsInit(sessionId, evt.data, { ackProven: true });
+      handleWsInit(sessionId, evt.data);
       break;
     case 'text_delta':
       handleWsTextDelta(sessionId, evt.data.delta);

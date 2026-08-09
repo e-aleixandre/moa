@@ -2,18 +2,18 @@
 // ordering needs to stay monotonic even when different sessions report them.
 // Keep the client-side presentation counter global and dedupe each server
 // occurrence identity so a following poll cannot replay a WS arrival. Server
-// occurrence IDs are monotonic only within one server process, so each
-// per-session high-water record is scoped to the server instance that minted
-// it. A restart therefore makes a lower, genuinely new generation arrive once.
+// occurrence sequences are monotonic only within one runtime namespace, so each
+// per-session high-water record is scoped to the namespace that minted it. A
+// restart therefore makes a lower, genuinely new occurrence arrive once.
 let nextArrival = 0;
 const sessionHighWater = new Map();
 
-export function attentionArrival(sessionID, unseenGen, serverInstance = '') {
-  if (!sessionID || !unseenGen) return 0;
+export function attentionArrival(sessionID, unseenSeq, namespace = '') {
+  if (!sessionID || !unseenSeq) return 0;
   const known = sessionHighWater.get(sessionID);
-  if (known && known.serverInstance === serverInstance && unseenGen <= known.generation) return known.arrival;
+  if (known && known.namespace === namespace && unseenSeq <= known.sequence) return known.arrival;
   const arrival = ++nextArrival;
-  sessionHighWater.set(sessionID, { serverInstance, generation: unseenGen, arrival });
+  sessionHighWater.set(sessionID, { namespace, sequence: unseenSeq, arrival });
   return arrival;
 }
 

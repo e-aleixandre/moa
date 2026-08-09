@@ -18,7 +18,7 @@ function seed(isMobile) {
   initIds(tile);
   setState({
     sessions: {
-      s1: { id: 's1', state: 'idle', updated: now, subagents: {} },
+      s1: { id: 's1', state: 'idle', updated: now, readCandidateSeq: 42, subagents: {} },
       s2: { id: 's2', state: 'idle', updated: now - 1000, subagents: {} },
       s3: { id: 's3', state: 'idle', updated: now - 2000, subagents: {} },
     },
@@ -42,6 +42,7 @@ test('closing the active session on mobile selects the next open one', async () 
 
   const state = store.get();
   expect(state.sessions.s1.state).toBe('saved');
+  expect(state.sessions.s1.readCandidateSeq).toBe(0);
   // Not left on the empty state: the next most recent OPEN session takes over.
   expect(state.activeSession).toBe('s2');
 });

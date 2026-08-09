@@ -121,14 +121,10 @@ export async function loadSessions() {
         // alarm until the user opens it.
         historyStale: serverRestarted ? visible.has(info.id) : (existing ? !!existing.historyStale : false),
         historyHydrated: serverRestarted ? false : (existing ? !!existing.historyHydrated : false),
-        historyAckProven: serverRestarted ? false : (existing ? !!existing.historyAckProven : false),
-        historyShownGen: serverRestarted ? 0 : (existing ? existing.historyShownGen || 0 : 0),
-        historyShownInstance: serverRestarted ? '' : (existing ? existing.historyShownInstance || '' : ''),
-        // Display-only provenance of retained rows. Unlike historyShown*, this
-        // survives opening a socket so a brief reconnect does not advertise an
-        // up-to-date transcript as behind.
-        historyCacheGen: existing ? existing.historyCacheGen || 0 : 0,
-        historyCacheInstance: existing ? existing.historyCacheInstance || '' : '',
+        // Display-only provenance of retained rows. This survives opening a
+        // socket so a brief reconnect does not advertise an up-to-date
+        // transcript as behind.
+        historyCacheSeq: cursorTransition.reset ? 0 : (existing ? existing.historyCacheSeq || 0 : 0),
         historyTailNeeded: existing ? !!existing.historyTailNeeded : false,
         historyTailReady: existing ? !!existing.historyTailReady : false,
         historyTruncated: existing ? !!existing.historyTruncated : false,
@@ -195,21 +191,13 @@ export async function loadSessions() {
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
         costUSD: wsOwns ? existing.costUSD : (info.cost_usd ?? (existing ? existing.costUSD : 0)),
 		unseen: polledUnseen,
-		unseenGen: existing ? existing.unseenGen || 0 : 0,
 		attentionNamespace: cursorTransition.namespace,
 		unseenSeq: cursorTransition.reset ? pollUnseenSeq : staleCursorRoster ? (existing.unseenSeq || 0) : polledUnseenSeq,
 		ackedThroughSeq: cursorTransition.reset ? 0 : (existing ? existing.ackedThroughSeq || 0 : 0),
 		// Only an authoritative WS init proves a rendered transcript boundary.
 		// A roster response, including a fresh incarnation, must never set this.
 		readCandidateSeq: cursorTransition.reset ? 0 : (existing ? existing.readCandidateSeq || 0 : 0),
-        serverUnseenGen: existing ? existing.serverUnseenGen || 0 : 0,
-        serverUnseenInstance: existing ? existing.serverUnseenInstance || '' : '',
         serverInstance: info.server_instance || (existing ? existing.serverInstance : ''),
-		// A generation namespace belongs to one server process. Keep the local
-		// read high-water across stale roster replacements, but discard it when
-		// the server process changes so its fresh generations can be acknowledged.
-		lastAckedUnseenGen: serverRestarted ? 0 : (existing ? existing.lastAckedUnseenGen || 0 : 0),
-		lastAckedUnseenInstance: serverRestarted ? '' : (existing ? existing.lastAckedUnseenInstance || '' : ''),
         // One global client arrival sequence covers every session. Repeating
         // the same server-instance occurrence after a poll returns its original value.
 		attentionArrival: staleCursorRoster ? (existing.attentionArrival || 0) : polledUnseen
@@ -363,9 +351,7 @@ export async function closeSession(id) {
   // (which can lag up to ~15s on mobile). The server already committed above.
   updateSession(id, {
     state: 'saved',
-    historyAckProven: false,
-    lastAckedUnseenGen: 0,
-    lastAckedUnseenInstance: '',
+    readCandidateSeq: 0,
   });
   const state = store.get();
   const tileTree = clearSession(state.tileTree, id);

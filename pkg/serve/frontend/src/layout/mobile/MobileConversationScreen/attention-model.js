@@ -14,14 +14,14 @@ export function aggregateAttention(sessions, activeId) {
     if (dotState === 'error') {
       urgent += 1;
       error += 1;
-      arrival = Math.max(arrival, session.attentionArrival || session.unseenGen || 0);
+      arrival = Math.max(arrival, session.attentionArrival || session.unseenSeq || 0);
     } else if (dotState === 'permission') {
       urgent += 1;
       permission += 1;
       arrival = Math.max(arrival, session.attentionArrival || 0);
     } else if (dotState === 'unseen') {
       unseen += 1;
-      arrival = Math.max(arrival, session.attentionArrival || session.unseenGen || 0);
+      arrival = Math.max(arrival, session.attentionArrival || session.unseenSeq || 0);
     }
   }
   return { urgent, unseen, error, permission, arrival };
@@ -47,7 +47,7 @@ export function mobileTitleChipPresentation(attention = {}) {
     count,
     tone,
     hasAttention: count > 0,
-    // Aggregate attention carries every active session's generation and state.
+    // Aggregate attention carries every active session's occurrence and state.
     // Re-keying the dot on this value restarts its finite animation when a new
     // arrival joins an already-visible indicator, without looping in CSS.
     arrival: attention.arrival || 0,
