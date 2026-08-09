@@ -53,7 +53,7 @@ export async function loadSessions() {
     const prev = state.sessions;
     const visible = new Set(visibleSessionIds(state));
     const sessions = {};
-	const restartedVisibleSessions = [];
+	const replacedVisibleSessions = [];
 	let sessionsChanged = Object.keys(prev).length !== list.length;
     for (const info of list) {
       const existing = prev[info.id];
@@ -63,6 +63,7 @@ export async function loadSessions() {
 			&& cursorTransition.namespace === info.attention_namespace;
 		const serverRestarted = !!existing?.serverInstance && !!info.server_instance
 			&& existing.serverInstance !== info.server_instance;
+		const transcriptReset = cursorTransition.reset || serverRestarted;
 		const pollUnseenSeq = info.unseen_seq || 0;
 		const localUnseenSeq = existing ? existing.unseenSeq || 0 : 0;
 		const staleAcknowledgedOccurrence = sameCursorNamespace && !!info.unseen
@@ -112,15 +113,15 @@ export async function loadSessions() {
         // A socket's init snapshot is the authority for retained cached
         // messages. Polling has no history, so it must never clear this visual
         // boundary while that snapshot is still in flight.
-        historyPending: serverRestarted ? false : (existing ? !!existing.historyPending : false),
+        historyPending: transcriptReset ? false : (existing ? !!existing.historyPending : false),
         // The roster has no transcript authority. Preserve both a failed
         // hydration boundary and proof that a later init did render one. A
-        // process change invalidates that proof: for a displayed transcript we
+        // runtime replacement invalidates that proof: for a displayed transcript we
         // make the boundary visible, then replace its socket below. A hidden
         // transcript is simply no longer authoritative; it need not raise an
         // alarm until the user opens it.
-        historyStale: serverRestarted ? visible.has(info.id) : (existing ? !!existing.historyStale : false),
-        historyHydrated: serverRestarted ? false : (existing ? !!existing.historyHydrated : false),
+        historyStale: transcriptReset ? visible.has(info.id) : (existing ? !!existing.historyStale : false),
+        historyHydrated: transcriptReset ? false : (existing ? !!existing.historyHydrated : false),
         // Display-only provenance of retained rows. This survives opening a
         // socket so a brief reconnect does not advertise an up-to-date
         // transcript as behind.
@@ -217,8 +218,8 @@ export async function loadSessions() {
 			sessions[info.id] = next;
 			sessionsChanged = true;
 		}
-		if (serverRestarted && visible.has(info.id) && existing.state !== 'saved') {
-			restartedVisibleSessions.push(info.id);
+		if (transcriptReset && visible.has(info.id) && existing.state !== 'saved') {
+			replacedVisibleSessions.push(info.id);
 		}
     }
     // Detect attention transitions (hidden sessions only)
@@ -235,10 +236,10 @@ export async function loadSessions() {
 		if (sessionsChanged) {
 			setState({ sessions });
 		}
-		// An existing socket belongs to the old process and cannot restore the
-		// transcript authority that its roster just revoked. Replace it rather
-		// than waiting for the old transport to notice the restart.
-		for (const id of restartedVisibleSessions) retryHistoryHydration(id);
+		// An existing socket belongs to the superseded runtime incarnation and
+		// cannot restore the transcript authority that the roster just revoked.
+		// Replace it rather than waiting for the old transport to notice the reset.
+		for (const id of replacedVisibleSessions) retryHistoryHydration(id);
     // Clean deleted sessions from tile tree
     const validIds = new Set(Object.keys(sessions));
     retainAttentionArrivals(validIds);

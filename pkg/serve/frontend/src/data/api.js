@@ -253,6 +253,7 @@ function openWs(sessionId, initialBackoff) {
     ws,
     backoff: initialBackoff,
     lastSeq: 0,
+    attentionNamespace: '',
   };
   connections.set(sessionId, entry);
   clearHistoryHydrationTimer(sessionId);
@@ -267,6 +268,12 @@ function openWs(sessionId, initialBackoff) {
     if (connections.get(sessionId)?.ws !== ws) return;
     const evt = JSON.parse(e.data);
     if (evt.type === 'init') {
+      const namespace = evt.data?.attention_namespace || '';
+      const currentNamespace = store.get().sessions[sessionId]?.attentionNamespace || '';
+      if (namespace && currentNamespace && namespace !== currentNamespace) {
+        ws.close();
+        return;
+      }
       // A server only emits delta_base after validating its tree path, but a
       // client may have evicted or locally rewritten that prefix. Never append
       // a suffix to a different transcript: retry once without a resume token.
@@ -276,10 +283,19 @@ function openWs(sessionId, initialBackoff) {
         return;
       }
       entry.lastSeq = evt.data?.last_seq ?? evt.seq ?? 0;
+      entry.attentionNamespace = namespace;
       clearHistoryHydrationTimer(sessionId);
       confirmHistoryHydrationInit(sessionId, { deltaBase: !!evt.data?.delta_base });
       handleWsInit(sessionId, evt.data);
       entry.backoff = 1000;
+      return;
+    }
+    // A socket's init stamps every later frame with the runtime incarnation
+    // that emitted it. Never let an old socket's bus sequence be interpreted
+    // against a cursor namespace adopted from a newer roster snapshot.
+    const currentNamespace = store.get().sessions[sessionId]?.attentionNamespace || '';
+    if (entry.attentionNamespace && currentNamespace && entry.attentionNamespace !== currentNamespace) {
+      ws.close();
       return;
     }
     // Bus sequences intentionally retain ordinary numeric ordering here. A

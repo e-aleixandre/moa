@@ -113,6 +113,62 @@ test('loadSessions accepts a namespace from a different server process', async (
   });
 });
 
+test('a late frame from a superseded attention incarnation cannot acknowledge the new cursor', async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  const reads = [];
+  class TestWebSocket {
+    constructor() { TestWebSocket.instances.push(this); }
+    close() { this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  globalThis.fetch = (path) => {
+    if (String(path).includes('/read?')) reads.push(path);
+    return Promise.resolve(new Response(JSON.stringify(apiResponse), { status: 200 }));
+  };
+  setState({
+    sessions: { s3: {
+      id: 's3', state: 'idle', provider: 'openai', cwd: '/z', subagents: {}, messages: [],
+      attentionNamespace: 'server-a:1', serverInstance: 'server-a',
+    } },
+    activeSession: 's3', isMobile: true,
+  });
+
+  try {
+    syncConnections(['s3']);
+    const oldSocket = TestWebSocket.instances[0];
+    oldSocket.onmessage({ data: JSON.stringify({
+      type: 'init', data: {
+        messages: [], subagents: [], server_instance: 'server-a', attention_namespace: 'server-a:1', last_seq: 4,
+      },
+    }) });
+    reads.length = 0;
+
+    apiResponse = [{
+      id: 's3', title: 'S3', state: 'idle', provider: 'openai', cwd: '/z',
+      server_instance: 'server-a', attention_namespace: 'server-a:2', unseen: false, unseen_seq: 0,
+    }];
+    await loadSessions();
+    oldSocket.onmessage({ data: JSON.stringify({
+      type: 'permission_request', seq: 5, data: { id: 'old', tool_name: 'Bash', args: {} },
+    }) });
+    await Promise.resolve();
+
+    expect(store.get().sessions.s3).toMatchObject({
+      attentionNamespace: 'server-a:2', unseen: false, unseenSeq: 0, ackedThroughSeq: 0,
+    });
+    expect(reads).toEqual([]);
+  } finally {
+    syncConnections([]);
+    globalThis.WebSocket = originalWebSocket;
+    if (originalLocation === undefined) delete globalThis.location;
+    else globalThis.location = originalLocation;
+    setState({ isMobile: false });
+  }
+});
+
 test('loadSessions adopts the server state for a visible-but-saved session (just resumed)', async () => {
   // Regression: tapping a saved session makes it visible (activeSession) while
   // still 'saved'. resumeSession POSTs /resume (server flips it to idle) then

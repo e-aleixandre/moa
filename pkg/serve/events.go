@@ -18,9 +18,8 @@ type Event struct {
 
 // InitData is sent on WebSocket connect with the full session state.
 type InitData struct {
-	// ServerInstance scopes process-local attention occurrence generations.
-	// Reconnecting to the same process preserves client deduplication; a restart
-	// starts a new generation namespace.
+	// ServerInstance identifies the process that owns this runtime incarnation.
+	// AttentionNamespace, not this value, scopes the bus-sequence read cursor.
 	ServerInstance string `json:"server_instance"`
 	// AttentionNamespace identifies the ordered runtime incarnation that owns
 	// bus-sequence read cursors. It changes on a close/resume even within one
