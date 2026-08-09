@@ -254,6 +254,42 @@ normal `server_instance`, `last_seq`, and `attention_namespace` semantics from
 every init. Unknown query parameters are ignored, so clients and
 servers can be upgraded independently.
 
+## Attention read cursor
+
+Attention is tracked per session as a read cursor: **you have seen everything
+through bus sequence N**. An attention-producing event whose sequence is above
+that cursor keeps the session marked unread. A confirmed WebSocket `init` for a
+selected session acknowledges its `last_seq` while the tab is in the foreground;
+a rendered live attention event acknowledges its own sequence. A hidden tab
+never acknowledges attention.
+
+`POST /api/sessions/{id}/read` advances that cursor. It takes these query
+parameters:
+
+- `through_seq`: the bus sequence through which the client has rendered.
+- `attention_namespace`: the runtime incarnation that owns that sequence.
+  It is `serverInstance:incarnation`, where the incarnation increases when a
+  session runtime is recreated.
+
+The endpoint returns `204 No Content` on success, `400 Bad Request` for an
+invalid or future cursor, `404 Not Found` for an unknown session, and `409
+Conflict` when the namespace has been superseded. A client must obtain both
+values from the current runtime rather than carrying a cursor across a session
+resume.
+
+Every WebSocket `init` includes `last_seq` and `attention_namespace`.
+`last_seq` is a conservative acknowledgement boundary, not an atomic snapshot
+of every field in the init: all attention effects at or below it are represented
+or superseded by the snapshot. `attention_namespace` identifies the ordered
+runtime incarnation for its bus sequence, preventing an old socket's sequence
+from being interpreted against a recreated runtime.
+
+The `GET /api/sessions` roster includes `unseen`, `unseen_seq`, and
+`attention_namespace`. `unseen` is the current attention badge,
+`unseen_seq` is the highest unread attention occurrence, and
+`attention_namespace` scopes that occurrence and any read cursor to its runtime
+incarnation.
+
 ## REST endpoints
 
 Beyond the per-session WebSocket, Serve exposes a few global read/write endpoints:

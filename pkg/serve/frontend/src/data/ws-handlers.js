@@ -525,7 +525,7 @@ export function handleWsInit(id, data) {
   // parent — which is what happens on mobile every time the screen sleeps.
   const namespace = attentionNamespaceFromInit(data);
   const cursorTransition = namespace
-    ? adoptAttentionNamespace(id, namespace)
+    ? attentionNamespaceTransition(store.get().sessions[id], namespace)
     : { accepted: false, reset: false, namespace: store.get().sessions[id]?.attentionNamespace || '' };
   const prev = store.get().sessions[id] || {};
   const serverInstance = data.server_instance || prev.serverInstance || '';
@@ -620,9 +620,9 @@ export function handleWsInit(id, data) {
     goalVerifying: !!data.goal_verifying,
     lastSeq: data.last_seq || 0,
   });
-	if (cursorTransition.accepted) {
-		updateSession(id, { readCandidateSeq: data.last_seq || 0 });
-	}
+  if (cursorTransition.accepted) {
+    updateSession(id, { readCandidateSeq: data.last_seq || 0 });
+  }
   acknowledgeInitAttention(id, data, namespace);
 }
 
@@ -1075,10 +1075,10 @@ export function handleWsStateChange(id, data, seq = 0) {
     // Keep pendingSteers: a steer queued during the last turn stays genuinely
     // queued (mostrar la verdad). It's cleared only by Steered or a snapshot.
     if (sess) updateSession(id, { streamingText: null, thinkingText: null, compacting: false, runStartedAtMs: null });
-		if (data.state === 'error' && seq > 0) {
-			markUnseen(id, seq, true);
-			acknowledgeVisibleLiveAttention(id, seq);
-		}
+    if (data.state === 'error' && seq > 0) {
+      markUnseen(id, seq, true);
+      acknowledgeVisibleLiveAttention(id, seq);
+    }
     if (wasRunning) {
       flashSession(id, data.state === 'error' ? 'error' : 'done');
       // A successful/cancelled terminal state is followed by run_end, which
@@ -1113,8 +1113,8 @@ export function handleWsAskUser(id, data, seq = 0) {
     pendingAsk: { id: data.id, questions: data.questions },
     resolvedPromptNotice: null,
   });
-	markUnseen(id, seq, true);
-	acknowledgeVisibleLiveAttention(id, seq);
+  markUnseen(id, seq, true);
+  acknowledgeVisibleLiveAttention(id, seq);
   const state = store.get();
   if (!visibleSessionIds(state).includes(id)) {
     flashSession(id, 'attention');
@@ -1134,8 +1134,8 @@ export function handleWsPermissionRequest(id, data, seq = 0) {
     },
     resolvedPromptNotice: null,
   });
-	markUnseen(id, seq, true);
-	acknowledgeVisibleLiveAttention(id, seq);
+  markUnseen(id, seq, true);
+  acknowledgeVisibleLiveAttention(id, seq);
   flashSession(id, 'attention');
   const state = store.get();
   if (!visibleSessionIds(state).includes(id)) {

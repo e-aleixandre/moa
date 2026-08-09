@@ -135,40 +135,40 @@ export function reconnectAll() {
 }
 
 export function acknowledgeVisibleAttentionThrough(sessionId, throughSeq, namespace = '') {
-	const session = store.get().sessions[sessionId];
-	const hidden = typeof document !== 'undefined' && document.hidden;
-	if (!session || hidden || !namespace) return Promise.resolve(false);
-	if (session.attentionNamespace && session.attentionNamespace !== namespace) return Promise.resolve(false);
-	if ((session.ackedThroughSeq || 0) >= throughSeq) {
-		commitCursorAcknowledgement(sessionId, throughSeq, namespace);
-		return Promise.resolve(true);
-	}
-	const key = cursorAcknowledgementKey(sessionId, throughSeq, namespace);
-	const inFlight = attentionAcknowledgements.get(key);
-	if (inFlight) return inFlight;
-	const acknowledgement = api(
-		'POST',
-		`/api/sessions/${sessionId}/read?through_seq=${throughSeq}&attention_namespace=${encodeURIComponent(namespace)}`,
-	)
-		.then(() => {
-			commitCursorAcknowledgement(sessionId, throughSeq, namespace);
-			return true;
-		})
-		.finally(() => attentionAcknowledgements.delete(key));
-	attentionAcknowledgements.set(key, acknowledgement);
-	return acknowledgement;
+  const session = store.get().sessions[sessionId];
+  const hidden = typeof document !== 'undefined' && document.hidden;
+  if (!session || hidden || !namespace) return Promise.resolve(false);
+  if (session.attentionNamespace && session.attentionNamespace !== namespace) return Promise.resolve(false);
+  if ((session.ackedThroughSeq || 0) >= throughSeq) {
+    commitCursorAcknowledgement(sessionId, throughSeq, namespace);
+    return Promise.resolve(true);
+  }
+  const key = cursorAcknowledgementKey(sessionId, throughSeq, namespace);
+  const inFlight = attentionAcknowledgements.get(key);
+  if (inFlight) return inFlight;
+  const acknowledgement = api(
+    'POST',
+    `/api/sessions/${sessionId}/read?through_seq=${throughSeq}&attention_namespace=${encodeURIComponent(namespace)}`,
+  )
+    .then(() => {
+      commitCursorAcknowledgement(sessionId, throughSeq, namespace);
+      return true;
+    })
+    .finally(() => attentionAcknowledgements.delete(key));
+  attentionAcknowledgements.set(key, acknowledgement);
+  return acknowledgement;
 }
 
 function commitCursorAcknowledgement(sessionId, throughSeq, namespace) {
-	const session = store.get().sessions[sessionId];
-	if (!session || session.attentionNamespace !== namespace) return;
-	const ackedThroughSeq = Math.max(session.ackedThroughSeq || 0, throughSeq);
-	updateSession(sessionId, {
-		ackedThroughSeq,
-		// A later occurrence remains lit while a delayed acknowledgement for an
-		// earlier cursor arrives (the init-cut race).
-		unseen: (session.unseenSeq || 0) > ackedThroughSeq ? session.unseen : false,
-	});
+  const session = store.get().sessions[sessionId];
+  if (!session || session.attentionNamespace !== namespace) return;
+  const ackedThroughSeq = Math.max(session.ackedThroughSeq || 0, throughSeq);
+  updateSession(sessionId, {
+    ackedThroughSeq,
+    // A later occurrence remains lit while a delayed acknowledgement for an
+    // earlier cursor arrives (the init-cut race).
+    unseen: (session.unseenSeq || 0) > ackedThroughSeq ? session.unseen : false,
+  });
 }
 
 function clearHistoryHydrationTimer(sessionId) {
@@ -303,14 +303,16 @@ function openWs(sessionId, initialBackoff) {
     // A socket's init stamps every later frame with the runtime incarnation
     // that emitted it. Never let an old socket's bus sequence be interpreted
     // against a cursor namespace adopted from a newer roster snapshot.
-    const namespaceTransition = attentionNamespaceTransition(
-      store.get().sessions[sessionId], entry.attentionNamespace, { allowCrossProcess: false },
-    );
-    if (!namespaceTransition.accepted) {
-      ws.close();
-      return;
+    if (store.get().sessions[sessionId]?.attentionNamespace !== entry.attentionNamespace) {
+      const namespaceTransition = attentionNamespaceTransition(
+        store.get().sessions[sessionId], entry.attentionNamespace, { allowCrossProcess: false },
+      );
+      if (!namespaceTransition.accepted) {
+        ws.close();
+        return;
+      }
+      adoptAttentionNamespace(sessionId, entry.attentionNamespace);
     }
-    adoptAttentionNamespace(sessionId, entry.attentionNamespace);
     // Bus sequences intentionally retain ordinary numeric ordering here. A
     // uint64 wrap cannot occur in a plausible server-process lifetime, and
     // JSON Numbers lose integer precision far before it, so a modular client
@@ -344,9 +346,6 @@ function openWs(sessionId, initialBackoff) {
 
 function routeEvent(sessionId, evt) {
   switch (evt.type) {
-    case 'init':
-      handleWsInit(sessionId, evt.data);
-      break;
     case 'text_delta':
       handleWsTextDelta(sessionId, evt.data.delta);
       break;
@@ -377,14 +376,14 @@ function routeEvent(sessionId, evt) {
     case 'tool_end':
       handleWsToolEnd(sessionId, evt.data);
       break;
-	case 'state_change':
-		handleWsStateChange(sessionId, evt.data, evt.seq);
-		break;
-	case 'permission_request':
-		handleWsPermissionRequest(sessionId, evt.data, evt.seq);
-		break;
-	case 'ask_user':
-		handleWsAskUser(sessionId, evt.data, evt.seq);
+    case 'state_change':
+      handleWsStateChange(sessionId, evt.data, evt.seq);
+      break;
+    case 'permission_request':
+      handleWsPermissionRequest(sessionId, evt.data, evt.seq);
+      break;
+    case 'ask_user':
+      handleWsAskUser(sessionId, evt.data, evt.seq);
       break;
     case 'permission_resolved':
       handleWsPermissionResolved(sessionId, evt.data);
@@ -425,8 +424,8 @@ function routeEvent(sessionId, evt) {
     case 'bash_complete':
       handleWsBashComplete(sessionId, evt.data);
       break;
-	case 'run_end':
-		handleWsRunEnd(sessionId, evt.data, evt.seq);
+    case 'run_end':
+      handleWsRunEnd(sessionId, evt.data, evt.seq);
       break;
     case 'command':
       handleWsCommand(sessionId, evt.data);

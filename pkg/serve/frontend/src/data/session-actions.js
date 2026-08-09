@@ -61,31 +61,31 @@ export async function loadSessions() {
     const prev = state.sessions;
     const visible = new Set(visibleSessionIds(state));
     const sessions = {};
-	const replacedVisibleSessions = [];
+    const replacedVisibleSessions = [];
 	let sessionsChanged = Object.keys(prev).length !== list.length;
     for (const info of list) {
       const existing = prev[info.id];
-		const cursorTransition = attentionNamespaceTransition(existing, info.attention_namespace || '');
-		const staleCursorRoster = !!existing && !!info.attention_namespace && !cursorTransition.accepted;
-		const sameCursorNamespace = !!existing && !!info.attention_namespace && !cursorTransition.reset
-			&& cursorTransition.namespace === info.attention_namespace;
+      const cursorTransition = attentionNamespaceTransition(existing, info.attention_namespace || '');
+      const staleCursorRoster = !!existing && !!info.attention_namespace && !cursorTransition.accepted;
+      const sameCursorNamespace = !!existing && !!info.attention_namespace && !cursorTransition.reset
+        && cursorTransition.namespace === info.attention_namespace;
 		const serverRestarted = !!existing?.serverInstance && !!info.server_instance
 			&& existing.serverInstance !== info.server_instance;
-		const transcriptReset = cursorTransition.reset || serverRestarted;
-		const pollUnseenSeq = info.unseen_seq || 0;
-		const localUnseenSeq = existing ? existing.unseenSeq || 0 : 0;
-		const staleAcknowledgedOccurrence = sameCursorNamespace && !!info.unseen
-			&& pollUnseenSeq <= (existing.ackedThroughSeq || 0);
-		const rosterCursorOlderThanLocal = sameCursorNamespace && pollUnseenSeq < localUnseenSeq;
-		// A roster snapshot can arrive behind a live WS occurrence. Within one
-		// namespace it may only advance the occurrence high-water; an older
-		// snapshot must also leave the newer local dot untouched.
-		const polledUnseen = staleCursorRoster || rosterCursorOlderThanLocal
-			? !!existing.unseen
-			: !!info.unseen && !staleAcknowledgedOccurrence;
-		const polledUnseenSeq = sameCursorNamespace
-			? Math.max(localUnseenSeq, pollUnseenSeq)
-			: pollUnseenSeq;
+      const transcriptReset = cursorTransition.reset || serverRestarted;
+      const pollUnseenSeq = info.unseen_seq || 0;
+      const localUnseenSeq = existing ? existing.unseenSeq || 0 : 0;
+      const staleAcknowledgedOccurrence = sameCursorNamespace && !!info.unseen
+        && pollUnseenSeq <= (existing.ackedThroughSeq || 0);
+      const rosterCursorOlderThanLocal = sameCursorNamespace && pollUnseenSeq < localUnseenSeq;
+      // A roster snapshot can arrive behind a live WS occurrence. Within one
+      // namespace it may only advance the occurrence high-water; an older
+      // snapshot must also leave the newer local dot untouched.
+      const polledUnseen = staleCursorRoster || rosterCursorOlderThanLocal
+        ? !!existing.unseen
+        : !!info.unseen && !staleAcknowledgedOccurrence;
+      const polledUnseenSeq = sameCursorNamespace
+        ? Math.max(localUnseenSeq, pollUnseenSeq)
+        : pollUnseenSeq;
       // A visible session has a live WS connection that owns its live-tracked
       // fields (state, config, context, plan). This poll response may already
       // be stale relative to WS events that arrived while the request was in
@@ -199,18 +199,18 @@ export async function loadSessions() {
         planMode: wsOwns ? existing.planMode : (info.plan_mode || (existing ? existing.planMode : 'off')),
         planFile: wsOwns ? existing.planFile : (info.plan_file || (existing ? existing.planFile : null)),
         costUSD: wsOwns ? existing.costUSD : (info.cost_usd ?? (existing ? existing.costUSD : 0)),
-		unseen: polledUnseen,
-		attentionNamespace: cursorTransition.namespace,
-		unseenSeq: cursorTransition.reset ? pollUnseenSeq : staleCursorRoster ? (existing.unseenSeq || 0) : polledUnseenSeq,
-		ackedThroughSeq: cursorTransition.reset ? 0 : (existing ? existing.ackedThroughSeq || 0 : 0),
-		// Only an authoritative WS init proves a rendered transcript boundary.
-		// A roster response, including a fresh incarnation, must never set this.
-		readCandidateSeq: cursorTransition.reset ? 0 : (existing ? existing.readCandidateSeq || 0 : 0),
+        unseen: polledUnseen,
+        attentionNamespace: cursorTransition.namespace,
+        unseenSeq: cursorTransition.reset ? pollUnseenSeq : staleCursorRoster ? (existing.unseenSeq || 0) : polledUnseenSeq,
+        ackedThroughSeq: cursorTransition.reset ? 0 : (existing ? existing.ackedThroughSeq || 0 : 0),
+        // Only an authoritative WS init proves a rendered transcript boundary.
+        // A roster response, including a fresh incarnation, must never set this.
+        readCandidateSeq: cursorTransition.reset ? 0 : (existing ? existing.readCandidateSeq || 0 : 0),
         serverInstance: info.server_instance || (existing ? existing.serverInstance : ''),
         // One global client arrival sequence covers every session. Repeating
         // the same server-instance occurrence after a poll returns its original value.
-		attentionArrival: staleCursorRoster ? (existing.attentionArrival || 0) : polledUnseen
-			? attentionArrival(info.id, pollUnseenSeq, info.attention_namespace || '')
+        attentionArrival: staleCursorRoster ? (existing.attentionArrival || 0) : polledUnseen
+          ? attentionArrival(info.id, pollUnseenSeq, info.attention_namespace || '')
           : (existing ? existing.attentionArrival || 0 : 0),
         // Server-owned session brief (cheap LLM status summary): attempting /
         // progress prose + freshness stamp. No WS event tracks it, so the poll
@@ -226,8 +226,8 @@ export async function loadSessions() {
 			sessions[info.id] = next;
 			sessionsChanged = true;
 		}
-		if (transcriptReset && visible.has(info.id) && existing.state !== 'saved') {
-			replacedVisibleSessions.push(info.id);
+      if (transcriptReset && visible.has(info.id) && existing.state !== 'saved') {
+        replacedVisibleSessions.push(info.id);
 		}
     }
     // Detect attention transitions (hidden sessions only)
@@ -244,10 +244,10 @@ export async function loadSessions() {
 		if (sessionsChanged) {
 			setState({ sessions });
 		}
-		// An existing socket belongs to the superseded runtime incarnation and
-		// cannot restore the transcript authority that the roster just revoked.
-		// Replace it rather than waiting for the old transport to notice the reset.
-		for (const id of replacedVisibleSessions) retryHistoryHydration(id);
+    // An existing socket belongs to the superseded runtime incarnation and
+    // cannot restore the transcript authority that the roster just revoked.
+    // Replace it rather than waiting for the old transport to notice the reset.
+    for (const id of replacedVisibleSessions) retryHistoryHydration(id);
     // Clean deleted sessions from tile tree
     const validIds = new Set(Object.keys(sessions));
     retainAttentionArrivals(validIds);
