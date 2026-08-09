@@ -252,7 +252,9 @@ test('a close after init revokes transcript authority', () => {
     setState({ sessions: { s1: { id: 's1', messages: [], subagents: {}, serverInstance: 'instance-a' } } });
     syncConnections(['s1']);
     TestWebSocket.instances[0].onmessage({ data: JSON.stringify({
-      type: 'init', data: { messages: [], subagents: [], server_instance: 'instance-a' },
+      type: 'init', data: {
+        messages: [], subagents: [], server_instance: 'instance-a', attention_namespace: 'instance-a:1',
+      },
     }) });
     expect(store.get().sessions.s1).toMatchObject({ historyHydrated: true, historyStale: false });
 

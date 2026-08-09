@@ -11,7 +11,7 @@ let apiResponse = [];
 const { store, setState } = await import('./store.js');
 const { syncConnections } = await import('./api.js');
 const { loadSessions, openPersistedSubagent, openBashJob, sendMessage } = await import('./session-actions.js');
-const { handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
+const { adoptAttentionNamespace, handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
 
 beforeEach(() => {
   apiResponse = [];
@@ -205,6 +205,110 @@ test('a newer socket init adopts its incarnation before the roster catches up', 
       attentionNamespace: 'server-a:2', unseen: false, unseenSeq: 0,
       ackedThroughSeq: 0, readCandidateSeq: 4,
     });
+  } finally {
+    syncConnections([]);
+    globalThis.WebSocket = originalWebSocket;
+    if (originalLocation === undefined) delete globalThis.location;
+    else globalThis.location = originalLocation;
+    setState({ isMobile: false });
+  }
+});
+
+test('a delayed init from another process cannot replace the roster namespace', () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  class TestWebSocket {
+    constructor() { TestWebSocket.instances.push(this); }
+    close() { this.closeCount = (this.closeCount || 0) + 1; this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  setState({
+    sessions: { s3: {
+      id: 's3', state: 'idle', provider: 'openai', cwd: '/z', subagents: {}, messages: [],
+      attentionNamespace: 'server-a:2', serverInstance: 'server-a', unseen: true, unseenSeq: 9,
+      ackedThroughSeq: 5, readCandidateSeq: 5,
+    } },
+    activeSession: null, isMobile: true,
+  });
+
+  try {
+    syncConnections(['s3']);
+    const socket = TestWebSocket.instances[0];
+    socket.onmessage({ data: JSON.stringify({
+      type: 'init', data: {
+        messages: [], subagents: [], state: 'idle', server_instance: 'server-b',
+        attention_namespace: 'server-b:1', last_seq: 4,
+      },
+    }) });
+
+    expect(socket.closeCount).toBe(1);
+    expect(store.get().sessions.s3).toMatchObject({
+      attentionNamespace: 'server-a:2', unseen: true, unseenSeq: 9,
+      ackedThroughSeq: 5,
+    });
+  } finally {
+    syncConnections([]);
+    globalThis.WebSocket = originalWebSocket;
+    if (originalLocation === undefined) delete globalThis.location;
+    else globalThis.location = originalLocation;
+    setState({ isMobile: false });
+  }
+});
+
+test('adopting an identical attention namespace does not reset its cursor', () => {
+  setState({ sessions: { s3: {
+    id: 's3', attentionNamespace: 'server-a:2', unseen: true, unseenSeq: 9,
+    ackedThroughSeq: 5, readCandidateSeq: 7,
+  } } });
+
+  adoptAttentionNamespace('s3', 'server-a:2');
+
+  expect(store.get().sessions.s3).toMatchObject({
+    attentionNamespace: 'server-a:2', unseen: true, unseenSeq: 9,
+    ackedThroughSeq: 5, readCandidateSeq: 7,
+  });
+});
+
+test('an init without a valid, matching attention namespace is neither adopted nor acknowledged', async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const originalLocation = globalThis.location;
+  const reads = [];
+  class TestWebSocket {
+    constructor() { TestWebSocket.instances.push(this); }
+    close() { this.closeCount = (this.closeCount || 0) + 1; this.onclose?.(); }
+  }
+  TestWebSocket.instances = [];
+  globalThis.WebSocket = TestWebSocket;
+  globalThis.location = { protocol: 'http:', host: 'localhost' };
+  globalThis.fetch = (path) => {
+    if (String(path).includes('/read?')) reads.push(path);
+    return Promise.resolve(new Response('', { status: 204 }));
+  };
+  setState({
+    sessions: { s3: {
+      id: 's3', state: 'idle', provider: 'openai', cwd: '/z', subagents: {}, messages: [],
+      attentionNamespace: 'server-a:1', serverInstance: 'server-a', unseen: true, unseenSeq: 9,
+    } },
+    activeSession: 's3', isMobile: true,
+  });
+
+  try {
+    for (const [attention_namespace, server_instance] of [
+      [undefined, 'server-a'], ['', 'server-a'], ['server-a:not-a-number', 'server-a'], ['server-b:1', 'server-a'],
+    ]) {
+      syncConnections([]);
+      syncConnections(['s3']);
+      const socket = TestWebSocket.instances.at(-1);
+      socket.onmessage({ data: JSON.stringify({
+        type: 'init', data: { messages: [], subagents: [], attention_namespace, server_instance, last_seq: 42 },
+      }) });
+      expect(socket.closeCount).toBe(1);
+      expect(store.get().sessions.s3.attentionNamespace).toBe('server-a:1');
+    }
+    await Promise.resolve();
+    expect(reads).toEqual([]);
   } finally {
     syncConnections([]);
     globalThis.WebSocket = originalWebSocket;

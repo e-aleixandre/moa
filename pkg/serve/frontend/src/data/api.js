@@ -21,7 +21,7 @@ import {
   handleWsRunTokens,
   handleWsAutoVerifyStart, handleWsAutoVerifyEnd, handleWsRateLimit,
   handleWsCompactionStart, handleWsCompactionEnd,
-  attentionNamespaceTransition, adoptAttentionNamespace,
+  attentionNamespaceFromInit, attentionNamespaceTransition, adoptAttentionNamespace,
 } from './ws-handlers.js';
 import { store, updateSession } from './store.js';
 import {
@@ -269,15 +269,20 @@ function openWs(sessionId, initialBackoff) {
     if (connections.get(sessionId)?.ws !== ws) return;
     const evt = JSON.parse(e.data);
     if (evt.type === 'init') {
-      const namespace = evt.data?.attention_namespace || '';
-      const namespaceTransition = attentionNamespaceTransition(store.get().sessions[sessionId], namespace);
-      if (namespace && !namespaceTransition.accepted) {
+      const namespace = attentionNamespaceFromInit(evt.data);
+      if (!namespace) {
         ws.close();
         return;
       }
-      // An init is newer evidence than the roster. Adopt a newer incarnation
-      // before any retry path can close this socket, resetting its cursor just
-      // as loadSessions would; only an older incarnation is rejected above.
+      const namespaceTransition = attentionNamespaceTransition(
+        store.get().sessions[sessionId], namespace, { allowCrossProcess: false },
+      );
+      if (!namespaceTransition.accepted) {
+        ws.close();
+        return;
+      }
+      // Only roster snapshots can choose between unordered server processes.
+      // A live socket may still advance an ordered incarnation in its process.
       adoptAttentionNamespace(sessionId, namespace);
       // A server only emits delta_base after validating its tree path, but a
       // client may have evicted or locally rewritten that prefix. Never append
@@ -299,9 +304,9 @@ function openWs(sessionId, initialBackoff) {
     // that emitted it. Never let an old socket's bus sequence be interpreted
     // against a cursor namespace adopted from a newer roster snapshot.
     const namespaceTransition = attentionNamespaceTransition(
-      store.get().sessions[sessionId], entry.attentionNamespace,
+      store.get().sessions[sessionId], entry.attentionNamespace, { allowCrossProcess: false },
     );
-    if (entry.attentionNamespace && !namespaceTransition.accepted) {
+    if (!namespaceTransition.accepted) {
       ws.close();
       return;
     }

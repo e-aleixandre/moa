@@ -419,22 +419,40 @@ function flushDeltas() {
 function parseAttentionNamespace(namespace) {
   const separator = typeof namespace === 'string' ? namespace.lastIndexOf(':') : -1;
   if (separator <= 0) return null;
-  const incarnation = Number(namespace.slice(separator + 1));
+  const incarnationText = namespace.slice(separator + 1);
+  if (!/^\d+$/.test(incarnationText)) return null;
+  const incarnation = Number(incarnationText);
   if (!Number.isSafeInteger(incarnation) || incarnation < 1) return null;
   return { serverInstance: namespace.slice(0, separator), incarnation };
 }
 
+// An init is usable for the cursor only when its namespace is well-formed and
+// belongs to the runtime that sent it. This keeps malformed cursor data from
+// becoming either a read boundary or a future frame's namespace.
+export function attentionNamespaceFromInit(data) {
+  const namespace = data?.attention_namespace;
+  const parsed = parseAttentionNamespace(namespace);
+  if (!parsed || parsed.serverInstance !== data?.server_instance) return '';
+  return namespace;
+}
+
 // The namespace is an ordered runtime incarnation, not an opaque token: a
 // delayed roster response for A must not reset state after the client accepted
-// B. A different server process has its own ordering and is always newer.
-export function attentionNamespaceTransition(session, namespace) {
+// B. Different server processes are unordered, so only the roster may move
+// between them; a socket may advance incarnations within its own process.
+export function attentionNamespaceTransition(session, namespace, { allowCrossProcess = true } = {}) {
   const current = session?.attentionNamespace || '';
-  if (!namespace) return { accepted: false, reset: false, namespace: current };
-  if (!current || current === namespace) return { accepted: true, reset: false, namespace };
-  const previous = parseAttentionNamespace(current);
   const next = parseAttentionNamespace(namespace);
-  if (!previous || !next) return { accepted: false, reset: false, namespace: current };
-  if (previous.serverInstance !== next.serverInstance) return { accepted: true, reset: true, namespace };
+  if (!next) return { accepted: false, reset: false, namespace: current };
+  if (!current) return { accepted: true, reset: false, namespace };
+  const previous = parseAttentionNamespace(current);
+  if (!previous) return { accepted: false, reset: false, namespace: current };
+  if (current === namespace) return { accepted: true, reset: false, namespace };
+  if (previous.serverInstance !== next.serverInstance) {
+    return allowCrossProcess
+      ? { accepted: true, reset: true, namespace }
+      : { accepted: false, reset: false, namespace: current };
+  }
   if (next.incarnation > previous.incarnation) return { accepted: true, reset: true, namespace };
   return { accepted: false, reset: false, namespace: current };
 }
@@ -505,7 +523,10 @@ export function handleWsInit(id, data) {
   // init snapshot lists live jobs only, so replacing the map outright would
   // delete the very transcript being read and bounce the reader back to the
   // parent — which is what happens on mobile every time the screen sleeps.
-  const cursorTransition = adoptAttentionNamespace(id, data.attention_namespace || '');
+  const namespace = attentionNamespaceFromInit(data);
+  const cursorTransition = namespace
+    ? adoptAttentionNamespace(id, namespace)
+    : { accepted: false, reset: false, namespace: store.get().sessions[id]?.attentionNamespace || '' };
   const prev = store.get().sessions[id] || {};
   const serverInstance = data.server_instance || prev.serverInstance || '';
   const viewing = prev.viewingSubagent;
@@ -602,17 +623,17 @@ export function handleWsInit(id, data) {
 	if (cursorTransition.accepted) {
 		updateSession(id, { readCandidateSeq: data.last_seq || 0 });
 	}
-  acknowledgeInitAttention(id, data);
+  acknowledgeInitAttention(id, data, namespace);
 }
 
 // An authoritative init is the read boundary: the selected session showed the
 // snapshot this cursor belongs to. No presentation proof beyond that —
 // selection plus a confirmed init plus a foregrounded tab is the whole
 // contract.
-function acknowledgeInitAttention(id, data) {
+function acknowledgeInitAttention(id, data, namespace) {
   finishHistoryHydration(id, { shown: true });
-  if (data.attention_namespace && visibleSessionIds(store.get()).includes(id)) {
-    acknowledgeVisibleAttentionThrough(id, data.last_seq || 0, data.attention_namespace).catch(() => {});
+  if (namespace && visibleSessionIds(store.get()).includes(id)) {
+    acknowledgeVisibleAttentionThrough(id, data.last_seq || 0, namespace).catch(() => {});
   }
 }
 
