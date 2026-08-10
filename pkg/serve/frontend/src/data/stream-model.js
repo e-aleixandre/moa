@@ -15,6 +15,12 @@
 //       closes the current assistant turn: assistant content after it starts a
 //       fresh document.
 //
+//   { kind:'compaction', id, summary, tokensBefore, readFiles, modifiedFiles }
+//       A durable context-compaction tree event. Its id is derived from the
+//       entry msg_id (plus an ordinal only if malformed history repeats it),
+//       never from the transcript index, so an expandable card retains state
+//       while earlier history is loaded.
+//
 //   { kind:'waypoint', time, text, msgId?, attachments? }
 //       A user turn. `text` is the joined text of the user message. `time` is
 //       the message ts when present (else undefined — we never invent one).
@@ -156,6 +162,7 @@ export function projectStream(session) {
   // currentDelegation = the open delegation block for this turn (SUBAGENTS-
   // REDESIGN-SPEC §1), or null. Reset at every turn boundary like currentDoc.
   let currentDelegation = null;
+  const compactionOrdinals = new Map();
 
   // Persisted messages identify blocks by message and type, plus an ordinal
   // for multiple blocks of one type emitted from the same message. Legacy
@@ -196,6 +203,24 @@ export function projectStream(session) {
       currentDoc = null;
       currentLedger = null;
       closeDelegation();
+      continue;
+    }
+
+    if (msg && msg._type === 'compaction_marker') {
+      currentDoc = null;
+      currentLedger = null;
+      closeDelegation();
+      const msgId = String(msg._msg_id || msg.msg_id || 'legacy');
+      const ordinal = compactionOrdinals.get(msgId) || 0;
+      compactionOrdinals.set(msgId, ordinal + 1);
+      blocks.push({
+        kind: 'compaction',
+        id: `compaction-${msgId}-${ordinal}`,
+        summary: typeof msg.summary === 'string' ? msg.summary : '',
+        tokensBefore: Number.isFinite(msg.tokensBefore) ? msg.tokensBefore : 0,
+        readFiles: Array.isArray(msg.readFiles) ? msg.readFiles : [],
+        modifiedFiles: Array.isArray(msg.modifiedFiles) ? msg.modifiedFiles : [],
+      });
       continue;
     }
 

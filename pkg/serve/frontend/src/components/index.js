@@ -16,6 +16,7 @@ export { Toast, ToastTitle, ToastMessage } from "./Toast/Toast.jsx";
 export { UserWaypoint } from "./UserWaypoint/UserWaypoint.jsx";
 export { AssistantDocument } from "./AssistantDocument/AssistantDocument.jsx";
 export { ActivityLedger } from "./ActivityLedger/ActivityLedger.jsx";
+export { CompactionCard } from "./CompactionCard/CompactionCard.jsx";
 export { CodeBlock } from "./CodeBlock/CodeBlock.jsx";
 export { DiffBlock, parseUnifiedDiff } from "./DiffBlock/DiffBlock.jsx";
 export { FanoutBlock } from "./FanoutBlock/FanoutBlock.jsx";

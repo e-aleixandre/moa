@@ -14,7 +14,32 @@ const tool = (id, name, args, status = 'done', result = 'ok', extra = {}) => ({
   _type: 'tool_start', tool_call_id: id, tool_name: name, args, status, result, ...extra,
 });
 const system = (text) => ({ _type: 'system', text });
+const compaction = (id, extra = {}) => ({
+  _type: 'compaction_marker', _msg_id: id, summary: 'Kept the important implementation context.',
+  tokensBefore: 24000, readFiles: ['pkg/a.go'], modifiedFiles: ['pkg/b.go'], ...extra,
+});
 const session = (messages, extra = {}) => ({ messages, ...extra });
+
+test('projects the durable compaction contract as its own card block', () => {
+  const [block] = projectStream(session([compaction('entry-42')]));
+  expect(block).toEqual({
+    kind: 'compaction', id: 'compaction-entry-42-0',
+    summary: 'Kept the important implementation context.', tokensBefore: 24000,
+    readFiles: ['pkg/a.go'], modifiedFiles: ['pkg/b.go'],
+  });
+});
+
+test('legacy compaction marker without complete custom data degrades to a minimal card', () => {
+  const [block] = projectStream(session([compaction('old-entry', { summary: undefined, tokensBefore: undefined, readFiles: undefined, modifiedFiles: undefined })]));
+  expect(block).toMatchObject({ kind: 'compaction', id: 'compaction-old-entry-0', summary: '', tokensBefore: 0, readFiles: [], modifiedFiles: [] });
+});
+
+test('multiple compactions have stable IDs derived from their msg_ids, not history position', () => {
+  const initial = projectStream(session([user('before'), compaction('first'), compaction('second')]));
+  const shifted = projectStream(session([user('new earlier message'), user('before'), compaction('first'), compaction('second')]));
+  expect(initial.filter(b => b.kind === 'compaction').map(b => b.id)).toEqual(['compaction-first-0', 'compaction-second-0']);
+  expect(shifted.filter(b => b.kind === 'compaction').map(b => b.id)).toEqual(['compaction-first-0', 'compaction-second-0']);
+});
 
 // ── 1. consecutive tool calls → one ledger of N rows ─────────────────────────
 test('consecutive tool calls without prose form a single ledger', () => {

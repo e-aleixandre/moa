@@ -6,6 +6,7 @@ import {
   DiffBlock,
   DelegationBlock,
   FileCard,
+  CompactionCard,
   HistoryHydrationTail,
   historyHydrationTailVisible,
 } from "../../components/index.js";
@@ -91,6 +92,8 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
       return <div class="stream-system">{block.text}</div>;
     case "secret_batch":
       return <SecretBatchCard aliases={block.aliases} />;
+    case "compaction":
+      return <CompactionCard summary={block.summary} tokensBefore={block.tokensBefore} readFiles={block.readFiles} modifiedFiles={block.modifiedFiles} />;
     case "waypoint":
       return (
         <UserWaypoint

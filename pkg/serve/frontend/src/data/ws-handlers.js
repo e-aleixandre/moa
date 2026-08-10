@@ -81,6 +81,20 @@ export function normalizeHistory(raw, liveSubagents = []) {
       // Rendered as a system line, matching the live goal event styling.
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
       result.push({ _type: 'system', _msg_id: msg.msg_id, text });
+    } else if (msg.role === 'session_event' && msg.custom?.type === 'compaction_marker') {
+      // Compaction entries are durable tree events, rather than conversational
+      // messages. Preserve their complete payload as a first-class normalized
+      // row so the stream projection can render the same card after init and
+      // when a command event includes the freshly persisted entry.
+      result.push({
+        _type: 'compaction_marker',
+        _msg_id: msg.msg_id,
+        timestamp: msg.timestamp,
+        summary: typeof msg.custom.summary === 'string' ? msg.custom.summary : '',
+        tokensBefore: Number.isFinite(msg.custom.tokens_before) ? msg.custom.tokens_before : 0,
+        readFiles: Array.isArray(msg.custom.read_files) ? msg.custom.read_files.filter(f => typeof f === 'string') : [],
+        modifiedFiles: Array.isArray(msg.custom.modified_files) ? msg.custom.modified_files.filter(f => typeof f === 'string') : [],
+      });
     } else if (msg.role === 'user') {
       if (msg.custom?.source === 'secret_batch') {
         result.push({
@@ -1890,12 +1904,16 @@ export function handleWsCommand(id, data) {
   if (data.command === 'clear') {
     updateSession(id, { messages: [], streamingText: null, thinkingText: null });
   } else if (data.command === 'compact') {
-    // Don't replace messages — display stays intact.
-    // Append a compaction marker for visual feedback.
+    // Don't replace the transcript with the compacted LLM context. When the
+    // command event includes the durable tree marker, append that exact row;
+    // otherwise wait for init/history hydration rather than fabricating a
+    // second, non-durable representation.
     const sess = store.get().sessions[id];
-    if (sess) {
-      const marker = { _type: 'system', text: '✂ Context compacted' };
-      updateSession(id, { messages: [...sess.messages, marker] });
+    const markers = normalizeHistory(data.messages || []).filter(row => row._type === 'compaction_marker');
+    if (sess && markers.length > 0) {
+      const known = new Set(sess.messages.map(message => message?._msg_id).filter(Boolean));
+      const fresh = markers.filter(marker => marker._msg_id && !known.has(marker._msg_id));
+      if (fresh.length > 0) updateSession(id, { messages: [...sess.messages, ...fresh] });
     }
   } else if (data.command === 'branch') {
     // Branch switched — reload messages from new branch path.

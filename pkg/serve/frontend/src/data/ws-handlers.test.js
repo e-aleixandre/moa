@@ -2,7 +2,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
 import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
@@ -994,6 +994,39 @@ test('normalizeHistory renders role "goal" markers as system lines', async () =>
   expect(systems[0].text).toContain('Goal started');
   expect(systems[1].text).toContain('iteration 1');
   expect(systems[2].text).toContain('Goal ended');
+});
+
+test('normalizeHistory preserves the durable compaction marker contract', () => {
+  const [marker] = normalizeHistory([{
+    role: 'session_event', msg_id: 'compact-entry',
+    content: [{ type: 'text', text: '✂ Context compacted (24K tokens summarized)' }],
+    custom: {
+      type: 'compaction_marker', summary: 'Keep the plan.', tokens_before: 24236,
+      read_files: ['a.go'], modified_files: ['b.go'],
+    },
+  }]);
+  expect(marker).toEqual({
+    _type: 'compaction_marker', _msg_id: 'compact-entry', timestamp: undefined,
+    summary: 'Keep the plan.', tokensBefore: 24236, readFiles: ['a.go'], modifiedFiles: ['b.go'],
+  });
+});
+
+test('live compact command appends the same durable marker shape as persisted history', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
+  const raw = {
+    role: 'session_event', msg_id: 'compact-entry', content: [{ type: 'text', text: '✂ Context compacted' }],
+    custom: { type: 'compaction_marker', summary: 'Keep the plan.', tokens_before: 24000, read_files: ['a.go'], modified_files: ['b.go'] },
+  };
+  handleWsCommand('s1', { command: 'compact', messages: [raw] });
+  expect(store.get().sessions.s1.messages).toEqual(normalizeHistory([raw]));
+});
+
+test('live compact command without a durable marker waits for history instead of inventing a transient system line', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
+  handleWsCommand('s1', { command: 'compact', messages: [] });
+  expect(store.get().sessions.s1.messages).toEqual([]);
 });
 
 // Bug #7 parity: a fresh goal activation shows a live "start" line (matching the
