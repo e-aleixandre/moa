@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { UserWaypoint } from "./UserWaypoint.jsx";
 import { WaypointAttachments, attachmentImageSrc } from "./WaypointAttachments.jsx";
 
 function descendants(node, nodes = []) {
@@ -128,4 +129,27 @@ test("a persisted document file chip downloads from its attachment endpoint", ()
 
 test("a text-only waypoint has no attachments strip", () => {
   expect(WaypointAttachments({ attachments: [] })).toBeNull();
+});
+
+test("a parent task uses the parent label and subagent accent", () => {
+  const waypoint = UserWaypoint({
+    tone: "parent",
+    accent: "teal",
+    label: "↳ FROM PARENT",
+    children: <p>Review this change.</p>,
+  });
+  const card = descendants(waypoint).find((node) => node.props?.class === "waypoint waypoint-parent");
+
+  expect(card).toBeDefined();
+  expect(card.props.style).toEqual({ "--waypoint-accent": "var(--teal)" });
+  expect(textContent(waypoint)).toContain("↳ FROM PARENT");
+  expect(textContent(waypoint)).not.toContain("You");
+});
+
+test("an ordinary user waypoint remains labeled You", () => {
+  const waypoint = UserWaypoint({ children: <p>Steer the child.</p> });
+  const card = descendants(waypoint).find((node) => node.props?.class === "waypoint waypoint-user");
+
+  expect(card).toBeDefined();
+  expect(textContent(waypoint)).toContain("You");
 });

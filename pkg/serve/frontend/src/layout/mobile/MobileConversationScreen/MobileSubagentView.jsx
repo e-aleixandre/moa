@@ -1,6 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { ChevronLeft, GitFork, X, Check, Copy } from "lucide-preact";
-import { RunModeChip, UserWaypoint } from "../../../components/index.js";
+import { RunModeChip } from "../../../components/index.js";
 import { Composer } from "../../Composer/Composer.jsx";
 import { StatusLineRow } from "../MobileStatusLine/StatusLineRow.jsx";
 import { MobileStream } from "./MobileStream.jsx";
@@ -26,7 +26,7 @@ import "./MobileSubagentView.css";
 //
 // What stays fork-proper: the full-screen push, a one-row header with the
 // codename in accent and the way back, the run-mode chip, the sibling rail, the
-// task card and the terminal outcome banner. The header survives even though
+// terminal outcome banner. The header survives even though
 // the parent screen no longer has one — it is what says "you are one level in,
 // and here is the way out".
 //
@@ -86,12 +86,7 @@ export function MobileSubagentView({ session, jobId, onBack }) {
       <MobileStream
         session={{ id: `${session.id}:${jobId}`, messages: [] }}
         blocks={view.blocks}
-        lead={
-          <UserWaypoint className="msa-task" time={undefined}>
-            <div class="msa-task-label" style={{ color: `var(--${accent})` }}>TASK — from parent</div>
-            <p>{view.task || "(no task recorded)"}</p>
-          </UserWaypoint>
-        }
+        waypointAccent={accent}
       />
 
       {view.terminal && <MobileOutcome view={view} onBack={onBack} />}

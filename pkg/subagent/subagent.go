@@ -1144,13 +1144,17 @@ func sanitizeResumeTranscript(msgs []core.AgentMessage) []core.AgentMessage {
 // resumed transcript (LoadMessages + Send). Resume replays the persisted
 // history and sends task as the next user message.
 func runChild(ctx context.Context, child *agent.Agent, task string, seedMsgs []core.AgentMessage) ([]core.AgentMessage, error) {
+	// The parent task is a real user-role message in the child transcript, but
+	// its source is distinct from a user steering the child through the UI.
+	// Persist the provenance so every resumed task can be rendered accurately.
+	custom := map[string]any{"source": "subagent_parent"}
 	if len(seedMsgs) == 0 {
-		return child.Run(ctx, task)
+		return child.RunWithCustom(ctx, task, custom)
 	}
 	if err := child.LoadMessages(seedMsgs); err != nil {
 		return nil, err
 	}
-	return child.Send(ctx, task)
+	return child.SendWithCustom(ctx, task, custom)
 }
 
 func buildSystemPrompt(promptBuilder func(agentcontext.SystemPromptOptions) string, agentsMD string, specs []core.ToolSpec, cwd, skillsIndex, memoryIndex string) string {

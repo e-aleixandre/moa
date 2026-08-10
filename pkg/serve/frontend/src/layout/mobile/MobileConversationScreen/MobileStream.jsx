@@ -84,7 +84,7 @@ function mobileDocChildren(blocks, onOpenSubagent) {
   return out;
 }
 
-function MobileStreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
+function MobileStreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent }) {
   switch (block.kind) {
     case "system":
       return <div class="mstream-system">{block.text}</div>;
@@ -96,7 +96,9 @@ function MobileStreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
       return (
         <UserWaypoint
           time={block.time}
-          label={block.steer ? "You — steer" : undefined}
+          label={block.fromParent ? "↳ FROM PARENT" : block.steer ? "You — steer" : undefined}
+          tone={block.fromParent ? "parent" : undefined}
+          accent={block.fromParent ? waypointAccent : undefined}
           attachments={block.attachments}
           sessionId={sessionId}
           onRewind={rewind && block.msgId ? () => rewind.to(block.msgId) : undefined}
@@ -123,7 +125,7 @@ function MobileStreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
 // MobileStream — same stick-to-bottom / "new messages" scroll intent as the
 // desktop Stream, sized for the mobile stream container. `lead` and `tail`
 // render inside the scroller before and after the blocks, respectively.
-export function MobileStream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl, rewind }) {
+export function MobileStream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl, rewind, waypointAccent }) {
   const hydrationAnchor = useRef(null);
   // In-flight tool output length: a tool_update grows the live bash tail
   // without changing block/message count, so it needs its own follow signal
@@ -172,7 +174,7 @@ export function MobileStream({ session, blocks = [], lead = null, tail = null, o
           {lead}
           {blocks.map((block) => (
             <div key={block.id} data-stream-anchor={block.id}>
-              <MobileStreamBlock block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} />
+              <MobileStreamBlock block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} waypointAccent={waypointAccent} />
             </div>
           ))}
           {tail}

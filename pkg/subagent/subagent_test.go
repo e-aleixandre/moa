@@ -1249,6 +1249,49 @@ func TestNewChildAgentAppliesGuardrails(t *testing.T) {
 	// here; guardrail values are covered by resolveChildGuardrails above).
 }
 
+func TestRunChildMarksFreshAndResumedParentTasks(t *testing.T) {
+	newChild := func(provider core.Provider) *agent.Agent {
+		t.Helper()
+		child, err := newChildAgent(
+			Config{}, provider, core.Model{ID: "m", Provider: "mock"},
+			"medium", 0, "sys", core.NewRegistry(),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return child
+	}
+	assertParentTask := func(t *testing.T, messages []core.AgentMessage, task string) {
+		t.Helper()
+		for _, message := range messages {
+			if message.Role == "user" && textOf(core.Result{Content: message.Content}) == task {
+				if got := message.Custom["source"]; got != "subagent_parent" {
+					t.Fatalf("task %q source = %#v, want subagent_parent", task, got)
+				}
+				return
+			}
+		}
+		t.Fatalf("parent task %q not found in %#v", task, messages)
+	}
+
+	t.Run("fresh", func(t *testing.T) {
+		child := newChild(newMockProvider(textResponse("done")))
+		if _, err := runChild(context.Background(), child, "initial task", nil); err != nil {
+			t.Fatal(err)
+		}
+		assertParentTask(t, child.Messages(), "initial task")
+	})
+
+	t.Run("resume", func(t *testing.T) {
+		child := newChild(newMockProvider(textResponse("done")))
+		seed := []core.AgentMessage{core.WrapMessage(core.NewUserMessage("previous task"))}
+		if _, err := runChild(context.Background(), child, "resumed task", seed); err != nil {
+			t.Fatal(err)
+		}
+		assertParentTask(t, child.Messages(), "resumed task")
+	})
+}
+
 func TestAsyncSubagentConcurrencyCap(t *testing.T) {
 	started := make(chan struct{}, 10)
 	release := make(chan struct{})
