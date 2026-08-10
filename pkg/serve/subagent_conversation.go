@@ -288,7 +288,7 @@ func safeSubagentConversationMessages(messages []core.AgentMessage) conversation
 	}
 	seenIDs := make(map[string]int, len(messages))
 	for index, msg := range messages {
-		if (msg.Role != "user" && msg.Role != "assistant") || len(msg.Custom) != 0 {
+		if !isVisibleSubagentConversationMessage(msg) {
 			continue
 		}
 		id := msg.MsgID
@@ -303,6 +303,9 @@ func safeSubagentConversationMessages(messages []core.AgentMessage) conversation
 		text, omitted, truncated := safeDisplayText(msg.Content)
 		if shouldShowConversationMessage(msg.Role, text, omitted, msg.Content) {
 			item := ConversationMessage{ID: id, Role: msg.Role, Text: text, Omitted: omitted, Truncated: truncated, Timestamp: conversationTimestamp(msg.Timestamp)}
+			if source, _ := msg.Custom["source"].(string); source == "subagent_parent" {
+				item.Source = source
+			}
 			for _, block := range msg.Content {
 				if block.Type != "text" && block.Type != "tool_call" {
 					item.OmittedBlocks++
@@ -333,4 +336,19 @@ func safeSubagentConversationMessages(messages []core.AgentMessage) conversation
 		}
 	}
 	return conversationProjection{messages: out, toolDetails: details}
+}
+
+// isVisibleSubagentConversationMessage admits ordinary turns and the one
+// provenance-tagged turn that is part of a child's conversation. Other Custom
+// messages are internal transcript records (such as compaction turns and
+// markers), not owner-facing conversation.
+func isVisibleSubagentConversationMessage(msg core.AgentMessage) bool {
+	if msg.Role != "user" && msg.Role != "assistant" {
+		return false
+	}
+	if len(msg.Custom) == 0 {
+		return true
+	}
+	source, _ := msg.Custom["source"].(string)
+	return source == "subagent_parent"
 }

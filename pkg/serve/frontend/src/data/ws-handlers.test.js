@@ -303,6 +303,19 @@ test('normalizeConversationProjection preserves persisted tool activity', async 
   });
 });
 
+test('normalizeConversationProjection preserves parent provenance for a terminal subagent', () => {
+  const messages = normalizeConversationProjection([
+    { id: 'parent-task', role: 'user', text: 'Implementa el modo element pack', source: 'subagent_parent' },
+    { id: 'answer', role: 'assistant', text: 'hecho' },
+  ]);
+
+  expect(messages[0]).toMatchObject({ custom: { source: 'subagent_parent' } });
+  const blocks = projectStream({ messages });
+  expect(blocks.find(block => block.kind === 'waypoint')).toMatchObject({
+    text: 'Implementa el modo element pack', fromParent: true,
+  });
+});
+
 test('handleWsSubagentStart creates a running entry with async flag, thinking level, and origin tool call ID', async () => {
   seedSession('s1');
   handleWsSubagentStart('s1', { job_id: 'j1', origin_tool_call_id: 'toolu_1', task: 't', model: 'm', thinking: 'high', async: false });

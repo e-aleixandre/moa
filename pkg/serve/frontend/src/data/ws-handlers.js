@@ -281,6 +281,7 @@ export function normalizeConversationProjection(raw) {
       role: item.role,
       _msg_id: item.id,
       content: item.text ? [{ type: 'text', text: item.text }] : [],
+      ...(item.source ? { custom: { source: item.source } } : {}),
     };
   });
 }
