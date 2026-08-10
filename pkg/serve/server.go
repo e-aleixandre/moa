@@ -710,8 +710,6 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 
 		ctx := conn.CloseRead(r.Context()) //nolint:staticcheck
 		query := r.URL.Query()
-		pendingPermissionID := query.Get("pending_permission")
-		pendingAskID := query.Get("pending_ask")
 
 		// Subscribe before taking the init snapshot. Events published while the
 		// snapshot is assembled are queued by the reactor and sent immediately
@@ -732,7 +730,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		// write.
 		streaming, liveTools, cut := sess.runtime.Context().SnapshotInFlightWithCut()
 		sinceMsg := query.Get("since_msg")
-		initData := buildInitData(sess, streaming, liveTools, sinceMsg, pendingPermissionID, pendingAskID)
+		initData := buildInitData(sess, streaming, liveTools, sinceMsg)
 		initData.LastSeq = cut
 		if deviceLeaseClosed(lease) || wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}) != nil {
 			return

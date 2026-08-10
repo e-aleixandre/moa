@@ -483,9 +483,6 @@ func TestPromptResolutionDismissesOnlyTheMatchingTUIPrompt(t *testing.T) {
 	if m.permPrompt.active {
 		t.Fatal("web resolution did not dismiss the matching permission prompt")
 	}
-	if got, want := m.status.text, "This request is no longer pending."; got != want {
-		t.Fatalf("status = %q, want %q", got, want)
-	}
 
 	m.askPrompt.ShowFromBus("ask-current", []bus.AskQuestion{{Text: "Continue?"}})
 	m.handleBusEvent(bus.AskUserResolved{ID: "ask-other"})
@@ -496,21 +493,15 @@ func TestPromptResolutionDismissesOnlyTheMatchingTUIPrompt(t *testing.T) {
 	if m.askPrompt.active {
 		t.Fatal("automation resolution did not dismiss the matching ask prompt")
 	}
-	if got, want := m.status.text, "This request is no longer pending."; got != want {
-		t.Fatalf("status = %q, want %q", got, want)
-	}
 
 	m.permPrompt.ShowFromBus("perm-terminal", "bash", nil, "", "ask")
 	m.handleBusEvent(bus.PermissionResolved{ID: "perm-terminal"})
 	if m.permPrompt.active {
 		t.Fatal("terminal resolution did not dismiss the matching permission prompt")
 	}
-	if got, want := m.status.text, "This request is no longer pending."; got != want {
-		t.Fatalf("status = %q, want %q", got, want)
-	}
 }
 
-func TestPromptResolutionSystemEventsUseTheNeutralTUIStatus(t *testing.T) {
+func TestPromptResolutionSystemEventsDismissTheTUIAsk(t *testing.T) {
 	for _, test := range []struct{ name string }{{name: "cancelled"}, {name: "aborted"}} {
 		t.Run(test.name, func(t *testing.T) {
 			m := newTestModel()
@@ -518,9 +509,6 @@ func TestPromptResolutionSystemEventsUseTheNeutralTUIStatus(t *testing.T) {
 			m.handleBusEvent(bus.AskUserResolved{ID: "ask-current"})
 			if m.askPrompt.active {
 				t.Fatal("system resolution did not dismiss the matching ask prompt")
-			}
-			if got, want := m.status.text, "This request is no longer pending."; got != want {
-				t.Fatalf("status = %q, want %q", got, want)
 			}
 		})
 	}

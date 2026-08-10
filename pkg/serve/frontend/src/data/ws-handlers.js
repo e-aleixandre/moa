@@ -587,7 +587,6 @@ export function handleWsInit(id, data) {
     permissionMode: data.permission_mode || 'yolo',
     pendingPerm: data.pending_permission || null,
     pendingAsk: data.pending_ask || null,
-    resolvedPromptNotice: resolvedPromptNoticeFromInit(id, data, prev),
     // The server's steer queue is authoritative and shared across all of this
     // session's clients. The snapshot replaces the queue; a local chip is kept
     // only if its client-minted ID is not yet in the snapshot (its POST was
@@ -1128,7 +1127,6 @@ export function handleWsStateChange(id, data, seq = 0) {
 export function handleWsAskUser(id, data, seq = 0) {
   updateSession(id, {
     pendingAsk: { id: data.id, questions: data.questions },
-    resolvedPromptNotice: null,
   });
   markUnseen(id, seq, true);
   acknowledgeVisibleLiveAttention(id, seq);
@@ -1149,7 +1147,6 @@ export function handleWsPermissionRequest(id, data, seq = 0) {
       args: data.args,
       allow_pattern: data.allow_pattern || '',
     },
-    resolvedPromptNotice: null,
   });
   markUnseen(id, seq, true);
   acknowledgeVisibleLiveAttention(id, seq);
@@ -1180,7 +1177,6 @@ export function handleWsPermissionResolved(id, data) {
   if (data?.id && data.id !== perm.id) return;
   updateSession(id, {
     pendingPerm: null,
-    resolvedPromptNotice: promptResolutionNotice(data?.id || perm.id, 'permission'),
   });
 }
 
@@ -1190,20 +1186,7 @@ export function handleWsAskResolved(id, data) {
   if (data?.id && data.id !== ask.id) return;
   updateSession(id, {
     pendingAsk: null,
-    resolvedPromptNotice: promptResolutionNotice(data?.id || ask.id, 'ask'),
   });
-}
-
-function promptResolutionNotice(id, kind) {
-  return { id, kind };
-}
-
-function resolvedPromptNoticeFromInit(id, data, prev) {
-  if (data.pending_permission || data.pending_ask) return null;
-  if (data.resolved_prompt) {
-    return promptResolutionNotice(data.resolved_prompt.id, data.resolved_prompt.kind);
-  }
-  return prev.resolvedPromptNotice || null;
 }
 
 function flashSession(id, type) {

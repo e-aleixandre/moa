@@ -195,7 +195,7 @@ test('a subscribed but unselected session is never marked seen by its own init',
 });
 
 
-test('prompt resolutions leave a generic presentational notice without touching unread state', () => {
+test('prompt resolutions clear pending prompts without touching unread state', () => {
   seedSession('s1');
   setState({ isMobile: true, activeSession: 's1', sessions: {
     s1: { id: 's1', messages: [], subagents: {}, unseen: true, unseenSeq: 7 },
@@ -205,56 +205,27 @@ test('prompt resolutions leave a generic presentational notice without touching 
   handleWsPermissionResolved('s1', { id: 'perm-1' });
   expect(store.get().sessions.s1).toMatchObject({
     pendingPerm: null,
-    resolvedPromptNotice: { id: 'perm-1', kind: 'permission' },
     unseen: true,
     unseenSeq: 7,
   });
 
   handleWsAskUser('s1', { id: 'ask-1', questions: [],});
   expect(store.get().sessions.s1).toMatchObject({ pendingAsk: { id: 'ask-1' } });
-  expect(store.get().sessions.s1.resolvedPromptNotice).toBeNull();
   handleWsAskResolved('s1', { id: 'ask-1' });
   expect(store.get().sessions.s1).toMatchObject({
     pendingAsk: null,
-    resolvedPromptNotice: { id: 'ask-1', kind: 'ask' },
     unseen: true,
     unseenSeq: 7,
   });
 });
 
-test('init restores a generic notice when a disconnected client lost the resolution', () => {
-  seedSession('s1');
-  setState({ isMobile: true, activeSession: 's1' });
-  handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {} });
-  handleWsInit('s1', {
-    messages: [], subagents: [], server_instance: 'instance-a',
-    resolved_prompt: { id: 'perm-1', kind: 'permission' },
-  });
-  expect(store.get().sessions.s1).toMatchObject({
-    pendingPerm: null,
-    resolvedPromptNotice: { id: 'perm-1', kind: 'permission' },
-  });
-});
-
-test('a resolved prompt never carries attribution metadata', () => {
-  seedSession('s1');
-  setState({ isMobile: true, activeSession: 's1' });
-  handleWsPermissionRequest('s1', { id: 'perm-1', tool_name: 'bash', args: {} });
-  handleWsPermissionResolved('s1', { id: 'perm-1' });
-  expect(store.get().sessions.s1).toMatchObject({
-    pendingPerm: null,
-    resolvedPromptNotice: { id: 'perm-1', kind: 'permission' },
-  });
-  expect(store.get().sessions.s1.localPermResolution).toBeUndefined();
-});
-
-test('cancelled and aborted prompts use the same generic notice', () => {
+test('cancelled and aborted prompts clear pending asks', () => {
   seedSession('s1');
   setState({ isMobile: true, activeSession: 's1' });
   for (const id of ['cancelled', 'aborted']) {
     handleWsAskUser('s1', { id, questions: [] });
     handleWsAskResolved('s1', { id });
-    expect(store.get().sessions.s1.resolvedPromptNotice).toEqual({ id, kind: 'ask' });
+    expect(store.get().sessions.s1.pendingAsk).toBeNull();
   }
 });
 

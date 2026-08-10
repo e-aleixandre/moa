@@ -1856,7 +1856,6 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 	case bus.PermissionResolved:
 		if m.permPrompt.active && m.permPrompt.permID == e.ID {
 			m.permPrompt.Cancel()
-			m.status.SetText(promptResolutionStatus)
 		}
 
 	// --- Ask user ---
@@ -1866,7 +1865,6 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 	case bus.AskUserResolved:
 		if m.askPrompt.active && m.askPrompt.askID == e.ID {
 			m.askPrompt.Cancel()
-			m.status.SetText(promptResolutionStatus)
 		}
 
 	// --- Config ---
@@ -2029,10 +2027,6 @@ func (m *appModel) handleAskUserRequested(e bus.AskUserRequested) []tea.Cmd {
 	m.status.SetPhase(phaseWaiting, time.Time{})
 	return cmds
 }
-
-// promptResolutionStatus is shown when a pending permission or ask prompt was
-// resolved elsewhere (e.g. from the web client) while this TUI displayed it.
-const promptResolutionStatus = "This request is no longer pending."
 
 func (m *appModel) handlePlanModeChanged(e bus.PlanModeChanged) []tea.Cmd {
 	if e.Mode == "" || e.Mode == "off" {

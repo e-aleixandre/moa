@@ -63,17 +63,17 @@ func TestWsEventFromBus_CompactionEndedCarriesDurableMarker(t *testing.T) {
 	}
 }
 
-func TestWsPromptResolutionProjectsOnlyPromptIdentity(t *testing.T) {
+func TestWsPromptResolutionProjectsPromptIdentity(t *testing.T) {
 	event := bus.PermissionResolved{ID: "p1"}
 	projected, ok := wsEventFromBus(event)
 	if !ok {
 		t.Fatal("resolution event not translated")
 	}
-	if got := projected.Data.(PromptResolutionData); got.ID != "p1" || got.Kind != "permission" {
+	if got := projected.Data.(PromptResolvedData); got.ID != "p1" {
 		t.Fatalf("resolution = %+v", got)
 	}
 	ask, _ := wsEventFromBus(bus.AskUserResolved{ID: "a1"})
-	if got := ask.Data.(PromptResolutionData); got.ID != "a1" || got.Kind != "ask" {
+	if got := ask.Data.(PromptResolvedData); got.ID != "a1" {
 		t.Fatalf("ask resolution = %+v", got)
 	}
 }
@@ -100,7 +100,7 @@ func TestBuildInitData_SubagentThinking(t *testing.T) {
 		return len(sess.subagents.Snapshot()) == 1
 	})
 
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "", "", "")
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
 	if len(data.Subagents) != 1 {
 		t.Fatalf("Subagents = %+v, want one job", data.Subagents)
 	}
@@ -118,7 +118,7 @@ func TestBuildInitDataCarriesAttentionNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "", "", "")
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
 	if data.AttentionNamespace != sess.attentionNamespace || data.AttentionNamespace == "" {
 		t.Fatalf("attention namespace = %q, want %q", data.AttentionNamespace, sess.attentionNamespace)
 	}
@@ -136,12 +136,12 @@ func TestBuildInitData_DeltaMessages(t *testing.T) {
 	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", MsgID: "one", Content: []core.Content{core.TextContent("one")}})})
 	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "assistant", MsgID: "two", Content: []core.Content{core.TextContent("two")}})})
 
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "one", "", "")
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "one")
 	if data.DeltaBase != "one" || len(data.Messages) != 1 || data.Messages[0].MsgID != "two" {
 		t.Fatalf("delta init = %+v", data)
 	}
 
-	data = buildInitData(sess, bus.StreamingAggregate{}, nil, "two", "", "")
+	data = buildInitData(sess, bus.StreamingAggregate{}, nil, "two")
 	if data.DeltaBase != "two" || len(data.Messages) != 0 {
 		t.Fatalf("empty delta init = %+v", data)
 	}
@@ -164,7 +164,7 @@ func TestBuildInitData_DeltaStartingWithToolResult(t *testing.T) {
 	})})
 	tree.Append(session.Entry{Type: session.EntryMessage, Message: historyMessage("assistant", "final")})
 
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "call", "", "")
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "call")
 	if data.DeltaBase != "call" || len(data.Messages) != 2 || data.Messages[0].Role != "tool_result" || data.Messages[1].MsgID != "final" {
 		t.Fatalf("delta init = %+v", data)
 	}
@@ -186,12 +186,12 @@ func TestBuildInitData_InvalidDeltaFallsBackToFull(t *testing.T) {
 	}
 	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "assistant", MsgID: "new", Content: []core.Content{core.TextContent("new")}})})
 
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil, offPath, "", "")
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, offPath)
 	if data.DeltaBase != "" || len(data.Messages) != 2 || data.Messages[1].MsgID != "new" {
 		t.Fatalf("off-path fallback = %+v", data)
 	}
 	tree.Clear()
-	data = buildInitData(sess, bus.StreamingAggregate{}, nil, base, "", "")
+	data = buildInitData(sess, bus.StreamingAggregate{}, nil, base)
 	if data.DeltaBase != "" || len(data.Messages) != 0 {
 		t.Fatalf("clear fallback = %+v", data)
 	}
@@ -208,7 +208,7 @@ func TestBuildInitData_DeltaIncludesCompactionMarker(t *testing.T) {
 	tree := sess.runtime.Context().Tree
 	base := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", MsgID: "base", Content: []core.Content{core.TextContent("base")}})})
 	tree.Append(session.Entry{Type: session.EntryCompaction, Compaction: session.CompactionData{Summary: "summary", FirstKeptEntryID: base, TokensBefore: 4000}})
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil, base, "", "")
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, base)
 	if data.DeltaBase != base || len(data.Messages) != 1 || data.Messages[0].Role != "session_event" {
 		t.Fatalf("compaction delta = %+v", data)
 	}
@@ -337,7 +337,7 @@ func TestBuildInitData_IncludesRunTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "", "", "")
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
 	if data.RunTokensUp != 0 || data.RunTokensDown != 0 {
 		t.Fatalf("initial run tokens = up=%d down=%d, want zero", data.RunTokensUp, data.RunTokensDown)
 	}
@@ -616,7 +616,7 @@ func TestBuildInitData_ReconnectProjectsSecretCustom(t *testing.T) {
 		"internal":       true,
 	})
 
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "", "", "")
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
 	if len(data.Messages) != 1 {
 		t.Fatalf("init messages = %#v", data.Messages)
 	}
@@ -953,7 +953,7 @@ func TestUserMessage_AnnouncedOnlyOnceInHistory(t *testing.T) {
 		}
 		// Read history exactly as a reconnecting client's snapshot does.
 		found := 0
-		for _, m := range buildInitData(sess, bus.StreamingAggregate{}, nil, "", "", "").Messages {
+		for _, m := range buildInitData(sess, bus.StreamingAggregate{}, nil, "").Messages {
 			if m.MsgID == msgID {
 				found++
 			}
@@ -1044,7 +1044,7 @@ func TestBuildInitDataCarriesLiveTools(t *testing.T) {
 
 	data := buildInitData(sess, bus.StreamingAggregate{}, []bus.LiveToolCall{
 		{ToolCallID: "tc1", ToolName: "bash", Phase: bus.LiveToolPhaseRunning, StartedAt: time.Now()},
-	}, "", "", "")
+	}, "")
 	if len(data.LiveTools) != 1 || data.LiveTools[0].ToolName != "bash" {
 		t.Fatalf("InitData.LiveTools = %+v, want the live bash call", data.LiveTools)
 	}
