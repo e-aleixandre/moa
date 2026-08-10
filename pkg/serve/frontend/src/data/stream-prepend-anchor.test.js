@@ -36,9 +36,50 @@ test('a page loaded at the transcript top leaves the first existing block in pla
   expect(f.node.getBoundingClientRect().top - f.el.getBoundingClientRect().top - f.el.scrollTop).toBe(-1);
 });
 
-test('the first durable block is captured even when it is just above the viewport', () => {
-  const first = {
-    dataset: { streamAnchor: 'first' },
+test('the leading truncation marker is never used as the anchor', () => {
+  // Reproduces the reported symptom: "Older messages…" is re-rendered above
+  // every incoming page, so anchoring to it leaves the reader pinned at the
+  // top and the page lands below them.
+  let markerTop = 50;
+  let seamTop = 87;
+  let firstTop = 300;
+  const marker = {
+    dataset: { streamAnchor: 'sys-truncated' },
+    getBoundingClientRect: () => ({ top: markerTop, bottom: markerTop + 17 }),
+  };
+  const seam = {
+    dataset: { streamAnchor: 'doc-seam-0' },
+    getBoundingClientRect: () => ({ top: seamTop, bottom: seamTop + 200 }),
+  };
+  const firstMessage = {
+    dataset: { streamAnchor: 'doc-bb5c52cd8b94b338-0' },
+    getBoundingClientRect: () => ({ top: firstTop, bottom: firstTop + 1079 }),
+  };
+  const el = {
+    scrollTop: 0,
+    getBoundingClientRect: () => ({ top: 0 }),
+    querySelectorAll: () => [marker, seam, firstMessage],
+  };
+
+  const captured = capturePrependAnchor(el);
+  expect(captured.id).toBe('doc-bb5c52cd8b94b338-0');
+
+  // The page is inserted above: every surviving block shifts down by its height.
+  firstTop += 2369;
+  restorePrependAnchor(el, captured, false);
+
+  // The reader keeps the message they were on; the page went above them.
+  expect(el.scrollTop).toBe(2369);
+  expect(firstMessage.getBoundingClientRect().top - el.scrollTop).toBe(captured.offset);
+});
+
+test('the block after the seam is captured, since the seam block is re-keyed', () => {
+  // Verified against a real 16k-message session: on a prepend the first
+  // history block is the only one whose id does not survive, because the
+  // incoming page continues that same document and projection re-keys it to
+  // the earlier message it now starts from. Anchoring to it loses the anchor.
+  const seam = {
+    dataset: { streamAnchor: 'seam' },
     getBoundingClientRect: () => ({ top: -20, bottom: -1 }),
   };
   const visible = {
@@ -48,10 +89,10 @@ test('the first durable block is captured even when it is just above the viewpor
   const el = {
     scrollTop: 20,
     getBoundingClientRect: () => ({ top: 0 }),
-    querySelectorAll: () => [first, visible],
+    querySelectorAll: () => [seam, visible],
   };
 
-  expect(capturePrependAnchor(el).id).toBe('first');
+  expect(capturePrependAnchor(el).id).toBe('visible');
 });
 
 test('tail growth concurrent with a prepend never enters the anchor correction', () => {
