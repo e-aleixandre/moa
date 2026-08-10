@@ -2,8 +2,6 @@
 
 function anchors(el) { return [...el.querySelectorAll('[data-stream-anchor]')]; }
 
-const FLICK_SCROLL_DELTA = 24;
-
 // The leading "Older messages…" marker is transcript chrome, not history: it is
 // re-rendered above whichever page arrives next. Anchoring to it keeps the
 // reader pinned to the top, so the page lands below them instead of above.
@@ -32,7 +30,6 @@ export function capturePrependAnchor(el) {
   };
 }
 
-// Do not override a scroll that changed since capture: a flick is user intent.
 // Returning the node lets the caller keep it anchored while newly inserted
 // images settle their intrinsic dimensions.
 export function restorePrependAnchor(el, snapshot, stickToBottom) {
@@ -45,9 +42,6 @@ export function restorePrependAnchor(el, snapshot, stickToBottom) {
     el.scrollTop = snapshot.scrollTop;
     return null;
   }
-  // Small momentum adjustments are not a new reading intent. A substantial
-  // movement is a deliberate flick, which must win over the pending restore.
-  if (Math.abs(el.scrollTop - snapshot.scrollTop) > FLICK_SCROLL_DELTA) return null;
   el.scrollTop += node.getBoundingClientRect().top - el.getBoundingClientRect().top - snapshot.offset;
   return node;
 }

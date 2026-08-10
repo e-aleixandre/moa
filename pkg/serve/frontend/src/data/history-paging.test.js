@@ -52,3 +52,29 @@ test('seeding always creates a new epoch for an authoritative replacement', () =
   seedOlderHistory('s1', 'cursor');
   expect(store.get().sessions.s1.olderHistory).toMatchObject({ epoch: 5, loading: false });
 });
+
+test('captures the prepend anchor after the page arrives, immediately before its commit', async () => {
+  let resolve;
+  let readerPosition = 0;
+  const calls = [];
+  globalThis.fetch = () => new Promise(done => { resolve = done; });
+  setState({ sessions: { s1: session() } });
+
+  const pending = loadOlderHistory('s1', () => {
+    calls.push({
+      readerPosition,
+      loading: store.get().sessions.s1.olderHistory.loading,
+      prependVersion: store.get().sessions.s1.olderHistory.prependVersion,
+    });
+  });
+  expect(calls).toEqual([]);
+  readerPosition = 47;
+  resolve({ ok: true, status: 200, text: async () => JSON.stringify({
+    messages: [{ role: 'user', msg_id: 'older', content: [{ type: 'text', text: 'old' }] }],
+    next_before: '', has_more: false,
+  }) });
+
+  await pending;
+  expect(calls).toEqual([{ readerPosition: 47, loading: true, prependVersion: 0 }]);
+  expect(store.get().sessions.s1.olderHistory.prependVersion).toBe(1);
+});
