@@ -2,6 +2,7 @@
 
 import { acknowledgeVisibleAttentionThrough, syncConnections } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
+import { armReadAnchor, __resetReadAnchorsForTests } from './stream-read-anchor.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
   splitTileNode, removeTileNode, setTileSession, swapSessions,
@@ -239,12 +240,18 @@ const resumingIds = new Set();
 // empty state. Every later pass (an intentional open/tap/DnD makes a saved
 // session visible) resumes as before.
 let booted = false;
+let previouslyVisible = new Set();
 
 // Test-only: reset the bootstrap guard so a test can exercise the first-pass
 // (release-not-resume) branch deterministically regardless of order.
-export function __resetBootForTests() { booted = false; }
+export function __resetBootForTests() {
+  booted = false;
+  previouslyVisible.clear();
+  __resetReadAnchorsForTests();
+}
 
 export function afterVisibilityChange() {
+  const bootstrapPass = !booted;
   let state = store.get();
   let visible = visibleSessionIds(state);
 
@@ -266,6 +273,16 @@ export function afterVisibilityChange() {
       }
     }
   }
+
+  // Arm before syncConnections / acknowledgement can recognize the badge as
+  // read. The first bootstrap pass merely records restored visibility: only a
+  // later user-driven transition into view may consume this one-shot intent.
+  if (!bootstrapPass) {
+    for (const id of visible) {
+      if (!previouslyVisible.has(id)) armReadAnchor(state.sessions[id]);
+    }
+  }
+  previouslyVisible = new Set(visible);
 
   const connectable = visible.filter(id => state.sessions[id]?.state !== 'saved');
   // Opening a socket synchronously marks its retained history pending. Do that

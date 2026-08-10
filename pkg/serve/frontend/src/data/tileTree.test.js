@@ -102,6 +102,7 @@ const {
   applyPreset, splitTile, closeTile, assignToTile,
   releaseStaleSaved, afterVisibilityChange, __resetBootForTests,
 } = await import('./tile-actions.js');
+const { hasReadAnchor, consumeReadAnchor } = await import('./stream-read-anchor.js');
 
 // Reset the store to a single empty tile with three loaded sessions before each
 // action test, so the assertions don't depend on persisted localStorage state.
@@ -244,5 +245,22 @@ describe('afterVisibilityChange — bootstrap pass', () => {
     // Released from the tile, and NOT resumed (state stays 'saved').
     expect(findTile(store.get().tileTree, tileId).sessionId).toBe(null);
     expect(store.get().sessions.s1.state).toBe('saved');
+  });
+
+  test('arms an unread completed result only when it becomes visible, once', () => {
+    __resetBootForTests();
+    const tile = seed([]);
+    afterVisibilityChange(); // bootstrap records the empty visible set
+
+    setState({
+      sessions: { s1: { id: 's1', state: 'idle', unseen: true, messages: [], subagents: {} } },
+      tileTree: setTileSession(store.get().tileTree, tile.id, 's1'),
+    });
+    afterVisibilityChange();
+    expect(hasReadAnchor('s1')).toBe(true);
+    expect(consumeReadAnchor('s1')).toBe(true);
+
+    afterVisibilityChange(); // re-render / repeated visibility handling
+    expect(hasReadAnchor('s1')).toBe(false);
   });
 });

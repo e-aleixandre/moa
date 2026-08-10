@@ -24,8 +24,11 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
   away; they are held only in Moa's process memory and appear first under **New
   results** in the mobile drawer. Selecting a session marks the result read
   after its authoritative transcript snapshot arrives while the tab is in the
-  foreground. Permission and question badges instead reflect pending session
-  state and disappear when the request is resolved.
+  foreground. When that completed unread result is opened, the transcript starts
+  at the last reply's reading position rather than jumping to its tail; live
+  sessions continue to follow their newest output. Permission and question
+  badges instead reflect pending session state and disappear when the request
+  is resolved.
 - Multi-pane tiled layouts
 - Keyboard-first navigation
 - Voice input
