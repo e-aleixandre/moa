@@ -49,7 +49,7 @@
 }
 
 /* The user's waypoint opens the stream: no extra top margin. */
-.mconv-stream > .waypoint:first-child {
+.mconv-stream > .mstream-col > .waypoint:first-child {
   margin-top: 0;
 }
 

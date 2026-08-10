@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "preact/hooks";
+import { useRef, useLayoutEffect } from "preact/hooks";
 import {
   UserWaypoint,
   AssistantDocument,
@@ -14,6 +14,7 @@ import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { renderMarkdown, renderMarkdownWithCaret } from "../../data/util/markdown.js";
 import { retryHistoryHydration } from "../../data/api.js";
 import { captureHydrationAnchor, restoreHydrationAnchor } from "../../data/stream-hydration-anchor.js";
+import { useStreamScroll } from "../../data/stream-scroll.js";
 import "./Stream.css";
 
 // Stream — the scrollable conversation area. It renders the REAL
@@ -120,12 +121,8 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
   }
 }
 
-const AT_BOTTOM_PX = 80;
-
 export function Stream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl, rewind }) {
-  const containerRef = useRef(null);
   const hydrationAnchor = useRef(null);
-  const [showNewBtn, setShowNewBtn] = useState(false);
   // Length of the in-flight tool's streaming output (a tool_update grows this
   // without changing block/message count or streamingText), so it must be its
   // own follow-content signal or a live bash tail would push content below the
@@ -136,68 +133,20 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
     lastMsg && lastMsg._type === "tool_start" && lastMsg.streamingResult
       ? lastMsg.streamingResult.length
       : 0;
-  // stickToBottom is a ref (not state) so the new-content effect reads the
-  // user's intent synchronously, without a render lag that would let a delta
-  // re-anchor the view mid-gesture. It starts true and flips false as soon as
-  // the user scrolls away from the bottom; it flips back true when they return.
-  const stickToBottom = useRef(true);
-
-  const maxScrollTop = (el) => Math.max(0, el.scrollHeight - el.clientHeight);
-
-  const scrollToBottomNow = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const target = maxScrollTop(el);
-    if (el.scrollTop >= target) return;
-    el.scrollTop = target;
-  }, []);
-
-  const checkScroll = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const isAtBottom = maxScrollTop(el) - el.scrollTop < AT_BOTTOM_PX;
-    stickToBottom.current = isAtBottom;
-    setShowNewBtn(!isAtBottom);
-  }, []);
-
-  // Stable callback ref: a fresh arrow each render would make Preact re-invoke
-  // it (null then el) on every render, thrashing onScrollEl. Pin it so it only
-  // fires on a real node change (mount/unmount/remount).
-  const setScrollEl = useCallback(
-    (el) => {
-      containerRef.current = el;
-      if (onScrollEl) onScrollEl(el);
-    },
-    [onScrollEl]
-  );
-
-  // Follow new content only when the user hasn't scrolled up. Keyed on the
-  // signals that grow the stream: message/block count and live streaming text.
-  useEffect(() => {
-    if (stickToBottom.current) scrollToBottomNow();
-  }, [
-    scrollToBottomNow,
-    blocks.length,
-    session?.messages?.length,
-    session?.streamingText,
-    session?.thinkingText,
-    session?.historyPending,
-    session?.resolvedPromptNotice?.id,
-    liveToolTailLen,
-  ]);
-
-  // Switching to another session (and the initial mount) starts pinned to the
-  // latest again. useLayoutEffect, not useEffect: on desktop, entering/leaving a
-  // subagent swaps Stream <-> SubagentView, remounting this Stream at
-  // scrollTop=0. A plain effect runs AFTER paint, so the user sees the whole
-  // transcript scroll down. A layout effect positions synchronously before
-  // paint, so it is born at the bottom. (Mobile overlays its subagent view
-  // instead of swapping, so it never remounts and never showed this.)
-  useLayoutEffect(() => {
-    stickToBottom.current = true;
-    setShowNewBtn(false);
-    scrollToBottomNow();
-  }, [session?.id, scrollToBottomNow]);
+  const { containerRef, contentRef, setScrollEl, checkScroll, scrollToBottom, showNewBtn, stickToBottom } = useStreamScroll({
+    sessionId: session?.id,
+    pendingAskId: session?.pendingAsk?.id,
+    onScrollEl,
+    followSignals: [
+      blocks.length,
+      session?.messages?.length,
+      session?.streamingText,
+      session?.thinkingText,
+      session?.historyPending,
+      session?.resolvedPromptNotice?.id,
+      liveToolTailLen,
+    ],
+  });
 
   // The init snapshot replaces cached blocks wholesale. A reader who is not
   // following the tail keeps the same rendered block at the same viewport
@@ -210,22 +159,6 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
     hydrationAnchor.current = captureHydrationAnchor(el, session?.id, !!session?.historyPending);
   }, [session?.id, session?.historyPending, blocks]);
 
-  // A new ask_user prompt blocks the turn, so reveal it once even when the
-  // user had scrolled away. Future scroll events immediately restore their
-  // usual position-following intent.
-  useEffect(() => {
-    if (!session?.pendingAsk?.id) return;
-    stickToBottom.current = true;
-    setShowNewBtn(false);
-    scrollToBottomNow();
-  }, [session?.pendingAsk?.id, scrollToBottomNow]);
-
-  const scrollToBottom = () => {
-    stickToBottom.current = true;
-    scrollToBottomNow();
-    setShowNewBtn(false);
-  };
-
   return (
     <div class="stream">
       <div
@@ -233,7 +166,7 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
         ref={setScrollEl}
         onScroll={checkScroll}
       >
-        <div class="stream-col">
+        <div class="stream-col" ref={contentRef}>
           {lead}
           {blocks.map((block) => (
             <div key={block.id} data-stream-anchor={block.id}>

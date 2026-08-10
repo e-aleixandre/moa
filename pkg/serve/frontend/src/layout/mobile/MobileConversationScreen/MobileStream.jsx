@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "preact/hooks";
+import { useRef, useLayoutEffect } from "preact/hooks";
 import {
   UserWaypoint,
   AssistantDocument,
@@ -14,6 +14,7 @@ import { renderMarkdown, renderMarkdownWithCaret } from "../../../data/util/mark
 import { fuseLedgerDetails } from "../../../data/util/ledger-details.jsx";
 import { retryHistoryHydration } from "../../../data/api.js";
 import { captureHydrationAnchor, restoreHydrationAnchor } from "../../../data/stream-hydration-anchor.js";
+import { useStreamScroll } from "../../../data/stream-scroll.js";
 import "./MobileStream.css";
 
 // MobileStream — the mobile counterpart to the desktop Stream. It consumes
@@ -116,16 +117,11 @@ function MobileStreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
   }
 }
 
-const AT_BOTTOM_PX = 80;
-
 // MobileStream — same stick-to-bottom / "new messages" scroll intent as the
 // desktop Stream, sized for the mobile stream container. `lead` and `tail`
 // render inside the scroller before and after the blocks, respectively.
 export function MobileStream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl, rewind }) {
-  const containerRef = useRef(null);
   const hydrationAnchor = useRef(null);
-  const [showNewBtn, setShowNewBtn] = useState(false);
-  const stickToBottom = useRef(true);
   // In-flight tool output length: a tool_update grows the live bash tail
   // without changing block/message count, so it needs its own follow signal
   // (P3 mini-logtail), or new output slides below the fold without re-anchoring.
@@ -136,52 +132,20 @@ export function MobileStream({ session, blocks = [], lead = null, tail = null, o
       ? lastMsg.streamingResult.length
       : 0;
 
-  const maxScrollTop = (el) => Math.max(0, el.scrollHeight - el.clientHeight);
-
-  const scrollToBottomNow = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const target = maxScrollTop(el);
-    if (el.scrollTop >= target) return;
-    el.scrollTop = target;
-  }, []);
-
-  const checkScroll = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const isAtBottom = maxScrollTop(el) - el.scrollTop < AT_BOTTOM_PX;
-    stickToBottom.current = isAtBottom;
-    setShowNewBtn(!isAtBottom);
-  }, []);
-
-  // Stable callback ref (see Stream.jsx): avoid re-invoking onScrollEl on every
-  // render by pinning the ref identity.
-  const setScrollEl = useCallback(
-    (el) => {
-      containerRef.current = el;
-      if (onScrollEl) onScrollEl(el);
-    },
-    [onScrollEl]
-  );
-
-  useLayoutEffect(() => {
-    if (stickToBottom.current) scrollToBottomNow();
-  }, [
-    scrollToBottomNow,
-    blocks.length,
-    session?.messages?.length,
-    session?.streamingText,
-    session?.thinkingText,
-    session?.historyPending,
-    session?.resolvedPromptNotice?.id,
-    liveToolTailLen,
-  ]);
-
-  useEffect(() => {
-    stickToBottom.current = true;
-    setShowNewBtn(false);
-    scrollToBottomNow();
-  }, [session?.id, scrollToBottomNow]);
+  const { containerRef, contentRef, setScrollEl, checkScroll, scrollToBottom, showNewBtn, stickToBottom } = useStreamScroll({
+    sessionId: session?.id,
+    pendingAskId: session?.pendingAsk?.id,
+    onScrollEl,
+    followSignals: [
+      blocks.length,
+      session?.messages?.length,
+      session?.streamingText,
+      session?.thinkingText,
+      session?.historyPending,
+      session?.resolvedPromptNotice?.id,
+      liveToolTailLen,
+    ],
+  });
 
   // See Stream: preserve a scrolled-up reader's surviving block across the
   // cached-history → init snapshot swap instead of letting the tail reflow
@@ -193,22 +157,6 @@ export function MobileStream({ session, blocks = [], lead = null, tail = null, o
     hydrationAnchor.current = captureHydrationAnchor(el, session?.id, !!session?.historyPending);
   }, [session?.id, session?.historyPending, blocks]);
 
-  // A new ask_user prompt blocks the turn, so reveal it once even when the
-  // user had scrolled away. Future scroll events immediately restore their
-  // usual position-following intent.
-  useEffect(() => {
-    if (!session?.pendingAsk?.id) return;
-    stickToBottom.current = true;
-    setShowNewBtn(false);
-    scrollToBottomNow();
-  }, [session?.pendingAsk?.id, scrollToBottomNow]);
-
-  const scrollToBottom = () => {
-    stickToBottom.current = true;
-    scrollToBottomNow();
-    setShowNewBtn(false);
-  };
-
   return (
     <div class="mstream">
       <div
@@ -216,20 +164,22 @@ export function MobileStream({ session, blocks = [], lead = null, tail = null, o
         ref={setScrollEl}
         onScroll={checkScroll}
       >
-        {lead}
-        {blocks.map((block) => (
-          <div key={block.id} data-stream-anchor={block.id}>
-            <MobileStreamBlock block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} />
-          </div>
-        ))}
-        {tail}
-        {historyHydrationTailVisible(session) && (
-          <HistoryHydrationTail
-            hasCachedTranscript={(session.messages || []).length > 0}
-            stale={session.historyStale}
-            onRetry={() => retryHistoryHydration(session.id)}
-          />
-        )}
+        <div class="mstream-col" ref={contentRef}>
+          {lead}
+          {blocks.map((block) => (
+            <div key={block.id} data-stream-anchor={block.id}>
+              <MobileStreamBlock block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} />
+            </div>
+          ))}
+          {tail}
+          {historyHydrationTailVisible(session) && (
+            <HistoryHydrationTail
+              hasCachedTranscript={(session.messages || []).length > 0}
+              stale={session.historyStale}
+              onRetry={() => retryHistoryHydration(session.id)}
+            />
+          )}
+        </div>
       </div>
       {showNewBtn && (
         <button class="mstream-new-btn" onClick={scrollToBottom} title="Scroll to latest">
