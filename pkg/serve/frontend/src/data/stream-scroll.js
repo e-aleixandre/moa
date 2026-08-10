@@ -4,13 +4,17 @@ import {
   isAtBottom,
   scrollTopAfterContentResize,
 } from "./stream-scroll-policy.js";
+import { loadOlderHistory, olderHistoryState } from "./history-paging.js";
+import { capturePrependAnchor, nearTranscriptTop, restorePrependAnchor } from "./stream-prepend-anchor.js";
 
 // Shared transcript scroll intent for desktop and mobile. The content element
 // is observed rather than the scroller: async image loads and expanding cards
 // change its height, while the scroller's border box stays the same.
-export function useStreamScroll({ sessionId, pendingAskId, followSignals, onScrollEl }) {
+export function useStreamScroll({ session, sessionId, pendingAskId, followSignals, onScrollEl }) {
   const containerRef = useRef(null);
   const contentRef = useRef(null);
+  const prependAnchor = useRef(null);
+  const prependVersion = useRef(0);
   const stickToBottom = useRef(true);
   const programmaticScroll = useRef(false);
   const observedScrollHeight = useRef(0);
@@ -37,7 +41,13 @@ export function useStreamScroll({ sessionId, pendingAskId, followSignals, onScro
     const atBottom = isAtBottom(el.scrollTop, el.scrollHeight, el.clientHeight);
     stickToBottom.current = atBottom;
     setShowNewBtn(!atBottom);
-  }, []);
+    const paging = olderHistoryState(session);
+    if (nearTranscriptTop(el) && paging.hasMore && !paging.loading) {
+      loadOlderHistory(sessionId, () => {
+        prependAnchor.current = capturePrependAnchor(el);
+      });
+    }
+  }, [session, sessionId]);
 
   const setScrollEl = useCallback(
     (el) => {
@@ -58,6 +68,40 @@ export function useStreamScroll({ sessionId, pendingAskId, followSignals, onScro
     setShowNewBtn(false);
     scrollToBottomNow();
   }, [sessionId, scrollToBottomNow]);
+
+  // Restore the first visible durable block after a history prepend. This lives
+  // beside the shared resize policy so desktop and mobile cannot diverge.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return undefined;
+    const version = session?.olderHistory?.prependVersion || 0;
+    if (version === prependVersion.current) return undefined;
+
+    const snapshot = prependAnchor.current;
+    const node = restorePrependAnchor(el, snapshot, stickToBottom.current);
+    prependVersion.current = version;
+    if (!node || !snapshot || typeof ResizeObserver === "undefined") return undefined;
+
+    let expected = el.scrollTop;
+    const observer = new ResizeObserver(() => {
+      // The ordinary resize observer only re-pins when following. Here the
+      // reader deliberately loaded at the top, so retain their element anchor
+      // unless they have scrolled since the restoration.
+      if (stickToBottom.current || el.scrollTop !== expected) {
+        observer.disconnect();
+        return;
+      }
+      const offset = node.getBoundingClientRect().top - el.getBoundingClientRect().top;
+      el.scrollTop += offset - snapshot.offset;
+      expected = el.scrollTop;
+    });
+    observer.observe(contentRef.current || node);
+    const timer = setTimeout(() => observer.disconnect(), 1500);
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [session?.olderHistory?.prependVersion, ...followSignals]);
 
   useLayoutEffect(() => {
     const content = contentRef.current;

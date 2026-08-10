@@ -7,6 +7,7 @@ import { finishHistoryHydration } from './history-hydration.js';
 import { newBuffers, applyNestedEvent } from './conversation-reducer.js';
 import { truncateText } from './util/format.js';
 import { attentionArrival } from './attention-arrivals.js';
+import { resetOlderHistory, seedOlderHistory } from './history-paging.js';
 
 // --- Message normalization ---
 
@@ -635,6 +636,7 @@ export function handleWsInit(id, data) {
     goalVerifying: !!data.goal_verifying,
     lastSeq: data.last_seq || 0,
   });
+  if (!data.delta_base) seedOlderHistory(id, data.history_before);
   if (cursorTransition.accepted) {
     updateSession(id, { readCandidateSeq: data.last_seq || 0 });
   }
@@ -1902,6 +1904,7 @@ export function handleWsPlanMode(id, data) {
 
 export function handleWsCommand(id, data) {
   if (data.command === 'clear') {
+    resetOlderHistory(id);
     updateSession(id, { messages: [], streamingText: null, thinkingText: null });
   } else if (data.command === 'compact') {
     // Don't replace the transcript with the compacted LLM context. When the
@@ -1918,6 +1921,7 @@ export function handleWsCommand(id, data) {
   } else if (data.command === 'branch') {
     // Branch switched — reload messages from new branch path.
     if (data.messages) {
+      resetOlderHistory(id);
       updateSession(id, { messages: normalizeHistory(data.messages), historyTruncated: !!data.history_truncated });
     }
   }

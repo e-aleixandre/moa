@@ -136,6 +136,7 @@ export function MobileStream({ session, blocks = [], lead = null, tail = null, o
       : 0;
 
   const { containerRef, contentRef, setScrollEl, checkScroll, scrollToBottom, showNewBtn, stickToBottom } = useStreamScroll({
+    session,
     sessionId: session?.id,
     pendingAskId: session?.pendingAsk?.id,
     onScrollEl,

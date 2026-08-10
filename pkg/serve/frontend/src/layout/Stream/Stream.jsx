@@ -137,6 +137,7 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
       ? lastMsg.streamingResult.length
       : 0;
   const { containerRef, contentRef, setScrollEl, checkScroll, scrollToBottom, showNewBtn, stickToBottom } = useStreamScroll({
+    session,
     sessionId: session?.id,
     pendingAskId: session?.pendingAsk?.id,
     onScrollEl,

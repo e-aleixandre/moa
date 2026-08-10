@@ -198,8 +198,9 @@ function scheduleReconnect(sessionId, entry) {
 // Retry an explicitly stale transcript immediately instead of waiting for the
 // normal reconnect backoff. Closing the old socket makes any late event from it
 // harmless: its handlers no longer own the entry in connections.
-export function retryHistoryHydration(sessionId) {
+export function retryHistoryHydration(sessionId, { fullInit = false } = {}) {
   if (!wantedIds.has(sessionId)) return false;
+  if (fullInit) forceFullInit.add(sessionId);
   const timer = pendingTimers.get(sessionId);
   if (timer !== undefined) {
     clearTimeout(timer);

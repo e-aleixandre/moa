@@ -137,6 +137,10 @@ export async function loadSessions() {
         historyTailNeeded: existing ? !!existing.historyTailNeeded : false,
         historyTailReady: existing ? !!existing.historyTailReady : false,
         historyTruncated: existing ? !!existing.historyTruncated : false,
+        // Backward pages are a client-side extension of the WS transcript.
+        // The roster has no transcript authority, so preserve their cursor and
+        // epoch exactly like cached messages.
+        olderHistory: existing ? existing.olderHistory : undefined,
         contextPercent: wsOwns ? existing.contextPercent : (info.context_percent ?? (existing ? existing.contextPercent : -1)),
         contextWindow: wsOwns ? existing.contextWindow : (info.context_window || (existing ? existing.contextWindow : 0)),
         compactAt: wsOwns ? existing.compactAt : (info.compact_at || (existing ? existing.compactAt : 0)),
