@@ -278,13 +278,13 @@ func wsEventFromBus(event any) (Event, bool) {
 			AllowPattern: e.AllowPattern,
 		}}, true
 	case bus.PermissionResolved:
-		return Event{Type: "permission_resolved", Data: PromptResolutionData{ID: e.ID, Kind: "permission"}}, true
+		return Event{Type: "permission_resolved", Data: PromptResolvedData{ID: e.ID}}, true
 	case bus.AskUserRequested:
 		return Event{Type: "ask_user", Data: map[string]any{
 			"id": e.ID, "run_gen": e.RunGen, "questions": e.Questions,
 		}}, true
 	case bus.AskUserResolved:
-		return Event{Type: "ask_resolved", Data: PromptResolutionData{ID: e.ID, Kind: "ask"}}, true
+		return Event{Type: "ask_resolved", Data: PromptResolvedData{ID: e.ID}}, true
 	case bus.SubagentCountChanged:
 		return Event{Type: "subagent_count", Data: SubagentCountData{Count: e.Count}}, true
 	case bus.SubagentCompleted:
@@ -459,11 +459,8 @@ func (r *wsReactor) cleanup() {
 
 // buildInitData constructs the WS init payload from bus queries. The streaming
 // aggregate and live tool calls are captured atomically with the sequence cut.
-// sinceMsg, when
-// non-empty, requests a validated delta resume from that entry; permissionID
-// and askID are the client's pending prompt IDs, used to emit a resolution
-// notice when a prompt was answered elsewhere while the client was away.
-func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, sinceMsg, permissionID, askID string) InitData {
+// sinceMsg, when non-empty, requests a validated delta resume from that entry.
+func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, sinceMsg string) InitData {
 	b := sess.runtime.Bus
 
 	// Use display messages (full history from tree) instead of agent messages.
@@ -622,7 +619,6 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	}
 
 	data.PendingPermission, data.PendingAsk = pendingAttentionData(pending)
-	data.ResolvedPrompt = reconnectPromptResolution(pending, permissionID, askID)
 	if planInfo.Mode != "off" {
 		data.PlanMode = planInfo.Mode
 		data.PlanFile = planInfo.PlanFile
@@ -637,19 +633,6 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	}
 
 	return data
-}
-
-// reconnectPromptResolution reports whether a prompt the client still shows as
-// pending was resolved while it was disconnected. Permission wins over ask so
-// at most one notice is emitted per reconnect.
-func reconnectPromptResolution(pending bus.PendingApprovalInfo, permissionID, askID string) *PromptResolutionData {
-	if permissionID != "" && (pending.Permission == nil || pending.Permission.ID != permissionID) {
-		return &PromptResolutionData{ID: permissionID, Kind: "permission"}
-	}
-	if askID != "" && (pending.Ask == nil || pending.Ask.ID != askID) {
-		return &PromptResolutionData{ID: askID, Kind: "ask"}
-	}
-	return nil
 }
 
 func pendingAttentionData(pending bus.PendingApprovalInfo) (*PermissionData, *AskData) {

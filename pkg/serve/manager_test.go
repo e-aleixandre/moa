@@ -280,7 +280,7 @@ func TestOwnedBashCompletionDoesNotStartRootNotificationRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	init := buildInitData(sess, bus.StreamingAggregate{}, nil, "", "", "")
+	init := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
 	if len(init.BashJobs) != 1 || init.BashJobs[0].OwnerAgentID != "child-1" {
 		t.Fatalf("bash init snapshot = %+v", init.BashJobs)
 	}
@@ -417,7 +417,7 @@ func TestSessionInfoSerializesAttentionActivity(t *testing.T) {
 	if dto.ServerInstance == "" || dto.ServerInstance != mgr.serverInstance {
 		t.Fatalf("session server_instance = %q, want %q", dto.ServerInstance, mgr.serverInstance)
 	}
-	if got := buildInitData(sess, bus.StreamingAggregate{}, nil, "", "", "").ServerInstance; got != mgr.serverInstance {
+	if got := buildInitData(sess, bus.StreamingAggregate{}, nil, "").ServerInstance; got != mgr.serverInstance {
 		t.Fatalf("init server_instance = %q, want %q", got, mgr.serverInstance)
 	}
 }

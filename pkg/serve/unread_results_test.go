@@ -365,7 +365,7 @@ func TestInitUsesAuthoritativeRunStartWhenCacheClockIsDelayed(t *testing.T) {
 	sess.runStartedAt = time.Time{}
 	sess.mu.Unlock()
 	streaming, liveTools, _ := sess.runtime.Context().SnapshotInFlightWithCut()
-	init := buildInitData(sess, streaming, liveTools, "", "", "")
+	init := buildInitData(sess, streaming, liveTools, "")
 	if init.RunStartedAtMs == 0 {
 		t.Fatal("running init omitted authoritative run-start anchor")
 	}

@@ -5,7 +5,7 @@ import { Stream } from "../Stream/Stream.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { LiveDock } from "../LiveDock/LiveDock.jsx";
-import { McpBanner, PermissionPrompt, AskUserPrompt, PromptResolutionNotice } from "../../components/index.js";
+import { McpBanner, PermissionPrompt, AskUserPrompt } from "../../components/index.js";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { snapToRatio } from "../../data/snap.js";
@@ -294,7 +294,6 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
       <Stream
         session={session}
         blocks={blocks}
-        tail={<PromptResolutionNotice notice={session.resolvedPromptNotice} />}
       />
     </Pane>
   );

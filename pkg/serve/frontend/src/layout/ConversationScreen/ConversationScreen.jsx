@@ -11,7 +11,7 @@ import { NowLine } from "../NowLine/NowLine.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
-import { ModelSelector, PermissionPrompt, AskUserPrompt, PromptResolutionNotice, McpBanner, NotificationSettings, UsagePanel } from "../../components/index.js";
+import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings, UsagePanel } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
@@ -385,9 +385,7 @@ export function ConversationScreen({ version }) {
                 disabled: settingsBusy,
               }}
               onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
-              tail={session.pendingAsk
-                ? <AskUserPrompt key={session.id} session={session} />
-                : <PromptResolutionNotice notice={session.resolvedPromptNotice} />}
+              tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
             />
             {(session.untrustedMcp || session.pendingPerm) && (
               <div class="conversation-blocking">

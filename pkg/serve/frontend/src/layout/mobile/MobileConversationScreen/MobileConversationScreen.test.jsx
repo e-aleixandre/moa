@@ -46,7 +46,6 @@ test('drawerSessions puts a running session with an unread result in New results
   const newResults = newResultSessions(Object.values(sessions));
   expect(newResults.map((session) => session.id)).toEqual(['s1']);
 });
-
 test('the selected session keeps its unread row in New results', () => {
   // Opening it is what clears the dot (server-confirmed); the list must not
   // hide the row just because the session happens to be the active one.
@@ -165,39 +164,4 @@ test('the closed mobile screen mounts its sheet and an opened drawer without ren
   const cardMenu = componentNode(cardTree, 'SessionCardMenu');
   expect(() => cardMenu.type(cardMenu.props)).not.toThrow();
   expect(layoutEffects).toBeGreaterThanOrEqual(3);
-});
-
-test('a resolved permission renders a generic notice in the mobile transcript tail', () => {
-  const notice = { id: 'perm-1', kind: 'permission' };
-  setState({
-    isMobile: true,
-    sessionsLoaded: true,
-    activeSession: 's1',
-    sessions: { s1: { id: 's1', title: 'Session', state: 'running', messages: [], subagents: {}, resolvedPromptNotice: notice } },
-  });
-
-  const screen = MobileConversationScreen({});
-  const stream = componentNode(screen, 'MobileStream');
-  expect(stream.props.tail.type.name).toBe('PromptResolutionNotice');
-  expect(stream.props.tail.props.notice).toBe(notice);
-  const rendered = stream.props.tail.type(stream.props.tail.props);
-  expect(rendered.props.children[1].props.children).toBe('This request is no longer pending.');
-});
-
-test('a resolved ask renders a generic notice in the desktop transcript tail', () => {
-  const notice = { id: 'ask-1', kind: 'ask' };
-  setState({
-    isMobile: false,
-    sessionsLoaded: true,
-    focusedTile: 1,
-    tileTree: { type: 'tile', id: 1, sessionId: 's1' },
-    sessions: { s1: { id: 's1', title: 'Session', state: 'running', messages: [], subagents: {}, resolvedPromptNotice: notice } },
-  });
-
-  const screen = ConversationScreen({});
-  const stream = componentNode(screen, 'Stream');
-  expect(stream.props.tail.type.name).toBe('PromptResolutionNotice');
-  expect(stream.props.tail.props.notice).toBe(notice);
-  const rendered = stream.props.tail.type(stream.props.tail.props);
-  expect(rendered.props.children[1].props.children).toBe('This request is no longer pending.');
 });

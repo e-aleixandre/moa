@@ -151,7 +151,6 @@ export async function loadSessions() {
         // A resolution leaves a client-only transcript-tail notice. The roster
         // does not carry this display state, so polling must not
         // erase it before the user can read it.
-        resolvedPromptNotice: existing ? existing.resolvedPromptNotice : null,
         pendingSteers: existing ? existing.pendingSteers : null,
         streamingText: existing ? existing.streamingText : null,
         thinkingText: existing ? existing.thinkingText : null,

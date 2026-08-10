@@ -24,37 +24,36 @@ type InitData struct {
 	// AttentionNamespace identifies the ordered runtime incarnation that owns
 	// bus-sequence read cursors. It changes on a close/resume even within one
 	// server process, whose bus sequence then starts again at zero.
-	AttentionNamespace string                `json:"attention_namespace,omitempty"`
-	Messages           []core.AgentMessage   `json:"messages"`
-	State              string                `json:"state"`
-	ContextPercent     int                   `json:"context_percent"`
-	ContextWindow      int                   `json:"context_window,omitempty"`
-	CompactAt          int                   `json:"compact_at,omitempty"`
-	CompactAtMin       int                   `json:"compact_at_min,omitempty"`
-	PermissionMode     string                `json:"permission_mode"`
-	PathScope          string                `json:"path_scope,omitempty"`
-	PendingPermission  *PermissionData       `json:"pending_permission,omitempty"`
-	PendingAsk         *AskData              `json:"pending_ask,omitempty"`
-	ResolvedPrompt     *PromptResolutionData `json:"resolved_prompt,omitempty"`
-	Tasks              any                   `json:"tasks,omitempty"`
-	PlanMode           string                `json:"plan_mode,omitempty"`
-	PlanFile           string                `json:"plan_file,omitempty"`
-	GoalActive         bool                  `json:"goal_active,omitempty"`
-	GoalObjective      string                `json:"goal_objective,omitempty"`
-	GoalWorkDir        string                `json:"goal_work_dir,omitempty"`
-	GoalIteration      int                   `json:"goal_iteration,omitempty"`
-	GoalStalled        int                   `json:"goal_stalled,omitempty"`
-	GoalVerifying      bool                  `json:"goal_verifying,omitempty"`
-	Compacting         bool                  `json:"compacting,omitempty"`
-	StreamingText      string                `json:"streaming_text,omitempty"`
-	StreamingThinking  string                `json:"streaming_thinking,omitempty"`
-	LiveTools          []LiveToolInitData    `json:"live_tools,omitempty"`
-	RunTokensUp        int                   `json:"run_tokens_up"`
-	RunTokensDown      int                   `json:"run_tokens_down"`
-	RunStartedAtMs     int64                 `json:"run_started_at_ms,omitempty"`
-	PendingSteers      []PendingSteerData    `json:"pending_steers,omitempty"`
-	CostUSD            float64               `json:"cost_usd,omitempty"`
-	Subagents          []SubagentInitData    `json:"subagents,omitempty"`
+	AttentionNamespace string              `json:"attention_namespace,omitempty"`
+	Messages           []core.AgentMessage `json:"messages"`
+	State              string              `json:"state"`
+	ContextPercent     int                 `json:"context_percent"`
+	ContextWindow      int                 `json:"context_window,omitempty"`
+	CompactAt          int                 `json:"compact_at,omitempty"`
+	CompactAtMin       int                 `json:"compact_at_min,omitempty"`
+	PermissionMode     string              `json:"permission_mode"`
+	PathScope          string              `json:"path_scope,omitempty"`
+	PendingPermission  *PermissionData     `json:"pending_permission,omitempty"`
+	PendingAsk         *AskData            `json:"pending_ask,omitempty"`
+	Tasks              any                 `json:"tasks,omitempty"`
+	PlanMode           string              `json:"plan_mode,omitempty"`
+	PlanFile           string              `json:"plan_file,omitempty"`
+	GoalActive         bool                `json:"goal_active,omitempty"`
+	GoalObjective      string              `json:"goal_objective,omitempty"`
+	GoalWorkDir        string              `json:"goal_work_dir,omitempty"`
+	GoalIteration      int                 `json:"goal_iteration,omitempty"`
+	GoalStalled        int                 `json:"goal_stalled,omitempty"`
+	GoalVerifying      bool                `json:"goal_verifying,omitempty"`
+	Compacting         bool                `json:"compacting,omitempty"`
+	StreamingText      string              `json:"streaming_text,omitempty"`
+	StreamingThinking  string              `json:"streaming_thinking,omitempty"`
+	LiveTools          []LiveToolInitData  `json:"live_tools,omitempty"`
+	RunTokensUp        int                 `json:"run_tokens_up"`
+	RunTokensDown      int                 `json:"run_tokens_down"`
+	RunStartedAtMs     int64               `json:"run_started_at_ms,omitempty"`
+	PendingSteers      []PendingSteerData  `json:"pending_steers,omitempty"`
+	CostUSD            float64             `json:"cost_usd,omitempty"`
+	Subagents          []SubagentInitData  `json:"subagents,omitempty"`
 	// SubagentOutcomes restores terminal child cards after reconnect/restart.
 	// It is separate from live Subagents because terminal jobs do not belong in
 	// the Live Dock.
@@ -68,10 +67,9 @@ type InitData struct {
 	DeltaBase string `json:"delta_base,omitempty"`
 }
 
-// PromptResolutionData identifies a prompt that is no longer pending.
-type PromptResolutionData struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
+// PromptResolvedData identifies the prompt cleared by a resolution event.
+type PromptResolvedData struct {
+	ID string `json:"id"`
 }
 
 // PendingSteerData is one queued (not yet delivered) item in the unified queue

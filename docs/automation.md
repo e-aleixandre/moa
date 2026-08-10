@@ -282,7 +282,7 @@ in-memory runtime — the tool call is blocked waiting on it — so a session th
 is only on disk (after a restart, say) has nothing pending by construction.
 These two endpoints therefore never load a session from disk: on a saved-only
 session they answer `400 no pending interaction`, the same class of answer as a
-request ID that is no longer pending.
+request ID that has already been resolved.
 
 `reply` does resume a saved session, because sending a message to one is
 meaningful: it starts a new run. That resume is bounded — it builds a whole

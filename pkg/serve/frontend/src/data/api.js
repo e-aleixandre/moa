@@ -237,9 +237,6 @@ function openWs(sessionId, initialBackoff) {
   let ws;
   try {
     const params = new URLSearchParams();
-    const pending = store.get().sessions[sessionId];
-    if (pending?.pendingPerm?.id) params.set('pending_permission', pending.pendingPerm.id);
-    if (pending?.pendingAsk?.id) params.set('pending_ask', pending.pendingAsk.id);
     if (useDeltaResume) params.set('since_msg', cachedBase);
     const query = params.size > 0 ? `?${params}` : '';
     ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws${query}`);

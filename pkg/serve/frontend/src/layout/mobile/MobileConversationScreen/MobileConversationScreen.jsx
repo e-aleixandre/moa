@@ -10,7 +10,7 @@ import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resume
 import { addToast } from "../../../data/notifications.js";
 import { shortPath, sessionDisplayDotState, sessionTitle } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
-import { PermissionPrompt, AskUserPrompt, PromptResolutionNotice, McpBanner, NotificationSettings } from "../../../components/index.js";
+import { PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings } from "../../../components/index.js";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
@@ -371,9 +371,7 @@ export function MobileConversationScreen({ version = null }) {
               disabled: session.state === "running" || session.state === "permission",
             }}
             onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
-            tail={session.pendingAsk
-              ? <AskUserPrompt key={session.id} session={session} />
-              : <PromptResolutionNotice notice={session.resolvedPromptNotice} />}
+            tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
           />
           {blocking && (
             <div class="mconv-blocking">
