@@ -1534,6 +1534,26 @@ func TestSafeSubagentConversationMessagesOmitsThinkingToolAssistantTurn(t *testi
 	}
 }
 
+func TestSafeSubagentConversationMessagesKeepsParentTaskAndHidesSyntheticMessages(t *testing.T) {
+	projection := safeSubagentConversationMessages([]core.AgentMessage{
+		{Message: core.Message{MsgID: "parent-task", Role: "user", Content: []core.Content{core.TextContent("Implementa el modo element pack")}}, Custom: map[string]any{"source": "subagent_parent"}},
+		{Message: core.Message{MsgID: "marker", Role: "user", Content: []core.Content{core.TextContent("compacted")}}, Custom: map[string]any{"type": "compaction_marker"}},
+		{Message: core.Message{MsgID: "prepare", Role: "user", Content: []core.Content{core.TextContent("prepare compaction")}}, Custom: map[string]any{"source": "prepare_compact", "internal": true}},
+		{Message: core.Message{MsgID: "notification", Role: "user", Content: []core.Content{core.TextContent("subagent notification")}}, Custom: map[string]any{"source": "subagent"}},
+		{Message: core.Message{MsgID: "answer", Role: "assistant", Content: []core.Content{core.TextContent("hecho")}}},
+	})
+
+	if len(projection.messages) != 2 {
+		t.Fatalf("visible messages = %#v, want parent task and answer", projection.messages)
+	}
+	if got := projection.messages[0]; got.ID != "parent-task" || got.Role != "user" || got.Source != "subagent_parent" {
+		t.Fatalf("parent task = %#v, want provenance-preserving parent task", got)
+	}
+	if got := projection.messages[1]; got.ID != "answer" || got.Role != "assistant" {
+		t.Fatalf("answer = %#v, want assistant answer", got)
+	}
+}
+
 func TestPromoteSubagentEndpoint(t *testing.T) {
 	srv, mgr, cancel := newTestServer(t)
 	defer cancel()

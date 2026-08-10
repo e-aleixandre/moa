@@ -32,6 +32,7 @@ const (
 type ConversationMessage struct {
 	ID            string          `json:"id"`
 	Role          string          `json:"role"`
+	Source        string          `json:"source,omitempty"`
 	Timestamp     time.Time       `json:"timestamp,omitempty"`
 	Text          string          `json:"text,omitempty"`
 	Truncated     bool            `json:"truncated,omitempty"`
