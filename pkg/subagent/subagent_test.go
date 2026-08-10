@@ -912,6 +912,130 @@ func TestSubagentInheritedDeadlineNotReportedAsChildTimeout(t *testing.T) {
 	}
 }
 
+func TestSubagentGenericFailureSurfacesResumableMessage(t *testing.T) {
+	const cause = "stream: openai: unknown error"
+	provider := newMockProvider(func(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 1)
+		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("openai: unknown error")}
+		close(ch)
+		return ch, nil
+	})
+	var (
+		notifiedMu   sync.Mutex
+		notifiedTail string
+	)
+	sub, statusTool, _ := newSubagentTools(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(core.Model) (core.Provider, error) { return provider, nil },
+		TranscriptLoader: func(string) ([]core.AgentMessage, error) {
+			return []core.AgentMessage{core.WrapMessage(core.NewUserMessage("saved task"))}, nil
+		},
+		OnAsyncComplete: func(_ string, _ string, _ string, resultTail string, _ bool) {
+			notifiedMu.Lock()
+			notifiedTail = resultTail
+			notifiedMu.Unlock()
+		},
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	waitFor(t, time.Second, func() bool {
+		return strings.Contains(textOf(mustStatus(t, statusTool, jobID)), "Status: failed")
+	})
+	got := textOf(mustStatus(t, statusTool, jobID))
+	if !strings.Contains(got, cause) {
+		t.Errorf("failure cause was lost: %q", got)
+	}
+	if !strings.Contains(got, fmt.Sprintf("resume=%q", jobID)) {
+		t.Errorf("resume guidance missing: %q", got)
+	}
+	waitFor(t, time.Second, func() bool {
+		notifiedMu.Lock()
+		defer notifiedMu.Unlock()
+		return notifiedTail != ""
+	})
+	notifiedMu.Lock()
+	defer notifiedMu.Unlock()
+	if !strings.Contains(notifiedTail, cause) || !strings.Contains(notifiedTail, fmt.Sprintf("resume=%q", jobID)) {
+		t.Errorf("async notification lost enriched failure: %q", notifiedTail)
+	}
+}
+
+func TestSubagentGenericFailureIncludesPartialOutput(t *testing.T) {
+	const partial = "finished the first half"
+	provider := newMockProvider(
+		func(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
+			ch := make(chan core.AssistantEvent, 2)
+			msg := core.Message{Role: "assistant", Content: []core.Content{
+				core.TextContent(partial),
+				core.ToolCallContent("noop-1", "noop", map[string]any{}),
+			}, StopReason: "tool_use"}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+			close(ch)
+			return ch, nil
+		},
+		func(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
+			ch := make(chan core.AssistantEvent, 1)
+			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("network dropped")}
+			close(ch)
+			return ch, nil
+		},
+	)
+	noop := core.Tool{Name: "noop", Execute: func(context.Context, map[string]any, func(core.Result)) (core.Result, error) {
+		return core.TextResult("ok"), nil
+	}}
+	sub, statusTool, _ := newSubagentTools(t, Config{
+		DefaultModel:     core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory:  func(core.Model) (core.Provider, error) { return provider, nil },
+		TranscriptLoader: func(string) ([]core.AgentMessage, error) { return nil, nil },
+	}, noop)
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it", "async": true, "tools": []any{"noop"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	waitFor(t, time.Second, func() bool {
+		return strings.Contains(textOf(mustStatus(t, statusTool, jobID)), "Status: failed")
+	})
+	got := textOf(mustStatus(t, statusTool, jobID))
+	if !strings.Contains(got, "Partial output before the failure:\n"+partial) {
+		t.Errorf("partial output missing: %q", got)
+	}
+}
+
+func TestSubagentGenericFailureWithoutTranscriptLoaderDoesNotOfferResume(t *testing.T) {
+	provider := newMockProvider(func(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
+		return nil, fmt.Errorf("stream unavailable")
+	})
+	sub, _, _ := newSubagentTools(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(core.Model) (core.Provider, error) { return provider, nil },
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := textOf(res); strings.Contains(got, "resume=") {
+		t.Errorf("resume must not be suggested without a transcript loader: %q", got)
+	}
+}
+
+func TestCanResumeFailureRequiresReplayableTranscript(t *testing.T) {
+	cfg := Config{TranscriptLoader: func(string) ([]core.AgentMessage, error) { return nil, nil }}
+	if canResumeFailure(cfg, "sa-empty", nil) {
+		t.Fatal("must not offer resume for an empty transcript")
+	}
+	if !canResumeFailure(cfg, "sa-task", []core.AgentMessage{core.WrapMessage(core.NewUserMessage("task"))}) {
+		t.Fatal("the original delegated task makes the transcript replayable")
+	}
+}
+
 // A genuine subagent_cancel racing the child's own deadline must be classified
 // as cancelled, never as a timeout.
 func TestSubagentCancelWinsOverTimeout(t *testing.T) {
@@ -1600,18 +1724,18 @@ func TestTimeoutMessage(t *testing.T) {
 	}
 }
 
-func TestTimeoutPartialExcludesMarker(t *testing.T) {
+func TestPartialOutputExcludesMarker(t *testing.T) {
 	// The synthetic "(run timed out)" marker must not be surfaced as real output.
 	marker := []core.AgentMessage{
 		core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent(agent.MarkerRunTimedOut)}}),
 	}
-	if got := timeoutPartial(marker); got != "" {
+	if got := partialOutput(marker); got != "" {
 		t.Errorf("marker-only should yield empty partial, got %q", got)
 	}
 	real := []core.AgentMessage{
 		core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent("real work")}}),
 	}
-	if got := timeoutPartial(real); got != "real work" {
+	if got := partialOutput(real); got != "real work" {
 		t.Errorf("real text should pass through, got %q", got)
 	}
 }
