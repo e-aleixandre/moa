@@ -45,6 +45,24 @@ func TestWsEventFromBus_SubagentStarted(t *testing.T) {
 	})
 }
 
+func TestWsEventFromBus_CompactionEndedCarriesDurableMarker(t *testing.T) {
+	marker := bus.NewCompactionMarker(&core.CompactionPayload{
+		Summary: "retain the plan", TokensBefore: 24000,
+		ReadFiles: []string{"a.go"}, ModifiedFiles: []string{"b.go"},
+	})
+	ev, ok := wsEventFromBus(bus.CompactionEnded{Payload: &core.CompactionPayload{}, Marker: marker})
+	if !ok || ev.Type != "compaction_end" {
+		t.Fatalf("event = %+v, ok=%v", ev, ok)
+	}
+	data := ev.Data.(CompactionEndData)
+	if data.Marker == nil || data.Marker.MsgID != marker.MsgID {
+		t.Fatalf("marker = %+v, want durable ID %q", data.Marker, marker.MsgID)
+	}
+	if got := data.Marker.Custom["summary"]; got != "retain the plan" {
+		t.Fatalf("summary = %v", got)
+	}
+}
+
 func TestWsPromptResolutionProjectsOnlyPromptIdentity(t *testing.T) {
 	event := bus.PermissionResolved{ID: "p1"}
 	projected, ok := wsEventFromBus(event)

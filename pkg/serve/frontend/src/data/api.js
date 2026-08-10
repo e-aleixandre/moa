@@ -485,7 +485,7 @@ function routeEvent(sessionId, evt) {
       handleWsCompactionStart(sessionId);
       break;
     case 'compaction_end':
-      handleWsCompactionEnd(sessionId);
+      handleWsCompactionEnd(sessionId, evt.data);
       break;
   }
 }

@@ -2,7 +2,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved, handleWsCompactionEnd } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
 import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
@@ -1027,6 +1027,42 @@ test('live compact command without a durable marker waits for history instead of
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
   handleWsCommand('s1', { command: 'compact', messages: [] });
   expect(store.get().sessions.s1.messages).toEqual([]);
+});
+
+test('live compaction end appends the durable marker normalized like init history', () => {
+  seedSession('s1');
+  const raw = {
+    role: 'session_event', msg_id: 'compact-entry', content: [{ type: 'text', text: '✂ Context compacted' }],
+    custom: { type: 'compaction_marker', summary: 'Keep the plan.', tokens_before: 24000, read_files: ['a.go'], modified_files: ['b.go'] },
+  };
+  handleWsCompactionEnd('s1', { marker: raw });
+  expect(store.get().sessions.s1.messages).toEqual(normalizeHistory([raw]));
+  expect(projectStream(store.get().sessions.s1).find(block => block.kind === 'compaction')).toMatchObject({ id: 'compaction-compact-entry-0', summary: 'Keep the plan.' });
+});
+
+test('init after a live compaction marker keeps exactly one durable card', () => {
+  seedSession('s1');
+  const raw = {
+    role: 'session_event', msg_id: 'compact-entry', content: [{ type: 'text', text: '✂ Context compacted' }],
+    custom: { type: 'compaction_marker', summary: 'Keep the plan.', tokens_before: 24000 },
+  };
+  handleWsCompactionEnd('s1', { marker: raw });
+  handleWsInit('s1', { messages: [raw], subagents: [] });
+  const cards = projectStream(store.get().sessions.s1).filter(block => block.kind === 'compaction');
+  expect(cards).toHaveLength(1);
+  expect(cards[0].id).toBe('compaction-compact-entry-0');
+});
+
+test('a compaction end without marker remains safe until init supplies the durable card', () => {
+  seedSession('s1');
+  const raw = {
+    role: 'session_event', msg_id: 'compact-entry', content: [{ type: 'text', text: '✂ Context compacted' }],
+    custom: { type: 'compaction_marker', summary: 'Keep the plan.', tokens_before: 24000 },
+  };
+  handleWsCompactionEnd('s1', {});
+  expect(store.get().sessions.s1.messages).toEqual([]);
+  handleWsInit('s1', { messages: [raw], subagents: [] });
+  expect(projectStream(store.get().sessions.s1).filter(block => block.kind === 'compaction')).toHaveLength(1);
 });
 
 // Bug #7 parity: a fresh goal activation shows a live "start" line (matching the

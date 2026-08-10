@@ -1132,10 +1132,12 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		return []any{CompactionStarted{SessionID: sid, RunGen: gen}}
 
 	case core.AgentEventCompactionEnd:
+		marker := NewCompactionMarker(e.Compaction)
 		return []any{CompactionEnded{
 			SessionID:         sid,
 			RunGen:            gen,
 			Payload:           e.Compaction,
+			Marker:            marker,
 			Err:               e.Error,
 			CostIncludedInRun: true,
 		}}

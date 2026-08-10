@@ -164,9 +164,12 @@ type CompactionStarted struct {
 
 // CompactionEnded is published when context compaction finishes.
 type CompactionEnded struct {
-	SessionID         string
-	RunGen            uint64
-	Payload           *core.CompactionPayload
+	SessionID string
+	RunGen    uint64
+	Payload   *core.CompactionPayload
+	// Marker is the display projection which TreeSyncer persists as the
+	// compaction entry. Its MsgID is therefore also the durable entry ID.
+	Marker            *core.AgentMessage
 	Err               error
 	CostIncludedInRun bool // true when this payload's usage is already included in RunEnded.Cost
 }

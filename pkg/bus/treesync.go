@@ -199,9 +199,14 @@ func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 	defer ts.mu.Unlock()
 
 	firstKeptID := e.Payload.FirstKeptMsgID
+	marker := core.AgentMessage{}
+	if e.Marker != nil {
+		marker = session.DeepCopyMessage(*e.Marker)
+	}
 
 	ts.tree.Append(session.Entry{
-		Type: session.EntryCompaction,
+		Type:    session.EntryCompaction,
+		Message: marker,
 		Compaction: session.CompactionData{
 			Summary:          e.Payload.Summary,
 			FirstKeptEntryID: firstKeptID,

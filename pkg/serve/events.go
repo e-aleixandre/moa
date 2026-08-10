@@ -365,6 +365,12 @@ type CommandData struct {
 	HistoryTruncated bool                `json:"history_truncated,omitempty"`
 }
 
+// CompactionEndData carries the durable display marker that TreeSyncer records
+// as the compaction entry.
+type CompactionEndData struct {
+	Marker *core.AgentMessage `json:"marker,omitempty"`
+}
+
 // ConfigChangeData is sent when model/thinking/permissions/path scope change.
 type ConfigChangeData struct {
 	Model          string `json:"model,omitempty"`

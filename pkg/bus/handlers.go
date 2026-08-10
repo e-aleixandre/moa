@@ -373,6 +373,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		sctx.Bus.Publish(CompactionEnded{
 			SessionID: sctx.SessionID,
 			Payload:   result, // nil if nothing to compact
+			Marker:    NewCompactionMarker(result),
 		})
 		// Always publish CommandExecuted on success so persistence and frontends react.
 		sctx.Bus.Publish(CommandExecuted{
@@ -440,7 +441,7 @@ func RegisterHandlers(sctx *SessionContext) {
 				sctx.Bus.Publish(CommandExecuted{SessionID: sctx.SessionID, Command: "prepare-compact-noop", Messages: sctx.Agent.Messages()})
 				return sctx.Agent.Messages(), nil
 			}
-			sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Payload: payload})
+			sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Payload: payload, Marker: NewCompactionMarker(payload)})
 			sctx.Bus.Drain(2 * time.Second)
 			if sctx.PersistNow != nil {
 				if err := sctx.PersistNow(); err != nil {

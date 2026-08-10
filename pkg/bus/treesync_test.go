@@ -198,6 +198,24 @@ func TestDisplayMessages_NoDuplicateAfterSync(t *testing.T) {
 	}
 }
 
+func TestTreeSyncer_CompactionUsesLiveMarkerID(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.Tree = session.NewTree()
+	RegisterHandlers(sctx)
+	RegisterTreeSyncer(b, sctx)
+
+	marker := NewCompactionMarker(&core.CompactionPayload{Summary: "summary", TokensBefore: 12000})
+	b.Publish(CompactionEnded{SessionID: "test-session", Payload: &core.CompactionPayload{Summary: "summary", TokensBefore: 12000}, Marker: marker})
+	b.Drain(time.Second)
+	all := sctx.Tree.AllMessages()
+	if len(all) != 1 || all[0].MsgID != marker.MsgID {
+		t.Fatalf("display marker = %+v, want durable ID %q", all, marker.MsgID)
+	}
+}
+
 func msgWithID(role, text, id string) core.AgentMessage {
 	m := msg(role, text)
 	m.MsgID = id

@@ -1923,6 +1923,14 @@ export function handleWsCommand(id, data) {
   }
 }
 
+function appendCompactionMarker(id, rawMarker) {
+  const sess = store.get().sessions[id];
+  if (!sess || !rawMarker) return;
+  const [marker] = normalizeHistory([rawMarker]);
+  if (!marker?._msg_id || sess.messages.some(message => message?._msg_id === marker._msg_id)) return;
+  updateSession(id, { messages: [...sess.messages, marker] });
+}
+
 /** Parse a subagent notification from a user message text (mirrors TUI's parseSubagentNotification). */
 function subagentRestoreStatus(raw) {
   // Backend persists completed | failed | cancelled. Map to the projection's
@@ -2068,6 +2076,7 @@ export function handleWsCompactionStart(id) {
   updateSession(id, { compacting: true });
 }
 
-export function handleWsCompactionEnd(id) {
+export function handleWsCompactionEnd(id, data) {
   updateSession(id, { compacting: false });
+  appendCompactionMarker(id, data?.marker);
 }

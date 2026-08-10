@@ -346,7 +346,12 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.CompactionStarted:
 		return Event{Type: "compaction_start"}, true
 	case bus.CompactionEnded:
-		return Event{Type: "compaction_end"}, true
+		data := CompactionEndData{}
+		if e.Marker != nil {
+			marker, _ := sanitizeHistoryMessage(*e.Marker)
+			data.Marker = &marker
+		}
+		return Event{Type: "compaction_end", Data: data}, true
 	default:
 		return Event{}, false
 	}
