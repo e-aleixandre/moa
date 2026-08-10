@@ -17,7 +17,7 @@ import { retryHistoryHydration } from "../../data/api.js";
 import { captureHydrationAnchor, restoreHydrationAnchor } from "../../data/stream-hydration-anchor.js";
 import { useStreamScroll } from "../../data/stream-scroll.js";
 import {
-  READ_ANCHOR_MARGIN, consumeReadAnchor, hasReadAnchor, readAnchorBlockID, settleReadAnchor,
+  READ_ANCHOR_MARGIN, consumeReadAnchor, hasReadAnchor, readAnchorTargetID, settleReadAnchor,
 } from "../../data/stream-read-anchor.js";
 import "./Stream.css";
 
@@ -168,15 +168,15 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
   }, [session?.id, session?.historyPending, blocks]);
 
   // The visibility action armed this only while the unread completed result
-  // still existed. Wait for this commit so its durable block is actually in
-  // the DOM; a later render cannot re-arm the one-shot latch.
+  // still existed. Cached history cannot consume it: wait for the
+  // authoritative init and then for its durable block to be in the DOM.
   useLayoutEffect(() => {
     const el = containerRef.current;
-    const targetID = readAnchorBlockID(session, blocks);
-    if (!el || !targetID || !hasReadAnchor(session?.id)) return undefined;
+    const targetID = readAnchorTargetID(session, blocks);
+    if (!el || !targetID || !hasReadAnchor(session)) return undefined;
     const node = [...el.querySelectorAll('[data-stream-anchor]')]
       .find((item) => item.dataset.streamAnchor === targetID);
-    if (!node || !consumeReadAnchor(session.id)) return undefined;
+    if (!node || !consumeReadAnchor(session)) return undefined;
     const reposition = (target) => placeReadAnchor(target, READ_ANCHOR_MARGIN);
     reposition(node);
     return settleReadAnchor(el, contentRef.current, node, reposition);

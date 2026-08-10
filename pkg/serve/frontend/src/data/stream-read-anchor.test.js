@@ -1,6 +1,6 @@
 import { beforeEach, expect, test } from 'bun:test';
 import {
-  armReadAnchor, consumeReadAnchor, hasReadAnchor, readAnchorBlockID, __resetReadAnchorsForTests,
+  armReadAnchor, consumeReadAnchor, hasReadAnchor, readAnchorBlockID, readAnchorTargetID, __resetReadAnchorsForTests,
 } from './stream-read-anchor.js';
 
 const prose = { kind: 'document', id: 'doc-answer', blocks: [{ type: 'prose', text: 'Answer' }] };
@@ -54,8 +54,45 @@ test('the anchored selection survives acknowledgement after the latch was armed'
 });
 
 test('the read anchor latch is consumed once', () => {
-  armReadAnchor(session());
-  expect(hasReadAnchor('s1')).toBe(true);
-  expect(consumeReadAnchor('s1')).toBe(true);
-  expect(consumeReadAnchor('s1')).toBe(false);
+  const unread = session();
+  armReadAnchor(unread);
+  expect(hasReadAnchor(unread)).toBe(true);
+  expect(consumeReadAnchor(unread)).toBe(true);
+  expect(consumeReadAnchor(unread)).toBe(false);
+});
+
+test('cached history cannot consume an anchor before authoritative init', () => {
+  const cached = session({
+    unseenSeq: 7,
+    historyPending: true,
+    historyHydrated: false,
+    messages: [{ role: 'user' }, { role: 'assistant', content: 'Old answer' }],
+  });
+  const oldProse = { kind: 'document', id: 'doc-old', blocks: [{ type: 'prose', text: 'Old answer' }] };
+  const fresh = session({
+    unseen: false,
+    unseenSeq: 7,
+    historyPending: false,
+    historyHydrated: true,
+    messages: [{ role: 'user' }, { role: 'assistant', content: 'New answer' }],
+  });
+  const newProse = { kind: 'document', id: 'doc-new', blocks: [{ type: 'prose', text: 'New answer' }] };
+
+  armReadAnchor(cached);
+
+  // This is the cached commit: no target means no placeReadAnchor call, so it
+  // cannot classify the old tail as following/stick-to-bottom.
+  expect(readAnchorTargetID(cached, [oldProse])).toBeNull();
+  expect(hasReadAnchor(cached)).toBe(true);
+
+  // The init commit selects and consumes only its rendered, authoritative target.
+  expect(readAnchorTargetID(fresh, [newProse])).toBe('doc-new');
+  expect(consumeReadAnchor(fresh)).toBe(true);
+  expect(hasReadAnchor(fresh)).toBe(false);
+});
+
+test('an anchor is tied to the unseen occurrence that armed it', () => {
+  const first = session({ unseenSeq: 7 });
+  armReadAnchor(first);
+  expect(hasReadAnchor(session({ unseenSeq: 8 }))).toBe(false);
 });
