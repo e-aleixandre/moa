@@ -147,6 +147,29 @@ func TestBuildInitData_DeltaMessages(t *testing.T) {
 	}
 }
 
+func TestBuildInitData_DeltaStartingWithToolResult(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(time.Second, "done")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := sess.runtime.Context().Tree
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{
+		Role: "assistant", MsgID: "call", Content: []core.Content{{Type: "tool_call", ToolCallID: "tool-1", ToolName: "bash"}},
+	})})
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{
+		Role: "tool_result", MsgID: "result", ToolCallID: "tool-1", Content: []core.Content{core.TextContent("done")},
+	})})
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: historyMessage("assistant", "final")})
+
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "call", "", "")
+	if data.DeltaBase != "call" || len(data.Messages) != 2 || data.Messages[0].Role != "tool_result" || data.Messages[1].MsgID != "final" {
+		t.Fatalf("delta init = %+v", data)
+	}
+}
+
 func TestBuildInitData_InvalidDeltaFallsBackToFull(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -522,6 +545,48 @@ func TestLimitInitHistoryBoundsLargeText(t *testing.T) {
 	}
 	if got := limited[0].Content[0].Text; len(got) <= historyContentMaxBytes || !strings.Contains(got, "historic content truncated") {
 		t.Fatalf("large text was not safely truncated: %d bytes", len(got))
+	}
+}
+
+func TestLimitInitHistoryAlwaysKeepsNewestTail(t *testing.T) {
+	for _, results := range []int{148, 149, 150, 200, 400} {
+		t.Run(fmt.Sprintf("%d results", results), func(t *testing.T) {
+			messages := []core.AgentMessage{
+				historyMessage("user", "filler"),
+				historyMessage("assistant", "call"),
+			}
+			for i := range results {
+				messages = append(messages, historyMessage("tool_result", fmt.Sprintf("result-%d", i)))
+			}
+			messages = append(messages, historyMessage("assistant", "final"))
+
+			bounded, _ := limitInitHistory(messages)
+			if len(bounded) > initHistoryMaxMessages {
+				t.Fatalf("got %d messages, cap is %d", len(bounded), initHistoryMaxMessages)
+			}
+			if got := bounded[len(bounded)-1].MsgID; got != "final" {
+				t.Fatalf("last message = %q, want final", got)
+			}
+			if results == 148 && bounded[0].MsgID != "call" {
+				t.Fatalf("aligned range starts with %q, want call", bounded[0].MsgID)
+			}
+		})
+	}
+}
+
+func TestLimitInitHistoryPrefersTailOverToolResultAlignment(t *testing.T) {
+	messages := []core.AgentMessage{historyMessage("assistant", "call")}
+	for i := range initHistoryMaxMessages {
+		messages = append(messages, historyMessage("tool_result", fmt.Sprintf("result-%d", i)))
+	}
+	messages = append(messages, historyMessage("assistant", "final"))
+
+	bounded, _ := limitInitHistory(messages)
+	if len(bounded) != initHistoryMaxMessages || bounded[0].Role != "tool_result" {
+		t.Fatalf("bounded range starts with %#v, want capped tool result tail", bounded[0])
+	}
+	if got := bounded[len(bounded)-1].MsgID; got != "final" {
+		t.Fatalf("last message = %q, want final", got)
 	}
 }
 

@@ -476,7 +476,9 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	deltaBase := ""
 	if sinceMsg != "" {
 		if delta, err := bus.QueryTyped[bus.GetDisplayMessagesSince, bus.DisplayMessagesSince](b, bus.GetDisplayMessagesSince{EntryID: sinceMsg}); err == nil && delta.Valid {
-			if bounded, truncated := limitInitHistory(delta.Messages); !truncated {
+			// A delta extends an already-present transcript, so it may legitimately
+			// begin with results for calls in the client's prefix.
+			if bounded, truncated := limitHistoryDelta(delta.Messages); !truncated {
 				msgs, deltaBase = bounded, sinceMsg
 			}
 		}
@@ -752,6 +754,31 @@ func limitInitHistory(messages []core.AgentMessage) ([]core.AgentMessage, bool) 
 	if len(messages) == 0 {
 		return nil, false
 	}
+	start := boundedHistoryTailStart(messages)
+	// Prefer including the call that owns a leading result run, but never at
+	// the cost of dropping the newest transcript messages. Grow the range only
+	// when it still fits the mobile bound in full.
+	if aligned := historyPageStart(messages, len(messages), start); aligned < start && boundedHistoryTailStart(messages[aligned:]) == 0 {
+		start = aligned
+	}
+	return sanitizeHistoryRange(messages[start:]), start > 0
+}
+
+// limitHistoryDelta bounds a durable suffix without trying to make it a
+// standalone page: leading tool results can complete calls the client already
+// has. A truncated delta is rejected by buildInitData rather than sent.
+func limitHistoryDelta(messages []core.AgentMessage) ([]core.AgentMessage, bool) {
+	if len(messages) == 0 {
+		return nil, false
+	}
+	start := boundedHistoryTailStart(messages)
+	return sanitizeHistoryRange(messages[start:]), start > 0
+}
+
+// boundedHistoryTailStart returns the newest range that fits the aggregate
+// init bounds. Starting at the tail is essential: reconnect must never omit
+// the transcript's newest message.
+func boundedHistoryTailStart(messages []core.AgentMessage) int {
 	bytes := 0
 	firstIndex := len(messages)
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -765,9 +792,19 @@ func limitInitHistory(messages []core.AgentMessage) ([]core.AgentMessage, bool) 
 		firstIndex = i
 		bytes += size
 	}
-	firstIndex = historyPageStart(messages, len(messages), firstIndex)
-	bounded := boundedHistoryRange(messages[firstIndex:])
-	return bounded, firstIndex > 0 || len(bounded) < len(messages[firstIndex:])
+	return firstIndex
+}
+
+func sanitizeHistoryRange(messages []core.AgentMessage) []core.AgentMessage {
+	bounded := make([]core.AgentMessage, 0, len(messages))
+	for _, original := range messages {
+		msg, size := sanitizeHistoryMessage(original)
+		if size > initHistoryMaxBytes {
+			msg = core.WrapMessage(core.Message{Role: original.Role, MsgID: original.MsgID, Content: []core.Content{core.TextContent("[historic message too large to load on this device]")}})
+		}
+		bounded = append(bounded, msg)
+	}
+	return bounded
 }
 
 // historyPageStart aligns a region's lower boundary to the assistant that
