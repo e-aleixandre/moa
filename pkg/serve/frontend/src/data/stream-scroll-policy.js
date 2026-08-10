@@ -8,10 +8,10 @@ export function isAtBottom(scrollTop, scrollHeight, clientHeight) {
   return bottomScrollTop(scrollHeight, clientHeight) - scrollTop < AT_BOTTOM_PX;
 }
 
-export function shouldRepinAfterContentResize(stickToBottom) {
-  return stickToBottom;
-}
-
-export function shouldPinForSessionChange() {
-  return true;
+// ResizeObserver runs after content has grown, so inspect the scroll position
+// against the previous height. That preserves the distinction between a reader
+// who moved up and a follower whose content grew below the viewport.
+export function scrollTopAfterContentResize(scrollTop, previousScrollHeight, scrollHeight, clientHeight) {
+  if (!isAtBottom(scrollTop, previousScrollHeight, clientHeight)) return scrollTop;
+  return bottomScrollTop(scrollHeight, clientHeight);
 }

@@ -2,8 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preac
 import {
   bottomScrollTop,
   isAtBottom,
-  shouldPinForSessionChange,
-  shouldRepinAfterContentResize,
+  scrollTopAfterContentResize,
 } from "./stream-scroll-policy.js";
 
 // Shared transcript scroll intent for desktop and mobile. The content element
@@ -14,6 +13,7 @@ export function useStreamScroll({ sessionId, pendingAskId, followSignals, onScro
   const contentRef = useRef(null);
   const stickToBottom = useRef(true);
   const programmaticScroll = useRef(false);
+  const observedScrollHeight = useRef(0);
   const [showNewBtn, setShowNewBtn] = useState(false);
 
   const scrollToBottomNow = useCallback(() => {
@@ -54,7 +54,6 @@ export function useStreamScroll({ sessionId, pendingAskId, followSignals, onScro
   }, [scrollToBottomNow, ...followSignals]);
 
   useLayoutEffect(() => {
-    if (!shouldPinForSessionChange()) return;
     stickToBottom.current = true;
     setShowNewBtn(false);
     scrollToBottomNow();
@@ -62,10 +61,33 @@ export function useStreamScroll({ sessionId, pendingAskId, followSignals, onScro
 
   useLayoutEffect(() => {
     const content = contentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return undefined;
+    const el = containerRef.current;
+    if (!content || !el || typeof ResizeObserver === "undefined") return undefined;
+
+    observedScrollHeight.current = el.scrollHeight;
 
     const observer = new ResizeObserver(() => {
-      if (programmaticScroll.current || !shouldRepinAfterContentResize(stickToBottom.current)) return;
+      const scroller = containerRef.current;
+      if (!scroller) return;
+
+      const previousScrollHeight = observedScrollHeight.current;
+      observedScrollHeight.current = scroller.scrollHeight;
+      if (programmaticScroll.current) return;
+
+      const nextScrollTop = scrollTopAfterContentResize(
+        scroller.scrollTop,
+        previousScrollHeight,
+        scroller.scrollHeight,
+        scroller.clientHeight
+      );
+      const following = nextScrollTop !== scroller.scrollTop || isAtBottom(
+        scroller.scrollTop,
+        previousScrollHeight,
+        scroller.clientHeight
+      );
+      stickToBottom.current = following;
+      setShowNewBtn(!following);
+      if (!following) return;
       scrollToBottomNow();
     });
     observer.observe(content);
