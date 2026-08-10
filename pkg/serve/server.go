@@ -117,6 +117,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}", handleGetSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/messages", handleConversationMessages(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/history", handleHistory(manager))
 	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/close", handleCloseSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))

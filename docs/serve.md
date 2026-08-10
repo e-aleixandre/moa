@@ -299,11 +299,15 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/version` | Current version, update state, and served frontend build id |
 | `GET /api/capabilities` | Server/session capabilities (providers, features) |
 | `GET /api/usage` | Usage/cost readout |
+| `GET /api/sessions/{id}/history?before={msg_id}&limit={n}` | Chronological, lossless display-history page before a message ID; the page size is an objective and can grow to keep tool calls with their results |
 | `GET /api/model-preferences` · `PATCH /api/model-preferences` | Read or pin/unpin models in the owner's global preferences |
 | `POST /api/sessions/{id}/secrets` | Stage a short-lived secret batch; returns its directory and aliases, never values |
 | `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |
 | `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |
+
+The web transcript initially opens on the recent conversation and automatically
+loads older history as you scroll upwards.
 
 ## Frontend development
 

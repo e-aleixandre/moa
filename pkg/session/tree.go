@@ -422,10 +422,11 @@ func displayMessages(entries []Entry) []core.AgentMessage {
 			msgs = append(msgs, core.AgentMessage{
 				Message: core.Message{
 					Role:      "session_event",
+					MsgID:     e.ID,
 					Content:   []core.Content{core.TextContent(text)},
 					Timestamp: e.Timestamp.Unix(),
 				},
-				Custom: map[string]any{"type": "compaction_marker"},
+				Custom: map[string]any{"type": "compaction_marker", "summary": e.Compaction.Summary, "tokens_before": e.Compaction.TokensBefore, "read_files": append([]string(nil), e.Compaction.ReadFiles...), "modified_files": append([]string(nil), e.Compaction.ModifiedFiles...)},
 			})
 		}
 	}

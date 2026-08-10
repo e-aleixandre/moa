@@ -355,6 +355,21 @@ func wsEventFromBus(event any) (Event, bool) {
 // projectWSMessageCustom is a second transport boundary for callers that
 // publish bus events directly. Keep it aligned with bus.projectLiveCustom.
 func projectWSMessageCustom(custom map[string]any) map[string]any {
+	if marker, _ := custom["type"].(string); marker == "compaction_marker" {
+		projected := map[string]any{"type": marker}
+		if summary, ok := custom["summary"].(string); ok {
+			projected["summary"] = truncateHistoryString(summary)
+		}
+		if tokens, ok := custom["tokens_before"].(int); ok {
+			projected["tokens_before"] = tokens
+		}
+		for _, key := range []string{"read_files", "modified_files"} {
+			if files, ok := custom[key].([]string); ok {
+				projected[key] = append([]string(nil), files...)
+			}
+		}
+		return projected
+	}
 	source, _ := custom["source"].(string)
 	if source == "" {
 		return nil
@@ -452,6 +467,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	// the cached transcript, so it deliberately fails closed to a full snapshot.
 	var msgs []core.AgentMessage
 	var historyTruncated bool
+	historyBefore := ""
 	deltaBase := ""
 	if sinceMsg != "" {
 		if delta, err := bus.QueryTyped[bus.GetDisplayMessagesSince, bus.DisplayMessagesSince](b, bus.GetDisplayMessagesSince{EntryID: sinceMsg}); err == nil && delta.Valid {
@@ -463,6 +479,9 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	if deltaBase == "" {
 		full, _ := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](b, bus.GetDisplayMessages{})
 		msgs, historyTruncated = limitInitHistory(full)
+		if historyTruncated && len(msgs) > 0 {
+			historyBefore = msgs[0].MsgID
+		}
 	}
 	state, _ := bus.QueryTyped[bus.GetSessionState, string](b, bus.GetSessionState{})
 	ctxPct, _ := bus.QueryTyped[bus.GetContextUsage, int](b, bus.GetContextUsage{})
@@ -490,6 +509,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		AttentionNamespace: sess.attentionNamespace,
 		Messages:           msgs,
 		HistoryTruncated:   historyTruncated,
+		HistoryBefore:      historyBefore,
 		DeltaBase:          deltaBase,
 		State:              state,
 		ContextPercent:     ctxPct,
@@ -727,48 +747,48 @@ func limitInitHistory(messages []core.AgentMessage) ([]core.AgentMessage, bool) 
 	if len(messages) == 0 {
 		return nil, false
 	}
-	selected := make([]core.AgentMessage, 0, min(len(messages), initHistoryMaxMessages))
 	bytes := 0
-	truncated := false
 	firstIndex := len(messages)
 	for i := len(messages) - 1; i >= 0; i-- {
-		msg, size := sanitizeHistoryMessage(messages[i])
+		_, size := sanitizeHistoryMessage(messages[i])
 		if size > initHistoryMaxBytes {
-			msg = core.WrapMessage(core.Message{
-				Role:    messages[i].Role,
-				MsgID:   messages[i].MsgID,
-				Content: []core.Content{core.TextContent("[historic message too large to load on this device]")},
-			})
 			size = len("[historic message too large to load on this device]") + 128
 		}
-		if len(selected) >= initHistoryMaxMessages || (len(selected) > 0 && bytes+size > initHistoryMaxBytes) {
-			truncated = true
+		if len(messages)-i > initHistoryMaxMessages || (i < len(messages)-1 && bytes+size > initHistoryMaxBytes) {
 			break
 		}
-		selected = append(selected, msg)
 		firstIndex = i
 		bytes += size
 	}
-	if len(selected) < len(messages) {
-		truncated = true
+	firstIndex = historyPageStart(messages, len(messages), firstIndex)
+	return sanitizeHistoryRange(messages[firstIndex:]), firstIndex > 0
+}
+
+// historyPageStart aligns a region's lower boundary to the assistant that
+// immediately precedes a contiguous tool-result run. A malformed transcript
+// with an intervening message deliberately degrades to an unmatched row.
+func historyPageStart(messages []core.AgentMessage, end, start int) int {
+	for start > 0 && messages[start].Role == "tool_result" {
+		start--
 	}
-	for left, right := 0, len(selected)-1; left < right; left, right = left+1, right-1 {
-		selected[left], selected[right] = selected[right], selected[left]
-	}
-	// Do not begin a display tail with orphaned tool results: retain the
-	// immediately preceding assistant/tool-call message when possible.
-	if len(selected) > 0 && selected[0].Role == "tool_result" && firstIndex > 0 {
-		previous := messages[firstIndex-1]
-		if previous.Role == "assistant" {
-			projected, _ := sanitizeHistoryMessage(previous)
-			selected = append([]core.AgentMessage{projected}, selected...)
-		} else {
-			for len(selected) > 0 && selected[0].Role == "tool_result" {
-				selected = selected[1:]
-			}
+	if start == 0 {
+		for start < end && messages[start].Role == "tool_result" {
+			start++
 		}
 	}
-	return selected, truncated
+	return start
+}
+
+func sanitizeHistoryRange(messages []core.AgentMessage) []core.AgentMessage {
+	selected := make([]core.AgentMessage, 0, len(messages))
+	for _, original := range messages {
+		msg, size := sanitizeHistoryMessage(original)
+		if size > initHistoryMaxBytes {
+			msg = core.WrapMessage(core.Message{Role: original.Role, MsgID: original.MsgID, Content: []core.Content{core.TextContent("[historic message too large to load on this device]")}})
+		}
+		selected = append(selected, msg)
+	}
+	return selected
 }
 
 func sanitizeHistoryMessage(msg core.AgentMessage) (core.AgentMessage, int) {

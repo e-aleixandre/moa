@@ -71,6 +71,21 @@ func compactionEntry(summary, firstKeptID string, tokensBefore int) Entry {
 	}
 }
 
+func TestAllMessagesCompactionMarkerHasDurableIdentityAndPayload(t *testing.T) {
+	tree := NewTree()
+	id := tree.Append(Entry{Type: EntryCompaction, Compaction: CompactionData{
+		Summary: "summary", TokensBefore: 42000,
+		ReadFiles: []string{"read.go"}, ModifiedFiles: []string{"write.go"},
+	}})
+	messages := tree.AllMessages()
+	if len(messages) != 1 || messages[0].MsgID != id {
+		t.Fatalf("marker ID = %#v, want %q", messages, id)
+	}
+	if messages[0].Custom["summary"] != "summary" || messages[0].Custom["tokens_before"] != 42000 {
+		t.Fatalf("marker custom = %#v", messages[0].Custom)
+	}
+}
+
 func configEntry(model string) Entry {
 	return Entry{
 		Type:   EntryConfig,
