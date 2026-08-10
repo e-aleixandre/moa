@@ -192,6 +192,9 @@ calls, output) streams to the UI as it happens:
 
 The parent agent still receives the subagent's final text as the tool result,
 so its own context is unchanged — the streaming view is purely for the user.
+When a child fails and its transcript can be reopened, its failure message
+preserves the underlying error and any partial output, and tells the parent it
+can continue the saved job with `resume: "<job-id>"` rather than starting over.
 
 ### Guardrails
 

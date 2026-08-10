@@ -652,7 +652,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 			// Same recovery as a timeout: the child hit a guardrail rather than
 			// failing, and its transcript is intact. Without this the parent got
 			// a bare "max turns exceeded" and always restarted from zero.
-			jobs.setFailed(j.id, turnLimitMessage(timeoutPartial(msgs), j.id, cfg.TranscriptLoader != nil))
+			jobs.setFailed(j.id, turnLimitMessage(partialOutput(msgs), j.id, cfg.TranscriptLoader != nil))
 			return
 		}
 		if child.TimedOut() {
@@ -662,10 +662,14 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 			// "stream: context deadline exceeded", and keep whatever it produced
 			// before the deadline so the work isn't lost.
 			_, effective := resolveChildGuardrails(cfg, maxRunDuration)
-			jobs.setFailed(j.id, timeoutMessage(effective, timeoutPartial(msgs), j.id, cfg.TranscriptLoader != nil))
+			jobs.setFailed(j.id, timeoutMessage(effective, partialOutput(msgs), j.id, cfg.TranscriptLoader != nil))
 			return
 		}
-		jobs.setFailed(j.id, err.Error())
+		// A transcript containing a replayable message is the only local signal
+		// that resume will not immediately fail. In the usual case it includes
+		// the original delegated task even when the provider failed before
+		// producing output.
+		jobs.setFailed(j.id, failureMessage(err.Error(), partialOutput(msgs), j.id, canResumeFailure(cfg, j.id, msgs)))
 		return
 	}
 	jobs.setCompleted(j.id, core.ExtractFinalAssistantText(msgs))
@@ -731,10 +735,29 @@ func turnLimitMessage(partial, jobID string, canResume bool) string {
 	return guidance
 }
 
-// timeoutPartial returns the child's real partial assistant text, excluding the
+// failureMessage preserves the underlying failure while making the saved child
+// transcript actionable. Guidance is last so it survives tail-truncation on
+// async notifications.
+func failureMessage(cause, partial, jobID string, canResume bool) string {
+	message := "subagent failed: " + cause
+	if partial != "" {
+		message += "\n\nPartial output before the failure:\n" + partial
+	}
+	if canResume && jobID != "" {
+		message += fmt.Sprintf("\n\nIts work so far is saved: resume it with resume=%q to continue where it stopped, instead of starting over. Re-run from scratch only if the partial work is unusable.", jobID)
+	}
+	return message
+}
+
+func canResumeFailure(cfg Config, jobID string, msgs []core.AgentMessage) bool {
+	return cfg.TranscriptLoader != nil && jobID != "" && len(sanitizeResumeTranscript(msgs)) > 0
+}
+
+// partialOutput returns the child's real partial assistant text, excluding the
 // synthetic "(run timed out)" marker the agent inserts when the deadline trips
-// before any reply — that marker is a status note, not model output.
-func timeoutPartial(msgs []core.AgentMessage) string {
+// before any reply — that marker is a status note, not model output. Despite
+// its origin, this applies equally to every failed child run.
+func partialOutput(msgs []core.AgentMessage) string {
 	partial := core.ExtractFinalAssistantText(msgs)
 	if partial == agent.MarkerRunTimedOut {
 		return ""
