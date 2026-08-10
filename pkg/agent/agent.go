@@ -467,6 +467,20 @@ func (a *Agent) Run(ctx context.Context, prompt string) ([]core.AgentMessage, er
 	})
 }
 
+// RunWithCustom initializes state with a prompt carrying custom metadata and
+// runs the agent loop. The metadata is retained in the transcript but does not
+// affect the LLM payload.
+func (a *Agent) RunWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error) {
+	return a.execute(ctx, func() {
+		msg := core.WrapMessage(core.NewUserMessage(prompt))
+		msg.Custom = custom
+		a.state = AgentState{
+			Messages: []core.AgentMessage{msg},
+			Model:    a.config.Model,
+		}
+	})
+}
+
 // IsRunning returns true if the agent is currently executing a Send/Run.
 func (a *Agent) IsRunning() bool {
 	a.mu.Lock()

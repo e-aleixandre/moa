@@ -89,7 +89,7 @@ function docChildren(blocks, onOpenSubagent) {
   return out;
 }
 
-function StreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
+function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent }) {
   switch (block.kind) {
     case "system":
       return <div class="stream-system">{block.text}</div>;
@@ -101,7 +101,9 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
       return (
         <UserWaypoint
           time={block.time}
-          label={block.steer ? "You — steer" : undefined}
+          label={block.fromParent ? "↳ FROM PARENT" : block.steer ? "You — steer" : undefined}
+          tone={block.fromParent ? "parent" : undefined}
+          accent={block.fromParent ? waypointAccent : undefined}
           attachments={block.attachments}
           sessionId={sessionId}
           // The waypoint's own rewind mark, offered only when the block carries
@@ -127,7 +129,7 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind }) {
   }
 }
 
-export function Stream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl, rewind }) {
+export function Stream({ session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl, rewind, waypointAccent }) {
   const hydrationAnchor = useRef(null);
   // Length of the in-flight tool's streaming output (a tool_update grows this
   // without changing block/message count or streamingText), so it must be its
@@ -191,7 +193,7 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
           {lead}
           {blocks.map((block) => (
             <div key={block.id} data-stream-anchor={block.id}>
-              <StreamBlock block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} />
+              <StreamBlock block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} waypointAccent={waypointAccent} />
             </div>
           ))}
           {tail}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { ArrowLeft, GitFork, X, Check, Copy } from "lucide-preact";
 import { Spinner, Kbd, IconButton } from "../../primitives/index.js";
-import { ModelPill, RunModeChip, UserWaypoint } from "../../components/index.js";
+import { ModelPill, RunModeChip } from "../../components/index.js";
 import { Stream } from "../Stream/Stream.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { Composer } from "../Composer/Composer.jsx";
@@ -15,7 +15,7 @@ import "./SubagentView.css";
 
 // SubagentView — "inside the fork". Zoom into ONE subagent: its
 // transcript rendered by the SAME Stream as the parent (zero divergence),
-// framed by a breadcrumb header, a sibling rail, a task card, a fused
+// framed by a breadcrumb header, a sibling rail, a fused
 // now-line, and — on terminal — an outcome banner.
 //
 // It reuses the pure projection subagentView(session, jobId) for everything
@@ -147,12 +147,7 @@ export function SubagentView({ session, jobId, onBack }) {
         <Stream
           session={{ id: session.id, messages: [] }}
           blocks={view.blocks}
-          lead={
-            <UserWaypoint className="sa-task" time={undefined}>
-              <div class="sa-task-label" style={{ color: accentVar }}>TASK — from parent</div>
-              <p>{view.task || "(no task recorded)"}</p>
-            </UserWaypoint>
-          }
+          waypointAccent={accent}
         />
       </div>
 

@@ -330,6 +330,10 @@ export function projectStream(session) {
         text: joinText(msg.content),
       };
       if (attachments.length > 0) wp.attachments = attachments;
+      // A task injected by the parent is a genuine child user-role message,
+      // but it is not authored by the owner steering this child from the UI.
+      // Its explicit backend provenance survives resumes and reconnects.
+      if (msg.custom?.source === 'subagent_parent') wp.fromParent = true;
       // A steered user message (injected mid-run) is labeled distinctly in the
       // transcript so it reads as a course-correction, not a fresh turn. Live
       // steers carry _steer_id; messages replayed from the persisted REST

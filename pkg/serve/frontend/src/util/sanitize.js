@@ -27,9 +27,15 @@ export function sanitizeHtml(html) {
 
 // Forces safe target/rel on any <a> after sanitizing (DOMPurify does not
 // rewrite existing attributes, it only allows/denies, so we do it as a hook).
-DOMPurify.addHook("afterSanitizeAttributes", (node) => {
-  if (node.tagName === "A") {
-    node.setAttribute("target", "_blank");
-    node.setAttribute("rel", "noopener noreferrer");
-  }
-});
+// With no DOM (a unit test importing a component for its pure helpers)
+// DOMPurify degrades to a stub without addHook, and registering at import time
+// would throw before any test runs. Sanitizing needs a DOM anyway, so skipping
+// the hook there loses nothing.
+if (typeof DOMPurify.addHook === "function") {
+  DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+    if (node.tagName === "A") {
+      node.setAttribute("target", "_blank");
+      node.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+}

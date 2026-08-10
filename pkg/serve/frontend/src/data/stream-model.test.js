@@ -41,6 +41,28 @@ test('multiple compactions have stable IDs derived from their msg_ids, not histo
   expect(shifted.filter(b => b.kind === 'compaction').map(b => b.id)).toEqual(['compaction-first-0', 'compaction-second-0']);
 });
 
+test('parent tasks stay in chronological order and carry explicit parent provenance', () => {
+  const blocks = projectStream(session([
+    user('initial task', { custom: { source: 'subagent_parent' } }),
+    assistant('I started.'),
+    user('steer this differently'),
+    assistant('Continuing.'),
+    user('resumed task', { custom: { source: 'subagent_parent' } }),
+  ]));
+
+  const waypoints = blocks.filter((block) => block.kind === 'waypoint');
+  expect(waypoints.map((block) => block.text)).toEqual([
+    'initial task', 'steer this differently', 'resumed task',
+  ]);
+  expect(waypoints.map((block) => block.fromParent === true)).toEqual([true, false, true]);
+});
+
+test('unmarked legacy user messages retain ordinary user treatment', () => {
+  const [waypoint] = projectStream(session([user('older task')]));
+  expect(waypoint).toMatchObject({ kind: 'waypoint', text: 'older task' });
+  expect(waypoint.fromParent).toBeUndefined();
+});
+
 // ── 1. consecutive tool calls → one ledger of N rows ─────────────────────────
 test('consecutive tool calls without prose form a single ledger', () => {
   const s = session([
