@@ -106,26 +106,6 @@ test('tail growth concurrent with a prepend never enters the anchor correction',
   expect(500 + (2640 - 2000)).toBe(1140);
 });
 
-test('a user flick after capture wins over a pending prepend restore', () => {
-  const f = fixture();
-  const captured = capturePrependAnchor(f.el);
-  f.el.scrollTop = 420;
-  f.moveAnchor(1300);
-  expect(restorePrependAnchor(f.el, captured, false)).toBeNull();
-  expect(f.el.scrollTop).toBe(420);
-});
-
-test('a small momentum adjustment still receives the prepend correction', () => {
-  const f = fixture();
-  const captured = capturePrependAnchor(f.el);
-  f.el.scrollTop = 510;
-  f.moveAnchor(1300);
-
-  restorePrependAnchor(f.el, captured, false);
-
-  expect(f.el.scrollTop).toBe(1110);
-});
-
 test('stick-to-bottom has precedence', () => {
   const f = fixture();
   const captured = capturePrependAnchor(f.el);

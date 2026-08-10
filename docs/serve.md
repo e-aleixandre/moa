@@ -310,7 +310,8 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |
 
 The web transcript initially opens on the recent conversation and automatically
-loads older history as you scroll upwards.
+loads older history as you scroll upwards. Each older page is prepended while
+preserving the visible reading position.
 
 ## Frontend development
 

@@ -2,9 +2,14 @@ import { expect, test } from "bun:test";
 import {
   AT_BOTTOM_PX,
   bottomScrollTop,
+  isAtBottom,
   scrollTopAfterContentResize,
 } from "./stream-scroll-policy.js";
-import { shouldLoadOlderHistory } from "./stream-scroll.js";
+import {
+  capturePrependForSession,
+  restorePrependLayout,
+  shouldLoadOlderHistory,
+} from "./stream-scroll.js";
 
 class FakeResizeObserver {
   constructor(callback) {
@@ -32,6 +37,66 @@ function observeContentResize(el, previousScrollHeight) {
     el.clientHeight
   );
 }
+
+function deliverGeneralResizeObserver(el, observedScrollHeight) {
+  const previousScrollHeight = observedScrollHeight.current;
+  observedScrollHeight.current = el.scrollHeight;
+  const nextScrollTop = scrollTopAfterContentResize(
+    el.scrollTop,
+    previousScrollHeight,
+    el.scrollHeight,
+    el.clientHeight
+  );
+  const following = nextScrollTop !== el.scrollTop || isAtBottom(
+    el.scrollTop,
+    previousScrollHeight,
+    el.clientHeight
+  );
+  if (following) el.scrollTop = bottomScrollTop(el.scrollHeight, el.clientHeight);
+}
+
+test.each([
+  [20000, 5000, 5040],
+  [6000, 5400, 5440],
+  [3000, 4000, 4040],
+  [2500, 8000, 8040],
+])("a prepend absorbs its resize baseline (%i + %i)", (oldHeight, inserted, restored) => {
+  const el = {
+    scrollTop: 40,
+    scrollHeight: oldHeight,
+    clientHeight: 800,
+    getBoundingClientRect: () => ({ top: 0 }),
+  };
+  const node = {
+    dataset: { streamAnchor: "reader" },
+    getBoundingClientRect: () => ({ top: inserted + 40 }),
+  };
+  el.querySelectorAll = () => [node];
+  const snapshot = { id: "reader", offset: 40, scrollTop: 40 };
+  const observedScrollHeight = { current: oldHeight };
+
+  // This is the browser order: commit the prepend, restore its anchor, then
+  // deliver the general content ResizeObserver.
+  el.scrollHeight += inserted;
+  restorePrependLayout(el, snapshot, false, observedScrollHeight);
+  expect(el.scrollTop).toBe(restored);
+  deliverGeneralResizeObserver(el, observedScrollHeight);
+
+  expect(el.scrollTop).toBe(restored);
+});
+
+test("an in-flight page never captures an anchor from a newly selected session", () => {
+  const el = {
+    scrollTop: 32,
+    getBoundingClientRect: () => ({ top: 0 }),
+    querySelectorAll: () => [{
+      dataset: { streamAnchor: "belongs-to-b" },
+      getBoundingClientRect: () => ({ top: 32 }),
+    }],
+  };
+
+  expect(capturePrependForSession("s2", "s1", el)).toBeNull();
+});
 
 test("a follower is repinned when streamed content grows", () => {
   const el = scroller({ scrollTop: 900, scrollHeight: 1000 });

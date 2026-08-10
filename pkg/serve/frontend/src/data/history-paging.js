@@ -38,12 +38,11 @@ function prependDeduped(page, current) {
   return [...page.filter(message => !message?._msg_id || !seen.has(message._msg_id)), ...current];
 }
 
-export async function loadOlderHistory(id, beforeLoad) {
+export async function loadOlderHistory(id, beforePrepend) {
   const session = store.get().sessions[id];
   const paging = stateFor(session);
   if (!session || paging.loading || !paging.hasMore || !paging.before) return false;
   const epoch = paging.epoch;
-  beforeLoad?.();
   updateSession(id, { olderHistory: { ...paging, loading: true } });
   try {
     const result = await api('GET', `/api/sessions/${id}/history?before=${encodeURIComponent(paging.before)}&limit=${PAGE_SIZE}`);
@@ -51,6 +50,7 @@ export async function loadOlderHistory(id, beforeLoad) {
     const now = stateFor(current);
     if (!current || now.epoch !== epoch) return false;
     const messages = prependDeduped(normalizeHistory(result.messages || []), current.messages || []);
+    beforePrepend?.();
     updateSession(id, {
       messages,
       olderHistory: {
