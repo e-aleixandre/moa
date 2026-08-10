@@ -2,7 +2,7 @@
 
 export const READ_ANCHOR_MARGIN = 12;
 
-const pendingSessionIDs = new Set();
+const pendingAnchors = new Map();
 
 function completed(session) {
   return session?.state === 'idle';
@@ -54,19 +54,32 @@ export function readAnchorBlockID(session, blocks = []) {
   return fallback;
 }
 
+// Cached history is useful to paint while the socket opens, but it is not
+// authoritative about the unread result that armed this one-shot anchor.
+// Waiting for init also prevents a cached tail placement from re-enabling
+// stick-to-bottom before the actual target exists.
+export function readAnchorTargetID(session, blocks = []) {
+  if (session?.historyPending || !session?.historyHydrated) return null;
+  return readAnchorBlockID(session, blocks);
+}
+
 export function armReadAnchor(session) {
   if (!completedUnread(session)) return false;
-  pendingSessionIDs.add(session.id);
+  pendingAnchors.set(session.id, { sessionId: session.id, unseenSeq: session.unseenSeq || 0 });
   return true;
 }
 
-export function hasReadAnchor(sessionID) {
-  return pendingSessionIDs.has(sessionID);
+export function hasReadAnchor(session) {
+  const sessionId = typeof session === 'string' ? session : session?.id;
+  const pending = pendingAnchors.get(sessionId);
+  if (!pending) return false;
+  return typeof session === 'string' || pending.unseenSeq === (session.unseenSeq || 0);
 }
 
-export function consumeReadAnchor(sessionID) {
-  if (!pendingSessionIDs.has(sessionID)) return false;
-  pendingSessionIDs.delete(sessionID);
+export function consumeReadAnchor(session) {
+  if (!hasReadAnchor(session)) return false;
+  const sessionId = typeof session === 'string' ? session : session.id;
+  pendingAnchors.delete(sessionId);
   return true;
 }
 
@@ -92,5 +105,5 @@ export function settleReadAnchor(el, content, node, reposition) {
 }
 
 export function __resetReadAnchorsForTests() {
-  pendingSessionIDs.clear();
+  pendingAnchors.clear();
 }
