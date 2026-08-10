@@ -2,9 +2,14 @@
 
 function anchors(el) { return [...el.querySelectorAll('[data-stream-anchor]')]; }
 
+const FLICK_SCROLL_DELTA = 24;
+
 export function capturePrependAnchor(el) {
   const top = el.getBoundingClientRect().top;
-  const node = anchors(el).find(item => item.getBoundingClientRect().bottom > top);
+  // The first durable block is the boundary between the existing transcript
+  // and the page being inserted. Keeping that boundary anchored means a page
+  // loaded at the top is added above the reader, rather than under them.
+  const node = anchors(el)[0];
   return {
     id: node?.dataset.streamAnchor || '',
     offset: node ? node.getBoundingClientRect().top - top : 0,
@@ -25,7 +30,9 @@ export function restorePrependAnchor(el, snapshot, stickToBottom) {
     el.scrollTop = snapshot.scrollTop;
     return null;
   }
-  if (el.scrollTop !== snapshot.scrollTop) return null;
+  // Small momentum adjustments are not a new reading intent. A substantial
+  // movement is a deliberate flick, which must win over the pending restore.
+  if (Math.abs(el.scrollTop - snapshot.scrollTop) > FLICK_SCROLL_DELTA) return null;
   el.scrollTop += node.getBoundingClientRect().top - el.getBoundingClientRect().top - snapshot.offset;
   return node;
 }

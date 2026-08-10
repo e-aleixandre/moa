@@ -4,6 +4,7 @@ import {
   bottomScrollTop,
   scrollTopAfterContentResize,
 } from "./stream-scroll-policy.js";
+import { shouldLoadOlderHistory } from "./stream-scroll.js";
 
 class FakeResizeObserver {
   constructor(callback) {
@@ -82,4 +83,19 @@ test("the 80 pixel following threshold is evaluated before content grows", () =>
   const outsideThreshold = scroller({ scrollTop: 820, scrollHeight: 1000 });
   observeContentResize(Object.assign(outsideThreshold, { scrollHeight: 1200 }), 1000);
   expect(outsideThreshold.scrollTop).toBe(820);
+});
+
+test("a completed top page cannot cascade until the reader leaves the top", () => {
+  const el = scroller({ scrollTop: 0, scrollHeight: 1000 });
+  const paging = { hasMore: true, loading: false };
+
+  expect(shouldLoadOlderHistory(el, paging, true)).toBe(true);
+  // useStreamScroll disarms before making the request, so a later scroll
+  // event while the restored reader remains near the top cannot load again.
+  expect(shouldLoadOlderHistory(el, paging, false)).toBe(false);
+
+  el.scrollTop = 120;
+  expect(shouldLoadOlderHistory(el, paging, true)).toBe(false);
+  el.scrollTop = 0;
+  expect(shouldLoadOlderHistory(el, paging, true)).toBe(true);
 });

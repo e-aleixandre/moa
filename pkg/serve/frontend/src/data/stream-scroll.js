@@ -7,6 +7,10 @@ import {
 import { loadOlderHistory, olderHistoryState } from "./history-paging.js";
 import { capturePrependAnchor, nearTranscriptTop, restorePrependAnchor } from "./stream-prepend-anchor.js";
 
+export function shouldLoadOlderHistory(el, paging, armed) {
+  return armed && nearTranscriptTop(el) && paging.hasMore && !paging.loading;
+}
+
 // Shared transcript scroll intent for desktop and mobile. The content element
 // is observed rather than the scroller: async image loads and expanding cards
 // change its height, while the scroller's border box stays the same.
@@ -15,6 +19,7 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
   const contentRef = useRef(null);
   const prependAnchor = useRef(null);
   const prependVersion = useRef(0);
+  const olderHistoryArmed = useRef(true);
   const stickToBottom = useRef(true);
   const programmaticScroll = useRef(false);
   const observedScrollHeight = useRef(0);
@@ -42,7 +47,12 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
     stickToBottom.current = atBottom;
     setShowNewBtn(!atBottom);
     const paging = olderHistoryState(session);
-    if (nearTranscriptTop(el) && paging.hasMore && !paging.loading) {
+    if (!nearTranscriptTop(el)) {
+      olderHistoryArmed.current = true;
+      return;
+    }
+    if (shouldLoadOlderHistory(el, paging, olderHistoryArmed.current)) {
+      olderHistoryArmed.current = false;
       loadOlderHistory(sessionId, () => {
         const snapshot = capturePrependAnchor(el);
         prependAnchor.current = { ...snapshot, sessionId };
@@ -68,6 +78,7 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
     stickToBottom.current = true;
     prependAnchor.current = null;
     prependVersion.current = 0;
+    olderHistoryArmed.current = true;
     setShowNewBtn(false);
     scrollToBottomNow();
   }, [sessionId, scrollToBottomNow]);

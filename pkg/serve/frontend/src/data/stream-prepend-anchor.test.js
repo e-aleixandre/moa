@@ -22,6 +22,38 @@ test('element anchor preserves the reader across a prepend', () => {
   expect(f.el.scrollTop).toBe(1100);
 });
 
+test('a page loaded at the transcript top leaves the first existing block in place', () => {
+  const f = fixture({ scrollTop: 0, anchorTop: 0 });
+  const captured = capturePrependAnchor(f.el);
+  // A one-pixel momentum adjustment during the request must not turn this
+  // into a second, unrequested history load at the top.
+  f.el.scrollTop = 1;
+  f.moveAnchor(600); // the new page was inserted above the existing first block
+
+  restorePrependAnchor(f.el, captured, false);
+
+  expect(f.el.scrollTop).toBe(601);
+  expect(f.node.getBoundingClientRect().top - f.el.getBoundingClientRect().top - f.el.scrollTop).toBe(-1);
+});
+
+test('the first durable block is captured even when it is just above the viewport', () => {
+  const first = {
+    dataset: { streamAnchor: 'first' },
+    getBoundingClientRect: () => ({ top: -20, bottom: -1 }),
+  };
+  const visible = {
+    dataset: { streamAnchor: 'visible' },
+    getBoundingClientRect: () => ({ top: 20, bottom: 60 }),
+  };
+  const el = {
+    scrollTop: 20,
+    getBoundingClientRect: () => ({ top: 0 }),
+    querySelectorAll: () => [first, visible],
+  };
+
+  expect(capturePrependAnchor(el).id).toBe('first');
+});
+
 test('tail growth concurrent with a prepend never enters the anchor correction', () => {
   const f = fixture();
   const captured = capturePrependAnchor(f.el);
@@ -40,6 +72,17 @@ test('a user flick after capture wins over a pending prepend restore', () => {
   f.moveAnchor(1300);
   expect(restorePrependAnchor(f.el, captured, false)).toBeNull();
   expect(f.el.scrollTop).toBe(420);
+});
+
+test('a small momentum adjustment still receives the prepend correction', () => {
+  const f = fixture();
+  const captured = capturePrependAnchor(f.el);
+  f.el.scrollTop = 510;
+  f.moveAnchor(1300);
+
+  restorePrependAnchor(f.el, captured, false);
+
+  expect(f.el.scrollTop).toBe(1110);
 });
 
 test('stick-to-bottom has precedence', () => {
