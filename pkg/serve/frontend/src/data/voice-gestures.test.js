@@ -52,12 +52,23 @@ test("hold past HOLD_MS starts recording; release stops and transcribes", () => 
 });
 
 test("empty-composer cancel before the hold fires records nothing and sends nothing", () => {
-  // Content is routed to the ordinary Composer send button. This reducer owns
-  // only the empty-composer mic gesture, where a cancelled pre-threshold touch
-  // must remain inert so it cannot create a phantom empty send.
+  // A cancelled empty mic attempt must remain inert so it cannot create a
+  // phantom empty send.
   const { state, actions } = drive([ev.pointerDown(100), ev.pointerCancel()]);
   expect(actions).toEqual([]);
   expect(state.phase).toBe("idle");
+});
+
+test("a draft or attachment keeps hold-to-record available and restores iOS cancelled taps", () => {
+  // Composer enables sendOnCancel only when there is content. Thus the same
+  // shared mobile/desktop button records after HOLD_MS, but an iOS cancellation
+  // before that threshold still sends the typed/attached message.
+  expect(drive([
+    ev.pointerDown(100), ev.holdTimer(), ev.pointerUp(),
+  ]).actions).toEqual(["start", "stop"]);
+  expect(drive([
+    ev.pointerDown(100), ev.pointerCancel(true),
+  ]).actions).toEqual(["send"]);
 });
 
 test("slide up past the threshold while recording locks hands-free (visual lock, no stop)", () => {

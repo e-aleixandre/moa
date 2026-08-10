@@ -24,7 +24,7 @@ import {
  * UI flags (recording / transcribing / locked / showSlideHint / supported) and
  * toggleFromShortcut for the ⌘. / Alt+. keyboard shortcut.
  */
-export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
+export function useVoiceGesture({ onTranscript, onError, onSend, sendOnPointerCancel = false } = {}) {
   // useVoice's error callback is routed through a ref so we can (a) reset the
   // gesture machine to idle — a getUserMedia failure from the shortcut/iOS path
   // would otherwise leave the button stuck visually in `locked` — and (b)
@@ -48,6 +48,8 @@ export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
   // closing over a stale sessionId/attachments closure at first render).
   const onSendRef = useRef(onSend);
   onSendRef.current = onSend;
+  const sendOnPointerCancelRef = useRef(sendOnPointerCancel);
+  sendOnPointerCancelRef.current = sendOnPointerCancel;
 
   // Active-hold bookkeeping (mirrors InputBar.holdRef): the HOLD_MS timer, the
   // captured pointerId + element, and the window fallback listeners we register
@@ -173,14 +175,17 @@ export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
   }, [dispatch, endHold, clearClickSuppressTimer]);
 
   const onPointerCancel = useCallback(() => {
-    // No synthetic click follows a pointercancel — clear the suppression flag
-    // now so a later legitimate activation isn't swallowed. The reducer decides
-    // whether to promote a mid-recording cancel to locked (the iOS path); we
-    // only route the event.
-    pointerDrivenRef.current = false;
+    // Usually pointercancel has no click, but WebKit may still emit one after
+    // the fallback send below. Treat it like pointerup: consume that trailing
+    // click while a fresh pointerdown clears this guard for the next gesture.
     clearClickSuppressTimer();
+    pointerDrivenRef.current = true;
+    clickSuppressTimer.current = setTimeout(() => {
+      pointerDrivenRef.current = false;
+      clickSuppressTimer.current = null;
+    }, 700);
     endHold();
-    dispatch(ev.pointerCancel());
+    dispatch(ev.pointerCancel(sendOnPointerCancelRef.current));
   }, [dispatch, endHold, clearClickSuppressTimer]);
 
   const onClick = useCallback(() => {
