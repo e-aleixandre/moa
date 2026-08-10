@@ -1,9 +1,8 @@
 // composer-send-button.js — exactly-once routing for Composer's Send action.
 //
-// Voice gestures own the button only for an empty composer. Content uses the
-// browser click as its normal activation, with an iOS pointercancel fallback.
-// The fallback must not turn a cancelled touch plus a trailing click into two
-// sends, especially while an attachment is still in the handler closure.
+// Voice gestures own the button whenever voice is available. Content sends
+// still share this reducer, including the iOS pointercancel fallback, so a
+// cancelled touch plus a trailing click cannot submit twice.
 
 export const SEND_BUTTON_INITIAL = Object.freeze({
   activePointerId: null,
@@ -20,8 +19,8 @@ export const sendButtonEvent = {
   sendFinished: () => ({ type: "SEND_FINISHED" }),
 };
 
-export function usesVoiceSendButton({ canVoice, hasText, attachmentCount }) {
-  return canVoice && !hasText && attachmentCount === 0;
+export function usesVoiceSendButton({ canVoice }) {
+  return canVoice;
 }
 
 function send(state, terminalActivation) {

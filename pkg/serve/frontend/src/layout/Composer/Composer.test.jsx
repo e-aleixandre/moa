@@ -2,6 +2,7 @@ import { expect, mock, test } from "bun:test";
 
 const refs = [];
 const sent = [];
+let voiceOptions;
 
 mock.module("preact/hooks", () => ({
   useRef(initial) {
@@ -15,14 +16,18 @@ mock.module("preact/hooks", () => ({
 }));
 
 mock.module("../../hooks/useVoiceGesture.js", () => ({
-  useVoiceGesture: () => ({
+  useVoiceGesture: (options) => {
+    voiceOptions = options;
+    return ({
     handlers: {}, recording: false, transcribing: false, locked: false,
     showSlideHint: false, supported: false, toggleFromShortcut() {},
-  }),
+    });
+  },
 }));
 
 mock.module("../../data/session-actions.js", () => ({
   sendMessage: async (...args) => { sent.push(args); },
+  newSteerId: () => "test-id",
   cancelRun: async () => ({}),
   cancelSteers: async () => {},
   execCommand: async () => ({ ok: true }),
@@ -60,4 +65,24 @@ test("ordinary textarea Enter sends through the Composer component", async () =>
   expect(prevented).toBe(true);
   expect(sent).toHaveLength(1);
   expect(sent[0]).toEqual(["s1", "ship this", []]);
+});
+
+test("successive voice transcripts append at the caret without replacing the draft", () => {
+  refs.length = 0;
+  Composer({ sessionId: "s1", session: { state: "idle" } });
+  const textarea = {
+    value: "already",
+    selectionStart: 7,
+    selectionEnd: 7,
+    focus() {},
+    dispatchEvent() {},
+  };
+  refs[0].current = textarea;
+
+  voiceOptions.onTranscript("first");
+  voiceOptions.onTranscript("second");
+
+  expect(textarea.value).toBe("already first second");
+  expect(textarea.selectionStart).toBe("already first second".length);
+  expect(textarea.selectionEnd).toBe("already first second".length);
 });

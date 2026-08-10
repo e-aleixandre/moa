@@ -57,11 +57,11 @@ On desktop, you can split panes horizontally or vertically, switch focus by keyb
 
 Requires `moa --login openai-transcribe`. Browser microphone access usually needs HTTPS, so it works best on localhost, Tailscale, or behind your own HTTPS setup.
 
-Hold the send button to record only when the composer is empty; release to
-transcribe, or slide up while holding to keep recording hands-free. When text
-or attachments are already present, the button sends them normally instead;
-use `⌘.` / `Alt+.` to start and stop a hands-free recording, which appends its
-transcript to the existing draft.
+Hold the send button to record, release to transcribe, or slide up while
+holding to keep recording hands-free. This also works when text or attachments
+are already present: a short tap sends them, while a hold appends the
+transcript at the cursor. `⌘.` / `Alt+.` also starts and stops a hands-free
+recording.
 
 Agent questions (`ask_user`) take dictation the same way: hold their answer
 button, or use the shortcut while the question is on screen. Speech is appended

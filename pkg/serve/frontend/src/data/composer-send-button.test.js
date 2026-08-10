@@ -20,10 +20,10 @@ const up = (id) => sendButtonEvent.pointerUp(id);
 const cancel = (id) => sendButtonEvent.pointerCancel(id);
 const click = () => sendButtonEvent.click();
 
-test("voice gestures own the shared desktop and mobile send button only while it is empty", () => {
+test("voice gestures own the shared desktop and mobile send button whenever voice is available", () => {
   expect(usesVoiceSendButton({ canVoice: true, hasText: false, attachmentCount: 0 })).toBe(true);
-  expect(usesVoiceSendButton({ canVoice: true, hasText: true, attachmentCount: 0 })).toBe(false);
-  expect(usesVoiceSendButton({ canVoice: true, hasText: false, attachmentCount: 1 })).toBe(false);
+  expect(usesVoiceSendButton({ canVoice: true, hasText: true, attachmentCount: 0 })).toBe(true);
+  expect(usesVoiceSendButton({ canVoice: true, hasText: false, attachmentCount: 1 })).toBe(true);
   expect(usesVoiceSendButton({ canVoice: false, hasText: false, attachmentCount: 0 })).toBe(false);
 });
 

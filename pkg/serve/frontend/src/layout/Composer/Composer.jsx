@@ -659,7 +659,12 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   const {
     handlers: voiceHandlers, recording, transcribing, locked: voiceLocked,
     showSlideHint, supported: voiceSupported, toggleFromShortcut,
-  } = useVoiceGesture({ onTranscript: insertAtCursor, onError: onVoiceError, onSend: () => dispatchContentSendActivation(sendButtonEvent.keyActivate()) });
+  } = useVoiceGesture({
+    onTranscript: insertAtCursor,
+    onError: onVoiceError,
+    onSend: () => dispatchContentSendActivation(sendButtonEvent.keyActivate()),
+    sendOnPointerCancel: hasText || attachments.length > 0,
+  });
 
   // Voice is usable only when the backend can transcribe AND the browser has a
   // MediaRecorder + mic (needs a secure context). Steer mode never records — it
@@ -1053,12 +1058,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
             </button>
           )}
           {(() => {
-            // Push-to-talk owns this button only when there is nothing to send.
-            // With typed text or an attachment it is an ordinary Send button:
-            // a tap sends through its normal click (or the pointercancel
-            // fallback), and it never starts recording. Recording with text is
-            // still available through ⌘. / Alt+.; this makes the text+hold transition explicit
-            // and prevents an iOS pointercancel from swallowing a message.
+            // Voice owns the shared send button whenever it is usable. A short
+            // press sends, while a hold records even over an existing draft or
+            // attachment; transcripts are inserted at the caret. Content only
+            // chooses the arrow icon, not whether the gesture is available.
             const voiceButtonMode = usesVoiceSendButton({
               canVoice, hasText, attachmentCount: attachments.length,
             });
@@ -1067,12 +1070,13 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
             // showing Send here would make a live mic invisible and let a tap
             // submit the unrelated text instead of stopping the recording.
             const voiceOwnsButton = voiceButtonMode || recording || transcribing;
+            const micMode = canVoice && !hasText && attachments.length === 0;
 
             let icon = <ArrowUp size={16} />;
             if (contentSendPending || transcribing) icon = <Loader2 size={16} class="spin" />;
             else if (recording && voiceLocked) icon = <Square size={14} />;
             else if (recording) icon = <Mic size={16} />;
-            else if (voiceButtonMode) icon = <Mic size={16} />;
+            else if (micMode) icon = <Mic size={16} />;
 
             const cls = [
               "composer-send",
@@ -1080,14 +1084,14 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
               recording ? "recording" : "",
               voiceLocked ? "locked" : "",
               transcribing ? "transcribing" : "",
-              voiceButtonMode ? "mic-mode" : "",
+              micMode ? "mic-mode" : "",
             ].filter(Boolean).join(" ");
 
             const sendTitle = busy ? "Send — steers the agent, doesn't stop it" : "Send";
             const title = contentSendPending ? "Sending…"
               : transcribing ? "Transcribing…"
               : recording ? (voiceLocked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
-              : voiceButtonMode ? `Hold to talk · tap to send (${formatShortcut(".", { mod: true })} for mic)`
+              : canVoice ? `Hold to talk · tap to send (${formatShortcut(".", { mod: true })} for mic)`
               : sendTitle;
 
             const gestureProps = voiceOwnsButton
@@ -1103,7 +1107,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
             const sendLabel = contentSendPending ? "Sending"
               : transcribing ? "Transcribing"
               : recording ? "Stop recording"
-              : voiceButtonMode ? "Record"
+              : micMode ? "Record"
               : busy ? "Send steer"
               : "Send";
 

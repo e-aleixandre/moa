@@ -44,7 +44,7 @@ export const ev = {
   holdTimer: () => ({ type: "HOLD_TIMER" }),
   pointerMove: (y = 0) => ({ type: "POINTER_MOVE", y }),
   pointerUp: () => ({ type: "POINTER_UP" }),
-  pointerCancel: () => ({ type: "POINTER_CANCEL" }),
+  pointerCancel: (sendOnCancel = false) => ({ type: "POINTER_CANCEL", sendOnCancel }),
   keyActivate: () => ({ type: "KEY_ACTIVATE" }),
   // Keyboard shortcut (⌘. / Alt+.) — a pointer-free toggle: from idle it starts
   // a hands-free (locked) recording; while recording it stops + transcribes.
@@ -105,8 +105,11 @@ export function reduce(state, event) {
           // Released before HOLD_MS → quick tap → send.
           return out("idle", {}, [{ type: "send" }]);
         case "POINTER_CANCEL":
-          // Cancelled before anything was recorded → nothing to do.
-          return out("idle", {}, []);
+          // A cancelled touch normally has no click on iOS. When there is
+          // composer content, retain its normal tap-to-send behavior through
+          // the same send action as POINTER_UP. An empty composer stays inert
+          // so a cancelled attempt cannot create a phantom empty message.
+          return out("idle", {}, event.sendOnCancel ? [{ type: "send" }] : []);
         case "POINTER_MOVE":
           // Not recording yet — movement is irrelevant until the hold fires.
           return { state: s, actions: [] };
