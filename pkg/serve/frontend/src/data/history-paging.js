@@ -14,9 +14,9 @@ export function seedOlderHistory(id, before) {
   const session = store.get().sessions[id];
   if (!session) return;
   const previous = stateFor(session);
-  // A delta-resume init retains the already loaded prefix. A full init is an
-  // authoritative replacement and starts a fresh paging epoch.
-  if (previous.before === before && previous.hasMore === !!before) return;
+  // handleWsInit calls this only for a full init. Its messages are an
+  // authoritative replacement, so invalidate a request from the old array
+  // even when the server happened to send the same cursor again.
   updateSession(id, { olderHistory: {
     before: before || '', hasMore: !!before, loading: false,
     epoch: previous.epoch + 1, prependVersion: previous.prependVersion,

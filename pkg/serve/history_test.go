@@ -85,6 +85,26 @@ func TestHistoryPageIncludesAssistantBeforeParallelResults(t *testing.T) {
 	}
 }
 
+func TestHistoryPageBoundsHugeParallelToolResultRun(t *testing.T) {
+	messages := []core.AgentMessage{historyMessage("user", "before"), historyMessage("assistant", "call")}
+	for i := range initHistoryMaxMessages * 20 {
+		messages = append(messages, historyMessage("tool_result", fmt.Sprintf("result-%d", i)))
+	}
+	page, _, _, ok := historyPage(messages, "", 1)
+	if !ok {
+		t.Fatal("page rejected")
+	}
+	if len(page) > initHistoryMaxMessages {
+		t.Fatalf("page has %d messages, cap is %d", len(page), initHistoryMaxMessages)
+	}
+	if page[0].Role != "assistant" || page[0].MsgID != "call" {
+		t.Fatalf("page starts with %#v, want the tool-call assistant", page[0])
+	}
+	if len(page) != initHistoryMaxMessages {
+		t.Fatalf("page has %d messages, want cap %d", len(page), initHistoryMaxMessages)
+	}
+}
+
 func TestHistoryPageAndInitBoundaryNeverBeginWithResult(t *testing.T) {
 	messages := []core.AgentMessage{
 		historyMessage("user", "before"), historyMessage("assistant", "call"),

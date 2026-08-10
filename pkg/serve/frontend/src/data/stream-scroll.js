@@ -44,7 +44,8 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
     const paging = olderHistoryState(session);
     if (nearTranscriptTop(el) && paging.hasMore && !paging.loading) {
       loadOlderHistory(sessionId, () => {
-        prependAnchor.current = capturePrependAnchor(el);
+        const snapshot = capturePrependAnchor(el);
+        prependAnchor.current = { ...snapshot, sessionId };
       });
     }
   }, [session, sessionId]);
@@ -65,6 +66,8 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
 
   useLayoutEffect(() => {
     stickToBottom.current = true;
+    prependAnchor.current = null;
+    prependVersion.current = 0;
     setShowNewBtn(false);
     scrollToBottomNow();
   }, [sessionId, scrollToBottomNow]);
@@ -77,13 +80,13 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
     const version = session?.olderHistory?.prependVersion || 0;
     if (version === prependVersion.current) return undefined;
 
-    const snapshot = prependAnchor.current;
+    const snapshot = prependAnchor.current?.sessionId === sessionId ? prependAnchor.current : null;
     const node = restorePrependAnchor(el, snapshot, stickToBottom.current);
     prependVersion.current = version;
-    if (!node || !snapshot || typeof ResizeObserver === "undefined") return undefined;
+    if (!node || !snapshot || typeof globalThis.ResizeObserver === "undefined") return undefined;
 
     let expected = el.scrollTop;
-    const observer = new ResizeObserver(() => {
+    const observer = new globalThis.ResizeObserver(() => {
       // The ordinary resize observer only re-pins when following. Here the
       // reader deliberately loaded at the top, so retain their element anchor
       // unless they have scrolled since the restoration.
@@ -96,21 +99,21 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
       expected = el.scrollTop;
     });
     observer.observe(contentRef.current || node);
-    const timer = setTimeout(() => observer.disconnect(), 1500);
+    const timer = globalThis.setTimeout(() => observer.disconnect(), 1500);
     return () => {
-      clearTimeout(timer);
+      globalThis.clearTimeout(timer);
       observer.disconnect();
     };
-  }, [session?.olderHistory?.prependVersion, ...followSignals]);
+  }, [sessionId, session?.olderHistory?.prependVersion, ...followSignals]);
 
   useLayoutEffect(() => {
     const content = contentRef.current;
     const el = containerRef.current;
-    if (!content || !el || typeof ResizeObserver === "undefined") return undefined;
+    if (!content || !el || typeof globalThis.ResizeObserver === "undefined") return undefined;
 
     observedScrollHeight.current = el.scrollHeight;
 
-    const observer = new ResizeObserver(() => {
+    const observer = new globalThis.ResizeObserver(() => {
       const scroller = containerRef.current;
       if (!scroller) return;
 

@@ -23,7 +23,7 @@ type historyResponse struct {
 
 // handleHistory returns chronological display history in backwards pages. Page
 // size is an objective: a page may grow to keep an assistant and its contiguous
-// tool results together.
+// tool results together, but remains bounded for mobile clients.
 func handleHistory(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := defaultHistoryPageSize
@@ -49,7 +49,7 @@ func handleHistory(m *Manager) http.HandlerFunc {
 			http.Error(w, "history anchor is no longer on this branch", http.StatusGone)
 			return
 		}
-		writeJSON(w, http.StatusOK, historyResponse{Messages: sanitizeHistoryRange(page), NextBefore: nextBefore, HasMore: hasMore})
+		writeJSON(w, http.StatusOK, historyResponse{Messages: page, NextBefore: nextBefore, HasMore: hasMore})
 	}
 }
 
@@ -92,7 +92,7 @@ func historyPage(messages []core.AgentMessage, before string, limit int) ([]core
 	if start >= end {
 		return nil, "", false, true
 	}
-	page := messages[start:end]
+	page := boundedHistoryRange(messages[start:end])
 	if start == 0 || page[0].MsgID == "" {
 		return page, "", false, true
 	}

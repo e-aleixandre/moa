@@ -49,3 +49,22 @@ test('stick-to-bottom has precedence', () => {
   expect(restorePrependAnchor(f.el, captured, true)).toBeNull();
   expect(f.el.scrollTop).toBe(500);
 });
+
+test('a removed anchor explicitly retains the captured scroll position', () => {
+  const f = fixture();
+  const captured = capturePrependAnchor(f.el);
+  f.el.querySelectorAll = () => [];
+  f.el.scrollTop = 900; // browser layout moved it while the block was replaced
+  expect(restorePrependAnchor(f.el, captured, false)).toBeNull();
+  expect(f.el.scrollTop).toBe(500);
+});
+
+test('a viewport without a durable block still captures a scroll fallback', () => {
+  const f = fixture();
+  f.el.querySelectorAll = () => [];
+  const captured = capturePrependAnchor(f.el);
+  expect(captured).toMatchObject({ id: '', scrollTop: 500 });
+  f.el.scrollTop = captured.scrollTop;
+  restorePrependAnchor(f.el, captured, false);
+  expect(f.el.scrollTop).toBe(500);
+});

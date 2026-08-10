@@ -766,7 +766,8 @@ func limitInitHistory(messages []core.AgentMessage) ([]core.AgentMessage, bool) 
 		bytes += size
 	}
 	firstIndex = historyPageStart(messages, len(messages), firstIndex)
-	return sanitizeHistoryRange(messages[firstIndex:]), firstIndex > 0
+	bounded := boundedHistoryRange(messages[firstIndex:])
+	return bounded, firstIndex > 0 || len(bounded) < len(messages[firstIndex:])
 }
 
 // historyPageStart aligns a region's lower boundary to the assistant that
@@ -784,14 +785,25 @@ func historyPageStart(messages []core.AgentMessage, end, start int) int {
 	return start
 }
 
-func sanitizeHistoryRange(messages []core.AgentMessage) []core.AgentMessage {
+// boundedHistoryRange applies the same aggregate bounds as an init payload.
+// If a parallel tool-result run exceeds them, it keeps the assistant call and
+// as many leading results as fit. The omitted results deliberately appear as
+// pending calls in the existing frontend projection rather than as orphaned
+// result rows or an unbounded response.
+func boundedHistoryRange(messages []core.AgentMessage) []core.AgentMessage {
 	selected := make([]core.AgentMessage, 0, len(messages))
+	bytes := 0
 	for _, original := range messages {
 		msg, size := sanitizeHistoryMessage(original)
 		if size > initHistoryMaxBytes {
 			msg = core.WrapMessage(core.Message{Role: original.Role, MsgID: original.MsgID, Content: []core.Content{core.TextContent("[historic message too large to load on this device]")}})
+			_, size = sanitizeHistoryMessage(msg)
+		}
+		if len(selected) > 0 && (len(selected) >= initHistoryMaxMessages || bytes+size > initHistoryMaxBytes) {
+			break
 		}
 		selected = append(selected, msg)
+		bytes += size
 	}
 	return selected
 }
