@@ -19,7 +19,8 @@ export function normalizeHistory(raw, liveSubagents = []) {
       resultMap[msg.tool_call_id] = msg;
     }
   }
-  for (const msg of raw) {
+  for (let index = 0; index < raw.length; index++) {
+    const msg = raw[index];
     if (msg.role === 'assistant') {
       const textParts = [];
       for (const c of (msg.content || [])) {
@@ -69,7 +70,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
       result.push({
         _type: 'tool_start',
         _msg_id: msg.msg_id,
-        tool_call_id: 'shell_' + result.length,
+        tool_call_id: 'shell_' + (msg.msg_id || index),
         tool_name: 'bash',
         args: { command },
         status: 'done',
@@ -99,7 +100,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
         result.push({
           _type: 'tool_start',
             _msg_id: msg.msg_id,
-          tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + result.length,
+          tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + (msg.msg_id || index),
           tool_name: 'subagent',
           args: { task: msg.custom.subagent_task || '' },
           status: subagentRestoreStatus(msg.custom.subagent_status),
@@ -115,7 +116,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
         result.push({
           _type: 'tool_start',
             _msg_id: msg.msg_id,
-          tool_call_id: 'bash_complete_' + result.length,
+          tool_call_id: 'bash_complete_' + (msg.msg_id || index),
           tool_name: 'bash',
           args: { command: msg.custom.bash_command || '' },
           status: (msg.custom.bash_status || '') === 'failed' ? 'error' : 'done',
@@ -131,7 +132,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           result.push({
             _type: 'tool_start',
             _msg_id: msg.msg_id,
-            tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + result.length,
+            tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + (msg.msg_id || index),
             subagentJobId: jobId || undefined,
             tool_name: 'subagent',
             args: { task: subagent.task },
@@ -144,7 +145,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
             result.push({
               _type: 'tool_start',
             _msg_id: msg.msg_id,
-              tool_call_id: 'bash_complete_' + result.length,
+              tool_call_id: 'bash_complete_' + (msg.msg_id || index),
               tool_name: 'bash',
               args: { command: bash.command },
               status: bash.status === 'failed' ? 'error' : 'done',

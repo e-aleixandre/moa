@@ -947,12 +947,44 @@ test('historyTruncated emits a leading system block', () => {
   expect(blocks[0].text).toBe('Older messages…');
 });
 
-test('more than 200 messages also triggers the truncation notice', () => {
+test('a complete history longer than 200 messages has no truncation notice', () => {
   const many = [];
   for (let i = 0; i < 201; i++) many.push(assistant('x'));
   const blocks = projectStream(session(many));
-  expect(blocks[0].kind).toBe('system');
-  expect(blocks[0].text).toBe('Older messages…');
+  expect(blocks[0].kind).toBe('document');
+  expect(blocks.some(block => block.text === 'Older messages…')).toBe(false);
+});
+
+test('persisted block ids are invariant when older messages are prepended', () => {
+  const existing = [
+    { role: 'user', _msg_id: 'user-existing', content: [{ type: 'text', text: 'question' }] },
+    { role: 'assistant', _msg_id: 'assistant-existing', content: [{ type: 'text', text: 'answer' }] },
+    { _type: 'tool_start', _msg_id: 'tool-existing', tool_call_id: 'edit-1', tool_name: 'edit', args: { path: 'x.js' }, status: 'done', result: '@@ -1 +1 @@\n-old\n+new' },
+    { _type: 'system', _msg_id: 'system-existing', text: 'compacted' },
+  ];
+  const prepend = [
+    { role: 'user', _msg_id: 'user-old', content: [{ type: 'text', text: 'old question' }] },
+    { role: 'assistant', _msg_id: 'assistant-old', content: [{ type: 'text', text: 'old answer' }] },
+  ];
+  const idsOf = (messages) => projectStream(session(messages)).flatMap(block => [
+    block.id,
+    ...(block.blocks || []).map(inner => inner.id),
+  ]);
+
+  const existingIds = idsOf(existing);
+  const prependedIds = idsOf(prepend);
+  expect(idsOf([...prepend, ...existing]).slice(prependedIds.length)).toEqual(existingIds);
+});
+
+test('persisted block ids remain unique within one projection', () => {
+  const blocks = projectStream(session([
+    { role: 'assistant', _msg_id: 'assistant-1', content: [{ type: 'text', text: 'before' }] },
+    { _type: 'tool_start', _msg_id: 'tool-1', tool_call_id: 'edit-1', tool_name: 'edit', args: { path: 'x.js' }, status: 'done', result: '@@ -1 +1 @@\n-old\n+new' },
+    // normalizeHistory can split one assistant message around tool calls.
+    { role: 'assistant', _msg_id: 'assistant-1', content: [{ type: 'text', text: 'after' }] },
+  ]));
+  const ids = blocks.flatMap(block => [block.id, ...(block.blocks || []).map(inner => inner.id)]);
+  expect(new Set(ids).size).toBe(ids.length);
 });
 
 // ── 10. multi-turn separation ────────────────────────────────────────────────

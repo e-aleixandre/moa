@@ -527,6 +527,22 @@ test('handleWsInit only correlates legacy cards to a unique live job', async () 
   expect(store.get().sessions.persisted.messages[0].tool_call_id).toBe('subagent-persisted-job');
 });
 
+test('synthetic tool ids are scoped to their persisted message across separately normalized pages', () => {
+  const shell = (msgId) => ({ role: 'shell', msg_id: msgId, content: [{ type: 'text', text: '$ pwd\n/work' }] });
+  const subagent = (msgId) => ({
+    role: 'user', msg_id: msgId, custom: { source: 'subagent', subagent_task: 'review', subagent_status: 'completed' }, content: [],
+  });
+  const bash = (msgId) => ({
+    role: 'user', msg_id: msgId, custom: { source: 'bash_job', bash_command: 'pwd', bash_status: 'completed' }, content: [],
+  });
+
+  for (const [name, make] of [['shell', shell], ['subagent', subagent], ['bash_complete', bash]]) {
+    const first = normalizeHistory([make(`${name}-first`)])[0].tool_call_id;
+    const second = normalizeHistory([make(`${name}-second`)])[0].tool_call_id;
+    expect(first).not.toBe(second);
+  }
+});
+
 test('handleWsInit does not conflate a legacy card with multiple live jobs sharing its task', async () => {
   seedSession('s1');
   handleWsInit('s1', {
