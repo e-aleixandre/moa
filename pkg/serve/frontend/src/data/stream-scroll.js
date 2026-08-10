@@ -165,5 +165,18 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
     setShowNewBtn(false);
   }, [scrollToBottomNow]);
 
-  return { containerRef, contentRef, setScrollEl, checkScroll, scrollToBottom, showNewBtn, stickToBottom };
+  const placeReadAnchor = useCallback((node, margin) => {
+    const el = containerRef.current;
+    if (!el || !node) return;
+    programmaticScroll.current = true;
+    el.scrollTop += node.getBoundingClientRect().top - el.getBoundingClientRect().top - margin;
+    const following = isAtBottom(el.scrollTop, el.scrollHeight, el.clientHeight);
+    stickToBottom.current = following;
+    setShowNewBtn(!following);
+    queueMicrotask(() => {
+      programmaticScroll.current = false;
+    });
+  }, []);
+
+  return { containerRef, contentRef, setScrollEl, checkScroll, scrollToBottom, placeReadAnchor, showNewBtn, stickToBottom };
 }

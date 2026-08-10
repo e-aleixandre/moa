@@ -16,6 +16,9 @@ import { renderMarkdown, renderMarkdownWithCaret } from "../../data/util/markdow
 import { retryHistoryHydration } from "../../data/api.js";
 import { captureHydrationAnchor, restoreHydrationAnchor } from "../../data/stream-hydration-anchor.js";
 import { useStreamScroll } from "../../data/stream-scroll.js";
+import {
+  READ_ANCHOR_MARGIN, consumeReadAnchor, hasReadAnchor, readAnchorBlockID, settleReadAnchor,
+} from "../../data/stream-read-anchor.js";
 import "./Stream.css";
 
 // Stream — the scrollable conversation area. It renders the REAL
@@ -136,7 +139,7 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
     lastMsg && lastMsg._type === "tool_start" && lastMsg.streamingResult
       ? lastMsg.streamingResult.length
       : 0;
-  const { containerRef, contentRef, setScrollEl, checkScroll, scrollToBottom, showNewBtn, stickToBottom } = useStreamScroll({
+  const { containerRef, contentRef, setScrollEl, checkScroll, scrollToBottom, placeReadAnchor, showNewBtn, stickToBottom } = useStreamScroll({
     session,
     sessionId: session?.id,
     pendingAskId: session?.pendingAsk?.id,
@@ -161,6 +164,21 @@ export function Stream({ session, blocks = [], lead = null, tail = null, onOpenS
     restoreHydrationAnchor(el, hydrationAnchor.current, session?.id, !!session?.historyPending, stickToBottom.current);
     hydrationAnchor.current = captureHydrationAnchor(el, session?.id, !!session?.historyPending);
   }, [session?.id, session?.historyPending, blocks]);
+
+  // The visibility action armed this only while the unread completed result
+  // still existed. Wait for this commit so its durable block is actually in
+  // the DOM; a later render cannot re-arm the one-shot latch.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    const targetID = readAnchorBlockID(session, blocks);
+    if (!el || !targetID || !hasReadAnchor(session?.id)) return undefined;
+    const node = [...el.querySelectorAll('[data-stream-anchor]')]
+      .find((item) => item.dataset.streamAnchor === targetID);
+    if (!node || !consumeReadAnchor(session.id)) return undefined;
+    const reposition = (target) => placeReadAnchor(target, READ_ANCHOR_MARGIN);
+    reposition(node);
+    return settleReadAnchor(el, contentRef.current, node, reposition);
+  }, [session, blocks, placeReadAnchor]);
 
   return (
     <div class="stream">
