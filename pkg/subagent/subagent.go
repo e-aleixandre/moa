@@ -119,12 +119,24 @@ type Config struct {
 	// 0 (or negative) falls back to defaultMaxConcurrentAsync.
 	MaxConcurrentAsync int
 
-	// TranscriptLoader loads a persisted subagent transcript's messages by job
-	// ID, enabling the "resume" parameter to continue a finished subagent's
+	// TranscriptLoader loads a persisted subagent transcript by job ID,
+	// enabling the "resume" parameter to continue a finished subagent's
 	// conversation instead of starting fresh. nil = resume unsupported (the
 	// tool reports a clear error when resume is requested). The caller wires
 	// this to its session-scoped transcript store (see pkg/serve).
-	TranscriptLoader func(jobID string) ([]core.AgentMessage, error)
+	TranscriptLoader func(jobID string) (ResumedTranscript, error)
+}
+
+// ResumedTranscript is what a TranscriptLoader hands back: the persisted
+// child conversation plus the identity it ran under. Model/Thinking let a
+// resume continue with the SAME model and thinking level the subagent already
+// used instead of silently adopting the parent's; both are optional (empty on
+// transcripts written before they were recorded, which fall back to the
+// parent's settings, i.e. the historical behaviour).
+type ResumedTranscript struct {
+	Messages []core.AgentMessage
+	Model    string
+	Thinking string
 }
 
 // RegisterAll registers the subagent tools on reg and returns a handle onto
@@ -166,11 +178,11 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				},
 				"model": {
 					"type": "string",
-					"description": "Model to use. Defaults to the configured model."
+					"description": "Model to use. Defaults to the current model, or to the resumed subagent's own model when 'resume' is set."
 				},
 				"thinking": {
 					"type": "string",
-					"description": "Thinking level for the subagent: off, low, medium, high, xhigh. Defaults to the current parent thinking level."
+					"description": "Thinking level for the subagent: off, low, medium, high, xhigh. Defaults to the current parent thinking level, or to the resumed subagent's own level when 'resume' is set."
 				},
 				"max_duration": {
 					"type": "string",
@@ -178,7 +190,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				},
 				"resume": {
 					"type": "string",
-					"description": "Job ID of a previous subagent to resume: its saved transcript is reloaded and 'task' is sent as the next message, continuing that conversation instead of starting fresh."
+					"description": "Job ID of a previous subagent to resume: its saved transcript is reloaded and 'task' is sent as the next message, continuing that conversation instead of starting fresh. It keeps the model and thinking level it ran under unless you pass 'model'/'thinking' explicitly."
 				},
 				"async": {
 					"type": "boolean",
@@ -204,19 +216,23 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				return *errResult, nil
 			}
 
-			model, errResult := resolveModel(currentModel(cfg), params)
-			if errResult != nil {
-				return *errResult, nil
-			}
-			thinkingLevel, errResult := resolveThinking(model, currentThinkingLevel(cfg), params)
-			if errResult != nil {
-				return *errResult, nil
-			}
 			maxRunDuration, errResult := resolveMaxDuration(params)
 			if errResult != nil {
 				return *errResult, nil
 			}
-			seedMsgs, errResult := resolveResume(cfg, params)
+			// Resume is resolved FIRST: without an explicit model/thinking, a
+			// resumed subagent continues with the ones it already ran under
+			// (from its transcript), not the parent's.
+			resumed, errResult := resolveResume(cfg, params)
+			if errResult != nil {
+				return *errResult, nil
+			}
+			seedMsgs := resumed.Messages
+			model, errResult := resolveModel(defaultModel(cfg, resumed), params)
+			if errResult != nil {
+				return *errResult, nil
+			}
+			thinkingLevel, errResult := resolveThinking(model, defaultThinking(cfg, resumed, model), params)
 			if errResult != nil {
 				return *errResult, nil
 			}
@@ -1046,34 +1062,70 @@ func resolveMaxDuration(params map[string]any) (time.Duration, *core.Result) {
 	return d, nil
 }
 
+// defaultModel is the model a subagent gets when the call carries no explicit
+// "model". A resumed subagent continues with the model recorded in its
+// transcript; anything else (a new subagent, an old transcript without the
+// field, or a recorded model that no longer resolves — renamed/retired)
+// inherits the parent's current model, which is the historical behaviour.
+func defaultModel(cfg Config, resumed ResumedTranscript) core.Model {
+	parent := currentModel(cfg)
+	spec := strings.TrimSpace(resumed.Model)
+	if spec == "" {
+		return parent
+	}
+	model, ok := core.ResolveModel(spec)
+	if ok || model.Provider != "" {
+		return model
+	}
+	return parent
+}
+
+// defaultThinking mirrors defaultModel for the thinking level: the resumed
+// transcript's level wins over the parent's, unless it is absent or no longer
+// valid for the model the child will actually run under (an unusable stored
+// level must not break the resume).
+func defaultThinking(cfg Config, resumed ResumedTranscript, model core.Model) string {
+	parent := currentThinkingLevel(cfg)
+	level := strings.TrimSpace(resumed.Thinking)
+	if level == "" {
+		return parent
+	}
+	if _, err := core.EffectiveThinkingLevel(model, level); err != nil {
+		return parent
+	}
+	return level
+}
+
 // resolveResume loads a prior subagent's transcript when the "resume" arg is
-// set, returning the messages to seed the child with. Returns nil (no seed)
-// when resume is absent. Errors are surfaced as tool results so the model gets
-// a clear message (unknown job ID, resume unsupported, etc.).
-func resolveResume(cfg Config, params map[string]any) ([]core.AgentMessage, *core.Result) {
+// set, returning the messages to seed the child with plus the model/thinking it
+// ran under. Returns a zero value (no seed) when resume is absent. Errors are
+// surfaced as tool results so the model gets a clear message (unknown job ID,
+// resume unsupported, etc.).
+func resolveResume(cfg Config, params map[string]any) (ResumedTranscript, *core.Result) {
 	jobID, _ := params["resume"].(string)
 	if strings.TrimSpace(jobID) == "" {
-		return nil, nil
+		return ResumedTranscript{}, nil
 	}
 	if cfg.TranscriptLoader == nil {
 		res := core.ErrorResult("resume is not supported in this environment")
-		return nil, &res
+		return ResumedTranscript{}, &res
 	}
-	msgs, err := cfg.TranscriptLoader(strings.TrimSpace(jobID))
+	t, err := cfg.TranscriptLoader(strings.TrimSpace(jobID))
 	if err != nil {
 		res := core.ErrorResult("cannot resume subagent " + jobID + ": " + err.Error())
-		return nil, &res
+		return ResumedTranscript{}, &res
 	}
-	if len(msgs) == 0 {
+	if len(t.Messages) == 0 {
 		res := core.ErrorResult("cannot resume subagent " + jobID + ": transcript is empty")
-		return nil, &res
+		return ResumedTranscript{}, &res
 	}
-	clean := sanitizeResumeTranscript(msgs)
+	clean := sanitizeResumeTranscript(t.Messages)
 	if len(clean) == 0 {
 		res := core.ErrorResult("cannot resume subagent " + jobID + ": transcript has no replayable messages")
-		return nil, &res
+		return ResumedTranscript{}, &res
 	}
-	return clean, nil
+	t.Messages = clean
+	return t, nil
 }
 
 // sanitizeResumeTranscript makes a persisted transcript safe to replay before a

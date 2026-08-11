@@ -124,11 +124,12 @@ type SessionConfig struct {
 	OnBashJobOutput func(job tool.BashJobInfo, delta string)
 	OnBashJobEnd    func(job tool.BashJobInfo)
 
-	// SubagentTranscriptLoader loads a finished subagent's persisted messages
-	// by job ID, enabling the subagent tool's "resume" parameter. Optional
-	// (nil = resume unsupported). The caller wires this to its transcript store
-	// (see pkg/serve's SubagentStore).
-	SubagentTranscriptLoader func(jobID string) ([]core.AgentMessage, error)
+	// SubagentTranscriptLoader loads a finished subagent's persisted transcript
+	// (messages plus the model/thinking it ran under) by job ID, enabling the
+	// subagent tool's "resume" parameter. Optional (nil = resume unsupported).
+	// The caller wires this to its transcript store (see pkg/serve's
+	// SubagentStore).
+	SubagentTranscriptLoader func(jobID string) (subagent.ResumedTranscript, error)
 }
 
 // Session is a fully wired session ready for agent.Run/Send.
