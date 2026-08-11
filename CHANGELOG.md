@@ -5,6 +5,82 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-08-11
+
+### Added
+
+- `/secret` stages credentials for the agent without pasting them into the
+  chat. Handing over a token or password used to mean typing it into the
+  composer, where it became a user message: sent to the provider, written to
+  the session file, and carried into titles, briefs, compaction and handoffs —
+  and from a phone there was no alternative. `/secret` now opens a masked
+  form, in the web UI and the TUI, and writes each value to a short-lived
+  private file; the agent is told only the directory and the aliases, so it
+  can install each credential where its client expects it. Only names are
+  accepted after `/secret`, never values, and a recognised `/secret` line is
+  kept out of input history and local drafts. This is not a vault: the agent's
+  shell runs as the same user and can read the staged files, so printing one
+  puts it in context like any other tool output — the docs state that
+  boundary plainly.
+- Long conversations no longer load in full. The web transcript opens on the
+  recent conversation and loads older history page by page as you scroll up,
+  prepending each page without moving what you were reading — exercised
+  against a real sixteen-thousand-message session. Tool calls stay together
+  with their results across page boundaries, and expandable cards keep their
+  state while earlier history arrives.
+- Opening a session with an unread result starts you at the beginning of the
+  last reply instead of dropping you at its end, so you read the answer top to
+  bottom rather than scrolling back to find where it began. Live sessions keep
+  following their newest output as before.
+- Context compaction is visible in the conversation. It used to happen
+  silently between two messages; it now appears as an expandable card — the
+  moment it happens and again after a reload — showing the summary carried
+  forward, how large the context was, and the files the session had read or
+  modified.
+
+### Changed
+
+- Opening and reconnecting sessions from the phone got lighter and more
+  robust. Visible sessions now share one multiplexed WebSocket instead of one
+  connection each, and a client that reconnects while holding a transcript it
+  already trusts receives only the messages it missed rather than a full
+  snapshot — falling back to the full, bounded history whenever the shortcut
+  cannot be proven safe. A reconnect snapshot also no longer drops the newest
+  message of the conversation.
+- The unread-result tracking introduced in 0.27.0 was reworked internally
+  around a single read cursor. Behaviour is the same; a browser tab left open
+  across this update needs one reload.
+
+### Fixed
+
+- The unread dot is cleared only once you have actually been shown what it
+  pointed at. Opening a flagged session on the phone could draw the transcript
+  from your last visit, silently swap in the real one seconds later, and clear
+  the dot on the way in — acknowledging the alert before showing its cause.
+  The cached transcript now stays readable but says it is catching up until
+  the authoritative history lands, and the dot survives until then. The dot
+  also no longer sticks after opening a session behind a closing drawer, and
+  permission and question badges now reflect the pending request itself,
+  disappearing the moment it is resolved.
+- A failed subagent always offers to be resumed. Previously only timeouts and
+  turn-limit hits told the parent it could continue the saved job, so any
+  other failure threw the child's work away; the failure message now keeps the
+  underlying error and any partial output, and points at the resume. A resumed
+  subagent also keeps the model and thinking level it already ran under,
+  instead of silently switching to the parent's current model — explicit
+  choices still win. And the task a parent delegates is labelled as coming
+  from the parent in the child's transcript instead of being duplicated, and
+  stays visible in finished subagents too.
+- Voice gestures work over drafts again. Holding the send button records even
+  when text or attachments are already present: a short tap sends them, a hold
+  appends the transcript at the cursor.
+- A message typed on the phone no longer vanishes when the browser cancels the
+  touch mid-send, and a send the server rejects puts your text back in the
+  composer — in the web UI and the TUI — rather than losing it.
+- Transcript scrolling: jumping to the newest message is instant and stays
+  pinned while images and expanding cards finish sizing, and a content resize
+  no longer drags the view around while you are actively scrolling.
+
 ## [0.27.0] - 2026-08-06
 
 ### Added
