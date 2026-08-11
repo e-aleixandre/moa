@@ -352,20 +352,20 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				}
 			}
 		},
-		SubagentTranscriptLoader: func(jobID string) ([]core.AgentMessage, error) {
+		SubagentTranscriptLoader: func(jobID string) (subagent.ResumedTranscript, error) {
 			s := sess
 			if s == nil || s.persister == nil {
-				return nil, fmt.Errorf("transcript store unavailable")
+				return subagent.ResumedTranscript{}, fmt.Errorf("transcript store unavailable")
 			}
 			store := s.persister.subagentStore(s.ID)
 			if store == nil {
-				return nil, fmt.Errorf("transcript store unavailable")
+				return subagent.ResumedTranscript{}, fmt.Errorf("transcript store unavailable")
 			}
 			t, err := store.Load(jobID)
 			if err != nil {
-				return nil, err
+				return subagent.ResumedTranscript{}, err
 			}
-			return t.Messages, nil
+			return subagent.ResumedTranscript{Messages: t.Messages, Model: t.Model, Thinking: t.Thinking}, nil
 		},
 	})
 	if err != nil {

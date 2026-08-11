@@ -196,6 +196,13 @@ When a child fails and its transcript can be reopened, its failure message
 preserves the underlying error and any partial output, and tells the parent it
 can continue the saved job with `resume: "<job-id>"` rather than starting over.
 
+A resumed subagent keeps the model and thinking level it already ran under, so
+continuing a `sol` or `fable` child does not silently switch it to the parent's
+current model. Passing `model` or `thinking` explicitly always wins, both on a
+fresh subagent and on a resume. Transcripts saved before those fields were
+recorded — or pointing at a model that no longer exists — fall back to the
+parent's model/thinking instead of failing the resume.
+
 ### Guardrails
 
 Child agents run with their own, independent limits (they do **not** inherit

@@ -927,8 +927,8 @@ func TestSubagentGenericFailureSurfacesResumableMessage(t *testing.T) {
 	sub, statusTool, _ := newSubagentTools(t, Config{
 		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
 		ProviderFactory: func(core.Model) (core.Provider, error) { return provider, nil },
-		TranscriptLoader: func(string) ([]core.AgentMessage, error) {
-			return []core.AgentMessage{core.WrapMessage(core.NewUserMessage("saved task"))}, nil
+		TranscriptLoader: func(string) (ResumedTranscript, error) {
+			return ResumedTranscript{Messages: []core.AgentMessage{core.WrapMessage(core.NewUserMessage("saved task"))}}, nil
 		},
 		OnAsyncComplete: func(_ string, _ string, _ string, resultTail string, _ bool) {
 			notifiedMu.Lock()
@@ -991,7 +991,7 @@ func TestSubagentGenericFailureIncludesPartialOutput(t *testing.T) {
 	sub, statusTool, _ := newSubagentTools(t, Config{
 		DefaultModel:     core.Model{ID: "default", Provider: "mock"},
 		ProviderFactory:  func(core.Model) (core.Provider, error) { return provider, nil },
-		TranscriptLoader: func(string) ([]core.AgentMessage, error) { return nil, nil },
+		TranscriptLoader: func(string) (ResumedTranscript, error) { return ResumedTranscript{}, nil },
 	}, noop)
 
 	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it", "async": true, "tools": []any{"noop"}}, nil)
@@ -1027,7 +1027,7 @@ func TestSubagentGenericFailureWithoutTranscriptLoaderDoesNotOfferResume(t *test
 }
 
 func TestCanResumeFailureRequiresReplayableTranscript(t *testing.T) {
-	cfg := Config{TranscriptLoader: func(string) ([]core.AgentMessage, error) { return nil, nil }}
+	cfg := Config{TranscriptLoader: func(string) (ResumedTranscript, error) { return ResumedTranscript{}, nil }}
 	if canResumeFailure(cfg, "sa-empty", nil) {
 		t.Fatal("must not offer resume for an empty transcript")
 	}
@@ -1761,8 +1761,8 @@ func TestResolveResumeWithoutLoaderFails(t *testing.T) {
 }
 
 func TestResolveResumeUnknownJobFails(t *testing.T) {
-	cfg := Config{TranscriptLoader: func(string) ([]core.AgentMessage, error) {
-		return nil, fmt.Errorf("not found")
+	cfg := Config{TranscriptLoader: func(string) (ResumedTranscript, error) {
+		return ResumedTranscript{}, fmt.Errorf("not found")
 	}}
 	_, errRes := resolveResume(cfg, map[string]any{"resume": "nope"})
 	if errRes == nil {
@@ -1771,12 +1771,12 @@ func TestResolveResumeUnknownJobFails(t *testing.T) {
 }
 
 func TestResolveResumeAbsentReturnsNil(t *testing.T) {
-	msgs, errRes := resolveResume(Config{}, map[string]any{})
+	resumed, errRes := resolveResume(Config{}, map[string]any{})
 	if errRes != nil {
 		t.Fatalf("unexpected error: %s", textOf(*errRes))
 	}
-	if msgs != nil {
-		t.Fatalf("expected nil seed messages, got %d", len(msgs))
+	if resumed.Messages != nil {
+		t.Fatalf("expected nil seed messages, got %d", len(resumed.Messages))
 	}
 }
 
@@ -1788,12 +1788,12 @@ func TestResolveResumeStripsThinking(t *testing.T) {
 			core.TextContent("earlier answer"),
 		}}},
 	}
-	cfg := Config{TranscriptLoader: func(string) ([]core.AgentMessage, error) { return prior, nil }}
-	msgs, errRes := resolveResume(cfg, map[string]any{"resume": "job-1"})
+	cfg := Config{TranscriptLoader: func(string) (ResumedTranscript, error) { return ResumedTranscript{Messages: prior}, nil }}
+	resumed, errRes := resolveResume(cfg, map[string]any{"resume": "job-1"})
 	if errRes != nil {
 		t.Fatalf("unexpected error: %s", textOf(*errRes))
 	}
-	for _, m := range msgs {
+	for _, m := range resumed.Messages {
 		for _, c := range m.Content {
 			if c.Type == "thinking" {
 				t.Fatal("thinking block was not stripped from resumed transcript")
@@ -1916,11 +1916,11 @@ func TestSubagentResumeReplaysHistory(t *testing.T) {
 	sub, _, _ := newSubagentTools(t, Config{
 		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
 		ProviderFactory: func(core.Model) (core.Provider, error) { return provider, nil },
-		TranscriptLoader: func(jobID string) ([]core.AgentMessage, error) {
+		TranscriptLoader: func(jobID string) (ResumedTranscript, error) {
 			if jobID != "job-1" {
-				return nil, fmt.Errorf("unknown job %q", jobID)
+				return ResumedTranscript{}, fmt.Errorf("unknown job %q", jobID)
 			}
-			return prior, nil
+			return ResumedTranscript{Messages: prior}, nil
 		},
 	})
 
@@ -2572,10 +2572,10 @@ func TestSubagentTurnLimitSurfacesResumableMessage(t *testing.T) {
 		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
 		AppCtx:          context.Background(),
 		ChildMaxTurns:   2,
-		TranscriptLoader: func(string) ([]core.AgentMessage, error) {
-			return []core.AgentMessage{core.WrapMessage(core.Message{
+		TranscriptLoader: func(string) (ResumedTranscript, error) {
+			return ResumedTranscript{Messages: []core.AgentMessage{core.WrapMessage(core.Message{
 				Role: "user", Content: []core.Content{core.TextContent("prior")},
-			})}, nil
+			})}}, nil
 		},
 	})
 
@@ -2598,5 +2598,160 @@ func TestSubagentTurnLimitSurfacesResumableMessage(t *testing.T) {
 	}
 	if strings.Contains(got, "max turns exceeded") {
 		t.Errorf("raw sentinel should not reach the parent: %q", got)
+	}
+}
+
+// resumeIdentity runs one subagent call and reports the model/thinking the
+// child actually ran under, as seen by the provider factory and by the job
+// identity published to the UI/cost path.
+type resumeIdentity struct {
+	factoryModel  string
+	startedModel  string
+	startedThink  string
+	requestThink  string
+	resultText    string
+	executeErrRes bool
+}
+
+func runResumeCase(t *testing.T, parent core.Model, parentThinking string, loaded ResumedTranscript, params map[string]any) resumeIdentity {
+	t.Helper()
+	var got resumeIdentity
+	provider := newMockProvider(func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		got.requestThink = req.Options.ThinkingLevel
+		return textResponse("done")(ctx, req)
+	})
+	cfg := Config{
+		DefaultModel:         parent,
+		CurrentThinkingLevel: func() string { return parentThinking },
+		ProviderFactory: func(m core.Model) (core.Provider, error) {
+			got.factoryModel = m.ID
+			return provider, nil
+		},
+		OnChildStart: func(_ string, _ string, model string, thinking string, _ string, _ bool, _ time.Time, _ int) {
+			got.startedModel = model
+			got.startedThink = thinking
+		},
+	}
+	if loaded.Messages != nil || loaded.Model != "" || loaded.Thinking != "" {
+		cfg.TranscriptLoader = func(string) (ResumedTranscript, error) { return loaded, nil }
+	}
+	sub, _, _ := newSubagentTools(t, cfg)
+	res, err := sub.Execute(context.Background(), params, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.resultText = textOf(res)
+	got.executeErrRes = res.IsError
+	return got
+}
+
+func priorTranscript() []core.AgentMessage {
+	return []core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("first task")),
+		{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("first answer")}}},
+	}
+}
+
+func TestResumeWithoutModelKeepsTranscriptModel(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "medium",
+		ResumedTranscript{Messages: priorTranscript(), Model: "gpt-5.6-sol"},
+		map[string]any{"task": "continue", "resume": "job-1"})
+	if got.factoryModel != "gpt-5.6-sol" {
+		t.Fatalf("resume must keep the transcript's model, got %q", got.factoryModel)
+	}
+	if got.startedModel != "gpt-5.6-sol" {
+		t.Fatalf("job/UI/cost identity must reflect the effective model, got %q", got.startedModel)
+	}
+}
+
+func TestResumeWithExplicitModelWins(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "medium",
+		ResumedTranscript{Messages: priorTranscript(), Model: "gpt-5.6-sol"},
+		map[string]any{"task": "continue", "resume": "job-1", "model": "claude-fable-5"})
+	if got.factoryModel != "claude-fable-5" {
+		t.Fatalf("explicit model must win over the transcript's, got %q", got.factoryModel)
+	}
+	if got.startedModel != "claude-fable-5" {
+		t.Fatalf("job identity must use the explicit model, got %q", got.startedModel)
+	}
+}
+
+func TestResumeWithoutThinkingKeepsTranscriptThinking(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "medium",
+		ResumedTranscript{Messages: priorTranscript(), Model: "gpt-5.6-sol", Thinking: "xhigh"},
+		map[string]any{"task": "continue", "resume": "job-1"})
+	if got.startedThink != "xhigh" {
+		t.Fatalf("resume must keep the transcript's thinking level, got %q", got.startedThink)
+	}
+	if got.requestThink != "xhigh" {
+		t.Fatalf("child request must run at the transcript's thinking level, got %q", got.requestThink)
+	}
+}
+
+func TestResumeWithExplicitThinkingWins(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "medium",
+		ResumedTranscript{Messages: priorTranscript(), Model: "gpt-5.6-sol", Thinking: "xhigh"},
+		map[string]any{"task": "continue", "resume": "job-1", "thinking": "low"})
+	if got.startedThink != "low" {
+		t.Fatalf("explicit thinking must win over the transcript's, got %q", got.startedThink)
+	}
+}
+
+func TestNewSubagentStillInheritsParentModelAndThinking(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "high",
+		ResumedTranscript{},
+		map[string]any{"task": "fresh"})
+	if got.factoryModel != "parent-model" {
+		t.Fatalf("a new subagent must inherit the parent's model, got %q", got.factoryModel)
+	}
+	if got.startedThink != "high" {
+		t.Fatalf("a new subagent must inherit the parent's thinking level, got %q", got.startedThink)
+	}
+}
+
+func TestResumeOldTranscriptWithoutIdentityInheritsParent(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "high",
+		ResumedTranscript{Messages: priorTranscript()},
+		map[string]any{"task": "continue", "resume": "job-1"})
+	if got.executeErrRes {
+		t.Fatalf("an old transcript must not break resume: %q", got.resultText)
+	}
+	if got.factoryModel != "parent-model" {
+		t.Fatalf("expected fallback to the parent's model, got %q", got.factoryModel)
+	}
+	if got.startedThink != "high" {
+		t.Fatalf("expected fallback to the parent's thinking level, got %q", got.startedThink)
+	}
+}
+
+func TestResumeUnknownStoredModelFallsBackToParent(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "medium",
+		ResumedTranscript{Messages: priorTranscript(), Model: "retired-model-9000"},
+		map[string]any{"task": "continue", "resume": "job-1"})
+	if got.executeErrRes {
+		t.Fatalf("a retired stored model must not break resume: %q", got.resultText)
+	}
+	if got.factoryModel != "parent-model" {
+		t.Fatalf("expected fallback to the parent's model, got %q", got.factoryModel)
+	}
+}
+
+func TestResumeInvalidStoredThinkingFallsBackToParent(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "medium",
+		ResumedTranscript{Messages: priorTranscript(), Model: "gpt-5.6-sol", Thinking: "ultra"},
+		map[string]any{"task": "continue", "resume": "job-1"})
+	if got.executeErrRes {
+		t.Fatalf("an invalid stored thinking level must not break resume: %q", got.resultText)
+	}
+	if got.startedThink != "medium" {
+		t.Fatalf("expected fallback to the parent's thinking level, got %q", got.startedThink)
 	}
 }
