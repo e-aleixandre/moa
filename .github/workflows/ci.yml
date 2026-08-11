@@ -38,6 +38,18 @@ jobs:
           npm ci
           npm run build
 
+      # The bundle under pkg/serve/static is generated but versioned (it ships
+      # via go:embed, so `go install` works without Node). Same contract as
+      # go.sum below: rebuilding it must be a no-op, or the commit that left it
+      # stale fails here instead of surfacing days later as a dirty tree in the
+      # release job.
+      - name: Check frontend bundle is up to date
+        run: |
+          # --intent-to-add so a brand new build directory (the usual shape of
+          # a stale bundle: the id changes, so the whole folder is untracked)
+          # shows up in the diff instead of passing unnoticed.
+          git add --intent-to-add -- pkg/serve/static
+          git diff --exit-code -- pkg/serve/static
 
       - name: Build
         run: go build ./...
