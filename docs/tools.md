@@ -19,7 +19,7 @@ Always registered:
 | `find` | Search files by glob (prefers `fd` if installed) |
 | `ls` | List directory contents |
 | `fetch_content` | Fetch a URL and extract readable markdown |
-| `memory` | Read/update persistent cross-session project notes |
+| `memory` | Search/read/update persistent cross-session notes |
 | `subagent` | Spawn a child agent (sync or async) |
 | `subagent_status` | Poll async subagent jobs |
 | `subagent_wait` | Block until an async subagent job finishes and return its result |
@@ -73,11 +73,14 @@ moa_docs(page: "recipes/linear")  # worked end-to-end integration
 
 ## Memory
 
-`memory` stores single-fact notes that survive across sessions. Each fact has a
-type that decides its scope: `user` and `feedback` are global (visible in every
-project), `project` and `reference` are scoped to the current **repository** —
+`memory` stores single-fact notes that survive across sessions. Each fact
+declares its scope: `global` facts are visible in every project, `project`
+facts are scoped to the current **repository** —
 every git worktree of one repo reads and writes the same project facts, and
-removing a worktree no longer strands what was learned in it.
+removing a worktree no longer strands what was learned in it. Files written
+before 0.26 carry the older four-value `type` (`user`/`feedback` → global,
+`project`/`reference` → project); they are still read, and a rewrite records
+`scope` while keeping a compatible `type`.
 
 Only an **index** — one line per fact — is injected into the prompt; full bodies
 are read on demand. The index has a byte budget, and each scope gets a reserved
@@ -100,10 +103,19 @@ instead of `durable`.
 When reading a fact with an invalidation condition, delete it if you can verify
 that the condition has occurred.
 
-The write parameters are `name`, `description`, `type`, `content`, and exactly
-one of `invalidate_when` or `durable`. `invalidate_when` is stored with the
+The write parameters are `name`, `description`, `scope`, `content`, and exactly
+one of `invalidate_when` or `durable`. The description is a one-line hook of at
+most 180 bytes — it is paid for on every turn, so the detail belongs in
+`content`. `invalidate_when` is stored with the
 fact and is shown by `memory` `read`; it is intentionally omitted from the
-always-in-context `list` index.
+always-in-context `list` index. A successful write reports how much of the
+index budget is in use, and how many facts overflow it and therefore never
+reach the prompt.
+
+`memory` `search` finds facts by text across names, descriptions and bodies in
+both scopes, returning ids and a short snippet around each match rather than
+whole bodies. It takes `query`, an optional `regex` flag (Go/RE2), `limit`
+(default 10, max 25) and `offset`.
 
 Other memory rules:
 
