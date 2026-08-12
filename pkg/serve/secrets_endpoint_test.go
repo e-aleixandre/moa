@@ -11,12 +11,33 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
+
+// syncBuffer serializes writes from the logging goroutines against the test's
+// own reads: slog's default logger is process-wide, so background subscribers
+// can log while the assertion inspects what was captured.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 func secretRequest(t *testing.T, srv *httptest.Server, sessionID, body string) *http.Response {
 	t.Helper()
@@ -98,9 +119,9 @@ func TestSecretsEndpointStrictDecodingAndValidation(t *testing.T) {
 
 func TestSecretsEndpointStashesAndDeliversOnlyNote(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	var logs bytes.Buffer
+	logs := &syncBuffer{}
 	oldLogger := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
 	t.Cleanup(func() { slog.SetDefault(oldLogger) })
 
 	srv, mgr, cancel := newTestServer(t)
