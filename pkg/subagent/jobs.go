@@ -38,6 +38,7 @@ type job struct {
 	id                    string
 	originToolCallID      string
 	task                  string
+	title                 string
 	model                 string
 	thinking              string
 	status                string
@@ -78,6 +79,7 @@ type jobSnapshot struct {
 	ID               string
 	OriginToolCallID string
 	Task             string
+	Title            string
 	Model            string
 	Thinking         string
 	Status           string
@@ -230,6 +232,7 @@ func snapshotLocked(j *job) jobSnapshot {
 		ID:               j.id,
 		OriginToolCallID: j.originToolCallID,
 		Task:             j.task,
+		Title:            j.title,
 		Model:            j.model,
 		Thinking:         j.thinking,
 		Status:           j.status,
@@ -244,6 +247,18 @@ func snapshotLocked(j *job) jobSnapshot {
 		ContextPercent:   j.contextPct,
 		AccentIndex:      j.accentIndex,
 	}
+}
+
+func (s *jobStore) setTitle(id, title string) {
+	j, ok := s.get(id)
+	if !ok || title == "" {
+		return
+	}
+	j.mu.Lock()
+	if j.title == "" {
+		j.title = title
+	}
+	j.mu.Unlock()
 }
 
 // setMessages stores a defensive deep copy of the child's message list.
@@ -553,6 +568,7 @@ type JobInfo struct {
 	JobID            string
 	OriginToolCallID string
 	Task             string
+	Title            string
 	Model            string
 	Thinking         string
 	Status           string
@@ -601,6 +617,7 @@ func (j *Jobs) Snapshot() []JobInfo {
 			JobID:            snap.ID,
 			OriginToolCallID: snap.OriginToolCallID,
 			Task:             snap.Task,
+			Title:            snap.Title,
 			Model:            snap.Model,
 			Thinking:         snap.Thinking,
 			Status:           snap.Status,

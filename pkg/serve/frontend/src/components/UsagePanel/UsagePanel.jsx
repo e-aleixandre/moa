@@ -6,6 +6,7 @@ import {
   fmtCost,
   money,
 } from "../../data/util/usage-pills.js";
+import { copyToClipboard } from "../../data/util/format.js";
 
 // UsagePanel — level 2 of the redesigned telemetry (TELEMETRY-SETTINGS-REDESIGN
 // spec §2). It is the read-only accounting the StatusStrip no longer keeps on
@@ -74,6 +75,7 @@ export function UsagePanel({ session, usage, ctxPercent, costUSD }) {
           )}
         </div>
       )}
+      {session?.id && <div class="usage-panel-group"><button type="button" class="usage-panel-row" onClick={() => copyToClipboard(session.id)}><span class="usage-panel-key">Session ID</span><span class="usage-panel-val">Copy</span></button></div>}
 
       {(u.fiveHour || u.week || extra || (u.moneyBuckets || []).length) && (
         <div class="usage-panel-group">

@@ -180,7 +180,7 @@ export function projectStream(session) {
 
   function ensureDoc(msg, index) {
     if (!currentDoc) {
-      currentDoc = { kind: 'document', id: blockID('doc', msg, index), blocks: [] };
+      currentDoc = { kind: 'document', id: blockID('doc', msg, index), message: msg, blocks: [] };
       blocks.push(currentDoc);
       currentLedger = null;
     }

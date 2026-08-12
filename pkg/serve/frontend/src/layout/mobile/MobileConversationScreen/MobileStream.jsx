@@ -116,7 +116,7 @@ function MobileStreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointA
     case "streaming":
       const proseHasCaret = block.blocks.some((b) => b.type === "prose" && b.caret);
       return (
-        <AssistantDocument streaming={block.kind === "streaming" && block.textLive === true && !proseHasCaret}>
+        <AssistantDocument message={block.message} streaming={block.kind === "streaming" && block.textLive === true && !proseHasCaret}>
           {mobileDocChildren(block.blocks, onOpenSubagent)}
         </AssistantDocument>
       );

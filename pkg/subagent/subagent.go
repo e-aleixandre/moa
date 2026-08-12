@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/agent"
+	"github.com/e-aleixandre/moa/pkg/autotitle"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -106,6 +107,12 @@ type Config struct {
 	// Result/Error are the terminal child outcome, not the one-time model
 	// delivery claim used by subagent_wait and async notifications.
 	OnChildEnd func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64)
+
+	// Title generation is deliberately asynchronous: starting work must never
+	// wait on a convenience model call. Resumed children keep their saved title.
+	TitleModel   core.Model
+	TitleEnabled bool
+	OnChildTitle func(jobID, title string)
 
 	// ChildMaxTurns caps the number of turns a child agent may take. 0 (or
 	// negative) falls back to defaultChildMaxTurns.
@@ -275,6 +282,9 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 					cfg.OnAsyncJobChange(jobs.runningCount())
 				}
 				notifyChildStart(cfg, jobs, job, task, model, true)
+				if len(seedMsgs) == 0 {
+					go generateTitle(cfg, jobs, job.id, task)
+				}
 				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil, true)
 				return taggedWithJob(core.TextResult("Subagent started in background.\nJob ID: "+job.id+"\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."), job.id), nil
 			}
@@ -300,9 +310,27 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			}
 			go linker(ctx, jobCancel, job)
 			notifyChildStart(cfg, jobs, job, task, model, false)
+			if len(seedMsgs) == 0 {
+				go generateTitle(cfg, jobs, job.id, task)
+			}
 			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate, true)
 			return awaitSyncResult(cfg, jobs, job, task, model)
 		},
+	}
+}
+
+func generateTitle(cfg Config, jobs *jobStore, jobID, task string) {
+	if !cfg.TitleEnabled || cfg.TitleModel.ID == "" || cfg.ProviderFactory == nil {
+		return
+	}
+	title, err := autotitle.Generate(cfg.AppCtx, cfg.ProviderFactory, cfg.TitleModel,
+		[]core.AgentMessage{core.WrapMessage(core.NewUserMessage(task))})
+	if err != nil {
+		return
+	}
+	jobs.setTitle(jobID, title)
+	if cfg.OnChildTitle != nil {
+		cfg.OnChildTitle(jobID, title)
 	}
 }
 

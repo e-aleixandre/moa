@@ -349,6 +349,7 @@ func (s *ManagedSession) persistSubagentTranscript(jobID, status, result, result
 	for _, info := range s.subagents.Snapshot() {
 		if info.JobID == jobID {
 			t.Task = info.Task
+			t.Title = info.Title
 			t.Model = info.Model
 			t.Thinking = info.Thinking
 			t.Async = info.Async
@@ -357,6 +358,9 @@ func (s *ManagedSession) persistSubagentTranscript(jobID, status, result, result
 			t.ContextPercent = &pct
 			break
 		}
+	}
+	if previous, err := store.Load(jobID); err == nil && previous.Title != "" && t.Title == "" {
+		t.Title = previous.Title
 	}
 	if err := store.Save(t); err != nil {
 		slog.Warn("subagent transcript save failed", "session", s.ID, "job", jobID, "error", err)

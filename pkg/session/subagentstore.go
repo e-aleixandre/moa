@@ -19,6 +19,7 @@ import (
 type SubagentTranscript struct {
 	JobID  string `json:"job_id"`
 	Task   string `json:"task"`
+	Title  string `json:"title,omitempty"`
 	Model  string `json:"model"`
 	Status string `json:"status"`
 	// Result and Error retain the terminal outcome separately from the child

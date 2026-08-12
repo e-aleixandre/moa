@@ -164,11 +164,14 @@ type Message struct {
 	Timestamp int64     `json:"timestamp"`
 
 	// assistant-only
-	Provider     string `json:"provider,omitempty"`
-	Model        string `json:"model,omitempty"`
-	Usage        *Usage `json:"usage,omitempty"`
-	StopReason   string `json:"stop_reason,omitempty"`
-	ErrorMessage string `json:"error_message,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	// RequestedModel is the normalized model selected for this response; Model
+	// is the effective model reported by the provider.
+	RequestedModel string `json:"requested_model,omitempty"`
+	Usage          *Usage `json:"usage,omitempty"`
+	StopReason     string `json:"stop_reason,omitempty"`
+	ErrorMessage   string `json:"error_message,omitempty"`
 
 	// tool_result-only
 	ToolCallID string `json:"tool_call_id,omitempty"`

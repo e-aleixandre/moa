@@ -9,7 +9,7 @@ import {
   handleWsPermissionResolved, handleWsAskResolved,
   handleWsConfigChange,
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
-  handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd, handleWsSubagentUsage,
+  handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd, handleWsSubagentUsage, handleWsSubagentTitle,
   handleWsBashJobStart, handleWsBashJobOutput, handleWsBashJobEnd, handleWsBashComplete,
   handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
   handleWsGoalChange, handleWsGoalIteration, handleWsGoalVerify, handleWsGoalEnd,
@@ -400,6 +400,9 @@ function routeEvent(sessionId, evt) {
       break;
     case 'subagent_start':
       handleWsSubagentStart(sessionId, evt.data);
+      break;
+    case 'subagent_title':
+      handleWsSubagentTitle(sessionId, evt.data);
       break;
     case 'subagent_event':
       handleWsSubagentEvent(sessionId, evt.data);

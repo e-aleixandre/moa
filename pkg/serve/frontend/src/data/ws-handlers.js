@@ -29,7 +29,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           textParts.push(c.text);
         } else if (c.type === 'tool_call') {
           if (textParts.length > 0) {
-            result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, content: [{ type: 'text', text: textParts.join('') }] });
+            result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, requested_model: msg.requested_model, model: msg.model, content: [{ type: 'text', text: textParts.join('') }] });
             textParts.length = 0;
           }
           const tr = resultMap[c.tool_call_id];
@@ -63,7 +63,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
         }
       }
       if (textParts.length > 0) {
-        result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, content: [{ type: 'text', text: textParts.join('') }] });
+        result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, requested_model: msg.requested_model, model: msg.model, content: [{ type: 'text', text: textParts.join('') }] });
       }
     } else if (msg.role === 'shell' || (msg.role === 'user' && msg.custom?.shell)) {
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
@@ -896,6 +896,13 @@ export function handleWsMessageEnd(id, fullText, msgId = '') {
 
 export function handleWsRunTokens(id, data) {
   updateSession(id, { runTokensUp: data.up || 0, runTokensDown: data.down || 0, runEpoch: nextRunEpoch(id) });
+}
+
+export function handleWsSubagentTitle(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess || !data?.job_id || !data?.title) return;
+  const existing = sess.subagents?.[data.job_id] || { jobId: data.job_id };
+  updateSession(id, { subagents: { ...sess.subagents, [data.job_id]: { ...existing, title: data.title } } });
 }
 
 export function handleWsToolCallStart(id, data) {

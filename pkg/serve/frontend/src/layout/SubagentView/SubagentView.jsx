@@ -11,6 +11,7 @@ import { fmtTokens, copyToClipboard, sessionTitle } from "../../data/util/format
 import { modelAccent } from "../../data/selectors.js";
 import { cancelSubagent, promoteSubagent } from "../../data/session-actions.js";
 import { updateSession } from "../../data/store.js";
+import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import "./SubagentView.css";
 
 // SubagentView — "inside the fork". Zoom into ONE subagent: its
@@ -38,6 +39,7 @@ export function SubagentView({ session, jobId, onBack }) {
 
   // Cancel confirm-inline: first click arms ("sure?"), a 2s timeout disarms.
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   useEffect(() => {
     if (!confirmCancel) return;
     const t = setTimeout(() => setConfirmCancel(false), 2000);
@@ -106,7 +108,7 @@ export function SubagentView({ session, jobId, onBack }) {
             {sessionTitle(session)}
           </button>
           <span class="sa-crumb-sep" aria-hidden="true">›</span>
-          <span class="sa-crumb-name" style={{ color: accentVar }}>{view.name}</span>
+          <button type="button" class="sa-crumb-name" style={{ color: accentVar }} onClick={() => setDetailsOpen(true)}>{view.name}</button>
         </div>
         <div class="sa-head-actions">
           {view.model && (
@@ -168,8 +170,22 @@ export function SubagentView({ session, jobId, onBack }) {
         />
       )}
       <BranchStrip session={session} view={view} />
+      <Sheet open={detailsOpen} onClose={() => setDetailsOpen(false)} title="Subagent details">
+        <SubagentDetails session={session} view={view} />
+      </Sheet>
     </div>
   );
+}
+
+function SubagentDetails({ session, view }) {
+  const [copied, setCopied] = useState("");
+  const copy = (value, key) => copyToClipboard(value).then((ok) => { if (ok) { setCopied(key); setTimeout(() => setCopied(""), 1200); } });
+  return <div class="sa-details">
+    <b>{view.name}</b><p>{view.task}</p>
+    <button type="button" onClick={() => copy(view.jobId, "job")}>Job ID: {view.jobId} {copied === "job" ? "✓" : "Copy"}</button>
+    <span>{view.model} · {view.thinking || "off"} · {view.async ? "background" : "sync"}</span>
+    <button type="button" onClick={() => copy(session.id, "parent")}>Parent session ID: {session.id} {copied === "parent" ? "✓" : "Copy"}</button>
+  </div>;
 }
 
 // BranchStrip — the parent's own StatusStrip, measuring the branch: the

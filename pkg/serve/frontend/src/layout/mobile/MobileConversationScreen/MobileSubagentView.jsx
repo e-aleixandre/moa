@@ -9,6 +9,7 @@ import { fmtTokens, copyToClipboard, sessionTitle } from "../../../data/util/for
 import { fmtCost } from "../../../data/util/usage-pills.js";
 import { modelAccent } from "../../../data/selectors.js";
 import { cancelSubagent, promoteSubagent } from "../../../data/session-actions.js";
+import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 // The now-line above the composer reuses MobileNowLine's rules verbatim (same
 // grammar, different subject), so its stylesheet has to be in the graph even
 // though this screen doesn't render that component.
@@ -43,6 +44,7 @@ export function MobileSubagentView({ session, jobId, onBack }) {
   }, [view, session, jobId, onBack]);
 
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   useEffect(() => {
     if (!confirmCancel) return;
     const t = setTimeout(() => setConfirmCancel(false), 2000);
@@ -78,7 +80,7 @@ export function MobileSubagentView({ session, jobId, onBack }) {
         <span class="msa-ident">
           <GitFork size={13} style={{ color: `var(--${accent})` }} aria-hidden="true" />
           <span class="msa-kind">subagent</span>
-          <span class="msa-name" style={{ color: `var(--${accent})` }}>{view.name}</span>
+          <button type="button" class="msa-name" style={{ color: `var(--${accent})` }} onClick={() => setDetailsOpen(true)}>{view.name}</button>
         </span>
         <RunModeChip async={view.async} canPromote={canPromote(view)} onPromote={onPromote} />
       </header>
@@ -120,6 +122,9 @@ export function MobileSubagentView({ session, jobId, onBack }) {
         )}
         <BranchStatusLine session={session} view={view} />
       </div>
+      <MobileSheet open={detailsOpen} onClose={() => setDetailsOpen(false)} title="Subagent details" scope="subagent">
+        <div class="msa-details"><b>{view.name}</b><p>{view.task}</p><button type="button" onClick={() => copyToClipboard(view.jobId)}>Copy job ID: {view.jobId}</button><span>{view.model} · {view.thinking || "off"} · {view.async ? "background" : "sync"}</span><button type="button" onClick={() => copyToClipboard(session.id)}>Copy parent session ID</button></div>
+      </MobileSheet>
     </div>
   );
 }

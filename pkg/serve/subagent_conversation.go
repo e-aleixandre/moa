@@ -18,6 +18,7 @@ import (
 type SubagentSummary struct {
 	JobID      string    `json:"job_id"`
 	Task       string    `json:"task"`
+	Title      string    `json:"title,omitempty"`
 	Model      string    `json:"model,omitempty"`
 	Thinking   string    `json:"thinking,omitempty"`
 	Status     string    `json:"status"`
@@ -247,7 +248,7 @@ func subagentSummaryFromLive(info subagent.JobInfo) SubagentSummary {
 }
 
 func subagentSummaryFromTranscript(transcript session.SubagentTranscript) SubagentSummary {
-	s := SubagentSummary{JobID: transcript.JobID, Task: transcript.Task, Model: transcript.Model, Thinking: transcript.Thinking, Status: transcript.Status, Async: transcript.Async, StartedAt: transcript.StartedAt, FinishedAt: transcript.FinishedAt, Source: "persisted", CostUSD: transcript.CostUSD, ContextPercent: -1}
+	s := SubagentSummary{JobID: transcript.JobID, Task: transcript.Task, Title: transcript.Title, Model: transcript.Model, Thinking: transcript.Thinking, Status: transcript.Status, Async: transcript.Async, StartedAt: transcript.StartedAt, FinishedAt: transcript.FinishedAt, Source: "persisted", CostUSD: transcript.CostUSD, ContextPercent: -1}
 	if transcript.ContextPercent != nil {
 		s.ContextPercent = *transcript.ContextPercent
 	}

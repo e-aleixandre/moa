@@ -360,6 +360,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			loopErr = fmt.Errorf("stream: %w", err)
 			return loopErr
 		}
+		// Keep the requested identity on this response. A provider can return a
+		// safety fallback without changing the session's selected model.
+		assistantMsg.RequestedModel = cfg.model.ID
 		// A stream succeeded: reset the consecutive-empty counter so the retry
 		// budget applies per stall point, not per run.
 		emptyRetries = 0

@@ -270,6 +270,14 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				})
 			}
 		},
+		SubagentTitleModel:   autoTitleModel,
+		SubagentTitleEnabled: autoTitleEnabled,
+		OnSubagentTitle: func(jobID, title string) {
+			if s := sess; s != nil {
+				s.persistSubagentTranscript(jobID, "running", "", "", time.Time{}, nil, 0)
+				s.runtime.Bus.Publish(bus.SubagentTitleChanged{SessionID: s.ID, JobID: jobID, Title: title})
+			}
+		},
 		OnSubagentEvent: func(jobID string, inner any) {
 			if s := sess; s != nil {
 				s.runtime.Bus.Publish(bus.SubagentEvent{
@@ -582,6 +590,7 @@ func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInf
 			JobID:            info.JobID,
 			OriginToolCallID: info.OriginToolCallID,
 			Task:             info.Task,
+			Title:            info.Title,
 			Model:            info.Model,
 			Thinking:         info.Thinking,
 			Status:           info.Status,

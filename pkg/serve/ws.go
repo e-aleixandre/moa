@@ -293,12 +293,14 @@ func wsEventFromBus(event any) (Event, bool) {
 		}}, true
 	case bus.SubagentStarted:
 		data := SubagentStartData{
-			JobID: e.JobID, OriginToolCallID: e.OriginToolCallID, Task: e.Task, Model: e.Model, Thinking: e.Thinking, Async: e.Async, AccentIndex: e.AccentIndex,
+			JobID: e.JobID, OriginToolCallID: e.OriginToolCallID, Task: e.Task, Title: e.Title, Model: e.Model, Thinking: e.Thinking, Async: e.Async, AccentIndex: e.AccentIndex,
 		}
 		if !e.StartedAt.IsZero() {
 			data.StartedAtMs = e.StartedAt.UnixMilli()
 		}
 		return Event{Type: "subagent_start", Data: data}, true
+	case bus.SubagentTitleChanged:
+		return Event{Type: "subagent_title", Data: map[string]string{"job_id": e.JobID, "title": e.Title}}, true
 	case bus.SubagentUsage:
 		var inputTok, outputTok int
 		if e.Usage != nil {
@@ -560,6 +562,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 				JobID:            sa.JobID,
 				OriginToolCallID: sa.OriginToolCallID,
 				Task:             sa.Task,
+				Title:            sa.Title,
 				Model:            sa.Model,
 				Thinking:         sa.Thinking,
 				Status:           sa.Status,
