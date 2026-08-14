@@ -2755,3 +2755,212 @@ func TestResumeInvalidStoredThinkingFallsBackToParent(t *testing.T) {
 		t.Fatalf("expected fallback to the parent's thinking level, got %q", got.startedThink)
 	}
 }
+
+// newSubagentSteerTool builds the launch + steer pair over one shared store, so
+// a test can start a job and then steer the very same child.
+func newSubagentSteerTool(t *testing.T, cfg Config) (core.Tool, core.Tool, core.Tool) {
+	t.Helper()
+	sub, status, _, jobs := newSubagentToolsWithStore(t, cfg)
+	return sub, newSubagentSteer(jobs), status
+}
+
+// The point of the tool: the message must land in the CHILD's context, not
+// merely be accepted. The second provider call is the child's next step, so
+// that is where the steered text has to show up.
+func TestSubagentSteerReachesTheChildContext(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	seen := make(chan []core.Message, 1)
+	provider := newMockProvider(
+		gateResponse(started, release, "first step"),
+		func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+			select {
+			case seen <- req.Messages:
+			default:
+			}
+			return textResponse("done")(ctx, req)
+		},
+	)
+	sub, steer, _ := newSubagentSteerTool(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "long", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	<-started
+
+	got, err := steer.Execute(context.Background(), map[string]any{"job_id": jobID, "message": "use the other file"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.IsError {
+		t.Fatalf("steering a running child must succeed: %q", textOf(got))
+	}
+	close(release)
+
+	select {
+	case msgs := <-seen:
+		var joined strings.Builder
+		for _, m := range msgs {
+			for _, c := range m.Content {
+				if c.Type == "text" {
+					joined.WriteString(c.Text)
+				}
+			}
+		}
+		if !strings.Contains(joined.String(), "use the other file") {
+			t.Fatalf("the steered message never reached the child: %q", joined.String())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the child never took a second step")
+	}
+}
+
+func TestSubagentSteerRejectsUnknownAndEmpty(t *testing.T) {
+	_, steer, _ := newSubagentSteerTool(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return newMockProvider(), nil },
+		AppCtx:          context.Background(),
+	})
+
+	res, err := steer.Execute(context.Background(), map[string]any{"job_id": "sa-nope", "message": "hi"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(textOf(res), "unknown job ID") {
+		t.Fatalf("expected an unknown-job error, got %q", textOf(res))
+	}
+
+	res, err = steer.Execute(context.Background(), map[string]any{"job_id": "sa-nope", "message": "   "}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(textOf(res), "message is required") {
+		t.Fatalf("expected an empty-message error, got %q", textOf(res))
+	}
+}
+
+// Steering a job that already finished is the likely mistake, and it must say
+// so rather than silently succeed.
+func TestSubagentSteerRefusesAFinishedJob(t *testing.T) {
+	provider := newMockProvider(textResponse("child done"))
+	sub, steer, status := newSubagentSteerTool(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "quick", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	waitFor(t, 3*time.Second, func() bool {
+		return strings.Contains(textOf(mustStatus(t, status, jobID)), "Status: completed")
+	})
+
+	got, err := steer.Execute(context.Background(), map[string]any{"job_id": jobID, "message": "too late"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsError || !strings.Contains(textOf(got), "not running") {
+		t.Fatalf("expected a not-running refusal, got %q", textOf(got))
+	}
+}
+
+// A child must not be able to redirect a sibling: subagents are leaf workers,
+// not orchestrators, so subagent_steer belongs to the excluded set like the
+// rest of the subagent family.
+func TestBuildChildRegistryExcludesSubagentSteer(t *testing.T) {
+	parent := core.NewRegistry()
+	_ = parent.Register(core.Tool{Name: "read"})
+	_ = parent.Register(core.Tool{Name: "subagent_steer"})
+
+	reg, errRes := buildChildRegistry(parent, nil)
+	if errRes != nil {
+		t.Fatalf("unexpected error: %s", textOf(*errRes))
+	}
+	if _, ok := reg.Get("subagent_steer"); ok {
+		t.Fatal("a child must not inherit subagent_steer")
+	}
+
+	// Asking for it by name is skipped too, not honoured.
+	reg2, errRes2 := buildChildRegistry(parent, map[string]any{"tools": []any{"read", "subagent_steer"}})
+	if errRes2 != nil {
+		t.Fatalf("unexpected error: %s", textOf(*errRes2))
+	}
+	if _, ok := reg2.Get("subagent_steer"); ok {
+		t.Fatal("an explicit request must not smuggle subagent_steer into a child")
+	}
+}
+
+// Jobs.Steer is the route the web UI uses. A finished job keeps both its entry
+// (until the TTL) and its childAgent, and an Agent only refuses while aborting
+// — so without an explicit status check this returned true and the composer
+// cleared the user's text for a message nobody would ever read.
+func TestJobsSteerRefusesAFinishedJob(t *testing.T) {
+	provider := newMockProvider(textResponse("child done"))
+	sub, status, _, store := newSubagentToolsWithStore(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+	})
+	jobs := &Jobs{store: store}
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "quick", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	waitFor(t, 3*time.Second, func() bool {
+		return strings.Contains(textOf(mustStatus(t, status, jobID)), "Status: completed")
+	})
+
+	// The job is still tracked (its result is readable) and still holds its
+	// child agent — which is exactly why this used to be accepted.
+	if j, ok := store.get(jobID); !ok || j.getChildAgent() == nil {
+		t.Fatal("precondition: a finished job should still be tracked with its child")
+	}
+	if jobs.Steer(jobID, "too late") {
+		t.Fatal("steering a finished job must not report the message as queued")
+	}
+}
+
+func TestJobsSteerRefusesAnUnknownJob(t *testing.T) {
+	_, _, _, store := newSubagentToolsWithStore(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return newMockProvider(), nil },
+		AppCtx:          context.Background(),
+	})
+	if (&Jobs{store: store}).Steer("sa-nope", "hello") {
+		t.Fatal("steering an unknown job must return false")
+	}
+}
+
+// The live path still has to work: a running child accepts through Jobs.Steer.
+func TestJobsSteerAcceptsARunningJob(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := newMockProvider(gateResponse(started, release, "done"))
+	sub, _, _, store := newSubagentToolsWithStore(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "long", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	<-started
+	if !(&Jobs{store: store}).Steer(jobID, "adjust course") {
+		t.Fatal("a running child must accept a steer")
+	}
+	close(release)
+}

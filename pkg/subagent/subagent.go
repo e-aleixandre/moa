@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/agent"
+	"github.com/e-aleixandre/moa/pkg/autotitle"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -47,6 +48,7 @@ var excludedTools = map[string]bool{
 	"subagent_status": true,
 	"subagent_wait":   true,
 	"subagent_cancel": true,
+	"subagent_steer":  true,
 	"memory":          true,
 	"ask_user":        true,
 }
@@ -107,6 +109,12 @@ type Config struct {
 	// delivery claim used by subagent_wait and async notifications.
 	OnChildEnd func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64)
 
+	// Title generation is deliberately asynchronous: starting work must never
+	// wait on a convenience model call. Resumed children keep their saved title.
+	TitleModel   core.Model
+	TitleEnabled bool
+	OnChildTitle func(jobID, title string)
+
 	// ChildMaxTurns caps the number of turns a child agent may take. 0 (or
 	// negative) falls back to defaultChildMaxTurns.
 	ChildMaxTurns int
@@ -151,6 +159,7 @@ func RegisterAll(reg *core.Registry, cfg Config) (*Jobs, error) {
 		newSubagentStatus(jobs),
 		newSubagentWait(jobs),
 		newSubagentCancel(jobs),
+		newSubagentSteer(jobs),
 	} {
 		if err := reg.Register(t); err != nil {
 			return nil, fmt.Errorf("subagent: %w", err)
@@ -275,6 +284,9 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 					cfg.OnAsyncJobChange(jobs.runningCount())
 				}
 				notifyChildStart(cfg, jobs, job, task, model, true)
+				if len(seedMsgs) == 0 {
+					go generateTitle(cfg, jobs, job.id, task)
+				}
 				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil, true)
 				return taggedWithJob(core.TextResult("Subagent started in background.\nJob ID: "+job.id+"\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."), job.id), nil
 			}
@@ -300,9 +312,27 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			}
 			go linker(ctx, jobCancel, job)
 			notifyChildStart(cfg, jobs, job, task, model, false)
+			if len(seedMsgs) == 0 {
+				go generateTitle(cfg, jobs, job.id, task)
+			}
 			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate, true)
 			return awaitSyncResult(cfg, jobs, job, task, model)
 		},
+	}
+}
+
+func generateTitle(cfg Config, jobs *jobStore, jobID, task string) {
+	if !cfg.TitleEnabled || cfg.TitleModel.ID == "" || cfg.ProviderFactory == nil {
+		return
+	}
+	title, err := autotitle.Generate(cfg.AppCtx, cfg.ProviderFactory, cfg.TitleModel,
+		[]core.AgentMessage{core.WrapMessage(core.NewUserMessage(task))})
+	if err != nil {
+		return
+	}
+	jobs.setTitle(jobID, title)
+	if cfg.OnChildTitle != nil {
+		cfg.OnChildTitle(jobID, title)
 	}
 }
 
@@ -450,6 +480,65 @@ func newSubagentCancel(jobs *jobStore) core.Tool {
 				return core.TextResult("Cancellation requested"), nil
 			case <-ctx.Done():
 				return core.ErrorResult(ctx.Err().Error()), nil
+			}
+		},
+	}
+}
+
+// newSubagentSteer lets a parent redirect a child that is already running,
+// instead of the all-or-nothing choice between waiting for a job it can see
+// going the wrong way and cancelling it to start over. The message is queued
+// and the child picks it up between steps, exactly like a steer typed from the
+// UI — so a correction reaches the child without discarding the work it has
+// already done.
+//
+// It is deliberately non-blocking: it reports that the message was queued, not
+// that the child has read it. Whether it acted on it is visible in the child's
+// own transcript (and through subagent_status / subagent_wait).
+func newSubagentSteer(jobs *jobStore) core.Tool {
+	return core.Tool{
+		Name:  "subagent_steer",
+		Label: "Subagent Steer",
+		Description: "Send a message to a RUNNING subagent job: extra instructions, a correction or an answer it is waiting for. " +
+			"The message is queued and the subagent reads it between steps, keeping the work it has already done. " +
+			"Use it instead of cancelling and relaunching a job that is merely going the wrong way.",
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"job_id": {
+					"type": "string",
+					"description": "The job ID returned by an async subagent call"
+				},
+				"message": {
+					"type": "string",
+					"description": "What to tell the subagent. Be explicit about what changes: it has its own context and cannot see this conversation."
+				}
+			},
+			"required": ["job_id", "message"]
+		}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			jobs.cleanup(jobTTL)
+			jobID, _ := params["job_id"].(string)
+			message, _ := params["message"].(string)
+			if strings.TrimSpace(message) == "" {
+				return core.ErrorResult("message is required"), nil
+			}
+			accepted, status := jobs.steerJob(jobID, message)
+			if accepted {
+				return core.TextResult("Message queued for " + jobID + "; it will be read between steps."), nil
+			}
+			switch status {
+			case "":
+				return core.ErrorResult("unknown job ID: " + jobID), nil
+			case statusRunning:
+				// Running, yet it refused: it is between its last step and its
+				// terminal state, or its queue is full.
+				return core.ErrorResult("the subagent did not accept the message (it is finishing, or its queue is full)"), nil
+			default:
+				// A finished job is the common mistake, and its status is a more
+				// useful answer than a bare failure: the parent can then read the
+				// result instead of steering into the void.
+				return core.ErrorResult("job is " + status + ", not running: nothing to steer"), nil
 			}
 		},
 	}

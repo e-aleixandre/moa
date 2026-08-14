@@ -9,7 +9,7 @@ import {
 } from "../../data/session-actions.js";
 import { store, updateSession } from "../../data/store.js";
 import { addToast } from "../../data/notifications.js";
-import { combineQueueText, droppedImageCount, queueSummary } from "../../data/composer-queue.js";
+import { combineQueueText, droppedImageCount, queueSummary, recallActivates, sendMayClear } from "../../data/composer-queue.js";
 import {
   slashSuggestions, findMentionToken, computeMentionInsertion, normalizeDashes,
 } from "../../data/composer-suggest.js";
@@ -93,6 +93,33 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   // (or click + Alt+↑) would see the same pendingSteers and combine the texts
   // twice into the textarea. Released once cancelSteers settles.
   const recallInFlight = useRef(false);
+  // A click only counts as a recall when this chip also received its
+  // pointerdown. The chip is born under the finger: it appears in the composer
+  // the instant a message is queued, which is exactly where the send button was
+  // just tapped, so the click that follows that tap lands on a control that did
+  // not exist when the gesture started. Production traces caught it firing the
+  // recall 11ms after a send (a real tap on it measured ~1500ms), cancelling
+  // the message server-side while the send was still in flight — the text was
+  // destroyed on both sides. Requiring the whole gesture to happen on the chip
+  // rejects an inherited click by construction, with no timing heuristics.
+  const recallPointerDown = useRef(null);
+  // Counts every write to the textarea that a send did not make itself: a queue
+  // recall or abort restoring messages, a voice transcript, history recall, an
+  // accepted suggestion. A send captures the count before awaiting the server
+  // and only clears the box if it has not moved.
+  //
+  // Comparing the text instead is not enough: a recall restores the very
+  // message that was just sent, so the two are equal by value.
+  //
+  // Writes go through writeComposer so a new one cannot forget to bump it —
+  // the previous fix listed the routes by hand and missed four.
+  const composerEpoch = useRef(0);
+  const writeComposer = useCallback((el, value) => {
+    if (!el) return;
+    el.value = value;
+    composerEpoch.current += 1;
+  }, []);
+
 
   // --- Slash command + @-mention suggestion state ---
   const [goalFlags, setGoalFlags] = useState([]);
@@ -163,7 +190,15 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   // cancel the not-yet-delivered steers server-side so re-submitting the edited
   // text doesn't deliver both the originals and the edit. The server broadcasts
   // steers_canceled to every client (shared queue), which clears the chips.
-  const handleDequeueSteers = useCallback(() => {
+  const handleDequeueSteers = useCallback((opts) => {
+    const armedPointerId = recallPointerDown.current;
+    recallPointerDown.current = null;
+    if (!recallActivates({
+      armedPointerId,
+      pointerId: opts?.pointerId,
+      detail: opts?.detail,
+      fromKeyboard: opts?.fromKeyboard === true,
+    })) return;
     if (recallInFlight.current) return; // a recall is already in flight
     const sess = store.get().sessions[sessionId];
     if (!sess?.pendingSteers?.length) return;
@@ -172,7 +207,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     if (!el) return;
 
     recallInFlight.current = true;
-    el.value = combineQueueText(el.value, sess.pendingSteers);
+    writeComposer(el, combineQueueText(el.value, sess.pendingSteers));
     setHasText(!!el.value.trim());
     saveDraft(sessionId, el.value); // persist the recalled text (no input event)
 
@@ -253,7 +288,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     const el = textareaRef.current;
     if (!el) return;
     const { value, cursor, retrigger } = computeMentionInsertion(el.value, el.selectionStart, path, isDir);
-    el.value = value;
+    writeComposer(el, value);
     el.selectionStart = el.selectionEnd = cursor;
     setFileSuggestions(null);
     if (retrigger) setTimeout(updateFileSuggestions, 50); // navigate into directory
@@ -271,7 +306,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       while (tokenStart > 0 && val[tokenStart - 1] !== ' ') tokenStart--;
       const before = val.slice(0, tokenStart);
       const after = val.slice(cursor);
-      el.value = before + cmd.name + ' ' + after;
+      writeComposer(el, before + cmd.name + ' ' + after);
       const newPos = before.length + cmd.name.length + 1;
       el.selectionStart = el.selectionEnd = newPos;
       el.focus();
@@ -280,7 +315,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       return;
     }
     if (cmd.args) {
-      el.value = '/' + cmd.name + ' ';
+      writeComposer(el, '/' + cmd.name + ' ');
       setCmdSuggestions(null);
       el.focus();
       // Mirror the flag branch: fire input so the draft/hasText/autoResize
@@ -288,7 +323,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       // the just-picked command).
       el.dispatchEvent(new Event('input', { bubbles: true }));
     } else {
-      el.value = '/' + cmd.name;
+      writeComposer(el, '/' + cmd.name);
       setCmdSuggestions(null);
       dispatchContentSendRef.current?.(sendButtonEvent.keyActivate());
     }
@@ -370,7 +405,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     const el = textareaRef.current;
     if (!el) return;
     if (el.value === '') {
-      el.value = '/';
+      writeComposer(el, '/');
       el.selectionStart = el.selectionEnd = 1;
       el.dispatchEvent(new Event('input', { bubbles: true }));
     }
@@ -423,13 +458,24 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
 
     // Steer mode: everything the user types goes to the live subagent as a
     // steer. No slash/shell/queue semantics, no attachments (the subagent steer
-    // endpoint is text-only). Clear the box and fire; the caller shows optimistic
-    // feedback / rebounds to the parent if the subagent already finished.
+    // endpoint is text-only). The message shows up in the child's transcript
+    // when the child takes it into its context and the server echoes the steer
+    // back over the socket; if the subagent already finished, we rebound to the
+    // parent.
     if (steer && steer.jobId) {
       if (!text) return;
+      const steerEpoch = composerEpoch.current;
       try {
-        await steerSubagent(sessionId, steer.jobId, text);
+        const res = await steerSubagent(sessionId, steer.jobId, text);
+        // The server answers whether the child actually took the message; a
+        // 200 alone does not mean it was queued. A refused steer must leave the
+        // text where the user can resend it rather than silently empty the box.
+        if (res && res.queued === false) throw new Error('the subagent did not accept the message');
         pushHistory(text);
+        // Same ownership rule as an ordinary send: history recall or an
+        // accepted suggestion during the round-trip means the box is no longer
+        // this steer's to empty.
+        if (!sendMayClear(steerEpoch, composerEpoch.current)) return;
         el.value = '';
         saveDraft(sessionId, '');
         setHasText(false);
@@ -450,7 +496,15 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       return;
     }
 
+    const sendEpoch = composerEpoch.current;
     const clearSentComposer = () => {
+      // Only clear what this send is entitled to clear. An ordinary message
+      // waits for the server response before emptying the box, and in that gap
+      // the textarea can legitimately hold something else: a queue recall
+      // restoring its messages, or an abort dumping them back. Wiping it
+      // blindly destroyed text the user never sent — that is how a queued
+      // message could vanish from both the server and the screen at once.
+      if (!sendMayClear(sendEpoch, composerEpoch.current)) return;
       // Safari can deliver a composition input after the Enter that submitted
       // it. Its epoch identifies it as stale without rejecting a later, new
       // composition.
@@ -645,7 +699,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
     const before = el.value.substring(0, start);
     const after = el.value.substring(end);
     const sep = before.length > 0 && !/\s$/.test(before) ? ' ' : '';
-    el.value = before + sep + text + after;
+    writeComposer(el, before + sep + text + after);
     const newPos = start + sep.length + text.length;
     el.selectionStart = el.selectionEnd = newPos;
     el.focus();
@@ -707,7 +761,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       if (restored.length === 0) return;
       const el = textareaRef.current;
       if (el) {
-        el.value = combineQueueText(el.value, restored);
+        writeComposer(el, combineQueueText(el.value, restored));
         setHasText(!!el.value.trim());
         autoResize();
         el.focus();
@@ -749,7 +803,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       const sess = store.get().sessions[sessionId];
       if (sess?.pendingSteers?.length) {
         e.preventDefault();
-        handleDequeueSteers();
+        handleDequeueSteers({ fromKeyboard: true });
         return;
       }
     }
@@ -839,7 +893,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       } else if (h.idx > 0) {
         h.idx--;
       }
-      el.value = h.entries[h.idx];
+      writeComposer(el, h.entries[h.idx]);
       autoResize();
       saveDraft(sessionId, el.value); // keep the persisted draft in sync
       el.selectionStart = el.selectionEnd = el.value.length;
@@ -853,10 +907,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       h.idx++;
       if (h.idx >= h.entries.length) {
         h.idx = -1;
-        el.value = h.draft;
+        writeComposer(el, h.draft);
         h.draft = "";
       } else {
-        el.value = h.entries[h.idx];
+        writeComposer(el, h.entries[h.idx]);
       }
       autoResize();
       saveDraft(sessionId, el.value); // keep the persisted draft in sync
@@ -1017,7 +1071,15 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
               type="button"
               class="queue-note"
               title="Click or Alt+↑ to edit queued messages"
-              onClick={handleDequeueSteers}
+              onPointerDown={(e) => { recallPointerDown.current = e.pointerId ?? true; }}
+              onPointerCancel={() => { recallPointerDown.current = null; }}
+              onPointerLeave={() => { recallPointerDown.current = null; }}
+              onClick={(e) => handleDequeueSteers({ pointerId: e.pointerId, detail: e.detail })}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                handleDequeueSteers({ fromKeyboard: true });
+              }}
             >
               <Chip size="sm" mono>{summary.count} queued</Chip>
               <span>

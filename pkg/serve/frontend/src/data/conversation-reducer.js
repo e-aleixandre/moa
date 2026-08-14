@@ -200,6 +200,31 @@ export function reduceRunEnd(target, buffers) {
   return target;
 }
 
+// reduceSteer appends a steer that the agent has taken into its context as the
+// user message it is. Without this a message steered into a RUNNING subagent
+// stayed invisible until the transcript was refetched, even though the server
+// had accepted, queued and delivered it.
+//
+// Deduplicated by msg_id: the same message can arrive both live and again in a
+// snapshot, and the id is what makes them the same message (the text is not —
+// the same words are often sent more than once).
+export function reduceSteer(target, data) {
+  target = ensureTarget(target);
+  const msgID = data.msg_id || undefined;
+  if (msgID && target.messages.some(m => m._msg_id === msgID)) return target;
+  const content = Array.isArray(data.content) && data.content.length > 0
+    ? data.content
+    : [{ type: 'text', text: data.text }];
+  target.messages = [...target.messages, {
+    role: 'user',
+    _msg_id: msgID,
+    _steer_id: data.id || undefined,
+    content,
+    custom: data.custom,
+  }];
+  return target;
+}
+
 // applyNestedEvent routes one nested WS event ({type, data}) to the right
 // reducer for a target. Used by the subagent handlers, where events arrive
 // wrapped inside subagent_event. Returns the updated target.
@@ -216,6 +241,7 @@ export function applyNestedEvent(target, buffers, evt, extractNote) {
     case 'tool_update':   return reduceToolUpdate(target, buffers, data);
     case 'tool_end':      return reduceToolEnd(target, buffers, data, extractNote);
     case 'run_end':       return reduceRunEnd(target, buffers);
+    case 'steer':         return reduceSteer(target, data);
     default:              return ensureTarget(target);
   }
 }

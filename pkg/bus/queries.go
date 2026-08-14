@@ -254,6 +254,7 @@ type SubagentSnapshot struct {
 	// OriginToolCallID identifies the parent model tool call that created this job.
 	OriginToolCallID string
 	Task             string
+	Title            string
 	Model            string
 	Thinking         string
 	Status           string

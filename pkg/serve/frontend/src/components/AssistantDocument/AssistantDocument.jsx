@@ -1,4 +1,5 @@
 import { sanitizeHtml } from "../../util/sanitize.js";
+import { ResponseModelBadge } from "../ResponseModelBadge/ResponseModelBadge.jsx";
 import "./AssistantDocument.css";
 
 // AssistantDocument — "document" flow of the agent's work: paragraphs,
@@ -12,12 +13,15 @@ export function AssistantDocument({
   html,
   streaming = false,
   className = "",
+
+  message,
   ...rest
 }) {
   const streamClass = streaming ? " is-streaming" : "";
   if (html != null) {
     return (
       <div class={`doc ${streamClass} ${className}`.trim()} {...rest}>
+        <ResponseModelBadge message={message} />
         <div
           class="doc-html"
           dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }}
@@ -28,6 +32,7 @@ export function AssistantDocument({
   }
   return (
     <div class={`doc ${streamClass} ${className}`.trim()} {...rest}>
+      <ResponseModelBadge message={message} />
       {children}
       {streaming && (
         <span class="doc-cursor" aria-hidden="true" />
@@ -35,4 +40,3 @@ export function AssistantDocument({
     </div>
   );
 }
-

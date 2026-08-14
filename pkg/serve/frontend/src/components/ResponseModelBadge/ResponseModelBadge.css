@@ -1,0 +1,1 @@
+.response-model-badge { display:inline-flex; margin:0 var(--space-2); padding:2px 6px; border-radius:var(--radius-sm); color:var(--yellow); border:1px solid color-mix(in srgb,var(--yellow) 40%,transparent); font-size:var(--text-micro); font-family:var(--mono); }

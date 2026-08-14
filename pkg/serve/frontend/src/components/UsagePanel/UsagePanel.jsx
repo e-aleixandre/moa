@@ -1,4 +1,5 @@
 import "./UsagePanel.css";
+import { Copy } from "lucide-preact";
 import {
   usageForSession,
   usageLevel,
@@ -6,6 +7,7 @@ import {
   fmtCost,
   money,
 } from "../../data/util/usage-pills.js";
+import { copyToClipboard } from "../../data/util/format.js";
 
 // UsagePanel — level 2 of the redesigned telemetry (TELEMETRY-SETTINGS-REDESIGN
 // spec §2). It is the read-only accounting the StatusStrip no longer keeps on
@@ -72,6 +74,15 @@ export function UsagePanel({ session, usage, ctxPercent, costUSD }) {
               <span class="usage-panel-val">{ctxPercent}%</span>
             </div>
           )}
+        </div>
+      )}
+      {session?.id && (
+        <div class="usage-panel-group">
+          <button type="button" class="usage-panel-row usage-panel-idrow" onClick={() => copyToClipboard(session.id)} aria-label="Copy session ID">
+            <span class="usage-panel-key">Session ID</span>
+            <span class="usage-panel-val usage-panel-id">{session.id}</span>
+            <Copy size={14} />
+          </button>
         </div>
       )}
 

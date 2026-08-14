@@ -18,6 +18,7 @@ const RUNNING = {
     subagents: {
       changelog: {
         jobId: "changelog",
+        title: "Draft release notes",
         task: "Collect the PRs merged since v0.10.0, group them by area (serve, tui, providers), and draft changelog entries in the house style. Skip dependabot noise.",
         model: "terra",
         async: false,
@@ -33,12 +34,12 @@ const RUNNING = {
         ],
       },
       docs: {
-        jobId: "docs", task: "Rewrite docs/serve.md security section", model: "sonnet",
+        jobId: "docs", title: "Rewrite security docs", task: "Rewrite docs/serve.md security section", model: "sonnet",
         async: false, status: "running",
         messages: [{ _type: "tool_start", tool_call_id: "d1", tool_name: "read", args: { path: "docs/serve.md" }, status: "running" }],
       },
       tests: {
-        jobId: "tests", task: "Run the full test sweep with -race", model: "sonnet",
+        jobId: "tests", title: "Run race test sweep", task: "Run the full test sweep with -race", model: "sonnet",
         async: false, status: "running",
         messages: [{ _type: "tool_start", tool_call_id: "x1", tool_name: "bash", args: { cmd: "go test -race ./..." }, status: "running" }],
       },
@@ -56,6 +57,7 @@ const COMPLETED = {
     subagents: {
       tests: {
         jobId: "tests",
+        title: "Run race test sweep",
         task: "Run the full test sweep with -race across all packages. Report any failure with enough context to fix it; note skips and why.",
         model: "sonnet",
         async: false,
@@ -83,6 +85,7 @@ const FAILED = {
     subagents: {
       audit: {
         jobId: "audit",
+        title: "Audit database schema",
         task: "Audit every table in state.db for columns unused since v0.8 and propose the drop migration.",
         model: "terra",
         async: false,

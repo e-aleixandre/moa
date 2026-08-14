@@ -118,6 +118,7 @@ type SubagentInitData struct {
 	JobID            string              `json:"job_id"`
 	OriginToolCallID string              `json:"origin_tool_call_id,omitempty"`
 	Task             string              `json:"task"`
+	Title            string              `json:"title,omitempty"`
 	Model            string              `json:"model"`
 	Thinking         string              `json:"thinking"`
 	Status           string              `json:"status"`
@@ -402,6 +403,7 @@ type SubagentStartData struct {
 	JobID            string `json:"job_id"`
 	OriginToolCallID string `json:"origin_tool_call_id,omitempty"`
 	Task             string `json:"task"`
+	Title            string `json:"title,omitempty"`
 	Model            string `json:"model"`
 	Thinking         string `json:"thinking"`
 	Async            bool   `json:"async"`

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "preact/hooks";
-import { Check } from "lucide-preact";
+import { Check, Copy } from "lucide-preact";
 import { ModelSelector } from "../../../components/index.js";
 import { api } from "../../../data/api.js";
 import { statusStripModel } from "../../../data/util/status-strip-model.js";
@@ -14,6 +14,7 @@ import { deriveModelSpecs, matchSelectedModel, modelAccent } from "../../../data
 import { configureSession } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { modelCodename, shortModel, fmtTokens } from "../../../data/util/format.js";
+import { copyToClipboard } from "../../../data/util/format.js";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { StatusLineRow } from "./StatusLineRow.jsx";
 import { McpPanel } from "../../../components/McpPanel/McpPanel.jsx";
@@ -254,6 +255,15 @@ function UsageSheetBody({ session, usage, busy }) {
       )}
 
       <ContextLimitRow session={session} disabled={busy} />
+      {session.id && (
+        <div class="msl-ugroup">
+          <button type="button" class="msl-urow msl-idrow" onClick={() => copyToClipboard(session.id)} aria-label="Copy session ID">
+            <span class="uk">Session ID</span>
+            <span class="uv uid">{session.id}</span>
+            <span class="uact"><Copy size={14} /></span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

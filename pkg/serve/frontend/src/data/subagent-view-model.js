@@ -35,6 +35,7 @@ function firstLine(str) {
 // There is no server-side codename today (SUBAGENT-VIEW-SPEC §9.3 [BACKEND]),
 // so we trim the first line; the full task lives in the task card below.
 function codenameOf(sub) {
+	if (sub.title) return String(sub.title);
   const short = firstLine(sub.task || '').trim();
   if (short) return short.length > 32 ? short.slice(0, 31) + '…' : short;
   return shortModel(sub.model) || sub.jobId || 'subagent';

@@ -16,6 +16,7 @@ type subagentTranscript struct {
 	jobID            string
 	originToolCallID string
 	task             string
+	title            string
 	model            string
 	status           string // "running", "completed", "failed", "cancelled"
 	finishedAt       time.Time
@@ -176,6 +177,9 @@ func (m *appModel) handleSubagentStarted(e bus.SubagentStarted) {
 	}
 	if e.Task != "" {
 		t.task = e.Task
+	}
+	if e.Title != "" {
+		t.title = e.Title
 	}
 	if e.Model != "" {
 		t.model = e.Model

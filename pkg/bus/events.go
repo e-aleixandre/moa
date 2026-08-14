@@ -480,6 +480,7 @@ type SubagentStarted struct {
 	// OriginToolCallID identifies the parent model tool call that created this job.
 	OriginToolCallID string
 	Task             string
+	Title            string
 	Model            string
 	Thinking         string
 	Async            bool
@@ -492,6 +493,13 @@ type SubagentStarted struct {
 	// clients to derive a deterministic accent color that survives WS
 	// reconnects instead of one derived from map iteration order.
 	AccentIndex int
+}
+
+// SubagentTitleChanged updates the one-shot generated identity of a child.
+type SubagentTitleChanged struct {
+	SessionID string
+	JobID     string
+	Title     string
 }
 
 // SubagentUsage carries a subagent's running aggregated usage/cost, published
