@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
-import { ArrowLeft, GitFork, X, Check, Copy } from "lucide-preact";
+import { ArrowLeft, GitFork, X, Check, Copy, Info } from "lucide-preact";
 import { Spinner, Kbd, IconButton } from "../../primitives/index.js";
-import { ModelPill, RunModeChip } from "../../components/index.js";
+import { ModelPill, RunModeChip, SubagentDetails } from "../../components/index.js";
 import { Stream } from "../Stream/Stream.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { Composer } from "../Composer/Composer.jsx";
@@ -108,9 +108,12 @@ export function SubagentView({ session, jobId, onBack }) {
             {sessionTitle(session)}
           </button>
           <span class="sa-crumb-sep" aria-hidden="true">›</span>
-          <button type="button" class="sa-crumb-name" style={{ color: accentVar }} onClick={() => setDetailsOpen(true)}>{view.name}</button>
+          <span class="sa-crumb-name" style={{ color: accentVar }}>{view.name}</span>
         </div>
         <div class="sa-head-actions">
+          <IconButton label="Subagent details" onClick={() => setDetailsOpen(true)}>
+            <Info size={15} />
+          </IconButton>
           {view.model && (
             <ModelPill
               model={view.model}
@@ -171,21 +174,10 @@ export function SubagentView({ session, jobId, onBack }) {
       )}
       <BranchStrip session={session} view={view} />
       <Sheet open={detailsOpen} onClose={() => setDetailsOpen(false)} title="Subagent details">
-        <SubagentDetails session={session} view={view} />
+        <SubagentDetails session={session} view={view} accent={modelAccent(view.model)} />
       </Sheet>
     </div>
   );
-}
-
-function SubagentDetails({ session, view }) {
-  const [copied, setCopied] = useState("");
-  const copy = (value, key) => copyToClipboard(value).then((ok) => { if (ok) { setCopied(key); setTimeout(() => setCopied(""), 1200); } });
-  return <div class="sa-details">
-    <b>{view.name}</b><p>{view.task}</p>
-    <button type="button" onClick={() => copy(view.jobId, "job")}>Job ID: {view.jobId} {copied === "job" ? "✓" : "Copy"}</button>
-    <span>{view.model} · {view.thinking || "off"} · {view.async ? "background" : "sync"}</span>
-    <button type="button" onClick={() => copy(session.id, "parent")}>Parent session ID: {session.id} {copied === "parent" ? "✓" : "Copy"}</button>
-  </div>;
 }
 
 // BranchStrip — the parent's own StatusStrip, measuring the branch: the

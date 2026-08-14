@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight, Copy } from "lucide-preact";
+import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight } from "lucide-preact";
 import { copyToClipboard } from "../../../data/util/format.js";
 import { SessionRow } from "../../../components/index.js";
 import { openOverlay } from "../../../data/overlay-history.js";
@@ -124,7 +124,7 @@ function SessionCardMenu({ session, onClose, onReopen, onDelete }) {
             </button>
           )}
           <button type="button" role="menuitem" class="sdcard-action" onClick={() => { copyToClipboard(session.id); closeMenu(); }}>
-            <Copy size={14} /> Copy session ID
+            Copy session ID
           </button>
           {confirmingDelete ? (
             <button

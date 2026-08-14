@@ -1,4 +1,5 @@
 import "./UsagePanel.css";
+import { Copy } from "lucide-preact";
 import {
   usageForSession,
   usageLevel,
@@ -75,7 +76,15 @@ export function UsagePanel({ session, usage, ctxPercent, costUSD }) {
           )}
         </div>
       )}
-      {session?.id && <div class="usage-panel-group"><button type="button" class="usage-panel-row" onClick={() => copyToClipboard(session.id)}><span class="usage-panel-key">Session ID</span><span class="usage-panel-val">Copy</span></button></div>}
+      {session?.id && (
+        <div class="usage-panel-group">
+          <button type="button" class="usage-panel-row usage-panel-idrow" onClick={() => copyToClipboard(session.id)} aria-label="Copy session ID">
+            <span class="usage-panel-key">Session ID</span>
+            <span class="usage-panel-val usage-panel-id">{session.id}</span>
+            <Copy size={14} />
+          </button>
+        </div>
+      )}
 
       {(u.fiveHour || u.week || extra || (u.moneyBuckets || []).length) && (
         <div class="usage-panel-group">

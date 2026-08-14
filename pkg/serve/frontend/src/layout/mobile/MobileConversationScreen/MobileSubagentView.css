@@ -24,6 +24,15 @@
   .msa { animation: none; }
 }
 
+/* While a back-swipe is in flight the screen follows the finger, so the push-in
+   animation must not fight the inline transform. The shadow is what makes the
+   parent read as a surface underneath rather than a flat swap. */
+.msa.is-swiping {
+  animation: none;
+  will-change: transform;
+  box-shadow: -8px 0 24px rgb(0 0 0 / 0.35);
+}
+
 /* One row: the way back, who you are looking at, how it runs. The parent screen
    is headerless (its name floats in MobileTitleChip), so this bar is the whole
    signal that you are one level in — which is why it stays, and why it is kept
@@ -70,6 +79,27 @@
 .msa-head .runmode {
   margin-left: auto;
 }
+
+/* Details lives in the header as its own control rather than hiding behind the
+   codename: a title that silently opens a sheet is a door with no handle. It
+   claims the free space before the run-mode chip, which keeps the far end. */
+.msa-details-btn {
+  flex: none;
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-full);
+  color: var(--overlay1);
+  cursor: pointer;
+}
+
+.msa-details-btn:active { color: var(--text); }
+
+.msa-details-btn ~ .runmode { margin-left: 0; }
 
 /* 44px hit-area for the back chevron. */
 .msa-back {

@@ -255,7 +255,15 @@ function UsageSheetBody({ session, usage, busy }) {
       )}
 
       <ContextLimitRow session={session} disabled={busy} />
-      {session.id && <div class="msl-ugroup"><button type="button" class="msl-urow" onClick={() => copyToClipboard(session.id)}><span class="uk">Session ID</span><span class="uv"><Copy size={14} /> Copy</span></button></div>}
+      {session.id && (
+        <div class="msl-ugroup">
+          <button type="button" class="msl-urow msl-idrow" onClick={() => copyToClipboard(session.id)} aria-label="Copy session ID">
+            <span class="uk">Session ID</span>
+            <span class="uv uid">{session.id}</span>
+            <span class="uact"><Copy size={14} /></span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
