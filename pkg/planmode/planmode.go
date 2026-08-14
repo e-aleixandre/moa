@@ -29,6 +29,7 @@ var planningAllowlist = map[string]bool{
 	"subagent":        true, // read-only context gathering; children inherit the restricted registry
 	"subagent_status": true,
 	"subagent_cancel": true,
+	"subagent_steer":  true, // only sends text to a child that is itself restricted
 }
 
 // Config configures a PlanMode instance.

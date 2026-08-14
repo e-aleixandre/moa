@@ -24,6 +24,7 @@ Always registered:
 | `subagent_status` | Poll async subagent jobs |
 | `subagent_wait` | Block until an async subagent job finishes and return its result |
 | `subagent_cancel` | Cancel a running async subagent |
+| `subagent_steer` | Send instructions or a correction to a subagent that is still running |
 | `tasks` | Track implementation tasks (used most heavily during plan mode, but always available) |
 | `moa_docs` | Read moa's own documentation (this page included), embedded in the binary |
 

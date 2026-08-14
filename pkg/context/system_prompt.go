@@ -27,6 +27,7 @@ var toolSnippets = map[string]string{
 	"subagent_status": "Check the status of an async subagent job.",
 	"subagent_wait":   "Block until an async subagent job finishes and return its result. Use instead of polling subagent_status.",
 	"subagent_cancel": "Cancel a running async subagent job.",
+	"subagent_steer":  "Send a message to a RUNNING subagent: extra instructions or a correction, read between its steps.",
 	"verify":          "Run project verification checks (build, test, lint) from .moa/verify.json.",
 	"memory":          "Manage cross-session memory as typed single-fact notes (list/read/write/delete). Only the index is in context; read facts on demand.",
 }
