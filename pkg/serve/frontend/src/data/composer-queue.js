@@ -67,13 +67,20 @@ export function queueSummary(pendingSteers) {
 // cancels the queued messages server-side, that stray click destroyed the
 // message the user had just written.
 //
-// A gesture only counts when its pointerdown landed on the chip too. That is a
-// property of the gesture, not of the clock, so it needs no grace period and
-// never penalises a genuinely fast tap. Keyboard activation (Alt+↑, Enter on a
-// focused chip) has no pointer at all and is always honoured.
-export function recallActivates({ pointerDownOnChip, fromKeyboard }) {
+// A pointer gesture only counts when its own pointerdown landed on this chip,
+// matched by pointerId so a click cannot borrow the arming of an earlier,
+// unrelated gesture. That is a property of the gesture rather than of the
+// clock, so it needs no grace period and never penalises a fast tap.
+//
+// Activations with no pointer at all are always honoured: Alt+↑, Enter on a
+// focused chip, and assistive technology, which dispatches a bare click whose
+// `detail` is 0. Gating those would make the queue unreachable without a mouse.
+export function recallActivates({ armedPointerId, pointerId, detail, fromKeyboard }) {
   if (fromKeyboard) return true;
-  return pointerDownOnChip === true;
+  if (detail === 0) return true; // synthesised activation (screen reader, .click())
+  if (armedPointerId == null || armedPointerId === false) return false;
+  if (armedPointerId === true) return true; // no pointerId available (older engines)
+  return armedPointerId === pointerId;
 }
 
 // sendMayClear decides whether a send that has just been accepted is still

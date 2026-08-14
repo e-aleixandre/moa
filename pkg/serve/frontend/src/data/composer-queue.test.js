@@ -72,18 +72,28 @@ test('queueSummary returns null for an empty queue', () => {
 // completes that tap is delivered to a control that did not exist when the
 // gesture started. Honouring it cancelled the message the user had just sent.
 test('recallActivates rejects a click whose pointerdown never touched the chip', () => {
-  expect(recallActivates({ pointerDownOnChip: false })).toBe(false);
-  expect(recallActivates({})).toBe(false);
+  expect(recallActivates({ armedPointerId: null, pointerId: 1, detail: 1 })).toBe(false);
+  expect(recallActivates({ detail: 1 })).toBe(false);
 });
 
 test('recallActivates honours a whole gesture made on the chip', () => {
-  expect(recallActivates({ pointerDownOnChip: true })).toBe(true);
+  expect(recallActivates({ armedPointerId: 7, pointerId: 7, detail: 1 })).toBe(true);
 });
 
-// Alt+↑ and Enter on a focused chip have no pointer at all; gating them on one
-// would make the queue unreachable from the keyboard.
+// A pointerdown that ended elsewhere must not arm a later, unrelated click:
+// the ids identify the gesture, so a stale arming cannot be borrowed.
+test('recallActivates rejects a click from a different pointer than the one armed', () => {
+  expect(recallActivates({ armedPointerId: 7, pointerId: 9, detail: 1 })).toBe(false);
+});
+
+// Alt+↑, Enter on a focused chip and assistive technology have no pointer at
+// all; gating them on one would make the queue unreachable from the keyboard.
 test('recallActivates always honours keyboard activation', () => {
-  expect(recallActivates({ pointerDownOnChip: false, fromKeyboard: true })).toBe(true);
+  expect(recallActivates({ armedPointerId: null, fromKeyboard: true })).toBe(true);
+});
+
+test('recallActivates honours a synthesised click with no pointer', () => {
+  expect(recallActivates({ armedPointerId: null, detail: 0 })).toBe(true);
 });
 
 // The window between "send accepted" and "server answered" is where a recall

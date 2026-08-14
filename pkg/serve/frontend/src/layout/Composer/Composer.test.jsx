@@ -158,28 +158,28 @@ test("a send that resolves late does not wipe text written meanwhile", async () 
   sendResult = new Promise((resolve) => { releaseSend = resolve; });
   const tree = Composer({ sessionId: "race1", session: { state: "running" } });
   const textarea = descendants(tree).find((node) => node.type === "textarea");
-  refs[0].current = { value: "queued message", style: {}, scrollHeight: 24, focus() {} };
+  refs[0].current = {
+    value: "queued message", style: {}, scrollHeight: 24,
+    focus() {}, dispatchEvent() {},
+  };
   textarea.props.onKeyDown({
     key: "Enter", shiftKey: false, altKey: false, metaKey: false,
     isComposing: false, preventDefault() {},
   });
   await Promise.resolve();
 
-  // A recall lands while the send is in flight: it cancels the queued message
-  // server-side and restores its text, bumping the composer epoch. The send's
-  // late clear must then recognise the box is no longer its own. The epoch is
-  // first numeric ref the composer creates, which pins it without hardcoding a
-  // hook index that later edits would silently shift.
-  const epoch = refs.find((r) => typeof r.current === "number");
-  expect(epoch).toBeDefined();
-  epoch.current += 1;
-  refs[0].current.value = "queued message";
+  // A voice transcript lands while the send is still in flight — the same
+  // ownership question as a queue recall, through a route the first fix missed.
+  // It goes through the composer's real write path, so the epoch it bumps is
+  // the one the send captured.
+  voiceOptions.onTranscript("second thought");
+  expect(refs[0].current.value).toContain("second thought");
 
   releaseSend();
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
-  expect(refs[0].current.value).toBe("queued message");
+  expect(refs[0].current.value).toContain("second thought");
 });
 
 test("a send still clears the composer when its text is untouched", async () => {
