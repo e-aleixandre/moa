@@ -1,6 +1,6 @@
 module github.com/e-aleixandre/moa
 
-go 1.25.0
+go 1.25.13
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
@@ -12,6 +12,7 @@ require (
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/muesli/reflow v0.3.0
+	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	nhooyr.io/websocket v1.8.17
 )
@@ -57,6 +58,5 @@ require (
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 )

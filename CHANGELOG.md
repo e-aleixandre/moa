@@ -51,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Session ids read as one line, truncating instead of folding, with the whole
   row as the copy target.
 
+### Security
+
+- Built with Go 1.25.13, which carries standard library fixes for six
+  vulnerabilities reachable from our code in `net/http`, `crypto/tls`,
+  `net/url`, `encoding/xml` and `encoding/asn1`.
+
 ## [0.28.0] - 2026-08-11
 
 ### Added
