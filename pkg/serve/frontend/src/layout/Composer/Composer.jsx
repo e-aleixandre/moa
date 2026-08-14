@@ -9,7 +9,7 @@ import {
 } from "../../data/session-actions.js";
 import { store, updateSession } from "../../data/store.js";
 import { addToast } from "../../data/notifications.js";
-import { combineQueueText, droppedImageCount, queueSummary } from "../../data/composer-queue.js";
+import { combineQueueText, droppedImageCount, queueSummary, recallActivates, sendMayClear } from "../../data/composer-queue.js";
 import {
   slashSuggestions, findMentionToken, computeMentionInsertion, normalizeDashes,
 } from "../../data/composer-suggest.js";
@@ -93,6 +93,22 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   // (or click + Alt+↑) would see the same pendingSteers and combine the texts
   // twice into the textarea. Released once cancelSteers settles.
   const recallInFlight = useRef(false);
+  // A click only counts as a recall when this chip also received its
+  // pointerdown. The chip is born under the finger: it appears in the composer
+  // the instant a message is queued, which is exactly where the send button was
+  // just tapped, so the click that follows that tap lands on a control that did
+  // not exist when the gesture started. Production traces caught it firing the
+  // recall 11ms after a send (a real tap on it measured ~1500ms), cancelling
+  // the message server-side while the send was still in flight — the text was
+  // destroyed on both sides. Requiring the whole gesture to happen on the chip
+  // rejects an inherited click by construction, with no timing heuristics.
+  const recallPointerDown = useRef(false);
+  // Counts the times something other than a send has written the textarea (a
+  // queue recall, an abort restoring the queue). A send captures it before
+  // awaiting the server and only clears the box if it has not moved: comparing
+  // the text itself is not enough, because a recall restores the very message
+  // that was just sent, so the two are indistinguishable by value.
+  const composerEpoch = useRef(0);
 
   // --- Slash command + @-mention suggestion state ---
   const [goalFlags, setGoalFlags] = useState([]);
@@ -163,7 +179,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   // cancel the not-yet-delivered steers server-side so re-submitting the edited
   // text doesn't deliver both the originals and the edit. The server broadcasts
   // steers_canceled to every client (shared queue), which clears the chips.
-  const handleDequeueSteers = useCallback(() => {
+  const handleDequeueSteers = useCallback((opts) => {
+    const fromKeyboard = opts?.fromKeyboard === true;
+    const pointerDownOnChip = recallPointerDown.current;
+    recallPointerDown.current = false;
+    if (!recallActivates({ pointerDownOnChip, fromKeyboard })) return;
     if (recallInFlight.current) return; // a recall is already in flight
     const sess = store.get().sessions[sessionId];
     if (!sess?.pendingSteers?.length) return;
@@ -173,6 +193,9 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
 
     recallInFlight.current = true;
     el.value = combineQueueText(el.value, sess.pendingSteers);
+    // The box now holds text this send did not put there: an in-flight send must
+    // not empty it when its response lands.
+    composerEpoch.current += 1;
     setHasText(!!el.value.trim());
     saveDraft(sessionId, el.value); // persist the recalled text (no input event)
 
@@ -456,7 +479,15 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       return;
     }
 
+    const sendEpoch = composerEpoch.current;
     const clearSentComposer = () => {
+      // Only clear what this send is entitled to clear. An ordinary message
+      // waits for the server response before emptying the box, and in that gap
+      // the textarea can legitimately hold something else: a queue recall
+      // restoring its messages, or an abort dumping them back. Wiping it
+      // blindly destroyed text the user never sent — that is how a queued
+      // message could vanish from both the server and the screen at once.
+      if (!sendMayClear(sendEpoch, composerEpoch.current)) return;
       // Safari can deliver a composition input after the Enter that submitted
       // it. Its epoch identifies it as stale without rejecting a later, new
       // composition.
@@ -714,6 +745,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       const el = textareaRef.current;
       if (el) {
         el.value = combineQueueText(el.value, restored);
+        composerEpoch.current += 1;
         setHasText(!!el.value.trim());
         autoResize();
         el.focus();
@@ -755,7 +787,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       const sess = store.get().sessions[sessionId];
       if (sess?.pendingSteers?.length) {
         e.preventDefault();
-        handleDequeueSteers();
+        handleDequeueSteers({ fromKeyboard: true });
         return;
       }
     }
@@ -1023,7 +1055,14 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
               type="button"
               class="queue-note"
               title="Click or Alt+↑ to edit queued messages"
-              onClick={handleDequeueSteers}
+              onPointerDown={() => { recallPointerDown.current = true; }}
+              onPointerCancel={() => { recallPointerDown.current = false; }}
+              onClick={() => handleDequeueSteers()}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                handleDequeueSteers({ fromKeyboard: true });
+              }}
             >
               <Chip size="sm" mono>{summary.count} queued</Chip>
               <span>

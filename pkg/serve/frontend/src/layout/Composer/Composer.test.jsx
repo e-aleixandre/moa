@@ -6,6 +6,10 @@ const steered = [];
 // Controls what the steer endpoint answers, so a test can exercise a refusal
 // ({queued:false}) as well as an acceptance.
 let steerResult = {};
+// Lets a test hold a send in flight, reproducing the window in which the box
+// can legitimately acquire other text before the server answers.
+let sendResult;
+
 let voiceOptions;
 
 mock.module("preact/hooks", () => ({
@@ -30,7 +34,7 @@ mock.module("../../hooks/useVoiceGesture.js", () => ({
 }));
 
 mock.module("../../data/session-actions.js", () => ({
-  sendMessage: async (...args) => { sent.push(args); },
+  sendMessage: async (...args) => { sent.push(args); await sendResult; },
   newSteerId: () => "test-id",
   cancelRun: async () => ({}),
   cancelSteers: async () => {},
@@ -40,6 +44,9 @@ mock.module("../../data/session-actions.js", () => ({
 }));
 
 const { Composer } = await import("./Composer.jsx");
+// The real store: the recall reads pendingSteers from it, so seeding it is
+// closer to the running app than faking the module.
+const { updateSession } = await import("../../data/store.js");
 
 function descendants(node, result = []) {
   if (!node || typeof node === "string") return result;
@@ -136,5 +143,58 @@ test("an accepted subagent steer clears the composer", async () => {
   await Promise.resolve();
   await Promise.resolve();
   expect(steered).toHaveLength(1);
+  expect(refs[0].current.value).toBe("");
+});
+
+// Reproduces the message-destroying race caught in production (session
+// 83aa2746): an ordinary send waits for the server before emptying the box, and
+// in that window a queue recall cancelled the message server-side and restored
+// its text to the textarea. The late clear then wiped that restored text, so
+// the message was gone from both the server and the screen.
+test("a send that resolves late does not wipe text written meanwhile", async () => {
+  refs.length = 0;
+  sent.length = 0;
+  let releaseSend;
+  sendResult = new Promise((resolve) => { releaseSend = resolve; });
+  const tree = Composer({ sessionId: "race1", session: { state: "running" } });
+  const textarea = descendants(tree).find((node) => node.type === "textarea");
+  refs[0].current = { value: "queued message", style: {}, scrollHeight: 24, focus() {} };
+  textarea.props.onKeyDown({
+    key: "Enter", shiftKey: false, altKey: false, metaKey: false,
+    isComposing: false, preventDefault() {},
+  });
+  await Promise.resolve();
+
+  // A recall lands while the send is in flight: it cancels the queued message
+  // server-side and restores its text, bumping the composer epoch. The send's
+  // late clear must then recognise the box is no longer its own. The epoch is
+  // first numeric ref the composer creates, which pins it without hardcoding a
+  // hook index that later edits would silently shift.
+  const epoch = refs.find((r) => typeof r.current === "number");
+  expect(epoch).toBeDefined();
+  epoch.current += 1;
+  refs[0].current.value = "queued message";
+
+  releaseSend();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(refs[0].current.value).toBe("queued message");
+});
+
+test("a send still clears the composer when its text is untouched", async () => {
+  refs.length = 0;
+  sent.length = 0;
+  sendResult = Promise.resolve();
+  const tree = Composer({ sessionId: "s1", session: { state: "idle" } });
+  const textarea = descendants(tree).find((node) => node.type === "textarea");
+  refs[0].current = { value: "ship it", style: {}, scrollHeight: 24 };
+  textarea.props.onKeyDown({
+    key: "Enter", shiftKey: false, altKey: false, metaKey: false,
+    isComposing: false, preventDefault() {},
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
   expect(refs[0].current.value).toBe("");
 });

@@ -56,3 +56,39 @@ export function queueSummary(pendingSteers) {
     lastImages: last.images || 0,
   };
 }
+
+// recallActivates decides whether a click on the "N queued" chip is a real
+// recall or an inherited one.
+//
+// The chip is born under the finger: it renders the instant a message is
+// queued, in the composer, right where the send button was just tapped. The
+// click that completes that tap is then delivered to whatever occupies the
+// point — the chip that did not exist when the gesture began. Because a recall
+// cancels the queued messages server-side, that stray click destroyed the
+// message the user had just written.
+//
+// A gesture only counts when its pointerdown landed on the chip too. That is a
+// property of the gesture, not of the clock, so it needs no grace period and
+// never penalises a genuinely fast tap. Keyboard activation (Alt+↑, Enter on a
+// focused chip) has no pointer at all and is always honoured.
+export function recallActivates({ pointerDownOnChip, fromKeyboard }) {
+  if (fromKeyboard) return true;
+  return pointerDownOnChip === true;
+}
+
+// sendMayClear decides whether a send that has just been accepted is still
+// entitled to empty the composer.
+//
+// An ordinary message waits for the server before clearing, so a rejected send
+// leaves the text there to retry. That wait is also a window in which the box
+// can legitimately acquire text this send never owned: a queue recall restoring
+// the messages it cancels, or an abort dumping them back. Clearing blindly then
+// destroys text the user never sent — the queued message vanishes from the
+// server AND the screen at once.
+//
+// Comparing the text is not enough: a recall restores the very message that was
+// just sent, so the two are equal by value. Only a counter bumped by every
+// foreign write distinguishes them.
+export function sendMayClear(sendEpoch, currentEpoch) {
+  return sendEpoch === currentEpoch;
+}

@@ -5,7 +5,7 @@
 // the chip summary, and by-id removal (WS reconciliation).
 import { test, expect } from 'bun:test';
 import {
-  willEnqueue, combineQueueText, droppedImageCount, queueSummary,
+  willEnqueue, combineQueueText, droppedImageCount, queueSummary, recallActivates, sendMayClear,
 } from './composer-queue.js';
 
 test('willEnqueue sends immediately when idle or errored', () => {
@@ -66,4 +66,32 @@ test('queueSummary strips the leading slash for a command chip', () => {
 test('queueSummary returns null for an empty queue', () => {
   expect(queueSummary([])).toBeNull();
   expect(queueSummary(null)).toBeNull();
+});
+
+// The chip renders where the send button was just tapped, so the click that
+// completes that tap is delivered to a control that did not exist when the
+// gesture started. Honouring it cancelled the message the user had just sent.
+test('recallActivates rejects a click whose pointerdown never touched the chip', () => {
+  expect(recallActivates({ pointerDownOnChip: false })).toBe(false);
+  expect(recallActivates({})).toBe(false);
+});
+
+test('recallActivates honours a whole gesture made on the chip', () => {
+  expect(recallActivates({ pointerDownOnChip: true })).toBe(true);
+});
+
+// Alt+↑ and Enter on a focused chip have no pointer at all; gating them on one
+// would make the queue unreachable from the keyboard.
+test('recallActivates always honours keyboard activation', () => {
+  expect(recallActivates({ pointerDownOnChip: false, fromKeyboard: true })).toBe(true);
+});
+
+// The window between "send accepted" and "server answered" is where a recall
+// can restore the very text being sent. Clearing then destroyed it.
+test('sendMayClear lets an undisturbed send empty the composer', () => {
+  expect(sendMayClear(3, 3)).toBe(true);
+});
+
+test('sendMayClear refuses to clear a composer written meanwhile', () => {
+  expect(sendMayClear(3, 4)).toBe(false);
 });
