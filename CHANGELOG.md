@@ -5,6 +5,52 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] - 2026-08-14
+
+### Added
+
+- A parent can now correct a subagent while it works. Watching a child head the
+  wrong way used to leave two options: wait for work you knew was wasted, or
+  cancel and start over. The new `subagent_steer` tool sends a correction that
+  reaches the child between steps, keeping everything it has already done. It
+  reports that the message was queued rather than that the child read it, and a
+  refusal comes back with the job's real status, so "already completed" tells
+  the parent to read the result instead of steering into the void. Children
+  don't inherit it: they are leaf workers, not orchestrators.
+- Subagent screens can be dismissed by swiping in from the left edge, the way a
+  pushed screen is dismissed on a phone. Only touches starting at the edge are
+  claimed, so horizontal content keeps its scroll, and a cancelled touch springs
+  back instead of navigating.
+
+### Fixed
+
+- A queued message could destroy itself. Sending while the agent was running
+  could leave the message gone from the server's queue and from the composer at
+  once, with no trace in any transcript. Two defects collided: the "N queued"
+  chip renders exactly where the send button was just tapped, so the click
+  completing that tap was inherited by a control that did not exist when the
+  gesture began — and that click cancels the queue server-side. The chip now
+  requires the whole gesture to happen on it, a property of the gesture rather
+  than of the clock, so no fast tap is ever penalised, while keyboard and
+  assistive activation stay unconditional. The recall then restored the
+  cancelled text correctly, but an ordinary send only empties the box once the
+  server answers, and that late clear wiped it; a send now clears only what it
+  still owns.
+- A message steered into a live subagent showed nothing on screen until the
+  transcript was refetched, even though it had been accepted, delivered and
+  read by the child. Steers are deduplicated by id rather than by text, since
+  the same words are often sent more than once on purpose.
+- Steering a job that had already finished was reported as queued. Both callers
+  now go through one admission point that answers with the job's status, and the
+  composer keeps your text whenever the server says the message was not queued.
+- The "Subagent details" sheet was unfinished: with no stylesheet at all, it
+  dumped the whole task prompt as raw text under two unstyled buttons. It is now
+  a shared component on both surfaces and drops the task, which is already
+  readable in full in the parent's transcript. Details open from their own
+  button: hanging them off the codename made the title a door with no handle.
+  Session ids read as one line, truncating instead of folding, with the whole
+  row as the copy target.
+
 ## [0.28.0] - 2026-08-11
 
 ### Added
