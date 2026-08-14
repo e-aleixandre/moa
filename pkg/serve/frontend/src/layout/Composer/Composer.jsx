@@ -423,12 +423,18 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
 
     // Steer mode: everything the user types goes to the live subagent as a
     // steer. No slash/shell/queue semantics, no attachments (the subagent steer
-    // endpoint is text-only). Clear the box and fire; the caller shows optimistic
-    // feedback / rebounds to the parent if the subagent already finished.
+    // endpoint is text-only). The message shows up in the child's transcript
+    // when the child takes it into its context and the server echoes the steer
+    // back over the socket; if the subagent already finished, we rebound to the
+    // parent.
     if (steer && steer.jobId) {
       if (!text) return;
       try {
-        await steerSubagent(sessionId, steer.jobId, text);
+        const res = await steerSubagent(sessionId, steer.jobId, text);
+        // The server answers whether the child actually took the message; a
+        // 200 alone does not mean it was queued. A refused steer must leave the
+        // text where the user can resend it rather than silently empty the box.
+        if (res && res.queued === false) throw new Error('the subagent did not accept the message');
         pushHistory(text);
         el.value = '';
         saveDraft(sessionId, '');

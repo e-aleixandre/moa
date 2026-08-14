@@ -2,6 +2,10 @@ import { expect, mock, test } from "bun:test";
 
 const refs = [];
 const sent = [];
+const steered = [];
+// Controls what the steer endpoint answers, so a test can exercise a refusal
+// ({queued:false}) as well as an acceptance.
+let steerResult = {};
 let voiceOptions;
 
 mock.module("preact/hooks", () => ({
@@ -32,7 +36,7 @@ mock.module("../../data/session-actions.js", () => ({
   cancelSteers: async () => {},
   execCommand: async () => ({ ok: true }),
   execShell: async () => {},
-  steerSubagent: async () => {},
+  steerSubagent: async (...args) => { steered.push(args); return steerResult; },
 }));
 
 const { Composer } = await import("./Composer.jsx");
@@ -85,4 +89,52 @@ test("successive voice transcripts append at the caret without replacing the dra
   expect(textarea.value).toBe("already first second");
   expect(textarea.selectionStart).toBe("already first second".length);
   expect(textarea.selectionEnd).toBe("already first second".length);
+});
+
+// A steer the server refused must not look like it was sent: the composer keeps
+// the text so the user can resend it, instead of silently emptying the box on
+// any HTTP 200. This is the case that made a lost message indistinguishable
+// from a delivered one.
+test("a refused subagent steer keeps the user's text in the composer", async () => {
+  refs.length = 0;
+  steered.length = 0;
+  steerResult = { queued: false };
+  const tree = Composer({
+    sessionId: "s1",
+    session: { state: "running" },
+    steer: { jobId: "sa-1", name: "child" },
+  });
+  const textarea = descendants(tree).find((node) => node.type === "textarea");
+  refs[0].current = { value: "please stop", style: {}, scrollHeight: 24 };
+  textarea.props.onKeyDown({
+    key: "Enter", shiftKey: false, altKey: false, metaKey: false,
+    isComposing: false, preventDefault() {},
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(steered).toHaveLength(1);
+  expect(refs[0].current.value).toBe("please stop");
+});
+
+test("an accepted subagent steer clears the composer", async () => {
+  refs.length = 0;
+  steered.length = 0;
+  steerResult = { queued: true };
+  const tree = Composer({
+    sessionId: "s1",
+    session: { state: "running" },
+    steer: { jobId: "sa-1", name: "child" },
+  });
+  const textarea = descendants(tree).find((node) => node.type === "textarea");
+  refs[0].current = { value: "look at the image", style: {}, scrollHeight: 24 };
+  textarea.props.onKeyDown({
+    key: "Enter", shiftKey: false, altKey: false, metaKey: false,
+    isComposing: false, preventDefault() {},
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(steered).toHaveLength(1);
+  expect(refs[0].current.value).toBe("");
 });
