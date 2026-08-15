@@ -73,6 +73,12 @@ func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult
 	case "openai":
 		if isOAuth {
 			cfg.AccountID = authStore.GetAccountID("openai")
+			// chatgpt.com can reject an access token before its advertised
+			// expiry, so the proactive expiry check alone is not enough: the
+			// transport needs a reactive refresh path for rejected tokens.
+			cfg.RefreshOAuth = func(rejected string) (string, error) {
+				return authStore.RefreshOAuthIfCurrent("openai", rejected)
+			}
 			authNotice = "ChatGPT subscription OAuth"
 		}
 	case "anthropic":

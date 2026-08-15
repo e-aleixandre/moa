@@ -37,7 +37,12 @@ type OpenAI struct {
 	baseURL   string
 	endpoint  string
 	accountID string // ChatGPT OAuth account ID (empty for API key auth)
-	client    *http.Client
+	// oauth marks the ChatGPT subscription transport. Reactive token refresh
+	// must only ever apply there: API-key credentials are not refreshable and
+	// a 401 on them is always terminal.
+	oauth        bool
+	refreshOAuth func(rejectedToken string) (string, error)
+	client       *http.Client
 }
 
 // New creates an OpenAI provider using an API key (api.openai.com).
@@ -52,13 +57,15 @@ func New(apiKey string) *OpenAI {
 
 // NewOAuth creates an OpenAI provider using ChatGPT subscription OAuth.
 // Uses chatgpt.com/backend-api with the /codex/responses endpoint.
-func NewOAuth(accessToken, accountID string) *OpenAI {
+func NewOAuth(accessToken, accountID string, refresh func(rejectedToken string) (string, error)) *OpenAI {
 	return &OpenAI{
-		apiKey:    accessToken,
-		baseURL:   codexBaseURL,
-		endpoint:  codexEndpoint,
-		accountID: accountID,
-		client:    &http.Client{Timeout: 10 * time.Minute},
+		apiKey:       accessToken,
+		baseURL:      codexBaseURL,
+		endpoint:     codexEndpoint,
+		accountID:    accountID,
+		oauth:        true,
+		refreshOAuth: refresh,
+		client:       &http.Client{Timeout: 10 * time.Minute},
 	}
 }
 
@@ -94,24 +101,26 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		return nil, fmt.Errorf("openai: building request: %w", err)
 	}
 
-	buildReq := func() (*http.Request, error) {
-		r, err := http.NewRequestWithContext(ctx, "POST", o.baseURL+o.endpoint, bytes.NewReader(body))
-		if err != nil {
-			return nil, err
+	request := func(token string) func() (*http.Request, error) {
+		return func() (*http.Request, error) {
+			r, err := http.NewRequestWithContext(ctx, "POST", o.baseURL+o.endpoint, bytes.NewReader(body))
+			if err != nil {
+				return nil, err
+			}
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Authorization", "Bearer "+token)
+			r.Header.Set("Accept", "text/event-stream")
+			if o.accountID != "" {
+				r.Header.Set("chatgpt-account-id", o.accountID)
+				// Newer Codex models (e.g. gpt-5.6-luna) are gated on the
+				// first-party Codex client identity: without these headers the
+				// backend returns "Model not found". A neutral version is used so
+				// we don't claim a specific Codex release.
+				r.Header.Set("originator", codexOriginator)
+				r.Header.Set("User-Agent", codexUserAgent)
+			}
+			return r, nil
 		}
-		r.Header.Set("Content-Type", "application/json")
-		r.Header.Set("Authorization", "Bearer "+apiKey)
-		r.Header.Set("Accept", "text/event-stream")
-		if o.accountID != "" {
-			r.Header.Set("chatgpt-account-id", o.accountID)
-			// Newer Codex models (e.g. gpt-5.6-luna) are gated on the
-			// first-party Codex client identity: without these headers the
-			// backend returns "Model not found". A neutral version is used so
-			// we don't claim a specific Codex release.
-			r.Header.Set("originator", codexOriginator)
-			r.Header.Set("User-Agent", codexUserAgent)
-		}
-		return r, nil
 	}
 
 	// Don't burn retries on a usage-limit 429 — the limit won't clear for
@@ -123,9 +132,32 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		}
 		return true
 	}
-	resp, err := retry.Do(ctx, o.client, buildReq, policy, nil)
+	resp, err := retry.Do(ctx, o.client, request(apiKey), policy, nil)
 	if err != nil {
 		return nil, fmt.Errorf("openai: %w", err)
+	}
+
+	// The ChatGPT backend can reject an OAuth access token long before the
+	// expiry the token itself advertises (observed as 401 "token_expired" with
+	// days of declared lifetime left), so the store's proactive expiry check
+	// never fires. Refresh exactly once and rebuild the request with the fresh
+	// token; a second 401 is terminal. API-key credentials never take this
+	// path — they cannot be refreshed and their 401s mean something else.
+	if resp.StatusCode == http.StatusUnauthorized && o.oauth && o.refreshOAuth != nil {
+		resp.Body.Close() //nolint:errcheck
+		fresh, refreshErr := o.refreshOAuth(apiKey)
+		if refreshErr != nil {
+			return nil, fmt.Errorf("openai: authentication failed (run --login openai to re-authenticate)")
+		}
+		apiKey = fresh
+		resp, err = retry.Do(ctx, o.client, request(apiKey), policy, nil)
+		if err != nil {
+			return nil, fmt.Errorf("openai: %w", err)
+		}
+		if resp.StatusCode == http.StatusUnauthorized {
+			resp.Body.Close() //nolint:errcheck
+			return nil, fmt.Errorf("openai: authentication failed (run --login openai to re-authenticate)")
+		}
 	}
 
 	if resp.StatusCode != http.StatusOK {

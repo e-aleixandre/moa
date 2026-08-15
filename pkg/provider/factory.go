@@ -40,7 +40,7 @@ func New(model core.Model, cfg Config) (core.Provider, error) {
 		return anthropic.New(cfg.APIKey), nil
 	case "openai":
 		if cfg.IsOAuth {
-			return openai.NewOAuth(cfg.APIKey, cfg.AccountID), nil
+			return openai.NewOAuth(cfg.APIKey, cfg.AccountID, cfg.RefreshOAuth), nil
 		}
 		return openai.New(cfg.APIKey), nil
 	case "xai":
