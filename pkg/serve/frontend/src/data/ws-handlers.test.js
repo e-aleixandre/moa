@@ -1107,6 +1107,39 @@ test('handleWsStateChange does not toast on a normal idle end', async () => {
   expect(getToasts().length).toBe(before);
 });
 
+// A failed /compact settles through the state machine (the bus transitions to
+// error before publishing its terminal event), so it reaches the client as a
+// plain error state_change. Blaming "Run failed" hid what actually broke: the
+// previous compacting flag names it, and it stays a SINGLE toast.
+test('handleWsStateChange names a failed compaction in its toast', async () => {
+  setState({
+    sessions: { s1: { id: 's1', state: 'running', compacting: true, subagents: {} } },
+    isMobile: true,
+    activeSession: 's1',
+  });
+  const before = getToasts().length;
+
+  handleWsStateChange('s1', { state: 'error', error: 'summarizer unavailable' });
+
+  const toasts = getToasts();
+  expect(toasts.length).toBe(before + 1);
+  const t = toasts[toasts.length - 1];
+  expect(t.title).toBe('Compaction failed');
+  expect(t.detail).toBe('summarizer unavailable');
+});
+
+// Without a compaction in flight the generic run wording is unchanged.
+test('handleWsStateChange keeps the generic run failure title outside a compaction', async () => {
+  setState({
+    sessions: { s1: { id: 's1', state: 'running', compacting: false, subagents: {} } },
+    isMobile: true,
+    activeSession: 's1',
+  });
+  handleWsStateChange('s1', { state: 'error', error: 'tool exploded' });
+  const toasts = getToasts();
+  expect(toasts[toasts.length - 1].title).toBe('Run failed');
+});
+
 test('handleWsBashComplete adds a bash card to the chat', async () => {
   setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [] } } });
   handleWsBashComplete('s1', { job_id: 'bash-1', command: 'sleep 5; echo done', status: 'completed', text: '[bash job completed] Job bash-1 finished.\nCommand: sleep 5; echo done\n\nOutput:\ndone' });

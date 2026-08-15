@@ -60,7 +60,15 @@ export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_
   try {
     const r = await fetch(path, opts);
     if (timedOut) throw new Error('request aborted');
-    if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+    if (!r.ok) {
+      // Carry the HTTP status on the error: a caller can then tell a REJECTION
+      // the server actually answered (409 busy, 503 queue full) from a request
+      // that never got an answer (aborted fetch, network failure), which proves
+      // nothing about the operation's outcome.
+      const error = new Error(`${r.status}: ${await r.text()}`);
+      error.status = r.status;
+      throw error;
+    }
     if (r.status === 204) return null;
     const text = await r.text();
     if (!text) return null;

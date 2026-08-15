@@ -167,6 +167,69 @@ func TestPump_BarrierThenTrailingSteer(t *testing.T) {
 	}
 }
 
+// Order under the asynchronous compact: a queued /compact barrier now returns
+// from Bus.Execute as soon as it is accepted, so the pump could pop it and
+// deliver the message behind it while the compaction is still running — the
+// message would reach a model whose context is being rewritten. The state
+// machine prevents it: the barrier leaves the session running, so the pump
+// abstains until the compaction's own CompactionEnded + requestPump.
+func TestPump_TrailingSteerWaitsForAsyncCompact(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	fa := &fakeAgent{}
+	fa.compactHook = func() {
+		close(entered)
+		<-release
+	}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+	ended, emu := collect[CompactionEnded](b)
+
+	fa.Steer(core.SteerItem{ID: "c1", Text: "/compact", Command: "/compact"})
+	fa.Steer(core.SteerItem{ID: "s2", Text: "after compact"})
+
+	requestPump(sctx)
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the barrier never started the compaction")
+	}
+	// Compaction in flight: the trailing message must NOT have been delivered.
+	b.Drain(200 * time.Millisecond)
+	fa.mu.Lock()
+	delivered := len(fa.sentItems)
+	fa.mu.Unlock()
+	if delivered != 0 {
+		t.Fatalf("trailing steer delivered mid-compaction: %+v", fa.sentItems)
+	}
+
+	close(release)
+	if !waitForLen(b, ended, emu, 1, 2*time.Second) {
+		t.Fatal("compaction never ended")
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		fa.mu.Lock()
+		n := len(fa.sentItems)
+		fa.mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("trailing steer never delivered after the compaction finished")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	fa.mu.Lock()
+	defer fa.mu.Unlock()
+	if fa.sentItems[0].ID != "s2" {
+		t.Fatalf("expected trailing steer s2 delivered, got %+v", fa.sentItems)
+	}
+}
+
 // A barrier is only executed when the session is idle: if a run is in flight the
 // pump defers, then runs once the session returns to idle.
 func TestPump_DefersWhileRunning(t *testing.T) {

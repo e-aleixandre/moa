@@ -1080,6 +1080,11 @@ export function handleWsStateChange(id, data, seq = 0) {
   const state = store.get();
   const prev = state.sessions[id];
   const wasRunning = prev && (prev.state === 'running' || prev.state === 'permission');
+  // A compaction settles through the state machine (the bus transitions to
+  // error before publishing its terminal event), so a failure arrives here as a
+  // plain error state. Read the flag BEFORE the patch clears it, so the toast
+  // can name what actually failed instead of blaming "the run".
+  const wasCompacting = prev?.compacting === true;
   const patch = { state: data.state, error: data.error || null, runEpoch: nextRunEpoch(id) };
   // Anchor the activity-indicator elapsed counter when a run begins. Only on
   // the transition into a running state, and only if not already set (a reconnect
@@ -1113,9 +1118,12 @@ export function handleWsStateChange(id, data, seq = 0) {
       // limit reads as an actionable "resets in X" line rather than a fault.
       if (data.state === 'error' && data.error) {
         const isQuota = /quota exceeded|usage limit/i.test(data.error);
+        let title = 'Run failed';
+        if (isQuota) title = 'Usage limit reached';
+        else if (wasCompacting) title = 'Compaction failed';
         addToast({
           sessionId: id,
-          title: isQuota ? 'Usage limit reached' : 'Run failed',
+          title,
           detail: data.error,
           type: 'attention',
         });

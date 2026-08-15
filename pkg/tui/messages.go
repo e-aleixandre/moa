@@ -41,8 +41,9 @@ type sessionSavedMsg struct{}
 // pinnedModelsSavedMsg signals an async pinned-models save completed.
 type pinnedModelsSavedMsg struct{ err error }
 
-// compactResultMsg carries the error from a manual /compact command.
-// Success display is handled by the CompactionEnded bus event.
+// compactResultMsg carries the ACCEPTANCE error from a manual /compact or
+// /prepare-compact. Both only start the work; the outcome (success or failure)
+// is displayed from the CompactionEnded / RunEnded bus events.
 type compactResultMsg struct {
 	Err error
 }

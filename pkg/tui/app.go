@@ -792,18 +792,23 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case compactResultMsg:
-		// A message queued during the compact may have started a follow-up run
-		// (the pump drains the queue at the idle point). If the session is
-		// actually running now, switch into run mode and seed the render loop —
-		// resetting to idle would freeze the UI for a live run. The run's own
-		// RunEnded restores idle.
+		// The bus command is only ACCEPTED here: both /compact and
+		// /prepare-compact do the expensive work on their own goroutine and
+		// settle the session through CompactionEnded / RunEnded. So a nil error
+		// means "started" — stay in run mode (CompactionStarted already set the
+		// compacting phase) and seed the render loop.
+		if msg.Err == nil {
+			return m, tea.Batch(renderTick(), m.status.spinner.Tick)
+		}
+		// The command was REFUSED (it never claimed the session). A message
+		// queued meanwhile may have started a follow-up run; if so switch into
+		// run mode instead of resetting to idle, which would freeze the UI for a
+		// live run. The run's own RunEnded restores idle.
 		if m.runtime.State != nil && m.runtime.State.Current() == bus.StateRunning {
 			m.prepareRun("working")
-			if msg.Err != nil {
-				m.s.blocks = append(m.s.blocks, messageBlock{
-					Type: "error", Raw: "Compaction failed: " + msg.Err.Error(),
-				})
-			}
+			m.s.blocks = append(m.s.blocks, messageBlock{
+				Type: "error", Raw: "Compaction failed: " + msg.Err.Error(),
+			})
 			m.updateViewport()
 			return m, tea.Batch(renderTick(), m.status.spinner.Tick)
 		}
@@ -811,13 +816,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.SetEnabled(true)
 		m.input.textarea.Placeholder = "Ask anything... (Ctrl+J for newline)"
 		m.status.SetText("")
-		if msg.Err != nil {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type: "error", Raw: "Compaction failed: " + msg.Err.Error(),
-			})
-			m.updateViewport()
-		}
-		// Success display handled by CompactionEnded bus event.
+		m.s.blocks = append(m.s.blocks, messageBlock{
+			Type: "error", Raw: "Compaction failed: " + msg.Err.Error(),
+		})
+		m.updateViewport()
 		return m, nil
 
 	case verifyResultMsg:
@@ -1778,7 +1780,20 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 				Raw:  fmt.Sprintf("✂ Context compacted (%dK → %dK tokens)", e.Payload.TokensBefore/1000, e.Payload.TokensAfter/1000),
 			})
 		}
-		m.status.SetPhase(phaseWorking, m.s.runStart)
+		// A standalone compaction (manual /compact) is now only ACCEPTED by
+		// Bus.Execute — the TUI already entered run mode from compactResultMsg —
+		// so this event, not the command's return, owns the settle back to idle.
+		// Still running means a live run owns the session (an automatic
+		// compaction inside a run, a prepare-compact run, or a follow-up run the
+		// pump started from the queue); its RunEnded restores idle.
+		if m.runtime.State != nil && m.runtime.State.Current() != bus.StateRunning {
+			m.s.running = false
+			m.input.SetEnabled(true)
+			m.input.textarea.Placeholder = "Ask anything... (Ctrl+J for newline)"
+			m.status.SetText("")
+		} else {
+			m.status.SetPhase(phaseWorking, m.s.runStart)
+		}
 		m.refreshContextSegment()
 		m.s.viewportDirty = true
 
