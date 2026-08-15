@@ -150,7 +150,7 @@ func TestWorktreesOfOneRepoShareMemory(t *testing.T) {
 
 	configDir := t.TempDir()
 	main := New(configDir, repo)
-	if err := main.Write(Memory{Name: "uses-docker", Description: "d", Type: TypeProject, Body: "b", Durable: true}); err != nil {
+	if _, err := main.Write(Memory{Name: "uses-docker", Description: "d", Scope: ScopeProject, Body: "b", Lifecycle: LifecycleDurable}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -170,7 +170,7 @@ func TestDistinctReposDoNotShareMemory(t *testing.T) {
 	newRepo(t, b)
 
 	configDir := t.TempDir()
-	if err := New(configDir, a).Write(Memory{Name: "secret", Description: "d", Type: TypeProject, Body: "b", Durable: true}); err != nil {
+	if _, err := New(configDir, a).Write(Memory{Name: "secret", Description: "d", Scope: ScopeProject, Body: "b", Lifecycle: LifecycleDurable}); err != nil {
 		t.Fatal(err)
 	}
 	if got := New(configDir, b).List(); len(got) != 0 {
@@ -184,7 +184,7 @@ func TestMigrateCopiesAndKeepsLegacyStore(t *testing.T) {
 	newRepo(t, repo)
 
 	configDir := t.TempDir()
-	legacy := writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Type: TypeProject, Body: "body"})
+	legacy := writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Scope: ScopeProject, Body: "body"})
 	writeSession(t, configDir, repo, time.Now())
 
 	s := New(configDir, repo)
@@ -224,7 +224,7 @@ func TestMigrateFindsStoreOfADifferentWorktree(t *testing.T) {
 	configDir := t.TempDir()
 	// The facts were learned in the worktree; the session in it is the only
 	// record of which path-keyed store that was.
-	writeLegacyFact(t, configDir, wt, Memory{Name: "from-worktree", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, wt, Memory{Name: "from-worktree", Description: "d", Scope: ScopeProject, Body: "b"})
 	writeSession(t, configDir, wt, time.Now())
 
 	// Migrating from the main checkout, which never had a store of its own.
@@ -245,8 +245,8 @@ func TestMigrateIgnoresOtherCodebases(t *testing.T) {
 	newRepo(t, theirs)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, mine, Memory{Name: "mine", Description: "d", Type: TypeProject, Body: "b"})
-	writeLegacyFact(t, configDir, theirs, Memory{Name: "theirs", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, mine, Memory{Name: "mine", Description: "d", Scope: ScopeProject, Body: "b"})
+	writeLegacyFact(t, configDir, theirs, Memory{Name: "theirs", Description: "d", Scope: ScopeProject, Body: "b"})
 	writeSession(t, configDir, mine, time.Now())
 	writeSession(t, configDir, theirs, time.Now())
 
@@ -268,7 +268,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	newRepo(t, repo)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Scope: ScopeProject, Body: "b"})
 	writeSession(t, configDir, repo, time.Now())
 
 	s := New(configDir, repo)
@@ -294,7 +294,7 @@ func TestMigrateStillCopiesWhenAnEmptyDestinationExists(t *testing.T) {
 	newRepo(t, repo)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Scope: ScopeProject, Body: "b"})
 
 	s := New(configDir, repo)
 	// The destination directory alone proves nothing: an ordinary memory.write
@@ -318,7 +318,7 @@ func TestMigrateAfterAFailureFollowedByAWrite(t *testing.T) {
 
 	configDir := t.TempDir()
 	legacyDir := legacyMemoryDir(t, configDir, repo)
-	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Scope: ScopeProject, Body: "b"})
 	unreadable := filepath.Join(legacyDir, "unreadable.md")
 	if err := os.WriteFile(unreadable, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
@@ -332,7 +332,7 @@ func TestMigrateAfterAFailureFollowedByAWrite(t *testing.T) {
 	// The exact sequence that used to strand the legacy store: the migration
 	// fails, the session carries on, and the first thing the agent remembers
 	// creates the destination directory.
-	if err := s.Write(Memory{Name: "written-after", Description: "d", Type: TypeProject, Body: "b", Durable: true}); err != nil {
+	if _, err := s.Write(Memory{Name: "written-after", Description: "d", Scope: ScopeProject, Body: "b", Lifecycle: LifecycleDurable}); err != nil {
 		t.Fatal(err)
 	}
 	stopFailing()
@@ -353,12 +353,12 @@ func TestMigrateNeverOverwritesADestinationFact(t *testing.T) {
 	newRepo(t, repo)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, repo, Memory{Name: "shared", Description: "d", Type: TypeProject, Body: "legacy text"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "shared", Description: "d", Scope: ScopeProject, Body: "legacy text"})
 
 	s := New(configDir, repo)
 	// Whatever is in the destination is live: an ID in an earlier conversation
 	// resolves to it, so the copy has to move aside, not the other way round.
-	if err := s.Write(Memory{Name: "shared", Description: "d", Type: TypeProject, Body: "current text", Durable: true}); err != nil {
+	if _, err := s.Write(Memory{Name: "shared", Description: "d", Scope: ScopeProject, Body: "current text", Lifecycle: LifecycleDurable}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Migrate(); err != nil {
@@ -396,10 +396,10 @@ func TestMigrateMergesSiblingWorktreesWithoutLosingFacts(t *testing.T) {
 
 	configDir := t.TempDir()
 	// Disjoint facts merge; the shared name is where data could be lost.
-	writeLegacyFact(t, configDir, wt1, Memory{Name: "only-one", Description: "d", Type: TypeProject, Body: "one"})
-	writeLegacyFact(t, configDir, wt2, Memory{Name: "only-two", Description: "d", Type: TypeProject, Body: "two"})
-	older := writeLegacyFact(t, configDir, wt1, Memory{Name: "shared", Description: "d", Type: TypeProject, Body: "older text"})
-	newer := writeLegacyFact(t, configDir, wt2, Memory{Name: "shared", Description: "d", Type: TypeProject, Body: "newer text"})
+	writeLegacyFact(t, configDir, wt1, Memory{Name: "only-one", Description: "d", Scope: ScopeProject, Body: "one"})
+	writeLegacyFact(t, configDir, wt2, Memory{Name: "only-two", Description: "d", Scope: ScopeProject, Body: "two"})
+	older := writeLegacyFact(t, configDir, wt1, Memory{Name: "shared", Description: "d", Scope: ScopeProject, Body: "older text"})
+	newer := writeLegacyFact(t, configDir, wt2, Memory{Name: "shared", Description: "d", Scope: ScopeProject, Body: "newer text"})
 	past := time.Now().Add(-time.Hour)
 	if err := os.Chtimes(older, past, past); err != nil {
 		t.Fatal(err)
@@ -458,7 +458,7 @@ func TestMigrateCollapsesIdenticalFacts(t *testing.T) {
 	configDir := t.TempDir()
 	// The same fact learned in two worktrees is the common case, not a
 	// conflict: it must not become "same" and "same-2".
-	fact := Memory{Name: "same", Description: "d", Type: TypeProject, Body: "identical"}
+	fact := Memory{Name: "same", Description: "d", Scope: ScopeProject, Body: "identical"}
 	writeLegacyFact(t, configDir, repo, fact)
 	writeLegacyFact(t, configDir, wt, fact)
 	writeSession(t, configDir, repo, time.Now())
@@ -481,7 +481,7 @@ func TestMigrateWithoutSessionsStillMovesOwnStore(t *testing.T) {
 	configDir := t.TempDir()
 	// No session history at all (pruned, or a fresh config): the store of the
 	// directory being opened is still known by construction.
-	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Scope: ScopeProject, Body: "b"})
 
 	s := New(configDir, repo)
 	if err := s.Migrate(); err != nil {
@@ -499,7 +499,7 @@ func TestMigrateInterruptedPublishesNoFacts(t *testing.T) {
 
 	configDir := t.TempDir()
 	legacyDir := legacyMemoryDir(t, configDir, repo)
-	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Scope: ScopeProject, Body: "b"})
 	// A fact that cannot be read stands in for any failure midway through:
 	// a full disk, a crash, the process being killed.
 	unreadable := filepath.Join(legacyDir, "unreadable.md")
@@ -544,9 +544,9 @@ func TestMigrateCountMatchesWhatIsOnDisk(t *testing.T) {
 	// The collision that used to lose a fact without anybody noticing: two
 	// versions of "foo" displace one to "foo-2", and an unrelated fact really
 	// called "foo-2" then landed on top of it. Three facts in, three facts out.
-	old := writeLegacyFact(t, configDir, repo, Memory{Name: "foo", Description: "d", Type: TypeProject, Body: "older foo"})
-	newer := writeLegacyFact(t, configDir, wt, Memory{Name: "foo", Description: "d", Type: TypeProject, Body: "newer foo"})
-	writeLegacyFact(t, configDir, wt, Memory{Name: "foo-2", Description: "d", Type: TypeProject, Body: "an unrelated fact"})
+	old := writeLegacyFact(t, configDir, repo, Memory{Name: "foo", Description: "d", Scope: ScopeProject, Body: "older foo"})
+	newer := writeLegacyFact(t, configDir, wt, Memory{Name: "foo", Description: "d", Scope: ScopeProject, Body: "newer foo"})
+	writeLegacyFact(t, configDir, wt, Memory{Name: "foo-2", Description: "d", Scope: ScopeProject, Body: "an unrelated fact"})
 	past := time.Now().Add(-time.Hour)
 	if err := os.Chtimes(old, past, past); err != nil {
 		t.Fatal(err)
@@ -585,7 +585,7 @@ func TestMigrateIgnoresLeftoverStagingDir(t *testing.T) {
 	newRepo(t, repo)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Scope: ScopeProject, Body: "b"})
 
 	s := New(configDir, repo)
 	// What an older build left behind between its staging write and its
@@ -598,7 +598,7 @@ func TestMigrateIgnoresLeftoverStagingDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(stale, "half.md"), serialize(Memory{Name: "half", Description: "d", Type: TypeProject, Body: "b"}), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(stale, "half.md"), serialize(Memory{Name: "half", Description: "d", Scope: ScopeProject, Body: "b"}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -639,7 +639,7 @@ func TestMigrateRunsBeforeV1Wrapping(t *testing.T) {
 	// A v1 MEMORY.md beside a v2 store: both migrations have work to do, and
 	// wrapping the flat file first would create the destination directory and
 	// convince the codebase migration it had already run.
-	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Scope: ScopeProject, Body: "b"})
 	if err := os.MkdirAll(s.legacyProjectRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -668,9 +668,9 @@ func TestMigrateSkipsStoresOfDeletedWorktrees(t *testing.T) {
 	// belonged to, and guessing from its parent directory would merge
 	// unrelated projects. Its store stays where it is.
 	gone := filepath.Join(base, "gone")
-	writeLegacyFact(t, configDir, gone, Memory{Name: "orphan", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, gone, Memory{Name: "orphan", Description: "d", Scope: ScopeProject, Body: "b"})
 	writeSession(t, configDir, gone, time.Now())
-	writeLegacyFact(t, configDir, repo, Memory{Name: "alive", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "alive", Description: "d", Scope: ScopeProject, Body: "b"})
 
 	s := New(configDir, repo)
 	if err := s.Migrate(); err != nil {
@@ -730,7 +730,7 @@ func TestMigrateKeepsWatchingAVanishedWorktreeOfThisRepo(t *testing.T) {
 	git("worktree", "add", "-b", "one", wt)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, wt, Memory{Name: "from-gone-wt", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, wt, Memory{Name: "from-gone-wt", Description: "d", Scope: ScopeProject, Body: "b"})
 	writeSession(t, configDir, wt, time.Now())
 	git("worktree", "remove", "--force", wt)
 
@@ -771,8 +771,8 @@ func TestMigrateClaimsItsOwnStoreAfterAnotherWorktreeSealedTheCodebase(t *testin
 	// The worktree's store exists, but nothing on disk says whose it is: no
 	// session ever recorded that path. Migrating from the main checkout seals
 	// the codebase without it.
-	writeLegacyFact(t, configDir, wt, Memory{Name: "from-wt", Description: "d", Type: TypeProject, Body: "b"})
-	writeLegacyFact(t, configDir, repo, Memory{Name: "from-repo", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, wt, Memory{Name: "from-wt", Description: "d", Scope: ScopeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "from-repo", Description: "d", Scope: ScopeProject, Body: "b"})
 	if err := New(configDir, repo).Migrate(); err != nil {
 		t.Fatal(err)
 	}
@@ -801,11 +801,11 @@ func TestMigrateSealedStartDoesNoWork(t *testing.T) {
 	newRepo(t, repo)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Scope: ScopeProject, Body: "b"})
 	// Somebody else's orphan, in a directory unrelated to this repository. It
 	// used to keep every codebase on the expensive path forever.
 	gone := filepath.Join(base, "gone")
-	writeLegacyFact(t, configDir, gone, Memory{Name: "orphan", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, gone, Memory{Name: "orphan", Description: "d", Scope: ScopeProject, Body: "b"})
 	writeSession(t, configDir, gone, time.Now())
 
 	s := New(configDir, repo)
@@ -868,7 +868,7 @@ func TestMigrationRecordIsValidatedBeforeItSeals(t *testing.T) {
 			newRepo(t, repo)
 
 			configDir := t.TempDir()
-			writeLegacyFact(t, configDir, repo, Memory{Name: "must-survive", Description: "d", Type: TypeProject, Body: "b"})
+			writeLegacyFact(t, configDir, repo, Memory{Name: "must-survive", Description: "d", Scope: ScopeProject, Body: "b"})
 
 			s := New(configDir, repo)
 			if err := os.MkdirAll(s.codebaseRoot, 0o700); err != nil {
@@ -904,7 +904,7 @@ func TestMigrateDistrustsARecordThatUndercountsAStore(t *testing.T) {
 	newRepo(t, repo)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, repo, Memory{Name: "must-survive", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "must-survive", Description: "d", Scope: ScopeProject, Body: "b"})
 
 	s := New(configDir, repo)
 	if err := os.MkdirAll(s.codebaseRoot, 0o700); err != nil {
@@ -932,7 +932,7 @@ func TestMigrateSealsDespiteSessionsThatNeverRecordedACWD(t *testing.T) {
 	newRepo(t, repo)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Scope: ScopeProject, Body: "b"})
 	// A session written by a moa old enough not to store a cwd. It decodes
 	// perfectly and will answer the same forever, so waiting for it to say
 	// something would keep this codebase rescanning on every start for good.
@@ -1003,12 +1003,12 @@ func TestMigrateReportsStoresNoSessionCanName(t *testing.T) {
 	newRepo(t, repo)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, repo, Memory{Name: "alive", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "alive", Description: "d", Scope: ScopeProject, Body: "b"})
 	// A store whose sessions were pruned: nothing on disk says which directory
 	// it came from, so nobody can claim it and nobody can be told to look
 	// again either. It has to survive in the one list that mentions it.
 	unknown := filepath.Join(base, "unknown")
-	writeLegacyFact(t, configDir, unknown, Memory{Name: "nameless", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, unknown, Memory{Name: "nameless", Description: "d", Scope: ScopeProject, Body: "b"})
 
 	s := New(configDir, repo)
 	if err := s.Migrate(); err != nil {
@@ -1035,9 +1035,9 @@ func TestOrphanLedgerIsWrittenOnceAndKeepsOtherCodebasesEntries(t *testing.T) {
 	newRepo(t, theirs)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, mine, Memory{Name: "mine", Description: "d", Type: TypeProject, Body: "b"})
-	writeLegacyFact(t, configDir, theirs, Memory{Name: "theirs", Description: "d", Type: TypeProject, Body: "b"})
-	writeLegacyFact(t, configDir, filepath.Join(base, "nameless"), Memory{Name: "orphan", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, mine, Memory{Name: "mine", Description: "d", Scope: ScopeProject, Body: "b"})
+	writeLegacyFact(t, configDir, theirs, Memory{Name: "theirs", Description: "d", Scope: ScopeProject, Body: "b"})
+	writeLegacyFact(t, configDir, filepath.Join(base, "nameless"), Memory{Name: "orphan", Description: "d", Scope: ScopeProject, Body: "b"})
 	writeSession(t, configDir, mine, time.Now())
 	writeSession(t, configDir, theirs, time.Now())
 
@@ -1084,7 +1084,7 @@ func TestMigrateDoesNotSealOnACorruptSession(t *testing.T) {
 	gitOrSkip(t, repo)("worktree", "add", "-b", "one", wt)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, wt, Memory{Name: "from-worktree", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, wt, Memory{Name: "from-worktree", Description: "d", Scope: ScopeProject, Body: "b"})
 	// The only record of where that store came from, truncated mid-write. The
 	// facts are fine; the evidence is not, and the migration must say so
 	// instead of publishing a store it knows is short.
@@ -1214,9 +1214,9 @@ func TestMigrateDoesNotFollowSymlinkedFacts(t *testing.T) {
 	newRepo(t, repo)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, repo, Memory{Name: "real", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "real", Description: "d", Scope: ScopeProject, Body: "b"})
 	outside := filepath.Join(base, "outside.md")
-	if err := os.WriteFile(outside, serialize(Memory{Name: "planted", Description: "d", Type: TypeProject, Body: "b"}), 0o600); err != nil {
+	if err := os.WriteFile(outside, serialize(Memory{Name: "planted", Description: "d", Scope: ScopeProject, Body: "b"}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// A memory directory is user data other programs can write into. A link
@@ -1247,8 +1247,8 @@ func TestMigrateConcurrentProcessesCopyEachFactOnce(t *testing.T) {
 	git("worktree", "add", "-b", "one", wt)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, repo, Memory{Name: "from-main", Description: "d", Type: TypeProject, Body: "b"})
-	writeLegacyFact(t, configDir, wt, Memory{Name: "from-wt", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "from-main", Description: "d", Scope: ScopeProject, Body: "b"})
+	writeLegacyFact(t, configDir, wt, Memory{Name: "from-wt", Description: "d", Scope: ScopeProject, Body: "b"})
 	writeSession(t, configDir, wt, time.Now())
 
 	// Two sessions starting at once in two worktrees of one repository: the
@@ -1323,7 +1323,7 @@ func TestMigrateLoserOfTheLockRereadsTheMarker(t *testing.T) {
 	newRepo(t, repo)
 
 	configDir := t.TempDir()
-	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Type: TypeProject, Body: "b"})
+	writeLegacyFact(t, configDir, repo, Memory{Name: "learned", Description: "d", Scope: ScopeProject, Body: "b"})
 
 	// What the process that loses the race sees: it was let past the cheap
 	// gate because no marker existed, and by the time it holds the lock the

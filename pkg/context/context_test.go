@@ -24,7 +24,7 @@ func TestBuildSystemPrompt_CustomToolDescRuneBoundary(t *testing.T) {
 
 func TestBuildSystemPrompt_MemoryAndCheckpointGuidanceWithoutIndex(t *testing.T) {
 	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: []core.ToolSpec{{Name: "memory"}, {Name: "checkpoint"}}, CWD: "/test"})
-	for _, want := range []string{"Use memory only for durable", "Never use it for temporary progress", "checkpoint tool as a session-local ephemeral slot", "when preparing to compact"} {
+	for _, want := range []string{"Use memory for what you discover while working", "belong in AGENTS.md, not in memory", "A work journal", "checkpoint tool as a session-local ephemeral slot", "when preparing to compact"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q", want)
 		}
@@ -288,7 +288,12 @@ func TestBuildSystemPrompt_MemoryGuideline(t *testing.T) {
 		{Name: "memory", Description: "Memory tool"},
 	}
 	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test"})
-	if !strings.Contains(prompt, "Use memory only for durable, non-obvious facts") {
+	if !strings.Contains(prompt, "Use memory for what you discover while working") {
 		t.Error("expected memory guideline when memory tool is available")
+	}
+	// The journal rule must stay generic: the directory is a user convention,
+	// not something the product names.
+	if strings.Contains(prompt, "tmp/") {
+		t.Error("prompt must not prescribe a concrete journal directory")
 	}
 }

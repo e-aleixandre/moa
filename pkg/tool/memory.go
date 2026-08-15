@@ -10,8 +10,12 @@ import (
 	"github.com/e-aleixandre/moa/pkg/memory"
 )
 
-// NewMemory creates the memory tool for managing cross-session memory as typed,
-// single-fact files (list/read/write/delete).
+// maxSearchResultBytes caps a whole search response. Search must stay cheap
+// enough to be worth calling instead of reading facts one by one.
+const maxSearchResultBytes = 6 * 1024
+
+// NewMemory creates the memory tool for managing cross-session memory as
+// single-fact files (list/search/read/write/delete).
 func NewMemory(cfg ToolConfig) core.Tool {
 	store := cfg.MemoryStore
 	lockKey := "memory:" + store.ProjectDir()
@@ -20,8 +24,8 @@ func NewMemory(cfg ToolConfig) core.Tool {
 		Name:  "memory",
 		Label: "Memory",
 		Description: "Manage persistent memory as small, single-fact notes. Only the index (one line per " +
-			"fact) is in your context; read a fact's full text on demand. Each fact has a type that decides " +
-			"its scope: user/feedback are global (all projects); project/reference are scoped to this project. " +
+			"fact) is in your context; search or read a fact's full text on demand. Each fact declares a " +
+			"scope: \"global\" facts apply to every project, \"project\" facts only to this one. " +
 			"Facts default to ephemeral: save each with a checkable expiry condition, unless it is genuinely " +
 			"permanent (such as a user preference, repository convention, or procedure). When reading a fact " +
 			"with an expiry condition, delete it if you can verify that condition has happened. Update the existing " +
@@ -32,12 +36,28 @@ func NewMemory(cfg ToolConfig) core.Tool {
 			"properties": {
 				"action": {
 					"type": "string",
-					"enum": ["list", "read", "write", "delete"],
-					"description": "list: show the index of all facts. read: return one fact's full text. write: create/overwrite one fact. delete: remove one fact."
+					"enum": ["list", "search", "read", "write", "delete"],
+					"description": "list: show the index of all facts. search: find facts by text, returning ids and short snippets. read: return one fact's full text. write: create/overwrite one fact. delete: remove one fact."
 				},
 				"id": {
 					"type": "string",
 					"description": "Canonical id for read/delete: \"project/<name>\", \"global/<name>\", or a bare \"<name>\" if unambiguous."
+				},
+				"query": {
+					"type": "string",
+					"description": "For search: text to look for in names, descriptions and bodies of both scopes. Required for search."
+				},
+				"regex": {
+					"type": "boolean",
+					"description": "For search: treat query as a Go (RE2) regular expression instead of a case-insensitive substring. Default false."
+				},
+				"limit": {
+					"type": "integer",
+					"description": "For search: maximum number of results (default 10, maximum 25)."
+				},
+				"offset": {
+					"type": "integer",
+					"description": "For search: skip this many results to page through a large match set (default 0)."
 				},
 				"name": {
 					"type": "string",
@@ -45,12 +65,12 @@ func NewMemory(cfg ToolConfig) core.Tool {
 				},
 				"description": {
 					"type": "string",
-					"description": "One-line hook shown in the index (for write). Required."
+					"description": "One-line hook shown in the index (for write). Required, single line, at most 180 bytes — the detail goes in content."
 				},
-				"type": {
+				"scope": {
 					"type": "string",
-					"enum": ["user", "feedback", "project", "reference"],
-					"description": "Fact type (for write). Decides scope: user/feedback → global, project/reference → this project."
+					"enum": ["global", "project"],
+					"description": "Where the fact lives (for write): \"global\" for facts useful in every project, \"project\" for facts about this repository. Required."
 				},
 				"content": {
 					"type": "string",
@@ -82,13 +102,23 @@ func NewMemory(cfg ToolConfig) core.Tool {
 				for _, m := range mems {
 					sb.WriteString("- ")
 					sb.WriteString(m.ID())
-					sb.WriteString(" (")
-					sb.WriteString(string(m.Type))
-					sb.WriteString(") — ")
+					sb.WriteString(" — ")
 					sb.WriteString(m.Description)
 					sb.WriteString("\n")
 				}
 				return core.TextResult(sb.String()), nil
+
+			case "search":
+				res, err := store.Search(memory.SearchOptions{
+					Query:  getString(params, "query", ""),
+					Regex:  getBool(params, "regex", false),
+					Limit:  getInt(params, "limit", 0),
+					Offset: getInt(params, "offset", 0),
+				})
+				if err != nil {
+					return core.ErrorResult(err.Error()), nil
+				}
+				return core.TextResult(formatSearch(res)), nil
 
 			case "read":
 				id := getString(params, "id", "")
@@ -108,19 +138,33 @@ func NewMemory(cfg ToolConfig) core.Tool {
 				return core.TextResult(m.Body), nil
 
 			case "write":
+				scopeStr := getString(params, "scope", "")
+				scope, ok := memory.ParseScope(scopeStr)
+				if !ok {
+					return core.ErrorResult(fmt.Sprintf("invalid scope %q: use \"global\" (every project) or \"project\" (this repository)", scopeStr)), nil
+				}
 				m := memory.Memory{
 					Name:           getString(params, "name", ""),
 					Description:    getString(params, "description", ""),
-					Type:           memory.Type(getString(params, "type", "")),
+					Scope:          scope,
 					InvalidateWhen: getString(params, "invalidate_when", ""),
-					Durable:        getBool(params, "durable", false),
 					Body:           getString(params, "content", ""),
 				}
-				if err := store.Write(m); err != nil {
+				if getBool(params, "durable", false) {
+					m.Lifecycle = memory.LifecycleDurable
+				}
+				note, err := store.Write(m)
+				if err != nil {
 					return core.ErrorResult(err.Error()), nil
 				}
-				m.Scope = memory.ScopeForType(m.Type)
-				return core.TextResult(fmt.Sprintf("Saved memory %q. Read it later with: read %s", m.Name, m.ID())), nil
+				out := fmt.Sprintf("Saved memory %q. Read it later with: read %s", m.Name, m.ID())
+				if note != "" {
+					out += "\n" + note
+				}
+				if budget := formatIndexBudget(store.List()); budget != "" {
+					out += "\n" + budget
+				}
+				return core.TextResult(out), nil
 
 			case "delete":
 				id := getString(params, "id", "")
@@ -133,8 +177,44 @@ func NewMemory(cfg ToolConfig) core.Tool {
 				return core.TextResult(fmt.Sprintf("Deleted memory %q.", id)), nil
 
 			default:
-				return core.ErrorResult(fmt.Sprintf("unknown action %q — use \"list\", \"read\", \"write\" or \"delete\"", getString(params, "action", ""))), nil
+				return core.ErrorResult(fmt.Sprintf("unknown action %q — use \"list\", \"search\", \"read\", \"write\" or \"delete\"", getString(params, "action", ""))), nil
 			}
 		},
 	}
+}
+
+// formatSearch renders a page of hits: ids and snippets only, never bodies,
+// and bounded so a broad query cannot flood the context.
+func formatSearch(res memory.SearchResult) string {
+	if res.Total == 0 {
+		return "No memories matched."
+	}
+	var sb strings.Builder
+	shown := res.Offset + len(res.Hits)
+	fmt.Fprintf(&sb, "%d matching memories (showing %d–%d).", res.Total, res.Offset+1, shown)
+	if shown < res.Total {
+		fmt.Fprintf(&sb, " For the rest, search again with offset=%d.", shown)
+	}
+	sb.WriteString("\n\n")
+	marker := fmt.Sprintf("[results truncated at %dKB — narrow the query or lower limit]\n", maxSearchResultBytes/1024)
+	for _, h := range res.Hits {
+		line := fmt.Sprintf("- %s (%s) — %s\n", h.Memory.ID(), h.Field, h.Snippet)
+		if sb.Len()+len(line)+len(marker) > maxSearchResultBytes {
+			sb.WriteString(marker)
+			break
+		}
+		sb.WriteString(line)
+	}
+	return sb.String()
+}
+
+// formatIndexBudget tells the agent whether what it just saved can actually
+// reach the prompt: an overflowing index drops facts silently otherwise.
+func formatIndexBudget(mems []memory.Memory) string {
+	st := memory.IndexStatusOf(mems)
+	if st.Dropped == 0 {
+		return fmt.Sprintf("Index: %d/%d bytes used by %d facts.", st.UsedBytes, st.BudgetBytes, st.Facts)
+	}
+	return fmt.Sprintf("Index: %d/%d bytes used by %d facts — %d do not fit and never reach the prompt. Consolidate or delete facts.",
+		st.UsedBytes, st.BudgetBytes, st.Facts, st.Dropped)
 }
