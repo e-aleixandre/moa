@@ -465,13 +465,24 @@ func ExtractFinalAssistantText(msgs []AgentMessage) string {
 		if msgs[i].Role != "assistant" {
 			continue
 		}
-		var parts []string
-		for _, c := range msgs[i].Content {
-			if c.Type == "text" && c.Text != "" {
-				parts = append(parts, c.Text)
-			}
-		}
-		return strings.Join(parts, "")
+		return ExtractAssistantText(msgs[i])
 	}
 	return ""
+}
+
+// ExtractAssistantText returns the concatenated non-empty text blocks of an
+// assistant message. Keeping this rule separate lets streaming transcript
+// readers reuse the exact outcome extraction semantics without materializing
+// every preceding message.
+func ExtractAssistantText(msg AgentMessage) string {
+	if msg.Role != "assistant" {
+		return ""
+	}
+	var parts []string
+	for _, c := range msg.Content {
+		if c.Type == "text" && c.Text != "" {
+			parts = append(parts, c.Text)
+		}
+	}
+	return strings.Join(parts, "")
 }

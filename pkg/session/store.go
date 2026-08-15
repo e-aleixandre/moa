@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bufio"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -109,11 +110,6 @@ func (s *FileStore) writeLocked(sess *Session) error {
 		}
 	}
 
-	data, err := json.MarshalIndent(sess, "", "  ")
-	if err != nil {
-		return fmt.Errorf("session: marshal error: %w", err)
-	}
-
 	path := s.path(sess.ID)
 
 	// Atomic write: temp file in same directory, then rename.
@@ -128,9 +124,9 @@ func (s *FileStore) writeLocked(sess *Session) error {
 		_ = tmp.Close()
 		return fmt.Errorf("session: chmod temp: %w", err)
 	}
-	if _, err := tmp.Write(data); err != nil {
+	if err := encodeIndentedJSON(tmp, sess); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("session: write error: %w", err)
+		return fmt.Errorf("session: marshal error: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
@@ -141,6 +137,73 @@ func (s *FileStore) writeLocked(sess *Session) error {
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("session: rename error: %w", err)
+	}
+	return nil
+}
+
+// encodeIndentedJSON streams the same bytes as json.MarshalIndent. Encoder
+// normally appends a newline after its value; holding back its final byte
+// avoids making an on-disk format change while keeping the JSON itself out of
+// the heap as one large []byte.
+func encodeIndentedJSON(w io.Writer, value any) error {
+	buf := bufio.NewWriter(w)
+	withoutFinalNewline := trimFinalNewlineWriter{w: buf}
+	enc := json.NewEncoder(&withoutFinalNewline)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(value); err != nil {
+		return err
+	}
+	if err := withoutFinalNewline.Flush(); err != nil {
+		return err
+	}
+	return buf.Flush()
+}
+
+// trimFinalNewlineWriter delays one byte so an Encoder's final newline can be
+// discarded without buffering the preceding JSON document.
+type trimFinalNewlineWriter struct {
+	w       io.Writer
+	pending byte
+	hasByte bool
+}
+
+func (w *trimFinalNewlineWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if w.hasByte {
+		if err := writeJSONByte(w.w, w.pending); err != nil {
+			return 0, err
+		}
+	}
+	if len(p) > 1 {
+		n, err := w.w.Write(p[:len(p)-1])
+		if err != nil {
+			return n, err
+		}
+		if n != len(p)-1 {
+			return n, io.ErrShortWrite
+		}
+	}
+	w.pending = p[len(p)-1]
+	w.hasByte = true
+	return len(p), nil
+}
+
+func (w *trimFinalNewlineWriter) Flush() error {
+	if !w.hasByte || w.pending == '\n' {
+		return nil
+	}
+	return writeJSONByte(w.w, w.pending)
+}
+
+func writeJSONByte(w io.Writer, b byte) error {
+	n, err := w.Write([]byte{b})
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return io.ErrShortWrite
 	}
 	return nil
 }

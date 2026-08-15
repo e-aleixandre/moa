@@ -586,7 +586,8 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	// an async result consumed by subagent_wait never creates a notification
 	// prompt, but its completed/failed card must survive reload just the same.
 	if sess.persister != nil {
-		transcripts, err := sess.persister.subagentStore(sess.ID).List()
+		store := sess.persister.subagentStore(sess.ID)
+		transcripts, err := store.ListSummaries()
 		if err == nil && len(transcripts) > 0 {
 			data.SubagentOutcomes = make([]SubagentEndData, 0, len(transcripts))
 			for _, transcript := range transcripts {
@@ -594,6 +595,16 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 					continue
 				}
 				result, resultErr := persistedSubagentOutcome(transcript)
+				// Legacy completed transcripts did not persist Result. Retain
+				// their historical final-assistant fallback while streaming past
+				// all messages instead of rebuilding the entire child transcript.
+				if transcript.Status == "completed" && transcript.Result == "" {
+					legacyResult, err := store.LegacyResult(transcript.JobID)
+					if err != nil {
+						continue
+					}
+					result = legacyResult
+				}
 				outcome := SubagentEndData{
 					JobID: transcript.JobID, Task: transcript.Task, Async: transcript.Async,
 					Status: transcript.Status, Result: truncateHistoryString(result), Error: truncateHistoryString(resultErr),

@@ -718,6 +718,75 @@ func TestPersistedSubagentOutcome_BackwardCompatibleResultFallback(t *testing.T)
 	}
 }
 
+func TestSubagentStore_LegacyResultMatchesPersistedOutcome(t *testing.T) {
+	store := session.NewSubagentStore(t.TempDir(), "parent")
+	cases := []struct {
+		name     string
+		messages []core.AgentMessage
+	}{
+		{
+			name: "final assistant text skips thinking and tool calls",
+			messages: []core.AgentMessage{
+				core.WrapMessage(core.Message{Role: "user", Content: []core.Content{core.TextContent("start")}}),
+				core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent("superseded")}}),
+				core.WrapMessage(core.Message{Role: "tool_result", Content: []core.Content{core.TextContent("tool output")}}),
+				core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{
+					core.TextContent("first "),
+					core.ThinkingContent("private reasoning"),
+					core.ToolCallContent("call-1", "read", map[string]any{"path": "<large>&ignored"}),
+					core.TextContent("last 世界"),
+				}}),
+			},
+		},
+		{
+			name: "no assistant message",
+			messages: []core.AgentMessage{
+				core.WrapMessage(core.Message{Role: "user", Content: []core.Content{core.TextContent("start")}}),
+				core.WrapMessage(core.Message{Role: "tool_result", Content: []core.Content{core.TextContent("done")}}),
+			},
+		},
+		{
+			name: "final assistant has no text",
+			messages: []core.AgentMessage{
+				core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent("previous")}}),
+				core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{
+					core.ThinkingContent("private reasoning"),
+					core.ToolCallContent("call-2", "read", nil),
+					{Type: "text", Text: ""},
+				}}),
+			},
+		},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			jobID := fmt.Sprintf("legacy-%d", i)
+			legacy := session.SubagentTranscript{
+				JobID: jobID, Task: "legacy outcome", Model: "haiku", Status: "completed", Async: true,
+				Messages: tc.messages,
+			}
+			if err := store.Save(legacy); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+			full, err := store.Load(jobID)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			want, wantErr := persistedSubagentOutcome(*full)
+			got, err := store.LegacyResult(jobID)
+			if err != nil {
+				t.Fatalf("LegacyResult: %v", err)
+			}
+			if got != want {
+				t.Fatalf("LegacyResult = %q, persistedSubagentOutcome = %q", got, want)
+			}
+			if wantErr != "" {
+				t.Fatalf("unexpected persisted error %q", wantErr)
+			}
+		})
+	}
+}
+
 func TestBuildInitData_SortsPersistedSubagentOutcomesChronologically(t *testing.T) {
 	// Sorting itself is intentionally independent of filesystem/list order;
 	// completed cards must replay oldest-to-newest in the parent timeline.

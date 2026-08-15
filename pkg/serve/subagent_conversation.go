@@ -208,7 +208,7 @@ func (m *Manager) subagentSummaries(sessionID string) ([]SubagentSummary, error)
 		items := make(map[string]SubagentSummary)
 		if sess.persister != nil {
 			if store := sess.persister.subagentStore(sessionID); store != nil {
-				transcripts, err := store.List()
+				transcripts, err := store.ListSummaries()
 				if err != nil {
 					return nil, err
 				}
@@ -228,7 +228,7 @@ func (m *Manager) subagentSummaries(sessionID string) ([]SubagentSummary, error)
 	if err != nil {
 		return nil, err
 	}
-	transcripts, err := session.NewSubagentStore(store.Dir(), sessionID).List()
+	transcripts, err := session.NewSubagentStore(store.Dir(), sessionID).ListSummaries()
 	if err != nil {
 		return nil, err
 	}

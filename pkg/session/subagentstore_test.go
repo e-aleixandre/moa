@@ -1,7 +1,9 @@
 package session
 
 import (
+	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -129,5 +131,100 @@ func TestSubagentStore_ListSortedNewestFirst(t *testing.T) {
 	}
 	if len(list) != 2 || list[0].JobID != "sa-new" {
 		t.Fatalf("expected newest-first, got %+v", list)
+	}
+}
+
+func TestSubagentStore_ListSummariesMatchesListHeadersAndOrder(t *testing.T) {
+	s := NewSubagentStore(t.TempDir(), "sess1")
+	older := sampleTranscript("sa-old")
+	older.Title = "Older"
+	older.Thinking = "medium"
+	older.Result = "finished <success>"
+	older.Error = ""
+	olderPercent := 42
+	older.ContextPercent = &olderPercent
+	older.StartedAt = time.Unix(100, 0)
+	older.FinishedAt = time.Unix(200, 0)
+	newer := sampleTranscript("sa-new")
+	newer.Title = "Newer"
+	newer.Thinking = "high"
+	newer.Result = "finished & verified"
+	newer.Error = ""
+	newerPercent := 84
+	newer.ContextPercent = &newerPercent
+	newer.StartedAt = time.Unix(300, 0)
+	newer.FinishedAt = time.Unix(400, 0)
+	if err := s.Save(older); err != nil {
+		t.Fatalf("Save older: %v", err)
+	}
+	if err := s.Save(newer); err != nil {
+		t.Fatalf("Save newer: %v", err)
+	}
+
+	full, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	summaries, err := s.ListSummaries()
+	if err != nil {
+		t.Fatalf("ListSummaries: %v", err)
+	}
+	if len(summaries) != len(full) {
+		t.Fatalf("ListSummaries returned %d sidecars, want %d", len(summaries), len(full))
+	}
+	for i := range full {
+		want := full[i]
+		want.Messages = nil
+		if !reflect.DeepEqual(summaries[i], want) {
+			t.Errorf("summary %d = %#v, want %#v", i, summaries[i], want)
+		}
+	}
+}
+
+func TestSubagentStore_ListSummariesStopsBeforeMessages(t *testing.T) {
+	s := NewSubagentStore(t.TempDir(), "sess1")
+	if err := os.MkdirAll(s.Dir(), 0700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// The messages value is deliberately incomplete. A successful summary can
+	// only mean the decoder stopped at its key instead of loading the tail.
+	data := []byte(`{"job_id":"sa-large","task":"header only","model":"haiku","status":"completed","async":true,"cost_usd":0.5,"messages":[`)
+	if err := os.WriteFile(filepath.Join(s.Dir(), "sa-large.json"), data, 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	summaries, err := s.ListSummaries()
+	if err != nil {
+		t.Fatalf("ListSummaries: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].JobID != "sa-large" || summaries[0].Messages != nil {
+		t.Fatalf("ListSummaries = %#v, want header without messages", summaries)
+	}
+	full, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(full) != 0 {
+		t.Fatalf("List parsed malformed messages: %#v", full)
+	}
+}
+
+func TestSubagentStore_ListSummariesSkipsCorruptHeader(t *testing.T) {
+	s := NewSubagentStore(t.TempDir(), "sess1")
+	good := sampleTranscript("sa-good")
+	good.FinishedAt = time.Unix(100, 0)
+	if err := s.Save(good); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(s.Dir(), "sa-bad.json"), []byte(`{"job_id":`), 0600); err != nil {
+		t.Fatalf("WriteFile corrupt sidecar: %v", err)
+	}
+
+	summaries, err := s.ListSummaries()
+	if err != nil {
+		t.Fatalf("ListSummaries: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].JobID != "sa-good" {
+		t.Fatalf("ListSummaries = %#v, want only valid sidecar", summaries)
 	}
 }
