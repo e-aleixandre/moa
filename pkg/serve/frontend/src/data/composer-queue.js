@@ -72,6 +72,13 @@ export function queueSummary(pendingSteers) {
 // unrelated gesture. That is a property of the gesture rather than of the
 // clock, so it needs no grace period and never penalises a fast tap.
 //
+// The chip must NOT disarm on pointerleave: a touch tap fires
+// pointerout/pointerleave BEFORE the click, so listening for it disarmed the
+// chip with the very gesture that was activating it, and recall never worked on
+// a phone. Nothing is lost by not listening — a press that drags off the chip
+// and releases elsewhere never produces a click on it. Only pointercancel
+// (scroll or gesture stolen) still disarms.
+//
 // Activations with no pointer at all are always honoured: Alt+↑, Enter on a
 // focused chip, and assistive technology, which dispatches a bare click whose
 // `detail` is 0. Gating those would make the queue unreachable without a mouse.

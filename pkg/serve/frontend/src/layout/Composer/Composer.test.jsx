@@ -46,7 +46,7 @@ mock.module("../../data/session-actions.js", () => ({
 const { Composer } = await import("./Composer.jsx");
 // The real store: the recall reads pendingSteers from it, so seeding it is
 // closer to the running app than faking the module.
-const { updateSession } = await import("../../data/store.js");
+const { updateSession, setState, store } = await import("../../data/store.js");
 
 function descendants(node, result = []) {
   if (!node || typeof node === "string") return result;
@@ -197,4 +197,40 @@ test("a send still clears the composer when its text is untouched", async () => 
   await Promise.resolve();
   await Promise.resolve();
   expect(refs[0].current.value).toBe("");
+});
+
+// A touch tap on the chip fires pointerout/pointerleave BEFORE the click. The
+// first version of the guard disarmed on pointerleave, so on a phone the recall
+// was killed by the very gesture activating it and the queue could not be
+// reached at all. This drives the chip's real handlers in the browser's touch
+// order, which the pure recallActivates tests cannot catch: they were green
+// while the chip was dead.
+test("tapping the queue chip recalls it despite the touch pointerleave", async () => {
+  refs.length = 0;
+  const sessionId = "touch-recall";
+  // The recall reads the queue from the store, so the session must exist there;
+  // updateSession ignores ids it doesn't know.
+  setState({
+    sessions: {
+      ...store.get().sessions,
+      [sessionId]: { id: sessionId, pendingSteers: [{ id: "a", text: "queued thought" }] },
+    },
+  });
+  const tree = Composer({
+    sessionId,
+    session: { state: "running", pendingSteers: [{ id: "a", text: "queued thought" }] },
+  });
+  const chip = descendants(tree).find((node) => node.props?.class === "queue-note");
+  expect(chip).toBeDefined();
+  refs[0].current = { value: "", style: {}, scrollHeight: 24, focus() {}, dispatchEvent() {} };
+
+  // The exact sequence a real finger produces (verified in Chromium): the
+  // leave arrives BEFORE the click. Called only if the chip listens for it, so
+  // the test states the browser's order rather than the current wiring.
+  chip.props.onPointerDown({ pointerId: 2 });
+  chip.props.onPointerLeave?.({ pointerId: 2 });
+  chip.props.onClick({ pointerId: 2, detail: 1 });
+  await Promise.resolve();
+
+  expect(refs[0].current.value).toContain("queued thought");
 });

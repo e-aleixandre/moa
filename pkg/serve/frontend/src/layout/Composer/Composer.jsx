@@ -1073,7 +1073,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
               title="Click or Alt+↑ to edit queued messages"
               onPointerDown={(e) => { recallPointerDown.current = e.pointerId ?? true; }}
               onPointerCancel={() => { recallPointerDown.current = null; }}
-              onPointerLeave={() => { recallPointerDown.current = null; }}
               onClick={(e) => handleDequeueSteers({ pointerId: e.pointerId, detail: e.detail })}
               onKeyDown={(e) => {
                 if (e.key !== "Enter" && e.key !== " ") return;
