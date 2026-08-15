@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/base64"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -73,7 +74,7 @@ func (m appModel) launchAgentSend(text string) tea.Cmd {
 			if err != nil {
 				return agentSendErrorMsg{Err: err}
 			}
-			return nil
+			return agentSendAdmittedMsg{}
 		},
 		renderTick(),
 		m.status.spinner.Tick,
@@ -89,7 +90,7 @@ func (m appModel) launchAgentSendWithContent(content []core.Content) tea.Cmd {
 			if err != nil {
 				return agentSendErrorMsg{Err: err}
 			}
-			return nil
+			return agentSendAdmittedMsg{}
 		},
 		renderTick(),
 		m.status.spinner.Tick,
@@ -119,6 +120,7 @@ func (m appModel) submitBusy(text string) (tea.Model, tea.Cmd) {
 		case bus.PolicyQueue:
 			id := core.NewSteerID()
 			if err := m.runtime.Bus.Execute(bus.QueueCommand{ID: id, Raw: cmd}); err != nil {
+				m.input.Restore(text)
 				m.status.SetText("Queue full — command not queued")
 				return m, nil
 			}
@@ -152,6 +154,7 @@ func (m appModel) submitBusy(text string) (tea.Model, tea.Cmd) {
 	// queue returns ErrSteerQueueFull, and showing an accepted chip that will
 	// never be delivered would be a lie (parity with the web 503 path).
 	if err := m.runtime.Bus.Execute(steer); err != nil {
+		m.input.Restore(text)
 		m.status.SetText("Queue full — message not sent")
 		return m, nil
 	}
@@ -246,8 +249,17 @@ func (m appModel) checkClipboardImage() tea.Cmd {
 
 // startAgentRun sends a prompt to the agent and starts streaming.
 func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
+	// Submit clears the textarea before dispatch. Keep a complete rollback
+	// snapshot until bus admission succeeds so a transient rejection retains
+	// both text and the pending clipboard image.
+	m.s.failedSendText = text
+	m.s.failedSendImage = m.s.pendingImage
+	m.s.failedSendImageMime = m.s.pendingImageMime
+	m.s.failedSendBlockIdx = len(m.s.blocks)
+	m.s.failedSendBlockN = 0
 	if err := m.commitPendingTimelineEvent(); err != nil {
 		m.s.pendingStatus = "✗ " + err.Error()
+		m.restoreFailedSend()
 		return m, nil
 	}
 
@@ -260,6 +272,7 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 	}
 
 	m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: text})
+	m.s.failedSendBlockN++
 
 	// Consume pending image if any.
 	hasImage := m.s.pendingImage != nil
@@ -275,6 +288,7 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 			Type: "status",
 			Raw:  fmt.Sprintf("📎 Image attached (%d KB, %s)", kb, imageMime),
 		})
+		m.s.failedSendBlockN++
 	}
 
 	// Set session title from the first user message.
@@ -294,6 +308,33 @@ func (m appModel) startAgentRun(text string) (tea.Model, tea.Cmd) {
 		return m, m.launchAgentSendWithContent(content)
 	}
 	return m, m.launchAgentSend(text)
+}
+
+func (m *appModel) restoreFailedSend() {
+	if m.s.failedSendText == "" {
+		return
+	}
+	start, count := m.s.failedSendBlockIdx, m.s.failedSendBlockN
+	if start >= 0 && count > 0 && start+count <= len(m.s.blocks) {
+		m.s.blocks = append(m.s.blocks[:start], m.s.blocks[start+count:]...)
+	}
+	m.input.Restore(m.s.failedSendText)
+	m.s.pendingImage = m.s.failedSendImage
+	m.s.pendingImageMime = m.s.failedSendImageMime
+	m.clearFailedSendSnapshot()
+}
+
+// clearFailedSendSnapshot drops the rollback snapshot once it can no longer
+// roll anything back: either this send's bus admission succeeded or the
+// snapshot was just restored. Without this, a later agentSendErrorMsg from an
+// unrelated path (handoff, subagent/bash notification run) would restore a
+// stale snapshot — reinjecting an already-delivered prompt into the composer
+// and removing legitimate transcript blocks.
+func (m *appModel) clearFailedSendSnapshot() {
+	m.s.failedSendText = ""
+	m.s.failedSendImage = nil
+	m.s.failedSendImageMime = ""
+	m.s.failedSendBlockN = 0
 }
 
 // --- Reconciliation ---
@@ -374,8 +415,46 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 	m.s.blocks = m.s.blocks[:0]
 
 	pendingCalls := make(map[string]core.Content)
+	// A terminal child outcome belongs at its actual completion point, not at
+	// the timestamp of the parent notification that happened to deliver it to
+	// the model. Keep the structured lifecycle as the sole presentation owner.
+	type terminalOutcome struct {
+		jobID      string
+		task       string
+		status     string
+		result     string
+		finishedAt time.Time
+	}
+	var outcomes []terminalOutcome
+	for jobID, child := range m.s.subagents {
+		if child == nil || child.kind == "bash" || (child.status != "completed" && child.status != "failed" && child.status != "cancelled") {
+			continue
+		}
+		outcomes = append(outcomes, terminalOutcome{
+			jobID: jobID, task: child.task, status: child.status,
+			result: child.terminalResult, finishedAt: child.finishedAt,
+		})
+	}
+	sort.SliceStable(outcomes, func(i, j int) bool {
+		if outcomes[i].finishedAt.IsZero() {
+			return false
+		}
+		if outcomes[j].finishedAt.IsZero() {
+			return true
+		}
+		return outcomes[i].finishedAt.Before(outcomes[j].finishedAt)
+	})
+	nextOutcome := 0
+	appendOutcomesThrough := func(timestamp int64) {
+		for nextOutcome < len(outcomes) && !outcomes[nextOutcome].finishedAt.IsZero() && outcomes[nextOutcome].finishedAt.Unix() <= timestamp {
+			o := outcomes[nextOutcome]
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "subagent", SubagentJobID: o.jobID, SubagentTask: o.task, SubagentStatus: o.status, SubagentResult: o.result})
+			nextOutcome++
+		}
+	}
 
 	for _, msg := range msgs {
+		appendOutcomesThrough(msg.Timestamp)
 		if isShellMessage(msg) {
 			cmd, output := parseShellBody(firstTextContent(msg.Content))
 			m.s.blocks = append(m.s.blocks, messageBlock{
@@ -395,6 +474,10 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 			if len(msg.Content) > 0 {
 				text := msg.Content[0].Text
 				if source, _ := msg.Custom["source"].(string); source == "subagent" {
+					jobID, _ := msg.Custom["subagent_job_id"].(string)
+					if m.hasTerminalSubagentOutcome(jobID) {
+						continue
+					}
 					task, _ := msg.Custom["subagent_task"].(string)
 					status, _ := msg.Custom["subagent_status"].(string)
 					result, _ := msg.Custom["subagent_result"].(string)
@@ -408,7 +491,12 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 					command, _ := msg.Custom["bash_command"].(string)
 					status, _ := msg.Custom["bash_status"].(string)
 					m.s.blocks = append(m.s.blocks, bashNotificationBlock(command, status, text))
+				} else if source == "secret_batch" {
+					m.s.blocks = append(m.s.blocks, messageBlock{Type: "status", Raw: secretBatchStatus(secretAliases(msg.Custom))})
 				} else if task, status, result, ok := parseSubagentNotification(text); ok {
+					if m.hasTerminalSubagentOutcome(subagentNotificationJobID(text)) {
+						continue
+					}
 					m.s.blocks = append(m.s.blocks, messageBlock{
 						Type:           "subagent",
 						SubagentTask:   task,
@@ -494,6 +582,20 @@ func (m *appModel) rebuildFromMessages(msgs []core.AgentMessage) {
 			}
 		}
 	}
+	// Legacy messages may have no timestamps; retain terminal outcomes rather
+	// than dropping them, after all timestamped parent history.
+	for ; nextOutcome < len(outcomes); nextOutcome++ {
+		o := outcomes[nextOutcome]
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "subagent", SubagentJobID: o.jobID, SubagentTask: o.task, SubagentStatus: o.status, SubagentResult: o.result})
+	}
+}
+
+func (m *appModel) hasTerminalSubagentOutcome(jobID string) bool {
+	if jobID == "" {
+		return false
+	}
+	child := m.s.subagents[jobID]
+	return child != nil && (child.status == "completed" || child.status == "failed" || child.status == "cancelled")
 }
 
 // isShellMessage returns true for messages produced by ! or !! shell escapes.

@@ -210,6 +210,20 @@ type GetPermissionDecisionSnapshot struct{ SessionID string }
 // Handler returns: []core.AgentMessage
 type GetDisplayMessages struct{ SessionID string }
 
+// GetDisplayMessagesSince returns only the display messages after a durable
+// tree entry on the current branch. Valid is false unless EntryID remains on
+// the current root-to-leaf path, so reconnect callers can fail closed to a
+// full snapshot after a branch switch or history reset.
+type GetDisplayMessagesSince struct {
+	SessionID string
+	EntryID   string
+}
+
+type DisplayMessagesSince struct {
+	Messages []core.AgentMessage
+	Valid    bool
+}
+
 // MsgIDInUse reports whether a message with this ID is already part of the
 // session's history. Ingress paths that accept a client-supplied message ID use
 // it to refuse an identity that is already taken: reusing a historical ID would
@@ -240,6 +254,7 @@ type SubagentSnapshot struct {
 	// OriginToolCallID identifies the parent model tool call that created this job.
 	OriginToolCallID string
 	Task             string
+	Title            string
 	Model            string
 	Thinking         string
 	Status           string

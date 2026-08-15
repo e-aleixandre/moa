@@ -1,6 +1,6 @@
 // format.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { formatDiff, toolPreview, sessionDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens, contextWindowLabel, sessionTitle, copyToClipboard } from './format.js';
+import { formatDiff, toolPreview, sessionDotState, sessionDisplayDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens, contextWindowLabel, sessionTitle, copyToClipboard } from './format.js';
 
 test('copyToClipboard falls back to execCommand when Clipboard.writeText is unavailable', async () => {
   const nav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -138,6 +138,31 @@ test('sessionDotState: null-safe', () => {
 
 test('sessionDotState: saved with subagent data stays saved', () => {
   expect(sessionDotState({ state: 'saved', subagentCount: 1 })).toBe('saved');
+});
+
+test('sessionDisplayDotState: an unread result wins over a live subagent', () => {
+  expect(sessionDisplayDotState({
+    state: 'idle', unseen: true, subagents: { child: { status: 'running' } },
+  })).toBe('unseen');
+});
+
+test('sessionDisplayDotState: an unread result wins over a background bash job', () => {
+  expect(sessionDisplayDotState({
+    state: 'idle', unseen: true, subagents: { bash: { kind: 'bash', status: 'running' } },
+  })).toBe('unseen');
+});
+
+test('sessionDisplayDotState: urgent states win over an unread result', () => {
+  expect(sessionDisplayDotState({ state: 'permission', unseen: true })).toBe('permission');
+  expect(sessionDisplayDotState({ state: 'error', unseen: true })).toBe('error');
+});
+
+test('sessionDisplayDotState: an unread result wins over a running main agent', () => {
+  expect(sessionDisplayDotState({ state: 'running', unseen: true })).toBe('unseen');
+});
+
+test('sessionDisplayDotState: a seen running session stays running', () => {
+  expect(sessionDisplayDotState({ state: 'running', unseen: false })).toBe('running');
 });
 
 test('isRecentSession: within the window is recent', () => {

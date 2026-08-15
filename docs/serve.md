@@ -20,10 +20,19 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Account plan-usage panel when a supported subscription OAuth login is active
 - Rename (`/rename <title>`) and delete sessions from the overview
 - Group the mobile drawer and desktop session spine by recency or folder; the choice is saved locally
-- Unread badges on sessions with activity you haven't seen yet
+- Unread result badges on sessions whose successful run finished while you were
+  away; they are held only in Moa's process memory and appear first under **New
+  results** in the mobile drawer. Selecting a session marks the result read
+  after its authoritative transcript snapshot arrives while the tab is in the
+  foreground. When that completed unread result is opened, the transcript starts
+  at the last reply's reading position rather than jumping to its tail; live
+  sessions continue to follow their newest output. Permission and question
+  badges instead reflect pending session state and disappear when the request
+  is resolved.
 - Multi-pane tiled layouts
 - Keyboard-first navigation
 - Voice input
+- Stage short-lived secrets for the agent without putting their values in chat
 - Pair a Pulse device by scanning a **QR code** (or manual code), created from the top bar (`POST /api/pulse/pairings`)
 - **Version indicator** in the top bar that links to the latest release when an update is available
 
@@ -51,8 +60,11 @@ On desktop, you can split panes horizontally or vertically, switch focus by keyb
 
 Requires `moa --login openai-transcribe`. Browser microphone access usually needs HTTPS, so it works best on localhost, Tailscale, or behind your own HTTPS setup.
 
-Hold the send button to record, release to transcribe, or slide up while holding
-to keep recording hands-free. `⌘.` / `Alt+.` does the same from the keyboard.
+Hold the send button to record, release to transcribe, or slide up while
+holding to keep recording hands-free. This also works when text or attachments
+are already present: a short tap sends them, while a hold appends the
+transcript at the cursor. `⌘.` / `Alt+.` also starts and stops a hands-free
+recording.
 
 Agent questions (`ask_user`) take dictation the same way: hold their answer
 button, or use the shortcut while the question is on screen. Speech is appended
@@ -102,6 +114,47 @@ review any external resources the page references before it loads.
 - Native binary content (images, plus any natively-forwarded documents) is additionally capped at **48 MB cumulative across the session's history** (`maxSessionNativeDocBytes`), because native blocks are re-sent to the model every turn; individual images are capped at **5 MB** decoded. Content beyond the cumulative budget falls back to disk instead.
 - Files that exceed the client-side cap are rejected before upload. Raising these limits would require changing the transport (currently base64-in-JSON), which is out of scope.
 - The base directory can be overridden with the `MOA_ATTACHMENTS_DIR` environment variable. It defaults to `/tmp/moa-<uid>`: the directory is created `0700` and moa refuses one owned by another account, so keying it by user is what lets two accounts on the same machine both stage attachments.
+
+## Staging secrets
+
+An owner-authorized client can send a short-lived credential batch to
+`POST /api/sessions/{id}/secrets` without putting the values in the chat:
+
+```json
+{
+  "secrets": [
+    {"name": "db-produccion", "value": "…"},
+    {"name": "netrc", "value": "…"}
+  ]
+}
+```
+
+Moa writes one `0600` file per alias in a fresh `0700` directory below the
+system temporary directory, then tells the agent only that directory and the
+aliases. The agent installs each credential where its client expects it and
+deletes the files afterwards. Batches are also removed on session close/delete
+or periodically once they are at least six hours old. The response contains
+only `directory` and `aliases`.
+
+**Important boundary: this is not a vault and does not protect a secret from
+the agent.** The agent's shell runs as the same Unix user and **can read the
+staged files**. If it reads or prints a value, that content enters the model
+context and transcript like any other tool output. Only use it with
+repositories and commands you trust.
+
+What staging does provide is narrower: the value never passes through chat
+input, is never persisted in your message, and Moa itself never sends it to the
+model — only the directory path and aliases.
+
+In the web or terminal UI, use `/secret alias1 alias2` to enter a masked value
+for each alias, or `/secret` to add aliases one at a time. Type **only names,
+never values**, after `/secret`: values are deliberately not accepted on that
+command line, and the command takes at most three aliases so a pasted value is
+less likely to be read as a name — add further names in the masked form. Moa
+refuses and discards every recognized `/secret` command before it can enter its
+composer history, local draft, dispatch, or transcript. Your browser, terminal,
+keyboard, or OS may still retain what you typed, so if you accidentally type a
+value there, rotate that credential.
 
 ## Queued commands and mid-run messages
 
@@ -188,6 +241,58 @@ Moa also rejects requests whose `Host` header isn't `localhost`, an IP literal, 
 xAI login and plan-usage support do not change this security model or expose a
 new Serve authentication route.
 
+## Session WebSocket resume
+
+`GET /api/sessions/{id}/ws` sends an `init` event before live events. A client
+with a retained transcript may pass `since_msg=<durable message ID>` to request
+a smaller init: if that entry is still on the session's current tree path, the
+init includes `delta_base` with that ID and `messages` contains only the suffix
+after it. Clients append that suffix only when they still have the named base.
+
+The server falls back to the ordinary full, bounded history snapshot when the
+token is absent, stale, from another branch, removed by `/clear`, or when the
+suffix itself cannot fit the reconnect history limit. A resume token is an
+optimization, not an event replay cursor: clients must continue using the
+normal `server_instance`, `last_seq`, and `attention_namespace` semantics from
+every init. Unknown query parameters are ignored, so clients and
+servers can be upgraded independently.
+
+## Attention read cursor
+
+Attention is tracked per session as a read cursor: **you have seen everything
+through bus sequence N**. An attention-producing event whose sequence is above
+that cursor keeps the session marked unread. A confirmed WebSocket `init` for a
+selected session acknowledges its `last_seq` while the tab is in the foreground;
+a rendered live attention event acknowledges its own sequence. A hidden tab
+never acknowledges attention.
+
+`POST /api/sessions/{id}/read` advances that cursor. It takes these query
+parameters:
+
+- `through_seq`: the bus sequence through which the client has rendered.
+- `attention_namespace`: the runtime incarnation that owns that sequence.
+  It is `serverInstance:incarnation`, where the incarnation increases when a
+  session runtime is recreated.
+
+The endpoint returns `204 No Content` on success, `400 Bad Request` for an
+invalid or future cursor, `404 Not Found` for an unknown session, and `409
+Conflict` when the namespace has been superseded. A client must obtain both
+values from the current runtime rather than carrying a cursor across a session
+resume.
+
+Every WebSocket `init` includes `last_seq` and `attention_namespace`.
+`last_seq` is a conservative acknowledgement boundary, not an atomic snapshot
+of every field in the init: all attention effects at or below it are represented
+or superseded by the snapshot. `attention_namespace` identifies the ordered
+runtime incarnation for its bus sequence, preventing an old socket's sequence
+from being interpreted against a recreated runtime.
+
+The `GET /api/sessions` roster includes `unseen`, `unseen_seq`, and
+`attention_namespace`. `unseen` is the current attention badge,
+`unseen_seq` is the highest unread attention occurrence, and
+`attention_namespace` scopes that occurrence and any read cursor to its runtime
+incarnation.
+
 ## REST endpoints
 
 Beyond the per-session WebSocket, Serve exposes a few global read/write endpoints:
@@ -197,10 +302,16 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/version` | Current version, update state, and served frontend build id |
 | `GET /api/capabilities` | Server/session capabilities (providers, features) |
 | `GET /api/usage` | Usage/cost readout |
+| `GET /api/sessions/{id}/history?before={msg_id}&limit={n}` | Chronological, lossless display-history page before a message ID; the page size is an objective and can grow to keep tool calls with their results |
 | `GET /api/model-preferences` · `PATCH /api/model-preferences` | Read or pin/unpin models in the owner's global preferences |
+| `POST /api/sessions/{id}/secrets` | Stage a short-lived secret batch; returns its directory and aliases, never values |
 | `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |
 | `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |
+
+The web transcript initially opens on the recent conversation and automatically
+loads older history as you scroll upwards. Each older page is prepended while
+preserving the visible reading position.
 
 ## Frontend development
 

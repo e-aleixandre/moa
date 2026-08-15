@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight } from "lucide-preact";
+import { copyToClipboard } from "../../../data/util/format.js";
 import { SessionRow } from "../../../components/index.js";
 import { openOverlay } from "../../../data/overlay-history.js";
 import { filterProjectSections, groupProjectSessions, hiddenProjectSavedCount, projectCollapsed, sessionSearchMatch, visibleProjectSessions } from "../../../data/util/project-sessions.js";
@@ -122,6 +123,9 @@ function SessionCardMenu({ session, onClose, onReopen, onDelete }) {
               Close session
             </button>
           )}
+          <button type="button" role="menuitem" class="sdcard-action" onClick={() => { copyToClipboard(session.id); closeMenu(); }}>
+            Copy session ID
+          </button>
           {confirmingDelete ? (
             <button
               type="button"
@@ -244,6 +248,7 @@ export function SessionDrawer({
   step = "list",
   onClose,
   onClosed,
+  newResults = [],
   active = [],
   saved = [],
   activeCount = 0,
@@ -282,6 +287,7 @@ export function SessionDrawer({
   const [view, setView] = useState(step);
   const [query, setQuery] = useState("");
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
+  const [showAllNew, setShowAllNew] = useState(false);
 
   // The screen an open lands on — and a step change while the drawer is
   // already open (the palette handing over to an open drawer) — both come from
@@ -413,9 +419,10 @@ export function SessionDrawer({
   // palette's subsequence matcher; long session titles otherwise match noise.
   const q = query.trim();
   const hit = (s) => sessionSearchMatch(q, s);
+  const shownNew = newResults.filter(hit);
   const shownActive = active.filter(hit);
   const shownSaved = saved.filter(hit);
-  const hitCount = shownActive.length + shownSaved.length;
+  const hitCount = shownNew.length + shownActive.length + shownSaved.length;
   const projectSections = filterProjectSections(groupProjectSessions([...active, ...saved]), query);
 
   const card = (s, hidePath = false) => (
@@ -481,6 +488,11 @@ export function SessionDrawer({
             </div>
 
             <div class="sdrawer-list">
+              {shownNew.length > 0 && <>
+                <span class="sdrawer-group sdrawer-group-new">New results · {shownNew.length}</span>
+                {shownNew.slice(0, showAllNew ? undefined : 3).map((s) => card(s))}
+                {!showAllNew && shownNew.length > 3 && <button type="button" class="sdrawer-show-all" onClick={() => setShowAllNew(true)}>Show all {shownNew.length} new results</button>}
+              </>}
               {groupByProject ? projectSections.map((section) => {
                 const collapsed = projectCollapsed(section, drawerCollapsed, !!q);
                 const expanded = expandedProjects.has(section.key);
@@ -498,7 +510,7 @@ export function SessionDrawer({
                     {hiddenSaved > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setExpandedProjects((keys) => new Set(keys).add(section.key))}>Show all {hiddenSaved} saved</button>}
                   </div>}
                 </section>;
-              }) : <>{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{shownSaved.map((s) => card(s))}</>}
+              }) : <>{shownActive.length > 0 && <span class="sdrawer-group">Active</span>}{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{shownSaved.map((s) => card(s))}</>}
               {q && hitCount === 0 && (
                 <span class="sdrawer-note">No session matches “{query}”</span>
               )}

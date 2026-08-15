@@ -128,6 +128,30 @@ test('run_end marks generating tools as errored', () => {
   expect(t.messages[0].status).toBe('error');
 });
 
+// A steer sent into a RUNNING subagent used to fall through to the default
+// branch and vanish: accepted, queued and delivered by the server, yet invisible
+// until the transcript was refetched.
+test('a nested steer appears in the subagent transcript', () => {
+  const t = freshTarget();
+  const b = newBuffers();
+  applyNestedEvent(t, b, { type: 'steer', data: { id: 's1', msg_id: 'm1', text: 'look at the image' } });
+  expect(t.messages).toHaveLength(1);
+  expect(t.messages[0].role).toBe('user');
+  expect(t.messages[0].content[0].text).toBe('look at the image');
+});
+
+test('a nested steer is deduplicated by msg_id, not by text', () => {
+  const t = freshTarget();
+  const b = newBuffers();
+  const evt = { type: 'steer', data: { id: 's1', msg_id: 'm1', text: 'Hola?' } };
+  applyNestedEvent(t, b, evt);
+  applyNestedEvent(t, b, evt);
+  expect(t.messages).toHaveLength(1);
+  // The same words sent again are a different message and must both show.
+  applyNestedEvent(t, b, { type: 'steer', data: { id: 's2', msg_id: 'm2', text: 'Hola?' } });
+  expect(t.messages).toHaveLength(2);
+});
+
 test('ensureTarget tolerates null/partial input', () => {
   const t = ensureTarget(null);
   expect(t.messages).toEqual([]);

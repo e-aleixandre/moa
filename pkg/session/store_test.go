@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -90,6 +91,86 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if loaded.Metadata["model"] != "claude-sonnet-4" {
 		t.Errorf("Metadata[model] = %v, want 'claude-sonnet-4'", loaded.Metadata["model"])
+	}
+}
+
+// TestSave_StreamedFormatAndRoundTrip ensures streaming persistence preserves
+// the exact established file format, including HTML escaping, while retaining
+// every field after loading it again.
+func TestSave_StreamedFormatAndRoundTrip(t *testing.T) {
+	store := tempStore(t)
+	sess := store.Create()
+	sess.Title = "Unicode <title> & symbols: café 世界"
+	sess.Metadata["html"] = "<tag>&value</tag>"
+	sess.Messages = []core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("hello <world> & café 世界")),
+		{Message: core.Message{
+			Role: "assistant",
+			Content: []core.Content{
+				core.TextContent("calling a tool"),
+				core.ToolCallContent("call-1", "write", map[string]any{"body": "<body>&世界"}),
+			},
+		}},
+	}
+
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	want, err := json.MarshalIndent(sess, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(store.Dir(), sess.ID+".json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("streamed file differs from MarshalIndent\n got: %s\nwant: %s", got, want)
+	}
+
+	loaded, err := store.Load(sess.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	roundTrip, err := json.MarshalIndent(loaded, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent loaded session: %v", err)
+	}
+	if !bytes.Equal(roundTrip, want) {
+		t.Fatal("loaded session does not preserve the saved representation")
+	}
+}
+
+func TestSave_StreamedEncodingErrorKeepsExistingFileAndCleansTemp(t *testing.T) {
+	store := tempStore(t)
+	sess := store.Create()
+	sess.Metadata["valid"] = "before"
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("initial Save: %v", err)
+	}
+	path := filepath.Join(store.Dir(), sess.ID+".json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile before failed Save: %v", err)
+	}
+
+	sess.Metadata["unsupported"] = func() {}
+	if err := store.Save(sess); err == nil {
+		t.Fatal("Save with an unsupported value succeeded")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile after failed Save: %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("failed streamed encoding changed the destination file")
+	}
+	temps, err := filepath.Glob(filepath.Join(store.Dir(), ".session-*.tmp"))
+	if err != nil {
+		t.Fatalf("Glob temporary files: %v", err)
+	}
+	if len(temps) != 0 {
+		t.Fatalf("failed streamed encoding left temporary files: %v", temps)
 	}
 }
 

@@ -94,6 +94,8 @@ type MoaConfig struct {
 	PlanReviewThinking     string               `json:"plan_review_thinking"`                    // Thinking level for plan reviewer (default: "low")
 	CodeReviewModel        string               `json:"code_review_model,omitempty"`             // Model for code reviewer (default: plan review model)
 	CodeReviewThinking     string               `json:"code_review_thinking,omitempty"`          // Thinking level for code reviewer (default: plan review thinking)
+	AutoTitleModel         string               `json:"auto_title_model,omitempty"`              // "auto", "off", or model spec for automatic session titles
+	SessionBriefModel      string               `json:"session_brief_model,omitempty"`           // "auto", "off", or model spec for web/Pulse session briefs
 	MaxBudget              float64              `json:"max_budget"`                              // Max USD per agent run. 0 = unlimited.
 	MaxTurns               int                  `json:"max_turns,omitempty"`                     // Max agent turns per run. 0 = unlimited.
 	MaxToolCallsPerTurn    int                  `json:"max_tool_calls_per_turn,omitempty"`       // Max tool calls per turn. 0 = unlimited.
@@ -423,7 +425,29 @@ func loadConfigFile(path string) MoaConfig {
 		fmt.Fprintf(os.Stderr, "warning: corrupt config %s: %v\n", path, err)
 		return MoaConfig{}
 	}
+	if err := ValidateAuxiliaryModelConfig(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: invalid auxiliary model config %s: %v; disabling affected feature\n", path, err)
+		if ValidateAuxiliaryModelSpec(cfg.AutoTitleModel) != nil {
+			cfg.AutoTitleModel = "off"
+		}
+		if ValidateAuxiliaryModelSpec(cfg.SessionBriefModel) != nil {
+			cfg.SessionBriefModel = "off"
+		}
+	}
 	return cfg
+}
+
+// ValidateAuxiliaryModelConfig validates the two background-model settings
+// without requiring credentials. Credential availability is intentionally a
+// startup concern: a valid config remains valid when a user logs out.
+func ValidateAuxiliaryModelConfig(cfg MoaConfig) error {
+	if err := ValidateAuxiliaryModelSpec(cfg.AutoTitleModel); err != nil {
+		return fmt.Errorf("auto_title_model: %w", err)
+	}
+	if err := ValidateAuxiliaryModelSpec(cfg.SessionBriefModel); err != nil {
+		return fmt.Errorf("session_brief_model: %w", err)
+	}
+	return nil
 }
 
 // mergeScalar returns override if non-zero, otherwise base.
@@ -473,6 +497,8 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		PlanReviewThinking: mergeScalar(base.PlanReviewThinking, override.PlanReviewThinking),
 		CodeReviewModel:    mergeScalar(base.CodeReviewModel, override.CodeReviewModel),
 		CodeReviewThinking: mergeScalar(base.CodeReviewThinking, override.CodeReviewThinking),
+		AutoTitleModel:     mergeScalar(base.AutoTitleModel, override.AutoTitleModel),
+		SessionBriefModel:  mergeScalar(base.SessionBriefModel, override.SessionBriefModel),
 		CacheTTL:           mergeScalar(base.CacheTTL, override.CacheTTL),
 		STTLanguage:        mergeScalar(base.STTLanguage, override.STTLanguage),
 		STTModel:           mergeScalar(base.STTModel, override.STTModel),

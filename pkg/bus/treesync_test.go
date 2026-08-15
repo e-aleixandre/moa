@@ -58,6 +58,57 @@ func TestDisplayMessages_IncludesInFlightTurn(t *testing.T) {
 	}
 }
 
+func TestClearSessionRejectsDeltaBeforeAsyncTreeSync(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.Tree = session.NewTree()
+	RegisterHandlers(sctx)
+
+	// Hold the async tree-sync subscriber at the clear event. This is the
+	// precise old race: Reset had already emptied the agent, but TreeSyncer had
+	// not yet consumed CommandExecuted and its old tree still validated tokens.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	b.SubscribeAll(func(event any) {
+		if command, ok := event.(CommandExecuted); ok && command.Command == "clear" {
+			close(entered)
+			<-release
+		}
+	})
+	RegisterTreeSyncer(b, sctx)
+
+	fa.mu.Lock()
+	fa.messages = []core.AgentMessage{msgWithID("user", "before clear", "old-message")}
+	fa.mu.Unlock()
+	b.Publish(RunEnded{SessionID: sctx.SessionID})
+	b.Drain(time.Second)
+
+	if err := b.Execute(ClearSession{}); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	defer close(release)
+
+	delta, err := QueryTyped[GetDisplayMessagesSince, DisplayMessagesSince](b, GetDisplayMessagesSince{EntryID: "old-message"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delta.Valid {
+		t.Fatalf("cleared session accepted stale delta token: %+v", delta)
+	}
+
+	full, err := QueryTyped[GetDisplayMessages, []core.AgentMessage](b, GetDisplayMessages{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full) != 0 {
+		t.Fatalf("cleared session display = %#v, want empty", full)
+	}
+}
+
 // TestTreeSyncer_NoDuplicateUserAcrossCompaction is a syncer-level guard: given
 // the ingress invariant (every message carries a stable MsgID — enforced in
 // pkg/agent and proven by TestIngress_AllUserMessagesGetMsgID and
@@ -144,6 +195,24 @@ func TestDisplayMessages_NoDuplicateAfterSync(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("display messages = %d, want 2 (no duplication after sync)", len(got))
+	}
+}
+
+func TestTreeSyncer_CompactionUsesLiveMarkerID(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.Tree = session.NewTree()
+	RegisterHandlers(sctx)
+	RegisterTreeSyncer(b, sctx)
+
+	marker := NewCompactionMarker(&core.CompactionPayload{Summary: "summary", TokensBefore: 12000})
+	b.Publish(CompactionEnded{SessionID: "test-session", Payload: &core.CompactionPayload{Summary: "summary", TokensBefore: 12000}, Marker: marker})
+	b.Drain(time.Second)
+	all := sctx.Tree.AllMessages()
+	if len(all) != 1 || all[0].MsgID != marker.MsgID {
+		t.Fatalf("display marker = %+v, want durable ID %q", all, marker.MsgID)
 	}
 }
 

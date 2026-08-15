@@ -94,16 +94,17 @@ func runServe(args []string) {
 			}
 			return build.Provider, nil
 		},
-		Transcriber:        transcriber,
-		UsagePoller:        newAnthropicUsagePoller(authStore),
-		PushStore:          pushStore,
-		PushDispatcher:     pushDispatcher,
-		DefaultModel:       defaultModel,
-		WorkspaceRoot:      cwd,
-		MoaCfg:             moaCfg,
-		ReleaseInfo:        release.Info{Version: version, Commit: commit, Date: date},
-		UpdateChecker:      release.NewChecker(release.Info{Version: version, Commit: commit, Date: date}),
-		UpdateCheckEnabled: core.IsUpdateCheckEnabled(moaCfg),
+		Transcriber:            transcriber,
+		UsagePoller:            newAnthropicUsagePoller(authStore),
+		PushStore:              pushStore,
+		PushDispatcher:         pushDispatcher,
+		DefaultModel:           defaultModel,
+		WorkspaceRoot:          cwd,
+		MoaCfg:                 moaCfg,
+		AuxiliaryModelResolver: auxiliaryModelResolver(authStore),
+		ReleaseInfo:            release.Info{Version: version, Commit: commit, Date: date},
+		UpdateChecker:          release.NewChecker(release.Info{Version: version, Commit: commit, Date: date}),
+		UpdateCheckEnabled:     core.IsUpdateCheckEnabled(moaCfg),
 	})
 
 	// serve speaks plain HTTP (the security boundary is Tailscale), so the auth

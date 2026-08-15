@@ -5,6 +5,196 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] - 2026-08-14
+
+### Added
+
+- A parent can now correct a subagent while it works. Watching a child head the
+  wrong way used to leave two options: wait for work you knew was wasted, or
+  cancel and start over. The new `subagent_steer` tool sends a correction that
+  reaches the child between steps, keeping everything it has already done. It
+  reports that the message was queued rather than that the child read it, and a
+  refusal comes back with the job's real status, so "already completed" tells
+  the parent to read the result instead of steering into the void. Children
+  don't inherit it: they are leaf workers, not orchestrators.
+- Subagent screens can be dismissed by swiping in from the left edge, the way a
+  pushed screen is dismissed on a phone. Only touches starting at the edge are
+  claimed, so horizontal content keeps its scroll, and a cancelled touch springs
+  back instead of navigating.
+
+### Fixed
+
+- A queued message could destroy itself. Sending while the agent was running
+  could leave the message gone from the server's queue and from the composer at
+  once, with no trace in any transcript. Two defects collided: the "N queued"
+  chip renders exactly where the send button was just tapped, so the click
+  completing that tap was inherited by a control that did not exist when the
+  gesture began — and that click cancels the queue server-side. The chip now
+  requires the whole gesture to happen on it, a property of the gesture rather
+  than of the clock, so no fast tap is ever penalised, while keyboard and
+  assistive activation stay unconditional. The recall then restored the
+  cancelled text correctly, but an ordinary send only empties the box once the
+  server answers, and that late clear wiped it; a send now clears only what it
+  still owns.
+- A message steered into a live subagent showed nothing on screen until the
+  transcript was refetched, even though it had been accepted, delivered and
+  read by the child. Steers are deduplicated by id rather than by text, since
+  the same words are often sent more than once on purpose.
+- Steering a job that had already finished was reported as queued. Both callers
+  now go through one admission point that answers with the job's status, and the
+  composer keeps your text whenever the server says the message was not queued.
+- The "Subagent details" sheet was unfinished: with no stylesheet at all, it
+  dumped the whole task prompt as raw text under two unstyled buttons. It is now
+  a shared component on both surfaces and drops the task, which is already
+  readable in full in the parent's transcript. Details open from their own
+  button: hanging them off the codename made the title a door with no handle.
+  Session ids read as one line, truncating instead of folding, with the whole
+  row as the copy target.
+
+### Security
+
+- Built with Go 1.25.13, which carries standard library fixes for six
+  vulnerabilities reachable from our code in `net/http`, `crypto/tls`,
+  `net/url`, `encoding/xml` and `encoding/asn1`.
+
+## [0.28.0] - 2026-08-11
+
+### Added
+
+- `/secret` stages credentials for the agent without pasting them into the
+  chat. Handing over a token or password used to mean typing it into the
+  composer, where it became a user message: sent to the provider, written to
+  the session file, and carried into titles, briefs, compaction and handoffs —
+  and from a phone there was no alternative. `/secret` now opens a masked
+  form, in the web UI and the TUI, and writes each value to a short-lived
+  private file; the agent is told only the directory and the aliases, so it
+  can install each credential where its client expects it. Only names are
+  accepted after `/secret`, never values, and a recognised `/secret` line is
+  kept out of input history and local drafts. This is not a vault: the agent's
+  shell runs as the same user and can read the staged files, so printing one
+  puts it in context like any other tool output — the docs state that
+  boundary plainly.
+- Long conversations no longer load in full. The web transcript opens on the
+  recent conversation and loads older history page by page as you scroll up,
+  prepending each page without moving what you were reading — exercised
+  against a real sixteen-thousand-message session. Tool calls stay together
+  with their results across page boundaries, and expandable cards keep their
+  state while earlier history arrives.
+- Opening a session with an unread result starts you at the beginning of the
+  last reply instead of dropping you at its end, so you read the answer top to
+  bottom rather than scrolling back to find where it began. Live sessions keep
+  following their newest output as before.
+- Context compaction is visible in the conversation. It used to happen
+  silently between two messages; it now appears as an expandable card — the
+  moment it happens and again after a reload — showing the summary carried
+  forward, how large the context was, and the files the session had read or
+  modified.
+
+### Changed
+
+- Opening and reconnecting sessions from the phone got lighter and more
+  robust. Visible sessions now share one multiplexed WebSocket instead of one
+  connection each, and a client that reconnects while holding a transcript it
+  already trusts receives only the messages it missed rather than a full
+  snapshot — falling back to the full, bounded history whenever the shortcut
+  cannot be proven safe. A reconnect snapshot also no longer drops the newest
+  message of the conversation.
+- The unread-result tracking introduced in 0.27.0 was reworked internally
+  around a single read cursor. Behaviour is the same; a browser tab left open
+  across this update needs one reload.
+
+### Fixed
+
+- The unread dot is cleared only once you have actually been shown what it
+  pointed at. Opening a flagged session on the phone could draw the transcript
+  from your last visit, silently swap in the real one seconds later, and clear
+  the dot on the way in — acknowledging the alert before showing its cause.
+  The cached transcript now stays readable but says it is catching up until
+  the authoritative history lands, and the dot survives until then. The dot
+  also no longer sticks after opening a session behind a closing drawer, and
+  permission and question badges now reflect the pending request itself,
+  disappearing the moment it is resolved.
+- A failed subagent always offers to be resumed. Previously only timeouts and
+  turn-limit hits told the parent it could continue the saved job, so any
+  other failure threw the child's work away; the failure message now keeps the
+  underlying error and any partial output, and points at the resume. A resumed
+  subagent also keeps the model and thinking level it already ran under,
+  instead of silently switching to the parent's current model — explicit
+  choices still win. And the task a parent delegates is labelled as coming
+  from the parent in the child's transcript instead of being duplicated, and
+  stays visible in finished subagents too.
+- Voice gestures work over drafts again. Holding the send button records even
+  when text or attachments are already present: a short tap sends them, a hold
+  appends the transcript at the cursor.
+- A message typed on the phone no longer vanishes when the browser cancels the
+  touch mid-send, and a send the server rejects puts your text back in the
+  composer — in the web UI and the TUI — rather than losing it.
+- Transcript scrolling: jumping to the newest message is instant and stays
+  pinned while images and expanding cards finish sizing, and a content resize
+  no longer drags the view around while you are actively scrolling.
+
+## [0.27.0] - 2026-08-06
+
+### Added
+
+- Sessions now tell you when a result is waiting for you. A run that finishes
+  while you are looking elsewhere left no trace: the session went back to
+  looking idle, indistinguishable from one you had already read. Finished work
+  you have not seen now holds a mauve dot across the session list, the desktop
+  spine, the pane grid and the command palette, and the mobile drawer groups it
+  under **New results**. The marker lives in `moa serve`'s memory only — it is
+  never written to a session file — so it survives a browser reload or
+  reopening the PWA, and a restart starts you clean.
+- The mobile title chip answers a different question from the rest of the UI:
+  not what a session is doing, but whether something happened that you have not
+  seen. A new result ripples the dot twice and then holds still, tinted by
+  whatever needs you most — red for an error, yellow for a permission, mauve
+  for an unread result. Opening the session silences it, while the drawer keeps
+  showing the session's true state. Reduced-motion settings get a static ring
+  instead.
+- Titles and Pulse briefs can run on a cheaper model than the conversation
+  itself. `auto_title_model` and `session_brief_model` accept `auto`, `off`, or
+  an explicit model; `auto` picks the cheapest auxiliary model you have
+  credentials for and degrades to `off` rather than falling back to an
+  expensive one. Note that `auto` may send a short title or brief excerpt to a
+  different provider than the session's own — see the configuration docs.
+- A responsive component lab in the web catalogue (`?view=catalog`) renders
+  real production components at real device widths, so layout decisions are
+  made against the shipping components and tokens rather than a mockup. It is
+  loaded lazily and is not part of the application bundle.
+
+### Fixed
+
+- Voice recording no longer loses audio when the phone locks. The capture
+  lifecycle was a set of loose callbacks that could fire after their attempt had
+  already been replaced, so a stale one could cancel a live recording, release a
+  microphone another attempt was using, or insert the transcript of a recording
+  you had cancelled. Capture is now an explicit state machine with per-attempt
+  identity and a generation-safe microphone lease: audio recorded before the
+  lock is kept, iOS resumes on unlock, and a cancelled recording never speaks.
+  Transcription also no longer fails in WebKit with `Can only call Window.fetch
+  on instances of Window`.
+- Resuming a session that had switched models could fail every request with
+  HTTP 400 `Invalid signature in thinking block`. Thinking signatures are
+  validated by the provider that minted them, and a session's history keeps the
+  original blocks, so replaying one to another provider was rejected. Switching
+  models already stripped them from the in-memory history, which is why the
+  failure only reappeared after a restart; they are now discarded when the
+  request is built, so affected sessions recover on their own.
+- Subagent cards show what actually happened. A terminal card was built from the
+  launch acknowledgement, so an asynchronous job could present "started" as
+  though it were the result, and a job's outcome landed where it was launched
+  rather than where it finished. Each job now has exactly one card carrying its
+  real status, result or error, placed at its completion time and restored in
+  that order after a reload — cancelled shows no result, failed shows the error,
+  and empty says so.
+- Tapping a push notification opens the session it came from, including when
+  the PWA was closed or had a stale session list.
+- Web usage figures survived reloads inconsistently for OpenAI accounts, and
+  Grok pricing is now the verified published rate.
+- Responses-API requests no longer send a tool choice when the turn has no tools
+  available.
+
 ## [0.26.0] - 2026-08-04
 
 ### Added

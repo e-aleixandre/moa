@@ -108,19 +108,29 @@ func newTestManager(t *testing.T, ctx context.Context, provider core.Provider) *
 
 func newTestManagerWithRoot(t *testing.T, ctx context.Context, provider core.Provider, root string) *Manager {
 	t.Helper()
-	return newTestManagerWithConfig(t, ctx, provider, root, core.MoaConfig{DisableSandbox: true})
+	// Keep the legacy helper's background behavior explicit. Production auto
+	// selection requires real completion credentials and therefore stays off in
+	// hermetic tests unless a test deliberately opts in.
+	return newTestManagerWithConfig(t, ctx, provider, root, core.MoaConfig{
+		DisableSandbox:    true,
+		AutoTitleModel:    "haiku",
+		SessionBriefModel: "haiku",
+	})
 }
 
 func newTestManagerWithConfig(t *testing.T, ctx context.Context, provider core.Provider, root string, moaCfg core.MoaConfig) *Manager {
 	t.Helper()
 	mgr := NewManager(ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return provider, nil },
-		DefaultModel:    core.Model{ID: "claude-haiku-4-5-20251001", Provider: "anthropic"},
-		WorkspaceRoot:   root,
-		MoaCfg:          moaCfg,
-		ConfigLoader:    isolatedTestConfigLoader(t, moaCfg),
-		SessionBaseDir:  t.TempDir(),
-		SchedulePath:    filepath.Join(t.TempDir(), "schedules.json"),
+		AuxiliaryModelResolver: func(spec string) (core.Model, bool, error) {
+			return core.ResolveAuxiliaryModel(spec, func(string) bool { return true })
+		},
+		DefaultModel:   core.Model{ID: "claude-haiku-4-5-20251001", Provider: "anthropic"},
+		WorkspaceRoot:  root,
+		MoaCfg:         moaCfg,
+		ConfigLoader:   isolatedTestConfigLoader(t, moaCfg),
+		SessionBaseDir: t.TempDir(),
+		SchedulePath:   filepath.Join(t.TempDir(), "schedules.json"),
 	})
 	// Ensure all sessions are properly shut down before TempDir cleanup.
 	// Without this, async persistence reactors can race with directory removal.
@@ -137,6 +147,38 @@ func newTestManagerWithConfig(t *testing.T, ctx context.Context, provider core.P
 		mgr.Shutdown()
 	})
 	return mgr
+}
+
+func TestExplicitAuxiliaryModelWithoutCredentialHasNoBackgroundCalls(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	provider := newMockProvider(simpleResponseHandler("reply"))
+	// No AuxiliaryModelResolver models an application without normal completion
+	// credentials. Explicit settings must not bypass that requirement.
+	mgr := NewManager(ctx, ManagerConfig{
+		ProviderFactory: func(_ core.Model) (core.Provider, error) { return provider, nil },
+		DefaultModel:    core.Model{ID: "claude-haiku-4-5-20251001", Provider: "anthropic"},
+		WorkspaceRoot:   t.TempDir(),
+		MoaCfg: core.MoaConfig{
+			DisableSandbox: true, AutoTitleModel: "haiku", SessionBriefModel: "haiku",
+		},
+		ConfigLoader:   isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true, AutoTitleModel: "haiku", SessionBriefModel: "haiku"}),
+		SessionBaseDir: t.TempDir(),
+		SchedulePath:   filepath.Join(t.TempDir(), "schedules.json"),
+	})
+	t.Cleanup(mgr.Shutdown)
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(sess.ID, "one normal run", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "main run completion", func() bool { return sessState(sess) == StateIdle })
+	time.Sleep(briefDebounce + 100*time.Millisecond)
+	if got := provider.calls.Load(); got != 1 {
+		t.Fatalf("provider calls = %d, want only the main run", got)
+	}
 }
 
 // sessState returns the current session state via bus query.
@@ -165,6 +207,26 @@ func pollUntil(t *testing.T, timeout time.Duration, desc string, fn func() bool)
 // ===========================================================================
 // Tests
 // ===========================================================================
+
+func TestShutdownStopsOwnedSecretReaper(t *testing.T) {
+	ctx := context.Background() // deliberately remains live after Shutdown
+	mgr := NewManager(ctx, ManagerConfig{
+		DefaultModel:   core.Model{ID: "test", Provider: "test"},
+		WorkspaceRoot:  t.TempDir(),
+		SessionBaseDir: t.TempDir(),
+		SchedulePath:   filepath.Join(t.TempDir(), "schedules.json"),
+	})
+	done := mgr.secretReaperDone
+	if done == nil {
+		t.Fatal("manager did not start its secret reaper")
+	}
+	mgr.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Shutdown did not wait for the secret reaper")
+	}
+}
 
 func TestCreateSession(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -218,7 +280,7 @@ func TestOwnedBashCompletionDoesNotStartRootNotificationRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	init := buildInitData(sess, bus.StreamingAggregate{}, nil)
+	init := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
 	if len(init.BashJobs) != 1 || init.BashJobs[0].OwnerAgentID != "child-1" {
 		t.Fatalf("bash init snapshot = %+v", init.BashJobs)
 	}
@@ -342,7 +404,8 @@ func TestSessionInfoSerializesAttentionActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	var dto struct {
-		Activity *attention.SessionActivity `json:"activity"`
+		Activity       *attention.SessionActivity `json:"activity"`
+		ServerInstance string                     `json:"server_instance"`
 	}
 	if err := json.Unmarshal(encoded, &dto); err != nil {
 		t.Fatal(err)
@@ -350,6 +413,12 @@ func TestSessionInfoSerializesAttentionActivity(t *testing.T) {
 	want := &attention.SessionActivity{Kind: "tool", Tool: "bash", Detail: "phpstan analyse"}
 	if !reflect.DeepEqual(dto.Activity, want) {
 		t.Fatalf("activity = %+v, want %+v", dto.Activity, want)
+	}
+	if dto.ServerInstance == "" || dto.ServerInstance != mgr.serverInstance {
+		t.Fatalf("session server_instance = %q, want %q", dto.ServerInstance, mgr.serverInstance)
+	}
+	if got := buildInitData(sess, bus.StreamingAggregate{}, nil, "").ServerInstance; got != mgr.serverInstance {
+		t.Fatalf("init server_instance = %q, want %q", got, mgr.serverInstance)
 	}
 }
 

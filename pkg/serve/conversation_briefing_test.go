@@ -241,14 +241,14 @@ func TestConversationToolArgumentsSkipsUnserializableValuesDeterministically(t *
 	}
 }
 
-func TestConversationMessagesToolDetailRequiresItemAndReturnsUTF8Tail(t *testing.T) {
+func TestConversationMessagesToolDetailRequiresItemAndReturnsCompleteUTF8Output(t *testing.T) {
 	mgr := newTestManager(t, context.Background(), newMockProvider())
 	sess, err := mgr.CreateSession(CreateOpts{Title: "tool detail"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	appendConversationTestMessage(sess, "assistant-tool", "assistant", "", nil, core.ToolCallContent("read-call", "read", map[string]any{"path": "large.txt"}))
-	output := "begin\n" + strings.Repeat("é", maxConversationToolDetailBytes) + "\nEND"
+	output := "begin\n" + strings.Repeat("é", 1<<20) + "\nEND"
 	appendConversationToolResult(sess, "result-tool", "read-call", "read", output, false, nil)
 	handler := NewServer(mgr)
 	request := func(path string) *httptest.ResponseRecorder {
@@ -277,8 +277,8 @@ func TestConversationMessagesToolDetailRequiresItemAndReturnsUTF8Tail(t *testing
 	if err := json.NewDecoder(rec.Body).Decode(&detail); err != nil {
 		t.Fatal(err)
 	}
-	if !detail.Truncated || len(detail.Output) > maxConversationToolDetailBytes || !utf8.ValidString(detail.Output) || !strings.HasSuffix(detail.Output, "\nEND") || strings.Contains(detail.Output, "begin\n") {
-		t.Fatalf("bounded detail = %#v", detail)
+	if detail.Output != output || !utf8.ValidString(detail.Output) {
+		t.Fatalf("detail = %#v", detail)
 	}
 }
 

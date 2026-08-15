@@ -360,6 +360,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			loopErr = fmt.Errorf("stream: %w", err)
 			return loopErr
 		}
+		// Keep the requested identity on this response. A provider can return a
+		// safety fallback without changing the session's selected model.
+		assistantMsg.RequestedModel = cfg.model.ID
 		// A stream succeeded: reset the consecutive-empty counter so the retry
 		// budget applies per stall point, not per run.
 		emptyRetries = 0
@@ -552,6 +555,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			if steered := cfg.drainSteers(); len(steered) > 0 {
 				for _, item := range steered {
 					um := core.WrapMessage(steerMessage(item))
+					um.Custom = item.Custom
 					um.EnsureMsgID()
 					cfg.appendState(um)
 					// Carry the message's MsgID so serve can publish it on the

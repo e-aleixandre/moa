@@ -140,6 +140,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	sess.runtime.AttachPersister(sp)
 
 	m.mu.Lock()
+	m.initializeAttentionRuntimeLocked(sess)
 	m.sessions[sess.ID] = sess
 	m.mu.Unlock()
 	m.invalidateSavedCache()
@@ -192,6 +193,8 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 	sessionCtx, sessionCancel := context.WithCancel(m.baseCtx)
 	moaCfg := m.loadConfig(cwd)
+	autoTitleModel, autoTitleEnabled := m.resolveAuxiliaryModel(moaCfg.AutoTitleModel, id, "auto title")
+	briefModel, briefEnabled := m.resolveAuxiliaryModel(moaCfg.SessionBriefModel, id, "session brief")
 	var mcpSources *core.MCPDisableSources
 	if m.mcpSourcesLoader != nil {
 		mcpSources = m.mcpSourcesLoader(cwd)
@@ -239,7 +242,6 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				return
 			}
 			b := s.runtime.Bus
-			b.Publish(bus.SubagentCompleted{SessionID: s.ID, JobID: jobID, Task: task, Status: status, Text: agentText})
 
 			if s.runtime.State.Current() == bus.StateRunning {
 				subagentTexts.Store(agentText, struct{}{})
@@ -268,6 +270,14 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				})
 			}
 		},
+		SubagentTitleModel:   autoTitleModel,
+		SubagentTitleEnabled: autoTitleEnabled,
+		OnSubagentTitle: func(jobID, title string) {
+			if s := sess; s != nil {
+				s.persistSubagentTranscript(jobID, "running", "", "", time.Time{}, nil, 0)
+				s.runtime.Bus.Publish(bus.SubagentTitleChanged{SessionID: s.ID, JobID: jobID, Title: title})
+			}
+		},
 		OnSubagentEvent: func(jobID string, inner any) {
 			if s := sess; s != nil {
 				s.runtime.Bus.Publish(bus.SubagentEvent{
@@ -282,12 +292,15 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				})
 			}
 		},
-		OnSubagentEnd: func(jobID, status string, usage *core.Usage, costUSD float64) {
+		OnSubagentEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) {
 			if s := sess; s != nil {
+				// Persist first: a client that reconnects immediately after the
+				// terminal WS event must be able to restore this same outcome.
+				s.persistSubagentTranscript(jobID, status, result, resultErr, finishedAt, usage, costUSD)
 				s.runtime.Bus.Publish(bus.SubagentEnded{
-					SessionID: s.ID, JobID: jobID, Status: status, Usage: usage, CostUSD: costUSD,
+					SessionID: s.ID, JobID: jobID, Task: task, Async: async, Status: status,
+					Result: result, Error: resultErr, FinishedAt: finishedAt, Usage: usage, CostUSD: costUSD,
 				})
-				s.persistSubagentTranscript(jobID, status, usage, costUSD)
 			}
 		},
 		OnBashJobStart: func(job tool.BashJobInfo) {
@@ -347,20 +360,20 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				}
 			}
 		},
-		SubagentTranscriptLoader: func(jobID string) ([]core.AgentMessage, error) {
+		SubagentTranscriptLoader: func(jobID string) (subagent.ResumedTranscript, error) {
 			s := sess
 			if s == nil || s.persister == nil {
-				return nil, fmt.Errorf("transcript store unavailable")
+				return subagent.ResumedTranscript{}, fmt.Errorf("transcript store unavailable")
 			}
 			store := s.persister.subagentStore(s.ID)
 			if store == nil {
-				return nil, fmt.Errorf("transcript store unavailable")
+				return subagent.ResumedTranscript{}, fmt.Errorf("transcript store unavailable")
 			}
 			t, err := store.Load(jobID)
 			if err != nil {
-				return nil, err
+				return subagent.ResumedTranscript{}, err
 			}
-			return t.Messages, nil
+			return subagent.ResumedTranscript{Messages: t.Messages, Model: t.Model, Thinking: t.Thinking}, nil
 		},
 	})
 	if err != nil {
@@ -474,16 +487,22 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// the system prompt automatically.
 
 	sess = &ManagedSession{
-		ID:         id,
-		Title:      title,
-		CWD:        cwd,
-		Created:    time.Now(),
-		Updated:    time.Now(),
-		cacheTTL:   core.CacheTTLDuration(moaCfg),
-		runtime:    rt,
-		subagents:  bs.Subagents,
-		bashJobs:   bs.BashJobs,
-		pathPolicy: bs.PathPolicy,
+		ID:                  id,
+		serverInstance:      m.serverInstance,
+		Title:               title,
+		CWD:                 cwd,
+		Created:             time.Now(),
+		Updated:             time.Now(),
+		modelProvider:       model.Provider,
+		cacheTTL:            core.CacheTTLDuration(moaCfg),
+		autoTitleModel:      autoTitleModel,
+		autoTitleEnabled:    autoTitleEnabled,
+		sessionBriefModel:   briefModel,
+		sessionBriefEnabled: briefEnabled,
+		runtime:             rt,
+		subagents:           bs.Subagents,
+		bashJobs:            bs.BashJobs,
+		pathPolicy:          bs.PathPolicy,
 		infra: serveInfra{
 			sessionCtx:      sessionCtx,
 			sessionCancel:   sessionCancel,
@@ -517,6 +536,8 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	m.subscribePush(sess)
 	m.subscribeAutoTitle(sess)
 	m.subscribeSessionBrief(sess)
+	m.subscribeUsageCache(sess)
+	m.subscribeUnreadResults(sess)
 	// A resumed transcript has no in-memory brief after a server restart. Queue
 	// one refresh rather than generating synchronously: briefPending coalesces
 	// this with any immediate bus trigger, while briefRunning and the per-session
@@ -569,6 +590,7 @@ func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInf
 			JobID:            info.JobID,
 			OriginToolCallID: info.OriginToolCallID,
 			Task:             info.Task,
+			Title:            info.Title,
 			Model:            info.Model,
 			Thinking:         info.Thinking,
 			Status:           info.Status,
@@ -585,13 +607,15 @@ func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInf
 }
 
 var (
-	ErrNotFound              = errors.New("session not found")
-	ErrBusy                  = errors.New("session is busy")
-	ErrInvalidCWD            = errors.New("invalid working directory")
-	ErrInvalidModel          = errors.New("invalid model")
-	ErrInvalidThinking       = errors.New("invalid thinking level")
-	ErrInvalidPermissionMode = errors.New("invalid permission mode")
-	ErrNoMCP                 = errors.New("session has no MCP servers")
+	ErrNotFound                = errors.New("session not found")
+	ErrBusy                    = errors.New("session is busy")
+	ErrInvalidCWD              = errors.New("invalid working directory")
+	ErrInvalidModel            = errors.New("invalid model")
+	ErrInvalidThinking         = errors.New("invalid thinking level")
+	ErrInvalidPermissionMode   = errors.New("invalid permission mode")
+	ErrNoMCP                   = errors.New("session has no MCP servers")
+	ErrInvalidAttentionCursor  = errors.New("invalid attention cursor")
+	ErrStaleAttentionNamespace = errors.New("stale attention namespace")
 )
 
 // Delete aborts any running agent, closes resources, and removes the session.
@@ -629,6 +653,8 @@ func (m *Manager) deleteSession(id string) error {
 			return err
 		}
 		m.invalidateSavedCache()
+		m.forgetUnseen(id)
+		m.forgetSecretBatches(id)
 		_ = removeSessionAttachDir(id)
 		if m.attachStore != nil {
 			if err := m.attachStore.ReleaseSession(id); err != nil {
@@ -638,7 +664,11 @@ func (m *Manager) deleteSession(id string) error {
 		return nil
 	}
 	delete(m.sessions, id)
+	m.deactivateAttentionRuntime(sess)
 	m.mu.Unlock()
+	sess.deleted.Store(true)
+	m.forgetUnseen(id)
+	m.forgetSecretBatches(id)
 	// Mark closing and drain the runtime's users before tearing it down, so a
 	// /send or /command already holding this pointer can't start a run into a
 	// runtime that is going away. Delete does NOT refuse a busy session (unlike
@@ -661,6 +691,16 @@ func (m *Manager) deleteSession(id string) error {
 	for _, unsub := range sess.pushUnsubs {
 		unsub()
 	}
+	if sess.usageUnsub != nil {
+		sess.usageUnsub()
+	}
+	if sess.unreadUnsub != nil {
+		sess.unreadUnsub()
+	}
+	// Delete removed the first snapshot before it waited for in-flight users.
+	// Sweep again so a secret request that had already passed that boundary
+	// cannot leave a newly registered batch behind.
+	m.forgetSecretBatches(id)
 
 	// Close MCP connections before context cancellation.
 	if sess.infra.mcpMgr != nil {
@@ -747,6 +787,11 @@ func (m *Manager) CloseSession(id string) error {
 		}
 		return nil
 	}
+	// Establish close's send boundary while m.mu still identifies this runtime.
+	// A sender that was already using it, or which acquires lifecycle after this
+	// point but before the writer lock, advances this value before it releases
+	// lifecycle and therefore makes this close lose the race.
+	sendGeneration := sess.sendGeneration.Load()
 	m.mu.Unlock()
 
 	// Drain the users of this runtime before deciding anything. Taking the
@@ -754,8 +799,15 @@ func (m *Manager) CloseSession(id string) error {
 	// the quiescence check below cannot be invalidated by a run starting right
 	// after it. Acquired OUTSIDE m.mu: senders hold it while doing bus work, so
 	// holding m.mu across it would stall every unrelated session.
+	//
+	// A Send that was admitted while this close waited may have a very fast
+	// provider and return to idle before we inspect the runtime; its acceptance
+	// still wins this race.
 	sess.lifecycle.Lock()
 	defer sess.lifecycle.Unlock()
+	if sess.sendGeneration.Load() != sendGeneration {
+		return ErrBusy
+	}
 
 	// A RunEnded fan-out schedules the automatic reactors asynchronously, so a
 	// close arriving right after a turn could observe "no background work" just
@@ -781,6 +833,7 @@ func (m *Manager) CloseSession(id string) error {
 	admitted := sess.runtime.DoIfQuiescent(func() {
 		sess.closing.Store(true)
 		delete(m.sessions, id)
+		m.deactivateAttentionRuntime(sess)
 		m.resuming[id] = struct{}{}
 	})
 	m.mu.Unlock()
@@ -815,6 +868,13 @@ func (m *Manager) CloseSession(id string) error {
 	for _, unsub := range sess.pushUnsubs {
 		unsub()
 	}
+	if sess.usageUnsub != nil {
+		sess.usageUnsub()
+	}
+	if sess.unreadUnsub != nil {
+		sess.unreadUnsub()
+	}
+	m.forgetSecretBatches(id)
 	if sess.infra.mcpMgr != nil {
 		sess.infra.mcpMgr.Close()
 	}
@@ -940,7 +1000,6 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 	}
 	sess.Origin = saved.Origin()
 	sess.automationCreated = automationCreatedMeta(saved.Metadata)
-
 	// 3. Restore permission mode and the context limit.
 	if savedPermMode != "" {
 		if err := sess.runtime.Bus.Execute(bus.SetPermissionMode{Mode: savedPermMode}); err != nil {
@@ -988,6 +1047,7 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 	sess.Created = saved.Created
 	m.mu.Lock()
 	delete(m.resuming, id)
+	m.initializeAttentionRuntimeLocked(sess)
 	m.sessions[id] = sess
 	m.mu.Unlock()
 	return sess, nil
@@ -1009,6 +1069,12 @@ const shutdownDrainBudget = 5 * time.Second
 // captures the complete final turn rather than a partial one. If the budget
 // expires we flush regardless (best effort beats losing the turn entirely).
 func (m *Manager) Shutdown() {
+	if m.secretReaperCancel != nil {
+		m.secretReaperCancel()
+		if m.secretReaperDone != nil {
+			<-m.secretReaperDone
+		}
+	}
 	if m.scheduler != nil {
 		m.scheduler.Close()
 	}
@@ -1065,7 +1131,7 @@ func (s *ManagedSession) flushLiveSubagentTranscripts() {
 		if info.Status != "running" && info.Status != "cancelling" {
 			continue // finished ones were already persisted on OnSubagentEnd
 		}
-		s.persistSubagentTranscript(info.JobID, info.Status, nil, 0)
+		s.persistSubagentTranscript(info.JobID, info.Status, "", "", time.Time{}, nil, 0)
 	}
 }
 

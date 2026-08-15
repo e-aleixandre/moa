@@ -2,8 +2,8 @@
 // typed, single-fact files with a lightweight frontmatter header.
 //
 // Facts live in two scopes:
-//   - global  (~/.config/moa/global/memory/<slug>.md)        — user, feedback
-//   - project (~/.config/moa/codebases/<key>/memory/<slug>.md) — project, reference
+//   - global  (~/.config/moa/global/memory/<slug>.md)          — cross-project
+//   - project (~/.config/moa/codebases/<key>/memory/<slug>.md) — this repository
 //
 // where <key> is core.CodebaseKey(workspaceRoot): the identity of the
 // repository the workspace belongs to, so every git worktree of one repo reads
@@ -33,14 +33,21 @@ const (
 	MaxFactSize = 16 * 1024
 	// maxIndexBytes caps the size of the index injected into the prompt.
 	maxIndexBytes = 8 * 1024
+	// MaxDescriptionBytes caps the one-line hook at write time. The
+	// description is the only part of a fact paid for on every turn, so a long
+	// one taxes every session; detail belongs in the body.
+	MaxDescriptionBytes = 180
+	// longDescriptionBytes is where a description stops being a hook and
+	// starts being prose. Advisory only: never a reason to reject a write.
+	longDescriptionBytes = 120
 )
 
 // Scope is where a fact lives.
 type Scope int
 
 const (
-	ScopeProject Scope = iota // project-local (project, reference)
-	ScopeGlobal               // cross-project (user, feedback)
+	ScopeProject Scope = iota // this repository only
+	ScopeGlobal               // every project
 )
 
 func (s Scope) String() string {
@@ -50,7 +57,10 @@ func (s Scope) String() string {
 	return "project"
 }
 
-// Type classifies a fact and (via scopeForType) decides its scope.
+// Type is the legacy fact classification. The four-value taxonomy existed only
+// to pick one of two scopes, so `scope:` is the source of truth. `type:` is
+// still written for interoperability with older binaries that route files by
+// it, and an existing compatible value is preserved on rewrite.
 type Type string
 
 const (
@@ -69,13 +79,51 @@ func ValidType(t Type) bool {
 	return false
 }
 
-// ScopeForType routes a type to its scope (D2): user/feedback are global,
-// everything else is project-local.
+// ScopeForType routes a legacy type to its scope (D2): user/feedback are
+// global, everything else is project-local. Only reachable through old files.
 func ScopeForType(t Type) Scope {
 	if t == TypeUser || t == TypeFeedback {
 		return ScopeGlobal
 	}
 	return ScopeProject
+}
+
+// ParseScope maps the tool-facing scope name to a Scope.
+func ParseScope(s string) (Scope, bool) {
+	switch s {
+	case "global":
+		return ScopeGlobal, true
+	case "project":
+		return ScopeProject, true
+	}
+	return 0, false
+}
+
+// Lifecycle is a fact's declared expiry contract. It replaces an inferred
+// bool: "no invalidate_when" used to mean durable, which silently promoted
+// every pre-lifecycle file to permanent instead of admitting that it never
+// declared anything.
+type Lifecycle int
+
+const (
+	// LifecycleLegacy is a file written before lifecycles existed: it declares
+	// neither `durable: true` nor `invalidate_when`. Readable, but a write
+	// must upgrade it to one of the other two.
+	LifecycleLegacy Lifecycle = iota
+	// LifecycleDurable is an explicit `durable: true`.
+	LifecycleDurable
+	// LifecycleConditional carries a checkable `invalidate_when` condition.
+	LifecycleConditional
+)
+
+func (l Lifecycle) String() string {
+	switch l {
+	case LifecycleDurable:
+		return "durable"
+	case LifecycleConditional:
+		return "conditional"
+	}
+	return "legacy"
 }
 
 // slugRe validates a fact name: lowercase ASCII kebab-case.
@@ -88,9 +136,9 @@ func ValidName(name string) bool { return slugRe.MatchString(name) }
 type Memory struct {
 	Name           string
 	Description    string
-	Type           Type
+	Type           Type // legacy routing field, preserved when compatible with Scope
 	InvalidateWhen string
-	Durable        bool // write-time declaration; durable facts omit invalidate_when on disk
+	Lifecycle      Lifecycle
 	Body           string
 	Scope          Scope
 	Path           string // absolute path to the file (set on read/list)
@@ -170,6 +218,37 @@ func (s *Store) FormatIndex(mems []Memory) string {
 	if len(mems) == 0 {
 		return ""
 	}
+	st := IndexStatusOf(mems)
+	var sb strings.Builder
+	sb.WriteString(st.text)
+	if st.Dropped > 0 {
+		slog.Warn("memory: index truncated in prompt",
+			"limit_bytes", maxIndexBytes, "facts", len(mems),
+			"dropped_project", st.DroppedProject, "dropped_global", st.DroppedGlobal)
+		fmt.Fprintf(&sb, "- … (%d more facts not shown; use the memory tool's list action to see all)\n", st.Dropped)
+	}
+	return sb.String()
+}
+
+// IndexStatus reports how much of the prompt index budget a fact set uses and
+// how many facts do not fit. It is the same computation FormatIndex performs
+// (including the two-way roll-over), exposed so a write can tell the agent
+// that what it just saved may never reach the prompt.
+type IndexStatus struct {
+	UsedBytes      int
+	BudgetBytes    int
+	Facts          int
+	Dropped        int
+	DroppedProject int
+	DroppedGlobal  int
+	text           string
+}
+
+// IndexStatusOf renders the index for mems and measures it.
+func IndexStatusOf(mems []Memory) IndexStatus {
+	if len(mems) == 0 {
+		return IndexStatus{BudgetBytes: maxIndexBytes}
+	}
 	// Global facts are cross-project preferences and standing user
 	// instructions; project facts are far more numerous and churn faster.
 	// A single ordered budget starved globals completely (measured: 0 of 28
@@ -194,16 +273,16 @@ func (s *Store) FormatIndex(mems []Memory) string {
 	globalText, globalDropped := renderIndexLines(globals, maxIndexBytes-len(projectFirst))
 	projectText, projectDropped := renderIndexLines(projects, maxIndexBytes-len(globalText))
 
-	var sb strings.Builder
-	sb.WriteString(projectText)
-	sb.WriteString(globalText)
-	if dropped := globalDropped + projectDropped; dropped > 0 {
-		slog.Warn("memory: index truncated in prompt",
-			"limit_bytes", maxIndexBytes, "facts", len(mems),
-			"dropped_project", projectDropped, "dropped_global", globalDropped)
-		fmt.Fprintf(&sb, "- … (%d more facts not shown; use the memory tool's list action to see all)\n", dropped)
+	text := projectText + globalText
+	return IndexStatus{
+		UsedBytes:      len(text),
+		BudgetBytes:    maxIndexBytes,
+		Facts:          len(mems),
+		Dropped:        globalDropped + projectDropped,
+		DroppedProject: projectDropped,
+		DroppedGlobal:  globalDropped,
+		text:           text,
 	}
-	return sb.String()
 }
 
 // globalIndexShare reserves a fraction of the index budget for global facts.
@@ -250,17 +329,28 @@ func (s *Store) Read(id string) (Memory, bool, error) {
 	return m, true, nil
 }
 
-// Write creates or overwrites a single fact. Scope is derived from Type (D2);
-// an invalid type or name is a hard error (D10).
-func (s *Store) Write(m Memory) error {
+// Write creates or overwrites a single fact in m.Scope. An invalid name,
+// description or lifecycle declaration is a hard error (D10). It returns an
+// advisory note (possibly empty) for the caller to surface: a write is not
+// rejected for style, only for correctness.
+func (s *Store) Write(m Memory) (string, error) {
 	if !ValidName(m.Name) {
-		return fmt.Errorf("invalid name %q: use kebab-case ascii [a-z0-9-]", m.Name)
-	}
-	if !ValidType(m.Type) {
-		return fmt.Errorf("invalid type %q: use user|feedback|project|reference", m.Type)
+		return "", fmt.Errorf("invalid name %q: use kebab-case ascii [a-z0-9-]", m.Name)
 	}
 	if strings.TrimSpace(m.Description) == "" {
-		return errors.New("description is required")
+		return "", errors.New("description is required")
+	}
+	// The description is a one-line hook in a line-oriented header: the same
+	// reason invalidate_when rejects line breaks applies here, plus control
+	// characters that would corrupt the rendered index.
+	if strings.ContainsAny(m.Description, "\r\n") {
+		return "", errors.New("description must be a single line")
+	}
+	if i := strings.IndexFunc(m.Description, isControl); i >= 0 {
+		return "", fmt.Errorf("description must not contain control characters (found %q)", m.Description[i])
+	}
+	if n := len(m.Description); n > MaxDescriptionBytes {
+		return "", fmt.Errorf("description is %d bytes, over the %d-byte limit: it is a one-line hook shown in the index, so keep the detail in the body", n, MaxDescriptionBytes)
 	}
 	// Whitespace cannot express a checkable lifecycle. Normalize it so a
 	// durable declaration with an empty condition also keeps the legacy durable
@@ -268,28 +358,43 @@ func (s *Store) Write(m Memory) error {
 	if strings.TrimSpace(m.InvalidateWhen) == "" {
 		m.InvalidateWhen = ""
 	}
-	if m.InvalidateWhen == "" && !m.Durable {
-		return errors.New("memory must declare its lifecycle: an ephemeral fact needs invalidate_when with a condition another agent can check without asking the user (for example, \"when issue #84 is closed\"), while a permanent fact needs durable: true (for example, a user preference)")
+	durable := m.Lifecycle == LifecycleDurable
+	if m.InvalidateWhen == "" && !durable {
+		return "", errors.New("memory must declare its lifecycle: an ephemeral fact needs invalidate_when with a condition another agent can check without asking the user (for example, \"when issue #84 is closed\"), while a permanent fact needs durable: true (for example, a user preference)")
 	}
-	if m.InvalidateWhen != "" && m.Durable {
-		return errors.New("invalidate_when and durable are mutually exclusive: declare either a checkable expiry condition or durable: true")
+	if m.InvalidateWhen != "" && durable {
+		return "", errors.New("invalidate_when and durable are mutually exclusive: declare either a checkable expiry condition or durable: true")
+	}
+	if m.InvalidateWhen != "" {
+		m.Lifecycle = LifecycleConditional
 	}
 	// Frontmatter is line-oriented. Reject line breaks rather than silently
 	// changing the condition: a changed condition could make a fact appear to
 	// expire for a different reason, and raw newlines could inject header keys.
 	if strings.ContainsAny(m.InvalidateWhen, "\r\n") {
-		return errors.New("invalidate_when must be a single line")
+		return "", errors.New("invalidate_when must be a single line")
 	}
 	data := serialize(m)
 	if len(data) > MaxFactSize {
-		return fmt.Errorf("fact exceeds %dKB limit (%d bytes)", MaxFactSize/1024, len(data))
+		return "", fmt.Errorf("fact exceeds %dKB limit (%d bytes)", MaxFactSize/1024, len(data))
 	}
-	dir := s.dirFor(ScopeForType(m.Type))
+	dir := s.dirFor(m.Scope)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("creating memory dir: %w", err)
+		return "", fmt.Errorf("creating memory dir: %w", err)
 	}
-	return writeFileAtomic(filepath.Join(dir, m.Name+".md"), data)
+	if err := writeFileAtomic(filepath.Join(dir, m.Name+".md"), data); err != nil {
+		return "", err
+	}
+	var note string
+	if n := len(m.Description); n > longDescriptionBytes {
+		note = fmt.Sprintf("Note: the description is %d bytes (limit %d) and is paid for on every turn — shorter hooks read better in the index.", n, MaxDescriptionBytes)
+	}
+	return note, nil
 }
+
+// isControl reports whether r is a C0/C1 control character (tab included: the
+// index is rendered as a single bullet line).
+func isControl(r rune) bool { return r < 0x20 || (r >= 0x7f && r <= 0x9f) }
 
 // Delete removes a single fact by canonical ID or bare name.
 func (s *Store) Delete(id string) error {
@@ -313,8 +418,8 @@ func v1Fact(body string) Memory {
 	return Memory{
 		Name:        v1FactName,
 		Description: "notas migradas de la memoria v1, pendientes de curar",
-		Type:        TypeProject,
 		Body:        body,
+		Lifecycle:   LifecycleDurable,
 		Scope:       ScopeProject,
 	}
 }
@@ -464,10 +569,13 @@ func isReservedFile(name string) bool {
 }
 
 // parseFact parses a fact file: a `---` frontmatter block (name/description/
-// type/invalidate_when) followed by the markdown body. invalidate_when has
-// its own quoted-value parsing rules. Tolerates CRLF, optional quotes around
-// values, and `:` inside a value. An unknown/missing type defaults to project
-// (D10). Missing or unterminated frontmatter is an error.
+// scope/durable/invalidate_when, plus the legacy type) followed by the
+// markdown body. invalidate_when has its own quoted-value parsing rules.
+// Tolerates CRLF, optional quotes around values, and `:` inside a value.
+// A file with no `scope:` falls back to its legacy type, and an
+// unknown/missing type to project (D10). Missing or unterminated frontmatter
+// is an error. Nothing here validates lengths: Write guards what moa writes,
+// while everything already on disk must stay readable.
 func parseFact(data []byte) (Memory, error) {
 	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	lines := strings.Split(text, "\n")
@@ -486,6 +594,7 @@ func parseFact(data []byte) (Memory, error) {
 	}
 
 	var m Memory
+	var durable, scopeDeclared bool
 	for _, line := range lines[1:closeIdx] {
 		key, val, ok := splitKV(line)
 		if !ok {
@@ -498,16 +607,32 @@ func parseFact(data []byte) (Memory, error) {
 			m.Description = val
 		case "type":
 			m.Type = Type(val)
+		case "scope":
+			if sc, ok := ParseScope(val); ok {
+				m.Scope = sc
+				scopeDeclared = true
+			}
+		case "durable":
+			durable = val == "true"
 		case "invalidate_when":
 			m.InvalidateWhen = parseInvalidationValue(line, val)
 		}
 	}
-	if !ValidType(m.Type) {
-		m.Type = TypeProject
+	// Files written before `scope:` existed only carry `type:`; map it. A file
+	// with neither is project-scoped, as an unknown type always was (D10).
+	if !scopeDeclared {
+		m.Scope = ScopeForType(m.Type)
 	}
-	// Durable is represented on disk by the absence of invalidate_when, so
-	// restore that declaration for callers that read, modify, then write facts.
-	m.Durable = m.InvalidateWhen == ""
+	// The lifecycle is read, never inferred: a file that declares neither is
+	// legacy, not permanent.
+	switch {
+	case m.InvalidateWhen != "":
+		m.Lifecycle = LifecycleConditional
+	case durable:
+		m.Lifecycle = LifecycleDurable
+	default:
+		m.Lifecycle = LifecycleLegacy
+	}
 	m.Body = strings.Trim(strings.Join(lines[closeIdx+1:], "\n"), "\n")
 	return m, nil
 }
@@ -543,15 +668,29 @@ func parseInvalidationValue(line, fallback string) string {
 	return fallback
 }
 
-// serialize renders a fact back to its file form.
+// serialize renders a fact back to its file form. Scope is the source of
+// truth; type is emitted only for interoperability with older binaries that
+// route files by the legacy field.
 func serialize(m Memory) []byte {
 	var sb strings.Builder
 	sb.WriteString("---\nname: ")
 	sb.WriteString(m.Name)
 	sb.WriteString("\ndescription: ")
 	sb.WriteString(m.Description)
+	sb.WriteString("\nscope: ")
+	sb.WriteString(m.Scope.String())
+	legacyType := m.Type
+	// Keep a compatible original type to avoid gratuitous corpus rewrites. A
+	// missing or incompatible one must still be replaced so an older binary
+	// routes the fact to the scope declared above.
+	if !ValidType(legacyType) || ScopeForType(legacyType) != m.Scope {
+		legacyType = defaultLegacyType(m.Scope)
+	}
 	sb.WriteString("\ntype: ")
-	sb.WriteString(string(m.Type))
+	sb.WriteString(string(legacyType))
+	if m.Lifecycle == LifecycleDurable {
+		sb.WriteString("\ndurable: true")
+	}
 	if m.InvalidateWhen != "" {
 		sb.WriteString("\ninvalidate_when: ")
 		sb.WriteString(strconv.Quote(m.InvalidateWhen))
@@ -560,6 +699,13 @@ func serialize(m Memory) []byte {
 	sb.WriteString(strings.TrimRight(m.Body, "\n"))
 	sb.WriteByte('\n')
 	return []byte(sb.String())
+}
+
+func defaultLegacyType(scope Scope) Type {
+	if scope == ScopeGlobal {
+		return TypeUser
+	}
+	return TypeProject
 }
 
 // writeFileAtomic replaces path with data, and is durable rather than merely

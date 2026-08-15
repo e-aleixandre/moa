@@ -2,6 +2,10 @@ import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { PrimitivesGallery } from "./primitives-gallery.jsx";
 import { MoleculesGallery } from "./molecules-gallery.jsx";
 import { ConversationGallery } from "./conversation-gallery.jsx";
+import { ResponsiveLab } from "./responsive-lab.jsx";
+import { TitleAttentionLab } from "./title-attention-lab.jsx";
+import { SecretInputLab } from "./secret-input-lab.jsx";
+import { HydrationLab } from "./hydration-lab.jsx";
 import "./catalog.css";
 
 // All values are READ from tokens.css at runtime (getComputedStyle), not
@@ -233,6 +237,10 @@ export function Catalog() {
       <PrimitivesGallery />
       <MoleculesGallery />
       <ConversationGallery />
+      <ResponsiveLab />
+      <TitleAttentionLab />
+      <SecretInputLab />
+      <HydrationLab />
     </div>
   );
 }

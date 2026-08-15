@@ -164,9 +164,12 @@ type CompactionStarted struct {
 
 // CompactionEnded is published when context compaction finishes.
 type CompactionEnded struct {
-	SessionID         string
-	RunGen            uint64
-	Payload           *core.CompactionPayload
+	SessionID string
+	RunGen    uint64
+	Payload   *core.CompactionPayload
+	// Marker is the display projection which TreeSyncer persists as the
+	// compaction entry. Its MsgID is therefore also the durable entry ID.
+	Marker            *core.AgentMessage
 	Err               error
 	CostIncludedInRun bool // true when this payload's usage is already included in RunEnded.Cost
 }
@@ -187,6 +190,7 @@ type Steered struct {
 	MsgID     string
 	Text      string
 	Content   []core.Content
+	Custom    map[string]any
 }
 
 // SteersCanceled is published when all queued (not yet delivered) steers are
@@ -255,7 +259,8 @@ type RunEnded struct {
 	SessionID string
 	RunGen    uint64
 	FinalText string
-	Err       error   // non-nil for real errors (not cancellation)
+	Err       error // non-nil for real errors (not cancellation)
+	Cancelled bool
 	HadEdits  bool    // true if edit/write/multiedit/apply_patch completed successfully
 	Cost      float64 // USD cost of this run (0 if the model has no pricing)
 }
@@ -279,9 +284,10 @@ type ContextUpdated struct {
 // the conversation as a new run (SendPrompt / SendPromptWithContent), so every
 // connected client renders it live instead of waiting for a reload. Mid-run
 // messages are NOT reported here: they travel the queue rail and are announced
-// by Steered on delivery. Internal prompts (goal loop, auto-verify, subagent /
-// bash notifications) carry a Custom source and are excluded too — they already
-// have their own live representation.
+// by Steered on delivery. Most internal prompts (goal loop, auto-verify,
+// subagent / bash notifications) are excluded because they have their own live
+// representation. Explicitly announced custom sources carry trusted Custom
+// rendering metadata.
 //
 // Text carries a plain-text prompt; Content carries the full block list of a
 // structured send (attachments plus text). Exactly one of them is populated.
@@ -293,6 +299,7 @@ type UserMessageAppended struct {
 	MsgID     string
 	Text      string
 	Content   []core.Content
+	Custom    map[string]any
 }
 
 // MCPChanged is published when a session's MCP servers change: a server
@@ -473,6 +480,7 @@ type SubagentStarted struct {
 	// OriginToolCallID identifies the parent model tool call that created this job.
 	OriginToolCallID string
 	Task             string
+	Title            string
 	Model            string
 	Thinking         string
 	Async            bool
@@ -485,6 +493,13 @@ type SubagentStarted struct {
 	// clients to derive a deterministic accent color that survives WS
 	// reconnects instead of one derived from map iteration order.
 	AccentIndex int
+}
+
+// SubagentTitleChanged updates the one-shot generated identity of a child.
+type SubagentTitleChanged struct {
+	SessionID string
+	JobID     string
+	Title     string
 }
 
 // SubagentUsage carries a subagent's running aggregated usage/cost, published
@@ -522,9 +537,19 @@ type SubagentEvent struct {
 type SubagentEnded struct {
 	SessionID string
 	JobID     string
-	Status    string
-	Usage     *core.Usage
-	CostUSD   float64
+	// Task and Async identify the terminal outcome independently from how its
+	// text was delivered to the parent model (notification or subagent_wait).
+	Task   string
+	Async  bool
+	Status string
+	// Result is populated only for a completed child. Error is populated only
+	// for a failed child; cancelled children deliberately have neither.
+	Result string
+	Error  string
+	// FinishedAt anchors a durable UI outcome at the actual child completion.
+	FinishedAt time.Time
+	Usage      *core.Usage
+	CostUSD    float64
 }
 
 // ---------------------------------------------------------------------------
@@ -586,6 +611,7 @@ type BashJobSettled struct {
 // PermissionRequested is published when a tool needs user approval.
 type PermissionRequested struct {
 	SessionID    string
+	RunGen       uint64
 	ID           string
 	ToolName     string
 	Args         map[string]any
@@ -605,6 +631,7 @@ type PermissionResolved struct {
 // AskUserRequested is published when the agent needs user input.
 type AskUserRequested struct {
 	SessionID string
+	RunGen    uint64
 	ID        string
 	Questions []AskQuestion
 }

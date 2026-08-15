@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +25,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/mcp"
+	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
 	"github.com/e-aleixandre/moa/pkg/usage"
@@ -114,13 +117,16 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}", handleGetSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/messages", handleConversationMessages(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/history", handleHistory(manager))
 	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/close", handleCloseSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/secrets", handleStashSecrets(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/steers/cancel", handleCancelSteers(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/read", handleReadSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel-and-recall", handleCancelAndRecall(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/cancel", handleCancelSubagent(manager))
@@ -466,6 +472,54 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 	}
 }
 
+// handleStashSecrets accepts credential values without adding them to a chat
+// message. The staged directory note, not the values, is what reaches the
+// agent. This is not a vault: the agent runs as the same Unix user and can
+// read the staged files.
+func handleStashSecrets(mgr *Manager) http.HandlerFunc {
+	type secretDTO struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
+	type request struct {
+		Secrets []secretDTO `json:"secrets"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		limitBody(w, r, maxJSONBodySize)
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		var body request
+		if err := decoder.Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if decoder.Decode(&struct{}{}) != io.EOF {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		entries := make([]secrets.Entry, len(body.Secrets))
+		for i, secret := range body.Secrets {
+			entries[i] = secrets.Entry{Name: secret.Name, Value: secret.Value}
+		}
+		dir, names, err := mgr.stashSecrets(r.PathValue("id"), entries)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case errors.Is(err, bus.ErrSteerQueueFull):
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		case err != nil:
+			// pkg/secrets errors name aliases only, never values. Do not log this
+			// path: a request body must never become a credential log sink.
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			writeJSON(w, http.StatusAccepted, struct {
+				Directory string   `json:"directory"`
+				Aliases   []string `json:"aliases"`
+			}{Directory: dir, Aliases: names})
+		}
+	}
+}
+
 // AttachmentDTO is the public metadata returned for attachments created by a
 // send. The URL is served by the attachment endpoint.
 type AttachmentDTO struct {
@@ -550,9 +604,7 @@ func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{
-			AskID: body.ID, Answers: body.Answers,
-		}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: body.ID, Answers: body.Answers}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -657,6 +709,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		defer sess.wsConns.Add(-1)
 
 		ctx := conn.CloseRead(r.Context()) //nolint:staticcheck
+		query := r.URL.Query()
 
 		// Subscribe before taking the init snapshot. Events published while the
 		// snapshot is assembled are queued by the reactor and sent immediately
@@ -676,7 +729,8 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		// events after it are already queued in the reactor, even during a slow
 		// write.
 		streaming, liveTools, cut := sess.runtime.Context().SnapshotInFlightWithCut()
-		initData := buildInitData(sess, streaming, liveTools)
+		sinceMsg := query.Get("since_msg")
+		initData := buildInitData(sess, streaming, liveTools, sinceMsg)
 		initData.LastSeq = cut
 		if deviceLeaseClosed(lease) || wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}) != nil {
 			return
@@ -704,6 +758,14 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		for {
 			select {
 			case evt := <-reactor.Events():
+				// Bus sequences deliberately use ordinary ordering everywhere they
+				// cross this protocol: a uint64 wrap is not plausible during one
+				// process lifetime, and the frontend JSON number would cease being
+				// exact far earlier. The one ambiguous wrap value fails closed by
+				// reconnecting instead of comparing it as an old event.
+				if evt.Seq == 0 {
+					return
+				}
 				if evt.Seq <= cut {
 					continue
 				}
@@ -923,6 +985,29 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, mgr.sessionInfo(sess))
+	}
+}
+
+func handleReadSession(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		throughSeq, err := strconv.ParseUint(r.URL.Query().Get("through_seq"), 10, 64)
+		if err != nil {
+			http.Error(w, "invalid through_seq", http.StatusBadRequest)
+			return
+		}
+		if err := mgr.MarkSessionRead(r.PathValue("id"), throughSeq, r.URL.Query().Get("attention_namespace")); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			if errors.Is(err, ErrStaleAttentionNamespace) {
+				http.Error(w, "stale attention namespace", http.StatusConflict)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
@@ -1348,7 +1433,9 @@ func withManifestType(next http.Handler) http.Handler {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Debug("write JSON response", "status", status, "error", err)
+	}
 }
 
 // wsWriteTimeout bounds a single WebSocket message write. A stalled client (its

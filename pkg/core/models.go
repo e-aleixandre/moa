@@ -70,9 +70,9 @@ var knownModels = map[string]Model{
 		// Short-context (<=272K input) pricing shown here. Long-context
 		// (>272K input) prompts are billed at 2x input and 1.5x output.
 		Pricing: &Pricing{
-			Input: 2.5, Output: 15, CacheRead: 0.25, CacheWrite: 3.125,
+			Input: 2, Output: 12, CacheRead: 0.2, CacheWrite: 2.5,
 			Tiers: []PricingTier{
-				{Threshold: 272_000, Input: 5, Output: 22.5, CacheRead: 0.5, CacheWrite: 6.25},
+				{Threshold: 272_000, Input: 4, Output: 18, CacheRead: 0.4, CacheWrite: 5},
 			},
 		},
 	},
@@ -82,9 +82,9 @@ var knownModels = map[string]Model{
 		// Short-context (<=272K input) pricing shown here. Long-context
 		// (>272K input) prompts are billed at 2x input and 1.5x output.
 		Pricing: &Pricing{
-			Input: 1, Output: 6, CacheRead: 0.1, CacheWrite: 1.25,
+			Input: 0.2, Output: 1.2, CacheRead: 0.02, CacheWrite: 0.25,
 			Tiers: []PricingTier{
-				{Threshold: 272_000, Input: 2, Output: 9, CacheRead: 0.2, CacheWrite: 2.5},
+				{Threshold: 272_000, Input: 0.4, Output: 1.8, CacheRead: 0.04, CacheWrite: 0.5},
 			},
 		},
 	},
@@ -107,12 +107,17 @@ var knownModels = map[string]Model{
 	},
 
 	// --- xAI ---
-	// The locally verified xAI reference identifies Grok 4.5's 500K context
-	// window. Pricing and output limits remain unset until verified on xAI's
-	// public API, preventing fabricated cost estimates or caps.
+	// Grok 4.5 charges its long-context rate to the whole request once the
+	// prompt reaches 200K tokens, including cached input.
 	"grok-4.5": {
 		ID: "grok-4.5", Provider: "xai", API: "xai-responses",
 		Name: "Grok 4.5", MaxInput: 500_000,
+		Pricing: &Pricing{
+			Input: 2, Output: 6, CacheRead: 0.3,
+			Tiers: []PricingTier{
+				{Threshold: 200_000, Input: 4, Output: 12, CacheRead: 0.6},
+			},
+		},
 	},
 }
 

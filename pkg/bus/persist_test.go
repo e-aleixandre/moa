@@ -224,6 +224,36 @@ func TestPersistenceReactor_TreeSyncedOrder(t *testing.T) {
 	}
 }
 
+func TestPersistenceReactor_CompactionMarkerKeepsLiveMsgIDAfterReload(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.Tree = session.NewTree()
+	RegisterTreeSyncer(b, sctx)
+	fp := &fakeTreePersister{}
+	RegisterPersistenceReactor(b, sctx, fp)
+
+	marker := NewCompactionMarker(&core.CompactionPayload{Summary: "compact", TokensBefore: 12000})
+	b.Publish(CompactionEnded{
+		SessionID: "test-session", Payload: &core.CompactionPayload{Summary: "compact", TokensBefore: 12000}, Marker: marker,
+	})
+	b.Drain(time.Second)
+
+	if fp.treeSnapCount() == 0 {
+		t.Fatal("compaction was not persisted")
+	}
+	entries := fp.lastTree()
+	tree, err := session.NewTreeFromEntries(entries, entries[len(entries)-1].ID)
+	if err != nil {
+		t.Fatalf("rebuild persisted tree: %v", err)
+	}
+	messages := tree.AllMessages()
+	if len(messages) != 1 || messages[0].MsgID != marker.MsgID {
+		t.Fatalf("reprojected marker ID = %#v, want %q", messages, marker.MsgID)
+	}
+}
+
 func TestCollectMetadata_Minimal(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()

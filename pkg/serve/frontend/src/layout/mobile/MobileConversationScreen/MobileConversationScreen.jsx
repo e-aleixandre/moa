@@ -8,13 +8,14 @@ import { setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
-import { shortPath, sessionDotState, sessionTitle } from "../../../data/util/format.js";
+import { shortPath, sessionDisplayDotState, sessionTitle } from "../../../data/util/format.js";
 import { activityPhase } from "../../../data/util/activity.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
+import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { MobileNowLine } from "./MobileNowLine.jsx";
@@ -22,6 +23,7 @@ import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import { MobileBashJobView } from "./MobileBashJobView.jsx";
 import { LiveDock } from "../../LiveDock/LiveDock.jsx";
 import { liveTrayAgents } from "../../../data/stream-model.js";
+import { aggregateAttention, newResultSessions } from "./attention-model.js";
 import "./MobileConversationScreen.css";
 
 // MobileConversationScreen — the CONNECTED root container of the mobile
@@ -84,19 +86,6 @@ function sessionBrief(sess) {
   return sess.state || "idle";
 }
 
-// aggregateAttention counts OTHER sessions (excluding the active one) that are
-// blocked on the user — the exact "needs you" datum the desktop GridToolbar's
-// attn-lamp consumes (permission ∪ error), so the mobile Sessions badge and the
-// desktop lamp never disagree. It reuses the same per-session "needs" predicate
-// the drawer cards use (pendingPerm / pendingAsk / permission), plus error.
-function aggregateAttention(sessions, activeId) {
-  return Object.values(sessions).filter(
-    (s) =>
-      s.id !== activeId &&
-      (s.pendingPerm || s.pendingAsk || s.state === "permission" || s.state === "error")
-  ).length;
-}
-
 // drawerSessions builds the drawer's two groups — active (newest first) and
 // saved — kept apart rather than concatenated because the drawer labels them
 // separately, exactly as the desktop Spine does.
@@ -109,11 +98,12 @@ function drawerSessions(sessions, activeId) {
     .filter((s) => s.state === "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
   const toCard = (s) => {
-    const needs = !!(s.pendingPerm || s.pendingAsk || s.state === "permission");
+    const dotState = sessionDisplayDotState(s);
+    const needs = dotState === "permission";
     return {
       id: s.id,
       title: sessionTitle(s),
-      state: sessionDotState(s),
+      state: dotState,
       when: relAge(s.updated),
       last: sessionBrief(s),
       needsLabel: needs ? "Needs you:" : undefined,
@@ -126,8 +116,11 @@ function drawerSessions(sessions, activeId) {
       updated: s.updated || 0,
     };
   };
+  const newResults = newResultSessions(active);
+  const remainingActive = active.filter((s) => !newResults.includes(s));
   return {
-    active: active.map(toCard),
+    newResults: newResults.map(toCard),
+    active: remainingActive.map(toCard),
     saved: saved.map(toCard),
     activeCount: active.length,
     savedCount: saved.length,
@@ -170,6 +163,7 @@ export function MobileConversationScreen({ version = null }) {
   useEffect(() => store.subscribe(setState), []);
 
   const [rewindOpen, setRewindOpen] = useState(false);
+  const [secretAliases, setSecretAliases] = useState(null);
   // Global Settings bottom-sheet, reached from the drawer footer via a sheet
   // HANDOFF: tapping ⚙ closes the drawer, and only once the drawer's leave
   // animation has settled (onClosed) does the Settings sheet slide up — one
@@ -257,12 +251,14 @@ export function MobileConversationScreen({ version = null }) {
   };
 
   useEffect(() => { setRewindOpen(false); }, [activeId]);
+  useEffect(() => { setSecretAliases(null); }, [activeId]);
 
   // Aggregate cross-session attention for the title chip's dot: OTHER sessions
   // blocked on the user (excludes the active one, whose block is the inline
   // PermissionPrompt in the conversation).
-  const attnCount = aggregateAttention(state.sessions, activeId);
+  const attention = aggregateAttention(state.sessions, activeId);
   const {
+    newResults,
     active: drawerActive,
     saved: drawerSaved,
     activeCount,
@@ -395,7 +391,7 @@ export function MobileConversationScreen({ version = null }) {
             />
           )}
           <MobileNowLine session={session} />
-          <MobileComposer key={session.id} session={session} usage={state.usage} />
+          <MobileComposer key={session.id} session={session} usage={state.usage} onSecret={setSecretAliases} />
         </>
       );
     }
@@ -412,7 +408,7 @@ export function MobileConversationScreen({ version = null }) {
       {session && !session.viewingSubagent && !session.viewingBashJob && (
         <MobileTitleChip
           title={sessionTitle(session)}
-          attnCount={attnCount}
+          attention={attention}
           open={drawerOpen}
           onToggle={setDrawerOpen}
         />
@@ -424,6 +420,7 @@ export function MobileConversationScreen({ version = null }) {
         onClose={() => setDrawerOpen(false)}
         onClosed={onDrawerClosed}
         active={drawerActive}
+        newResults={newResults}
         saved={drawerSaved}
         activeCount={activeCount}
         savedCount={savedCount}
@@ -448,6 +445,21 @@ export function MobileConversationScreen({ version = null }) {
       >
         <GlobalSettings soundEnabled={state.soundEnabled} version={version} />
       </MobileSheet>
+      {session && (
+        <MobileSheet
+          open={secretAliases !== null}
+          onClose={() => setSecretAliases(null)}
+          title="Send secrets"
+          scope="private"
+        >
+          <SecretBatch
+            open={secretAliases !== null}
+            sessionId={session.id}
+            aliases={secretAliases || []}
+            onClose={() => setSecretAliases(null)}
+          />
+        </MobileSheet>
+      )}
       {session && (
         <RewindTimeline
           open={rewindOpen}

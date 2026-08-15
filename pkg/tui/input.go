@@ -76,6 +76,25 @@ func (m *inputModel) Submit() string {
 	return text
 }
 
+// Discard clears an input without recording it in history. Sensitive commands
+// use this path as soon as they are recognized.
+func (m *inputModel) Discard() {
+	m.textarea.Reset()
+	m.histIdx = -1
+	m.draft = ""
+}
+
+// Restore puts a rejected submission back in the composer without adding a
+// second history entry. Sending is optimistic in the TUI too, so failures must
+// not turn a transient bus rejection into lost user input.
+func (m *inputModel) Restore(text string) {
+	m.textarea.Reset()
+	m.textarea.SetValue(text)
+	m.textarea.CursorEnd()
+	m.histIdx = -1
+	m.draft = text
+}
+
 // HistoryUp navigates to the previous history entry.
 // Returns true if it consumed the key (caller should not propagate).
 func (m *inputModel) HistoryUp() bool {

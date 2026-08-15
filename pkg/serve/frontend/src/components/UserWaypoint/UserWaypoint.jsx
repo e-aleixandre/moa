@@ -9,8 +9,8 @@ import "./UserWaypoint.css";
 // the stream: peach border on the left, "YOU" header + time, text
 // body. `html` allows passing an already-rendered body (e.g. markdown); if not
 // given, `children` is used as-is (usually a <p>). `label` overrides the "You"
-// header text (e.g. "You — steer" for a mid-run course-correction); the peach
-// treatment stays (peach = user), only the header word differs.
+// header text (e.g. "You — steer" for a mid-run course-correction). `tone`
+// selects a semantic source treatment; ordinary user messages remain peach.
 function ImageLightbox({ attachment, sessionId, onClose }) {
   const src = attachmentImageSrc(attachment, sessionId);
   if (!src) return null;
@@ -75,6 +75,8 @@ export function UserWaypoint({
   children,
   html,
   label = "You",
+  tone = "user",
+  accent,
   className = "",
   attachments,
   sessionId,
@@ -92,7 +94,11 @@ export function UserWaypoint({
 
   return (
     <>
-      <div class={`waypoint ${className}`.trim()} {...rest}>
+      <div
+        class={`waypoint waypoint-${tone} ${className}`.trim()}
+        style={accent ? { "--waypoint-accent": `var(--${accent})` } : undefined}
+        {...rest}
+      >
         <div class="who">
           <span class="who-label">{label}</span>
           {time && <time>{time}</time>}

@@ -164,11 +164,14 @@ type Message struct {
 	Timestamp int64     `json:"timestamp"`
 
 	// assistant-only
-	Provider     string `json:"provider,omitempty"`
-	Model        string `json:"model,omitempty"`
-	Usage        *Usage `json:"usage,omitempty"`
-	StopReason   string `json:"stop_reason,omitempty"`
-	ErrorMessage string `json:"error_message,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	// RequestedModel is the normalized model selected for this response; Model
+	// is the effective model reported by the provider.
+	RequestedModel string `json:"requested_model,omitempty"`
+	Usage          *Usage `json:"usage,omitempty"`
+	StopReason     string `json:"stop_reason,omitempty"`
+	ErrorMessage   string `json:"error_message,omitempty"`
 
 	// tool_result-only
 	ToolCallID string `json:"tool_call_id,omitempty"`
@@ -197,6 +200,10 @@ func (m *Message) EnsureMsgID() {
 type SteerItem struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
+	// Custom is persisted with the eventual conversation message. It lets
+	// internal ingress retain its rendering/source metadata when it has to wait
+	// on the queue rail instead of starting a direct run.
+	Custom map[string]any `json:"-"`
 	// Content, when non-nil, is the full payload of a steer (text plus image or
 	// other content blocks). It is injected with NewUserMessageWithContent. A
 	// nil Content means a plain-text steer carried in Text.
@@ -458,13 +465,24 @@ func ExtractFinalAssistantText(msgs []AgentMessage) string {
 		if msgs[i].Role != "assistant" {
 			continue
 		}
-		var parts []string
-		for _, c := range msgs[i].Content {
-			if c.Type == "text" && c.Text != "" {
-				parts = append(parts, c.Text)
-			}
-		}
-		return strings.Join(parts, "")
+		return ExtractAssistantText(msgs[i])
 	}
 	return ""
+}
+
+// ExtractAssistantText returns the concatenated non-empty text blocks of an
+// assistant message. Keeping this rule separate lets streaming transcript
+// readers reuse the exact outcome extraction semantics without materializing
+// every preceding message.
+func ExtractAssistantText(msg AgentMessage) string {
+	if msg.Role != "assistant" {
+		return ""
+	}
+	var parts []string
+	for _, c := range msg.Content {
+		if c.Type == "text" && c.Text != "" {
+			parts = append(parts, c.Text)
+		}
+	}
+	return strings.Join(parts, "")
 }

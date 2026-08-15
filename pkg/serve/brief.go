@@ -1,7 +1,6 @@
 package serve
 
 import (
-	"errors"
 	"log/slog"
 	"time"
 
@@ -36,7 +35,7 @@ const briefCooldown = 10 * time.Second
 // inside one live session where that summary is redundant. The shared logic is
 // kept in pkg/pulsebrief should a future TUI multi-session view need it.
 func (m *Manager) subscribeSessionBrief(sess *ManagedSession) {
-	if m.providerFactory == nil {
+	if m.providerFactory == nil || !sess.sessionBriefEnabled {
 		return
 	}
 	b := sess.runtime.Bus
@@ -102,12 +101,8 @@ func (m *Manager) generateSessionBrief(sess *ManagedSession) {
 	sess.briefLastAttempt = time.Now()
 	sess.mu.Unlock()
 
-	sessionModel, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
-	brief, err := pulsebrief.Generate(sess.infra.sessionCtx, m.providerFactory, sessionModel, msgs)
+	brief, err := pulsebrief.Generate(sess.infra.sessionCtx, m.providerFactory, sess.sessionBriefModel, msgs)
 	if err != nil {
-		if errors.Is(err, pulsebrief.ErrNoCheapSameVendorModel) {
-			return
-		}
 		slog.Debug("pulsebrief: generation failed", "session", sess.ID, "error", err)
 		return
 	}

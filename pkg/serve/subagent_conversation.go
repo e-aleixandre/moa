@@ -18,6 +18,7 @@ import (
 type SubagentSummary struct {
 	JobID      string    `json:"job_id"`
 	Task       string    `json:"task"`
+	Title      string    `json:"title,omitempty"`
 	Model      string    `json:"model,omitempty"`
 	Thinking   string    `json:"thinking,omitempty"`
 	Status     string    `json:"status"`
@@ -102,7 +103,7 @@ func handleSubagentConversation(m *Manager) http.HandlerFunc {
 				http.Error(w, "tool item not found", http.StatusNotFound)
 				return
 			}
-			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output, Truncated: toolDetail.truncated})
+			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output})
 			return
 		}
 		beforeID := ""
@@ -207,7 +208,7 @@ func (m *Manager) subagentSummaries(sessionID string) ([]SubagentSummary, error)
 		items := make(map[string]SubagentSummary)
 		if sess.persister != nil {
 			if store := sess.persister.subagentStore(sessionID); store != nil {
-				transcripts, err := store.List()
+				transcripts, err := store.ListSummaries()
 				if err != nil {
 					return nil, err
 				}
@@ -227,7 +228,7 @@ func (m *Manager) subagentSummaries(sessionID string) ([]SubagentSummary, error)
 	if err != nil {
 		return nil, err
 	}
-	transcripts, err := session.NewSubagentStore(store.Dir(), sessionID).List()
+	transcripts, err := session.NewSubagentStore(store.Dir(), sessionID).ListSummaries()
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +248,7 @@ func subagentSummaryFromLive(info subagent.JobInfo) SubagentSummary {
 }
 
 func subagentSummaryFromTranscript(transcript session.SubagentTranscript) SubagentSummary {
-	s := SubagentSummary{JobID: transcript.JobID, Task: transcript.Task, Model: transcript.Model, Thinking: transcript.Thinking, Status: transcript.Status, Async: transcript.Async, StartedAt: transcript.StartedAt, FinishedAt: transcript.FinishedAt, Source: "persisted", CostUSD: transcript.CostUSD, ContextPercent: -1}
+	s := SubagentSummary{JobID: transcript.JobID, Task: transcript.Task, Title: transcript.Title, Model: transcript.Model, Thinking: transcript.Thinking, Status: transcript.Status, Async: transcript.Async, StartedAt: transcript.StartedAt, FinishedAt: transcript.FinishedAt, Source: "persisted", CostUSD: transcript.CostUSD, ContextPercent: -1}
 	if transcript.ContextPercent != nil {
 		s.ContextPercent = *transcript.ContextPercent
 	}
@@ -288,7 +289,7 @@ func safeSubagentConversationMessages(messages []core.AgentMessage) conversation
 	}
 	seenIDs := make(map[string]int, len(messages))
 	for index, msg := range messages {
-		if (msg.Role != "user" && msg.Role != "assistant") || len(msg.Custom) != 0 {
+		if !isVisibleSubagentConversationMessage(msg) {
 			continue
 		}
 		id := msg.MsgID
@@ -303,6 +304,9 @@ func safeSubagentConversationMessages(messages []core.AgentMessage) conversation
 		text, omitted, truncated := safeDisplayText(msg.Content)
 		if shouldShowConversationMessage(msg.Role, text, omitted, msg.Content) {
 			item := ConversationMessage{ID: id, Role: msg.Role, Text: text, Omitted: omitted, Truncated: truncated, Timestamp: conversationTimestamp(msg.Timestamp)}
+			if source, _ := msg.Custom["source"].(string); source == "subagent_parent" {
+				item.Source = source
+			}
 			for _, block := range msg.Content {
 				if block.Type != "text" && block.Type != "tool_call" {
 					item.OmittedBlocks++
@@ -333,4 +337,19 @@ func safeSubagentConversationMessages(messages []core.AgentMessage) conversation
 		}
 	}
 	return conversationProjection{messages: out, toolDetails: details}
+}
+
+// isVisibleSubagentConversationMessage admits ordinary turns and the one
+// provenance-tagged turn that is part of a child's conversation. Other Custom
+// messages are internal transcript records (such as compaction turns and
+// markers), not owner-facing conversation.
+func isVisibleSubagentConversationMessage(msg core.AgentMessage) bool {
+	if msg.Role != "user" && msg.Role != "assistant" {
+		return false
+	}
+	if len(msg.Custom) == 0 {
+		return true
+	}
+	source, _ := msg.Custom["source"].(string)
+	return source == "subagent_parent"
 }

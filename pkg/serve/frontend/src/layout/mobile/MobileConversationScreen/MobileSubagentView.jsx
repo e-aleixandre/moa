@@ -1,6 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
-import { ChevronLeft, GitFork, X, Check, Copy } from "lucide-preact";
-import { RunModeChip, UserWaypoint } from "../../../components/index.js";
+import { ChevronLeft, GitFork, X, Check, Copy, Info } from "lucide-preact";
+import { RunModeChip } from "../../../components/index.js";
 import { Composer } from "../../Composer/Composer.jsx";
 import { StatusLineRow } from "../MobileStatusLine/StatusLineRow.jsx";
 import { MobileStream } from "./MobileStream.jsx";
@@ -9,6 +9,9 @@ import { fmtTokens, copyToClipboard, sessionTitle } from "../../../data/util/for
 import { fmtCost } from "../../../data/util/usage-pills.js";
 import { modelAccent } from "../../../data/selectors.js";
 import { cancelSubagent, promoteSubagent } from "../../../data/session-actions.js";
+import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
+import { SubagentDetails } from "../../../components/index.js";
+import { useEdgeSwipeBack } from "../../../hooks/useEdgeSwipeBack.js";
 // The now-line above the composer reuses MobileNowLine's rules verbatim (same
 // grammar, different subject), so its stylesheet has to be in the graph even
 // though this screen doesn't render that component.
@@ -26,7 +29,7 @@ import "./MobileSubagentView.css";
 //
 // What stays fork-proper: the full-screen push, a one-row header with the
 // codename in accent and the way back, the run-mode chip, the sibling rail, the
-// task card and the terminal outcome banner. The header survives even though
+// terminal outcome banner. The header survives even though
 // the parent screen no longer has one — it is what says "you are one level in,
 // and here is the way out".
 //
@@ -43,6 +46,10 @@ export function MobileSubagentView({ session, jobId, onBack }) {
   }, [view, session, jobId, onBack]);
 
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  // Swipe from the left edge to go back, the way a pushed screen is dismissed
+  // on a phone. The header chevron remains the accessible path.
+  const { screenRef, dragging, swipeBind } = useEdgeSwipeBack({ onBack });
   useEffect(() => {
     if (!confirmCancel) return;
     const t = setTimeout(() => setConfirmCancel(false), 2000);
@@ -70,7 +77,7 @@ export function MobileSubagentView({ session, jobId, onBack }) {
   const onPromote = () => { promoteSubagent(session.id, jobId).catch(() => {}); };
 
   return (
-    <div class="msa">
+    <div class={dragging ? "msa is-swiping" : "msa"} ref={screenRef} {...swipeBind}>
       <header class="msa-head">
         <button type="button" class="msa-back" aria-label={`Back to ${sessionTitle(session)}`} onClick={onBack}>
           <ChevronLeft size={20} />
@@ -80,18 +87,16 @@ export function MobileSubagentView({ session, jobId, onBack }) {
           <span class="msa-kind">subagent</span>
           <span class="msa-name" style={{ color: `var(--${accent})` }}>{view.name}</span>
         </span>
+        <button type="button" class="msa-details-btn" aria-label="Subagent details" onClick={() => setDetailsOpen(true)}>
+          <Info size={16} />
+        </button>
         <RunModeChip async={view.async} canPromote={canPromote(view)} onPromote={onPromote} />
       </header>
 
       <MobileStream
         session={{ id: `${session.id}:${jobId}`, messages: [] }}
         blocks={view.blocks}
-        lead={
-          <UserWaypoint className="msa-task" time={undefined}>
-            <div class="msa-task-label" style={{ color: `var(--${accent})` }}>TASK — from parent</div>
-            <p>{view.task || "(no task recorded)"}</p>
-          </UserWaypoint>
-        }
+        waypointAccent={accent}
       />
 
       {view.terminal && <MobileOutcome view={view} onBack={onBack} />}
@@ -125,6 +130,9 @@ export function MobileSubagentView({ session, jobId, onBack }) {
         )}
         <BranchStatusLine session={session} view={view} />
       </div>
+      <MobileSheet open={detailsOpen} onClose={() => setDetailsOpen(false)} title="Subagent details" scope="subagent">
+        <SubagentDetails session={session} view={view} accent={accent} />
+      </MobileSheet>
     </div>
   );
 }
@@ -195,7 +203,7 @@ function MobileOutcome({ view, onBack }) {
           </button>
         )}
         {view.outcome === "completed" && (
-          <button type="button" class="msa-outcome-btn" onClick={() => copy(view.resultChip || "")}>
+          <button type="button" class="msa-outcome-btn" onClick={() => copy(view.result || "")}>
             {copied ? "copied ✓" : <>{<Copy size={13} />} Copy result</>}
           </button>
         )}

@@ -18,38 +18,58 @@ type Event struct {
 
 // InitData is sent on WebSocket connect with the full session state.
 type InitData struct {
-	Messages          []core.AgentMessage `json:"messages"`
-	State             string              `json:"state"`
-	ContextPercent    int                 `json:"context_percent"`
-	ContextWindow     int                 `json:"context_window,omitempty"`
-	CompactAt         int                 `json:"compact_at,omitempty"`
-	CompactAtMin      int                 `json:"compact_at_min,omitempty"`
-	PermissionMode    string              `json:"permission_mode"`
-	PathScope         string              `json:"path_scope,omitempty"`
-	PendingPermission *PermissionData     `json:"pending_permission,omitempty"`
-	PendingAsk        *AskData            `json:"pending_ask,omitempty"`
-	Tasks             any                 `json:"tasks,omitempty"`
-	PlanMode          string              `json:"plan_mode,omitempty"`
-	PlanFile          string              `json:"plan_file,omitempty"`
-	GoalActive        bool                `json:"goal_active,omitempty"`
-	GoalObjective     string              `json:"goal_objective,omitempty"`
-	GoalWorkDir       string              `json:"goal_work_dir,omitempty"`
-	GoalIteration     int                 `json:"goal_iteration,omitempty"`
-	GoalStalled       int                 `json:"goal_stalled,omitempty"`
-	GoalVerifying     bool                `json:"goal_verifying,omitempty"`
-	Compacting        bool                `json:"compacting,omitempty"`
-	StreamingText     string              `json:"streaming_text,omitempty"`
-	StreamingThinking string              `json:"streaming_thinking,omitempty"`
-	LiveTools         []LiveToolInitData  `json:"live_tools,omitempty"`
-	RunTokensUp       int                 `json:"run_tokens_up"`
-	RunTokensDown     int                 `json:"run_tokens_down"`
-	RunStartedAtMs    int64               `json:"run_started_at_ms,omitempty"`
-	PendingSteers     []PendingSteerData  `json:"pending_steers,omitempty"`
-	CostUSD           float64             `json:"cost_usd,omitempty"`
-	Subagents         []SubagentInitData  `json:"subagents,omitempty"`
-	BashJobs          []BashJobInitData   `json:"bash_jobs,omitempty"`
-	LastSeq           uint64              `json:"last_seq,omitempty"`
-	HistoryTruncated  bool                `json:"history_truncated,omitempty"`
+	// ServerInstance identifies the process that owns this runtime incarnation.
+	// AttentionNamespace, not this value, scopes the bus-sequence read cursor.
+	ServerInstance string `json:"server_instance"`
+	// AttentionNamespace identifies the ordered runtime incarnation that owns
+	// bus-sequence read cursors. It changes on a close/resume even within one
+	// server process, whose bus sequence then starts again at zero.
+	AttentionNamespace string              `json:"attention_namespace,omitempty"`
+	Messages           []core.AgentMessage `json:"messages"`
+	State              string              `json:"state"`
+	ContextPercent     int                 `json:"context_percent"`
+	ContextWindow      int                 `json:"context_window,omitempty"`
+	CompactAt          int                 `json:"compact_at,omitempty"`
+	CompactAtMin       int                 `json:"compact_at_min,omitempty"`
+	PermissionMode     string              `json:"permission_mode"`
+	PathScope          string              `json:"path_scope,omitempty"`
+	PendingPermission  *PermissionData     `json:"pending_permission,omitempty"`
+	PendingAsk         *AskData            `json:"pending_ask,omitempty"`
+	Tasks              any                 `json:"tasks,omitempty"`
+	PlanMode           string              `json:"plan_mode,omitempty"`
+	PlanFile           string              `json:"plan_file,omitempty"`
+	GoalActive         bool                `json:"goal_active,omitempty"`
+	GoalObjective      string              `json:"goal_objective,omitempty"`
+	GoalWorkDir        string              `json:"goal_work_dir,omitempty"`
+	GoalIteration      int                 `json:"goal_iteration,omitempty"`
+	GoalStalled        int                 `json:"goal_stalled,omitempty"`
+	GoalVerifying      bool                `json:"goal_verifying,omitempty"`
+	Compacting         bool                `json:"compacting,omitempty"`
+	StreamingText      string              `json:"streaming_text,omitempty"`
+	StreamingThinking  string              `json:"streaming_thinking,omitempty"`
+	LiveTools          []LiveToolInitData  `json:"live_tools,omitempty"`
+	RunTokensUp        int                 `json:"run_tokens_up"`
+	RunTokensDown      int                 `json:"run_tokens_down"`
+	RunStartedAtMs     int64               `json:"run_started_at_ms,omitempty"`
+	PendingSteers      []PendingSteerData  `json:"pending_steers,omitempty"`
+	CostUSD            float64             `json:"cost_usd,omitempty"`
+	Subagents          []SubagentInitData  `json:"subagents,omitempty"`
+	// SubagentOutcomes restores terminal child cards after reconnect/restart.
+	// It is separate from live Subagents because terminal jobs do not belong in
+	// the Live Dock.
+	SubagentOutcomes []SubagentEndData `json:"subagent_outcomes,omitempty"`
+	BashJobs         []BashJobInitData `json:"bash_jobs,omitempty"`
+	LastSeq          uint64            `json:"last_seq,omitempty"`
+	HistoryTruncated bool              `json:"history_truncated,omitempty"`
+	HistoryBefore    string            `json:"history_before,omitempty"`
+	// DeltaBase is the validated tree entry requested by since_msg. When set,
+	// Messages is a complete suffix after this entry and clients append it.
+	DeltaBase string `json:"delta_base,omitempty"`
+}
+
+// PromptResolvedData identifies the prompt cleared by a resolution event.
+type PromptResolvedData struct {
+	ID string `json:"id"`
 }
 
 // PendingSteerData is one queued (not yet delivered) item in the unified queue
@@ -98,6 +118,7 @@ type SubagentInitData struct {
 	JobID            string              `json:"job_id"`
 	OriginToolCallID string              `json:"origin_tool_call_id,omitempty"`
 	Task             string              `json:"task"`
+	Title            string              `json:"title,omitempty"`
 	Model            string              `json:"model"`
 	Thinking         string              `json:"thinking"`
 	Status           string              `json:"status"`
@@ -135,6 +156,7 @@ type BashJobInitData struct {
 // PermissionData is a pending permission request.
 type PermissionData struct {
 	ID           string         `json:"id"`
+	RunGen       uint64         `json:"run_gen,omitempty"`
 	ToolName     string         `json:"tool_name"`
 	Args         map[string]any `json:"args"`
 	AllowPattern string         `json:"allow_pattern,omitempty"`
@@ -143,6 +165,7 @@ type PermissionData struct {
 // AskData is a pending ask_user request.
 type AskData struct {
 	ID        string            `json:"id"`
+	RunGen    uint64            `json:"run_gen,omitempty"`
 	Questions []bus.AskQuestion `json:"questions"`
 }
 
@@ -211,7 +234,10 @@ type TasksUpdateData struct {
 
 // RunEndData carries the final assistant text when a run completes.
 type RunEndData struct {
-	Text string `json:"text"`
+	Text      string `json:"text"`
+	RunGen    uint64 `json:"run_gen"`
+	Cancelled bool   `json:"cancelled,omitempty"`
+	HasError  bool   `json:"has_error,omitempty"`
 }
 
 // ContextUpdateData carries the current context usage percentage.
@@ -271,6 +297,7 @@ type SteerData struct {
 	MsgID   string         `json:"msg_id,omitempty"`
 	Text    string         `json:"text"`
 	Content []core.Content `json:"content,omitempty"`
+	Custom  map[string]any `json:"custom,omitempty"`
 }
 
 // UserMessageData is sent when a user prompt starts a new run, so every
@@ -282,6 +309,7 @@ type UserMessageData struct {
 	MsgID   string         `json:"msg_id,omitempty"`
 	Text    string         `json:"text,omitempty"`
 	Content []core.Content `json:"content,omitempty"`
+	Custom  map[string]any `json:"custom,omitempty"`
 }
 
 // CommandQueuedData is sent when a slash command is enqueued as a barrier in the
@@ -336,6 +364,12 @@ type CommandData struct {
 	HistoryTruncated bool                `json:"history_truncated,omitempty"`
 }
 
+// CompactionEndData carries the durable display marker that TreeSyncer records
+// as the compaction entry.
+type CompactionEndData struct {
+	Marker *core.AgentMessage `json:"marker,omitempty"`
+}
+
 // ConfigChangeData is sent when model/thinking/permissions/path scope change.
 type ConfigChangeData struct {
 	Model          string `json:"model,omitempty"`
@@ -369,6 +403,7 @@ type SubagentStartData struct {
 	JobID            string `json:"job_id"`
 	OriginToolCallID string `json:"origin_tool_call_id,omitempty"`
 	Task             string `json:"task"`
+	Title            string `json:"title,omitempty"`
 	Model            string `json:"model"`
 	Thinking         string `json:"thinking"`
 	Async            bool   `json:"async"`
@@ -401,8 +436,19 @@ type SubagentUsageData struct {
 
 // SubagentEndData is sent when a subagent finishes, carrying its usage/cost.
 type SubagentEndData struct {
-	JobID        string  `json:"job_id"`
-	Status       string  `json:"status"`
+	JobID  string `json:"job_id"`
+	Task   string `json:"task,omitempty"`
+	Async  bool   `json:"async"`
+	Status string `json:"status"`
+	// Result is present for completed children. Error is present for failures;
+	// cancellation intentionally has neither, so it cannot masquerade as a
+	// successful empty result.
+	Result string `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
+	// Excerpt says Result/Error was bounded for this WebSocket/init payload;
+	// the Conversation action still opens the complete persisted transcript.
+	Excerpt      bool    `json:"excerpt,omitempty"`
+	FinishedAtMs int64   `json:"finished_at_ms,omitempty"`
 	InputTokens  int     `json:"input_tokens"`
 	OutputTokens int     `json:"output_tokens"`
 	CostUSD      float64 `json:"cost_usd"`

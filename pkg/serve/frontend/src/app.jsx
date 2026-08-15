@@ -1,10 +1,7 @@
 import { render } from "preact";
 import { useState, useEffect } from "preact/hooks";
+import { lazy, Suspense } from "preact/compat";
 import "./index.css";
-import { Catalog } from "./catalog/catalog.jsx";
-import { LiveStatesGallery } from "./catalog/live-states-gallery.jsx";
-import { MobileGallery } from "./catalog/mobile-gallery.jsx";
-import { SubagentGallery } from "./catalog/subagent-gallery.jsx";
 import { ConversationScreen, PaneGridScreen, MobileConversationScreen } from "./layout/index.js";
 import { CommandPalette, ToastContainer, PulsePairingPanel } from "./components/index.js";
 import { store, setState as setStoreState } from "./data/store.js";
@@ -20,9 +17,30 @@ import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
 import { refreshPushState } from "./data/push-client.js";
+import { installOpenSessionNavigation } from "./data/push-navigation.js";
 import {
-  setMobile, autoFillTiles, autoSelectMobile, openSession,
+  setMobile, autoFillTiles, autoSelectMobile, openSession, afterVisibilityChange,
 } from "./data/tile-actions.js";
+
+// Galleries are development/reference surfaces, never part of the production
+// startup graph. Dynamic imports retain direct ?view=… access while keeping
+// their specimens and CSS out of app.js/app.css.
+const loadCatalog = () => import("./catalog-entry.js");
+const Catalog = lazy(() => loadCatalog().then((m) => ({ default: m.Catalog })));
+const LiveStatesGallery = lazy(() => loadCatalog().then((m) => ({ default: m.LiveStatesGallery })));
+const MobileGallery = lazy(() => loadCatalog().then((m) => ({ default: m.MobileGallery })));
+const SubagentGallery = lazy(() => loadCatalog().then((m) => ({ default: m.SubagentGallery })));
+
+function GalleryLoad({ children }) {
+  useEffect(() => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = new URL("./catalog-entry.css", import.meta.url).href;
+    document.head.appendChild(link);
+    return () => link.remove();
+  }, []);
+  return <Suspense fallback={<div class="conversation-placeholder">Loading gallery…</div>}>{children}</Suspense>;
+}
 
 const welcomeStyle = {
   maxWidth: "640px",
@@ -163,19 +181,17 @@ function useBootstrap() {
   // hops use pushState, no reload — see data/router.js).
   useEffect(() => bindRouter(), []);
 
-  // Mobile breakpoint → setMobile. Also lock the document to the viewport on
-  // mobile (adds .mobile-locked to <html>): the mobile shell owns its own
-  // internal scroll (.mconv-stream), so the page itself must not scroll — on
-  // iOS a scrollable document lets Safari pan the whole page up to reveal a
-  // focused input and never pans it back when the keyboard closes, leaving a
-  // gap and pushing the header out of view (reset.css min-height:100vh made the
-  // document taller than the visual viewport). Locking html/body/#root to the
-  // dynamic viewport height keeps the header pinned.
+  // Warm notification taps use the same openSession behavior as a cold
+  // ?session= deep link, waiting for the authoritative initial session list.
+  useEffect(() => installOpenSessionNavigation(), []);
+
+  // Mobile breakpoint → setMobile. The App below decides whether the current
+  // view owns document scrolling: galleries need native document scroll while
+  // the mobile conversation keeps its dedicated internal scroller.
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
     const handler = (e) => {
       setMobile(e.matches);
-      document.documentElement.classList.toggle("mobile-locked", e.matches);
     };
     handler(mq);
     mq.addEventListener("change", handler);
@@ -246,6 +262,7 @@ function useBootstrap() {
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
+        afterVisibilityChange();
         reconnectAll();
         loadSessions();
         startPolling();
@@ -365,10 +382,17 @@ function App() {
   useEffect(() => store.subscribe(setState), []);
   const view = state.view;
 
+  // Lock the document only for application screens that supply their own
+  // mobile scroller. Catalog and gallery routes are long reference documents.
+  useEffect(() => {
+    const gallery = view === "catalog" || view === "live" || view === "subagent" || view === "mobile";
+    document.documentElement.classList.toggle("mobile-locked", state.isMobile && !gallery);
+  }, [state.isMobile, view]);
+
   if (view === "catalog") {
     return (
       <>
-        <CatalogScreen />
+      <GalleryLoad><CatalogScreen /></GalleryLoad>
         <GalleryNav current="catalog" />
       </>
     );
@@ -376,7 +400,7 @@ function App() {
   if (view === "live") {
     return (
       <>
-        <LiveStatesGallery />
+        <GalleryLoad><LiveStatesGallery /></GalleryLoad>
         <GalleryNav current="live" />
       </>
     );
@@ -384,7 +408,7 @@ function App() {
   if (view === "subagent") {
     return (
       <>
-        <SubagentGallery />
+        <GalleryLoad><SubagentGallery /></GalleryLoad>
         <GalleryNav current="subagent" />
       </>
     );
@@ -392,7 +416,7 @@ function App() {
   if (view === "mobile") {
     return (
       <>
-        <MobileGallery />
+        <GalleryLoad><MobileGallery /></GalleryLoad>
         <GalleryNav current="mobile" />
       </>
     );

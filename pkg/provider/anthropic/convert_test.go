@@ -435,7 +435,7 @@ func TestConvertAssistantContent_NilArguments(t *testing.T) {
 	blocks := []core.Content{
 		core.ToolCallContent("tc-1", "pwd", nil),
 	}
-	result := convertAssistantContent(blocks, false)
+	result := convertAssistantContent(blocks, false, false)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(result))
 	}
@@ -655,7 +655,7 @@ func TestConvertAssistantContent_ThinkingWithoutSignature(t *testing.T) {
 		core.TextContent("partial response"),
 	}
 
-	result := convertAssistantContent(blocks, false)
+	result := convertAssistantContent(blocks, false, false)
 
 	if len(result) != 2 {
 		t.Fatalf("expected 2 blocks, got %d", len(result))
@@ -685,7 +685,7 @@ func TestConvertAssistantContent_ThinkingWithSignature(t *testing.T) {
 		core.TextContent("response"),
 	}
 
-	result := convertAssistantContent(blocks, false)
+	result := convertAssistantContent(blocks, false, false)
 
 	first := result[0].(map[string]any)
 	if first["type"] != "thinking" {
@@ -696,6 +696,83 @@ func TestConvertAssistantContent_ThinkingWithSignature(t *testing.T) {
 	}
 }
 
+func TestForeignThinkingDetectsProviderMismatch(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  core.Message
+		want bool
+	}{
+		{"native anthropic", core.Message{Provider: "anthropic"}, false},
+		{"foreign openai", core.Message{Provider: "openai"}, true},
+		{"foreign xai", core.Message{Provider: "xai"}, true},
+		// Sessions written before provenance tracking carry no provider; they
+		// are native by assumption, so their thinking must survive.
+		{"legacy without provenance", core.Message{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := foreignThinking(tc.msg); got != tc.want {
+				t.Errorf("foreignThinking(%q) = %v, want %v", tc.msg.Provider, got, tc.want)
+			}
+		})
+	}
+}
+
+// A session that switched models keeps the original provider's thinking blocks
+// in its append-only tree. Replaying one to Anthropic used to fail the whole
+// request with HTTP 400 "Invalid `signature` in `thinking` block".
+func TestConvertMessages_DropsForeignThinkingSignatures(t *testing.T) {
+	msgs := []core.Message{
+		{
+			Role:     "assistant",
+			Provider: "openai",
+			Model:    "gpt-5.6-sol",
+			Content: []core.Content{
+				{Type: "thinking", Thinking: "openai reasoning", ThinkingSignature: "openai-signature"},
+				core.TextContent("from the other provider"),
+			},
+		},
+		{
+			Role:     "assistant",
+			Provider: "anthropic",
+			Model:    "claude-opus-5",
+			Content: []core.Content{
+				{Type: "thinking", Thinking: "native reasoning", ThinkingSignature: "anthropic-signature"},
+				core.TextContent("native answer"),
+			},
+		},
+	}
+
+	result := convertMessages(msgs, false)
+
+	// Consecutive assistant messages are merged into one.
+	if len(result) != 1 {
+		t.Fatalf("expected 1 merged assistant message, got %d", len(result))
+	}
+	content, _ := result[0]["content"].([]any)
+
+	var signatures []string
+	var texts []string
+	for _, raw := range content {
+		block, _ := raw.(map[string]any)
+		switch block["type"] {
+		case "thinking":
+			signatures = append(signatures, block["signature"].(string))
+		case "text":
+			texts = append(texts, block["text"].(string))
+		}
+	}
+
+	if len(signatures) != 1 || signatures[0] != "anthropic-signature" {
+		t.Errorf("expected only the native signature to survive, got %v", signatures)
+	}
+	// The foreign block is dropped whole: its reasoning text must not leak
+	// back in as a text block either.
+	if len(texts) != 2 || texts[0] != "from the other provider" || texts[1] != "native answer" {
+		t.Errorf("text blocks: got %v", texts)
+	}
+}
+
 func TestConvertAssistantContent_EmptyThinkingSkipped(t *testing.T) {
 	// Empty thinking blocks should be skipped entirely
 	blocks := []core.Content{
@@ -703,7 +780,7 @@ func TestConvertAssistantContent_EmptyThinkingSkipped(t *testing.T) {
 		core.TextContent("response"),
 	}
 
-	result := convertAssistantContent(blocks, false)
+	result := convertAssistantContent(blocks, false, false)
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 block (empty thinking skipped), got %d", len(result))
@@ -719,7 +796,7 @@ func TestConvertAssistantContent_RedactedThinking(t *testing.T) {
 		{Type: "thinking", Redacted: true, ThinkingSignature: "opaque-data"},
 	}
 
-	result := convertAssistantContent(blocks, false)
+	result := convertAssistantContent(blocks, false, false)
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(result))

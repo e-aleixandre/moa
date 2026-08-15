@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -384,7 +385,7 @@ func TestNewOAuth_UsesCodexEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	prov := NewOAuth("token", "acct_123")
+	prov := NewOAuth("token", "acct_123", nil)
 	prov.baseURL = server.URL
 
 	ch, err := prov.Stream(context.Background(), core.Request{
@@ -406,6 +407,135 @@ func TestNewOAuth_UsesCodexEndpoint(t *testing.T) {
 	}
 	if !gotDone {
 		t.Fatal("expected done")
+	}
+}
+
+func TestNewOAuth_RefreshesOnceOn401(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			if r.Header.Get("Authorization") != "Bearer old" {
+				t.Fatalf("first request auth = %q", r.Header.Get("Authorization"))
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = fmt.Fprint(w, `{"detail":{"code":"token_expired"}}`)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer new" {
+			t.Fatalf("retried request auth = %q, want refreshed token", r.Header.Get("Authorization"))
+		}
+		if r.Header.Get("chatgpt-account-id") != "acct_123" {
+			t.Fatal("retried request lost the account-id header")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`))
+	}))
+	defer server.Close()
+
+	var refreshes int
+	prov := NewOAuth("old", "acct_123", func(rejected string) (string, error) {
+		refreshes++
+		if rejected != "old" {
+			t.Fatalf("rejected token = %q", rejected)
+		}
+		return "new", nil
+	})
+	prov.baseURL = server.URL
+
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("test")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ch {
+	}
+	if refreshes != 1 {
+		t.Fatalf("refreshes = %d, want 1", refreshes)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+}
+
+func TestNewOAuth_Second401IsTerminal(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = fmt.Fprint(w, `{"detail":{"code":"token_expired"}}`)
+	}))
+	defer server.Close()
+
+	var refreshes int
+	prov := NewOAuth("old", "acct_123", func(string) (string, error) {
+		refreshes++
+		return "new", nil
+	})
+	prov.baseURL = server.URL
+
+	_, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("test")},
+	})
+	if err == nil || !strings.Contains(err.Error(), "authentication failed") {
+		t.Fatalf("err = %v, want authentication failed", err)
+	}
+	if refreshes != 1 {
+		t.Fatalf("refreshes = %d, want exactly 1 (no refresh loop)", refreshes)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want exactly 2 (no retry loop)", requests)
+	}
+}
+
+func TestStream_APIKey401NeverRefreshes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	prov := NewWithBaseURL("sk-key", server.URL)
+	// Simulate a wiring mistake: even with a refresh callback present, an
+	// API-key transport must never invoke it.
+	prov.refreshOAuth = func(string) (string, error) {
+		t.Fatal("refresh must never run for API-key credentials")
+		return "", nil
+	}
+
+	_, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3"},
+		Messages: []core.Message{core.NewUserMessage("test")},
+	})
+	if err == nil {
+		t.Fatal("expected error on 401")
+	}
+}
+
+func TestNewOAuth_RefreshFailureIsCleanError(t *testing.T) {
+	const secret = "upstream-secret-detail"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = fmt.Fprint(w, `{"detail":"`+secret+`"}`)
+	}))
+	defer server.Close()
+
+	prov := NewOAuth("old", "acct_123", func(string) (string, error) {
+		return "", errors.New("refresh endpoint said no")
+	})
+	prov.baseURL = server.URL
+
+	_, err := prov.Stream(context.Background(), core.Request{
+		Model:    core.Model{ID: "gpt-5.3-codex"},
+		Messages: []core.Message{core.NewUserMessage("test")},
+	})
+	if err == nil || !strings.Contains(err.Error(), "authentication failed") {
+		t.Fatalf("err = %v, want a clear authentication failure", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error leaks upstream body: %v", err)
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 func TestCursorByteOffset_WideRunes(t *testing.T) {
 	m := newInput()
 	m.textarea.SetValue("日本語x") // 3 three-byte CJK runes + 1 ASCII byte
-	m.textarea.SetCursor(3)        // cursor after the 3 wide runes, before 'x'
+	m.textarea.SetCursor(3)     // cursor after the 3 wide runes, before 'x'
 	if got := m.CursorByteOffset(); got != 9 {
 		t.Errorf("CursorByteOffset() = %d, want 9 (3 wide runes × 3 bytes)", got)
 	}
@@ -20,7 +20,7 @@ func TestCursorByteOffset_SoftWrap(t *testing.T) {
 	m := newInput()
 	m.textarea.SetWidth(10)
 	m.textarea.SetValue(strings.Repeat("a", 25)) // one logical line wrapped across visual rows
-	m.textarea.SetCursor(20)                      // rune column 20 within the logical line
+	m.textarea.SetCursor(20)                     // rune column 20 within the logical line
 	if got := m.CursorByteOffset(); got != 20 {
 		t.Errorf("CursorByteOffset() = %d, want 20", got)
 	}
@@ -30,8 +30,8 @@ func TestTrimLastRune(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"", ""},
 		{"abc", "ab"},
-		{"sí", "s"},          // multibyte: "í" is 2 bytes
-		{"café", "caf"},      // "é" is 2 bytes
+		{"sí", "s"},         // multibyte: "í" is 2 bytes
+		{"café", "caf"},     // "é" is 2 bytes
 		{"emoji😀", "emoji"}, // "😀" is 4 bytes
 		{"ñ", ""},
 	}
@@ -187,6 +187,19 @@ func TestInputHistory_Dedup(t *testing.T) {
 
 	if len(m.history) != 1 {
 		t.Fatalf("expected 1 entry after dedup, got %d", len(m.history))
+	}
+}
+
+func TestInputRestoreKeepsRejectedSubmissionEditable(t *testing.T) {
+	m := newInput()
+	m.textarea.SetValue("retry this")
+	m.Submit()
+	m.Restore("retry this")
+	if got := m.textarea.Value(); got != "retry this" {
+		t.Fatalf("restored input = %q", got)
+	}
+	if m.histIdx != -1 || m.draft != "retry this" {
+		t.Fatalf("restore state = histIdx %d, draft %q", m.histIdx, m.draft)
 	}
 }
 

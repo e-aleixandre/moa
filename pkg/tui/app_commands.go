@@ -14,6 +14,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/handoff"
+	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/verify"
@@ -69,6 +70,10 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	if rest, ok := cutCommand(cmd, "compact"); ok {
 		return m.handleCompactCommand(rest)
+	}
+
+	if rest, ok := cutCommand(cmd, "secret"); ok {
+		return m.handleSecretCommand(rest)
 	}
 
 	if rest, ok := cutCommand(cmd, "handoff"); ok {
@@ -227,6 +232,173 @@ func (m appModel) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		})
 		return m, nil
 	}
+}
+
+// handleSecretCommand opens the masked secret-entry prompt. Arguments are
+// aliases only: secret values are deliberately never parsed from the command
+// line, which is discarded before it can enter history or the transcript.
+func (m appModel) handleSecretCommand(args string) (tea.Model, tea.Cmd) {
+	names := strings.Fields(commandFirstLine(args))
+	// A short command-line list is useful for common batches, but longer lists
+	// are too easy to be an alias followed by pasted values. Additional names
+	// can be entered in the isolated prompt, which still supports 16 entries.
+	if len(names) > 3 {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Refused /secret command: enter at most 3 aliases here, then add more in the masked prompt. Never type values on the command line."})
+		m.updateViewport()
+		return m, nil
+	}
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if !secretAliasPattern.MatchString(name) {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Refused /secret command: aliases use only letters, numbers, dots, underscores, and dashes. Never type values on the command line."})
+			m.updateViewport()
+			return m, nil
+		}
+		key := strings.ToLower(name)
+		if _, duplicate := seen[key]; duplicate {
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Duplicate secret alias"})
+			m.updateViewport()
+			return m, nil
+		}
+		seen[key] = struct{}{}
+	}
+	m.secretPrompt.Start(names)
+	m.input.SetEnabled(false)
+	m.s.chromeCacheDirty = true
+	return m, nil
+}
+
+// commandFirstLine keeps /secret's alias carrier aligned with the web UI:
+// text after the command line may be an accidentally pasted value, never an
+// alias. It is intentionally narrow; other multiline commands retain their
+// existing argument behavior.
+func commandFirstLine(text string) string {
+	if i := strings.IndexAny(text, "\r\n"); i >= 0 {
+		return text[:i]
+	}
+	return text
+}
+
+// handleSecretKey consumes every key while a secret batch is being entered, so
+// values cannot reach the regular textarea, its history, or the transcript.
+func (m appModel) handleSecretKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.secretPrompt.phase == secretMore {
+		switch msg.Type {
+		case tea.KeyEsc, tea.KeyCtrlC:
+			m.secretPrompt.Cancel()
+			m.recomputeInputEnabled()
+			m.s.pendingStatus = "Secret entry cancelled"
+			return m, nil
+		case tea.KeyEnter:
+			return m.finishSecretPrompt()
+		case tea.KeyRunes, tea.KeySpace:
+			switch strings.ToLower(strings.TrimSpace(msg.String())) {
+			case "y":
+				m.secretPrompt.phase = secretAlias
+				return m, nil
+			case "n":
+				return m.finishSecretPrompt()
+			}
+		}
+		return m, nil
+	}
+
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.secretPrompt.Cancel()
+		m.recomputeInputEnabled()
+		m.s.pendingStatus = "Secret entry cancelled"
+		return m, nil
+	case tea.KeyEnter:
+		complete, err := m.secretPrompt.Submit()
+		if err != nil {
+			m.s.pendingStatus = "✗ " + err.Error()
+			return m, nil
+		}
+		if complete {
+			return m.finishSecretPrompt()
+		}
+		return m, nil
+	case tea.KeyBackspace:
+		m.secretPrompt.Backspace()
+		return m, nil
+	case tea.KeyRunes, tea.KeySpace:
+		m.secretPrompt.Type(msg.String())
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m appModel) finishSecretPrompt() (tea.Model, tea.Cmd) {
+	entries := m.secretPrompt.Entries()
+	m.recomputeInputEnabled()
+	dir, err := secrets.Stash(entries)
+	if err != nil {
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Could not stage secrets: " + err.Error()})
+		m.updateViewport()
+		return m, nil
+	}
+	if err := m.runtime.Bus.Execute(bus.AddAllowedPath{Path: dir}); err != nil {
+		_ = secrets.Forget(dir)
+		m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Could not allow the secret directory: " + err.Error()})
+		m.updateViewport()
+		return m, nil
+	}
+
+	names := make([]string, len(entries))
+	for i, entry := range entries {
+		names[i] = entry.Name
+	}
+	note := secrets.Note(dir, names)
+	custom := map[string]any{
+		"source":         "secret_batch",
+		"internal":       true,
+		"secret_dir":     dir,
+		"secret_aliases": names,
+	}
+	m.s.blocks = append(m.s.blocks, messageBlock{
+		Type: "status",
+		Raw:  secretBatchStatus(names),
+	})
+	m.secretDirs = append(m.secretDirs, dir)
+
+	state := m.runtime.State.Current()
+	if state == bus.StateRunning || state == bus.StatePermission {
+		id := core.NewSteerID()
+		if m.secretSteers == nil {
+			m.secretSteers = make(map[string]struct{})
+		}
+		m.secretSteers[id] = struct{}{}
+		if err := m.runtime.Bus.Execute(bus.SteerAgent{ID: id, Text: note, Custom: custom, Internal: true}); err != nil {
+			delete(m.secretSteers, id)
+			_ = secrets.Forget(dir)
+			m.secretDirs = m.secretDirs[:len(m.secretDirs)-1]
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Could not send secret note: " + err.Error()})
+			m.updateViewport()
+			return m, nil
+		}
+		m.updateViewport()
+		return m, nil
+	}
+
+	m.prepareRun("secret batch")
+	if err := m.runtime.Bus.Execute(bus.SendPrompt{Text: note, Custom: custom}); err != nil {
+		id := core.NewSteerID()
+		if m.secretSteers == nil {
+			m.secretSteers = make(map[string]struct{})
+		}
+		m.secretSteers[id] = struct{}{}
+		if steerErr := m.runtime.Bus.Execute(bus.SteerAgent{ID: id, Text: note, Custom: custom, Internal: true}); steerErr != nil {
+			delete(m.secretSteers, id)
+			_ = secrets.Forget(dir)
+			m.secretDirs = m.secretDirs[:len(m.secretDirs)-1]
+			m.s.blocks = append(m.s.blocks, messageBlock{Type: "error", Raw: "Could not send secret note: " + steerErr.Error()})
+			m.updateViewport()
+			return m, nil
+		}
+	}
+	m.updateViewport()
+	return m, tea.Batch(renderTick(), m.status.spinner.Tick)
 }
 
 // handleAskKey routes keys to the ask prompt.
@@ -984,6 +1156,7 @@ func (m appModel) activateSession(sess *session.Session) (tea.Model, tea.Cmd) {
 	m.s.sessionCacheRead = 0
 	m.s.asyncSubagents = 0
 	m.s.subagents = nil
+	m.s.subagentNotificationDelivery = nil
 	m.s.viewingSubagent = ""
 	m.statusBar.UpdateCostSegment(0)
 	m.statusBar.UpdateCacheSegment(0)

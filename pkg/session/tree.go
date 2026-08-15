@@ -377,25 +377,56 @@ func (t *Tree) AllMessages() []core.AgentMessage {
 	}
 	t.mu.RUnlock()
 
-	if len(path) == 0 {
-		return nil
-	}
+	return displayMessages(path)
+}
 
+// DisplayMessagesSince returns the display projection strictly after entryID
+// when entryID is on the current root-to-leaf path. The boolean is false for
+// an empty, unknown, or off-path token; callers must then use a full snapshot.
+// A compaction remains a display marker, exactly as it does in AllMessages.
+func (t *Tree) DisplayMessagesSince(entryID string) ([]core.AgentMessage, bool) {
+	if entryID == "" {
+		return nil, false
+	}
+	t.mu.RLock()
+	if t.leafID == "" {
+		t.mu.RUnlock()
+		return nil, false
+	}
+	path := t.pathToLocked(t.leafID)
+	t.mu.RUnlock()
+
+	start := -1
+	for i, entry := range path {
+		if entry.ID == entryID {
+			start = i + 1
+			break
+		}
+	}
+	if start < 0 {
+		return nil, false
+	}
+	return displayMessages(path[start:]), true
+}
+
+// displayMessages projects tree entries for display: messages pass through and
+// compactions become synthetic status markers.
+func displayMessages(entries []Entry) []core.AgentMessage {
 	var msgs []core.AgentMessage
-	for _, e := range path {
+	for _, e := range entries {
 		switch e.Type {
 		case EntryMessage:
 			msgs = append(msgs, e.Message)
 		case EntryCompaction:
-			// Synthetic status message for display
 			text := fmt.Sprintf("✂ Context compacted (%dK tokens summarized)", e.Compaction.TokensBefore/1000)
 			msgs = append(msgs, core.AgentMessage{
 				Message: core.Message{
 					Role:      "session_event",
+					MsgID:     e.ID,
 					Content:   []core.Content{core.TextContent(text)},
 					Timestamp: e.Timestamp.Unix(),
 				},
-				Custom: map[string]any{"type": "compaction_marker"},
+				Custom: map[string]any{"type": "compaction_marker", "summary": e.Compaction.Summary, "tokens_before": e.Compaction.TokensBefore, "read_files": append([]string(nil), e.Compaction.ReadFiles...), "modified_files": append([]string(nil), e.Compaction.ModifiedFiles...)},
 			})
 		}
 	}

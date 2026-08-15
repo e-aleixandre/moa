@@ -20,6 +20,27 @@ import (
 	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
+func TestClearRunStartedAtCannotEraseNewGenerationAnchor(t *testing.T) {
+	sctx := &SessionContext{}
+	old := &runStartAnchor{gen: 1, at: time.Unix(1, 0)}
+	newer := &runStartAnchor{gen: 2, at: time.Unix(2, 0)}
+	sctx.runStartedAnchor.Store(old)
+
+	// This is the formerly unsafe interleaving: the old run has loaded its
+	// anchor, a new run has installed its anchor, then the old clear executes.
+	// A generation check followed by Store(nil) loses newer; CAS must fail.
+	loadedByOldRun := sctx.runStartedAnchor.Load()
+	sctx.runStartedAnchor.Store(newer)
+	if sctx.runStartedAnchor.CompareAndSwap(loadedByOldRun, nil) {
+		t.Fatal("stale clear erased a newer run anchor")
+	}
+
+	sctx.clearRunStartedAt(1)
+	if got := sctx.RunStartedAt(); !got.Equal(newer.at) {
+		t.Fatalf("run start after stale clear = %v, want %v", got, newer.at)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // fakeAgent — implements AgentController for handler tests
 // Thread-safe: all fields protected by mu for SendPrompt goroutine tests.
@@ -282,6 +303,7 @@ func (f *fakeAgent) Reset() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resetCalled = true
+	f.messages = nil
 	return nil
 }
 
@@ -343,6 +365,10 @@ func (f *fakeAgent) Send(ctx context.Context, prompt string) ([]core.AgentMessag
 }
 
 func (f *fakeAgent) SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error) {
+	return f.Send(ctx, prompt)
+}
+
+func (f *fakeAgent) SendWithCustomAnnounced(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error) {
 	return f.Send(ctx, prompt)
 }
 
@@ -1059,6 +1085,27 @@ func TestBridgeEvent_Steered(t *testing.T) {
 	e := drainChan(got, b, t)
 	if e.Text != "focus on X" {
 		t.Fatalf("Text = %q", e.Text)
+	}
+}
+
+func TestProjectLiveCustomExposesOnlyFrontendFields(t *testing.T) {
+	got := projectLiveCustom(map[string]any{
+		"source":         "secret_batch",
+		"secret_aliases": []string{"db"},
+		"internal_only":  "must-not-leave-the-process",
+	})
+	if got["source"] != "secret_batch" {
+		t.Fatalf("source = %#v", got)
+	}
+	if aliases, ok := got["secret_aliases"].([]string); !ok || len(aliases) != 1 || aliases[0] != "db" {
+		t.Fatalf("aliases = %#v", got["secret_aliases"])
+	}
+	if _, ok := got["internal_only"]; ok {
+		t.Fatalf("internal Custom field was exposed: %#v", got)
+	}
+	ordinary := projectLiveCustom(map[string]any{"source": "schedule", "schedule_id": "private"})
+	if len(ordinary) != 1 || ordinary["source"] != "schedule" {
+		t.Fatalf("ordinary source projection = %#v", ordinary)
 	}
 }
 

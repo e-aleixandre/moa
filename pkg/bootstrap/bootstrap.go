@@ -113,10 +113,13 @@ type SessionConfig struct {
 	// own bus (see cmd/moa's preBus, pkg/serve's session_lifecycle closure)
 	// since bootstrap has no bus reference of its own. All optional (nil =
 	// no-op).
-	OnSubagentStart func(jobID, task, model, thinking, originToolCallID string, async bool, startedAt time.Time, accentIndex int)
-	OnSubagentEvent func(jobID string, inner any)
-	OnSubagentUsage func(jobID string, usage *core.Usage, costUSD float64, contextPct int)
-	OnSubagentEnd   func(jobID, status string, usage *core.Usage, costUSD float64)
+	OnSubagentStart      func(jobID, task, model, thinking, originToolCallID string, async bool, startedAt time.Time, accentIndex int)
+	OnSubagentEvent      func(jobID string, inner any)
+	OnSubagentUsage      func(jobID string, usage *core.Usage, costUSD float64, contextPct int)
+	OnSubagentEnd        func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64)
+	SubagentTitleModel   core.Model
+	SubagentTitleEnabled bool
+	OnSubagentTitle      func(jobID, title string)
 
 	// Background bash callbacks feed the shared session bus/UI. Output is a
 	// lossy live delta; end carries the authoritative bounded log.
@@ -124,11 +127,12 @@ type SessionConfig struct {
 	OnBashJobOutput func(job tool.BashJobInfo, delta string)
 	OnBashJobEnd    func(job tool.BashJobInfo)
 
-	// SubagentTranscriptLoader loads a finished subagent's persisted messages
-	// by job ID, enabling the subagent tool's "resume" parameter. Optional
-	// (nil = resume unsupported). The caller wires this to its transcript store
-	// (see pkg/serve's SubagentStore).
-	SubagentTranscriptLoader func(jobID string) ([]core.AgentMessage, error)
+	// SubagentTranscriptLoader loads a finished subagent's persisted transcript
+	// (messages plus the model/thinking it ran under) by job ID, enabling the
+	// subagent tool's "resume" parameter. Optional (nil = resume unsupported).
+	// The caller wires this to its transcript store (see pkg/serve's
+	// SubagentStore).
+	SubagentTranscriptLoader func(jobID string) (subagent.ResumedTranscript, error)
 }
 
 // Session is a fully wired session ready for agent.Run/Send.
@@ -536,6 +540,9 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		OnChildEvent:        cfg.OnSubagentEvent,
 		OnChildUsage:        cfg.OnSubagentUsage,
 		OnChildEnd:          cfg.OnSubagentEnd,
+		TitleModel:          cfg.SubagentTitleModel,
+		TitleEnabled:        cfg.SubagentTitleEnabled,
+		OnChildTitle:        cfg.OnSubagentTitle,
 		TranscriptLoader:    cfg.SubagentTranscriptLoader,
 	})
 	if err != nil {

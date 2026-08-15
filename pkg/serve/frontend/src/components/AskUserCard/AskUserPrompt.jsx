@@ -53,7 +53,6 @@ export function AskUserPrompt({ session }) {
   const submitFreeRef = useRef(null);
   // Scopes the keyboard shortcut to this card (see the effect below).
   const rootRef = useRef(null);
-
   // The ask batch a recording belongs to. A transcription resolves
   // asynchronously, so one started under a previous batch (or after the answer
   // was submitted) must be dropped rather than typed into a different question.

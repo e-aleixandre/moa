@@ -5,6 +5,8 @@ package serve
 import (
 	"context"
 	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -22,6 +24,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/push"
 	"github.com/e-aleixandre/moa/pkg/release"
+	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
 	"github.com/e-aleixandre/moa/pkg/tool"
@@ -53,6 +56,14 @@ type ManagedSession struct {
 	// label any creator may pass, it is what authorizes the automation token to
 	// interact with the session.
 	automationCreated bool
+	// serverInstance identifies the Manager process that assigned this
+	// runtime's process-local attention generations. It is sent with snapshots
+	// and session info so clients do not compare generations across a restart.
+	serverInstance string
+	// attentionNamespace identifies this runtime incarnation for read cursors.
+	// It changes when a saved session is resumed because bus sequence numbers
+	// begin again at zero in the new runtime.
+	attentionNamespace string
 
 	// pathPolicy is the runtime-mutable path access policy shared with the
 	// session's tools; attachments-to-disk add the session's attachment dir
@@ -64,10 +75,11 @@ type ManagedSession struct {
 	attachMu sync.Mutex
 
 	// Mutable under mu.
-	mu          sync.Mutex
-	Title       string
-	TitleSource string // "manual" | "auto" | "" (legacy=auto); see session.TitleSource
-	Updated     time.Time
+	mu            sync.Mutex
+	Title         string
+	TitleSource   string // "manual" | "auto" | "" (legacy=auto); see session.TitleSource
+	Updated       time.Time
+	modelProvider string // current model provider; updated with idle model switches
 	// briefAttempting/briefProgress are the cheap LLM-generated status prose
 	// (what the session is attempting, how it's going) surfaced to voice/mobile
 	// clients. This is prose that can age; the actionable state (idle/running/
@@ -99,6 +111,12 @@ type ManagedSession struct {
 	// cacheTTL is the prompt-cache retention window (5m default, or 1h when
 	// configured). Immutable after creation; read alongside lastRunAt.
 	cacheTTL time.Duration
+	// Auxiliary models are resolved when this session is created, from its own
+	// merged project config.
+	autoTitleModel      core.Model
+	autoTitleEnabled    bool
+	sessionBriefModel   core.Model
+	sessionBriefEnabled bool
 
 	// Bus runtime — owns all session state.
 	runtime *bus.SessionRuntime
@@ -134,14 +152,23 @@ type ManagedSession struct {
 	// waits for in-flight senders and no new one can slip between the quiescence
 	// check and the teardown. Checking `closing` alone is not enough: the check
 	// and the run-start are two steps, and this is what makes them one.
-	lifecycle  sync.RWMutex
-	autoTitled atomic.Bool // guards one-shot auto-title generation (see autotitle.go)
+	lifecycle sync.RWMutex
+	// sendGeneration advances only after Send has accepted work, while it still
+	// holds lifecycle. CloseSession snapshots it before waiting for lifecycle's
+	// write lock: if a send it had to wait for settled unusually quickly, closing
+	// must still lose that race instead of treating the now-idle runtime as one
+	// that was never used.
+	sendGeneration atomic.Uint64
+	autoTitled     atomic.Bool // guards one-shot auto-title generation (see autotitle.go)
 	// briefGen serializes brief regeneration (see brief.go): briefPending marks
 	// a coalesced regeneration request; briefRunning is the one-flight guard so
 	// two generations for the same session never overlap.
 	briefPending atomic.Bool
 	briefRunning atomic.Bool
 	pushUnsubs   []func()
+	usageUnsub   func()
+	unreadUnsub  func()
+	runProvider  string
 
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
 	// must not run verify.Execute at once and interleave AutoVerify events.
@@ -167,6 +194,12 @@ func (s *ManagedSession) title() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.Title
+}
+
+func (s *ManagedSession) setProviderName(provider string) {
+	s.mu.Lock()
+	s.modelProvider = provider
+	s.mu.Unlock()
 }
 
 // serveInfra holds serve-layer infrastructure that doesn't belong in the bus.
@@ -199,18 +232,22 @@ type MCPSummary struct {
 
 // SessionInfo is the public representation returned by List/Get endpoints.
 type SessionInfo struct {
-	ID           string       `json:"id"`
-	Title        string       `json:"title"`
-	State        SessionState `json:"state"`
-	Model        string       `json:"model"`
-	Provider     string       `json:"provider"`
-	Thinking     string       `json:"thinking"`
-	CWD          string       `json:"cwd"`
-	Created      time.Time    `json:"created"`
-	Updated      time.Time    `json:"updated"`
-	Origin       string       `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
-	Error        string       `json:"error,omitempty"`
-	UntrustedMCP bool         `json:"untrusted_mcp,omitempty"`
+	ID                 string       `json:"id"`
+	Title              string       `json:"title"`
+	State              SessionState `json:"state"`
+	Model              string       `json:"model"`
+	Provider           string       `json:"provider"`
+	Thinking           string       `json:"thinking"`
+	CWD                string       `json:"cwd"`
+	Created            time.Time    `json:"created"`
+	Updated            time.Time    `json:"updated"`
+	Origin             string       `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
+	Error              string       `json:"error,omitempty"`
+	Unseen             bool         `json:"unseen"`
+	UnseenSeq          uint64       `json:"unseen_seq,omitempty"`
+	ServerInstance     string       `json:"server_instance"`
+	AttentionNamespace string       `json:"attention_namespace,omitempty"`
+	UntrustedMCP       bool         `json:"untrusted_mcp,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
 	// whether any is unhealthy, so the indicator can appear only when servers
 	// exist and turn red when one has failed or exited. The full per-server
@@ -288,7 +325,7 @@ func (s *ManagedSession) History() []core.AgentMessage {
 // side store so it survives restarts and can be reopened. Best-effort: logged
 // and dropped on error. Metadata (task/model/async/messages) comes from the
 // live Jobs handle, which still holds the job at OnChildEnd time.
-func (s *ManagedSession) persistSubagentTranscript(jobID, status string, usage *core.Usage, costUSD float64) {
+func (s *ManagedSession) persistSubagentTranscript(jobID, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) {
 	if s.persister == nil || s.subagents == nil {
 		return
 	}
@@ -296,17 +333,23 @@ func (s *ManagedSession) persistSubagentTranscript(jobID, status string, usage *
 	if store == nil {
 		return
 	}
+	if finishedAt.IsZero() {
+		finishedAt = time.Now()
+	}
 	t := session.SubagentTranscript{
 		JobID:      jobID,
 		Status:     status,
+		Result:     result,
+		Error:      resultErr,
 		Usage:      usage,
 		CostUSD:    costUSD,
-		FinishedAt: time.Now(),
+		FinishedAt: finishedAt,
 		Messages:   s.subagents.Messages(jobID),
 	}
 	for _, info := range s.subagents.Snapshot() {
 		if info.JobID == jobID {
 			t.Task = info.Task
+			t.Title = info.Title
 			t.Model = info.Model
 			t.Thinking = info.Thinking
 			t.Async = info.Async
@@ -315,6 +358,9 @@ func (s *ManagedSession) persistSubagentTranscript(jobID, status string, usage *
 			t.ContextPercent = &pct
 			break
 		}
+	}
+	if previous, err := store.Load(jobID); err == nil && previous.Title != "" && t.Title == "" {
+		t.Title = previous.Title
 	}
 	if err := store.Save(t); err != nil {
 		slog.Warn("subagent transcript save failed", "session", s.ID, "job", jobID, "error", err)
@@ -340,7 +386,6 @@ func (s *ManagedSession) info() SessionInfo {
 	s.mu.Lock()
 	lastRun := s.lastRunAt
 	cacheTTL := s.cacheTTL
-	runStartedAt := s.runStartedAt
 	info := SessionInfo{
 		ID:             s.ID,
 		Title:          s.Title,
@@ -361,6 +406,7 @@ func (s *ManagedSession) info() SessionInfo {
 		CompactAtMin:   compactAtMin,
 		PermissionMode: permMode,
 		CostUSD:        cost,
+		ServerInstance: s.serverInstance,
 
 		BriefAttempting: s.briefAttempting,
 		BriefProgress:   s.briefProgress,
@@ -378,7 +424,7 @@ func (s *ManagedSession) info() SessionInfo {
 	}
 	// Surface the run-start time only while a run is in flight so the client can
 	// show (and keep) an accurate elapsed counter across reconnects.
-	if !runStartedAt.IsZero() && (info.State == StateRunning || info.State == StatePermission) {
+	if runStartedAt := s.runtime.Context().RunStartedAt(); !runStartedAt.IsZero() && (info.State == StateRunning || info.State == StatePermission) {
 		info.RunStartedAt = runStartedAt
 	}
 	return info
@@ -397,6 +443,7 @@ func nonUserOrigin(origin string) string {
 // second, potentially divergent event tracker in ManagedSession.
 func (m *Manager) sessionInfo(s *ManagedSession) SessionInfo {
 	info := s.info()
+	info.Unseen, info.UnseenSeq, info.AttentionNamespace = m.attentionState(s)
 	if m.attention == nil {
 		return info
 	}
@@ -407,6 +454,86 @@ func (m *Manager) sessionInfo(s *ManagedSession) SessionInfo {
 		}
 	}
 	return info
+}
+
+func (m *Manager) isUnseen(id string) bool {
+	m.unseenMu.RLock()
+	defer m.unseenMu.RUnlock()
+	return m.unseen[id]
+}
+
+func (m *Manager) attentionState(sess *ManagedSession) (bool, uint64, string) {
+	m.unseenMu.RLock()
+	defer m.unseenMu.RUnlock()
+	if m.attentionRuntime[sess.ID] != sess {
+		return false, 0, ""
+	}
+	return m.unseen[sess.ID], m.unseenSeq[sess.ID], sess.attentionNamespace
+}
+
+func (m *Manager) markAttention(sess *ManagedSession, seq uint64) {
+	m.unseenMu.Lock()
+	defer m.unseenMu.Unlock()
+	if m.attentionRuntime[sess.ID] != sess {
+		return
+	}
+	if sess.deleted.Load() {
+		return
+	}
+	if seq <= m.readThroughSeq[sess.ID] {
+		return
+	}
+	if m.unseen == nil {
+		m.unseen = make(map[string]bool)
+	}
+	if m.unseenSeq == nil {
+		m.unseenSeq = make(map[string]uint64)
+	}
+	m.unseen[sess.ID] = true
+	if seq > m.unseenSeq[sess.ID] {
+		m.unseenSeq[sess.ID] = seq
+	}
+}
+
+func (m *Manager) forgetUnseen(id string) {
+	m.unseenMu.Lock()
+	delete(m.unseen, id)
+	delete(m.unseenSeq, id)
+	delete(m.readThroughSeq, id)
+	m.unseenMu.Unlock()
+}
+
+// MarkSessionRead advances a runtime's process-local bus read cursor.
+// Runtime identity, namespace, the bus sequence cap, and the cursor mutation
+// share unseenMu so a close/resume cannot redirect a request from an old
+// runtime onto its replacement.
+func (m *Manager) MarkSessionRead(id string, throughSeq uint64, namespace string) error {
+	m.unseenMu.Lock()
+	defer m.unseenMu.Unlock()
+	sess := m.attentionRuntime[id]
+	if sess == nil {
+		return ErrNotFound
+	}
+	if namespace != sess.attentionNamespace {
+		return ErrStaleAttentionNamespace
+	}
+	if m.beforeReadThroughAdvance != nil {
+		m.beforeReadThroughAdvance()
+	}
+	if throughSeq > sess.runtime.Bus.LastSeq() {
+		return ErrInvalidAttentionCursor
+	}
+	if throughSeq > m.readThroughSeq[id] {
+		if m.readThroughSeq == nil {
+			m.readThroughSeq = make(map[string]uint64)
+		}
+		m.readThroughSeq[id] = throughSeq
+	}
+	if m.unseenSeq[id] <= m.readThroughSeq[id] {
+		delete(m.unseen, id)
+		delete(m.unseenSeq, id)
+	}
+	return nil
 }
 
 // activityIndex snapshots the attention roster once and indexes live activity
@@ -427,28 +554,40 @@ func (m *Manager) activityIndex() map[string]*attention.SessionActivity {
 
 // Manager owns all active sessions.
 type Manager struct {
-	mu       sync.RWMutex
-	sessions map[string]*ManagedSession
-	resuming map[string]struct{}
-	baseCtx  context.Context
+	mu                   sync.RWMutex
+	sessions             map[string]*ManagedSession
+	resuming             map[string]struct{}
+	unseenMu             sync.RWMutex
+	unseen               map[string]bool // process-local; never persisted with a session
+	unseenSeq            map[string]uint64
+	readThroughSeq       map[string]uint64
+	attentionRuntime     map[string]*ManagedSession
+	attentionIncarnation map[string]uint64
+	serverInstance       string
+	baseCtx              context.Context
+	secretReaperCancel   context.CancelFunc
+	secretReaperDone     <-chan struct{}
 
 	conversationKey []byte // process-local HMAC key for read cursors
 
-	providerFactory func(model core.Model) (core.Provider, error)
-	transcriber     core.Transcriber   // nil when no speech-to-text is available
-	usagePoller     *usage.MultiPoller // nil when plan usage tracking is unavailable
-	pushStore       *push.Store        // nil when Web Push is unavailable
-	pushDispatcher  *push.Dispatcher   // nil when Web Push is unavailable
-	defaultModel    core.Model
-	workspaceRoot   string
-	moaCfg          core.MoaConfig
-	configLoader    func(cwd string) core.MoaConfig
+	providerFactory        func(model core.Model) (core.Provider, error)
+	transcriber            core.Transcriber   // nil when no speech-to-text is available
+	usagePoller            *usage.MultiPoller // nil when plan usage tracking is unavailable
+	pushStore              *push.Store        // nil when Web Push is unavailable
+	pushDispatcher         *push.Dispatcher   // nil when Web Push is unavailable
+	defaultModel           core.Model
+	workspaceRoot          string
+	moaCfg                 core.MoaConfig
+	configLoader           func(cwd string) core.MoaConfig
+	auxiliaryModelResolver func(spec string) (core.Model, bool, error)
 	// mcpSourcesLoader resolves the provenance (global vs project) of MCP disable
 	// vetoes for a cwd. nil when a custom ConfigLoader is in use (tests), in which
 	// case bootstrap falls back to treating the merged list as global.
 	mcpSourcesLoader func(cwd string) *core.MCPDisableSources
 	sessionBaseDir   string // root for session stores; empty = default (~/.config/moa/sessions/)
 	attachStore      *attachment.Store
+	secretMu         sync.Mutex
+	secretBatches    map[string][]string // process-local; values never enter session persistence
 
 	// savedCache caches the result of session.ListAll to avoid
 	// re-scanning disk on every poll (frontend polls every 3s).
@@ -478,6 +617,44 @@ type Manager struct {
 	// create a session.
 	automation   *automationIndex
 	automationMu sync.Mutex
+
+	// Test hooks coordinate deterministic attention tracker and cursor races.
+	beforeAttentionMark               func()
+	afterAttentionMark                func()
+	beforeReadThroughAdvance          func()
+	attentionRuntimeDeactivateBlocked func()
+}
+
+func (m *Manager) initializeAttentionRuntimeLocked(sess *ManagedSession) {
+	if m.attentionIncarnation == nil {
+		m.attentionIncarnation = make(map[string]uint64)
+	}
+	m.attentionIncarnation[sess.ID]++
+	sess.attentionNamespace = fmt.Sprintf("%s:%d", m.serverInstance, m.attentionIncarnation[sess.ID])
+	m.unseenMu.Lock()
+	if m.attentionRuntime == nil {
+		m.attentionRuntime = make(map[string]*ManagedSession)
+	}
+	m.attentionRuntime[sess.ID] = sess
+	delete(m.unseen, sess.ID)
+	delete(m.unseenSeq, sess.ID)
+	delete(m.readThroughSeq, sess.ID)
+	m.unseenMu.Unlock()
+}
+
+func (m *Manager) deactivateAttentionRuntime(sess *ManagedSession) {
+	if m.attentionRuntimeDeactivateBlocked != nil {
+		if !m.unseenMu.TryLock() {
+			m.attentionRuntimeDeactivateBlocked()
+		} else {
+			m.unseenMu.Unlock()
+		}
+	}
+	m.unseenMu.Lock()
+	if m.attentionRuntime[sess.ID] == sess {
+		delete(m.attentionRuntime, sess.ID)
+	}
+	m.unseenMu.Unlock()
 }
 
 // ManagerConfig configures a Manager.
@@ -490,6 +667,10 @@ type ManagerConfig struct {
 	DefaultModel    core.Model
 	WorkspaceRoot   string
 	MoaCfg          core.MoaConfig
+	// AuxiliaryModelResolver resolves auto-title/session-brief settings against
+	// normal completion credentials. A nil resolver leaves auto unavailable;
+	// explicit specs continue to work through the core resolver.
+	AuxiliaryModelResolver func(spec string) (core.Model, bool, error)
 	// ConfigLoader loads configuration for an individual session CWD. When
 	// nil, core.LoadMoaConfig preserves the normal global/project lookup.
 	ConfigLoader   func(cwd string) core.MoaConfig
@@ -561,27 +742,30 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		slog.Warn("conversation cursor key unavailable", "error", err)
 	}
 	m := &Manager{
-		sessions:         make(map[string]*ManagedSession),
-		resuming:         make(map[string]struct{}),
-		baseCtx:          ctx,
-		providerFactory:  cfg.ProviderFactory,
-		transcriber:      cfg.Transcriber,
-		usagePoller:      cfg.UsagePoller,
-		pushStore:        cfg.PushStore,
-		pushDispatcher:   cfg.PushDispatcher,
-		defaultModel:     cfg.DefaultModel,
-		workspaceRoot:    cfg.WorkspaceRoot,
-		moaCfg:           cfg.MoaCfg,
-		configLoader:     configLoader,
-		mcpSourcesLoader: mcpSourcesLoader,
-		sessionBaseDir:   cfg.SessionBaseDir,
-		attachStore:      attachStore,
-		savedCacheTTL:    30 * time.Second,
-		fileScanner:      files.NewScanner(),
-		scheduler:        scheduler,
-		attention:        attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
-		conversationKey:  conversationKey,
-		version:          release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
+		sessions:               make(map[string]*ManagedSession),
+		resuming:               make(map[string]struct{}),
+		serverInstance:         newServerInstanceID(),
+		baseCtx:                ctx,
+		providerFactory:        cfg.ProviderFactory,
+		transcriber:            cfg.Transcriber,
+		usagePoller:            cfg.UsagePoller,
+		pushStore:              cfg.PushStore,
+		pushDispatcher:         cfg.PushDispatcher,
+		defaultModel:           cfg.DefaultModel,
+		workspaceRoot:          cfg.WorkspaceRoot,
+		moaCfg:                 cfg.MoaCfg,
+		configLoader:           configLoader,
+		auxiliaryModelResolver: cfg.AuxiliaryModelResolver,
+		mcpSourcesLoader:       mcpSourcesLoader,
+		sessionBaseDir:         cfg.SessionBaseDir,
+		attachStore:            attachStore,
+		secretBatches:          make(map[string][]string),
+		savedCacheTTL:          30 * time.Second,
+		fileScanner:            files.NewScanner(),
+		scheduler:              scheduler,
+		attention:              attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
+		conversationKey:        conversationKey,
+		version:                release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
 	}
 	m.automation = newAutomationIndex(cfg.SessionBaseDir)
 	if cfg.UpdateCheckEnabled && cfg.UpdateChecker != nil {
@@ -610,6 +794,13 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		m.scheduler.Start(m)
 	}
 	reapStaleAttachments()
+	secrets.Reap()
+	// The manager, rather than its caller's context, owns this process-wide
+	// maintenance goroutine. An embedding caller may keep ctx alive after
+	// shutting down a manager.
+	reaperCtx, reaperCancel := context.WithCancel(context.Background())
+	m.secretReaperCancel = reaperCancel
+	m.secretReaperDone = secrets.StartReaper(reaperCtx)
 	if m.attachStore != nil {
 		live := make(map[string]bool)
 		if summaries, err := session.ListAll(m.sessionBaseDir); err != nil {
@@ -624,6 +815,19 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		}
 	}
 	return m
+}
+
+var serverInstanceFallback atomic.Uint64
+
+// newServerInstanceID creates an opaque process epoch for attention occurrence
+// IDs. It deliberately is not persisted: the client must discard its
+// generation high-water marks after every server restart.
+func newServerInstanceID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err == nil {
+		return hex.EncodeToString(b)
+	}
+	return fmt.Sprintf("%x-%x", time.Now().UnixNano(), serverInstanceFallback.Add(1))
 }
 
 func newConversationKey() ([]byte, error) {
@@ -641,6 +845,25 @@ func (m *Manager) Version() release.Result {
 
 func (m *Manager) loadConfig(cwd string) core.MoaConfig {
 	return m.configLoader(cwd)
+}
+
+// resolveAuxiliaryModel deliberately degrades invalid settings and unavailable
+// credentials to disabled: a background convenience must never prevent a
+// session from being usable. Explicit settings are resolved once only; callers
+// do not retry another vendor after a provider failure.
+func (m *Manager) resolveAuxiliaryModel(spec, sessionID, feature string) (core.Model, bool) {
+	resolver := m.auxiliaryModelResolver
+	if resolver == nil {
+		resolver = func(spec string) (core.Model, bool, error) {
+			return core.ResolveAuxiliaryModel(spec, nil)
+		}
+	}
+	model, enabled, err := resolver(spec)
+	if err != nil {
+		slog.Warn("auxiliary model disabled", "session", sessionID, "feature", feature, "error", err)
+		return core.Model{}, false
+	}
+	return model, enabled
 }
 
 // Send delivers a user message (with optional attachments) to a session.
@@ -671,7 +894,15 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 	// admitted while this runs, so the quiescence check it makes and the run
 	// this may start cannot interleave. `closing` is then a stable read.
 	sess.lifecycle.RLock()
-	defer sess.lifecycle.RUnlock()
+	defer func() {
+		// Record acceptance before releasing lifecycle. A very fast provider can
+		// settle a run before Execute returns; CloseSession still needs to see
+		// that this sender won the lifecycle race rather than unload its runtime.
+		if err == nil && action != "" {
+			sess.sendGeneration.Add(1)
+		}
+		sess.lifecycle.RUnlock()
+	}()
 	// A close won the race: the runtime is gone (or going). The session is no
 	// longer in the manager, so this reads as "not found" — which is what a
 	// client that raced a close sees.
@@ -843,6 +1074,7 @@ func (m *Manager) List() []SessionInfo {
 			continue // nil placeholder during ResumeSession
 		}
 		info := s.info()
+		info.Unseen, info.UnseenSeq, info.AttentionNamespace = m.attentionState(s)
 		info.Activity = activity[s.ID]
 		list = append(list, info)
 	}
@@ -857,14 +1089,16 @@ func (m *Manager) List() []SessionInfo {
 		cwd, _ := sum.Metadata["cwd"].(string)
 		origin, _ := sum.Metadata[session.MetaOrigin].(string)
 		list = append(list, SessionInfo{
-			ID:      sum.ID,
-			Title:   sum.Title,
-			State:   StateSaved,
-			Model:   model,
-			CWD:     cwd,
-			Origin:  nonUserOrigin(origin),
-			Created: sum.Created,
-			Updated: sum.Updated,
+			ID:             sum.ID,
+			Title:          sum.Title,
+			State:          StateSaved,
+			Model:          model,
+			CWD:            cwd,
+			Origin:         nonUserOrigin(origin),
+			Created:        sum.Created,
+			Updated:        sum.Updated,
+			Unseen:         m.isUnseen(sum.ID),
+			ServerInstance: m.serverInstance,
 		})
 	}
 

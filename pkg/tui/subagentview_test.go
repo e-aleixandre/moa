@@ -112,6 +112,50 @@ func TestHandleSubagentStartedAndEnded(t *testing.T) {
 	}
 }
 
+func TestStructuredTerminalOutcomeSuppressesModelNotificationDuplicate(t *testing.T) {
+	for _, name := range []string{"natural async", "promoted sync"} {
+		t.Run(name, func(t *testing.T) {
+			m := &appModel{s: &state{}}
+			jobID := "sa-" + name
+			m.handleSubagentStarted(bus.SubagentStarted{JobID: jobID, Task: "inspect", Async: true})
+
+			// SubagentCompleted still delivers its notification to the model as a
+			// steer. Marking it makes the subsequent Steered event presentation-
+			// only, leaving SubagentEnded as the sole terminal UI owner.
+			m.markSubagentNotificationDelivery(jobID)
+			m.handleSubagentNotificationSteer(jobID, "inspect", "completed", "notification tail")
+			if got := len(m.s.blocks); got != 0 {
+				t.Fatalf("notification added %d UI blocks, want 0", got)
+			}
+
+			m.handleSubagentEnded(bus.SubagentEnded{
+				JobID: jobID, Task: "inspect", Status: "completed", Result: "full terminal result",
+			})
+			if got := len(m.s.blocks); got != 1 {
+				t.Fatalf("terminal blocks = %d, want exactly 1", got)
+			}
+			block := m.s.blocks[0]
+			if block.SubagentJobID != jobID || block.SubagentResult != "full terminal result" {
+				t.Fatalf("terminal block = %+v", block)
+			}
+		})
+	}
+}
+
+func TestTerminalOutcomeMovesFallbackNotificationToLiveCompletionPosition(t *testing.T) {
+	m := &appModel{s: &state{}}
+	m.handleSubagentStarted(bus.SubagentStarted{JobID: "sa-async", Task: "async work", Async: true})
+	m.s.blocks = []messageBlock{
+		{Type: "assistant", Raw: "before"},
+		{Type: "subagent", SubagentJobID: "sa-async", SubagentTask: "async work", SubagentStatus: "completed", SubagentResult: "notification result"},
+		{Type: "assistant", Raw: "parent work after notification"},
+	}
+	m.handleSubagentEnded(bus.SubagentEnded{JobID: "sa-async", Task: "async work", Status: "completed", Result: "structured result"})
+	if len(m.s.blocks) != 3 || m.s.blocks[0].Raw != "before" || m.s.blocks[1].Raw != "parent work after notification" || m.s.blocks[2].Type != "subagent" || m.s.blocks[2].SubagentResult != "structured result" {
+		t.Fatalf("live terminal chronology = %+v", m.s.blocks)
+	}
+}
+
 func TestBashJobTranscript(t *testing.T) {
 	m := &appModel{s: &state{}}
 	m.handleBashJobStarted(bus.BashJobStarted{JobID: "bash-1", Command: "go test ./...", CWD: "/work"})

@@ -30,6 +30,41 @@ func TestParseAllowPattern_Valid(t *testing.T) {
 	}
 }
 
+func TestAuxiliaryModelResolver_UsesCompletionCredentialsOnly(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	store := newTestAuthStore(t)
+	resolve := auxiliaryModelResolver(store)
+
+	if _, enabled, err := resolve("auto"); err != nil || enabled {
+		t.Fatalf("no completion credentials: enabled=%v err=%v", enabled, err)
+	}
+	if _, enabled, err := resolve("luna"); err != nil || enabled {
+		t.Fatalf("explicit Luna without completion credentials: enabled=%v err=%v", enabled, err)
+	}
+	if err := store.Set("openai-transcribe", auth.Credential{Type: "api_key", Key: "transcribe-only"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, enabled, err := resolve("auto"); err != nil || enabled {
+		t.Fatalf("transcribe-only credentials: enabled=%v err=%v", enabled, err)
+	}
+	if _, enabled, err := resolve("luna"); err != nil || enabled {
+		t.Fatalf("explicit Luna with transcribe-only credentials: enabled=%v err=%v", enabled, err)
+	}
+	if err := store.Set("anthropic", auth.Credential{Type: "api_key", Key: "anthropic-key"}); err != nil {
+		t.Fatal(err)
+	}
+	if model, enabled, err := resolve("auto"); err != nil || !enabled || model.ID != "claude-haiku-4-5-20251001" {
+		t.Fatalf("Anthropic fallback = %+v, %v, %v", model, enabled, err)
+	}
+	if err := store.Set("openai", auth.Credential{Type: "api_key", Key: "openai-key"}); err != nil {
+		t.Fatal(err)
+	}
+	if model, enabled, err := resolve("auto"); err != nil || !enabled || model.ID != "gpt-5.6-luna" {
+		t.Fatalf("OpenAI priority = %+v, %v, %v", model, enabled, err)
+	}
+}
+
 func TestBuildProvider_XAIStoredOAuth(t *testing.T) {
 	store := newTestAuthStore(t)
 	if err := store.Set("xai", auth.Credential{Type: "oauth", Access: "consumer-token", Refresh: "refresh", Expires: time.Now().Add(time.Hour).UnixMilli()}); err != nil {

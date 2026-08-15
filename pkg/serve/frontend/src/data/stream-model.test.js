@@ -14,7 +14,54 @@ const tool = (id, name, args, status = 'done', result = 'ok', extra = {}) => ({
   _type: 'tool_start', tool_call_id: id, tool_name: name, args, status, result, ...extra,
 });
 const system = (text) => ({ _type: 'system', text });
+const compaction = (id, extra = {}) => ({
+  _type: 'compaction_marker', _msg_id: id, summary: 'Kept the important implementation context.',
+  tokensBefore: 24000, readFiles: ['pkg/a.go'], modifiedFiles: ['pkg/b.go'], ...extra,
+});
 const session = (messages, extra = {}) => ({ messages, ...extra });
+
+test('projects the durable compaction contract as its own card block', () => {
+  const [block] = projectStream(session([compaction('entry-42')]));
+  expect(block).toEqual({
+    kind: 'compaction', id: 'compaction-entry-42-0',
+    summary: 'Kept the important implementation context.', tokensBefore: 24000,
+    readFiles: ['pkg/a.go'], modifiedFiles: ['pkg/b.go'],
+  });
+});
+
+test('legacy compaction marker without complete custom data degrades to a minimal card', () => {
+  const [block] = projectStream(session([compaction('old-entry', { summary: undefined, tokensBefore: undefined, readFiles: undefined, modifiedFiles: undefined })]));
+  expect(block).toMatchObject({ kind: 'compaction', id: 'compaction-old-entry-0', summary: '', tokensBefore: 0, readFiles: [], modifiedFiles: [] });
+});
+
+test('multiple compactions have stable IDs derived from their msg_ids, not history position', () => {
+  const initial = projectStream(session([user('before'), compaction('first'), compaction('second')]));
+  const shifted = projectStream(session([user('new earlier message'), user('before'), compaction('first'), compaction('second')]));
+  expect(initial.filter(b => b.kind === 'compaction').map(b => b.id)).toEqual(['compaction-first-0', 'compaction-second-0']);
+  expect(shifted.filter(b => b.kind === 'compaction').map(b => b.id)).toEqual(['compaction-first-0', 'compaction-second-0']);
+});
+
+test('parent tasks stay in chronological order and carry explicit parent provenance', () => {
+  const blocks = projectStream(session([
+    user('initial task', { custom: { source: 'subagent_parent' } }),
+    assistant('I started.'),
+    user('steer this differently'),
+    assistant('Continuing.'),
+    user('resumed task', { custom: { source: 'subagent_parent' } }),
+  ]));
+
+  const waypoints = blocks.filter((block) => block.kind === 'waypoint');
+  expect(waypoints.map((block) => block.text)).toEqual([
+    'initial task', 'steer this differently', 'resumed task',
+  ]);
+  expect(waypoints.map((block) => block.fromParent === true)).toEqual([true, false, true]);
+});
+
+test('unmarked legacy user messages retain ordinary user treatment', () => {
+  const [waypoint] = projectStream(session([user('older task')]));
+  expect(waypoint).toMatchObject({ kind: 'waypoint', text: 'older task' });
+  expect(waypoint.fromParent).toBeUndefined();
+});
 
 // ── 1. consecutive tool calls → one ledger of N rows ─────────────────────────
 test('consecutive tool calls without prose form a single ledger', () => {
@@ -947,12 +994,44 @@ test('historyTruncated emits a leading system block', () => {
   expect(blocks[0].text).toBe('Older messages…');
 });
 
-test('more than 200 messages also triggers the truncation notice', () => {
+test('a complete history longer than 200 messages has no truncation notice', () => {
   const many = [];
   for (let i = 0; i < 201; i++) many.push(assistant('x'));
   const blocks = projectStream(session(many));
-  expect(blocks[0].kind).toBe('system');
-  expect(blocks[0].text).toBe('Older messages…');
+  expect(blocks[0].kind).toBe('document');
+  expect(blocks.some(block => block.text === 'Older messages…')).toBe(false);
+});
+
+test('persisted block ids are invariant when older messages are prepended', () => {
+  const existing = [
+    { role: 'user', _msg_id: 'user-existing', content: [{ type: 'text', text: 'question' }] },
+    { role: 'assistant', _msg_id: 'assistant-existing', content: [{ type: 'text', text: 'answer' }] },
+    { _type: 'tool_start', _msg_id: 'tool-existing', tool_call_id: 'edit-1', tool_name: 'edit', args: { path: 'x.js' }, status: 'done', result: '@@ -1 +1 @@\n-old\n+new' },
+    { _type: 'system', _msg_id: 'system-existing', text: 'compacted' },
+  ];
+  const prepend = [
+    { role: 'user', _msg_id: 'user-old', content: [{ type: 'text', text: 'old question' }] },
+    { role: 'assistant', _msg_id: 'assistant-old', content: [{ type: 'text', text: 'old answer' }] },
+  ];
+  const idsOf = (messages) => projectStream(session(messages)).flatMap(block => [
+    block.id,
+    ...(block.blocks || []).map(inner => inner.id),
+  ]);
+
+  const existingIds = idsOf(existing);
+  const prependedIds = idsOf(prepend);
+  expect(idsOf([...prepend, ...existing]).slice(prependedIds.length)).toEqual(existingIds);
+});
+
+test('persisted block ids remain unique within one projection', () => {
+  const blocks = projectStream(session([
+    { role: 'assistant', _msg_id: 'assistant-1', content: [{ type: 'text', text: 'before' }] },
+    { _type: 'tool_start', _msg_id: 'tool-1', tool_call_id: 'edit-1', tool_name: 'edit', args: { path: 'x.js' }, status: 'done', result: '@@ -1 +1 @@\n-old\n+new' },
+    // normalizeHistory can split one assistant message around tool calls.
+    { role: 'assistant', _msg_id: 'assistant-1', content: [{ type: 'text', text: 'after' }] },
+  ]));
+  const ids = blocks.flatMap(block => [block.id, ...(block.blocks || []).map(inner => inner.id)]);
+  expect(new Set(ids).size).toBe(ids.length);
 });
 
 // ── 10. multi-turn separation ────────────────────────────────────────────────
@@ -1067,6 +1146,7 @@ test('a failed subagent is summarised as failed with an error chip', () => {
   const delegation = doc.blocks.find(b => b.type === 'delegation');
   expect(delegation.agents[0].state).toBe('failed');
   expect(delegation.agents[0].chip).toBe('panic: nil map');
+  expect(delegation.agents[0].error).toBe('panic: nil map');
   expect(delegation.summary).toEqual({ total: 1, done: 0, failed: 1 });
   expect(delegation.settled).toBe(true);
 });

@@ -57,8 +57,18 @@ type EventBus interface {
 	// publication boundary; gaps are valid when consumers drop lossy events.
 	SubscribeAllSeq(handler func(seq uint64, event any)) func()
 
+	// SubscribeAttentionSeq registers a lossless, sequenced attention tracker.
+	// It receives only compact attention occurrences, so streaming deltas cannot
+	// fill its queue.
+	SubscribeAttentionSeq(handler func(seq uint64, event AttentionSequenceEvent)) func()
+
 	// LastSeq returns the most recently accepted publication sequence.
 	LastSeq() uint64
+
+	// CaptureSeq returns the most recently accepted publication sequence while
+	// sequence allocation is serialized with Publish. It is an exact
+	// publication cut.
+	CaptureSeq() uint64
 
 	// Execute dispatches a command to its registered handler synchronously.
 	// Returns ErrNoHandler if none registered, ErrClosed if bus is closed.
@@ -89,6 +99,25 @@ type EventBus interface {
 	// New Publish calls become no-ops; Execute/Query return ErrClosed.
 	// Subscriber goroutines drain remaining queued events and exit.
 	Close()
+}
+
+// AttentionSequenceKind identifies the compact attention occurrence retained
+// by SubscribeAttentionSeq.
+type AttentionSequenceKind uint8
+
+const (
+	AttentionRunEnded AttentionSequenceKind = iota
+	AttentionPermissionRequested
+	AttentionAskUserRequested
+	AttentionStateError
+)
+
+// AttentionSequenceEvent is the fixed compact projection used by the
+// correctness tracker. In particular it never retains RunEnded.FinalText.
+type AttentionSequenceEvent struct {
+	Kind      AttentionSequenceKind
+	Cancelled bool
+	Errored   bool
 }
 
 // ---------------------------------------------------------------------------
@@ -163,13 +192,14 @@ type subscriber struct {
 	notify chan struct{} // buffered(1): signals the queue is non-empty
 
 	fn       reflect.Value
+	seqFn    func(uint64, any)
+	project  func(any) (any, bool)
 	done     chan struct{} // closed to signal drain-and-exit
 	exited   chan struct{} // closed when goroutine returns
 	stopOnce sync.Once     // guards close(done) — safe for concurrent close/unsub
 	stopped  atomic.Bool   // fast check: true after stop() called
 	bus      *LocalBus     // back-reference for inflight tracking
 	isAll    bool          // true for SubscribeAll handlers (fn is func(any))
-	isSeqAll bool          // true for SubscribeAllSeq (fn is func(uint64, any))
 }
 
 type queuedEvent struct {
@@ -302,8 +332,9 @@ func (b *LocalBus) SubscribeAllSeq(handler func(uint64, any)) func() {
 		return func() {}
 	}
 	sub := &subscriber{
-		notify: make(chan struct{}, 1), fn: reflect.ValueOf(handler),
-		done: make(chan struct{}), exited: make(chan struct{}), bus: b, isSeqAll: true,
+		notify: make(chan struct{}, 1),
+		seqFn:  handler,
+		done:   make(chan struct{}), exited: make(chan struct{}), bus: b,
 	}
 	go sub.loop()
 	b.allSeqSubs = append(b.allSeqSubs, sub)
@@ -324,8 +355,54 @@ func (b *LocalBus) SubscribeAllSeq(handler func(uint64, any)) func() {
 	}
 }
 
+// SubscribeAttentionSeq implements EventBus.SubscribeAttentionSeq.
+func (b *LocalBus) SubscribeAttentionSeq(handler func(uint64, AttentionSequenceEvent)) func() {
+	if handler == nil {
+		panic("bus: SubscribeAttentionSeq handler must not be nil")
+	}
+	b.mu.Lock()
+	if b.closed.Load() {
+		b.mu.Unlock()
+		return func() {}
+	}
+	sub := &subscriber{
+		notify: make(chan struct{}, 1),
+		seqFn: func(seq uint64, event any) {
+			handler(seq, event.(AttentionSequenceEvent))
+		},
+		project: func(event any) (any, bool) {
+			return AttentionSequenceEventFor(event)
+		},
+		done: make(chan struct{}), exited: make(chan struct{}), bus: b,
+	}
+	go sub.loop()
+	b.allSeqSubs = append(b.allSeqSubs, sub)
+	b.mu.Unlock()
+	var unsubOnce sync.Once
+	return func() {
+		unsubOnce.Do(func() {
+			b.mu.Lock()
+			for i, candidate := range b.allSeqSubs {
+				if candidate == sub {
+					b.allSeqSubs = append(b.allSeqSubs[:i], b.allSeqSubs[i+1:]...)
+					break
+				}
+			}
+			b.mu.Unlock()
+			sub.stop()
+		})
+	}
+}
+
 // LastSeq implements EventBus.LastSeq.
 func (b *LocalBus) LastSeq() uint64 {
+	b.publishMu.Lock()
+	defer b.publishMu.Unlock()
+	return b.seq.Load()
+}
+
+// CaptureSeq implements EventBus.CaptureSeq.
+func (b *LocalBus) CaptureSeq() uint64 {
 	b.publishMu.Lock()
 	defer b.publishMu.Unlock()
 	return b.seq.Load()
@@ -366,8 +443,16 @@ func (b *LocalBus) Publish(event any) {
 		if sub.stopped.Load() {
 			continue
 		}
+		queued := event
+		if sub.project != nil {
+			var accepted bool
+			queued, accepted = sub.project(event)
+			if !accepted {
+				continue
+			}
+		}
 		b.inflight.Add(1)
-		if !sub.enqueue(seq, event, lossy) {
+		if !sub.enqueue(seq, queued, lossy) {
 			b.decrementInflight()
 		}
 	}
@@ -576,9 +661,6 @@ func (b *LocalBus) Close() {
 // ---------------------------------------------------------------------------
 
 // enqueue appends an event to the subscriber's queue and wakes its goroutine.
-// Lossy events are dropped once the queue depth reaches subscriberBuffer;
-// lossless events are always enqueued. Returns false only when the event was
-// dropped. Never blocks.
 func (s *subscriber) enqueue(seq uint64, event any, lossy bool) bool {
 	s.mu.Lock()
 	if lossy && len(s.queue) >= subscriberBuffer {
@@ -587,8 +669,6 @@ func (s *subscriber) enqueue(seq uint64, event any, lossy bool) bool {
 	}
 	s.queue = append(s.queue, queuedEvent{seq: seq, event: event})
 	s.mu.Unlock()
-
-	// Wake the goroutine; a single pending signal is enough.
 	select {
 	case s.notify <- struct{}{}:
 	default:
@@ -633,11 +713,32 @@ func (s *subscriber) process(queued queuedEvent) {
 	if s.isAll {
 		// SubscribeAll handler: fn is func(any), call directly for efficiency.
 		s.fn.Interface().(func(any))(queued.event)
-	} else if s.isSeqAll {
-		s.fn.Interface().(func(uint64, any))(queued.seq, queued.event)
+	} else if s.seqFn != nil {
+		s.seqFn(queued.seq, queued.event)
 	} else {
 		s.fn.Call([]reflect.Value{reflect.ValueOf(queued.event)})
 	}
+}
+
+func AttentionSequenceEventFor(event any) (AttentionSequenceEvent, bool) {
+	switch event := event.(type) {
+	case RunEnded:
+		if event.Cancelled && event.Err == nil {
+			return AttentionSequenceEvent{}, false
+		}
+		return AttentionSequenceEvent{
+			Kind: AttentionRunEnded, Cancelled: event.Cancelled, Errored: event.Err != nil,
+		}, true
+	case PermissionRequested:
+		return AttentionSequenceEvent{Kind: AttentionPermissionRequested}, true
+	case AskUserRequested:
+		return AttentionSequenceEvent{Kind: AttentionAskUserRequested}, true
+	case StateChanged:
+		if event.State == string(StateError) {
+			return AttentionSequenceEvent{Kind: AttentionStateError}, true
+		}
+	}
+	return AttentionSequenceEvent{}, false
 }
 
 func (b *LocalBus) decrementInflight() {

@@ -59,10 +59,10 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 		case CommandExecuted:
 			switch e.Command {
 			case "clear":
-				ts.mu.Lock()
-				ts.tree.Clear()
-				ts.synced = make(map[string]struct{})
-				ts.mu.Unlock()
+				// ClearSession resets the agent and tree synchronously through
+				// ResetAndClear below. Keeping this event case as a no-op preserves
+				// the TreeSynced notification without leaving a window where a
+				// reconnect can validate a token against the pre-clear tree.
 			case "compact", "prepare-compact", "prepare-compact-noop":
 				// CompactionEnded records the compacted tree state.
 			default:
@@ -76,6 +76,23 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 	return ts
 }
 
+// ResetAndClear resets the agent and clears its display tree as one history
+// mutation. DisplayMessages and DisplayMessagesSince hold this same mutex while
+// reading both stores, so a resume token can observe either the complete old
+// history or the complete cleared history, never the reset agent with the old
+// tree still accepting a stale token.
+func (ts *TreeSyncer) ResetAndClear() error {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	if err := ts.sctx.Agent.Reset(); err != nil {
+		return err
+	}
+	ts.tree.Clear()
+	ts.synced = make(map[string]struct{})
+	return nil
+}
+
 // DisplayMessages returns the full display history: the messages already synced
 // to the tree PLUS any agent messages appended since the last sync (the
 // in-flight turn). The tree only gains a turn's messages after RunEnded, so
@@ -86,20 +103,33 @@ func (ts *TreeSyncer) DisplayMessages() []core.AgentMessage {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
-	treeMsgs := ts.tree.AllMessages()
-	agentMsgs := ts.sctx.Agent.Messages()
+	return ts.appendInFlightTail(ts.tree.AllMessages())
+}
 
-	out := make([]core.AgentMessage, 0, len(treeMsgs)+len(agentMsgs))
-	out = append(out, treeMsgs...)
-	for i, msg := range agentMsgs {
-		if _, ok := ts.synced[messageSyncID(msg, i)]; !ok {
-			if isHiddenInternalPrompt(msg) {
-				continue
-			}
-			out = append(out, msg)
-		}
+// DisplayMessagesSince returns the durable tree suffix after entryID plus the
+// current in-flight tail. It validates the token against the tree, rather than
+// the lossy event stream, so it remains correct across reconnects and restarts.
+func (ts *TreeSyncer) DisplayMessagesSince(entryID string) ([]core.AgentMessage, bool) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	msgs, valid := ts.tree.DisplayMessagesSince(entryID)
+	if !valid {
+		return nil, false
 	}
-	return out
+	return ts.appendInFlightTail(msgs), true
+}
+
+// appendInFlightTail appends the agent messages not yet synced to the tree
+// (the in-flight turn), skipping hidden internal prompts. Caller holds ts.mu.
+func (ts *TreeSyncer) appendInFlightTail(msgs []core.AgentMessage) []core.AgentMessage {
+	for i, msg := range ts.sctx.Agent.Messages() {
+		if _, ok := ts.synced[messageSyncID(msg, i)]; ok || isHiddenInternalPrompt(msg) {
+			continue
+		}
+		msgs = append(msgs, msg)
+	}
+	return msgs
 }
 
 // HasMsgID reports whether this ID belongs to a message that exists anywhere in
@@ -169,9 +199,14 @@ func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 	defer ts.mu.Unlock()
 
 	firstKeptID := e.Payload.FirstKeptMsgID
+	marker := core.AgentMessage{}
+	if e.Marker != nil {
+		marker = session.DeepCopyMessage(*e.Marker)
+	}
 
 	ts.tree.Append(session.Entry{
-		Type: session.EntryCompaction,
+		Type:    session.EntryCompaction,
+		Message: marker,
 		Compaction: session.CompactionData{
 			Summary:          e.Payload.Summary,
 			FirstKeptEntryID: firstKeptID,

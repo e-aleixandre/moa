@@ -13,6 +13,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 func TestWsEventFromBus_SubagentStarted(t *testing.T) {
@@ -44,6 +45,39 @@ func TestWsEventFromBus_SubagentStarted(t *testing.T) {
 	})
 }
 
+func TestWsEventFromBus_CompactionEndedCarriesDurableMarker(t *testing.T) {
+	marker := bus.NewCompactionMarker(&core.CompactionPayload{
+		Summary: "retain the plan", TokensBefore: 24000,
+		ReadFiles: []string{"a.go"}, ModifiedFiles: []string{"b.go"},
+	})
+	ev, ok := wsEventFromBus(bus.CompactionEnded{Payload: &core.CompactionPayload{}, Marker: marker})
+	if !ok || ev.Type != "compaction_end" {
+		t.Fatalf("event = %+v, ok=%v", ev, ok)
+	}
+	data := ev.Data.(CompactionEndData)
+	if data.Marker == nil || data.Marker.MsgID != marker.MsgID {
+		t.Fatalf("marker = %+v, want durable ID %q", data.Marker, marker.MsgID)
+	}
+	if got := data.Marker.Custom["summary"]; got != "retain the plan" {
+		t.Fatalf("summary = %v", got)
+	}
+}
+
+func TestWsPromptResolutionProjectsPromptIdentity(t *testing.T) {
+	event := bus.PermissionResolved{ID: "p1"}
+	projected, ok := wsEventFromBus(event)
+	if !ok {
+		t.Fatal("resolution event not translated")
+	}
+	if got := projected.Data.(PromptResolvedData); got.ID != "p1" {
+		t.Fatalf("resolution = %+v", got)
+	}
+	ask, _ := wsEventFromBus(bus.AskUserResolved{ID: "a1"})
+	if got := ask.Data.(PromptResolvedData); got.ID != "a1" {
+		t.Fatalf("ask resolution = %+v", got)
+	}
+}
+
 func TestBuildInitData_SubagentThinking(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -66,7 +100,7 @@ func TestBuildInitData_SubagentThinking(t *testing.T) {
 		return len(sess.subagents.Snapshot()) == 1
 	})
 
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil)
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
 	if len(data.Subagents) != 1 {
 		t.Fatalf("Subagents = %+v, want one job", data.Subagents)
 	}
@@ -75,6 +109,108 @@ func TestBuildInitData_SubagentThinking(t *testing.T) {
 	}
 	if got := data.Subagents[0].OriginToolCallID; got != "toolu_init" {
 		t.Fatalf("OriginToolCallID = %q, want toolu_init", got)
+	}
+}
+
+func TestBuildInitDataCarriesAttentionNamespace(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
+	if data.AttentionNamespace != sess.attentionNamespace || data.AttentionNamespace == "" {
+		t.Fatalf("attention namespace = %q, want %q", data.AttentionNamespace, sess.attentionNamespace)
+	}
+}
+
+func TestBuildInitData_DeltaMessages(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(time.Second, "done")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := sess.runtime.Context().Tree
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", MsgID: "one", Content: []core.Content{core.TextContent("one")}})})
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "assistant", MsgID: "two", Content: []core.Content{core.TextContent("two")}})})
+
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "one")
+	if data.DeltaBase != "one" || len(data.Messages) != 1 || data.Messages[0].MsgID != "two" {
+		t.Fatalf("delta init = %+v", data)
+	}
+
+	data = buildInitData(sess, bus.StreamingAggregate{}, nil, "two")
+	if data.DeltaBase != "two" || len(data.Messages) != 0 {
+		t.Fatalf("empty delta init = %+v", data)
+	}
+}
+
+func TestBuildInitData_DeltaStartingWithToolResult(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(time.Second, "done")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := sess.runtime.Context().Tree
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{
+		Role: "assistant", MsgID: "call", Content: []core.Content{{Type: "tool_call", ToolCallID: "tool-1", ToolName: "bash"}},
+	})})
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{
+		Role: "tool_result", MsgID: "result", ToolCallID: "tool-1", Content: []core.Content{core.TextContent("done")},
+	})})
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: historyMessage("assistant", "final")})
+
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "call")
+	if data.DeltaBase != "call" || len(data.Messages) != 2 || data.Messages[0].Role != "tool_result" || data.Messages[1].MsgID != "final" {
+		t.Fatalf("delta init = %+v", data)
+	}
+}
+
+func TestBuildInitData_InvalidDeltaFallsBackToFull(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(time.Second, "done")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := sess.runtime.Context().Tree
+	base := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", MsgID: "base", Content: []core.Content{core.TextContent("base")}})})
+	offPath := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "assistant", MsgID: "old", Content: []core.Content{core.TextContent("old")}})})
+	if err := tree.Branch(base); err != nil {
+		t.Fatal(err)
+	}
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "assistant", MsgID: "new", Content: []core.Content{core.TextContent("new")}})})
+
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, offPath)
+	if data.DeltaBase != "" || len(data.Messages) != 2 || data.Messages[1].MsgID != "new" {
+		t.Fatalf("off-path fallback = %+v", data)
+	}
+	tree.Clear()
+	data = buildInitData(sess, bus.StreamingAggregate{}, nil, base)
+	if data.DeltaBase != "" || len(data.Messages) != 0 {
+		t.Fatalf("clear fallback = %+v", data)
+	}
+}
+
+func TestBuildInitData_DeltaIncludesCompactionMarker(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(time.Second, "done")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := sess.runtime.Context().Tree
+	base := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", MsgID: "base", Content: []core.Content{core.TextContent("base")}})})
+	tree.Append(session.Entry{Type: session.EntryCompaction, Compaction: session.CompactionData{Summary: "summary", FirstKeptEntryID: base, TokensBefore: 4000}})
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, base)
+	if data.DeltaBase != base || len(data.Messages) != 1 || data.Messages[0].Role != "session_event" {
+		t.Fatalf("compaction delta = %+v", data)
 	}
 }
 
@@ -116,6 +252,21 @@ func TestWsEventFromBus_SubagentUsage(t *testing.T) {
 		ev, _ := wsEventFromBus(bus.SubagentUsage{JobID: "sa-1"})
 		if !isLossyWsEvent(ev) {
 			t.Fatal("subagent_usage should be lossy")
+		}
+	})
+
+	t.Run("terminal outcome preserves result separately from failure", func(t *testing.T) {
+		finished := time.UnixMilli(1_700_000_000_000)
+		ev, ok := wsEventFromBus(bus.SubagentEnded{
+			SessionID: "s1", JobID: "sa-3", Task: "inspect", Async: true,
+			Status: "failed", Error: "connection refused", FinishedAt: finished,
+		})
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		data := ev.Data.(SubagentEndData)
+		if data.Task != "inspect" || !data.Async || data.Status != "failed" || data.Result != "" || data.Error != "connection refused" || data.FinishedAtMs != finished.UnixMilli() {
+			t.Fatalf("terminal data = %+v", data)
 		}
 	})
 }
@@ -186,7 +337,7 @@ func TestBuildInitData_IncludesRunTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data := buildInitData(sess, bus.StreamingAggregate{}, nil)
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
 	if data.RunTokensUp != 0 || data.RunTokensDown != 0 {
 		t.Fatalf("initial run tokens = up=%d down=%d, want zero", data.RunTokensUp, data.RunTokensDown)
 	}
@@ -228,7 +379,10 @@ func TestWsEventFromBus_CommandDequeued(t *testing.T) {
 }
 
 func TestWsEventFromBus_UserMessageAppended(t *testing.T) {
-	ev, ok := wsEventFromBus(bus.UserMessageAppended{SessionID: "s1", MsgID: "m1", Text: "hola"})
+	ev, ok := wsEventFromBus(bus.UserMessageAppended{
+		SessionID: "s1", MsgID: "m1", Text: "hola",
+		Custom: map[string]any{"source": "secret_batch", "secret_aliases": []string{"db"}},
+	})
 	if !ok || ev.Type != "user_message" {
 		t.Fatalf("Type = %q ok=%v, want user_message", ev.Type, ok)
 	}
@@ -238,6 +392,26 @@ func TestWsEventFromBus_UserMessageAppended(t *testing.T) {
 	}
 	if data.MsgID != "m1" || data.Text != "hola" || len(data.Content) != 0 {
 		t.Fatalf("Data = %+v, want text-only message m1", data)
+	}
+	if data.Custom["source"] != "secret_batch" {
+		t.Fatalf("Custom = %#v", data.Custom)
+	}
+}
+
+func TestWsEventFromBus_UserMessageAppended_ProjectsCustom(t *testing.T) {
+	ev, ok := wsEventFromBus(bus.UserMessageAppended{
+		SessionID: "s1", MsgID: "m1", Text: "hola",
+		Custom: map[string]any{"source": "secret_batch", "secret_aliases": []string{"db"}, "internal": "nope"},
+	})
+	if !ok {
+		t.Fatal("event was not translated")
+	}
+	data := ev.Data.(UserMessageData)
+	if data.Custom["source"] != "secret_batch" {
+		t.Fatalf("source = %#v", data.Custom)
+	}
+	if _, ok := data.Custom["internal"]; ok {
+		t.Fatalf("internal custom field exposed in WS payload: %#v", data.Custom)
 	}
 }
 
@@ -374,6 +548,48 @@ func TestLimitInitHistoryBoundsLargeText(t *testing.T) {
 	}
 }
 
+func TestLimitInitHistoryAlwaysKeepsNewestTail(t *testing.T) {
+	for _, results := range []int{148, 149, 150, 200, 400} {
+		t.Run(fmt.Sprintf("%d results", results), func(t *testing.T) {
+			messages := []core.AgentMessage{
+				historyMessage("user", "filler"),
+				historyMessage("assistant", "call"),
+			}
+			for i := range results {
+				messages = append(messages, historyMessage("tool_result", fmt.Sprintf("result-%d", i)))
+			}
+			messages = append(messages, historyMessage("assistant", "final"))
+
+			bounded, _ := limitInitHistory(messages)
+			if len(bounded) > initHistoryMaxMessages {
+				t.Fatalf("got %d messages, cap is %d", len(bounded), initHistoryMaxMessages)
+			}
+			if got := bounded[len(bounded)-1].MsgID; got != "final" {
+				t.Fatalf("last message = %q, want final", got)
+			}
+			if results == 148 && bounded[0].MsgID != "call" {
+				t.Fatalf("aligned range starts with %q, want call", bounded[0].MsgID)
+			}
+		})
+	}
+}
+
+func TestLimitInitHistoryPrefersTailOverToolResultAlignment(t *testing.T) {
+	messages := []core.AgentMessage{historyMessage("assistant", "call")}
+	for i := range initHistoryMaxMessages {
+		messages = append(messages, historyMessage("tool_result", fmt.Sprintf("result-%d", i)))
+	}
+	messages = append(messages, historyMessage("assistant", "final"))
+
+	bounded, _ := limitInitHistory(messages)
+	if len(bounded) != initHistoryMaxMessages || bounded[0].Role != "tool_result" {
+		t.Fatalf("bounded range starts with %#v, want capped tool result tail", bounded[0])
+	}
+	if got := bounded[len(bounded)-1].MsgID; got != "final" {
+		t.Fatalf("last message = %q, want final", got)
+	}
+}
+
 func TestLimitInitHistoryDropsOversizedToolArguments(t *testing.T) {
 	message := core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{{
 		Type: "tool_call", ToolCallID: "tool-1", ToolName: "bash",
@@ -383,6 +599,44 @@ func TestLimitInitHistoryDropsOversizedToolArguments(t *testing.T) {
 	args := limited[0].Content[0].Arguments
 	if args["_truncated"] != true {
 		t.Fatalf("oversized args = %#v, want truncation marker", args)
+	}
+}
+
+func TestBuildInitData_ReconnectProjectsSecretCustom(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const secretDir = "/tmp/moa-secrets-private/batch-private"
+	appendConversationTestMessage(sess, "secret-note", "user", "secret batch staged", map[string]any{
+		"source":         "secret_batch",
+		"secret_aliases": []string{"token"},
+		"secret_dir":     secretDir,
+		"internal":       true,
+	})
+
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
+	if len(data.Messages) != 1 {
+		t.Fatalf("init messages = %#v", data.Messages)
+	}
+	custom := data.Messages[0].Custom
+	aliases, ok := custom["secret_aliases"].([]string)
+	if custom["source"] != "secret_batch" || !ok || len(aliases) != 1 {
+		t.Fatalf("projected custom = %#v", custom)
+	}
+	if _, ok := custom["secret_dir"]; ok {
+		t.Fatalf("secret_dir leaked in reconnect history: %#v", custom)
+	}
+	if _, ok := custom["internal"]; ok {
+		t.Fatalf("internal custom field leaked in reconnect history: %#v", custom)
+	}
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), secretDir) {
+		t.Fatalf("secret directory reached reconnect payload: %s", encoded)
 	}
 }
 
@@ -443,6 +697,108 @@ func TestWsEventFromBus_SubagentEnded(t *testing.T) {
 			t.Fatalf("expected zero tokens for nil usage, got %+v", data)
 		}
 	})
+}
+
+func TestPersistedSubagentOutcome_BackwardCompatibleResultFallback(t *testing.T) {
+	legacy := session.SubagentTranscript{
+		Status: "completed",
+		Messages: []core.AgentMessage{{Message: core.Message{
+			Role: "assistant", Content: []core.Content{core.TextContent("legacy final result")},
+		}}},
+	}
+	result, resultErr := persistedSubagentOutcome(legacy)
+	if result != "legacy final result" || resultErr != "" {
+		t.Fatalf("legacy outcome = result %q, error %q", result, resultErr)
+	}
+
+	failed := session.SubagentTranscript{Status: "failed", Messages: legacy.Messages}
+	result, resultErr = persistedSubagentOutcome(failed)
+	if result != "" || resultErr != "" {
+		t.Fatalf("failed legacy outcome must not mislabel partial output: result %q, error %q", result, resultErr)
+	}
+}
+
+func TestSubagentStore_LegacyResultMatchesPersistedOutcome(t *testing.T) {
+	store := session.NewSubagentStore(t.TempDir(), "parent")
+	cases := []struct {
+		name     string
+		messages []core.AgentMessage
+	}{
+		{
+			name: "final assistant text skips thinking and tool calls",
+			messages: []core.AgentMessage{
+				core.WrapMessage(core.Message{Role: "user", Content: []core.Content{core.TextContent("start")}}),
+				core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent("superseded")}}),
+				core.WrapMessage(core.Message{Role: "tool_result", Content: []core.Content{core.TextContent("tool output")}}),
+				core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{
+					core.TextContent("first "),
+					core.ThinkingContent("private reasoning"),
+					core.ToolCallContent("call-1", "read", map[string]any{"path": "<large>&ignored"}),
+					core.TextContent("last 世界"),
+				}}),
+			},
+		},
+		{
+			name: "no assistant message",
+			messages: []core.AgentMessage{
+				core.WrapMessage(core.Message{Role: "user", Content: []core.Content{core.TextContent("start")}}),
+				core.WrapMessage(core.Message{Role: "tool_result", Content: []core.Content{core.TextContent("done")}}),
+			},
+		},
+		{
+			name: "final assistant has no text",
+			messages: []core.AgentMessage{
+				core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent("previous")}}),
+				core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{
+					core.ThinkingContent("private reasoning"),
+					core.ToolCallContent("call-2", "read", nil),
+					{Type: "text", Text: ""},
+				}}),
+			},
+		},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			jobID := fmt.Sprintf("legacy-%d", i)
+			legacy := session.SubagentTranscript{
+				JobID: jobID, Task: "legacy outcome", Model: "haiku", Status: "completed", Async: true,
+				Messages: tc.messages,
+			}
+			if err := store.Save(legacy); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+			full, err := store.Load(jobID)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			want, wantErr := persistedSubagentOutcome(*full)
+			got, err := store.LegacyResult(jobID)
+			if err != nil {
+				t.Fatalf("LegacyResult: %v", err)
+			}
+			if got != want {
+				t.Fatalf("LegacyResult = %q, persistedSubagentOutcome = %q", got, want)
+			}
+			if wantErr != "" {
+				t.Fatalf("unexpected persisted error %q", wantErr)
+			}
+		})
+	}
+}
+
+func TestBuildInitData_SortsPersistedSubagentOutcomesChronologically(t *testing.T) {
+	// Sorting itself is intentionally independent of filesystem/list order;
+	// completed cards must replay oldest-to-newest in the parent timeline.
+	outcomes := []SubagentEndData{
+		{JobID: "late", FinishedAtMs: 30},
+		{JobID: "unknown"},
+		{JobID: "early", FinishedAtMs: 10},
+	}
+	sortSubagentOutcomes(outcomes)
+	if outcomes[0].JobID != "early" || outcomes[1].JobID != "late" || outcomes[2].JobID != "unknown" {
+		t.Fatalf("outcome order = %+v", outcomes)
+	}
 }
 
 func TestWsEventFromBus_SubagentEvent_Translatable(t *testing.T) {
@@ -666,7 +1022,7 @@ func TestUserMessage_AnnouncedOnlyOnceInHistory(t *testing.T) {
 		}
 		// Read history exactly as a reconnecting client's snapshot does.
 		found := 0
-		for _, m := range buildInitData(sess, bus.StreamingAggregate{}, nil).Messages {
+		for _, m := range buildInitData(sess, bus.StreamingAggregate{}, nil, "").Messages {
 			if m.MsgID == msgID {
 				found++
 			}
@@ -757,7 +1113,7 @@ func TestBuildInitDataCarriesLiveTools(t *testing.T) {
 
 	data := buildInitData(sess, bus.StreamingAggregate{}, []bus.LiveToolCall{
 		{ToolCallID: "tc1", ToolName: "bash", Phase: bus.LiveToolPhaseRunning, StartedAt: time.Now()},
-	})
+	}, "")
 	if len(data.LiveTools) != 1 || data.LiveTools[0].ToolName != "bash" {
 		t.Fatalf("InitData.LiveTools = %+v, want the live bash call", data.LiveTools)
 	}

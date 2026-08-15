@@ -8,6 +8,61 @@ import (
 	"time"
 )
 
+func TestAttentionSubscriptionIsLosslessAndProjected(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	var got []uint64
+	unsub := b.SubscribeAttentionSeq(func(seq uint64, event AttentionSequenceEvent) {
+		once.Do(func() { close(entered); <-release })
+		if event.Kind != AttentionRunEnded {
+			t.Errorf("event kind = %v, want run ended", event.Kind)
+		}
+		got = append(got, seq)
+	})
+	defer unsub()
+
+	b.Publish(RunEnded{})
+	<-entered
+	for i := 0; i < 200; i++ {
+		b.Publish(RunEnded{})
+	}
+	close(release)
+	b.Drain(time.Second)
+	if len(got) != 201 {
+		t.Fatalf("attention events = %d, want 201", len(got))
+	}
+	for i, seq := range got {
+		if seq != uint64(i+1) {
+			t.Fatalf("sequence[%d] = %d, want %d", i, seq, i+1)
+		}
+	}
+}
+
+func TestAttentionSubscriptionHandlerCanUseBusOperations(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	done := make(chan struct{})
+	var unsub func()
+	unsub = b.SubscribeAttentionSeq(func(_ uint64, _ AttentionSequenceEvent) {
+		b.Publish(testEvent{Value: "from attention handler"})
+		unsubscribe := b.Subscribe(func(testEvent) {})
+		unsubscribe()
+		unsub()
+		close(done)
+	})
+	b.Publish(PermissionRequested{ID: "p1"})
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("attention handler deadlocked using bus operations")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers — tiny event/command/query types local to tests
 // ---------------------------------------------------------------------------
@@ -64,6 +119,35 @@ func TestSubscribeAllSeq_OrdersPublicationsAndReportsBoundary(t *testing.T) {
 		if e != want {
 			t.Fatalf("event = %#v, want %#v", e, want)
 		}
+	}
+}
+
+func TestSubscribeAllSeqHandlerCanPublishAndCaptureSequence(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	var captured atomic.Uint64
+	done := make(chan struct{})
+	b.SubscribeAllSeq(func(_ uint64, event any) {
+		if event.(testEvent).Value != "first" {
+			return
+		}
+		captured.Store(b.CaptureSeq())
+		b.Publish(testEvent{Value: "second"})
+		close(done)
+	})
+	b.Publish(testEvent{Value: "first"})
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("sequence subscriber deadlocked while publishing")
+	}
+	b.Drain(time.Second)
+	if got := captured.Load(); got != 1 {
+		t.Fatalf("captured sequence = %d, want 1", got)
+	}
+	if got := b.LastSeq(); got != 2 {
+		t.Fatalf("last sequence = %d, want 2", got)
 	}
 }
 

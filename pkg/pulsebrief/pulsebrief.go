@@ -11,7 +11,6 @@ package pulsebrief
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -20,32 +19,6 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
-
-// DefaultModelSpec is the cheap, fast Anthropic model used for brief
-// generation for Anthropic sessions.
-const DefaultModelSpec = "haiku"
-
-// cheapModelSpecFor returns a cheap summary-generation model on the SAME
-// provider as the session, so an OpenAI session's transcript isn't shipped to
-// Anthropic (a different vendor) just to summarize it. The bool is false when
-// no known cheap same-vendor model exists; callers must then not generate.
-func cheapModelSpecFor(provider string) (string, bool) {
-	switch strings.ToLower(provider) {
-	case "openai":
-		return "gpt-5.4-mini", true
-	case "anthropic":
-		return DefaultModelSpec, true
-	case "xai":
-		return "grok", true
-	default:
-		return "", false
-	}
-}
-
-// ErrNoCheapSameVendorModel means the session provider has no configured cheap
-// model for briefs. It is deliberately non-fatal: callers should skip brief
-// generation rather than send the transcript to another vendor.
-var ErrNoCheapSameVendorModel = errors.New("no cheap same-vendor model")
 
 // MaxFieldLen caps each generated field length (in runes).
 const MaxFieldLen = 140
@@ -115,11 +88,11 @@ func wrapPrompt(transcript string) string {
 type ProviderFactory func(core.Model) (core.Provider, error)
 
 // Generate makes a one-shot LLM call to produce a status brief from the
-// conversation messages, using a cheap same-vendor model. It returns an empty
+// conversation messages using model. It returns an empty
 // Brief (no error) when the conversation has no concrete task yet. It returns
 // an error only when the model can't be resolved, the provider can't be built,
 // or the call produces no usable text.
-func Generate(ctx context.Context, factory ProviderFactory, sessionModel core.Model, msgs []core.AgentMessage) (Brief, error) {
+func Generate(ctx context.Context, factory ProviderFactory, model core.Model, msgs []core.AgentMessage) (Brief, error) {
 	if factory == nil {
 		return Brief{}, fmt.Errorf("pulsebrief: nil provider factory")
 	}
@@ -128,17 +101,6 @@ func Generate(ctx context.Context, factory ProviderFactory, sessionModel core.Mo
 		return Brief{}, fmt.Errorf("pulsebrief: no conversation content")
 	}
 
-	spec, ok := cheapModelSpecFor(sessionModel.Provider)
-	if !ok {
-		return Brief{}, fmt.Errorf("pulsebrief: %w for provider %q", ErrNoCheapSameVendorModel, sessionModel.Provider)
-	}
-	model, ok := core.ResolveModel(spec)
-	if !ok {
-		return Brief{}, fmt.Errorf("pulsebrief: cannot resolve model %q", spec)
-	}
-	if !strings.EqualFold(model.Provider, sessionModel.Provider) {
-		return Brief{}, fmt.Errorf("pulsebrief: %w for provider %q", ErrNoCheapSameVendorModel, sessionModel.Provider)
-	}
 	thinking, err := core.EffectiveThinkingLevel(model, internalThinking(model))
 	if err != nil {
 		return Brief{}, fmt.Errorf("pulsebrief: thinking level: %w", err)

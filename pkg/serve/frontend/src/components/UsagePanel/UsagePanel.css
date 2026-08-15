@@ -45,6 +45,31 @@
   font-weight: var(--weight-medium);
 }
 
+/* The session id row: an identifier, not a measurement. The whole row copies,
+   and the id truncates rather than wrapping onto a second line. */
+.usage-panel-idrow {
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  font: inherit;
+  color: var(--overlay1);
+  cursor: pointer;
+}
+
+.usage-panel-idrow .usage-panel-id {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-weight: var(--weight-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-panel-idrow:hover { color: var(--text); }
+
 .usage-panel-note {
   margin-left: auto;
   color: var(--overlay0);

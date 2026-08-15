@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
-import { ArrowLeft, GitFork, X, Check, Copy } from "lucide-preact";
+import { ArrowLeft, GitFork, X, Check, Copy, Info } from "lucide-preact";
 import { Spinner, Kbd, IconButton } from "../../primitives/index.js";
-import { ModelPill, RunModeChip, UserWaypoint } from "../../components/index.js";
+import { ModelPill, RunModeChip, SubagentDetails } from "../../components/index.js";
 import { Stream } from "../Stream/Stream.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { Composer } from "../Composer/Composer.jsx";
@@ -11,11 +11,12 @@ import { fmtTokens, copyToClipboard, sessionTitle } from "../../data/util/format
 import { modelAccent } from "../../data/selectors.js";
 import { cancelSubagent, promoteSubagent } from "../../data/session-actions.js";
 import { updateSession } from "../../data/store.js";
+import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import "./SubagentView.css";
 
 // SubagentView — "inside the fork". Zoom into ONE subagent: its
 // transcript rendered by the SAME Stream as the parent (zero divergence),
-// framed by a breadcrumb header, a sibling rail, a task card, a fused
+// framed by a breadcrumb header, a sibling rail, a fused
 // now-line, and — on terminal — an outcome banner.
 //
 // It reuses the pure projection subagentView(session, jobId) for everything
@@ -38,6 +39,7 @@ export function SubagentView({ session, jobId, onBack }) {
 
   // Cancel confirm-inline: first click arms ("sure?"), a 2s timeout disarms.
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   useEffect(() => {
     if (!confirmCancel) return;
     const t = setTimeout(() => setConfirmCancel(false), 2000);
@@ -109,6 +111,9 @@ export function SubagentView({ session, jobId, onBack }) {
           <span class="sa-crumb-name" style={{ color: accentVar }}>{view.name}</span>
         </div>
         <div class="sa-head-actions">
+          <IconButton label="Subagent details" onClick={() => setDetailsOpen(true)}>
+            <Info size={15} />
+          </IconButton>
           {view.model && (
             <ModelPill
               model={view.model}
@@ -145,14 +150,9 @@ export function SubagentView({ session, jobId, onBack }) {
 
       <div class="sa-body">
         <Stream
-          session={{ id: `${session.id}:${jobId}`, messages: [] }}
+          session={{ id: session.id, messages: [] }}
           blocks={view.blocks}
-          lead={
-            <UserWaypoint className="sa-task" time={undefined}>
-              <div class="sa-task-label" style={{ color: accentVar }}>TASK — from parent</div>
-              <p>{view.task || "(no task recorded)"}</p>
-            </UserWaypoint>
-          }
+          waypointAccent={accent}
         />
       </div>
 
@@ -173,6 +173,9 @@ export function SubagentView({ session, jobId, onBack }) {
         />
       )}
       <BranchStrip session={session} view={view} />
+      <Sheet open={detailsOpen} onClose={() => setDetailsOpen(false)} title="Subagent details">
+        <SubagentDetails session={session} view={view} accent={modelAccent(view.model)} />
+      </Sheet>
     </div>
   );
 }
@@ -268,7 +271,7 @@ function OutcomeBanner({ view, onBack }) {
         {view.resultChip && <span class="sa-outcome-chip">{view.resultChip}</span>}
       </div>
       <div class="sa-outcome-actions">
-        <button type="button" class="sa-outcome-btn" onClick={() => copy(view.resultChip || "")}>
+        <button type="button" class="sa-outcome-btn" onClick={() => copy(view.result || "")}>
           {copied ? "copied ✓" : <>{<Copy size={13} />} Copy result</>}
         </button>
         <button type="button" class="sa-outcome-btn primary" onClick={onBack}>Back to parent</button>

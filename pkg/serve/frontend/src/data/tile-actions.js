@@ -1,7 +1,8 @@
 // tile-actions.js — tile tree manipulation and visibility management
 
-import { syncConnections } from './api.js';
+import { acknowledgeVisibleAttentionThrough, syncConnections } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
+import { armReadAnchor, __resetReadAnchorsForTests } from './stream-read-anchor.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
   splitTileNode, removeTileNode, setTileSession, swapSessions,
@@ -239,46 +240,76 @@ const resumingIds = new Set();
 // empty state. Every later pass (an intentional open/tap/DnD makes a saved
 // session visible) resumes as before.
 let booted = false;
+let previouslyVisible = new Set();
 
 // Test-only: reset the bootstrap guard so a test can exercise the first-pass
 // (release-not-resume) branch deterministically regardless of order.
-export function __resetBootForTests() { booted = false; }
+export function __resetBootForTests() {
+  booted = false;
+  previouslyVisible.clear();
+  __resetReadAnchorsForTests();
+}
 
 export function afterVisibilityChange() {
+  const bootstrapPass = !booted;
   let state = store.get();
   let visible = visibleSessionIds(state);
-
-  // Clear the unread badge for sessions the user can now see (only when the
-  // tab is actually in the foreground — a background visibility shuffle
-  // shouldn't mark things read).
-  if (typeof document === 'undefined' || !document.hidden) {
-    for (const id of visible) {
-      const sess = state.sessions[id];
-      if (sess && sess.unseen) updateSession(id, { unseen: false });
-    }
-  }
 
   if (!booted) {
     booted = true;
     releaseStaleSaved();
     state = store.get();
     visible = visibleSessionIds(state);
-    syncConnections(visible.filter(id => state.sessions[id]?.state !== 'saved'));
-    return;
-  }
-
-  for (const id of visible) {
-    const sess = state.sessions[id];
-    if (sess?.state === 'saved' && !resumingIds.has(id)) {
-      resumingIds.add(id);
-      getResumeSession().then(resume =>
-        resume(id)
-          .catch(e => console.error('Auto-resume failed for', id, e))
-          .finally(() => resumingIds.delete(id))
-      );
+  } else {
+    for (const id of visible) {
+      const sess = state.sessions[id];
+      if (sess?.state === 'saved' && !resumingIds.has(id)) {
+        resumingIds.add(id);
+        getResumeSession().then(resume =>
+          resume(id)
+            .catch(e => console.error('Auto-resume failed for', id, e))
+            .finally(() => resumingIds.delete(id))
+        );
+      }
     }
   }
 
+  // Arm before syncConnections / acknowledgement can recognize the badge as
+  // read. The first bootstrap pass merely records restored visibility: only a
+  // later user-driven transition into view may consume this one-shot intent.
+  if (!bootstrapPass) {
+    for (const id of visible) {
+      if (!previouslyVisible.has(id)) armReadAnchor(state.sessions[id]);
+    }
+  }
+  previouslyVisible = new Set(visible);
+
   const connectable = visible.filter(id => state.sessions[id]?.state !== 'saved');
-  syncConnections(connectable);
+  // Opening a socket synchronously marks its retained history pending. Do that
+  // before considering an unread badge: tapping a stale transcript must not
+  // acknowledge the result until init makes the history authoritative.
+  // Store-level presentation transitions are also exercised by non-DOM unit
+  // tests. There is no socket endpoint in that environment; the acknowledgement
+  // pass below remains meaningful, while connection ownership is browser-only.
+  if (typeof location !== 'undefined') syncConnections(connectable);
+
+  if (typeof document === 'undefined' || !document.hidden) {
+    const current = store.get();
+    for (const id of visibleSessionIds(current)) {
+      const sess = current.sessions[id];
+      // Only a confirmed authoritative init makes a selected transcript read.
+      // A cached or stale one leaves the occurrence alone until its own init
+      // lands, so a badge is never cleared for content this client never got.
+      if (sess?.historyHydrated) {
+        if (sess.attentionNamespace) {
+          const throughSeq = sess.readCandidateSeq || sess.ackedThroughSeq || 0;
+          // Stay behind the sequence gate: a retry must not clear attention
+          // that the init did not render.
+          if (throughSeq) {
+            acknowledgeVisibleAttentionThrough(id, throughSeq, sess.attentionNamespace).catch(() => {});
+          }
+		}
+      }
+    }
+  }
 }

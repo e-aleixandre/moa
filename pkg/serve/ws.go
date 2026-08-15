@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"sort"
 	"sync"
 	"unicode/utf8"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/tool"
 )
@@ -172,7 +174,14 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.TasksUpdated:
 		return Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}}, true
 	case bus.RunEnded:
-		return Event{Type: "run_end", Data: RunEndData{Text: e.FinalText}}, true
+		// The same classifier as the tracker decides whether this terminal event
+		// is an attention occurrence. Failed and cancelled runs still travel to
+		// the client, but must not be treated as a second occurrence.
+		attention := attentionEvent(e)
+		return Event{Type: "run_end", Data: RunEndData{
+			Text: e.FinalText, RunGen: e.RunGen,
+			Cancelled: e.Cancelled, HasError: !attention && e.Err != nil,
+		}}, true
 	case bus.ContextUpdated:
 		return Event{Type: "context_update", Data: ContextUpdateData{ContextPercent: e.Percent}}, true
 	case bus.MCPChanged:
@@ -229,7 +238,7 @@ func wsEventFromBus(event any) (Event, bool) {
 			Command: e.Command, Messages: messages, HistoryTruncated: truncated,
 		}}, true
 	case bus.Steered:
-		data := SteerData{ID: e.ID, MsgID: e.MsgID, Text: truncateHistoryString(e.Text)}
+		data := SteerData{ID: e.ID, MsgID: e.MsgID, Text: truncateHistoryString(e.Text), Custom: projectWSMessageCustom(e.Custom)}
 		if len(e.Content) > 0 {
 			// Same history projection as UserMessageAppended, so an attached
 			// image travels bounded (inline payloads stripped to references)
@@ -239,7 +248,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		}
 		return Event{Type: "steer", Data: data}, true
 	case bus.UserMessageAppended:
-		data := UserMessageData{MsgID: e.MsgID, Text: truncateHistoryString(e.Text)}
+		data := UserMessageData{MsgID: e.MsgID, Text: truncateHistoryString(e.Text), Custom: projectWSMessageCustom(e.Custom)}
 		if len(e.Content) > 0 {
 			// Reuse the history projection so inline attachment payloads and
 			// oversized text are bounded exactly as on reconnect.
@@ -265,17 +274,17 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "auto_verify_end", Data: data}, true
 	case bus.PermissionRequested:
 		return Event{Type: "permission_request", Data: PermissionData{
-			ID: e.ID, ToolName: e.ToolName, Args: e.Args,
+			ID: e.ID, RunGen: e.RunGen, ToolName: e.ToolName, Args: e.Args,
 			AllowPattern: e.AllowPattern,
 		}}, true
 	case bus.PermissionResolved:
-		return Event{Type: "permission_resolved", Data: map[string]any{"id": e.ID}}, true
+		return Event{Type: "permission_resolved", Data: PromptResolvedData{ID: e.ID}}, true
 	case bus.AskUserRequested:
 		return Event{Type: "ask_user", Data: map[string]any{
-			"id": e.ID, "questions": e.Questions,
+			"id": e.ID, "run_gen": e.RunGen, "questions": e.Questions,
 		}}, true
 	case bus.AskUserResolved:
-		return Event{Type: "ask_resolved", Data: map[string]any{"id": e.ID}}, true
+		return Event{Type: "ask_resolved", Data: PromptResolvedData{ID: e.ID}}, true
 	case bus.SubagentCountChanged:
 		return Event{Type: "subagent_count", Data: SubagentCountData{Count: e.Count}}, true
 	case bus.SubagentCompleted:
@@ -284,12 +293,14 @@ func wsEventFromBus(event any) (Event, bool) {
 		}}, true
 	case bus.SubagentStarted:
 		data := SubagentStartData{
-			JobID: e.JobID, OriginToolCallID: e.OriginToolCallID, Task: e.Task, Model: e.Model, Thinking: e.Thinking, Async: e.Async, AccentIndex: e.AccentIndex,
+			JobID: e.JobID, OriginToolCallID: e.OriginToolCallID, Task: e.Task, Title: e.Title, Model: e.Model, Thinking: e.Thinking, Async: e.Async, AccentIndex: e.AccentIndex,
 		}
 		if !e.StartedAt.IsZero() {
 			data.StartedAtMs = e.StartedAt.UnixMilli()
 		}
 		return Event{Type: "subagent_start", Data: data}, true
+	case bus.SubagentTitleChanged:
+		return Event{Type: "subagent_title", Data: map[string]string{"job_id": e.JobID, "title": e.Title}}, true
 	case bus.SubagentUsage:
 		var inputTok, outputTok int
 		if e.Usage != nil {
@@ -306,10 +317,16 @@ func wsEventFromBus(event any) (Event, bool) {
 			inputTok = e.Usage.Input
 			outputTok = e.Usage.Output
 		}
-		return Event{Type: "subagent_end", Data: SubagentEndData{
-			JobID: e.JobID, Status: e.Status,
+		data := SubagentEndData{
+			JobID: e.JobID, Task: e.Task, Async: e.Async, Status: e.Status,
+			Result: truncateHistoryString(e.Result), Error: truncateHistoryString(e.Error),
 			InputTokens: inputTok, OutputTokens: outputTok, CostUSD: e.CostUSD,
-		}}, true
+		}
+		data.Excerpt = data.Result != e.Result || data.Error != e.Error
+		if !e.FinishedAt.IsZero() {
+			data.FinishedAtMs = e.FinishedAt.UnixMilli()
+		}
+		return Event{Type: "subagent_end", Data: data}, true
 	case bus.SubagentEvent:
 		inner, ok := wsEventFromBus(e.Inner)
 		if !ok {
@@ -331,10 +348,55 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.CompactionStarted:
 		return Event{Type: "compaction_start"}, true
 	case bus.CompactionEnded:
-		return Event{Type: "compaction_end"}, true
+		data := CompactionEndData{}
+		if e.Marker != nil {
+			marker, _ := sanitizeHistoryMessage(*e.Marker)
+			data.Marker = &marker
+		}
+		return Event{Type: "compaction_end", Data: data}, true
 	default:
 		return Event{}, false
 	}
+}
+
+// projectWSMessageCustom is a second transport boundary for callers that
+// publish bus events directly. Keep it aligned with bus.projectLiveCustom.
+func projectWSMessageCustom(custom map[string]any) map[string]any {
+	if marker, _ := custom["type"].(string); marker == "compaction_marker" {
+		projected := map[string]any{"type": marker}
+		if summary, ok := custom["summary"].(string); ok {
+			projected["summary"] = truncateHistoryString(summary)
+		}
+		if tokens, ok := custom["tokens_before"].(int); ok {
+			projected["tokens_before"] = tokens
+		}
+		for _, key := range []string{"read_files", "modified_files"} {
+			if files, ok := custom[key].([]string); ok {
+				projected[key] = append([]string(nil), files...)
+			}
+		}
+		return projected
+	}
+	source, _ := custom["source"].(string)
+	if source == "" {
+		return nil
+	}
+	projected := map[string]any{"source": source}
+	if source == "secret_batch" {
+		switch aliases := custom["secret_aliases"].(type) {
+		case []string:
+			projected["secret_aliases"] = append([]string(nil), aliases...)
+		case []any:
+			values := make([]string, 0, len(aliases))
+			for _, alias := range aliases {
+				if value, ok := alias.(string); ok {
+					values = append(values, value)
+				}
+			}
+			projected["secret_aliases"] = values
+		}
+	}
+	return projected
 }
 
 // wsLossyEventTypes are streaming deltas that may be dropped under backpressure
@@ -398,15 +460,35 @@ func (r *wsReactor) cleanup() {
 }
 
 // buildInitData constructs the WS init payload from bus queries. The streaming
-// aggregate and the live tool calls are passed in (captured atomically with the
-// sequence cut by the caller via SnapshotInFlightWithCut) rather than queried
-// here, so in-flight state can't be both seeded into the snapshot and replayed
-// live after the cut.
-func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall) InitData {
+// aggregate and live tool calls are captured atomically with the sequence cut.
+// sinceMsg, when non-empty, requests a validated delta resume from that entry.
+func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveTools []bus.LiveToolCall, sinceMsg string) InitData {
 	b := sess.runtime.Bus
 
 	// Use display messages (full history from tree) instead of agent messages.
-	msgs, _ := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](b, bus.GetDisplayMessages{})
+	// A validated delta is used only when its entire suffix fits the same mobile
+	// bounds as a normal init. Truncating a suffix would silently leave a hole in
+	// the cached transcript, so it deliberately fails closed to a full snapshot.
+	var msgs []core.AgentMessage
+	var historyTruncated bool
+	historyBefore := ""
+	deltaBase := ""
+	if sinceMsg != "" {
+		if delta, err := bus.QueryTyped[bus.GetDisplayMessagesSince, bus.DisplayMessagesSince](b, bus.GetDisplayMessagesSince{EntryID: sinceMsg}); err == nil && delta.Valid {
+			// A delta extends an already-present transcript, so it may legitimately
+			// begin with results for calls in the client's prefix.
+			if bounded, truncated := limitHistoryDelta(delta.Messages); !truncated {
+				msgs, deltaBase = bounded, sinceMsg
+			}
+		}
+	}
+	if deltaBase == "" {
+		full, _ := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](b, bus.GetDisplayMessages{})
+		msgs, historyTruncated = limitInitHistory(full)
+		if historyTruncated && len(msgs) > 0 {
+			historyBefore = msgs[0].MsgID
+		}
+	}
 	state, _ := bus.QueryTyped[bus.GetSessionState, string](b, bus.GetSessionState{})
 	ctxPct, _ := bus.QueryTyped[bus.GetContextUsage, int](b, bus.GetContextUsage{})
 	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
@@ -428,33 +510,34 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	compacting, _ := bus.QueryTyped[bus.GetCompacting, bool](b, bus.GetCompacting{})
 	pendingSteers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](b, bus.GetPendingSteers{})
 
-	msgs, historyTruncated := limitInitHistory(msgs)
 	data := InitData{
-		Messages:          msgs,
-		HistoryTruncated:  historyTruncated,
-		State:             state,
-		ContextPercent:    ctxPct,
-		ContextWindow:     initModel.MaxInput,
-		CompactAt:         compactAt,
-		CompactAtMin:      compactAtMin,
-		PermissionMode:    permMode,
-		Tasks:             taskList,
-		PathScope:         pathInfo.Scope,
-		CostUSD:           cost,
-		RunTokensUp:       runTokens.Up,
-		RunTokensDown:     runTokens.Down,
-		Compacting:        compacting,
-		StreamingText:     truncateHistoryString(streaming.Text),
-		StreamingThinking: truncateHistoryString(streaming.Thinking),
-		LiveTools:         liveToolInitData(liveTools),
+		ServerInstance:     sess.serverInstance,
+		AttentionNamespace: sess.attentionNamespace,
+		Messages:           msgs,
+		HistoryTruncated:   historyTruncated,
+		HistoryBefore:      historyBefore,
+		DeltaBase:          deltaBase,
+		State:              state,
+		ContextPercent:     ctxPct,
+		ContextWindow:      initModel.MaxInput,
+		CompactAt:          compactAt,
+		CompactAtMin:       compactAtMin,
+		PermissionMode:     permMode,
+		Tasks:              taskList,
+		PathScope:          pathInfo.Scope,
+		CostUSD:            cost,
+		RunTokensUp:        runTokens.Up,
+		RunTokensDown:      runTokens.Down,
+		Compacting:         compacting,
+		StreamingText:      truncateHistoryString(streaming.Text),
+		StreamingThinking:  truncateHistoryString(streaming.Thinking),
+		LiveTools:          liveToolInitData(liveTools),
 	}
 
-	// Anchor the client's elapsed counter to the server-side run-start time so
-	// it stays correct across reconnects instead of restarting at zero. Only
-	// while a run is in flight.
-	sess.mu.Lock()
-	runStartedAt := sess.runStartedAt
-	sess.mu.Unlock()
+	// Read the run anchor from the runtime's synchronous state. The cache-clock
+	// subscriber is asynchronous, so using its copy here could omit an anchor
+	// for a RunStarted already included by this snapshot's sequence cut.
+	runStartedAt := sess.runtime.Context().RunStartedAt()
 	if !runStartedAt.IsZero() && (state == string(StateRunning) || state == string(StatePermission)) {
 		data.RunStartedAtMs = runStartedAt.UnixMilli()
 	}
@@ -479,6 +562,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 				JobID:            sa.JobID,
 				OriginToolCallID: sa.OriginToolCallID,
 				Task:             sa.Task,
+				Title:            sa.Title,
 				Model:            sa.Model,
 				Thinking:         sa.Thinking,
 				Status:           sa.Status,
@@ -498,6 +582,49 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 			data.Subagents[i] = sad
 		}
 	}
+	// Terminal outcomes are persisted separately from parent model delivery:
+	// an async result consumed by subagent_wait never creates a notification
+	// prompt, but its completed/failed card must survive reload just the same.
+	if sess.persister != nil {
+		store := sess.persister.subagentStore(sess.ID)
+		transcripts, err := store.ListSummaries()
+		if err == nil && len(transcripts) > 0 {
+			data.SubagentOutcomes = make([]SubagentEndData, 0, len(transcripts))
+			for _, transcript := range transcripts {
+				if transcript.Status != "completed" && transcript.Status != "failed" && transcript.Status != "cancelled" {
+					continue
+				}
+				result, resultErr := persistedSubagentOutcome(transcript)
+				// Legacy completed transcripts did not persist Result. Retain
+				// their historical final-assistant fallback while streaming past
+				// all messages instead of rebuilding the entire child transcript.
+				if transcript.Status == "completed" && transcript.Result == "" {
+					legacyResult, err := store.LegacyResult(transcript.JobID)
+					if err != nil {
+						continue
+					}
+					result = legacyResult
+				}
+				outcome := SubagentEndData{
+					JobID: transcript.JobID, Task: transcript.Task, Async: transcript.Async,
+					Status: transcript.Status, Result: truncateHistoryString(result), Error: truncateHistoryString(resultErr),
+					CostUSD: transcript.CostUSD,
+				}
+				outcome.Excerpt = outcome.Result != result || outcome.Error != resultErr
+				if !transcript.FinishedAt.IsZero() {
+					outcome.FinishedAtMs = transcript.FinishedAt.UnixMilli()
+				}
+				if transcript.Usage != nil {
+					outcome.InputTokens = transcript.Usage.Input
+					outcome.OutputTokens = transcript.Usage.Output
+				}
+				data.SubagentOutcomes = append(data.SubagentOutcomes, outcome)
+			}
+		}
+	}
+	if len(data.SubagentOutcomes) > 1 {
+		sortSubagentOutcomes(data.SubagentOutcomes)
+	}
 	if len(bashJobs) > 0 {
 		data.BashJobs = make([]BashJobInitData, len(bashJobs))
 		for i, job := range bashJobs {
@@ -505,20 +632,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		}
 	}
 
-	if pending.Permission != nil {
-		data.PendingPermission = &PermissionData{
-			ID:           pending.Permission.ID,
-			ToolName:     pending.Permission.ToolName,
-			Args:         pending.Permission.Args,
-			AllowPattern: pending.Permission.AllowPattern,
-		}
-	}
-	if pending.Ask != nil {
-		data.PendingAsk = &AskData{
-			ID:        pending.Ask.ID,
-			Questions: pending.Ask.Questions,
-		}
-	}
+	data.PendingPermission, data.PendingAsk = pendingAttentionData(pending)
 	if planInfo.Mode != "off" {
 		data.PlanMode = planInfo.Mode
 		data.PlanFile = planInfo.PlanFile
@@ -533,6 +647,53 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	}
 
 	return data
+}
+
+func pendingAttentionData(pending bus.PendingApprovalInfo) (*PermissionData, *AskData) {
+	var permissionData *PermissionData
+	if pending.Permission != nil {
+		permissionData = &PermissionData{
+			ID:           pending.Permission.ID,
+			ToolName:     pending.Permission.ToolName,
+			Args:         pending.Permission.Args,
+			AllowPattern: pending.Permission.AllowPattern,
+		}
+	}
+	var askData *AskData
+	if pending.Ask != nil {
+		askData = &AskData{
+			ID:        pending.Ask.ID,
+			Questions: pending.Ask.Questions,
+		}
+	}
+	return permissionData, askData
+}
+
+func sortSubagentOutcomes(outcomes []SubagentEndData) {
+	sort.SliceStable(outcomes, func(i, j int) bool {
+		left, right := outcomes[i].FinishedAtMs, outcomes[j].FinishedAtMs
+		if left == 0 {
+			return false
+		}
+		if right == 0 {
+			return true
+		}
+		return left < right
+	})
+}
+
+// persistedSubagentOutcome reads the explicit terminal fields written by the
+// structured lifecycle. Pre-change transcripts have neither: completed jobs
+// can safely recover their result from the child's final assistant response;
+// failed jobs deliberately remain empty because a partial assistant reply is
+// not necessarily the failure error. The frontend retains any legacy parent
+// notification text when this fallback is empty.
+func persistedSubagentOutcome(transcript session.SubagentTranscript) (result, resultErr string) {
+	result, resultErr = transcript.Result, transcript.Error
+	if transcript.Status == "completed" && result == "" {
+		result = core.ExtractFinalAssistantText(transcript.Messages)
+	}
+	return result, resultErr
 }
 
 // liveToolInitData projects the bus registry of in-flight tool calls into the
@@ -590,54 +751,104 @@ func limitInitHistory(messages []core.AgentMessage) ([]core.AgentMessage, bool) 
 	if len(messages) == 0 {
 		return nil, false
 	}
-	selected := make([]core.AgentMessage, 0, min(len(messages), initHistoryMaxMessages))
+	start := boundedHistoryTailStart(messages)
+	// Prefer including the call that owns a leading result run, but never at
+	// the cost of dropping the newest transcript messages. Grow the range only
+	// when it still fits the mobile bound in full.
+	if aligned := historyPageStart(messages, len(messages), start); aligned < start && boundedHistoryTailStart(messages[aligned:]) == 0 {
+		start = aligned
+	}
+	return sanitizeHistoryRange(messages[start:]), start > 0
+}
+
+// limitHistoryDelta bounds a durable suffix without trying to make it a
+// standalone page: leading tool results can complete calls the client already
+// has. A truncated delta is rejected by buildInitData rather than sent.
+func limitHistoryDelta(messages []core.AgentMessage) ([]core.AgentMessage, bool) {
+	if len(messages) == 0 {
+		return nil, false
+	}
+	start := boundedHistoryTailStart(messages)
+	return sanitizeHistoryRange(messages[start:]), start > 0
+}
+
+// boundedHistoryTailStart returns the newest range that fits the aggregate
+// init bounds. Starting at the tail is essential: reconnect must never omit
+// the transcript's newest message.
+func boundedHistoryTailStart(messages []core.AgentMessage) int {
 	bytes := 0
-	truncated := false
 	firstIndex := len(messages)
 	for i := len(messages) - 1; i >= 0; i-- {
-		msg, size := sanitizeHistoryMessage(messages[i])
+		_, size := sanitizeHistoryMessage(messages[i])
 		if size > initHistoryMaxBytes {
-			msg = core.WrapMessage(core.Message{
-				Role:    messages[i].Role,
-				MsgID:   messages[i].MsgID,
-				Content: []core.Content{core.TextContent("[historic message too large to load on this device]")},
-			})
 			size = len("[historic message too large to load on this device]") + 128
 		}
-		if len(selected) >= initHistoryMaxMessages || (len(selected) > 0 && bytes+size > initHistoryMaxBytes) {
-			truncated = true
+		if len(messages)-i > initHistoryMaxMessages || (i < len(messages)-1 && bytes+size > initHistoryMaxBytes) {
 			break
 		}
-		selected = append(selected, msg)
 		firstIndex = i
 		bytes += size
 	}
-	if len(selected) < len(messages) {
-		truncated = true
+	return firstIndex
+}
+
+func sanitizeHistoryRange(messages []core.AgentMessage) []core.AgentMessage {
+	bounded := make([]core.AgentMessage, 0, len(messages))
+	for _, original := range messages {
+		msg, size := sanitizeHistoryMessage(original)
+		if size > initHistoryMaxBytes {
+			msg = core.WrapMessage(core.Message{Role: original.Role, MsgID: original.MsgID, Content: []core.Content{core.TextContent("[historic message too large to load on this device]")}})
+		}
+		bounded = append(bounded, msg)
 	}
-	for left, right := 0, len(selected)-1; left < right; left, right = left+1, right-1 {
-		selected[left], selected[right] = selected[right], selected[left]
+	return bounded
+}
+
+// historyPageStart aligns a region's lower boundary to the assistant that
+// immediately precedes a contiguous tool-result run. A malformed transcript
+// with an intervening message deliberately degrades to an unmatched row.
+func historyPageStart(messages []core.AgentMessage, end, start int) int {
+	for start > 0 && messages[start].Role == "tool_result" {
+		start--
 	}
-	// Do not begin a display tail with orphaned tool results: retain the
-	// immediately preceding assistant/tool-call message when possible.
-	if len(selected) > 0 && selected[0].Role == "tool_result" && firstIndex > 0 {
-		previous := messages[firstIndex-1]
-		if previous.Role == "assistant" {
-			projected, _ := sanitizeHistoryMessage(previous)
-			selected = append([]core.AgentMessage{projected}, selected...)
-		} else {
-			for len(selected) > 0 && selected[0].Role == "tool_result" {
-				selected = selected[1:]
-			}
+	if start == 0 {
+		for start < end && messages[start].Role == "tool_result" {
+			start++
 		}
 	}
-	return selected, truncated
+	return start
+}
+
+// boundedHistoryRange applies the same aggregate bounds as an init payload.
+// If a parallel tool-result run exceeds them, it keeps the assistant call and
+// as many leading results as fit. The omitted results deliberately appear as
+// pending calls in the existing frontend projection rather than as orphaned
+// result rows or an unbounded response.
+func boundedHistoryRange(messages []core.AgentMessage) []core.AgentMessage {
+	selected := make([]core.AgentMessage, 0, len(messages))
+	bytes := 0
+	for _, original := range messages {
+		msg, size := sanitizeHistoryMessage(original)
+		if size > initHistoryMaxBytes {
+			msg = core.WrapMessage(core.Message{Role: original.Role, MsgID: original.MsgID, Content: []core.Content{core.TextContent("[historic message too large to load on this device]")}})
+			_, size = sanitizeHistoryMessage(msg)
+		}
+		if len(selected) > 0 && (len(selected) >= initHistoryMaxMessages || bytes+size > initHistoryMaxBytes) {
+			break
+		}
+		selected = append(selected, msg)
+		bytes += size
+	}
+	return selected
 }
 
 func sanitizeHistoryMessage(msg core.AgentMessage) (core.AgentMessage, int) {
 	copyMsg := msg
 	copyMsg.Content = append([]core.Content(nil), msg.Content...)
-	copyMsg.Custom = boundedHistoryMap(copyMsg.Custom)
+	// Reconnect history crosses the same public WS boundary as live message
+	// events. Do not expose internal custom fields merely because this is an
+	// init snapshot.
+	copyMsg.Custom = projectWSMessageCustom(copyMsg.Custom)
 	for i := range copyMsg.Content {
 		content := &copyMsg.Content[i]
 		switch content.Type {

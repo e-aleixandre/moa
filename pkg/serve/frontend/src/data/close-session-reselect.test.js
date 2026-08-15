@@ -5,14 +5,7 @@
 // store (as `saved`), so the app-level effect that re-fills on a session-COUNT
 // change never fired — the mobile screen showed "No open sessions" while the
 // drawer, reading the store directly, still listed three active ones.
-import { test, expect, beforeEach, mock } from 'bun:test';
-
-const realApi = await import('./api.js');
-mock.module('./api.js', () => ({
-  ...realApi,
-  api: async () => ({}),
-  syncConnections: () => {},
-}));
+import { test, expect, beforeEach } from 'bun:test';
 
 const { store, setState } = await import('./store.js');
 const { createTile, initIds, allSessionIds } = await import('./tileTree.js');
@@ -25,7 +18,7 @@ function seed(isMobile) {
   initIds(tile);
   setState({
     sessions: {
-      s1: { id: 's1', state: 'idle', updated: now, subagents: {} },
+      s1: { id: 's1', state: 'idle', updated: now, readCandidateSeq: 42, subagents: {} },
       s2: { id: 's2', state: 'idle', updated: now - 1000, subagents: {} },
       s3: { id: 's3', state: 'idle', updated: now - 2000, subagents: {} },
     },
@@ -37,7 +30,10 @@ function seed(isMobile) {
   return tile;
 }
 
-beforeEach(() => setState({ sessions: {}, activeSession: null, isMobile: false }));
+beforeEach(() => {
+  globalThis.fetch = () => Promise.resolve(new Response('{}', { status: 200 }));
+  setState({ sessions: {}, activeSession: null, isMobile: false });
+});
 
 test('closing the active session on mobile selects the next open one', async () => {
   seed(true);
@@ -46,6 +42,7 @@ test('closing the active session on mobile selects the next open one', async () 
 
   const state = store.get();
   expect(state.sessions.s1.state).toBe('saved');
+  expect(state.sessions.s1.readCandidateSeq).toBe(0);
   // Not left on the empty state: the next most recent OPEN session takes over.
   expect(state.activeSession).toBe('s2');
 });

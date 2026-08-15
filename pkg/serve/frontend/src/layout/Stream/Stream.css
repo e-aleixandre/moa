@@ -11,7 +11,6 @@
   overflow-y: auto;
   overflow-x: hidden; /* horizontal scrolling is a block affordance (pre/table), never page-level */
   min-height: 0;
-  scroll-behavior: smooth;
 }
 
 .stream .stream-col {
@@ -85,10 +84,4 @@
 
 .stream .stream-new-btn:hover {
   border-color: var(--peach);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .stream .stream-scroll {
-    scroll-behavior: auto;
-  }
 }

@@ -1,9 +1,13 @@
 // ws-handlers.js — WebSocket event handlers and streaming delta batching
 
 import { triggerAttention, triggerDone, addToast } from './notifications.js';
+import { api, acknowledgeVisibleAttentionThrough } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
+import { finishHistoryHydration } from './history-hydration.js';
 import { newBuffers, applyNestedEvent } from './conversation-reducer.js';
 import { truncateText } from './util/format.js';
+import { attentionArrival } from './attention-arrivals.js';
+import { resetOlderHistory, seedOlderHistory } from './history-paging.js';
 
 // --- Message normalization ---
 
@@ -16,7 +20,8 @@ export function normalizeHistory(raw, liveSubagents = []) {
       resultMap[msg.tool_call_id] = msg;
     }
   }
-  for (const msg of raw) {
+  for (let index = 0; index < raw.length; index++) {
+    const msg = raw[index];
     if (msg.role === 'assistant') {
       const textParts = [];
       for (const c of (msg.content || [])) {
@@ -24,7 +29,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           textParts.push(c.text);
         } else if (c.type === 'tool_call') {
           if (textParts.length > 0) {
-            result.push({ role: 'assistant', _msg_id: msg.msg_id, content: [{ type: 'text', text: textParts.join('') }] });
+            result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, requested_model: msg.requested_model, model: msg.model, content: [{ type: 'text', text: textParts.join('') }] });
             textParts.length = 0;
           }
           const tr = resultMap[c.tool_call_id];
@@ -42,6 +47,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           }
           result.push({
             _type: 'tool_start',
+            _msg_id: msg.msg_id,
             tool_call_id: c.tool_call_id,
             tool_name: c.tool_name,
             args: c.arguments || {},
@@ -52,18 +58,20 @@ export function normalizeHistory(raw, liveSubagents = []) {
             // tool call ID is the provider's, so this is the only link from a
             // restored card to a subagent transcript on disk.
             subagentJobId: tr?.custom?.subagent_job_id || undefined,
+            timestamp: tr?.timestamp || msg.timestamp,
           });
         }
       }
       if (textParts.length > 0) {
-        result.push({ role: 'assistant', _msg_id: msg.msg_id, content: [{ type: 'text', text: textParts.join('') }] });
+        result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, requested_model: msg.requested_model, model: msg.model, content: [{ type: 'text', text: textParts.join('') }] });
       }
     } else if (msg.role === 'shell' || (msg.role === 'user' && msg.custom?.shell)) {
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
       const { command, output } = parseShellBody(text);
       result.push({
         _type: 'tool_start',
-        tool_call_id: 'shell_' + result.length,
+        _msg_id: msg.msg_id,
+        tool_call_id: 'shell_' + (msg.msg_id || index),
         tool_name: 'bash',
         args: { command },
         status: 'done',
@@ -73,9 +81,30 @@ export function normalizeHistory(raw, liveSubagents = []) {
       // Persistent goal-lifecycle marker (start / iteration verdict / end).
       // Rendered as a system line, matching the live goal event styling.
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
-      result.push({ _type: 'system', text });
+      result.push({ _type: 'system', _msg_id: msg.msg_id, text });
+    } else if (msg.role === 'session_event' && msg.custom?.type === 'compaction_marker') {
+      // Compaction entries are durable tree events, rather than conversational
+      // messages. Preserve their complete payload as a first-class normalized
+      // row so the stream projection can render the same card after init and
+      // when a command event includes the freshly persisted entry.
+      result.push({
+        _type: 'compaction_marker',
+        _msg_id: msg.msg_id,
+        timestamp: msg.timestamp,
+        summary: typeof msg.custom.summary === 'string' ? msg.custom.summary : '',
+        tokensBefore: Number.isFinite(msg.custom.tokens_before) ? msg.custom.tokens_before : 0,
+        readFiles: Array.isArray(msg.custom.read_files) ? msg.custom.read_files.filter(f => typeof f === 'string') : [],
+        modifiedFiles: Array.isArray(msg.custom.modified_files) ? msg.custom.modified_files.filter(f => typeof f === 'string') : [],
+      });
     } else if (msg.role === 'user') {
-      if (msg.custom?.source === 'subagent') {
+      if (msg.custom?.source === 'secret_batch') {
+        result.push({
+          _type: 'secret_batch',
+          _msg_id: msg.msg_id,
+          timestamp: msg.timestamp,
+          aliases: Array.isArray(msg.custom.secret_aliases) ? msg.custom.secret_aliases : [],
+        });
+      } else if (msg.custom?.source === 'subagent') {
         // When a real job ID is available, key the restored card
         // `subagent-<jobId>` so projectStream folds it into the turn's
         // delegation block by that ID. Unmatched legacy cards retain a
@@ -85,20 +114,24 @@ export function normalizeHistory(raw, liveSubagents = []) {
           legacySubagentJobIds.get(subagentTaskIdentity(msg.custom.subagent_task));
         result.push({
           _type: 'tool_start',
-          tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + result.length,
+            _msg_id: msg.msg_id,
+          tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + (msg.msg_id || index),
           tool_name: 'subagent',
           args: { task: msg.custom.subagent_task || '' },
           status: subagentRestoreStatus(msg.custom.subagent_status),
           accentIndex: Number.isInteger(msg.custom.subagent_accent_index)
             ? msg.custom.subagent_accent_index
             : undefined,
-          result: msg.custom.subagent_result || '',
+          result: msg.custom.subagent_status === 'completed' ? (msg.custom.subagent_result || '') : '',
+          error: msg.custom.subagent_status === 'failed' ? (msg.custom.subagent_result || '') : '',
+          timestamp: msg.timestamp,
         });
       } else if (msg.custom?.source === 'bash_job') {
         const bashText = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
         result.push({
           _type: 'tool_start',
-          tool_call_id: 'bash_complete_' + result.length,
+            _msg_id: msg.msg_id,
+          tool_call_id: 'bash_complete_' + (msg.msg_id || index),
           tool_name: 'bash',
           args: { command: msg.custom.bash_command || '' },
           status: (msg.custom.bash_status || '') === 'failed' ? 'error' : 'done',
@@ -113,7 +146,8 @@ export function normalizeHistory(raw, liveSubagents = []) {
           const jobId = subagent.jobId || legacySubagentJobIds.get(subagentTaskIdentity(subagent.task));
           result.push({
             _type: 'tool_start',
-            tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + result.length,
+            _msg_id: msg.msg_id,
+            tool_call_id: jobId ? 'subagent-' + jobId : 'subagent_' + (msg.msg_id || index),
             subagentJobId: jobId || undefined,
             tool_name: 'subagent',
             args: { task: subagent.task },
@@ -125,7 +159,8 @@ export function normalizeHistory(raw, liveSubagents = []) {
           if (bash) {
             result.push({
               _type: 'tool_start',
-              tool_call_id: 'bash_complete_' + result.length,
+            _msg_id: msg.msg_id,
+              tool_call_id: 'bash_complete_' + (msg.msg_id || index),
               tool_name: 'bash',
               args: { command: bash.command },
               status: bash.status === 'failed' ? 'error' : 'done',
@@ -142,6 +177,42 @@ export function normalizeHistory(raw, liveSubagents = []) {
     }
   }
   return result;
+}
+
+// A delta init is a suffix of the durable tree, not a replay stream. Append it
+// in place so the cached prefix keeps both its array and row identities; this
+// lets stream projection memoization retain the expensive already-rendered
+// history. Tool results are special: their matching assistant call may be in
+// that prefix, while normalizeHistory normally sees both at once.
+export function appendNormalizedHistoryDelta(prefix, raw, liveSubagents = []) {
+  const toolResults = new Map();
+  for (const msg of raw) {
+    if (msg?.role !== 'tool_result' || !msg.tool_call_id) continue;
+    const result = (msg.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+    toolResults.set(msg.tool_call_id, {
+      result,
+      status: msg.custom?.rejected === true ? 'rejected' : msg.is_error ? 'error' : 'done',
+      timestamp: msg.timestamp,
+    });
+  }
+  for (let i = 0; i < prefix.length; i++) {
+    const row = prefix[i];
+    const update = row?._type === 'tool_start' && toolResults.get(row.tool_call_id);
+    if (!update) continue;
+    prefix[i] = {
+      ...row, ...update,
+      note: extractToolNote(update.result, update.status === 'rejected'),
+      timestamp: update.timestamp || row.timestamp,
+    };
+  }
+
+  for (const row of normalizeHistory(raw, liveSubagents)) {
+    const duplicate = row._type === 'tool_start'
+      ? prefix.some(existing => existing?._type === 'tool_start' && existing.tool_call_id === row.tool_call_id)
+      : row._msg_id && prefix.some(existing => existing?._type !== 'tool_start' && existing._msg_id === row._msg_id);
+    if (!duplicate) prefix.push(row);
+  }
+  return prefix;
 }
 
 // Match an old terminal card to a snapshot job only when the task identifies
@@ -210,6 +281,7 @@ export function normalizeConversationProjection(raw) {
       role: item.role,
       _msg_id: item.id,
       content: item.text ? [{ type: 'text', text: item.text }] : [],
+      ...(item.source ? { custom: { source: item.source } } : {}),
     };
   });
 }
@@ -361,6 +433,68 @@ function flushDeltas() {
 
 // --- WS event handlers ---
 
+function parseAttentionNamespace(namespace) {
+  const separator = typeof namespace === 'string' ? namespace.lastIndexOf(':') : -1;
+  if (separator <= 0) return null;
+  const incarnationText = namespace.slice(separator + 1);
+  if (!/^\d+$/.test(incarnationText)) return null;
+  const incarnation = Number(incarnationText);
+  if (!Number.isSafeInteger(incarnation) || incarnation < 1) return null;
+  return { serverInstance: namespace.slice(0, separator), incarnation };
+}
+
+// An init is usable for the cursor only when its namespace is well-formed and
+// belongs to the runtime that sent it. This keeps malformed cursor data from
+// becoming either a read boundary or a future frame's namespace.
+export function attentionNamespaceFromInit(data) {
+  const namespace = data?.attention_namespace;
+  const parsed = parseAttentionNamespace(namespace);
+  if (!parsed || parsed.serverInstance !== data?.server_instance) return '';
+  return namespace;
+}
+
+// The namespace is an ordered runtime incarnation, not an opaque token: a
+// delayed roster response for A must not reset state after the client accepted
+// B. Different server processes are unordered, so only the roster may move
+// between them; a socket may advance incarnations within its own process.
+export function attentionNamespaceTransition(session, namespace, { allowCrossProcess = true } = {}) {
+  const current = session?.attentionNamespace || '';
+  const next = parseAttentionNamespace(namespace);
+  if (!next) return { accepted: false, reset: false, namespace: current };
+  if (!current) return { accepted: true, reset: false, namespace };
+  const previous = parseAttentionNamespace(current);
+  if (!previous) return { accepted: false, reset: false, namespace: current };
+  if (current === namespace) return { accepted: true, reset: false, namespace };
+  if (previous.serverInstance !== next.serverInstance) {
+    return allowCrossProcess
+      ? { accepted: true, reset: true, namespace }
+      : { accepted: false, reset: false, namespace: current };
+  }
+  if (next.incarnation > previous.incarnation) return { accepted: true, reset: true, namespace };
+  return { accepted: false, reset: false, namespace: current };
+}
+
+// Apply an accepted socket namespace transition before its init or frames use
+// the cursor. An init is fresher than the roster, but follows the same ordered
+// incarnation rule.
+export function adoptAttentionNamespace(id, namespace) {
+  const session = store.get().sessions[id];
+  const transition = attentionNamespaceTransition(session, namespace);
+  if (!transition.accepted) return transition;
+  if (transition.reset) {
+    updateSession(id, {
+      attentionNamespace: transition.namespace,
+      unseen: false,
+      unseenSeq: 0,
+      ackedThroughSeq: 0,
+      readCandidateSeq: 0,
+    });
+  } else if (session?.attentionNamespace !== transition.namespace) {
+    updateSession(id, { attentionNamespace: transition.namespace });
+  }
+  return transition;
+}
+
 // mergeSteers reconciles the authoritative server queue from an init snapshot
 // with any local optimistic chips. The snapshot (each item carrying its
 // client-minted ID) is authoritative. A local chip is kept only if it is still
@@ -406,7 +540,12 @@ export function handleWsInit(id, data) {
   // init snapshot lists live jobs only, so replacing the map outright would
   // delete the very transcript being read and bounce the reader back to the
   // parent — which is what happens on mobile every time the screen sleeps.
+  const namespace = attentionNamespaceFromInit(data);
+  const cursorTransition = namespace
+    ? attentionNamespaceTransition(store.get().sessions[id], namespace)
+    : { accepted: false, reset: false, namespace: store.get().sessions[id]?.attentionNamespace || '' };
   const prev = store.get().sessions[id] || {};
+  const serverInstance = data.server_instance || prev.serverInstance || '';
   const viewing = prev.viewingSubagent;
   const keptLocal = viewing && prev.subagents && prev.subagents[viewing]
     && !(data.subagents || []).some(sa => sa && sa.job_id === viewing)
@@ -421,8 +560,25 @@ export function handleWsInit(id, data) {
     && !(data.bash_jobs || []).some(bj => bj && bj.job_id === viewingBash)
     ? { [viewingBash]: prev.subagents[viewingBash] }
     : null;
+  // A delta token only proves the cached history when it names its durable
+  // tail. Finding it earlier in the array would retain local rows after the
+  // token (for example a compaction marker) that may no longer be on the
+  // server's current branch.
+  const canAppendDelta = !!data.delta_base && prev.messages?.at(-1)?._msg_id === data.delta_base;
+  let messages = canAppendDelta
+    ? withLiveToolsInPlace(appendNormalizedHistoryDelta(prev.messages, data.messages || [], data.subagents), data.live_tools)
+    : withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools);
+  // The live init snapshot cannot contain terminal jobs, so restore their
+  // persisted lifecycle cards separately. Upserting by job ID also upgrades
+  // old notification-derived cards to the real terminal result/error.
+  for (const outcome of chronologicalSubagentOutcomes(data.subagent_outcomes)) {
+    messages = upsertTerminalSubagentOutcome(messages, {
+      task: outcome.task || '', accentIndex: outcome.accent_index,
+    }, outcome);
+  }
   updateSession(id, {
-    messages: withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools),
+    serverInstance,
+    messages,
     historyTruncated: !!data.history_truncated,
     state: data.state || 'idle',
     contextPercent: data.context_percent ?? -1,
@@ -480,6 +636,22 @@ export function handleWsInit(id, data) {
     goalVerifying: !!data.goal_verifying,
     lastSeq: data.last_seq || 0,
   });
+  if (!data.delta_base) seedOlderHistory(id, data.history_before);
+  if (cursorTransition.accepted) {
+    updateSession(id, { readCandidateSeq: data.last_seq || 0 });
+  }
+  acknowledgeInitAttention(id, data, namespace);
+}
+
+// An authoritative init is the read boundary: the selected session showed the
+// snapshot this cursor belongs to. No presentation proof beyond that —
+// selection plus a confirmed init plus a foregrounded tab is the whole
+// contract.
+function acknowledgeInitAttention(id, data, namespace) {
+  finishHistoryHydration(id, { shown: true });
+  if (namespace && visibleSessionIds(store.get()).includes(id)) {
+    acknowledgeVisibleAttentionThrough(id, data.last_seq || 0, namespace).catch(() => {});
+  }
 }
 
 // withLiveTools appends the tool calls that were in flight when the snapshot
@@ -512,6 +684,12 @@ function withLiveTools(messages, liveTools) {
   });
   for (const t of byId.values()) out.push(liveToolRow(t));
   return out;
+}
+
+function withLiveToolsInPlace(messages, liveTools) {
+  const reconciled = withLiveTools(messages, liveTools);
+  if (reconciled !== messages) messages.splice(0, messages.length, ...reconciled);
+  return messages;
 }
 
 function liveToolRow(t) {
@@ -720,6 +898,13 @@ export function handleWsRunTokens(id, data) {
   updateSession(id, { runTokensUp: data.up || 0, runTokensDown: data.down || 0, runEpoch: nextRunEpoch(id) });
 }
 
+export function handleWsSubagentTitle(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess || !data?.job_id || !data?.title) return;
+  const existing = sess.subagents?.[data.job_id] || { jobId: data.job_id };
+  updateSession(id, { subagents: { ...sess.subagents, [data.job_id]: { ...existing, title: data.title } } });
+}
+
 export function handleWsToolCallStart(id, data) {
   const sess = store.get().sessions[id];
   if (!sess) return;
@@ -891,7 +1076,7 @@ export function handleWsToolEnd(id, data) {
   updateSession(id, { messages, runningTool: null });
 }
 
-export function handleWsStateChange(id, data) {
+export function handleWsStateChange(id, data, seq = 0) {
   const state = store.get();
   const prev = state.sessions[id];
   const wasRunning = prev && (prev.state === 'running' || prev.state === 'permission');
@@ -914,9 +1099,15 @@ export function handleWsStateChange(id, data) {
     // Keep pendingSteers: a steer queued during the last turn stays genuinely
     // queued (mostrar la verdad). It's cleared only by Steered or a snapshot.
     if (sess) updateSession(id, { streamingText: null, thinkingText: null, compacting: false, runStartedAtMs: null });
+    if (data.state === 'error' && seq > 0) {
+      markUnseen(id, seq, true);
+      acknowledgeVisibleLiveAttention(id, seq);
+    }
     if (wasRunning) {
       flashSession(id, data.state === 'error' ? 'error' : 'done');
-      markUnseen(id);
+      // A successful/cancelled terminal state is followed by run_end, which
+      // owns its authoritative occurrence. Only error state_change is itself
+      // the terminal attention event (its run_end reuses that same ID).
       // Surface the reason for an error end so it's visible even when the tile
       // isn't focused — parity with the TUI's run-end error block. A usage/quota
       // limit reads as an actionable "resets in X" line rather than a fault.
@@ -941,20 +1132,21 @@ export function handleWsStateChange(id, data) {
   }
 }
 
-export function handleWsAskUser(id, data) {
+export function handleWsAskUser(id, data, seq = 0) {
   updateSession(id, {
     pendingAsk: { id: data.id, questions: data.questions },
   });
+  markUnseen(id, seq, true);
+  acknowledgeVisibleLiveAttention(id, seq);
   const state = store.get();
-  const visible = visibleSessionIds(state);
-  if (!visible.includes(id)) {
+  if (!visibleSessionIds(state).includes(id)) {
     flashSession(id, 'attention');
     const sess = state.sessions[id];
     if (sess) triggerAttention(sess, 'ask_user', state.soundEnabled);
   }
 }
 
-export function handleWsPermissionRequest(id, data) {
+export function handleWsPermissionRequest(id, data, seq = 0) {
   updateSession(id, {
     state: 'permission',
     pendingPerm: {
@@ -964,29 +1156,45 @@ export function handleWsPermissionRequest(id, data) {
       allow_pattern: data.allow_pattern || '',
     },
   });
+  markUnseen(id, seq, true);
+  acknowledgeVisibleLiveAttention(id, seq);
   flashSession(id, 'attention');
   const state = store.get();
-  const visible = visibleSessionIds(state);
-  if (!visible.includes(id)) {
+  if (!visibleSessionIds(state).includes(id)) {
     const sess = state.sessions[id];
     if (sess) triggerAttention(sess, data.tool_name, state.soundEnabled);
   }
 }
 
-// Another client (or a run abort) resolved the permission — clear the modal
-// so it doesn't hang on this client. Guard by id so a newer request survives.
+// A terminal event rendered live in the selected session is itself the read:
+// the user was watching that run finish. It must POST /read rather than only
+// clearing local state, or the next roster poll surfaces a dot for a result
+// this client just showed.
+function acknowledgeVisibleLiveAttention(id, seq) {
+  const state = store.get();
+  if (!visibleSessionIds(state).includes(id)) return;
+  const session = state.sessions[id];
+  if (seq > 0 && session?.attentionNamespace) {
+    acknowledgeVisibleAttentionThrough(id, seq, session.attentionNamespace).catch(() => {});
+  }
+}
+
 export function handleWsPermissionResolved(id, data) {
-  const sess = store.get().sessions[id];
-  if (!sess || !sess.pendingPerm) return;
-  if (data && data.id && sess.pendingPerm.id !== data.id) return;
-  updateSession(id, { pendingPerm: null });
+  const perm = store.get().sessions[id]?.pendingPerm;
+  if (!perm) return;
+  if (data?.id && data.id !== perm.id) return;
+  updateSession(id, {
+    pendingPerm: null,
+  });
 }
 
 export function handleWsAskResolved(id, data) {
-  const sess = store.get().sessions[id];
-  if (!sess || !sess.pendingAsk) return;
-  if (data && data.id && sess.pendingAsk.id !== data.id) return;
-  updateSession(id, { pendingAsk: null });
+  const ask = store.get().sessions[id]?.pendingAsk;
+  if (!ask) return;
+  if (data?.id && data.id !== ask.id) return;
+  updateSession(id, {
+    pendingAsk: null,
+  });
 }
 
 function flashSession(id, type) {
@@ -999,13 +1207,21 @@ function flashSession(id, type) {
 // markUnseen flags a session as having unread activity when the user isn't
 // currently looking at it (not visible, or the tab is backgrounded), so a badge
 // can nudge them back. Cleared by afterVisibilityChange when it comes into view.
-function markUnseen(id) {
+function markUnseen(id, seq = 0, isNewOccurrence = false) {
   const state = store.get();
-  const visible = visibleSessionIds(state);
   const hidden = typeof document !== 'undefined' && document.hidden;
-  if (visible.includes(id) && !hidden) return;
   const sess = state.sessions[id];
-  if (sess && !sess.unseen) updateSession(id, { unseen: true });
+  if (!sess || seq === 0) return;
+  const visible = visibleSessionIds(state).includes(id) && !hidden;
+  const unseenSeq = Math.max(sess.unseenSeq || 0, seq);
+  if (visible) {
+    if (unseenSeq !== (sess.unseenSeq || 0)) updateSession(id, { unseenSeq });
+    return;
+  }
+  const arrival = (isNewOccurrence || !sess.unseen) ? (sess.attentionArrival || 0) + 1 : sess.attentionArrival || 0;
+  if (!sess.unseen || arrival !== sess.attentionArrival || unseenSeq !== (sess.unseenSeq || 0)) {
+    updateSession(id, { unseen: true, unseenSeq, attentionArrival: arrival });
+  }
 }
 
 // isSessionAway is true when the user isn't looking at a session (tab hidden or
@@ -1070,12 +1286,10 @@ export function handleWsSessionCost(id, data) {
   }
 }
 
-// handleWsRateLimit reflects a request's live rate-limit headers: a per-session
-// "on extra usage" flag, the per-session 5h/weekly utilizations (the only usage
-// source for OpenAI/Codex, which has no poller), plus — for Anthropic — an
-// instant refresh of the global plan-usage snapshot (account-wide windows) so
-// the widget doesn't lag the 60s poll. The extra-usage spend (€) stays sourced
-// from the poller.
+// handleWsRateLimit reflects a request's live rate-limit headers. OpenAI/Codex
+// has no usage endpoint, so its last observed account-wide windows are kept in
+// the global snapshot. Anthropic also patches its global plan snapshot here so
+// the widget does not lag the 60s poll; extra-usage spend (€) stays poller-owned.
 export function handleWsRateLimit(id, data) {
   // Per-session utilizations: always record when the header was present
   // (pct >= 0). This is what the OpenAI widget reads (no global poller), and it
@@ -1090,6 +1304,25 @@ export function handleWsRateLimit(id, data) {
   // must NOT overwrite the Anthropic snapshot in a mixed layout.
   const sess = store.get().sessions[id];
   const isAnthropic = !sess?.provider || sess.provider === 'anthropic';
+  if (sess?.provider === 'openai') {
+    const current = store.get().usage || { available: false, version: 2, providers: {}, provider_status: {} };
+    const prior = current.providers?.openai || {};
+    const openai = {
+      ...prior,
+      provider: 'openai',
+      auth_kind: 'oauth',
+      stability: 'response_headers',
+    };
+    if (data.five_hour_pct >= 0) openai.five_hour = { utilization: data.five_hour_pct };
+    if (data.seven_day_pct >= 0) openai.seven_day = { utilization: data.seven_day_pct };
+    setState({ usage: {
+      ...current,
+      available: true,
+      providers: { ...(current.providers || {}), openai },
+      provider_status: { ...(current.provider_status || {}), openai: { available: true, auth_kind: 'oauth' } },
+    } });
+    return;
+  }
   if (!isAnthropic) return;
 
   const u = store.get().usage;
@@ -1131,29 +1364,9 @@ export function handleWsSubagentComplete(id, data) {
     });
   }
 
-  // Add a subagent card to the chat (mirrors TUI's subagent block).
-  const sess = store.get().sessions[id];
-  if (!sess) return;
-  const messages = [...(sess.messages || [])];
-  const priorAccent = sess.subagents && sess.subagents[data.job_id]
-    ? sess.subagents[data.job_id].accentIndex
-    : undefined;
-  const completion = parseSubagentNotification(data.text || '');
-  messages.push({
-    _type: 'tool_start',
-    tool_call_id: `subagent-${data.job_id}`,
-    // A completion card outlives the live subagent map. Keep the canonical job
-    // identity on the durable card so its result can always open the persisted
-    // child conversation instead of guessing from a provider tool-call ID.
-    subagentJobId: data.job_id,
-    tool_name: 'subagent',
-    args: { task: data.task || completion?.task || '' },
-    // Preserve cancelled distinctly (⊘) from a real failure (✗).
-    status: data.status === 'completed' ? 'done' : data.status === 'cancelled' ? 'cancelled' : 'error',
-    accentIndex: Number.isInteger(priorAccent) ? priorAccent : undefined,
-    result: completion?.result || data.text || '',
-  });
-  updateSession(id, { messages });
+  // This legacy event is a model-delivery mechanism, not a UI lifecycle
+  // event. subagent_end owns the one terminal card even when subagent_wait
+  // consumed the model result and no completion notification was emitted.
   markUnseen(id);
 }
 
@@ -1293,7 +1506,16 @@ export function handleWsSubagentStart(id, data) {
     // the live event omits it, though the backend always sends it).
     accentIndex: data.accent_index ?? (existing && existing.accentIndex),
   };
-  updateSession(id, { subagents: subs });
+  // A start can race the parent's already-materialized tool row. Attach the
+  // durable job ID immediately so the launch acknowledgement never projects
+  // as a completed Result while the child is actually live.
+  const originToolCallId = data.origin_tool_call_id || existing?.originToolCallId;
+  const messages = originToolCallId
+    ? (sess.messages || []).map(m => m?._type === 'tool_start' && m.tool_call_id === originToolCallId
+      ? { ...m, subagentJobId: jobId }
+      : m)
+    : sess.messages;
+  updateSession(id, { subagents: subs, ...(originToolCallId ? { messages } : {}) });
 }
 
 // handleWsSubagentUsage applies the backend's live, cumulative token/cost
@@ -1347,8 +1569,17 @@ export function handleWsSubagentEnd(id, data) {
   const after = store.get().sessions[id];
   if (!after) return;
   const subs = { ...(after.subagents || {}) };
-  const existing = subs[jobId];
-  if (!existing) return;
+  const existing = subs[jobId] || {
+    jobId,
+    task: data.task || '',
+    model: '',
+    status: data.status || 'completed',
+    async: !!data.async,
+    messages: [],
+    streamingText: null,
+    thinkingText: null,
+    usage: null,
+  };
   subs[jobId] = {
     ...existing,
     status: data.status || 'completed',
@@ -1361,7 +1592,73 @@ export function handleWsSubagentEnd(id, data) {
     },
   };
   delete subagentBuffers[subBufKey(id, jobId)];
-  updateSession(id, { subagents: subs });
+  const terminal = subs[jobId];
+  updateSession(id, {
+    subagents: subs,
+    messages: upsertTerminalSubagentOutcome(after.messages, terminal, data),
+  });
+}
+
+// upsertTerminalSubagentOutcome is the UI's terminal lifecycle projection.
+// It is keyed by job ID rather than model-delivery ownership: a waiter-owned
+// result, a natural async notification, and a promoted sync child therefore
+// all produce exactly one card. A later replay/reconnect simply replaces it.
+export function upsertTerminalSubagentOutcome(messages, subagent, data) {
+  const jobId = data?.job_id;
+  if (!jobId) return messages || [];
+  const status = data.status || subagent?.status || 'completed';
+  const current = Array.isArray(messages) ? messages : [];
+  const key = `subagent-${jobId}`;
+  const index = current.findIndex(m => m?._type === 'tool_start' && m.tool_call_id === key);
+  const existing = index >= 0 ? current[index] : null;
+  // Old sidecar transcripts did not carry explicit result/error. Do not let
+  // their empty fields erase the historical parent notification that is the
+  // only available outcome for that job.
+  const legacyResult = existing?.result || '';
+  const legacyError = existing?.error || existing?.result || '';
+  const result = status === 'completed' ? (data.result || legacyResult) : '';
+  const error = status === 'failed' ? (data.error || legacyError) : '';
+  const row = {
+    _type: 'tool_start',
+    tool_call_id: `subagent-${jobId}`,
+    subagentJobId: jobId,
+    tool_name: 'subagent',
+    args: { task: data.task || subagent?.task || '' },
+    status: status === 'completed' ? 'done' : status === 'cancelled' ? 'cancelled' : 'error',
+    accentIndex: Number.isInteger(subagent?.accentIndex) ? subagent.accentIndex : undefined,
+    // A successful but empty child response has no Result action. Failed
+    // children expose their actual error as Error; cancelled has neither.
+    result,
+    error,
+    excerpt: !!data.excerpt,
+    finishedAtMs: data.finished_at_ms || null,
+  };
+  if (index < 0) return insertTerminalSubagentOutcome(current, row);
+  // A model-delivery notification may already have normalized to this card,
+  // but its parent-message timestamp is not the child's completion time. Move
+  // it to the authoritative finished_at_ms position rather than retaining a
+  // live/reload ordering discrepancy.
+  const withoutExisting = [...current.slice(0, index), ...current.slice(index + 1)];
+  return insertTerminalSubagentOutcome(withoutExisting, { ...existing, ...row });
+}
+
+// Restored terminal cards belong at their real completion point in the parent
+// history. Core message timestamps are seconds; lifecycle outcomes are millis.
+function insertTerminalSubagentOutcome(messages, row) {
+  const finished = row.finishedAtMs || 0;
+  if (!finished) return [...messages, row];
+  const index = messages.findIndex(message => {
+    const timestamp = messageTimelineMs(message);
+    return timestamp > 0 && timestamp > finished;
+  });
+  if (index < 0) return [...messages, row];
+  return [...messages.slice(0, index), row, ...messages.slice(index)];
+}
+
+function messageTimelineMs(message) {
+  if (!message) return 0;
+  if (message.finishedAtMs) return message.finishedAtMs;
+  return message.timestamp ? message.timestamp * 1000 : 0;
 }
 
 export function handleWsBashJobStart(id, data) {
@@ -1406,7 +1703,7 @@ export function handleWsBashJobEnd(id, data) {
   });
 }
 
-export function handleWsRunEnd(id) {
+export function handleWsRunEnd(id, data = {}, seq = 0) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
@@ -1439,6 +1736,11 @@ export function handleWsRunEnd(id) {
   } else {
     updateSession(id, { streamingText: null, thinkingText: null, runningTool: null, compacting: false });
   }
+  // The backend tracker marks only a non-cancelled, non-error RunEnded.
+  // Errors were already marked by their StateChanged(error) event.
+  if (data.cancelled || data.has_error || seq === 0) return;
+  markUnseen(id, seq, sess?.state !== 'error');
+  acknowledgeVisibleLiveAttention(id, seq);
 }
 
 // handleWsUserMessage renders a user prompt that started a new run on EVERY
@@ -1448,19 +1750,31 @@ export function handleWsRunEnd(id) {
 // optimistically under the same ID, and a reconnect snapshot may already
 // contain it too.
 export function handleWsUserMessage(id, data) {
-  const sess = store.get().sessions[id];
-  if (!sess || !data) return;
-  if (data.msg_id && sess.messages.some(m => m._msg_id === data.msg_id)) return;
+	const sess = store.get().sessions[id];
+	if (!sess || !data) return;
+	const messages = sess.messages || [];
+	if (data.msg_id && messages.some(m => m._msg_id === data.msg_id)) return;
+  const secretBatch = secretBatchFromMessage(data);
+  if (secretBatch) {
+    updateSession(id, { messages: [...messages, { _type: 'secret_batch', _msg_id: data.msg_id || undefined, aliases: secretBatch }] });
+    return;
+  }
   const content = Array.isArray(data.content) && data.content.length > 0
     ? data.content
     : [{ type: 'text', text: data.text || '' }];
-  const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, content };
-  updateSession(id, { messages: [...sess.messages, userMsg] });
+  // Completion notifications are still delivered to the parent model as user
+  // messages. The structured child lifecycle owns their presentation, though:
+  // while its live/terminal job exists, rendering this envelope as another
+  // user turn would duplicate the terminal outcome and diverge from reload.
+	if (isStructuredSubagentNotification(sess, data.text || '')) return;
+	const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, content, custom: data.custom };
+	updateSession(id, { messages: [...messages, userMsg] });
 }
 
 export function handleWsSteer(id, data) {
-  const sess = store.get().sessions[id];
-  if (!sess) return;
+	const sess = store.get().sessions[id];
+	if (!sess) return;
+	const messages = sess.messages || [];
   let steers = [...(sess.pendingSteers || [])];
   // Reconcile purely by authoritative ID. Steer IDs are minted client-side
   // before the chip appears, so every chip already has its final identity and
@@ -1473,19 +1787,57 @@ export function handleWsSteer(id, data) {
   // Dedup the injected user message by MsgID: a non-atomic reconnect snapshot
   // may already contain it (the agent appended it to state before the cut),
   // and this Steered event (seq > cut) would otherwise add it a second time.
-  const already = data.msg_id && sess.messages.some(m => m._msg_id === data.msg_id);
+	const already = data.msg_id && messages.some(m => m._msg_id === data.msg_id);
   const patch = { pendingSteers: steers.length > 0 ? steers : null };
   if (!already) {
+    const secretBatch = secretBatchFromMessage(data);
+    if (secretBatch) {
+      patch.messages = [...messages, { _type: 'secret_batch', _msg_id: data.msg_id || undefined, aliases: secretBatch }];
+      updateSession(id, patch);
+      return;
+    }
     // A steer with attachments arrives with its blocks (same projection as
     // user_message), so the delivered message shows its thumbnails live; a
     // text-only steer only carries text.
     const content = Array.isArray(data.content) && data.content.length > 0
       ? data.content
       : [{ type: 'text', text: data.text }];
-    const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content };
-    patch.messages = [...sess.messages, userMsg];
+    if (!isStructuredSubagentNotification(sess, data.text || '')) {
+		const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content, custom: data.custom };
+		patch.messages = [...messages, userMsg];
+    }
   }
   updateSession(id, patch);
+}
+
+function secretBatchFromMessage(data) {
+  if (data?.custom?.source === 'secret_batch') {
+    return Array.isArray(data.custom.secret_aliases) ? data.custom.secret_aliases : [];
+  }
+  return null;
+}
+
+function isStructuredSubagentNotification(session, text) {
+  const notification = parseSubagentNotification(text);
+  if (!notification?.jobId) return false;
+  if (session?.subagents?.[notification.jobId]) return true;
+  return (session?.messages || []).some(m =>
+    m?._type === 'tool_start' && m.tool_call_id === `subagent-${notification.jobId}`,
+  );
+}
+
+// Sidecar storage historically returns newest-first. Terminal cards are parent
+// timeline entries, so restore them from their actual completion anchors, not
+// reverse directory/list order. Unknown old timestamps stay after dated rows
+// in their stable source order.
+function chronologicalSubagentOutcomes(outcomes) {
+  return [...(outcomes || [])].sort((a, b) => {
+    const at = a?.finished_at_ms || 0;
+    const bt = b?.finished_at_ms || 0;
+    if (!at) return bt ? 1 : 0;
+    if (!bt) return -1;
+    return at - bt;
+  });
 }
 
 // handleWsSteersCanceled clears the shared queue on every client when the
@@ -1543,21 +1895,35 @@ export function handleWsPlanMode(id, data) {
 
 export function handleWsCommand(id, data) {
   if (data.command === 'clear') {
+    resetOlderHistory(id);
     updateSession(id, { messages: [], streamingText: null, thinkingText: null });
   } else if (data.command === 'compact') {
-    // Don't replace messages — display stays intact.
-    // Append a compaction marker for visual feedback.
+    // Don't replace the transcript with the compacted LLM context. When the
+    // command event includes the durable tree marker, append that exact row;
+    // otherwise wait for init/history hydration rather than fabricating a
+    // second, non-durable representation.
     const sess = store.get().sessions[id];
-    if (sess) {
-      const marker = { _type: 'system', text: '✂ Context compacted' };
-      updateSession(id, { messages: [...sess.messages, marker] });
+    const markers = normalizeHistory(data.messages || []).filter(row => row._type === 'compaction_marker');
+    if (sess && markers.length > 0) {
+      const known = new Set(sess.messages.map(message => message?._msg_id).filter(Boolean));
+      const fresh = markers.filter(marker => marker._msg_id && !known.has(marker._msg_id));
+      if (fresh.length > 0) updateSession(id, { messages: [...sess.messages, ...fresh] });
     }
   } else if (data.command === 'branch') {
     // Branch switched — reload messages from new branch path.
     if (data.messages) {
+      resetOlderHistory(id);
       updateSession(id, { messages: normalizeHistory(data.messages), historyTruncated: !!data.history_truncated });
     }
   }
+}
+
+function appendCompactionMarker(id, rawMarker) {
+  const sess = store.get().sessions[id];
+  if (!sess || !rawMarker) return;
+  const [marker] = normalizeHistory([rawMarker]);
+  if (!marker?._msg_id || sess.messages.some(message => message?._msg_id === marker._msg_id)) return;
+  updateSession(id, { messages: [...sess.messages, marker] });
 }
 
 /** Parse a subagent notification from a user message text (mirrors TUI's parseSubagentNotification). */
@@ -1705,6 +2071,7 @@ export function handleWsCompactionStart(id) {
   updateSession(id, { compacting: true });
 }
 
-export function handleWsCompactionEnd(id) {
+export function handleWsCompactionEnd(id, data) {
   updateSession(id, { compacting: false });
+  appendCompactionMarker(id, data?.marker);
 }

@@ -36,6 +36,22 @@ func newTestModel() appModel {
 	}
 }
 
+func TestMaybeAutoTitle_DisabledDoesNotStartBackgroundCall(t *testing.T) {
+	called := false
+	m := appModel{
+		s:                &state{},
+		session:          &session.Session{},
+		providerFactory:  func(core.Model) (core.Provider, error) { called = true; return staticProvider{}, nil },
+		autoTitleEnabled: false,
+	}
+	if cmd := m.maybeAutoTitle([]core.AgentMessage{core.WrapMessage(core.NewUserMessage("task"))}, nil); cmd != nil {
+		t.Fatal("disabled auto-title must not schedule a command")
+	}
+	if called {
+		t.Fatal("disabled auto-title must not construct a provider")
+	}
+}
+
 // newTestRuntime creates a SessionRuntime for tests.
 func newTestRuntime(t *testing.T, ag *agent.Agent) *bus.SessionRuntime {
 	t.Helper()
@@ -110,6 +126,20 @@ func TestNew_StartInSessionBrowserDisablesInput(t *testing.T) {
 	}
 	if m.input.enabled {
 		t.Fatal("input should be disabled while the browser is active")
+	}
+}
+
+func TestCleanupWaitsForSecretReaper(t *testing.T) {
+	m := newSwitchTestApp(t)
+	done := m.secretReaperDone
+	if done == nil {
+		t.Fatal("New did not start a secret reaper")
+	}
+	m.cleanup()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cleanup did not wait for the secret reaper")
 	}
 }
 
@@ -438,6 +468,49 @@ func TestPermissionRequest_ExitsTranscript(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("expected non-nil cmd for EnterAltScreen + waitForBusEvent")
+	}
+}
+
+func TestPromptResolutionDismissesOnlyTheMatchingTUIPrompt(t *testing.T) {
+	m := newTestModel()
+	m.permPrompt.ShowFromBus("perm-current", "bash", nil, "", "ask")
+	m.handleBusEvent(bus.PermissionResolved{ID: "perm-other"})
+	if !m.permPrompt.active {
+		t.Fatal("unrelated permission resolution dismissed the active prompt")
+	}
+
+	m.handleBusEvent(bus.PermissionResolved{ID: "perm-current"})
+	if m.permPrompt.active {
+		t.Fatal("web resolution did not dismiss the matching permission prompt")
+	}
+
+	m.askPrompt.ShowFromBus("ask-current", []bus.AskQuestion{{Text: "Continue?"}})
+	m.handleBusEvent(bus.AskUserResolved{ID: "ask-other"})
+	if !m.askPrompt.active {
+		t.Fatal("unrelated ask resolution dismissed the active prompt")
+	}
+	m.handleBusEvent(bus.AskUserResolved{ID: "ask-current"})
+	if m.askPrompt.active {
+		t.Fatal("automation resolution did not dismiss the matching ask prompt")
+	}
+
+	m.permPrompt.ShowFromBus("perm-terminal", "bash", nil, "", "ask")
+	m.handleBusEvent(bus.PermissionResolved{ID: "perm-terminal"})
+	if m.permPrompt.active {
+		t.Fatal("terminal resolution did not dismiss the matching permission prompt")
+	}
+}
+
+func TestPromptResolutionSystemEventsDismissTheTUIAsk(t *testing.T) {
+	for _, test := range []struct{ name string }{{name: "cancelled"}, {name: "aborted"}} {
+		t.Run(test.name, func(t *testing.T) {
+			m := newTestModel()
+			m.askPrompt.ShowFromBus("ask-current", []bus.AskQuestion{{Text: "Continue?"}})
+			m.handleBusEvent(bus.AskUserResolved{ID: "ask-current"})
+			if m.askPrompt.active {
+				t.Fatal("system resolution did not dismiss the matching ask prompt")
+			}
+		})
 	}
 }
 
@@ -2104,6 +2177,98 @@ func TestParseSubagentNotification(t *testing.T) {
 				t.Errorf("result = %q, want %q", result, tt.wantResult)
 			}
 		})
+	}
+}
+
+func TestSubagentNotificationJobID(t *testing.T) {
+	if got := subagentNotificationJobID("[subagent completed] Job sa-abc finished.\nTask: inspect\n\nResult:\nok"); got != "sa-abc" {
+		t.Fatalf("job ID = %q, want sa-abc", got)
+	}
+	if got := subagentNotificationJobID("a user message"); got != "" {
+		t.Fatalf("user message ID = %q, want empty", got)
+	}
+}
+
+func TestToolExecEnded_StructuredSubagentToolsDoNotRenderGenericTerminalRows(t *testing.T) {
+	t.Run("launch with child lifecycle", func(t *testing.T) {
+		m := newTestModel()
+		m.handleSubagentStarted(bus.SubagentStarted{JobID: "sa-launch", OriginToolCallID: "call", Async: true})
+		m.s.blocks = []messageBlock{{Type: "tool", ToolCallID: "call", ToolName: "subagent", Generating: true}}
+		m.handleBusEvent(bus.ToolExecEnded{ToolCallID: "call", ToolName: "subagent", Result: "model-facing result"})
+		if len(m.s.blocks) != 0 {
+			t.Fatalf("structured launch generic row survived: %+v", m.s.blocks)
+		}
+	})
+	t.Run("wait with terminal child lifecycle", func(t *testing.T) {
+		m := newTestModel()
+		m.handleSubagentStarted(bus.SubagentStarted{JobID: "sa-wait", Async: true})
+		m.handleSubagentEnded(bus.SubagentEnded{JobID: "sa-wait", Status: "completed", Result: "child result"})
+		m.s.blocks = []messageBlock{{Type: "tool", ToolCallID: "wait", ToolName: "subagent_wait", ToolArgs: map[string]any{"job_id": "sa-wait"}}}
+		m.handleBusEvent(bus.ToolExecEnded{ToolCallID: "wait", ToolName: "subagent_wait", Result: "model-facing result"})
+		if len(m.s.blocks) != 0 {
+			t.Fatalf("structured wait generic row survived: %+v", m.s.blocks)
+		}
+	})
+	t.Run("launch and wait failures remain visible", func(t *testing.T) {
+		for _, block := range []messageBlock{
+			{Type: "tool", ToolCallID: "bad-launch", ToolName: "subagent"},
+			{Type: "tool", ToolCallID: "bad-wait", ToolName: "subagent_wait", ToolArgs: map[string]any{"job_id": "unknown"}},
+		} {
+			m := newTestModel()
+			m.s.blocks = []messageBlock{block}
+			m.handleBusEvent(bus.ToolExecEnded{ToolCallID: block.ToolCallID, ToolName: block.ToolName, IsError: true, Result: "useful failure"})
+			if len(m.s.blocks) != 1 || !m.s.blocks[0].ToolDone || !m.s.blocks[0].IsError || m.s.blocks[0].ToolResult != "useful failure" {
+				t.Fatalf("failure row lost for %s: %+v", block.ToolName, m.s.blocks)
+			}
+		}
+	})
+	t.Run("timed-out wait remains visible while child is live", func(t *testing.T) {
+		m := newTestModel()
+		m.handleSubagentStarted(bus.SubagentStarted{JobID: "sa-live", Async: true})
+		m.s.blocks = []messageBlock{{Type: "tool", ToolCallID: "timeout", ToolName: "subagent_wait", ToolArgs: map[string]any{"job_id": "sa-live"}}}
+		m.handleBusEvent(bus.ToolExecEnded{ToolCallID: "timeout", ToolName: "subagent_wait", Result: "still running after timeout"})
+		if len(m.s.blocks) != 1 || !m.s.blocks[0].ToolDone || m.s.blocks[0].ToolResult != "still running after timeout" {
+			t.Fatalf("timed-out wait row lost: %+v", m.s.blocks)
+		}
+	})
+
+	m := newTestModel()
+	m.s.blocks = []messageBlock{{Type: "tool", ToolCallID: "read", ToolName: "read", Generating: true}}
+	m.handleBusEvent(bus.ToolExecEnded{ToolCallID: "read", ToolName: "read", Result: "file contents"})
+	if len(m.s.blocks) != 1 || !m.s.blocks[0].ToolDone || m.s.blocks[0].ToolResult != "file contents" {
+		t.Fatalf("ordinary tool terminal rendering changed: %+v", m.s.blocks)
+	}
+}
+
+func TestStructuredSubagentToolAndTerminalLifecycleProduceExactlyOneTUIOutcome(t *testing.T) {
+	m := newTestModel()
+	m.handleSubagentStarted(bus.SubagentStarted{JobID: "sa-1", OriginToolCallID: "call-1", Task: "inspect"})
+	m.handleSubagentEnded(bus.SubagentEnded{JobID: "sa-1", Task: "inspect", Status: "completed", Result: "child result"})
+	m.s.blocks = append(m.s.blocks, messageBlock{Type: "tool", ToolCallID: "call-1", ToolName: "subagent"})
+	m.handleBusEvent(bus.ToolExecEnded{ToolCallID: "call-1", ToolName: "subagent", Result: "parent tool acknowledgement"})
+	if len(m.s.blocks) != 1 || m.s.blocks[0].Type != "subagent" || m.s.blocks[0].SubagentResult != "child result" {
+		t.Fatalf("terminal outcome was not exact-one: %+v", m.s.blocks)
+	}
+}
+
+func TestRebuildHistoryPlacesStructuredAsyncOutcomeAtCompletionNotNotificationTime(t *testing.T) {
+	m := newTestModel()
+	finished := time.Unix(20, 0)
+	m.handleSubagentStarted(bus.SubagentStarted{JobID: "sa-async", Task: "async work", Async: true})
+	m.handleSubagentEnded(bus.SubagentEnded{JobID: "sa-async", Task: "async work", Status: "completed", Result: "structured result", FinishedAt: finished})
+
+	m.rebuildFromMessages([]core.AgentMessage{
+		{Message: core.Message{Role: "assistant", Timestamp: 10, Content: []core.Content{core.TextContent("before")}}},
+		{Message: core.Message{Role: "user", Timestamp: 30, Content: []core.Content{core.TextContent("model notification")}}, Custom: map[string]any{
+			"source": "subagent", "subagent_job_id": "sa-async", "subagent_task": "async work", "subagent_status": "completed", "subagent_result": "notification result",
+		}},
+		{Message: core.Message{Role: "assistant", Timestamp: 40, Content: []core.Content{core.TextContent("after")}}},
+	})
+	if len(m.s.blocks) != 3 {
+		t.Fatalf("blocks = %+v", m.s.blocks)
+	}
+	if m.s.blocks[0].Type != "assistant" || m.s.blocks[1].Type != "subagent" || m.s.blocks[1].SubagentResult != "structured result" || m.s.blocks[2].Type != "assistant" {
+		t.Fatalf("outcome chronology = %+v", m.s.blocks)
 	}
 }
 

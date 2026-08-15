@@ -35,6 +35,7 @@ function firstLine(str) {
 // There is no server-side codename today (SUBAGENT-VIEW-SPEC §9.3 [BACKEND]),
 // so we trim the first line; the full task lives in the task card below.
 function codenameOf(sub) {
+	if (sub.title) return String(sub.title);
   const short = firstLine(sub.task || '').trim();
   if (short) return short.length > 32 ? short.slice(0, 31) + '…' : short;
   return shortModel(sub.model) || sub.jobId || 'subagent';
@@ -73,8 +74,19 @@ function lastError(sub) {
 // resultChip returns a short result string for a completed subagent, or ''. No
 // structured result_chip exists yet (SUBAGENT-VIEW-SPEC §9.4 [BACKEND]); we use
 // the first line of the free-text result as a best-effort chip.
+function resultText(sub) {
+	if (sub.result) return String(sub.result);
+	for (let i = (sub.messages || []).length - 1; i >= 0; i--) {
+		const m = sub.messages[i];
+		if (m?.role !== 'assistant') continue;
+		const text = Array.isArray(m.content) ? m.content.filter((b) => b?.type === 'text').map((b) => b.text || '').join('') : m.text;
+		if (text) return String(text);
+	}
+	return '';
+}
+
 function resultChip(sub) {
-  const line = firstLine(sub.result || '').trim();
+	const line = firstLine(resultText(sub)).trim();
   if (!line) return '';
   return line.length > 60 ? line.slice(0, 59) + '…' : line;
 }
@@ -161,7 +173,10 @@ export function subagentView(session, jobId) {
 
   if (terminal) {
     if (outcome === 'failed') view.error = lastError(sub);
-    if (outcome === 'completed') view.resultChip = resultChip(sub);
+    if (outcome === 'completed') {
+      view.result = resultText(sub);
+      view.resultChip = resultChip(sub);
+    }
   } else {
     // Live now-line segments. The action (last in-flight tool / "Working")
     // comes from liveAgent when this subagent is in the live set; elapsed is

@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"math"
+	"reflect"
+	"testing"
+)
 
 func TestResolveModel_Alias(t *testing.T) {
 	m, ok := ResolveModel("sonnet")
@@ -21,6 +25,59 @@ func TestResolveModel_Grok(t *testing.T) {
 		if !ok || m.ID != "grok-4.5" || m.Provider != "xai" {
 			t.Errorf("ResolveModel(%q) = %+v, %v", spec, m, ok)
 		}
+	}
+}
+
+func TestGrokPricing(t *testing.T) {
+	model, ok := ResolveModel("grok")
+	if !ok || model.Pricing == nil {
+		t.Fatal("Grok pricing missing")
+	}
+	p := model.Pricing
+	if model.MaxInput != 500_000 || p.Input != 2 || p.Output != 6 || p.CacheRead != 0.3 {
+		t.Fatalf("base Grok definition = %+v, pricing = %+v", model, p)
+	}
+	if len(p.Tiers) != 1 || p.Tiers[0] != (PricingTier{Threshold: 200_000, Input: 4, Output: 12, CacheRead: 0.6}) {
+		t.Fatalf("Grok tiers = %+v", p.Tiers)
+	}
+	short := p.Cost(Usage{Input: 199_999, Output: 1_000})
+	long := p.Cost(Usage{Input: 200_000, Output: 1_000})
+	if math.Abs(short-0.405998) > 1e-12 || math.Abs(long-0.812) > 1e-12 {
+		t.Fatalf("Grok costs = short %v, long %v", short, long)
+	}
+}
+
+func TestGPT56TerraPricing(t *testing.T) {
+	model, ok := ResolveModel("terra")
+	if !ok || model.Pricing == nil {
+		t.Fatal("Terra pricing missing")
+	}
+	p := model.Pricing
+	if got, want := *p, (Pricing{Input: 2, Output: 12, CacheRead: 0.2, CacheWrite: 2.5, Tiers: []PricingTier{{Threshold: 272_000, Input: 4, Output: 18, CacheRead: 0.4, CacheWrite: 5}}}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Terra pricing = %+v, want %+v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 261_999, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), 0.542998; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("short Terra cost = %v, want %v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 262_000, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), 1.08; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("long Terra cost = %v, want %v", got, want)
+	}
+}
+
+func TestGPT56LunaPricing(t *testing.T) {
+	model, ok := ResolveModel("luna")
+	if !ok || model.Pricing == nil {
+		t.Fatal("Luna pricing missing")
+	}
+	p := model.Pricing
+	if got, want := *p, (Pricing{Input: .2, Output: 1.2, CacheRead: .02, CacheWrite: .25, Tiers: []PricingTier{{Threshold: 272_000, Input: .4, Output: 1.8, CacheRead: .04, CacheWrite: .5}}}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Luna pricing = %+v, want %+v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 261_999, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), .0542998; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("short Luna cost = %v, want %v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 262_000, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), .108; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("long Luna cost = %v, want %v", got, want)
 	}
 }
 
@@ -292,11 +349,8 @@ func TestPricing_Cost_Tiers(t *testing.T) {
 
 func TestKnownModels_PricingIsExplicit(t *testing.T) {
 	for id, m := range knownModels {
-		if m.Pricing == nil && id != "grok-4.5" {
+		if m.Pricing == nil {
 			t.Errorf("model %s has no pricing", id)
 		}
-	}
-	if knownModels["grok-4.5"].Pricing != nil {
-		t.Error("unverified xAI pricing must remain unavailable")
 	}
 }

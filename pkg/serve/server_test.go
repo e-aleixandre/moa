@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,44 @@ import (
 func newTestServer(t *testing.T) (*httptest.Server, *Manager, context.CancelFunc) {
 	t.Helper()
 	return newTestServerWithRoot(t, "/tmp")
+}
+
+func TestReadSessionCursorRejectsStaleNamespaceAndEmitsRosterFields(t *testing.T) {
+	ts, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer ts.Close()
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed := make(chan struct{})
+	mgr.afterAttentionMark = func() { close(processed) }
+	sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, ID: "cursor-roster", RunGen: 1})
+	<-processed
+
+	stale := apiReq(t, ts, http.MethodPost, "/api/sessions/"+sess.ID+"/read?through_seq="+strconv.FormatUint(sess.runtime.Bus.LastSeq(), 10)+"&attention_namespace=old", "")
+	stale.Body.Close() //nolint:errcheck
+	if stale.StatusCode != http.StatusConflict {
+		t.Fatalf("stale cursor namespace status = %d, want %d", stale.StatusCode, http.StatusConflict)
+	}
+	if !mgr.sessionInfo(sess).Unseen {
+		t.Fatal("stale cursor namespace cleared attention")
+	}
+
+	resp := apiReq(t, ts, http.MethodGet, "/api/sessions", "")
+	defer resp.Body.Close() //nolint:errcheck
+	var list []struct {
+		ID                 string `json:"id"`
+		UnseenSeq          uint64 `json:"unseen_seq"`
+		AttentionNamespace string `json:"attention_namespace"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != sess.ID || list[0].UnseenSeq != sess.runtime.Bus.LastSeq() || list[0].AttentionNamespace != sess.attentionNamespace {
+		t.Fatalf("roster cursor fields = %+v, want seq %d namespace %q", list, sess.runtime.Bus.LastSeq(), sess.attentionNamespace)
+	}
 }
 
 func TestAttentionEndpointReturnsCrossSessionBlockingPermissionMetadata(t *testing.T) {
@@ -433,6 +472,72 @@ func TestWebSocket_Init(t *testing.T) {
 	}
 	if data["state"] != "idle" {
 		t.Fatalf("expected state idle, got %v", data["state"])
+	}
+	if data["attention_namespace"] != sess.attentionNamespace {
+		t.Fatalf("init attention_namespace = %v, want %q", data["attention_namespace"], sess.attentionNamespace)
+	}
+}
+
+func TestWebSocket_InitDeltaSinceMessage(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	sess, err := mgr.CreateSession(CreateOpts{Title: "ws-delta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := sess.runtime.Context().Tree
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", MsgID: "base", Content: []core.Content{core.TextContent("base")}})})
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "assistant", MsgID: "suffix", Content: []core.Content{core.TextContent("suffix")}})})
+
+	ctx, wsCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer wsCancel()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws?since_msg=base", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var evt Event
+	if err := wsjson.Read(ctx, conn, &evt); err != nil {
+		t.Fatal(err)
+	}
+	data := evt.Data.(map[string]any)
+	if data["delta_base"] != "base" {
+		t.Fatalf("delta_base = %v, want base", data["delta_base"])
+	}
+	messages, ok := data["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages = %#v, want one suffix", data["messages"])
+	}
+}
+
+func TestWebSocketInit_EmptySessionBindsInitialZeroAndStaysConnected(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	defer srv.Close()
+	sess, err := mgr.CreateSession(CreateOpts{Title: "empty-ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancelWS := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelWS()
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	var evt Event
+	if err := wsjson.Read(ctx, conn, &evt); err != nil {
+		t.Fatal(err)
+	}
+	if evt.Type != "init" {
+		t.Fatalf("first event = %q, want init", evt.Type)
+	}
+	// Keep this otherwise idle socket open beyond that recovery turn; wsConns
+	// would drop to zero if the server had initiated the reconnect loop.
+	time.Sleep(150 * time.Millisecond)
+	if got := sess.wsConns.Load(); got != 1 {
+		t.Fatalf("empty-session websocket viewers = %d, want stable 1", got)
 	}
 }
 
@@ -1386,7 +1491,7 @@ func TestSubagentTranscriptEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close() //nolint:errcheck
-	if detail.Output != "private tool output" || detail.Truncated {
+	if detail.Output != "private tool output" {
 		t.Fatalf("read item detail = %+v, want read output only", detail)
 	}
 
@@ -1426,6 +1531,26 @@ func TestSafeSubagentConversationMessagesOmitsThinkingToolAssistantTurn(t *testi
 	item := projection.messages[0]
 	if item.Role != "tool" || item.ID != "tool:assistant:1" || item.Tool != "bash" || item.Status != "ok" {
 		t.Fatalf("tool item = %#v", item)
+	}
+}
+
+func TestSafeSubagentConversationMessagesKeepsParentTaskAndHidesSyntheticMessages(t *testing.T) {
+	projection := safeSubagentConversationMessages([]core.AgentMessage{
+		{Message: core.Message{MsgID: "parent-task", Role: "user", Content: []core.Content{core.TextContent("Implementa el modo element pack")}}, Custom: map[string]any{"source": "subagent_parent"}},
+		{Message: core.Message{MsgID: "marker", Role: "user", Content: []core.Content{core.TextContent("compacted")}}, Custom: map[string]any{"type": "compaction_marker"}},
+		{Message: core.Message{MsgID: "prepare", Role: "user", Content: []core.Content{core.TextContent("prepare compaction")}}, Custom: map[string]any{"source": "prepare_compact", "internal": true}},
+		{Message: core.Message{MsgID: "notification", Role: "user", Content: []core.Content{core.TextContent("subagent notification")}}, Custom: map[string]any{"source": "subagent"}},
+		{Message: core.Message{MsgID: "answer", Role: "assistant", Content: []core.Content{core.TextContent("hecho")}}},
+	})
+
+	if len(projection.messages) != 2 {
+		t.Fatalf("visible messages = %#v, want parent task and answer", projection.messages)
+	}
+	if got := projection.messages[0]; got.ID != "parent-task" || got.Role != "user" || got.Source != "subagent_parent" {
+		t.Fatalf("parent task = %#v, want provenance-preserving parent task", got)
+	}
+	if got := projection.messages[1]; got.ID != "answer" || got.Role != "assistant" {
+		t.Fatalf("answer = %#v, want assistant answer", got)
 	}
 }
 

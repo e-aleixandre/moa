@@ -244,11 +244,14 @@ func TestResumeSession_SchedulesMissingBrief(t *testing.T) {
 	p := &briefTestProvider{}
 	mgr := NewManager(ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return p, nil },
-		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
-		WorkspaceRoot:   root,
-		MoaCfg:          core.MoaConfig{DisableSandbox: true},
-		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
-		SessionBaseDir:  sessionBase,
+		AuxiliaryModelResolver: func(spec string) (core.Model, bool, error) {
+			return core.ResolveAuxiliaryModel(spec, func(string) bool { return true })
+		},
+		DefaultModel:   core.Model{ID: "test-model", Provider: "mock"},
+		WorkspaceRoot:  root,
+		MoaCfg:         core.MoaConfig{DisableSandbox: true, SessionBriefModel: "haiku"},
+		ConfigLoader:   isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true, SessionBriefModel: "haiku"}),
+		SessionBaseDir: sessionBase,
 	})
 	t.Cleanup(mgr.Shutdown)
 
@@ -264,9 +267,17 @@ func TestResumeSession_SchedulesMissingBrief(t *testing.T) {
 	}
 }
 
-func TestSessionBrief_UnknownProviderDoesNotGenerate(t *testing.T) {
+func TestSessionBrief_OffDoesNotGenerate(t *testing.T) {
 	p := &briefTestProvider{}
-	mgr, sess := newBriefTestSession(t, p, "google/gemini-test")
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	mgr := newTestManagerWithConfig(t, ctx, p, t.TempDir(), core.MoaConfig{
+		DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off",
+	})
+	sess, err := mgr.CreateSession(CreateOpts{Title: "brief disabled", Model: "google/gemini-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, _, _, err := mgr.Send(sess.ID, "repair the session brief", nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -276,6 +287,6 @@ func TestSessionBrief_UnknownProviderDoesNotGenerate(t *testing.T) {
 		t.Fatalf("provider calls = %d, want only main session call", got)
 	}
 	if info := sess.info(); !info.BriefUpdated.IsZero() || info.BriefAttempting != "" || info.BriefProgress != "" {
-		t.Fatalf("unknown-provider session got brief: %+v", info)
+		t.Fatalf("brief-disabled session got brief: %+v", info)
 	}
 }

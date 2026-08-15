@@ -912,6 +912,130 @@ func TestSubagentInheritedDeadlineNotReportedAsChildTimeout(t *testing.T) {
 	}
 }
 
+func TestSubagentGenericFailureSurfacesResumableMessage(t *testing.T) {
+	const cause = "stream: openai: unknown error"
+	provider := newMockProvider(func(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 1)
+		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("openai: unknown error")}
+		close(ch)
+		return ch, nil
+	})
+	var (
+		notifiedMu   sync.Mutex
+		notifiedTail string
+	)
+	sub, statusTool, _ := newSubagentTools(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(core.Model) (core.Provider, error) { return provider, nil },
+		TranscriptLoader: func(string) (ResumedTranscript, error) {
+			return ResumedTranscript{Messages: []core.AgentMessage{core.WrapMessage(core.NewUserMessage("saved task"))}}, nil
+		},
+		OnAsyncComplete: func(_ string, _ string, _ string, resultTail string, _ bool) {
+			notifiedMu.Lock()
+			notifiedTail = resultTail
+			notifiedMu.Unlock()
+		},
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	waitFor(t, time.Second, func() bool {
+		return strings.Contains(textOf(mustStatus(t, statusTool, jobID)), "Status: failed")
+	})
+	got := textOf(mustStatus(t, statusTool, jobID))
+	if !strings.Contains(got, cause) {
+		t.Errorf("failure cause was lost: %q", got)
+	}
+	if !strings.Contains(got, fmt.Sprintf("resume=%q", jobID)) {
+		t.Errorf("resume guidance missing: %q", got)
+	}
+	waitFor(t, time.Second, func() bool {
+		notifiedMu.Lock()
+		defer notifiedMu.Unlock()
+		return notifiedTail != ""
+	})
+	notifiedMu.Lock()
+	defer notifiedMu.Unlock()
+	if !strings.Contains(notifiedTail, cause) || !strings.Contains(notifiedTail, fmt.Sprintf("resume=%q", jobID)) {
+		t.Errorf("async notification lost enriched failure: %q", notifiedTail)
+	}
+}
+
+func TestSubagentGenericFailureIncludesPartialOutput(t *testing.T) {
+	const partial = "finished the first half"
+	provider := newMockProvider(
+		func(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
+			ch := make(chan core.AssistantEvent, 2)
+			msg := core.Message{Role: "assistant", Content: []core.Content{
+				core.TextContent(partial),
+				core.ToolCallContent("noop-1", "noop", map[string]any{}),
+			}, StopReason: "tool_use"}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+			close(ch)
+			return ch, nil
+		},
+		func(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
+			ch := make(chan core.AssistantEvent, 1)
+			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("network dropped")}
+			close(ch)
+			return ch, nil
+		},
+	)
+	noop := core.Tool{Name: "noop", Execute: func(context.Context, map[string]any, func(core.Result)) (core.Result, error) {
+		return core.TextResult("ok"), nil
+	}}
+	sub, statusTool, _ := newSubagentTools(t, Config{
+		DefaultModel:     core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory:  func(core.Model) (core.Provider, error) { return provider, nil },
+		TranscriptLoader: func(string) (ResumedTranscript, error) { return ResumedTranscript{}, nil },
+	}, noop)
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it", "async": true, "tools": []any{"noop"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	waitFor(t, time.Second, func() bool {
+		return strings.Contains(textOf(mustStatus(t, statusTool, jobID)), "Status: failed")
+	})
+	got := textOf(mustStatus(t, statusTool, jobID))
+	if !strings.Contains(got, "Partial output before the failure:\n"+partial) {
+		t.Errorf("partial output missing: %q", got)
+	}
+}
+
+func TestSubagentGenericFailureWithoutTranscriptLoaderDoesNotOfferResume(t *testing.T) {
+	provider := newMockProvider(func(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
+		return nil, fmt.Errorf("stream unavailable")
+	})
+	sub, _, _ := newSubagentTools(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(core.Model) (core.Provider, error) { return provider, nil },
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := textOf(res); strings.Contains(got, "resume=") {
+		t.Errorf("resume must not be suggested without a transcript loader: %q", got)
+	}
+}
+
+func TestCanResumeFailureRequiresReplayableTranscript(t *testing.T) {
+	cfg := Config{TranscriptLoader: func(string) (ResumedTranscript, error) { return ResumedTranscript{}, nil }}
+	if canResumeFailure(cfg, "sa-empty", nil) {
+		t.Fatal("must not offer resume for an empty transcript")
+	}
+	if !canResumeFailure(cfg, "sa-task", []core.AgentMessage{core.WrapMessage(core.NewUserMessage("task"))}) {
+		t.Fatal("the original delegated task makes the transcript replayable")
+	}
+}
+
 // A genuine subagent_cancel racing the child's own deadline must be classified
 // as cancelled, never as a timeout.
 func TestSubagentCancelWinsOverTimeout(t *testing.T) {
@@ -1249,6 +1373,49 @@ func TestNewChildAgentAppliesGuardrails(t *testing.T) {
 	// here; guardrail values are covered by resolveChildGuardrails above).
 }
 
+func TestRunChildMarksFreshAndResumedParentTasks(t *testing.T) {
+	newChild := func(provider core.Provider) *agent.Agent {
+		t.Helper()
+		child, err := newChildAgent(
+			Config{}, provider, core.Model{ID: "m", Provider: "mock"},
+			"medium", 0, "sys", core.NewRegistry(),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return child
+	}
+	assertParentTask := func(t *testing.T, messages []core.AgentMessage, task string) {
+		t.Helper()
+		for _, message := range messages {
+			if message.Role == "user" && textOf(core.Result{Content: message.Content}) == task {
+				if got := message.Custom["source"]; got != "subagent_parent" {
+					t.Fatalf("task %q source = %#v, want subagent_parent", task, got)
+				}
+				return
+			}
+		}
+		t.Fatalf("parent task %q not found in %#v", task, messages)
+	}
+
+	t.Run("fresh", func(t *testing.T) {
+		child := newChild(newMockProvider(textResponse("done")))
+		if _, err := runChild(context.Background(), child, "initial task", nil); err != nil {
+			t.Fatal(err)
+		}
+		assertParentTask(t, child.Messages(), "initial task")
+	})
+
+	t.Run("resume", func(t *testing.T) {
+		child := newChild(newMockProvider(textResponse("done")))
+		seed := []core.AgentMessage{core.WrapMessage(core.NewUserMessage("previous task"))}
+		if _, err := runChild(context.Background(), child, "resumed task", seed); err != nil {
+			t.Fatal(err)
+		}
+		assertParentTask(t, child.Messages(), "resumed task")
+	})
+}
+
 func TestAsyncSubagentConcurrencyCap(t *testing.T) {
 	started := make(chan struct{}, 10)
 	release := make(chan struct{})
@@ -1557,18 +1724,18 @@ func TestTimeoutMessage(t *testing.T) {
 	}
 }
 
-func TestTimeoutPartialExcludesMarker(t *testing.T) {
+func TestPartialOutputExcludesMarker(t *testing.T) {
 	// The synthetic "(run timed out)" marker must not be surfaced as real output.
 	marker := []core.AgentMessage{
 		core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent(agent.MarkerRunTimedOut)}}),
 	}
-	if got := timeoutPartial(marker); got != "" {
+	if got := partialOutput(marker); got != "" {
 		t.Errorf("marker-only should yield empty partial, got %q", got)
 	}
 	real := []core.AgentMessage{
 		core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent("real work")}}),
 	}
-	if got := timeoutPartial(real); got != "real work" {
+	if got := partialOutput(real); got != "real work" {
 		t.Errorf("real text should pass through, got %q", got)
 	}
 }
@@ -1594,8 +1761,8 @@ func TestResolveResumeWithoutLoaderFails(t *testing.T) {
 }
 
 func TestResolveResumeUnknownJobFails(t *testing.T) {
-	cfg := Config{TranscriptLoader: func(string) ([]core.AgentMessage, error) {
-		return nil, fmt.Errorf("not found")
+	cfg := Config{TranscriptLoader: func(string) (ResumedTranscript, error) {
+		return ResumedTranscript{}, fmt.Errorf("not found")
 	}}
 	_, errRes := resolveResume(cfg, map[string]any{"resume": "nope"})
 	if errRes == nil {
@@ -1604,12 +1771,12 @@ func TestResolveResumeUnknownJobFails(t *testing.T) {
 }
 
 func TestResolveResumeAbsentReturnsNil(t *testing.T) {
-	msgs, errRes := resolveResume(Config{}, map[string]any{})
+	resumed, errRes := resolveResume(Config{}, map[string]any{})
 	if errRes != nil {
 		t.Fatalf("unexpected error: %s", textOf(*errRes))
 	}
-	if msgs != nil {
-		t.Fatalf("expected nil seed messages, got %d", len(msgs))
+	if resumed.Messages != nil {
+		t.Fatalf("expected nil seed messages, got %d", len(resumed.Messages))
 	}
 }
 
@@ -1621,12 +1788,12 @@ func TestResolveResumeStripsThinking(t *testing.T) {
 			core.TextContent("earlier answer"),
 		}}},
 	}
-	cfg := Config{TranscriptLoader: func(string) ([]core.AgentMessage, error) { return prior, nil }}
-	msgs, errRes := resolveResume(cfg, map[string]any{"resume": "job-1"})
+	cfg := Config{TranscriptLoader: func(string) (ResumedTranscript, error) { return ResumedTranscript{Messages: prior}, nil }}
+	resumed, errRes := resolveResume(cfg, map[string]any{"resume": "job-1"})
 	if errRes != nil {
 		t.Fatalf("unexpected error: %s", textOf(*errRes))
 	}
-	for _, m := range msgs {
+	for _, m := range resumed.Messages {
 		for _, c := range m.Content {
 			if c.Type == "thinking" {
 				t.Fatal("thinking block was not stripped from resumed transcript")
@@ -1749,11 +1916,11 @@ func TestSubagentResumeReplaysHistory(t *testing.T) {
 	sub, _, _ := newSubagentTools(t, Config{
 		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
 		ProviderFactory: func(core.Model) (core.Provider, error) { return provider, nil },
-		TranscriptLoader: func(jobID string) ([]core.AgentMessage, error) {
+		TranscriptLoader: func(jobID string) (ResumedTranscript, error) {
 			if jobID != "job-1" {
-				return nil, fmt.Errorf("unknown job %q", jobID)
+				return ResumedTranscript{}, fmt.Errorf("unknown job %q", jobID)
 			}
-			return prior, nil
+			return ResumedTranscript{Messages: prior}, nil
 		},
 	})
 
@@ -2118,6 +2285,12 @@ func TestSubagentWaitSuppressesAsyncComplete(t *testing.T) {
 
 	var mu sync.Mutex
 	completeN := 0
+	type terminalOutcome struct {
+		status string
+		result string
+		err    string
+	}
+	ended := make(chan terminalOutcome, 1)
 	reg := core.NewRegistry()
 	cfg := Config{
 		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
@@ -2127,6 +2300,9 @@ func TestSubagentWaitSuppressesAsyncComplete(t *testing.T) {
 			mu.Lock()
 			completeN++
 			mu.Unlock()
+		},
+		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) {
+			ended <- terminalOutcome{status: status, result: result, err: resultErr}
 		},
 	}
 	cfg.ParentTools = reg
@@ -2167,6 +2343,14 @@ func TestSubagentWaitSuppressesAsyncComplete(t *testing.T) {
 	if !claimed {
 		t.Fatal("blocked waiter did not claim terminal result")
 	}
+	select {
+	case outcome := <-ended:
+		if outcome.status != statusCompleted || outcome.result != "child result" || outcome.err != "" {
+			t.Fatalf("terminal outcome = %+v, want completed child result", outcome)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("OnChildEnd did not publish waiter-owned terminal outcome")
+	}
 }
 
 // TestSubagentWaitNoWaiterStillNotifies verifies OnAsyncComplete DOES fire
@@ -2178,6 +2362,10 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 
 	var mu sync.Mutex
 	completeN := 0
+	ended := make(chan struct {
+		status string
+		result string
+	}, 1)
 	reg := core.NewRegistry()
 	cfg := Config{
 		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
@@ -2187,6 +2375,12 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 			mu.Lock()
 			completeN++
 			mu.Unlock()
+		},
+		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) {
+			ended <- struct {
+				status string
+				result string
+			}{status: status, result: result}
 		},
 	}
 	cfg.ParentTools = reg
@@ -2226,6 +2420,14 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 	mu.Unlock()
 	if gotCompleteN != 1 {
 		t.Fatalf("OnAsyncComplete called %d times after fast-path wait, want 1", gotCompleteN)
+	}
+	select {
+	case outcome := <-ended:
+		if outcome.status != statusCompleted || outcome.result != "child result" {
+			t.Fatalf("terminal outcome = %+v, want completed child result", outcome)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("OnChildEnd did not publish natural async terminal outcome")
 	}
 }
 
@@ -2370,10 +2572,10 @@ func TestSubagentTurnLimitSurfacesResumableMessage(t *testing.T) {
 		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
 		AppCtx:          context.Background(),
 		ChildMaxTurns:   2,
-		TranscriptLoader: func(string) ([]core.AgentMessage, error) {
-			return []core.AgentMessage{core.WrapMessage(core.Message{
+		TranscriptLoader: func(string) (ResumedTranscript, error) {
+			return ResumedTranscript{Messages: []core.AgentMessage{core.WrapMessage(core.Message{
 				Role: "user", Content: []core.Content{core.TextContent("prior")},
-			})}, nil
+			})}}, nil
 		},
 	})
 
@@ -2397,4 +2599,368 @@ func TestSubagentTurnLimitSurfacesResumableMessage(t *testing.T) {
 	if strings.Contains(got, "max turns exceeded") {
 		t.Errorf("raw sentinel should not reach the parent: %q", got)
 	}
+}
+
+// resumeIdentity runs one subagent call and reports the model/thinking the
+// child actually ran under, as seen by the provider factory and by the job
+// identity published to the UI/cost path.
+type resumeIdentity struct {
+	factoryModel  string
+	startedModel  string
+	startedThink  string
+	requestThink  string
+	resultText    string
+	executeErrRes bool
+}
+
+func runResumeCase(t *testing.T, parent core.Model, parentThinking string, loaded ResumedTranscript, params map[string]any) resumeIdentity {
+	t.Helper()
+	var got resumeIdentity
+	provider := newMockProvider(func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		got.requestThink = req.Options.ThinkingLevel
+		return textResponse("done")(ctx, req)
+	})
+	cfg := Config{
+		DefaultModel:         parent,
+		CurrentThinkingLevel: func() string { return parentThinking },
+		ProviderFactory: func(m core.Model) (core.Provider, error) {
+			got.factoryModel = m.ID
+			return provider, nil
+		},
+		OnChildStart: func(_ string, _ string, model string, thinking string, _ string, _ bool, _ time.Time, _ int) {
+			got.startedModel = model
+			got.startedThink = thinking
+		},
+	}
+	if loaded.Messages != nil || loaded.Model != "" || loaded.Thinking != "" {
+		cfg.TranscriptLoader = func(string) (ResumedTranscript, error) { return loaded, nil }
+	}
+	sub, _, _ := newSubagentTools(t, cfg)
+	res, err := sub.Execute(context.Background(), params, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.resultText = textOf(res)
+	got.executeErrRes = res.IsError
+	return got
+}
+
+func priorTranscript() []core.AgentMessage {
+	return []core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("first task")),
+		{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("first answer")}}},
+	}
+}
+
+func TestResumeWithoutModelKeepsTranscriptModel(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "medium",
+		ResumedTranscript{Messages: priorTranscript(), Model: "gpt-5.6-sol"},
+		map[string]any{"task": "continue", "resume": "job-1"})
+	if got.factoryModel != "gpt-5.6-sol" {
+		t.Fatalf("resume must keep the transcript's model, got %q", got.factoryModel)
+	}
+	if got.startedModel != "gpt-5.6-sol" {
+		t.Fatalf("job/UI/cost identity must reflect the effective model, got %q", got.startedModel)
+	}
+}
+
+func TestResumeWithExplicitModelWins(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "medium",
+		ResumedTranscript{Messages: priorTranscript(), Model: "gpt-5.6-sol"},
+		map[string]any{"task": "continue", "resume": "job-1", "model": "claude-fable-5"})
+	if got.factoryModel != "claude-fable-5" {
+		t.Fatalf("explicit model must win over the transcript's, got %q", got.factoryModel)
+	}
+	if got.startedModel != "claude-fable-5" {
+		t.Fatalf("job identity must use the explicit model, got %q", got.startedModel)
+	}
+}
+
+func TestResumeWithoutThinkingKeepsTranscriptThinking(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "medium",
+		ResumedTranscript{Messages: priorTranscript(), Model: "gpt-5.6-sol", Thinking: "xhigh"},
+		map[string]any{"task": "continue", "resume": "job-1"})
+	if got.startedThink != "xhigh" {
+		t.Fatalf("resume must keep the transcript's thinking level, got %q", got.startedThink)
+	}
+	if got.requestThink != "xhigh" {
+		t.Fatalf("child request must run at the transcript's thinking level, got %q", got.requestThink)
+	}
+}
+
+func TestResumeWithExplicitThinkingWins(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "medium",
+		ResumedTranscript{Messages: priorTranscript(), Model: "gpt-5.6-sol", Thinking: "xhigh"},
+		map[string]any{"task": "continue", "resume": "job-1", "thinking": "low"})
+	if got.startedThink != "low" {
+		t.Fatalf("explicit thinking must win over the transcript's, got %q", got.startedThink)
+	}
+}
+
+func TestNewSubagentStillInheritsParentModelAndThinking(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "high",
+		ResumedTranscript{},
+		map[string]any{"task": "fresh"})
+	if got.factoryModel != "parent-model" {
+		t.Fatalf("a new subagent must inherit the parent's model, got %q", got.factoryModel)
+	}
+	if got.startedThink != "high" {
+		t.Fatalf("a new subagent must inherit the parent's thinking level, got %q", got.startedThink)
+	}
+}
+
+func TestResumeOldTranscriptWithoutIdentityInheritsParent(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "high",
+		ResumedTranscript{Messages: priorTranscript()},
+		map[string]any{"task": "continue", "resume": "job-1"})
+	if got.executeErrRes {
+		t.Fatalf("an old transcript must not break resume: %q", got.resultText)
+	}
+	if got.factoryModel != "parent-model" {
+		t.Fatalf("expected fallback to the parent's model, got %q", got.factoryModel)
+	}
+	if got.startedThink != "high" {
+		t.Fatalf("expected fallback to the parent's thinking level, got %q", got.startedThink)
+	}
+}
+
+func TestResumeUnknownStoredModelFallsBackToParent(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "medium",
+		ResumedTranscript{Messages: priorTranscript(), Model: "retired-model-9000"},
+		map[string]any{"task": "continue", "resume": "job-1"})
+	if got.executeErrRes {
+		t.Fatalf("a retired stored model must not break resume: %q", got.resultText)
+	}
+	if got.factoryModel != "parent-model" {
+		t.Fatalf("expected fallback to the parent's model, got %q", got.factoryModel)
+	}
+}
+
+func TestResumeInvalidStoredThinkingFallsBackToParent(t *testing.T) {
+	got := runResumeCase(t,
+		core.Model{ID: "parent-model", Provider: "mock"}, "medium",
+		ResumedTranscript{Messages: priorTranscript(), Model: "gpt-5.6-sol", Thinking: "ultra"},
+		map[string]any{"task": "continue", "resume": "job-1"})
+	if got.executeErrRes {
+		t.Fatalf("an invalid stored thinking level must not break resume: %q", got.resultText)
+	}
+	if got.startedThink != "medium" {
+		t.Fatalf("expected fallback to the parent's thinking level, got %q", got.startedThink)
+	}
+}
+
+// newSubagentSteerTool builds the launch + steer pair over one shared store, so
+// a test can start a job and then steer the very same child.
+func newSubagentSteerTool(t *testing.T, cfg Config) (core.Tool, core.Tool, core.Tool) {
+	t.Helper()
+	sub, status, _, jobs := newSubagentToolsWithStore(t, cfg)
+	return sub, newSubagentSteer(jobs), status
+}
+
+// The point of the tool: the message must land in the CHILD's context, not
+// merely be accepted. The second provider call is the child's next step, so
+// that is where the steered text has to show up.
+func TestSubagentSteerReachesTheChildContext(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	seen := make(chan []core.Message, 1)
+	provider := newMockProvider(
+		gateResponse(started, release, "first step"),
+		func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+			select {
+			case seen <- req.Messages:
+			default:
+			}
+			return textResponse("done")(ctx, req)
+		},
+	)
+	sub, steer, _ := newSubagentSteerTool(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "long", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	<-started
+
+	got, err := steer.Execute(context.Background(), map[string]any{"job_id": jobID, "message": "use the other file"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.IsError {
+		t.Fatalf("steering a running child must succeed: %q", textOf(got))
+	}
+	close(release)
+
+	select {
+	case msgs := <-seen:
+		var joined strings.Builder
+		for _, m := range msgs {
+			for _, c := range m.Content {
+				if c.Type == "text" {
+					joined.WriteString(c.Text)
+				}
+			}
+		}
+		if !strings.Contains(joined.String(), "use the other file") {
+			t.Fatalf("the steered message never reached the child: %q", joined.String())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the child never took a second step")
+	}
+}
+
+func TestSubagentSteerRejectsUnknownAndEmpty(t *testing.T) {
+	_, steer, _ := newSubagentSteerTool(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return newMockProvider(), nil },
+		AppCtx:          context.Background(),
+	})
+
+	res, err := steer.Execute(context.Background(), map[string]any{"job_id": "sa-nope", "message": "hi"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(textOf(res), "unknown job ID") {
+		t.Fatalf("expected an unknown-job error, got %q", textOf(res))
+	}
+
+	res, err = steer.Execute(context.Background(), map[string]any{"job_id": "sa-nope", "message": "   "}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(textOf(res), "message is required") {
+		t.Fatalf("expected an empty-message error, got %q", textOf(res))
+	}
+}
+
+// Steering a job that already finished is the likely mistake, and it must say
+// so rather than silently succeed.
+func TestSubagentSteerRefusesAFinishedJob(t *testing.T) {
+	provider := newMockProvider(textResponse("child done"))
+	sub, steer, status := newSubagentSteerTool(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "quick", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	waitFor(t, 3*time.Second, func() bool {
+		return strings.Contains(textOf(mustStatus(t, status, jobID)), "Status: completed")
+	})
+
+	got, err := steer.Execute(context.Background(), map[string]any{"job_id": jobID, "message": "too late"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsError || !strings.Contains(textOf(got), "not running") {
+		t.Fatalf("expected a not-running refusal, got %q", textOf(got))
+	}
+}
+
+// A child must not be able to redirect a sibling: subagents are leaf workers,
+// not orchestrators, so subagent_steer belongs to the excluded set like the
+// rest of the subagent family.
+func TestBuildChildRegistryExcludesSubagentSteer(t *testing.T) {
+	parent := core.NewRegistry()
+	_ = parent.Register(core.Tool{Name: "read"})
+	_ = parent.Register(core.Tool{Name: "subagent_steer"})
+
+	reg, errRes := buildChildRegistry(parent, nil)
+	if errRes != nil {
+		t.Fatalf("unexpected error: %s", textOf(*errRes))
+	}
+	if _, ok := reg.Get("subagent_steer"); ok {
+		t.Fatal("a child must not inherit subagent_steer")
+	}
+
+	// Asking for it by name is skipped too, not honoured.
+	reg2, errRes2 := buildChildRegistry(parent, map[string]any{"tools": []any{"read", "subagent_steer"}})
+	if errRes2 != nil {
+		t.Fatalf("unexpected error: %s", textOf(*errRes2))
+	}
+	if _, ok := reg2.Get("subagent_steer"); ok {
+		t.Fatal("an explicit request must not smuggle subagent_steer into a child")
+	}
+}
+
+// Jobs.Steer is the route the web UI uses. A finished job keeps both its entry
+// (until the TTL) and its childAgent, and an Agent only refuses while aborting
+// — so without an explicit status check this returned true and the composer
+// cleared the user's text for a message nobody would ever read.
+func TestJobsSteerRefusesAFinishedJob(t *testing.T) {
+	provider := newMockProvider(textResponse("child done"))
+	sub, status, _, store := newSubagentToolsWithStore(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+	})
+	jobs := &Jobs{store: store}
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "quick", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	waitFor(t, 3*time.Second, func() bool {
+		return strings.Contains(textOf(mustStatus(t, status, jobID)), "Status: completed")
+	})
+
+	// The job is still tracked (its result is readable) and still holds its
+	// child agent — which is exactly why this used to be accepted.
+	if j, ok := store.get(jobID); !ok || j.getChildAgent() == nil {
+		t.Fatal("precondition: a finished job should still be tracked with its child")
+	}
+	if jobs.Steer(jobID, "too late") {
+		t.Fatal("steering a finished job must not report the message as queued")
+	}
+}
+
+func TestJobsSteerRefusesAnUnknownJob(t *testing.T) {
+	_, _, _, store := newSubagentToolsWithStore(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return newMockProvider(), nil },
+		AppCtx:          context.Background(),
+	})
+	if (&Jobs{store: store}).Steer("sa-nope", "hello") {
+		t.Fatal("steering an unknown job must return false")
+	}
+}
+
+// The live path still has to work: a running child accepts through Jobs.Steer.
+func TestJobsSteerAcceptsARunningJob(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := newMockProvider(gateResponse(started, release, "done"))
+	sub, _, _, store := newSubagentToolsWithStore(t, Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "long", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := jobIDFromResult(t, res)
+	<-started
+	if !(&Jobs{store: store}).Steer(jobID, "adjust course") {
+		t.Fatal("a running child must accept a steer")
+	}
+	close(release)
 }

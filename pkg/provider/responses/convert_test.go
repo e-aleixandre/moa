@@ -36,6 +36,9 @@ func TestBuildRequestBody_Basic(t *testing.T) {
 	if parsed["instructions"] != "You are helpful." {
 		t.Fatalf("instructions: %v", parsed["instructions"])
 	}
+	if _, present := parsed["tool_choice"]; present {
+		t.Fatalf("tool_choice must be omitted without tools, got %v", parsed["tool_choice"])
+	}
 	if got := int(parsed["max_output_tokens"].(float64)); got != core.DefaultMaxOutputTokens {
 		t.Fatalf("max_output_tokens: got %d, want %d", got, core.DefaultMaxOutputTokens)
 	}
@@ -130,6 +133,9 @@ func TestBuildRequestBody_WithTools(t *testing.T) {
 	}
 	if tool["name"] != "bash" {
 		t.Fatalf("tool name: %v", tool["name"])
+	}
+	if got := parsed["tool_choice"]; got != "auto" {
+		t.Fatalf("tool_choice: got %v, want auto", got)
 	}
 }
 

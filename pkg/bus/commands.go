@@ -78,6 +78,9 @@ type SteerAgent struct {
 	SessionID string
 	ID        string
 	Text      string
+	// Custom is retained on the eventual user message when this steer is
+	// delivered from the queue rail.
+	Custom map[string]any
 	// Content, when non-nil, carries the full payload of the steer (text plus
 	// image/content blocks) so a mid-run message can include attachments. When
 	// nil the steer is plain text carried in Text.

@@ -9,6 +9,7 @@ import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { NowLine } from "../NowLine/NowLine.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
+import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings, UsagePanel, Sheet, GlobalSettings } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
@@ -20,7 +21,7 @@ import { navigate } from "../../data/router.js";
 import { openPalette } from "../../data/palette.js";
 import { setGroupByProject } from "../../data/drawer.js";
 import { registerOverlay } from "../../data/overlays.js";
-import { shortModel, shortPath, modelCodename, sessionTitle } from "../../data/util/format.js";
+import { shortModel, shortPath, modelCodename, sessionDisplayDotState, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { activityPhase } from "../../data/util/activity.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
@@ -67,7 +68,7 @@ function spineSessions(sessions) {
       id: s.id,
       cwd: s.cwd || "", updated: s.updated || 0,
       title: sessionTitle(s),
-      state: s.state || "idle",
+      state: sessionDisplayDotState(s),
       unseen: !!s.unseen,
       meta: relAge(s.updated),
       origin: s.origin || undefined,
@@ -193,7 +194,9 @@ export function ConversationScreen({ version }) {
 
   // --- Rewind timeline sheet (ChatHead/MobileHeader's Rewind button) ---
   const [rewindOpen, setRewindOpen] = useState(false);
+  const [secretAliases, setSecretAliases] = useState(null);
   useEffect(() => { setRewindOpen(false); }, [activeId]);
+  useEffect(() => { setSecretAliases(null); }, [activeId]);
 
   // --- Usage panel popover (StatusStrip's cost segment) — level 2 telemetry
   // (TELEMETRY-SETTINGS-REDESIGN §2). Anchored to the strip, not the head, but
@@ -420,7 +423,7 @@ export function ConversationScreen({ version }) {
                 permissions, MCP, tokens). flex:none, so it pushes the stream up
                 instead of overlaying the composer. */}
             <NowLine session={session} nowMs={nowMs} />
-            <Composer key={session.id} sessionId={session.id} session={session} />
+            <Composer key={session.id} sessionId={session.id} session={session} onSecret={setSecretAliases} />
             <div class="status-strip-anchor" ref={usageAnchorRef}>
               <StatusStrip
                 ctxPercent={session.contextPercent}
@@ -476,6 +479,16 @@ export function ConversationScreen({ version }) {
       >
         <GlobalSettings soundEnabled={state.soundEnabled} version={version} />
       </Sheet>
+      {session && (
+        <Sheet open={secretAliases !== null} onClose={() => setSecretAliases(null)} title="Send secrets">
+          <SecretBatch
+            open={secretAliases !== null}
+            sessionId={session.id}
+            aliases={secretAliases || []}
+            onClose={() => setSecretAliases(null)}
+          />
+        </Sheet>
+      )}
     </div>
   );
 }

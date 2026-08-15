@@ -2,7 +2,7 @@ import "./StateDot.css";
 
 // StateDot — session state dot. Base atom reused by chips, mobile strips,
 // headers, etc.
-const STATES = ["idle", "running", "permission", "error", "saved"];
+const STATES = ["idle", "running", "permission", "error", "saved", "unseen"];
 
 // Default 8px = --space-2. Passed as a number to allow arbitrary sizes in
 // context, but the default value comes from the spacing scale.

@@ -24,7 +24,7 @@ import {
  * UI flags (recording / transcribing / locked / showSlideHint / supported) and
  * toggleFromShortcut for the ⌘. / Alt+. keyboard shortcut.
  */
-export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
+export function useVoiceGesture({ onTranscript, onError, onSend, sendOnPointerCancel = false } = {}) {
   // useVoice's error callback is routed through a ref so we can (a) reset the
   // gesture machine to idle — a getUserMedia failure from the shortcut/iOS path
   // would otherwise leave the button stuck visually in `locked` — and (b)
@@ -34,7 +34,7 @@ export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
   const forwardVoiceError = useCallback((msg) => voiceErrorRef.current?.(msg), []);
   const {
     recording, transcribing, start: startVoice, stop: stopVoice,
-    cancel: cancelVoice, supported,
+    cancel: cancelVoice, completion, supported,
   } = useVoice(onTranscript, forwardVoiceError);
 
   // The reducer state lives in a ref (read fresh inside pointer handlers without
@@ -48,6 +48,8 @@ export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
   // closing over a stale sessionId/attachments closure at first render).
   const onSendRef = useRef(onSend);
   onSendRef.current = onSend;
+  const sendOnPointerCancelRef = useRef(sendOnPointerCancel);
+  sendOnPointerCancelRef.current = sendOnPointerCancel;
 
   // Active-hold bookkeeping (mirrors InputBar.holdRef): the HOLD_MS timer, the
   // captured pointerId + element, and the window fallback listeners we register
@@ -58,22 +60,6 @@ export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
   // activation (a bug the old InputBar had).
   const pointerDrivenRef = useRef(false);
   const clickSuppressTimer = useRef(null);
-  // After a "stop" action the reducer sits in its inert `transcribing` phase
-  // until TRANSCRIBE_DONE. Normally that fires on useVoice's transcribing
-  // true→false edge — but useVoice DISCARDS too-short (<400ms) / empty
-  // recordings without ever flipping `transcribing` true, so that edge never
-  // comes and the reducer would be stuck (button unresponsive). This fallback
-  // timer, armed on every "stop" and cleared once a real transcription starts,
-  // returns the reducer to idle in the discard case.
-  const stopFallbackTimer = useRef(null);
-
-  const clearStopFallback = useCallback(() => {
-    if (stopFallbackTimer.current != null) {
-      clearTimeout(stopFallbackTimer.current);
-      stopFallbackTimer.current = null;
-    }
-  }, []);
-
   const clearClickSuppressTimer = useCallback(() => {
     if (clickSuppressTimer.current != null) {
       clearTimeout(clickSuppressTimer.current);
@@ -106,13 +92,6 @@ export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
         case "start": startVoice(); break;
         case "stop":
           stopVoice();
-          // Arm the discard fallback: if no real transcription kicks in shortly
-          // (recording was too short / empty), leave the inert phase anyway.
-          clearStopFallback();
-          stopFallbackTimer.current = setTimeout(() => {
-            stopFallbackTimer.current = null;
-            if (isTranscribingPhase(stateRef.current)) dispatch(ev.transcribeDone());
-          }, 600);
           break;
         case "send": onSendRef.current?.(); break;
         case "lock": /* visual only — derived from state */ break;
@@ -120,7 +99,7 @@ export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
         default: break;
       }
     }
-  }, [startVoice, stopVoice, clearStopFallback]);
+  }, [startVoice, stopVoice]);
 
   // Bind the voice-error handler now that dispatch exists: a recorder error
   // (mic denied, no device, failed getUserMedia — reachable from the shortcut
@@ -129,10 +108,9 @@ export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
   // message to the caller. Kept in a ref so useVoice's callback identity is
   // stable.
   const handleVoiceError = useCallback((msg) => {
-    clearStopFallback();
     if (stateRef.current.phase !== "idle") dispatch(ev.reset());
     onError?.(msg);
-  }, [dispatch, clearStopFallback, onError]);
+  }, [dispatch, onError]);
   voiceErrorRef.current = handleVoiceError;
 
   const onPointerDown = useCallback((e) => {
@@ -197,14 +175,17 @@ export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
   }, [dispatch, endHold, clearClickSuppressTimer]);
 
   const onPointerCancel = useCallback(() => {
-    // No synthetic click follows a pointercancel — clear the suppression flag
-    // now so a later legitimate activation isn't swallowed. The reducer decides
-    // whether to promote a mid-recording cancel to locked (the iOS path); we
-    // only route the event.
-    pointerDrivenRef.current = false;
+    // Usually pointercancel has no click, but WebKit may still emit one after
+    // the fallback send below. Treat it like pointerup: consume that trailing
+    // click while a fresh pointerdown clears this guard for the next gesture.
     clearClickSuppressTimer();
+    pointerDrivenRef.current = true;
+    clickSuppressTimer.current = setTimeout(() => {
+      pointerDrivenRef.current = false;
+      clickSuppressTimer.current = null;
+    }, 700);
     endHold();
-    dispatch(ev.pointerCancel());
+    dispatch(ev.pointerCancel(sendOnPointerCancelRef.current));
   }, [dispatch, endHold, clearClickSuppressTimer]);
 
   const onClick = useCallback(() => {
@@ -224,36 +205,31 @@ export function useVoiceGesture({ onTranscript, onError, onSend } = {}) {
   // toggleFromShortcut — the ⌘. / Alt+. keyboard shortcut. Routes a single
   // pointer-free SHORTCUT_TOGGLE through the reducer: from idle it starts a
   // hands-free recording (parked in `locked`), and while recording it stops +
-  // transcribes. All the decisions (and the stop-fallback arming via the "stop"
-  // action) go through the normal dispatch path — no out-of-band state.
+  // transcribes. All decisions and effects go through the normal dispatch path
+  // — no out-of-band state.
   const toggleFromShortcut = useCallback(() => {
     dispatch(ev.shortcutToggle());
   }, [dispatch]);
 
-  // When a transcription resolves (transcribing true → false) tell the reducer
-  // to leave its inert "transcribing" phase and return to idle. Guarded by a
-  // prev-value ref so it never fires on the first render.
-  const prevTranscribingRef = useRef(transcribing);
+  // Every capture attempt reports completion exactly once, including recordings
+  // discarded for being short/empty. This is deterministic, unlike guessing
+  // from a timeout whether a transcription ever started.
+  const previousCompletionRef = useRef(completion);
   useEffect(() => {
-    const prev = prevTranscribingRef.current;
-    prevTranscribingRef.current = transcribing;
-    // A real transcription started: cancel the discard fallback so it can't
-    // prematurely yank the reducer out of the (legitimate) transcribing phase.
-    if (transcribing) clearStopFallback();
-    if (prev && !transcribing && isTranscribingPhase(stateRef.current)) {
+    if (previousCompletionRef.current !== completion && isTranscribingPhase(stateRef.current)) {
       dispatch(ev.transcribeDone());
     }
-  }, [transcribing, dispatch, clearStopFallback]);
+    previousCompletionRef.current = completion;
+  }, [completion, dispatch]);
 
   // Cleanup on unmount: tear down the timer + window listeners and discard any
   // active/pending recording, then reset the reducer.
   useEffect(() => () => {
     endHold();
     clearClickSuppressTimer();
-    clearStopFallback();
     cancelVoice();
     stateRef.current = INITIAL;
-  }, [endHold, clearClickSuppressTimer, clearStopFallback, cancelVoice]);
+  }, [endHold, clearClickSuppressTimer, cancelVoice]);
 
   return {
     handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onClick, onContextMenu },

@@ -71,6 +71,21 @@ func compactionEntry(summary, firstKeptID string, tokensBefore int) Entry {
 	}
 }
 
+func TestAllMessagesCompactionMarkerHasDurableIdentityAndPayload(t *testing.T) {
+	tree := NewTree()
+	id := tree.Append(Entry{Type: EntryCompaction, Compaction: CompactionData{
+		Summary: "summary", TokensBefore: 42000,
+		ReadFiles: []string{"read.go"}, ModifiedFiles: []string{"write.go"},
+	}})
+	messages := tree.AllMessages()
+	if len(messages) != 1 || messages[0].MsgID != id {
+		t.Fatalf("marker ID = %#v, want %q", messages, id)
+	}
+	if messages[0].Custom["summary"] != "summary" || messages[0].Custom["tokens_before"] != 42000 {
+		t.Fatalf("marker custom = %#v", messages[0].Custom)
+	}
+}
+
 func configEntry(model string) Entry {
 	return Entry{
 		Type:   EntryConfig,
@@ -431,8 +446,8 @@ func TestBuildContext_MultipleCompactions(t *testing.T) {
 func TestBuildContext_FiltersNonMessages(t *testing.T) {
 	tree := NewTree()
 	tree.Append(userEntry("hello"))
-	tree.Append(configEntry("claude-4"))   // should be filtered
-	tree.Append(labelEntry("bookmark"))    // should be filtered
+	tree.Append(configEntry("claude-4")) // should be filtered
+	tree.Append(labelEntry("bookmark"))  // should be filtered
 	tree.Append(assistantEntry("hi"))
 
 	msgs, epoch := tree.BuildContext()
@@ -549,6 +564,52 @@ func TestAllMessages_EmptyTree(t *testing.T) {
 	msgs := tree.AllMessages()
 	if msgs != nil {
 		t.Fatal("empty tree should return nil")
+	}
+}
+
+func TestDisplayMessagesSince_CurrentPathSuffix(t *testing.T) {
+	tree := NewTree()
+	base := tree.Append(userEntry("first"))
+	tree.Append(assistantEntry("reply"))
+	tree.Append(userEntry("second"))
+
+	got, valid := tree.DisplayMessagesSince(base)
+	if !valid {
+		t.Fatal("current-path entry should be a valid resume token")
+	}
+	if len(got) != 2 || got[0].Content[0].Text != "reply" || got[1].Content[0].Text != "second" {
+		t.Fatalf("suffix = %#v", got)
+	}
+
+	empty, valid := tree.DisplayMessagesSince(tree.LeafID())
+	if !valid || len(empty) != 0 {
+		t.Fatalf("leaf suffix = %#v, valid=%v; want valid empty suffix", empty, valid)
+	}
+}
+
+func TestDisplayMessagesSince_OffPathAndClearAreInvalid(t *testing.T) {
+	tree := NewTree()
+	root := tree.Append(userEntry("root"))
+	offPath := tree.Append(assistantEntry("old branch"))
+	if err := tree.Branch(root); err != nil {
+		t.Fatal(err)
+	}
+	tree.Append(assistantEntry("current branch"))
+	if _, valid := tree.DisplayMessagesSince(offPath); valid {
+		t.Fatal("branched-away entry must not be a valid resume token")
+	}
+	tree.Clear()
+	if _, valid := tree.DisplayMessagesSince(root); valid {
+		t.Fatal("cleared entry must not be a valid resume token")
+	}
+}
+
+func TestDisplayMessagesSince_IncludesCompactionMarker(t *testing.T) {
+	tree := NewTree()
+	base := tree.Append(userEntry("old"))
+	tree.Append(compactionEntry("summary", base, 4000))
+	if got, valid := tree.DisplayMessagesSince(base); !valid || len(got) != 1 || got[0].Role != "session_event" {
+		t.Fatalf("compaction suffix = %#v, valid=%v", got, valid)
 	}
 }
 

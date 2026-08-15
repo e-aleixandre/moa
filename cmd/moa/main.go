@@ -315,9 +315,10 @@ func main() {
 				JobID: jobID, Usage: usage, CostUSD: costUSD, ContextPercent: contextPct,
 			})
 		},
-		OnSubagentEnd: func(jobID, status string, usage *core.Usage, costUSD float64) {
+		OnSubagentEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) {
 			preBus.Publish(bus.SubagentEnded{
-				JobID: jobID, Status: status, Usage: usage, CostUSD: costUSD,
+				JobID: jobID, Task: task, Async: async, Status: status,
+				Result: result, Error: resultErr, FinishedAt: finishedAt, Usage: usage, CostUSD: costUSD,
 			})
 		},
 		OnBashJobStart: func(job tool.BashJobInfo) {
@@ -496,6 +497,10 @@ func main() {
 			}
 		}
 
+		autoTitleModel, autoTitleEnabled, autoTitleErr := auxiliaryModelResolver(authStore)(moaCfg.AutoTitleModel)
+		if autoTitleErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: automatic session titles disabled: %v\n", autoTitleErr)
+		}
 		app := tui.New(ctx, tui.Config{
 			Runtime:               rt,
 			SessionStore:          sessionStore,
@@ -522,6 +527,8 @@ func main() {
 			CacheTTL:           core.CacheTTLDuration(moaCfg),
 			UsagePoller:        newAnthropicUsagePoller(authStore),
 			ProviderFactory:    providerFactory,
+			AutoTitleModel:     autoTitleModel,
+			AutoTitleEnabled:   autoTitleEnabled && autoTitleErr == nil,
 			ReleaseInfo:        release.Info{Version: version, Commit: commit, Date: date},
 			UpdateChecker:      release.NewChecker(release.Info{Version: version, Commit: commit, Date: date}),
 			UpdateCheckEnabled: core.IsUpdateCheckEnabled(moaCfg),

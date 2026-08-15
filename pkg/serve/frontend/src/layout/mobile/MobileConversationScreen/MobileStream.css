@@ -43,12 +43,6 @@
   box-shadow: var(--shadow-md);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .mstream .mconv-stream {
-    scroll-behavior: auto;
-  }
-}
-
 /* ── Mobile density for the shared content components ──
    The stream reuses the desktop content components (AssistantDocument prose,
    UserWaypoint, CodeBlock/DiffBlock), whose sizes/margins are tuned for a wide

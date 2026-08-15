@@ -122,7 +122,7 @@ function collectBuild(outputFiles) {
 // adopt the new build. File names and separators make the digest unambiguous.
 function calculateBuildID(files) {
   const hash = createHash("sha256");
-  for (const file of ["app.js", "app.css", ...staticAssets].sort()) {
+  for (const file of [...files.keys()].sort()) {
     hash.update(file).update("\0").update(files.get(file)).update("\0");
   }
   return hash.digest("hex").slice(0, 12);
@@ -146,14 +146,15 @@ function writeStagedBuild(files, id) {
   rmSync(staged, { recursive: true, force: true });
   mkdirSync(staged);
 
-  const js = files.get("app.js").toString("utf8");
   const html = files.get("index.html").toString("utf8");
-  writeFileSync(`${staged}/app.js`, `${js}\nglobalThis.__MOA_BUILD_ID__=${JSON.stringify(id)};\n`);
-  writeFileSync(`${staged}/app.css`, files.get("app.css"));
-  writeFileSync(`${staged}/shell.html`, versionShell(html, id));
-  for (const sourceMap of ["app.js.map", "app.css.map"]) {
-    if (files.has(sourceMap)) writeFileSync(`${staged}/${sourceMap}`, files.get(sourceMap));
+  for (const [file, contents] of files) {
+    if (staticAssets.includes(file)) continue;
+    const output = file === "app.js"
+      ? `${contents.toString("utf8")}\nglobalThis.__MOA_BUILD_ID__=${JSON.stringify(id)};\n`
+      : contents;
+    writeFileSync(`${staged}/${file}`, output);
   }
+  writeFileSync(`${staged}/shell.html`, versionShell(html, id));
 
   // A repeated deterministic build already has these exact runtime files.
   if (existsSync(target)) rmSync(staged, { recursive: true, force: true });
@@ -192,8 +193,10 @@ function publishBuild(outputFiles) {
 }
 
 const config = {
-  entryPoints: ["src/app.jsx"],
+  entryPoints: ["src/app.jsx", "src/catalog-entry.js"],
   bundle: true,
+  splitting: true,
+  external: ["./catalog-entry.js"],
   outdir,
   write: false,
   format: "esm",

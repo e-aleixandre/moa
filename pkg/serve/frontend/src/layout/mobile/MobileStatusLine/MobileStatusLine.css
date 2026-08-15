@@ -273,6 +273,37 @@
   background: var(--red);
 }
 
+/* the session id — the one row whose value is an identifier rather than a
+   measurement. It is centred (not baseline) because the copy glyph at the end
+   is an icon, and the id itself truncates instead of wrapping: a 26-character
+   id folding onto a second line was what made this row look broken. */
+.msl-urow.msl-idrow {
+  align-items: center;
+  min-height: 44px;
+  width: 100%;
+  background: none;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+}
+.msl-idrow .uid {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msl-idrow .uact {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--overlay1);
+}
+
 /* the context limit — a usage row whose value is a choice rather than a number.
    It sits in the usage sheet because it is measured on that sheet's own ring. */
 .msl-urow.msl-limit {

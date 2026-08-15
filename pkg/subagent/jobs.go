@@ -38,6 +38,7 @@ type job struct {
 	id                    string
 	originToolCallID      string
 	task                  string
+	title                 string
 	model                 string
 	thinking              string
 	status                string
@@ -78,6 +79,7 @@ type jobSnapshot struct {
 	ID               string
 	OriginToolCallID string
 	Task             string
+	Title            string
 	Model            string
 	Thinking         string
 	Status           string
@@ -230,6 +232,7 @@ func snapshotLocked(j *job) jobSnapshot {
 		ID:               j.id,
 		OriginToolCallID: j.originToolCallID,
 		Task:             j.task,
+		Title:            j.title,
 		Model:            j.model,
 		Thinking:         j.thinking,
 		Status:           j.status,
@@ -244,6 +247,18 @@ func snapshotLocked(j *job) jobSnapshot {
 		ContextPercent:   j.contextPct,
 		AccentIndex:      j.accentIndex,
 	}
+}
+
+func (s *jobStore) setTitle(id, title string) {
+	j, ok := s.get(id)
+	if !ok || title == "" {
+		return
+	}
+	j.mu.Lock()
+	if j.title == "" {
+		j.title = title
+	}
+	j.mu.Unlock()
 }
 
 // setMessages stores a defensive deep copy of the child's message list.
@@ -553,6 +568,7 @@ type JobInfo struct {
 	JobID            string
 	OriginToolCallID string
 	Task             string
+	Title            string
 	Model            string
 	Thinking         string
 	Status           string
@@ -601,6 +617,7 @@ func (j *Jobs) Snapshot() []JobInfo {
 			JobID:            snap.ID,
 			OriginToolCallID: snap.OriginToolCallID,
 			Task:             snap.Task,
+			Title:            snap.Title,
 			Model:            snap.Model,
 			Thinking:         snap.Thinking,
 			Status:           snap.Status,
@@ -661,24 +678,54 @@ func (j *Jobs) Has(jobID string) bool {
 	return ok
 }
 
+// steerJob is the single admission point for a steer aimed at a child, shared
+// by the HTTP route (Jobs.Steer) and the subagent_steer tool.
+//
+// Status and child are read together under the job's lock because the two facts
+// are not independent: a job that has just gone terminal still holds its
+// childAgent (it is never cleared, so the transcript survives for the tray), and
+// an Agent only refuses a steer while it is aborting — not once its run is
+// simply over. Reading them separately let a message be accepted moments after
+// the last delivery point: "queued" for something nobody would ever read.
+//
+// The child's own lock is taken OUTSIDE this one. The agent loop emits events
+// while holding its steerMu, and those handlers take the job lock
+// (forwardAsyncEvent → addProgress), so holding the job lock across
+// child.Steer would invert that order and deadlock.
+//
+// A job that goes terminal in the gap between the two is handled by the child
+// itself: its run is over, its queue is no longer drained, and Agent.Steer's
+// own verdict is the last word.
+//
+// Returns (accepted, status). The status is returned so callers can say why:
+// "the job already completed" is a far more useful answer than a bare false.
+func (s *jobStore) steerJob(jobID, text string) (bool, string) {
+	jb, ok := s.get(jobID)
+	if !ok {
+		return false, ""
+	}
+	jb.mu.Lock()
+	status, child := jb.status, jb.childAgent
+	jb.mu.Unlock()
+
+	if status != statusRunning || child == nil {
+		return false, status
+	}
+	// A user-initiated steer to a subagent child: not Internal (the Internal
+	// flag is only for system-generated completions folded into a snapshot).
+	// The child's own verdict is the last word: reporting success for a message
+	// it refused would tell the caller it was queued when it was dropped.
+	return child.Steer(core.SteerItem{ID: core.NewSteerID(), Text: text}), status
+}
+
 // Steer queues a message for inter-step delivery to the running child agent
-// of jobID. Returns false if no job with that ID is tracked, or if the job
-// has no live child agent yet (e.g. still initializing) or has already
-// finished. Non-blocking; safe to call concurrently.
+// of jobID. Returns false if no job with that ID is tracked, if the job is no
+// longer running (finished, cancelled or still initializing), or if the child
+// itself refused the message. Non-blocking; safe to call concurrently.
 func (j *Jobs) Steer(jobID string, text string) bool {
 	if j == nil || j.store == nil {
 		return false
 	}
-	jb, ok := j.store.get(jobID)
-	if !ok {
-		return false
-	}
-	child := jb.getChildAgent()
-	if child == nil {
-		return false
-	}
-	// A user-initiated steer to a subagent child: not Internal (the Internal
-	// flag is only for system-generated completions folded into a snapshot).
-	child.Steer(core.SteerItem{ID: core.NewSteerID(), Text: text})
-	return true
+	accepted, _ := j.store.steerJob(jobID, text)
+	return accepted
 }

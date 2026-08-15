@@ -91,14 +91,6 @@
   background: color-mix(in srgb, var(--peach) 8%, var(--mantle));
 }
 
-.session-row.variant-pill .unseen {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--peach);
-  flex: none;
-}
-
 .session-row.variant-pill.needs-yellow {
   border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
   color: var(--yellow);
@@ -141,14 +133,6 @@
 
 .session-row.variant-tab.needs-red {
   color: var(--red);
-}
-
-.session-row.variant-tab .unseen {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--peach);
-  flex: none;
 }
 
 .session-row.variant-tab .n {
@@ -289,14 +273,6 @@
   padding: 0 5px;
   line-height: 15px;
   letter-spacing: 0.05em;
-}
-
-.session-row.variant-card .unseen {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--peach);
-  flex: none;
 }
 
 .session-row.variant-card.needs-yellow .r1,

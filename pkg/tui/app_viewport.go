@@ -97,6 +97,10 @@ func (m *appModel) buildBottomChrome() string {
 		if pv := m.permPrompt.View(m.width, ActiveTheme); pv != "" {
 			parts = append(parts, pv)
 		}
+	} else if m.secretPrompt.active {
+		if sv := m.secretPrompt.View(m.width, ActiveTheme); sv != "" {
+			parts = append(parts, sv)
+		}
 	} else if m.askPrompt.active {
 		if av := m.askPrompt.View(m.width, ActiveTheme, m.voice.available()); av != "" {
 			parts = append(parts, av)
@@ -210,7 +214,7 @@ func (m *appModel) renderTranscriptBlocks(fullHistory bool) string {
 // recomputeInputEnabled sets input enabled/disabled based on current state.
 // Used when exiting transcript mode to avoid unconditionally enabling input.
 func (m *appModel) recomputeInputEnabled() {
-	enabled := !m.s.running && !m.permPrompt.active && !m.picker.active && !m.sessionBrowser.active && !m.planMenu.active && !m.thinkingPicker.active && !m.branchPicker.active && !m.subagentPicker.active && !m.mcpPicker.active
+	enabled := !m.s.running && !m.permPrompt.active && !m.secretPrompt.active && !m.picker.active && !m.sessionBrowser.active && !m.planMenu.active && !m.thinkingPicker.active && !m.branchPicker.active && !m.subagentPicker.active && !m.mcpPicker.active
 	m.input.SetEnabled(enabled)
 }
 
@@ -274,6 +278,31 @@ func parseSubagentNotification(text string) (task, status, result string, ok boo
 		}
 	}
 	return "", "", "", false
+}
+
+// subagentNotificationJobID extracts the durable job ID from a notification
+// produced by bootstrap.FormatSubagentNotification. It deliberately accepts
+// only that fixed envelope, so ordinary user steers cannot suppress a card.
+func subagentNotificationJobID(text string) string {
+	if !strings.HasPrefix(text, "[subagent ") {
+		return ""
+	}
+	line, _, ok := strings.Cut(text, "\n")
+	if !ok || !strings.Contains(line, "] Job ") {
+		return ""
+	}
+	after, ok := strings.CutPrefix(line, "[subagent completed] Job ")
+	if !ok {
+		after, ok = strings.CutPrefix(line, "[subagent failed] Job ")
+	}
+	if !ok {
+		after, ok = strings.CutPrefix(line, "[subagent cancelled] Job ")
+	}
+	if !ok {
+		return ""
+	}
+	jobID, _, _ := strings.Cut(after, " ")
+	return jobID
 }
 
 // parseBashNotification detects steer messages formatted as async bash

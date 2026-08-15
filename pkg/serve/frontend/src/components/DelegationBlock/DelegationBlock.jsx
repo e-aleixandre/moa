@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import { GitFork, Check, X, ChevronDown, ChevronRight } from "lucide-preact";
 import "./DelegationBlock.css";
 import { Spinner } from "../../primitives/index.js";
+import { copyToClipboard } from "../../data/util/format.js";
 
 // DelegationBlock — replaces FanoutBlock as the ONE surface for a wave of
 // subagents in the stream (SUBAGENTS-REDESIGN-SPEC-FABLE.md §1). It renders
@@ -79,9 +80,10 @@ function RunningAgentRow({ agent, onOpenAgent }) {
 }
 
 function DoneAgentRow({ agent, onOpenAgent }) {
-  const { id, name, accent = "sky", state, chip, result, time } = agent;
+  const { id, name, accent = "sky", state, result, time } = agent;
   const failed = state === "failed" || state === "cancelled";
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const canExpand = !!result;
   const RowTag = canExpand ? "button" : "div";
   return (
@@ -104,9 +106,7 @@ function DoneAgentRow({ agent, onOpenAgent }) {
           )}
           <span class="a-name">{name}</span>
         </span>
-        <span class="a-result">
-          {chip && <span class={`a-chip${failed ? " err" : ""}`}>{chip}</span>}
-        </span>
+        <span class={`a-state${failed ? " failed" : ""}`}>{state === "cancelled" ? "Cancelled" : failed ? "Failed" : "Completed"}</span>
         {time && <span class="a-time">{time}</span>}
         {canExpand && <ChevronDown class={`a-expand${expanded ? " open" : ""}`} size={13} aria-hidden="true" />}
       </RowTag>
@@ -115,7 +115,54 @@ function DoneAgentRow({ agent, onOpenAgent }) {
           <span>conversation</span><ChevronRight size={14} aria-hidden="true" />
         </button>
       )}
-      {expanded && <pre class="dlg-result-body">{result}</pre>}
+      {expanded && <div class="dlg-result-body">
+        <span class="dlg-result-label">Result</span>
+        <pre>{result}</pre>
+        <button type="button" class="dlg-copy" onClick={() => copyToClipboard(result).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1200); } })}>{copied ? "Copied ✓" : "Copy result"}</button>
+      </div>}
+    </div>
+  );
+}
+
+function OutcomeAgentRow({ agent, onOpenAgent }) {
+	const { id, name, accent = "sky", state, action, chip, result, error, excerpt, time } = agent;
+  const terminal = state !== "running";
+  const failed = state === "failed";
+  const cancelled = state === "cancelled";
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef(null);
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
+	const outcomeText = failed ? error : result;
+	const outcomeLabel = `${failed ? "Error" : "Result"}${excerpt ? " excerpt" : ""}`;
+	const canExpand = !!outcomeText;
+  const SummaryTag = canExpand ? "button" : "div";
+  const preview = terminal ? (chip || (cancelled ? "Cancelled before producing a result." : "No result returned.")) : action || "Working";
+
+  return (
+    <div class={`dlg-outcome-card${failed ? " failed" : ""}${cancelled ? " cancelled" : ""}`} style={{ "--a": `var(--${accent})` }}>
+      <SummaryTag
+        {...(canExpand ? { type: "button" } : {})}
+        class={`dlg-outcome-summary${canExpand ? " clickable" : ""}`}
+        onClick={canExpand ? () => setExpanded((open) => !open) : undefined}
+        aria-expanded={canExpand ? expanded : undefined}
+        aria-label={canExpand ? `${state === "done" ? "Completed" : failed ? "Failed" : "Cancelled"}: ${name}` : undefined}
+      >
+        <span class="outcome-title">
+          <span class="outcome-mark" aria-hidden="true">{state === "running" ? <Spinner color={accent} size={11} /> : cancelled ? "⊘" : failed ? <X size={12} strokeWidth={2.5} /> : <Check size={12} strokeWidth={2.5} />}</span>
+          <span class="outcome-name">{name}</span>
+          {time && <span class="outcome-time">{time}</span>}
+        </span>
+        <span class="outcome-preview">{state === "running" && "▸ "}{preview}</span>
+      </SummaryTag>
+		{(canExpand || onOpenAgent) && <div class={`dlg-outcome-actions${canExpand && onOpenAgent ? "" : " single"}`}>
+			{canExpand && <button type="button" onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}>{outcomeLabel} <ChevronDown class={expanded ? "open" : ""} size={13} aria-hidden="true" /></button>}
+			{onOpenAgent && <button type="button" onClick={() => onOpenAgent(id)} aria-label={`Open ${name} conversation`}>Conversation <ChevronRight size={14} aria-hidden="true" /></button>}
+		</div>}
+		{expanded && <div class="dlg-result-body">
+			<span class="dlg-result-label">{outcomeLabel}</span><pre>{outcomeText}</pre>
+			<button type="button" class="dlg-copy" onClick={() => copyToClipboard(outcomeText).then((ok) => { if (ok) { clearTimeout(copiedTimer.current); setCopied(true); copiedTimer.current = setTimeout(() => setCopied(false), 1200); } })}>{copied ? "Copied ✓" : `Copy ${outcomeLabel.toLowerCase()}`}</button>
+		</div>}
     </div>
   );
 }
@@ -125,7 +172,7 @@ function DoneAgentRow({ agent, onOpenAgent }) {
 // time?, chip?, result?, bashJobs:[] } as emitted by stream-model.js. `summary` is
 // { total, done, failed }; `settled` is true once no agent is running.
 // `onOpenAgent(id)` opens the subagent's detail view on row click.
-export function DelegationBlock({ agents = [], summary, settled, onOpenAgent }) {
+export function DelegationBlock({ agents = [], summary, settled, onOpenAgent, variant = "outcome" }) {
   const total = summary?.total ?? agents.length;
   const showHeader = total > 1;
   // Settled blocks start collapsed to the header line (spec §1.3.4); live
@@ -165,7 +212,9 @@ export function DelegationBlock({ agents = [], summary, settled, onOpenAgent }) 
 
       {!collapsed &&
         agents.map((a) =>
-          a.state === "running" ? (
+          variant === "outcome" ? (
+            <OutcomeAgentRow key={a.id ?? a.name} agent={a} onOpenAgent={onOpenAgent} />
+          ) : a.state === "running" ? (
             <RunningAgentRow key={a.id ?? a.name} agent={a} onOpenAgent={onOpenAgent} />
           ) : (
             <DoneAgentRow key={a.id ?? a.name} agent={a} onOpenAgent={onOpenAgent} />

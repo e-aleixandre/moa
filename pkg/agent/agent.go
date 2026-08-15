@@ -320,6 +320,9 @@ func ownItem(it core.SteerItem) core.SteerItem {
 	if len(it.Content) > 0 {
 		it.Content = core.CloneContent(it.Content)
 	}
+	if it.Custom != nil {
+		it.Custom = core.CloneArgs(it.Custom)
+	}
 	return it
 }
 
@@ -464,6 +467,20 @@ func (a *Agent) Run(ctx context.Context, prompt string) ([]core.AgentMessage, er
 	})
 }
 
+// RunWithCustom initializes state with a prompt carrying custom metadata and
+// runs the agent loop. The metadata is retained in the transcript but does not
+// affect the LLM payload.
+func (a *Agent) RunWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error) {
+	return a.execute(ctx, func() {
+		msg := core.WrapMessage(core.NewUserMessage(prompt))
+		msg.Custom = custom
+		a.state = AgentState{
+			Messages: []core.AgentMessage{msg},
+			Model:    a.config.Model,
+		}
+	})
+}
+
 // IsRunning returns true if the agent is currently executing a Send/Run.
 func (a *Agent) IsRunning() bool {
 	a.mu.Lock()
@@ -543,6 +560,25 @@ func (a *Agent) SendWithCustom(ctx context.Context, prompt string, custom map[st
 		msg := core.WrapMessage(core.NewUserMessage(prompt))
 		msg.Custom = custom
 		a.state.Messages = append(a.state.Messages, msg)
+	})
+}
+
+// SendWithCustomAnnounced appends a custom user message and announces it after
+// it reaches history. It is for custom sources with an explicit live UI
+// representation; other internal sources remain unannounced.
+func (a *Agent) SendWithCustomAnnounced(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error) {
+	var appended core.AgentMessage
+	return a.executeAnnounced(ctx, func() {
+		if a.state.Model.ID == "" {
+			a.state.Model = a.config.Model
+		}
+		msg := core.WrapMessage(core.NewUserMessage(prompt))
+		msg.Custom = custom
+		msg.EnsureMsgID()
+		a.state.Messages = append(a.state.Messages, msg)
+		appended = msg
+	}, func() {
+		a.announceUserMessage(appended, prompt)
 	})
 }
 
@@ -670,6 +706,7 @@ func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []
 		}
 		for i, o := range list {
 			um := core.WrapMessage(steerMessage(o.item))
+			um.Custom = o.item.Custom
 			if o.msgID != "" {
 				um.MsgID = o.msgID
 			} else {
@@ -1498,6 +1535,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		for _, item := range steered {
 			a.mu.Lock()
 			um := core.WrapMessage(steerMessage(item))
+			um.Custom = item.Custom
 			um.EnsureMsgID()
 			mid := um.MsgID
 			a.state.Messages = append(a.state.Messages, um)

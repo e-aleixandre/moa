@@ -36,6 +36,7 @@ var allCommands = []commandDef{
 	{Name: "rename", Args: "<new title>", Desc: "Rename this session"},
 	{Name: "voice", Desc: "Toggle voice recording (Ctrl+R)"},
 	{Name: "settings", Desc: "Open settings menu"},
+	{Name: "secret", Args: "[alias ...]", Desc: "Stage masked secrets for the agent"},
 	{Name: "clear", Desc: "Clear conversation and start fresh"},
 	{Name: "exit", Desc: "Quit moa"},
 }

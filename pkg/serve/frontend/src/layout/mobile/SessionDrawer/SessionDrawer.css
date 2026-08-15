@@ -210,6 +210,7 @@
   letter-spacing: var(--tracking-wide);
   padding: 8px 4px 2px;
 }
+.sdrawer-group-new { color: var(--mauve); }
 
 /* Card slot — the shared SessionRow, full width, with the ⋯ overflow laid over
    its top-right corner. The row reserves that corner so the age never slides

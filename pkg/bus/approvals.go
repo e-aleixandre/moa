@@ -142,6 +142,7 @@ func (am *ApprovalManager) StartPermissionBridge(sessionCtx context.Context, gat
 				_ = am.state.Transition(StatePermission)
 				am.bus.Publish(PermissionRequested{
 					SessionID:    am.sid,
+					RunGen:       am.currentGen(),
 					ID:           id,
 					ToolName:     req.ToolName,
 					Args:         argsCopy,
@@ -164,10 +165,12 @@ func (am *ApprovalManager) StopPermissionBridge() {
 	}
 	// Collect pending responses to send outside lock.
 	var pendingResponses []chan<- permission.Response
+	var pendingIDs []string
 	for id, p := range am.perms {
 		if !p.resolved {
 			p.resolved = true
 			pendingResponses = append(pendingResponses, p.response)
+			pendingIDs = append(pendingIDs, id)
 		}
 		delete(am.perms, id)
 	}
@@ -179,6 +182,9 @@ func (am *ApprovalManager) StopPermissionBridge() {
 		case resp <- permission.Response{Approved: false}:
 		default:
 		}
+	}
+	for _, id := range pendingIDs {
+		am.bus.Publish(PermissionResolved{SessionID: am.sid, ID: id})
 	}
 
 	// Transition back from permission if we were there.
@@ -369,6 +375,7 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 				}
 				am.bus.Publish(AskUserRequested{
 					SessionID: am.sid,
+					RunGen:    am.currentGen(),
 					ID:        id,
 					Questions: questions,
 				})

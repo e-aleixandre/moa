@@ -21,6 +21,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/planmode"
 	promptpkg "github.com/e-aleixandre/moa/pkg/prompt"
 	"github.com/e-aleixandre/moa/pkg/release"
+	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/usage"
@@ -73,6 +74,11 @@ type state struct {
 	runStartBlockIdx   int                            // block index at start of current run (patch boundary)
 	pendingImage       []byte                         // raw image bytes waiting to be sent with next message
 	pendingImageMime   string                         // mime type of pending image
+	failedSendText      string                // input retained until direct bus admission succeeds
+	failedSendImage     []byte
+	failedSendImageMime string
+	failedSendBlockIdx  int
+	failedSendBlockN    int
 	queuedSteers       []core.SteerItem               // steer messages waiting to be processed by the agent
 	chromeCache        string                         // cached bottom chrome string (built once per frame)
 	chromeCacheDirty   bool                           // chrome needs rebuild
@@ -83,6 +89,10 @@ type state struct {
 	sessionEpoch       uint64                         // invalidates delayed work from a previously active session
 	sessionEventFloor  uint64                         // last bus event published before the current session became active
 	subagentEpoch      map[string]uint64              // job ownership, retained across switches to reject old completions
+	// subagentNotificationDelivery marks a model-facing async notification that
+	// is about to return through Steered. The terminal SubagentEnded event owns
+	// the one visible outcome card, so the steer must not add a second one.
+	subagentNotificationDelivery map[string]struct{}
 }
 
 type pendingTimelineEvent struct {
@@ -103,11 +113,13 @@ type appModel struct {
 	s *state
 
 	// Bus runtime — all interaction goes through this
-	runtime  *bus.SessionRuntime
-	eventCh  chan busEventMsg
-	quit     chan struct{}
-	unsubAll func()
-	baseCtx  context.Context // parent context for signal cancellation
+	runtime            *bus.SessionRuntime
+	eventCh            chan busEventMsg
+	quit               chan struct{}
+	unsubAll           func()
+	baseCtx            context.Context // parent context for signal cancellation
+	secretReaperCancel context.CancelFunc
+	secretReaperDone   <-chan struct{}
 	// handoffReady is held until the source run settles, because switching the
 	// reusable TUI runtime while that run is still unwinding is unsafe.
 	handoffReady   *bus.HandoffReady
@@ -152,6 +164,9 @@ type appModel struct {
 	cmdPalette         cmdPalette
 	filePicker         filePicker
 	permPrompt         permissionPrompt
+	secretPrompt       secretPrompt
+	secretSteers       map[string]struct{}
+	secretDirs         []string
 	askPrompt          askPrompt
 	sessionBrowser     sessionBrowser
 	statusBar          *StatusLine
@@ -163,8 +178,10 @@ type appModel struct {
 
 	// Auto-titling: one-shot cheap LLM call to name the session after the
 	// first run. nil factory disables it.
-	providerFactory func(core.Model) (core.Provider, error)
-	autoTitled      bool
+	providerFactory  func(core.Model) (core.Provider, error)
+	autoTitleModel   core.Model
+	autoTitleEnabled bool
+	autoTitled       bool
 
 	// Display
 	modelName     string
@@ -231,6 +248,8 @@ type Config struct {
 	CacheTTL              time.Duration                           // prompt-cache retention (Anthropic); drives the "cache cold" hint
 	UsagePoller           *usage.MultiPoller                      // plan usage poller (nil = usage tracking disabled)
 	ProviderFactory       func(core.Model) (core.Provider, error) // one-shot LLM calls (auto-titling); nil disables
+	AutoTitleModel        core.Model                              // resolved auto-title model
+	AutoTitleEnabled      bool                                    // false disables automatic titles
 	ReleaseInfo           release.Info                            // build metadata shown immediately in the status line
 	UpdateChecker         *release.Checker                        // optional stable-release checker
 	UpdateCheckEnabled    bool                                    // false disables the asynchronous check
@@ -253,6 +272,9 @@ func isStructuralBusEvent(event any) bool {
 
 // New creates the TUI model. All interaction goes through the bus runtime.
 func New(ctx context.Context, cfg Config) appModel {
+	secrets.Reap()
+	secretReaperCtx, secretReaperCancel := context.WithCancel(ctx)
+	secretReaperDone := secrets.StartReaper(secretReaperCtx)
 	eventCh := make(chan busEventMsg, 1024)
 	quit := make(chan struct{})
 
@@ -286,6 +308,8 @@ func New(ctx context.Context, cfg Config) appModel {
 		quit:                 quit,
 		unsubAll:             unsubAll,
 		baseCtx:              ctx,
+		secretReaperCancel:   secretReaperCancel,
+		secretReaperDone:     secretReaperDone,
 		mcpCtrl:              mcpControlOrNil(cfg.MCPController),
 		mcpSessionVetoes:     map[string][]string{},
 		mcpReconcileArmed:    &atomic.Bool{},
@@ -300,6 +324,8 @@ func New(ctx context.Context, cfg Config) appModel {
 		sessionStore:         cfg.SessionStore,
 		session:              cfg.Session,
 		providerFactory:      cfg.ProviderFactory,
+		autoTitleModel:       cfg.AutoTitleModel,
+		autoTitleEnabled:     cfg.AutoTitleEnabled,
 		cwd:                  cfg.CWD,
 		scopedModels:         pinnedModelsToSet(cfg.PinnedModels),
 		loadPinnedModels:     cfg.LoadPinnedModels,
@@ -316,6 +342,7 @@ func New(ctx context.Context, cfg Config) appModel {
 			model:       cfg.STTModel,
 			vocabPrompt: core.BuildSTTPrompt(cfg.STTVocabulary),
 		},
+		secretSteers: map[string]struct{}{},
 	}
 	if cfg.ReleaseInfo.Version != "" {
 		m.statusBar.UpdateVersionSegment(cfg.ReleaseInfo.DisplayVersion(), "")
@@ -621,7 +648,12 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		allCmds = append(allCmds, cmds...)
 		return m, tea.Batch(allCmds...)
 
+	case agentSendAdmittedMsg:
+		m.clearFailedSendSnapshot()
+		return m, nil
+
 	case agentSendErrorMsg:
+		m.restoreFailedSend()
 		m.s.running = false
 		m.s.streamState = stateIdle
 		m.input.SetEnabled(true)
@@ -947,6 +979,10 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePermissionKey(msg)
 	}
 
+	if m.secretPrompt.active {
+		return m.handleSecretKey(msg)
+	}
+
 	if m.picker.active {
 		return m.handlePickerKey(msg)
 	}
@@ -1175,6 +1211,14 @@ func (m appModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.acceptFileMention(selected)
 			}
 			return m, m.forceRepaint()
+		}
+		// /secret is recognized before Submit so even a refused command cannot
+		// land in input history. Its text may already contain an accidentally
+		// pasted value, so discard it unconditionally, including while a run is
+		// active (the busy path would otherwise call Submit first).
+		if cmd, ok := ParseCommand(m.input.textarea.Value()); ok && strings.Fields(commandFirstLine(cmd))[0] == "secret" {
+			m.input.Discard()
+			return m.handleCommand(cmd)
 		}
 		if m.s.running {
 			text := m.input.Submit()
@@ -1603,6 +1647,13 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		for i := len(m.s.blocks) - 1; i >= 0; i-- {
 			b := &m.s.blocks[i]
 			if b.Type == "tool" && b.ToolCallID == e.ToolCallID {
+				if m.hasStructuredSubagentLifecycle(*b) {
+					// Structured terminal lifecycle (SubagentEnded) is the sole
+					// outcome surface. Drop the parent launch/wait tool row rather
+					// than converting its acknowledgement/result into a second card.
+					m.s.blocks = append(m.s.blocks[:i], m.s.blocks[i+1:]...)
+					break
+				}
 				b.ToolDone = true
 				b.IsError = e.IsError
 				b.Rejected = e.Rejected
@@ -1643,14 +1694,11 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 			}
 		}
 		if task, status, result, ok := parseSubagentNotification(e.Text); ok {
-			m.s.blocks = append(m.s.blocks, messageBlock{
-				Type:           "subagent",
-				SubagentTask:   task,
-				SubagentStatus: status,
-				SubagentResult: result,
-			})
+			m.handleSubagentNotificationSteer(subagentNotificationJobID(e.Text), task, status, result)
 		} else if command, status, ok := parseBashNotification(e.Text); ok {
 			m.s.blocks = append(m.s.blocks, bashNotificationBlock(command, status, e.Text))
+		} else if _, secretSteer := m.secretSteers[e.ID]; secretSteer {
+			delete(m.secretSteers, e.ID)
 		} else {
 			m.s.blocks = append(m.s.blocks, messageBlock{Type: "user", Raw: e.Text})
 			// A steer queued with an image now carries its blocks, so the
@@ -1806,14 +1854,18 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 		return m.handlePermissionRequested(e)
 
 	case bus.PermissionResolved:
-		// no-op for TUI
+		if m.permPrompt.active && m.permPrompt.permID == e.ID {
+			m.permPrompt.Cancel()
+		}
 
 	// --- Ask user ---
 	case bus.AskUserRequested:
 		return m.handleAskUserRequested(e)
 
 	case bus.AskUserResolved:
-		// no-op
+		if m.askPrompt.active && m.askPrompt.askID == e.ID {
+			m.askPrompt.Cancel()
+		}
 
 	// --- Config ---
 	case bus.ConfigChanged:
@@ -1925,6 +1977,30 @@ func (m *appModel) handleBusEventSeq(seq uint64, event any) []tea.Cmd {
 	return nil
 }
 
+// hasStructuredSubagentLifecycle distinguishes a real child job from a parent
+// launch/wait failure. Invalid launch params, concurrency rejection, unknown
+// wait IDs, and wait timeouts have no child lifecycle, so their useful error
+// rows remain visible instead of being suppressed.
+func (m *appModel) hasStructuredSubagentLifecycle(block messageBlock) bool {
+	if block.ToolName == "subagent" {
+		for _, child := range m.s.subagents {
+			if child != nil && child.originToolCallID == block.ToolCallID {
+				return true
+			}
+		}
+		return false
+	}
+	if block.ToolName != "subagent_wait" {
+		return false
+	}
+	jobID, _ := block.ToolArgs["job_id"].(string)
+	child := m.s.subagents[jobID]
+	// A timed-out wait reports current progress while the child remains live;
+	// it is not a terminal duplicate and remains useful feedback. Suppress only
+	// a wait that observed a terminal child, whose SubagentEnded card exists.
+	return child != nil && (child.status == "completed" || child.status == "failed" || child.status == "cancelled")
+}
+
 func (m *appModel) handlePermissionRequested(e bus.PermissionRequested) []tea.Cmd {
 	var cmds []tea.Cmd
 	if m.s.transcript {
@@ -1973,11 +2049,39 @@ func (m *appModel) handlePlanModeChanged(e bus.PlanModeChanged) []tea.Cmd {
 func (m *appModel) handleSubagentCompleted(e bus.SubagentCompleted) []tea.Cmd {
 	if m.s.running {
 		// Agent is mid-run — inject as steer.
+		m.markSubagentNotificationDelivery(e.JobID)
 		_ = m.runtime.Bus.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: e.Text, Internal: true})
 		return nil
 	}
 	// Agent is idle — start a notification run.
 	return m.startSubagentNotificationRun(e)
+}
+
+func (m *appModel) markSubagentNotificationDelivery(jobID string) {
+	if jobID == "" {
+		return
+	}
+	if m.s.subagentNotificationDelivery == nil {
+		m.s.subagentNotificationDelivery = make(map[string]struct{})
+	}
+	m.s.subagentNotificationDelivery[jobID] = struct{}{}
+}
+
+// handleSubagentNotificationSteer preserves the model-facing notification but
+// suppresses its old visual card when the structured terminal lifecycle owns
+// the same job. The fallback remains for transcripts/events from older builds
+// that never published SubagentEnded.
+func (m *appModel) handleSubagentNotificationSteer(jobID, task, status, result string) {
+	if jobID != "" && m.s.subagentNotificationDelivery != nil {
+		if _, duplicate := m.s.subagentNotificationDelivery[jobID]; duplicate {
+			delete(m.s.subagentNotificationDelivery, jobID)
+			return
+		}
+	}
+	m.s.blocks = append(m.s.blocks, messageBlock{
+		Type: "subagent", SubagentJobID: jobID, SubagentTask: task,
+		SubagentStatus: status, SubagentResult: result,
+	})
 }
 
 // startSubagentNotificationRun starts an agent run triggered by a subagent completion.
@@ -1988,13 +2092,8 @@ func (m *appModel) startSubagentNotificationRun(e bus.SubagentCompleted) []tea.C
 	}
 
 	m.s.pendingStatus = ""
-	m.s.blocks = append(m.s.blocks, messageBlock{
-		Type:           "subagent",
-		SubagentTask:   e.Task,
-		SubagentStatus: e.Status,
-		SubagentResult: e.Text,
-	})
-
+	// The notification run is model-facing only. SubagentEnded owns the one
+	// terminal presentation card (including when this run starts from idle).
 	m.prepareRun(truncateLabel(e.Task))
 	m.updateViewport()
 
@@ -2196,7 +2295,7 @@ type autoTitleMsg struct {
 // first successful run, unless the session was manually renamed. Returns nil
 // when titling doesn't apply.
 func (m *appModel) maybeAutoTitle(msgs []core.AgentMessage, runErr error) tea.Cmd {
-	if runErr != nil || m.autoTitled || m.providerFactory == nil || m.session == nil {
+	if runErr != nil || m.autoTitled || m.providerFactory == nil || !m.autoTitleEnabled || m.session == nil {
 		return nil
 	}
 	if m.session.TitleIsManual() || len(msgs) == 0 {
@@ -2207,9 +2306,8 @@ func (m *appModel) maybeAutoTitle(msgs []core.AgentMessage, runErr error) tea.Cm
 	ctx := m.baseCtx
 	target := m.session
 	epoch := m.s.sessionEpoch
-	sessionModel, _ := bus.QueryTyped[bus.GetModel, core.Model](m.runtime.Bus, bus.GetModel{})
 	return func() tea.Msg {
-		title, err := autotitle.Generate(ctx, factory, sessionModel, msgs)
+		title, err := autotitle.Generate(ctx, factory, m.autoTitleModel, msgs)
 		if err != nil {
 			return autoTitleMsg{} // empty → ignored
 		}
@@ -2250,6 +2348,16 @@ func renderTick() tea.Cmd {
 
 func (m *appModel) cleanup() {
 	m.s.cleanupOnce.Do(func() {
+		if m.secretReaperCancel != nil {
+			m.secretReaperCancel()
+			if m.secretReaperDone != nil {
+				<-m.secretReaperDone
+			}
+		}
+		for _, dir := range m.secretDirs {
+			_ = secrets.Forget(dir)
+		}
+		m.secretDirs = nil
 		close(m.quit)
 		// Let an active run observe cancellation and let TreeSyncer consume its
 		// final events before taking the durable snapshot. Closing the runtime

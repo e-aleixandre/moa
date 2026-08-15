@@ -36,6 +36,10 @@ const marked = new Marked({
   gfm: true,
 });
 
+// Highlighting is synchronous and can monopolize a mobile browser on a large
+// tool result. Plain escaped code remains safe and readable without it.
+const HIGHLIGHT_MAX_BYTES = 64 * 1024;
+
 // Escape untrusted text before interpolating it into HTML attributes/markup.
 // The code fence info-string (lang) is attacker-controllable when the assistant
 // quotes file/web content, so it must never break out of the attribute.
@@ -50,7 +54,7 @@ function escapeHtml(s) {
 const renderer = {
   code({ text, lang }) {
     let highlighted;
-    if (lang && hljs.getLanguage(lang)) {
+    if (text.length <= HIGHLIGHT_MAX_BYTES && lang && hljs.getLanguage(lang)) {
       highlighted = hljs.highlight(text, { language: lang }).value;
     } else {
       // core build: no highlightAuto (it needs every language registered).

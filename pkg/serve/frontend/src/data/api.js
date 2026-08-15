@@ -9,7 +9,7 @@ import {
   handleWsPermissionResolved, handleWsAskResolved,
   handleWsConfigChange,
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
-  handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd, handleWsSubagentUsage,
+  handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd, handleWsSubagentUsage, handleWsSubagentTitle,
   handleWsBashJobStart, handleWsBashJobOutput, handleWsBashJobEnd, handleWsBashComplete,
   handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
   handleWsGoalChange, handleWsGoalIteration, handleWsGoalVerify, handleWsGoalEnd,
@@ -21,7 +21,12 @@ import {
   handleWsRunTokens,
   handleWsAutoVerifyStart, handleWsAutoVerifyEnd, handleWsRateLimit,
   handleWsCompactionStart, handleWsCompactionEnd,
+  attentionNamespaceFromInit, attentionNamespaceTransition, adoptAttentionNamespace,
 } from './ws-handlers.js';
+import { store, updateSession } from './store.js';
+import {
+  beginHistoryHydration, confirmHistoryHydrationInit, finishHistoryHydration,
+} from './history-hydration.js';
 
 export const REQUEST_HEADERS = Object.freeze({ 'Content-Type': 'application/json', 'X-Moa-Request': '1' });
 export const DEFAULT_API_TIMEOUT_MS = 15000;
@@ -31,6 +36,10 @@ export const DEFAULT_API_TIMEOUT_MS = 15000;
 // slow-but-valid restart and mislabel it as failed, so restart uses a longer,
 // coherent timeout.
 export const MCP_RESTART_TIMEOUT_MS = 30000;
+// A live socket normally sends init immediately. If a proxy or half-open
+// transport swallows it, keep the cached transcript legible but explicitly
+// marked stale. Only an authoritative init may acknowledge its attention.
+export const HISTORY_HYDRATION_TIMEOUT_MS = 12000;
 
 export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_MS, cache } = {}) {
   const controller = timeoutMs > 0 ? new AbortController() : null;
@@ -76,8 +85,15 @@ export function getVersion() {
 
 const connections = new Map();    // sessionId → { ws, backoff, timer }
 const pendingTimers = new Map();  // sessionId → timeoutId (for reconnects awaiting retry)
+const hydrationTimers = new Map(); // sessionId → timeoutId (waiting for WS init)
 const wantedIds = new Set();      // sessions that should have a connection
+const forceFullInit = new Set();  // session IDs whose cached delta base was absent
+const attentionAcknowledgements = new Map(); // occurrence → confirmed POST
 const MAX_BACKOFF = 16000;
+
+function cursorAcknowledgementKey(sessionId, seq, namespace) {
+  return `cursor:${sessionId}:${seq}:${namespace}`;
+}
 
 export function syncConnections(visibleIds) {
   wantedIds.clear();
@@ -85,10 +101,7 @@ export function syncConnections(visibleIds) {
 
   // Close connections and cancel pending reconnects for sessions no longer visible
   for (const [id, entry] of connections) {
-    if (!wantedIds.has(id)) {
-      entry.ws.close();
-      connections.delete(id);
-    }
+    if (!wantedIds.has(id)) settleAndClose(id, entry);
   }
   for (const [id, timer] of pendingTimers) {
     if (!wantedIds.has(id)) {
@@ -96,7 +109,6 @@ export function syncConnections(visibleIds) {
       pendingTimers.delete(id);
     }
   }
-
   // Open connections for newly visible sessions (that aren't already connecting/pending)
   for (const id of visibleIds) {
     if (!connections.has(id) && !pendingTimers.has(id)) {
@@ -112,26 +124,202 @@ export function syncConnections(visibleIds) {
 // the session would sit frozen until a manual reload.
 export function reconnectAll() {
   const ids = [...wantedIds];
-  for (const [, entry] of connections) entry.ws.close();
-  connections.clear();
+  // Remove ownership before close so an asynchronous onclose cannot schedule
+  // a competing retry. Explicitly settle first: a superseded socket's close
+  // handler deliberately bails out, but its hydration/timer must not leak
+  // into the replacement socket's fresh grace window.
+  for (const [id, entry] of connections) settleAndClose(id, entry);
   for (const [, timer] of pendingTimers) clearTimeout(timer);
   pendingTimers.clear();
   for (const id of ids) openWs(id, 1000);
 }
 
+export function acknowledgeVisibleAttentionThrough(sessionId, throughSeq, namespace = '') {
+  const session = store.get().sessions[sessionId];
+  const hidden = typeof document !== 'undefined' && document.hidden;
+  if (!session || hidden || !namespace) return Promise.resolve(false);
+  if (session.attentionNamespace && session.attentionNamespace !== namespace) return Promise.resolve(false);
+  if ((session.ackedThroughSeq || 0) >= throughSeq) {
+    commitCursorAcknowledgement(sessionId, throughSeq, namespace);
+    return Promise.resolve(true);
+  }
+  const key = cursorAcknowledgementKey(sessionId, throughSeq, namespace);
+  const inFlight = attentionAcknowledgements.get(key);
+  if (inFlight) return inFlight;
+  const acknowledgement = api(
+    'POST',
+    `/api/sessions/${sessionId}/read?through_seq=${throughSeq}&attention_namespace=${encodeURIComponent(namespace)}`,
+  )
+    .then(() => {
+      commitCursorAcknowledgement(sessionId, throughSeq, namespace);
+      return true;
+    })
+    .finally(() => attentionAcknowledgements.delete(key));
+  attentionAcknowledgements.set(key, acknowledgement);
+  return acknowledgement;
+}
+
+function commitCursorAcknowledgement(sessionId, throughSeq, namespace) {
+  const session = store.get().sessions[sessionId];
+  if (!session || session.attentionNamespace !== namespace) return;
+  const ackedThroughSeq = Math.max(session.ackedThroughSeq || 0, throughSeq);
+  updateSession(sessionId, {
+    ackedThroughSeq,
+    // A later occurrence remains lit while a delayed acknowledgement for an
+    // earlier cursor arrives (the init-cut race).
+    unseen: (session.unseenSeq || 0) > ackedThroughSeq ? session.unseen : false,
+  });
+}
+
+function clearHistoryHydrationTimer(sessionId) {
+  const timer = hydrationTimers.get(sessionId);
+  if (timer !== undefined) clearTimeout(timer);
+  hydrationTimers.delete(sessionId);
+}
+
+function failHistoryHydration(sessionId) {
+  clearHistoryHydrationTimer(sessionId);
+  finishHistoryHydration(sessionId, { stale: true });
+}
+
+function scheduleReconnect(sessionId, entry) {
+  if (!wantedIds.has(sessionId) || pendingTimers.has(sessionId)) return;
+  const delay = entry.backoff;
+  const nextBackoff = Math.min(delay * 2, MAX_BACKOFF);
+  const timer = setTimeout(() => {
+    pendingTimers.delete(sessionId);
+    if (wantedIds.has(sessionId) && !connections.has(sessionId)) {
+      openWs(sessionId, nextBackoff);
+    }
+  }, delay);
+  pendingTimers.set(sessionId, timer);
+}
+
+// Retry an explicitly stale transcript immediately instead of waiting for the
+// normal reconnect backoff. Closing the old socket makes any late event from it
+// harmless: its handlers no longer own the entry in connections.
+export function retryHistoryHydration(sessionId, { fullInit = false } = {}) {
+  if (!wantedIds.has(sessionId)) return false;
+  if (fullInit) forceFullInit.add(sessionId);
+  const timer = pendingTimers.get(sessionId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    pendingTimers.delete(sessionId);
+  }
+  const entry = connections.get(sessionId);
+  // This close is intentionally superseded, so it cannot settle hydration
+  // through onclose. Clear its boundary before opening the replacement.
+  if (entry) settleAndClose(sessionId, entry);
+  openWs(sessionId, 1000);
+  return true;
+}
+
+// settleAndClose removes a socket's ownership, settles its hydration boundary
+// and timer, and closes it. Once ownership is removed the socket's own
+// onclose/onmessage handlers bail out, so nothing from it can leak into a
+// replacement connection.
+function settleAndClose(sessionId, entry) {
+  connections.delete(sessionId);
+  clearHistoryHydrationTimer(sessionId);
+  finishHistoryHydration(sessionId);
+  try { entry.ws.close(); } catch (_) { /* a replacement or absence is fine */ }
+}
+
 function openWs(sessionId, initialBackoff) {
   pendingTimers.delete(sessionId);
+  const cached = store.get().sessions[sessionId]?.messages || [];
+  const cachedBase = cached.at(-1)?._msg_id;
+  // delete() reports whether a full init was forced, consuming the flag.
+  const skipDelta = forceFullInit.delete(sessionId);
+  const useDeltaResume = !skipDelta && !!cachedBase;
+  beginHistoryHydration(sessionId, { deltaResume: useDeltaResume });
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws`);
-  const entry = { ws, backoff: initialBackoff, lastSeq: 0 };
+  let ws;
+  try {
+    const params = new URLSearchParams();
+    if (useDeltaResume) params.set('since_msg', cachedBase);
+    const query = params.size > 0 ? `?${params}` : '';
+    ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws${query}`);
+  } catch (_) {
+    // Preserve the forced-full decision for the retry: the flag was consumed
+    // above but this attempt never reached the server.
+    if (skipDelta) forceFullInit.add(sessionId);
+    failHistoryHydration(sessionId);
+    scheduleReconnect(sessionId, { backoff: initialBackoff });
+    return;
+  }
+  const entry = {
+    ws,
+    backoff: initialBackoff,
+    lastSeq: 0,
+    attentionNamespace: '',
+  };
   connections.set(sessionId, entry);
+  clearHistoryHydrationTimer(sessionId);
+  hydrationTimers.set(sessionId, setTimeout(() => {
+    if (connections.get(sessionId)?.ws === ws) {
+      failHistoryHydration(sessionId);
+      ws.close(); // onclose schedules the normal backoff retry
+    }
+  }, HISTORY_HYDRATION_TIMEOUT_MS));
 
   ws.onmessage = (e) => {
     if (connections.get(sessionId)?.ws !== ws) return;
     const evt = JSON.parse(e.data);
     if (evt.type === 'init') {
-      entry.backoff = 1000; // reset on successful handshake
-      entry.lastSeq = evt.data?.last_seq || evt.seq || 0;
+      const namespace = attentionNamespaceFromInit(evt.data);
+      if (!namespace) {
+        ws.close();
+        return;
+      }
+      const namespaceTransition = attentionNamespaceTransition(
+        store.get().sessions[sessionId], namespace, { allowCrossProcess: false },
+      );
+      if (!namespaceTransition.accepted) {
+        ws.close();
+        return;
+      }
+      // Only roster snapshots can choose between unordered server processes.
+      // A live socket may still advance an ordered incarnation in its process.
+      adoptAttentionNamespace(sessionId, namespace);
+      // A server only emits delta_base after validating its tree path, but a
+      // client may have evicted or locally rewritten that prefix. Never append
+      // a suffix to a different transcript: retry once without a resume token.
+      if (evt.data?.delta_base && store.get().sessions[sessionId]?.messages?.at(-1)?._msg_id !== evt.data.delta_base) {
+        forceFullInit.add(sessionId);
+        ws.close();
+        return;
+      }
+      entry.lastSeq = evt.data?.last_seq ?? evt.seq ?? 0;
+      entry.attentionNamespace = namespace;
+      clearHistoryHydrationTimer(sessionId);
+      confirmHistoryHydrationInit(sessionId, { deltaBase: !!evt.data?.delta_base });
+      handleWsInit(sessionId, evt.data);
+      entry.backoff = 1000;
+      return;
+    }
+    // A socket's init stamps every later frame with the runtime incarnation
+    // that emitted it. Never let an old socket's bus sequence be interpreted
+    // against a cursor namespace adopted from a newer roster snapshot.
+    if (store.get().sessions[sessionId]?.attentionNamespace !== entry.attentionNamespace) {
+      const namespaceTransition = attentionNamespaceTransition(
+        store.get().sessions[sessionId], entry.attentionNamespace, { allowCrossProcess: false },
+      );
+      if (!namespaceTransition.accepted) {
+        ws.close();
+        return;
+      }
+      adoptAttentionNamespace(sessionId, entry.attentionNamespace);
+    }
+    // Bus sequences intentionally retain ordinary numeric ordering here. A
+    // uint64 wrap cannot occur in a plausible server-process lifetime, and
+    // JSON Numbers lose integer precision far before it, so a modular client
+    // comparison would not be correct without a protocol-wide BigInt/string
+    // migration. Zero is the ambiguous wrap value: fail closed and reconnect
+    // rather than rendering it as an unsequenced live event.
+    if (evt.type !== 'init' && evt.seq === 0) {
+      ws.close();
+      return;
     }
     if (evt.type !== 'init' && evt.seq > 0) {
       if (evt.seq <= entry.lastSeq) return;
@@ -144,16 +332,9 @@ function openWs(sessionId, initialBackoff) {
     if (connections.get(sessionId)?.ws !== ws) return; // superseded
     connections.delete(sessionId);
     if (!wantedIds.has(sessionId)) return; // intentionally removed
-    // Reconnect with exponential backoff (read from entry — may have been reset by init)
-    const delay = entry.backoff;
-    const nextBackoff = Math.min(delay * 2, MAX_BACKOFF);
-    const timer = setTimeout(() => {
-      pendingTimers.delete(sessionId);
-      if (wantedIds.has(sessionId) && !connections.has(sessionId)) {
-        openWs(sessionId, nextBackoff);
-      }
-    }, delay);
-    pendingTimers.set(sessionId, timer);
+    failHistoryHydration(sessionId);
+    // Reconnect with exponential backoff (read from entry — may have been reset by init).
+    scheduleReconnect(sessionId, entry);
   };
 
   ws.onerror = () => {
@@ -163,9 +344,6 @@ function openWs(sessionId, initialBackoff) {
 
 function routeEvent(sessionId, evt) {
   switch (evt.type) {
-    case 'init':
-      handleWsInit(sessionId, evt.data);
-      break;
     case 'text_delta':
       handleWsTextDelta(sessionId, evt.data.delta);
       break;
@@ -197,13 +375,13 @@ function routeEvent(sessionId, evt) {
       handleWsToolEnd(sessionId, evt.data);
       break;
     case 'state_change':
-      handleWsStateChange(sessionId, evt.data);
+      handleWsStateChange(sessionId, evt.data, evt.seq);
       break;
     case 'permission_request':
-      handleWsPermissionRequest(sessionId, evt.data);
+      handleWsPermissionRequest(sessionId, evt.data, evt.seq);
       break;
     case 'ask_user':
-      handleWsAskUser(sessionId, evt.data);
+      handleWsAskUser(sessionId, evt.data, evt.seq);
       break;
     case 'permission_resolved':
       handleWsPermissionResolved(sessionId, evt.data);
@@ -222,6 +400,9 @@ function routeEvent(sessionId, evt) {
       break;
     case 'subagent_start':
       handleWsSubagentStart(sessionId, evt.data);
+      break;
+    case 'subagent_title':
+      handleWsSubagentTitle(sessionId, evt.data);
       break;
     case 'subagent_event':
       handleWsSubagentEvent(sessionId, evt.data);
@@ -245,7 +426,7 @@ function routeEvent(sessionId, evt) {
       handleWsBashComplete(sessionId, evt.data);
       break;
     case 'run_end':
-      handleWsRunEnd(sessionId);
+      handleWsRunEnd(sessionId, evt.data, evt.seq);
       break;
     case 'command':
       handleWsCommand(sessionId, evt.data);
@@ -305,7 +486,7 @@ function routeEvent(sessionId, evt) {
       handleWsCompactionStart(sessionId);
       break;
     case 'compaction_end':
-      handleWsCompactionEnd(sessionId);
+      handleWsCompactionEnd(sessionId, evt.data);
       break;
   }
 }

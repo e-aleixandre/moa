@@ -22,6 +22,10 @@
   background: var(--red);
 }
 
+.state-dot.unseen {
+  background: var(--mauve);
+}
+
 .state-dot.saved {
   background: var(--overlay0);
 }

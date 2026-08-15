@@ -97,6 +97,7 @@ export function Pane({
     error: "error",
     saved: "saved",
     idle: "idle",
+    unseen: "new result",
   };
   const stateText = STATE_LABEL[state] ?? state;
 

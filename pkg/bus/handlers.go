@@ -116,7 +116,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		if cmd.ID == "" {
 			cmd.ID = core.NewSteerID()
 		}
-		if !sctx.Agent.Steer(core.SteerItem{ID: cmd.ID, Text: cmd.Text, Content: cmd.Content, Internal: cmd.Internal}) {
+		if !sctx.Agent.Steer(core.SteerItem{ID: cmd.ID, Text: cmd.Text, Custom: cmd.Custom, Content: cmd.Content, Internal: cmd.Internal}) {
 			return ErrSteerQueueFull
 		}
 		// Kick the pump after enqueuing. While a run is in flight this is a
@@ -294,8 +294,20 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd ClearSession) error {
-		if err := sctx.Agent.Reset(); err != nil {
-			return err
+		if sctx.treeSyncer != nil {
+			if err := sctx.treeSyncer.ResetAndClear(); err != nil {
+				return err
+			}
+		} else {
+			sctx.historyMu.Lock()
+			if err := sctx.Agent.Reset(); err != nil {
+				sctx.historyMu.Unlock()
+				return err
+			}
+			if sctx.Tree != nil {
+				sctx.Tree.Clear()
+			}
+			sctx.historyMu.Unlock()
 		}
 		// If we were in error state, transition back to idle.
 		if sctx.State != nil && sctx.State.Current() == StateError {
@@ -361,6 +373,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		sctx.Bus.Publish(CompactionEnded{
 			SessionID: sctx.SessionID,
 			Payload:   result, // nil if nothing to compact
+			Marker:    NewCompactionMarker(result),
 		})
 		// Always publish CommandExecuted on success so persistence and frontends react.
 		sctx.Bus.Publish(CommandExecuted{
@@ -428,7 +441,7 @@ func RegisterHandlers(sctx *SessionContext) {
 				sctx.Bus.Publish(CommandExecuted{SessionID: sctx.SessionID, Command: "prepare-compact-noop", Messages: sctx.Agent.Messages()})
 				return sctx.Agent.Messages(), nil
 			}
-			sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Payload: payload})
+			sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Payload: payload, Marker: NewCompactionMarker(payload)})
 			sctx.Bus.Drain(2 * time.Second)
 			if sctx.PersistNow != nil {
 				if err := sctx.PersistNow(); err != nil {
@@ -711,7 +724,7 @@ func RegisterHandlers(sctx *SessionContext) {
 			if id == "" {
 				id = core.NewSteerID()
 			}
-			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: cmd.Text}) {
+			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: cmd.Text, Custom: cmd.Custom}) {
 				return ErrSteerQueueFull
 			}
 			// Report the identity on the STEER rail: a chip ID must never be
@@ -746,9 +759,10 @@ func RegisterHandlers(sctx *SessionContext) {
 		// Pre-mint the user message's ID so the prompt is announced live
 		// (UserMessageAppended, emitted by the agent when the message actually
 		// lands in history) under the same identity clients dedup by. Prompts
-		// carrying Custom metadata are internal producers (goal/auto-verify/
-		// schedule) or notifications (subagent/bash) with their own rendering, so
-		// they keep the plain path and are not announced.
+		// carrying Custom metadata are usually internal producers (goal/auto-
+		// verify/schedule) or notifications (subagent/bash) with their own
+		// rendering. Secret batches are the exception: their trusted metadata
+		// drives the live secret card.
 		//
 		// The claim happens HERE, at the point the run is accepted, not in the
 		// caller: only an atomic check-and-claim keeps two concurrent sends with
@@ -763,6 +777,9 @@ func RegisterHandlers(sctx *SessionContext) {
 		}
 		if err := startRun(sctx, cmd.Text, func(ctx context.Context) ([]core.AgentMessage, error) {
 			if cmd.Custom != nil {
+				if cmd.Custom["source"] == "secret_batch" {
+					return sctx.Agent.SendWithCustomAnnounced(ctx, cmd.Text, cmd.Custom)
+				}
 				return sctx.Agent.SendWithCustom(ctx, cmd.Text, cmd.Custom)
 			}
 			if msgID != "" {
@@ -1273,12 +1290,28 @@ func RegisterHandlers(sctx *SessionContext) {
 		if sctx.treeSyncer != nil {
 			return sctx.treeSyncer.DisplayMessages(), nil
 		}
+		sctx.historyMu.RLock()
+		defer sctx.historyMu.RUnlock()
 		if sctx.Tree != nil {
 			if msgs := sctx.Tree.AllMessages(); len(msgs) > 0 {
 				return msgs, nil
 			}
 		}
 		return sctx.Agent.Messages(), nil
+	})
+
+	b.OnQuery(func(q GetDisplayMessagesSince) (DisplayMessagesSince, error) {
+		if sctx.treeSyncer != nil {
+			messages, valid := sctx.treeSyncer.DisplayMessagesSince(q.EntryID)
+			return DisplayMessagesSince{Messages: messages, Valid: valid}, nil
+		}
+		sctx.historyMu.RLock()
+		defer sctx.historyMu.RUnlock()
+		if sctx.Tree != nil {
+			messages, valid := sctx.Tree.DisplayMessagesSince(q.EntryID)
+			return DisplayMessagesSince{Messages: messages, Valid: valid}, nil
+		}
+		return DisplayMessagesSince{}, nil
 	})
 
 	b.OnQuery(func(q MsgIDInUse) (bool, error) {
@@ -2310,6 +2343,7 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 				_ = sctx.State.Transition(StateIdle)
 			}
 		}
+		sctx.clearRunStartedAt(gen)
 
 		// Controllers used by integrations may return messages without emitting
 		// lifecycle events. Keep text/edit compatibility fallbacks only; cost
@@ -2334,6 +2368,7 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 			RunGen:    gen,
 			FinalText: stats.finalText,
 			Err:       runErr,
+			Cancelled: cancelled,
 			HadEdits:  stats.hadEdits,
 			Cost:      stats.costUSD,
 		})

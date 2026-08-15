@@ -132,14 +132,17 @@ test("anthropic: a snapshot missing one window keeps the other", () => {
 
 // --- usageForSession: OpenAI -------------------------------------------------
 
-test("openai: meters come from per-session rl* percents (no resetsAt)", () => {
-  const out = usageForSession({ provider: "openai", rlFiveHourPct: 55.4, rlSevenDayPct: 90 }, null);
+test("openai: meters come from the provider-wide snapshot (no resetsAt)", () => {
+  const usage = { available: true, providers: { openai: {
+    five_hour: { utilization: 55.4 }, seven_day: { utilization: 90 },
+  } } };
+  const out = usageForSession({ provider: "openai" }, usage);
   expect(out.fiveHour).toEqual({ pct: 55, resetsAt: null, source: "openai" });
   expect(out.week).toEqual({ pct: 90, resetsAt: null, source: "openai" });
   expect(out.extra).toBeNull();
 });
 
-test("openai: ignores the global snapshot entirely", () => {
+test("openai: does not read Anthropic's global snapshot", () => {
   const out = usageForSession({ provider: "openai", rlFiveHourPct: 10 }, anthSnapshot);
   expect(out.fiveHour.source).toBe("openai");
   expect(out.week).toBeNull(); // rlSevenDayPct missing
@@ -150,6 +153,12 @@ test("openai: negative/undefined rl* → null meters", () => {
   expect(usageForSession({ provider: "openai", rlFiveHourPct: -1, rlSevenDayPct: -1 }, null).fiveHour).toBeNull();
   expect(usageForSession({ provider: "openai" }, null).fiveHour).toBeNull();
   expect(usageForSession({ provider: "openai" }, null).week).toBeNull();
+});
+
+test("openai: retains the per-session fields only as an old-server fallback", () => {
+  const out = usageForSession({ provider: "openai", rlFiveHourPct: 55.4, rlSevenDayPct: 90 }, null);
+  expect(out.fiveHour).toEqual({ pct: 55, resetsAt: null, source: "openai" });
+  expect(out.week).toEqual({ pct: 90, resetsAt: null, source: "openai" });
 });
 
 test("openai: zero percent is a valid meter", () => {

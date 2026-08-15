@@ -23,7 +23,6 @@ const (
 	defaultConversationPageSize     = 50
 	maxConversationPageSize         = 100
 	maxConversationTextBytes        = 12 << 10
-	maxConversationToolDetailBytes  = 16 << 10
 	maxConversationToolSummaryBytes = 512
 )
 
@@ -33,6 +32,7 @@ const (
 type ConversationMessage struct {
 	ID            string          `json:"id"`
 	Role          string          `json:"role"`
+	Source        string          `json:"source,omitempty"`
 	Timestamp     time.Time       `json:"timestamp,omitempty"`
 	Text          string          `json:"text,omitempty"`
 	Truncated     bool            `json:"truncated,omitempty"`
@@ -70,13 +70,11 @@ type conversationSnapshot struct {
 }
 
 type conversationToolDetail struct {
-	output    string
-	truncated bool
+	output string
 }
 
 type conversationToolDetailResponse struct {
-	Output    string `json:"output"`
-	Truncated bool   `json:"truncated,omitempty"`
+	Output string `json:"output"`
 }
 
 type conversationProjection struct {
@@ -128,7 +126,7 @@ func handleConversationMessages(m *Manager) http.HandlerFunc {
 				http.Error(w, "tool item not found", http.StatusNotFound)
 				return
 			}
-			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output, Truncated: toolDetail.truncated})
+			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output})
 			return
 		}
 		beforeID := ""
@@ -412,47 +410,17 @@ func conversationToolStatus(result core.AgentMessage) string {
 }
 
 func conversationToolDetailFromResult(result core.AgentMessage) conversationToolDetail {
-	output, truncated := conversationToolResultTail(result.Content, maxConversationToolDetailBytes)
-	return conversationToolDetail{output: output, truncated: truncated}
-}
-
-func conversationToolResultTail(content []core.Content, maxBytes int) (string, bool) {
-	var output string
-	truncated := false
-	for _, block := range content {
+	var output strings.Builder
+	for _, block := range result.Content {
 		if block.Type != "text" {
 			continue
 		}
-		part := strings.ToValidUTF8(block.Text, "�")
-		if output != "" {
-			part = "\n" + part
+		if output.Len() > 0 {
+			output.WriteByte('\n')
 		}
-		var wasTruncated bool
-		output, wasTruncated = appendConversationTail(output, part, maxBytes)
-		truncated = truncated || wasTruncated
+		output.WriteString(strings.ToValidUTF8(block.Text, "�"))
 	}
-	return output, truncated
-}
-
-func appendConversationTail(current, part string, maxBytes int) (string, bool) {
-	if maxBytes <= 0 {
-		return "", current != "" || part != ""
-	}
-	if len(part) > maxBytes {
-		return conversationTail(part, maxBytes), true
-	}
-	if len(current)+len(part) <= maxBytes {
-		return current + part, false
-	}
-	return conversationTail(current+part, maxBytes), true
-}
-
-func conversationTail(value string, maxBytes int) string {
-	start := len(value) - maxBytes
-	for start < len(value) && !utf8.RuneStart(value[start]) {
-		start++
-	}
-	return value[start:]
+	return conversationToolDetail{output: output.String()}
 }
 
 // conversationToolActivity exposes a bounded description of every tool's

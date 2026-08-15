@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/agent"
+	"github.com/e-aleixandre/moa/pkg/autotitle"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -47,6 +48,7 @@ var excludedTools = map[string]bool{
 	"subagent_status": true,
 	"subagent_wait":   true,
 	"subagent_cancel": true,
+	"subagent_steer":  true,
 	"memory":          true,
 	"ask_user":        true,
 }
@@ -102,10 +104,16 @@ type Config struct {
 	// final total.
 	OnChildUsage func(jobID string, usage *core.Usage, costUSD float64, contextPct int)
 
-	// OnChildEnd is called once when a child agent (sync or async) finishes,
-	// with its final status and aggregated usage/cost (cost computed with the
-	// CHILD's model pricing, which may differ from the parent's).
-	OnChildEnd func(jobID, status string, usage *core.Usage, costUSD float64)
+	// OnChildEnd is called once when a child agent (sync or async) finishes.
+	// Result/Error are the terminal child outcome, not the one-time model
+	// delivery claim used by subagent_wait and async notifications.
+	OnChildEnd func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64)
+
+	// Title generation is deliberately asynchronous: starting work must never
+	// wait on a convenience model call. Resumed children keep their saved title.
+	TitleModel   core.Model
+	TitleEnabled bool
+	OnChildTitle func(jobID, title string)
 
 	// ChildMaxTurns caps the number of turns a child agent may take. 0 (or
 	// negative) falls back to defaultChildMaxTurns.
@@ -119,12 +127,24 @@ type Config struct {
 	// 0 (or negative) falls back to defaultMaxConcurrentAsync.
 	MaxConcurrentAsync int
 
-	// TranscriptLoader loads a persisted subagent transcript's messages by job
-	// ID, enabling the "resume" parameter to continue a finished subagent's
+	// TranscriptLoader loads a persisted subagent transcript by job ID,
+	// enabling the "resume" parameter to continue a finished subagent's
 	// conversation instead of starting fresh. nil = resume unsupported (the
 	// tool reports a clear error when resume is requested). The caller wires
 	// this to its session-scoped transcript store (see pkg/serve).
-	TranscriptLoader func(jobID string) ([]core.AgentMessage, error)
+	TranscriptLoader func(jobID string) (ResumedTranscript, error)
+}
+
+// ResumedTranscript is what a TranscriptLoader hands back: the persisted
+// child conversation plus the identity it ran under. Model/Thinking let a
+// resume continue with the SAME model and thinking level the subagent already
+// used instead of silently adopting the parent's; both are optional (empty on
+// transcripts written before they were recorded, which fall back to the
+// parent's settings, i.e. the historical behaviour).
+type ResumedTranscript struct {
+	Messages []core.AgentMessage
+	Model    string
+	Thinking string
 }
 
 // RegisterAll registers the subagent tools on reg and returns a handle onto
@@ -139,6 +159,7 @@ func RegisterAll(reg *core.Registry, cfg Config) (*Jobs, error) {
 		newSubagentStatus(jobs),
 		newSubagentWait(jobs),
 		newSubagentCancel(jobs),
+		newSubagentSteer(jobs),
 	} {
 		if err := reg.Register(t); err != nil {
 			return nil, fmt.Errorf("subagent: %w", err)
@@ -166,11 +187,11 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				},
 				"model": {
 					"type": "string",
-					"description": "Model to use. Defaults to the configured model."
+					"description": "Model to use. Defaults to the current model, or to the resumed subagent's own model when 'resume' is set."
 				},
 				"thinking": {
 					"type": "string",
-					"description": "Thinking level for the subagent: off, low, medium, high, xhigh. Defaults to the current parent thinking level."
+					"description": "Thinking level for the subagent: off, low, medium, high, xhigh. Defaults to the current parent thinking level, or to the resumed subagent's own level when 'resume' is set."
 				},
 				"max_duration": {
 					"type": "string",
@@ -178,7 +199,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				},
 				"resume": {
 					"type": "string",
-					"description": "Job ID of a previous subagent to resume: its saved transcript is reloaded and 'task' is sent as the next message, continuing that conversation instead of starting fresh."
+					"description": "Job ID of a previous subagent to resume: its saved transcript is reloaded and 'task' is sent as the next message, continuing that conversation instead of starting fresh. It keeps the model and thinking level it ran under unless you pass 'model'/'thinking' explicitly."
 				},
 				"async": {
 					"type": "boolean",
@@ -204,19 +225,23 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				return *errResult, nil
 			}
 
-			model, errResult := resolveModel(currentModel(cfg), params)
-			if errResult != nil {
-				return *errResult, nil
-			}
-			thinkingLevel, errResult := resolveThinking(model, currentThinkingLevel(cfg), params)
-			if errResult != nil {
-				return *errResult, nil
-			}
 			maxRunDuration, errResult := resolveMaxDuration(params)
 			if errResult != nil {
 				return *errResult, nil
 			}
-			seedMsgs, errResult := resolveResume(cfg, params)
+			// Resume is resolved FIRST: without an explicit model/thinking, a
+			// resumed subagent continues with the ones it already ran under
+			// (from its transcript), not the parent's.
+			resumed, errResult := resolveResume(cfg, params)
+			if errResult != nil {
+				return *errResult, nil
+			}
+			seedMsgs := resumed.Messages
+			model, errResult := resolveModel(defaultModel(cfg, resumed), params)
+			if errResult != nil {
+				return *errResult, nil
+			}
+			thinkingLevel, errResult := resolveThinking(model, defaultThinking(cfg, resumed, model), params)
 			if errResult != nil {
 				return *errResult, nil
 			}
@@ -258,7 +283,11 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				if cfg.OnAsyncJobChange != nil {
 					cfg.OnAsyncJobChange(jobs.runningCount())
 				}
-				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil)
+				notifyChildStart(cfg, jobs, job, task, model, true)
+				if len(seedMsgs) == 0 {
+					go generateTitle(cfg, jobs, job.id, task)
+				}
+				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil, true)
 				return taggedWithJob(core.TextResult("Subagent started in background.\nJob ID: "+job.id+"\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."), job.id), nil
 			}
 
@@ -282,9 +311,28 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				cfg.BashState.Seed(job.id, core.AgentIDFromContext(ctx))
 			}
 			go linker(ctx, jobCancel, job)
-			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate)
+			notifyChildStart(cfg, jobs, job, task, model, false)
+			if len(seedMsgs) == 0 {
+				go generateTitle(cfg, jobs, job.id, task)
+			}
+			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate, true)
 			return awaitSyncResult(cfg, jobs, job, task, model)
 		},
+	}
+}
+
+func generateTitle(cfg Config, jobs *jobStore, jobID, task string) {
+	if !cfg.TitleEnabled || cfg.TitleModel.ID == "" || cfg.ProviderFactory == nil {
+		return
+	}
+	title, err := autotitle.Generate(cfg.AppCtx, cfg.ProviderFactory, cfg.TitleModel,
+		[]core.AgentMessage{core.WrapMessage(core.NewUserMessage(task))})
+	if err != nil {
+		return
+	}
+	jobs.setTitle(jobID, title)
+	if cfg.OnChildTitle != nil {
+		cfg.OnChildTitle(jobID, title)
 	}
 }
 
@@ -437,6 +485,65 @@ func newSubagentCancel(jobs *jobStore) core.Tool {
 	}
 }
 
+// newSubagentSteer lets a parent redirect a child that is already running,
+// instead of the all-or-nothing choice between waiting for a job it can see
+// going the wrong way and cancelling it to start over. The message is queued
+// and the child picks it up between steps, exactly like a steer typed from the
+// UI — so a correction reaches the child without discarding the work it has
+// already done.
+//
+// It is deliberately non-blocking: it reports that the message was queued, not
+// that the child has read it. Whether it acted on it is visible in the child's
+// own transcript (and through subagent_status / subagent_wait).
+func newSubagentSteer(jobs *jobStore) core.Tool {
+	return core.Tool{
+		Name:  "subagent_steer",
+		Label: "Subagent Steer",
+		Description: "Send a message to a RUNNING subagent job: extra instructions, a correction or an answer it is waiting for. " +
+			"The message is queued and the subagent reads it between steps, keeping the work it has already done. " +
+			"Use it instead of cancelling and relaunching a job that is merely going the wrong way.",
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"job_id": {
+					"type": "string",
+					"description": "The job ID returned by an async subagent call"
+				},
+				"message": {
+					"type": "string",
+					"description": "What to tell the subagent. Be explicit about what changes: it has its own context and cannot see this conversation."
+				}
+			},
+			"required": ["job_id", "message"]
+		}`),
+		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+			jobs.cleanup(jobTTL)
+			jobID, _ := params["job_id"].(string)
+			message, _ := params["message"].(string)
+			if strings.TrimSpace(message) == "" {
+				return core.ErrorResult("message is required"), nil
+			}
+			accepted, status := jobs.steerJob(jobID, message)
+			if accepted {
+				return core.TextResult("Message queued for " + jobID + "; it will be read between steps."), nil
+			}
+			switch status {
+			case "":
+				return core.ErrorResult("unknown job ID: " + jobID), nil
+			case statusRunning:
+				// Running, yet it refused: it is between its last step and its
+				// terminal state, or its queue is full.
+				return core.ErrorResult("the subagent did not accept the message (it is finishing, or its queue is full)"), nil
+			default:
+				// A finished job is the common mistake, and its status is a more
+				// useful answer than a bare failure: the parent can then read the
+				// result instead of steering into the void.
+				return core.ErrorResult("job is " + status + ", not running: nothing to steer"), nil
+			}
+		},
+	}
+}
+
 // linker propagates parentCtx's cancellation into jobCancel, but only while
 // the job has not been promoted (or already finished). Once promoted, the
 // child is deliberately decoupled from the parent's context so it survives
@@ -543,7 +650,7 @@ func syncResult(cfg Config, jobs *jobStore, j *job, task string, model core.Mode
 // sync job may be promoted to async mid-run) decides how each streamed event
 // is forwarded, so there is a single subscription with no resubscription and
 // therefore no risk of losing or duplicating events across a promotion.
-func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result)) {
+func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result), startNotified bool) {
 	defer j.cancel()
 	defer close(j.done)
 	var finalMsgs []core.AgentMessage
@@ -582,10 +689,18 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		if cfg.OnChildEnd != nil {
 			snap, ok := jobs.snapshot(j.id)
 			status := statusFailed
+			result := ""
+			resultErr := ""
+			finishedAt := time.Time{}
+			async := !j.isSync()
 			if ok {
 				status = snap.Status
+				result = snap.Result
+				resultErr = snap.Error
+				finishedAt = snap.FinishedAt
+				async = !snap.Sync
 			}
-			cfg.OnChildEnd(j.id, status, childUsage(finalMsgs), childCost(model, finalMsgs))
+			cfg.OnChildEnd(j.id, task, async, status, result, resultErr, finishedAt, childUsage(finalMsgs), childCost(model, finalMsgs))
 		}
 	}()
 
@@ -619,18 +734,8 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 	})
 	defer unsub()
 
-	if cfg.OnChildStart != nil {
-		var startedAt time.Time
-		var accentIndex int
-		var thinking string
-		var originToolCallID string
-		if snap, ok := jobs.snapshot(j.id); ok {
-			startedAt = snap.StartedAt
-			accentIndex = snap.AccentIndex
-			thinking = snap.Thinking
-			originToolCallID = snap.OriginToolCallID
-		}
-		cfg.OnChildStart(j.id, task, model.ID, thinking, originToolCallID, !j.isSync(), startedAt, accentIndex)
+	if !startNotified {
+		notifyChildStart(cfg, jobs, j, task, model, !j.isSync())
 	}
 
 	msgs, err := runChild(jobCtx, child, task, seedMsgs)
@@ -652,7 +757,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 			// Same recovery as a timeout: the child hit a guardrail rather than
 			// failing, and its transcript is intact. Without this the parent got
 			// a bare "max turns exceeded" and always restarted from zero.
-			jobs.setFailed(j.id, turnLimitMessage(timeoutPartial(msgs), j.id, cfg.TranscriptLoader != nil))
+			jobs.setFailed(j.id, turnLimitMessage(partialOutput(msgs), j.id, cfg.TranscriptLoader != nil))
 			return
 		}
 		if child.TimedOut() {
@@ -662,13 +767,38 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 			// "stream: context deadline exceeded", and keep whatever it produced
 			// before the deadline so the work isn't lost.
 			_, effective := resolveChildGuardrails(cfg, maxRunDuration)
-			jobs.setFailed(j.id, timeoutMessage(effective, timeoutPartial(msgs), j.id, cfg.TranscriptLoader != nil))
+			jobs.setFailed(j.id, timeoutMessage(effective, partialOutput(msgs), j.id, cfg.TranscriptLoader != nil))
 			return
 		}
-		jobs.setFailed(j.id, err.Error())
+		// A transcript containing a replayable message is the only local signal
+		// that resume will not immediately fail. In the usual case it includes
+		// the original delegated task even when the provider failed before
+		// producing output.
+		jobs.setFailed(j.id, failureMessage(err.Error(), partialOutput(msgs), j.id, canResumeFailure(cfg, j.id, msgs)))
 		return
 	}
 	jobs.setCompleted(j.id, core.ExtractFinalAssistantText(msgs))
+}
+
+// notifyChildStart publishes the durable job identity before the spawning tool
+// can return. This makes an async launch an immediately-live Dock entry rather
+// than a transient terminal-looking tool result if the parent reaches its tool
+// end before the child goroutine gets scheduled.
+func notifyChildStart(cfg Config, jobs *jobStore, j *job, task string, model core.Model, async bool) {
+	if cfg.OnChildStart == nil {
+		return
+	}
+	var startedAt time.Time
+	var accentIndex int
+	var thinking string
+	var originToolCallID string
+	if snap, ok := jobs.snapshot(j.id); ok {
+		startedAt = snap.StartedAt
+		accentIndex = snap.AccentIndex
+		thinking = snap.Thinking
+		originToolCallID = snap.OriginToolCallID
+	}
+	cfg.OnChildStart(j.id, task, model.ID, thinking, originToolCallID, async, startedAt, accentIndex)
 }
 
 // timeoutMessage builds the actionable text shown when a subagent exhausts its
@@ -710,10 +840,29 @@ func turnLimitMessage(partial, jobID string, canResume bool) string {
 	return guidance
 }
 
-// timeoutPartial returns the child's real partial assistant text, excluding the
+// failureMessage preserves the underlying failure while making the saved child
+// transcript actionable. Guidance is last so it survives tail-truncation on
+// async notifications.
+func failureMessage(cause, partial, jobID string, canResume bool) string {
+	message := "subagent failed: " + cause
+	if partial != "" {
+		message += "\n\nPartial output before the failure:\n" + partial
+	}
+	if canResume && jobID != "" {
+		message += fmt.Sprintf("\n\nIts work so far is saved: resume it with resume=%q to continue where it stopped, instead of starting over. Re-run from scratch only if the partial work is unusable.", jobID)
+	}
+	return message
+}
+
+func canResumeFailure(cfg Config, jobID string, msgs []core.AgentMessage) bool {
+	return cfg.TranscriptLoader != nil && jobID != "" && len(sanitizeResumeTranscript(msgs)) > 0
+}
+
+// partialOutput returns the child's real partial assistant text, excluding the
 // synthetic "(run timed out)" marker the agent inserts when the deadline trips
-// before any reply — that marker is a status note, not model output.
-func timeoutPartial(msgs []core.AgentMessage) string {
+// before any reply — that marker is a status note, not model output. Despite
+// its origin, this applies equally to every failed child run.
+func partialOutput(msgs []core.AgentMessage) string {
 	partial := core.ExtractFinalAssistantText(msgs)
 	if partial == agent.MarkerRunTimedOut {
 		return ""
@@ -1002,34 +1151,70 @@ func resolveMaxDuration(params map[string]any) (time.Duration, *core.Result) {
 	return d, nil
 }
 
+// defaultModel is the model a subagent gets when the call carries no explicit
+// "model". A resumed subagent continues with the model recorded in its
+// transcript; anything else (a new subagent, an old transcript without the
+// field, or a recorded model that no longer resolves — renamed/retired)
+// inherits the parent's current model, which is the historical behaviour.
+func defaultModel(cfg Config, resumed ResumedTranscript) core.Model {
+	parent := currentModel(cfg)
+	spec := strings.TrimSpace(resumed.Model)
+	if spec == "" {
+		return parent
+	}
+	model, ok := core.ResolveModel(spec)
+	if ok || model.Provider != "" {
+		return model
+	}
+	return parent
+}
+
+// defaultThinking mirrors defaultModel for the thinking level: the resumed
+// transcript's level wins over the parent's, unless it is absent or no longer
+// valid for the model the child will actually run under (an unusable stored
+// level must not break the resume).
+func defaultThinking(cfg Config, resumed ResumedTranscript, model core.Model) string {
+	parent := currentThinkingLevel(cfg)
+	level := strings.TrimSpace(resumed.Thinking)
+	if level == "" {
+		return parent
+	}
+	if _, err := core.EffectiveThinkingLevel(model, level); err != nil {
+		return parent
+	}
+	return level
+}
+
 // resolveResume loads a prior subagent's transcript when the "resume" arg is
-// set, returning the messages to seed the child with. Returns nil (no seed)
-// when resume is absent. Errors are surfaced as tool results so the model gets
-// a clear message (unknown job ID, resume unsupported, etc.).
-func resolveResume(cfg Config, params map[string]any) ([]core.AgentMessage, *core.Result) {
+// set, returning the messages to seed the child with plus the model/thinking it
+// ran under. Returns a zero value (no seed) when resume is absent. Errors are
+// surfaced as tool results so the model gets a clear message (unknown job ID,
+// resume unsupported, etc.).
+func resolveResume(cfg Config, params map[string]any) (ResumedTranscript, *core.Result) {
 	jobID, _ := params["resume"].(string)
 	if strings.TrimSpace(jobID) == "" {
-		return nil, nil
+		return ResumedTranscript{}, nil
 	}
 	if cfg.TranscriptLoader == nil {
 		res := core.ErrorResult("resume is not supported in this environment")
-		return nil, &res
+		return ResumedTranscript{}, &res
 	}
-	msgs, err := cfg.TranscriptLoader(strings.TrimSpace(jobID))
+	t, err := cfg.TranscriptLoader(strings.TrimSpace(jobID))
 	if err != nil {
 		res := core.ErrorResult("cannot resume subagent " + jobID + ": " + err.Error())
-		return nil, &res
+		return ResumedTranscript{}, &res
 	}
-	if len(msgs) == 0 {
+	if len(t.Messages) == 0 {
 		res := core.ErrorResult("cannot resume subagent " + jobID + ": transcript is empty")
-		return nil, &res
+		return ResumedTranscript{}, &res
 	}
-	clean := sanitizeResumeTranscript(msgs)
+	clean := sanitizeResumeTranscript(t.Messages)
 	if len(clean) == 0 {
 		res := core.ErrorResult("cannot resume subagent " + jobID + ": transcript has no replayable messages")
-		return nil, &res
+		return ResumedTranscript{}, &res
 	}
-	return clean, nil
+	t.Messages = clean
+	return t, nil
 }
 
 // sanitizeResumeTranscript makes a persisted transcript safe to replay before a
@@ -1123,13 +1308,17 @@ func sanitizeResumeTranscript(msgs []core.AgentMessage) []core.AgentMessage {
 // resumed transcript (LoadMessages + Send). Resume replays the persisted
 // history and sends task as the next user message.
 func runChild(ctx context.Context, child *agent.Agent, task string, seedMsgs []core.AgentMessage) ([]core.AgentMessage, error) {
+	// The parent task is a real user-role message in the child transcript, but
+	// its source is distinct from a user steering the child through the UI.
+	// Persist the provenance so every resumed task can be rendered accurately.
+	custom := map[string]any{"source": "subagent_parent"}
 	if len(seedMsgs) == 0 {
-		return child.Run(ctx, task)
+		return child.RunWithCustom(ctx, task, custom)
 	}
 	if err := child.LoadMessages(seedMsgs); err != nil {
 		return nil, err
 	}
-	return child.Send(ctx, task)
+	return child.SendWithCustom(ctx, task, custom)
 }
 
 func buildSystemPrompt(promptBuilder func(agentcontext.SystemPromptOptions) string, agentsMD string, specs []core.ToolSpec, cwd, skillsIndex, memoryIndex string) string {

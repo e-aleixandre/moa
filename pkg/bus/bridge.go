@@ -50,6 +50,7 @@ type AgentController interface {
 	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
 	SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error)
 	SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
+	SendWithCustomAnnounced(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)
 	SendWithContentMsgID(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error)
 	// SendWithContentAnnounced is SendWithContentMsgID that also announces the
@@ -187,10 +188,18 @@ type SessionContext struct {
 	// complete.
 	treeSyncer *TreeSyncer
 
+	// historyMu protects the legacy no-TreeSyncer history path. TreeSyncer has
+	// its own mutex because it also protects its sync baseline.
+	historyMu sync.RWMutex
+
 	// RunGenAtomic is the current run generation, readable without locks.
 	// Stamped on agent-lifecycle events by the bridge. Written by startRun
 	// (under runMu), read atomically by the bridge.
 	RunGenAtomic atomic.Uint64
+	// runStartedAnchor is written synchronously with reserving a run, before
+	// RunStarted is published. The immutable pair lets a finishing generation
+	// clear only its own anchor without racing a newly reserved run.
+	runStartedAnchor atomic.Pointer[runStartAnchor]
 
 	// sessionCost accumulates the session's USD spend (main run cost from
 	// RunEnded plus each subagent's cost from SubagentEnded). Reset to 0 on
@@ -453,13 +462,14 @@ func (sctx *SessionContext) StreamingAggregate() (text, thinking, msgID string) 
 func (sctx *SessionContext) SnapshotInFlightWithCut() (StreamingAggregate, []LiveToolCall, uint64) {
 	sctx.streamMu.Lock()
 	defer sctx.streamMu.Unlock()
-	return StreamingAggregate{
-			Text:     sctx.streamText,
-			Thinking: sctx.streamThinking,
-			MsgID:    sctx.streamMsgID,
-		},
-		sctx.liveToolsSnapshotLocked(),
-		sctx.Bus.LastSeq()
+	aggregate := StreamingAggregate{
+		Text:     sctx.streamText,
+		Thinking: sctx.streamThinking,
+		MsgID:    sctx.streamMsgID,
+	}
+	liveTools := sctx.liveToolsSnapshotLocked()
+	cut := sctx.Bus.CaptureSeq()
+	return aggregate, liveTools, cut
 }
 
 // LiveTools returns the tool calls currently generating arguments or executing.
@@ -623,10 +633,38 @@ func (sctx *SessionContext) newRunContext() (context.Context, uint64) {
 	sctx.runCancel = cancel
 	sctx.runGen++
 	sctx.RunGenAtomic.Store(sctx.runGen)
+	sctx.runStartedAnchor.Store(&runStartAnchor{gen: sctx.runGen, at: time.Now()})
 	sctx.runStatsMu.Lock()
 	sctx.runStats = runStats{gen: sctx.runGen}
 	sctx.runStatsMu.Unlock()
 	return ctx, sctx.runGen
+}
+
+// RunStartedAt returns the authoritative start anchor for the current run.
+// It is zero once that generation has settled.
+func (sctx *SessionContext) RunStartedAt() time.Time {
+	anchor := sctx.runStartedAnchor.Load()
+	if anchor == nil {
+		return time.Time{}
+	}
+	return anchor.at
+}
+
+func (sctx *SessionContext) clearRunStartedAt(gen uint64) {
+	for {
+		anchor := sctx.runStartedAnchor.Load()
+		if anchor == nil || anchor.gen != gen {
+			return
+		}
+		if sctx.runStartedAnchor.CompareAndSwap(anchor, nil) {
+			return
+		}
+	}
+}
+
+type runStartAnchor struct {
+	gen uint64
+	at  time.Time
 }
 
 func (sctx *SessionContext) addRunEvent(gen uint64, e core.AgentEvent) {
@@ -718,6 +756,7 @@ func (sctx *SessionContext) clearRunCancel(gen uint64) {
 	if sctx.runGen == gen {
 		sctx.runCancel = nil
 	}
+	sctx.clearRunStartedAt(gen)
 }
 
 // settleRunCancel atomically closes the AbortRun window for gen and reports
@@ -1069,6 +1108,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 
 	case core.AgentEventSteer:
 		ev := Steered{SessionID: sid, RunGen: gen, ID: e.SteerID, MsgID: e.MsgID, Text: e.Text}
+		ev.Custom = projectLiveCustom(e.Message.Custom)
 		// A steer always carries its plain text, but one with attachments was
 		// injected as content blocks: publish them too so clients render the
 		// thumbnails live instead of only after a reload. Text-only steers keep
@@ -1080,6 +1120,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 
 	case core.AgentEventUserMessage:
 		ev := UserMessageAppended{SessionID: sid, RunGen: gen, MsgID: e.MsgID, Text: e.Text}
+		ev.Custom = projectLiveCustom(e.Message.Custom)
 		// A structured send carries its blocks; a plain-text prompt travels in
 		// Text alone, so clients render exactly one shape per message.
 		if e.Text == "" {
@@ -1091,15 +1132,43 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		return []any{CompactionStarted{SessionID: sid, RunGen: gen}}
 
 	case core.AgentEventCompactionEnd:
+		marker := NewCompactionMarker(e.Compaction)
 		return []any{CompactionEnded{
 			SessionID:         sid,
 			RunGen:            gen,
 			Payload:           e.Compaction,
+			Marker:            marker,
 			Err:               e.Error,
 			CostIncludedInRun: true,
 		}}
 	}
 	return nil
+}
+
+// projectLiveCustom limits live transport metadata to the fields frontends
+// render. Conversation Custom may grow internal fields; publishing it whole
+// would silently turn each one into a WebSocket API field.
+func projectLiveCustom(custom map[string]any) map[string]any {
+	source, _ := custom["source"].(string)
+	if source == "" {
+		return nil
+	}
+	projected := map[string]any{"source": source}
+	if source == "secret_batch" {
+		switch aliases := custom["secret_aliases"].(type) {
+		case []string:
+			projected["secret_aliases"] = append([]string(nil), aliases...)
+		case []any:
+			values := make([]string, 0, len(aliases))
+			for _, alias := range aliases {
+				if value, ok := alias.(string); ok {
+					values = append(values, value)
+				}
+			}
+			projected["secret_aliases"] = values
+		}
+	}
+	return projected
 }
 
 // hasNonTextContent reports whether a message carries blocks that plain text

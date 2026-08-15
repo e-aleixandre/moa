@@ -14,7 +14,7 @@ import (
 // after the first successful run, unless the session was manually renamed. It
 // mirrors the TUI behavior so titles look the same in both frontends.
 func (m *Manager) subscribeAutoTitle(sess *ManagedSession) {
-	if m.providerFactory == nil {
+	if m.providerFactory == nil || !sess.autoTitleEnabled {
 		return
 	}
 	b := sess.runtime.Bus
@@ -45,8 +45,7 @@ func (m *Manager) generateAutoTitle(sess *ManagedSession) {
 	}
 
 	// Tie generation to the session context so deleting the session aborts it.
-	sessionModel, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
-	title, err := autotitle.Generate(sess.infra.sessionCtx, m.providerFactory, sessionModel, msgs)
+	title, err := autotitle.Generate(sess.infra.sessionCtx, m.providerFactory, sess.autoTitleModel, msgs)
 	if err != nil {
 		slog.Debug("autotitle: generation failed", "session", sess.ID, "error", err)
 		return

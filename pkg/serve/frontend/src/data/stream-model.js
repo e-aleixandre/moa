@@ -15,6 +15,12 @@
 //       closes the current assistant turn: assistant content after it starts a
 //       fresh document.
 //
+//   { kind:'compaction', id, summary, tokensBefore, readFiles, modifiedFiles }
+//       A durable context-compaction tree event. Its id is derived from the
+//       entry msg_id (plus an ordinal only if malformed history repeats it),
+//       never from the transcript index, so an expandable card retains state
+//       while earlier history is loaded.
+//
 //   { kind:'waypoint', time, text, msgId?, attachments? }
 //       A user turn. `text` is the joined text of the user message. `time` is
 //       the message ts when present (else undefined — we never invent one).
@@ -114,7 +120,6 @@ import { formatElapsed } from './util/activity.js';
 import { parseFileCardData } from './util/file-card.js';
 import { parseUnifiedDiff } from './util/unified-diff.js';
 
-const MAX_MESSAGES_BEFORE_TRUNCATION_NOTE = 200;
 export const LIVE_FULL_MAX_LINES = 400;
 export const LIVE_FULL_MAX_CHARS = 20000;
 
@@ -129,20 +134,13 @@ export const FANOUT_ACCENTS = ['sky', 'teal', 'mauve', 'peach', 'blue', 'lavende
 // mutates the input.
 export function projectStream(session) {
   if (!session) return [];
-  const allMessages = Array.isArray(session.messages) ? session.messages : [];
-
-  // Cap the rendered history like the old SPA's MessageList: only the last
-  // MAX_MESSAGES_BEFORE_TRUNCATION_NOTE turns are projected, so a very long
-  // conversation stays responsive. `firstRendered` is the absolute offset of
-  // the first kept message, used both to slice and as a stable id base.
-  const firstRendered = Math.max(0, allMessages.length - MAX_MESSAGES_BEFORE_TRUNCATION_NOTE);
-  const messages = firstRendered > 0 ? allMessages.slice(firstRendered) : allMessages;
+  const messages = Array.isArray(session.messages) ? session.messages : [];
 
   const blocks = [];
 
-  // Truncation notice first, mirroring the old SPA: either the server told us
-  // history was cut, or we elided older turns above.
-  if (session.historyTruncated || firstRendered > 0) {
+  // The server tells us whether this snapshot omitted older history. Future
+  // pagination also uses olderHistory.hasMore for the same leading marker.
+  if (session.historyTruncated || session.olderHistory?.hasMore) {
     blocks.push({ kind: 'system', id: 'sys-truncated', text: 'Older messages…' });
   }
 
@@ -164,16 +162,25 @@ export function projectStream(session) {
   // currentDelegation = the open delegation block for this turn (SUBAGENTS-
   // REDESIGN-SPEC §1), or null. Reset at every turn boundary like currentDoc.
   let currentDelegation = null;
+  const compactionOrdinals = new Map();
 
-  // abs = absolute index of the message being processed (stable across polls
-  // as long as older messages aren't dropped), used to derive block ids that
-  // survive re-projection so preact doesn't recycle <details>/BackgroundJob
-  // state into the wrong block.
-  let abs = firstRendered;
+  // Persisted messages identify blocks by message and type, plus an ordinal
+  // for multiple blocks of one type emitted from the same message. Legacy
+  // messages without an ID use their index: they cannot be paginated, so a
+  // prepend cannot shift their fallback identity.
+  const blockOrdinals = new Map();
+  const blockID = (type, msg, index) => {
+    const msgID = msg?._msg_id || msg?.msg_id;
+    if (!msgID) return `${type}-${index}`;
+    const key = `${type}\u0000${msgID}`;
+    const ordinal = blockOrdinals.get(key) || 0;
+    blockOrdinals.set(key, ordinal + 1);
+    return `${type}-${msgID}-${ordinal}`;
+  };
 
-  function ensureDoc() {
+  function ensureDoc(msg, index) {
     if (!currentDoc) {
-      currentDoc = { kind: 'document', id: `doc-${abs}`, blocks: [] };
+      currentDoc = { kind: 'document', id: blockID('doc', msg, index), message: msg, blocks: [] };
       blocks.push(currentDoc);
       currentLedger = null;
     }
@@ -188,14 +195,32 @@ export function projectStream(session) {
     currentDelegation = null;
   }
 
-  for (let i = 0; i < messages.length; i++, abs++) {
+  for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (msg && msg._type === 'system') {
       // System line breaks the turn: emit at top level, start fresh doc after.
-      blocks.push({ kind: 'system', id: `sys-${abs}`, text: msg.text || '' });
+      blocks.push({ kind: 'system', id: blockID('sys', msg, i), text: msg.text || '' });
       currentDoc = null;
       currentLedger = null;
       closeDelegation();
+      continue;
+    }
+
+    if (msg && msg._type === 'compaction_marker') {
+      currentDoc = null;
+      currentLedger = null;
+      closeDelegation();
+      const msgId = String(msg._msg_id || msg.msg_id || 'legacy');
+      const ordinal = compactionOrdinals.get(msgId) || 0;
+      compactionOrdinals.set(msgId, ordinal + 1);
+      blocks.push({
+        kind: 'compaction',
+        id: `compaction-${msgId}-${ordinal}`,
+        summary: typeof msg.summary === 'string' ? msg.summary : '',
+        tokensBefore: Number.isFinite(msg.tokensBefore) ? msg.tokensBefore : 0,
+        readFiles: Array.isArray(msg.readFiles) ? msg.readFiles : [],
+        modifiedFiles: Array.isArray(msg.modifiedFiles) ? msg.modifiedFiles : [],
+      });
       continue;
     }
 
@@ -205,7 +230,7 @@ export function projectStream(session) {
       // (SUBAGENTS-REDESIGN-SPEC §4). Drop it from the projection entirely.
       if (msg.tool_name === 'subagent_wait') continue;
 
-      const doc = ensureDoc();
+      const doc = ensureDoc(msg, i);
 
       // A terminated subagent card folds into the turn's delegation block
       // (SUBAGENTS-REDESIGN-SPEC §1) — sync AND async alike. The sync/async
@@ -236,7 +261,7 @@ export function projectStream(session) {
           if (canonicalSubagentJobIds.has(jobId)) continue;
         }
         if (!currentDelegation) {
-          currentDelegation = { type: 'delegation', id: `delegation-${abs}`, agents: [], settled: true };
+          currentDelegation = { type: 'delegation', id: blockID('delegation', msg, i), agents: [], settled: true };
           doc.blocks.push(currentDelegation);
         }
         currentDelegation.agents.push(delegationDoneAgent(msg, subagentAccent(session.subagents, jobId, msg.accentIndex), jobId));
@@ -246,7 +271,7 @@ export function projectStream(session) {
 
       closeDelegation();
       if (!currentLedger) {
-        currentLedger = { type: 'ledger', id: `ledger-${abs}`, rows: [] };
+        currentLedger = { type: 'ledger', id: blockID('ledger', msg, i), rows: [] };
         doc.blocks.push(currentLedger);
       }
       currentLedger.rows.push(toLedgerRow(msg));
@@ -255,7 +280,7 @@ export function projectStream(session) {
       // closes the ledger so subsequent tools open a new one below the diff.
       const diff = toDiffBlock(msg);
       if (diff) {
-        diff.id = `diff-${abs}`;
+        diff.id = blockID('diff', msg, i);
         doc.blocks.push(diff);
         closeLedger();
       }
@@ -264,20 +289,28 @@ export function projectStream(session) {
       // the ledger row (like the diff above) instead of raw text.
       const file = toFileBlock(msg);
       if (file) {
-        file.id = `file-${abs}`;
+        file.id = blockID('file', msg, i);
         doc.blocks.push(file);
         closeLedger();
       }
       continue;
     }
 
+    if (msg && msg._type === 'secret_batch') {
+      currentDoc = null;
+      currentLedger = null;
+      closeDelegation();
+      blocks.push({ kind: 'secret_batch', id: blockID('secret', msg, i), aliases: msg.aliases || [] });
+      continue;
+    }
+
     if (msg && msg.role === 'assistant') {
       const text = joinText(msg.content);
       if (text) {
-        const doc = ensureDoc();
+        const doc = ensureDoc(msg, i);
         closeLedger();
         closeDelegation();
-        doc.blocks.push({ type: 'prose', id: `prose-${abs}`, text });
+        doc.blocks.push({ type: 'prose', id: blockID('prose', msg, i), text });
       }
       continue;
     }
@@ -291,12 +324,16 @@ export function projectStream(session) {
       const msgId = msg.msg_id || msg._msg_id || '';
       const wp = {
         kind: 'waypoint',
-        id: `wp-${msgId || abs}`,
+        id: blockID('wp', msg, i),
         msgId,
         time: msg.ts,
         text: joinText(msg.content),
       };
       if (attachments.length > 0) wp.attachments = attachments;
+      // A task injected by the parent is a genuine child user-role message,
+      // but it is not authored by the owner steering this child from the UI.
+      // Its explicit backend provenance survives resumes and reconnects.
+      if (msg.custom?.source === 'subagent_parent') wp.fromParent = true;
       // A steered user message (injected mid-run) is labeled distinctly in the
       // transcript so it reads as a course-correction, not a fresh turn. Live
       // steers carry _steer_id; messages replayed from the persisted REST
@@ -322,7 +359,7 @@ export function projectStream(session) {
   const live = hasStreamingText || hasThinking || trailingRunningTool || hasLiveWork;
 
   if (live) {
-    const doc = ensureDoc();
+    const doc = ensureDoc(lastMsg, messages.length);
     closeLedger();
     if (hasStreamingText || hasThinking) closeDelegation();
     // Thinking is intentionally NOT projected to a rendered block: it streams
@@ -551,7 +588,7 @@ function toLedgerRow(msg) {
   // Diffs and answered questions have dedicated detail renderers, so neither
   // becomes a generic code-block row body.
   const body = preview && preview.kind !== 'diff' && preview.kind !== 'ask-user'
-    ? truncateText(preview.text)
+    ? preview.text
     : undefined;
   const row = {
     tool: toolToken(name),
@@ -816,9 +853,16 @@ function delegationDoneAgent(msg, accent, jobIDOverride) {
     state: failed ? (msg.status === 'cancelled' ? 'cancelled' : 'failed') : 'done',
     bashJobs: [],
   };
-  const chip = msg.result ? shortLabel(firstLine(msg.result), 48) : '';
+  const outcome = msg.status === 'error' || msg.status === 'failed'
+    ? (msg.error || msg.result)
+    : msg.result;
+  const chip = outcome ? shortLabel(firstLine(outcome), 48) : '';
   if (chip) agent.chip = chip;
   if (msg.result) agent.result = String(msg.result);
+  if (msg.error || ((msg.status === 'error' || msg.status === 'failed') && msg.result)) {
+    agent.error = String(msg.error || msg.result);
+  }
+  if (msg.excerpt) agent.excerpt = true;
   return agent;
 }
 

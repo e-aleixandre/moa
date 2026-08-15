@@ -39,21 +39,56 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const sessionId = (event.notification.data && event.notification.data.session_id) || '';
-  const url = sessionId ? `/?session=${sessionId}` : '/';
+  const rawSessionId = event.notification.data && event.notification.data.session_id;
+  const sessionId = typeof rawSessionId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(rawSessionId) ? rawSessionId : '';
+  const url = sessionId ? `/?session=${encodeURIComponent(sessionId)}` : '/';
 
   event.waitUntil((async () => {
-    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const clients = await self.clients.matchAll({ type: 'window' });
     // Prefer focusing an already-open window and telling it which session to show
     // (no reload, keeps live WS connections).
     for (const client of clients) {
-      if ('focus' in client) {
+      if (!('focus' in client)) continue;
+      let sameOrigin = false;
+      try { sameOrigin = new URL(client.url).origin === self.location.origin; } catch (_) { /* ignore malformed client URL */ }
+      if (!sameOrigin) continue;
+      try {
         await client.focus();
-        if (sessionId) client.postMessage({ type: 'open-session', sessionId });
-        return;
-      }
+        if (!sessionId) return;
+        if (await requestOpenSession(client, sessionId)) return;
+        // The focused client did not acknowledge promptly, usually because an
+        // installed iOS PWA was suspended or is restarting. Navigate it to the
+        // same deep link a cold start uses instead of losing the notification.
+        if ('navigate' in client) {
+          const navigated = await client.navigate(url);
+          if (navigated) {
+            if ('focus' in navigated) await navigated.focus();
+            return;
+          }
+        }
+      } catch (_) { /* another controlled client may still be focusable */ }
     }
     // No window open → cold start with the session pinned in the URL.
     if (self.clients.openWindow) await self.clients.openWindow(url);
   })());
 });
+
+function requestOpenSession(client, sessionId) {
+  if (typeof MessageChannel === 'undefined') return Promise.resolve(false);
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const channel = new MessageChannel();
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => finish(false), 1200);
+    const finish = (acknowledged) => {
+      clearTimeout(timeout);
+      channel.port1.onmessage = null;
+      channel.port1.close();
+      resolve(acknowledged);
+    };
+    channel.port1.onmessage = (event) => {
+      const data = event.data;
+      finish(!!data && data.type === 'open-session-ack' && data.requestId === requestId);
+    };
+    client.postMessage({ type: 'open-session', sessionId, requestId }, [channel.port2]);
+  });
+}
