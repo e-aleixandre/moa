@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState, useEffect } from "preact/hooks";
+import { useCallback, useMemo, useRef, useState, useEffect, useLayoutEffect } from "preact/hooks";
+import { createPortal } from "preact/compat";
 import { MessageSquarePlus } from "lucide-preact";
 import { Pane } from "../Pane/Pane.jsx";
 import { Stream } from "../Stream/Stream.jsx";
@@ -28,6 +29,7 @@ import { activityPhase, activityText, formatElapsed } from "../../data/util/acti
 import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
+import { positionModelPopover } from "./model-popover-position.js";
 import "./PaneGrid.css";
 
 // PaneGrid. Renders the REAL binary split tree (state.tileTree) recursively:
@@ -218,6 +220,8 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
   const [models, setModels] = useState(null);
   const stripAnchorRef = useRef(null);
   const modelAnchorRef = useRef(null);
+  const modelPopoverRef = useRef(null);
+  const [modelPopoverPosition, setModelPopoverPosition] = useState(null);
 
   useEffect(() => {
     setUsageOpen(false);
@@ -230,12 +234,43 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
     api("GET", "/api/models").then(setModels).catch(() => setModels([]));
   }, [modelOpen, models]);
 
+  const placeModelPopover = useCallback(() => {
+    const anchor = modelAnchorRef.current?.getBoundingClientRect();
+    const popover = modelPopoverRef.current?.getBoundingClientRect();
+    if (!anchor || !popover) return;
+    setModelPopoverPosition(positionModelPopover(anchor, popover, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!modelOpen) {
+      setModelPopoverPosition(null);
+      return undefined;
+    }
+    placeModelPopover();
+    window.addEventListener("resize", placeModelPopover);
+    // Capture nested pane scrolling as well as document scrolling.
+    window.addEventListener("scroll", placeModelPopover, true);
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(placeModelPopover);
+    if (observer && modelPopoverRef.current) observer.observe(modelPopoverRef.current);
+    return () => {
+      window.removeEventListener("resize", placeModelPopover);
+      window.removeEventListener("scroll", placeModelPopover, true);
+      observer?.disconnect();
+    };
+  }, [modelOpen, placeModelPopover]);
+
   useEffect(() => {
     if (!usageOpen && !mcpOpen && !modelOpen) return undefined;
     const onDocDown = (e) => {
       const t = e.target;
       if (stripAnchorRef.current?.contains(t)) return;
       if (modelAnchorRef.current?.contains(t)) return;
+      if (modelPopoverRef.current?.contains(t)) return;
       setUsageOpen(false);
       setMcpOpen(false);
       setModelOpen(false);
@@ -312,8 +347,16 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
 
   const specs = deriveModelSpecs(models);
   const selectedModel = matchSelectedModel(specs, session.model);
-  const modelPopover = modelOpen && (
-    <div class="head-popover pane-model-popover">
+  const modelPopover = modelOpen && typeof document !== "undefined" && document.body && createPortal(
+    <div
+      class="head-popover pane-model-popover"
+      ref={modelPopoverRef}
+      style={{
+        left: modelPopoverPosition?.left,
+        top: modelPopoverPosition?.top,
+        visibility: modelPopoverPosition ? undefined : "hidden",
+      }}
+    >
       <ModelSelector
         models={specs}
         selected={selectedModel}
@@ -331,7 +374,8 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
         }}
         onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
       />
-    </div>
+    </div>,
+    document.body,
   );
 
   return (
