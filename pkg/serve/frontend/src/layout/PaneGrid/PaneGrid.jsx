@@ -1,11 +1,15 @@
-import { useCallback, useMemo, useRef, useState, useEffect } from "preact/hooks";
+import { useCallback, useMemo, useRef, useState, useEffect, useLayoutEffect } from "preact/hooks";
+import { createPortal } from "preact/compat";
 import { MessageSquarePlus } from "lucide-preact";
 import { Pane } from "../Pane/Pane.jsx";
 import { Stream } from "../Stream/Stream.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { LiveDock } from "../LiveDock/LiveDock.jsx";
-import { McpBanner, PermissionPrompt, AskUserPrompt } from "../../components/index.js";
+import {
+  McpBanner, PermissionPrompt, AskUserPrompt, UsagePanel, ModelSelector,
+} from "../../components/index.js";
+import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { snapToRatio } from "../../data/snap.js";
@@ -17,12 +21,15 @@ import { navigate } from "../../data/router.js";
 import { allTileIds } from "../../data/tileTree.js";
 import { getTileCount, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
-import { openPersistedSubagent, openBashJob } from "../../data/session-actions.js";
-import { modelAccent } from "../../data/selectors.js";
+import { openPersistedSubagent, openBashJob, configureSession } from "../../data/session-actions.js";
+import { modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
 import { shortModel, shortPath, sessionDisplayDotState, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
 import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
+import { api } from "../../data/api.js";
+import { addToast } from "../../data/notifications.js";
+import { positionModelPopover } from "./model-popover-position.js";
 import "./PaneGrid.css";
 
 // PaneGrid. Renders the REAL binary split tree (state.tileTree) recursively:
@@ -177,9 +184,16 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
   }, [applyDrop]);
 
   // --- Click-to-focus (ported from Tile.handleTileClick) ---
+  // Interactive chrome (status strip, model pill, popovers, tools) must not
+  // steal focus into the composer — otherwise usage/perm/mcp/model clicks feel
+  // dead because the caret jumps to the input.
   const handleFocus = useCallback((e) => {
     const t = e.target;
-    if (t && t.closest && t.closest('input, textarea, [contenteditable="true"], .ask-user-card, .composer')) {
+    if (t && t.closest && t.closest(
+      'input, textarea, [contenteditable="true"], .ask-user-card, .composer, '
+      + '.status-strip, .status-strip-anchor, .p-model-btn, .p-model-wrap, '
+      + '.p-tools, .head-popover, .status-strip-usage-popover, button, a, [role="menu"]'
+    )) {
       focusTile(tileId, { focusInput: false });
       return;
     }
@@ -195,6 +209,86 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
     assignToTile(tileId, node.sessionId);
     navigate(null, { session: node.sessionId });
   }, [tileId, node.sessionId]);
+
+  // --- Pane telemetry / model popovers (parity with ConversationScreen) ---
+  // Without these handlers the StatusStrip is read-only and model is decorative:
+  // clicks look broken (TOC-3). Popovers are local to this pane so multi-pane
+  // grids don't share one global open state.
+  const [usageOpen, setUsageOpen] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
+  const [models, setModels] = useState(null);
+  const stripAnchorRef = useRef(null);
+  const modelAnchorRef = useRef(null);
+  const modelPopoverRef = useRef(null);
+  const [modelPopoverPosition, setModelPopoverPosition] = useState(null);
+
+  useEffect(() => {
+    setUsageOpen(false);
+    setMcpOpen(false);
+    setModelOpen(false);
+  }, [node.sessionId]);
+
+  useEffect(() => {
+    if (!modelOpen || models) return;
+    api("GET", "/api/models").then(setModels).catch(() => setModels([]));
+  }, [modelOpen, models]);
+
+  const placeModelPopover = useCallback(() => {
+    const anchor = modelAnchorRef.current?.getBoundingClientRect();
+    const popover = modelPopoverRef.current?.getBoundingClientRect();
+    if (!anchor || !popover) return;
+    setModelPopoverPosition(positionModelPopover(anchor, popover, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!modelOpen) {
+      setModelPopoverPosition(null);
+      return undefined;
+    }
+    placeModelPopover();
+    window.addEventListener("resize", placeModelPopover);
+    // Capture nested pane scrolling as well as document scrolling.
+    window.addEventListener("scroll", placeModelPopover, true);
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(placeModelPopover);
+    if (observer && modelPopoverRef.current) observer.observe(modelPopoverRef.current);
+    return () => {
+      window.removeEventListener("resize", placeModelPopover);
+      window.removeEventListener("scroll", placeModelPopover, true);
+      observer?.disconnect();
+    };
+  }, [modelOpen, placeModelPopover]);
+
+  useEffect(() => {
+    if (!usageOpen && !mcpOpen && !modelOpen) return undefined;
+    const onDocDown = (e) => {
+      const t = e.target;
+      if (stripAnchorRef.current?.contains(t)) return;
+      if (modelAnchorRef.current?.contains(t)) return;
+      if (modelPopoverRef.current?.contains(t)) return;
+      setUsageOpen(false);
+      setMcpOpen(false);
+      setModelOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setUsageOpen(false);
+        setMcpOpen(false);
+        setModelOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [usageOpen, mcpOpen, modelOpen]);
 
   const commonProps = {
     paneRef,
@@ -242,6 +336,7 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
   const liveAgents = liveTrayAgents(session);
   const dotState = sessionDisplayDotState(session);
   const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
+  const settingsBusy = session.state === "running" || session.state === "permission";
   const blocking = (session.untrustedMcp || session.pendingPerm || session.pendingAsk) ? (
     <>
       {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
@@ -249,6 +344,39 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
       {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
     </>
   ) : null;
+
+  const specs = deriveModelSpecs(models);
+  const selectedModel = matchSelectedModel(specs, session.model);
+  const modelPopover = modelOpen && typeof document !== "undefined" && document.body && createPortal(
+    <div
+      class="head-popover pane-model-popover"
+      ref={modelPopoverRef}
+      style={{
+        left: modelPopoverPosition?.left,
+        top: modelPopoverPosition?.top,
+        visibility: modelPopoverPosition ? undefined : "hidden",
+      }}
+    >
+      <ModelSelector
+        models={specs}
+        selected={selectedModel}
+        thinking={thinking}
+        sessionModel={session.model || ""}
+        sessionProvider={session.provider}
+        onSelect={(spec) => {
+          configureSession(session.id, { model: spec })
+            .then(() => setModelOpen(false))
+            .catch((error) => addToast({
+              title: "Could not change model",
+              detail: error.message,
+              type: "error",
+            }));
+        }}
+        onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
+      />
+    </div>,
+    document.body,
+  );
 
   return (
     <Pane
@@ -261,6 +389,13 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
       thinkingLevel={thinking}
       attention={attention}
       onMaximize={handleMaximize}
+      onModelClick={() => {
+        setUsageOpen(false);
+        setMcpOpen(false);
+        setModelOpen((v) => !v);
+      }}
+      modelPopover={modelPopover}
+      modelAnchorRef={modelAnchorRef}
       blocking={blocking}
       bodyLive
       composer={<Composer key={session.id} sessionId={session.id} session={session} onSecret={(aliases) => onSecret(session.id, aliases)} />}
@@ -270,25 +405,54 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
           open={!!session.dockOpen}
           onToggle={(next) => updateSession(session.id, { dockOpen: next })}
           onOpen={async (jobId, kind) => {
-            // A pane is too small for either detail view, so opening a dock row
-            // from the grid also leaves the grid for the full conversation
-            // screen (where the view has room), same as before for subagents.
-            if (kind === "bash") openBashJob(session.id, jobId);
-            else await openPersistedSubagent(session.id, jobId);
+            // Detail views need room; open them in single conversation but
+            // remember the grid so Back restores the layout (TOC-4).
+            if (kind === "bash") openBashJob(session.id, jobId, { returnView: "grid" });
+            else await openPersistedSubagent(session.id, jobId, { returnView: "grid" });
             navigate(null, { session: session.id });
           }}
         />
       )}
       status={(
-        <StatusStrip
-          ctxPercent={session.contextPercent}
-          tokensUp={session.runTokensUp}
-          tokensDown={session.runTokensDown}
-          task={task}
-          spend={fmtCost(session.costUSD)}
-          session={session}
-          usage={state.usage}
-        />
+        <div class="status-strip-anchor pane-status-anchor" ref={stripAnchorRef}>
+          <StatusStrip
+            ctxPercent={session.contextPercent}
+            tokensUp={session.runTokensUp}
+            tokensDown={session.runTokensDown}
+            task={task}
+            spend={fmtCost(session.costUSD)}
+            session={session}
+            usage={state.usage}
+            onOpenUsage={() => {
+              setMcpOpen(false);
+              setModelOpen(false);
+              setUsageOpen((v) => !v);
+            }}
+            onOpenMcp={() => {
+              setUsageOpen(false);
+              setModelOpen(false);
+              setMcpOpen((v) => !v);
+            }}
+            onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
+            permBusy={settingsBusy}
+            showTokens
+          />
+          {usageOpen && (
+            <div class="status-strip-usage-popover">
+              <UsagePanel
+                session={session}
+                usage={state.usage}
+                ctxPercent={session.contextPercent}
+                costUSD={session.costUSD}
+              />
+            </div>
+          )}
+          {mcpOpen && (
+            <div class="status-strip-usage-popover status-strip-mcp-popover">
+              <McpPanel sessionId={session.id} mcpTick={session.mcpTick} />
+            </div>
+          )}
+        </div>
       )}
     >
       <Stream

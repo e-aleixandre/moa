@@ -1039,6 +1039,23 @@ test('openBashJob opens a live background job and closes any subagent view', () 
   expect(s1.viewingSubagent).toBeNull();
 });
 
+test('openBashJob stores detailReturnView when opening from grid', () => {
+  setState({
+    sessions: {
+      s1: {
+        id: 's1',
+        subagents: { 'bash-1': { jobId: 'bash-1', kind: 'bash', status: 'running', messages: [] } },
+      },
+    },
+  });
+
+  openBashJob('s1', 'bash-1', { returnView: 'grid' });
+
+  const s1 = store.get().sessions.s1;
+  expect(s1.viewingBashJob).toBe('bash-1');
+  expect(s1.detailReturnView).toBe('grid');
+});
+
 test('openBashJob is a no-op for a job the store never had (no disk fallback)', () => {
   setState({ sessions: { s1: { id: 's1', subagents: {} } } });
 

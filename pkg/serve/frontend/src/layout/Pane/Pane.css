@@ -399,3 +399,64 @@
   font-size: var(--text-xs);
   color: var(--surface2);
 }
+
+/* Model badge as control (grid): same look as .p-model, clickable. */
+.pane .p-model-wrap {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
+
+.pane button.p-model-btn {
+  cursor: pointer;
+  border: 0;
+  font: inherit;
+  color: inherit;
+}
+
+.pane button.p-model-btn:hover {
+  filter: brightness(1.08);
+}
+
+.pane button.p-model-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ModelSelector is portalled to body because a grid pane clips its children.
+   Fixed coordinates are supplied from the badge's viewport rect. */
+.pane-model-popover {
+  position: fixed;
+  right: auto;
+  z-index: var(--z-overlay);
+  max-width: calc(100vw - var(--space-4));
+}
+
+.pane-model-popover .model-selector {
+  box-sizing: border-box;
+  max-height: calc(100vh - var(--space-4));
+}
+
+.pane-model-popover .model-selector-view {
+  max-height: min(430px, calc(100vh - 250px));
+}
+
+/* Usage / MCP popovers above the pane status strip. */
+.pane .pane-status-anchor {
+  position: relative;
+}
+
+.pane .status-strip-usage-popover {
+  position: absolute;
+  right: var(--space-2);
+  bottom: calc(100% + var(--space-1));
+  z-index: var(--z-overlay);
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-3);
+  max-width: min(360px, 90vw);
+  max-height: min(70vh, 480px);
+  overflow: auto;
+}

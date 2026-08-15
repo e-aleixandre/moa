@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "preact/hooks";
+import { useState, useRef, useEffect, useLayoutEffect } from "preact/hooks";
+import { createPortal } from "preact/compat";
 import { Check } from "lucide-preact";
 import { registerOverlay } from "../../data/overlays.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
@@ -24,12 +25,9 @@ import "./PermissionControl.css";
 // both densities so its accent color remains a glanceable safety signal — only
 // the act of changing moves into the sheet.
 //
-// The chip wears the STATUS-LINE language in every density: mono, lowercase, no
-// filled background and no icon, keeping only the mode's canonical color, which
-// is what actually carries the safety signal. The mobile line established that
-// vocabulary and the desktop strip used to disagree (filled pill + shield +
-// uppercase) for the very same datum; one definition here is what keeps the two
-// lines from drifting apart again.
+// Desktop popover is PORTALLED to <body> with fixed coords: panes use
+// overflow:hidden, so an absolute menu clipped at the pane edge (grid). Portal
+// keeps the same upward-from-chip placement without fighting pane overflow.
 //
 // Self-contained: owns its open state, click-outside, Escape and overlay-history
 // registration, so the call sites just drop it in. `disabled` locks it while the
@@ -42,9 +40,49 @@ const MODES = [
   { value: "ask", label: "ASK", desc: "Ask before every command" },
 ];
 
+const MENU_WIDTH = 220;
+const MENU_GAP = 8;
+
 export function PermissionControl({ mode = "yolo", disabled = false, onChange, sheet = false }) {
   const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState(null);
   const anchorRef = useRef(null);
+  const menuRef = useRef(null);
+
+  // Place the portal menu above the chip, right-aligned, clamped to the viewport.
+  const placeMenu = () => {
+    const chip = anchorRef.current?.querySelector(".perm-chip") || anchorRef.current;
+    if (!chip) return;
+    const r = chip.getBoundingClientRect();
+    const width = MENU_WIDTH;
+    let right = window.innerWidth - r.right;
+    right = Math.max(8, Math.min(right, window.innerWidth - width - 8));
+    // Prefer above the chip; if not enough room, flip below.
+    const menuH = menuRef.current?.offsetHeight || 160;
+    const spaceAbove = r.top;
+    const openBelow = spaceAbove < menuH + MENU_GAP && window.innerHeight - r.bottom > spaceAbove;
+    if (openBelow) {
+      setMenuPos({ top: r.bottom + MENU_GAP, right, bottom: "auto" });
+    } else {
+      setMenuPos({ bottom: window.innerHeight - r.top + MENU_GAP, right, top: "auto" });
+    }
+  };
+
+  useLayoutEffect(() => {
+    if (!open || sheet) {
+      setMenuPos(null);
+      return undefined;
+    }
+    placeMenu();
+    const onReposition = () => placeMenu();
+    window.addEventListener("resize", onReposition);
+    // Capture scroll in nested panes (stream, grid splits).
+    window.addEventListener("scroll", onReposition, true);
+    return () => {
+      window.removeEventListener("resize", onReposition);
+      window.removeEventListener("scroll", onReposition, true);
+    };
+  }, [open, sheet]);
 
   // Popover-only lifecycle: click-outside / Escape / overlay-history are handled
   // here for the desktop popover. The Sheet variant gets all of that from the
@@ -53,7 +91,9 @@ export function PermissionControl({ mode = "yolo", disabled = false, onChange, s
     if (!open || sheet) return;
     const unregister = registerOverlay("permission-menu");
     const onDocDown = (e) => {
-      if (anchorRef.current && !anchorRef.current.contains(e.target)) setOpen(false);
+      if (anchorRef.current && anchorRef.current.contains(e.target)) return;
+      if (menuRef.current && menuRef.current.contains(e.target)) return;
+      setOpen(false);
     };
     const onKeyDown = (e) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", onDocDown);
@@ -92,6 +132,25 @@ export function PermissionControl({ mode = "yolo", disabled = false, onChange, s
     </button>
   ));
 
+  const desktopMenu = open && !sheet && menuPos && typeof document !== "undefined" && document.body
+    ? createPortal(
+        <div
+          class="perm-menu perm-menu-portal"
+          role="menu"
+          aria-label="Permission mode"
+          ref={menuRef}
+          style={{
+            top: menuPos.top === "auto" ? undefined : menuPos.top,
+            bottom: menuPos.bottom === "auto" ? undefined : menuPos.bottom,
+            right: menuPos.right,
+          }}
+        >
+          {options}
+        </div>,
+        document.body,
+      )
+    : null;
+
   return (
     <span class="perm-control" ref={anchorRef}>
       <button
@@ -113,11 +172,7 @@ export function PermissionControl({ mode = "yolo", disabled = false, onChange, s
           </div>
         </Sheet>
       ) : (
-        open && (
-          <div class="perm-menu" role="menu" aria-label="Permission mode">
-            {options}
-          </div>
-        )
+        desktopMenu
       )}
     </span>
   );

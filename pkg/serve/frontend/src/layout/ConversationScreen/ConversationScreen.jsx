@@ -9,9 +9,8 @@ import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { NowLine } from "../NowLine/NowLine.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
-import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
-import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings, UsagePanel } from "../../components/index.js";
+import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings, UsagePanel, Sheet, GlobalSettings } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
@@ -89,6 +88,9 @@ function fmtSpend(costUSD) {
 export function ConversationScreen({ version }) {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
+  // Global Settings sheet (spine ⚙) — device-wide, not per-session. Shared body
+  // with mobile so desktop is no longer a stub.
+  const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
 
   const session = focusedSession(state);
   const activeId = focusedSessionId(state);
@@ -250,7 +252,7 @@ export function ConversationScreen({ version }) {
       onSelectSession={onSelectSession}
       onNewSession={() => openPalette("create")}
       onSearch={() => openPalette("search")}
-      onSettings={() => { /* 5x: settings */ }}
+      onSettings={() => setGlobalSettingsOpen(true)}
     />
   );
 
@@ -288,6 +290,15 @@ export function ConversationScreen({ version }) {
     // openable row). The two are mutually exclusive by construction (opening
     // one clears the other), and the subagent wins any residual tie.
     const viewingBash = !viewingSub && session.viewingBashJob;
+
+    // Back from bash/subagent: clear the detail view and, when the detail was
+    // opened from the pane grid (detailReturnView === "grid"), restore the grid
+    // so the user does not lose the multi-pane layout (TOC-4).
+    const leaveDetail = (patch) => {
+      const returnView = session.detailReturnView;
+      updateSession(session.id, { ...patch, detailReturnView: null });
+      if (returnView === "grid") navigate("grid");
+    };
 
     const modelPopover = modelOpen && (
       <div class="head-popover">
@@ -365,14 +376,14 @@ export function ConversationScreen({ version }) {
             key={viewingSub}
             session={session}
             jobId={viewingSub}
-            onBack={() => updateSession(session.id, { viewingSubagent: null })}
+            onBack={() => leaveDetail({ viewingSubagent: null })}
           />
         ) : viewingBash ? (
           <BashJobView
             key={viewingBash}
             session={session}
             jobId={viewingBash}
-            onBack={() => updateSession(session.id, { viewingBashJob: null })}
+            onBack={() => leaveDetail({ viewingBashJob: null })}
           />
         ) : (
           <>
@@ -460,6 +471,14 @@ export function ConversationScreen({ version }) {
           sessionId={session.id}
         />
       )}
+      <Sheet
+        open={globalSettingsOpen}
+        onClose={() => setGlobalSettingsOpen(false)}
+        title="Settings"
+        class="global-settings-sheet"
+      >
+        <GlobalSettings soundEnabled={state.soundEnabled} version={version} />
+      </Sheet>
       {session && (
         <Sheet open={secretAliases !== null} onClose={() => setSecretAliases(null)} title="Send secrets">
           <SecretBatch

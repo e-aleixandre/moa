@@ -1,0 +1,69 @@
+/* GlobalSettings — body for the device-wide Settings sheet (desktop + mobile).
+   NotificationSettings ships as a bordered dropdown for the head popover; inside
+   this shell it sheds its own chrome and fills the width. */
+
+.global-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 280px;
+}
+
+/* Desktop Sheet body padding — Sheet.css leaves body padding to consumers. */
+.global-settings-sheet .sheet-body {
+  padding: var(--space-4) var(--space-6) var(--space-6);
+}
+
+.global-settings-lbl {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--overlay0);
+  margin-bottom: var(--space-3);
+}
+
+.global-settings .notif-dropdown {
+  width: 100%;
+  border: 0;
+  box-shadow: none;
+  background: none;
+  padding: 0;
+}
+
+/* Section label already says "Notifications". */
+.global-settings .notif-dropdown .notif-title {
+  display: none;
+}
+
+.global-settings-about-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--base);
+  border: 1px solid var(--surface0);
+}
+
+.global-settings-about-key {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--subtext1);
+}
+
+.global-settings-about-val {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--subtext0);
+}
+
+.global-settings-about-update {
+  color: var(--yellow);
+}
+
+.global-settings-about-muted {
+  color: var(--overlay0);
+}
