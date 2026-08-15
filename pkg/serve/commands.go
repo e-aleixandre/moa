@@ -234,6 +234,11 @@ func cmdHandoff(m *Manager, sess *ManagedSession, args []string) (*CommandResult
 	}
 }
 
+// cmdCompact starts a compaction. The bus command only ACCEPTS it (the model
+// call takes tens of seconds on its own goroutine), so the response reports
+// that the session is now busy compacting — not that the conversation was
+// compacted. The outcome travels as WS events (compaction_end, or state_change
+// to error), which is what lets the client survive a suspended tab.
 func cmdCompact(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
 	if err := requireIdle(sess); err != nil {
 		return nil, err
@@ -242,9 +247,13 @@ func cmdCompact(_ *Manager, sess *ManagedSession, args []string) (*CommandResult
 	if err := sess.runtime.Bus.Execute(bus.CompactSession{Focus: focus}); err != nil {
 		return &CommandResult{OK: false, Message: "compaction failed: " + err.Error()}, nil
 	}
-	return &CommandResult{OK: true, Message: "conversation compacted"}, nil
+	// Queued without an ID: the command was started, not enqueued behind a run,
+	// so no command_dequeued will ever retire an optimistic chip for it.
+	return &CommandResult{OK: true, Queued: true, Message: "compaction started"}, nil
 }
 
+// cmdPrepareCompact runs a preparation turn and then compacts. Its handler is
+// already asynchronous (launchRun), so the response is likewise an acceptance.
 func cmdPrepareCompact(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
 	if err := requireIdle(sess); err != nil {
 		return nil, err
@@ -252,7 +261,7 @@ func cmdPrepareCompact(_ *Manager, sess *ManagedSession, _ []string) (*CommandRe
 	if err := sess.runtime.Bus.Execute(bus.PrepareCompactSession{}); err != nil {
 		return &CommandResult{OK: false, Message: "preparation/compaction failed: " + err.Error()}, nil
 	}
-	return &CommandResult{OK: true, Message: "preparing context; compaction will follow"}, nil
+	return &CommandResult{OK: true, Queued: true, Message: "preparing context; compaction will follow"}, nil
 }
 
 func cmdRename(m *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {

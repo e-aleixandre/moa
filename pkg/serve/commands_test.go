@@ -388,6 +388,120 @@ func TestCmdCompact_ForwardsFocusIdle(t *testing.T) {
 	}
 }
 
+// The POST contract for a command whose outcome is deferred: /compact answers
+// as soon as the compaction is STARTED, with queued=true and NO id (nothing
+// will ever dequeue it, so the client must not keep an optimistic chip). The
+// response must not claim the conversation was compacted — the real outcome
+// travels over the WS.
+func TestCmdCompact_AnswersAcceptedWithoutID(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := bus.NewLocalBus()
+	defer b.Close()
+	b.OnCommand(func(_ bus.CompactSession) error { return nil })
+	sess.runtime.Bus = b
+
+	res, err := mgr.ExecCommand(sess.ID, "/compact", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK || !res.Queued || res.ID != "" {
+		t.Fatalf("expected {ok, queued, no id}, got %+v", res)
+	}
+	if strings.Contains(res.Message, "compacted") {
+		t.Fatalf("message claims a finished compaction: %q", res.Message)
+	}
+}
+
+// /prepare-compact is likewise deferred (its handler already runs on its own
+// goroutine via launchRun), so it uses the same contract.
+func TestCmdPrepareCompact_AnswersAcceptedWithoutID(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := bus.NewLocalBus()
+	defer b.Close()
+	b.OnCommand(func(_ bus.PrepareCompactSession) error { return nil })
+	sess.runtime.Bus = b
+
+	res, err := mgr.ExecCommand(sess.ID, "/prepare-compact", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK || !res.Queued || res.ID != "" {
+		t.Fatalf("expected {ok, queued, no id}, got %+v", res)
+	}
+}
+
+// The lifecycle guarantee that makes the asynchronous handler safe. ExecCommand
+// holds sess.lifecycle.RLock for its whole body, so the compaction must claim
+// the session (idle→running) BEFORE the command returns: once the POST releases
+// that lock, a concurrent close finds the session busy (DoIfQuiescent →
+// State.DoIfIdle) and refuses instead of tearing the runtime down under the
+// goroutine. When the compaction settles, the close is admitted again.
+func TestCmdCompact_HoldsSessionBusyUntilItSettles(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A bus that claims the session exactly like the real handler and holds it
+	// until released, standing in for the model call.
+	b := bus.NewLocalBus()
+	defer b.Close()
+	release := make(chan struct{})
+	done := make(chan struct{})
+	state := sess.runtime.State
+	b.OnCommand(func(_ bus.CompactSession) error {
+		if err := state.Transition(bus.StateRunning); err != nil {
+			return err
+		}
+		go func() {
+			defer close(done)
+			<-release
+			_ = state.Transition(bus.StateIdle)
+		}()
+		return nil
+	})
+	sess.runtime.Bus = b
+
+	res, err := mgr.ExecCommand(sess.ID, "/compact", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK || !res.Queued {
+		t.Fatalf("compact not accepted: %+v", res)
+	}
+	// ExecCommand has returned (its RLock is released) while the compaction is
+	// still in flight: the close must be refused.
+	if err := mgr.CloseSession(sess.ID); !errors.Is(err, ErrBusy) {
+		t.Fatalf("CloseSession during compaction = %v, want ErrBusy", err)
+	}
+
+	close(release)
+	<-done
+	pollUntil(t, 2*time.Second, "session idle after compaction", func() bool {
+		return sessState(sess) == StateIdle
+	})
+	if err := mgr.CloseSession(sess.ID); err != nil {
+		t.Fatalf("CloseSession after compaction = %v, want success", err)
+	}
+}
+
 // `/verify <dir>` from the web UI runs another checkout's checks, the
 // multi-repo case where the session lives in one repository and the work
 // happened in another.

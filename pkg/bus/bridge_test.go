@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -62,6 +63,7 @@ type fakeAgent struct {
 	checkpointPassed string
 	compactFocus     string
 	compactHook      func()
+	panicMessages    bool
 
 	setModelProvider core.Provider
 	setModelModel    core.Model
@@ -259,6 +261,9 @@ func (f *fakeAgent) ThinkingLevel() string {
 func (f *fakeAgent) Messages() []core.AgentMessage {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.panicMessages {
+		panic("messages panic")
+	}
 	// Return a copy to prevent races.
 	cp := make([]core.AgentMessage, len(f.messages))
 	copy(cp, f.messages)
@@ -626,6 +631,40 @@ func expectNone[T any](ch <-chan T, b EventBus, t *testing.T) {
 		t.Fatalf("expected no event, got %+v", v)
 	default:
 		// good
+	}
+}
+
+// waitForEvent waits for any typed event with drain + timeout. A compaction is
+// asynchronous now (the command only accepts it), so tests observe its outcome
+// through events instead of the Execute return.
+func waitForEvent[T any](t *testing.T, b EventBus, ch <-chan T, name string) T {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		b.Drain(100 * time.Millisecond)
+		select {
+		case v := <-ch:
+			return v
+		case <-deadline:
+			t.Fatalf("timeout waiting for %s", name)
+			var zero T
+			return zero
+		}
+	}
+}
+
+// sawErrorState reports whether an error transition carrying msg was published,
+// draining whatever StateChanged events are already buffered.
+func sawErrorState(ch <-chan StateChanged, msg string) bool {
+	for {
+		select {
+		case e := <-ch:
+			if e.State == string(StateError) && e.Error == msg {
+				return true
+			}
+		default:
+			return false
+		}
 	}
 }
 
@@ -1455,10 +1494,12 @@ func TestHandler_CompactSession(t *testing.T) {
 	if err := b.Execute(CompactSession{}); err != nil {
 		t.Fatal(err)
 	}
+	e := drainChan(got, b, t)
+	// Execute only ACCEPTS the compaction now, so the agent call is observed
+	// after its terminal event, not on return.
 	if !fa.wasCompactCalled() {
 		t.Fatal("Compact not called")
 	}
-	e := drainChan(got, b, t)
 	if e.Command != "compact" {
 		t.Fatalf("Command = %q", e.Command)
 	}
@@ -1472,27 +1513,45 @@ func TestHandler_CompactSession_ForwardsFocus(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 	fa := &fakeAgent{messages: []core.AgentMessage{{Message: core.Message{Role: "user"}}}}
-	sctx := newTestSessionContext(b, fa)
+	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
+	ended := make(chan CompactionEnded, 1)
+	b.Subscribe(func(e CompactionEnded) { ended <- e })
 
 	if err := b.Execute(CompactSession{Focus: "keep phase 3"}); err != nil {
 		t.Fatal(err)
 	}
+	waitForEvent(t, b, ended, "CompactionEnded")
 	if got := fa.focusPassed(); got != "keep phase 3" {
 		t.Fatalf("focus passed to agent = %q, want %q", got, "keep phase 3")
 	}
 }
 
+// A compaction failure is no longer the return value of Execute (the model call
+// is asynchronous): the session settles to StateError carrying the message, and
+// the terminal CompactionEnded carries the error too.
 func TestHandler_CompactSession_Error(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 	fa := &fakeAgent{compactErr: errors.New("no context")}
-	sctx := newTestSessionContext(b, fa)
+	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
+	ended := make(chan CompactionEnded, 1)
+	b.Subscribe(func(e CompactionEnded) { ended <- e })
+	states := make(chan StateChanged, 8)
+	b.Subscribe(func(e StateChanged) { states <- e })
 
-	err := b.Execute(CompactSession{})
-	if err == nil || err.Error() != "no context" {
-		t.Fatalf("err = %v", err)
+	if err := b.Execute(CompactSession{}); err != nil {
+		t.Fatalf("Execute must accept the compaction, got %v", err)
+	}
+	e := waitForEvent(t, b, ended, "CompactionEnded")
+	if e.Err == nil || e.Err.Error() != "no context" {
+		t.Fatalf("CompactionEnded.Err = %v", e.Err)
+	}
+	// The failure reaches frontends through the state machine (StateChanged →
+	// state_change), which is why no dedicated error event is needed.
+	if !sawErrorState(states, "no context") {
+		t.Fatal("no StateChanged(error) carrying the compaction error")
 	}
 }
 
@@ -1502,11 +1561,13 @@ func TestHandler_CompactSession_Error(t *testing.T) {
 func TestHandler_CompactSession_OccupiesSession(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
-	var during SessionState
+	during := make(chan SessionState, 1)
 	fa := &fakeAgent{}
 	sctx := newTestSessionContextWithState(b, fa)
-	fa.compactHook = func() { during = sctx.State.Current() }
+	fa.compactHook = func() { during <- sctx.State.Current() }
 	RegisterHandlers(sctx)
+	ended := make(chan CompactionEnded, 1)
+	b.Subscribe(func(e CompactionEnded) { ended <- e })
 
 	if got := sctx.State.Current(); got != StateIdle {
 		t.Fatalf("pre-compact state = %q, want idle", got)
@@ -1514,9 +1575,15 @@ func TestHandler_CompactSession_OccupiesSession(t *testing.T) {
 	if err := b.Execute(CompactSession{}); err != nil {
 		t.Fatal(err)
 	}
-	if during != StateRunning {
-		t.Fatalf("state during compaction = %q, want running", during)
+	select {
+	case got := <-during:
+		if got != StateRunning {
+			t.Fatalf("state during compaction = %q, want running", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for the agent to enter Compact")
 	}
+	waitForEvent(t, b, ended, "CompactionEnded")
 	if got := sctx.State.Current(); got != StateIdle {
 		t.Fatalf("post-compact state = %q, want idle", got)
 	}
@@ -1530,8 +1597,11 @@ func TestHandler_CompactSession_ErrorSettlesState(t *testing.T) {
 	fa := &fakeAgent{compactErr: errors.New("boom")}
 	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
+	ended := make(chan CompactionEnded, 1)
+	b.Subscribe(func(e CompactionEnded) { ended <- e })
 
 	_ = b.Execute(CompactSession{})
+	waitForEvent(t, b, ended, "CompactionEnded")
 	if got := sctx.State.Current(); got != StateError {
 		t.Fatalf("post-error state = %q, want error", got)
 	}
@@ -1550,11 +1620,13 @@ func TestHandler_CompactSession_CompactingFlag(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		b := NewLocalBus()
 		defer b.Close()
-		var during bool
+		during := make(chan bool, 1)
 		fa := &fakeAgent{}
 		sctx := newTestSessionContextWithState(b, fa)
-		fa.compactHook = func() { during = compactingNow(b) }
+		fa.compactHook = func() { during <- compactingNow(b) }
 		RegisterHandlers(sctx)
+		ended := make(chan CompactionEnded, 1)
+		b.Subscribe(func(e CompactionEnded) { ended <- e })
 
 		if compactingNow(b) {
 			t.Fatal("compacting flag set before compaction")
@@ -1562,9 +1634,10 @@ func TestHandler_CompactSession_CompactingFlag(t *testing.T) {
 		if err := b.Execute(CompactSession{}); err != nil {
 			t.Fatal(err)
 		}
-		if !during {
+		if got := <-during; !got {
 			t.Fatal("compacting flag not set during compaction")
 		}
+		waitForEvent(t, b, ended, "CompactionEnded")
 		if compactingNow(b) {
 			t.Fatal("compacting flag still set after successful compaction")
 		}
@@ -1576,8 +1649,11 @@ func TestHandler_CompactSession_CompactingFlag(t *testing.T) {
 		fa := &fakeAgent{compactErr: errors.New("boom")}
 		sctx := newTestSessionContextWithState(b, fa)
 		RegisterHandlers(sctx)
+		ended := make(chan CompactionEnded, 1)
+		b.Subscribe(func(e CompactionEnded) { ended <- e })
 
 		_ = b.Execute(CompactSession{})
+		waitForEvent(t, b, ended, "CompactionEnded")
 		if compactingNow(b) {
 			t.Fatal("compacting flag still set after failed compaction")
 		}
@@ -1590,14 +1666,323 @@ func TestHandler_CompactSession_CompactingFlag(t *testing.T) {
 		sctx := newTestSessionContextWithState(b, fa)
 		fa.compactHook = func() { panic("kaboom") }
 		RegisterHandlers(sctx)
+		ended := make(chan CompactionEnded, 1)
+		b.Subscribe(func(e CompactionEnded) { ended <- e })
 
-		// The handler recovers the panic into an error; the deferred
-		// setCompacting(false) must still clear the flag.
+		// The goroutine recovers the panic into an error and still clears the
+		// flag: LocalBus.Execute's own recover no longer covers this code.
 		_ = b.Execute(CompactSession{})
+		waitForEvent(t, b, ended, "CompactionEnded")
 		if compactingNow(b) {
 			t.Fatal("compacting flag still set after panicking compaction")
 		}
 	})
+}
+
+// The whole point of the asynchronous handler: Bus.Execute returns an
+// ACCEPTANCE, not a completion. A `/compact` POST that blocked for the model
+// call left the web composer read-only for tens of seconds, and a suspended PWA
+// saw the aborted fetch as a failed command. On return the session must already
+// be claimed (running + compacting + CompactionStarted published) so a
+// concurrent close or run cannot slip in.
+func TestHandler_CompactSession_ReturnsOnAcceptance(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	fa := &fakeAgent{}
+	fa.compactHook = func() {
+		close(entered)
+		<-release
+	}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+	started := make(chan CompactionStarted, 1)
+	b.Subscribe(func(e CompactionStarted) { started <- e })
+	ended := make(chan CompactionEnded, 1)
+	b.Subscribe(func(e CompactionEnded) { ended <- e })
+
+	if err := b.Execute(CompactSession{}); err != nil {
+		t.Fatalf("Execute = %v, want acceptance", err)
+	}
+	// Blocked inside Agent.Compact while the command has already returned.
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for the agent to enter Compact")
+	}
+	select {
+	case <-ended:
+		t.Fatal("Execute returned only after the compaction completed")
+	default:
+	}
+	if got := sctx.State.Current(); got != StateRunning {
+		t.Fatalf("state on acceptance = %q, want running", got)
+	}
+	if v, _ := QueryTyped[GetCompacting, bool](b, GetCompacting{}); !v {
+		t.Fatal("compacting flag not set on acceptance")
+	}
+	waitForEvent(t, b, started, "CompactionStarted")
+
+	close(release)
+	waitForEvent(t, b, ended, "CompactionEnded")
+	if got := sctx.State.Current(); got != StateIdle {
+		t.Fatalf("post-compact state = %q, want idle", got)
+	}
+}
+
+// The terminal ordering the frontends depend on: the state settles to idle
+// BEFORE the result is published, so a reactor seeing CompactionEnded never
+// observes a running session.
+func TestHandler_CompactSession_SettlesStateBeforeTerminalEvent(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{
+		messages:       []core.AgentMessage{{Message: core.Message{Role: "user"}}},
+		compactPayload: &core.CompactionPayload{Summary: "gist", TokensBefore: 2000, TokensAfter: 500},
+	}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+	// One ordered subscription: separate typed subscribers each run on their own
+	// goroutine, so only the sequenced stream states the publication order.
+	var mu sync.Mutex
+	var order []string
+	ended := make(chan CompactionEnded, 1)
+	executed := make(chan CommandExecuted, 1)
+	b.SubscribeAllSeq(func(_ uint64, event any) {
+		switch e := event.(type) {
+		case StateChanged:
+			mu.Lock()
+			order = append(order, "state:"+e.State)
+			mu.Unlock()
+		case CompactionEnded:
+			mu.Lock()
+			order = append(order, "compaction_ended")
+			mu.Unlock()
+			ended <- e
+		case CommandExecuted:
+			executed <- e
+		}
+	})
+
+	if err := b.Execute(CompactSession{}); err != nil {
+		t.Fatal(err)
+	}
+	e := waitForEvent(t, b, ended, "CompactionEnded")
+	if e.Err != nil {
+		t.Fatalf("CompactionEnded.Err = %v", e.Err)
+	}
+	if e.Marker == nil {
+		t.Fatal("CompactionEnded carries no marker")
+	}
+	if cmd := waitForEvent(t, b, executed, "CommandExecuted"); cmd.Command != "compact" {
+		t.Fatalf("CommandExecuted.Command = %q", cmd.Command)
+	}
+	if v, _ := QueryTyped[GetCompacting, bool](b, GetCompacting{}); v {
+		t.Fatal("compacting flag still set after success")
+	}
+	b.Drain(time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	idleAt, endedAt := -1, -1
+	for i, s := range order {
+		if s == "state:idle" && idleAt < 0 {
+			idleAt = i
+		}
+		if s == "compaction_ended" && endedAt < 0 {
+			endedAt = i
+		}
+	}
+	if idleAt < 0 || endedAt < 0 || idleAt > endedAt {
+		t.Fatalf("state must settle before the terminal event, order = %v", order)
+	}
+}
+
+// A panic inside Agent.Compact is no longer covered by LocalBus.Execute's
+// recover, so the goroutine must recover it itself: a session stuck in running
+// would be unusable and unclosable until a restart.
+func TestHandler_CompactSession_PanicSettlesSession(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	fa.compactHook = func() { panic("kaboom") }
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+	ended := make(chan CompactionEnded, 1)
+	b.Subscribe(func(e CompactionEnded) { ended <- e })
+	states := make(chan StateChanged, 8)
+	b.Subscribe(func(e StateChanged) { states <- e })
+	// A message queued while the compact held the session must still be drained
+	// after the panic: the queue is pumped on every exit path.
+	fa.Steer(core.SteerItem{ID: "s1", Text: "after the panic"})
+
+	if err := b.Execute(CompactSession{}); err != nil {
+		t.Fatalf("Execute = %v, want acceptance", err)
+	}
+	e := waitForEvent(t, b, ended, "CompactionEnded")
+	if e.Err == nil {
+		t.Fatal("panic did not surface as a compaction error")
+	}
+	// The session must have LEFT running: it settled to error. (It may be
+	// running again right after, because the pump starts the queued message —
+	// which is itself the proof it was never stuck.)
+	b.Drain(time.Second)
+	if !sawErrorState(states, e.Err.Error()) {
+		t.Fatal("session did not settle to error after a panicking compaction")
+	}
+	if v, _ := QueryTyped[GetCompacting, bool](b, GetCompacting{}); v {
+		t.Fatal("compacting flag still set after a panicking compaction")
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		fa.mu.Lock()
+		n := len(fa.sentItems)
+		fa.mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the queue was not pumped after the panicking compaction")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// Two concurrent /compact: the state machine is the mutual exclusion. The
+// second fails to claim idle→running and never reaches the agent, so the model
+// call happens exactly once.
+func TestHandler_CompactSession_ConcurrentSecondRejected(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	release := make(chan struct{})
+	var calls atomic.Int32
+	fa := &fakeAgent{}
+	fa.compactHook = func() {
+		calls.Add(1)
+		<-release
+	}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+	ended := make(chan CompactionEnded, 1)
+	b.Subscribe(func(e CompactionEnded) { ended <- e })
+
+	if err := b.Execute(CompactSession{}); err != nil {
+		t.Fatalf("first compact = %v, want acceptance", err)
+	}
+	if err := b.Execute(CompactSession{}); err == nil {
+		t.Fatal("second concurrent compact was accepted; it must fail to claim the session")
+	}
+	close(release)
+	waitForEvent(t, b, ended, "CompactionEnded")
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("Agent.Compact entered %d times, want 1", got)
+	}
+}
+
+// The first compact settles state before it publishes its terminal event. That
+// state change must not let a second compact start until the first terminal
+// event has been published, or the first cleanup would clear the second
+// compact's authoritative flag.
+func TestHandler_CompactSession_TerminalPublicationPrecedesNextStart(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	secondEntered := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	var calls atomic.Int32
+	fa := &fakeAgent{}
+	fa.compactHook = func() {
+		if calls.Add(1) == 2 {
+			close(secondEntered)
+			<-releaseSecond
+		}
+	}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+
+	var launchSecond sync.Once
+	secondResult := make(chan error, 1)
+	b.Subscribe(func(e StateChanged) {
+		if e.State == string(StateIdle) {
+			launchSecond.Do(func() { secondResult <- b.Execute(CompactSession{}) })
+		}
+	})
+
+	var orderMu sync.Mutex
+	var order []string
+	ended := make(chan CompactionEnded, 2)
+	b.SubscribeAllSeq(func(_ uint64, event any) {
+		switch e := event.(type) {
+		case CompactionStarted:
+			orderMu.Lock()
+			order = append(order, "start")
+			orderMu.Unlock()
+		case CompactionEnded:
+			orderMu.Lock()
+			order = append(order, "end")
+			orderMu.Unlock()
+			ended <- e
+		}
+	})
+
+	if err := b.Execute(CompactSession{}); err != nil {
+		t.Fatalf("first compact = %v", err)
+	}
+	select {
+	case <-secondEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second compact never started from the idle transition")
+	}
+	if err := <-secondResult; err != nil {
+		t.Fatalf("second compact = %v", err)
+	}
+	close(releaseSecond)
+	waitForEvent(t, b, ended, "first CompactionEnded")
+	waitForEvent(t, b, ended, "second CompactionEnded")
+	b.Drain(time.Second)
+
+	orderMu.Lock()
+	defer orderMu.Unlock()
+	firstEnd, secondStart := -1, -1
+	for i, event := range order {
+		if event == "end" && firstEnd < 0 {
+			firstEnd = i
+		}
+		if event == "start" && i > 0 {
+			secondStart = i
+			break
+		}
+	}
+	if firstEnd < 0 || secondStart < 0 || firstEnd > secondStart {
+		t.Fatalf("first terminal event must precede the second start, order = %v", order)
+	}
+}
+
+// The deferred finalizer must also recover panics after Agent.Compact returns.
+// An extension controller can panic while producing the success snapshot; that
+// must not strand the state in running or skip the queue pump.
+func TestHandler_CompactSession_RecoveryCoversWholeGoroutine(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{panicMessages: true}
+	sctx := newTestSessionContextWithState(b, fa)
+	RegisterHandlers(sctx)
+	ended := make(chan CompactionEnded, 1)
+	b.Subscribe(func(e CompactionEnded) { ended <- e })
+
+	if err := b.Execute(CompactSession{}); err != nil {
+		t.Fatalf("Execute = %v, want acceptance", err)
+	}
+	e := waitForEvent(t, b, ended, "CompactionEnded")
+	if e.Err == nil || e.Err.Error() != "compaction panic: messages panic" {
+		t.Fatalf("CompactionEnded.Err = %v, want messages panic", e.Err)
+	}
+	if got := sctx.State.Current(); got != StateError {
+		t.Fatalf("post-panic state = %q, want error", got)
+	}
+	if v, _ := QueryTyped[GetCompacting, bool](b, GetCompacting{}); v {
+		t.Fatal("compacting flag still set after a post-compact panic")
+	}
 }
 
 // A message sent while a compact holds the session busy is queued as a steer;

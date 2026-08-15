@@ -122,3 +122,21 @@ test('a hidden tab never posts a cursor acknowledgement', async () => {
     else Object.defineProperty(globalThis, 'document', { configurable: true, value: originalDocument });
   }
 });
+
+// The distinction between "the server answered a rejection" and "no answer
+// arrived" is what lets a caller stay silent when a suspended PWA kills an
+// in-flight request: only the former proves the operation failed.
+test('an answered rejection carries its HTTP status, a dead request carries none', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = () => Promise.resolve(new Response('queue full', { status: 503 }));
+    const answered = await api('POST', '/api/x', {}).then(() => null, (e) => e);
+    expect(answered.status).toBe(503);
+
+    globalThis.fetch = () => Promise.reject(new TypeError('Load failed'));
+    const dead = await api('POST', '/api/x', {}).then(() => null, (e) => e);
+    expect(dead.status).toBeUndefined();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

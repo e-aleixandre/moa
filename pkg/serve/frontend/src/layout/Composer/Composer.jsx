@@ -534,6 +534,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       // starts a token back into "--"; a real em-dash inside prose is left
       // untouched.
       const normalized = normalizeDashes(text);
+      const commandName = normalized.trim().split(/\s+/, 1)[0].replace(/^\//, '').toLowerCase();
+      const hasDeferredOutcome = commandName === 'compact' || commandName === 'prepare-compact';
 
       // While the session is occupied (running / permission) OR the queue rail
       // is non-empty, a command is classified by policy (mirrors the server's
@@ -566,9 +568,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       try {
         const result = await execCommand(sessionId, normalized, cmdId);
         if (optimisticCmd) {
-          if (result && result.queued) {
-            // Confirm the chip if it's still there (a concurrent
-            // command_dequeued may already have removed it); never resurrect.
+          if (result && result.queued && result.id) {
+            // Enqueued as a barrier under the ID the server echoes: confirm the
+            // chip if it's still there (a concurrent command_dequeued may
+            // already have removed it); never resurrect.
             const cur = store.get().sessions[sessionId];
             const list = cur?.pendingSteers;
             if (list && list.some((s) => s.id === cmdId)) {
@@ -578,17 +581,19 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
             }
             return; // queued — no immediate outcome to surface
           }
-          // The run ended before the POST landed: the server found the session
-          // idle and ran the command immediately (queued:false), so no
-          // command_dequeued will retire the optimistic chip. Remove it now and
-          // fall through to surface the immediate outcome (verify/rename/error).
+          // Either the command was ACCEPTED AND STARTED now (queued without an
+          // ID: /compact, whose outcome arrives as WS events), or it ran
+          // immediately because the run ended before the POST landed
+          // (queued:false). Neither will produce a command_dequeued, so the
+          // optimistic chip must be retired here or it stays forever.
           const cur = store.get().sessions[sessionId];
           if (cur?.pendingSteers) {
             const kept = cur.pendingSteers.filter((s) => s !== optimisticCmd);
             updateSession(sessionId, { pendingSteers: kept.length > 0 ? kept : null });
           }
+          if (result && result.queued) return; // started — the outcome is not in this response
         } else if (result && result.queued) {
-          return; // enqueued server-side without an optimistic chip (e.g. idle→queue race)
+          return; // enqueued or started server-side without an optimistic chip
         }
         if (text.startsWith('/verify') && result) {
           // Verify ran — surface the pass/fail outcome (the spinner is driven
@@ -616,6 +621,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
             updateSession(sessionId, { pendingSteers: kept.length > 0 ? kept : null });
           }
         }
+        // Only deferred compaction commands can still report their outcome over
+        // the socket after a dead request. Other commands have no such terminal
+        // event, so hiding their transport error would lose the only feedback.
+        if (hasDeferredOutcome && e?.status == null) return;
         addToast({ title: 'Command error', detail: e.message, type: 'error' });
       }
       return;

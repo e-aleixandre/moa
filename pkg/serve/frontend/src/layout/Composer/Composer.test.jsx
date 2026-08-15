@@ -6,6 +6,12 @@ const steered = [];
 // Controls what the steer endpoint answers, so a test can exercise a refusal
 // ({queued:false}) as well as an acceptance.
 let steerResult = {};
+// Controls what the command endpoint answers (and records the calls), so a test
+// can exercise the deferred-outcome contract ({queued:true} without an id) and
+// a transport failure separately.
+let commandResult = { ok: true };
+let commandError = null;
+const commands = [];
 // Lets a test hold a send in flight, reproducing the window in which the box
 // can legitimately acquire other text before the server answers.
 let sendResult;
@@ -38,7 +44,11 @@ mock.module("../../data/session-actions.js", () => ({
   newSteerId: () => "test-id",
   cancelRun: async () => ({}),
   cancelSteers: async () => {},
-  execCommand: async () => ({ ok: true }),
+  execCommand: async (...args) => {
+    commands.push(args);
+    if (commandError) throw commandError;
+    return commandResult;
+  },
   execShell: async () => {},
   steerSubagent: async (...args) => { steered.push(args); return steerResult; },
 }));
@@ -47,6 +57,7 @@ const { Composer } = await import("./Composer.jsx");
 // The real store: the recall reads pendingSteers from it, so seeding it is
 // closer to the running app than faking the module.
 const { updateSession, setState, store } = await import("../../data/store.js");
+const { getToasts } = await import("../../data/notifications.js");
 
 function descendants(node, result = []) {
   if (!node || typeof node === "string") return result;
@@ -233,4 +244,162 @@ test("tapping the queue chip recalls it despite the touch pointerleave", async (
   await Promise.resolve();
 
   expect(refs[0].current.value).toContain("queued thought");
+});
+
+// `/compact` is answered immediately now ({ok:true, queued:true} with no id:
+// the compaction was STARTED, its outcome arrives over the WS). The composer
+// must come back to life as soon as that response lands — the bug was that the
+// POST only answered when the whole compaction finished, leaving the textarea
+// readOnly for tens of seconds — and a message typed next must go to the queue.
+test("a started /compact frees the composer and the next message is queued", async () => {
+  refs.length = 0;
+  sent.length = 0;
+  commands.length = 0;
+  commandError = null;
+  commandResult = { ok: true, queued: true };
+  sendResult = Promise.resolve();
+  const sessionId = "compact-async";
+  setState({
+    sessions: {
+      ...store.get().sessions,
+      [sessionId]: { id: sessionId, state: "running", compacting: true },
+    },
+  });
+  const session = { state: "running", compacting: true };
+  let tree = Composer({ sessionId, session });
+  let textarea = descendants(tree).find((node) => node.type === "textarea");
+  refs[0].current = { value: "/compact", style: {}, scrollHeight: 24 };
+  textarea.props.onKeyDown({
+    key: "Enter", shiftKey: false, altKey: false, metaKey: false,
+    isComposing: false, preventDefault() {},
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(commands).toHaveLength(1);
+
+  // The input is usable while the session is running/compacting: readOnly is
+  // driven by the in-flight send, which the fast response already released.
+  refs.length = 0;
+  tree = Composer({ sessionId, session });
+  textarea = descendants(tree).find((node) => node.type === "textarea");
+  expect(textarea.props.readOnly).toBeFalsy();
+
+  // A message written right after goes out (the server queues it as a steer).
+  refs[0].current = { value: "meanwhile", style: {}, scrollHeight: 24 };
+  textarea.props.onKeyDown({
+    key: "Enter", shiftKey: false, altKey: false, metaKey: false,
+    isComposing: false, preventDefault() {},
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(sent).toHaveLength(1);
+  expect(sent[0][1]).toBe("meanwhile");
+});
+
+// Chip reconciliation against the two shapes of `queued`. A command ENQUEUED
+// behind a run echoes its id and will be retired by command_dequeued, so the
+// optimistic chip is confirmed. A command ACCEPTED AND STARTED answers queued
+// without an id and no command_dequeued ever follows: keeping its chip would
+// leave a phantom queue entry forever.
+test("a queued command with an id keeps its chip; one without an id leaves none", async () => {
+  const chipsFor = async (result) => {
+    refs.length = 0;
+    commands.length = 0;
+    commandError = null;
+    commandResult = result;
+    const sessionId = `chip-${Math.random()}`;
+    setState({
+      sessions: { ...store.get().sessions, [sessionId]: { id: sessionId, state: "running" } },
+    });
+    const tree = Composer({ sessionId, session: { state: "running" } });
+    const textarea = descendants(tree).find((node) => node.type === "textarea");
+    refs[0].current = { value: "/compact", style: {}, scrollHeight: 24 };
+    textarea.props.onKeyDown({
+      key: "Enter", shiftKey: false, altKey: false, metaKey: false,
+      isComposing: false, preventDefault() {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    return store.get().sessions[sessionId].pendingSteers;
+  };
+
+  // Enqueued behind a run: the chip survives, confirmed, until command_dequeued.
+  const queuedWithId = await chipsFor({ ok: true, queued: true, id: "test-id" });
+  expect(queuedWithId).toHaveLength(1);
+  expect(queuedWithId[0].id).toBe("test-id");
+  expect(queuedWithId[0].confirmed).toBe(true);
+
+  // Started now: no chip may remain.
+  expect(await chipsFor({ ok: true, queued: true })).toBeFalsy();
+
+  // Ran immediately (unchanged behaviour): no chip either.
+  expect(await chipsFor({ ok: true })).toBeFalsy();
+});
+
+// A backgrounded PWA aborts its in-flight fetches, but the server keeps
+// compacting and finishes fine. Reporting that abort as "Command error" told
+// the user a compaction had failed when it had not: only an ANSWERED request
+// (which carries an HTTP status) proves a rejection.
+test("a transport failure raises no command error, an answered rejection does", async () => {
+  const toastsAfter = async (error) => {
+    refs.length = 0;
+    commands.length = 0;
+    commandError = error;
+    commandResult = { ok: true };
+    const before = getToasts().length;
+    const sessionId = `transport-${Math.random()}`;
+    setState({
+      sessions: { ...store.get().sessions, [sessionId]: { id: sessionId, state: "idle" } },
+    });
+    const tree = Composer({ sessionId, session: { state: "idle" } });
+    const textarea = descendants(tree).find((node) => node.type === "textarea");
+    refs[0].current = { value: "/compact", style: {}, scrollHeight: 24 };
+    textarea.props.onKeyDown({
+      key: "Enter", shiftKey: false, altKey: false, metaKey: false,
+      isComposing: false, preventDefault() {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    return getToasts().slice(before);
+  };
+
+  // No status: the request never got an answer — say nothing, the WS carries
+  // the truth.
+  expect(await toastsAfter(new TypeError("Failed to fetch"))).toHaveLength(0);
+
+  // Answered with a rejection: surfaced exactly as before.
+  const rejected = Object.assign(new Error("409: session is busy"), { status: 409 });
+  const shown = await toastsAfter(rejected);
+  expect(shown).toHaveLength(1);
+  expect(shown[0].title).toBe("Command error");
+  commandError = null;
+});
+
+// A command with no deferred outcome has no event coming to reveal its fate:
+// swallowing its transport failure loses the error entirely.
+test("a dead request still reports commands whose outcome is not deferred", async () => {
+  refs.length = 0;
+  commands.length = 0;
+  commandError = new TypeError("Failed to fetch");
+  commandResult = { ok: true };
+  const before = getToasts().length;
+  const sessionId = `rename-${Math.random()}`;
+  setState({ sessions: { ...store.get().sessions, [sessionId]: { id: sessionId, state: "idle" } } });
+  const tree = Composer({ sessionId, session: { state: "idle" } });
+  const textarea = descendants(tree).find((node) => node.type === "textarea");
+  refs[0].current = { value: "/rename Nuevo nombre", style: {}, scrollHeight: 24 };
+  textarea.props.onKeyDown({
+    key: "Enter", shiftKey: false, altKey: false, metaKey: false,
+    isComposing: false, preventDefault() {},
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  const shown = getToasts().slice(before);
+  commandError = null;
+  expect(shown).toHaveLength(1);
 });

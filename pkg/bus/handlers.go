@@ -58,6 +58,11 @@ func RegisterHandlers(sctx *SessionContext) {
 
 	// Serializes manual /verify runs (bus command and queued barrier share it).
 	var manualVerifyRunning atomic.Bool
+	// Serializes the short start and terminal sections of manual compactions.
+	// The model call itself deliberately runs without this lock. Without the
+	// lock, the idle transition at the end can admit a second compact before the
+	// first one clears the compacting flag and publishes its terminal event.
+	var compactionLifecycleMu sync.Mutex
 
 	// Background jobs can continue after the foreground agent reaches idle.
 	// Keep their lifecycle in the runtime so headless callers can wait for the
@@ -325,6 +330,8 @@ func RegisterHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd CompactSession) error {
+		compactionLifecycleMu.Lock()
+		defer compactionLifecycleMu.Unlock()
 		// A manual compact occupies the agent's run slot for seconds, so it
 		// must occupy the session too: transition to running so frontends
 		// switch the input to queue mode (steer) and Manager.Send/requireIdle
@@ -337,53 +344,74 @@ func RegisterHandlers(sctx *SessionContext) {
 		// Emit CompactionStarted/Ended explicitly (agent.Compact doesn't emit lifecycle events).
 		// Set the authoritative flag BEFORE publishing so a concurrent reconnect
 		// snapshot cut observes compacting=true consistently with the streamed
-		// events; the defer is a safety net against a panic path.
+		// events.
 		sctx.setCompacting(true)
-		defer sctx.setCompacting(false)
 		sctx.Bus.Publish(CompactionStarted{SessionID: sctx.SessionID})
-		result, err := func() (p *core.CompactionPayload, e error) {
-			// Recover panics so the state machine can never be left stuck in
-			// running by a crashing Compact.
+		// The expensive part (a model call taking tens of seconds) runs on its
+		// own goroutine so the caller — an HTTP POST, the TUI command — gets an
+		// ACCEPTANCE, not a completion: a returned nil means "compaction
+		// started", and the outcome arrives as events. Everything that claims
+		// the session (the running transition, the compacting flag and
+		// CompactionStarted) already happened synchronously above, which is what
+		// makes this safe: by the time this handler returns, a concurrent close
+		// sees the session busy (DoIfQuiescent → State.DoIfIdle) and refuses to
+		// tear the runtime down under the goroutine.
+		go func() {
+			var result *core.CompactionPayload
+			var err error
+			var messages []core.AgentMessage
+			var marker *core.AgentMessage
+			// This defer covers the complete asynchronous path, not only
+			// Agent.Compact. A panic from any controller callback must still leave
+			// the session settled and let queued work continue.
 			defer func() {
 				if r := recover(); r != nil {
-					e = fmt.Errorf("compaction panic: %v", r)
+					err = fmt.Errorf("compaction panic: %v", r)
+					result = nil
+					messages = nil
+					marker = nil
 				}
+
+				compactionLifecycleMu.Lock()
+				defer compactionLifecycleMu.Unlock()
+				// Settle the state BEFORE publishing results, mirroring startRun:
+				// reactors observing CompactionEnded must see idle/error, not
+				// running. Holding the lifecycle lock through the terminal event
+				// prevents another compact from starting in this narrow interval.
+				if sctx.State != nil {
+					if err != nil {
+						_ = sctx.State.TransitionWithError(StateError, err.Error())
+					} else {
+						_ = sctx.State.Transition(StateIdle)
+					}
+				}
+				sctx.setCompacting(false)
+				if err != nil {
+					sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Err: err})
+				} else {
+					sctx.Bus.Publish(CompactionEnded{
+						SessionID: sctx.SessionID,
+						Payload:   result, // nil if nothing to compact
+						Marker:    marker,
+					})
+					// Always publish CommandExecuted on success so persistence and frontends react.
+					sctx.Bus.Publish(CommandExecuted{
+						SessionID: sctx.SessionID,
+						Command:   "compact",
+						Messages:  messages,
+					})
+				}
+				// Messages sent while the compact held the session busy were queued as
+				// steers, but no run is coming to drain them — pump the queue now.
+				requestPump(sctx)
 			}()
-			return sctx.Agent.Compact(sctx.SessionCtx, cmd.Focus)
-		}()
-		// Settle the state BEFORE publishing results, mirroring startRun:
-		// reactors observing CompactionEnded must see idle/error, not running.
-		if sctx.State != nil {
-			if err != nil {
-				_ = sctx.State.TransitionWithError(StateError, err.Error())
-			} else {
-				_ = sctx.State.Transition(StateIdle)
+
+			result, err = sctx.Agent.Compact(sctx.SessionCtx, cmd.Focus)
+			if err == nil {
+				messages = sctx.Agent.Messages()
+				marker = NewCompactionMarker(result)
 			}
-		}
-		if err != nil {
-			sctx.setCompacting(false)
-			sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Err: err})
-			// A message queued during the failed compact must still be
-			// delivered (Error→Running is a valid transition).
-			requestPump(sctx)
-			return err
-		}
-		// Signal compaction ended (with or without payload).
-		sctx.setCompacting(false)
-		sctx.Bus.Publish(CompactionEnded{
-			SessionID: sctx.SessionID,
-			Payload:   result, // nil if nothing to compact
-			Marker:    NewCompactionMarker(result),
-		})
-		// Always publish CommandExecuted on success so persistence and frontends react.
-		sctx.Bus.Publish(CommandExecuted{
-			SessionID: sctx.SessionID,
-			Command:   "compact",
-			Messages:  sctx.Agent.Messages(),
-		})
-		// Messages sent while the compact held the session busy were queued as
-		// steers, but no run is coming to drain them — pump the queue now.
-		requestPump(sctx)
+		}()
 		return nil
 	})
 

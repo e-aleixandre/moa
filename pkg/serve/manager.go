@@ -1157,10 +1157,12 @@ type CommandResult struct {
 	OK           bool   `json:"ok"`
 	Message      string `json:"message"`
 	NewSessionID string `json:"newSessionId,omitempty"`
-	// Queued is true when the command was not executed now but enqueued as a
-	// barrier in the unified queue rail (issued while the session was busy). ID
-	// is then the queued chip's authoritative ID, so the client reconciles its
-	// optimistic command chip by ID.
+	// Queued marks a command whose OUTCOME IS NOT IN THIS RESPONSE. Two shapes:
+	// enqueued as a barrier in the unified queue rail (issued while the session
+	// was busy), where ID is the queued chip's authoritative ID so the client
+	// reconciles its optimistic command chip by it; or accepted and started now
+	// (/compact, /prepare-compact) with no ID, since no command_dequeued will
+	// follow. Either way the result arrives as WS events, never here.
 	Queued bool   `json:"queued,omitempty"`
 	ID     string `json:"id,omitempty"`
 }
