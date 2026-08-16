@@ -4,6 +4,7 @@ import { Spinner } from "../../../primitives/index.js";
 import { BashJobLog } from "../../../components/BashJobLog/BashJobLog.jsx";
 import { bashJobView } from "../../../data/bash-job-view-model.js";
 import { cancelBashJob } from "../../../data/session-actions.js";
+import { useEdgeSwipeBack } from "../../../hooks/useEdgeSwipeBack.js";
 import "./MobileBashJobView.css";
 
 // MobileBashJobView — full-screen push counterpart of the desktop
@@ -26,6 +27,9 @@ export function MobileBashJobView({ session, jobId, onBack }) {
   }, [view, session, jobId, onBack]);
 
   const [confirmStop, setConfirmStop] = useState(false);
+  // Swipe from the left edge to go back, the way a pushed screen is dismissed
+  // on a phone. The header chevron remains the accessible path.
+  const { screenRef, dragging, swipeBind } = useEdgeSwipeBack({ onBack });
   useEffect(() => {
     if (!confirmStop) return;
     const t = setTimeout(() => setConfirmStop(false), 2000);
@@ -41,7 +45,7 @@ export function MobileBashJobView({ session, jobId, onBack }) {
   };
 
   return (
-    <div class="mbj">
+    <div class={dragging ? "mbj is-swiping" : "mbj"} ref={screenRef} {...swipeBind}>
       <header class="mbj-head">
         <button type="button" class="mbj-back" aria-label="Back to conversation" onClick={onBack}>
           <ChevronLeft size={20} />

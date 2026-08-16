@@ -22,6 +22,15 @@
   .mbj { animation: none; }
 }
 
+/* While a back-swipe is in flight the screen follows the finger, so the push-in
+   animation must not fight the inline transform. The shadow is what makes the
+   parent read as a surface underneath rather than a flat swap. */
+.mbj.is-swiping {
+  animation: none;
+  will-change: transform;
+  box-shadow: -8px 0 24px rgb(0 0 0 / 0.35);
+}
+
 .mbj-head {
   flex: none;
   display: flex;
