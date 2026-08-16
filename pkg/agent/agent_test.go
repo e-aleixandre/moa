@@ -271,11 +271,14 @@ func TestMaterializeContentRunsForEveryProviderRound(t *testing.T) {
 	}
 }
 
-func TestMaterializeContentNilPassesAttachmentDescriptorsThrough(t *testing.T) {
+// TestUnmaterializedDescriptorNeverReachesProvider: without a materializer an
+// attachment descriptor used to pass straight through to the provider, which
+// means the model silently sees an empty image. The barrier in the loop now
+// turns that into a visible error, and the provider is never called.
+func TestUnmaterializedDescriptorNeverReachesProvider(t *testing.T) {
+	var called atomic.Bool
 	provider := NewMockProvider(func(req core.Request) (<-chan core.AssistantEvent, error) {
-		if got := req.Messages[0].Content[0].Data; got != "" {
-			t.Errorf("provider image data = %q, want unmaterialized descriptor", got)
-		}
+		called.Store(true)
 		return simpleTextResponse("done")(req)
 	})
 	ag, err := New(AgentConfig{
@@ -291,8 +294,11 @@ func TestMaterializeContentNilPassesAttachmentDescriptorsThrough(t *testing.T) {
 		Type:         "image",
 		AttachmentID: "att_aaaaaaaaaaaaaaaaaaaaaaaa",
 	}})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrUnresolvedAttachment) {
+		t.Fatalf("err = %v, want ErrUnresolvedAttachment", err)
+	}
+	if called.Load() {
+		t.Error("provider was called with an unresolved attachment reference")
 	}
 }
 

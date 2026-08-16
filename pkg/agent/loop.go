@@ -317,6 +317,19 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			llmMessages = materialized
 		}
 
+		// Last barrier before the provider: an image/document block that still
+		// carries only an AttachmentID has no bytes behind it. AttachmentID is
+		// a moa-internal identifier no provider can resolve, so letting it
+		// through means the model silently sees nothing at all. Fail loudly
+		// instead. The very same block is legitimate in the in-memory history,
+		// on disk, in UI snapshots and before materialization — it is only
+		// illegal in a request bound for the provider, which is why the check
+		// lives here and not in the state.
+		if err := checkResolvedAttachments(llmMessages); err != nil {
+			loopErr = err
+			return loopErr
+		}
+
 		// Build request
 		req := core.Request{
 			Model:    cfg.model,
@@ -707,6 +720,30 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 			}
 		}
 	}
+}
+
+// ErrUnresolvedAttachment reports a provider-bound request that still carries
+// an attachment reference with no bytes. It is a bug in the producing or
+// materializing side, never something the user can fix by retrying.
+var ErrUnresolvedAttachment = errors.New("unresolved attachment reference in provider request")
+
+// checkResolvedAttachments enforces the invariant at the only place shared by
+// every agent: no image/document block may reach the provider with an
+// AttachmentID and no Data. Failing here turns a silently invisible image into
+// a visible error.
+func checkResolvedAttachments(msgs []core.Message) error {
+	for _, msg := range msgs {
+		for _, content := range msg.Content {
+			if content.Type != "image" && content.Type != "document" {
+				continue
+			}
+			if content.AttachmentID != "" && content.Data == "" {
+				return fmt.Errorf("%w: %s block %q was not materialized (the model would see nothing)",
+					ErrUnresolvedAttachment, content.Type, content.AttachmentID)
+			}
+		}
+	}
+	return nil
 }
 
 // defaultConvertToLLM filters AgentMessages to LLM-compatible Messages.
