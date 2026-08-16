@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/agent"
+	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/autotitle"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
@@ -71,6 +72,16 @@ type Config struct {
 	// subagent seeds an isolated copy for the child (subshell semantics) and
 	// drops it when the child finishes. nil = no shell-state isolation.
 	BashState *tool.BashState
+
+	// AttachmentScope is the PARENT session's attachment capability, handed to
+	// every child agent through its own AgentConfig. It cannot be inherited from
+	// the context: a child's context is derived from AppCtx, not from the tool
+	// call that spawned it, so anything the parent's run installed is simply not
+	// there. Children persist their sidecar transcript, so they do externalize —
+	// always owned by the PARENT session ID, never the job ID: the store's GC
+	// only knows main sessions, so a job-owned blob would be collected on
+	// restart. nil = children work inline.
+	AttachmentScope *attachment.Scope
 
 	// OnAsyncComplete is called when an async subagent finishes (completed, failed, or cancelled).
 	// truncated is true when resultTail is only the last N lines of the full output.
@@ -1062,6 +1073,11 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 		Tools:          childReg,
 		MaxTurns:       maxTurns,
 		MaxRunDuration: runDuration,
+		// Explicitly passed, never inherited: the child's context derives from
+		// cfg.AppCtx (see the jobCtx derivations in the subagent tool), not from
+		// the parent's tool call, so the capability must travel through the
+		// child's own config or the child silently falls back to inline.
+		AttachmentScope: cfg.AttachmentScope,
 		// No MaxBudget: children have no $ guardrail of their own (they run under
 		// the parent's own budget, if any).
 		PermissionCheck: func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {

@@ -17,6 +17,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/askuser"
+	"github.com/e-aleixandre/moa/pkg/attachment"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
@@ -102,6 +103,12 @@ type SessionConfig struct {
 	// MaterializeContent rehydrates byte-free attachment references before a
 	// provider request. Nil preserves legacy inline content unchanged.
 	MaterializeContent func(context.Context, []core.Message) ([]core.Message, error)
+
+	// AttachmentScope is the session's attachment capability (store + owning
+	// session ID) as ONE value. It is handed whole to the main agent and to the
+	// subagent tool, so producing references and resolving them always travel
+	// together and no constructor can wire one half only. Nil = inline.
+	AttachmentScope *attachment.Scope
 
 	// Subagent callbacks. All optional (nil = no-op).
 	OnAsyncJobChange func(count int)
@@ -531,6 +538,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		SkillsIndex:         skillsIndex,
 		MemoryIndex:         memoryIndex,
 		BashState:           bashState,
+		AttachmentScope:     cfg.AttachmentScope,
 		OnAsyncJobChange:    cfg.OnAsyncJobChange,
 		OnAsyncComplete:     cfg.OnAsyncComplete,
 		ChildMaxTurns:       moaCfg.SubagentMaxTurns,
@@ -627,6 +635,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		MaxRunDuration:      maxRunDuration,
 		MaxBudget:           maxBudget,
 		MaterializeContent:  cfg.MaterializeContent,
+		AttachmentScope:     cfg.AttachmentScope,
 		SessionCheckpoint:   sessionCheckpoint,
 	}
 	if gate != nil {

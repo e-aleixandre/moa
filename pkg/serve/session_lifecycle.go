@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/bootstrap"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/checkpoint"
@@ -202,9 +203,20 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 	cpStore := checkpoint.New(20)
 	subagentTexts := &sync.Map{}
-	var materializeContent func(context.Context, []core.Message) ([]core.Message, error)
+	// The scope bundles BOTH halves of the attachment capability (producing
+	// references and resolving them) into one value, so bootstrap cannot wire
+	// the materializer and forget the producer, or vice versa.
+	//
+	// An ID the store refuses to own is not fatal: attachments could not have
+	// been stored under it before either, so the session loads without the
+	// capability (inline, as before) instead of becoming unopenable.
+	var attachScope *attachment.Scope
 	if m.attachStore != nil {
-		materializeContent = m.attachStore.MaterializerFor(id)
+		var err error
+		attachScope, err = attachment.NewScope(m.attachStore, id)
+		if err != nil {
+			slog.Warn("attachment scope unavailable for session", "session", id, "error", err)
+		}
 	}
 
 	// Forward-declare for closures.
@@ -226,7 +238,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		Ctx:                sessionCtx,
 		EnableAskUser:      true,
 		BeforeWrite:        cpStore.Capture,
-		MaterializeContent: materializeContent,
+		AttachmentScope:    attachScope,
 		OnAsyncJobChange: func(count int) {
 			if s := sess; s != nil {
 				s.runtime.Bus.Publish(bus.SubagentCountChanged{SessionID: s.ID, Count: count})
