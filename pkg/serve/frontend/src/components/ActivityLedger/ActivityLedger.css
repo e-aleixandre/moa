@@ -232,6 +232,17 @@
   background: color-mix(in srgb, var(--blue) 7%, transparent);
 }
 
+/* A live row that can open its full command IS interactive, so it takes the
+   pointer and a hover tint back; an output-only live row stays the inert div
+   the rule above describes. Collapsed, it looks exactly the same. */
+.tg button.tg-row.live {
+  cursor: pointer;
+}
+
+.tg button.tg-row.live:hover {
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+}
+
 .tg .tg-row.live .txt {
   color: var(--text);
 }
