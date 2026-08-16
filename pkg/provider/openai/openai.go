@@ -173,6 +173,11 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 	}
 
 	ch := make(chan core.AssistantEvent, 64)
+	// Only the model ID is needed to consume the stream. Capturing req itself
+	// would keep the whole request — every image in base64 — reachable for as
+	// long as the SSE body is being consumed.
+	modelID := req.Model.ID
+
 	go func() {
 		defer resp.Body.Close() //nolint:errcheck
 		defer close(ch)
@@ -188,7 +193,7 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 			}
 		}
 		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))
-		responses.ConsumeStream(ctx, body, ch, "openai", req.Model.ID)
+		responses.ConsumeStream(ctx, body, ch, "openai", modelID)
 	}()
 
 	return ch, nil

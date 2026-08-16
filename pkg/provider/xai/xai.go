@@ -133,10 +133,15 @@ func (x *XAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assista
 		return nil, classifyHTTPResponse(resp, errBody)
 	}
 	ch := make(chan core.AssistantEvent, 64)
+	// Only the model ID is needed to consume the stream. Capturing req itself
+	// would keep the whole request — every image in base64 — reachable for as
+	// long as the SSE body is being consumed.
+	modelID := req.Model.ID
+
 	go func() {
 		defer resp.Body.Close() //nolint:errcheck
 		defer close(ch)
-		responses.ConsumeStreamSanitized(ctx, sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute), ch, "xai", req.Model.ID)
+		responses.ConsumeStreamSanitized(ctx, sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute), ch, "xai", modelID)
 	}()
 	return ch, nil
 }

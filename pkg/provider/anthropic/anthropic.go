@@ -116,6 +116,11 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 
 	ch := make(chan core.AssistantEvent, 64)
 
+	// Only the tool list is needed to decode the stream. Capturing req itself
+	// would keep the whole request — every materialized image in base64 —
+	// reachable for as long as the SSE body is being consumed.
+	tools := req.Tools
+
 	go func() {
 		defer resp.Body.Close() //nolint:errcheck
 		defer close(ch)
@@ -123,7 +128,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 			ch <- core.AssistantEvent{Type: core.ProviderEventRateLimit, RateLimit: rl}
 		}
 		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))
-		a.consumeStream(ctx, body, ch, req.Tools, oauthMode)
+		a.consumeStream(ctx, body, ch, tools, oauthMode)
 	}()
 
 	return ch, nil
