@@ -111,6 +111,7 @@ type MoaConfig struct {
 	SubagentMaxTurns       int                  `json:"subagent_max_turns,omitempty"`            // Max turns per subagent run. 0 = use package default.
 	SubagentMaxRunDuration string               `json:"subagent_max_run_duration,omitempty"`     // Max subagent run duration as Go duration string. Empty = use package default.
 	SubagentMaxConcurrent  int                  `json:"subagent_max_concurrent_async,omitempty"` // Max concurrent async subagents. 0 = use package default.
+	SubagentAllowedModels  []string             `json:"subagent_allowed_models,omitempty"`       // Model IDs a subagent may run under. Empty/absent = no restriction (opt-in).
 }
 
 // IsMemoryEnabled returns whether cross-session memory is enabled.
@@ -478,7 +479,10 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		AllowedPaths:   append(base.AllowedPaths, override.AllowedPaths...),
 		PathScope:      mergeScalar(base.PathScope, override.PathScope),
 		PinnedModels:   base.PinnedModels, // global-only preference; project level ignored
-		MCPServers:     MergeMCPServers(base.MCPServers, override.MCPServers),
+		// Global-only like PinnedModels: a delegation allowlist is the owner's
+		// policy, so a project config must not be able to widen (or narrow) it.
+		SubagentAllowedModels: base.SubagentAllowedModels,
+		MCPServers:            MergeMCPServers(base.MCPServers, override.MCPServers),
 		// disabled is a veto that accumulates across levels: a project can add
 		// to but never relax a global disable (union, deduplicated). Provenance
 		// is lost here, so a scope-aware caller uses LoadMoaConfigResolved.

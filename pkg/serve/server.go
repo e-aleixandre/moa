@@ -110,6 +110,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/models", handleListModels())
 	mux.HandleFunc("GET /api/model-preferences", handleModelPreferences(manager))
 	mux.HandleFunc("PATCH /api/model-preferences", handleModelPreferences(manager))
+	mux.HandleFunc("GET /api/subagent-models", handleSubagentModels(manager))
+	mux.HandleFunc("PATCH /api/subagent-models", handleSubagentModels(manager))
 	mux.HandleFunc("GET /api/version", handleVersion(manager, static.buildID))
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/attention", handleAttention(manager))

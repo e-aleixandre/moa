@@ -101,6 +101,7 @@ global config and a project's jargon in its `.moa/config.json`:
 | `subagent_max_turns` | int | `100` | Max agent turns per subagent run (0 = package default) |
 | `subagent_max_run_duration` | string | `"10m"` | Max subagent wall-clock duration, Go duration (empty = package default) |
 | `subagent_max_concurrent_async` | int | `5` | Max concurrent async subagents (0 = package default) |
+| `subagent_allowed_models` | []string | `[]` | Model IDs a subagent may run under. Empty = no restriction. Excluded models are hidden from the agent and refused if requested. Editable from the web Settings sheet. **Global-only.** |
 
 ### Models
 

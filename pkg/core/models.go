@@ -364,6 +364,48 @@ func ModelAliases() []string {
 	return aliases
 }
 
+// AllowedModelAliases returns the aliases of the models whose IDs appear in
+// allowedIDs, in the same curated order as ModelAliases.
+//
+// An empty (or nil) allowedIDs means "no restriction" and yields every alias:
+// the allowlist is opt-in, so an unset one must never shrink what callers may
+// offer. IDs matching no known model are skipped rather than reported — the
+// registry changes over time and a stale saved entry must not invalidate the
+// rest of the list.
+func AllowedModelAliases(allowedIDs []string) []string {
+	if len(allowedIDs) == 0 {
+		return ModelAliases()
+	}
+	allowed := make(map[string]bool, len(allowedIDs))
+	for _, id := range allowedIDs {
+		allowed[id] = true
+	}
+	seen := make(map[string]bool, len(allowedIDs))
+	var aliases []string
+	for _, entry := range ListModels() {
+		if entry.Alias == "" || seen[entry.Alias] || !allowed[entry.Model.ID] {
+			continue
+		}
+		seen[entry.Alias] = true
+		aliases = append(aliases, entry.Alias)
+	}
+	return aliases
+}
+
+// IsModelAllowed reports whether model may be used under allowedIDs. An empty
+// list means unrestricted, so existing installs keep working untouched.
+func IsModelAllowed(model Model, allowedIDs []string) bool {
+	if len(allowedIDs) == 0 {
+		return true
+	}
+	for _, id := range allowedIDs {
+		if id == model.ID {
+			return true
+		}
+	}
+	return false
+}
+
 // SuggestModelAlias returns the alias a misspelled spec most likely meant, or
 // "" when nothing is close enough. It exists so an unknown-model error can
 // teach the correct name instead of only rejecting the wrong one: agents write
@@ -373,6 +415,13 @@ func ModelAliases() []string {
 // Only unambiguous matches are offered: a suggestion that is wrong is worse
 // than none, because it invites a second failed attempt.
 func SuggestModelAlias(spec string) string {
+	return SuggestAliasFrom(spec, ModelAliases())
+}
+
+// SuggestAliasFrom is SuggestModelAlias over an explicit alias set, so a
+// caller that may only offer some models (a subagent allowlist) never teaches
+// a name it would then refuse.
+func SuggestAliasFrom(spec string, aliases []string) string {
 	spec = strings.ToLower(strings.TrimSpace(spec))
 	if idx := strings.IndexByte(spec, '/'); idx > 0 {
 		// A "provider/model" typo is about the model portion; the provider is
@@ -384,7 +433,7 @@ func SuggestModelAlias(spec string) string {
 	}
 
 	best, bestDistance, tied := "", 0, false
-	for _, alias := range ModelAliases() {
+	for _, alias := range aliases {
 		d := editDistance(spec, alias)
 		// Tolerate more typing in longer names, but never so much that
 		// unrelated short aliases match each other.

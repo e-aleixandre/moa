@@ -67,3 +67,88 @@
 .global-settings-about-muted {
   color: var(--overlay0);
 }
+
+/* Subagent model allowlist. Same vocabulary as the notification rows (44px
+   touch rows, surface tint when on) so the section reads as one settings body
+   in both densities. */
+.subagent-models {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.subagent-models-hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--overlay1);
+}
+
+.subagent-models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* The catalog grows; cap the list so Subagents can never push About out of
+     reach inside the sheet. */
+  max-height: 260px;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  background: var(--base);
+  border: 1px solid var(--surface0);
+}
+
+.subagent-models-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--subtext1);
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+
+.subagent-models-row:hover {
+  background: var(--surface0);
+}
+
+.subagent-models-row:has(.subagent-models-box:disabled) {
+  cursor: default;
+}
+
+.subagent-models-row:has(.subagent-models-box:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.subagent-models-box {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--mauve);
+  cursor: inherit;
+}
+
+.subagent-models-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-models-row.on .subagent-models-name {
+  color: var(--text);
+}
+
+.subagent-models-alias {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+}

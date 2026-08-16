@@ -2973,7 +2973,7 @@ func TestJobsSteerAcceptsARunningJob(t *testing.T) {
 func TestResolveModel_TypoWithProviderPrefixFailsLoudly(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
 	for _, spec := range []string{"opeanai/sol", "foo/sonnet"} {
-		model, res := resolveModel(fallback, map[string]any{"model": spec})
+		model, res := resolveModel(fallback, map[string]any{"model": spec}, nil)
 		if res == nil {
 			t.Errorf("resolveModel(%q): expected an error result, got model %q", spec, model.ID)
 			continue
@@ -2988,7 +2988,7 @@ func TestResolveModel_TypoWithProviderPrefixFailsLoudly(t *testing.T) {
 // under a provider that contradicts nothing is still legitimate.
 func TestResolveModel_GenuineCustomModelStillRuns(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
-	model, res := resolveModel(fallback, map[string]any{"model": "openai/my-finetune-v3"})
+	model, res := resolveModel(fallback, map[string]any{"model": "openai/my-finetune-v3"}, nil)
 	if res != nil {
 		t.Fatalf("a custom model was rejected: %v", res.Content)
 	}
@@ -3000,7 +3000,7 @@ func TestResolveModel_GenuineCustomModelStillRuns(t *testing.T) {
 // Capitalized aliases are what models actually write when delegating.
 func TestResolveModel_CapitalizedAliasResolves(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
-	model, res := resolveModel(fallback, map[string]any{"model": "Sol"})
+	model, res := resolveModel(fallback, map[string]any{"model": "Sol"}, nil)
 	if res != nil {
 		t.Fatalf("unexpected error: %v", res.Content)
 	}
@@ -3042,7 +3042,7 @@ func TestSubagentSchema_IsValidJSONAndNamesTheAliases(t *testing.T) {
 // so it has to carry the right name.
 func TestResolveModel_ErrorSuggestsTheRightAlias(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
-	_, res := resolveModel(fallback, map[string]any{"model": "Sonet"})
+	_, res := resolveModel(fallback, map[string]any{"model": "Sonet"}, nil)
 	if res == nil {
 		t.Fatal("expected an error result")
 	}
@@ -3052,6 +3052,87 @@ func TestResolveModel_ErrorSuggestsTheRightAlias(t *testing.T) {
 	}
 	if !strings.Contains(text, "sol") || !strings.Contains(text, "terra") {
 		t.Errorf("error does not list the available models: %s", text)
+	}
+}
+
+// The allowlist is opt-in: with no policy configured, delegation must behave
+// exactly as it did before it existed.
+func TestResolveModel_NoAllowlistAcceptsAnyKnownModel(t *testing.T) {
+	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
+	for _, alias := range core.ModelAliases() {
+		model, res := resolveModel(fallback, map[string]any{"model": alias}, nil)
+		if res != nil {
+			t.Errorf("alias %q rejected with no allowlist: %s", alias, resultText(res))
+			continue
+		}
+		if model.ID == "" {
+			t.Errorf("alias %q resolved to an empty model", alias)
+		}
+	}
+}
+
+// A hard limit: a model outside the list cannot be launched, and the error
+// says so in terms the agent can act on.
+func TestResolveModel_AllowlistRejectsExcludedModel(t *testing.T) {
+	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
+	allowed := []string{"gpt-5.6-sol"}
+
+	_, res := resolveModel(fallback, map[string]any{"model": "terra"}, allowed)
+	if res == nil {
+		t.Fatal("an excluded model was accepted")
+	}
+	text := resultText(res)
+	if !strings.Contains(text, "not available") {
+		t.Errorf("error does not say the model is unavailable: %s", text)
+	}
+	if strings.Contains(text, "terra,") || strings.Contains(text, ", terra") {
+		t.Errorf("error lists an excluded model as available: %s", text)
+	}
+	if !strings.Contains(text, "sol") {
+		t.Errorf("error does not list the allowed model: %s", text)
+	}
+
+	model, res := resolveModel(fallback, map[string]any{"model": "sol"}, allowed)
+	if res != nil {
+		t.Fatalf("an allowed model was rejected: %s", resultText(res))
+	}
+	if model.ID != "gpt-5.6-sol" {
+		t.Fatalf("got %q", model.ID)
+	}
+}
+
+// A custom "provider/model-id" spec must not be a way around the list.
+func TestResolveModel_AllowlistRejectsCustomSpec(t *testing.T) {
+	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
+	if _, res := resolveModel(fallback, map[string]any{"model": "openai/my-finetune-v3"}, []string{"gpt-5.6-sol"}); res == nil {
+		t.Fatal("a custom spec bypassed the allowlist")
+	}
+}
+
+// Discovery is filtered too: a model the agent may not use must not be named
+// in the schema, or it will keep asking for it.
+func TestSubagentSchema_AllowlistHidesExcludedModels(t *testing.T) {
+	tool := newSubagent(Config{AllowedModels: []string{"gpt-5.6-sol"}}, &jobStore{})
+
+	var parsed struct {
+		Properties struct {
+			Model struct {
+				Description string `json:"description"`
+			} `json:"model"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(tool.Parameters, &parsed); err != nil {
+		t.Fatalf("subagent schema is not valid JSON: %v", err)
+	}
+	desc := parsed.Properties.Model.Description
+	if !strings.Contains(desc, "sol") {
+		t.Errorf("model description omits the allowed model: %s", desc)
+	}
+	if strings.Contains(desc, "terra") || strings.Contains(desc, "sonnet") {
+		t.Errorf("model description names an excluded model: %s", desc)
+	}
+	if strings.Contains(desc, "provider/model-id") {
+		t.Errorf("model description offers custom specs the allowlist forbids: %s", desc)
 	}
 }
 
