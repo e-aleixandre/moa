@@ -20,7 +20,14 @@ func TestResolveModel_Alias(t *testing.T) {
 }
 
 func TestResolveModel_Grok(t *testing.T) {
-	for _, spec := range []string{"grok", "xai/grok-4.5"} {
+	// The short alias tracks the newest model; older ones stay reachable by ID.
+	for _, spec := range []string{"grok", "grok-4.6", "xai/grok-4.6"} {
+		m, ok := ResolveModel(spec)
+		if !ok || m.ID != "grok-4.6" || m.Provider != "xai" {
+			t.Errorf("ResolveModel(%q) = %+v, %v", spec, m, ok)
+		}
+	}
+	for _, spec := range []string{"grok-4.5", "xai/grok-4.5"} {
 		m, ok := ResolveModel(spec)
 		if !ok || m.ID != "grok-4.5" || m.Provider != "xai" {
 			t.Errorf("ResolveModel(%q) = %+v, %v", spec, m, ok)
@@ -29,7 +36,7 @@ func TestResolveModel_Grok(t *testing.T) {
 }
 
 func TestGrokPricing(t *testing.T) {
-	model, ok := ResolveModel("grok")
+	model, ok := ResolveModel("grok-4.5")
 	if !ok || model.Pricing == nil {
 		t.Fatal("Grok pricing missing")
 	}
@@ -45,6 +52,38 @@ func TestGrokPricing(t *testing.T) {
 	if math.Abs(short-0.405998) > 1e-12 || math.Abs(long-0.812) > 1e-12 {
 		t.Fatalf("Grok costs = short %v, long %v", short, long)
 	}
+}
+
+func TestGrok46Pricing(t *testing.T) {
+	model, ok := ResolveModel("grok-4.6")
+	if !ok || model.Pricing == nil {
+		t.Fatal("Grok 4.6 pricing missing")
+	}
+	p := model.Pricing
+	// Same token rates as 4.5; only cached input differs (0.5 vs 0.3), and it
+	// doubles past the long-context threshold.
+	if model.MaxInput != 500_000 || p.Input != 2 || p.Output != 6 || p.CacheRead != 0.5 {
+		t.Fatalf("base Grok 4.6 definition = %+v, pricing = %+v", model, p)
+	}
+	if len(p.Tiers) != 1 || p.Tiers[0] != (PricingTier{Threshold: 200_000, Input: 4, Output: 12, CacheRead: 1}) {
+		t.Fatalf("Grok 4.6 tiers = %+v", p.Tiers)
+	}
+	// A cached-heavy turn is where 4.6 costs more than 4.5.
+	cached := Usage{Input: 1_000, CacheRead: 100_000}
+	got45 := mustPricing(t, "grok-4.5").Cost(cached)
+	got46 := p.Cost(cached)
+	if got46 <= got45 {
+		t.Fatalf("4.6 cached cost %v should exceed 4.5 %v", got46, got45)
+	}
+}
+
+func mustPricing(t *testing.T, id string) *Pricing {
+	t.Helper()
+	m, ok := ResolveModel(id)
+	if !ok || m.Pricing == nil {
+		t.Fatalf("no pricing for %q", id)
+	}
+	return m.Pricing
 }
 
 func TestGPT56TerraPricing(t *testing.T) {
