@@ -40,6 +40,7 @@ All state lives under `~/.config/moa/`:
 | `config.json` | Global config |
 | `auth.json` | Provider credentials |
 | `sessions/` | Saved sessions |
+| `attachments/v1/` | Image and document bytes referenced by sessions, deduplicated by content |
 | `prompts/` | Global prompt templates |
 | `skills/` | Global skill packs (`<name>/SKILL.md`) |
 | `global/memory/` | Global memory facts (scope: global) |

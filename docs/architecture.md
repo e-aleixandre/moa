@@ -58,8 +58,9 @@
 |---------|------|
 | `pkg/auth/` | Credential store + OAuth flows, including xAI's OIDC device grant |
 | `pkg/session/` | Session persistence (file-backed, atomic writes) |
+| `pkg/attachment/` | Content-addressed store for image/document bytes referenced by sessions |
 | `pkg/extension/` | Extension host + typed hooks (internal; fired every turn but no user-facing loader/config to register extensions yet) |
-| `pkg/mcp/` | MCP manager — stdio tool-server integration |
+| `pkg/mcp/` | MCP manager — local tool servers over stdio, remote ones over streamable HTTP |
 | `pkg/git/` | Git context detection |
 | `pkg/clipboard/` | Clipboard integration (platform-specific) |
 | `pkg/files/` | File utilities |
@@ -105,6 +106,29 @@ The TUI and serve layer subscribe to events for rendering. The agent loop publis
 ## Sessions
 
 Sessions persist full message history plus metadata using atomic file writes. Both TUI and serve use the same session store for persistence and resume.
+
+## Attachments
+
+Images and documents are **not** stored inline in the session file. When a tool
+produces one, the bytes go to a content-addressed store under
+`~/.config/moa/attachments/v1` and the transcript keeps only a small reference;
+the bytes are put back just before the provider request. Identical content is
+stored once no matter how many sessions or subagents read it.
+
+The reason is that a session file is rewritten whole on every save, so inlining
+base64 made the cost of a conversation grow with every screenshot it had ever
+seen — in both disk and memory — even when nothing referred to them anymore.
+
+Producing a reference and being able to resolve it is a **single capability**
+tied to the owning session (`attachment.Scope`), resolved per tool invocation
+rather than captured when a tool is built: tools are shared between a parent and
+its children, and an ephemeral agent that does not persist its transcript must
+not mint references nobody will ever resolve. Subagent attachments are owned by
+the *parent* session, so they survive a restart that ends the child's job.
+
+A request carrying an unresolved reference is refused before it reaches the
+provider: silently sending an empty image would make the model answer about
+something it cannot see.
 
 ## Compaction
 

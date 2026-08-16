@@ -78,7 +78,7 @@ See [Web UI](./serve.md) for details.
 | `codex` | `gpt-5.3-codex` |
 | `codex-spark` | `gpt-5.3-codex-spark` |
 | `codex-5.2` | `gpt-5.2-codex` |
-| `grok` | `grok-4.5` (xAI) |
+| `grok` | `grok-4.6` (xAI) |
 | `sol` | `gpt-5.6-sol` |
 | `terra` | `gpt-5.6-terra` |
 | `luna` | `gpt-5.6-luna` |
@@ -98,7 +98,7 @@ moa -p "fix flaky tests"
 # explicit provider/model
 moa -model openai/gpt-5.3-codex -p "optimize this query"
 
-# Grok 4.5 with its supported thinking levels
+# Grok 4.6 with its supported thinking levels
 moa -model grok -thinking high -p "review this change"
 
 # budget-limited run

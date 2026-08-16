@@ -86,7 +86,7 @@ Moa-operated service.
   network such as Tailscale, or place it behind your own authenticated reverse proxy.
 - **Keep operational state on your machine.** Session history, configuration, credentials,
   and project memory are stored by your Moa installation.
-- **Use the provider you choose.** Moa talks to Anthropic or OpenAI from your machine and
+- **Use the provider you choose.** Moa talks to Anthropic, OpenAI or xAI from your machine and
   does not add a separate hosted agent service in between.
 
 Self-hosted does **not** mean offline: prompts, selected code or file content, and tool results
@@ -122,12 +122,12 @@ For the complete capability reference, see the
 
 ## Use the provider you already have
 
-Moa supports Anthropic and OpenAI.
+Moa supports Anthropic, OpenAI and xAI.
 
-You can authenticate with a **Claude Pro or Max** or **ChatGPT Plus/Pro** subscription through
-OAuth, without configuring a separate API key for the main agent. Anthropic and OpenAI API keys
-are supported as well. Model availability and usage limits remain those of the provider account
-you use.
+You can authenticate with a **Claude Pro or Max**, **ChatGPT Plus/Pro** or **SuperGrok/X**
+subscription through OAuth, without configuring a separate API key for the main agent.
+Anthropic, OpenAI and xAI API keys are supported as well. Model availability and usage limits
+remain those of the provider account you use.
 
 ## Quick start
 

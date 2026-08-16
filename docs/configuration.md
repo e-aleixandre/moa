@@ -79,7 +79,7 @@ switched off for a project — is kept separately, in
 | `brave_api_key` | string | | Enables the `web_search` tool |
 | `cache_ttl` | string | `"5m"` | Interactive prompt-cache TTL. Only `"1h"` changes behavior; any other value falls back to the 5m default |
 | `stt_language` | string | `"en"` | Speech-to-text language hint (ISO-639-1, e.g. `"es"`, `"en"`). Avoids mis-detection on short clips. Use `"auto"` to let the model detect |
-| `stt_model` | string | `"gpt-transcribe"` | Speech-to-text model. `"gpt-4o-mini-transcribe"` costs half as much per minute; `"whisper-1"` is the older, slower default |
+| `stt_model` | string | `"gpt-transcribe"` | Speech-to-text model. `"gpt-4o-mini-transcribe"` costs half as much per minute; `"whisper-1"` is the older, slower model it replaced |
 | `stt_vocabulary` | string[] | `[]` | Words the transcriber keeps getting wrong (names, jargon, product names). Accumulates across scopes: a project adds its terms to your global ones. Keep it short — long lists make transcription worse (max 50 terms) |
 | `persistent_shell` | bool | `true` | Whether `bash` persists working directory and exported env between calls in a session |
 | `update_check` | bool | `true` | Check GitHub for a newer stable Moa release (six-hour ETag cache); set `false` to opt out |
@@ -101,7 +101,7 @@ global config and a project's jargon in its `.moa/config.json`:
 | `subagent_max_turns` | int | `100` | Max agent turns per subagent run (0 = package default) |
 | `subagent_max_run_duration` | string | `"10m"` | Max subagent wall-clock duration, Go duration (empty = package default) |
 | `subagent_max_concurrent_async` | int | `5` | Max concurrent async subagents (0 = package default) |
-| `subagent_allowed_models` | []string | `[]` | Model IDs a subagent may run under. Empty = no restriction. Excluded models are hidden from the agent and refused if requested. Editable from the web Settings sheet. **Global-only.** |
+| `subagent_allowed_models` | []string | `[]` | Model IDs a subagent may run under. Empty = no restriction. Excluded models are hidden from the agent and refused if requested; a change applies to sessions already open, without a restart. The list governs the model a delegation explicitly asks for: a child that inherits the parent's model still runs when that model is not listed. Editable from the web Settings sheet. **Global-only.** |
 
 ### Models
 
@@ -115,10 +115,10 @@ global config and a project's jargon in its `.moa/config.json`:
 | `auto_title_model` | string | Model for automatic session titles: `auto` (default), `off`, or a valid model spec/alias. Auto may send a snippet of **any session’s transcript** — not only sessions already on that vendor — to the selected available auxiliary provider: OpenAI Luna when normal OpenAI completion credentials exist, otherwise Anthropic Haiku. Thus an Anthropic/xAI session can be sent to OpenAI, or an OpenAI/xAI session to Anthropic when Haiku is the fallback. Privacy-sensitive users should choose an explicit same-provider model or `off`. |
 | `session_brief_model` | string | Model for web/Pulse session status briefs: `auto` (default), `off`, or a valid model spec/alias. Auto has the same cross-provider behavior as titles: a snippet of any session transcript can be sent to Luna, or to Haiku when it is the available fallback. Choose an explicit same-provider model or `off` when that is not acceptable. Briefs are not shown in the single-session TUI. |
 
-The initial xAI model is `grok-4.5`, also available as `grok`. Its supported
-thinking levels are `low`, `medium`, and `high`. A provider-qualified custom
-model such as `xai/<model-id>` is accepted, but Moa has no context-window or
-pricing metadata for it unless it is in the built-in model registry.
+The xAI models are `grok-4.6` (also available as `grok`) and `grok-4.5`. Their
+supported thinking levels are `low`, `medium`, and `high`. A provider-qualified
+custom model such as `xai/<model-id>` is accepted, but Moa has no context-window
+or pricing metadata for it unless it is in the built-in model registry.
 
 ### MCP servers
 
