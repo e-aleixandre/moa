@@ -1112,6 +1112,16 @@ func resolveModel(defaultModel core.Model, params map[string]any) (core.Model, *
 	if ok {
 		return model, nil
 	}
+	// A spec that doesn't resolve used to be accepted as a custom model as
+	// long as it carried any "provider/" prefix, so a typo like "openai/Sol"
+	// silently launched a child against a model ID no provider knows — the
+	// failure surfaced later, far from its cause. ValidateModelSpec still
+	// admits genuine custom models; it only rejects a prefix that contradicts
+	// a known model, which is a typo rather than a deliberate choice.
+	if err := core.ValidateModelSpec(modelSpec); err != nil {
+		res := core.ErrorResult(err.Error())
+		return core.Model{}, &res
+	}
 	if model.Provider == "" {
 		res := core.ErrorResult("unknown model: " + modelSpec)
 		return core.Model{}, &res

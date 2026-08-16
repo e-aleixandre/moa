@@ -2964,3 +2964,47 @@ func TestJobsSteerAcceptsARunningJob(t *testing.T) {
 	}
 	close(release)
 }
+
+// A "provider/model" spec whose prefix contradicts a known model is a typo,
+// not a custom model. It used to be accepted, launching a child against an ID
+// no provider knows: the run failed later, far from the mistake that caused
+// it. The owner's call is that a wrong name must fail loudly rather than
+// quietly run something else.
+func TestResolveModel_TypoWithProviderPrefixFailsLoudly(t *testing.T) {
+	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
+	for _, spec := range []string{"opeanai/sol", "foo/sonnet"} {
+		model, res := resolveModel(fallback, map[string]any{"model": spec})
+		if res == nil {
+			t.Errorf("resolveModel(%q): expected an error result, got model %q", spec, model.ID)
+			continue
+		}
+		if model.ID == fallback.ID {
+			t.Errorf("resolveModel(%q): silently fell back to the parent model", spec)
+		}
+	}
+}
+
+// The loud failure must not swallow genuine custom models: an unknown model
+// under a provider that contradicts nothing is still legitimate.
+func TestResolveModel_GenuineCustomModelStillRuns(t *testing.T) {
+	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
+	model, res := resolveModel(fallback, map[string]any{"model": "openai/my-finetune-v3"})
+	if res != nil {
+		t.Fatalf("a custom model was rejected: %v", res.Content)
+	}
+	if model.ID != "my-finetune-v3" || model.Provider != "openai" {
+		t.Fatalf("got %q under %q", model.ID, model.Provider)
+	}
+}
+
+// Capitalized aliases are what models actually write when delegating.
+func TestResolveModel_CapitalizedAliasResolves(t *testing.T) {
+	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
+	model, res := resolveModel(fallback, map[string]any{"model": "Sol"})
+	if res != nil {
+		t.Fatalf("unexpected error: %v", res.Content)
+	}
+	if model.ID != "gpt-5.6-sol" {
+		t.Fatalf("got %q", model.ID)
+	}
+}

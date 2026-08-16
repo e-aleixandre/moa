@@ -200,33 +200,45 @@ func ValidateModelSpec(spec string) error {
 // "provider/" prefix whose model portion matched a *known* model registered
 // under a different provider.
 func resolveModelSpec(spec string) (m Model, ok bool, mismatch bool) {
+	// Models write these names themselves ("ask Sol to review this"), so a spec
+	// arrives capitalized or padded as often as not. Every alias, known ID and
+	// provider name in the registry is lowercase, so folding case here only
+	// makes specs resolve that would otherwise fail — it cannot change an
+	// existing match. Custom "provider/model" IDs are NOT folded below: those
+	// reach a real provider API, where case can be significant.
+	spec = strings.TrimSpace(spec)
+	lower := strings.ToLower(spec)
+
 	// Check alias first.
-	if full, ok := modelAliases[spec]; ok {
+	if full, ok := modelAliases[lower]; ok {
 		if m, ok2 := knownModels[full]; ok2 {
 			return m, true, false
 		}
 	}
 
 	// Direct lookup.
-	if m, ok := knownModels[spec]; ok {
+	if m, ok := knownModels[lower]; ok {
 		return m, true, false
 	}
 
 	// Fallback: match by display Name (handles legacy session data
 	// that stored "Claude Sonnet 4.6" instead of "claude-sonnet-4-6").
 	for _, m := range knownModels {
-		if m.Name == spec {
+		if strings.EqualFold(m.Name, spec) {
 			return m, true, false
 		}
 	}
 
 	// Try provider/model format.
 	if idx := strings.IndexByte(spec, '/'); idx > 0 {
-		provider := spec[:idx]
-		modelID := spec[idx+1:]
+		provider := strings.ToLower(spec[:idx])
+		modelID := strings.TrimSpace(spec[idx+1:])
+		// Only the lookup is case-folded; modelID keeps its original case so an
+		// unknown one can still be passed through to its provider verbatim.
+		lowerID := strings.ToLower(modelID)
 
 		// Alias after stripping provider.
-		if full, ok := modelAliases[modelID]; ok {
+		if full, ok := modelAliases[lowerID]; ok {
 			if m, ok2 := knownModels[full]; ok2 {
 				if m.Provider != provider {
 					// Explicit provider mismatches the provider of the known
@@ -241,7 +253,7 @@ func resolveModelSpec(spec string) (m Model, ok bool, mismatch bool) {
 		}
 
 		// Direct lookup of model ID part.
-		if m, ok := knownModels[modelID]; ok {
+		if m, ok := knownModels[lowerID]; ok {
 			if m.Provider != provider {
 				return Model{ID: modelID, Provider: provider}, false, true
 			}

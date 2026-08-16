@@ -354,3 +354,47 @@ func TestKnownModels_PricingIsExplicit(t *testing.T) {
 		}
 	}
 }
+
+// Models name these aliases themselves when delegating ("ask Sol to review
+// this"), so specs arrive capitalized or padded. Before this was folded, only
+// the exact lowercase form resolved and everything else failed.
+func TestResolveModel_CaseAndSpaceInsensitive(t *testing.T) {
+	cases := map[string]string{
+		"Sol":             "gpt-5.6-sol",
+		"SOL":             "gpt-5.6-sol",
+		"Terra":           "gpt-5.6-terra",
+		"Luna":            "gpt-5.6-luna",
+		"Opus":            "claude-opus-5",
+		"Fable":           "claude-fable-5",
+		" sol ":           "gpt-5.6-sol",
+		"openai/Sol":      "gpt-5.6-sol",
+		"ANTHROPIC/Opus":  "claude-opus-5",
+		"Claude-Sonnet-5": "claude-sonnet-5",
+		"Claude Sonnet 5": "claude-sonnet-5",
+	}
+	for spec, want := range cases {
+		m, ok := ResolveModel(spec)
+		if !ok {
+			t.Errorf("ResolveModel(%q): expected it to resolve", spec)
+			continue
+		}
+		if m.ID != want {
+			t.Errorf("ResolveModel(%q) = %q, want %q", spec, m.ID, want)
+		}
+	}
+}
+
+// A custom model ID reaches a provider API verbatim, where case can be
+// significant, so folding must stop at the registry lookup.
+func TestResolveModel_CustomIDKeepsItsCase(t *testing.T) {
+	m, ok := ResolveModel("openai/My-Custom-Model")
+	if ok {
+		t.Fatal("a custom model is not a known one")
+	}
+	if m.ID != "My-Custom-Model" {
+		t.Fatalf("custom ID was rewritten: got %q", m.ID)
+	}
+	if m.Provider != "openai" {
+		t.Fatalf("provider: %q", m.Provider)
+	}
+}
