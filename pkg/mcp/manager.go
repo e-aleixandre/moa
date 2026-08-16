@@ -16,6 +16,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -770,23 +771,29 @@ func (m *Manager) wrapTool(sess *serverSession, ti toolInfo) core.Tool {
 			if err != nil {
 				return core.ErrorResult(fmt.Sprintf("MCP tool %s failed: %v", label, err)), nil
 			}
-			return convertMCPResult(result), nil
+			return convertMCPResult(ctx, result), nil
 		},
 	}
 }
 
-func convertMCPResult(r *sdkmcp.CallToolResult) core.Result {
+// convertMCPResult turns an MCP result into moa content. It takes the ctx of
+// THIS invocation on purpose: the attachment capability is read from there and
+// is never captured by NewManager or by the tool wrapper. MCP tools are shared
+// objects reused across agents (and rebuilt on reload), so a captured
+// capability would externalize on behalf of an agent that must stay inline.
+func convertMCPResult(ctx context.Context, r *sdkmcp.CallToolResult) core.Result {
 	if r == nil {
 		return core.TextResult("(no result)")
 	}
 
+	scope := attachment.ScopeFromContext(ctx)
 	var content []core.Content
 	for _, c := range r.Content {
 		switch v := c.(type) {
 		case *sdkmcp.TextContent:
 			content = append(content, core.TextContent(v.Text))
 		case *sdkmcp.ImageContent:
-			content = append(content, core.ImageContent(base64.StdEncoding.EncodeToString(v.Data), v.MIMEType))
+			content = append(content, mcpImageContent(scope, v))
 		default:
 			// Unknown content type (audio, resource, etc.) — JSON fallback.
 			if data, err := json.Marshal(c); err == nil {
@@ -803,4 +810,36 @@ func convertMCPResult(r *sdkmcp.CallToolResult) core.Result {
 		Content: content,
 		IsError: r.IsError,
 	}
+}
+
+// mcpImageContent externalizes an MCP image when the invoking agent brought
+// the capability, and returns plain inline base64 otherwise. A descriptor is
+// only produced after the blob is durably stored: any storage error falls back
+// to inline instead of surfacing an error, because a valid image must never
+// become a user-visible failure, and a reference with no blob behind it would
+// reach the provider as an empty image.
+func mcpImageContent(scope *attachment.Scope, v *sdkmcp.ImageContent) core.Content {
+	if scope != nil {
+		mimeType := v.MIMEType
+		if actual := core.ImageMimeFromBytes(v.Data); actual != "" {
+			mimeType = actual
+		}
+		width, height := core.ImageDimensions(v.Data)
+		descriptor, err := scope.Put(v.Data, attachment.PutMeta{
+			Mime:   mimeType,
+			Kind:   "image",
+			Width:  width,
+			Height: height,
+		})
+		if err == nil {
+			return core.Content{
+				Type:           "image",
+				MimeType:       descriptor.Mime,
+				AttachmentID:   descriptor.ID,
+				AttachmentSize: descriptor.Size,
+			}
+		}
+		slog.Warn("mcp: could not externalize image, falling back to inline", "error", err)
+	}
+	return core.ImageContent(base64.StdEncoding.EncodeToString(v.Data), v.MIMEType)
 }

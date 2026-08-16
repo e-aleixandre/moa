@@ -623,21 +623,21 @@ func TestSanitizeToolName_Empty(t *testing.T) {
 // --- convertMCPResult ---
 
 func TestConvertMCPResult_Nil(t *testing.T) {
-	r := convertMCPResult(nil)
+	r := convertMCPResult(context.Background(), nil)
 	if len(r.Content) != 1 || r.Content[0].Text != "(no result)" {
 		t.Fatalf("unexpected result for nil: %+v", r)
 	}
 }
 
 func TestConvertMCPResult_Empty(t *testing.T) {
-	r := convertMCPResult(&sdkmcp.CallToolResult{})
+	r := convertMCPResult(context.Background(), &sdkmcp.CallToolResult{})
 	if len(r.Content) != 1 || r.Content[0].Text != "(empty result)" {
 		t.Fatalf("unexpected result for empty: %+v", r)
 	}
 }
 
 func TestConvertMCPResult_Text(t *testing.T) {
-	r := convertMCPResult(&sdkmcp.CallToolResult{
+	r := convertMCPResult(context.Background(), &sdkmcp.CallToolResult{
 		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "hello"}},
 	})
 	if len(r.Content) != 1 || r.Content[0].Type != "text" || r.Content[0].Text != "hello" {
@@ -649,7 +649,7 @@ func TestConvertMCPResult_Text(t *testing.T) {
 }
 
 func TestConvertMCPResult_Image(t *testing.T) {
-	r := convertMCPResult(&sdkmcp.CallToolResult{
+	r := convertMCPResult(context.Background(), &sdkmcp.CallToolResult{
 		Content: []sdkmcp.Content{&sdkmcp.ImageContent{Data: []byte("png-data"), MIMEType: "image/png"}},
 	})
 	if len(r.Content) != 1 || r.Content[0].Type != "image" {
@@ -661,7 +661,7 @@ func TestConvertMCPResult_Image(t *testing.T) {
 }
 
 func TestConvertMCPResult_Error(t *testing.T) {
-	r := convertMCPResult(&sdkmcp.CallToolResult{
+	r := convertMCPResult(context.Background(), &sdkmcp.CallToolResult{
 		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "something went wrong"}},
 		IsError: true,
 	})
@@ -674,7 +674,7 @@ func TestConvertMCPResult_Error(t *testing.T) {
 }
 
 func TestConvertMCPResult_UnknownContentType(t *testing.T) {
-	r := convertMCPResult(&sdkmcp.CallToolResult{
+	r := convertMCPResult(context.Background(), &sdkmcp.CallToolResult{
 		Content: []sdkmcp.Content{&sdkmcp.AudioContent{Data: []byte("audio"), MIMEType: "audio/wav"}},
 	})
 	if len(r.Content) != 1 || r.Content[0].Type != "text" {

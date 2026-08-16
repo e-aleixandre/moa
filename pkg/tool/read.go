@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -103,7 +105,11 @@ func NewRead(cfg ToolConfig) core.Tool {
 
 			// Image — no pagination
 			if mimeType, ok := imageExtensions[ext]; ok {
-				result, err := readImage(resolved, mimeType)
+				// ctx, not a captured value: the attachment capability belongs to
+				// the agent making THIS call, not to the tool object. This same
+				// core.Tool is shared with ephemeral agents (reviewers), which
+				// must stay inline.
+				result, err := readImage(ctx, resolved, mimeType)
 				if err == nil && !result.IsError && cfg.FileTracker != nil {
 					cfg.FileTracker.MarkRead(resolved)
 				}
@@ -131,7 +137,7 @@ func NewRead(cfg ToolConfig) core.Tool {
 
 const maxImageBytes = 10 * 1024 * 1024 // 10 MB
 
-func readImage(path, mimeType string) (core.Result, error) {
+func readImage(ctx context.Context, path, mimeType string) (core.Result, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("read error: %v", err)), nil
@@ -148,11 +154,12 @@ func readImage(path, mimeType string) (core.Result, error) {
 	// An oversized image is rejected by the provider with a hard 400, and since
 	// history is replayed every turn it would leave the whole conversation
 	// unsendable. Fail here instead, with an actionable message for the model.
-	if w, h := core.ImageDimensions(data); w > core.MaxImageDimension || h > core.MaxImageDimension {
+	width, height := core.ImageDimensions(data)
+	if width > core.MaxImageDimension || height > core.MaxImageDimension {
 		return core.ErrorResult(fmt.Sprintf(
 			"image is %dx%d px; both sides must be at most %d px (provider limit). "+
 				"Resize or crop it first (e.g. split a tall screenshot into sections) and read the smaller file.",
-			w, h, core.MaxImageDimension)), nil
+			width, height, core.MaxImageDimension)), nil
 	}
 
 	// Auto-detect mime if needed
@@ -165,6 +172,37 @@ func readImage(path, mimeType string) (core.Result, error) {
 	// so trust the magic bytes over the name.
 	if actual := core.ImageMimeFromBytes(data); actual != "" {
 		mimeType = actual
+	}
+
+	// Externalize only when the invoking agent brought the capability. The
+	// scope is resolved from the context on every call, never captured in
+	// NewRead's closure: tools are shared objects (the plan/code reviewers and
+	// subagents reuse the parent's `read`), so a captured scope would make an
+	// agent that must not externalize write references into the parent's index.
+	if scope := attachment.ScopeFromContext(ctx); scope != nil {
+		descriptor, err := scope.Put(data, attachment.PutMeta{
+			Name:   filepath.Base(path),
+			Mime:   mimeType,
+			Kind:   "image",
+			Width:  width,
+			Height: height,
+		})
+		if err != nil {
+			// A valid screenshot must never become a user-visible failure just
+			// because the blob store misbehaved: fall back to the inline bytes.
+			// No partial descriptor is returned — a reference without a blob
+			// behind it would reach the provider as an empty image.
+			slog.Warn("read: could not externalize image, falling back to inline", "path", path, "error", err)
+		} else {
+			return core.Result{
+				Content: []core.Content{{
+					Type:           "image",
+					MimeType:       descriptor.Mime,
+					AttachmentID:   descriptor.ID,
+					AttachmentSize: descriptor.Size,
+				}},
+			}, nil
+		}
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(data)
