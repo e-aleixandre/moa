@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/compaction"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/extension"
@@ -387,6 +388,20 @@ type AgentConfig struct {
 	// resolved). pkg/agent stays decoupled from the blob store: the closure is
 	// injected by the caller via the store's MaterializerFor.
 	MaterializeContent func(context.Context, []core.Message) ([]core.Message, error)
+
+	// AttachmentScope is the agent's attachment capability: the store plus the
+	// session that OWNS anything it externalizes. It is a single indivisible
+	// value on purpose — the agent derives BOTH halves from it (it publishes it
+	// on the run context so tools can produce references, and it takes the
+	// materializer from the same value so those references can be resolved), so
+	// no constructor can wire one half and forget the other.
+	//
+	// nil = this agent works inline: it produces no references, and it hides any
+	// capability inherited from a caller's context (see executeWithOptions).
+	// Agents whose conversation is discarded (plan/code reviewers, goal
+	// verifier) must stay nil: externalizing there would only leave orphan
+	// references in the parent's index.
+	AttachmentScope *attachment.Scope
 
 	// Compaction settings. nil = use DefaultCompactionSettings.
 	// Set Enabled:false to disable.
@@ -1396,6 +1411,29 @@ func (a *Agent) executeAnnounced(ctx context.Context, prepare, announce func()) 
 	return a.executeWithOptions(ctx, prepare, announce, a.tools, "", false)
 }
 
+// materializeContent resolves the hook that expands attachment references
+// before a provider request. An AttachmentScope always supplies one: holding
+// the producer without the resolver is precisely the failure this design
+// forbids, so a configured MaterializeContent may complement other uses but
+// can never REPLACE (and thus disable) the scope's own materializer.
+func (a *Agent) materializeContent() func(context.Context, []core.Message) ([]core.Message, error) {
+	scoped := a.config.AttachmentScope.Materializer()
+	if scoped == nil {
+		return a.config.MaterializeContent
+	}
+	extra := a.config.MaterializeContent
+	if extra == nil {
+		return scoped
+	}
+	return func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
+		out, err := extra(ctx, msgs)
+		if err != nil {
+			return nil, err
+		}
+		return scoped(ctx, out)
+	}
+}
+
 func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func(), tools *core.Registry, extraPrompt string, allowCheckpoint bool) ([]core.AgentMessage, error) {
 	a.mu.Lock()
 	if a.cancel != nil {
@@ -1427,6 +1465,21 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	}
 	cancel := a.cancel
 	a.mu.Unlock()
+
+	// Publish this agent's attachment capability on the run context, so shared
+	// tools (a `read` built by the parent and reused by a reviewer, an MCP
+	// wrapper) resolve it per invocation instead of capturing it once.
+	//
+	// UNCONDITIONAL, nil INCLUDED — do not "simplify" this into
+	// `if scope != nil`. Ephemeral agents run on a context inherited from their
+	// caller: ReviewCode is invoked with the parent's TOOL context
+	// (pkg/planmode/tools.go) and runs the reviewer with that very context
+	// (pkg/planmode/review.go). Skipping the write when the scope is nil would
+	// leave the parent's capability visible, and the reviewer would externalize
+	// into the parent's index with no conversation left to resolve it. Writing
+	// nil is what SHADOWS the inherited value.
+	ctx = attachment.WithScope(ctx, a.config.AttachmentScope)
+
 	a.steerMu.Lock()
 	a.aborting = false
 	a.steerMu.Unlock()
@@ -1483,7 +1536,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		maxToolCallsPerTurn: a.config.MaxToolCallsPerTurn,
 		maxBudget:           a.config.MaxBudget,
 		convertToLLM:        a.config.ConvertToLLM,
-		materializeContent:  a.config.MaterializeContent,
+		materializeContent:  a.materializeContent(),
 		permissionCheck:     permissionCheck,
 		compaction:          a.config.Compaction,
 		// A prepare-compact run writes the checkpoint and is then discarded by
