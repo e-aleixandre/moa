@@ -48,6 +48,16 @@ function argParts(arg) {
   return { text: arg, detail: null };
 }
 
+// fullLabel — the UNTRUNCATED value behind a row's one-line label, exposed as
+// a native tooltip. The short label is deliberate (a row is ONE line), but the
+// user still has to be able to read what a tool is actually acting on: paths,
+// patterns and urls reach the DOM whole and are only clipped by CSS, while a
+// bash command is shortened in JS and travels apart on `row.command`.
+export function fullLabel(row, text) {
+  const value = row.command || (typeof text === "string" ? text : "");
+  return value || undefined;
+}
+
 // StatusMark — the small outcome mark on the RIGHT of a done row (Variant B):
 // ✓ ok (green) / ✗ error (red) / ! rejected (yellow). Running rows have none.
 // The glyph is decorative; the outcome is named for screen readers via an
@@ -88,7 +98,7 @@ function DoneRow({ row }) {
         <span class="ic" aria-hidden="true">
           <Icon size={14} />
         </span>
-        <span class="txt">
+        <span class="txt" title={fullLabel(row, text)}>
           <b>{row.tool}</b> {text}
           {argDetail && <span class="dim"> · {argDetail}</span>}
         </span>
@@ -168,6 +178,21 @@ function LiveWindow({ lines, start = 0, diff = false, expanded, onToggle }) {
   );
 }
 
+// LiveCommand — the full command of a RUNNING tool, in the same recessed
+// panel a done row opens (.tg-detail + the $ prompt of ledger-details). A live
+// bash writing to a file streams nothing, so without this there is literally
+// nothing to look at and the only way to learn what is running is to cancel it.
+function LiveCommand({ command }) {
+  return (
+    <div class="tg-detail">
+      <div class="doc-mono tg-cmd">
+        <span class="tg-cmd-prompt" aria-hidden="true">$ </span>
+        {command}
+      </div>
+    </div>
+  );
+}
+
 // LiveRow — the running tool call: the SAME atom, tinted blue. Breathing dot in
 // the icon column, blue verb + bright object, elapsed (from 3s), a 1px progress
 // sweep. Every tool streams through the same rolling `.tg-log` panel below.
@@ -186,19 +211,39 @@ function LiveRow({ row }) {
     ? { lines: row.liveFull.lines, start: row.liveFull.start || 0, diff: row.liveFull.kind === "diff" }
     : null;
   const displayedWindow = expanded && fullWindow ? fullWindow : liveWindow;
+  // The live row opens ONLY when it has something the collapsed line can't
+  // show: the whole command. Rows with nothing extra stay the inert <div> they
+  // are today (not a disabled button, which SRs announce as an unavailable
+  // action). The row shares the `expanded` state with the output window, so
+  // opening either shows everything the running tool can offer.
+  const expandable = !!row.command;
+  const Tag = expandable ? "button" : "div";
   return (
     <>
-      <div class="tg-row live" role="status" aria-live="off">
+      <Tag
+        type={expandable ? "button" : undefined}
+        class={`tg-row live${expanded && expandable ? " open" : ""}`}
+        role={expandable ? undefined : "status"}
+        aria-live={expandable ? undefined : "off"}
+        onClick={expandable ? () => setExpanded((value) => !value) : undefined}
+        aria-expanded={expandable ? expanded : undefined}
+      >
         <span class="ic" aria-hidden="true">
           <StateDot state="running" size={6} />
         </span>
-        <span class="txt">
+        <span class="txt" title={fullLabel(row, text)}>
           <span class="verb">{verb}</span> {text}
           {argDetail && <span class="dim"> {argDetail}</span>}
         </span>
         {elapsed >= 3000 && <span class="res">{formatElapsed(elapsed)}</span>}
+        {expandable && (
+          <span class="chev" aria-hidden="true">
+            <ChevronRight size={12} />
+          </span>
+        )}
         <span class="hair" aria-hidden="true" />
-      </div>
+      </Tag>
+      {expandable && expanded && <LiveCommand command={row.command} />}
       {displayedWindow && (
         <LiveWindow
           {...displayedWindow}
