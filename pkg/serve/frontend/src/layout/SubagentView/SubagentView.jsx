@@ -11,6 +11,7 @@ import { fmtTokens, copyToClipboard, sessionTitle } from "../../data/util/format
 import { modelAccent } from "../../data/selectors.js";
 import { cancelSubagent, promoteSubagent } from "../../data/session-actions.js";
 import { updateSession } from "../../data/store.js";
+import { useSubagentTranscript } from "../../hooks/useSubagentTranscript.js";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import "./SubagentView.css";
 
@@ -29,6 +30,10 @@ import "./SubagentView.css";
 
 export function SubagentView({ session, jobId, onBack }) {
   const view = subagentView(session, jobId);
+
+  // A subagent born while this conversation was open holds only the deltas
+  // received since; fetch the history that predates opening this view.
+  useSubagentTranscript(session?.id, jobId);
 
   // Rebound: the subagent was pruned (finished + cleaned). Fall back to parent.
   // All hooks below run on EVERY render regardless of `view` (rules of hooks);

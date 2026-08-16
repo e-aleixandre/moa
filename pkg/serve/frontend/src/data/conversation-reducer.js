@@ -162,7 +162,11 @@ export function reduceToolEnd(target, buffers, data, extractNote) {
 // NOTE: buffers.materializedText is a string (possibly ""). Storing a boolean
 // here would break startsWith/slice — a fullText starting with "true" would be
 // silently truncated. Keep it a string.
-export function reduceMessageEnd(target, buffers, fullText) {
+//
+// msgID, when the server sends one, becomes the row's identity, so a
+// transcript later fetched over REST can recognize this same message instead
+// of appending a second copy of it.
+export function reduceMessageEnd(target, buffers, fullText, msgID) {
   target = ensureTarget(target);
   const streamed = target.streamingText || '';
   const materialized = buffers.materializedText || '';
@@ -179,6 +183,7 @@ export function reduceMessageEnd(target, buffers, fullText) {
   if (assistantText) {
     target.messages = [...target.messages, {
       role: 'assistant',
+      ...(msgID ? { _msg_id: msgID } : {}),
       content: [{ type: 'text', text: assistantText }],
     }];
   }
@@ -234,7 +239,7 @@ export function applyNestedEvent(target, buffers, evt, extractNote) {
     case 'message_start': return reduceMessageStart(target, buffers);
     case 'text_delta':    return reduceTextDelta(target, buffers, data.delta);
     case 'thinking_delta':return reduceThinkingDelta(target, buffers, data.delta);
-    case 'message_end':   return reduceMessageEnd(target, buffers, data.text);
+    case 'message_end':   return reduceMessageEnd(target, buffers, data.text, data.msg_id);
     case 'tool_call_start':return reduceToolCallStart(target, buffers, data);
     case 'tool_call_delta':return reduceToolCallDelta(target, buffers, data);
     case 'tool_start':    return reduceToolStart(target, buffers, data);
