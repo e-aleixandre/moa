@@ -165,3 +165,14 @@ test('the closed mobile screen mounts its sheet and an opened drawer without ren
   expect(() => cardMenu.type(cardMenu.props)).not.toThrow();
   expect(layoutEffects).toBeGreaterThanOrEqual(3);
 });
+
+// Ideally this would render the screen and assert the handlers reached its
+// root, but the suite's shared preact/hooks mocks stub the gesture hook away,
+// so the wiring is asserted at the source level: it still catches the mistake
+// this fixes (a screen that simply never spreads the handlers).
+test('MobileBashJobView spreads edge-swipe handlers onto its screen root', async () => {
+  const source = await Bun.file(new URL('./MobileBashJobView.jsx', import.meta.url)).text();
+
+  expect(source).toContain('ref={screenRef} {...swipeBind}');
+});
+
