@@ -274,9 +274,11 @@
   background: color-mix(in srgb, var(--surface0) 35%, transparent);
 }
 
+/* The check alone carries the state. Tinting the row as well repeated the same
+   fact three times (fill + border + box) and read as an alert; the model
+   selector's pin does the same with icon colour only. */
 .subagent-model-row.on {
-  background: color-mix(in srgb, var(--mauve) 7%, transparent);
-  border-color: color-mix(in srgb, var(--mauve) 32%, transparent);
+  background: none;
 }
 
 .subagent-model-dot {
@@ -349,14 +351,13 @@
 }
 
 .subagent-allow.on .subagent-allow-box {
-  background: var(--mauve);
-  border-color: var(--mauve);
-  color: var(--crust);
+  border-color: color-mix(in srgb, var(--mauve) 55%, transparent);
+  color: var(--mauve);
 }
 
 .subagent-allow.on:disabled .subagent-allow-box {
-  background: color-mix(in srgb, var(--mauve) 45%, transparent);
-  border-color: color-mix(in srgb, var(--mauve) 45%, transparent);
+  border-color: color-mix(in srgb, var(--mauve) 30%, transparent);
+  color: color-mix(in srgb, var(--mauve) 50%, transparent);
 }
 
 .subagent-models-empty {
