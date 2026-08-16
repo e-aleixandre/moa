@@ -26,7 +26,7 @@ func TestResolveAuxiliaryModel_AutoPriorityAndAvailability(t *testing.T) {
 
 func TestResolveAuxiliaryModel_ExplicitAndOff(t *testing.T) {
 	model, enabled, err := ResolveAuxiliaryModel("grok", func(provider string) bool { return provider == "xai" })
-	if err != nil || !enabled || model.ID != "grok-4.5" {
+	if err != nil || !enabled || model.ID != "grok-4.6" {
 		t.Fatalf("explicit Grok = %+v, %v, %v", model, enabled, err)
 	}
 	if model, enabled, err := ResolveAuxiliaryModel("grok", func(string) bool { return false }); err != nil || enabled || model.ID != "" {

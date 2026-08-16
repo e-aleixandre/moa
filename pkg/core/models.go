@@ -119,6 +119,18 @@ var knownModels = map[string]Model{
 			},
 		},
 	},
+	// Grok 4.6 applies the same whole-request long-context rule as 4.5, but its
+	// cached input costs more (0.5 vs 0.3), which dominates in long sessions.
+	"grok-4.6": {
+		ID: "grok-4.6", Provider: "xai", API: "xai-responses",
+		Name: "Grok 4.6", MaxInput: 500_000,
+		Pricing: &Pricing{
+			Input: 2, Output: 6, CacheRead: 0.5,
+			Tiers: []PricingTier{
+				{Threshold: 200_000, Input: 4, Output: 12, CacheRead: 1},
+			},
+		},
+	},
 }
 
 // Short aliases → full model ID.
@@ -140,7 +152,7 @@ var modelAliases = map[string]string{
 	"gpt5-mini":   "gpt-5.4-mini",
 	"gpt5.5":      "gpt-5.5",
 	// xAI
-	"grok": "grok-4.5",
+	"grok": "grok-4.6",
 }
 
 // ResolveModel resolves a model specifier to a fully-populated Model.
