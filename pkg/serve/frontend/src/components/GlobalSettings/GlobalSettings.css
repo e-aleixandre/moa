@@ -67,3 +67,318 @@
 .global-settings-about-muted {
   color: var(--overlay0);
 }
+
+/* Subagent model allowlist — same vocabulary as ModelSelector (filter field,
+   folded provider rows, per-model row) so picking models reads the same way
+   everywhere in the app. Where the selector uses a star for "pinned", this
+   uses a check for "allowed": a permission is not a favourite, and the two
+   must not share a glyph. */
+.subagent-models {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.subagent-models-hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--overlay1);
+}
+
+.subagent-models-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.subagent-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  color: var(--overlay0);
+}
+
+.subagent-filter:focus-within {
+  border-color: var(--surface2);
+}
+
+.subagent-filter input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font);
+  /* --text-input (16px) — anything smaller makes iOS zoom on focus. */
+  font-size: var(--text-input);
+  line-height: var(--leading-tight);
+}
+
+.subagent-filter input::placeholder {
+  color: var(--overlay0);
+}
+
+.subagent-filter input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.subagent-filter-clear {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin: -5px -7px -5px 0;
+  background: none;
+  border: 0;
+  color: var(--overlay1);
+  cursor: pointer;
+}
+
+.subagent-models-tally {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+
+.subagent-models-lock {
+  color: var(--overlay1);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.subagent-models-providers,
+.subagent-models-results {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.subagent-provider {
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface0) 34%, transparent);
+}
+
+.subagent-provider.open {
+  background: none;
+}
+
+.subagent-provider-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: 0;
+  border-radius: inherit;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.subagent-provider-mark {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+}
+
+.subagent-provider-copy {
+  min-width: 0;
+}
+
+.subagent-provider-name {
+  display: block;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  text-transform: capitalize;
+}
+
+.subagent-provider-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
+  color: var(--overlay1);
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+}
+
+.subagent-provider-count {
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface0);
+  color: var(--overlay1);
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+}
+
+/* Mauve, not green: green is the product's `.ok` state (a run that succeeded).
+   Being allowed is a property of the model, not an outcome, so it borrows the
+   identity accent that already marks models elsewhere (ModelPill). */
+.subagent-provider-count.on {
+  background: color-mix(in srgb, var(--mauve) 14%, transparent);
+  color: var(--mauve);
+}
+
+.subagent-provider-chevron {
+  color: var(--overlay0);
+  transition: transform var(--duration) var(--ease);
+}
+
+.subagent-provider.open .subagent-provider-chevron {
+  transform: rotate(90deg);
+}
+
+.subagent-provider-body {
+  display: grid;
+  gap: var(--space-1);
+  padding: 0 var(--space-1) var(--space-1);
+}
+
+.subagent-model-row {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 48px;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
+}
+
+.subagent-model-row:hover {
+  background: color-mix(in srgb, var(--surface0) 35%, transparent);
+}
+
+/* The check alone carries the state. Tinting the row as well repeated the same
+   fact three times (fill + border + box) and read as an alert; the model
+   selector's pin does the same with icon colour only. */
+.subagent-model-row.on {
+  background: none;
+}
+
+.subagent-model-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+}
+
+.subagent-model-copy {
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+
+.subagent-model-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--overlay1);
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  font-weight: var(--weight-normal);
+}
+
+.subagent-provider-badge {
+  max-width: 68px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 3px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--surface0);
+  color: var(--overlay1);
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  text-transform: uppercase;
+}
+
+/* The whole 40px square is the hit target; the 20px box is what the eye
+   reads, so the control stays tappable on a 390px phone. */
+.subagent-allow {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.subagent-allow:disabled {
+  cursor: default;
+}
+
+.subagent-allow-box {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--surface2);
+  color: transparent;
+  transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+
+.subagent-allow:hover .subagent-allow-box {
+  border-color: var(--overlay0);
+}
+
+.subagent-allow.on .subagent-allow-box {
+  border-color: color-mix(in srgb, var(--mauve) 55%, transparent);
+  color: var(--mauve);
+}
+
+.subagent-allow.on:disabled .subagent-allow-box {
+  border-color: color-mix(in srgb, var(--mauve) 30%, transparent);
+  color: color-mix(in srgb, var(--mauve) 50%, transparent);
+}
+
+.subagent-models-empty {
+  padding: var(--space-3);
+  color: var(--overlay1);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.subagent-provider-row:focus-visible,
+.subagent-allow:focus-visible,
+.subagent-filter-clear:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subagent-model-row,
+  .subagent-allow-box,
+  .subagent-provider-chevron {
+    transition: none;
+  }
+}

@@ -216,6 +216,22 @@ func TestMergeConfigs_PinnedModelsFromGlobalOnly(t *testing.T) {
 	}
 }
 
+// A delegation allowlist is the owner's policy: a project config must not be
+// able to widen it, nor impose one where the owner set none.
+func TestMergeConfigs_SubagentAllowedModelsFromGlobalOnly(t *testing.T) {
+	global := MoaConfig{SubagentAllowedModels: []string{"claude-sonnet-5"}}
+	project := MoaConfig{SubagentAllowedModels: []string{"gpt-5.6-sol"}} // should be ignored
+	merged := mergeConfigs(global, project)
+	if !slices.Equal(merged.SubagentAllowedModels, []string{"claude-sonnet-5"}) {
+		t.Fatalf("SubagentAllowedModels = %v, want [claude-sonnet-5] (project level should be ignored)", merged.SubagentAllowedModels)
+	}
+
+	merged = mergeConfigs(MoaConfig{}, project)
+	if len(merged.SubagentAllowedModels) != 0 {
+		t.Fatalf("SubagentAllowedModels = %v, want empty (a project cannot impose a policy)", merged.SubagentAllowedModels)
+	}
+}
+
 func TestMergeConfigs_GuardrailsCanOnlyTighten(t *testing.T) {
 	base := MoaConfig{MaxTurns: 10, MaxToolCallsPerTurn: 20, MaxRunDurationStr: "30m"}
 	tighter := MoaConfig{MaxTurns: 5, MaxToolCallsPerTurn: 10, MaxRunDurationStr: "10m"}

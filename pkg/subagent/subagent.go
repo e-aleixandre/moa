@@ -127,6 +127,14 @@ type Config struct {
 	// 0 (or negative) falls back to defaultMaxConcurrentAsync.
 	MaxConcurrentAsync int
 
+	// AllowedModels restricts, by model ID, which models a subagent may be
+	// launched with. Empty (the default) means no restriction: the allowlist
+	// is opt-in and must not change behaviour for anyone who never set one.
+	// It also filters what the tool advertises — a model the agent cannot use
+	// must not be named in the schema or in an error, or the agent will keep
+	// trying it.
+	AllowedModels []string
+
 	// TranscriptLoader loads a persisted subagent transcript by job ID,
 	// enabling the "resume" parameter to continue a finished subagent's
 	// conversation instead of starting fresh. nil = resume unsupported (the
@@ -177,11 +185,21 @@ func RegisterAll(reg *core.Registry, cfg Config) (*Jobs, error) {
 // Naming the aliases is what makes the delegation land: agents write these
 // names from memory ("ask Sol to review this"), and the field used to describe
 // no model at all. Custom "provider/model-id" specs stay valid and are
-// mentioned, so a model without an alias is still reachable.
-func modelParamDescription() string {
-	desc := "Model to use: " + strings.Join(core.ModelAliases(), ", ") +
-		". Any other model can be given as \"provider/model-id\". " +
-		"Defaults to the current model, or to the resumed subagent's own model when 'resume' is set."
+// mentioned, so a model without an alias is still reachable — unless an
+// allowlist is active, in which case only the allowed aliases are named: an
+// agent that never reads an unavailable name never tries to use it.
+func modelParamDescription(allowedModels []string) string {
+	aliases := core.AllowedModelAliases(allowedModels)
+	desc := "Model to use: " + strings.Join(aliases, ", ") + "."
+	if len(allowedModels) == 0 {
+		// Custom specs are only worth mentioning when they can actually be
+		// used: under an allowlist they are rejected, and advertising them
+		// would invite a call that always fails.
+		desc += " Any other model can be given as \"provider/model-id\"."
+	} else {
+		desc += " No other model is available."
+	}
+	desc += " Defaults to the current model, or to the resumed subagent's own model when 'resume' is set."
 	encoded, err := json.Marshal(desc)
 	if err != nil {
 		// Marshalling a plain string cannot fail; fall back to the static
@@ -210,7 +228,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				},
 				"model": {
 					"type": "string",
-					"description": ` + modelParamDescription() + `
+					"description": ` + modelParamDescription(cfg.AllowedModels) + `
 				},
 				"thinking": {
 					"type": "string",
@@ -260,7 +278,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				return *errResult, nil
 			}
 			seedMsgs := resumed.Messages
-			model, errResult := resolveModel(defaultModel(cfg, resumed), params)
+			model, errResult := resolveModel(defaultModel(cfg, resumed), params, cfg.AllowedModels)
 			if errResult != nil {
 				return *errResult, nil
 			}
@@ -1126,14 +1144,32 @@ func buildChildRegistry(parent *core.Registry, params map[string]any) (*core.Reg
 	return reg, nil
 }
 
-func resolveModel(defaultModel core.Model, params map[string]any) (core.Model, *core.Result) {
+// resolveModel picks the child's model. allowedModels is the opt-in allowlist
+// of model IDs; empty means unrestricted.
+//
+// The allowlist governs the model the CALL asks for, not the implicit default:
+// inheriting the parent's (or a resumed child's) model is not a delegation
+// choice the agent makes, and refusing it would leave the tool unusable on a
+// session whose own model the owner never allowlisted.
+func resolveModel(defaultModel core.Model, params map[string]any, allowedModels []string) (core.Model, *core.Result) {
 	modelSpec, _ := params["model"].(string)
 	if strings.TrimSpace(modelSpec) == "" {
 		return defaultModel, nil
 	}
 	model, ok := core.ResolveModel(modelSpec)
 	if ok {
+		if !core.IsModelAllowed(model, allowedModels) {
+			res := core.ErrorResult(modelErrorMessage(modelSpec, fmt.Sprintf("model %q is not available for subagents", modelSpec), allowedModels))
+			return core.Model{}, &res
+		}
 		return model, nil
+	}
+	// A custom "provider/model-id" spec cannot be checked against a list of
+	// known model IDs, so an active allowlist rejects it outright rather than
+	// letting an unlisted model in through the custom-spec door.
+	if len(allowedModels) > 0 {
+		res := core.ErrorResult(modelErrorMessage(modelSpec, fmt.Sprintf("model %q is not available for subagents", modelSpec), allowedModels))
+		return core.Model{}, &res
 	}
 	// A spec that doesn't resolve used to be accepted as a custom model as
 	// long as it carried any "provider/" prefix, so a typo like "openai/Sol"
@@ -1142,11 +1178,11 @@ func resolveModel(defaultModel core.Model, params map[string]any) (core.Model, *
 	// admits genuine custom models; it only rejects a prefix that contradicts
 	// a known model, which is a typo rather than a deliberate choice.
 	if err := core.ValidateModelSpec(modelSpec); err != nil {
-		res := core.ErrorResult(modelErrorMessage(modelSpec, err.Error()))
+		res := core.ErrorResult(modelErrorMessage(modelSpec, err.Error(), allowedModels))
 		return core.Model{}, &res
 	}
 	if model.Provider == "" {
-		res := core.ErrorResult(modelErrorMessage(modelSpec, "unknown model: "+modelSpec))
+		res := core.ErrorResult(modelErrorMessage(modelSpec, "unknown model: "+modelSpec, allowedModels))
 		return core.Model{}, &res
 	}
 	return model, nil
@@ -1155,14 +1191,20 @@ func resolveModel(defaultModel core.Model, params map[string]any) (core.Model, *
 // modelErrorMessage turns a rejected model spec into one that teaches the
 // right name. The agent that wrote the wrong name is the one that reads this,
 // and it can retry immediately — so naming the likely alias, and the valid
-// ones, is what turns a dead end into a corrected call.
-func modelErrorMessage(spec, reason string) string {
+// ones, is what turns a dead end into a corrected call. Under an allowlist
+// both the suggestion and the list are drawn from the allowed models only:
+// teaching a name that would be refused next turn is worse than teaching none.
+func modelErrorMessage(spec, reason string, allowedModels []string) string {
+	aliases := core.AllowedModelAliases(allowedModels)
 	msg := reason
-	if suggestion := core.SuggestModelAlias(spec); suggestion != "" {
+	if suggestion := core.SuggestAliasFrom(spec, aliases); suggestion != "" {
 		msg += fmt.Sprintf(" — did you mean %q?", suggestion)
 	}
-	return msg + "\nAvailable models: " + strings.Join(core.ModelAliases(), ", ") +
-		". Any other model can be given as \"provider/model-id\"."
+	msg += "\nAvailable models: " + strings.Join(aliases, ", ") + "."
+	if len(allowedModels) == 0 {
+		msg += " Any other model can be given as \"provider/model-id\"."
+	}
+	return msg
 }
 
 func resolveThinking(model core.Model, defaultThinking string, params map[string]any) (string, *core.Result) {
