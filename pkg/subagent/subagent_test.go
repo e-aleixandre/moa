@@ -3008,3 +3008,57 @@ func TestResolveModel_CapitalizedAliasResolves(t *testing.T) {
 		t.Fatalf("got %q", model.ID)
 	}
 }
+
+// The schema is assembled by string concatenation, so a bad escape would ship
+// a tool no provider can parse — and the failure would look like the subagent
+// tool vanishing, not like a typo here.
+func TestSubagentSchema_IsValidJSONAndNamesTheAliases(t *testing.T) {
+	tool := newSubagent(Config{}, &jobStore{})
+
+	var parsed struct {
+		Properties struct {
+			Model struct {
+				Description string `json:"description"`
+			} `json:"model"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(tool.Parameters, &parsed); err != nil {
+		t.Fatalf("subagent schema is not valid JSON: %v", err)
+	}
+
+	desc := parsed.Properties.Model.Description
+	for _, alias := range core.ModelAliases() {
+		if !strings.Contains(desc, alias) {
+			t.Errorf("model description never names the alias %q: %s", alias, desc)
+		}
+	}
+	// A model without an alias must stay reachable.
+	if !strings.Contains(desc, "provider/model-id") {
+		t.Errorf("model description does not mention custom models: %s", desc)
+	}
+}
+
+// The agent that wrote the wrong name reads this error and can retry at once,
+// so it has to carry the right name.
+func TestResolveModel_ErrorSuggestsTheRightAlias(t *testing.T) {
+	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
+	_, res := resolveModel(fallback, map[string]any{"model": "Sonet"})
+	if res == nil {
+		t.Fatal("expected an error result")
+	}
+	text := resultText(res)
+	if !strings.Contains(text, `did you mean "sonnet"`) {
+		t.Errorf("error does not suggest the right alias: %s", text)
+	}
+	if !strings.Contains(text, "sol") || !strings.Contains(text, "terra") {
+		t.Errorf("error does not list the available models: %s", text)
+	}
+}
+
+func resultText(res *core.Result) string {
+	var b strings.Builder
+	for _, c := range res.Content {
+		b.WriteString(c.Text)
+	}
+	return b.String()
+}

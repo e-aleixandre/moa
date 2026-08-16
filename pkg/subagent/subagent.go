@@ -168,6 +168,29 @@ func RegisterAll(reg *core.Registry, cfg Config) (*Jobs, error) {
 	return &Jobs{store: jobs}, nil
 }
 
+// modelParamDescription builds the "model" parameter description with the
+// aliases the agent can actually use, as a JSON string literal. The list is
+// generated from the model registry rather than written here, because a
+// hand-kept copy drifts silently as models are added or retired — and an agent
+// that reads a stale name has no way to tell.
+//
+// Naming the aliases is what makes the delegation land: agents write these
+// names from memory ("ask Sol to review this"), and the field used to describe
+// no model at all. Custom "provider/model-id" specs stay valid and are
+// mentioned, so a model without an alias is still reachable.
+func modelParamDescription() string {
+	desc := "Model to use: " + strings.Join(core.ModelAliases(), ", ") +
+		". Any other model can be given as \"provider/model-id\". " +
+		"Defaults to the current model, or to the resumed subagent's own model when 'resume' is set."
+	encoded, err := json.Marshal(desc)
+	if err != nil {
+		// Marshalling a plain string cannot fail; fall back to the static
+		// description rather than emitting a schema that won't parse.
+		return `"Model to use. Defaults to the current model, or to the resumed subagent's own model when 'resume' is set."`
+	}
+	return string(encoded)
+}
+
 func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 	return core.Tool{
 		Name:        "subagent",
@@ -187,7 +210,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				},
 				"model": {
 					"type": "string",
-					"description": "Model to use. Defaults to the current model, or to the resumed subagent's own model when 'resume' is set."
+					"description": ` + modelParamDescription() + `
 				},
 				"thinking": {
 					"type": "string",
@@ -1119,14 +1142,27 @@ func resolveModel(defaultModel core.Model, params map[string]any) (core.Model, *
 	// admits genuine custom models; it only rejects a prefix that contradicts
 	// a known model, which is a typo rather than a deliberate choice.
 	if err := core.ValidateModelSpec(modelSpec); err != nil {
-		res := core.ErrorResult(err.Error())
+		res := core.ErrorResult(modelErrorMessage(modelSpec, err.Error()))
 		return core.Model{}, &res
 	}
 	if model.Provider == "" {
-		res := core.ErrorResult("unknown model: " + modelSpec)
+		res := core.ErrorResult(modelErrorMessage(modelSpec, "unknown model: "+modelSpec))
 		return core.Model{}, &res
 	}
 	return model, nil
+}
+
+// modelErrorMessage turns a rejected model spec into one that teaches the
+// right name. The agent that wrote the wrong name is the one that reads this,
+// and it can retry immediately — so naming the likely alias, and the valid
+// ones, is what turns a dead end into a corrected call.
+func modelErrorMessage(spec, reason string) string {
+	msg := reason
+	if suggestion := core.SuggestModelAlias(spec); suggestion != "" {
+		msg += fmt.Sprintf(" — did you mean %q?", suggestion)
+	}
+	return msg + "\nAvailable models: " + strings.Join(core.ModelAliases(), ", ") +
+		". Any other model can be given as \"provider/model-id\"."
 }
 
 func resolveThinking(model core.Model, defaultThinking string, params map[string]any) (string, *core.Result) {

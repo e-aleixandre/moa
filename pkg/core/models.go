@@ -347,3 +347,82 @@ func ListModels() []ModelEntry {
 
 	return result
 }
+
+// ModelAliases returns every alias that resolves to a known model, in the
+// curated display order. Callers that need to *tell* a model which names are
+// valid must derive the list from here rather than writing one by hand: a
+// hand-kept copy silently drifts from modelAliases as models come and go.
+func ModelAliases() []string {
+	seen := make(map[string]bool, len(modelAliases))
+	var aliases []string
+	for _, entry := range ListModels() {
+		if entry.Alias != "" && !seen[entry.Alias] {
+			seen[entry.Alias] = true
+			aliases = append(aliases, entry.Alias)
+		}
+	}
+	return aliases
+}
+
+// SuggestModelAlias returns the alias a misspelled spec most likely meant, or
+// "" when nothing is close enough. It exists so an unknown-model error can
+// teach the correct name instead of only rejecting the wrong one: agents write
+// these names from memory and a near miss ("sonet", "grok/4") is far more
+// common than an unknown model.
+//
+// Only unambiguous matches are offered: a suggestion that is wrong is worse
+// than none, because it invites a second failed attempt.
+func SuggestModelAlias(spec string) string {
+	spec = strings.ToLower(strings.TrimSpace(spec))
+	if idx := strings.IndexByte(spec, '/'); idx > 0 {
+		// A "provider/model" typo is about the model portion; the provider is
+		// checked separately by ValidateModelSpec.
+		spec = strings.TrimSpace(spec[idx+1:])
+	}
+	if spec == "" {
+		return ""
+	}
+
+	best, bestDistance, tied := "", 0, false
+	for _, alias := range ModelAliases() {
+		d := editDistance(spec, alias)
+		// Tolerate more typing in longer names, but never so much that
+		// unrelated short aliases match each other.
+		budget := 1 + len(alias)/4
+		if d > budget {
+			continue
+		}
+		switch {
+		case best == "" || d < bestDistance:
+			best, bestDistance, tied = alias, d, false
+		case d == bestDistance:
+			tied = true
+		}
+	}
+	if tied {
+		return ""
+	}
+	return best
+}
+
+// editDistance is the Levenshtein distance between a and b, over bytes: model
+// aliases are ASCII, so bytes and characters coincide.
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	curr := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		curr[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			curr[j] = min(prev[j]+1, min(curr[j-1]+1, prev[j-1]+cost))
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(b)]
+}

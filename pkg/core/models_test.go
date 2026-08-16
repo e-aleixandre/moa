@@ -398,3 +398,60 @@ func TestResolveModel_CustomIDKeepsItsCase(t *testing.T) {
 		t.Fatalf("provider: %q", m.Provider)
 	}
 }
+
+// The alias list an agent is shown must come from the registry, so it cannot
+// drift as models are added or retired.
+func TestModelAliases_ComeFromTheRegistry(t *testing.T) {
+	aliases := ModelAliases()
+	if len(aliases) == 0 {
+		t.Fatal("no aliases returned")
+	}
+	seen := map[string]bool{}
+	for _, alias := range aliases {
+		if seen[alias] {
+			t.Errorf("duplicate alias %q", alias)
+		}
+		seen[alias] = true
+		if _, ok := ResolveModel(alias); !ok {
+			t.Errorf("advertised alias %q does not resolve", alias)
+		}
+	}
+	// Every known model reachable by alias must be advertised under one of
+	// them. Synonyms ("gpt5.5" alongside "gpt5") are deliberately not listed:
+	// the agent needs one working name per model, not every spelling.
+	for alias, id := range modelAliases {
+		if _, known := knownModels[id]; !known {
+			continue
+		}
+		advertised := false
+		for _, shown := range aliases {
+			if modelAliases[shown] == id {
+				advertised = true
+				break
+			}
+		}
+		if !advertised {
+			t.Errorf("model %q is reachable via alias %q but never advertised", id, alias)
+		}
+	}
+}
+
+// A suggestion that is wrong is worse than none: it invites a second failed
+// attempt. Near misses must be corrected, unrelated names left alone.
+func TestSuggestModelAlias(t *testing.T) {
+	for spec, want := range map[string]string{
+		"sonet":       "sonnet",
+		"Sonet":       "sonnet",
+		"tera":        "terra",
+		"lunna":       "luna",
+		"grock":       "grok",
+		"opeanai/sol": "sol",
+		"banana":      "",
+		"":            "",
+		"claude":      "",
+	} {
+		if got := SuggestModelAlias(spec); got != want {
+			t.Errorf("SuggestModelAlias(%q) = %q, want %q", spec, got, want)
+		}
+	}
+}
