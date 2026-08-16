@@ -146,6 +146,10 @@ type Config struct {
 	// trying it.
 	AllowedModels []string
 
+	// LoadAllowedModels reads the current global delegation policy. It keeps
+	// already-open sessions subject to policy changes without recreating them.
+	LoadAllowedModels func() []string
+
 	// TranscriptLoader loads a persisted subagent transcript by job ID,
 	// enabling the "resume" parameter to continue a finished subagent's
 	// conversation instead of starting fresh. nil = resume unsupported (the
@@ -221,7 +225,7 @@ func modelParamDescription(allowedModels []string) string {
 }
 
 func newSubagent(cfg Config, jobs *jobStore) core.Tool {
-	return core.Tool{
+	tool := core.Tool{
 		Name:        "subagent",
 		Label:       "Subagent",
 		Description: "Spawn a child agent with its own context for focused subtasks or background work.",
@@ -239,7 +243,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				},
 				"model": {
 					"type": "string",
-					"description": ` + modelParamDescription(cfg.AllowedModels) + `
+					"description": ` + modelParamDescription(currentAllowedModels(cfg)) + `
 				},
 				"thinking": {
 					"type": "string",
@@ -289,7 +293,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				return *errResult, nil
 			}
 			seedMsgs := resumed.Messages
-			model, errResult := resolveModel(defaultModel(cfg, resumed), params, cfg.AllowedModels)
+			model, errResult := resolveModel(defaultModel(cfg, resumed), params, currentAllowedModels(cfg))
 			if errResult != nil {
 				return *errResult, nil
 			}
@@ -371,6 +375,36 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			return awaitSyncResult(cfg, jobs, job, task, model)
 		},
 	}
+	tool.SpecFunc = func() core.ToolSpec {
+		spec := core.ToolSpec{
+			Name:        tool.Name,
+			Description: tool.Description,
+			Parameters:  append(json.RawMessage(nil), tool.Parameters...),
+		}
+		var schema map[string]any
+		if json.Unmarshal(spec.Parameters, &schema) == nil {
+			if properties, ok := schema["properties"].(map[string]any); ok {
+				if model, ok := properties["model"].(map[string]any); ok {
+					var description string
+					if json.Unmarshal([]byte(modelParamDescription(currentAllowedModels(cfg))), &description) == nil {
+						model["description"] = description
+					}
+				}
+			}
+			if parameters, err := json.Marshal(schema); err == nil {
+				spec.Parameters = parameters
+			}
+		}
+		return spec
+	}
+	return tool
+}
+
+func currentAllowedModels(cfg Config) []string {
+	if cfg.LoadAllowedModels != nil {
+		return cfg.LoadAllowedModels()
+	}
+	return cfg.AllowedModels
 }
 
 func generateTitle(cfg Config, jobs *jobStore, jobID, task string) {

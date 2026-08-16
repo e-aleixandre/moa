@@ -544,15 +544,17 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		ChildMaxTurns:       moaCfg.SubagentMaxTurns,
 		ChildMaxRunDuration: core.GetSubagentMaxRunDuration(moaCfg),
 		MaxConcurrentAsync:  moaCfg.SubagentMaxConcurrent,
-		AllowedModels:       moaCfg.SubagentAllowedModels,
-		OnChildStart:        cfg.OnSubagentStart,
-		OnChildEvent:        cfg.OnSubagentEvent,
-		OnChildUsage:        cfg.OnSubagentUsage,
-		OnChildEnd:          cfg.OnSubagentEnd,
-		TitleModel:          cfg.SubagentTitleModel,
-		TitleEnabled:        cfg.SubagentTitleEnabled,
-		OnChildTitle:        cfg.OnSubagentTitle,
-		TranscriptLoader:    cfg.SubagentTranscriptLoader,
+		LoadAllowedModels: func() []string {
+			return core.LoadGlobalConfig().SubagentAllowedModels
+		},
+		OnChildStart:     cfg.OnSubagentStart,
+		OnChildEvent:     cfg.OnSubagentEvent,
+		OnChildUsage:     cfg.OnSubagentUsage,
+		OnChildEnd:       cfg.OnSubagentEnd,
+		TitleModel:       cfg.SubagentTitleModel,
+		TitleEnabled:     cfg.SubagentTitleEnabled,
+		OnChildTitle:     cfg.OnSubagentTitle,
+		TranscriptLoader: cfg.SubagentTranscriptLoader,
 	})
 	if err != nil {
 		if mcpMgr != nil {

@@ -3136,6 +3136,102 @@ func TestSubagentSchema_AllowlistHidesExcludedModels(t *testing.T) {
 	}
 }
 
+func TestSubagentLiveAllowlist_AcceptsModelAddedAfterConstruction(t *testing.T) {
+	allowed := []string{"gpt-5.6-sol"}
+	provider := newMockProvider(textResponse("done"))
+	sub, _, _ := newSubagentTools(t, Config{
+		DefaultModel:      core.Model{ID: "claude-sonnet-5", Provider: "anthropic"},
+		AllowedModels:     allowed,
+		LoadAllowedModels: func() []string { return allowed },
+		ProviderFactory:   func(core.Model) (core.Provider, error) { return provider, nil },
+	})
+
+	allowed = []string{"gpt-5.6-terra"}
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it", "model": "terra"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := textOf(res); got != "done" {
+		t.Fatalf("model added after construction was not launched: %q", got)
+	}
+}
+
+func TestSubagentLiveAllowlist_RejectsModelRemovedAfterConstruction(t *testing.T) {
+	allowed := []string{"gpt-5.6-terra"}
+	sub, _, _ := newSubagentTools(t, Config{
+		DefaultModel:      core.Model{ID: "claude-sonnet-5", Provider: "anthropic"},
+		AllowedModels:     allowed,
+		LoadAllowedModels: func() []string { return allowed },
+	})
+
+	allowed = []string{"gpt-5.6-sol"}
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it", "model": "terra"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(textOf(res), "not available") {
+		t.Fatalf("model removed after construction was accepted: %q", textOf(res))
+	}
+}
+
+func TestSubagentLiveAllowlist_EmptyAllowsAnyModel(t *testing.T) {
+	allowed := []string{"gpt-5.6-sol"}
+	provider := newMockProvider(textResponse("done"))
+	sub, _, _ := newSubagentTools(t, Config{
+		DefaultModel:      core.Model{ID: "claude-sonnet-5", Provider: "anthropic"},
+		AllowedModels:     allowed,
+		LoadAllowedModels: func() []string { return allowed },
+		ProviderFactory:   func(core.Model) (core.Provider, error) { return provider, nil },
+	})
+
+	allowed = nil
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it", "model": "terra"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := textOf(res); got != "done" {
+		t.Fatalf("empty allowlist did not allow the model: %q", got)
+	}
+}
+
+func TestSubagentLiveAllowlist_InheritsParentOutsideAllowlist(t *testing.T) {
+	provider := newMockProvider(textResponse("done"))
+	sub, _, _ := newSubagentTools(t, Config{
+		DefaultModel:      core.Model{ID: "gpt-5.6-terra", Provider: "openai"},
+		LoadAllowedModels: func() []string { return []string{"gpt-5.6-sol"} },
+		ProviderFactory:   func(core.Model) (core.Provider, error) { return provider, nil },
+	})
+
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := textOf(res); got != "done" {
+		t.Fatalf("inheriting the parent model was rejected: %q", got)
+	}
+}
+
+func TestSubagentSchema_LiveAllowlistRefreshesDescription(t *testing.T) {
+	allowed := []string{"gpt-5.6-sol"}
+	tool := newSubagent(Config{LoadAllowedModels: func() []string { return allowed }}, &jobStore{})
+
+	allowed = []string{"gpt-5.6-terra"}
+	var parsed struct {
+		Properties struct {
+			Model struct {
+				Description string `json:"description"`
+			} `json:"model"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(tool.Spec().Parameters, &parsed); err != nil {
+		t.Fatalf("subagent schema is not valid JSON: %v", err)
+	}
+	desc := parsed.Properties.Model.Description
+	if !strings.Contains(desc, "terra") || strings.Contains(desc, "sol") {
+		t.Fatalf("description did not reflect the current allowlist: %s", desc)
+	}
+}
+
 func resultText(res *core.Result) string {
 	var b strings.Builder
 	for _, c := range res.Content {

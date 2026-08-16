@@ -27,6 +27,7 @@ type Tool struct {
 	Label       string          `json:"label"`
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"`
+	SpecFunc    func() ToolSpec `json:"-"` // Lets schemas that reflect live policy be refreshed for each provider request.
 	Execute     ExecuteFunc     `json:"-"`
 	Effect      ToolEffect      `json:"-"` // scheduling hint for conflict-aware execution
 	LockKey     LockKeyFunc     `json:"-"` // required when Effect is EffectWritePath
@@ -38,6 +39,9 @@ type LockKeyFunc func(args map[string]any) string
 
 // Spec returns a ToolSpec (definition without the execute function).
 func (t Tool) Spec() ToolSpec {
+	if t.SpecFunc != nil {
+		return t.SpecFunc()
+	}
 	return ToolSpec{
 		Name:        t.Name,
 		Description: t.Description,
