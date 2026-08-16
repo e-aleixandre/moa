@@ -12,6 +12,7 @@ import { cancelSubagent, promoteSubagent } from "../../../data/session-actions.j
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SubagentDetails } from "../../../components/index.js";
 import { useEdgeSwipeBack } from "../../../hooks/useEdgeSwipeBack.js";
+import { useSubagentTranscript } from "../../../hooks/useSubagentTranscript.js";
 // The now-line above the composer reuses MobileNowLine's rules verbatim (same
 // grammar, different subject), so its stylesheet has to be in the graph even
 // though this screen doesn't render that component.
@@ -38,6 +39,9 @@ import "./MobileSubagentView.css";
 
 export function MobileSubagentView({ session, jobId, onBack }) {
   const view = subagentView(session, jobId);
+
+  // Same backfill as the desktop view: see useSubagentTranscript.
+  useSubagentTranscript(session?.id, jobId);
 
   // All hooks run on EVERY render regardless of `view` (rules of hooks); each
   // one guards internally for a null view rather than an early `if (!view)`.
