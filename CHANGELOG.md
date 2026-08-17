@@ -5,6 +5,45 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.0] - 2026-08-17
+
+### Added
+
+- Moa talks to xAI. Grok 4.6 joins the model registry and the `grok` alias
+  points at it; 4.5 stays reachable by its full ID. It shares 4.5's input and
+  output rates and only charges more for cached input, which is what a long
+  session mostly pays for.
+- The owner can restrict which models a subagent may run under. An empty list
+  keeps everything allowed, so nothing changes until you opt in; excluded models
+  are hidden from the agent rather than merely refused, because a model it can
+  see is a model it will keep trying. Editing the list takes effect in sessions
+  that are already open. Delegating without naming a model still inherits the
+  parent's, which was never the agent's choice to make.
+- Images and documents no longer live inside the session file. A tool that
+  produces one writes the bytes to a content-addressed store and the transcript
+  keeps a small reference, rehydrated just before the provider request.
+  Identical content is stored once however many sessions or subagents read it.
+  A session file is rewritten whole on every save, so an inline screenshot used
+  to cost its full size again on every turn that followed it. A request carrying
+  a reference nobody resolved is refused before it reaches the provider: an
+  empty image would make the model answer confidently about something it cannot
+  see.
+
+### Fixed
+
+- A model alias written in the wrong case (`Sonnet`, `GROK`) resolved to nothing
+  and the run silently started on the default model. Aliases now resolve
+  regardless of case, and a spec close to a real one is rejected with the name
+  it probably meant.
+- A provider request stayed pinned in memory for as long as its stream lasted,
+  so a long answer held the whole conversation twice.
+- A subagent's transcript began at the moment you opened it: everything the
+  child had already written was missing until the view was refetched.
+- The full value of a tool call could not be read when it was long, including a
+  bash command still running.
+- A bash job screen could not be dismissed by swiping in from the left edge, the
+  way every other pushed screen can.
+
 ## [0.29.0] - 2026-08-14
 
 ### Added
