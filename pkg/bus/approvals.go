@@ -422,16 +422,15 @@ func (am *ApprovalManager) ResolveAskUser(id string, answers []string) error {
 	return nil
 }
 
-// ClearPending auto-denies and removes still-pending permission/ask requests
+// ClearPending auto-denies pending permissions and removes pending asks
 // orphaned by the ended run, publishing Resolved events so no stale modal
 // survives. Called when a run ends: a normal resolve already removed its entry
 // before the run finished, so this only fires for approvals orphaned by an
 // abort — which would otherwise reappear on every reconnect via PendingInfo.
 //
-// gen is the generation of the ended run. Only requests from that run or an
-// earlier one (RunGen <= gen) are cleared: if the user immediately re-sent a
-// prompt, a newer run may already have a live approval, and a delayed RunEnded
-// of the old run must not auto-deny it.
+// gen is the generation of the ended run. Permissions from that run or an
+// earlier one are cleared, while asks must belong to the exact generation: a
+// delayed RunEnded must not clear an ask from any other run.
 func (am *ApprovalManager) ClearPending(gen uint64) {
 	am.mu.Lock()
 	var permResponses []chan<- permission.Response
@@ -447,35 +446,30 @@ func (am *ApprovalManager) ClearPending(gen uint64) {
 		}
 		delete(am.perms, id)
 	}
-	var askResponses []chan<- []string
 	var askIDs []string
 	for id, a := range am.asks {
-		if a.RunGen > gen {
-			continue // belongs to a newer run — leave it live
+		if a.RunGen != gen {
+			continue // belongs to another run — leave it live
 		}
 		if !a.resolved {
 			a.resolved = true
-			askResponses = append(askResponses, a.response)
 			askIDs = append(askIDs, id)
 		}
 		delete(am.asks, id)
 	}
 	am.mu.Unlock()
 
-	// Unblock any goroutine still holding the response channel, then clear the
-	// UI. Channels are buffered(1), so the sends never block.
+	// Unblock permission goroutines, then clear the UI. Channels are buffered(1),
+	// so the sends never block.
 	for _, resp := range permResponses {
 		select {
 		case resp <- permission.Response{Approved: false}:
 		default:
 		}
 	}
-	for _, resp := range askResponses {
-		select {
-		case resp <- nil:
-		default:
-		}
-	}
+	// Do not inject an ask answer: after RunEnded, that run can no longer be
+	// waiting for its own ask. A live ask is resolved only by the user or by
+	// cancellation of its context.
 	for _, id := range permIDs {
 		am.bus.Publish(PermissionResolved{SessionID: am.sid, ID: id})
 	}
