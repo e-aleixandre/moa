@@ -911,7 +911,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 	}
 
 	state := sess.runtime.State.Current()
-	busy := state == bus.StateRunning || state == bus.StatePermission
+	busy := state == bus.StateRunning || state == bus.StatePermission || sess.runtime.Context().Agent.IsRunning()
 	// Direct send requires BOTH an idle session AND an empty queue rail: a queued
 	// barrier/steer ahead of us means a new run would jump the queue and break
 	// strict send order. When either holds, enqueue as a steer instead (the pump
