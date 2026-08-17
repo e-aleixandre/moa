@@ -554,6 +554,28 @@ func TestSendPrepareCompactNeverLeaksAfterFailureCancelOrPanic(t *testing.T) {
 	}
 }
 
+func TestExecuteWithOptions_AnnouncePanicReleasesRunSlot(t *testing.T) {
+	ag := newTestAgent(&alwaysProvider{text: "done"})
+
+	panicked := false
+	func() {
+		defer func() { panicked = recover() != nil }()
+		_, _ = ag.executeWithOptions(context.Background(), func() {}, func() {
+			panic("announce panic")
+		}, ag.tools, "", false)
+	}()
+	if !panicked {
+		t.Fatal("announce panic was not propagated")
+	}
+	if ag.IsRunning() {
+		t.Fatal("agent remained running after announce panic")
+	}
+
+	if _, err := ag.Send(context.Background(), "next run"); err != nil {
+		t.Fatalf("subsequent send = %v, want run slot released", err)
+	}
+}
+
 func hasToolSpec(specs []core.ToolSpec, name string) bool {
 	for _, spec := range specs {
 		if spec.Name == name {
