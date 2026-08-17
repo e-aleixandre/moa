@@ -69,6 +69,21 @@ func NewTreeFromEntries(entries []Entry, leafID string) (*Tree, error) {
 			return nil, err
 		}
 	}
+	// Older sessions may have been saved after a cancelled provider stream
+	// recorded tool calls but before their results. Close only the unresolved
+	// calls on the selected context; existing entries remain untouched.
+	msgs, epoch := t.BuildContext()
+	for _, tc := range unresolvedToolCalls(msgs, epoch) {
+		t.Append(Entry{
+			Type: EntryMessage,
+			Message: core.WrapMessage(core.NewToolResultMessage(
+				tc.ToolCallID,
+				tc.ToolName,
+				[]core.Content{core.TextContent("Tool result unavailable: the previous run ended before a result was recorded.")},
+				true,
+			)),
+		})
+	}
 	return t, nil
 }
 
@@ -460,29 +475,37 @@ func collectMessages(path []Entry) []core.AgentMessage {
 // A dangling tool_call is a history a provider can legitimately reject, so
 // this is used to reject branch targets that would produce one.
 func validateToolCallBalance(msgs []core.AgentMessage, _ int) error {
-	pending := make(map[string]string) // tool_call_id -> tool name (for the error message)
+	pending := unresolvedToolCalls(msgs, 0)
+	if len(pending) == 0 {
+		return nil
+	}
+	return fmt.Errorf("unresolved tool call %s (%s)", pending[0].ToolCallID, pending[0].ToolName)
+}
+
+func unresolvedToolCalls(msgs []core.AgentMessage, _ int) []core.Content {
+	pending := make(map[string]core.Content)
 	for _, m := range msgs {
 		switch m.Role {
 		case "assistant":
 			for _, c := range m.Content {
 				if c.Type == "tool_call" && c.ToolCallID != "" {
-					pending[c.ToolCallID] = c.ToolName
+					pending[c.ToolCallID] = c
 				}
 			}
 		case "tool_result":
 			delete(pending, m.ToolCallID)
 		}
 	}
-	if len(pending) == 0 {
-		return nil
-	}
-	// Deterministic error message.
 	ids := make([]string, 0, len(pending))
 	for id := range pending {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	return fmt.Errorf("unresolved tool call %s (%s)", ids[0], pending[ids[0]])
+	result := make([]core.Content, 0, len(ids))
+	for _, id := range ids {
+		result = append(result, pending[id])
+	}
+	return result
 }
 
 // generateEntryID creates a unique entry ID (16 hex chars from 8 random bytes).
