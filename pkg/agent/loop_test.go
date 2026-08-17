@@ -117,6 +117,41 @@ func TestAbortWithLateToolCallKeepsHistoryBalanced(t *testing.T) {
 	}
 }
 
+func TestAbortDuringToolExecutionPersistsErrorResult(t *testing.T) {
+	started := make(chan struct{})
+	block := core.Tool{
+		Name:       "block",
+		Parameters: []byte(`{"type":"object"}`),
+		Execute: func(ctx context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+			close(started)
+			<-ctx.Done()
+			return core.Result{}, ctx.Err()
+		},
+	}
+	ag := newTestAgent(NewMockProvider(toolCallResponse("toolu_running", "block", nil)), block)
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Run(context.Background(), "run the tool")
+		done <- err
+	}()
+
+	<-started
+	ag.Abort()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("aborted run did not finish")
+	}
+
+	msgs := ag.Messages()
+	if len(msgs) != 3 || msgs[2].Role != "tool_result" {
+		t.Fatalf("running tool result was discarded: %+v", msgs)
+	}
+	if msgs[2].ToolCallID != "toolu_running" || !msgs[2].IsError {
+		t.Fatalf("tool result = %+v, want cancellation error for toolu_running", msgs[2])
+	}
+}
+
 // A tool's Custom annotations reach the recorded tool_result: that map is how
 // the subagent tool records which job a call spawned, and the UI reads it back
 // from the transcript long after the job is gone.
