@@ -35,6 +35,34 @@ export function skipAnswers(questions, answers) {
   return (questions || []).map((_, i) => (answers[i] && answers[i].trim()) || '(skipped)');
 }
 
+// skipActivates decides whether an activation of Skip is the user's own or an
+// inherited one.
+//
+// Skip is destructive: it answers a question the run is blocked on with the
+// '(skipped)' sentinel and the agent carries on without the human. The card it
+// sits under moves while a gesture is in progress — the voice error box above
+// the actions row appears and disappears with each recording attempt, and the
+// card itself mounts at the bottom of a transcript that is still growing — so
+// the click completing a tap aimed at something else (the mic, the composer)
+// can be delivered to the Skip button that arrived at that point meanwhile.
+//
+// A pointer gesture therefore only counts when its own pointerdown landed on
+// Skip, matched by pointerId so a click cannot borrow the arming of an earlier,
+// unrelated gesture. That is a property of the gesture rather than of the clock,
+// so it needs no grace period and never penalises a fast tap. Same rule, and
+// same reason, as the composer's queue chip (see recallActivates in
+// data/composer-queue.js, which documents the production trace behind it).
+//
+// Activations with no pointer at all are always honoured: Enter/Space on the
+// focused button and assistive technology, which dispatch a bare click whose
+// `detail` is 0. Gating those would make Skip unreachable without a mouse.
+export function skipActivates({ armedPointerId, pointerId, detail }) {
+  if (detail === 0) return true; // synthesised activation (screen reader, .click())
+  if (armedPointerId == null || armedPointerId === false) return false;
+  if (armedPointerId === true) return true; // no pointerId available (older engines)
+  return armedPointerId === pointerId;
+}
+
 // appendDictation adds transcribed speech to the answer at `idx`.
 //
 // Dictation appends rather than replaces so a long answer can be spoken in

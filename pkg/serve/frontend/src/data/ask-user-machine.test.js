@@ -1,7 +1,8 @@
 // ask-user-machine.test.js — run with `bun test`
 import { test, expect, describe } from 'bun:test';
 import {
-  initAnswers, setAnswer, firstUnanswered, allAnswered, skipAnswers, appendDictation,
+  initAnswers, setAnswer, firstUnanswered, allAnswered, skipAnswers, skipActivates,
+  appendDictation,
 } from './ask-user-machine.js';
 
 const QUESTIONS = [
@@ -45,6 +46,28 @@ test('skipAnswers fills blanks with (skipped) but keeps existing answers', () =>
 
 test('skipAnswers on an all-blank set returns all sentinels', () => {
   expect(skipAnswers(QUESTIONS, initAnswers(QUESTIONS))).toEqual(['(skipped)', '(skipped)', '(skipped)']);
+});
+
+describe('skipActivates', () => {
+  test('a click whose own pointerdown landed on Skip is the user', () => {
+    expect(skipActivates({ armedPointerId: 3, pointerId: 3, detail: 1 })).toBe(true);
+  });
+
+  test('a click with no arming at all is inherited from another gesture', () => {
+    expect(skipActivates({ armedPointerId: null, pointerId: 3, detail: 1 })).toBe(false);
+  });
+
+  test('a click cannot borrow an earlier gesture arming', () => {
+    expect(skipActivates({ armedPointerId: 2, pointerId: 7, detail: 1 })).toBe(false);
+  });
+
+  test('an engine without pointerId still activates when armed', () => {
+    expect(skipActivates({ armedPointerId: true, pointerId: undefined, detail: 1 })).toBe(true);
+  });
+
+  test('keyboard and assistive activations are honoured unarmed', () => {
+    expect(skipActivates({ armedPointerId: null, detail: 0 })).toBe(true);
+  });
 });
 
 describe('appendDictation', () => {

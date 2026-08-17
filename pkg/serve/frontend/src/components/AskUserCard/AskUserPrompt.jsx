@@ -4,7 +4,8 @@ import { resolveAskUser } from "../../data/session-actions.js";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import { useCanTranscribe } from "../../hooks/useCanTranscribe.js";
 import {
-  initAnswers, setAnswer, firstUnanswered, allAnswered, skipAnswers, appendDictation,
+  initAnswers, setAnswer, firstUnanswered, allAnswered, skipAnswers, skipActivates,
+  appendDictation,
 } from "../../data/ask-user-machine.js";
 import "./AskUserPrompt.css";
 
@@ -30,6 +31,13 @@ export function AskUserPrompt({ session }) {
   // latches the moment a resolve starts and is only released on error / on a
   // new ask batch, guaranteeing a single resolution.
   const resolvingRef = useRef(false);
+  // A click only counts as a Skip when this button also received its
+  // pointerdown. The card moves under the finger — the voice error box above the
+  // actions row comes and goes with every recording attempt, and the card mounts
+  // at the tail of a growing transcript — so a click completing a tap aimed
+  // elsewhere can land on Skip and throw away a question the agent is blocked
+  // on. See skipActivates for the rule and the precedent.
+  const skipPointerDown = useRef(null);
 
   // Reset whenever the ask batch changes (new ask.id) — mirrors the old
   // card's `useEffect(..., [ask.id])`.
@@ -184,7 +192,12 @@ export function AskUserPrompt({ session }) {
     resolve(trimmed);
   };
 
-  const handleSkip = () => resolve(skipAnswers(questions, answers));
+  const handleSkip = (e) => {
+    const armedPointerId = skipPointerDown.current;
+    skipPointerDown.current = null;
+    if (!skipActivates({ armedPointerId, pointerId: e?.pointerId, detail: e?.detail })) return;
+    resolve(skipAnswers(questions, answers));
+  };
 
   const canSubmit = allAnswered(answers);
 
@@ -235,7 +248,13 @@ export function AskUserPrompt({ session }) {
         <button type="button" class="ask-user-prompt-submit" onClick={handleSubmit}>
           {canSubmit ? "Submit" : "Submit — jump to unanswered"}
         </button>
-        <button type="button" class="ask-user-prompt-skip" onClick={handleSkip}>
+        <button
+          type="button"
+          class="ask-user-prompt-skip"
+          onPointerDown={(e) => { skipPointerDown.current = e.pointerId ?? true; }}
+          onPointerCancel={() => { skipPointerDown.current = null; }}
+          onClick={handleSkip}
+        >
           Skip
         </button>
       </div>
