@@ -195,7 +195,7 @@ func TestApprovalManager_StopBridge_AutoDeniesAndResolves(t *testing.T) {
 	}
 }
 
-func TestApprovalManager_ClearPending_AutoDeniesAndResolves(t *testing.T) {
+func TestApprovalManager_ClearPending_RemovesAskWithoutInjectingAnswer(t *testing.T) {
 	am, b := newTestApprovalManager(t)
 
 	permResp := make(chan permission.Response, 1)
@@ -212,7 +212,7 @@ func TestApprovalManager_ClearPending_AutoDeniesAndResolves(t *testing.T) {
 
 	am.ClearPending(1)
 
-	// Both pending requests must be auto-denied so the agent goroutines unblock.
+	// Permissions are auto-denied so their blocked goroutines can finish.
 	select {
 	case resp := <-permResp:
 		if resp.Approved {
@@ -221,13 +221,12 @@ func TestApprovalManager_ClearPending_AutoDeniesAndResolves(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("permission response never sent")
 	}
+	// An ended run cannot still be waiting on its own ask. Sending an empty
+	// answer here could instead resolve a live ask from another generation.
 	select {
 	case answers := <-askResp:
-		if answers != nil {
-			t.Fatalf("expected nil ask answers, got %v", answers)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("ask response never sent")
+		t.Fatalf("unexpected injected ask answers: %v", answers)
+	default:
 	}
 
 	// Resolved events must fire so reconnecting clients clear the modal.
@@ -251,6 +250,28 @@ func TestApprovalManager_ClearPending_AutoDeniesAndResolves(t *testing.T) {
 	// Nothing must remain pending.
 	if info := am.PendingInfo(); info.Permission != nil || info.Ask != nil {
 		t.Fatalf("expected no pending after clear, got %+v", info)
+	}
+}
+
+func TestApprovalManager_ClearPending_SparesAskFromOtherGeneration(t *testing.T) {
+	am, _ := newTestApprovalManager(t)
+
+	endedResp := make(chan []string, 1)
+	otherResp := make(chan []string, 1)
+	am.mu.Lock()
+	am.asks["ended"] = &PendingAsk{ID: "ended", Questions: []AskQuestion{{Text: "Done?"}}, RunGen: 2, response: endedResp}
+	am.asks["other"] = &PendingAsk{ID: "other", Questions: []AskQuestion{{Text: "Older?"}}, RunGen: 1, response: otherResp}
+	am.mu.Unlock()
+
+	am.ClearPending(2)
+
+	if info := am.PendingInfo(); info.Ask == nil || info.Ask.ID != "other" {
+		t.Fatalf("ask from another generation was cleared: %+v", info)
+	}
+	select {
+	case answers := <-otherResp:
+		t.Fatalf("unexpected answer for ask from another generation: %v", answers)
+	default:
 	}
 }
 

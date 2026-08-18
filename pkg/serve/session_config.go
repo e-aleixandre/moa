@@ -152,7 +152,7 @@ func (m *Manager) CancelWithDiscardedSteers(sessionID string) ([]core.SteerItem,
 	}
 
 	state := sess.runtime.State.Current()
-	if state != bus.StateRunning && state != bus.StatePermission {
+	if state != bus.StateRunning && state != bus.StatePermission && !sess.runtime.Context().Agent.IsRunning() {
 		return nil, fmt.Errorf("session is not running")
 	}
 

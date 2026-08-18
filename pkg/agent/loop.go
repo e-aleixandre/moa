@@ -366,9 +366,17 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					continue
 				}
 			}
-			// On cancellation, save partial content so it persists in session.
+			// On cancellation, save partial content so it persists in session. A
+			// complete message can arrive while consumeStream is draining the
+			// cancelled provider stream; close any tool calls from that message in
+			// the same state append because they were deliberately not executed.
 			if assistantMsg != nil && ctx.Err() != nil {
-				cfg.appendState(core.WrapMessage(*assistantMsg))
+				msgs := []core.AgentMessage{core.WrapMessage(*assistantMsg)}
+				msgs = append(msgs, errorToolResultMessages(
+					extractToolCalls(assistantMsg),
+					"Tool result unavailable: the run was cancelled before a result was recorded.",
+				)...)
+				cfg.appendState(msgs...)
 			}
 			loopErr = fmt.Errorf("stream: %w", err)
 			return loopErr
@@ -1115,13 +1123,19 @@ func rejectToolCall(cfg *loopConfig, slot toolExecSlot) {
 // Without this, providers like Anthropic reject the session on resume because
 // every tool_use must have a matching tool_result.
 func injectErrorToolResults(cfg *loopConfig, toolCalls []core.Content, errMsg string) {
+	cfg.appendState(errorToolResultMessages(toolCalls, errMsg)...)
+}
+
+func errorToolResultMessages(toolCalls []core.Content, errMsg string) []core.AgentMessage {
+	msgs := make([]core.AgentMessage, 0, len(toolCalls))
 	for _, tc := range toolCalls {
 		content := []core.Content{core.TextContent(errMsg)}
 		msg := core.WrapMessage(core.NewToolResultMessage(
 			tc.ToolCallID, tc.ToolName, content, true,
 		))
-		cfg.appendState(msg)
+		msgs = append(msgs, msg)
 	}
+	return msgs
 }
 
 // addRunCost accumulates the USD cost of a usage record into the run total

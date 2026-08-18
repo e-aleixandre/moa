@@ -634,6 +634,39 @@ func TestNewTreeFromEntries_Valid(t *testing.T) {
 	}
 }
 
+func TestNewTreeFromEntries_ClosesUnresolvedToolCalls(t *testing.T) {
+	broken := NewTree()
+	broken.Append(userEntry("run both"))
+	broken.Append(assistantToolCallEntry("tc-done", "tc-missing"))
+	broken.Append(toolResultEntry("tc-done", "bash", "completed"))
+	entries, leafID := broken.Snapshot()
+
+	tree, err := NewTreeFromEntries(entries, leafID)
+	if err != nil {
+		t.Fatalf("NewTreeFromEntries: %v", err)
+	}
+	msgs, epoch := tree.BuildContext()
+	if err := validateToolCallBalance(msgs, epoch); err != nil {
+		t.Fatalf("loaded context remains unbalanced: %v", err)
+	}
+	if len(msgs) != 4 {
+		t.Fatalf("loaded context has %d messages, want 4", len(msgs))
+	}
+	for i := range entries {
+		got, ok := tree.Entry(entries[i].ID)
+		if !ok || got.ID != entries[i].ID || got.ParentID != entries[i].ParentID || got.Message.MsgID != entries[i].Message.MsgID {
+			t.Fatalf("original entry %d was changed: got %+v, want %+v", i, got, entries[i])
+		}
+	}
+	repair := msgs[len(msgs)-1]
+	if repair.Role != "tool_result" || repair.ToolCallID != "tc-missing" || repair.ToolName != "bash" || !repair.IsError {
+		t.Fatalf("repair = %+v, want error result for tc-missing", repair)
+	}
+	if got := repair.Content[0].Text; !strings.Contains(got, "result was recorded") {
+		t.Fatalf("repair text = %q", got)
+	}
+}
+
 func TestNewTreeFromEntries_DuplicateID(t *testing.T) {
 	entries := []Entry{
 		{ID: "a", ParentID: "", Type: EntryMessage},

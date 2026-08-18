@@ -1485,6 +1485,63 @@ func TestCancelWithDiscardedSteers(t *testing.T) {
 	}
 }
 
+func TestCancelAndSendUseAgentOccupancyWhenBusIsIdle(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := t.TempDir()
+	started := make(chan struct{}, 2)
+	blockingHandler := func(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent)
+		go func() {
+			started <- struct{}{}
+			<-ctx.Done()
+			close(ch)
+		}()
+		return ch, nil
+	}
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(blockingHandler, blockingHandler), dir)
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runDirectly := func() <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := sess.runtime.Context().Agent.Send(context.Background(), "occupy agent")
+			done <- err
+		}()
+		<-started
+		if sess.runtime.State.Current() != bus.StateIdle {
+			t.Fatalf("bus state = %q, want idle", sess.runtime.State.Current())
+		}
+		if !sess.runtime.Context().Agent.IsRunning() {
+			t.Fatal("agent is not occupied")
+		}
+		return done
+	}
+
+	firstDone := runDirectly()
+	if _, err := mgr.CancelWithDiscardedSteers(sess.ID); err != nil {
+		t.Fatalf("cancel with occupied agent and idle bus = %v", err)
+	}
+	<-firstDone
+
+	secondDone := runDirectly()
+	action, _, _, err := mgr.Send(sess.ID, "queued instead of direct", nil, "steer-id", "")
+	if err != nil {
+		t.Fatalf("send with occupied agent and idle bus = %v", err)
+	}
+	if action != "steer" {
+		t.Fatalf("send action = %q, want steer", action)
+	}
+	if _, err := mgr.CancelWithDiscardedSteers(sess.ID); err != nil {
+		t.Fatalf("cleanup cancel = %v", err)
+	}
+	<-secondDone
+}
+
 func TestCancel_WhileIdle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

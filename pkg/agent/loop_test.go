@@ -3,9 +3,12 @@ package agent
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 // TestConsumeStream_CancelledTurnWithLateDoneIsNotSuccess pins M18: when the
@@ -32,6 +35,120 @@ func TestConsumeStream_CancelledTurnWithLateDoneIsNotSuccess(t *testing.T) {
 	}
 	if msg != final {
 		t.Fatalf("msg = %v, want the complete final message preserved for history", msg)
+	}
+}
+
+type cancelledToolCallProvider struct {
+	started chan struct{}
+}
+
+func (p *cancelledToolCallProvider) Stream(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+	ch := make(chan core.AssistantEvent, 1)
+	close(p.started)
+	go func() {
+		defer close(ch)
+		<-ctx.Done()
+		msg := &core.Message{
+			Role: "assistant",
+			Content: []core.Content{{
+				Type:       "tool_call",
+				ToolCallID: "toolu_cancelled",
+				ToolName:   "block",
+			}},
+		}
+		ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: msg}
+	}()
+	return ch, nil
+}
+
+func TestAbortWithLateToolCallKeepsHistoryBalanced(t *testing.T) {
+	provider := &cancelledToolCallProvider{started: make(chan struct{})}
+	var executed atomic.Bool
+	block := core.Tool{
+		Name:       "block",
+		Parameters: []byte(`{"type":"object"}`),
+		Execute: func(context.Context, map[string]any, func(core.Result)) (core.Result, error) {
+			executed.Store(true)
+			return core.TextResult("unexpected"), nil
+		},
+	}
+	ag := newTestAgent(provider, block)
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Run(context.Background(), "run the tool")
+		done <- err
+	}()
+
+	<-provider.started
+	ag.Abort()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("aborted run did not finish")
+	}
+	if executed.Load() {
+		t.Fatal("tool was executed after cancellation")
+	}
+
+	msgs := ag.Messages()
+	if len(msgs) != 3 || msgs[1].Role != "assistant" || msgs[2].Role != "tool_result" {
+		t.Fatalf("cancelled tool call was not closed: %+v", msgs)
+	}
+	if msgs[2].ToolCallID != "toolu_cancelled" || !msgs[2].IsError {
+		t.Fatalf("synthetic result = %+v, want cancelled error for toolu_cancelled", msgs[2])
+	}
+
+	tree := session.NewTree()
+	for _, msg := range msgs {
+		tree.Append(session.Entry{Type: session.EntryMessage, Message: msg})
+	}
+	tree.Append(session.Entry{
+		Type: session.EntryMessage,
+		Message: core.WrapMessage(core.Message{
+			Role:    "assistant",
+			Content: []core.Content{core.TextContent("balance probe")},
+		}),
+	})
+	if err := tree.ValidBranchTarget(tree.LeafID()); err != nil {
+		t.Fatalf("persisted context has a dangling tool call: %v", err)
+	}
+}
+
+func TestAbortDuringToolExecutionPersistsErrorResult(t *testing.T) {
+	started := make(chan struct{})
+	block := core.Tool{
+		Name:       "block",
+		Parameters: []byte(`{"type":"object"}`),
+		Execute: func(ctx context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+			close(started)
+			<-ctx.Done()
+			return core.Result{}, ctx.Err()
+		},
+	}
+	ag := newTestAgent(NewMockProvider(toolCallResponse("toolu_running", "block", nil)), block)
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Run(context.Background(), "run the tool")
+		done <- err
+	}()
+
+	<-started
+	ag.Abort()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("aborted run did not finish")
+	}
+
+	msgs := ag.Messages()
+	if len(msgs) != 3 || msgs[2].Role != "tool_result" {
+		t.Fatalf("running tool result was discarded: %+v", msgs)
+	}
+	if msgs[2].ToolCallID != "toolu_running" || !msgs[2].IsError {
+		t.Fatalf("tool result = %+v, want cancellation error for toolu_running", msgs[2])
 	}
 }
 

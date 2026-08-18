@@ -1184,16 +1184,15 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	ctx, a.cancel = context.WithCancel(ctx)
 	cancel := a.cancel
 	a.mu.Unlock()
-	a.steerMu.Lock()
-	a.aborting = false
-	a.steerMu.Unlock()
-
 	defer func() {
 		cancel()
 		a.mu.Lock()
 		a.cancel = nil
 		a.mu.Unlock()
 	}()
+	a.steerMu.Lock()
+	a.aborting = false
+	a.steerMu.Unlock()
 
 	if settings == nil {
 		defaults := core.DefaultCompactionSettings
@@ -1465,6 +1464,12 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	}
 	cancel := a.cancel
 	a.mu.Unlock()
+	defer func() {
+		cancel()
+		a.mu.Lock()
+		a.cancel = nil
+		a.mu.Unlock()
+	}()
 
 	// Publish this agent's attachment capability on the run context, so shared
 	// tools (a `read` built by the parent and reused by a reviewer, an MCP
@@ -1491,13 +1496,6 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	if announce != nil {
 		announce()
 	}
-
-	defer func() {
-		cancel()
-		a.mu.Lock()
-		a.cancel = nil
-		a.mu.Unlock()
-	}()
 
 	// Build stream options
 	streamOpts := core.StreamOptions{
