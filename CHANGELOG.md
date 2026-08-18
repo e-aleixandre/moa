@@ -5,6 +5,32 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.1] - 2026-08-18
+
+### Fixed
+
+- Cancelling a run no longer breaks the session for good. A provider can deliver
+  a complete message while Moa is draining the cancelled stream, and its tool
+  calls were kept even though they were deliberately never executed; every
+  provider then rejects a history where a tool call has no result, so the
+  session answered nothing but HTTP 400 and switching models did not help.
+  Those calls are now closed as errors, and a session already saved in that
+  state repairs itself when it is loaded — nothing recorded is rewritten, only
+  what was left open is closed.
+- Skipping a question now takes a deliberate gesture. A pointer released over
+  Skip could dismiss a question the owner never meant to answer, when the press
+  had started somewhere else entirely. Keyboard and assistive activation are
+  unaffected.
+- Answering a question no longer leaks across runs. Clearing the pending state
+  of a finished run injected empty answers into questions belonging to a newer
+  one.
+- Stop works when the bus and the agent disagree about who is busy. The button
+  did nothing in exactly the situation that most needed it, and a message sent
+  meanwhile is delivered as a steer instead of being refused.
+- An agent no longer stays busy forever when a run fails while starting up. The
+  cleanup that frees the run slot is installed as soon as the slot is taken, so
+  the session cannot be left reporting that an agent is already running.
+
 ## [0.30.0] - 2026-08-17
 
 ### Added
