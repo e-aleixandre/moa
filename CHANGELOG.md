@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - 2026-08-22
+
+### Added
+
+- Desktop session cards now expose the same lifecycle menu as mobile: close or
+  reopen a session, copy its ID, and deliberately confirm before deleting it.
+- Creating a desktop session keeps its default model visible without making
+  model choice a required step. Choose a different model on demand in the
+  command palette, with search, pinned models, and provider groups.
+
+### Fixed
+
+- A newly created session no longer waits for a full session roster reload
+  before opening. The confirmed create response is shown immediately, while
+  stale roster requests cannot make it disappear.
+
 ## [0.30.1] - 2026-08-18
 
 ### Fixed
