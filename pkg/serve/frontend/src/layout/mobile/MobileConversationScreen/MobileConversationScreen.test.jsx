@@ -24,6 +24,7 @@ mock.module('../../../util/sanitize.js', () => ({ sanitizeHtml(html) { return ht
 const { MobileConversationScreen } = await import('./MobileConversationScreen.jsx');
 const { setState } = await import('../../../data/store.js');
 const { ConversationScreen } = await import('../../ConversationScreen/ConversationScreen.jsx');
+const { Spine } = await import('../../Spine/Spine.jsx');
 
 function componentNode(node, name) {
   if (Array.isArray(node)) {
@@ -166,6 +167,35 @@ test('the closed mobile screen mounts its sheet and an opened drawer without ren
   expect(layoutEffects).toBeGreaterThanOrEqual(3);
 });
 
+test('desktop session cards use the shared lifecycle menu and forward its actions', () => {
+  const onCloseSession = () => {};
+  const onReopenSession = () => {};
+  const onDeleteSession = () => {};
+  const tree = Spine({
+    activeSessions: [{ id: 'open', title: 'Open', state: 'idle' }],
+    savedSessions: [{ id: 'saved', title: 'Saved', saved: true }],
+    onCloseSession,
+    onReopenSession,
+    onDeleteSession,
+  });
+  const menus = [];
+  const collectMenus = (node) => {
+    if (Array.isArray(node)) return node.forEach(collectMenus);
+    if (!node || typeof node !== 'object') return;
+    if (node.type?.name === 'SessionCardMenu') menus.push(node);
+    collectMenus(node.props?.children);
+  };
+  collectMenus(tree);
+
+  expect(menus).toHaveLength(2);
+  expect(menus[0].props).toMatchObject({
+    onClose: onCloseSession,
+    onReopen: onReopenSession,
+    onDelete: onDeleteSession,
+    scrollContainerSelector: '.spine-sessions',
+  });
+});
+
 // Ideally this would render the screen and assert the handlers reached its
 // root, but the suite's shared preact/hooks mocks stub the gesture hook away,
 // so the wiring is asserted at the source level: it still catches the mistake
@@ -175,4 +205,3 @@ test('MobileBashJobView spreads edge-swipe handlers onto its screen root', async
 
   expect(source).toContain('ref={screenRef} {...swipeBind}');
 });
-

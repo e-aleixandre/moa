@@ -144,7 +144,6 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	m.initializeAttentionRuntimeLocked(sess)
 	m.sessions[sess.ID] = sess
 	m.mu.Unlock()
-	m.invalidateSavedCache()
 	return sess, nil
 }
 

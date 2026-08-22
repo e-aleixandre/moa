@@ -28,7 +28,7 @@ import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
-import { configureSession, closeSession, openPersistedSubagent, openBashJob, rewindToMessage } from "../../data/session-actions.js";
+import { configureSession, closeSession, deleteSession, openPersistedSubagent, openBashJob, resumeSession, rewindToMessage } from "../../data/session-actions.js";
 import "./ConversationScreen.css";
 
 // ConversationScreen — root organism AND container of the desktop conversation
@@ -253,6 +253,9 @@ export function ConversationScreen({ version }) {
       onNewSession={() => openPalette("create")}
       onSearch={() => openPalette("search")}
       onSettings={() => setGlobalSettingsOpen(true)}
+      onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
+      onReopenSession={(id) => { resumeSession(id).catch(() => {}); }}
+      onDeleteSession={(id) => { deleteSession(id).catch(() => {}); }}
     />
   );
 

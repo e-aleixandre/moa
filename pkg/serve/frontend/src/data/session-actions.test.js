@@ -10,13 +10,90 @@ let apiResponse = [];
 
 const { store, setState } = await import('./store.js');
 const { syncConnections } = await import('./api.js');
-const { loadSessions, openPersistedSubagent, openBashJob, sendMessage } = await import('./session-actions.js');
+const { createSession, loadSessions, openPersistedSubagent, openBashJob, sendMessage } = await import('./session-actions.js');
 const { adoptAttentionNamespace, handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
 
 beforeEach(() => {
   apiResponse = [];
   globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify(apiResponse), { status: 200 }));
   setState({ sessions: {}, tileTree: null, activeSession: null });
+});
+
+test('createSession publishes and selects the POST response without a roster GET', async () => {
+  const calls = [];
+  globalThis.fetch = (path, opts) => {
+    calls.push({ path, opts });
+    return Promise.resolve(new Response(JSON.stringify({
+      id: 'created', title: 'New session', state: 'idle', provider: 'openai', cwd: '/work',
+      thinking: 'low', permission_mode: 'ask', context_percent: 12,
+    }), { status: 200 }));
+  };
+  setState({ isMobile: true });
+
+  await createSession({ cwd: '/work' });
+
+  expect(calls).toHaveLength(1);
+  expect(calls[0].path).toBe('/api/sessions');
+  expect(calls[0].opts.method).toBe('POST');
+  expect(store.get().activeSession).toBe('created');
+  expect(store.get().sessions.created).toMatchObject({
+    id: 'created', title: 'New session', thinking: 'low', permissionMode: 'ask', contextPercent: 12,
+  });
+  setState({ isMobile: false });
+});
+
+test('an in-flight roster from before create cannot erase the created session', async () => {
+  let resolveRoster;
+  globalThis.fetch = (path, opts) => {
+    if (opts.method === 'GET') return new Promise(resolve => { resolveRoster = resolve; });
+    return Promise.resolve(new Response(JSON.stringify({
+      id: 'created', title: 'New session', state: 'idle', provider: 'openai', cwd: '/work',
+    }), { status: 200 }));
+  };
+  setState({ isMobile: true });
+
+  const roster = loadSessions();
+  await Promise.resolve();
+  await createSession({ cwd: '/work' });
+  resolveRoster(new Response(JSON.stringify([]), { status: 200 }));
+  await roster;
+
+  expect(store.get().sessions.created).toMatchObject({ id: 'created', title: 'New session' });
+  expect(store.get().activeSession).toBe('created');
+  setState({ isMobile: false });
+});
+
+test('a failed create does not add a roster entry', async () => {
+  globalThis.fetch = () => Promise.resolve(new Response('nope', { status: 500 }));
+
+  await expect(createSession({ cwd: '/work' })).rejects.toThrow('500');
+
+  expect(store.get().sessions).toEqual({});
+});
+
+test('a later roster reconciles a created session without duplicates', async () => {
+  let roster = [];
+  globalThis.fetch = (path, opts) => {
+    if (opts.method === 'POST') return Promise.resolve(new Response(JSON.stringify({
+      id: 'created', title: 'New session', state: 'idle', provider: 'openai', cwd: '/work',
+    }), { status: 200 }));
+    return Promise.resolve(new Response(JSON.stringify(roster), { status: 200 }));
+  };
+  setState({ isMobile: true });
+
+  await createSession({ cwd: '/work' });
+  store.get().sessions.created.streamingText = 'local WS text';
+  roster = [{
+    id: 'created', title: 'Server title', state: 'idle', provider: 'openai', cwd: '/work',
+    updated: '2026-08-22T17:00:00Z',
+  }];
+  await loadSessions();
+
+  expect(Object.keys(store.get().sessions)).toEqual(['created']);
+  expect(store.get().sessions.created).toMatchObject({
+    title: 'Server title', streamingText: 'local WS text', updated: Date.parse('2026-08-22T17:00:00Z'),
+  });
+  setState({ isMobile: false });
 });
 
 test('loadSessions preserves OpenAI rate-limit percents across a poll', async () => {

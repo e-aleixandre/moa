@@ -258,6 +258,24 @@ func TestCreateSession(t *testing.T) {
 	}
 }
 
+func TestCreateSessionKeepsSavedCache(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("hello")))
+	marker := []session.Summary{{ID: "saved-session"}}
+	mgr.savedCache = marker
+	mgr.savedCacheAt = time.Now()
+
+	if _, err := mgr.CreateSession(CreateOpts{}); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr.savedCacheMu.Lock()
+	defer mgr.savedCacheMu.Unlock()
+	if !reflect.DeepEqual(mgr.savedCache, marker) {
+		t.Fatalf("active create invalidated saved cache: got %#v, want %#v", mgr.savedCache, marker)
+	}
+}
+
 func TestOwnedBashCompletionDoesNotStartRootNotificationRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

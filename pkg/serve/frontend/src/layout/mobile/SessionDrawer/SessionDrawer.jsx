@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight } from "lucide-preact";
-import { copyToClipboard } from "../../../data/util/format.js";
-import { SessionRow } from "../../../components/index.js";
+import { SessionCardMenu, SessionRow } from "../../../components/index.js";
 import { openOverlay } from "../../../data/overlay-history.js";
 import { filterProjectSections, groupProjectSessions, hiddenProjectSavedCount, projectCollapsed, sessionSearchMatch, visibleProjectSessions } from "../../../data/util/project-sessions.js";
 import { useMenuKeyboard } from "../../../hooks/useMenuKeyboard.js";
@@ -41,116 +40,6 @@ function DrawerVersion({ version }) {
   );
 }
 
-// SessionCardMenu — the per-card ⋯ overflow (TELEMETRY-SETTINGS-REDESIGN §3.3).
-// Session lifecycle (close / reopen / delete) is list management, not a
-// conversation setting, so it lives here on the card rather than inside the
-// chat view. Close unloads the session (it stays in the list as saved);
-// Reopen resumes a saved session; Delete is
-// irreversible so it takes a deliberate second
-// tap to confirm. Self-contained: owns its open state, click-outside and
-// Escape, and stops taps from bubbling to the card's own select handler.
-function SessionCardMenu({ session, onClose, onReopen, onDelete }) {
-  const [open, setOpen] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [dropUp, setDropUp] = useState(false);
-  const ref = useRef(null);
-  const actionsRef = useRef(null);
-  const triggerRef = useRef(null);
-  const { onMenuKeyDown, closeMenu } = useMenuKeyboard(open, setOpen, triggerRef, actionsRef);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDocDown = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocDown);
-    return () => {
-      document.removeEventListener("mousedown", onDocDown);
-    };
-  }, [open]);
-
-  // The drawer list is a scroll container, so an absolutely-positioned popup on
-  // the last cards would be clipped when it opens downward. Measure the space
-  // below the ⋯ button against the list's viewport and flip the menu upward
-  // when it wouldn't fit.
-  useLayoutEffect(() => {
-    if (!open) {
-      setDropUp(false);
-      return;
-    }
-    const btn = ref.current?.querySelector(".sdcard-menu-btn");
-    const menu = actionsRef.current;
-    if (!btn || !menu) return;
-    const scroller = ref.current.closest(".sdrawer-list");
-    const bounds = scroller ? scroller.getBoundingClientRect() : { bottom: window.innerHeight };
-    const spaceBelow = bounds.bottom - btn.getBoundingClientRect().bottom;
-    setDropUp(menu.offsetHeight + 8 > spaceBelow);
-  }, [open, confirmingDelete]);
-
-  // Reset the delete confirmation whenever the menu closes.
-  useEffect(() => { if (!open) setConfirmingDelete(false); }, [open]);
-
-  const isSaved = session.saved;
-  const stop = (e) => { e.stopPropagation(); };
-
-  return (
-    <div class="sdcard-menu" ref={ref} onClick={stop}>
-      <button
-        type="button"
-        class="sdcard-menu-btn"
-        ref={triggerRef}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Session actions"
-        onClick={(e) => { stop(e); setOpen((v) => !v); }}
-      >
-        <MoreHorizontal size={16} aria-hidden="true" />
-      </button>
-      {open && (
-        <div
-          class={dropUp ? "sdcard-actions sdcard-actions--up" : "sdcard-actions"}
-          role="menu"
-          aria-label="Session actions"
-          ref={actionsRef}
-          onKeyDown={onMenuKeyDown}
-        >
-          {isSaved ? (
-            <button type="button" role="menuitem" class="sdcard-action" onClick={() => { closeMenu(); onReopen?.(session.id); }}>
-              Reopen session
-            </button>
-          ) : (
-            <button type="button" role="menuitem" class="sdcard-action" onClick={() => { closeMenu(); onClose?.(session.id); }}>
-              Close session
-            </button>
-          )}
-          <button type="button" role="menuitem" class="sdcard-action" onClick={() => { copyToClipboard(session.id); closeMenu(); }}>
-            Copy session ID
-          </button>
-          {confirmingDelete ? (
-            <button
-              type="button"
-              role="menuitem"
-              class="sdcard-action sdcard-action-danger"
-              onClick={() => { closeMenu(); onDelete?.(session.id); }}
-            >
-              Delete — this cannot be undone
-            </button>
-          ) : (
-            <button
-              type="button"
-              role="menuitem"
-              class="sdcard-action sdcard-action-danger"
-              onClick={(e) => { stop(e); setConfirmingDelete(true); }}
-            >
-              Delete…
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // SessionDrawerCard — one session in the list. The card itself is the SHARED
 // SessionRow in its `card` variant — the very same component the desktop Spine
 // lists sessions with, so the two surfaces can't drift apart. The mobile-only
@@ -183,6 +72,7 @@ function SessionDrawerCard({ session, hidePath = false, onSelect, onCloseSession
         onClose={onCloseSession}
         onReopen={onReopenSession}
         onDelete={onDeleteSession}
+        scrollContainerSelector=".sdrawer-list"
       />
     </div>
   );

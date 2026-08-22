@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "preact/hooks";
 import {
   Search, Plus, LayoutGrid, MessageSquare, CornerDownLeft,
-  ArrowLeft, Folder, FolderOpen, ChevronRight, Smartphone,
+  ArrowLeft, Folder, FolderOpen, ChevronRight, Smartphone, Check,
 } from "lucide-preact";
 import { store } from "../../data/store.js";
+import { api } from "../../data/api.js";
 import { closePalette } from "../../data/palette.js";
 import { openDrawer } from "../../data/drawer.js";
 import { openPulsePairing } from "../../data/pulse-pairing-panel.js";
@@ -21,6 +22,8 @@ import {
 } from "../../data/util/format.js";
 import { sessionSearchMatch } from "../../data/util/project-sessions.js";
 import { modLabel } from "../../data/util/shortcut.js";
+import { deriveModelSpecs } from "../../data/selectors.js";
+import { defaultModelSpec, modelStepItems, stepBack } from "./command-palette-model.js";
 import "./CommandPalette.css";
 
 // ── Cached capabilities (workspaceRoot / homeDir / defaultModel). Module-level
@@ -40,6 +43,17 @@ function getModels() {
   return fetch("/api/models", { headers: { "X-Moa-Request": "1" } })
     .then((r) => r.json())
     .then((m) => { _models = Array.isArray(m) ? m : []; return _models; })
+    .catch(() => []);
+}
+// Pinned models come from the same preference the ModelSelector's stars write
+// (/api/model-preferences), so the palette's model step opens on the user's
+// go-to models instead of a second, palette-only notion of "favourite". Cached
+// like caps/models: read-only here — pinning stays in the ModelSelector.
+let _pinnedIDs = null;
+function getPinnedIDs() {
+  if (_pinnedIDs) return Promise.resolve(_pinnedIDs);
+  return api("GET", "/api/model-preferences")
+    .then((prefs) => { _pinnedIDs = prefs?.pinned_models || []; return _pinnedIDs; })
     .catch(() => []);
 }
 
@@ -177,6 +191,11 @@ export function CommandPalette({
   const [caps, setCaps] = useState(_caps || {});
   const [models, setModels] = useState(_models || []);
   const [model, setModel] = useState("");
+  // Mirrors `model` for the async default seeding, which must read the value
+  // as of its resolution, not as of the effect that started it.
+  const modelRef = useRef("");
+  modelRef.current = model;
+  const [pinnedIDs, setPinnedIDs] = useState(_pinnedIDs || []);
   const [exploreDir, setExploreDir] = useState("");
   const [dirFilter, setDirFilter] = useState("");
   const [browseEntries, setBrowseEntries] = useState([]);
@@ -191,6 +210,11 @@ export function CommandPalette({
   // (`creating`) doesn't settle between two fast Enter presses, so a double
   // Enter would fire createSession/resumeSession/assignToTile twice.
   const inFlightRef = useRef(false);
+  // Set when the model step is opened so the cursor can land on the current
+  // model once its rows exist (see the effect below).
+  const syncModelSelectionRef = useRef(false);
+  // The create-step query parked while the model step is open (see goToModel).
+  const createQueryRef = useRef("");
   const homeDir = caps.homeDir || "";
   const serverCwd = caps.workspaceRoot || "";
   const isMobile = context === "mobile";
@@ -213,10 +237,7 @@ export function CommandPalette({
     setCreating(false);
     inFlightRef.current = false;
     setBrowseErr(false);
-    getCaps().then((c) => {
-      setCaps(c);
-      if (c.defaultModel && !model) setModel(c.defaultModel);
-    });
+    getCaps().then(setCaps);
     requestAnimationFrame(() => inputRef.current?.focus());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialStep]);
@@ -229,22 +250,37 @@ export function CommandPalette({
   }, [open]);
 
   // Entering the create step: lazy-load models, seed the browse root + default
-  // model, refocus the (now cleared) input.
+  // model, refocus the (now cleared) input. Coming BACK from the model step is
+  // not an entry — the browsed directory the user already picked must survive
+  // choosing a model.
+  const prevStepRef = useRef(initialStep);
   useEffect(() => {
-    if (!open || step !== "create") return;
+    const cameFromModel = prevStepRef.current === "model";
+    prevStepRef.current = step;
+    if (!open || step !== "create" || cameFromModel) return;
     setQuery("");
     setSelectedIdx(0);
     setExploreDir(serverCwd || homeDir || "/");
     setDirFilter("");
-    getModels().then((m) => {
+    // Seed the default from BOTH answers at once: the server's default model
+    // is in caps, but only the catalogue can tell whether that spec exists, and
+    // whichever request lands second must not overwrite an explicit choice —
+    // hence modelRef instead of the value captured by this effect.
+    Promise.all([getCaps(), getModels()]).then(([c, m]) => {
       setModels(m);
-      if (!model) {
-        const def = caps.defaultModel || (m[0] ? modelSpec(m[0]) : "");
-        if (def) setModel(def);
-      }
+      if (modelRef.current) return;
+      const def = defaultModelSpec(c, deriveModelSpecs(m));
+      if (def) setModel(def);
     });
     requestAnimationFrame(() => inputRef.current?.focus());
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, step]);
+
+  // Entering the model step: the pinned list is the only datum create doesn't
+  // already have.
+  useEffect(() => {
+    if (!open || step !== "model") return;
+    getPinnedIDs().then(setPinnedIDs);
   }, [open, step]);
 
   // ── SEARCH: recent-projects for the create step (dedupe basename) ───────────
@@ -440,13 +476,35 @@ export function CommandPalette({
     return out;
   }, [query, recents, homeDir, dirFilter, browseEntries, loadingDir, browseErr, exploreDir]);
 
-  const items = step === "create" ? createItems : searchItems;
+  // ── Build the flat item list for the MODEL step ────────────────────────────
+  // Same rows/keyboard/search as every other step — the model choice is a step
+  // of the palette, not a selector embedded inside it. Pinned first, then one
+  // group per provider (ModelSelector's own reading order); a query filters
+  // with its matcher (codename / name / alias / provider).
+  const modelSpecs = useMemo(() => deriveModelSpecs(models), [models]);
+  const modelItems = useMemo(
+    () => modelStepItems(modelSpecs, pinnedIDs, query),
+    [modelSpecs, pinnedIDs, query],
+  );
+
+  const items = step === "create" ? createItems : step === "model" ? modelItems : searchItems;
 
   // Selectable indices (skip groups / notes). selectedIdx indexes into this.
   const selectable = useMemo(
     () => items.filter((it) => it.kind !== "group" && it.kind !== "note"),
     [items],
   );
+
+  // Entering the model step lands on the model already selected, so ⏎ is a
+  // no-op instead of a silent change. It re-runs while the list is still
+  // settling (the pinned preference arrives after the first paint and reorders
+  // the rows) and stops the moment the user takes over the cursor by typing,
+  // navigating or hovering.
+  useEffect(() => {
+    if (step !== "model" || !syncModelSelectionRef.current || !selectable.length) return;
+    const at = selectable.findIndex((it) => it.spec?.id === model);
+    setSelectedIdx(at > 0 ? at : 0);
+  }, [step, selectable, model]);
 
   // Clamp selection when the list shrinks.
   useEffect(() => {
@@ -528,13 +586,33 @@ export function CommandPalette({
     setSelectedIdx(0);
   }, [homeDir]);
 
-  // Cycle the model chips (⌘M / click).
-  const cycleModel = useCallback(() => {
-    if (!models.length) return;
-    const specs = models.map(modelSpec);
-    const i = specs.indexOf(model);
-    setModel(specs[(i + 1) % specs.length]);
-  }, [models, model]);
+  // Open the model step (Change / ⌘M): the palette's own list + search, not a
+  // second selector chrome on top of it. The create step's query is kept aside
+  // so returning lands on the very project/directory it was left on.
+  const goToModel = useCallback(() => {
+    createQueryRef.current = query;
+    setQuery("");
+    setSelectedIdx(0);
+    syncModelSelectionRef.current = true;
+    setStep("model");
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [query]);
+
+  // Back to create with its query (and therefore its browsed directory)
+  // restored — shared by choosing a model and by backing out of the step.
+  const backToCreate = useCallback(() => {
+    setQuery(createQueryRef.current);
+    setSelectedIdx(0);
+    setStep("create");
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
+  // Choose a model and return to create — the selection is the whole point of
+  // the step, so there is nothing else to confirm.
+  const chooseModel = useCallback((spec) => {
+    setModel(spec);
+    backToCreate();
+  }, [backToCreate]);
 
   // Primary (⏎) / secondary (⌘⏎) verb on the current selection.
   const activateSelected = useCallback((secondary) => {
@@ -554,11 +632,12 @@ export function CommandPalette({
       return;
     }
     if (sel.kind === "project") { doCreate(sel.cwd); return; }
+    if (sel.kind === "model") { chooseModel(sel.spec.id); return; }
     if (sel.kind === "dir") {
       if (secondary) doCreate(exploreDir); else goToDir(sel.path);
       return;
     }
-  }, [selectable, selectedIdx, step, activateSession, doCreate, goToDir, exploreDir, goToCreate]);
+  }, [selectable, selectedIdx, step, activateSession, doCreate, goToDir, exploreDir, goToCreate, chooseModel]);
 
   // create-step input handler (recents filter vs path explorer — ported from
   // NewSessionSheet.onInput).
@@ -579,24 +658,54 @@ export function CommandPalette({
     }
   }, [homeDir]);
 
+  // Input handler shared by both chassis: the create step has its own path/
+  // recents parsing, every other step is a plain filter. Typing always hands
+  // the cursor back to "first hit".
+  const onInput = useCallback((v) => {
+    syncModelSelectionRef.current = false;
+    if (step === "create") { onCreateInput(v); return; }
+    setQuery(v);
+    setSelectedIdx(0);
+  }, [step, onCreateInput]);
+
+  // goBack — one back gesture for Escape, ⌫-on-empty-query and the crumb
+  // chip, so all three agree on where a step returns to (stepBack).
+  const goBack = useCallback(() => {
+    const to = stepBack(step, initialStep);
+    if (to === "close") { onClose(); return; }
+    if (to === "create") { backToCreate(); return; }
+    setQuery("");
+    setSelectedIdx(0);
+    setStep(to);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [step, initialStep, onClose, backToCreate]);
+
   const onKeyDown = useCallback((e) => {
     const meta = e.metaKey || e.ctrlKey;
     // Focus trap: Tab never leaves the palette (input always keeps focus).
     if (e.key === "Tab") { e.preventDefault(); return; }
-    if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      // The model step is a sub-step: Escape backs out of it (keeping the
+      // create it was opened from) instead of throwing the whole flow away.
+      if (step === "model") goBack(); else onClose();
+      return;
+    }
     if (meta && (e.key === "n" || e.key === "N") && step === "search") {
       e.preventDefault(); goToCreate(); return;
     }
     if (meta && (e.key === "m" || e.key === "M") && step === "create") {
-      e.preventDefault(); cycleModel(); return;
+      e.preventDefault(); goToModel(); return;
     }
     if (e.key === "ArrowDown") {
       e.preventDefault();
+      syncModelSelectionRef.current = false;
       setSelectedIdx((i) => (selectable.length ? (i + 1) % selectable.length : 0));
       return;
     }
     if (e.key === "ArrowUp") {
       e.preventDefault();
+      syncModelSelectionRef.current = false;
       setSelectedIdx((i) => (selectable.length ? (i - 1 + selectable.length) % selectable.length : 0));
       return;
     }
@@ -609,20 +718,21 @@ export function CommandPalette({
       activateSelected(meta);
       return;
     }
-    if (e.key === "Backspace" && step === "create" && query === "") {
+    if (e.key === "Backspace" && (step === "create" || step === "model") && query === "") {
       e.preventDefault();
-      if (initialStep === "create") onClose();
-      else setStep("search");
+      goBack();
       return;
     }
-  }, [step, query, selectable, selectedIdx, onClose, cycleModel, goToDir, activateSelected, initialStep, goToCreate]);
+  }, [step, query, selectable, selectedIdx, onClose, goToModel, goToDir, activateSelected, goBack, goToCreate]);
 
   if (!open) return null;
 
   const activeDescId = selectable.length ? `pal-opt-${selectedIdx}` : undefined;
   const placeholder = step === "create"
     ? "Search a project or type a path…"
-    : "Jump to session or type a command…";
+    : step === "model"
+      ? "Search models…"
+      : "Jump to session or type a command…";
 
   // Render a single selectable row, tracking its selectable index so hover/
   // click/aria line up with keyboard selection.
@@ -643,7 +753,7 @@ export function CommandPalette({
       "aria-selected": si === selectedIdx,
       "data-sel": si,
       class: `${isMobile ? "m-row" : "row"}${sel ? " sel" : ""}`,
-      onMouseEnter: isMobile ? undefined : () => setSelectedIdx(si),
+      onMouseEnter: isMobile ? undefined : () => { syncModelSelectionRef.current = false; setSelectedIdx(si); },
       onClick: () => { setSelectedIdx(si); requestAnimationFrame(() => activateSelectedFor(si)); },
     };
     if (it.kind === "session") {
@@ -693,6 +803,21 @@ export function CommandPalette({
         </div>
       );
     }
+    if (it.kind === "model") {
+      const spec = it.spec;
+      const on = spec.id === model;
+      return (
+        <div {...common} key={spec.id}>
+          <span class="model-dot" style={{ background: `var(--${spec.accent})` }} />
+          <span class="act-name" style={{ color: `var(--${spec.accent})` }}>
+            <Highlight text={spec.codename} query={query.toLowerCase().trim()} />
+          </span>
+          {spec.sub && !isMobile && <span class="act-sub">{spec.sub}</span>}
+          <span class="badge provider">{spec.provider}</span>
+          {on && <Check class="model-check" size={14} />}
+        </div>
+      );
+    }
     if (it.kind === "dir") {
       return (
         <div {...common} key={it.path}>
@@ -713,6 +838,7 @@ export function CommandPalette({
     if (sel.kind === "action") { sel.run(); return; }
     if (sel.kind === "create-from-query") { goToCreate(); return; }
     if (sel.kind === "project") { doCreate(sel.cwd); return; }
+    if (sel.kind === "model") { chooseModel(sel.spec.id); return; }
     if (sel.kind === "dir") { goToDir(sel.path); return; }
   }
 
@@ -726,9 +852,17 @@ export function CommandPalette({
     } else if (context === "conversation") {
       secondaryHint = "open in pane";
     }
+  } else if (step === "model") {
+    primaryHint = "use model";
   }
 
   const onVeil = (e) => { if (e.target === e.currentTarget) onClose(); };
+
+  // The model row's copy: the catalogued spec of the current selection when we
+  // know it, else the raw spec string a server default may carry before the
+  // catalogue arrives (never an empty row).
+  const currentModelSpec = modelSpecs.find((spec) => spec.id === model);
+  const currentModelLabel = currentModelSpec?.codename || model.split("/").pop() || "default";
 
   // Back from the "create" step — same rule the Backspace shortcut already
   // follows: step back to search only if that is where we CAME FROM. Opened
@@ -776,7 +910,7 @@ export function CommandPalette({
               autocomplete="off" autocapitalize="off" spellcheck={false}
               placeholder={placeholder}
               value={query}
-              onInput={(e) => (step === "create" ? onCreateInput(e.target.value) : (setQuery(e.target.value), setSelectedIdx(0)))}
+              onInput={(e) => onInput(e.target.value)}
             />
           </div>
           <div class="m-list" id="pal-listbox" role="listbox" aria-label="Results" ref={listRef}>
@@ -820,9 +954,13 @@ export function CommandPalette({
         onKeyDown={onKeyDown}
       >
         <div class="pal-input-row">
-          {step === "create"
-            ? <button type="button" class="crumb-chip" onClick={() => { setStep("search"); inputRef.current?.focus(); }}><ArrowLeft size={12} /> New session</button>
-            : <Search size={16} aria-hidden="true" />}
+          {step === "search"
+            ? <Search size={16} aria-hidden="true" />
+            : (
+              <button type="button" class="crumb-chip" onClick={goBack}>
+                <ArrowLeft size={12} /> {step === "model" ? "Model" : "New session"}
+              </button>
+            )}
           <input
             ref={inputRef}
             class="pal-input"
@@ -834,7 +972,7 @@ export function CommandPalette({
             autocomplete="off" autocapitalize="off" spellcheck={false}
             placeholder={placeholder}
             value={query}
-            onInput={(e) => (step === "create" ? onCreateInput(e.target.value) : (setQuery(e.target.value), setSelectedIdx(0)))}
+            onInput={(e) => onInput(e.target.value)}
           />
           <kbd class="kbd">esc</kbd>
         </div>
@@ -844,19 +982,15 @@ export function CommandPalette({
         </div>
 
         {step === "create" && (
-          <div class="field-row">
+          <div class="field-row model-row">
             <span class="lbl">Model</span>
-            <div class="model-chips">
-              {models.map((m) => {
-                const spec = modelSpec(m);
-                return (
-                  <button type="button" key={spec} class={`mchip${spec === model ? " on" : ""}`} onClick={() => setModel(spec)}>
-                    {m.name || m.id}
-                  </button>
-                );
-              })}
-            </div>
-            <kbd class="kbd">{modLabel}M cycle</kbd>
+            <span class="model-current" style={currentModelSpec ? { color: `var(--${currentModelSpec.accent})` } : undefined}>
+              {currentModelLabel}
+            </span>
+            {currentModelSpec?.sub && <span class="model-sub">{currentModelSpec.sub}</span>}
+            <button type="button" class="model-change" onClick={goToModel}>
+              Change <kbd class="kbd">{modLabel}M</kbd>
+            </button>
           </div>
         )}
 
@@ -873,9 +1007,12 @@ export function CommandPalette({
             <span class="f"><kbd class="kbd">↑↓</kbd> navigate</span>
             <span class="f"><kbd class="kbd">⏎</kbd> {primaryHint}</span>
             {secondaryHint && <span class="f"><kbd class="kbd">{modLabel}⏎</kbd> {secondaryHint}</span>}
+            {step === "model" && <span class="f"><kbd class="kbd">⌫</kbd> back</span>}
             <span class="spring" />
             <span class="ctxhint" aria-live="polite">
-              {context === "grid" && focusedPane != null ? `grid · pane ${focusedPane} focused` : `${selectable.length} result${selectable.length === 1 ? "" : "s"}`}
+              {context === "grid" && focusedPane != null && step === "search"
+                ? `grid · pane ${focusedPane} focused`
+                : `${selectable.length} result${selectable.length === 1 ? "" : "s"}`}
             </span>
           </div>
         )}

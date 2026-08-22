@@ -1,7 +1,7 @@
 import { Search, Plus, Settings, MoreHorizontal, Check } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Kbd, IconButton } from "../../primitives/index.js";
-import { SessionRow } from "../../components/index.js";
+import { SessionCardMenu, SessionRow } from "../../components/index.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { groupProjectSessions, hiddenProjectSavedCount, visibleProjectSessions } from "../../data/util/project-sessions.js";
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
@@ -86,12 +86,26 @@ export function Spine({
   onNewSession,
   onSearch,
   onSettings,
+  onCloseSession,
+  onReopenSession,
+  onDeleteSession,
   groupByProject = false,
   onGroupByProject,
 }) {
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const projectSections = groupProjectSessions([...activeSessions, ...savedSessions]);
-  const row = (s) => <SessionRow key={s.id} variant="card" title={s.title} state={s.state || (s.saved ? "saved" : "idle")} active={s.active ?? s.id === activeId} unseen={s.unseen} meta={s.meta} pane={s.pane} origin={s.origin} onClick={() => onSelectSession?.(s.id)} />;
+  const row = (s) => (
+    <div class="spine-session-card" key={s.id}>
+      <SessionRow variant="card" title={s.title} state={s.state || (s.saved ? "saved" : "idle")} active={s.active ?? s.id === activeId} unseen={s.unseen} meta={s.meta} pane={s.pane} origin={s.origin} onClick={() => onSelectSession?.(s.id)} />
+      <SessionCardMenu
+        session={s}
+        onClose={onCloseSession}
+        onReopen={onReopenSession}
+        onDelete={onDeleteSession}
+        scrollContainerSelector=".spine-sessions"
+      />
+    </div>
+  );
   return (
     <aside class="spine">
       <div class="spine-head">

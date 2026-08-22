@@ -127,8 +127,28 @@
 .spine-show-all:hover { background: var(--surface0); color: var(--text); }
 .spine-show-all:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 
-.spine .spine-list .session-row {
+.spine .spine-session-card {
+  position: relative;
+}
+
+.spine .spine-session-card .session-row {
   width: 100%;
+}
+
+/* Keep the hidden action target keyboard-reachable, but do not let its empty
+   hit area steal card selection until the card is hovered or focused. */
+.spine .session-card-menu {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration) var(--ease);
+}
+.spine .spine-session-card:hover .session-card-menu,
+.spine .spine-session-card:focus-within .session-card-menu {
+  opacity: 1;
+  pointer-events: auto;
+}
+.spine .spine-session-card .session-row.variant-card .session-row-hit {
+  padding-right: 40px;
 }
 
 .spine .new-session {

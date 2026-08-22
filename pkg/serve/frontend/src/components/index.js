@@ -1,4 +1,5 @@
 export { SessionRow } from "./SessionRow/SessionRow.jsx";
+export { SessionCardMenu } from "./SessionCardMenu/SessionCardMenu.jsx";
 export { ModelPill } from "./ModelPill/ModelPill.jsx";
 export { RunModeChip } from "./RunModeChip/RunModeChip.jsx";
 export { ModelSelector } from "./ModelSelector/ModelSelector.jsx";
