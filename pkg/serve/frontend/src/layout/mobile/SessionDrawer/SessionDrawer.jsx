@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight } from "lucide-preact";
 import { SessionCardMenu, SessionRow } from "../../../components/index.js";
 import { openOverlay } from "../../../data/overlay-history.js";
-import { filterProjectSections, groupProjectSessions, hiddenProjectSavedCount, projectCollapsed, sessionSearchMatch, visibleProjectSessions } from "../../../data/util/project-sessions.js";
+import { filterProjectSections, groupProjectSessions, hiddenProjectSavedCount, previewSavedSessions, projectCollapsed, sessionSearchMatch, visibleProjectSessions } from "../../../data/util/project-sessions.js";
 import { useMenuKeyboard } from "../../../hooks/useMenuKeyboard.js";
 import { NewSessionView } from "./NewSessionView.jsx";
 import "./SessionDrawer.css";
@@ -178,6 +178,7 @@ export function SessionDrawer({
   const [query, setQuery] = useState("");
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const [showAllNew, setShowAllNew] = useState(false);
+  const [showAllSaved, setShowAllSaved] = useState(false);
 
   // The screen an open lands on — and a step change while the drawer is
   // already open (the palette handing over to an open drawer) — both come from
@@ -213,6 +214,7 @@ export function SessionDrawer({
       clearTimeout(closeTimerRef.current);
       setVisible(true);
       setQuery("");
+      setShowAllSaved(false);
       if (reduce) {
         setEntered(true);
       } else {
@@ -307,13 +309,29 @@ export function SessionDrawer({
   // Search filters the list in place — no second surface, no second list.
   // Session search intentionally uses word substrings rather than the command
   // palette's subsequence matcher; long session titles otherwise match noise.
+  //
+  // Memoized on the inputs because this runs on every render, and a render
+  // happens on every keystroke: with a few hundred saved sessions the
+  // unmemoized version re-filtered and re-grouped the whole roster per typed
+  // character, which is felt as a laggy keyboard on a phone.
   const q = query.trim();
-  const hit = (s) => sessionSearchMatch(q, s);
-  const shownNew = newResults.filter(hit);
-  const shownActive = active.filter(hit);
-  const shownSaved = saved.filter(hit);
-  const hitCount = shownNew.length + shownActive.length + shownSaved.length;
-  const projectSections = filterProjectSections(groupProjectSessions([...active, ...saved]), query);
+  const { shownNew, shownActive, shownSaved, hitCount, projectSections } = useMemo(() => {
+    const hit = (s) => sessionSearchMatch(q, s);
+    const newHits = newResults.filter(hit);
+    const activeHits = active.filter(hit);
+    const savedHits = saved.filter(hit);
+    return {
+      shownNew: newHits,
+      shownActive: activeHits,
+      shownSaved: savedHits,
+      hitCount: newHits.length + activeHits.length + savedHits.length,
+      projectSections: filterProjectSections(groupProjectSessions([...active, ...saved]), query),
+    };
+  }, [q, query, newResults, active, saved]);
+
+  // Recency view: cap the saved tail behind the same "Show all" affordance the
+  // grouped view already uses for its own tail.
+  const savedPreview = previewSavedSessions(shownSaved, { expanded: showAllSaved, searching: !!q });
 
   const card = (s, hidePath = false) => (
     <SessionDrawerCard
@@ -400,7 +418,7 @@ export function SessionDrawer({
                     {hiddenSaved > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setExpandedProjects((keys) => new Set(keys).add(section.key))}>Show all {hiddenSaved} saved</button>}
                   </div>}
                 </section>;
-              }) : <>{shownActive.length > 0 && <span class="sdrawer-group">Active</span>}{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{shownSaved.map((s) => card(s))}</>}
+              }) : <>{shownActive.length > 0 && <span class="sdrawer-group">Active</span>}{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{savedPreview.visible.map((s) => card(s))}{savedPreview.hidden > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setShowAllSaved(true)}>Show all {shownSaved.length} saved</button>}</>}
               {q && hitCount === 0 && (
                 <span class="sdrawer-note">No session matches “{query}”</span>
               )}
