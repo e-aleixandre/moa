@@ -1330,14 +1330,22 @@ func RegisterHandlers(sctx *SessionContext) {
 
 	b.OnQuery(func(q GetDisplayMessagesSince) (DisplayMessagesSince, error) {
 		if sctx.treeSyncer != nil {
-			messages, valid := sctx.treeSyncer.DisplayMessagesSince(q.EntryID)
-			return DisplayMessagesSince{Messages: messages, Valid: valid}, nil
+			// The syncer dates the anchor from its own tree under its own lock;
+			// re-reading sctx.Tree here would race the pointer swap on
+			// clear/resume and could mix two trees in one answer.
+			messages, valid, entryAt := sctx.treeSyncer.DisplayMessagesSince(q.EntryID)
+			return DisplayMessagesSince{Messages: messages, Valid: valid, EntryAt: entryAt}, nil
 		}
 		sctx.historyMu.RLock()
 		defer sctx.historyMu.RUnlock()
-		if sctx.Tree != nil {
-			messages, valid := sctx.Tree.DisplayMessagesSince(q.EntryID)
-			return DisplayMessagesSince{Messages: messages, Valid: valid}, nil
+		// One read of the pointer, used for both the suffix and its anchor, so
+		// this branch cannot mix trees either.
+		if tree := sctx.Tree; tree != nil {
+			messages, valid := tree.DisplayMessagesSince(q.EntryID)
+			if !valid {
+				return DisplayMessagesSince{}, nil
+			}
+			return DisplayMessagesSince{Messages: messages, Valid: true, EntryAt: anchorTimestamp(tree, q.EntryID)}, nil
 		}
 		return DisplayMessagesSince{}, nil
 	})

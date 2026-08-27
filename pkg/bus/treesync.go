@@ -3,6 +3,7 @@ package bus
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
@@ -107,17 +108,42 @@ func (ts *TreeSyncer) DisplayMessages() []core.AgentMessage {
 }
 
 // DisplayMessagesSince returns the durable tree suffix after entryID plus the
-// current in-flight tail. It validates the token against the tree, rather than
-// the lossy event stream, so it remains correct across reconnects and restarts.
-func (ts *TreeSyncer) DisplayMessagesSince(entryID string) ([]core.AgentMessage, bool) {
+// current in-flight tail, and the timestamp of the anchor entry itself. It
+// validates the token against the tree, rather than the lossy event stream, so
+// it remains correct across reconnects and restarts.
+//
+// The anchor time is read from ts.tree under the SAME lock as the messages, on
+// purpose: callers must not re-read sctx.Tree afterwards to date the anchor.
+// That pointer is replaced on clear/resume, so an unlocked read races the
+// replacement AND could date the anchor from a different tree than the one the
+// messages came from.
+func (ts *TreeSyncer) DisplayMessagesSince(entryID string) ([]core.AgentMessage, bool, time.Time) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
 	msgs, valid := ts.tree.DisplayMessagesSince(entryID)
 	if !valid {
-		return nil, false
+		return nil, false, time.Time{}
 	}
-	return ts.appendInFlightTail(msgs), true
+	return ts.appendInFlightTail(msgs), true, anchorTimestamp(ts.tree, entryID)
+}
+
+// anchorTimestamp dates a validated resume token from the tree that produced
+// it. It reports the anchor MESSAGE's creation time, not the entry's append
+// time: entries reach the tree when a run ends, so the append time can be well
+// after the client actually received the message, and anything that happened in
+// that window would be wrongly treated as already known. Returns zero for a
+// missing entry, a non-message entry or an undated message, which makes callers
+// fail closed to sending everything rather than silently omitting state.
+func anchorTimestamp(tree *session.Tree, entryID string) time.Time {
+	if tree == nil || entryID == "" {
+		return time.Time{}
+	}
+	entry, ok := tree.Entry(entryID)
+	if !ok || entry.Type != session.EntryMessage || entry.Message.Timestamp == 0 {
+		return time.Time{}
+	}
+	return time.Unix(entry.Message.Timestamp, 0)
 }
 
 // appendInFlightTail appends the agent messages not yet synced to the tree

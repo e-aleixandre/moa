@@ -115,11 +115,11 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/version", handleVersion(manager, static.buildID))
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/attention", handleAttention(manager))
-	mux.HandleFunc("GET /api/sessions", handleListSessions(manager))
+	mux.HandleFunc("GET /api/sessions", withGzip(handleListSessions(manager)))
 	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}", handleGetSession(manager))
-	mux.HandleFunc("GET /api/sessions/{id}/messages", handleConversationMessages(manager))
-	mux.HandleFunc("GET /api/sessions/{id}/history", handleHistory(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/messages", withGzip(handleConversationMessages(manager)))
+	mux.HandleFunc("GET /api/sessions/{id}/history", withGzip(handleHistory(manager)))
 	mux.HandleFunc("DELETE /api/sessions/{id}", handleDeleteSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/close", handleCloseSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
@@ -136,7 +136,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/promote", handlePromoteSubagent(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/steer", handleSteerSubagent(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/subagents", handleSubagentList(manager))
-	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", handleSubagentConversation(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", withGzip(handleSubagentConversation(manager)))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/mcp", handleMCPStatus(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/mcp/{server}", handleMCPToggle(manager))
@@ -686,7 +686,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		conn, err := websocket.Accept(w, r, nil) //nolint:staticcheck
+		conn, err := websocket.Accept(w, r, wsAcceptOptions()) //nolint:staticcheck
 		if err != nil {
 			return
 		}
@@ -1438,6 +1438,17 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Debug("write JSON response", "status", status, "error", err)
 	}
+}
+
+// wsAcceptOptions is the upgrade configuration shared by every WebSocket this
+// server accepts. permessage-deflate is negotiated because the payloads are
+// repetitive JSON — the init snapshot alone compresses by about two thirds —
+// and these sockets are mostly served to phones. NoContextTakeover compresses a
+// little worse than context takeover but keeps no 32 KB sliding window per
+// connection, which matters with many long-lived, seldom-written sessions.
+// Clients that don't offer the extension (Safari) simply negotiate it away.
+func wsAcceptOptions() *websocket.AcceptOptions { //nolint:staticcheck
+	return &websocket.AcceptOptions{CompressionMode: websocket.CompressionNoContextTakeover} //nolint:staticcheck
 }
 
 // wsWriteTimeout bounds a single WebSocket message write. A stalled client (its
