@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -286,4 +287,79 @@ func TestMsgIDInUse_WithoutTreeSyncer(t *testing.T) {
 	if got, _ := QueryTyped[MsgIDInUse, bool](b, MsgIDInUse{MsgID: "m-2"}); got {
 		t.Fatal("MsgIDInUse(m-2) = true, want false")
 	}
+}
+
+// TestDisplayMessagesSince_ConcurrentWithTreeReplacement is the race guard for
+// the resume anchor. The anchor timestamp must come from the SAME tree, under
+// the SAME lock, as the messages it dates. Reading sctx.Tree again after the
+// syncer released its lock raced the pointer swap performed by ClearSession /
+// resume (runtime.go) and could also date an anchor from a different tree than
+// the suffix. Run under -race; a regression reports a read/write on sctx.Tree.
+func TestDisplayMessagesSince_ConcurrentWithTreeReplacement(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.Tree = session.NewTree()
+	RegisterHandlers(sctx)
+	RegisterTreeSyncer(b, sctx)
+
+	fa.mu.Lock()
+	fa.messages = []core.AgentMessage{
+		msgWithID("user", "anchor", "anchor-id"),
+		msgWithID("assistant", "reply", "reply-id"),
+	}
+	fa.mu.Unlock()
+	b.Publish(RunEnded{SessionID: sctx.SessionID})
+	b.Drain(time.Second)
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	// Readers: the WS reconnect path.
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				delta, err := QueryTyped[GetDisplayMessagesSince, DisplayMessagesSince](b, GetDisplayMessagesSince{EntryID: "anchor-id"})
+				if err != nil {
+					continue
+				}
+				// A validated delta must never carry an anchor time newer than
+				// the tree it came from could justify; mixing trees would.
+				if delta.Valid && delta.EntryAt.After(time.Now().Add(time.Minute)) {
+					t.Errorf("anchor time %v is not from this tree", delta.EntryAt)
+					return
+				}
+			}
+		}()
+	}
+	// Writer: a session switch/plan reset, which REPLACES the tree pointer on
+	// sctx while handing the new tree to the syncer (runtime.go:625,
+	// handlers.go:1051 do exactly this pair).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			replacement := session.NewTree()
+			replacement.Append(session.Entry{Type: session.EntryMessage, Message: msgWithID("user", "anchor", "anchor-id")})
+			sctx.Tree = replacement
+			sctx.treeSyncer.Reset(replacement, 0)
+		}
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	close(stop)
+	wg.Wait()
 }

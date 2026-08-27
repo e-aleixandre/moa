@@ -222,6 +222,12 @@ type GetDisplayMessagesSince struct {
 type DisplayMessagesSince struct {
 	Messages []core.AgentMessage
 	Valid    bool
+	// EntryAt is when the durable entry named by EntryID was appended. It dates
+	// the transcript the client already holds, so a reconnect can be served only
+	// the side-channel state (terminal subagent cards) produced after it. Zero
+	// when the entry carries no timestamp; callers must then fall back to
+	// sending that state in full.
+	EntryAt time.Time
 }
 
 // MsgIDInUse reports whether a message with this ID is already part of the
