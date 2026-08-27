@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -39,6 +40,57 @@ const (
 	initHistoryMaxBytes    = 1 << 20
 	historyContentMaxBytes = 64 << 10
 )
+
+// Terminal subagent cards are collapsed summaries, not conversation body, so
+// they get their own — much tighter — budget than historyContentMaxBytes: the
+// card shows a preview and the full text is one tap away through
+// GET /api/sessions/{id}/subagents/{jobID}. A session accumulates outcomes for
+// its whole life, so an unbounded per-outcome budget turned the init payload
+// into megabytes of text nobody reads on arrival.
+const (
+	subagentOutcomeExcerptMaxBytes = 2 << 10
+	// subagentTaskMaxBytes bounds the model-authored task echoed on every card.
+	subagentTaskMaxBytes = 1 << 10
+	// initSubagentOutcomeLimit keeps the newest outcomes by completion time.
+	// This is a LOSSY cap, not a display preference: an outcome dropped here may
+	// have no other representation in the payload. A card whose result was
+	// consumed by subagent_wait never produced a parent notification message, so
+	// nothing in the message history stands in for it — the client simply will
+	// not show that job until it is opened by ID. The cap is accepted as the
+	// fail-closed side of a bounded payload: sessions in production carried 200+
+	// outcomes of up to 108 KiB each.
+	initSubagentOutcomeLimit = 50
+)
+
+// Live children share one transcript budget in the init payload. Granting each
+// running subagent a full initHistoryMaxBytes meant ten of them could add ten
+// megabytes on their own.
+//
+// The two constants CONFLICT above 16 concurrent children (16 × 32 KiB = 512
+// KiB), and the floor deliberately wins: a child whose transcript is cut to
+// nothing is a useless row in the Live Dock, and this section is not the one
+// that made the payload explode. So the maximum is a TARGET, not a guarantee —
+// the guarantee is per child. The real ceiling is therefore
+// max(initSubagentHistoryMaxBytes, liveChildren × initSubagentHistoryMinBytes),
+// which the aggregate init budget test exercises with 10 and 20 children.
+// Beyond that many live children the Live Dock has bigger problems than bytes.
+const (
+	initSubagentHistoryMaxBytes = 512 << 10
+	initSubagentHistoryMinBytes = 32 << 10
+)
+
+// outcomeResendGrace widens the delta cutoff backwards. The anchor is a message
+// timestamp in whole seconds, and a card can go terminal in the same second the
+// client's last cached message was created, so an exact comparison could drop a
+// card the client never saw. Re-sending a few seconds of already-known outcomes
+// is cheap; losing one until the next full snapshot is not.
+const outcomeResendGrace = 5 * time.Second
+
+// initPayloadMaxBytes is the aggregate budget asserted by
+// TestBuildInitData_TotalPayloadStaysWithinBudget. It is not enforced at
+// runtime — a hard cut would silently drop state — but every section added to
+// InitData must bound itself so the encoded snapshot stays under it.
+const initPayloadMaxBytes = 2 << 20
 
 // newWsReactor subscribes to all bus events and session context cancellation.
 // cwd is the session working directory, used to resolve relative file paths
@@ -318,8 +370,8 @@ func wsEventFromBus(event any) (Event, bool) {
 			outputTok = e.Usage.Output
 		}
 		data := SubagentEndData{
-			JobID: e.JobID, Task: e.Task, Async: e.Async, Status: e.Status,
-			Result: truncateHistoryString(e.Result), Error: truncateHistoryString(e.Error),
+			JobID: e.JobID, Task: truncateSubagentTask(e.Task), Async: e.Async, Status: e.Status,
+			Result: truncateSubagentOutcome(e.Result), Error: truncateSubagentOutcome(e.Error),
 			InputTokens: inputTok, OutputTokens: outputTok, CostUSD: e.CostUSD,
 		}
 		data.Excerpt = data.Result != e.Result || data.Error != e.Error
@@ -473,12 +525,19 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	var historyTruncated bool
 	historyBefore := ""
 	deltaBase := ""
+	// outcomesSince dates the transcript the client already holds on a validated
+	// delta, so only terminal subagent cards finished after it are re-sent. Zero
+	// means "send them all" (full snapshot, or an anchor without a timestamp).
+	var outcomesSince time.Time
 	if sinceMsg != "" {
 		if delta, err := bus.QueryTyped[bus.GetDisplayMessagesSince, bus.DisplayMessagesSince](b, bus.GetDisplayMessagesSince{EntryID: sinceMsg}); err == nil && delta.Valid {
 			// A delta extends an already-present transcript, so it may legitimately
 			// begin with results for calls in the client's prefix.
 			if bounded, truncated := limitHistoryDelta(delta.Messages); !truncated {
 				msgs, deltaBase = bounded, sinceMsg
+				if !delta.EntryAt.IsZero() {
+					outcomesSince = delta.EntryAt.Add(-outcomeResendGrace)
+				}
 			}
 		}
 	}
@@ -554,34 +613,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		}
 	}
 
-	if len(subagents) > 0 {
-		data.Subagents = make([]SubagentInitData, len(subagents))
-		for i, sa := range subagents {
-			messages, _ := limitInitHistory(sa.Messages)
-			sad := SubagentInitData{
-				JobID:            sa.JobID,
-				OriginToolCallID: sa.OriginToolCallID,
-				Task:             sa.Task,
-				Title:            sa.Title,
-				Model:            sa.Model,
-				Thinking:         sa.Thinking,
-				Status:           sa.Status,
-				Async:            sa.Async,
-				Messages:         messages,
-				ContextPercent:   sa.ContextPercent,
-				AccentIndex:      sa.AccentIndex,
-			}
-			if !sa.StartedAt.IsZero() {
-				sad.StartedAtMs = sa.StartedAt.UnixMilli()
-			}
-			if sa.Usage != nil {
-				sad.InputTokens = sa.Usage.Input
-				sad.OutputTokens = sa.Usage.Output
-			}
-			sad.CostUSD = sa.CostUSD
-			data.Subagents[i] = sad
-		}
-	}
+	data.Subagents = liveSubagentInitData(subagents)
 	// Terminal outcomes are persisted separately from parent model delivery:
 	// an async result consumed by subagent_wait never creates a notification
 	// prompt, but its completed/failed card must survive reload just the same.
@@ -589,9 +621,21 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		store := sess.persister.subagentStore(sess.ID)
 		transcripts, err := store.ListSummaries()
 		if err == nil && len(transcripts) > 0 {
-			data.SubagentOutcomes = make([]SubagentEndData, 0, len(transcripts))
+			// ListSummaries is newest-finished first, so the cap is applied by
+			// walking it in that order and stopping; the chronological order the
+			// client expects is restored by sortSubagentOutcomes below.
+			data.SubagentOutcomes = make([]SubagentEndData, 0, min(len(transcripts), initSubagentOutcomeLimit))
 			for _, transcript := range transcripts {
+				if len(data.SubagentOutcomes) >= initSubagentOutcomeLimit {
+					break
+				}
 				if transcript.Status != "completed" && transcript.Status != "failed" && transcript.Status != "cancelled" {
+					continue
+				}
+				// On a validated delta the client already holds every card that
+				// finished before its cached tail, so re-sending them is pure
+				// waste on exactly the connection that can least afford it.
+				if !outcomesSince.IsZero() && !transcript.FinishedAt.IsZero() && !transcript.FinishedAt.After(outcomesSince) {
 					continue
 				}
 				result, resultErr := persistedSubagentOutcome(transcript)
@@ -606,8 +650,8 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 					result = legacyResult
 				}
 				outcome := SubagentEndData{
-					JobID: transcript.JobID, Task: transcript.Task, Async: transcript.Async,
-					Status: transcript.Status, Result: truncateHistoryString(result), Error: truncateHistoryString(resultErr),
+					JobID: transcript.JobID, Task: truncateSubagentTask(transcript.Task), Async: transcript.Async,
+					Status: transcript.Status, Result: truncateSubagentOutcome(result), Error: truncateSubagentOutcome(resultErr),
 					CostUSD: transcript.CostUSD,
 				}
 				outcome.Excerpt = outcome.Result != result || outcome.Error != resultErr
@@ -696,6 +740,54 @@ func persistedSubagentOutcome(transcript session.SubagentTranscript) (result, re
 	return result, resultErr
 }
 
+// liveSubagentInitData projects the running children into the snapshot. Their
+// transcripts share ONE aggregate budget rather than each receiving a full
+// history's worth: ten running subagents used to be able to add ten megabytes
+// on their own. The share is recomputed from what is left after each child, so
+// a quiet child hands its unused bytes to the next one and the section total
+// stays bounded no matter how many run. A child the user actually opens loads
+// its complete transcript from the subagent endpoint.
+func liveSubagentInitData(subagents []bus.SubagentSnapshot) []SubagentInitData {
+	if len(subagents) == 0 {
+		return nil
+	}
+	remainingBytes := initSubagentHistoryMaxBytes
+	out := make([]SubagentInitData, len(subagents))
+	for i, sa := range subagents {
+		// The fair share of what is left, never more than a full ration: a quiet
+		// child hands its unused bytes to the ones after it, but no single child
+		// may absorb the entire remainder (which is what let the last child ship
+		// hundreds of KB). The floor is the per-child guarantee and wins over
+		// the aggregate target — see the constants' comment.
+		share := max(min(remainingBytes/(len(subagents)-i), initSubagentHistoryMaxBytes/len(subagents)), initSubagentHistoryMinBytes)
+		messages, _ := limitInitHistoryWithin(sa.Messages, share)
+		remainingBytes = max(0, remainingBytes-encodedHistorySize(messages))
+		sad := SubagentInitData{
+			JobID:            sa.JobID,
+			OriginToolCallID: sa.OriginToolCallID,
+			Task:             truncateSubagentTask(sa.Task),
+			Title:            truncateSubagentTask(sa.Title),
+			Model:            sa.Model,
+			Thinking:         sa.Thinking,
+			Status:           sa.Status,
+			Async:            sa.Async,
+			Messages:         messages,
+			ContextPercent:   sa.ContextPercent,
+			AccentIndex:      sa.AccentIndex,
+		}
+		if !sa.StartedAt.IsZero() {
+			sad.StartedAtMs = sa.StartedAt.UnixMilli()
+		}
+		if sa.Usage != nil {
+			sad.InputTokens = sa.Usage.Input
+			sad.OutputTokens = sa.Usage.Output
+		}
+		sad.CostUSD = sa.CostUSD
+		out[i] = sad
+	}
+	return out
+}
+
 // liveToolInitData projects the bus registry of in-flight tool calls into the
 // snapshot payload, bounding what travels: only the args map is unbounded in
 // principle (a write carries a whole file), so it is dropped wholesale when its
@@ -744,21 +836,42 @@ func boundedLiveToolArgs(args map[string]any) map[string]any {
 	return args
 }
 
+// encodedHistorySize is the JSON weight a projected message range adds to the
+// payload. Used to charge a live subagent's transcript against the shared
+// section budget, so the remaining children are sized by what is actually left.
+func encodedHistorySize(messages []core.AgentMessage) int {
+	if len(messages) == 0 {
+		return 0
+	}
+	encoded, err := json.Marshal(messages)
+	if err != nil {
+		return 0
+	}
+	return len(encoded)
+}
+
 // limitInitHistory returns a bounded, recent display tail. It also removes
 // large inline attachment payloads and bounds individual text blocks: sending
 // a whole historic image or pasted file to a phone is neither useful nor safe.
 func limitInitHistory(messages []core.AgentMessage) ([]core.AgentMessage, bool) {
+	return limitInitHistoryWithin(messages, initHistoryMaxBytes)
+}
+
+// limitInitHistoryWithin is limitInitHistory with an explicit byte budget, used
+// by the live-subagent section to share one budget across every child instead
+// of granting each of them a full history's worth.
+func limitInitHistoryWithin(messages []core.AgentMessage, maxBytes int) ([]core.AgentMessage, bool) {
 	if len(messages) == 0 {
 		return nil, false
 	}
-	start := boundedHistoryTailStart(messages)
+	start := boundedHistoryTailStart(messages, maxBytes)
 	// Prefer including the call that owns a leading result run, but never at
 	// the cost of dropping the newest transcript messages. Grow the range only
 	// when it still fits the mobile bound in full.
-	if aligned := historyPageStart(messages, len(messages), start); aligned < start && boundedHistoryTailStart(messages[aligned:]) == 0 {
+	if aligned := historyPageStart(messages, len(messages), start); aligned < start && boundedHistoryTailStart(messages[aligned:], maxBytes) == 0 {
 		start = aligned
 	}
-	return sanitizeHistoryRange(messages[start:]), start > 0
+	return sanitizeHistoryRange(messages[start:], maxBytes), start > 0
 }
 
 // limitHistoryDelta bounds a durable suffix without trying to make it a
@@ -768,22 +881,22 @@ func limitHistoryDelta(messages []core.AgentMessage) ([]core.AgentMessage, bool)
 	if len(messages) == 0 {
 		return nil, false
 	}
-	start := boundedHistoryTailStart(messages)
-	return sanitizeHistoryRange(messages[start:]), start > 0
+	start := boundedHistoryTailStart(messages, initHistoryMaxBytes)
+	return sanitizeHistoryRange(messages[start:], initHistoryMaxBytes), start > 0
 }
 
-// boundedHistoryTailStart returns the newest range that fits the aggregate
-// init bounds. Starting at the tail is essential: reconnect must never omit
-// the transcript's newest message.
-func boundedHistoryTailStart(messages []core.AgentMessage) int {
+// boundedHistoryTailStart returns the newest range that fits maxBytes and the
+// init message count. Starting at the tail is essential: reconnect must never
+// omit the transcript's newest message.
+func boundedHistoryTailStart(messages []core.AgentMessage, maxBytes int) int {
 	bytes := 0
 	firstIndex := len(messages)
 	for i := len(messages) - 1; i >= 0; i-- {
 		_, size := sanitizeHistoryMessage(messages[i])
-		if size > initHistoryMaxBytes {
-			size = len("[historic message too large to load on this device]") + 128
-		}
-		if len(messages)-i > initHistoryMaxMessages || (i < len(messages)-1 && bytes+size > initHistoryMaxBytes) {
+		// An oversized message is not dropped, it is degraded to the budget by
+		// sanitizeHistoryRange, so charge it what it will actually weigh.
+		size = min(size, maxBytes)
+		if len(messages)-i > initHistoryMaxMessages || (i < len(messages)-1 && bytes+size > maxBytes) {
 			break
 		}
 		firstIndex = i
@@ -792,16 +905,92 @@ func boundedHistoryTailStart(messages []core.AgentMessage) int {
 	return firstIndex
 }
 
-func sanitizeHistoryRange(messages []core.AgentMessage) []core.AgentMessage {
+func sanitizeHistoryRange(messages []core.AgentMessage, maxBytes int) []core.AgentMessage {
 	bounded := make([]core.AgentMessage, 0, len(messages))
 	for _, original := range messages {
 		msg, size := sanitizeHistoryMessage(original)
-		if size > initHistoryMaxBytes {
-			msg = core.WrapMessage(core.Message{Role: original.Role, MsgID: original.MsgID, Content: []core.Content{core.TextContent("[historic message too large to load on this device]")}})
+		if size > maxBytes {
+			msg = fitMessageWithin(msg, maxBytes)
 		}
 		bounded = append(bounded, msg)
 	}
 	return bounded
+}
+
+// fitMessageWithin degrades one oversized message to maxBytes instead of
+// dropping it. Dropping is not an option for the newest message — a reconnect
+// must never omit the tail of a transcript — and a message can exceed the
+// budget while every individual block is under historyContentMaxBytes, simply
+// by carrying many of them.
+//
+// Blocks are kept in order while they fit; the first block that does not is
+// truncated to whatever room is left, and the remainder is replaced by one
+// marker block so the client renders "there was more here" rather than a
+// silently short message. A message with no room at all still travels as the
+// marker, keeping its role and MsgID so the row stays addressable.
+func fitMessageWithin(sanitized core.AgentMessage, maxBytes int) core.AgentMessage {
+	// Charge the envelope (role, ids, timestamps) before any content, so the
+	// budget bounds the encoded message and not just its text.
+	envelope := sanitized
+	envelope.Content = nil
+	room := maxBytes - encodedMessageSize(envelope)
+
+	kept := make([]core.Content, 0, len(sanitized.Content))
+	truncatedAny := false
+	// Reserve the marker block up front. It is appended after the loop, so its
+	// own encoded weight has to come out of the budget before anything else is
+	// admitted, or the result overshoots by exactly one block.
+	marker := core.TextContent(truncationNotice)
+	room -= encodedContentSize(marker)
+	for _, block := range sanitized.Content {
+		size := encodedContentSize(block)
+		if size <= room {
+			kept = append(kept, block)
+			room -= size
+			continue
+		}
+		// Only text is worth partially keeping; a half image or tool-call
+		// argument map is not renderable.
+		if block.Type == "text" {
+			// truncateUTF8 appends "\n\n" + truncationNotice to whatever budget
+			// it is given, so subtract that as well as the block envelope.
+			overhead := encodedContentSize(core.TextContent("")) + len(truncationNotice) + 2
+			if budget := room - overhead; budget > 0 {
+				kept = append(kept, core.TextContent(truncateUTF8(block.Text, budget)))
+			}
+		}
+		truncatedAny = true
+		break
+	}
+	if truncatedAny {
+		kept = append(kept, marker)
+	}
+	degraded := sanitized
+	degraded.Content = kept
+	// The arithmetic above is an estimate (JSON escaping can make an encoded
+	// block larger than its raw text). Verify the real encoded size and, if the
+	// estimate fell short, fall back to the marker alone — a bounded payload is
+	// the invariant, and the client can still open the full transcript.
+	if encodedMessageSize(degraded) > maxBytes {
+		degraded.Content = []core.Content{marker}
+	}
+	return degraded
+}
+
+func encodedMessageSize(msg core.AgentMessage) int {
+	encoded, err := json.Marshal(msg)
+	if err != nil {
+		return 0
+	}
+	return len(encoded)
+}
+
+func encodedContentSize(block core.Content) int {
+	encoded, err := json.Marshal(block)
+	if err != nil {
+		return 0
+	}
+	return len(encoded)
 }
 
 // historyPageStart aligns a region's lower boundary to the assistant that
@@ -851,6 +1040,13 @@ func sanitizeHistoryMessage(msg core.AgentMessage) (core.AgentMessage, int) {
 	copyMsg.Custom = projectWSMessageCustom(copyMsg.Custom)
 	for i := range copyMsg.Content {
 		content := &copyMsg.Content[i]
+		// Provider round-trip signatures are opaque metadata the browser never
+		// reads (0 references in the frontend) and can be large. Clear them on
+		// THIS COPY only: the transcript kept in memory, persisted to disk and
+		// replayed to the provider must keep them or Anthropic rejects the
+		// thinking blocks they authenticate.
+		content.TextSignature = ""
+		content.ThinkingSignature = ""
 		switch content.Type {
 		case "image", "document":
 			if len(content.Data) > historyContentMaxBytes {
@@ -885,12 +1081,39 @@ func boundedHistoryMap(values map[string]any) map[string]any {
 }
 
 func truncateHistoryString(value string) string {
-	if len(value) <= historyContentMaxBytes {
+	return truncateUTF8(value, historyContentMaxBytes)
+}
+
+// truncateSubagentOutcome bounds one terminal card's result/error text to the
+// excerpt the collapsed card actually renders. The caller compares the result
+// with its input to set SubagentEndData.Excerpt, which is what makes the UI
+// label it "Result excerpt" and offer the full transcript.
+//
+// The SAME projection is used by the live subagent_end event and by the init
+// snapshot on purpose: with different budgets a 10 KiB result showed whole when
+// the child finished and shrank on the next reload, which reads as data loss.
+func truncateSubagentOutcome(value string) string {
+	return truncateUTF8(value, subagentOutcomeExcerptMaxBytes)
+}
+
+// truncateSubagentTask bounds the task description echoed on a subagent card.
+// It is model-authored and therefore unbounded in principle: fifty cards, each
+// carrying a full delegation brief, is a payload section of its own.
+func truncateSubagentTask(value string) string {
+	return truncateUTF8(value, subagentTaskMaxBytes)
+}
+
+// truncationNotice is the single marker every bounded projection appends, so a
+// caller reserving room for it and the function writing it cannot disagree.
+const truncationNotice = "[historic content truncated on this device]"
+
+func truncateUTF8(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
 		return value
 	}
-	end := historyContentMaxBytes
+	end := maxBytes
 	for end > 0 && !utf8.RuneStart(value[end]) {
 		end--
 	}
-	return value[:end] + "\n\n[historic content truncated on this device]"
+	return value[:end] + "\n\n" + truncationNotice
 }
