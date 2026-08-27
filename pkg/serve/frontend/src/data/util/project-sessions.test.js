@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import {
   defaultProjectCollapsed, filterProjectSections, groupProjectSessions,
   hiddenProjectSavedCount, projectCollapsed, projectSectionOrder, pruneDrawerCollapsed,
-  sessionSearchMatch, visibleProjectSessions,
+  previewSavedSessions, SAVED_PREVIEW_LIMIT, sessionSearchMatch, visibleProjectSessions,
 } from "./project-sessions.js";
 
 const session = (id, cwd, state, updated, extra = {}) => ({ id, cwd, state, updated, title: id, ...extra });
@@ -117,4 +117,23 @@ test("accordion integration preserves the user fold across search and restore", 
 
 test("prunes collapsed keys only when their project has no sessions", () => {
   expect(pruneDrawerCollapsed({ "/work/a": true, "/gone": false }, [session("a", "/work/a/", "idle", 1)])).toEqual({ "/work/a": true });
+});
+
+test("the recency view previews a long saved list and reports the remainder", () => {
+  const sessions = Array.from({ length: 199 }, (_, i) => ({ id: `s${i}`, state: "saved" }));
+  const preview = previewSavedSessions(sessions);
+  expect(preview.visible).toHaveLength(SAVED_PREVIEW_LIMIT);
+  expect(preview.hidden).toBe(199 - SAVED_PREVIEW_LIMIT);
+  // The preview is the newest slice, not an arbitrary one.
+  expect(preview.visible[0]).toBe(sessions[0]);
+});
+
+test("a saved list that already fits is not capped, and asking for all reveals them", () => {
+  const sessions = Array.from({ length: SAVED_PREVIEW_LIMIT }, (_, i) => ({ id: `s${i}`, state: "saved" }));
+  expect(previewSavedSessions(sessions)).toEqual({ visible: sessions, hidden: 0 });
+
+  const many = Array.from({ length: 60 }, (_, i) => ({ id: `s${i}`, state: "saved" }));
+  expect(previewSavedSessions(many, { expanded: true }).visible).toHaveLength(60);
+  // Searching must reach the whole roster: a hidden match reads as data loss.
+  expect(previewSavedSessions(many, { searching: true }).visible).toHaveLength(60);
 });

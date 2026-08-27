@@ -108,6 +108,23 @@ export function hiddenProjectSavedCount(section, expanded = false, searching = f
   return section.sessions.length - visibleProjectSessions(section, expanded, searching).length;
 }
 
+// The recency view lists every project in one flat run, so it needs its own
+// cap: without one the drawer builds a card per saved session on open, which a
+// phone pays for in dropped frames before the first row is readable.
+//
+// The limit is higher than a project section's because this caps the whole
+// roster rather than one folder's tail, and it only applies to the resting
+// view: an explicit expansion or an active search means the user asked for
+// those rows, so they all render.
+export const SAVED_PREVIEW_LIMIT = 20;
+
+export function previewSavedSessions(sessions, { expanded = false, searching = false } = {}) {
+  if (expanded || searching || sessions.length <= SAVED_PREVIEW_LIMIT) {
+    return { visible: sessions, hidden: 0 };
+  }
+  return { visible: sessions.slice(0, SAVED_PREVIEW_LIMIT), hidden: sessions.length - SAVED_PREVIEW_LIMIT };
+}
+
 // Search stays global: it filters rows, retains their project metadata, and
 // leaves the persisted accordion state untouched for the caller to restore.
 export function filterProjectSections(sections, query) {
