@@ -104,7 +104,7 @@ func handleGuardianWebSocket(m *Manager, devices *deviceStore) http.HandlerFunc 
 			return
 		}
 
-		conn, err := websocket.Accept(w, r, nil) //nolint:staticcheck
+		conn, err := websocket.Accept(w, r, wsAcceptOptions()) //nolint:staticcheck
 		if err != nil {
 			return
 		}
