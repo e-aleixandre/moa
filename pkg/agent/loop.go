@@ -633,8 +633,8 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 	var finalMsg *core.Message
 
 	// Accumulate partial content so we can return it on cancellation.
-	var partialText string
-	var partialThinking string
+	var partialText strings.Builder
+	var partialThinking strings.Builder
 
 	for {
 		select {
@@ -653,9 +653,9 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 					}
 					switch event.Type {
 					case core.ProviderEventTextDelta:
-						partialText += event.Delta
+						partialText.WriteString(event.Delta)
 					case core.ProviderEventThinkingDelta:
-						partialThinking += event.Delta
+						partialThinking.WriteString(event.Delta)
 					case core.ProviderEventDone:
 						if event.Message != nil {
 							// Capture the complete message but keep draining; do not
@@ -677,16 +677,16 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 				return finalMsg, ctx.Err()
 			}
 			// Otherwise fall back to a partial message from accumulated deltas.
-			if partialText != "" || partialThinking != "" {
+			if partialText.Len() > 0 || partialThinking.Len() > 0 {
 				partial := &core.Message{Role: "assistant"}
-				if partialThinking != "" {
+				if partialThinking.Len() > 0 {
 					partial.Content = append(partial.Content, core.Content{
 						Type:     "thinking",
-						Thinking: partialThinking,
+						Thinking: partialThinking.String(),
 					})
 				}
-				if partialText != "" {
-					partial.Content = append(partial.Content, core.TextContent(partialText))
+				if partialText.Len() > 0 {
+					partial.Content = append(partial.Content, core.TextContent(partialText.String()))
 				}
 				return partial, ctx.Err()
 			}
@@ -715,9 +715,9 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 					})
 				}
 			case core.ProviderEventTextDelta:
-				partialText += event.Delta
+				partialText.WriteString(event.Delta)
 			case core.ProviderEventThinkingDelta:
-				partialThinking += event.Delta
+				partialThinking.WriteString(event.Delta)
 			case core.ProviderEventDone:
 				finalMsg = event.Message
 			case core.ProviderEventError:
