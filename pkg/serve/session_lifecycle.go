@@ -227,17 +227,17 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	}
 
 	bs, err := bootstrap.BuildSession(bootstrap.SessionConfig{
-		CWD:                cwd,
-		Model:              model,
-		Provider:           prov,
-		ProviderFactory:    m.providerFactory,
-		MoaCfg:             &moaCfg,
-		MCPDisableSources:  mcpSources,
-		ExtraMCPServers:    extraMCPServers,
-		Ctx:                sessionCtx,
-		EnableAskUser:      true,
-		BeforeWrite:        cpStore.Capture,
-		AttachmentScope:    attachScope,
+		CWD:               cwd,
+		Model:             model,
+		Provider:          prov,
+		ProviderFactory:   m.providerFactory,
+		MoaCfg:            &moaCfg,
+		MCPDisableSources: mcpSources,
+		ExtraMCPServers:   extraMCPServers,
+		Ctx:               sessionCtx,
+		EnableAskUser:     true,
+		BeforeWrite:       cpStore.Capture,
+		AttachmentScope:   attachScope,
 		OnAsyncJobChange: func(count int) {
 			if s := sess; s != nil {
 				s.runtime.Bus.Publish(bus.SubagentCountChanged{SessionID: s.ID, Count: count})
@@ -725,24 +725,33 @@ func (m *Manager) deleteSession(id string) error {
 	sess.runtime.Close()
 
 	// Delete from disk.
+	// Report every failed removal so callers never claim a conversation was
+	// deleted while its private data remains on disk.
+	var deleteErrs []error
 	if sess.persister != nil {
 		sess.persister.mu.Lock()
 		store := sess.persister.store
 		sess.persister.mu.Unlock()
 		if store != nil {
-			_ = store.Delete(id)
+			if err := store.Delete(id); err != nil && !os.IsNotExist(err) {
+				deleteErrs = append(deleteErrs, err)
+			}
 			// Remove the side directory of persisted subagent transcripts.
-			_ = session.NewSubagentStore(store.Dir(), id).Remove()
+			if err := session.NewSubagentStore(store.Dir(), id).Remove(); err != nil && !os.IsNotExist(err) {
+				deleteErrs = append(deleteErrs, err)
+			}
 		}
 	}
 	m.invalidateSavedCache()
-	_ = removeSessionAttachDir(id)
+	if err := removeSessionAttachDir(id); err != nil && !os.IsNotExist(err) {
+		deleteErrs = append(deleteErrs, err)
+	}
 	if m.attachStore != nil {
 		if err := m.attachStore.ReleaseSession(id); err != nil {
 			slog.Warn("release session attachments", "session", id, "error", err)
 		}
 	}
-	return nil
+	return errors.Join(deleteErrs...)
 }
 
 // drainLifecycleUsers blocks until every in-flight request that may be using
@@ -844,7 +853,6 @@ func (m *Manager) CloseSession(id string) error {
 	admitted := sess.runtime.DoIfQuiescent(func() {
 		sess.closing.Store(true)
 		delete(m.sessions, id)
-		m.deactivateAttentionRuntime(sess)
 		m.resuming[id] = struct{}{}
 	})
 	m.mu.Unlock()
@@ -857,21 +865,28 @@ func (m *Manager) CloseSession(id string) error {
 		m.mu.Unlock()
 	}()
 
+	// Flush before tearing anything down: the final turn must be on disk before
+	// the runtime that holds it goes away. Subagent transcripts are captured the
+	// same way Shutdown does it, before the context cancellation below can kill
+	// a still-live child.
+	if err := sess.runtime.Flush(); err != nil {
+		// Keep the runtime alive: unloading it here would discard the only copy
+		// of a conversation whose final snapshot could not be written.
+		m.mu.Lock()
+		m.sessions[id] = sess
+		sess.closing.Store(false)
+		m.mu.Unlock()
+		return fmt.Errorf("close session: flush: %w", err)
+	}
+	sess.flushLiveSubagentTranscripts()
+
 	// An automation idempotency key must not resolve to a session that is no
 	// longer loaded: the interaction endpoints refuse to resume saved sessions,
 	// so a retry should start a fresh run instead of hitting a dead reference.
 	if m.automation != nil {
 		m.automation.forget(id)
 	}
-
-	// Flush before tearing anything down: the final turn must be on disk before
-	// the runtime that holds it goes away. Subagent transcripts are captured the
-	// same way Shutdown does it, before the context cancellation below can kill
-	// a still-live child.
-	if err := sess.runtime.Flush(); err != nil {
-		slog.Warn("close session: flush", "session", id, "error", err)
-	}
-	sess.flushLiveSubagentTranscripts()
+	m.deactivateAttentionRuntime(sess)
 
 	// Same teardown order as delete — push subscribers first so events drained
 	// during shutdown can't notify for a session that is no longer live, then

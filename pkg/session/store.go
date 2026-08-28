@@ -138,6 +138,16 @@ func (s *FileStore) writeLocked(sess *Session) error {
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("session: rename error: %w", err)
 	}
+	// A power loss after rename can otherwise lose the directory entry even
+	// though the temporary file itself was synced.
+	dir, err := os.Open(s.dir)
+	if err != nil {
+		return fmt.Errorf("session: open directory for sync: %w", err)
+	}
+	defer func() { _ = dir.Close() }()
+	if err := dir.Sync(); err != nil {
+		return fmt.Errorf("session: sync directory: %w", err)
+	}
 	return nil
 }
 

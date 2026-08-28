@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -997,6 +998,30 @@ func TestCloseSession_UnloadsButKeepsSession(t *testing.T) {
 	}
 }
 
+func TestCloseSession_FlushFailureKeepsSessionLoaded(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "unsaved"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeDir := sess.persister.store.Dir()
+	if err := os.Chmod(storeDir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(storeDir, 0700) })
+
+	err = mgr.CloseSession(sess.ID)
+	if err == nil {
+		t.Fatal("CloseSession succeeded after its final flush failed")
+	}
+	if _, ok := mgr.Get(sess.ID); !ok {
+		t.Fatal("CloseSession unloaded the session after its final flush failed")
+	}
+}
+
 // Closing is refused while the session is still working: the teardown cancels
 // the session context, which would kill an in-flight run or the background work
 // (async subagents, bash jobs) whose output the user is waiting for.
@@ -1379,6 +1404,34 @@ func TestDelete_RemovesSavedFile(t *testing.T) {
 	_, _, findErr = session.FindSession(sessionBase, sess.ID)
 	if !errors.Is(findErr, session.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after delete, got %v", findErr)
+	}
+}
+
+func TestDelete_ReturnsPersistedFileRemovalFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "cannot-delete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sess.persister.store.Dir(), sess.ID+".json")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "remaining"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.Delete(sess.ID); err == nil {
+		t.Fatal("Delete succeeded after the persisted session file could not be removed")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("persisted session path was unexpectedly removed: %v", err)
 	}
 }
 
