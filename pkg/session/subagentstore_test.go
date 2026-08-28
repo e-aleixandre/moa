@@ -1,6 +1,8 @@
 package session
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -33,22 +35,59 @@ func TestSubagentStore_SaveLoadRoundTrip(t *testing.T) {
 	if err := s.Save(in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
+	wantJSON, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	gotJSON, err := os.ReadFile(filepath.Join(s.Dir(), "sa-abc.json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !bytes.Equal(gotJSON, wantJSON) {
+		t.Fatalf("sidecar differs from compact Marshal\n got: %s\nwant: %s", gotJSON, wantJSON)
+	}
 
-	got, err := s.Load("sa-abc")
+	got, err := s.Load(in.JobID)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got.JobID != in.JobID || got.Task != in.Task || got.Model != in.Model {
-		t.Fatalf("metadata mismatch: %+v", got)
+	if !reflect.DeepEqual(got, &in) {
+		t.Fatalf("loaded sidecar differs from saved sidecar\n got: %#v\nwant: %#v", got, in)
 	}
-	if got.Status != "completed" || !got.Async || got.CostUSD != 0.0042 {
-		t.Fatalf("fields mismatch: %+v", got)
+}
+
+func TestSubagentStore_LoadIndentedSidecarCompatibility(t *testing.T) {
+	s := NewSubagentStore(t.TempDir(), "sess1")
+	if err := os.MkdirAll(s.Dir(), 0700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
 	}
-	if got.Usage == nil || got.Usage.Input != 100 || got.Usage.Output != 40 {
-		t.Fatalf("usage mismatch: %+v", got.Usage)
+	const oldIndentedSidecar = `{
+  "job_id": "sa-old",
+  "task": "saved before compact JSON",
+  "model": "haiku",
+  "status": "completed",
+  "async": true,
+  "messages": [
+    {
+      "role": "assistant",
+      "content": [{"type": "text", "text": "done"}]
+    }
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(s.Dir(), "sa-old.json"), []byte(oldIndentedSidecar), 0600); err != nil {
+		t.Fatalf("WriteFile old indented sidecar: %v", err)
 	}
-	if len(got.Messages) != 1 || got.Messages[0].Content[0].Text != "hi" {
-		t.Fatalf("messages mismatch: %+v", got.Messages)
+
+	got, err := s.Load("sa-old")
+	if err != nil {
+		t.Fatalf("Load old indented sidecar: %v", err)
+	}
+	want := &SubagentTranscript{
+		JobID: "sa-old", Task: "saved before compact JSON", Model: "haiku", Status: "completed", Async: true,
+		Messages: []core.AgentMessage{{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("done")}}}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("loaded indented sidecar differs\n got: %#v\nwant: %#v", got, want)
 	}
 }
 
