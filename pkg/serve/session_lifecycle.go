@@ -252,6 +252,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			if agentText == "" {
 				return
 			}
+			if discardCancelledNotification(subagentTexts, status, agentText) {
+				return
+			}
 			b := s.runtime.Bus
 
 			if s.runtime.State.Current() == bus.StateRunning {
@@ -342,6 +345,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			}
 			agentText := bootstrap.FormatBashNotification(job.JobID, job.Command, job.Status, job.Output)
 			if agentText == "" {
+				return
+			}
+			if discardCancelledNotification(subagentTexts, job.Status, agentText) {
 				return
 			}
 			b.Publish(bus.BashCompleted{SessionID: s.ID, JobID: job.JobID, OwnerAgentID: job.OwnerAgentID, Command: job.Command, Status: job.Status, Text: agentText})
@@ -566,6 +572,16 @@ func (m *Manager) subscribeAttachmentReleases(sess *ManagedSession) {
 	sess.runtime.Bus.Subscribe(func(e bus.SteersCanceled) {
 		m.releaseAttachmentIDs(e.SessionID, e.AttachmentIDs)
 	})
+}
+
+// discardCancelledNotification removes text that cannot be consumed after its
+// job was cancelled, so the per-session steer filter does not retain it.
+func discardCancelledNotification(texts *sync.Map, status, text string) bool {
+	if status != "cancelled" {
+		return false
+	}
+	texts.Delete(text)
+	return true
 }
 
 // initSubagentSnapshots retains a terminal child while a reconnect snapshot
