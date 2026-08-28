@@ -1059,8 +1059,10 @@ export function handleWsToolEnd(id, data) {
     : (data.is_error ? 'error' : 'done');
 
   const note = extractToolNote(data.result, data.rejected === true);
+  let matched = false;
   const messages = sess.messages.map(m => {
-    if (m._type === 'tool_start' && m.tool_call_id === data.tool_call_id) {
+    if (!matched && m._type === 'tool_start' && m.tool_call_id === data.tool_call_id) {
+      matched = true;
       return {
         ...m,
         status: nextStatus,

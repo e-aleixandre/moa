@@ -1582,6 +1582,17 @@ test('a live event arriving after the snapshot updates the restored row instead 
   expect(after[0].status).toBe('done');
 });
 
+test('tool_end only completes the first matching tool call', () => {
+  setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [
+    { _type: 'tool_start', tool_call_id: 'reused', tool_name: 'read', status: 'running', result: null },
+    { _type: 'tool_start', tool_call_id: 'reused', tool_name: 'read', status: 'running', result: null },
+  ] } } });
+  handleWsToolEnd('s1', { tool_call_id: 'reused', result: 'first result', is_error: false });
+  const rows = store.get().sessions.s1.messages;
+  expect(rows[0]).toMatchObject({ status: 'done', result: 'first result' });
+  expect(rows[1]).toMatchObject({ status: 'running', result: null });
+});
+
 test('handleWsInit without live tools leaves history untouched', async () => {
   seedSession('s1');
   handleWsInit('s1', { messages: [], subagents: [] });
