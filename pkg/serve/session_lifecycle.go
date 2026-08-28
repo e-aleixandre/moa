@@ -514,7 +514,8 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			buildBasePrompt: bs.BuildBasePrompt,
 			UntrustedMCP:    bs.UntrustedMCP,
 		},
-		sharedFiles: shared,
+		sharedFiles:     shared,
+		attachmentScope: attachScope,
 	}
 	// Wire the MCP controller's prompt refresh now that the runtime exists: when
 	// a server is enabled/disabled the tool set changes, so the base system
@@ -677,6 +678,7 @@ func (m *Manager) deleteSession(id string) error {
 	// the in-flight request to return. Taken outside m.mu, as in CloseSession.
 	sess.closing.Store(true)
 	sess.drainLifecycleUsers()
+	sess.attachmentScope.Revoke()
 	// Mark deleted to prevent persistence from resurrecting.
 	if sess.persister != nil {
 		sess.persister.markDeleted()

@@ -72,7 +72,8 @@ type ManagedSession struct {
 
 	// attachMu serializes per-session attachment processing so the on-disk
 	// quota check is atomic against concurrent /send requests.
-	attachMu sync.Mutex
+	attachMu        sync.Mutex
+	attachmentScope *attachment.Scope
 
 	// Mutable under mu.
 	mu            sync.Mutex
