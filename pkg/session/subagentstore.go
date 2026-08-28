@@ -75,7 +75,7 @@ func (s *SubagentStore) Save(t SubagentTranscript) error {
 		return fmt.Errorf("session: subagent write: %w", err)
 	}
 	defer func() { _ = os.Remove(tmp) }()
-	if err := encodeIndentedJSON(f, t); err != nil {
+	if err := encodeCompactJSON(f, t); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("session: subagent marshal: %w", err)
 	}
