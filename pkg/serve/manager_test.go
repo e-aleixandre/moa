@@ -1131,7 +1131,15 @@ func TestCloseSession_RacesSend(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	prov := newMockProvider(simpleResponseHandler("reply"))
+	blockingResponse := func(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	// Keep an accepted send running for the whole assertion. A start barrier only
+	// schedules both callers; with an immediate response the complete turn can
+	// finish before CloseSession establishes its boundary, making both operations
+	// correctly succeed in sequence rather than exercise the lifecycle race.
+	prov := newMockProvider(blockingResponse)
 	mgr := newTestManager(t, ctx, prov)
 
 	sess, err := mgr.CreateSession(CreateOpts{Title: "test"})
@@ -1156,18 +1164,26 @@ func TestCloseSession_RacesSend(t *testing.T) {
 	close(start)
 	wg.Wait()
 
-	// Exactly one of the two outcomes, never a send accepted into a closed
-	// session: a successful send means the close was refused or never applied.
-	if sendErr == nil && closeErr == nil {
+	// Exactly one operation wins: either the send is accepted and the close is
+	// refused while its run remains active, or close removes the runtime before
+	// send can use it.
+	if sendErr == nil {
+		if !errors.Is(closeErr, ErrBusy) {
+			t.Fatalf("send won the race: close got %v, want ErrBusy", closeErr)
+		}
 		if _, ok := mgr.Get(sess.ID); !ok {
 			t.Fatal("send succeeded but the session was closed under it")
 		}
+		return
 	}
-	if sendErr != nil && !errors.Is(sendErr, ErrNotFound) {
-		t.Errorf("send lost the race: got %v, want ErrNotFound", sendErr)
+	if !errors.Is(sendErr, ErrNotFound) {
+		t.Fatalf("send lost the race: got %v, want ErrNotFound", sendErr)
 	}
-	if closeErr != nil && !errors.Is(closeErr, ErrBusy) {
-		t.Errorf("close lost the race: got %v, want ErrBusy", closeErr)
+	if closeErr != nil {
+		t.Fatalf("close won the race: got %v, want nil", closeErr)
+	}
+	if _, ok := mgr.Get(sess.ID); ok {
+		t.Fatal("close succeeded but the session remained loaded")
 	}
 }
 
