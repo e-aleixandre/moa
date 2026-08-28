@@ -3,7 +3,7 @@
 import { triggerAttention, triggerDone, addToast } from './notifications.js';
 import { api, acknowledgeVisibleAttentionThrough } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
-import { finishHistoryHydration } from './history-hydration.js';
+import { canAppendHistoryDelta, finishHistoryHydration } from './history-hydration.js';
 import { newBuffers, applyNestedEvent } from './conversation-reducer.js';
 import { truncateText } from './util/format.js';
 import { attentionArrival } from './attention-arrivals.js';
@@ -560,11 +560,7 @@ export function handleWsInit(id, data) {
     && !(data.bash_jobs || []).some(bj => bj && bj.job_id === viewingBash)
     ? { [viewingBash]: prev.subagents[viewingBash] }
     : null;
-  // A delta token only proves the cached history when it names its durable
-  // tail. Finding it earlier in the array would retain local rows after the
-  // token (for example a compaction marker) that may no longer be on the
-  // server's current branch.
-  const canAppendDelta = !!data.delta_base && prev.messages?.at(-1)?._msg_id === data.delta_base;
+  const canAppendDelta = !!data.delta_base && canAppendHistoryDelta(prev.messages || [], data.delta_base);
   let messages = canAppendDelta
     ? withLiveToolsInPlace(appendNormalizedHistoryDelta(prev.messages, data.messages || [], data.subagents), data.live_tools)
     : withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools);

@@ -489,10 +489,13 @@ function adoptMessageRail(id, { optimisticMsg, msgId, effMsgId, optimisticSteer,
   const already = messages.some((m) => m._msg_id === effMsgId);
   const patch = {};
   if (optimisticMsg) {
-    if (effMsgId === msgId) return;
-    patch.messages = already
-      ? messages.filter((m) => m._msg_id !== msgId)
-      : messages.map((m) => (m._msg_id === msgId ? { ...m, _msg_id: effMsgId } : m));
+    if (effMsgId === msgId) {
+      patch.messages = messages.map((m) => (m === optimisticMsg ? { ...m, _optimistic: false } : m));
+    } else {
+      patch.messages = already
+        ? messages.filter((m) => m._msg_id !== msgId)
+        : messages.map((m) => (m._msg_id === msgId ? { ...m, _msg_id: effMsgId, _optimistic: false } : m));
+    }
   } else {
     const kept = (cur.pendingSteers || []).filter((s) => s !== optimisticSteer);
     patch.pendingSteers = kept.length > 0 ? kept : null;
@@ -583,7 +586,7 @@ export async function sendMessage(id, text, attachments = []) {
     // message under: the authoritative user_message broadcast (which also
     // reaches other tabs and API clients) then dedups against this echo
     // instead of duplicating it.
-    optimisticMsg = { role: 'user', _msg_id: msgId, content };
+    optimisticMsg = { role: 'user', _msg_id: msgId, _optimistic: true, content };
     updateSession(id, {
       messages: [...sess.messages, optimisticMsg],
       state: 'running',
