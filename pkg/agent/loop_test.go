@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -10,6 +11,119 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 )
+
+func TestStreamErrorPersistsPartialTextAndThinking(t *testing.T) {
+	provider := NewMockProvider(func(core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 3)
+		ch <- core.AssistantEvent{Type: core.ProviderEventThinkingDelta, Delta: "valuable reasoning"}
+		ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "valuable partial"}
+		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: errors.New("connection lost")}
+		close(ch)
+		return ch, nil
+	})
+	ag := newTestAgent(provider)
+
+	msgs, err := ag.Run(context.Background(), "start")
+	if err == nil || !strings.Contains(err.Error(), "connection lost") {
+		t.Fatalf("Run error = %v, want connection lost", err)
+	}
+	if len(msgs) != 2 || msgs[1].Role != "assistant" {
+		t.Fatalf("partial stream message was not persisted: %+v", msgs)
+	}
+	got := msgs[1].Content
+	if len(got) != 3 || got[0].Thinking != "valuable reasoning" || got[1].Text != "valuable partial" || got[2].Text != "(stopped: stream: connection lost)" {
+		t.Fatalf("persisted partial stream content = %+v, want thinking, text, and stream error marker", got)
+	}
+}
+
+func TestConsumeStreamReturnsPartialWhenChannelClosesWithoutDone(t *testing.T) {
+	ch := make(chan core.AssistantEvent, 2)
+	ch <- core.AssistantEvent{Type: core.ProviderEventThinkingDelta, Delta: "unfinished reasoning"}
+	ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "unfinished answer"}
+	close(ch)
+
+	msg, err := consumeStream(context.Background(), ch, NewEmitter(nil))
+	if err == nil || !strings.Contains(err.Error(), "without final message") {
+		t.Fatalf("consumeStream error = %v, want missing final message", err)
+	}
+	if msg == nil || len(msg.Content) != 2 || msg.Content[0].Thinking != "unfinished reasoning" || msg.Content[1].Text != "unfinished answer" {
+		t.Fatalf("partial message = %+v, want accumulated thinking and text", msg)
+	}
+}
+
+func TestPartialStreamErrorClosesOpenToolCalls(t *testing.T) {
+	provider := NewMockProvider(func(core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 3)
+		ch <- core.AssistantEvent{Type: core.ProviderEventToolCallStart, ToolCallID: "call_partial", ToolName: "write"}
+		ch <- core.AssistantEvent{Type: core.ProviderEventToolCallDelta, ToolCallID: "call_partial", ToolName: "write", PartialArgs: map[string]any{"path": "draft.txt"}}
+		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: errors.New("connection lost")}
+		close(ch)
+		return ch, nil
+	})
+	ag := newTestAgent(provider)
+
+	msgs, err := ag.Run(context.Background(), "start")
+	if err == nil {
+		t.Fatal("Run returned nil error")
+	}
+	if len(msgs) != 3 || msgs[1].Role != "assistant" || msgs[2].Role != "tool_result" {
+		t.Fatalf("partial tool call was not closed: %+v", msgs)
+	}
+	if calls := extractToolCalls(&msgs[1].Message); len(calls) != 1 || calls[0].ToolCallID != "call_partial" {
+		t.Fatalf("persisted tool calls = %+v, want call_partial", calls)
+	}
+	if msgs[2].ToolCallID != "call_partial" || !msgs[2].IsError {
+		t.Fatalf("synthetic tool result = %+v, want error for call_partial", msgs[2])
+	}
+
+	tree := session.NewTree()
+	for _, msg := range msgs {
+		tree.Append(session.Entry{Type: session.EntryMessage, Message: msg})
+	}
+	tree.Append(session.Entry{
+		Type: session.EntryMessage,
+		Message: core.WrapMessage(core.Message{
+			Role:    "assistant",
+			Content: []core.Content{core.TextContent("balance probe")},
+		}),
+	})
+	if err := tree.ValidBranchTarget(tree.LeafID()); err != nil {
+		t.Fatalf("persisted context has a dangling tool call: %v", err)
+	}
+}
+
+func TestPartialEmptyResponseIsNotRetriedOrDuplicated(t *testing.T) {
+	provider := NewMockProvider(
+		func(core.Request) (<-chan core.AssistantEvent, error) {
+			ch := make(chan core.AssistantEvent, 2)
+			ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "valuable partial"}
+			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: &core.EmptyResponseError{Provider: "mock"}}
+			close(ch)
+			return ch, nil
+		},
+		simpleTextResponse("valuable partial"),
+	)
+	ag := newTestAgent(provider)
+
+	msgs, err := ag.Run(context.Background(), "start")
+	if err == nil {
+		t.Fatal("partial stream failure was retried as a successful empty response")
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1; a response with partial output must not be retried", provider.calls)
+	}
+	occurrences := 0
+	for _, msg := range msgs {
+		for _, content := range msg.Content {
+			if strings.Contains(content.Text, "valuable partial") {
+				occurrences++
+			}
+		}
+	}
+	if occurrences != 1 {
+		t.Fatalf("partial text occurrences = %d, want exactly 1; messages: %+v", occurrences, msgs)
+	}
+}
 
 // TestConsumeStream_CancelledTurnWithLateDoneIsNotSuccess pins M18: when the
 // turn is cancelled but the provider still delivers a complete final message
