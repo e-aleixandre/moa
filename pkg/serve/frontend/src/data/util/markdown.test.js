@@ -97,6 +97,35 @@ test('renderMarkdown reuses the sanitized HTML for identical transcript text', (
   }
 });
 
+test('the cache holds a whole long transcript, so a streaming frame re-renders nothing', () => {
+  // Every streaming frame re-renders the ENTIRE mounted transcript. A cache
+  // smaller than the mounted block count therefore evicts itself once per
+  // frame and degrades to a 0% hit rate — measured at 505 misses per delta and
+  // ~1200ms/frame on 4x-throttled mobile with a 500-turn session. This pins
+  // the invariant that matters: a transcript far longer than anything the
+  // capacity was sized for must still cost zero renders on the second frame.
+  const blocks = Array.from({ length: 600 }, (_, i) => (
+    `## Turn ${i} ${crypto.randomUUID()}\n\n`
+    + 'The transcript keeps this completed response stable while a later response streams.\n\n'
+    + '- the ledger rows fuse with the diff sibling that follows them\n'
+    + '- the hydration anchor is captured before the snapshot swap\n'
+  ));
+  const sanitize = DOMPurify.sanitize;
+  let calls = 0;
+  DOMPurify.sanitize = (html) => {
+    calls++;
+    return html;
+  };
+  try {
+    for (const block of blocks) renderMarkdown(block); // frame 1: cold
+    calls = 0;
+    for (const block of blocks) renderMarkdown(block); // frame 2: must be free
+    expect(calls).toBe(0);
+  } finally {
+    DOMPurify.sanitize = sanitize;
+  }
+});
+
 test('large fenced code skips synchronous highlighting', () => {
   const source = `\`\`\`javascript\n${'const x = 1;\n'.repeat(6000)}\`\`\``;
   const html = parseMarkdown(source);
