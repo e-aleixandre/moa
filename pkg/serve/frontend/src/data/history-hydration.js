@@ -13,6 +13,30 @@ export const HISTORY_DELTA_HYDRATION_GRACE_MS = 1500;
 
 const tailTimers = new Map();
 
+// Terminal subagent outcomes are local projections of the sidecar rather than
+// durable history rows. They may follow a durable message without invalidating
+// a delta whose server suffix will re-send and reconcile that outcome.
+function isTerminalSubagentOutcome(row) {
+  return row?._type === 'tool_start' && row.tool_name === 'subagent'
+    && (row.status === 'done' || row.status === 'error' || row.status === 'cancelled');
+}
+
+// Optimistic user messages have an ID before the POST that makes it durable
+// has completed. Do not offer that provisional ID as a server tree anchor.
+export function lastDurableHistoryAnchor(messages) {
+  for (let index = (messages?.length || 0) - 1; index >= 0; index--) {
+    const row = messages[index];
+    if (row?._msg_id && !row._optimistic) return { id: row._msg_id, index };
+  }
+  return null;
+}
+
+export function canAppendHistoryDelta(messages, deltaBase) {
+  const anchor = lastDurableHistoryAnchor(messages);
+  if (!anchor || anchor.id !== deltaBase) return false;
+  return messages.slice(anchor.index + 1).every(isTerminalSubagentOutcome);
+}
+
 function clearTailTimer(id) {
   const timer = tailTimers.get(id);
   if (timer !== undefined) clearTimeout(timer);

@@ -822,6 +822,7 @@ test('sendMessage adopts the server-minted msg_id when the server re-minted ours
   const messages = store.get().sessions.s1.messages;
   expect(messages.length).toBe(1);
   expect(messages[0]._msg_id).toBe('server-minted-1');
+  expect(messages[0]._optimistic).toBe(false);
 });
 
 test('sendMessage drops its optimistic echo when the broadcast already landed under the effective id', async () => {
@@ -860,6 +861,7 @@ test('sendMessage keeps its own msg_id when the server honored it', async () => 
   sentMsgId = store.get().sessions.s1.messages[0]._msg_id;
   expect(sentMsgId).toBeTruthy();
   expect(sentMsgId.startsWith('c-')).toBe(true);
+  expect(store.get().sessions.s1.messages[0]._optimistic).toBe(false);
 });
 
 test('sendMessage turns its optimistic message into a chip when the server queued it', async () => {

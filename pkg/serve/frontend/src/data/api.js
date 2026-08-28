@@ -25,7 +25,8 @@ import {
 } from './ws-handlers.js';
 import { store, updateSession } from './store.js';
 import {
-  beginHistoryHydration, confirmHistoryHydrationInit, finishHistoryHydration,
+  beginHistoryHydration, canAppendHistoryDelta, confirmHistoryHydrationInit,
+  finishHistoryHydration, lastDurableHistoryAnchor,
 } from './history-hydration.js';
 
 export const REQUEST_HEADERS = Object.freeze({ 'Content-Type': 'application/json', 'X-Moa-Request': '1' });
@@ -236,7 +237,7 @@ function settleAndClose(sessionId, entry) {
 function openWs(sessionId, initialBackoff) {
   pendingTimers.delete(sessionId);
   const cached = store.get().sessions[sessionId]?.messages || [];
-  const cachedBase = cached.at(-1)?._msg_id;
+  const cachedBase = lastDurableHistoryAnchor(cached)?.id;
   // delete() reports whether a full init was forced, consuming the flag.
   const skipDelta = forceFullInit.delete(sessionId);
   const useDeltaResume = !skipDelta && !!cachedBase;
@@ -293,7 +294,7 @@ function openWs(sessionId, initialBackoff) {
       // A server only emits delta_base after validating its tree path, but a
       // client may have evicted or locally rewritten that prefix. Never append
       // a suffix to a different transcript: retry once without a resume token.
-      if (evt.data?.delta_base && store.get().sessions[sessionId]?.messages?.at(-1)?._msg_id !== evt.data.delta_base) {
+      if (evt.data?.delta_base && !canAppendHistoryDelta(store.get().sessions[sessionId]?.messages || [], evt.data.delta_base)) {
         forceFullInit.add(sessionId);
         ws.close();
         return;

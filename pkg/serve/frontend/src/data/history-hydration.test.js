@@ -97,7 +97,7 @@ test('a full-init fallback releases a required catching-up tail immediately', ()
   expect(store.get().sessions.s1.historyTailReady).toBe(true);
 });
 
-test('socket resume token is sent only for a cached durable transcript', () => {
+test('socket resume token uses the last durable row before a terminal subagent card', () => {
   const originalWebSocket = globalThis.WebSocket;
   const originalLocation = globalThis.location;
   class TestWebSocket {
@@ -123,16 +123,54 @@ test('socket resume token is sent only for a cached durable transcript', () => {
     setState({ sessions: { s1: {
       id: 's1', messages: [
         { role: 'user', _msg_id: 'durable-base' },
-        { _type: 'system', text: '✂ Context compacted' },
+        { _type: 'tool_start', tool_call_id: 'subagent-job-1', tool_name: 'subagent', status: 'done', result: 'finished' },
       ], subagents: {},
     } } });
     syncConnections(['s1']);
-    expect(TestWebSocket.instances[2].url).not.toContain('since_msg');
+    expect(TestWebSocket.instances[2].url).toContain('since_msg=durable-base');
+    syncConnections([]);
+
+    setState({ sessions: { s1: {
+      id: 's1', messages: [
+        { role: 'user', _msg_id: 'durable-base' },
+        { role: 'user', _msg_id: 'c-pending', _optimistic: true },
+      ], subagents: {},
+    } } });
+    syncConnections(['s1']);
+    expect(TestWebSocket.instances[3].url).toContain('since_msg=durable-base');
+    syncConnections([]);
+
+    setState({ sessions: { s1: {
+      id: 's1', messages: [{ _type: 'tool_start', tool_call_id: 'subagent-job-1', tool_name: 'subagent', status: 'done' }], subagents: {},
+    } } });
+    syncConnections(['s1']);
+    expect(TestWebSocket.instances[4].url).not.toContain('since_msg');
     syncConnections([]);
   } finally {
     globalThis.WebSocket = originalWebSocket;
     globalThis.location = originalLocation;
   }
+});
+
+test('a delta after a terminal subagent card keeps one reconciled card', () => {
+  const base = { role: 'user', _msg_id: 'durable-base', timestamp: 1, content: [{ type: 'text', text: 'start' }] };
+  const terminal = {
+    _type: 'tool_start', tool_call_id: 'subagent-job-1', subagentJobId: 'job-1', tool_name: 'subagent',
+    args: { task: 'inspect' }, status: 'done', result: 'cached result', finishedAtMs: 2000,
+  };
+  setState({ sessions: { s1: { id: 's1', messages: [base, terminal], subagents: {} } } });
+
+  handleWsInit('s1', {
+    delta_base: 'durable-base',
+    messages: [{ role: 'assistant', msg_id: 'after-base', timestamp: 3, content: [{ type: 'text', text: 'after' }] }],
+    subagents: [],
+    subagent_outcomes: [{ job_id: 'job-1', task: 'inspect', status: 'completed', result: 'authoritative result', finished_at_ms: 2000 }],
+  });
+
+  const messages = store.get().sessions.s1.messages;
+  expect(messages.map(m => m.tool_call_id || m._msg_id)).toEqual(['durable-base', 'subagent-job-1', 'after-base']);
+  expect(messages.filter(m => m.tool_call_id === 'subagent-job-1')).toHaveLength(1);
+  expect(messages[1]).toMatchObject({ result: 'authoritative result', status: 'done' });
 });
 
 test('socket close and init timeout settle hydration', () => {
