@@ -248,7 +248,7 @@ type GetBranchPoints struct{ SessionID string }
 // cancelling), plus terminal children that still own a retained background
 // bash job, including their accumulated transcript. Used to populate the
 // agent tray and reconnect clients mid-run. Bus itself does not know about
-// pkg/subagent — the handler is registered by the frontend (serve/TUI) that
+// pkg/subagent — the handler is registered by the frontend (serve) that
 // owns the *subagent.Jobs handle.
 // Handler returns: []SubagentSnapshot
 type GetSubagents struct{ SessionID string }

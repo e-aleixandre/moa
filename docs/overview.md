@@ -1,6 +1,6 @@
 # Overview
 
-Moa is a coding agent runtime in Go. One core, three interfaces: TUI, web UI, and headless CLI.
+Moa is a coding agent runtime in Go. One core, two interfaces: web UI and headless CLI.
 
 ## What it does
 
@@ -16,8 +16,7 @@ Moa is a coding agent runtime in Go. One core, three interfaces: TUI, web UI, an
 - **Checkpoint / undo**: revert file changes per agent turn
 - **Context compaction**: automatic summarization when context grows large
 - **MCP**: connect external tool servers
-- **Voice input**: in both TUI and web UI
-- **Prompt templates**: reusable prompts from `~/.config/moa/prompts/` or `.moa/prompts/`
+- **Voice input**: in the web UI
 - **AGENTS.md**: project instructions discovered automatically from working directory
 - **Multi-provider**: Anthropic, OpenAI, and xAI Grok, with model aliases for quick switching
 
@@ -29,7 +28,7 @@ Moa is a coding agent runtime in Go. One core, three interfaces: TUI, web UI, an
 4. Tool results go back to the model.
 5. Loop continues until the assistant stops calling tools.
 
-That same loop powers all three interfaces.
+That same loop powers both interfaces.
 
 ## Storage
 
@@ -41,7 +40,6 @@ All state lives under `~/.config/moa/`:
 | `auth.json` | Provider credentials |
 | `sessions/` | Saved sessions |
 | `attachments/v1/` | Image and document bytes referenced by sessions, deduplicated by content |
-| `prompts/` | Global prompt templates |
 | `skills/` | Global skill packs (`<name>/SKILL.md`) |
 | `global/memory/` | Global memory facts (scope: global) |
 | `codebases/<key>/memory/` | Project memory facts, keyed by repository |

@@ -33,7 +33,7 @@ Conditionally registered:
 | Tool | Condition |
 |------|-----------|
 | `web_search` | `brave_api_key` is configured |
-| `ask_user` | TUI or web UI is active (not headless) |
+| `ask_user` | The web UI is active (not headless) |
 | `verify` | always |
 | `load_skill` | At least one skill is discovered in `.moa/skills/` or `~/.config/moa/skills/` |
 
@@ -162,7 +162,7 @@ Override with:
 - `-yolo` flag
 - `path_scope: "unrestricted"` in config
 - `allowed_paths` for specific extra directories
-- `/path add <dir>` at runtime in the TUI
+- `/path add <dir>` at runtime in the web UI
 
 ### Dangerous-command confirmation
 
@@ -197,12 +197,6 @@ calls, output) streams to the UI as it happens:
   and a cancelled child has no result. **Conversation** always opens the full
   child transcript. This card is independent of whether the parent model got
   the text through the normal async notification or through `subagent_wait`.
-- **TUI:** press `Ctrl+G` to pick a subagent and view its transcript in
-  streaming; `Ctrl+G` or `Esc` returns. Its terminal block has the same
-  completed/failed/cancelled outcome semantics. Unlike serve, the TUI
-  keeps child transcripts only for its current process, so it cannot reopen a
-  completed child after switching sessions or restarting.
-
 The parent agent still receives the subagent's final text as the tool result,
 so its own context is unchanged — the streaming view is purely for the user.
 When a child fails and its transcript can be reopened, its failure message

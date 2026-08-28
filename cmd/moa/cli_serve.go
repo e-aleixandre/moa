@@ -216,8 +216,7 @@ var errUsageTokenExpired = errors.New("oauth token expired")
 // newAnthropicUsagePoller builds a plan-usage poller backed by the auth store.
 // It stays inert unless an Anthropic OAuth (Claude subscription) credential is
 // present — a plain API key has no plan usage to report. It reads the token
-// without triggering a refresh (see auth.Store.PeekOAuthToken). Shared by serve
-// and TUI.
+// without triggering a refresh (see auth.Store.PeekOAuthToken).
 func newAnthropicUsagePoller(authStore *auth.Store) *usage.MultiPoller {
 	anthropic := usage.NewPoller(func(context.Context) (string, bool, error) {
 		token, isOAuth, valid := authStore.PeekOAuthToken("anthropic")

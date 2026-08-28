@@ -164,7 +164,7 @@ func cmdClear(m *Manager, sess *ManagedSession, _ []string) (*CommandResult, err
 	}
 	// "clear context" must not destroy data: start a fresh session and leave the
 	// previous one intact on disk (recoverable from the session list), matching
-	// the TUI. The frontend switches the tile to NewSessionID.
+	// The frontend switches the tile to NewSessionID.
 	newSess, err := m.CreateSession(CreateOpts{CWD: sess.CWD})
 	if err != nil {
 		return &CommandResult{OK: false, Message: "could not start a new conversation: " + err.Error()}, nil
@@ -464,7 +464,7 @@ func cmdUndo(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, erro
 	return &CommandResult{OK: true, Message: "⏪ Undo: reverted file edits from the last turn (bash/MCP/subagent changes are not tracked)"}, nil
 }
 
-// cmdVerify runs the project's verification checks, mirroring the TUI's
+// cmdVerify runs the project's verification checks, mirroring the
 // manual /verify command. It reuses the core verify.Execute entry point and
 // publishes AutoVerify events so the web frontend paints the running spinner.
 func cmdVerify(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
@@ -482,7 +482,7 @@ func cmdVerify(_ *Manager, sess *ManagedSession, args []string) (*CommandResult,
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
 
-	// Serialize: unlike the single-threaded TUI, two concurrent web POSTs can
+	// Serialize: two concurrent web POSTs can
 	// reach here at once. Reject the second so their AutoVerify events don't
 	// interleave and their verify processes don't clobber each other.
 	if !sess.verifyRunning.CompareAndSwap(false, true) {

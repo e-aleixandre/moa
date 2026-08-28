@@ -328,7 +328,7 @@ func ownItem(it core.SteerItem) core.SteerItem {
 }
 
 // Agent runs the core loop: prompt → LLM → tool calls → execute → repeat.
-// It's a library — no I/O, no TUI, no filesystem opinions.
+// It's a library — no I/O, no UI, no filesystem opinions.
 type Agent struct {
 	config  AgentConfig
 	state   AgentState
@@ -856,7 +856,7 @@ func (a *Agent) LoadState(msgs []core.AgentMessage, compactionEpoch int) error {
 }
 
 // AppendMessage appends a non-LLM message to the current conversation state.
-// Used by the TUI to persist timeline events before the next user turn.
+// Used to persist timeline events before the next user turn.
 func (a *Agent) AppendMessage(msg core.AgentMessage) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

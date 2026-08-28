@@ -107,7 +107,7 @@ const (
 )
 
 // OriginUser is the implicit origin of a session created by a human through
-// the TUI or the web client. Sessions persisted before origins existed carry no
+// the web client. Sessions persisted before origins existed carry no
 // key and are treated as user-originated.
 const OriginUser = "user"
 
@@ -208,7 +208,7 @@ func (s *Session) CompactAtMeta() int {
 // SetRuntimeMetadata persists the core session configuration (model, cwd,
 // permission mode, thinking level) into Metadata. Called on every state
 // change and at session creation. Centralizes what gets persisted so all
-// frontends (TUI, serve, headless CLI) stay consistent.
+// frontends (serve, headless CLI) stay consistent.
 func (s *Session) SetRuntimeMetadata(model, cwd, permissionMode, thinking string) {
 	if s.Metadata == nil {
 		s.Metadata = make(map[string]any)

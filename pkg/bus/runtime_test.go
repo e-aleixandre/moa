@@ -549,7 +549,7 @@ func TestWaitSettled_TimesOutWhileRunning(t *testing.T) {
 	}
 }
 
-// fileSessionPersister is a TUI-shaped persister backed by real session JSON.
+// fileSessionPersister is a rebinding persister backed by real session JSON.
 // It lets the switching regression test verify disk state, not merely a fake
 // Snapshot call's arguments.
 type fileSessionPersister struct {

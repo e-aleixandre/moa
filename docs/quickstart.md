@@ -90,7 +90,7 @@ uses a shared public Grok Build client and a private consumer proxy, so it is
 best-effort rather than a promised public xAI API integration. If both are set,
 `XAI_API_KEY` takes precedence over the stored xAI OAuth login.
 
-For voice input (TUI and web UI):
+For voice input (web UI):
 
 ```bash
 moa --login openai-transcribe
@@ -105,9 +105,6 @@ moa --logout anthropic
 ## Use it
 
 ```bash
-# Interactive TUI
-moa
-
 # One-shot
 moa -p "refactor the handler to use middleware"
 moa -p @prompt.md
@@ -117,17 +114,8 @@ moa serve
 # → http://127.0.0.1:8080
 ```
 
-## Resume sessions
-
-```bash
-moa --continue       # latest session
-moa --resume         # session browser
-moa --resume <id>    # specific session
-```
-
 ## Next
 
 - [CLI Reference](./cli.md) — all flags and model aliases
-- [TUI Usage](./tui.md) — slash commands, keybindings, plan mode
 - [Web UI](./serve.md) — `moa serve` features
 - [Configuration](./configuration.md) — config files and options

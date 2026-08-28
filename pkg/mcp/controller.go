@@ -9,7 +9,7 @@ import (
 )
 
 // Controller coordinates one session's MCP manager, its tool registry, and the
-// disable policy, so neither the web nor the TUI frontend has to orchestrate
+// disable policy, so the web frontend does not have to orchestrate
 // process + registry + prompt by hand. It is the single place that:
 //
 //   - resolves the desired enabled/disabled set from the policy;
@@ -261,7 +261,7 @@ func (c *Controller) SessionDisabled() []string {
 
 // SetSessionDisabled replaces the SESSION-scope veto set wholesale (global and
 // project scopes are untouched). It does not reconcile; the caller reconciles at
-// quiescence. Used by single-controller frontends (the TUI) to swap the
+// quiescence. Used by single-controller frontends to swap the
 // process-memory session scope when the active conversation changes.
 func (c *Controller) SetSessionDisabled(names []string) {
 	c.mu.Lock()

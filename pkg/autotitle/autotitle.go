@@ -1,6 +1,6 @@
 // Package autotitle generates short, human-readable session titles from a
-// conversation using a cheap LLM call. It is shared by all frontends (TUI,
-// serve) so the auto-titling behavior stays identical across them.
+// conversation using a cheap LLM call. It is shared by all frontends so the
+// auto-titling behavior stays identical across them.
 package autotitle
 
 import (

@@ -1,4 +1,4 @@
-// Package bus provides a typed event bus for decoupling agent, TUI, and serve layers.
+// Package bus provides a typed event bus for decoupling the agent and serve layers.
 //
 // Events are fire-and-forget (async fan-out to subscribers).
 // Commands are synchronous request→response (one handler per type).
@@ -684,7 +684,7 @@ type AutoVerifyEnded struct {
 // isLossyEvent reports whether an event may be dropped under backpressure.
 // Only high-frequency streaming deltas are lossy; every other event is
 // structural and MUST be delivered — dropping one (e.g. a StateChanged) can
-// leave a UI wedged in "running". Mirrors the TUI's isStructuralBusEvent.
+// leave a UI wedged in "running".
 func isLossyEvent(event any) bool {
 	if se, ok := event.(SubagentEvent); ok {
 		return isLossyEvent(se.Inner)

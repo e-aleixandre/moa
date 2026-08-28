@@ -419,7 +419,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// ResumeSession (SyncPlanMode) — call SetSystemPrompt("") and strip the agent
 	// down to no system prompt at all. That left resumed serve sessions (i.e. any
 	// session after a reconnect/redeploy) running with an empty prompt, which is
-	// exactly why models behaved erratically and stalled. TUI never wiped it.
+	// exactly why models behaved erratically and stalled.
 	rcfg.SteerFilter = func(text string) bool {
 		_, was := subagentTexts.LoadAndDelete(text)
 		return !was

@@ -7,7 +7,6 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/core"
-	"github.com/e-aleixandre/moa/pkg/prompt"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/skill"
 )
@@ -34,21 +33,6 @@ func TestMoaConfigDirMovesEveryStore(t *testing.T) {
 		found := skill.Discover(t.TempDir())
 		if len(found) != 1 || found[0].Name != "instance-b-only" {
 			t.Fatalf("skills should come from MOA_CONFIG_DIR, got %+v", found)
-		}
-	})
-
-	t.Run("prompts", func(t *testing.T) {
-		promptDir := filepath.Join(dir, "prompts")
-		if err := os.MkdirAll(promptDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(promptDir, "instance-b.md"), []byte("hello"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		found := prompt.Discover(t.TempDir())
-		if len(found) != 1 || found[0].Name != "instance-b" {
-			t.Fatalf("prompts should come from MOA_CONFIG_DIR, got %+v", found)
 		}
 	})
 

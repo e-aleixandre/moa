@@ -82,7 +82,7 @@ func firstCellTokens(t *testing.T, rows [][]string) []string {
 //   - checkpoint: an internal overlay tool, visible only during the
 //     pre-compaction turn (agent.SendPrepareCompact).
 //   - submit_plan / request_review: registered and unregistered dynamically by
-//     plan mode, documented in docs/tui.md's plan-mode section instead.
+//     plan mode.
 var knownUnregisterable = map[string]bool{
 	"checkpoint":     true,
 	"submit_plan":    true,
@@ -251,92 +251,7 @@ func jsonTagSet(typ reflect.Type) map[string]bool {
 	return out
 }
 
-// --- 4. Slash commands ------------------------------------------------------
-
-// The palette (allCommands) and the dispatcher (handleCommand) are two
-// different key sets and both are checked: the palette lists one canonical name
-// per action, while the dispatcher is where aliases live (`case "exit",
-// "quit":`). Comparing only the palette let a new, undocumented alias through —
-// it appears in neither set the test looked at.
-//
-// A palette command needs a row of its own; an alias only needs to be mentioned
-// somewhere in the table (docs/tui.md writes them in the description cell, as
-// in "(alias `/back`)"), so the alias check scans every cell.
-func TestSlashCommandsDocumented(t *testing.T) {
-	root := repoRoot(t)
-	content := doc(t, root, "docs/tui.md")
-
-	names, err := GoStructSliceField(filepath.Join(root, "pkg/tui/cmdpalette.go"), "allCommands", "Name")
-	if err != nil {
-		t.Fatalf("parse pkg/tui/cmdpalette.go: %v", err)
-	}
-	palette := SetOf(names)
-
-	dispatched, err := GoDispatchedCommandNames(
-		filepath.Join(root, "pkg/tui/app_commands.go"), "handleCommand", "cmd")
-	if err != nil {
-		t.Fatalf("parse pkg/tui/app_commands.go: %v", err)
-	}
-	accepted := SetOf(dispatched)
-
-	rows, err := TablesInSection(content, "## Slash commands")
-	if err != nil {
-		t.Fatalf("docs/tui.md: %v", err)
-	}
-	// documented: commands with their own row. mentioned: every /token in the
-	// table, description cells included.
-	documented := make(map[string]bool)
-	mentioned := make(map[string]bool)
-	for _, row := range rows {
-		for i, cell := range row {
-			for _, tok := range AllBacktickTokens(cell) {
-				if !strings.HasPrefix(tok, "/") {
-					continue
-				}
-				// Cells look like "/goal <objective> [flags]|stop|status".
-				name, _, _ := strings.Cut(strings.TrimPrefix(tok, "/"), " ")
-				mentioned[name] = true
-				if i == 0 {
-					documented[name] = true
-				}
-			}
-		}
-	}
-
-	var missing, undocumentedAlias, unexpected []string
-	for name := range palette {
-		if !documented[name] {
-			missing = append(missing, "/"+name)
-		}
-	}
-	for name := range accepted {
-		if !mentioned[name] {
-			undocumentedAlias = append(undocumentedAlias, "/"+name)
-		}
-	}
-	for name := range documented {
-		if !accepted[name] {
-			unexpected = append(unexpected, "/"+name)
-		}
-	}
-	sort.Strings(missing)
-	sort.Strings(undocumentedAlias)
-	sort.Strings(unexpected)
-	if len(missing) > 0 {
-		t.Errorf("slash commands: in allCommands but without a row in docs/tui.md (## Slash commands): %s",
-			strings.Join(missing, ", "))
-	}
-	if len(undocumentedAlias) > 0 {
-		t.Errorf("slash commands: accepted by handleCommand but never mentioned in docs/tui.md (## Slash commands); give it a row, or mention it as an alias in the description of the command it aliases: %s",
-			strings.Join(undocumentedAlias, ", "))
-	}
-	if len(unexpected) > 0 {
-		t.Errorf("slash commands: documented in docs/tui.md but not accepted by handleCommand (remove or rename): %s",
-			strings.Join(unexpected, ", "))
-	}
-}
-
-// --- 5. Model aliases -------------------------------------------------------
+// --- 4. Model aliases -------------------------------------------------------
 
 func TestModelAliasesDocumented(t *testing.T) {
 	root := repoRoot(t)

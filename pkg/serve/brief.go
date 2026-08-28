@@ -31,9 +31,8 @@ const briefCooldown = 10 * time.Second
 // minutes old.
 //
 // This feature is web/Pulse-only by design: a per-session summary serves
-// multi-session views (the web dashboard and Pulse voice), while the TUI works
-// inside one live session where that summary is redundant. The shared logic is
-// kept in pkg/pulsebrief should a future TUI multi-session view need it.
+// multi-session views (the web dashboard and Pulse voice). The shared logic is
+// kept in pkg/pulsebrief so another multi-session view could reuse it.
 func (m *Manager) subscribeSessionBrief(sess *ManagedSession) {
 	if m.providerFactory == nil || !sess.sessionBriefEnabled {
 		return

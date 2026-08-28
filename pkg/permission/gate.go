@@ -1,5 +1,5 @@
 // Package permission mediates tool execution approvals between the agent
-// loop and the TUI. Three modes: yolo (auto-approve all), ask (auto-approve
+// loop and the frontend. Three modes: yolo (auto-approve all), ask (auto-approve
 // reads, confirm writes), auto (AI decides, with user-provided rules).
 package permission
 
@@ -57,7 +57,7 @@ func PopApprovedFeedback(args map[string]any) string {
 	return strings.TrimSpace(s)
 }
 
-// Gate mediates tool permissions. Created once, shared between agent and TUI.
+// Gate mediates tool permissions. Created once, shared between agent and frontend.
 type Gate struct {
 	mu        sync.RWMutex
 	mode      Mode

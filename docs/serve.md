@@ -16,7 +16,7 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Plan mode, subagents, MCP
 - Model and thinking reconfiguration per session, with pinned-model shortcuts and provider drill-down
 - Queue commands and messages while the agent is working (strict send order)
-- Per-session cost readout (main run + subagents), matching the TUI
+- Per-session cost readout (main run + subagents)
 - Account plan-usage panel when a supported subscription OAuth login is active
 - Rename (`/rename <title>`) and delete sessions from the overview
 - Group the mobile drawer and desktop session spine by recency or folder; the choice is saved locally
@@ -146,7 +146,7 @@ What staging does provide is narrower: the value never passes through chat
 input, is never persisted in your message, and Moa itself never sends it to the
 model — only the directory path and aliases.
 
-In the web or terminal UI, use `/secret alias1 alias2` to enter a masked value
+In the web UI, use `/secret alias1 alias2` to enter a masked value
 for each alias, or `/secret` to add aliases one at a time. Type **only names,
 never values**, after `/secret`: values are deliberately not accepted on that
 command line, and the command takes at most three aliases so a pasted value is

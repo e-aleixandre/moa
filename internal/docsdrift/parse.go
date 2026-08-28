@@ -7,8 +7,8 @@
 // compared — only membership.
 //
 // Several of the code-side key sets live in unexported identifiers (the CLI
-// flag set is built inline in main(), modelAliases and allCommands are package
-// private). Rather than exporting them just to be testable, the helpers below
+// flag set is built inline in main(), modelAliases is package private).
+// Rather than exporting them just to be testable, the helpers below
 // read the source with go/ast. That keeps production code untouched and the
 // coupling confined to this package.
 package docsdrift
@@ -197,26 +197,6 @@ func BacktickToken(cell string) string {
 	return rest[:end]
 }
 
-// AllBacktickTokens returns the text inside every pair of backticks in cell.
-// Used where a token may appear anywhere in the row (an alias mentioned in a
-// description, e.g. "Quit (alias `/quit`)"), not only as the row's key.
-func AllBacktickTokens(cell string) []string {
-	var out []string
-	for {
-		start := strings.Index(cell, "`")
-		if start < 0 {
-			return out
-		}
-		rest := cell[start+1:]
-		end := strings.Index(rest, "`")
-		if end < 0 {
-			return out
-		}
-		out = append(out, rest[:end])
-		cell = rest[end+1:]
-	}
-}
-
 // flagNameArg maps every flag-registering method of flag/flag.FlagSet to the
 // index of its flag-name argument. The plain forms (String, Bool, …) take the
 // name first; the *Var forms take the destination pointer first, so their name
@@ -308,84 +288,6 @@ func GoFlagNames(path, receiver string) ([]string, error) {
 	return names, nil
 }
 
-// GoDispatchedCommandNames extracts the command names a dispatcher function
-// accepts: the string literals it compares the command variable against. It
-// recognises the three shapes used by pkg/tui's handleCommand —
-//
-//	switch cmd { case "branch", "back": … }
-//	cmd == "prompt" / strings.HasPrefix(cmd, "prompt ")
-//	cutCommand(cmd, "compact")
-//
-// — which is where aliases actually live: allCommands lists one canonical name
-// per action, so an alias added to the dispatcher alone would never show up in
-// a palette-only comparison.
-//
-// Known limitation: only comparisons against a literal, inside the named
-// function, and against the named variable are seen. A command routed through
-// a helper, a table or a computed name is invisible here; the test would then
-// under-report rather than mis-report.
-func GoDispatchedCommandNames(path, funcName, cmdVar string) ([]string, error) {
-	file, _, err := parseGoFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var body *ast.BlockStmt
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Name.Name == funcName && fn.Body != nil {
-			body = fn.Body
-			break
-		}
-	}
-	if body == nil {
-		return nil, fmt.Errorf("func %s not found in %s", funcName, path)
-	}
-
-	isCmdVar := func(e ast.Expr) bool {
-		id, ok := e.(*ast.Ident)
-		return ok && id.Name == cmdVar
-	}
-	var names []string
-	add := func(e ast.Expr) {
-		if s, ok := stringLit(e); ok {
-			// "prompt " (prefix match with an argument) and "prompt" name the
-			// same command.
-			names = append(names, strings.TrimSpace(s))
-		}
-	}
-	ast.Inspect(body, func(n ast.Node) bool {
-		switch node := n.(type) {
-		case *ast.SwitchStmt:
-			if !isCmdVar(node.Tag) {
-				return true
-			}
-			for _, stmt := range node.Body.List {
-				cc, ok := stmt.(*ast.CaseClause)
-				if !ok {
-					continue
-				}
-				for _, expr := range cc.List {
-					add(expr)
-				}
-			}
-		case *ast.BinaryExpr:
-			if node.Op == token.EQL && isCmdVar(node.X) {
-				add(node.Y)
-			}
-		case *ast.CallExpr:
-			// strings.HasPrefix(cmd, "x ") and cutCommand(cmd, "x").
-			if len(node.Args) == 2 && isCmdVar(node.Args[0]) {
-				add(node.Args[1])
-			}
-		}
-		return true
-	})
-	if len(names) == 0 {
-		return nil, fmt.Errorf("no %s comparisons found in %s.%s", cmdVar, path, funcName)
-	}
-	return names, nil
-}
-
 // GoStringMap extracts a package-level `var name = map[string]string{…}`
 // literal with constant keys and values. An entry that is not a
 // literal-to-literal pair is an error rather than a skip: silently dropping it
@@ -416,53 +318,6 @@ func GoStringMap(path, name string) (map[string]string, error) {
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("map %s in %s has no constant entries", name, path)
-	}
-	return out, nil
-}
-
-// GoStructSliceField extracts one string field from every element of a
-// package-level `var name = []T{{Field: "…"}, …}` slice literal. Every element
-// must carry the field as a string literal: an element the extractor cannot
-// read is an element whose documentation cannot be checked, so it fails loudly
-// instead of shrinking the set under comparison.
-func GoStructSliceField(path, name, field string) ([]string, error) {
-	lit, fset, err := varCompositeLit(path, name)
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, elt := range lit.Elts {
-		el, ok := elt.(*ast.CompositeLit)
-		if !ok {
-			return nil, fmt.Errorf("%s: element of slice %s is not a struct literal; the docs-drift test cannot read it",
-				fset.Position(elt.Pos()), name)
-		}
-		found := false
-		for _, f := range el.Elts {
-			kv, ok := f.(*ast.KeyValueExpr)
-			if !ok {
-				return nil, fmt.Errorf("%s: element of slice %s uses positional fields; the docs-drift test needs %s: \"…\"",
-					fset.Position(f.Pos()), name, field)
-			}
-			key, ok := kv.Key.(*ast.Ident)
-			if !ok || key.Name != field {
-				continue
-			}
-			s, ok := stringLit(kv.Value)
-			if !ok {
-				return nil, fmt.Errorf("%s: field %s of a %s element is not a string literal; the docs-drift test cannot read it",
-					fset.Position(kv.Value.Pos()), field, name)
-			}
-			out = append(out, s)
-			found = true
-		}
-		if !found {
-			return nil, fmt.Errorf("%s: element of slice %s has no %s field; the docs-drift test cannot identify it",
-				fset.Position(elt.Pos()), name, field)
-		}
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("slice %s in %s has no %s values", name, path, field)
 	}
 	return out, nil
 }

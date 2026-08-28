@@ -1052,7 +1052,7 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 // handleCancelSteers drops all steer messages still queued (not yet delivered)
 // for a session's agent. The web client calls this when the user pulls queued
 // messages back into the input to edit them, so the agent doesn't also deliver
-// the originals (double-delivery). Mirrors the TUI's Alt+Up dequeue.
+// the originals (double-delivery).
 func handleCancelSteers(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := mgr.Get(r.PathValue("id"))

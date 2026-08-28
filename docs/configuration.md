@@ -107,13 +107,13 @@ global config and a project's jargon in its `.moa/config.json`:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `pinned_models` | []string | Models shown as shortcuts in the web/TUI selectors and used for `Ctrl+P` cycling. **Global-only.** |
+| `pinned_models` | []string | Models shown as shortcuts in the web selector. **Global-only.** |
 | `plan_review_model` | string | Model for plan review (default: current model) |
 | `plan_review_thinking` | string | Thinking level for plan review (default: `low`) |
 | `code_review_model` | string | Model for code review |
 | `code_review_thinking` | string | Thinking level for code review |
 | `auto_title_model` | string | Model for automatic session titles: `auto` (default), `off`, or a valid model spec/alias. Auto may send a snippet of **any session’s transcript** — not only sessions already on that vendor — to the selected available auxiliary provider: OpenAI Luna when normal OpenAI completion credentials exist, otherwise Anthropic Haiku. Thus an Anthropic/xAI session can be sent to OpenAI, or an OpenAI/xAI session to Anthropic when Haiku is the fallback. Privacy-sensitive users should choose an explicit same-provider model or `off`. |
-| `session_brief_model` | string | Model for web/Pulse session status briefs: `auto` (default), `off`, or a valid model spec/alias. Auto has the same cross-provider behavior as titles: a snippet of any session transcript can be sent to Luna, or to Haiku when it is the available fallback. Choose an explicit same-provider model or `off` when that is not acceptable. Briefs are not shown in the single-session TUI. |
+| `session_brief_model` | string | Model for web/Pulse session status briefs: `auto` (default), `off`, or a valid model spec/alias. Auto has the same cross-provider behavior as titles: a snippet of any session transcript can be sent to Luna, or to Haiku when it is the available fallback. Choose an explicit same-provider model or `off` when that is not acceptable. |
 
 The xAI models are `grok-4.6` (also available as `grok`) and `grok-4.5`. Their
 supported thinking levels are `low`, `medium`, and `high`. A provider-qualified
@@ -182,7 +182,6 @@ Project-specific files live in `<cwd>/.moa/`:
 | `config.json` | Project config (merged with global) |
 | `verify.json` | Verification commands for the `verify` tool |
 | `tools/*.json` | Custom [script tools](./tools.md#custom-script-tools) |
-| `prompts/` | Project prompt templates (override global `~/.config/moa/prompts/`) |
 
 ## Your project state
 

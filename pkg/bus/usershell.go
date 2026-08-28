@@ -10,7 +10,7 @@ import (
 )
 
 // UserShellTimeout bounds how long a "!" / "!!" shell escape may run before
-// being killed. Shared by TUI and web so behaviour matches.
+// being killed.
 const UserShellTimeout = 5 * time.Minute
 
 // UserShellMaxOutput caps captured shell-escape output (head+tail, combined
@@ -50,7 +50,7 @@ type UserShellResult struct {
 
 // UserShellExecuted is published after a "!" / "!!" shell escape completes
 // and its output has been delivered (or an attempt was made to deliver it).
-// Both TUI and web frontends can render from this single event.
+// Frontends render from this single event.
 type UserShellExecuted struct {
 	SessionID string
 	Command   string
