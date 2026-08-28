@@ -54,6 +54,10 @@ func rebuildSystemPrompt(sctx *SessionContext) {
 // RegisterHandlers registers command and query handlers for a session on its bus.
 // Call once after creating a SessionContext.
 func RegisterHandlers(sctx *SessionContext) {
+	registerHandlers(sctx, func(fn func()) { go fn() })
+}
+
+func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 	b := sctx.Bus
 
 	// Serializes manual /verify runs (bus command and queued barrier share it).
@@ -1584,16 +1588,22 @@ func RegisterHandlers(sctx *SessionContext) {
 		startRunGen := e.RunGen
 		sctx.beginAutoVerify()
 
-		go func() {
+		ctx, cancel := context.WithTimeout(sctx.SessionCtx, 5*time.Minute)
+		// Register before launching so a new user turn cannot miss the cancel
+		// function while this goroutine is waiting to be scheduled.
+		autoVerifyCancel.Store(&cancel)
+
+		launchAutoVerify(func() {
 			defer sctx.endAutoVerify()
+			defer cancel()
+			defer autoVerifyCancel.CompareAndSwap(&cancel, nil)
 			sctx.Bus.Publish(AutoVerifyStarted{SessionID: sctx.SessionID})
 
-			ctx, cancel := context.WithTimeout(sctx.SessionCtx, 5*time.Minute)
-			defer cancel()
-
-			// Store cancel so new user runs can abort this verify.
-			autoVerifyCancel.Store(&cancel)
-			defer autoVerifyCancel.CompareAndSwap(&cancel, nil)
+			// Do not touch the workspace if cancellation or a newer run won before
+			// this goroutine reached the verifier.
+			if ctx.Err() != nil || sctx.RunGenAtomic.Load() != startRunGen {
+				return
+			}
 
 			result, err := verify.Execute(ctx, sctx.CWD)
 
@@ -1632,7 +1642,7 @@ func RegisterHandlers(sctx *SessionContext) {
 					})
 				}
 			}
-		}()
+		})
 	})
 
 	// --- Goal driver ---
