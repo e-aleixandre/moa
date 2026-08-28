@@ -767,7 +767,11 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		conversationKey:        conversationKey,
 		version:                release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
 	}
-	m.automation = newAutomationIndex(cfg.SessionBaseDir)
+	// Read the persisted roster once for all startup consumers. The automation
+	// index requires the read error to preserve its fail-closed behavior; the
+	// attachment reconciler likewise only runs after a complete roster read.
+	summaries, summariesErr := m.loadSavedSessions()
+	m.automation = newAutomationIndexFromSummaries(cfg.SessionBaseDir, summaries, summariesErr)
 	if cfg.UpdateCheckEnabled && cfg.UpdateChecker != nil {
 		go func() {
 			check := func() {
@@ -803,8 +807,8 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	m.secretReaperDone = secrets.StartReaper(reaperCtx)
 	if m.attachStore != nil {
 		live := make(map[string]bool)
-		if summaries, err := session.ListAll(m.sessionBaseDir); err != nil {
-			slog.Warn("attachment startup reconcile: list sessions", "error", err)
+		if summariesErr != nil {
+			slog.Warn("attachment startup reconcile: list sessions", "error", summariesErr)
 		} else {
 			for _, summary := range summaries {
 				live[summary.ID] = true
@@ -1110,15 +1114,23 @@ func (m *Manager) List() []SessionInfo {
 
 // cachedSavedSessions returns saved sessions from disk, using a TTL cache.
 func (m *Manager) cachedSavedSessions() []session.Summary {
+	saved, _ := m.loadSavedSessions()
+	return saved
+}
+
+// loadSavedSessions returns saved sessions from disk, using the same TTL cache
+// as List. It retains List's best-effort error handling while allowing startup
+// consumers that need it to distinguish a complete roster from a partial one.
+func (m *Manager) loadSavedSessions() ([]session.Summary, error) {
 	m.savedCacheMu.Lock()
 	defer m.savedCacheMu.Unlock()
 	if m.savedCache != nil && time.Since(m.savedCacheAt) < m.savedCacheTTL {
-		return m.savedCache
+		return m.savedCache, nil
 	}
-	saved, _ := session.ListAll(m.sessionBaseDir)
+	saved, err := listAllSessions(m.sessionBaseDir)
 	m.savedCache = saved
 	m.savedCacheAt = time.Now()
-	return saved
+	return saved, err
 }
 
 // invalidateSavedCache forces the next List() call to re-scan disk.

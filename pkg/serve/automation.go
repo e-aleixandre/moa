@@ -29,6 +29,9 @@ const automationOriginDefault = "automation"
 // rejected rather than turned into a session.
 const maxAutomationPromptBytes = 256 << 10
 
+// listAllSessions is indirect so startup roster reads can be counted in tests.
+var listAllSessions = session.ListAll
+
 // Per-field byte limits. The body as a whole is already capped, but a single
 // oversized field is still harmful on its own: a 1 MiB title pollutes every
 // session list, and the other fields are identifiers, not payloads.
@@ -264,12 +267,25 @@ func newAutomationIndex(baseDir string) *automationIndex {
 	return idx
 }
 
+// newAutomationIndexFromSummaries initializes the index from a just-completed
+// roster read. Startup consumers share that read so each one sees the same
+// point-in-time metadata without decoding every session again.
+func newAutomationIndexFromSummaries(baseDir string, summaries []session.Summary, err error) *automationIndex {
+	idx := &automationIndex{baseDir: baseDir, keys: make(map[string]string)}
+	idx.load(summaries)
+	idx.ready = err == nil
+	if err != nil {
+		slog.Warn("automation idempotency index unavailable", "error", err)
+	}
+	return idx
+}
+
 // rebuild reloads the key→session map from persisted metadata. Partial results
 // are kept even when ListAll also reports an error (one unreadable project
 // store must not erase the keys of the others), but the index is only marked
 // ready on a clean pass.
 func (a *automationIndex) rebuild() error {
-	summaries, err := session.ListAll(a.baseDir)
+	summaries, err := listAllSessions(a.baseDir)
 	a.load(summaries)
 	a.mu.Lock()
 	a.ready = err == nil

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/attention"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -274,6 +275,60 @@ func TestCreateSessionKeepsSavedCache(t *testing.T) {
 	defer mgr.savedCacheMu.Unlock()
 	if !reflect.DeepEqual(mgr.savedCache, marker) {
 		t.Fatalf("active create invalidated saved cache: got %#v, want %#v", mgr.savedCache, marker)
+	}
+}
+
+func TestManagerStartupSharesRosterRead(t *testing.T) {
+	baseDir := t.TempDir()
+	store, err := session.NewFileStore(baseDir, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := store.Create()
+	saved.Metadata[session.MetaIdempotencyKey] = "startup-key"
+	if err := store.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+
+	attachments, err := attachment.New(filepath.Join(filepath.Dir(baseDir), "attachments", "v1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := attachments.PutRef(saved.ID, []byte("attachment"), attachment.PutMeta{Name: "startup.txt", Mime: "text/plain", Kind: "document"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	originalListAll := listAllSessions
+	var reads atomic.Int32
+	listAllSessions = func(dir string) ([]session.Summary, error) {
+		reads.Add(1)
+		return originalListAll(dir)
+	}
+	t.Cleanup(func() { listAllSessions = originalListAll })
+
+	mgr := NewManager(context.Background(), ManagerConfig{
+		DefaultModel:   core.Model{ID: "test", Provider: "test"},
+		WorkspaceRoot:  t.TempDir(),
+		SessionBaseDir: baseDir,
+		SchedulePath:   filepath.Join(t.TempDir(), "schedules.json"),
+	})
+	t.Cleanup(mgr.Shutdown)
+
+	if got := reads.Load(); got != 1 {
+		t.Fatalf("startup roster reads = %d, want 1", got)
+	}
+	if id, ok := mgr.automation.lookup("startup-key"); !ok || id != saved.ID {
+		t.Fatalf("automation index lookup = %q, %v; want %q, true", id, ok, saved.ID)
+	}
+	if _, ok := mgr.attachStore.Lookup(saved.ID, descriptor.ID); !ok {
+		t.Fatal("attachment reconciliation removed a live session attachment")
+	}
+	if got := len(mgr.List()); got != 1 {
+		t.Fatalf("saved sessions in List = %d, want 1", got)
+	}
+	if got := reads.Load(); got != 1 {
+		t.Fatalf("List triggered an extra startup roster read: got %d, want 1", got)
 	}
 }
 
