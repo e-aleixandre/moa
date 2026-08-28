@@ -124,7 +124,7 @@ func (s *FileStore) writeLocked(sess *Session) error {
 		_ = tmp.Close()
 		return fmt.Errorf("session: chmod temp: %w", err)
 	}
-	if err := encodeIndentedJSON(tmp, sess); err != nil {
+	if err := encodeCompactJSON(tmp, sess); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("session: marshal error: %w", err)
 	}
@@ -151,15 +151,13 @@ func (s *FileStore) writeLocked(sess *Session) error {
 	return nil
 }
 
-// encodeIndentedJSON streams the same bytes as json.MarshalIndent. Encoder
-// normally appends a newline after its value; holding back its final byte
-// avoids making an on-disk format change while keeping the JSON itself out of
-// the heap as one large []byte.
-func encodeIndentedJSON(w io.Writer, value any) error {
+// encodeCompactJSON streams compact JSON because each session save rewrites
+// its full history and indentation adds avoidable CPU work on every turn.
+// It keeps the document out of the heap and omits Encoder's trailing newline.
+func encodeCompactJSON(w io.Writer, value any) error {
 	buf := bufio.NewWriter(w)
 	withoutFinalNewline := trimFinalNewlineWriter{w: buf}
 	enc := json.NewEncoder(&withoutFinalNewline)
-	enc.SetIndent("", "  ")
 	if err := enc.Encode(value); err != nil {
 		return err
 	}

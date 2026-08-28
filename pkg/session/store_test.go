@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -94,11 +96,14 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 }
 
-// TestSave_StreamedFormatAndRoundTrip ensures streaming persistence preserves
-// the exact established file format, including HTML escaping, while retaining
-// every field after loading it again.
-func TestSave_StreamedFormatAndRoundTrip(t *testing.T) {
+// TestSave_StreamedCompactFormatAndRoundTrip ensures streaming persistence
+// retains every field while writing the compact standard-library JSON form.
+func TestSave_StreamedCompactFormatAndRoundTrip(t *testing.T) {
 	store := tempStore(t)
+	savedAt := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	originalNow := nowFunc
+	nowFunc = func() time.Time { return savedAt }
+	defer func() { nowFunc = originalNow }()
 	sess := store.Create()
 	sess.Title = "Unicode <title> & symbols: café 世界"
 	sess.Metadata["html"] = "<tag>&value</tag>"
@@ -116,28 +121,58 @@ func TestSave_StreamedFormatAndRoundTrip(t *testing.T) {
 	if err := store.Save(sess); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	want, err := json.MarshalIndent(sess, "", "  ")
+	want, err := json.Marshal(sess)
 	if err != nil {
-		t.Fatalf("MarshalIndent: %v", err)
+		t.Fatalf("Marshal: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(store.Dir(), sess.ID+".json"))
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
 	if !bytes.Equal(got, want) {
-		t.Fatalf("streamed file differs from MarshalIndent\n got: %s\nwant: %s", got, want)
+		t.Fatalf("streamed file differs from Marshal\n got: %s\nwant: %s", got, want)
 	}
 
 	loaded, err := store.Load(sess.ID)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	roundTrip, err := json.MarshalIndent(loaded, "", "  ")
-	if err != nil {
-		t.Fatalf("MarshalIndent loaded session: %v", err)
+	if !reflect.DeepEqual(loaded, sess) {
+		t.Fatalf("loaded session differs from saved session\n got: %#v\nwant: %#v", loaded, sess)
 	}
-	if !bytes.Equal(roundTrip, want) {
-		t.Fatal("loaded session does not preserve the saved representation")
+}
+
+func TestLoad_IndentedSessionCompatibility(t *testing.T) {
+	store := tempStore(t)
+	const id = "0123456789abcdef01234567"
+	const oldIndentedSession = `{
+  "id": "0123456789abcdef01234567",
+  "version": 2,
+  "created": "2025-01-01T00:00:00Z",
+  "updated": "2025-01-02T03:04:05Z",
+  "title": "saved before compact JSON",
+  "metadata": {
+    "model": "claude"
+  }
+}`
+	if err := os.WriteFile(filepath.Join(store.Dir(), id+".json"), []byte(oldIndentedSession), 0o600); err != nil {
+		t.Fatalf("WriteFile old indented session: %v", err)
+	}
+
+	loaded, err := store.Load(id)
+	if err != nil {
+		t.Fatalf("Load old indented session: %v", err)
+	}
+	want := &Session{
+		ID:       id,
+		Version:  SessionVersion,
+		Created:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Updated:  time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC),
+		Title:    "saved before compact JSON",
+		Metadata: map[string]any{"model": "claude"},
+	}
+	if !reflect.DeepEqual(loaded, want) {
+		t.Fatalf("loaded indented session differs\n got: %#v\nwant: %#v", loaded, want)
 	}
 }
 
@@ -415,6 +450,30 @@ func BenchmarkList_ManySessions(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		if _, err := store.List(); err != nil {
 			b.Fatalf("List: %v", err)
+		}
+	}
+}
+
+// BenchmarkEncodeSessionFile measures encoding a copied session without
+// touching live session storage. Set MOA_SESSION_BENCH_FILE to the copy.
+func BenchmarkEncodeSessionFile(b *testing.B) {
+	path := os.Getenv("MOA_SESSION_BENCH_FILE")
+	if path == "" {
+		b.Skip("set MOA_SESSION_BENCH_FILE to a copied session JSON file")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var sess Session
+	if err := json.Unmarshal(data, &sess); err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(data)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := encodeCompactJSON(io.Discard, &sess); err != nil {
+			b.Fatal(err)
 		}
 	}
 }
