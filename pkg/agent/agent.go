@@ -46,6 +46,13 @@ var ErrMaxTurnsExceeded = errors.New("max turns exceeded")
 // tool calls (a doom loop). The concrete error wraps it via fmt.Errorf("%w").
 var ErrDoomLoop = errors.New("doom loop detected")
 
+// ErrSteerAdmissionClosed means the current run has stopped accepting queued
+// messages. Callers may retry the message as a new run once the run settles.
+var ErrSteerAdmissionClosed = errors.New("steer admission closed")
+
+// ErrSteerQueueFull means the steer queue has reached its bounded capacity.
+var ErrSteerQueueFull = errors.New("steer queue full")
+
 const steerBufferSize = 32 // capacity of the steer queue
 
 // steerQueue is an inspectable, order-preserving queue of steer items.
@@ -340,10 +347,13 @@ type Agent struct {
 
 	steers     steerQueue          // inspectable queue, drained by agentLoop between steps
 	waitSteers steerWaitInterrupts // wakes an active wait when a user steer arrives
-	steerMu    sync.Mutex          // serializes stop, steer admission, and delivery
-	aborting   bool                // rejects steers until a newly-started run owns them
-	followUpMu sync.Mutex
-	followUps  []string // consumed after agentLoop returns in execute()
+	// Nested locking always starts with steerMu, then takes mu, followUpMu, or
+	// the queue mutex. No path takes one of those locks and then steerMu.
+	steerMu     sync.Mutex // serializes stop, queued-message admission, and delivery
+	aborting    bool       // rejects queued messages until a newly-started run owns them
+	runTerminal bool       // rejects queued messages after the final drain, before run cleanup
+	followUpMu  sync.Mutex
+	followUps   []string // consumed after agentLoop returns in execute()
 
 	lastRunCost float64 // USD cost of the most recent execute(), guarded by mu
 	// lastRunTimedOut records whether the most recent execute() ended because
@@ -1245,21 +1255,27 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 
 // Steer queues a message for inter-step delivery. The agent sees it
 // at the next gap between tool executions. Safe to call while running.
-// Returns false if the queue is full (the message was dropped), so callers can
-// surface a rejection instead of confirming a message that will never arrive.
+// Returns false if admission is closed or the queue is full, so callers can
+// surface or reclassify a message that the current run will not consume.
 func (a *Agent) Steer(it core.SteerItem) bool {
+	return a.TrySteer(it) == nil
+}
+
+// TrySteer is Steer with a typed rejection reason for orchestration layers
+// that need to distinguish a terminal run from a full queue.
+func (a *Agent) TrySteer(it core.SteerItem) error {
 	a.steerMu.Lock()
 	defer a.steerMu.Unlock()
-	if a.aborting {
-		return false
+	if a.aborting || a.runTerminal {
+		return ErrSteerAdmissionClosed
 	}
 	if !a.steers.push(ownItem(it)) {
-		return false
+		return ErrSteerQueueFull
 	}
 	if !it.Internal && !it.IsBarrier() {
 		a.waitSteers.interrupt()
 	}
-	return true
+	return nil
 }
 
 func (a *Agent) registerSteerWait(cancel context.CancelCauseFunc) func() {
@@ -1311,13 +1327,19 @@ func (a *Agent) PendingSteers() []core.SteerItem {
 	return out
 }
 
-// Enqueue queues a message for post-turn delivery. It will be processed
-// after the current agent turn completes, triggering a new turn.
-// Safe to call at any time.
-func (a *Agent) Enqueue(msg string) {
+// Enqueue queues a message for post-turn delivery. It will be processed after
+// the current agent turn completes, triggering a new turn. Returns false when
+// the ending run can no longer consume it.
+func (a *Agent) Enqueue(msg string) bool {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	if a.aborting || a.runTerminal {
+		return false
+	}
 	a.followUpMu.Lock()
 	defer a.followUpMu.Unlock()
 	a.followUps = append(a.followUps, msg)
+	return true
 }
 
 func (a *Agent) drainFollowUps() []string {
@@ -1466,9 +1488,14 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	a.mu.Unlock()
 	defer func() {
 		cancel()
+		// Keep admission closed until clearing the running slot is visible. The
+		// steerMu -> mu order matches Abort and the delivery paths below.
+		a.steerMu.Lock()
 		a.mu.Lock()
 		a.cancel = nil
 		a.mu.Unlock()
+		a.runTerminal = false
+		a.steerMu.Unlock()
 	}()
 
 	// Publish this agent's attachment capability on the run context, so shared
@@ -1485,6 +1512,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 
 	a.steerMu.Lock()
 	a.aborting = false
+	a.runTerminal = false
 	a.steerMu.Unlock()
 
 	// The user message appended by prepare (if any) is now visible to every
@@ -1555,10 +1583,14 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	for {
 		err = agentLoop(ctx, cfg)
 		if err != nil {
+			a.steerMu.Lock()
+			a.runTerminal = true
+			a.steerMu.Unlock()
 			break
 		}
 		a.steerMu.Lock()
 		if ctx.Err() != nil {
+			a.runTerminal = true
 			a.steerMu.Unlock()
 			err = ctx.Err()
 			break
@@ -1566,6 +1598,9 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		followUps := a.drainFollowUps()
 		steered := a.steers.drainUntilBarrier()
 		if len(followUps) == 0 && len(steered) == 0 {
+			// Closing admission under the same lock as the final empty drain
+			// prevents a producer from being accepted after the consumer exits.
+			a.runTerminal = true
 			a.steerMu.Unlock()
 			break
 		}

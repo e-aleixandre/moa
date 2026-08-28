@@ -1669,6 +1669,73 @@ func TestCancelAndSendUseAgentOccupancyWhenBusIsIdle(t *testing.T) {
 	<-secondDone
 }
 
+func TestSendRetriesAsNewRunWhenQueueAdmissionCloses(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := t.TempDir()
+	mgr := newTestManagerWithRoot(t, ctx, newMockProvider(
+		simpleResponseHandler("first"),
+		simpleResponseHandler("second"),
+	), dir)
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	admissionClosed := make(chan struct{})
+	releaseEnd := make(chan struct{})
+	var endOnce sync.Once
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseEnd) })
+	sess.runtime.Context().Agent.(bus.AgentSubscriber).Subscribe(func(e core.AgentEvent) {
+		if e.Type != core.AgentEventEnd {
+			return
+		}
+		endOnce.Do(func() {
+			// Force the same closed-admission state as the final-drain window and
+			// hold run settlement so the concurrent Send must take its retry path.
+			sess.runtime.Context().Agent.Abort()
+			close(admissionClosed)
+			<-releaseEnd
+		})
+	})
+
+	if _, _, _, err := mgr.Send(sess.ID, "first", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-admissionClosed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("run did not close queue admission")
+	}
+
+	type result struct {
+		action string
+		err    error
+	}
+	second := make(chan result, 1)
+	go func() {
+		action, _, _, err := mgr.Send(sess.ID, "second", nil, "", "")
+		second <- result{action: action, err: err}
+	}()
+	select {
+	case got := <-second:
+		t.Fatalf("send returned before the terminal run settled: %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(releaseEnd) })
+
+	select {
+	case got := <-second:
+		if got.err != nil || got.action != "send" {
+			t.Fatalf("retried send = action %q, err %v; want send, nil", got.action, got.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("send was not retried after the terminal run settled")
+	}
+}
+
 func TestCancel_WhileIdle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
