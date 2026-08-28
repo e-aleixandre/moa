@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"nhooyr.io/websocket"        //nolint:staticcheck // keep Serve WebSocket transport consistent
-	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // keep Serve WebSocket transport consistent
+	"github.com/coder/websocket"        // keep Serve WebSocket transport consistent
+	"github.com/coder/websocket/wsjson" // keep Serve WebSocket transport consistent
 
 	"github.com/e-aleixandre/moa/pkg/attention"
 )
@@ -22,7 +22,7 @@ var guardianSinkSeq atomic.Uint64
 // its state from the next authoritative init.
 type guardianSink struct {
 	id   uint64
-	conn *websocket.Conn //nolint:staticcheck // existing Serve WebSocket transport
+	conn *websocket.Conn // existing Serve WebSocket transport
 	out  chan attention.ServerMsg
 	done chan struct{}
 	once sync.Once
@@ -30,7 +30,7 @@ type guardianSink struct {
 	dead bool
 }
 
-func newGuardianSink(conn *websocket.Conn) *guardianSink { //nolint:staticcheck // existing Serve WebSocket transport
+func newGuardianSink(conn *websocket.Conn) *guardianSink { // existing Serve WebSocket transport
 	return &guardianSink{
 		id:   guardianSinkSeq.Add(1),
 		conn: conn,
@@ -80,7 +80,7 @@ func (s *guardianSink) close() {
 		s.dead = true
 		close(s.done)
 		s.mu.Unlock()
-		_ = s.conn.CloseNow() //nolint:staticcheck // force unblock on overflow/revocation
+		_ = s.conn.CloseNow() // force unblock on overflow/revocation
 	})
 }
 
@@ -104,7 +104,7 @@ func handleGuardianWebSocket(m *Manager, devices *deviceStore) http.HandlerFunc 
 			return
 		}
 
-		conn, err := websocket.Accept(w, r, wsAcceptOptions()) //nolint:staticcheck
+		conn, err := websocket.Accept(w, r, wsAcceptOptions())
 		if err != nil {
 			return
 		}
@@ -124,10 +124,10 @@ func handleGuardianWebSocket(m *Manager, devices *deviceStore) http.HandlerFunc 
 		defer m.attention.ClearActiveClient(sink)
 
 		go guardianPing(ctx, sink)
-		conn.SetReadLimit(64 << 10) //nolint:staticcheck // guardian client messages are tiny control JSON
+		conn.SetReadLimit(64 << 10) // guardian client messages are tiny control JSON
 		for {
 			var msg attention.ClientMsg
-			if err := wsjson.Read(ctx, conn, &msg); err != nil { //nolint:staticcheck
+			if err := wsjson.Read(ctx, conn, &msg); err != nil {
 				return
 			}
 			switch msg.Type {
@@ -170,7 +170,7 @@ func guardianPing(ctx context.Context, sink *guardianSink) {
 			return
 		case <-ticker.C:
 			pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			err := sink.conn.Ping(pingCtx) //nolint:staticcheck
+			err := sink.conn.Ping(pingCtx)
 			cancel()
 			if err != nil {
 				sink.close()

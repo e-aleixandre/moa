@@ -10,18 +10,18 @@ import (
 	"testing"
 	"time"
 
-	"nhooyr.io/websocket"        //nolint:staticcheck // existing Serve WebSocket transport
-	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // existing Serve WebSocket transport
+	"github.com/coder/websocket"        // existing Serve WebSocket transport
+	"github.com/coder/websocket/wsjson" // existing Serve WebSocket transport
 
 	"github.com/e-aleixandre/moa/pkg/attention"
 	"github.com/e-aleixandre/moa/pkg/bus"
 )
 
-func dialGuardian(t *testing.T, server *httptest.Server, credential string) *websocket.Conn { //nolint:staticcheck // existing Serve WebSocket transport
+func dialGuardian(t *testing.T, server *httptest.Server, credential string) *websocket.Conn { // existing Serve WebSocket transport
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, _, err := websocket.Dial(ctx, server.URL+"/api/pulse/guardian/ws", &websocket.DialOptions{ //nolint:staticcheck
+	conn, _, err := websocket.Dial(ctx, server.URL+"/api/pulse/guardian/ws", &websocket.DialOptions{
 		HTTPHeader: http.Header{"Authorization": []string{deviceAuthorizationScheme + " " + credential}},
 	})
 	if err != nil {
@@ -30,12 +30,12 @@ func dialGuardian(t *testing.T, server *httptest.Server, credential string) *web
 	return conn
 }
 
-func readGuardian(t *testing.T, conn *websocket.Conn) attention.ServerMsg { //nolint:staticcheck // existing Serve WebSocket transport
+func readGuardian(t *testing.T, conn *websocket.Conn) attention.ServerMsg { // existing Serve WebSocket transport
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	var msg attention.ServerMsg
-	if err := wsjson.Read(ctx, conn, &msg); err != nil { //nolint:staticcheck
+	if err := wsjson.Read(ctx, conn, &msg); err != nil {
 		t.Fatal(err)
 	}
 	return msg
@@ -66,20 +66,20 @@ func TestGuardianDeviceAuthInitAndSupersession(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_, response, err := websocket.Dial(ctx, server.URL+"/api/pulse/guardian/ws", nil) //nolint:staticcheck
+	_, response, err := websocket.Dial(ctx, server.URL+"/api/pulse/guardian/ws", nil)
 	if err == nil || response == nil || response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated guardian dial err=%v status=%v", err, response)
 	}
 
 	first := dialGuardian(t, server, credential.Credential)
-	defer first.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer first.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	init := readGuardian(t, first)
 	if init.Type != "init" || init.V != attention.ProtocolVersion || len(init.Items) != 1 || len(init.Sessions) != 1 {
 		t.Fatalf("guardian init = %+v", init)
 	}
 
 	second := dialGuardian(t, server, credential.Credential)
-	defer second.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer second.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	if msg := readGuardian(t, second); msg.Type != "init" {
 		t.Fatalf("second guardian first message = %+v", msg)
 	}
@@ -88,12 +88,12 @@ func TestGuardianDeviceAuthInitAndSupersession(t *testing.T) {
 	readCtx, readCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer readCancel()
 	var superseded attention.ServerMsg
-	err = wsjson.Read(readCtx, first, &superseded) //nolint:staticcheck
+	err = wsjson.Read(readCtx, first, &superseded)
 	if err == nil && superseded.Type != "inactive" {
 		t.Fatalf("first guardian supersession message = %+v", superseded)
 	}
 	if err == nil {
-		if err := wsjson.Read(readCtx, first, &superseded); err == nil { //nolint:staticcheck
+		if err := wsjson.Read(readCtx, first, &superseded); err == nil {
 			t.Fatalf("superseded guardian remained open: %+v", superseded)
 		}
 	}
@@ -104,7 +104,7 @@ func TestGuardianRejectsTokenAndNetworkOwners(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	_, response, err := websocket.Dial(ctx, server.URL+"/api/pulse/guardian/ws", &websocket.DialOptions{ //nolint:staticcheck
+	_, response, err := websocket.Dial(ctx, server.URL+"/api/pulse/guardian/ws", &websocket.DialOptions{
 		HTTPHeader: http.Header{"Cookie": []string{authCookieName + "=owner"}},
 	})
 	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
@@ -114,7 +114,7 @@ func TestGuardianRejectsTokenAndNetworkOwners(t *testing.T) {
 	networkHandler := NewServer(mgr, WithDeviceStorePath(filepath.Join(t.TempDir(), "network-devices.json")))
 	networkServer := httptest.NewServer(networkHandler)
 	defer networkServer.Close()
-	_, response, err = websocket.Dial(ctx, networkServer.URL+"/api/pulse/guardian/ws", nil) //nolint:staticcheck
+	_, response, err = websocket.Dial(ctx, networkServer.URL+"/api/pulse/guardian/ws", nil)
 	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
 		t.Fatalf("network guardian dial err=%v status=%v", err, response)
 	}
@@ -130,17 +130,17 @@ func TestGuardianAckAndGetStatus(t *testing.T) {
 	pollUntil(t, time.Second, "attention item", func() bool { return len(mgr.attention.Status()) == 1 })
 
 	conn := dialGuardian(t, server, credential.Credential)
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	init := readGuardian(t, conn)
 	if init.Type != "init" || len(init.Items) != 1 {
 		t.Fatalf("init = %+v", init)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := wsjson.Write(ctx, conn, attention.ClientMsg{Type: "ack", ItemID: init.Items[0].ID}); err != nil { //nolint:staticcheck
+	if err := wsjson.Write(ctx, conn, attention.ClientMsg{Type: "ack", ItemID: init.Items[0].ID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := wsjson.Write(ctx, conn, attention.ClientMsg{Type: "get_status"}); err != nil { //nolint:staticcheck
+	if err := wsjson.Write(ctx, conn, attention.ClientMsg{Type: "get_status"}); err != nil {
 		t.Fatal(err)
 	}
 	status := readGuardian(t, conn)
@@ -166,26 +166,26 @@ func TestGuardianTerminationReplaysUntilAcknowledged(t *testing.T) {
 		t.Fatalf("first init = %+v", init)
 	}
 	term := init.Terminations[0]
-	_ = first.Close(websocket.StatusNormalClosure, "before speech") //nolint:errcheck,staticcheck
+	_ = first.Close(websocket.StatusNormalClosure, "before speech") //nolint:errcheck
 
 	second := dialGuardian(t, server, credential.Credential)
-	defer second.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer second.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	init = readGuardian(t, second)
 	if len(init.Terminations) != 1 || init.Terminations[0].ID != term.ID {
 		t.Fatalf("termination did not replay after drop: %+v", init)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := wsjson.Write(ctx, second, attention.ClientMsg{Type: "ack_termination", TerminationID: term.ID}); err != nil { //nolint:staticcheck
+	if err := wsjson.Write(ctx, second, attention.ClientMsg{Type: "ack_termination", TerminationID: term.ID}); err != nil {
 		t.Fatal(err)
 	}
 	// Let the server process the acknowledgement before opening the next init.
 	pollUntil(t, time.Second, "termination acknowledgement", func() bool {
 		return len(mgr.attention.Snapshot().Terminations) == 0
 	})
-	_ = second.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	_ = second.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	third := dialGuardian(t, server, credential.Credential)
-	defer third.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer third.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	if init = readGuardian(t, third); len(init.Terminations) != 0 {
 		t.Fatalf("acknowledged termination returned in init: %+v", init)
 	}
@@ -194,7 +194,7 @@ func TestGuardianTerminationReplaysUntilAcknowledged(t *testing.T) {
 func TestGuardianOverflowClosesSocket(t *testing.T) {
 	ready := make(chan *guardianSink, 1)
 	handler := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := websocket.Accept(w, r, nil) //nolint:staticcheck
+		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
 		}
@@ -207,11 +207,11 @@ func TestGuardianOverflowClosesSocket(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	conn, _, err := websocket.Dial(ctx, handler.URL, nil) //nolint:staticcheck
+	conn, _, err := websocket.Dial(ctx, handler.URL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	sink := <-ready
 	if !sink.Send(attention.ServerMsg{Type: "init"}) || sink.Send(attention.ServerMsg{Type: "roster"}) {
 		t.Fatal("overflow did not reject the second message")
@@ -222,7 +222,7 @@ func TestGuardianOverflowClosesSocket(t *testing.T) {
 		t.Fatal("overflow did not close the sink")
 	}
 	var raw json.RawMessage
-	if err := wsjson.Read(ctx, conn, &raw); err == nil { //nolint:staticcheck
+	if err := wsjson.Read(ctx, conn, &raw); err == nil {
 		t.Fatal("overflow socket remained readable")
 	}
 }
@@ -230,7 +230,7 @@ func TestGuardianOverflowClosesSocket(t *testing.T) {
 func TestGuardianSinkSendCloseRace(t *testing.T) {
 	ready := make(chan *guardianSink, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := websocket.Accept(w, r, nil) //nolint:staticcheck
+		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
 		}
@@ -240,11 +240,11 @@ func TestGuardianSinkSendCloseRace(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	conn, _, err := websocket.Dial(ctx, server.URL, nil) //nolint:staticcheck
+	conn, _, err := websocket.Dial(ctx, server.URL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	sink := <-ready
 	var wg sync.WaitGroup
 	for range 16 {
@@ -270,7 +270,7 @@ func TestGuardianSinkSendCloseRace(t *testing.T) {
 func TestGuardianRevokeClosesSocket(t *testing.T) {
 	_, server, handler, credential := guardianServer(t)
 	conn := dialGuardian(t, server, credential.Credential)
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	if msg := readGuardian(t, conn); msg.Type != "init" {
 		t.Fatalf("init = %+v", msg)
 	}
@@ -281,7 +281,7 @@ func TestGuardianRevokeClosesSocket(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	var msg attention.ServerMsg
-	if err := wsjson.Read(ctx, conn, &msg); err == nil { //nolint:staticcheck
+	if err := wsjson.Read(ctx, conn, &msg); err == nil {
 		t.Fatalf("guardian remained open after revoke: %+v", msg)
 	}
 }

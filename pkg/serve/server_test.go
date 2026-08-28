@@ -15,8 +15,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
-	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 
 	"github.com/e-aleixandre/moa/pkg/attention"
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -453,11 +453,11 @@ func TestWebSocket_Init(t *testing.T) {
 	ctx, wsCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer wsCancel()
 
-	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 
 	var evt Event
 	if err := wsjson.Read(ctx, conn, &evt); err != nil {
@@ -491,11 +491,11 @@ func TestWebSocket_InitDeltaSinceMessage(t *testing.T) {
 
 	ctx, wsCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer wsCancel()
-	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws?since_msg=base", nil) //nolint:staticcheck
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws?since_msg=base", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	var evt Event
 	if err := wsjson.Read(ctx, conn, &evt); err != nil {
 		t.Fatal(err)
@@ -521,11 +521,11 @@ func TestWebSocketInit_EmptySessionBindsInitialZeroAndStaysConnected(t *testing.
 
 	ctx, cancelWS := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelWS()
-	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	var evt Event
 	if err := wsjson.Read(ctx, conn, &evt); err != nil {
 		t.Fatal(err)
@@ -555,11 +555,11 @@ func TestWebSocket_Streaming(t *testing.T) {
 	wsCtx, wsCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer wsCancel()
 
-	conn, _, err := websocket.Dial(wsCtx, httpSrv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	conn, _, err := websocket.Dial(wsCtx, httpSrv.URL+"/api/sessions/"+sess.ID+"/ws", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 
 	// Read init event.
 	var init Event
@@ -671,11 +671,11 @@ func TestWebSocket_TextBeforeToolCallPreservesEventOrder(t *testing.T) {
 	wsCtx, wsCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer wsCancel()
 
-	conn, _, err := websocket.Dial(wsCtx, httpSrv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	conn, _, err := websocket.Dial(wsCtx, httpSrv.URL+"/api/sessions/"+sess.ID+"/ws", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 
 	var init Event
 	if err := wsjson.Read(wsCtx, conn, &init); err != nil {
@@ -758,11 +758,11 @@ func TestWebSocket_PermissionDenied_OrdersToolStartBeforePromptAndMarksRejected(
 
 	wsCtx, wsCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer wsCancel()
-	conn, _, err := websocket.Dial(wsCtx, httpSrv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	conn, _, err := websocket.Dial(wsCtx, httpSrv.URL+"/api/sessions/"+sess.ID+"/ws", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 
 	var init Event
 	if err := wsjson.Read(wsCtx, conn, &init); err != nil {
@@ -858,7 +858,7 @@ func TestWebSocket_Disconnect(t *testing.T) {
 	ctx, wsCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer wsCancel()
 
-	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -868,7 +868,7 @@ func TestWebSocket_Disconnect(t *testing.T) {
 	_ = wsjson.Read(ctx, conn, &init)
 
 	// Close connection.
-	_ = conn.Close(websocket.StatusNormalClosure, "bye") //nolint:staticcheck
+	_ = conn.Close(websocket.StatusNormalClosure, "bye")
 
 	// Give WS handler time to process the close.
 	time.Sleep(100 * time.Millisecond)
