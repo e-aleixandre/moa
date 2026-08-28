@@ -408,7 +408,9 @@ func wsEventFromBus(event any) (Event, bool) {
 }
 
 // projectWSMessageCustom is a second transport boundary for callers that
-// publish bus events directly. Keep it aligned with bus.projectLiveCustom.
+// publish bus events directly. It mirrors bus.projectLiveCustom's allowlist,
+// plus the keys only reconnect history carries: bus events project live user
+// and steer messages, this one also projects tool results.
 func projectWSMessageCustom(custom map[string]any) map[string]any {
 	if marker, _ := custom["type"].(string); marker == "compaction_marker" {
 		projected := map[string]any{"type": marker}
@@ -425,11 +427,23 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 		}
 		return projected
 	}
+	// A subagent launch result carries the job it spawned. The tool call ID is
+	// the provider's, so this annotation is the only link from the launch row
+	// to the child; without it a reconnected client cannot tell the launch and
+	// the completion apart and draws both, the second one pointing at a
+	// conversation it cannot open.
+	jobID, _ := custom["subagent_job_id"].(string)
 	source, _ := custom["source"].(string)
 	if source == "" {
-		return nil
+		if jobID == "" {
+			return nil
+		}
+		return map[string]any{"subagent_job_id": jobID}
 	}
 	projected := map[string]any{"source": source}
+	if jobID != "" {
+		projected["subagent_job_id"] = jobID
+	}
 	if source == "secret_batch" {
 		switch aliases := custom["secret_aliases"].(type) {
 		case []string:
