@@ -5,19 +5,16 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/permission"
-	"github.com/e-aleixandre/moa/pkg/planmode"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 func TestRuntimeConfig_CommonFields(t *testing.T) {
 	ts := tasks.NewStore()
-	pm := planmode.New(planmode.Config{})
 	pp := tool.NewPathPolicy("/tmp", nil, false)
 	ab := askuser.NewBridge()
 	bs := newTestBootstrapSession("medium")
 	bs.TaskStore = ts
-	bs.PlanMode = pm
 	bs.PathPolicy = pp
 	bs.AskBridge = ab
 
@@ -28,9 +25,6 @@ func TestRuntimeConfig_CommonFields(t *testing.T) {
 	}
 	if rcfg.TaskStore != ts {
 		t.Error("TaskStore mismatch")
-	}
-	if rcfg.PlanMode != pm {
-		t.Error("PlanMode mismatch")
 	}
 	if rcfg.PathPolicy != pp {
 		t.Error("PathPolicy mismatch")

@@ -145,7 +145,7 @@ func (r *Registry) WithInternalTools(internal ...Tool) (*Registry, error) {
 }
 
 // RegisterOrLog registers a tool and logs a warning on failure.
-// Use for dynamic tool sources (MCP, extensions, plan mode) where
+// Use for dynamic tool sources (MCP, extensions) where
 // a registration error shouldn't abort the caller.
 func RegisterOrLog(reg *Registry, t Tool) {
 	if err := reg.Register(t); err != nil {

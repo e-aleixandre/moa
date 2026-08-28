@@ -11,7 +11,6 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/permission"
-	"github.com/e-aleixandre/moa/pkg/planmode"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 	"github.com/e-aleixandre/moa/pkg/tasks"
@@ -96,7 +95,6 @@ type SessionContext struct {
 	Approvals  *ApprovalManager // manages pending permissions/asks; may be nil
 	Tree       *session.Tree    // session entry tree; may be nil during migration
 
-	PlanMode          *planmode.PlanMode      // may be nil
 	Goal              *goal.Goal              // may be nil
 	TaskStore         *tasks.Store            // may be nil
 	Checkpoints       *checkpoint.Store       // may be nil

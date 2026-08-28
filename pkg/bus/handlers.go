@@ -16,35 +16,18 @@ import (
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/handoff"
 	"github.com/e-aleixandre/moa/pkg/permission"
-	"github.com/e-aleixandre/moa/pkg/planmode"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/verify"
 )
 
 // rebuildSystemPrompt recomposes the agent's system prompt from the base prompt
-// plus any active mode fragments (plan mode, goal mode). Called after any mode
-// transition. Plan mode and goal mode are independent — a session may have
-// either, both, or neither. No-op if neither mode is present.
+// plus the active goal directive. Called after a goal mode transition.
 func rebuildSystemPrompt(sctx *SessionContext) {
-	if sctx.PlanMode == nil && sctx.Goal == nil {
+	if sctx.Goal == nil {
 		return
 	}
 	prompt := sctx.BaseSystemPrompt
-	if sctx.PlanMode != nil {
-		mode := sctx.PlanMode.Mode()
-		planFile := sctx.PlanMode.PlanFilePath()
-		if mode == planmode.ModePlanning {
-			if p := planmode.PlanningPrompt(planFile); p != "" {
-				prompt += "\n\n" + p
-			}
-		}
-		if mode == planmode.ModeExecuting {
-			if p := planmode.ExecutionPrompt(planFile); p != "" {
-				prompt += "\n\n" + p
-			}
-		}
-	}
 	if sctx.Goal != nil && sctx.Goal.Active() {
 		prompt += "\n\n" + goal.GoalDirective(sctx.Goal.Info())
 	}
@@ -634,24 +617,6 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 		return sctx.RunGenAtomic.Load(), nil
 	})
 
-	b.OnQuery(func(q GetPlanMode) (PlanModeInfo, error) {
-		if sctx.PlanMode == nil {
-			return PlanModeInfo{Mode: "off"}, nil
-		}
-		rc := sctx.PlanMode.GetReviewConfig()
-		reviewName := rc.Model.Name
-		if reviewName == "" {
-			reviewName = rc.Model.ID
-		}
-		return PlanModeInfo{
-			Mode:                string(sctx.PlanMode.Mode()),
-			PlanFile:            sctx.PlanMode.PlanFilePath(),
-			ReviewModelID:       rc.Model.ID,
-			ReviewModelName:     reviewName,
-			ReviewThinkingLevel: rc.ThinkingLevel,
-		}, nil
-	})
-
 	b.OnQuery(func(q GetGoal) (GoalInfo, error) {
 		if sctx.Goal == nil {
 			return GoalInfo{}, nil
@@ -1009,88 +974,6 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 	})
 
 	// -------------------------------------------------------------------
-	// Plan mode
-	// -------------------------------------------------------------------
-
-	b.OnCommand(func(cmd EnterPlanMode) error {
-		if sctx.PlanMode == nil {
-			return fmt.Errorf("plan mode not available")
-		}
-		// Enter() calls onChange → publishes PlanModeChanged.
-		_, err := sctx.PlanMode.Enter()
-		return err
-	})
-
-	b.OnCommand(func(cmd ExitPlanMode) error {
-		if sctx.PlanMode == nil {
-			return fmt.Errorf("plan mode not available")
-		}
-		if sctx.PlanMode.Mode() == planmode.ModeOff {
-			return fmt.Errorf("not in plan mode")
-		}
-		// Exit() calls onChange → publishes PlanModeChanged.
-		sctx.PlanMode.Exit()
-		return nil
-	})
-
-	b.OnCommand(func(cmd StartPlanExecution) error {
-		if sctx.PlanMode == nil {
-			return fmt.Errorf("plan mode not available")
-		}
-		if cmd.CleanContext {
-			if err := sctx.Agent.Reset(); err != nil {
-				return fmt.Errorf("reset before execution: %w", err)
-			}
-			// Reset no longer drops the queue (it preserves it for the queued
-			// /clear reset-in-place case); a clean-context plan execution is a
-			// genuine clean slate, so drop any queued steers explicitly.
-			discarded := sctx.Agent.CancelSteer()
-			sctx.Bus.Publish(SteersCanceled{
-				SessionID:     sctx.SessionID,
-				AttachmentIDs: steerAttachmentIDs(discarded),
-			})
-			// Agent.Reset alone leaves the persisted tree and the syncer's old
-			// baseline behind. Replace both in the same transition so the next
-			// execution turn cannot revive or splice into the planning history.
-			sctx.Tree = session.NewTree()
-			if sctx.treeSyncer != nil {
-				sctx.treeSyncer.Reset(sctx.Tree, 0)
-			}
-			sctx.resetSessionCost()
-		}
-		// StartExecution() calls onChange → publishes PlanModeChanged.
-		sctx.PlanMode.StartExecution()
-		return nil
-	})
-
-	b.OnCommand(func(cmd StartPlanReview) error {
-		if sctx.PlanMode == nil {
-			return fmt.Errorf("plan mode not available")
-		}
-		// StartReview() calls onChange → publishes PlanModeChanged.
-		sctx.PlanMode.StartReview()
-		return nil
-	})
-
-	b.OnCommand(func(cmd ContinueRefining) error {
-		if sctx.PlanMode == nil {
-			return fmt.Errorf("plan mode not available")
-		}
-		// ContinueRefining() calls onChange → publishes PlanModeChanged.
-		sctx.PlanMode.ContinueRefining()
-		return nil
-	})
-
-	b.OnCommand(func(cmd FinishPlanReview) error {
-		if sctx.PlanMode == nil {
-			return fmt.Errorf("plan mode not available")
-		}
-		// ReviewDone() calls onChange → publishes PlanModeChanged.
-		sctx.PlanMode.ReviewDone()
-		return nil
-	})
-
-	// -------------------------------------------------------------------
 	// Goal mode
 	// -------------------------------------------------------------------
 
@@ -1409,23 +1292,6 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 			})
 		}
 		return points, nil
-	})
-
-	// -------------------------------------------------------------------
-	// Plan submitted reactor — detects when submit_plan tool completes
-	// -------------------------------------------------------------------
-
-	b.Subscribe(func(e ToolExecEnded) {
-		if e.ToolName == "submit_plan" && !e.IsError && !e.Rejected {
-			if sctx.PlanMode != nil && sctx.PlanMode.OnPlanSubmitted() {
-				rebuildSystemPrompt(sctx)
-				sctx.Bus.Publish(PlanModeChanged{
-					SessionID: sctx.SessionID,
-					Mode:      string(planmode.ModeReady),
-					PlanFile:  sctx.PlanMode.PlanFilePath(),
-				})
-			}
-		}
 	})
 
 	// Run-token reactor — derive authoritative logical traffic from the main

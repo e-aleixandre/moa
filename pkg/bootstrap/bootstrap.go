@@ -1,5 +1,5 @@
 // Package bootstrap wires up a complete agent session: tool registry, MCP,
-// permissions, subagents, plan mode, skills, verify, and system prompt.
+// permissions, subagents, skills, verify, and system prompt.
 //
 // Both the CLI (cmd/moa) and the HTTP server (pkg/serve) call BuildSession
 // to avoid duplicating the 14-step setup sequence.
@@ -25,7 +25,6 @@ import (
 	"github.com/e-aleixandre/moa/pkg/memory"
 	"github.com/e-aleixandre/moa/pkg/moadocs"
 	"github.com/e-aleixandre/moa/pkg/permission"
-	"github.com/e-aleixandre/moa/pkg/planmode"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 	"github.com/e-aleixandre/moa/pkg/skill"
 	"github.com/e-aleixandre/moa/pkg/subagent"
@@ -33,9 +32,6 @@ import (
 	"github.com/e-aleixandre/moa/pkg/tool"
 	"github.com/e-aleixandre/moa/pkg/verify"
 )
-
-// Default review thinking level for plan mode (shared between CLI and serve).
-const DefaultReviewThinking = "medium"
 
 // SessionConfig configures a session build. Most fields have sensible defaults.
 type SessionConfig struct {
@@ -89,9 +85,6 @@ type SessionConfig struct {
 	Headless bool
 	// ExtraAllowPatterns are merged with config allow patterns (from --allow flags).
 	ExtraAllowPatterns []string
-
-	// PlanMode session dir. If empty, uses CWD.
-	PlanSessionDir string
 
 	// Feature toggles. All default to true.
 	EnableAskUser bool // Register ask_user tool. Default: true.
@@ -147,7 +140,6 @@ type Session struct {
 	Agent         *agent.Agent
 	ToolReg       *core.Registry
 	TaskStore     *tasks.Store
-	PlanMode      *planmode.PlanMode
 	Goal          *goal.Goal
 	AskBridge     *askuser.Bridge
 	Gate          *permission.Gate
@@ -198,7 +190,7 @@ type Session struct {
 //
 // BuildSession does NOT create the agent — it returns all the pieces needed
 // to create one. This allows callers to customize the AgentConfig (e.g.,
-// compose permission checks with plan mode filtering) before calling agent.New.
+// compose permission checks) before calling agent.New.
 func BuildSession(cfg SessionConfig) (*Session, error) {
 	if cfg.CWD == "" {
 		return nil, fmt.Errorf("bootstrap: CWD is required")
@@ -565,51 +557,9 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	sess.Subagents = subagentJobs
 	sess.BashJobs = bashJobs
 
-	// 11. Plan mode.
-	planSessionDir := cfg.PlanSessionDir
-	if planSessionDir == "" {
-		planSessionDir = core.ConfigDir()
-		if planSessionDir == "" {
-			planSessionDir = cfg.CWD // last resort
-		}
-	}
-	reviewModel, reviewThinking, err := resolveReviewConfig(cfg.Model, moaCfg.PlanReviewModel, moaCfg.PlanReviewThinking)
-	if err != nil {
-		return nil, fmt.Errorf("bootstrap: plan review: %w", err)
-	}
-	codeReviewModel, codeReviewThinking, err := resolveReviewConfig(reviewModel, moaCfg.CodeReviewModel, moaCfg.CodeReviewThinking)
-	if err != nil {
-		return nil, fmt.Errorf("bootstrap: code review: %w", err)
-	}
-	// Code review defaults to plan review settings (not the primary model).
-	if moaCfg.CodeReviewThinking == "" {
-		codeReviewThinking, err = core.EffectiveThinkingLevel(codeReviewModel, reviewThinking)
-		if err != nil {
-			return nil, fmt.Errorf("bootstrap: code review: %w", err)
-		}
-	}
-
-	pm := planmode.New(planmode.Config{
-		Registry:   toolReg,
-		SessionDir: planSessionDir,
-		TaskStore:  taskStore,
-		ReviewCfg: planmode.ReviewConfig{
-			ProviderFactory: cfg.ProviderFactory,
-			Model:           reviewModel,
-			ThinkingLevel:   reviewThinking,
-			ParentTools:     toolReg,
-		},
-		CodeReviewCfg: planmode.ReviewConfig{
-			ProviderFactory: cfg.ProviderFactory,
-			Model:           codeReviewModel,
-			ThinkingLevel:   codeReviewThinking,
-			ParentTools:     toolReg,
-		},
-	})
-	sess.PlanMode = pm
 	sess.Goal = goal.New()
 
-	// 12. System prompt (after ALL tools registered).
+	// 11. System prompt (after ALL tools registered).
 	sess.BuildBasePrompt = func(specs []core.ToolSpec) string {
 		return agentcontext.BuildSystemPrompt(agentcontext.SystemPromptOptions{
 			AgentsMD:    agentsMD,
@@ -623,7 +573,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	systemPrompt := sess.BuildBasePrompt(toolReg.Specs())
 	sess.SystemPrompt = systemPrompt
 
-	// 13. Agent.
+	// 12. Agent.
 	agentCfg := agent.AgentConfig{
 		Provider:            cfg.Provider,
 		Model:               cfg.Model,
@@ -654,31 +604,6 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	sess.Agent = ag
 	sess.agentHolder.Store(ag)
 	return sess, nil
-}
-
-// resolveReviewConfig resolves the model and thinking level for plan/code review.
-// Falls back to the parent model and DefaultReviewThinking when not configured.
-func resolveReviewConfig(fallbackModel core.Model, modelSpec, thinkingSpec string) (core.Model, string, error) {
-	model := fallbackModel
-	if modelSpec != "" {
-		if err := core.ValidateModelSpec(modelSpec); err != nil {
-			return core.Model{}, "", err
-		}
-		// An explicit provider/model is a valid custom model even when it has
-		// no catalog metadata. Keep that provider: silently retaining the
-		// parent here can send a review to a different vendor.
-		m, _ := core.ResolveModel(modelSpec)
-		model = m
-	}
-	thinking := DefaultReviewThinking
-	if thinkingSpec != "" {
-		thinking = thinkingSpec
-	}
-	effective, err := core.EffectiveThinkingLevel(model, thinking)
-	if err != nil {
-		return core.Model{}, "", err
-	}
-	return model, effective, nil
 }
 
 // FormatSubagentNotification produces the text injected into the agent's

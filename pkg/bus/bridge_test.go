@@ -2339,22 +2339,6 @@ func TestQuery_GetTasks_NilStore(t *testing.T) {
 	}
 }
 
-func TestQuery_GetPlanMode_Nil(t *testing.T) {
-	b := NewLocalBus()
-	defer b.Close()
-	fa := &fakeAgent{}
-	sctx := newTestSessionContext(b, fa)
-	RegisterHandlers(sctx)
-
-	info, err := QueryTyped[GetPlanMode, PlanModeInfo](b, GetPlanMode{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode != "off" {
-		t.Fatalf("Mode = %q, want %q", info.Mode, "off")
-	}
-}
-
 func TestQuery_GetCompactionEpoch(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()

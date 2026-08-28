@@ -16,16 +16,10 @@ test("perm mode is always present and defaults to yolo", () => {
   expect(statusStripModel({ permissionMode: "ask" }, null).perm.mode).toBe("ask");
 });
 
-test("modes are omitted when off/empty", () => {
-  const m = statusStripModel({ planMode: "off", goalActive: false, tasks: [] }, null);
-  expect(m.modes.planMode).toBeUndefined();
+test("modes are omitted when empty", () => {
+  const m = statusStripModel({ goalActive: false, tasks: [] }, null);
   expect(m.modes.goal).toBeUndefined();
   expect(m.modes.tasks).toBeUndefined();
-});
-
-test("plan mode surfaces only when not off", () => {
-  expect(statusStripModel({ planMode: "plan" }, null).modes.planMode).toBe("plan");
-  expect(statusStripModel({ planMode: "off" }, null).modes.planMode).toBeUndefined();
 });
 
 test("goal mode carries verifying/iteration/objective", () => {

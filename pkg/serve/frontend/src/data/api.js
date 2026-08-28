@@ -11,7 +11,7 @@ import {
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
   handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd, handleWsSubagentUsage, handleWsSubagentTitle,
   handleWsBashJobStart, handleWsBashJobOutput, handleWsBashJobEnd, handleWsBashComplete,
-  handleWsCommand, handleWsTasksUpdate, handleWsPlanMode,
+  handleWsCommand, handleWsTasksUpdate,
   handleWsGoalChange, handleWsGoalIteration, handleWsGoalVerify, handleWsGoalEnd,
   handleWsAskUser, handleWsContextUpdate, handleWsSteer, handleWsSteersCanceled,
   handleWsUserMessage,
@@ -442,9 +442,6 @@ function routeEvent(sessionId, evt) {
       break;
     case 'tasks_update':
       handleWsTasksUpdate(sessionId, evt.data);
-      break;
-    case 'plan_mode':
-      handleWsPlanMode(sessionId, evt.data);
       break;
     case 'goal_change':
       handleWsGoalChange(sessionId, evt.data);

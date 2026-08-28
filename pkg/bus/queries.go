@@ -68,19 +68,6 @@ type RunTokens struct {
 // Handler returns: []tasks.Task
 type GetTasks struct{ SessionID string }
 
-// GetPlanMode returns the current plan mode and plan file path.
-// Handler returns: PlanModeInfo
-type GetPlanMode struct{ SessionID string }
-
-// PlanModeInfo is the result of GetPlanMode.
-type PlanModeInfo struct {
-	Mode                string
-	PlanFile            string
-	ReviewModelID       string // model ID for plan review
-	ReviewModelName     string // display name of review model
-	ReviewThinkingLevel string // thinking level for plan review
-}
-
 // GetGoal returns the current goal-mode state.
 // Handler returns: GoalInfo
 type GetGoal struct{ SessionID string }

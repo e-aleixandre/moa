@@ -1477,9 +1477,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	//
 	// UNCONDITIONAL, nil INCLUDED — do not "simplify" this into
 	// `if scope != nil`. Ephemeral agents run on a context inherited from their
-	// caller: ReviewCode is invoked with the parent's TOOL context
-	// (pkg/planmode/tools.go) and runs the reviewer with that very context
-	// (pkg/planmode/review.go). Skipping the write when the scope is nil would
+	// caller. Skipping the write when the scope is nil would
 	// leave the parent's capability visible, and the reviewer would externalize
 	// into the parent's index with no conversation left to resolve it. Writing
 	// nil is what SHADOWS the inherited value.

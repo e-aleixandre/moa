@@ -13,7 +13,7 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Session persistence and resume
 - Streaming output over WebSocket
 - Permission prompts and cancel
-- Plan mode, subagents, MCP
+- Subagents, MCP
 - Model and thinking reconfiguration per session, with pinned-model shortcuts and provider drill-down
 - Queue commands and messages while the agent is working (strict send order)
 - Per-session cost readout (main run + subagents)

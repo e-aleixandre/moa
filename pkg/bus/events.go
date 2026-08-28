@@ -383,17 +383,6 @@ type ConfigChanged struct {
 }
 
 // ---------------------------------------------------------------------------
-// Plan mode
-// ---------------------------------------------------------------------------
-
-// PlanModeChanged is published when the plan mode state transitions.
-type PlanModeChanged struct {
-	SessionID string
-	Mode      string // "off", "planning", "ready", "executing", "reviewing"
-	PlanFile  string
-}
-
-// ---------------------------------------------------------------------------
 // Goal mode
 // ---------------------------------------------------------------------------
 

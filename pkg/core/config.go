@@ -90,10 +90,6 @@ type MoaConfig struct {
 	DisabledMCPServers     []string             `json:"disabled_mcp_servers,omitempty"`          // MCP server names vetoed at this config level (server stays configured but is not started)
 	TrustedMCPPaths        []string             `json:"trusted_mcp_paths"`                       // Project paths trusted for .mcp.json auto-load
 	TrustedProjectPaths    []string             `json:"trusted_project_paths"`                   // Project paths trusted for .moa/config.json + .moa/tools/* auto-load
-	PlanReviewModel        string               `json:"plan_review_model"`                       // Model for plan reviewer (default: current model)
-	PlanReviewThinking     string               `json:"plan_review_thinking"`                    // Thinking level for plan reviewer (default: "low")
-	CodeReviewModel        string               `json:"code_review_model,omitempty"`             // Model for code reviewer (default: plan review model)
-	CodeReviewThinking     string               `json:"code_review_thinking,omitempty"`          // Thinking level for code reviewer (default: plan review thinking)
 	AutoTitleModel         string               `json:"auto_title_model,omitempty"`              // "auto", "off", or model spec for automatic session titles
 	SessionBriefModel      string               `json:"session_brief_model,omitempty"`           // "auto", "off", or model spec for web/Pulse session briefs
 	MaxBudget              float64              `json:"max_budget"`                              // Max USD per agent run. 0 = unlimited.
@@ -496,16 +492,12 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 			Deny:  append(base.Permissions.Deny, override.Permissions.Deny...),
 			Rules: append(base.Permissions.Rules, override.Permissions.Rules...),
 		},
-		BraveAPIKey:        mergeScalar(base.BraveAPIKey, override.BraveAPIKey),
-		PlanReviewModel:    mergeScalar(base.PlanReviewModel, override.PlanReviewModel),
-		PlanReviewThinking: mergeScalar(base.PlanReviewThinking, override.PlanReviewThinking),
-		CodeReviewModel:    mergeScalar(base.CodeReviewModel, override.CodeReviewModel),
-		CodeReviewThinking: mergeScalar(base.CodeReviewThinking, override.CodeReviewThinking),
-		AutoTitleModel:     mergeScalar(base.AutoTitleModel, override.AutoTitleModel),
-		SessionBriefModel:  mergeScalar(base.SessionBriefModel, override.SessionBriefModel),
-		CacheTTL:           mergeScalar(base.CacheTTL, override.CacheTTL),
-		STTLanguage:        mergeScalar(base.STTLanguage, override.STTLanguage),
-		STTModel:           mergeScalar(base.STTModel, override.STTModel),
+		BraveAPIKey:       mergeScalar(base.BraveAPIKey, override.BraveAPIKey),
+		AutoTitleModel:    mergeScalar(base.AutoTitleModel, override.AutoTitleModel),
+		SessionBriefModel: mergeScalar(base.SessionBriefModel, override.SessionBriefModel),
+		CacheTTL:          mergeScalar(base.CacheTTL, override.CacheTTL),
+		STTLanguage:       mergeScalar(base.STTLanguage, override.STTLanguage),
+		STTModel:          mergeScalar(base.STTModel, override.STTModel),
 		// Vocabulary accumulates instead of replacing: a project adds its own
 		// jargon on top of the names you set globally, rather than erasing them.
 		// Concatenated into a fresh slice so neither input is ever aliased.

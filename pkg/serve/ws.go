@@ -261,10 +261,6 @@ func wsEventFromBus(event any) (Event, bool) {
 			PermissionMode: e.PermissionMode, PathScope: e.PathScope,
 			CompactAt: e.CompactAt, ContextWindow: e.ContextWindow,
 		}}, true
-	case bus.PlanModeChanged:
-		return Event{Type: "plan_mode", Data: PlanModeData{
-			Mode: e.Mode, PlanFile: e.PlanFile,
-		}}, true
 	case bus.GoalChanged:
 		return Event{Type: "goal_change", Data: GoalChangeData{
 			Active: e.Active, Objective: e.Objective, WorkDir: e.WorkDir,
@@ -557,7 +553,6 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](b, bus.GetPendingApproval{})
 	taskList, _ := bus.QueryTyped[bus.GetTasks, []tasks.Task](b, bus.GetTasks{})
 	pathInfo, _ := bus.QueryTyped[bus.GetPathPolicy, bus.PathPolicyInfo](b, bus.GetPathPolicy{})
-	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
 	// Read bash jobs before subagents. GetSubagents retains terminal owners of
 	// its current bash snapshot, so this ordering keeps every bash included in
 	// this init payload routable to a real owner.
@@ -677,10 +672,6 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	}
 
 	data.PendingPermission, data.PendingAsk = pendingAttentionData(pending)
-	if planInfo.Mode != "off" {
-		data.PlanMode = planInfo.Mode
-		data.PlanFile = planInfo.PlanFile
-	}
 	if goalInfo.Active {
 		data.GoalActive = true
 		data.GoalObjective = goalInfo.Objective

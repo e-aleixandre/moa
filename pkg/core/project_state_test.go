@@ -225,7 +225,7 @@ func TestProjectState_ConcurrentUpdatesAllSurvive(t *testing.T) {
 }
 
 // Settings you want in one project but not in its repository: a turn limit you
-// prefer here, your own review model. Global config is for every project, and
+// prefer here. Global config is for every project, and
 // the project's own file is committed and shared — neither fits.
 func TestProjectState_ConfigAppliesToThisProjectOnly(t *testing.T) {
 	home := t.TempDir()
@@ -237,7 +237,7 @@ func TestProjectState_ConfigAppliesToThisProjectOnly(t *testing.T) {
 		MaxTurns: 100,
 	})
 	if err := UpdateProjectState(cwd, func(st *ProjectState) {
-		st.Config = &MoaConfig{MaxTurns: 40, CodeReviewModel: "haiku"}
+		st.Config = &MoaConfig{MaxTurns: 40}
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -245,9 +245,6 @@ func TestProjectState_ConfigAppliesToThisProjectOnly(t *testing.T) {
 	cfg := LoadMoaConfig(cwd)
 	if cfg.MaxTurns != 40 {
 		t.Errorf("MaxTurns = %d, want your project setting (40)", cfg.MaxTurns)
-	}
-	if cfg.CodeReviewModel != "haiku" {
-		t.Errorf("CodeReviewModel = %q, want haiku", cfg.CodeReviewModel)
 	}
 	// Another workspace keeps the global value.
 	if other := LoadMoaConfig(t.TempDir()); other.MaxTurns != 100 {

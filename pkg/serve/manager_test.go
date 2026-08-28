@@ -1283,12 +1283,8 @@ func TestResumeSession(t *testing.T) {
 	}
 }
 
-// TestResumeSession_KeepsSystemPrompt guards against the serve regression where
-// ResumeSession wiped the agent's system prompt to "" (via SyncPlanMode →
-// rebuildSystemPrompt with an empty BaseSystemPrompt), leaving resumed serve
-// sessions running with no identity / tool guidance / Persistence section. That
-// made OpenAI (and other) models behave erratically and stall. The base prompt
-// must survive a resume and reach the provider.
+// TestResumeSession_KeepsSystemPrompt verifies that resuming a legacy session
+// with removed plan-mode metadata preserves its usable session data.
 func TestResumeSession_KeepsSystemPrompt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1302,7 +1298,6 @@ func TestResumeSession_KeepsSystemPrompt(t *testing.T) {
 	}
 	saved := store.Create()
 	saved.Title = "resume-prompt"
-	// planmode present + mode "off" is the common case that triggered the wipe.
 	saved.Metadata = map[string]any{
 		"model":    "test-model",
 		"cwd":      dir,
@@ -1336,6 +1331,12 @@ func TestResumeSession_KeepsSystemPrompt(t *testing.T) {
 	sess, err := mgr.ResumeSession(saved.ID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if sess.Title != saved.Title || sess.CWD != dir {
+		t.Fatalf("legacy session fields changed on resume: title=%q cwd=%q", sess.Title, sess.CWD)
+	}
+	if history := sess.History(); len(history) != 1 || history[0].Content[0].Text != "prior message" {
+		t.Fatalf("legacy session history changed on resume: %+v", history)
 	}
 
 	// Drive one run so the provider is invoked and records req.System.

@@ -253,12 +253,6 @@
 .status-strip .status-strip-pill.perm-ask { color: var(--yellow); background: var(--yellow-dim); }
 .status-strip .status-strip-pill.perm-auto { color: var(--blue); background: var(--blue-dim); }
 
-/* Plan mode */
-.status-strip .status-strip-pill.plan-planning { color: var(--blue); background: var(--blue-dim); }
-.status-strip .status-strip-pill.plan-ready { color: var(--green); background: var(--green-dim); }
-.status-strip .status-strip-pill.plan-reviewing { color: var(--mauve); background: var(--mauve-dim); }
-.status-strip .status-strip-pill.plan-executing { color: var(--peach); background: var(--peach-dim); }
-
 /* Goal */
 .status-strip .status-strip-pill.goal { color: var(--mauve); background: var(--mauve-dim); }
 

@@ -17,7 +17,7 @@ const (
 // Claude Code canonical tool names (must match exactly for OAuth).
 var claudeCodeTools = []string{
 	"Read", "Write", "Edit", "Bash", "Grep", "Glob",
-	"AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
+	"AskUserQuestion",
 	"KillShell", "NotebookEdit", "Skill", "Task",
 	"TaskOutput", "TodoWrite", "WebFetch", "WebSearch",
 }

@@ -15,7 +15,6 @@ export const COMMANDS = [
   { name: 'model', desc: 'Switch model', args: '<model>' },
   { name: 'thinking', desc: 'Set thinking level', args: '<off|low|medium|high|xhigh>' },
   { name: 'permissions', desc: 'Set permission mode', args: '<yolo|ask|auto>' },
-  { name: 'plan', desc: 'Enter/exit plan mode', args: '[exit]' },
   { name: 'goal', desc: 'Autonomous maker→verifier loop', args: '<objective> [flags]|stop|status' },
   { name: 'tasks', desc: 'View/manage tasks', args: '[done <id> | reset]' },
   { name: 'verify', desc: 'Run verification checks' },
