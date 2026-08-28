@@ -37,9 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   roster was decoded three times over, and two of those readings threw their
   work away. Measured against 199 real sessions, 5.21s/698MB down to
   1.89s/232MB.
-- Saving a session is about five times faster. Every save rewrites the whole
+- Saving a session is about three times faster. Every save rewrites the whole
   history, so indenting the file cost real work on every single turn; session
-  and subagent transcripts are now written compactly.
+  and subagent transcripts are now written compactly. Measured by re-encoding
+  a real 86MB session file: 784ms indented down to 257ms compact.
 - The owner's iPhone dropped every compressed WebSocket, reopening the socket
   every ~1.4s and re-hydrating the transcript continuously, so the conversation
   flickered. The underlying library emitted a compressed message as a long run
