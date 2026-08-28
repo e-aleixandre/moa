@@ -36,8 +36,6 @@ type InitData struct {
 	PendingPermission  *PermissionData     `json:"pending_permission,omitempty"`
 	PendingAsk         *AskData            `json:"pending_ask,omitempty"`
 	Tasks              any                 `json:"tasks,omitempty"`
-	PlanMode           string              `json:"plan_mode,omitempty"`
-	PlanFile           string              `json:"plan_file,omitempty"`
 	GoalActive         bool                `json:"goal_active,omitempty"`
 	GoalObjective      string              `json:"goal_objective,omitempty"`
 	GoalWorkDir        string              `json:"goal_work_dir,omitempty"`
@@ -328,12 +326,6 @@ type CommandDequeuedData struct {
 	Raw      string `json:"raw"`
 	Executed bool   `json:"executed"`
 	Err      string `json:"err,omitempty"`
-}
-
-// PlanModeData is sent on plan mode state changes.
-type PlanModeData struct {
-	Mode     string `json:"mode"`
-	PlanFile string `json:"plan_file,omitempty"`
 }
 
 // GoalChangeData is sent when goal mode activates or deactivates.

@@ -23,9 +23,6 @@ function activeModes(session) {
   const s = session || {};
   const modes = {};
 
-  const planMode = s.planMode;
-  if (planMode && planMode !== "off") modes.planMode = planMode;
-
   if (s.goalActive) {
     modes.goal = {
       verifying: !!s.goalVerifying,
@@ -58,7 +55,6 @@ export function spendLevel(usage) {
 //   {
 //     perm: { mode },                       // always present; the tappable control
 //     modes: {                              // only the ones currently active
-//       planMode?: string,
 //       goal?:  { verifying, iteration, objective },
 //       tasks?: { done, total, complete },
 //     },

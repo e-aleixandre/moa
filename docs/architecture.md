@@ -22,7 +22,6 @@
 | `pkg/permission/` | Gate for `yolo`/`ask`/`auto` tool approvals |
 | `pkg/checkpoint/` | File-level undo — snapshots before writes, pop to revert |
 | `pkg/memory/` | Cross-session persistent project memory |
-| `pkg/planmode/` | Plan-then-execute workflow, tool restrictions, task tracking |
 | `pkg/tasks/` | Task store and tool for plan execution |
 | `pkg/subagent/` | Child agent execution and async job management |
 | `pkg/verify/` | Run project verification checks |
@@ -80,9 +79,9 @@ The same agent core is reused across all interfaces:
 
 `pkg/bus` is the central nervous system. Components communicate through typed messages:
 
-- **Events** — async, fan-out (e.g. `ToolExecStarted`, `PlanModeChanged`)
-- **Commands** — sync, one handler (e.g. `EnterPlanMode`, `AbortRun`)
-- **Queries** — sync, request-response (e.g. `GetPlanMode`, `GetSessionState`)
+- **Events** — async, fan-out (e.g. `ToolExecStarted`, `GoalChanged`)
+- **Commands** — sync, one handler (e.g. `AbortRun`)
+- **Queries** — sync, request-response (e.g. `GetSessionState`)
 
 The serve layer subscribes to events for rendering. The agent loop publishes events and handles commands.
 

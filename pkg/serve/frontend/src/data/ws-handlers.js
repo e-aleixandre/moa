@@ -603,8 +603,6 @@ export function handleWsInit(id, data) {
     // if one is still running, it is restored.
     compacting: !!data.compacting,
     tasks: data.tasks || [],
-    planMode: data.plan_mode || 'off',
-    planFile: data.plan_file || null,
     costUSD: data.cost_usd || 0,
     // Logical per-run traffic is authoritative in every init snapshot, so a
     // reconnect replaces stale local totals even when the run is already idle.
@@ -1888,13 +1886,6 @@ export function handleWsCommandDequeued(id, data) {
 
 export function handleWsTasksUpdate(id, data) {
   updateSession(id, { tasks: data.tasks || [] });
-}
-
-export function handleWsPlanMode(id, data) {
-  updateSession(id, {
-    planMode: data.mode || 'off',
-    planFile: data.plan_file || null,
-  });
 }
 
 export function handleWsCommand(id, data) {

@@ -2,7 +2,7 @@
 //
 // This is the only file in package bootstrap that imports pkg/bus.
 // The dependency direction is intentional: bootstrap already knows all the
-// domain types (agent, permission, tasks, planmode, etc.) that constitute a
+// domain types (agent, permission, tasks, etc.) that constitute a
 // RuntimeConfig. This file simply groups them into the struct that
 // NewSessionRuntime expects, eliminating manual field mapping in every caller.
 package bootstrap
@@ -36,7 +36,6 @@ func (s *Session) RuntimeConfig() bus.RuntimeConfig {
 	return bus.RuntimeConfig{
 		Agent:             s.Agent,
 		TaskStore:         s.TaskStore,
-		PlanMode:          s.PlanMode,
 		Goal:              s.Goal,
 		Gate:              s.Gate,
 		PathPolicy:        s.PathPolicy,

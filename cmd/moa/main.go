@@ -197,7 +197,7 @@ func main() {
 	preBus := bus.NewLocalBus()
 
 	// Bootstrap: single function wires up tools, MCP, permissions, subagents,
-	// plan mode, skills, verify, and agent.
+	// skills, verify, and agent.
 	//
 	// Resolve MCP disable provenance from disk so project-scope vetoes aren't
 	// misattributed to global.

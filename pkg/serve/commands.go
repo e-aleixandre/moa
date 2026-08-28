@@ -27,7 +27,6 @@ var commandRegistry = map[string]commandHandler{
 	"prepare-compact": cmdPrepareCompact,
 	"model":           cmdModel,
 	"thinking":        cmdThinking,
-	"plan":            cmdPlan,
 	"goal":            cmdGoal,
 	"tasks":           cmdTasks,
 	"permissions":     cmdPermissions,
@@ -301,35 +300,6 @@ func cmdThinking(m *Manager, sess *ManagedSession, args []string) (*CommandResul
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
 	return &CommandResult{OK: true, Message: "thinking: " + result["thinking"]}, nil
-}
-
-func cmdPlan(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
-	if err := requireIdle(sess); err != nil {
-		return nil, err
-	}
-
-	b := sess.runtime.Bus
-
-	// Check current mode via query.
-	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
-
-	if len(args) > 0 && args[0] == "exit" {
-		if err := b.Execute(bus.ExitPlanMode{}); err != nil {
-			return &CommandResult{OK: false, Message: err.Error()}, nil
-		}
-		return &CommandResult{OK: true, Message: "exited plan mode"}, nil
-	}
-
-	if planInfo.Mode == "off" {
-		if err := b.Execute(bus.EnterPlanMode{}); err != nil {
-			return &CommandResult{OK: false, Message: err.Error()}, nil
-		}
-		// Re-query to get the plan file path.
-		planInfo, _ = bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
-		return &CommandResult{OK: true, Message: "entered plan mode → " + planInfo.PlanFile}, nil
-	}
-
-	return &CommandResult{OK: true, Message: "plan mode: " + planInfo.Mode}, nil
 }
 
 func cmdGoal(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {

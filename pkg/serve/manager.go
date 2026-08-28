@@ -254,8 +254,6 @@ type SessionInfo struct {
 	// detail is fetched on demand from GET /api/sessions/{id}/mcp. Omitted when
 	// the session has no MCP servers.
 	MCP            *MCPSummary `json:"mcp,omitempty"`
-	PlanMode       string      `json:"plan_mode,omitempty"`
-	PlanFile       string      `json:"plan_file,omitempty"`
 	ContextPercent int         `json:"context_percent"` // 0-100, -1 if unknown
 	// ContextWindow is the model's usable input window in tokens — the
 	// denominator ContextPercent is measured against, and the scale CompactAt
@@ -376,7 +374,6 @@ func (s *ManagedSession) info() SessionInfo {
 	permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](b, bus.GetPermissionMode{})
 	state, _ := bus.QueryTyped[bus.GetSessionState, string](b, bus.GetSessionState{})
 	stateErr, _ := bus.QueryTyped[bus.GetSessionError, string](b, bus.GetSessionError{})
-	planInfo, _ := bus.QueryTyped[bus.GetPlanMode, bus.PlanModeInfo](b, bus.GetPlanMode{})
 	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
 	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
 	compactAtMin, _ := bus.QueryTyped[bus.GetCompactAtFloor, int](b, bus.GetCompactAtFloor{})
@@ -417,10 +414,6 @@ func (s *ManagedSession) info() SessionInfo {
 	// an expiry for those models and only once a run has warmed the cache.
 	if !lastRun.IsZero() && cacheTTL > 0 && model.Provider == "anthropic" {
 		info.CacheExpiresAt = lastRun.Add(cacheTTL)
-	}
-	if planInfo.Mode != "off" {
-		info.PlanMode = planInfo.Mode
-		info.PlanFile = planInfo.PlanFile
 	}
 	// Surface the run-start time only while a run is in flight so the client can
 	// show (and keep) an accurate elapsed counter across reconnects.

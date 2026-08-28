@@ -1259,7 +1259,6 @@ func handleListCommands() http.HandlerFunc {
 		"thinking":        {Description: "Set thinking level", Args: "<off|low|medium|high|xhigh>"},
 		"permissions":     {Description: "Set permission mode", Args: "<yolo|ask|auto>"},
 		"path":            {Description: "Manage path access scope", Args: "[list|add <dir>|rm <dir>|scope workspace|unrestricted]"},
-		"plan":            {Description: "Enter/exit plan mode", Args: "[exit]"},
 		"goal":            {Description: "Autonomous maker→verifier loop toward an objective", Args: "<objective> [flags]|stop|status"},
 		"tasks":           {Description: "View/manage tasks", Args: "[done <id> | reset]"},
 		"undo":            {Description: "Undo last file change"},

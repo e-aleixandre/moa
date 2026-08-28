@@ -1,5 +1,5 @@
 // Package tasks provides a standalone task tracking system.
-// It can be used independently or as part of plan mode.
+// It can be used independently by an agent session.
 package tasks
 
 import (

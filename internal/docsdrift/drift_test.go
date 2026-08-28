@@ -81,12 +81,8 @@ func firstCellTokens(t *testing.T, rows [][]string) []string {
 //
 //   - checkpoint: an internal overlay tool, visible only during the
 //     pre-compaction turn (agent.SendPrepareCompact).
-//   - submit_plan / request_review: registered and unregistered dynamically by
-//     plan mode.
 var knownUnregisterable = map[string]bool{
-	"checkpoint":     true,
-	"submit_plan":    true,
-	"request_review": true,
+	"checkpoint": true,
 }
 
 func TestToolsDocumented(t *testing.T) {

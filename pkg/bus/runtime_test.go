@@ -12,7 +12,6 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/permission"
-	"github.com/e-aleixandre/moa/pkg/planmode"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/tool"
@@ -669,12 +668,6 @@ func TestSessionRuntime_SwitchSession_RestoresMetadataTransactionally(t *testing
 	fas.model = modelDefault
 	fas.thinkingLevel = "medium"
 	taskStore := tasks.NewStore()
-	registry := core.NewRegistry()
-	pm := planmode.New(planmode.Config{
-		Registry:   registry,
-		SessionDir: t.TempDir(),
-		TaskStore:  taskStore,
-	})
 	gate := permission.New(permission.ModeAsk, permission.Config{Allow: []string{"read"}})
 	// This deliberately differs from the secure legacy fallback expected for B.
 	pathPolicy := tool.NewPathPolicy(workspace, nil, true)
@@ -683,7 +676,6 @@ func TestSessionRuntime_SwitchSession_RestoresMetadataTransactionally(t *testing
 		Agent:      fas.fakeAgent,
 		Subscriber: &fas.fakeSubscriber,
 		TaskStore:  taskStore,
-		PlanMode:   pm,
 		Gate:       gate,
 		GateConfig: gate.SnapshotConfig(),
 		PathPolicy: pathPolicy,
@@ -702,7 +694,7 @@ func TestSessionRuntime_SwitchSession_RestoresMetadataTransactionally(t *testing
 	rt.Bus.Subscribe(func(e ConfigChanged) { configChanges <- e })
 	rt.Bus.Subscribe(func(e SessionLoaded) { loaded <- e })
 
-	assertRuntime := func(wantModel core.Model, wantThinking, wantPermission, wantScope, wantTask, wantPlan, wantHistory string) {
+	assertRuntime := func(wantModel core.Model, wantThinking, wantPermission, wantScope, wantTask, wantHistory string) {
 		t.Helper()
 		model, err := QueryTyped[GetModel, core.Model](rt.Bus, GetModel{})
 		if err != nil || !sameModel(model, wantModel) {
@@ -731,10 +723,6 @@ func TestSessionRuntime_SwitchSession_RestoresMetadataTransactionally(t *testing
 		} else if len(taskList) != 1 || taskList[0].Title != wantTask {
 			t.Fatalf("tasks = %+v, want %q", taskList, wantTask)
 		}
-		plan, err := QueryTyped[GetPlanMode, PlanModeInfo](rt.Bus, GetPlanMode{})
-		if err != nil || plan.Mode != wantPlan {
-			t.Fatalf("plan = %+v, %v; want %q", plan, err, wantPlan)
-		}
 		messages := fas.Messages()
 		if len(messages) != 1 || len(messages[0].Content) != 1 || messages[0].Content[0].Text != wantHistory {
 			t.Fatalf("history = %+v, want %q", messages, wantHistory)
@@ -757,7 +745,7 @@ func TestSessionRuntime_SwitchSession_RestoresMetadataTransactionally(t *testing
 		t.Fatal(err)
 	}
 	rt.Bus.Drain(time.Second)
-	assertRuntime(modelA, "high", "yolo", "unrestricted", "A-only task", "planning", "session A history")
+	assertRuntime(modelA, "high", "yolo", "unrestricted", "A-only task", "session A history")
 
 	// A non-zero cost must be reset as part of the switch, without a separate
 	// SessionCostUpdated event/config save.
@@ -766,7 +754,7 @@ func TestSessionRuntime_SwitchSession_RestoresMetadataTransactionally(t *testing
 		t.Fatal(err)
 	}
 	rt.Bus.Drain(time.Second)
-	assertRuntime(modelDefault, "medium", "ask", "workspace", "", "off", "session B history")
+	assertRuntime(modelDefault, "medium", "ask", "workspace", "", "session B history")
 	if cost, err := QueryTyped[GetSessionCost, float64](rt.Bus, GetSessionCost{}); err != nil || cost != 0 {
 		t.Fatalf("session cost = %v, %v; want 0", cost, err)
 	}
@@ -788,7 +776,7 @@ func TestSessionRuntime_SwitchSession_RestoresMetadataTransactionally(t *testing
 		t.Fatal(err)
 	}
 	rt.Bus.Drain(time.Second)
-	assertRuntime(modelA, "high", "yolo", "unrestricted", "A-only task", "planning", "session A history")
+	assertRuntime(modelA, "high", "yolo", "unrestricted", "A-only task", "session A history")
 	savedA := loadJSON(sessA.ID)
 	if savedA.Metadata[session.MetaModel] != "openai/gpt-5.6-sol" ||
 		savedA.Metadata[session.MetaThinking] != "high" ||

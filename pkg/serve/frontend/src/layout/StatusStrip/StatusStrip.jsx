@@ -1,5 +1,5 @@
 import "./StatusStrip.css";
-import { ClipboardList, Map, Flame, Target, Gauge, Plug, AlertTriangle } from "lucide-preact";
+import { ClipboardList, Flame, Target, Gauge, Plug, AlertTriangle } from "lucide-preact";
 import { statusStripModel } from "../../data/util/status-strip-model.js";
 import { PermissionControl } from "../../components/PermissionControl/PermissionControl.jsx";
 import { TokenFlow } from "../../components/TokenFlow/TokenFlow.jsx";
@@ -12,7 +12,7 @@ import { activityPhase } from "../../data/util/activity.js";
 //
 // Level 1 (this line): the context ring + session cost (leading the line, same
 // side as the mobile line), per-run tokens, the permission chip, and the modes
-// that are currently ACTIVE (plan/goal/tasks) plus the on-extra alert. The
+// that are currently ACTIVE (goal/tasks) plus the on-extra alert. The
 // foreground run's ACTIVITY is not here: it lives in the NowLine above the
 // composer, in both densities. `task` survives for the consumers whose subject
 // is NOT the focused run — the subagent strip (a child's activity, which can be
@@ -134,13 +134,6 @@ export function StatusStrip({
 
       {/* Active modes — only rendered when the model reports them (off modes
           are omitted upstream). */}
-      {modes.planMode && (
-        <span class={`status-strip-pill plan-${modes.planMode}`}>
-          <Map />
-          {modes.planMode}
-        </span>
-      )}
-
       {modes.goal && (
         <span class="status-strip-pill goal" title={modes.goal.objective || "Goal active"}>
           <Target />

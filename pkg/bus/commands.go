@@ -249,36 +249,6 @@ type UndoLastChange struct{ SessionID string }
 type BranchTo struct{ EntryID string }
 
 // ---------------------------------------------------------------------------
-// Plan mode
-// ---------------------------------------------------------------------------
-
-// EnterPlanMode enters planning mode (creates plan file).
-type EnterPlanMode struct{ SessionID string }
-
-// ExitPlanMode exits planning mode.
-type ExitPlanMode struct{ SessionID string }
-
-// StartPlanExecution transitions from ready → executing.
-// CleanContext controls whether the conversation is reset before execution.
-type StartPlanExecution struct {
-	SessionID    string
-	CleanContext bool
-}
-
-// StartPlanReview transitions from ready → reviewing.
-// Review configuration (model, thinking) is handled by the frontend locally,
-// not by the bus — the plan mode state machine only tracks the mode transition.
-type StartPlanReview struct {
-	SessionID string
-}
-
-// ContinueRefining transitions from reviewing → planning (continue refining).
-type ContinueRefining struct{ SessionID string }
-
-// FinishPlanReview completes the review phase and transitions to ready.
-type FinishPlanReview struct{ SessionID string }
-
-// ---------------------------------------------------------------------------
 // Goal mode
 // ---------------------------------------------------------------------------
 

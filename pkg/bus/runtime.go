@@ -13,7 +13,6 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/permission"
-	"github.com/e-aleixandre/moa/pkg/planmode"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 	"github.com/e-aleixandre/moa/pkg/tasks"
@@ -30,7 +29,6 @@ type RuntimeConfig struct {
 	TaskStore         *tasks.Store
 	Checkpoints       *checkpoint.Store
 	SessionCheckpoint *sessioncheckpoint.Slot
-	PlanMode          *planmode.PlanMode
 	Goal              *goal.Goal
 	Gate              *permission.Gate
 	PathPolicy        *tool.PathPolicy
@@ -89,7 +87,6 @@ type sessionRuntimeDefaults struct {
 	permissionMode permission.Mode
 	gateConfig     permission.Config
 	tasks          tasks.State
-	plan           planmode.State
 }
 
 // SessionRestoreState is the validated, typed runtime state decoded from a
@@ -103,7 +100,6 @@ type SessionRestoreState struct {
 	HasPermissionMode bool
 	Tasks             tasks.State
 	HasTasks          bool
-	Plan              planmode.State
 	PathScope         string
 	AllowedPaths      []string
 	HasPathPolicy     bool
@@ -112,7 +108,7 @@ type SessionRestoreState struct {
 // NewSessionRestoreState decodes the metadata persisted on sess. Invalid
 // values are treated as absent so callers fall back to runtime defaults.
 func NewSessionRestoreState(sess *session.Session) SessionRestoreState {
-	state := SessionRestoreState{Plan: planmode.State{Mode: planmode.ModeOff}}
+	state := SessionRestoreState{}
 	if sess == nil || sess.Metadata == nil {
 		return state
 	}
@@ -139,7 +135,6 @@ func NewSessionRestoreState(sess *session.Session) SessionRestoreState {
 		state.Tasks = taskState
 		state.HasTasks = true
 	}
-	state.Plan = planmode.RestoreFromMetadata(meta)
 	if scope, paths := sess.PathMeta(); scope != "" {
 		switch strings.ToLower(scope) {
 		case "unrestricted":
@@ -197,7 +192,6 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		TaskStore:         cfg.TaskStore,
 		Checkpoints:       cfg.Checkpoints,
 		SessionCheckpoint: cfg.SessionCheckpoint,
-		PlanMode:          cfg.PlanMode,
 		Goal:              cfg.Goal,
 		PathPolicy:        cfg.PathPolicy,
 		AskBridge:         cfg.AskBridge,
@@ -213,17 +207,8 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 	// generation so ClearPending can spare a newer run's live approvals.
 	am.runGen = &sctx.RunGenAtomic
 
-	// Compose permission check: plan mode filter + gate check.
+	// Compose the permission check with the session gate.
 	permCheck := func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
-		if sctx.PlanMode != nil {
-			if allowed, reason := sctx.PlanMode.FilterToolCall(name, args); !allowed {
-				return &core.ToolCallDecision{
-					Block:  true,
-					Reason: reason,
-					Kind:   core.ToolCallDecisionKindPolicy,
-				}
-			}
-		}
 		if g := sctx.GetGate(); g != nil {
 			return g.Check(ctx, name, args)
 		}
@@ -261,20 +246,6 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		sctx.SessionCheckpoint.Restore(cfg.InitialMetadata)
 	}
 
-	// Take ownership of PlanMode's onChange callback:
-	// 1. Rebuild system prompt (centralized, every transition)
-	// 2. Publish PlanModeChanged event
-	if cfg.PlanMode != nil {
-		cfg.PlanMode.SetOnChange(func(mode planmode.Mode) {
-			rebuildSystemPrompt(sctx)
-			sctx.Bus.Publish(PlanModeChanged{
-				SessionID: sctx.SessionID,
-				Mode:      string(mode),
-				PlanFile:  sctx.PlanMode.PlanFilePath(),
-			})
-		})
-	}
-
 	// Goal mode: rebuild system prompt (inject/remove directive) and announce.
 	if cfg.Goal != nil {
 		cfg.Goal.SetOnChange(func(active bool) {
@@ -303,7 +274,6 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		permissionMode: permission.ModeYolo,
 		gateConfig:     clonePermissionConfig(cfg.GateConfig),
 		tasks:          tasks.State{WidgetMode: tasks.WidgetAll},
-		plan:           planmode.State{Mode: planmode.ModeOff},
 	}
 	if cfg.Gate != nil {
 		rt.defaults.permissionMode = cfg.Gate.Mode()
@@ -519,32 +489,13 @@ func (r *SessionRuntime) WaitQuiescent(ctx context.Context) bool {
 	}
 }
 
-// SyncPlanMode rebuilds the system prompt and publishes PlanModeChanged
-// for the current plan mode state. Call after restoring plan mode from
-// persisted metadata (RestoreState/ApplyRestoredState happen before
-// SetOnChange is wired).
-func (r *SessionRuntime) SyncPlanMode() {
-	if r.sctx.PlanMode == nil {
-		return
-	}
-	rebuildSystemPrompt(r.sctx)
-	mode := r.sctx.PlanMode.Mode()
-	if mode != planmode.ModeOff {
-		r.Bus.Publish(PlanModeChanged{
-			SessionID: r.sctx.SessionID,
-			Mode:      string(mode),
-			PlanFile:  r.sctx.PlanMode.PlanFilePath(),
-		})
-	}
-}
-
 // Context returns the SessionContext. For testing and advanced use.
 func (r *SessionRuntime) Context() *SessionContext {
 	return r.sctx
 }
 
 // RefreshBaseSystemPrompt sets a freshly built base system prompt and re-applies
-// it, composing plan/goal fragments on top. Callers use it after the tool set
+// it, composing goal fragments on top. Callers use it after the tool set
 // changes at runtime (e.g. an MCP server is enabled or disabled) so the model is
 // never told about a tool that is no longer registered. It must be called while
 // the agent is not running; the MCP controller only reconciles at quiescence,
@@ -554,10 +505,10 @@ func (r *SessionRuntime) RefreshBaseSystemPrompt(base string) {
 		return
 	}
 	r.sctx.BaseSystemPrompt = base
-	// rebuildSystemPrompt re-applies BaseSystemPrompt + plan/goal fragments, but
+	// rebuildSystemPrompt re-applies BaseSystemPrompt + goal fragments, but
 	// it is a no-op when neither mode is active — in that case set the base
 	// prompt directly so a plain session still picks up the new tool list.
-	if r.sctx.PlanMode == nil && r.sctx.Goal == nil {
+	if r.sctx.Goal == nil {
 		_ = r.sctx.Agent.SetSystemPrompt(base)
 		return
 	}
@@ -633,14 +584,6 @@ func (r *SessionRuntime) SwitchSession(sess *session.Session) error {
 		} else {
 			r.sctx.TaskStore.RestoreState(r.defaults.tasks)
 		}
-	}
-	if r.sctx.PlanMode != nil {
-		plan := r.defaults.plan
-		if sess != nil && sess.Metadata != nil {
-			plan = restored.Plan
-		}
-		r.sctx.PlanMode.Restore(plan)
-		r.sctx.PlanMode.ApplyRestoredState()
 	}
 	if r.sctx.PathPolicy != nil {
 		// Legacy sessions without explicit path metadata must not inherit the
