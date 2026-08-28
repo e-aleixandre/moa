@@ -249,6 +249,36 @@ test('delta init completes a tool whose call is in the cached prefix', () => {
   expect(prefix[0]).toMatchObject({ status: 'done', result: 'done' });
 });
 
+// A mobile reconnect resumes by delta, so the launch row sits in the cached
+// prefix while its result arrives in the suffix. Losing the job link there
+// drew a second, unopenable card for a single child on every screen wake.
+test('delta init links a prefix subagent launch to the job its result recorded', () => {
+  const prefix = normalizeHistory([{
+    role: 'assistant', msg_id: 'call-msg', timestamp: 100,
+    content: [{ type: 'tool_call', tool_call_id: 'toolu_1', tool_name: 'subagent', arguments: { task: 'do it' } }],
+  }]);
+  setState({ sessions: { s1: { id: 's1', messages: prefix, subagents: {} } } });
+
+  handleWsInit('s1', {
+    delta_base: 'call-msg', subagents: [], server_instance: 'instance-a',
+    messages: [{
+      role: 'tool_result', tool_call_id: 'toolu_1', msg_id: 'res-msg', timestamp: 200,
+      content: [{ type: 'text', text: 'ok' }], custom: { subagent_job_id: 'sa-1' },
+    }],
+    subagent_outcomes: [{
+      job_id: 'sa-1', task: 'do it', status: 'completed', result: 'ok', finished_at_ms: 250,
+    }],
+  });
+
+  expect(store.get().sessions.s1.messages.find(m => m.tool_call_id === 'toolu_1'))
+    .toMatchObject({ subagentJobId: 'sa-1' });
+  const agents = projectStream(store.get().sessions.s1)
+    .flatMap(doc => (doc.blocks || []).filter(block => block.type === 'delegation'))
+    .flatMap(block => block.agents);
+  expect(agents).toHaveLength(1);
+  expect(agents[0]).toMatchObject({ id: 'sa-1', openable: true });
+});
+
 test('handleWsInit appends a validated delta without replacing the prefix array', () => {
   const prefix = [{ role: 'user', _msg_id: 'one', content: [{ type: 'text', text: 'one' }] }];
   setState({ sessions: { s1: { id: 's1', messages: prefix, subagents: {} } } });

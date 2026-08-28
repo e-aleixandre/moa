@@ -189,11 +189,18 @@ export function appendNormalizedHistoryDelta(prefix, raw, liveSubagents = []) {
   for (const msg of raw) {
     if (msg?.role !== 'tool_result' || !msg.tool_call_id) continue;
     const result = (msg.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
-    toolResults.set(msg.tool_call_id, {
+    const update = {
       result,
       status: msg.custom?.rejected === true ? 'rejected' : msg.is_error ? 'error' : 'done',
       timestamp: msg.timestamp,
-    });
+    };
+    // Carry the spawned job the same way normalizeHistory does when it sees the
+    // call and its result together. A delta splits them: the launch row is
+    // already in the cached prefix, so dropping this link leaves that row
+    // unmatchable and the turn draws a second, unopenable card for one child.
+    const subagentJobId = msg.custom?.subagent_job_id;
+    if (subagentJobId) update.subagentJobId = subagentJobId;
+    toolResults.set(msg.tool_call_id, update);
   }
   for (let i = 0; i < prefix.length; i++) {
     const row = prefix[i];
