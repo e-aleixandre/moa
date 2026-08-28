@@ -529,3 +529,43 @@ func TestSignaturesAreAbsentFromInitAndHistoryButKeptInTheTranscript(t *testing.
 		t.Fatal("signed message missing from the stored transcript")
 	}
 }
+
+// TestInitProjectionKeepsTheSubagentJobIDLinkingALaunchToItsChild is the
+// duplication test. The subagent tool records the job it spawned under
+// custom.subagent_job_id (subagent.go#taggedWithJob), and that annotation is
+// the ONLY link from a launch tool call — whose ID belongs to the provider —
+// to the child it started. The client's dedup reads it (stream-model.js
+// #projectStream) to fold the launch acknowledgement into the completion card.
+//
+// projectWSMessageCustom used to drop every custom key without a "source"
+// field, so the reconnect snapshot arrived with the link erased and the
+// launch card was projected as a second, orphan row next to the real
+// outcome: the "Subagent started in background." duplicate the owner sees on
+// every reload, with a Conversation button pointing at a job that does not
+// exist.
+func TestInitProjectionKeepsTheSubagentJobIDLinkingALaunchToItsChild(t *testing.T) {
+	original := core.AgentMessage{Message: core.Message{
+		Role: "tool_result", MsgID: "launch", ToolCallID: "call_provider_1",
+		Content: []core.Content{core.TextContent("Subagent started in background.\nJob ID: sa-1\n")},
+	}, Custom: map[string]any{"subagent_job_id": "sa-1"}}
+
+	projected, _ := sanitizeHistoryMessage(original)
+	if got, _ := projected.Custom["subagent_job_id"].(string); got != "sa-1" {
+		t.Fatalf("subagent_job_id = %q, want sa-1 (custom = %#v)", got, projected.Custom)
+	}
+}
+
+// The projection is an allowlist, so it must not become a passthrough while
+// fixing the link above: internal bookkeeping the browser has no business
+// reading stays server-side.
+func TestInitProjectionStillDropsUnrelatedInternalCustomKeys(t *testing.T) {
+	original := core.AgentMessage{Message: core.Message{
+		Role: "tool_result", MsgID: "launch", ToolCallID: "call_provider_1",
+		Content: []core.Content{core.TextContent("done")},
+	}, Custom: map[string]any{"subagent_job_id": "sa-1", "internal_secret": "nope"}}
+
+	projected, _ := sanitizeHistoryMessage(original)
+	if _, leaked := projected.Custom["internal_secret"]; leaked {
+		t.Fatalf("unrelated internal key reached the client: %#v", projected.Custom)
+	}
+}
