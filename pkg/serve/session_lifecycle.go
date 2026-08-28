@@ -713,10 +713,13 @@ func (m *Manager) deleteSession(id string) error {
 	// cannot leave a newly registered batch behind.
 	m.forgetSecretBatches(id)
 
-	// Close MCP connections before context cancellation.
+	// Serialize with reload so a manager swapped in after closing begins cannot
+	// escape teardown and leave its child processes alive.
+	sess.mcpLifecycleMu.Lock()
 	if sess.infra.mcpMgr != nil {
 		sess.infra.mcpMgr.Close()
 	}
+	sess.mcpLifecycleMu.Unlock()
 
 	// Cancel session context — stops bridges, subagent jobs, and in-flight runs.
 	sess.infra.sessionCancel()
@@ -901,9 +904,12 @@ func (m *Manager) CloseSession(id string) error {
 		sess.unreadUnsub()
 	}
 	m.forgetSecretBatches(id)
+	// Serialize with reload so teardown closes whichever manager won the swap.
+	sess.mcpLifecycleMu.Lock()
 	if sess.infra.mcpMgr != nil {
 		sess.infra.mcpMgr.Close()
 	}
+	sess.mcpLifecycleMu.Unlock()
 	sess.infra.sessionCancel()
 	// Close drains the bus's async persistence reactor, so no delayed save can
 	// still be writing when the deferred unreserve lets a resume rebuild this
@@ -1292,6 +1298,12 @@ func (s *ManagedSession) RestartMCPServer(name string) (mcp.ServerStatus, error)
 
 // reloadMCP reloads MCP servers for a session.
 func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
+	// The lifecycle guard held by callers makes this check atomic with teardown:
+	// once closing starts, no replacement manager may outlive the session.
+	if s.closing.Load() {
+		return ErrBusy
+	}
+
 	// Phase 1: prepare (no mutation).
 	projectServers, err := core.LoadMCPFile(filepath.Join(s.CWD, ".mcp.json"))
 	if err != nil {

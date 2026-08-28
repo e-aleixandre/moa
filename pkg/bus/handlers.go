@@ -54,6 +54,10 @@ func rebuildSystemPrompt(sctx *SessionContext) {
 // RegisterHandlers registers command and query handlers for a session on its bus.
 // Call once after creating a SessionContext.
 func RegisterHandlers(sctx *SessionContext) {
+	registerHandlers(sctx, func(fn func()) { go fn() })
+}
+
+func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 	b := sctx.Bus
 
 	// Serializes manual /verify runs (bus command and queued barrier share it).
@@ -1584,16 +1588,22 @@ func RegisterHandlers(sctx *SessionContext) {
 		startRunGen := e.RunGen
 		sctx.beginAutoVerify()
 
-		go func() {
+		ctx, cancel := context.WithTimeout(sctx.SessionCtx, 5*time.Minute)
+		// Register before launching so a new user turn cannot miss the cancel
+		// function while this goroutine is waiting to be scheduled.
+		autoVerifyCancel.Store(&cancel)
+
+		launchAutoVerify(func() {
 			defer sctx.endAutoVerify()
+			defer cancel()
+			defer autoVerifyCancel.CompareAndSwap(&cancel, nil)
 			sctx.Bus.Publish(AutoVerifyStarted{SessionID: sctx.SessionID})
 
-			ctx, cancel := context.WithTimeout(sctx.SessionCtx, 5*time.Minute)
-			defer cancel()
-
-			// Store cancel so new user runs can abort this verify.
-			autoVerifyCancel.Store(&cancel)
-			defer autoVerifyCancel.CompareAndSwap(&cancel, nil)
+			// Do not touch the workspace if cancellation or a newer run won before
+			// this goroutine reached the verifier.
+			if ctx.Err() != nil || sctx.RunGenAtomic.Load() != startRunGen {
+				return
+			}
 
 			result, err := verify.Execute(ctx, sctx.CWD)
 
@@ -1632,7 +1642,7 @@ func RegisterHandlers(sctx *SessionContext) {
 					})
 				}
 			}
-		}()
+		})
 	})
 
 	// --- Goal driver ---
@@ -2035,13 +2045,40 @@ func stopGoal(sctx *SessionContext, reason string) {
 	compactErr := sctx.Agent.SetCompactAt(prev)
 	budgetErr := sctx.Agent.SetMaxBudget(prevBudget)
 	if compactErr != nil || budgetErr != nil {
-		var unsub func()
-		unsub = sctx.Bus.Subscribe(func(e RunEnded) {
-			_ = sctx.Agent.SetCompactAt(prev)
-			_ = sctx.Agent.SetMaxBudget(prevBudget)
-			rebuildSystemPrompt(sctx) // re-apply now that the goal directive is gone
-			unsub()
-		})
+		var (
+			mu    sync.Mutex
+			fired bool
+			unsub func()
+		)
+		tearDown := func() {
+			// caller holds mu
+			if fired && unsub != nil {
+				u := unsub
+				unsub = nil
+				u()
+			}
+		}
+		handler := func(e RunEnded) {
+			mu.Lock()
+			alreadyFired := fired
+			fired = true
+			mu.Unlock()
+			if !alreadyFired {
+				_ = sctx.Agent.SetCompactAt(prev)
+				_ = sctx.Agent.SetMaxBudget(prevBudget)
+				rebuildSystemPrompt(sctx) // re-apply now that the goal directive is gone
+			}
+			mu.Lock()
+			tearDown()
+			mu.Unlock()
+		}
+		u := sctx.Bus.Subscribe(handler)
+		mu.Lock()
+		unsub = u
+		// RunEnded may have fired before Subscribe returned; complete teardown
+		// here so the one-shot subscription cannot leak or call a nil function.
+		tearDown()
+		mu.Unlock()
 	}
 	sctx.Bus.Publish(GoalEnded{SessionID: sctx.SessionID, Reason: reason})
 	appendGoalMarker(sctx, "🎯 Goal ended: "+reason, map[string]any{

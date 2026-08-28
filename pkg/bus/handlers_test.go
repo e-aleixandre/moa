@@ -3,11 +3,104 @@ package bus
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/session"
 )
+
+type busyGoalRestoreAgent struct{ *fakeAgent }
+
+func (a *busyGoalRestoreAgent) SetCompactAt(int) error { return errors.New("busy") }
+func (a *busyGoalRestoreAgent) SetMaxBudget(float64) error {
+	return errors.New("busy")
+}
+
+type runEndedDuringSubscribeBus struct {
+	*LocalBus
+	fire       atomic.Bool
+	unsubCalls atomic.Int32
+}
+
+func (b *runEndedDuringSubscribeBus) Subscribe(handler any) func() {
+	unsub := b.LocalBus.Subscribe(handler)
+	wrapped := func() {
+		b.unsubCalls.Add(1)
+		unsub()
+	}
+	if b.fire.CompareAndSwap(true, false) {
+		b.Publish(RunEnded{})
+		b.Drain(time.Second)
+	}
+	return wrapped
+}
+
+func TestStopGoalRunEndedDuringSubscribeTearsDown(t *testing.T) {
+	b := &runEndedDuringSubscribeBus{LocalBus: NewLocalBus()}
+	defer b.Close()
+	agent := &busyGoalRestoreAgent{fakeAgent: &fakeAgent{}}
+	sctx := newTestSessionContextWithState(b, agent)
+	sctx.Goal = goal.New()
+	if err := sctx.Goal.Enter(goal.Options{
+		Objective: "finish",
+		StatePath: filepath.Join(t.TempDir(), "STATE.md"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	b.fire.Store(true)
+	stopGoal(sctx, "stopped")
+
+	if got := b.unsubCalls.Load(); got != 1 {
+		t.Fatalf("deferred goal restore unsubscribe calls = %d, want 1", got)
+	}
+}
+
+func TestAutoVerifyCanceledBeforeGoroutineStartsDoesNotExecute(t *testing.T) {
+	deferred := make(chan func(), 1)
+
+	cwd := t.TempDir()
+	if err := os.Mkdir(filepath.Join(cwd, ".moa"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := `{"checks":[{"name":"marker","command":"touch verify-started"}]}`
+	if err := os.WriteFile(filepath.Join(cwd, ".moa", "verify.json"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContextWithState(b, &fakeAgent{})
+	sctx.AutoVerify = true
+	sctx.CWD = cwd
+	sctx.RunGenAtomic.Store(7)
+	registerHandlers(sctx, func(fn func()) { deferred <- fn })
+
+	b.Publish(RunEnded{RunGen: 7, HadEdits: true})
+	var run func()
+	select {
+	case run = <-deferred:
+	case <-time.After(time.Second):
+		t.Fatal("auto-verify goroutine was not launched")
+	}
+
+	// Force startRun to reject after SendPrompt has synchronously canceled the
+	// pending auto-verify, keeping the run generation unchanged for this test.
+	sctx.State.ForceState(StateRunning)
+	if err := b.Execute(SendPrompt{Text: "new turn"}); err == nil {
+		t.Fatal("SendPrompt unexpectedly started while state was running")
+	}
+	run()
+
+	if _, err := os.Stat(filepath.Join(cwd, "verify-started")); !os.IsNotExist(err) {
+		t.Fatalf("stale auto-verify executed after user prompt; marker stat: %v", err)
+	}
+}
 
 // TestCleanRunError guards the user-facing rendering of run errors: a usage
 // limit shows its typed, actionable message, while a generic error is stripped
