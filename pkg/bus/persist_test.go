@@ -1,6 +1,10 @@
 package bus
 
 import (
+	"bytes"
+	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,13 +26,14 @@ type persistSnapshot struct {
 type fakePersister struct {
 	mu        sync.Mutex
 	snapshots []persistSnapshot
+	err       error
 }
 
 func (fp *fakePersister) Snapshot(msgs []core.AgentMessage, epoch int, meta map[string]any) error {
 	fp.mu.Lock()
 	defer fp.mu.Unlock()
 	fp.snapshots = append(fp.snapshots, persistSnapshot{msgs, epoch, meta})
-	return nil
+	return fp.err
 }
 
 func (fp *fakePersister) count() int {
@@ -96,6 +101,26 @@ func TestPersistenceReactor_SavesOnRunEnded(t *testing.T) {
 	snap := fp.last()
 	if len(snap.messages) != 1 {
 		t.Fatalf("messages len = %d", len(snap.messages))
+	}
+}
+
+func TestPersistenceReactor_LogsSnapshotFailure(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContext(b, &fakeAgent{})
+	fp := &fakePersister{err: errors.New("disk full")}
+
+	var logs bytes.Buffer
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+	RegisterPersistenceReactor(b, sctx, fp)
+
+	b.Publish(RunEnded{SessionID: "s1"})
+	b.Drain(time.Second)
+
+	if got := logs.String(); !strings.Contains(got, "session persistence failed") || !strings.Contains(got, "disk full") {
+		t.Fatalf("persistence failure was not reported: %q", got)
 	}
 }
 

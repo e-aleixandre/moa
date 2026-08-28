@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -110,13 +111,17 @@ func RegisterPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersi
 		// Prefer tree-based persistence when available (even if empty, to clear v2 fields)
 		if hasTree && sctx.Tree != nil {
 			entries, leafID := sctx.Tree.Snapshot()
-			_ = tp.SnapshotTree(entries, leafID, meta)
+			if err := tp.SnapshotTree(entries, leafID, meta); err != nil {
+				slog.Error("session persistence failed", "error", err)
+			}
 			return
 		}
 
 		msgs := sctx.Agent.Messages()
 		epoch := sctx.Agent.CompactionEpoch()
-		_ = p.Snapshot(msgs, epoch, meta)
+		if err := p.Snapshot(msgs, epoch, meta); err != nil {
+			slog.Error("session persistence failed", "error", err)
+		}
 	}
 	if hasTree {
 		// Tree-based persistence: save AFTER the TreeSyncer has applied the
