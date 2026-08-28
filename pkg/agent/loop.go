@@ -349,6 +349,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Consume stream, build assistant message, emit events
 		assistantMsg, err := consumeStream(ctx, ch, cfg.emitter)
 		if err != nil {
+			hasPartial := assistantMsg != nil && len(assistantMsg.Content) > 0
 			// A typed empty-response error (completed with no text/tool call and
 			// no continue signal) is often transient during polling. Re-sample
 			// the SAME request once — nothing is appended to the history, so the
@@ -359,26 +360,33 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				// An empty response can still bill input tokens; account for it
 				// so retries (and the eventual error) can't slip past the budget.
 				addRunCost(cfg, emptyErr.Usage)
-				if ctx.Err() == nil && emptyRetries < maxEmptyRetries {
+				if !hasPartial && ctx.Err() == nil && emptyRetries < maxEmptyRetries {
 					emptyRetries++
 					inTurn = false
 					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
 					continue
 				}
 			}
-			// On cancellation, save partial content so it persists in session. A
-			// complete message can arrive while consumeStream is draining the
-			// cancelled provider stream; close any tool calls from that message in
-			// the same state append because they were deliberately not executed.
-			if assistantMsg != nil && ctx.Err() != nil {
+			streamErr := fmt.Errorf("stream: %w", err)
+			// Preserve output the user has already seen whether the stream was
+			// cancelled or failed. A provider failure gets its own visible marker;
+			// cancellation keeps the existing interruption handling. Close any
+			// streamed tool calls because none of them will be executed.
+			if hasPartial {
+				assistantMsg.RequestedModel = cfg.model.ID
+				toolResultErr := "Tool result unavailable: the run was cancelled before a result was recorded."
+				if ctx.Err() == nil {
+					assistantMsg.Content = append(assistantMsg.Content, core.TextContent(interruptedMarkerText(ctx, streamErr)))
+					toolResultErr = "Tool result unavailable: the provider stream failed before a result was recorded."
+				}
 				msgs := []core.AgentMessage{core.WrapMessage(*assistantMsg)}
 				msgs = append(msgs, errorToolResultMessages(
 					extractToolCalls(assistantMsg),
-					"Tool result unavailable: the run was cancelled before a result was recorded.",
+					toolResultErr,
 				)...)
 				cfg.appendState(msgs...)
 			}
-			loopErr = fmt.Errorf("stream: %w", err)
+			loopErr = streamErr
 			return loopErr
 		}
 		// Keep the requested identity on this response. A provider can return a
@@ -632,9 +640,59 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *Emitter) (*core.Message, error) {
 	var finalMsg *core.Message
 
-	// Accumulate partial content so we can return it on cancellation.
+	// Accumulate partial content so failures cannot discard output already shown.
 	var partialText strings.Builder
 	var partialThinking strings.Builder
+	var partialToolCalls []core.Content
+	var toolCallIndexes map[string]int
+
+	accumulate := func(event core.AssistantEvent) {
+		switch event.Type {
+		case core.ProviderEventTextDelta:
+			partialText.WriteString(event.Delta)
+		case core.ProviderEventThinkingDelta:
+			partialThinking.WriteString(event.Delta)
+		case core.ProviderEventToolCallStart, core.ProviderEventToolCallDelta:
+			if event.ToolCallID == "" {
+				return
+			}
+			if idx, ok := toolCallIndexes[event.ToolCallID]; ok {
+				if event.ToolName != "" {
+					partialToolCalls[idx].ToolName = event.ToolName
+				}
+				if event.PartialArgs != nil {
+					partialToolCalls[idx].Arguments = event.PartialArgs
+				}
+				return
+			}
+			if toolCallIndexes == nil {
+				toolCallIndexes = make(map[string]int)
+			}
+			toolCallIndexes[event.ToolCallID] = len(partialToolCalls)
+			partialToolCalls = append(partialToolCalls, core.ToolCallContent(event.ToolCallID, event.ToolName, event.PartialArgs))
+		}
+	}
+
+	partialMessage := func() *core.Message {
+		if finalMsg != nil {
+			return finalMsg
+		}
+		if partialText.Len() == 0 && partialThinking.Len() == 0 && len(partialToolCalls) == 0 {
+			return nil
+		}
+		partial := &core.Message{Role: "assistant"}
+		if partialThinking.Len() > 0 {
+			partial.Content = append(partial.Content, core.Content{
+				Type:     "thinking",
+				Thinking: partialThinking.String(),
+			})
+		}
+		if partialText.Len() > 0 {
+			partial.Content = append(partial.Content, core.TextContent(partialText.String()))
+		}
+		partial.Content = append(partial.Content, core.CloneContent(partialToolCalls)...)
+		return partial
+	}
 
 	for {
 		select {
@@ -651,11 +709,8 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 					if !ok {
 						break drain
 					}
+					accumulate(event)
 					switch event.Type {
-					case core.ProviderEventTextDelta:
-						partialText.WriteString(event.Delta)
-					case core.ProviderEventThinkingDelta:
-						partialThinking.WriteString(event.Delta)
 					case core.ProviderEventDone:
 						if event.Message != nil {
 							// Capture the complete message but keep draining; do not
@@ -673,29 +728,12 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 			// was received — either via the normal path before cancellation or
 			// during the drain above; the top-level select is a race, so relying
 			// on which branch consumed the final Done would be non-deterministic.
-			if finalMsg != nil {
-				return finalMsg, ctx.Err()
-			}
-			// Otherwise fall back to a partial message from accumulated deltas.
-			if partialText.Len() > 0 || partialThinking.Len() > 0 {
-				partial := &core.Message{Role: "assistant"}
-				if partialThinking.Len() > 0 {
-					partial.Content = append(partial.Content, core.Content{
-						Type:     "thinking",
-						Thinking: partialThinking.String(),
-					})
-				}
-				if partialText.Len() > 0 {
-					partial.Content = append(partial.Content, core.TextContent(partialText.String()))
-				}
-				return partial, ctx.Err()
-			}
-			return nil, ctx.Err()
+			return partialMessage(), ctx.Err()
 		case event, ok := <-ch:
 			if !ok {
 				// Channel closed
 				if finalMsg == nil {
-					return nil, fmt.Errorf("stream ended without final message")
+					return partialMessage(), fmt.Errorf("stream ended without final message")
 				}
 				return finalMsg, nil
 			}
@@ -714,18 +752,15 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 						Message: core.WrapMessage(*event.Partial),
 					})
 				}
-			case core.ProviderEventTextDelta:
-				partialText.WriteString(event.Delta)
-			case core.ProviderEventThinkingDelta:
-				partialThinking.WriteString(event.Delta)
 			case core.ProviderEventDone:
 				finalMsg = event.Message
 			case core.ProviderEventError:
 				if event.Error != nil {
-					return nil, event.Error
+					return partialMessage(), event.Error
 				}
-				return nil, fmt.Errorf("provider stream error")
+				return partialMessage(), fmt.Errorf("provider stream error")
 			}
+			accumulate(event)
 		}
 	}
 }
