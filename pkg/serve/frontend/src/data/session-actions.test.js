@@ -664,6 +664,52 @@ test('sendMessage from idle resets the token tally to start the new run at zero'
   expect(s1.runTokensDown).toBe(0);
 });
 
+test('sendMessage rejection does not overwrite a run that started while the POST was in flight', async () => {
+  setState({
+    sessions: {
+      s1: {
+        id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [], runEpoch: 4,
+      },
+    },
+  });
+  let resolveSend;
+  globalThis.fetch = () => new Promise(resolve => { resolveSend = resolve; });
+
+  const pending = sendMessage('s1', 'follow-up', []);
+  handleWsStateChange('s1', { state: 'running' });
+  resolveSend(new Response('rejected', { status: 409 }));
+
+  await expect(pending).rejects.toThrow('409');
+  const s1 = store.get().sessions.s1;
+  expect(s1.state).toBe('running');
+  expect(s1.runEpoch).toBe(5);
+  expect(s1.messages).toHaveLength(0);
+});
+
+test('sendMessage rejection rolls back an invalid attachment while the session stays stopped', async () => {
+  setState({
+    sessions: {
+      s1: {
+        id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [],
+        runTokensUp: 700, runTokensDown: 120,
+      },
+    },
+  });
+  globalThis.fetch = () => Promise.resolve(new Response('invalid attachment', { status: 400 }));
+
+  await expect(sendMessage('s1', 'look', [
+    { name: 'bad.png', mime: 'image/png', data: 'AAAA', isImage: true },
+  ])).rejects.toThrow('400');
+
+  const s1 = store.get().sessions.s1;
+  expect(s1.state).toBe('idle');
+  expect(s1.messages).toHaveLength(0);
+  expect(s1.streamingText).toBeNull();
+  expect(s1.thinkingText).toBeNull();
+  expect(s1.runTokensUp).toBe(700);
+  expect(s1.runTokensDown).toBe(120);
+});
+
 test('sendMessage replaces an accepted optimistic image with its durable descriptor', async () => {
   setState({
     sessions: {

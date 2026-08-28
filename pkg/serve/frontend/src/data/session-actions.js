@@ -675,16 +675,22 @@ export async function sendMessage(id, text, attachments = []) {
     if (optimisticMsg) {
       const cur = store.get().sessions[id];
       if (cur) {
-        updateSession(id, {
+        const patch = {
           messages: cur.messages.filter((m) => m !== optimisticMsg),
-          state: 'idle',
-          streamingText: null,
-          thinkingText: null,
-          // Restore the token tally reset by the optimistic patch: this run
-          // never actually started.
-          runTokensUp: prevTokensUp,
-          runTokensDown: prevTokensDown,
-        });
+        };
+        // A WS event that landed during the POST owns the live state. Only
+        // undo the optimistic run fields when the epoch still matches our
+        // pre-send snapshot; otherwise removing our phantom echo is enough.
+        if ((cur.runEpoch || 0) === prevRunEpoch) {
+          Object.assign(patch, {
+            state: sess.state,
+            streamingText: null,
+            thinkingText: null,
+            runTokensUp: prevTokensUp,
+            runTokensDown: prevTokensDown,
+          });
+        }
+        updateSession(id, patch);
       }
     }
     // Roll back the optimistic steer chip too: a rejected steer (e.g. 503 queue
