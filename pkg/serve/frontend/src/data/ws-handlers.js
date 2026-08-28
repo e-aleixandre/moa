@@ -613,6 +613,9 @@ export function handleWsInit(id, data) {
     // finished while this pane had no WS, the stale local spinner is cleared;
     // if one is still running, it is restored.
     compacting: !!data.compacting,
+    // The auto-verify may have ended while this client had no socket, so the
+    // snapshot must replace the stale local indicator with server truth.
+    autoVerifying: !!data.auto_verifying,
     tasks: data.tasks || [],
     costUSD: data.cost_usd || 0,
     // Logical per-run traffic is authoritative in every init snapshot, so a

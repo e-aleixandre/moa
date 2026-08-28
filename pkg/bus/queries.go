@@ -93,6 +93,11 @@ type GetCompactionEpoch struct{ SessionID string }
 // Handler returns: bool
 type GetCompacting struct{ SessionID string }
 
+// GetAutoVerifying reports whether an auto-verify is currently in progress, so
+// a reconnect snapshot can restore (or clear) the auto-verify indicator.
+// Handler returns: bool
+type GetAutoVerifying struct{ SessionID string }
+
 // StreamingAggregate is the in-flight partial assistant text/thinking and its
 // message ID, surfaced in the reconnect snapshot so a reconnect during
 // generation restores the whole streamed-so-far reply instead of only post-cut

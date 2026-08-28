@@ -1012,6 +1012,24 @@ test('handleWsInit restores an in-progress compacting spinner from the snapshot'
   expect(store.get().sessions.s1.compacting).toBe(true);
 });
 
+test('handleWsInit clears a stale auto-verify indicator from the snapshot', async () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, autoVerifying: true } } });
+
+  // Reconnect: the verify ended while the client had no socket.
+  handleWsInit('s1', { messages: [] });
+
+  expect(store.get().sessions.s1.autoVerifying).toBe(false);
+});
+
+test('handleWsInit restores an auto-verify still in progress from the snapshot', async () => {
+  seedSession('s1');
+
+  handleWsInit('s1', { messages: [], auto_verifying: true });
+
+  expect(store.get().sessions.s1.autoVerifying).toBe(true);
+});
+
 // Regression: a reconnect during generation must restore the whole
 // streamed-so-far reply from the snapshot, not start from the next delta.
 test('handleWsInit restores the in-flight streamed reply from the snapshot', async () => {

@@ -576,6 +576,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
 	runTokens, _ := bus.QueryTyped[bus.GetRunTokens, bus.RunTokens](b, bus.GetRunTokens{})
 	compacting, _ := bus.QueryTyped[bus.GetCompacting, bool](b, bus.GetCompacting{})
+	autoVerifying, _ := bus.QueryTyped[bus.GetAutoVerifying, bool](b, bus.GetAutoVerifying{})
 	pendingSteers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](b, bus.GetPendingSteers{})
 
 	data := InitData{
@@ -597,6 +598,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		RunTokensUp:        runTokens.Up,
 		RunTokensDown:      runTokens.Down,
 		Compacting:         compacting,
+		AutoVerifying:      autoVerifying,
 		StreamingText:      truncateHistoryString(streaming.Text),
 		StreamingThinking:  truncateHistoryString(streaming.Thinking),
 		LiveTools:          liveToolInitData(liveTools),
