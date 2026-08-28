@@ -50,7 +50,9 @@ func TestLoadAgentsMD_ProjectLocal(t *testing.T) {
 	cwd := t.TempDir()
 	_ = os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("# Project rules"), 0o644)
 
-	content, err := LoadAgentsMD(cwd, "")
+	// Isolate agentHome: an empty one falls back to the real user config dir,
+	// so a developer's own global AGENTS.md would leak into the result.
+	content, err := LoadAgentsMD(cwd, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +72,7 @@ func TestLoadAgentsMD_Priority(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("ROOT"), 0o644)
 	_ = os.WriteFile(filepath.Join(sub, "AGENTS.md"), []byte("SUB"), 0o644)
 
-	content, err := LoadAgentsMD(sub, "")
+	content, err := LoadAgentsMD(sub, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +104,10 @@ func TestLoadAgentsMD_Dedup(t *testing.T) {
 
 func TestLoadAgentsMD_NoFiles(t *testing.T) {
 	cwd := t.TempDir()
-	content, err := LoadAgentsMD(cwd, "")
+	// Both roots must be isolated. With an empty agentHome this fell back to
+	// the real user config dir, so the test failed on any machine whose owner
+	// had a global AGENTS.md — which is every machine running the agent.
+	content, err := LoadAgentsMD(cwd, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
