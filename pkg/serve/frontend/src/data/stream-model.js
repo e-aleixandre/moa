@@ -252,6 +252,12 @@ export function projectStream(session) {
         const jobId = origin
           ? String(origin.jobId)
           : (msg.subagentJobId || rawToolCallID.replace(/^subagent[-_]/, ''));
+        // Whether that job id actually names a child the server can serve.
+        // The two fallbacks above do not: a provider tool-call ID, and the
+        // synthetic `subagent_<msgId>` key normalizeHistory mints for a legacy
+        // notification it could not match to a job. Offering Conversation on
+        // those renders a button whose only possible outcome is nothing.
+        const openable = !!(origin || msg.subagentJobId || rawToolCallID.startsWith('subagent-'));
         if (!completionCard) {
           // The live job is authoritative while it runs — the dock or the
           // running row shows it. Once terminal, an async job gets its own
@@ -264,7 +270,7 @@ export function projectStream(session) {
           currentDelegation = { type: 'delegation', id: blockID('delegation', msg, i), agents: [], settled: true };
           doc.blocks.push(currentDelegation);
         }
-        currentDelegation.agents.push(delegationDoneAgent(msg, subagentAccent(session.subagents, jobId, msg.accentIndex), jobId));
+        currentDelegation.agents.push(delegationDoneAgent(msg, subagentAccent(session.subagents, jobId, msg.accentIndex), jobId, openable));
         closeLedger();
         continue;
       }
@@ -827,6 +833,8 @@ function delegationRunningAgent(sub, accentIdx) {
     accent: FANOUT_ACCENTS[accentIdx % FANOUT_ACCENTS.length],
     state: 'running',
     bashJobs: [],
+    // A live job is always addressable: it is the session's own entry.
+    openable: true,
   };
   const action = agentAction(sub);
   if (action) agent.action = action;
@@ -842,7 +850,7 @@ function delegationRunningAgent(sub, accentIdx) {
 // delegationDoneAgent builds a terminated agent row from a subagent card
 // (tool_name 'subagent', keyed `subagent-<jobId>` or legacy `subagent_<index>`)
 // comes from session.subagents (the completed entry keeps its accentIndex).
-function delegationDoneAgent(msg, accent, jobIDOverride) {
+function delegationDoneAgent(msg, accent, jobIDOverride, openable = true) {
   const jobId = jobIDOverride || String(msg.tool_call_id || '').replace(/^subagent[-_]/, '');
   const failed = msg.status === 'error' || msg.status === 'failed' || msg.status === 'cancelled';
   const task = msg.args && msg.args.task ? firstLine(msg.args.task) : '';
@@ -852,6 +860,9 @@ function delegationDoneAgent(msg, accent, jobIDOverride) {
     accent: accent || FANOUT_ACCENTS[0],
     state: failed ? (msg.status === 'cancelled' ? 'cancelled' : 'failed') : 'done',
     bashJobs: [],
+    // Drives the Conversation affordance: a row whose id names no real child
+    // must not offer to open one (see projectStream's `openable`).
+    openable: !!openable,
   };
   const outcome = msg.status === 'error' || msg.status === 'failed'
     ? (msg.error || msg.result)

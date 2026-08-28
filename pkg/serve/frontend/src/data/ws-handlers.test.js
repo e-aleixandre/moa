@@ -1598,3 +1598,89 @@ test('handleWsInit without live tools leaves history untouched', async () => {
   handleWsInit('s1', { messages: [], subagents: [] });
   expect(store.get().sessions.s1.messages).toHaveLength(0);
 });
+
+// ── Reload duplication: the launch row and its child are ONE card ───────────
+// The provider owns the tool_call_id, so custom.subagent_job_id is the only
+// bridge from a launch row to the child it spawned. When the init projection
+// dropped that key, every reload drew the launch acknowledgement as a second,
+// orphan card next to the real outcome — the duplicate the owner sees always,
+// whose Conversation button pointed at a job the server never knew.
+function reloadedSubagentAgents(payload) {
+  seedSession('s1');
+  handleWsInit('s1', payload);
+  return projectStream(store.get().sessions.s1)
+    .flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+}
+
+test('a reloaded async launch and its outcome are one card, not two', () => {
+  const agents = reloadedSubagentAgents({
+    messages: [
+      { role: 'user', msg_id: 'u1', content: [{ type: 'text', text: 'go' }] },
+      { role: 'assistant', msg_id: 'a1', content: [{ type: 'tool_call', tool_call_id: 'call_provider_1', tool_name: 'subagent', arguments: { task: 'Review ws.go', async: true } }] },
+      {
+        role: 'tool_result', msg_id: 'r1', tool_call_id: 'call_provider_1',
+        custom: { subagent_job_id: 'sa-1' },
+        content: [{ type: 'text', text: 'Subagent started in background.\nJob ID: sa-1\n' }],
+      },
+    ],
+    subagents: [],
+    subagent_outcomes: [{ job_id: 'sa-1', task: 'Review ws.go', status: 'completed', result: 'Looks good', async: true, finished_at_ms: 5000 }],
+  });
+
+  expect(agents).toEqual([expect.objectContaining({ id: 'sa-1', state: 'done', chip: 'Looks good', openable: true })]);
+});
+
+test('a reloaded sync launch and its outcome are one card, not two', () => {
+  const agents = reloadedSubagentAgents({
+    messages: [
+      { role: 'user', msg_id: 'u1', content: [{ type: 'text', text: 'go' }] },
+      { role: 'assistant', msg_id: 'a1', content: [{ type: 'tool_call', tool_call_id: 'call_provider_2', tool_name: 'subagent', arguments: { task: 'Analyze auth' } }] },
+      {
+        role: 'tool_result', msg_id: 'r2', tool_call_id: 'call_provider_2',
+        custom: { subagent_job_id: 'sa-2' },
+        content: [{ type: 'text', text: 'Status: completed\n\nResult:\nFound three issues' }],
+      },
+    ],
+    subagents: [],
+    subagent_outcomes: [{ job_id: 'sa-2', task: 'Analyze auth', status: 'completed', result: 'Found three issues', async: false, finished_at_ms: 5000 }],
+  });
+
+  expect(agents).toEqual([expect.objectContaining({ id: 'sa-2', state: 'done', openable: true })]);
+});
+
+// Non-regression: the ordinary live path must keep showing one card that
+// UPDATES IN PLACE from running to its outcome. Breaking this to fix the
+// duplicate would be worse than the duplicate.
+test('a live async subagent stays one card that updates in place when it ends', () => {
+  seedSession('s1');
+  handleWsToolStart('s1', { tool_call_id: 'call_live_1', tool_name: 'subagent', args: { task: 'Review ws.go', async: true } });
+  handleWsSubagentStart('s1', { job_id: 'sa-live', origin_tool_call_id: 'call_live_1', task: 'Review ws.go', model: 'm', async: true });
+  handleWsToolEnd('s1', { tool_call_id: 'call_live_1', result: 'Subagent started in background.\nJob ID: sa-live\n' });
+
+  // Running async work lives in the dock, so nothing is drawn inline yet.
+  const running = store.get().sessions.s1;
+  expect(projectStream(running).flatMap(b => (b.blocks || []).flatMap(i => i.agents || []))).toHaveLength(0);
+  expect(liveTrayAgents(running)).toEqual([expect.objectContaining({ id: 'sa-live' })]);
+
+  handleWsSubagentEnd('s1', { job_id: 'sa-live', status: 'completed', task: 'Review ws.go', result: 'Looks good', finished_at_ms: 9000 });
+
+  const ended = store.get().sessions.s1;
+  expect(projectStream(ended).flatMap(b => (b.blocks || []).flatMap(i => i.agents || [])))
+    .toEqual([expect.objectContaining({ id: 'sa-live', state: 'done', chip: 'Looks good', openable: true })]);
+  expect(liveTrayAgents(ended)).toHaveLength(0);
+});
+
+test('a live sync subagent card mutates from running to its outcome', () => {
+  seedSession('s1');
+  handleWsToolStart('s1', { tool_call_id: 'call_live_2', tool_name: 'subagent', args: { task: 'Analyze auth' } });
+  handleWsSubagentStart('s1', { job_id: 'sa-sync', origin_tool_call_id: 'call_live_2', task: 'Analyze auth', model: 'm', async: false });
+
+  expect(projectStream(store.get().sessions.s1).flatMap(b => (b.blocks || []).flatMap(i => i.agents || [])))
+    .toEqual([expect.objectContaining({ id: 'sa-sync', state: 'running', openable: true })]);
+
+  handleWsSubagentEnd('s1', { job_id: 'sa-sync', status: 'completed', task: 'Analyze auth', result: 'Found three issues', async: false, finished_at_ms: 9000 });
+  handleWsToolEnd('s1', { tool_call_id: 'call_live_2', result: 'Status: completed\n\nResult:\nFound three issues' });
+
+  expect(projectStream(store.get().sessions.s1).flatMap(b => (b.blocks || []).flatMap(i => i.agents || [])))
+    .toEqual([expect.objectContaining({ id: 'sa-sync', state: 'done', openable: true })]);
+});

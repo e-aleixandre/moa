@@ -125,7 +125,7 @@ function DoneAgentRow({ agent, onOpenAgent }) {
 }
 
 function OutcomeAgentRow({ agent, onOpenAgent }) {
-	const { id, name, accent = "sky", state, action, chip, result, error, excerpt, time } = agent;
+	const { id, name, accent = "sky", state, action, chip, result, error, excerpt, time, openable = true } = agent;
   const terminal = state !== "running";
   const failed = state === "failed";
   const cancelled = state === "cancelled";
@@ -138,6 +138,9 @@ function OutcomeAgentRow({ agent, onOpenAgent }) {
 	const canExpand = !!outcomeText;
   const SummaryTag = canExpand ? "button" : "div";
   const preview = terminal ? (chip || (cancelled ? "Cancelled before producing a result." : "No result returned.")) : action || "Working";
+  // A button that cannot reach a conversation is a bug, not an affordance: an
+  // id that names no child the server can serve gets no Conversation action.
+  const openAgent = openable ? onOpenAgent : null;
 
   return (
     <div class={`dlg-outcome-card${failed ? " failed" : ""}${cancelled ? " cancelled" : ""}`} style={{ "--a": `var(--${accent})` }}>
@@ -155,9 +158,9 @@ function OutcomeAgentRow({ agent, onOpenAgent }) {
         </span>
         <span class="outcome-preview">{state === "running" && "▸ "}{preview}</span>
       </SummaryTag>
-		{(canExpand || onOpenAgent) && <div class={`dlg-outcome-actions${canExpand && onOpenAgent ? "" : " single"}`}>
+		{(canExpand || openAgent) && <div class={`dlg-outcome-actions${canExpand && openAgent ? "" : " single"}`}>
 			{canExpand && <button type="button" onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}>{outcomeLabel} <ChevronDown class={expanded ? "open" : ""} size={13} aria-hidden="true" /></button>}
-			{onOpenAgent && <button type="button" onClick={() => onOpenAgent(id)} aria-label={`Open ${name} conversation`}>Conversation <ChevronRight size={14} aria-hidden="true" /></button>}
+			{openAgent && <button type="button" onClick={() => openAgent(id)} aria-label={`Open ${name} conversation`}>Conversation <ChevronRight size={14} aria-hidden="true" /></button>}
 		</div>}
 		{expanded && <div class="dlg-result-body">
 			<span class="dlg-result-label">{outcomeLabel}</span><pre>{outcomeText}</pre>

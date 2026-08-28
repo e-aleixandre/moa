@@ -1263,3 +1263,32 @@ test('growing the conversation keeps earlier block ids unchanged', () => {
   expect(after[0].id).toBe(before[0].id);
   expect(after[1].id).toBe(before[1].id);
 });
+
+// ── Conversation only when there IS a conversation ──────────────────────────
+// A row's id must name a child the server can serve before the UI offers to
+// open it. Two ids never do: a bare provider tool-call ID (nothing recorded
+// the job it spawned) and the synthetic `subagent_<msgId>` key normalizeHistory
+// mints for a legacy notification it could not match. Offering Conversation
+// there renders a button whose only possible outcome is nothing.
+test('a terminal card whose id names no real child offers no Conversation', () => {
+  const s = session([
+    tool('toolu_orphan', 'subagent', { task: 'Legacy delegation' }, 'done', 'finished'),
+    tool('subagent_msg-42', 'subagent', { task: 'Unmatched legacy card' }, 'done', 'finished'),
+  ]);
+  const agents = projectStream(s).flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+
+  expect(agents.map(agent => agent.openable)).toEqual([false, false]);
+});
+
+test('a card backed by a real job stays openable', () => {
+  const s = session([
+    tool('subagent-sa-1', 'subagent', { task: 'Review ws.go' }, 'done', 'Looks good'),
+    tool('toolu_1', 'subagent', { task: 'Analyze auth' }, 'done', 'Found issues', { subagentJobId: 'sa-2' }),
+  ]);
+  const agents = projectStream(s).flatMap(block => (block.blocks || []).flatMap(inner => inner.agents || []));
+
+  expect(agents).toEqual([
+    expect.objectContaining({ id: 'sa-1', openable: true }),
+    expect.objectContaining({ id: 'sa-2', openable: true }),
+  ]);
+});
