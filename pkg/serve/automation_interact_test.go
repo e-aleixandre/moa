@@ -53,16 +53,15 @@ func unloadSession(t *testing.T, mgr *Manager, id string) {
 	mgr.mu.Unlock()
 }
 
-// pendingCatcher records the first blocking request of each kind published on a
-// session's bus, so a test can answer it through the API.
-type pendingCatcher struct {
-	mu     sync.Mutex
-	askID  string
-	permID string
+// pendingAskCatcher records the first ask request published on a session's
+// bus, so a test can answer it through the API.
+type pendingAskCatcher struct {
+	mu    sync.Mutex
+	askID string
 }
 
-func catchPending(sess *ManagedSession) *pendingCatcher {
-	c := &pendingCatcher{}
+func catchPendingAsk(sess *ManagedSession) *pendingAskCatcher {
+	c := &pendingAskCatcher{}
 	sess.runtime.Bus.Subscribe(func(e bus.AskUserRequested) {
 		c.mu.Lock()
 		if c.askID == "" {
@@ -70,26 +69,13 @@ func catchPending(sess *ManagedSession) *pendingCatcher {
 		}
 		c.mu.Unlock()
 	})
-	sess.runtime.Bus.Subscribe(func(e bus.PermissionRequested) {
-		c.mu.Lock()
-		if c.permID == "" {
-			c.permID = e.ID
-		}
-		c.mu.Unlock()
-	})
 	return c
 }
 
-func (c *pendingCatcher) ask() string {
+func (c *pendingAskCatcher) ask() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.askID
-}
-
-func (c *pendingCatcher) permission() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.permID
 }
 
 // toolCallHandlerFor emits a single tool call, which is what makes a session
@@ -154,7 +140,7 @@ func TestAutomationAskResponseAnswersPendingQuestion(t *testing.T) {
 		simpleResponseHandler("shipped"))
 	id := startAutomationRun(t, mgr, "ask me something")
 	sess, _ := mgr.Get(id)
-	catcher := catchPending(sess)
+	catcher := catchPendingAsk(sess)
 
 	pollUntil(t, 5*time.Second, "ask_user request", func() bool { return catcher.ask() != "" })
 	body := `{"id":"` + catcher.ask() + `","answers":["yes"]}`
@@ -173,10 +159,22 @@ func TestAutomationPermissionDecidesPendingRequest(t *testing.T) {
 		simpleResponseHandler("denied then"))
 	id := startAutomationRun(t, mgr, "run something")
 	sess, _ := mgr.Get(id)
-	catcher := catchPending(sess)
 
-	pollUntil(t, 5*time.Second, "permission request", func() bool { return catcher.permission() != "" })
-	body := `{"id":"` + catcher.permission() + `","approved":false,"feedback":"not this time"}`
+	// The run starts asynchronously before this test receives the session, so
+	// subscribing now can miss the event. Read the pending source of truth that
+	// late production consumers also use instead.
+	var permissionID string
+	pollUntil(t, 5*time.Second, "permission request", func() bool {
+		pending, err := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](
+			sess.runtime.Bus, bus.GetPendingApproval{SessionID: id},
+		)
+		if err != nil || pending.Permission == nil {
+			return false
+		}
+		permissionID = pending.Permission.ID
+		return true
+	})
+	body := `{"id":"` + permissionID + `","approved":false,"feedback":"not this time"}`
 	resp := automationReq(t, srv, "/api/automation/sessions/"+id+"/permission", testAutomationToken, body, false)
 	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusNoContent {
