@@ -81,7 +81,14 @@ func TestWsPromptResolutionProjectsPromptIdentity(t *testing.T) {
 func TestBuildInitData_SubagentThinking(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(time.Second, "done")))
+	blockingResponse := func(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	// Subagent title generation shares this provider with the child. Block both
+	// calls so scheduler order cannot let the child consume the mock fallback and
+	// finish before the live-job snapshot.
+	mgr := newTestManager(t, ctx, newMockProvider(blockingResponse, blockingResponse))
 	sess, err := mgr.CreateSession(CreateOpts{})
 	if err != nil {
 		t.Fatal(err)
@@ -96,9 +103,6 @@ func TestBuildInitData_SubagentThinking(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	pollUntil(t, time.Second, "subagent job creation", func() bool {
-		return len(sess.subagents.Snapshot()) == 1
-	})
 
 	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
 	if len(data.Subagents) != 1 {
