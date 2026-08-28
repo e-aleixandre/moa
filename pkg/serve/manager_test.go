@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -994,6 +995,30 @@ func TestCloseSession_UnloadsButKeepsSession(t *testing.T) {
 	}
 	if !sawPrompt {
 		t.Fatalf("the conversation must survive a close/reopen; got %d messages", len(msgs))
+	}
+}
+
+func TestCloseSession_FlushFailureKeepsSessionLoaded(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "unsaved"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeDir := sess.persister.store.Dir()
+	if err := os.Chmod(storeDir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(storeDir, 0700) })
+
+	err = mgr.CloseSession(sess.ID)
+	if err == nil {
+		t.Fatal("CloseSession succeeded after its final flush failed")
+	}
+	if _, ok := mgr.Get(sess.ID); !ok {
+		t.Fatal("CloseSession unloaded the session after its final flush failed")
 	}
 }
 
