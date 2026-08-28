@@ -43,6 +43,7 @@ type InitData struct {
 	GoalStalled        int                 `json:"goal_stalled,omitempty"`
 	GoalVerifying      bool                `json:"goal_verifying,omitempty"`
 	Compacting         bool                `json:"compacting,omitempty"`
+	AutoVerifying      bool                `json:"auto_verifying,omitempty"`
 	StreamingText      string              `json:"streaming_text,omitempty"`
 	StreamingThinking  string              `json:"streaming_thinking,omitempty"`
 	LiveTools          []LiveToolInitData  `json:"live_tools,omitempty"`

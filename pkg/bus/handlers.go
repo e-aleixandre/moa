@@ -660,6 +660,10 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 		return sctx.Compacting(), nil
 	})
 
+	b.OnQuery(func(q GetAutoVerifying) (bool, error) {
+		return sctx.AutoVerifying(), nil
+	})
+
 	b.OnQuery(func(q GetPendingSteers) ([]core.SteerItem, error) {
 		return sctx.Agent.PendingSteers(), nil
 	})

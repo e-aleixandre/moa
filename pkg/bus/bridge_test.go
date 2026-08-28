@@ -1688,6 +1688,43 @@ func TestHandler_CompactSession_CompactingFlag(t *testing.T) {
 	})
 }
 
+// The reconnect snapshot must distinguish a finished auto-verify from one
+// still in flight. The counter permits overlapping verifies, so one ending
+// cannot clear the indicator while another remains.
+func TestHandler_GetAutoVerifying(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContextWithState(b, &fakeAgent{})
+	RegisterHandlers(sctx)
+
+	autoVerifying := func() bool {
+		v, err := QueryTyped[GetAutoVerifying, bool](b, GetAutoVerifying{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+
+	if autoVerifying() {
+		t.Fatal("reconnect snapshot reports auto-verify after it finished")
+	}
+
+	sctx.beginAutoVerify()
+	sctx.beginAutoVerify()
+	if !autoVerifying() {
+		t.Fatal("reconnect snapshot does not report an auto-verify still in progress")
+	}
+
+	sctx.endAutoVerify()
+	if !autoVerifying() {
+		t.Fatal("reconnect snapshot cleared while another auto-verify is still in progress")
+	}
+	sctx.endAutoVerify()
+	if autoVerifying() {
+		t.Fatal("reconnect snapshot reports auto-verify after it finished")
+	}
+}
+
 // The whole point of the asynchronous handler: Bus.Execute returns an
 // ACCEPTANCE, not a completion. A `/compact` POST that blocked for the model
 // call left the web composer read-only for tens of seconds, and a suspended PWA

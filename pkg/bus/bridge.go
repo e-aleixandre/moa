@@ -418,6 +418,14 @@ func (sctx *SessionContext) GoalVerifying() bool {
 	return sctx.goalVerifyRunning > 0
 }
 
+// AutoVerifying reports whether an auto-verify is currently running, so a
+// reconnect snapshot can restore the authoritative indicator state.
+func (sctx *SessionContext) AutoVerifying() bool {
+	sctx.quiescenceMu.Lock()
+	defer sctx.quiescenceMu.Unlock()
+	return sctx.autoVerifyRunning > 0
+}
+
 // Compacting reports whether a compaction is currently in progress, so a
 // reconnect snapshot can restore (or clear) the compacting spinner.
 func (sctx *SessionContext) Compacting() bool {
