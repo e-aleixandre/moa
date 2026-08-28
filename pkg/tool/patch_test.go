@@ -284,6 +284,50 @@ func TestPatch_MidApplyFailureRollsBack(t *testing.T) {
 	}
 }
 
+func TestPatch_RollbackFailureIsReported(t *testing.T) {
+	dir := t.TempDir()
+	file1 := filepath.Join(dir, "a.go")
+	file2 := filepath.Join(dir, "b.go")
+	_ = os.WriteFile(file1, []byte("package a\n"), 0o644)
+	_ = os.WriteFile(file2, []byte("package b\n"), 0o644)
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	ft := NewFileTracker()
+	ft.MarkRead(file1)
+	ft.MarkRead(file2)
+	tool := NewApplyPatch(ToolConfig{
+		WorkspaceRoot:  dir,
+		FileTracker:    ft,
+		DisableSandbox: true,
+		BeforeWrite: func(path string) error {
+			if path == file2 {
+				if err := os.Chmod(dir, 0o555); err != nil {
+					return err
+				}
+				return os.ErrPermission
+			}
+			return nil
+		},
+	})
+
+	patch := `*** Begin Patch
+*** Update File: a.go
+-package a
++package aa
+*** Update File: b.go
+-package b
++package bb
+*** End Patch`
+
+	result, err := tool.Execute(nil, map[string]any{"patch": patch}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError || !strings.Contains(result.Content[0].Text, "rollback incomplete") || !strings.Contains(result.Content[0].Text, file1) {
+		t.Fatalf("rollback failure was not reported with its file: %v", result.Content)
+	}
+}
+
 func TestPatch_ValidationFailureNoChanges(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "exists.go")

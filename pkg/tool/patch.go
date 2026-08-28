@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -81,14 +82,20 @@ Format:
 				snapshots[p] = fileSnap{existed: true, content: data, mode: fileModeOr(p, 0o644)}
 				return nil
 			}
-			rollback := func() {
+			rollback := func() error {
+				var errs []error
 				for p, s := range snapshots {
 					if s.existed {
-						_ = atomicWriteFile(p, s.content, s.mode)
+						if err := atomicWriteFile(p, s.content, s.mode); err != nil {
+							errs = append(errs, fmt.Errorf("restore %s: %w", p, err))
+						}
 					} else {
-						_ = os.Remove(p)
+						if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+							errs = append(errs, fmt.Errorf("remove %s: %w", p, err))
+						}
 					}
 				}
+				return errors.Join(errs...)
 			}
 
 			var summary []string
@@ -169,7 +176,9 @@ Format:
 			}
 
 			if err := apply(); err != nil {
-				rollback()
+				if rollbackErr := rollback(); rollbackErr != nil {
+					return core.ErrorResult(fmt.Sprintf("%v; rollback incomplete: %v", err, rollbackErr)), nil
+				}
 				return core.ErrorResult(err.Error()), nil
 			}
 
@@ -186,7 +195,7 @@ Format:
 type stagedAction int
 
 const (
-	actionAdd    stagedAction = iota
+	actionAdd stagedAction = iota
 	actionDelete
 	actionUpdate
 	actionMove

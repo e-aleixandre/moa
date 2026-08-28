@@ -3,6 +3,9 @@ package attachment
 import (
 	"context"
 	"encoding/base64"
+	"errors"
+	"io/fs"
+	"os"
 	"testing"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -74,6 +77,28 @@ func TestNilScopeIsInertButUsable(t *testing.T) {
 	}
 	if _, err := scope.Put([]byte("x"), PutMeta{Kind: "image"}); err == nil {
 		t.Fatal("a nil scope must refuse to produce references")
+	}
+}
+
+func TestScopeRevokePreventsRecreatingDeletedSessionIndex(t *testing.T) {
+	store := newTestStore(t)
+	scope, err := NewScope(store, sessionOne)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scope.Put([]byte("before delete"), PutMeta{Name: "before.png", Mime: "image/png", Kind: "image"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReleaseSession(sessionOne); err != nil {
+		t.Fatal(err)
+	}
+	scope.Revoke()
+
+	if _, err := scope.Put([]byte("late tool"), PutMeta{Name: "late.png", Mime: "image/png", Kind: "image"}); !errors.Is(err, ErrScopeRevoked) {
+		t.Fatalf("late Put error = %v, want ErrScopeRevoked", err)
+	}
+	if _, err := os.Stat(store.sessionPath(sessionOne)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("deleted session index exists or stat failed: %v", err)
 	}
 }
 

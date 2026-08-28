@@ -3,6 +3,7 @@ package attachment
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -24,11 +25,16 @@ import (
 type Scope struct {
 	store     *Store
 	sessionID string
+	mu        sync.RWMutex
+	revoked   bool
 }
 
 // ErrNoScope is returned by Scope methods called on a nil Scope, i.e. by code
 // that tried to produce an attachment reference without holding the capability.
 var ErrNoScope = errors.New("attachment: no attachment scope (work inline)")
+
+// ErrScopeRevoked is returned after the owning session has been deleted.
+var ErrScopeRevoked = errors.New("attachment: attachment scope revoked")
 
 // NewScope builds the capability for sessionID on store. It rejects a nil
 // store or an invalid session ID so a Scope can never exist half-built: if it
@@ -61,7 +67,23 @@ func (s *Scope) Put(data []byte, meta PutMeta) (Descriptor, error) {
 	if s == nil {
 		return Descriptor{}, ErrNoScope
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.revoked {
+		return Descriptor{}, ErrScopeRevoked
+	}
 	return s.store.PutRef(s.sessionID, data, meta)
+}
+
+// Revoke prevents a deleted session's in-flight tools from recreating its
+// attachment index after it has been released. It is safe to call repeatedly.
+func (s *Scope) Revoke() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.revoked = true
+	s.mu.Unlock()
 }
 
 // Materializer returns the consumer half: the hook that expands references
