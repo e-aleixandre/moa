@@ -40,9 +40,18 @@ const marked = new Marked({
 // tool result. Plain escaped code remains safe and readable without it.
 const HIGHLIGHT_MAX_BYTES = 64 * 1024;
 
-const MARKDOWN_CACHE_MAX_ENTRIES = 300;
+// The cache must hold EVERY prose block currently mounted, not a recent
+// window: each streaming frame re-renders the whole transcript, so a cache
+// smaller than the mounted block count degrades to a 0% hit rate and evicts
+// itself once per frame. Measured on a 500-turn session paged back to 440
+// blocks: a 300-entry cache produced 505 misses per streaming delta and
+// ~1200ms/frame on 4x-throttled mobile; sized above the block count the same
+// frame costs ~200ms with a 100% hit rate. Those 624 blocks hold 1.7MB of
+// cached HTML, so the byte ceiling — not the entry count — is what actually
+// bounds memory here.
+const MARKDOWN_CACHE_MAX_ENTRIES = 2000;
 const MARKDOWN_CACHE_MAX_SOURCE_BYTES = 16 * 1024;
-const MARKDOWN_CACHE_MAX_BYTES = 2 * 1024 * 1024;
+const MARKDOWN_CACHE_MAX_BYTES = 8 * 1024 * 1024;
 const markdownCache = new Map();
 let markdownCacheBytes = 0;
 

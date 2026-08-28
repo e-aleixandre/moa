@@ -1537,9 +1537,18 @@ func TestHandler_CompactSession_Error(t *testing.T) {
 	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
 	ended := make(chan CompactionEnded, 1)
-	b.Subscribe(func(e CompactionEnded) { ended <- e })
 	states := make(chan StateChanged, 8)
-	b.Subscribe(func(e StateChanged) { states <- e })
+	// Observe both events on one ordered subscriber. Separate typed subscribers
+	// run on independent goroutines, so receiving CompactionEnded would not prove
+	// that the earlier StateChanged callback has run yet.
+	b.SubscribeAll(func(event any) {
+		switch e := event.(type) {
+		case CompactionEnded:
+			ended <- e
+		case StateChanged:
+			states <- e
+		}
+	})
 
 	if err := b.Execute(CompactSession{}); err != nil {
 		t.Fatalf("Execute must accept the compaction, got %v", err)
