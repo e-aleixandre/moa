@@ -46,7 +46,7 @@ const maxFocusLen = 500
 
 // sanitizeFocus prepares a caller focus for interpolation into the prompt. It
 // trims, collapses internal whitespace so every entry path (idle/queued, web/
-// TUI) yields the same value, caps the length, and neutralizes a literal
+// queued path) yields the same value, caps the length, and neutralizes a literal
 // closing tag so the value cannot break out of its <focus> block. Returns ""
 // when there is nothing to add.
 func sanitizeFocus(focus string) string {
@@ -56,7 +56,7 @@ func sanitizeFocus(focus string) string {
 	}
 	// A topic hint, not formatted content: collapse any run of whitespace
 	// (including newlines a multiline composer allows) to a single space, so the
-	// web idle path (strings.Fields) and the whitespace-preserving queued/TUI
+	// web idle path (strings.Fields) and the whitespace-preserving queued
 	// paths all reach the summarizer identically.
 	f = strings.Join(strings.Fields(f), " ")
 	if len(f) > maxFocusLen {

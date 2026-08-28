@@ -76,7 +76,7 @@ type Goal struct {
 	// instead of judging every iteration cold. Guarded by mu.
 	verdicts []IterationVerdict
 
-	// onChange fires after Enter/Exit (for TUI/serve status + system-prompt
+	// onChange fires after Enter/Exit (for serve status + system-prompt
 	// rebuild). Called with the mutex released.
 	onChange func(active bool)
 }

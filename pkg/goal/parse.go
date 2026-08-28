@@ -32,7 +32,7 @@ type FlagSpec struct {
 
 // Flags returns the declarative list of accepted /goal flags. It is the single
 // source of truth consumed by ParseCommand (known-flag set), FlagsUsage, and
-// the web/TUI autocompletion.
+// the web autocompletion.
 func Flags() []FlagSpec {
 	return []FlagSpec{
 		{Name: "--max", Placeholder: "N", Desc: "max iterations (0 = unlimited)"},

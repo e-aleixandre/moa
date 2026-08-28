@@ -6,7 +6,7 @@ import (
 )
 
 // ConfigDir returns the directory holding moa's own state: config.json,
-// credentials, sessions, skills, prompts, memory and attachments.
+// credentials, sessions, skills, memory and attachments.
 //
 // MOA_CONFIG_DIR overrides it. That knob existed before this function but was
 // only honored by some of the call sites, so setting it produced a half-moved

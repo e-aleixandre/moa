@@ -1,5 +1,5 @@
 // Package files provides reusable file scanning and filtering logic.
-// It is used by both the TUI file picker and the HTTP /api/sessions/{id}/files endpoint.
+// It backs the HTTP /api/sessions/{id}/files endpoint.
 package files
 
 import (

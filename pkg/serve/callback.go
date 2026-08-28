@@ -242,7 +242,7 @@ func permissionPending(e bus.PermissionRequested) *CallbackPending {
 }
 
 // permissionArgsSummary renders the most relevant argument of a permission
-// request, the same way the TUI prompt picks it (command for bash, path for the
+// request, the same way the permission prompt picks it (command for bash, path for the
 // file tools), falling back to a deterministic key=value rendering.
 func permissionArgsSummary(toolName string, args map[string]any) string {
 	switch toolName {

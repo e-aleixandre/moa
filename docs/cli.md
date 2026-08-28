@@ -15,8 +15,6 @@
 | `-path-scope` | derived | `workspace` or `unrestricted` |
 | `-allow` | | Permission pattern (repeatable), e.g. `"Bash(go:*)"` |
 | `-allow-path` | | Allow extra directory outside workspace (repeatable) |
-| `-continue` | | Resume latest session |
-| `-resume` | | Session browser, or `--resume <id>` for specific session |
 | `-output` | `text` | `text` or `json` (JSON-lines) |
 | `-login` | | `anthropic`, `openai`, `xai` (SuperGrok/X OAuth device login), `openai-transcribe` |
 | `-logout` | | Remove stored credentials for provider |

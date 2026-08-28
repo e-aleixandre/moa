@@ -33,7 +33,6 @@ var pageOrder = []string{
 	"cli",
 	"tools",
 	"configuration",
-	"tui",
 	"serve",
 	"automation",
 	"architecture",

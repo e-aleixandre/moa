@@ -262,7 +262,7 @@ func FormatResult(r Result) string {
 var ErrNoConfig = errors.New("no .moa/verify.json found — create one to define verification checks")
 
 // Execute is the single entry point for running verification.
-// Both the verify tool and the TUI /verify command call this.
+// Both the verify tool and the /verify command call this.
 func Execute(ctx context.Context, cwd string) (Result, error) {
 	cfg, err := LoadConfig(cwd)
 	if err != nil {

@@ -14,7 +14,7 @@ import (
 )
 
 // RuntimeConfig returns a bus.RuntimeConfig pre-populated with all session
-// dependencies that are common across frontends (CLI, TUI, serve).
+// dependencies that are common across frontends (headless CLI, serve).
 //
 // Callers must set at minimum: SessionID, Ctx. They typically also set
 // Bus, Checkpoints, ProviderFactory, and frontend-specific fields like

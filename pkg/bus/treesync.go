@@ -250,7 +250,7 @@ func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 }
 
 // Reset re-points the syncer at a new tree and sync baseline. Used when the
-// runtime loads a different session in place (TUI session switch), where the
+// runtime loads a different session in place, where the
 // cached tree pointer and lastSyncCount would otherwise still reference the
 // previous session.
 func (ts *TreeSyncer) Reset(tree *session.Tree, syncCount int) {

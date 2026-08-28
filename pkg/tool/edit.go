@@ -98,7 +98,7 @@ func NewEdit(cfg ToolConfig) core.Tool {
 
 			diff := unifiedDiff(content, newContent, 3)
 
-			// Emit diff for TUI streaming display.
+			// Emit diff for streaming display.
 			if onUpdate != nil && diff != "" {
 				onUpdate(core.TextResult(diff))
 			}

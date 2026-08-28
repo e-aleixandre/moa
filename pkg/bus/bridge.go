@@ -1097,7 +1097,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 			IsError:    e.IsError,
 			Rejected:   e.Rejected,
 		}}
-		// Emit task update on tool_end only (matches serve and TUI behavior).
+		// Emit task update on tool_end only (matches serve behavior).
 		if e.ToolName == "tasks" && taskStore != nil {
 			events = append(events, TasksUpdated{
 				SessionID: sid,

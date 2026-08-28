@@ -2528,7 +2528,7 @@ func TestTimeoutMessage_SuggestsResume(t *testing.T) {
 		t.Errorf("partial work must survive: %q", msg)
 	}
 
-	// Without a transcript loader (TUI today) resume is impossible: do not
+	// Without a transcript loader resume is impossible: do not
 	// advertise it.
 	noResume := timeoutMessage(10*time.Minute, "", "sa-abc123", false)
 	if strings.Contains(noResume, "resume=") {

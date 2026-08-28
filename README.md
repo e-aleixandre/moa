@@ -208,14 +208,13 @@ The token is defense in depth, not a replacement for an appropriate network boun
 
 ## Prefer the terminal?
 
-The browser, TUI, and headless CLI share the same agent core and session model.
+The browser and the headless CLI share the same agent core and session model.
 
 ```bash
-./bin/moa                       # interactive TUI
 ./bin/moa -p "fix the tests"    # one-shot, headless
 ```
 
-See [TUI Usage](docs/tui.md) and the [CLI Reference](docs/cli.md).
+See the [CLI Reference](docs/cli.md).
 
 ## Documentation
 
@@ -228,7 +227,6 @@ the same markdown that lives in `docs/` here, so either place works:
 | [Quickstart](docs/quickstart.md) | Requirements, build, authentication, and first run |
 | [Web UI](docs/serve.md) | Serve, panes, mobile use, attachments, voice, and security |
 | [CLI Reference](docs/cli.md) | Commands, flags, model aliases, and examples |
-| [TUI Usage](docs/tui.md) | Slash commands, keybindings, and interactive workflows |
 | [Configuration](docs/configuration.md) | Config files, permissions, sandboxing, models, and MCP |
 | [Tools](docs/tools.md) | Built-in tools, custom tools, subagents, and verification |
 | [Architecture](docs/architecture.md) | Package map, event bus, and runtime design |

@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
-
-	"golang.org/x/term"
 
 	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -45,7 +42,7 @@ func (p *refreshingProvider) Unwrap() core.Provider {
 }
 
 // buildProvider creates the appropriate provider based on the model's Provider field.
-// Side-effect free — the TUI reuses it while Bubble Tea owns the terminal.
+// Side-effect free: it writes nothing, so callers own their own output.
 func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult, error) {
 	providerName := model.Provider
 	if providerName == "" {
@@ -137,7 +134,8 @@ func parseAllowPattern(val string) (string, error) {
 	return val, nil
 }
 
-// resolvePrompt resolves the prompt from flag, @file, or stdin pipe.
+// resolvePrompt resolves the prompt from flag, @file, or stdin pipe. A run
+// always needs one: there is no interactive frontend to fall back to.
 func resolvePrompt(p string) (string, error) {
 	if p != "" {
 		if strings.HasPrefix(p, "@") {
@@ -171,124 +169,5 @@ func resolvePrompt(p string) (string, error) {
 		return content, nil
 	}
 
-	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return "", fmt.Errorf("no prompt provided: use -p \"text\", -p @file, or pipe to stdin")
-	}
-
-	return "", nil
-}
-
-func normalizeArgs(args []string) []string {
-	if len(args) <= 1 {
-		return args
-	}
-	out := []string{args[0]}
-	for i := 1; i < len(args); i++ {
-		arg := args[i]
-		if (arg == "--resume" || arg == "-resume") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-			out = append(out, arg+"="+args[i+1])
-			i++
-			continue
-		}
-		out = append(out, arg)
-	}
-	return out
-}
-
-// loadProjectMCPServers loads .mcp.json from the project root if trusted.
-// On first encounter in interactive mode, prompts the user and persists trust.
-func loadProjectMCPServers(cfg *core.MoaConfig, cwd, promptContent string) {
-	path := filepath.Join(cwd, ".mcp.json")
-	if _, err := os.Stat(path); err != nil {
-		return
-	}
-
-	if core.IsMCPPathTrusted(*cfg, cwd) {
-		servers, err := core.LoadMCPFile(path)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: invalid .mcp.json: %v\n", err)
-			return
-		}
-		cfg.MCPServers = core.MergeMCPServers(cfg.MCPServers, servers)
-		return
-	}
-
-	if promptContent != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
-		return
-	}
-
-	fmt.Fprintf(os.Stderr, "Project .mcp.json found. Trust MCP servers in %s? [y/N] ", cwd)
-	var answer string
-	_, _ = fmt.Scanln(&answer)
-	if !strings.HasPrefix(strings.ToLower(answer), "y") {
-		return
-	}
-
-	if err := core.SaveGlobalConfig(func(c *core.MoaConfig) {
-		c.TrustedMCPPaths = append(c.TrustedMCPPaths, cwd)
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not persist MCP trust: %v\n", err)
-	}
-
-	servers, err := core.LoadMCPFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: invalid .mcp.json: %v\n", err)
-		return
-	}
-	cfg.MCPServers = core.MergeMCPServers(cfg.MCPServers, servers)
-}
-
-// promptProjectConfigTrust gates the repo-local .moa/config.json and
-// .moa/tools/* behind a per-directory trust decision, mirroring the .mcp.json
-// flow. Repo-local config can escalate permissions and script tools run
-// `bash -c`, so an untrusted clone must not silently apply them at the first
-// prompt. On first interactive encounter it prompts and persists trust; once
-// trusted it reloads the config so this session picks up the project values.
-// Must run before loadProjectMCPServers so a reload does not drop project MCP.
-func promptProjectConfigTrust(cfg *core.MoaConfig, cwd, promptContent string) {
-	hasConfig := false
-	if _, err := os.Stat(filepath.Join(cwd, ".moa", "config.json")); err == nil {
-		hasConfig = true
-	}
-	toolFiles, _ := filepath.Glob(filepath.Join(cwd, ".moa", "tools", "*.json"))
-	hasTools := len(toolFiles) > 0
-	if !hasConfig && !hasTools {
-		return // nothing repo-local to trust
-	}
-	if core.IsProjectPathTrusted(*cfg, cwd) {
-		return // already trusted; LoadMoaConfig merged config, bootstrap loads tools
-	}
-
-	// Non-interactive (headless, piped prompt): keep the safe default of ignoring
-	// repo-local config/tools rather than blindly trusting them.
-	if promptContent != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
-		return
-	}
-
-	var what string
-	switch {
-	case hasConfig && hasTools:
-		what = ".moa/config.json and .moa/tools/*"
-	case hasConfig:
-		what = ".moa/config.json"
-	default:
-		what = ".moa/tools/*"
-	}
-	fmt.Fprintf(os.Stderr, "Project %s found in %s.\n"+
-		"These can change permissions and run shell commands. Trust this directory? [y/N] ", what, cwd)
-	var answer string
-	_, _ = fmt.Scanln(&answer)
-	if !strings.HasPrefix(strings.ToLower(answer), "y") {
-		return
-	}
-
-	if err := core.SaveGlobalConfig(func(c *core.MoaConfig) {
-		c.TrustedProjectPaths = append(c.TrustedProjectPaths, cwd)
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not persist project trust: %v\n", err)
-	}
-
-	// Reload now that the dir is trusted so this session applies the project
-	// config; bootstrap will register the script tools.
-	*cfg = core.LoadMoaConfig(cwd)
+	return "", fmt.Errorf("no prompt provided: use -p \"text\", -p @file, or pipe to stdin")
 }

@@ -288,7 +288,7 @@ type ModelEntry struct {
 }
 
 // modelDisplayOrder is the explicit order models appear in selectors (web
-// dropdown + TUI). Grouped by provider, and within each provider roughly by
+// dropdown). Grouped by provider, and within each provider roughly by
 // generation and then by capability/power — not strict release date (e.g.
 // Fable 5 before Opus 5 before Sonnet 5, and GPT-5.6 Sol before Terra before
 // Luna). Models not listed here fall to the end, in provider-then-name order.

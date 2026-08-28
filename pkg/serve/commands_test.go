@@ -26,7 +26,7 @@ func writeVerifyConfig(t *testing.T, dir, body string) {
 }
 
 // TestCmdClear_StartsNewSessionKeepsOld verifies /clear gives the web the same
-// semantics as the TUI: it starts a fresh session instead of wiping the
+// semantics: it starts a fresh session instead of wiping the
 // current one in place, so the previous conversation stays recoverable on
 // disk (and in the Manager) instead of being destroyed.
 func TestCmdClear_StartsNewSessionKeepsOld(t *testing.T) {
@@ -359,7 +359,7 @@ func TestExecCommand_PolicyGateWhileRunning(t *testing.T) {
 }
 
 // The idle web path forwards a /compact focus argument into CompactSession,
-// mirroring the TUI. The session bus is swapped for a local one so the command
+// The session bus is swapped for a local one so the command
 // is intercepted before it reaches the agent.
 func TestCmdCompact_ForwardsFocusIdle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

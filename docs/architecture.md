@@ -27,7 +27,6 @@
 | `pkg/subagent/` | Child agent execution and async job management |
 | `pkg/verify/` | Run project verification checks |
 | `pkg/skill/` | Skill file loading |
-| `pkg/prompt/` | Prompt template discovery and loading |
 | `pkg/askuser/` | `ask_user` tool bridge to UI |
 | `pkg/goal/` | Autonomous maker→verifier loop toward an objective (`/goal`). The verifier is a read-only mini-agent (read/grep/find/ls) that inspects the repo to judge completion, and carries memory of its earlier verdicts across iterations; `--verify-oneshot` falls back to the legacy tool-less check. When the project defines `.moa/verify.json`, red checks are a hard gate — the goal can't be declared done while they fail, whatever the verdict says |
 | `pkg/autotitle/` | Generates short session titles from the conversation via a cheap LLM call |
@@ -49,7 +48,6 @@
 
 | Package | Role |
 |---------|------|
-| `pkg/tui/` | Bubble Tea terminal application |
 | `pkg/serve/` | HTTP/WebSocket server + web UI session manager; also hosts the Pulse backend (device pairing, guardian WebSocket, Realtime client-secret broker, session brief) |
 
 ### Infrastructure
@@ -62,7 +60,6 @@
 | `pkg/extension/` | Extension host + typed hooks (internal; fired every turn but no user-facing loader/config to register extensions yet) |
 | `pkg/mcp/` | MCP manager — local tool servers over stdio, remote ones over streamable HTTP |
 | `pkg/git/` | Git context detection |
-| `pkg/clipboard/` | Clipboard integration (platform-specific) |
 | `pkg/files/` | File utilities |
 | `pkg/jsonutil/` | JSON parsing utilities |
 | `pkg/push/` | Web Push notifications (VAPID keys, subscription store, dispatch) |
@@ -77,7 +74,6 @@
 The same agent core is reused across all interfaces:
 
 - **CLI** calls the agent directly, streams events to stdout
-- **TUI** wraps the agent in a Bubble Tea terminal app
 - **Serve** wraps the agent in HTTP/WebSocket session management
 
 ## Event bus
@@ -88,7 +84,7 @@ The same agent core is reused across all interfaces:
 - **Commands** — sync, one handler (e.g. `EnterPlanMode`, `AbortRun`)
 - **Queries** — sync, request-response (e.g. `GetPlanMode`, `GetSessionState`)
 
-The TUI and serve layer subscribe to events for rendering. The agent loop publishes events and handles commands.
+The serve layer subscribes to events for rendering. The agent loop publishes events and handles commands.
 
 ## Agent loop
 
@@ -105,7 +101,7 @@ The TUI and serve layer subscribe to events for rendering. The agent loop publis
 
 ## Sessions
 
-Sessions persist full message history plus metadata using atomic file writes. Both TUI and serve use the same session store for persistence and resume.
+Sessions persist full message history plus metadata using atomic file writes. Serve uses that store for persistence and resume.
 
 ## Attachments
 

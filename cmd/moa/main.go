@@ -4,31 +4,20 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log/slog"
 	"math"
 	"os"
 	"os/signal"
 	"runtime/pprof"
-	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/bootstrap"
 	"github.com/e-aleixandre/moa/pkg/bus"
-	"github.com/e-aleixandre/moa/pkg/checkpoint"
 	"github.com/e-aleixandre/moa/pkg/core"
-	"github.com/e-aleixandre/moa/pkg/mcp"
-	promptpkg "github.com/e-aleixandre/moa/pkg/prompt"
-	"github.com/e-aleixandre/moa/pkg/provider/openai"
 	"github.com/e-aleixandre/moa/pkg/release"
-	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tool"
-	"github.com/e-aleixandre/moa/pkg/tui"
 )
 
 // Set by goreleaser ldflags.
@@ -37,34 +26,6 @@ var (
 	commit  = "none"
 	date    = "unknown"
 )
-
-type resumeFlag struct {
-	Enabled bool
-	ID      string
-}
-
-func (r *resumeFlag) String() string {
-	if !r.Enabled {
-		return ""
-	}
-	return r.ID
-}
-
-func (r *resumeFlag) Set(value string) error {
-	r.Enabled = true
-	switch value {
-	case "", "true":
-		r.ID = ""
-	case "false":
-		r.Enabled = false
-		r.ID = ""
-	default:
-		r.ID = strings.TrimSpace(value)
-	}
-	return nil
-}
-
-func (r *resumeFlag) IsBoolFlag() bool { return true }
 
 // printUsage lists the subcommands before the flag defaults, which
 // flag.PrintDefaults alone would never mention.
@@ -93,16 +54,11 @@ func main() {
 		}
 	}
 
-	os.Args = normalizeArgs(os.Args)
-
 	p := flag.String("p", "", "Prompt text or @file to read prompt from file")
 	modelFlag := flag.String("model", "sonnet", "Model: alias (sonnet, opus, codex) or provider/model-id")
 	thinking := flag.String("thinking", "medium", "Thinking level: off, low, medium, high, xhigh")
 	maxTurns := flag.Int("max-turns", 0, "Maximum agent turns (0 = unlimited, default from config.json)")
 	maxBudget := flag.Float64("max-budget", -1, "Max USD spend per run (0 = unlimited, default: from config)")
-	continueFlag := flag.Bool("continue", false, "Resume the most recent session")
-	var resume resumeFlag
-	flag.Var(&resume, "resume", "Open the session browser, or resume a specific session with --resume <id>")
 	output := flag.String("output", "text", "Output format: text (default) or json (JSON-lines to stdout)")
 	yolo := flag.Bool("yolo", false, "Disable path sandbox and permissions")
 	perms := flag.String("permissions", "", "Permission mode: yolo, ask, auto (default: from config or yolo)")
@@ -147,11 +103,6 @@ func main() {
 
 	if *output != "text" && *output != "json" {
 		fmt.Fprintf(os.Stderr, "error: --output must be 'text' or 'json'\n")
-		os.Exit(1)
-	}
-
-	if *continueFlag && resume.Enabled {
-		fmt.Fprintln(os.Stderr, "error: use either --continue or --resume, not both")
 		os.Exit(1)
 	}
 
@@ -212,13 +163,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Load config (pre-bootstrap) for MCP trust prompt — CLI-specific interactive flow.
+	// Load config (pre-bootstrap) to resolve the budget below. Repo-local
+	// config, tools and .mcp.json stay behind their trust gates, which
+	// bootstrap.BuildSession applies.
 	moaCfg := core.LoadMoaConfig(cwd)
-	// Gate repo-local .moa/config.json + .moa/tools/* behind a trust prompt
-	// (before the MCP prompt: a trust grant reloads config, which would otherwise
-	// drop the project MCP servers merged just below).
-	promptProjectConfigTrust(&moaCfg, cwd, promptContent)
-	loadProjectMCPServers(&moaCfg, cwd, promptContent)
 
 	// Resolve budget: flag wins (including explicit 0), else config.
 	resolvedBudget := moaCfg.MaxBudget
@@ -245,18 +193,14 @@ func main() {
 		pathScopeStr = "unrestricted"
 	}
 
-	useTUI := promptContent == ""
-
-	// Create bus early so subagent callbacks can publish to it (both TUI and headless).
+	// Create bus early so subagent callbacks can publish to it.
 	preBus := bus.NewLocalBus()
 
 	// Bootstrap: single function wires up tools, MCP, permissions, subagents,
 	// plan mode, skills, verify, and agent.
-	// File checkpoints for /undo.
-	cpStore := checkpoint.New(20)
-
-	// Resolve MCP disable provenance from disk (reflecting any project-config
-	// trust just granted), so project-scope vetoes aren't misattributed to global.
+	//
+	// Resolve MCP disable provenance from disk so project-scope vetoes aren't
+	// misattributed to global.
 	mcpDisableSources := core.LoadMoaConfigResolved(cwd).MCPDisabled
 
 	sess, err := bootstrap.BuildSession(bootstrap.SessionConfig{
@@ -281,10 +225,8 @@ func main() {
 		ExtraAllowedPaths:   extraAllowPaths,
 		PermissionMode:      permModeStr,
 		PermissionEvalModel: *permsModel,
-		Headless:            !useTUI,
+		Headless:            true,
 		ExtraAllowPatterns:  extraAllowPatterns,
-		EnableAskUser:       useTUI,
-		BeforeWrite:         cpStore.Capture,
 		OnAsyncJobChange: func(count int) {
 			preBus.Publish(bus.SubagentCountChanged{Count: count})
 		},
@@ -355,199 +297,11 @@ func main() {
 		defer sess.MCPManager.Close()
 	}
 
-	ag := sess.Agent
-
-	// Discover prompt templates for TUI (CLI-specific, not part of bootstrap).
-	promptTemplates := promptpkg.Discover(cwd)
-
-	// --- Mode selection ---
-
-	if promptContent == "" {
-		// Interactive mode — launch TUI with session persistence
-		var sessionStore session.SessionStore
-		if fs, err := session.NewFileStore("", cwd); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: session persistence disabled: %v\n", err)
-		} else {
-			sessionStore = fs
-		}
-
-		var persistedSess *session.Session
-		startInSessionBrowser := false
-		if sessionStore != nil {
-			switch {
-			case resume.Enabled && resume.ID == "":
-				startInSessionBrowser = true
-			case resume.Enabled:
-				persistedSess, err = sessionStore.Load(resume.ID)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not load session %q: %v\n", resume.ID, err)
-				}
-			case *continueFlag:
-				persistedSess, err = sessionStore.Latest()
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not load latest session: %v\n", err)
-				}
-				if persistedSess == nil {
-					fmt.Fprintf(os.Stderr, "No previous session found. Starting fresh.\n")
-				}
-			}
-		}
-		providerFactory := func(model core.Model) (core.Provider, error) {
-			build, err := buildProvider(model, authStore)
-			if err != nil {
-				return nil, err
-			}
-			return build.Provider, nil
-		}
-
-		if persistedSess == nil && sessionStore != nil && !startInSessionBrowser {
-			persistedSess = sessionStore.Create()
-			persistedSess.SetRuntimeMetadata(
-				bootstrap.FullModelSpec(resolvedModel),
-				cwd,
-				sess.CurrentPermissionMode(),
-				ag.ThinkingLevel(),
-			)
-		}
-
-		// Build transcriber from OpenAI API key (same logic as serve).
-		var transcriber core.Transcriber
-		if cred, ok := authStore.Get("openai-transcribe"); ok && cred.Key != "" {
-			transcriber = openai.New(cred.Key)
-		} else if apiKey, isOAuth, err := authStore.GetAPIKey("openai"); err == nil && apiKey != "" && !isOAuth {
-			transcriber = openai.New(apiKey)
-		}
-
-		// Create SessionRuntime with the pre-created bus.
-		sessionID := "tui"
-		if persistedSess != nil {
-			sessionID = persistedSess.ID
-		}
-		rcfg := sess.RuntimeConfig()
-		rcfg.SessionID = sessionID
-		rcfg.Ctx = ctx
-		rcfg.Bus = preBus
-		rcfg.Checkpoints = cpStore
-		rcfg.ProviderFactory = providerFactory
-		rt, err := bus.NewSessionRuntime(rcfg)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error creating runtime: %v\n", err)
-			os.Exit(1)
-		}
-
-		rt.Bus.OnCommand(func(c bus.PromoteSubagent) error {
-			return sess.Subagents.Promote(c.JobID)
-		})
-		rt.Bus.OnCommand(func(c bus.CancelBashJob) error {
-			if sess.BashJobs == nil || !sess.BashJobs.Cancel(c.JobID) {
-				return fmt.Errorf("unknown bash job: %s", c.JobID)
-			}
-			return nil
-		})
-
-		// Wire the shared MCP controller into the TUI runtime, mirroring what
-		// serve does per session: (1) rebuild the base system prompt from the
-		// registry whenever the tool set changes (enable/disable/restart), and
-		// (2) publish bus.MCPChanged on every server transition so the status
-		// line and an open /mcp picker refresh live — including external crashes.
-		if sess.MCPController != nil {
-			toolReg := sess.ToolReg
-			build := sess.BuildBasePrompt
-			if toolReg != nil && build != nil {
-				sess.MCPController.SetRefreshPrompt(func() {
-					rt.RefreshBaseSystemPrompt(build(toolReg.Specs()))
-				})
-			}
-			if sess.MCPManager != nil {
-				mcpBus := rt.Bus
-				sess.MCPManager.OnChange(func(mcp.ServerStatus) {
-					mcpBus.Publish(bus.MCPChanged{})
-				})
-			}
-		}
-
-		// Attach persister BEFORE bus restore so state changes are persisted.
-		// Attach even in browser mode (persistedSess may be nil): the persister
-		// is nil-safe until the first session is opened, at which point
-		// SwitchSession rebinds it via SessionRebinder.
-		if sessionStore != nil {
-			rt.AttachPersister(&tuiPersister{store: sessionStore, session: persistedSess})
-		}
-
-		// Restore the complete persisted snapshot transactionally. This is after
-		// attaching the TUI persister so the single final Flush belongs to the
-		// selected session, not whichever session was previously active.
-		if persistedSess != nil {
-			if err := rt.SwitchSession(persistedSess); err != nil {
-				slog.Warn("restore: session", "id", persistedSess.ID, "error", err)
-				if sessionStore != nil {
-					fallback := sessionStore.Create()
-					fallback.SetRuntimeMetadata(
-						bootstrap.FullModelSpec(resolvedModel),
-						cwd,
-						sess.CurrentPermissionMode(),
-						ag.ThinkingLevel(),
-					)
-					if fallbackErr := rt.SwitchSession(fallback); fallbackErr != nil {
-						slog.Warn("restore: fallback session", "error", fallbackErr)
-					} else {
-						persistedSess = fallback
-					}
-				}
-			}
-		}
-
-		autoTitleModel, autoTitleEnabled, autoTitleErr := auxiliaryModelResolver(authStore)(moaCfg.AutoTitleModel)
-		if autoTitleErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: automatic session titles disabled: %v\n", autoTitleErr)
-		}
-		app := tui.New(ctx, tui.Config{
-			Runtime:               rt,
-			SessionStore:          sessionStore,
-			Session:               persistedSess,
-			StartInSessionBrowser: startInSessionBrowser,
-			CWD:                   cwd,
-			PinnedModels:          moaCfg.PinnedModels,
-			LoadPinnedModels: func() []string {
-				return core.LoadGlobalConfig().PinnedModels
-			},
-			PromptTemplates: promptTemplates,
-			MCPController:   sess.MCPController,
-			OnPinnedModelsChange: func(changes []tui.PinnedModelChange) error {
-				return core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
-					for _, change := range changes {
-						cfg.PinnedModels = core.UpdatePinnedModels(cfg.PinnedModels, change.ID, change.Pinned)
-					}
-				})
-			},
-			Transcriber:        transcriber,
-			STTLanguage:        core.GetSTTLanguage(moaCfg),
-			STTModel:           core.GetSTTModel(moaCfg),
-			STTVocabulary:      moaCfg.STTVocabulary,
-			CacheTTL:           core.CacheTTLDuration(moaCfg),
-			UsagePoller:        newAnthropicUsagePoller(authStore),
-			ProviderFactory:    providerFactory,
-			AutoTitleModel:     autoTitleModel,
-			AutoTitleEnabled:   autoTitleEnabled && autoTitleErr == nil,
-			ReleaseInfo:        release.Info{Version: version, Commit: commit, Date: date},
-			UpdateChecker:      release.NewChecker(release.Info{Version: version, Commit: commit, Date: date}),
-			UpdateCheckEnabled: core.IsUpdateCheckEnabled(moaCfg),
-		})
-		prog := tea.NewProgram(app, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(24))
-		if _, err := prog.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-
-	// --- Headless mode ---
-
 	jsonOutput := *output == "json"
 
 	printAuthNotice(os.Stderr, providerBuild.AuthNotice)
 
-	// Create SessionRuntime for headless — same contract as TUI and serve.
+	// Create SessionRuntime for headless — same contract as serve.
 	rcfg := sess.RuntimeConfig()
 	rcfg.SessionID = "headless"
 	rcfg.Ctx = ctx
@@ -684,47 +438,4 @@ drainedRunResults:
 		fmt.Fprintf(os.Stderr, "\nerror: %v\n", result.Err)
 		os.Exit(1)
 	}
-}
-
-// tuiPersister implements bus.SessionPersister, bus.TreePersister and
-// bus.SessionRebinder for TUI mode. The target session is swappable so a single
-// long-lived runtime can switch sessions (see SessionRuntime.LoadSession).
-type tuiPersister struct {
-	store   session.SessionStore
-	mu      sync.Mutex
-	session *session.Session
-}
-
-func (p *tuiPersister) RebindSession(sess *session.Session) {
-	p.mu.Lock()
-	p.session = sess
-	p.mu.Unlock()
-}
-
-func (p *tuiPersister) Snapshot(msgs []core.AgentMessage, epoch int, meta map[string]any) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.session == nil {
-		return nil // no active session yet (browser mode before first open)
-	}
-	p.session.Messages = msgs
-	p.session.CompactionEpoch = epoch
-	p.session.Metadata = meta
-	return p.store.Save(p.session)
-}
-
-func (p *tuiPersister) SnapshotTree(entries []session.Entry, leafID string, meta map[string]any) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.session == nil {
-		return nil // no active session yet (browser mode before first open)
-	}
-	p.session.Version = session.SessionVersion
-	p.session.Entries = entries
-	p.session.LeafID = leafID
-	p.session.Metadata = meta
-	// Clear v1 fields
-	p.session.Messages = nil
-	p.session.CompactionEpoch = 0
-	return p.store.Save(p.session)
 }

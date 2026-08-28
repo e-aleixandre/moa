@@ -12,7 +12,7 @@ import (
 
 // subscribeAutoTitle generates a concise session title (via a cheap LLM call)
 // after the first successful run, unless the session was manually renamed. It
-// mirrors the TUI behavior so titles look the same in both frontends.
+// keeps titles consistent across frontends.
 func (m *Manager) subscribeAutoTitle(sess *ManagedSession) {
 	if m.providerFactory == nil || !sess.autoTitleEnabled {
 		return

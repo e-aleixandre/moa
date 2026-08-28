@@ -1,6 +1,6 @@
 // Package planmode implements a plan-then-execute workflow.
 //
-// The TUI (or serve) creates a PlanMode, passes the agent's tool registry,
+// A frontend (serve) creates a PlanMode, passes the agent's tool registry,
 // and calls Enter/Exit/StartExecution at the right moments. PlanMode manages
 // tool visibility (unregister/re-register) and provides prompt fragments.
 package planmode
@@ -53,7 +53,7 @@ type PlanMode struct {
 	codeReviewCfg ReviewConfig
 	taskStore     *tasks.Store
 
-	// onChange is called after state transitions (for TUI/serve status updates).
+	// onChange is called after state transitions (for serve status updates).
 	// Called with the mutex released.
 	onChange func(mode Mode)
 }
@@ -166,7 +166,7 @@ func (pm *PlanMode) Exit() {
 }
 
 // OnPlanSubmitted returns true if submit_plan was called since the last check.
-// Resets the flag. Used by TUI to detect when to show the action menu.
+// Resets the flag. Used by a frontend to detect when to show the action menu.
 func (pm *PlanMode) OnPlanSubmitted() bool {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()

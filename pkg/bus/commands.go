@@ -104,7 +104,7 @@ type QueueCommand struct {
 }
 
 // CancelSteer drops steer messages still queued (not yet delivered) for the
-// running agent. Pairs with the TUI pulling queued steers back for editing.
+// running agent. Pairs with a frontend pulling queued steers back for editing.
 type CancelSteer struct {
 	SessionID string
 }
@@ -228,7 +228,7 @@ type HandoffSession struct {
 // emits AutoVerifyStarted/Ended and returns an error describing a failure
 // (ErrManualVerifyGoalActive when goal mode is active, ErrSessionBusy when a run
 // is in flight, ErrVerifyRunning when one is already running, or a check
-// failure). The serve/TUI /verify commands are routed through it in a later
+// failure). The serve /verify command is routed through it in a later
 // commit so both frontends share this state-occupying implementation.
 //
 // Dir carries the optional directory of `/verify <dir>`; empty means the
@@ -266,7 +266,7 @@ type StartPlanExecution struct {
 }
 
 // StartPlanReview transitions from ready → reviewing.
-// Review configuration (model, thinking) is handled by the TUI locally,
+// Review configuration (model, thinking) is handled by the frontend locally,
 // not by the bus — the plan mode state machine only tracks the mode transition.
 type StartPlanReview struct {
 	SessionID string

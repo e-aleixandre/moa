@@ -162,8 +162,8 @@ func RegisterHandlers(sctx *SessionContext) {
 		// like a run: this is what keeps a queued /verify barrier in its position
 		// (a concurrent SendPrompt can't slip in while it runs). A second caller
 		// fails the transition and gets ErrSessionBusy. The atomic below is a
-		// belt against two verifies that both somehow saw idle. The serve/TUI
-		// direct /verify commands do not go through here; only the queued
+		// belt against two verifies that both somehow saw idle. The serve
+		// direct /verify command does not go through here; only the queued
 		// barrier uses this state-occupying path.
 		if sctx.State != nil {
 			if err := sctx.State.Transition(StateRunning); err != nil {
@@ -348,7 +348,7 @@ func RegisterHandlers(sctx *SessionContext) {
 		sctx.setCompacting(true)
 		sctx.Bus.Publish(CompactionStarted{SessionID: sctx.SessionID})
 		// The expensive part (a model call taking tens of seconds) runs on its
-		// own goroutine so the caller — an HTTP POST, the TUI command — gets an
+		// own goroutine so the caller — an HTTP POST — gets an
 		// ACCEPTANCE, not a completion: a returned nil means "compaction
 		// started", and the outcome arrives as events. Everything that claims
 		// the session (the running transition, the compacting flag and
@@ -1517,7 +1517,7 @@ func RegisterHandlers(sctx *SessionContext) {
 	// -------------------------------------------------------------------
 	// SessionCostUpdated reactor — accumulates the session's USD spend from
 	// the main run (RunEnded.Cost) and each subagent (SubagentEnded.CostUSD),
-	// so TUI and web report the same figure from one source of truth.
+	// so every reader reports the same figure from one source of truth.
 	// -------------------------------------------------------------------
 	b.Subscribe(func(e RunEnded) {
 		if e.Cost == 0 {
@@ -1771,7 +1771,7 @@ func RegisterHandlers(sctx *SessionContext) {
 			spent := sctx.Goal.AddSpent(stats.CostUSD)
 
 			// The verifier's spend is real LLM cost — surface it in the session
-			// total too (TUI statusline + web usage widget), not only the goal
+			// total too (the web usage widget), not only the goal
 			// budget. RunEnded/SubagentEnded don't cover it: this is a separate
 			// agentic call outside the maker run.
 			if stats.CostUSD > 0 {

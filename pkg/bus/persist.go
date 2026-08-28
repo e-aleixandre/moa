@@ -27,7 +27,7 @@ type TreePersister interface {
 
 // SessionRebinder is an optional SessionPersister capability: re-point it at a
 // different session so subsequent snapshots write there. A single long-lived
-// runtime (the TUI) uses it to switch sessions without re-registering the
+// runtime uses it to switch sessions without re-registering the
 // persistence reactor.
 type SessionRebinder interface {
 	RebindSession(sess *session.Session)

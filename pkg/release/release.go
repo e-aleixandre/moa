@@ -21,7 +21,7 @@ import (
 const (
 	githubLatestURL = "https://api.github.com/repos/e-aleixandre/moa/releases/latest"
 	// CheckInterval bounds both persistent-cache freshness and UI refreshes.
-	// It deliberately keeps GitHub traffic low for short-lived TUI processes.
+	// It deliberately keeps GitHub traffic low for short-lived CLI processes.
 	CheckInterval  = 6 * time.Hour
 	requestTimeout = 5 * time.Second
 )
