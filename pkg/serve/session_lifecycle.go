@@ -725,24 +725,33 @@ func (m *Manager) deleteSession(id string) error {
 	sess.runtime.Close()
 
 	// Delete from disk.
+	// Report every failed removal so callers never claim a conversation was
+	// deleted while its private data remains on disk.
+	var deleteErrs []error
 	if sess.persister != nil {
 		sess.persister.mu.Lock()
 		store := sess.persister.store
 		sess.persister.mu.Unlock()
 		if store != nil {
-			_ = store.Delete(id)
+			if err := store.Delete(id); err != nil && !os.IsNotExist(err) {
+				deleteErrs = append(deleteErrs, err)
+			}
 			// Remove the side directory of persisted subagent transcripts.
-			_ = session.NewSubagentStore(store.Dir(), id).Remove()
+			if err := session.NewSubagentStore(store.Dir(), id).Remove(); err != nil && !os.IsNotExist(err) {
+				deleteErrs = append(deleteErrs, err)
+			}
 		}
 	}
 	m.invalidateSavedCache()
-	_ = removeSessionAttachDir(id)
+	if err := removeSessionAttachDir(id); err != nil && !os.IsNotExist(err) {
+		deleteErrs = append(deleteErrs, err)
+	}
 	if m.attachStore != nil {
 		if err := m.attachStore.ReleaseSession(id); err != nil {
 			slog.Warn("release session attachments", "session", id, "error", err)
 		}
 	}
-	return nil
+	return errors.Join(deleteErrs...)
 }
 
 // drainLifecycleUsers blocks until every in-flight request that may be using

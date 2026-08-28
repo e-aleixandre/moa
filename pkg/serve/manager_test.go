@@ -1407,6 +1407,34 @@ func TestDelete_RemovesSavedFile(t *testing.T) {
 	}
 }
 
+func TestDelete_ReturnsPersistedFileRemovalFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{Title: "cannot-delete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sess.persister.store.Dir(), sess.ID+".json")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "remaining"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.Delete(sess.ID); err == nil {
+		t.Fatal("Delete succeeded after the persisted session file could not be removed")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("persisted session path was unexpectedly removed: %v", err)
+	}
+}
+
 func TestDelete_SavedOnly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
