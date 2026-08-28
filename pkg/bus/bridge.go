@@ -158,8 +158,8 @@ type SessionContext struct {
 	// SnapshotInFlightWithCut can pair them with the sequence cut for the
 	// reconnect snapshot.
 	streamMu       sync.Mutex
-	streamText     string
-	streamThinking string
+	streamText     []byte
+	streamThinking []byte
 	streamMsgID    string
 
 	// liveTools is the registry of tool calls that exist but are not yet
@@ -440,7 +440,7 @@ func (sctx *SessionContext) setCompacting(v bool) {
 func (sctx *SessionContext) StreamingAggregate() (text, thinking, msgID string) {
 	sctx.streamMu.Lock()
 	defer sctx.streamMu.Unlock()
-	return sctx.streamText, sctx.streamThinking, sctx.streamMsgID
+	return string(sctx.streamText), string(sctx.streamThinking), sctx.streamMsgID
 }
 
 // SnapshotInFlightWithCut atomically captures the in-flight streaming aggregate
@@ -463,8 +463,8 @@ func (sctx *SessionContext) SnapshotInFlightWithCut() (StreamingAggregate, []Liv
 	sctx.streamMu.Lock()
 	defer sctx.streamMu.Unlock()
 	aggregate := StreamingAggregate{
-		Text:     sctx.streamText,
-		Thinking: sctx.streamThinking,
+		Text:     string(sctx.streamText),
+		Thinking: string(sctx.streamThinking),
 		MsgID:    sctx.streamMsgID,
 	}
 	liveTools := sctx.liveToolsSnapshotLocked()
@@ -557,8 +557,8 @@ func (sctx *SessionContext) resetLiveToolsLocked() {
 // completes (its text is now a real message in state) and defensively on
 // turn/run end. Caller must hold streamMu.
 func (sctx *SessionContext) resetStreamingLocked() {
-	sctx.streamText = ""
-	sctx.streamThinking = ""
+	sctx.streamText = nil
+	sctx.streamThinking = nil
 	sctx.streamMsgID = ""
 }
 
@@ -566,21 +566,21 @@ func (sctx *SessionContext) resetStreamingLocked() {
 // streaming, resetting the accumulated deltas for the new message. Caller must
 // hold streamMu.
 func (sctx *SessionContext) setStreamMsgIDLocked(id string) {
-	sctx.streamText = ""
-	sctx.streamThinking = ""
+	sctx.streamText = nil
+	sctx.streamThinking = nil
 	sctx.streamMsgID = id
 }
 
 // appendStreamTextLocked accumulates a streamed text delta. Caller must hold
 // streamMu.
 func (sctx *SessionContext) appendStreamTextLocked(delta string) {
-	sctx.streamText += delta
+	sctx.streamText = append(sctx.streamText, delta...)
 }
 
 // appendStreamThinkingLocked accumulates a streamed thinking delta. Caller must
 // hold streamMu.
 func (sctx *SessionContext) appendStreamThinkingLocked(delta string) {
-	sctx.streamThinking += delta
+	sctx.streamThinking = append(sctx.streamThinking, delta...)
 }
 
 // GetGate returns the current permission gate (may be nil for yolo mode).

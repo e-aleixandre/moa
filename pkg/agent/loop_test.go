@@ -42,6 +42,53 @@ type cancelledToolCallProvider struct {
 	started chan struct{}
 }
 
+type cancelledPartialProvider struct {
+	streamed chan struct{}
+}
+
+func (p *cancelledPartialProvider) Stream(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+	ch := make(chan core.AssistantEvent, 5)
+	ch <- core.AssistantEvent{Type: core.ProviderEventThinkingDelta, Delta: "reason"}
+	ch <- core.AssistantEvent{Type: core.ProviderEventThinkingDelta, Delta: "ing"}
+	ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "partial "}
+	ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "answer"}
+	close(p.streamed)
+	go func() {
+		<-ctx.Done()
+		close(ch)
+	}()
+	return ch, nil
+}
+
+func TestAbortPersistsPartialStreamTextAndThinking(t *testing.T) {
+	provider := &cancelledPartialProvider{streamed: make(chan struct{})}
+	ag := newTestAgent(provider)
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Run(context.Background(), "start")
+		done <- err
+	}()
+
+	<-provider.streamed
+	ag.Abort()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("aborted run did not finish")
+	}
+
+	msgs := ag.Messages()
+	if len(msgs) != 2 || msgs[1].Role != "assistant" {
+		t.Fatalf("cancelled partial message was not persisted: %+v", msgs)
+	}
+	if got := msgs[1].Content; len(got) != 2 || got[0].Thinking != "reasoning" || got[1].Text != "partial answer" {
+		t.Fatalf("persisted partial content = %+v", got)
+	}
+}
+
 func (p *cancelledToolCallProvider) Stream(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
 	ch := make(chan core.AssistantEvent, 1)
 	close(p.started)

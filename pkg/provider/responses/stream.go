@@ -112,6 +112,7 @@ type slot struct {
 	// message
 	msgItemID string
 	msgPhase  string
+	text      strings.Builder
 }
 
 // streamState tracks the evolving message across SSE events.
@@ -273,7 +274,7 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 		}
 		sl := state.getSlot(ev.OutputIndex, "message")
 		if sl != nil {
-			state.message.Content[sl.contentIndex].Text += ev.Delta
+			sl.text.WriteString(ev.Delta)
 		} else {
 			// Fallback: a text delta without a preceding message item.
 			state.message.Content = appendOrUpdateText(state.message.Content, ev.Delta)
@@ -356,6 +357,8 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 			}
 			if text != "" {
 				state.message.Content[sl.contentIndex].Text = text
+			} else {
+				state.message.Content[sl.contentIndex].Text = sl.text.String()
 			}
 			state.message.Content[sl.contentIndex].TextSignature = encodeTextSignature(id, phase)
 			delete(state.slots, ev.OutputIndex)
@@ -522,6 +525,15 @@ func (s *streamState) finalizeToolCall(sl *slot, argsStr string, ch chan<- core.
 // continue signal → typed EmptyResponseError (the loop re-samples once before
 // surfacing it); (5) normal Done.
 func (s *streamState) finalize(ev *event, ch chan<- core.AssistantEvent) bool {
+	// A completed response does not always include output_item.done. Materialize
+	// any open message slots before the final message crosses the goroutine
+	// boundary or is inspected for substantive content.
+	for _, sl := range s.slots {
+		if sl.kind == "message" {
+			s.message.Content[sl.contentIndex].Text = sl.text.String()
+		}
+	}
+
 	var endTurn *bool
 	if ev.Response != nil {
 		endTurn = ev.Response.EndTurn
