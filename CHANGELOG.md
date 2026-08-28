@@ -5,6 +5,98 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] - 2026-08-28
+
+### Removed
+
+- The terminal interface is gone. Moa now has two modes: the web UI and the
+  headless CLI (`-p`, piped stdin). Keeping a second full frontend alive cost
+  review effort and constrained the core for something nobody ran. With it go
+  `--resume` and `--continue`, which existed to reach the TUI's session
+  browser: a run started from the command line now always needs a prompt. The
+  interactive `.mcp.json` and `.moa` trust prompts are gone too — they could
+  only be answered from the terminal — but both gates still apply, and `moa
+  serve` keeps its own way to grant trust.
+- Plan mode is gone, in full: the mode itself, its tool restrictions, its plan
+  review, and the `plan_review_model`, `plan_review_thinking`,
+  `code_review_model` and `code_review_thinking` settings, which no longer do
+  anything if a configuration file still carries them.
+
+### Changed
+
+- Streaming into a long conversation is about eight times faster. Typing while
+  the model answers, with a long history on screen, cost 959 ms per frame at
+  200 turns and 1047 ms at 500; it now costs 121 ms and 134 ms (measured at
+  390x844 with the CPU throttled 4x). The markdown cache was smaller than the
+  transcript mounted above it, so a cache meant to make long sessions cheap
+  evicted itself once per streaming frame and never scored a single hit.
+- The reply no longer gets copied whole on every token. Building the streamed
+  answer, the text kept for a cancellation, and the snapshot a reconnect is
+  served from all grew quadratically with the length of the answer.
+- Starting the server is about 2.8 times faster and reads far less: the session
+  roster was decoded three times over, and two of those readings threw their
+  work away. Measured against 199 real sessions, 5.21s/698MB down to
+  1.89s/232MB.
+- Saving a session is about five times faster. Every save rewrites the whole
+  history, so indenting the file cost real work on every single turn; session
+  and subagent transcripts are now written compactly.
+- The owner's iPhone dropped every compressed WebSocket, reopening the socket
+  every ~1.4s and re-hydrating the transcript continuously, so the conversation
+  flickered. The underlying library emitted a compressed message as a long run
+  of tiny continuation frames, a shape iOS rejects by closing the connection.
+  Moa now sends one frame, keeping compression instead of trading it away.
+- Opening a conversation on a phone downloaded up to 4.4 MB before the first
+  paint, almost all of it subagent cards. Every section of that first frame now
+  bounds itself, terminal cards carry an excerpt with the full text one tap
+  away, and both the WebSocket and the large read responses are compressed
+  (the roster went from 81 KB to 14 KB).
+- Reconnecting no longer refetches the whole transcript. The server now dates
+  the resume point, so a client that already holds the conversation is told
+  what changed rather than sent everything again.
+- The session drawer no longer builds every saved session before the first row
+  is readable, nor re-filters the whole roster on each keystroke. Search still
+  looks at everything: a match hidden behind a cap reads as data loss.
+
+### Fixed
+
+- A session could get stuck refusing everything the owner typed. When the
+  assistant asked a question and an asynchronous subagent expired at the same
+  moment, the completion opened a run of its own while the question was still
+  pending, leaving the session in an error state while the agent carried on
+  working; messages sent meanwhile were rejected. The completion is now
+  delivered to the waiting run, and a rejected send no longer rewrites a
+  session as idle when the answer arrives after the run has already moved on.
+- Every subagent drew two cards, the second offering a "Conversation" button
+  that led nowhere. The link between a launch and the child it started was
+  dropped by the server when a client reconnected, and lost again by the client
+  on a partial resume — which is exactly what runs when the phone screen wakes.
+  Both sides now carry it, and a row only offers the button when it names a
+  child the server can actually open.
+- The auto-verify indicator could stay lit forever when the verify finished
+  while the phone screen was asleep. The reconnect snapshot now carries the
+  real state, clearing a stale spinner and restoring one still running.
+- A stream that failed mid-answer discarded everything already on screen.
+  Partial output is kept, with a visible marker for the failure, and any tool
+  calls that will never run are closed.
+- Failures that used to pass in silence are now reported: a session whose
+  closing snapshot cannot be written is kept in memory instead of being
+  discarded, a deletion that leaves private data on disk no longer claims
+  success, and an `apply_patch` whose rollback could not be completed says so
+  rather than implying the files were restored.
+- Session files survive power loss better: the directory entry is synced after
+  the file itself, which could otherwise be lost after the rename.
+- Deleting a session now revokes its attachments, so a tool still in flight
+  cannot recreate the index of a conversation that no longer exists.
+- Reloading MCP while a session was being torn down could leave child processes
+  running.
+- An auto-verify started by one turn could survive into the next, because the
+  handle used to cancel it was published too late.
+- Two display defects in the conversation: a tool result could be applied to
+  more than one call when identifiers repeated, and a subagent event queued
+  before a reconnect could resurrect a job the server no longer lists.
+- Deleting or reopening a session from the phone now says so when it fails,
+  instead of appearing to have worked.
+
 ## [0.31.0] - 2026-08-22
 
 ### Added
