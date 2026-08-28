@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/handoff"
@@ -38,6 +39,23 @@ func rebuildSystemPrompt(sctx *SessionContext) {
 // Call once after creating a SessionContext.
 func RegisterHandlers(sctx *SessionContext) {
 	registerHandlers(sctx, func(fn func()) { go fn() })
+}
+
+type detailedSteerer interface {
+	TrySteer(core.SteerItem) error
+}
+
+func trySteer(controller AgentController, item core.SteerItem) error {
+	if detailed, ok := controller.(detailedSteerer); ok {
+		if err := detailed.TrySteer(item); !errors.Is(err, agent.ErrSteerQueueFull) {
+			return err
+		}
+		return ErrSteerQueueFull
+	}
+	if controller.Steer(item) {
+		return nil
+	}
+	return ErrSteerQueueFull
 }
 
 func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
@@ -108,8 +126,8 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 		if cmd.ID == "" {
 			cmd.ID = core.NewSteerID()
 		}
-		if !sctx.Agent.Steer(core.SteerItem{ID: cmd.ID, Text: cmd.Text, Custom: cmd.Custom, Content: cmd.Content, Internal: cmd.Internal}) {
-			return ErrSteerQueueFull
+		if err := trySteer(sctx.Agent, core.SteerItem{ID: cmd.ID, Text: cmd.Text, Custom: cmd.Custom, Content: cmd.Content, Internal: cmd.Internal}); err != nil {
+			return err
 		}
 		// Kick the pump after enqueuing. While a run is in flight this is a
 		// no-op (the running agent drains the steer at its next turn boundary);
@@ -128,8 +146,8 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 		}
 		// A barrier carries the raw command line in both Command (the executable
 		// form) and Text (display). It is never injected as a message.
-		if !sctx.Agent.Steer(core.SteerItem{ID: cmd.ID, Text: cmd.Raw, Command: cmd.Raw}) {
-			return ErrSteerQueueFull
+		if err := trySteer(sctx.Agent, core.SteerItem{ID: cmd.ID, Text: cmd.Raw, Command: cmd.Raw}); err != nil {
+			return err
 		}
 		sctx.Bus.Publish(CommandQueued{SessionID: sctx.SessionID, ID: cmd.ID, Raw: cmd.Raw})
 		// Kick the pump after enqueuing (same orphan-race close as SteerAgent):
@@ -721,8 +739,8 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 			if id == "" {
 				id = core.NewSteerID()
 			}
-			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: cmd.Text, Custom: cmd.Custom}) {
-				return ErrSteerQueueFull
+			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: cmd.Text, Custom: cmd.Custom}); err != nil {
+				return err
 			}
 			// Report the identity on the STEER rail: a chip ID must never be
 			// reported as a message ID, or the caller reconciles the wrong rail
@@ -808,8 +826,8 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 			// Carry the plain text alongside the content blocks: the Steered
 			// event (and every client rendering it) shows Text, so a queued
 			// send with attachments would otherwise surface as an empty chip.
-			if !sctx.Agent.Steer(core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content}) {
-				return ErrSteerQueueFull
+			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content}); err != nil {
+				return err
 			}
 			if cmd.AcceptedSteerID != nil {
 				*cmd.AcceptedSteerID = id

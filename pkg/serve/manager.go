@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/attention"
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -908,6 +910,7 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 		return "", "", nil, ErrNotFound
 	}
 
+retryAfterTerminalRun:
 	state := sess.runtime.State.Current()
 	busy := state == bus.StateRunning || state == bus.StatePermission || sess.runtime.Context().Agent.IsRunning()
 	// Direct send requires BOTH an idle session AND an empty queue rail: a queued
@@ -932,6 +935,9 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 		}
 		if len(atts) == 0 {
 			if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text}); err != nil {
+				if errors.Is(err, agent.ErrSteerAdmissionClosed) && sess.runtime.WaitSettled(m.baseCtx) {
+					goto retryAfterTerminalRun
+				}
 				return "", "", nil, err
 			}
 			return "steer", steerID, nil, nil
@@ -939,10 +945,10 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 		// Serialize attachment processing per session so the on-disk quota check
 		// is atomic against concurrent /send requests (see the idle path below).
 		sess.attachMu.Lock()
-		defer sess.attachMu.Unlock()
 		priorNativeDoc := priorNativeDocBytes(sess)
 		content, writtenFiles, descriptors, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, priorNativeDoc, m.attachStore)
 		if err != nil {
+			sess.attachMu.Unlock()
 			return "", "", nil, err
 		}
 		if text != "" {
@@ -955,8 +961,13 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 				_ = os.Remove(p)
 			}
 			m.releaseAttachmentRefs(sessionID, descriptors)
+			sess.attachMu.Unlock()
+			if errors.Is(err, agent.ErrSteerAdmissionClosed) && sess.runtime.WaitSettled(m.baseCtx) {
+				goto retryAfterTerminalRun
+			}
 			return "", "", nil, err
 		}
+		sess.attachMu.Unlock()
 		return "steer", steerID, descriptors, nil
 	}
 
@@ -993,6 +1004,9 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 			Text: text, MsgID: msgID, AcceptedMsgID: &accepted,
 			SteerID: steerID, AcceptedSteerID: &acceptedSteer,
 		}); err != nil {
+			if errors.Is(err, agent.ErrSteerAdmissionClosed) && sess.runtime.WaitSettled(m.baseCtx) {
+				goto retryAfterTerminalRun
+			}
 			return "", "", nil, err
 		}
 		if acceptedSteer != "" {
@@ -1007,10 +1021,10 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 	// prompt is accepted, so releasing this before Execute would let multiple
 	// requests each observe the same previous total.
 	sess.attachMu.Lock()
-	defer sess.attachMu.Unlock()
 	priorNativeDoc := priorNativeDocBytes(sess)
 	content, writtenFiles, descriptors, err := buildAttachmentContent(atts, sessionID, sess.pathPolicy, priorNativeDoc, m.attachStore)
 	if err != nil {
+		sess.attachMu.Unlock()
 		return "", "", nil, err
 	}
 	if text != "" {
@@ -1026,8 +1040,13 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 			_ = os.Remove(p)
 		}
 		m.releaseAttachmentRefs(sessionID, descriptors)
+		sess.attachMu.Unlock()
+		if errors.Is(err, agent.ErrSteerAdmissionClosed) && sess.runtime.WaitSettled(m.baseCtx) {
+			goto retryAfterTerminalRun
+		}
 		return "", "", nil, err
 	}
+	sess.attachMu.Unlock()
 	if acceptedSteer != "" {
 		return "steer", acceptedSteer, descriptors, nil
 	}

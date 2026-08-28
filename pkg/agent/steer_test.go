@@ -242,6 +242,81 @@ func TestFollowUpDoesNothingWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestQueuedMessageRejectedAfterFinalDrain(t *testing.T) {
+	tests := []struct {
+		name  string
+		admit func(*Agent) bool
+	}{
+		{
+			name: "Steer",
+			admit: func(ag *Agent) bool {
+				return ag.Steer(core.SteerItem{ID: "too-late", Text: "too late"})
+			},
+		},
+		{
+			name: "Enqueue",
+			admit: func(ag *Agent) bool {
+				return ag.Enqueue("too late")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ag := newTestAgent(NewMockProvider(simpleTextResponse("done")))
+			endSeen := make(chan struct{})
+			releaseEnd := make(chan struct{})
+			var endOnce sync.Once
+			var releaseOnce sync.Once
+			defer releaseOnce.Do(func() { close(releaseEnd) })
+			ag.Subscribe(func(e core.AgentEvent) {
+				if e.Type != core.AgentEventEnd {
+					return
+				}
+				endOnce.Do(func() { close(endSeen) })
+				<-releaseEnd
+			})
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				_, _ = ag.Run(context.Background(), "finish")
+			}()
+
+			select {
+			case <-endSeen:
+			case <-time.After(2 * time.Second):
+				t.Fatal("agent_end was not emitted")
+			}
+			pollUntilAgent(t, 2*time.Second, "run to close admission after its final drain", func() bool {
+				ag.steerMu.Lock()
+				defer ag.steerMu.Unlock()
+				return ag.runTerminal
+			})
+
+			if tt.admit(ag) {
+				t.Fatalf("%s returned true after AgentEnd; want false", tt.name)
+			}
+			if got := ag.QueueLen(); got != 0 {
+				t.Fatalf("queue length = %d after rejected %s; want 0", got, tt.name)
+			}
+			ag.followUpMu.Lock()
+			followUps := len(ag.followUps)
+			ag.followUpMu.Unlock()
+			if followUps != 0 {
+				t.Fatalf("follow-up queue length = %d after rejected %s; want 0", followUps, tt.name)
+			}
+
+			releaseOnce.Do(func() { close(releaseEnd) })
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("agent did not finish cleanup")
+			}
+		})
+	}
+}
+
 func TestSteerDropsWhenChannelFull(t *testing.T) {
 	provider := NewMockProvider(simpleTextResponse("ok"))
 	ag := newTestAgent(provider)
@@ -292,8 +367,12 @@ func TestSteerAndFollowUpCombined(t *testing.T) {
 	}()
 
 	<-started
-	ag.Steer(core.SteerItem{ID: "steer-1", Text: "steer msg"})
-	ag.Enqueue("followup msg")
+	if !ag.Steer(core.SteerItem{ID: "steer-1", Text: "steer msg"}) {
+		t.Fatal("active Steer was rejected")
+	}
+	if !ag.Enqueue("followup msg") {
+		t.Fatal("active Enqueue was rejected")
+	}
 	close(release)
 	<-done
 
