@@ -257,7 +257,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			}
 			b := s.runtime.Bus
 
-			if s.runtime.State.Current() == bus.StateRunning {
+			state := s.runtime.State.Current()
+			// StatePermission still belongs to the foreground run; starting a
+			// notification run there would race the agent blocked on ask_user.
+			if state == bus.StateRunning || state == bus.StatePermission {
 				subagentTexts.Store(agentText, struct{}{})
 				_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Internal: true})
 			} else {
