@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/e-aleixandre/moa/pkg/bus"
-	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
-	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
 )
 
 func TestUnreadAttentionAcknowledgementPreservesNewerAttentionAcrossReadRace(t *testing.T) {
@@ -394,11 +394,11 @@ func TestSubscribedSessionIsNotSeenAndStillPushes(t *testing.T) {
 
 	ctx, wsCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer wsCancel()
-	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil) //nolint:staticcheck
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	var evt Event
 	if err := wsjson.Read(ctx, conn, &evt); err != nil {
 		t.Fatal(err)

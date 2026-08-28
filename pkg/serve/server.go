@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"nhooyr.io/websocket"        //nolint:staticcheck // TODO: migrate to coder/websocket
-	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // TODO: migrate to coder/websocket
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 
 	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/bootstrap"
@@ -686,16 +686,16 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		conn, err := websocket.Accept(w, r, wsAcceptOptions()) //nolint:staticcheck
+		conn, err := websocket.Accept(w, r, wsAcceptOptions())
 		if err != nil {
 			return
 		}
-		defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+		defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 		lease, err := deviceLeaseForWebSocket(r, func(string) {
-			_ = conn.CloseNow() //nolint:staticcheck // revoke/expiry must not wait for a peer close handshake
+			_ = conn.CloseNow() // revoke/expiry must not wait for a peer close handshake
 		})
 		if err != nil {
-			_ = conn.CloseNow() //nolint:staticcheck
+			_ = conn.CloseNow()
 			return
 		}
 		if lease != nil {
@@ -710,7 +710,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		sess.wsConns.Add(1)
 		defer sess.wsConns.Add(-1)
 
-		ctx := conn.CloseRead(r.Context()) //nolint:staticcheck
+		ctx := conn.CloseRead(r.Context())
 		query := r.URL.Query()
 
 		// Subscribe before taking the init snapshot. Events published while the
@@ -779,13 +779,13 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 				}
 			case <-pingTicker.C:
 				pingCtx, cancelPing := context.WithTimeout(ctx, 10*time.Second)
-				err := conn.Ping(pingCtx) //nolint:staticcheck
+				err := conn.Ping(pingCtx)
 				cancelPing()
 				if err != nil {
 					return // dead connection — defer releases wsConns
 				}
 			case <-reactor.Done():
-				conn.Close(websocket.StatusGoingAway, "session closed") //nolint:errcheck,staticcheck
+				conn.Close(websocket.StatusGoingAway, "session closed") //nolint:errcheck
 				return
 			case <-leaseDone:
 				return
@@ -1446,9 +1446,16 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // and these sockets are mostly served to phones. NoContextTakeover compresses a
 // little worse than context takeover but keeps no 32 KB sliding window per
 // connection, which matters with many long-lived, seldom-written sessions.
-// Clients that don't offer the extension (Safari) simply negotiate it away.
-func wsAcceptOptions() *websocket.AcceptOptions { //nolint:staticcheck
-	return &websocket.AcceptOptions{CompressionMode: websocket.CompressionNoContextTakeover} //nolint:staticcheck
+//
+// Safari does offer the extension, contrary to what the old library's docs
+// claimed, and it is strict about how the message arrives: nhooyr.io/websocket
+// flushed the deflate writer on every internal chunk, so one compressed message
+// went out as a long run of alternating ~236/4-byte continuation frames, and
+// iOS answered by closing the socket right after the init (WebKit #228296).
+// coder/websocket buffers and sends a single frame. See
+// TestCompressedMessageIsNotFragmented, which asserts that shape on the wire.
+func wsAcceptOptions() *websocket.AcceptOptions {
+	return &websocket.AcceptOptions{CompressionMode: websocket.CompressionNoContextTakeover}
 }
 
 // wsWriteTimeout bounds a single WebSocket message write. A stalled client (its
@@ -1456,7 +1463,7 @@ func wsAcceptOptions() *websocket.AcceptOptions { //nolint:staticcheck
 // the write fails and the handler tears the connection down.
 const wsWriteTimeout = 30 * time.Second
 
-func wsWriteJSON(ctx context.Context, conn *websocket.Conn, v any) error { //nolint:staticcheck
+func wsWriteJSON(ctx context.Context, conn *websocket.Conn, v any) error {
 	ctx, cancel := context.WithTimeout(ctx, wsWriteTimeout)
 	defer cancel()
 	return wsjson.Write(ctx, conn, v)

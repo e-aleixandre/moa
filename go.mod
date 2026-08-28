@@ -9,12 +9,12 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
+	github.com/coder/websocket v1.8.15
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/muesli/reflow v0.3.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
-	nhooyr.io/websocket v1.8.17
 )
 
 require (

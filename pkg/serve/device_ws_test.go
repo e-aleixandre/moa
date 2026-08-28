@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"nhooyr.io/websocket"        //nolint:staticcheck // device websocket lifecycle coverage
-	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // device websocket lifecycle coverage
+	"github.com/coder/websocket"        // device websocket lifecycle coverage
+	"github.com/coder/websocket/wsjson" // device websocket lifecycle coverage
 
 	"github.com/e-aleixandre/moa/pkg/bus"
 )
@@ -52,15 +52,15 @@ func createStoredDeviceCredential(t *testing.T, path string, expiresAt time.Time
 }
 
 type deviceWSSet struct {
-	session *websocket.Conn //nolint:staticcheck // existing server WebSocket library compatibility
+	session *websocket.Conn // existing server WebSocket library compatibility
 }
 
 func dialDeviceWebSockets(t *testing.T, server *httptest.Server, sessionID, credential string) deviceWSSet {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	dial := func(path string) *websocket.Conn { //nolint:staticcheck // existing server WebSocket library compatibility
-		conn, _, err := websocket.Dial(ctx, server.URL+path, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{deviceAuthorizationScheme + " " + credential}}}) //nolint:staticcheck
+	dial := func(path string) *websocket.Conn { // existing server WebSocket library compatibility
+		conn, _, err := websocket.Dial(ctx, server.URL+path, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{deviceAuthorizationScheme + " " + credential}}})
 		if err != nil {
 			t.Fatalf("dial %s: %v", path, err)
 		}
@@ -68,7 +68,7 @@ func dialDeviceWebSockets(t *testing.T, server *httptest.Server, sessionID, cred
 	}
 	set := deviceWSSet{session: dial("/api/sessions/" + sessionID + "/ws")}
 	var init Event
-	if err := wsjson.Read(ctx, set.session, &init); err != nil { //nolint:staticcheck
+	if err := wsjson.Read(ctx, set.session, &init); err != nil {
 		t.Fatal(err)
 	}
 	if init.Type != "init" {
@@ -78,19 +78,19 @@ func dialDeviceWebSockets(t *testing.T, server *httptest.Server, sessionID, cred
 }
 
 func (set deviceWSSet) close() {
-	_ = set.session.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	_ = set.session.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 }
 
-func expectDeviceWSClose(t *testing.T, conn *websocket.Conn, name string) { //nolint:staticcheck // existing server WebSocket library compatibility
+func expectDeviceWSClose(t *testing.T, conn *websocket.Conn, name string) { // existing server WebSocket library compatibility
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	var value json.RawMessage
-	err := wsjson.Read(ctx, conn, &value) //nolint:staticcheck
+	err := wsjson.Read(ctx, conn, &value)
 	if err == nil {
 		t.Fatalf("%s received data after device access ended: %s", name, value)
 	}
-	if status := websocket.CloseStatus(err); status != -1 && status != websocket.StatusPolicyViolation { //nolint:staticcheck // existing server WebSocket library compatibility
+	if status := websocket.CloseStatus(err); status != -1 && status != websocket.StatusPolicyViolation { // existing server WebSocket library compatibility
 		t.Fatalf("%s close status = %v, want policy violation or transport closure; err=%v", name, status, err)
 	}
 }
@@ -114,13 +114,13 @@ func TestDeviceRevokeClosesEveryWebSocketAndLeavesTokenSocketAlive(t *testing.T)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	tokenConn, _, err := websocket.Dial(ctx, server.URL+"/api/sessions/"+sess.ID+"/ws", &websocket.DialOptions{HTTPHeader: http.Header{"Cookie": []string{authCookieName + "=owner"}}}) //nolint:staticcheck
+	tokenConn, _, err := websocket.Dial(ctx, server.URL+"/api/sessions/"+sess.ID+"/ws", &websocket.DialOptions{HTTPHeader: http.Header{"Cookie": []string{authCookieName + "=owner"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tokenConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer tokenConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	var init Event
-	if err := wsjson.Read(ctx, tokenConn, &init); err != nil { //nolint:staticcheck
+	if err := wsjson.Read(ctx, tokenConn, &init); err != nil {
 		t.Fatal(err)
 	}
 
@@ -135,7 +135,7 @@ func TestDeviceRevokeClosesEveryWebSocketAndLeavesTokenSocketAlive(t *testing.T)
 	tokenReadCtx, cancelTokenRead := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancelTokenRead()
 	var tokenEvent Event
-	if err := wsjson.Read(tokenReadCtx, tokenConn, &tokenEvent); err != nil { //nolint:staticcheck
+	if err := wsjson.Read(tokenReadCtx, tokenConn, &tokenEvent); err != nil {
 		t.Fatalf("token-authenticated websocket closed on device revoke: %v", err)
 	}
 	if tokenEvent.Type != "text_delta" {

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"nhooyr.io/websocket"        //nolint:staticcheck // device WS authentication coverage
-	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // device WS authentication coverage
+	"github.com/coder/websocket"        // device WS authentication coverage
+	"github.com/coder/websocket/wsjson" // device WS authentication coverage
 )
 
 func pairingRequest(handler http.Handler, method, path, body string, cookie *http.Cookie, credential string) *httptest.ResponseRecorder {
@@ -192,13 +192,13 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, _, err := websocket.Dial(ctx, server.URL+"/api/sessions/"+sess.ID+"/ws", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{deviceAuthorizationScheme + " " + credential.Credential}}}) //nolint:staticcheck
+	conn, _, err := websocket.Dial(ctx, server.URL+"/api/sessions/"+sess.ID+"/ws", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{deviceAuthorizationScheme + " " + credential.Credential}}})
 	if err != nil {
 		t.Fatalf("device session WS auth: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 	var event Event
-	if err := wsjson.Read(ctx, conn, &event); err != nil { //nolint:staticcheck
+	if err := wsjson.Read(ctx, conn, &event); err != nil {
 		t.Fatal(err)
 	}
 	if event.Type != "init" {

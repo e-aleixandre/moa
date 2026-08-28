@@ -1,17 +1,21 @@
 package serve
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
-	"nhooyr.io/websocket"        //nolint:staticcheck
-	"nhooyr.io/websocket/wsjson" //nolint:staticcheck
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 // readBody returns the response body, transparently decompressing gzip. The
@@ -141,13 +145,13 @@ func TestWebSocketNegotiatesPermessageDeflate(t *testing.T) {
 	ctx, wsCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer wsCancel()
 
-	conn, resp, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", &websocket.DialOptions{ //nolint:staticcheck
-		CompressionMode: websocket.CompressionNoContextTakeover, //nolint:staticcheck
+	conn, resp, err := websocket.Dial(ctx, srv.URL+"/api/sessions/"+sess.ID+"/ws", &websocket.DialOptions{
+		CompressionMode: websocket.CompressionNoContextTakeover,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck,staticcheck
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 
 	ext := resp.Header.Get("Sec-WebSocket-Extensions")
 	if !strings.Contains(ext, "permessage-deflate") {
@@ -165,5 +169,112 @@ func TestWebSocketNegotiatesPermessageDeflate(t *testing.T) {
 	}
 	if evt.Type != "init" {
 		t.Fatalf("first event = %q, want init", evt.Type)
+	}
+}
+
+// TestCompressedMessageIsNotFragmented guards the reason this server moved off
+// nhooyr.io/websocket. That library flushed the deflate writer on every
+// internal chunk, so a single compressed message left as a long run of
+// alternating ~236/4-byte continuation frames. iOS closes such a socket right
+// after the init (WebKit #228296): the owner's iPhone opened 39 sockets in 4
+// minutes, each dying 0.2s after receiving a compressed snapshot, while
+// desktop Chrome and Go clients tolerated the very same stream.
+//
+// Byte counts are not the invariant — frame count is. A future rewrite that
+// re-fragments compressed messages would silently bring the flicker back, so
+// assert the wire shape directly with a hand-rolled handshake.
+func TestCompressedMessageIsNotFragmented(t *testing.T) {
+	payload := bytes.Repeat([]byte(`{"type":"init","data":"aaaaaaaaaaaaaaaa"},`), 12000) // ~500 KiB of compressible JSON
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close() //nolint:errcheck
+
+	srv := &http.Server{
+		ReadHeaderTimeout: 5 * time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := websocket.Accept(w, r, wsAcceptOptions())
+			if err != nil {
+				return
+			}
+			defer conn.CloseNow() //nolint:errcheck
+			_ = conn.Write(r.Context(), websocket.MessageText, payload)
+			<-r.Context().Done()
+		}),
+	}
+	go srv.Serve(ln)  //nolint:errcheck
+	defer srv.Close() //nolint:errcheck
+
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close() //nolint:errcheck
+	if _, err := fmt.Fprint(conn, "GET / HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"+
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"+
+		"Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var raw []byte
+	buf := make([]byte, 32<<10)
+	for len(raw) < 256<<10 {
+		n, err := conn.Read(buf)
+		raw = append(raw, buf[:n]...)
+		if err != nil {
+			break
+		}
+		// The whole message is one short burst; stop once reads go quiet.
+		if err := conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	headerEnd := bytes.Index(raw, []byte("\r\n\r\n"))
+	if headerEnd < 0 {
+		t.Fatalf("no handshake response in %d bytes", len(raw))
+	}
+	if !bytes.Contains(raw[:headerEnd], []byte("permessage-deflate")) {
+		t.Fatal("server did not negotiate permessage-deflate")
+	}
+
+	frames, continuations := 0, 0
+	for i := headerEnd + 4; i+2 <= len(raw); {
+		opcode := raw[i] & 0x0f
+		length := int(raw[i+1] & 0x7f)
+		header := 2
+		switch length {
+		case 126:
+			if i+4 > len(raw) {
+				i = len(raw)
+				continue
+			}
+			length = int(raw[i+2])<<8 | int(raw[i+3])
+			header = 4
+		case 127:
+			if i+10 > len(raw) {
+				i = len(raw)
+				continue
+			}
+			length = int(binary.BigEndian.Uint64(raw[i+2 : i+10]))
+			header = 10
+		}
+		if i+header+length > len(raw) {
+			break
+		}
+		frames++
+		if opcode == 0 {
+			continuations++
+		}
+		i += header + length
+	}
+
+	if frames != 1 || continuations != 0 {
+		t.Fatalf("compressed 500 KiB message sent as %d frames (%d continuations), want exactly 1: "+
+			"fragmented deflate messages make iOS close the socket", frames, continuations)
 	}
 }
