@@ -2045,13 +2045,40 @@ func stopGoal(sctx *SessionContext, reason string) {
 	compactErr := sctx.Agent.SetCompactAt(prev)
 	budgetErr := sctx.Agent.SetMaxBudget(prevBudget)
 	if compactErr != nil || budgetErr != nil {
-		var unsub func()
-		unsub = sctx.Bus.Subscribe(func(e RunEnded) {
-			_ = sctx.Agent.SetCompactAt(prev)
-			_ = sctx.Agent.SetMaxBudget(prevBudget)
-			rebuildSystemPrompt(sctx) // re-apply now that the goal directive is gone
-			unsub()
-		})
+		var (
+			mu    sync.Mutex
+			fired bool
+			unsub func()
+		)
+		tearDown := func() {
+			// caller holds mu
+			if fired && unsub != nil {
+				u := unsub
+				unsub = nil
+				u()
+			}
+		}
+		handler := func(e RunEnded) {
+			mu.Lock()
+			alreadyFired := fired
+			fired = true
+			mu.Unlock()
+			if !alreadyFired {
+				_ = sctx.Agent.SetCompactAt(prev)
+				_ = sctx.Agent.SetMaxBudget(prevBudget)
+				rebuildSystemPrompt(sctx) // re-apply now that the goal directive is gone
+			}
+			mu.Lock()
+			tearDown()
+			mu.Unlock()
+		}
+		u := sctx.Bus.Subscribe(handler)
+		mu.Lock()
+		unsub = u
+		// RunEnded may have fired before Subscribe returned; complete teardown
+		// here so the one-shot subscription cannot leak or call a nil function.
+		tearDown()
+		mu.Unlock()
 	}
 	sctx.Bus.Publish(GoalEnded{SessionID: sctx.SessionID, Reason: reason})
 	appendGoalMarker(sctx, "🎯 Goal ended: "+reason, map[string]any{

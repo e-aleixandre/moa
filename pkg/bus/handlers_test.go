@@ -5,12 +5,61 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/session"
 )
+
+type busyGoalRestoreAgent struct{ *fakeAgent }
+
+func (a *busyGoalRestoreAgent) SetCompactAt(int) error { return errors.New("busy") }
+func (a *busyGoalRestoreAgent) SetMaxBudget(float64) error {
+	return errors.New("busy")
+}
+
+type runEndedDuringSubscribeBus struct {
+	*LocalBus
+	fire       atomic.Bool
+	unsubCalls atomic.Int32
+}
+
+func (b *runEndedDuringSubscribeBus) Subscribe(handler any) func() {
+	unsub := b.LocalBus.Subscribe(handler)
+	wrapped := func() {
+		b.unsubCalls.Add(1)
+		unsub()
+	}
+	if b.fire.CompareAndSwap(true, false) {
+		b.Publish(RunEnded{})
+		b.Drain(time.Second)
+	}
+	return wrapped
+}
+
+func TestStopGoalRunEndedDuringSubscribeTearsDown(t *testing.T) {
+	b := &runEndedDuringSubscribeBus{LocalBus: NewLocalBus()}
+	defer b.Close()
+	agent := &busyGoalRestoreAgent{fakeAgent: &fakeAgent{}}
+	sctx := newTestSessionContextWithState(b, agent)
+	sctx.Goal = goal.New()
+	if err := sctx.Goal.Enter(goal.Options{
+		Objective: "finish",
+		StatePath: filepath.Join(t.TempDir(), "STATE.md"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	b.fire.Store(true)
+	stopGoal(sctx, "stopped")
+
+	if got := b.unsubCalls.Load(); got != 1 {
+		t.Fatalf("deferred goal restore unsubscribe calls = %d, want 1", got)
+	}
+}
 
 func TestAutoVerifyCanceledBeforeGoroutineStartsDoesNotExecute(t *testing.T) {
 	deferred := make(chan func(), 1)
