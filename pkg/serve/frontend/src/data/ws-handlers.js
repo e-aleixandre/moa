@@ -533,8 +533,12 @@ export function handleWsInit(id, data) {
   delete pendingTextDeltas[id];
   delete pendingThinkingDeltas[id];
   delete pendingToolDeltas[id];
-	delete pendingBashDeltas[id];
+  delete pendingBashDeltas[id];
   delete pendingToolCallBuffers[id];
+  delete pendingSubagentEvents[id];
+  for (const key of Object.keys(subagentBuffers)) {
+    if (key.startsWith(`${id}:`)) delete subagentBuffers[key];
+  }
   delete materializedTextDuringMessage[id];
   // A finished subagent opened from its card lives only in local state: the
   // init snapshot lists live jobs only, so replacing the map outright would
@@ -1055,8 +1059,10 @@ export function handleWsToolEnd(id, data) {
     : (data.is_error ? 'error' : 'done');
 
   const note = extractToolNote(data.result, data.rejected === true);
+  let matched = false;
   const messages = sess.messages.map(m => {
-    if (m._type === 'tool_start' && m.tool_call_id === data.tool_call_id) {
+    if (!matched && m._type === 'tool_start' && m.tool_call_id === data.tool_call_id) {
+      matched = true;
       return {
         ...m,
         status: nextStatus,
@@ -1454,10 +1460,13 @@ function flushSubagentEvents() {
     const subs = { ...(sess.subagents || {}) };
     let changed = false;
     for (const { jobId, evt } of queue) {
-      const existing = subs[jobId] || {
-        jobId, task: '', model: '', status: 'running', async: true,
-        messages: [], streamingText: null, thinkingText: null, usage: null,
-      };
+      const existing = subs[jobId];
+      // An init is authoritative about live jobs. A queued event from before
+      // that snapshot must not recreate a job the server no longer lists;
+      // terminal jobs likewise cannot receive more transcript updates.
+      const isTerminal = existing
+        && (existing.status === 'completed' || existing.status === 'failed' || existing.status === 'cancelled');
+      if (!existing || isTerminal) continue;
       // Shallow clone the mutable transcript fields before reducing.
       const target = {
         messages: existing.messages || [],

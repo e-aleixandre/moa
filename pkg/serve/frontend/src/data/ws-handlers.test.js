@@ -2,7 +2,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved, handleWsCompactionEnd } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved, handleWsCompactionEnd } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
 import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
@@ -370,6 +370,50 @@ test('handleWsSubagentStart does not downgrade a terminal status back to running
   const sa = store.get().sessions.s1.subagents.j1;
   expect(sa.status).toBe('completed');
   expect(sa.async).toBe(true);
+});
+
+function queueSubagentFlush(run) {
+  const original = globalThis.requestAnimationFrame;
+  let flush;
+  globalThis.requestAnimationFrame = callback => {
+    flush = callback;
+    return 1;
+  };
+  try {
+    run();
+    flush();
+  } finally {
+    globalThis.requestAnimationFrame = original;
+  }
+}
+
+test('an init discards a queued event for a subagent absent from its live snapshot', () => {
+  seedSession('s1');
+  handleWsSubagentStart('s1', { job_id: 'j1', task: 'stale job', model: 'm', async: true });
+  queueSubagentFlush(() => {
+    handleWsSubagentEvent('s1', { job_id: 'j1', event: { type: 'text_delta', data: { delta: 'stale' } } });
+    handleWsInit('s1', { messages: [], subagents: [] });
+  });
+  expect(store.get().sessions.s1.subagents.j1).toBeUndefined();
+});
+
+test('a live subagent continues to receive queued transcript deltas', () => {
+  seedSession('s1');
+  handleWsSubagentStart('s1', { job_id: 'j1', task: 'live job', model: 'm', async: true });
+  queueSubagentFlush(() => {
+    handleWsSubagentEvent('s1', { job_id: 'j1', event: { type: 'text_delta', data: { delta: 'live text' } } });
+  });
+  expect(store.get().sessions.s1.subagents.j1).toMatchObject({ status: 'running', streamingText: 'live text' });
+});
+
+test('a late transcript event does not reopen a terminal subagent stream', () => {
+  seedSession('s1');
+  handleWsSubagentStart('s1', { job_id: 'j1', task: 'finished job', model: 'm', async: true });
+  handleWsSubagentEnd('s1', { job_id: 'j1', status: 'completed' });
+  queueSubagentFlush(() => {
+    handleWsSubagentEvent('s1', { job_id: 'j1', event: { type: 'text_delta', data: { delta: 'late' } } });
+  });
+  expect(store.get().sessions.s1.subagents.j1).toMatchObject({ status: 'completed', streamingText: null });
 });
 
 test('terminal subagent outcome is keyed by job ID and preserves result/error semantics', async () => {
@@ -1536,6 +1580,17 @@ test('a live event arriving after the snapshot updates the restored row instead 
   const after = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
   expect(after).toHaveLength(1);
   expect(after[0].status).toBe('done');
+});
+
+test('tool_end only completes the first matching tool call', () => {
+  setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [
+    { _type: 'tool_start', tool_call_id: 'reused', tool_name: 'read', status: 'running', result: null },
+    { _type: 'tool_start', tool_call_id: 'reused', tool_name: 'read', status: 'running', result: null },
+  ] } } });
+  handleWsToolEnd('s1', { tool_call_id: 'reused', result: 'first result', is_error: false });
+  const rows = store.get().sessions.s1.messages;
+  expect(rows[0]).toMatchObject({ status: 'done', result: 'first result' });
+  expect(rows[1]).toMatchObject({ status: 'running', result: null });
 });
 
 test('handleWsInit without live tools leaves history untouched', async () => {
