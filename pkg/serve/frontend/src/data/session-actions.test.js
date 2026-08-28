@@ -10,13 +10,15 @@ let apiResponse = [];
 
 const { store, setState } = await import('./store.js');
 const { syncConnections } = await import('./api.js');
-const { createSession, loadSessions, openPersistedSubagent, openBashJob, sendMessage } = await import('./session-actions.js');
+const { createSession, deleteSession, loadSessions, openPersistedSubagent, openBashJob, sendMessage } = await import('./session-actions.js');
+const { getToasts, removeToast } = await import('./notifications.js');
 const { adoptAttentionNamespace, handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
 
 beforeEach(() => {
   apiResponse = [];
   globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify(apiResponse), { status: 200 }));
   setState({ sessions: {}, tileTree: null, activeSession: null });
+  getToasts().forEach(({ id }) => removeToast(id));
 });
 
 test('createSession publishes and selects the POST response without a roster GET', async () => {
@@ -69,6 +71,17 @@ test('a failed create does not add a roster entry', async () => {
   await expect(createSession({ cwd: '/work' })).rejects.toThrow('500');
 
   expect(store.get().sessions).toEqual({});
+});
+
+test('a failed delete surfaces an error toast', async () => {
+  globalThis.fetch = () => Promise.resolve(new Response('nope', { status: 500 }));
+
+  await expect(deleteSession('s1')).rejects.toThrow('500');
+
+  expect(getToasts()).toEqual([expect.objectContaining({
+    title: 'Could not delete session',
+    type: 'error',
+  })]);
 });
 
 test('a later roster reconciles a created session without duplicates', async () => {

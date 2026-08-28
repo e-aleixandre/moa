@@ -339,7 +339,16 @@ export async function createSession(opts) {
 }
 
 export async function deleteSession(id) {
-  await api('DELETE', `/api/sessions/${id}`);
+  try {
+    await api('DELETE', `/api/sessions/${id}`);
+  } catch (e) {
+    addToast({
+      title: 'Could not delete session',
+      detail: String(e.message || e),
+      type: 'error',
+    });
+    throw e;
+  }
   // Read the store after the await so concurrent WS updates to other
   // sessions aren't clobbered by a stale pre-request snapshot.
   const state = store.get();
@@ -795,7 +804,17 @@ export async function resolveAskUser(sessionId, askId, answers) {
 }
 
 export async function resumeSession(id) {
-  const sess = await api('POST', `/api/sessions/${id}/resume`, undefined, { timeoutMs: 0 });
+  let sess;
+  try {
+    sess = await api('POST', `/api/sessions/${id}/resume`, undefined, { timeoutMs: 0 });
+  } catch (e) {
+    addToast({
+      title: 'Could not reopen session',
+      detail: String(e.message || e),
+      type: 'error',
+    });
+    throw e;
+  }
   await loadSessions();
   const state = store.get();
   if (state.isMobile) {
