@@ -192,14 +192,17 @@ func (a *Anthropic) consumeStream(ctx context.Context, body io.Reader, ch chan<-
 
 // streamState tracks the evolving message across SSE events.
 type streamState struct {
-	message      core.Message
-	contentIdx   int
-	blockType    string // current block type being built
-	jsonAccum    string // accumulated JSON for tool_use input
-	toolCallID   string
-	toolCallName string
-	requestTools []core.ToolSpec // original tool specs for reverse name mapping
-	isOAuth      bool            // whether this request used OAuth (for tool name mapping)
+	message        core.Message
+	contentIdx     int
+	blockType      string // current block type being built
+	jsonAccum      string // accumulated JSON for tool_use input
+	toolCallID     string
+	toolCallName   string
+	requestTools   []core.ToolSpec // original tool specs for reverse name mapping
+	isOAuth        bool            // whether this request used OAuth (for tool name mapping)
+	textAccum      strings.Builder
+	thinkingAccum  strings.Builder
+	signatureAccum strings.Builder
 
 	// Partial JSON parsing for streaming tool call arguments.
 	partialParser jsonutil.PartialParser
@@ -306,6 +309,10 @@ func (a *Anthropic) handleContentBlockStart(data string, state *streamState) *co
 		}
 	}
 
+	state.materializeContentBlock()
+	state.textAccum.Reset()
+	state.thinkingAccum.Reset()
+	state.signatureAccum.Reset()
 	state.contentIdx = payload.Index
 	state.blockType = payload.ContentBlock.Type
 
@@ -391,7 +398,7 @@ func (a *Anthropic) handleContentBlockDelta(data string, state *streamState) *co
 	case "text_delta":
 		// Append text to current content block
 		if idx < len(state.message.Content) {
-			state.message.Content[idx].Text += payload.Delta.Text
+			state.textAccum.WriteString(payload.Delta.Text)
 		}
 		return &core.AssistantEvent{
 			Type:         core.ProviderEventTextDelta,
@@ -401,7 +408,7 @@ func (a *Anthropic) handleContentBlockDelta(data string, state *streamState) *co
 
 	case "thinking_delta":
 		if idx < len(state.message.Content) {
-			state.message.Content[idx].Thinking += payload.Delta.Thinking
+			state.thinkingAccum.WriteString(payload.Delta.Thinking)
 		}
 		return &core.AssistantEvent{
 			Type:         core.ProviderEventThinkingDelta,
@@ -413,7 +420,7 @@ func (a *Anthropic) handleContentBlockDelta(data string, state *streamState) *co
 		// Thinking block signature — required for multi-turn with thinking.
 		// Must be preserved unmodified in message history.
 		if idx < len(state.message.Content) {
-			state.message.Content[idx].ThinkingSignature += payload.Delta.Signature
+			state.signatureAccum.WriteString(payload.Delta.Signature)
 		}
 		return nil // No user-visible event for signatures
 
@@ -445,6 +452,7 @@ func (a *Anthropic) handleContentBlockDelta(data string, state *streamState) *co
 
 func (a *Anthropic) handleContentBlockStop(state *streamState) *core.AssistantEvent {
 	idx := state.contentIdx
+	state.materializeContentBlock()
 
 	switch state.blockType {
 	case "text":
@@ -533,9 +541,23 @@ func (a *Anthropic) handleMessageDelta(data string, state *streamState) *core.As
 }
 
 func (a *Anthropic) handleMessageStop(state *streamState) *core.AssistantEvent {
+	state.materializeContentBlock()
 	final := state.message // copy
 	return &core.AssistantEvent{
 		Type:    core.ProviderEventDone,
 		Message: &final,
+	}
+}
+
+func (state *streamState) materializeContentBlock() {
+	if state.contentIdx >= len(state.message.Content) {
+		return
+	}
+	switch state.blockType {
+	case "text":
+		state.message.Content[state.contentIdx].Text = state.textAccum.String()
+	case "thinking":
+		state.message.Content[state.contentIdx].Thinking = state.thinkingAccum.String()
+		state.message.Content[state.contentIdx].ThinkingSignature = state.signatureAccum.String()
 	}
 }
