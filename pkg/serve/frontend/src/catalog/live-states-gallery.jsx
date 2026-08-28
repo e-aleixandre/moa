@@ -1,57 +1,15 @@
-import { GitFork } from "lucide-preact";
 import {
   UserWaypoint,
   AssistantDocument,
-  FanoutBlock,
   DelegationBlock,
-  BackgroundJob,
   StreamingSkeleton,
-  TypingDots,
-  ToolTicker,
   PermissionCard,
 } from "../components/index.js";
-import { AgentTray, Composer, StatusStrip, Pane, GridToolbar, LiveDock } from "../layout/index.js";
+import { Composer, StatusStrip, Pane, GridToolbar, LiveDock } from "../layout/index.js";
 import { StateDot } from "../primitives/index.js";
 import "./live-states-gallery.css";
 
-// LiveStatesGallery — reproduces the 3 sections of live-states.html: parallel
-// subagent fan-out, a background job with a collapsible log tail,
-// and the grid with three live panes at once. Everything reuses existing
-// primitives and components (Pane, AgentTray, AssistantDocument, ...); no
-// new layout is invented beyond what is explicitly required
-// (FanoutBlock, BackgroundJob, StreamingSkeleton/TypingDots, ToolTicker).
-
-const FANOUT_AGENTS = [
-  {
-    id: "changelog",
-    name: "changelog",
-    accent: "sky",
-    state: "running",
-    action: "grep merged PRs since v0.10.0 · 23 found",
-    time: "1m 12s",
-  },
-  {
-    id: "docs",
-    name: "docs",
-    accent: "teal",
-    state: "running",
-    action: "rewriting docs/serve.md §security",
-    time: "0m 47s",
-  },
-  {
-    id: "tests",
-    name: "tests",
-    state: "done",
-    result: "ok · 412 tests",
-    resultDesc: "full sweep green, -race clean, 2 skips (docker)",
-  },
-];
-
-const TRAY_AGENTS = [
-  { id: "changelog", kind: "subagent", name: "changelog", accent: "sky", action: "scanning PRs", time: "1m 12s" },
-  { id: "docs", kind: "subagent", name: "docs", accent: "teal", action: "serve.md", time: "0m 47s" },
-  { id: "tests", kind: "bash", name: "bash", action: "go test ./...", time: "0m 09s" },
-];
+// LiveStatesGallery — specimens for the current live conversation surfaces.
 
 // Live Dock specimen — same descriptor shape as liveTrayAgents(session).
 const LIVE_DOCK_AGENTS = [
@@ -60,7 +18,7 @@ const LIVE_DOCK_AGENTS = [
   { id: "bench", kind: "bash", name: "bash", action: "go test -race ./...", time: "4m 18s" },
 ];
 
-// DelegationBlock specimens (replaces FanoutBlock — see DelegationSection):
+// DelegationBlock specimens:
 // one live wave (2 running + 1 done, unsettled) and one fully terminal wave
 // that starts collapsed (settled, 2 done + 1 failed).
 const DELEGATION_LIVE_AGENTS = [
@@ -124,85 +82,7 @@ const DELEGATION_SETTLED_AGENTS = [
 ];
 
 
-const BGJOB_LINES = [
-  { text: "ok  pkg/bus      0.31s", tone: "dim" },
-  { text: "ok  pkg/session  1.24s", tone: "dim" },
-  { text: "ok  pkg/usage    0.09s", tone: "ok" },
-  { text: "=== RUN  TestServeResume/reconnect_mid_stream" },
-];
-
-const TICKER_LINES = [
-  { tool: "read", text: "docs/serve.md · §security" },
-  { tool: "grep", text: '"merged:" · 23 PRs' },
-  { tool: "edit", text: "CHANGELOG.md · drafting" },
-];
-
-// --- Section 1: parallel subagents ------------------------------------
-
-function FanoutSection() {
-  return (
-    <section class="lsg-section">
-      <h2>
-        Parallel subagents <span class="alt">fan-out block in the stream · running → done → result</span>
-      </h2>
-
-      <div class="lsg-convo">
-        <div class="lsg-convo-head">
-          <StateDot state="running" size={9} />
-          <span class="title">release 0.11</span>
-          <span class="path">~/dev/moa/main</span>
-          <span class="mp">sol ▰▰▰▱</span>
-        </div>
-        <div class="lsg-convo-body">
-          <UserWaypoint time="10:41">
-            <p>
-              Prep the 0.11 release: changelog from the merged PRs, docs pass, and a full test sweep.
-              Parallelize it.
-            </p>
-          </UserWaypoint>
-
-          <AssistantDocument>
-            <p>
-              Fanning out — three subagents, one per track. I'll assemble the release notes when they
-              report back.
-            </p>
-          </AssistantDocument>
-
-          <FanoutBlock
-            task="release prep"
-            count={3}
-            startedAt="10:41"
-            agents={FANOUT_AGENTS}
-            onViewReport={() => {}}
-          />
-
-          <AssistantDocument>
-            <p>
-              Tests are already green. When <code>changelog</code> lands I'll draft the notes against it{" "}
-              <TypingDots />
-            </p>
-          </AssistantDocument>
-        </div>
-
-        <AgentTray agents={TRAY_AGENTS} />
-        {/* Composer specimen: no session, so it shows the idle default (its
-            queue/activity are driven by a real session in the app). */}
-        <Composer />
-        <StatusStrip task="2 agents running · 1 result waiting" ctxPercent={44} tokensUp={58300} tokensDown={12100} />
-      </div>
-
-      <p class="lsg-caption">
-        <b>Running rows</b> show the agent's current action as a live mono line (blinking cursor) over an
-        indeterminate bar — glance and know what each one is doing. <b>Finished rows</b> turn green,
-        compress into a result chip, and offer "view report →". The tray mirrors the same jobs when you
-        scroll away; a finished-but-unread result gets the peach unseen pulse. While all this runs, the
-        composer stays yours — typing is never blocked.
-      </p>
-    </section>
-  );
-}
-
-// --- Section 1b: delegation block (replaces the fan-out block above) -----
+// --- Section 1: delegation block -----------------------------------------
 
 function DelegationSection() {
   return (
@@ -293,66 +173,7 @@ function LiveDockSection() {
   );
 }
 
-// --- Section 2: background jobs -----------------------------------------
-
-function BackgroundJobSection() {
-  return (
-    <section class="lsg-section">
-      <h2>
-        Background jobs <span class="alt">long bash in async · live tail · you keep working</span>
-      </h2>
-
-      <div class="lsg-convo">
-        <div class="lsg-convo-head">
-          <StateDot state="running" size={9} />
-          <span class="title">ws race fix</span>
-          <span class="path">~/dev/moa/main</span>
-          <span class="mp">sol ▰▰▰▱</span>
-        </div>
-        <div class="lsg-convo-body">
-          <AssistantDocument>
-            <p>
-              Full suite takes ~4 min, so I've launched it <strong>in the background</strong> and I'll
-              keep going with the changelog meanwhile:
-            </p>
-          </AssistantDocument>
-
-          <BackgroundJob
-            jobId="bg2"
-            jobLabel="BG · JOB 2"
-            cmd="go test -race ./..."
-            progress="pkg 31/47"
-            elapsed="2:18"
-            lines={BGJOB_LINES}
-            live
-          />
-
-          <AssistantDocument>
-            <p>
-              Meanwhile, drafting the changelog entry for the reconnect fix. The race was subtle: the
-              resume snapshot and the live subscription didn't overlap, so any event published in that
-              <span class="doc-cursor" aria-hidden="true" />
-            </p>
-          </AssistantDocument>
-          <StreamingSkeleton />
-        </div>
-
-        <Composer />
-        <StatusStrip task="streaming · bg job 2:18" ctxPercent={62} tokensUp={41200} tokensDown={8700} />
-      </div>
-
-      <p class="lsg-caption">
-        <b>The strip</b> pins the job with elapsed time and a progress tail (<code>pkg 31/47</code>);
-        "peek" unfolds the last lines of live output — the newest line carries the teal cursor. Above it,
-        the assistant keeps <b>streaming its own text</b> (mauve caret + shimmer skeleton for the
-        not-yet-arrived paragraph). Two things happening at once, each with its own pulse, neither
-        shouting.
-      </p>
-    </section>
-  );
-}
-
-// --- Section 3: grid alive -----------------------------------------------
+// --- Section 2: grid alive -----------------------------------------------
 
 function GridAliveSection() {
   return (
@@ -380,23 +201,6 @@ function GridAliveSection() {
           >
             <p>Drafting release notes…</p>
             <StreamingSkeleton widths={["94%", "81%", "56%"]} />
-          </Pane>
-
-          <Pane
-            title="release 0.11"
-            state="running"
-            hideComposer
-            footer={
-              <>
-                <span class="pulse-b">● working</span>
-                <span class="spacer">1m 40s</span>
-              </>
-            }
-          >
-            <span class="lsg-ticker-head">
-              <GitFork size={12} aria-hidden="true" /> 2 subagents running
-            </span>
-            <ToolTicker lines={TICKER_LINES} />
           </Pane>
 
           <Pane
@@ -441,10 +245,8 @@ export function LiveStatesGallery() {
         </p>
       </header>
 
-      <FanoutSection />
       <DelegationSection />
       <LiveDockSection />
-      <BackgroundJobSection />
       <GridAliveSection />
     </div>
   );

@@ -5,7 +5,7 @@
 // sanitization. That's the part we customize (the table-wrapping renderer).
 import { test, expect } from 'bun:test';
 import DOMPurify from 'dompurify';
-import { parseMarkdown, renderMarkdownWithCaret } from './markdown.js';
+import { parseMarkdown, renderMarkdown, renderMarkdownWithCaret } from './markdown.js';
 
 test('a GFM table is wrapped in a horizontal-scroll container', () => {
   const html = parseMarkdown('| a | b |\n|---|---|\n| 1 | 2 |\n');
@@ -76,6 +76,22 @@ test('a streaming caret is passed through DOMPurify sanitization', () => {
     renderMarkdownWithCaret('hello');
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain('doc-cursor');
+  } finally {
+    DOMPurify.sanitize = sanitize;
+  }
+});
+
+test('renderMarkdown reuses the sanitized HTML for identical transcript text', () => {
+  const sanitize = DOMPurify.sanitize;
+  let calls = 0;
+  DOMPurify.sanitize = (html) => {
+    calls++;
+    return html;
+  };
+  try {
+    const text = `cache-test-${crypto.randomUUID()}\n\n**stable transcript block**`;
+    expect(renderMarkdown(text)).toBe(renderMarkdown(text));
+    expect(calls).toBe(1);
   } finally {
     DOMPurify.sanitize = sanitize;
   }

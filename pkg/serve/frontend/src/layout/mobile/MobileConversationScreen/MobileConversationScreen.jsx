@@ -430,8 +430,8 @@ export function MobileConversationScreen({ version = null }) {
         onSettings={onSettingsFromDrawer}
         version={version}
         onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
-        onReopenSession={(id) => resumeSession(id)}
-        onDeleteSession={(id) => deleteSession(id)}
+        onReopenSession={(id) => { resumeSession(id).catch(() => {}); }}
+        onDeleteSession={(id) => { deleteSession(id).catch(() => {}); }}
         groupByProject={state.groupByProject}
         drawerCollapsed={state.drawerCollapsed}
         onGroupByProject={setGroupByProject}

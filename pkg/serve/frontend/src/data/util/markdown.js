@@ -40,6 +40,12 @@ const marked = new Marked({
 // tool result. Plain escaped code remains safe and readable without it.
 const HIGHLIGHT_MAX_BYTES = 64 * 1024;
 
+const MARKDOWN_CACHE_MAX_ENTRIES = 300;
+const MARKDOWN_CACHE_MAX_SOURCE_BYTES = 16 * 1024;
+const MARKDOWN_CACHE_MAX_BYTES = 2 * 1024 * 1024;
+const markdownCache = new Map();
+let markdownCacheBytes = 0;
+
 // Escape untrusted text before interpolating it into HTML attributes/markup.
 // The code fence info-string (lang) is attacker-controllable when the assistant
 // quotes file/web content, so it must never break out of the attribute.
@@ -130,7 +136,7 @@ export function parseMarkdown(text) {
   return marked.parse(text);
 }
 
-export function renderMarkdown(text) {
+function renderAndSanitizeMarkdown(text) {
   const raw = marked.parse(text);
   return DOMPurify.sanitize(raw, {
     ADD_TAGS: ['div', 'button', 'span'],
@@ -138,9 +144,39 @@ export function renderMarkdown(text) {
   });
 }
 
+export function renderMarkdown(text) {
+  // Long tool results are unlikely to be revisited and would otherwise let
+  // cached source plus HTML consume disproportionate memory.
+  if (text.length > MARKDOWN_CACHE_MAX_SOURCE_BYTES) return renderAndSanitizeMarkdown(text);
+
+  const cached = markdownCache.get(text);
+  if (cached) {
+    markdownCache.delete(text);
+    markdownCache.set(text, cached);
+    return cached.html;
+  }
+
+  const html = renderAndSanitizeMarkdown(text);
+  const bytes = 2 * (text.length + html.length);
+  if (bytes > MARKDOWN_CACHE_MAX_BYTES) return html;
+
+  while (markdownCache.size >= MARKDOWN_CACHE_MAX_ENTRIES
+    || markdownCacheBytes + bytes > MARKDOWN_CACHE_MAX_BYTES) {
+    const oldest = markdownCache.entries().next().value;
+    if (!oldest) break;
+    markdownCache.delete(oldest[0]);
+    markdownCacheBytes -= oldest[1].bytes;
+  }
+  markdownCache.set(text, { html, bytes });
+  markdownCacheBytes += bytes;
+  return html;
+}
+
 // Append the caret to the markdown source so marked keeps it in the final
 // inline context instead of placing it after the prose block.
 export function renderMarkdownWithCaret(text) {
   if (!text) return '<span class="doc-cursor"></span>';
-  return renderMarkdown(`${text}<span class="doc-cursor"></span>`);
+  // The streaming source changes for every token, so caching it would evict
+  // stable transcript entries without producing cache hits.
+  return renderAndSanitizeMarkdown(`${text}<span class="doc-cursor"></span>`);
 }
