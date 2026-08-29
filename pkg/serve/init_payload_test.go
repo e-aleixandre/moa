@@ -12,7 +12,10 @@ import (
 	"github.com/e-aleixandre/moa/pkg/session"
 )
 
-// saveOutcome writes one terminal transcript to a session's sidecar store.
+// saveOutcome writes one terminal transcript to a session's sidecar store,
+// together with the launch row that anchors its restored card. Both exist in
+// any real session: the subagent tool tags its own tool result with the job id
+// (subagent.go#taggedWithJob) before the child can reach a terminal state.
 func saveOutcome(t *testing.T, sess *ManagedSession, transcript session.SubagentTranscript) {
 	t.Helper()
 	store := sess.persister.subagentStore(sess.ID)
@@ -22,6 +25,25 @@ func saveOutcome(t *testing.T, sess *ManagedSession, transcript session.Subagent
 	if err := store.Save(transcript); err != nil {
 		t.Fatalf("save transcript %q: %v", transcript.JobID, err)
 	}
+	appendSubagentLaunch(t, sess, transcript.JobID)
+}
+
+// appendSubagentLaunch records the tagged tool result the subagent tool writes
+// when it spawns a child. The init payload only sends a card whose launch row
+// it is also sending, so a test that skips this gets no outcome at all.
+func appendSubagentLaunch(t *testing.T, sess *ManagedSession, jobID string) {
+	t.Helper()
+	sess.runtime.Context().Tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{
+		Message: core.Message{
+			MsgID:      "launch-" + jobID,
+			Role:       "tool_result",
+			ToolName:   "subagent",
+			ToolCallID: "call-" + jobID,
+			Content:    []core.Content{{Type: "text", Text: "Subagent started in background."}},
+			Timestamp:  time.Now().Unix(),
+		},
+		Custom: map[string]any{"subagent_job_id": jobID},
+	}})
 }
 
 // TestBuildInitData_TotalPayloadStaysWithinBudget is the aggregate invariant
@@ -567,5 +589,42 @@ func TestInitProjectionStillDropsUnrelatedInternalCustomKeys(t *testing.T) {
 	projected, _ := sanitizeHistoryMessage(original)
 	if _, leaked := projected.Custom["internal_secret"]; leaked {
 		t.Fatalf("unrelated internal key reached the client: %#v", projected.Custom)
+	}
+}
+
+// TestBuildInitData_OmitsOutcomesWhoseLaunchIsNotSent covers the report behind
+// this filter: a long-running session showed ~50 subagent cards in one block at
+// the end of the transcript, hours apart from each other. The cap is applied to
+// the newest finished children, which in an active session are spread far wider
+// than the messages the init sends, so every card missed its launch row and the
+// client appended them all after the last message.
+func TestBuildInitData_OmitsOutcomesWhoseLaunchIsNotSent(t *testing.T) {
+	mgr := newTestManager(t, t.Context(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := sess.persister.subagentStore(sess.ID)
+	if store == nil {
+		t.Fatal("session has no subagent store")
+	}
+	// Two finished children. Only the second one's launch row is in history,
+	// standing in for a launch that has scrolled out of the init window.
+	for _, jobID := range []string{"sa-old", "sa-recent"} {
+		if err := store.Save(session.SubagentTranscript{
+			JobID: jobID, Status: "completed", Task: "t", Result: "ok", FinishedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("save %q: %v", jobID, err)
+		}
+	}
+	appendSubagentLaunch(t, sess, "sa-recent")
+
+	outcomes := buildInitData(sess, bus.StreamingAggregate{}, nil, "").SubagentOutcomes
+	ids := make([]string, len(outcomes))
+	for i, outcome := range outcomes {
+		ids[i] = outcome.JobID
+	}
+	if len(ids) != 1 || ids[0] != "sa-recent" {
+		t.Fatalf("outcomes = %v, want only [sa-recent]: a card whose launch row is absent has nothing to attach to", ids)
 	}
 }

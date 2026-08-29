@@ -632,6 +632,15 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		store := sess.persister.subagentStore(sess.ID)
 		transcripts, err := store.ListSummaries()
 		if err == nil && len(transcripts) > 0 {
+			// A card is rendered against the launch row that spawned it. One
+			// whose launch sits outside this payload has nothing to attach to,
+			// so the client appends it after the last message instead — and in
+			// a long session every card in the cap can miss at once, which
+			// reads as a run of unrelated subagents at the end of the
+			// transcript. The launch row is durable history, so skipping a card
+			// here does not lose it: paging back to its turn renders it in
+			// place.
+			launched := launchedSubagentJobIDs(msgs)
 			// ListSummaries is newest-finished first, so the cap is applied by
 			// walking it in that order and stopping; the chronological order the
 			// client expects is restored by sortSubagentOutcomes below.
@@ -641,6 +650,9 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 					break
 				}
 				if transcript.Status != "completed" && transcript.Status != "failed" && transcript.Status != "cancelled" {
+					continue
+				}
+				if !launched[transcript.JobID] {
 					continue
 				}
 				// On a validated delta the client already holds every card that
@@ -718,6 +730,16 @@ func pendingAttentionData(pending bus.PendingApprovalInfo) (*PermissionData, *As
 		}
 	}
 	return permissionData, askData
+}
+
+func launchedSubagentJobIDs(msgs []core.AgentMessage) map[string]bool {
+	launched := make(map[string]bool)
+	for _, msg := range msgs {
+		if jobID, ok := msg.Custom["subagent_job_id"].(string); ok && jobID != "" {
+			launched[jobID] = true
+		}
+	}
+	return launched
 }
 
 func sortSubagentOutcomes(outcomes []SubagentEndData) {
