@@ -44,6 +44,11 @@ type SessionConfig struct {
 	// Config overrides. When nil, loaded from disk via core.LoadMoaConfig(CWD).
 	MoaCfg *core.MoaConfig
 
+	// SessionID identifies this conversation for prompt-cache routing on the
+	// Responses providers. Empty (the default) sends no key, which is the
+	// right behavior for one-off agents that have no conversation to pin.
+	SessionID string
+
 	// MCPDisableSources gives the provenance (global/project) of MCP disable
 	// vetoes when MoaCfg is injected. The merged MoaCfg.DisabledMCPServers loses
 	// which scope each name came from, so callers that inject MoaCfg should also
@@ -529,6 +534,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		WorkspaceRoot:       cfg.CWD,
 		SkillsIndex:         skillsIndex,
 		MemoryIndex:         memoryIndex,
+		PromptCacheKey:      core.PromptCacheKey(cfg.SessionID),
 		BashState:           bashState,
 		AttachmentScope:     cfg.AttachmentScope,
 		OnAsyncJobChange:    cfg.OnAsyncJobChange,
@@ -580,6 +586,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		SystemPrompt:        systemPrompt,
 		ThinkingLevel:       cfg.ThinkingLevel,
 		CacheTTL:            core.GetCacheTTL(moaCfg),
+		PromptCacheKey:      core.PromptCacheKey(cfg.SessionID),
 		Tools:               toolReg,
 		WorkspaceRoot:       cfg.CWD,
 		MaxTurns:            maxTurns,

@@ -733,3 +733,35 @@ func ResolvePathScope(pathScope string, disableSandbox bool, permMode string) st
 		return "workspace"
 	}
 }
+
+// PromptCacheKey builds the conversation identifier sent to the Responses
+// providers (OpenAI, xAI) so requests sharing a prefix reach the machine
+// holding their cache. Cache entries are per-machine, and traffic above a
+// provider's per-machine limit overflows elsewhere and misses; a stable key
+// per conversation is what keeps a session pinned to its own cache.
+//
+// The key only influences routing — a read still requires the prefix to match —
+// so it is never a correctness concern, and an empty sessionID yields an empty
+// key that callers omit from the request.
+//
+// It deliberately excludes the model: routing is already per-model, so adding
+// it would only churn the key on every model switch. The session id is a random
+// token, not derived from user content.
+func PromptCacheKey(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	return "moa:session:" + sessionID
+}
+
+// SubagentPromptCacheKey derives a child's cache key from its parent session
+// and job id. A child is a separate conversation — its own system prompt, tools
+// and history — so it shares no reusable prefix with its parent and must not
+// share its routing group. The parent id is included because job ids are only
+// unique within one session's job store.
+func SubagentPromptCacheKey(parentKey, jobID string) string {
+	if parentKey == "" || jobID == "" {
+		return ""
+	}
+	return parentKey + ":subagent:" + jobID
+}

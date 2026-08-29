@@ -194,6 +194,11 @@ type StreamOptions struct {
 	APIKey         string   `json:"-"`
 	ThinkingLevel  string   `json:"thinking_level,omitempty"`
 	CacheRetention string   `json:"cache_retention,omitempty"`
+	// PromptCacheKey identifies the conversation this request belongs to, so
+	// requests sharing a prefix are routed to the machine holding its cache.
+	// Consumed by the Responses providers (OpenAI, xAI); Anthropic has no
+	// equivalent and ignores it.
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
 // ThinkingLevels is the canonical list of valid thinking levels.

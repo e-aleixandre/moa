@@ -75,6 +75,12 @@ func (x *XAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assista
 	body, err := responses.BuildRequestBody(req, responses.Dialect{
 		Provider: "xai", Model: req.Model.ID,
 		SupportsDocuments: false, SupportsMaxOutputTokens: false, SupportsParallelToolCalls: true,
+		// prompt_cache_key is documented for api.x.ai. The consumer proxy is
+		// undocumented and this project has already hit parameter differences
+		// between Responses backends, so only send it on the documented one.
+		// Gate on the consumer flag: both transports share the same endpoint
+		// path, so the path cannot tell them apart.
+		SupportsPromptCacheKey:  !x.consumer,
 		AllowedReasoningEfforts: []string{"low", "medium", "high"},
 	})
 	if err != nil {

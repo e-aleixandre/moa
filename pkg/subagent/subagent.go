@@ -68,6 +68,12 @@ type Config struct {
 	SkillsIndex            string // pre-formatted skills index for system prompt
 	MemoryIndex            string // pre-formatted memory index (one line per fact)
 
+	// PromptCacheKey is the PARENT's cache-routing key. Each child derives its
+	// own from it plus the job id: a child is a separate conversation with its
+	// own system prompt, tools and history, so it shares no reusable prefix
+	// with the parent and must not share its routing group. Empty = no key.
+	PromptCacheKey string
+
 	// BashState, when non-nil, is the per-agent persistent shell state. The
 	// subagent seeds an isolated copy for the child (subshell semantics) and
 	// drops it when the child finishes. nil = no shell-state isolation.
@@ -790,7 +796,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		}
 	}()
 
-	child, err := newChildAgent(cfg, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg)
+	child, err := newChildAgent(cfg, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, j.id)
 	if err != nil {
 		jobs.setFailed(j.id, err.Error())
 		return
@@ -1094,7 +1100,7 @@ func resolveChildGuardrails(cfg Config, perCallDuration time.Duration) (maxTurns
 	return maxTurns, maxRunDuration
 }
 
-func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry) (*agent.Agent, error) {
+func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, jobID string) (*agent.Agent, error) {
 	maxTurns, runDuration := resolveChildGuardrails(cfg, maxRunDuration)
 	effectiveThinking, err := core.EffectiveThinkingLevel(model, thinkingLevel)
 	if err != nil {
@@ -1105,6 +1111,7 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 		Model:          model,
 		SystemPrompt:   systemPrompt,
 		ThinkingLevel:  effectiveThinking,
+		PromptCacheKey: core.SubagentPromptCacheKey(cfg.PromptCacheKey, jobID),
 		Tools:          childReg,
 		MaxTurns:       maxTurns,
 		MaxRunDuration: runDuration,

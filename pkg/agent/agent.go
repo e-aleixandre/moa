@@ -372,6 +372,9 @@ type AgentConfig struct {
 	SystemPrompt  string
 	ThinkingLevel string
 	CacheTTL      string // Prompt-cache TTL: "" (5m default) or "1h". Interactive agent only.
+	// PromptCacheKey identifies this agent's conversation for cache routing on
+	// the Responses providers (OpenAI, xAI). Empty omits the field entirely.
+	PromptCacheKey string
 	MaxTokens     int    // Max output tokens per LLM call. 0 = shared model-aware default.
 	Tools         *core.Registry
 	Extensions    []extension.Extension
@@ -1215,7 +1218,9 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	toolSpecs := a.tools.Specs()
 	estimate := core.EstimateContextTokens(msgs, a.config.SystemPrompt, toolSpecs, epoch)
 
-	streamOpts := core.StreamOptions{ThinkingLevel: a.config.ThinkingLevel}
+	// Compaction runs against a different prefix, so it will likely miss the
+	// cache — but it belongs to this conversation and must route with it.
+	streamOpts := core.StreamOptions{ThinkingLevel: a.config.ThinkingLevel, PromptCacheKey: a.config.PromptCacheKey}
 	result, compacted, err := compaction.Compact(
 		ctx, provider, model, streamOpts,
 		msgs, estimate.Tokens, settings.EffectiveWindow(model.MaxInput), *settings, focus,
@@ -1527,6 +1532,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	streamOpts := core.StreamOptions{
 		ThinkingLevel:  a.config.ThinkingLevel,
 		CacheRetention: a.config.CacheTTL,
+		PromptCacheKey: a.config.PromptCacheKey,
 	}
 	if a.config.MaxTokens > 0 {
 		mt := a.config.MaxTokens

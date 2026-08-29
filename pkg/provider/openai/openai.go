@@ -96,7 +96,10 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		apiKey = req.Options.APIKey
 	}
 
-	body, err := responses.BuildRequestBody(req, responses.Dialect{Provider: "openai", Model: req.Model.ID, SupportsDocuments: o.SupportsDocuments(), SupportsMaxOutputTokens: o.supportsMaxOutputTokens(), SupportsParallelToolCalls: o.endpoint == apiEndpoint})
+	// prompt_cache_key is accepted by both transports: the official Codex
+	// client sends it to the same ChatGPT OAuth backend, unlike
+	// max_output_tokens which that backend rejects.
+	body, err := responses.BuildRequestBody(req, responses.Dialect{Provider: "openai", Model: req.Model.ID, SupportsDocuments: o.SupportsDocuments(), SupportsMaxOutputTokens: o.supportsMaxOutputTokens(), SupportsParallelToolCalls: o.endpoint == apiEndpoint, SupportsPromptCacheKey: true})
 	if err != nil {
 		return nil, fmt.Errorf("openai: building request: %w", err)
 	}

@@ -203,10 +203,16 @@ func main() {
 	// misattributed to global.
 	mcpDisableSources := core.LoadMoaConfigResolved(cwd).MCPDisabled
 
+	// A headless run is its own short-lived conversation. It needs a unique id
+	// for prompt-cache routing: the literal "headless" used for bus events
+	// would lump every independent invocation into one routing group.
+	headlessSessionID := core.NewSteerID()
+
 	sess, err := bootstrap.BuildSession(bootstrap.SessionConfig{
-		CWD:      cwd,
-		Model:    resolvedModel,
-		Provider: providerBuild.Provider,
+		CWD:       cwd,
+		Model:     resolvedModel,
+		Provider:  providerBuild.Provider,
+		SessionID: headlessSessionID,
 		ProviderFactory: func(model core.Model) (core.Provider, error) {
 			build, err := buildProvider(model, authStore)
 			if err != nil {

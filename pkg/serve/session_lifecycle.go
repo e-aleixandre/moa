@@ -232,6 +232,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		Provider:          prov,
 		ProviderFactory:   m.providerFactory,
 		MoaCfg:            &moaCfg,
+		SessionID:         id,
 		MCPDisableSources: mcpSources,
 		ExtraMCPServers:   extraMCPServers,
 		Ctx:               sessionCtx,

@@ -23,6 +23,10 @@ type responsesRequest struct {
 	ToolChoice        string           `json:"tool_choice,omitempty"`
 	Include           []string         `json:"include,omitempty"`
 	ParallelToolCalls bool             `json:"parallel_tool_calls,omitempty"`
+	// PromptCacheKey groups requests that share a prefix so they reach the
+	// same cache. Omitted when empty: an empty string would lump every
+	// unidentified request into one routing group.
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
 type reasoning struct {
@@ -39,6 +43,7 @@ type Dialect struct {
 	SupportsDocuments         bool
 	SupportsMaxOutputTokens   bool
 	SupportsParallelToolCalls bool
+	SupportsPromptCacheKey    bool
 	AllowedReasoningEfforts   []string
 }
 
@@ -70,6 +75,13 @@ func BuildRequestBody(req core.Request, dialect Dialect) ([]byte, error) {
 	}
 	if req.Options.Temperature != nil {
 		r.Temperature = req.Options.Temperature
+	}
+
+	// Cache entries live on specific machines, so both OpenAI and xAI use this
+	// key to route requests that share a prefix to the same one. It only
+	// influences routing — the prefix must still match for a cache read.
+	if dialect.SupportsPromptCacheKey {
+		r.PromptCacheKey = req.Options.PromptCacheKey
 	}
 
 	if effort := MapReasoningEffort(req.Options.ThinkingLevel, dialect.AllowedReasoningEfforts); effort != "" {

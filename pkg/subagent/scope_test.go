@@ -47,7 +47,7 @@ func TestChildAgentCarriesParentScopeFromConfig(t *testing.T) {
 	)
 	child, err := newChildAgent(
 		Config{AttachmentScope: parentScope}, provider,
-		core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", reg,
+		core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", reg, "job-test",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func TestChildAgentWithoutParentScopeWorksInline(t *testing.T) {
 		textResponse("done"),
 	)
 	child, err := newChildAgent(
-		Config{}, provider, core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", reg,
+		Config{}, provider, core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", reg, "job-test",
 	)
 	if err != nil {
 		t.Fatal(err)
