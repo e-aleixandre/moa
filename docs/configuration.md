@@ -77,7 +77,7 @@ switched off for a project — is kept separately, in
 | `memory_enabled` | bool | `true` | Cross-session project memory |
 | `auto_verify` | bool | `false` | Run verification checks automatically after changes |
 | `brave_api_key` | string | | Enables the `web_search` tool |
-| `cache_ttl` | string | `"5m"` | Interactive prompt-cache TTL. Only `"1h"` changes behavior; any other value falls back to the 5m default |
+| `cache_ttl` | string | `"1h"` | Interactive prompt-cache TTL. Only `"5m"` changes behavior; any other value falls back to the 1h default |
 | `stt_language` | string | `"en"` | Speech-to-text language hint (ISO-639-1, e.g. `"es"`, `"en"`). Avoids mis-detection on short clips. Use `"auto"` to let the model detect |
 | `stt_model` | string | `"gpt-transcribe"` | Speech-to-text model. `"gpt-4o-mini-transcribe"` costs half as much per minute; `"whisper-1"` is the older, slower model it replaced |
 | `stt_vocabulary` | string[] | `[]` | Words the transcriber keeps getting wrong (names, jargon, product names). Accumulates across scopes: a project adds its terms to your global ones. Keep it short — long lists make transcription worse (max 50 terms) |

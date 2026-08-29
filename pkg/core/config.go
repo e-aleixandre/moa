@@ -100,7 +100,7 @@ type MoaConfig struct {
 	AutoVerify             *bool                `json:"auto_verify,omitempty"`                   // nil = false (disabled by default)
 	PersistentShell        *bool                `json:"persistent_shell,omitempty"`              // nil = true (enabled by default)
 	UpdateCheck            *bool                `json:"update_check,omitempty"`                  // nil = true (check stable releases at most every 6h)
-	CacheTTL               string               `json:"cache_ttl,omitempty"`                     // Interactive prompt-cache TTL: "5m" (default) or "1h". Only "1h" changes behavior.
+	CacheTTL               string               `json:"cache_ttl,omitempty"`                     // Interactive prompt-cache TTL: "1h" (default) or "5m". Only "5m" changes behavior.
 	STTLanguage            string               `json:"stt_language,omitempty"`                  // Speech-to-text language as ISO-639-1 (e.g. "es", "en"). Empty = "en"; "auto" lets the model detect.
 	STTModel               string               `json:"stt_model,omitempty"`                     // Speech-to-text model id. Empty = "gpt-transcribe".
 	STTVocabulary          []string             `json:"stt_vocabulary,omitempty"`                // Words the transcriber tends to get wrong (names, jargon). Keep it short: long lists hurt accuracy.
@@ -140,14 +140,18 @@ func IsUpdateCheckEnabled(cfg MoaConfig) bool {
 	return cfg.UpdateCheck == nil || *cfg.UpdateCheck
 }
 
-// GetCacheTTL returns the prompt-cache TTL for the interactive agent. Only "1h"
-// is honored; anything else (including empty or a typo) yields "" — the
-// Anthropic default of 5 minutes. Subagents and one-shot calls never use this.
+// GetCacheTTL returns the prompt-cache TTL for the interactive agent. The
+// default is "1h": interactive sessions routinely sit idle for more than five
+// minutes, and a lapsed cache forces a full-price prefix rebuild that costs far
+// more than the 2x (vs 1.25x) write premium of the extended window. An explicit
+// "5m" opts back into the provider's short-lived cache; anything else
+// (including a typo) also gets the 1h default. Subagents and one-shot calls
+// never use this — their runs are short-lived, so the 5m cache fits them.
 func GetCacheTTL(cfg MoaConfig) string {
-	if cfg.CacheTTL == "1h" {
-		return "1h"
+	if cfg.CacheTTL == "5m" {
+		return ""
 	}
-	return ""
+	return "1h"
 }
 
 // CacheTTLDuration maps the configured cache retention to a concrete window.
