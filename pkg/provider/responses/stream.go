@@ -589,8 +589,11 @@ func (s *streamState) finalize(ev *event, ch chan<- core.AssistantEvent) bool {
 		}
 		// Response.Model is the actual model used (e.g. "gpt-5.5"); Response.ID
 		// is "resp_..." and would poison per-model cost attribution/ResolveModel.
+		// Canonicalize it: xAI names the same model "grok-4.6-build" on the
+		// subscription backend and "grok-4.6" on the API one, and storing the
+		// backend's spelling makes an identical model look like two.
 		if ev.Response.Model != "" {
-			s.message.Model = ev.Response.Model
+			s.message.Model = core.CanonicalModelID(ev.Response.Model)
 		}
 
 		// (1) A response that ran out of output budget (status "incomplete")

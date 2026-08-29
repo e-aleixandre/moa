@@ -77,6 +77,8 @@ See [Web UI](./serve.md) for details.
 | `codex-spark` | `gpt-5.3-codex-spark` |
 | `codex-5.2` | `gpt-5.2-codex` |
 | `grok` | `grok-4.6` (xAI) |
+| `grok-4.6-build` | `grok-4.6` (the subscription backend's name for it) |
+| `grok-4.5-build` | `grok-4.5` (the subscription backend's name for it) |
 | `sol` | `gpt-5.6-sol` |
 | `terra` | `gpt-5.6-terra` |
 | `luna` | `gpt-5.6-luna` |

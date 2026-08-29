@@ -154,6 +154,11 @@ var modelAliases = map[string]string{
 	"gpt5.5":      "gpt-5.5",
 	// xAI
 	"grok": "grok-4.6",
+	// The subscription backend names the same models "-build"; the API backend
+	// omits the suffix. Same model, same pricing, so both spellings resolve to
+	// one entry and cost/identity work whichever backend answered.
+	"grok-4.6-build": "grok-4.6",
+	"grok-4.5-build": "grok-4.5",
 }
 
 // ResolveModel resolves a model specifier to a fully-populated Model.
