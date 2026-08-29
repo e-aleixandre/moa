@@ -81,3 +81,45 @@ func TestCacheClock_IgnoresNonAnthropicRequests(t *testing.T) {
 		t.Error("a non-Anthropic request warmed the Anthropic cache clock")
 	}
 }
+
+// TestCacheClock_ModelSwitchDoesNotLeakExpiry covers both directions of a model
+// switch, since the clock (MessageStarted) and the display gate (info()) look
+// at different things: the message's provider and the session's current model.
+//
+// OpenAI and xAI run through the same responses stream, which reports no cache
+// write and honors no TTL — their caching is automatic and not user-tunable —
+// so neither may ever produce an Anthropic cache countdown.
+func TestCacheClock_ModelSwitchDoesNotLeakExpiry(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := newTestManager(t, ctx, newMockProvider())
+	defer mgr.Shutdown()
+	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An OpenAI and an xAI request must not warm the clock, even though the
+	// session's default model is Anthropic: no Anthropic request ever ran.
+	for _, provider := range []string{"openai", "xai"} {
+		sess.runtime.Bus.Publish(bus.MessageStarted{
+			SessionID: sess.ID,
+			Message:   core.AgentMessage{Message: core.Message{Role: "assistant", Provider: provider}},
+		})
+	}
+	sess.runtime.Bus.Drain(time.Second)
+	if got := sess.info().CacheExpiresAt; !got.IsZero() {
+		t.Errorf("non-Anthropic requests surfaced an expiry: %v", got)
+	}
+
+	// After a real Anthropic request the countdown appears, anchored on that
+	// request rather than on the end of the run.
+	sess.runtime.Bus.Publish(bus.MessageStarted{
+		SessionID: sess.ID,
+		Message:   core.AgentMessage{Message: core.Message{Role: "assistant", Provider: "anthropic"}},
+	})
+	pollUntil(t, time.Second, "expiry surfaced after an Anthropic request", func() bool {
+		return !sess.info().CacheExpiresAt.IsZero()
+	})
+}
