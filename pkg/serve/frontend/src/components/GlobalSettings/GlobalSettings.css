@@ -382,3 +382,68 @@
     transition: none;
   }
 }
+
+/* Global auto-compaction threshold. Same column rhythm as the allowlist above,
+   so both server-side settings read as one family. The number field borrows the
+   filter field's chrome rather than inventing a third input style. */
+.compact-at {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.compact-at-hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--overlay1);
+}
+
+.compact-at-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.compact-at-input {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+}
+
+.compact-at-input:focus-within {
+  border-color: var(--surface2);
+}
+
+.compact-at-input input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font-family: var(--mono);
+  /* --text-input (16px) — anything smaller makes iOS zoom on focus. */
+  font-size: var(--text-input);
+  line-height: var(--leading-tight);
+}
+
+.compact-at-input input::placeholder {
+  color: var(--overlay0);
+}
+
+.compact-at-unit {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+}
+
+.compact-at-note {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--overlay1);
+}

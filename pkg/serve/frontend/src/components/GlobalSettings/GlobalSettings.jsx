@@ -1,4 +1,5 @@
 import { NotificationSettings } from "../NotificationSettings/NotificationSettings.jsx";
+import { CompactAt } from "./CompactAt.jsx";
 import { SubagentModels } from "./SubagentModels.jsx";
 import "./GlobalSettings.css";
 
@@ -7,10 +8,11 @@ import "./GlobalSettings.css";
 // no per-session rows. Parents own the shell (Sheet / MobileSheet) and open
 // state; this owns the content so both densities stay in parity.
 //
-// Today: Notifications (push + sound), Subagents (which models delegation may
-// use) and About (version). Expand here rather than forking desktop/mobile
-// bodies again. Server-side settings live here too: this is THE global
-// settings surface, regardless of where the value is stored.
+// Today: Notifications (push + sound), Context (when to auto-compact),
+// Subagents (which models delegation may use) and About (version). Expand here
+// rather than forking desktop/mobile bodies again. Server-side settings live
+// here too: this is THE global settings surface, regardless of where the value
+// is stored.
 export function GlobalSettings({ soundEnabled, version = null }) {
   const current = version?.current || null;
   const latest = version?.latest || null;
@@ -21,6 +23,11 @@ export function GlobalSettings({ soundEnabled, version = null }) {
       <section class="global-settings-section">
         <div class="global-settings-lbl">Notifications</div>
         <NotificationSettings soundEnabled={soundEnabled} />
+      </section>
+
+      <section class="global-settings-section">
+        <div class="global-settings-lbl">Context</div>
+        <CompactAt />
       </section>
 
       <section class="global-settings-section">
