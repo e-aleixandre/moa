@@ -135,15 +135,14 @@ func NewRead(cfg ToolConfig) core.Tool {
 	}
 }
 
-const maxImageBytes = 10 * 1024 * 1024 // 10 MB
-
 func readImage(ctx context.Context, path, mimeType string) (core.Result, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("read error: %v", err)), nil
 	}
-	if info.Size() > maxImageBytes {
-		return core.ErrorResult(fmt.Sprintf("image too large (%d MB, max 10 MB)", info.Size()/(1024*1024))), nil
+	encodedSize := base64.StdEncoding.EncodedLen(int(info.Size()))
+	if encodedSize > core.MaxImageBase64Bytes {
+		return core.ErrorResult(fmt.Sprintf("image too large after base64 encoding (%d MB, max %d MB)", encodedSize/(1024*1024), core.MaxImageBase64Bytes/(1024*1024))), nil
 	}
 
 	data, err := os.ReadFile(path)

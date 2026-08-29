@@ -27,6 +27,11 @@ import (
 // the moment the user switches to Anthropic mid-session.
 const MaxImageDimension = 8000
 
+// MaxImageBase64Bytes is Anthropic's maximum image payload size after base64
+// encoding. The limit is applied where images enter history so a block that
+// would be rejected cannot poison every later replay of the conversation.
+const MaxImageBase64Bytes = 10 * 1024 * 1024
+
 // imageHeaderBytes bounds how much of an image is decoded to read its size.
 // DecodeConfig only needs the header, which for JPEG means everything up to the
 // SOF marker. That marker sits after any EXIF/ICC segments, and those are

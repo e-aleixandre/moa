@@ -207,3 +207,14 @@ func TestMCPImageFallsBackToInlineWhenStoringFails(t *testing.T) {
 		t.Errorf("a failed Put left %d staging file(s) behind", len(entries))
 	}
 }
+
+func TestMCPImageExceedingBase64PayloadLimitIsNotReturned(t *testing.T) {
+	image := &sdkmcp.ImageContent{Data: make([]byte, 9_902_807), MIMEType: "image/png"}
+	got := mcpImageContent(nil, image)
+	if got.Type != "text" {
+		t.Fatalf("expected an explanatory text block, got %+v", got)
+	}
+	if want := "MCP image too large after base64 encoding (12 MB, max 10 MB); return a smaller image."; got.Text != want {
+		t.Fatalf("text: got %q, want %q", got.Text, want)
+	}
+}

@@ -53,6 +53,19 @@ func TestConvertContentBlocks_OversizedImageReplacedByNote(t *testing.T) {
 	}
 }
 
+func TestConvertContentBlocks_ImageExceedingBase64PayloadReplacedByNote(t *testing.T) {
+	blocks := convertContentBlocks([]core.Content{
+		core.ImageContent(strings.Repeat("A", core.MaxImageBase64Bytes+1), "image/png"),
+	}, nil)
+	block := blocks[0].(map[string]any)
+	if block["type"] != "text" {
+		t.Fatalf("oversized payload should become text, got %v", block["type"])
+	}
+	if got := block["text"]; got != "[image omitted: base64 payload exceeds the 10 MB limit; read a smaller image]" {
+		t.Fatalf("note: got %q", got)
+	}
+}
+
 // An unreadable/unknown payload must be passed through untouched rather than
 // silently dropped: only images we can prove are oversized get replaced.
 func TestConvertContentBlocks_UndecodableImagePassedThrough(t *testing.T) {

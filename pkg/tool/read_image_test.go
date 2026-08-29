@@ -38,6 +38,54 @@ func TestRead_Image(t *testing.T) {
 	}
 }
 
+// Anthropic limits the base64 payload, not the file on disk. A 9.9 MB image
+// expands past its 10 MB limit and must not be allowed into history.
+func TestRead_ImageExceedingBase64PayloadLimit(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "large.png")
+	if err := os.WriteFile(path, make([]byte, 9_902_807), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
+	result, err := read.Execute(context.Background(), map[string]any{"path": "large.png"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected an error result for a 9,902,807-byte image, got an image block")
+	}
+	if got, want := result.Content[0].Text, "Error: image too large after base64 encoding (12 MB, max 10 MB)"; got != want {
+		t.Fatalf("error: got %q, want %q", got, want)
+	}
+}
+
+func TestRead_ImageWithinBase64PayloadLimit(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "normal.jpg")
+	writeJPEG(t, path, 100, 200)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(make([]byte, 2*1024*1024)); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	read := NewRead(ToolConfig{WorkspaceRoot: tmp})
+	result, err := read.Execute(context.Background(), map[string]any{"path": "normal.jpg"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || len(result.Content) != 1 || result.Content[0].Type != "image" {
+		t.Fatalf("expected an image block, got %+v", result)
+	}
+}
+
 // A tall screenshot beyond the provider's per-side limit must be refused at
 // read time: once such a block enters history, every later request 400s.
 func TestRead_ImageExceedingMaxDimension(t *testing.T) {

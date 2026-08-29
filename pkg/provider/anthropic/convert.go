@@ -195,6 +195,9 @@ func newImageRetirer(msgs []core.Message) *imageRetirer {
 			if b.Type != "image" {
 				continue
 			}
+			if len(b.Data) > core.MaxImageBase64Bytes {
+				continue
+			}
 			// Images above MaxImageDimension are replaced by a note further
 			// down, so they never reach the wire as image blocks and must not
 			// inflate the count.
@@ -310,6 +313,15 @@ func convertContentBlocks(blocks []core.Content, retire *imageRetirer) []any {
 				"text": b.Text,
 			})
 		case "image":
+			// The provider's size limit covers the encoded payload. This keeps
+			// histories recorded before the input checks recoverable on replay.
+			if len(b.Data) > core.MaxImageBase64Bytes {
+				result = append(result, map[string]any{
+					"type": "text",
+					"text": fmt.Sprintf("[image omitted: base64 payload exceeds the %d MB limit; read a smaller image]", core.MaxImageBase64Bytes/(1024*1024)),
+				})
+				continue
+			}
 			// A single oversized image makes every subsequent request fail with a
 			// hard 400, because history is replayed each turn. Substitute a note
 			// so an already-poisoned conversation stays usable; the read tool

@@ -819,6 +819,10 @@ func convertMCPResult(ctx context.Context, r *sdkmcp.CallToolResult) core.Result
 // become a user-visible failure, and a reference with no blob behind it would
 // reach the provider as an empty image.
 func mcpImageContent(scope *attachment.Scope, v *sdkmcp.ImageContent) core.Content {
+	encodedSize := base64.StdEncoding.EncodedLen(len(v.Data))
+	if encodedSize > core.MaxImageBase64Bytes {
+		return core.TextContent(fmt.Sprintf("MCP image too large after base64 encoding (%d MB, max %d MB); return a smaller image.", encodedSize/(1024*1024), core.MaxImageBase64Bytes/(1024*1024)))
+	}
 	if scope != nil {
 		mimeType := v.MIMEType
 		if actual := core.ImageMimeFromBytes(v.Data); actual != "" {
