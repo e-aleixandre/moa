@@ -172,19 +172,39 @@ func TestAttentionTrackerProcessesBurstLosslessly(t *testing.T) {
 	var once sync.Once
 	entered := make(chan struct{})
 	release := make(chan struct{})
+	processed := make(chan struct{})
+	expected := make(chan uint64, 1)
+	processedCount := 0
+	observedCount := 0
+	unsub := sess.runtime.Bus.SubscribeAttentionSeq(func(seq uint64, _ bus.AttentionSequenceEvent) {
+		observedCount++
+		if observedCount == count {
+			expected <- seq
+		}
+	})
+	defer unsub()
 	mgr.beforeAttentionMark = func() {
 		once.Do(func() { close(entered); <-release })
+	}
+	mgr.afterAttentionMark = func() {
+		processedCount++
+		if processedCount == count {
+			close(processed)
+		}
 	}
 	sess.runtime.Bus.Publish(bus.RunEnded{SessionID: sess.ID})
 	<-entered
 	for i := 1; i < count; i++ {
 		sess.runtime.Bus.Publish(bus.RunEnded{SessionID: sess.ID})
 	}
-	want := sess.runtime.Bus.LastSeq()
 	close(release)
-	pollUntil(t, time.Second, "lossless attention burst", func() bool {
-		return mgr.sessionInfo(sess).UnseenSeq == want
-	})
+	// LastSeq also includes unrelated asynchronous events, such as context
+	// updates. Record the final attention occurrence rather than racing them.
+	want := <-expected
+	<-processed
+	if got := mgr.sessionInfo(sess).UnseenSeq; got != want {
+		t.Fatalf("attention sequence = %d, want %d", got, want)
+	}
 }
 
 func TestUnreadAttentionMarksAwayPermissionAskAndError(t *testing.T) {
