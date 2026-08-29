@@ -82,6 +82,7 @@ switched off for a project — is kept separately, in
 | `stt_model` | string | `"gpt-transcribe"` | Speech-to-text model. `"gpt-4o-mini-transcribe"` costs half as much per minute; `"whisper-1"` is the older, slower model it replaced |
 | `stt_vocabulary` | string[] | `[]` | Words the transcriber keeps getting wrong (names, jargon, product names). Accumulates across scopes: a project adds its terms to your global ones. Keep it short — long lists make transcription worse (max 50 terms) |
 | `persistent_shell` | bool | `true` | Whether `bash` persists working directory and exported env between calls in a session |
+| `compact_at` | int | `0` | Default auto-compaction threshold in tokens for sessions that set none of their own. `0` = automatic: compaction waits for the model's window. A session's own limit always wins, and a subagent inherits its parent's, falling back to this. Values under the engine's floor (reserve + kept context + margin, ≈41k) are raised, since a lower threshold would compact on every turn. Editable from the web Settings sheet |
 | `update_check` | bool | `true` | Check GitHub for a newer stable Moa release (six-hour ETag cache); set `false` to opt out |
 
 Start `stt_vocabulary` empty and add words only once you catch the transcriber
