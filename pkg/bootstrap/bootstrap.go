@@ -545,6 +545,13 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		LoadAllowedModels: func() []string {
 			return core.LoadGlobalConfig().SubagentAllowedModels
 		},
+		// Read live from the parent, with the global default as fallback: the
+		// parent's threshold changes mid-session (a slider drag, a model switch
+		// that rescales it), and a child spawned afterwards must run under the
+		// value in force now, not the one at session start.
+		InheritedCompactAt: func() int {
+			return inheritedCompactAt(sess, core.GetCompactAt(moaCfg))
+		},
 		OnChildStart:     cfg.OnSubagentStart,
 		OnChildEvent:     cfg.OnSubagentEvent,
 		OnChildUsage:     cfg.OnSubagentUsage,
@@ -596,6 +603,11 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		MaterializeContent:  cfg.MaterializeContent,
 		AttachmentScope:     cfg.AttachmentScope,
 		SessionCheckpoint:   sessionCheckpoint,
+		// The GLOBAL default only. A resumed session's own compact_at is applied
+		// afterwards via SetCompactAt, and the agent keeps the two apart, which is
+		// what lets a session's own choice win here without erasing the global
+		// value for the sessions that never made one.
+		Compaction: core.CompactionWithDefault(core.GetCompactAt(moaCfg)),
 	}
 	if gate != nil {
 		agentCfg.PermissionCheck = gate.Check
@@ -611,6 +623,18 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	sess.Agent = ag
 	sess.agentHolder.Store(ag)
 	return sess, nil
+}
+
+// inheritedCompactAt resolves the compaction threshold a subagent spawned from
+// sess should run under: the parent's own choice when it made one, otherwise
+// globalCompactAt. Split out of the closure so the rule can be tested without
+// standing up a whole session.
+func inheritedCompactAt(sess *Session, globalCompactAt int) int {
+	var sessionCompactAt int
+	if a := sess.agentHolder.Load(); a != nil {
+		sessionCompactAt = a.CompactAt()
+	}
+	return core.ResolveCompactAt(sessionCompactAt, globalCompactAt)
 }
 
 // FormatSubagentNotification produces the text injected into the agent's

@@ -156,6 +156,16 @@ type Config struct {
 	// already-open sessions subject to policy changes without recreating them.
 	LoadAllowedModels func() []string
 
+	// InheritedCompactAt is the soft compaction threshold (tokens) a child
+	// should run under: the PARENT session's own threshold when it set one,
+	// otherwise the global default. Resolved by the caller, which is the only
+	// side that can see both. nil or 0 = compact at the child's model window.
+	//
+	// A child is a separate agent with its own history, so nothing reaches it
+	// implicitly: without this a long delegated task would keep filling context
+	// to the brim while the parent that spawned it compacts at 60%.
+	InheritedCompactAt func() int
+
 	// TranscriptLoader loads a persisted subagent transcript by job ID,
 	// enabling the "resume" parameter to continue a finished subagent's
 	// conversation instead of starting fresh. nil = resume unsupported (the
@@ -1130,13 +1140,23 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 		},
 		// With a turn budget as high as defaultChildMaxTurns, a child on a long
 		// task can realistically hit the context window before exhausting turns,
-		// so compaction runs with the same defaults as the main session.
-		Compaction: &core.CompactionSettings{
-			Enabled:       true,
-			ReserveTokens: core.DefaultCompactionSettings.ReserveTokens,
-			KeepRecent:    core.DefaultCompactionSettings.KeepRecent,
-		},
+		// so compaction runs with the same defaults as the main session — and
+		// with the threshold inherited from it, read at spawn time so a child
+		// launched after the parent moved its limit uses the current value.
+		Compaction: core.CompactionWithDefault(resolveChildCompactAt(cfg)),
 	})
+}
+
+// resolveChildCompactAt reads the threshold a child should inherit. It is
+// carried as the settings' DEFAULT rather than as the child's own CompactAt so
+// the child behaves like a session that never chose one: the value is inherited,
+// not a choice the child made, and nothing in the child can be read back as a
+// per-session setting the user configured.
+func resolveChildCompactAt(cfg Config) int {
+	if cfg.InheritedCompactAt == nil {
+		return 0
+	}
+	return cfg.InheritedCompactAt()
 }
 
 func buildChildRegistry(parent *core.Registry, params map[string]any) (*core.Registry, *core.Result) {

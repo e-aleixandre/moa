@@ -108,6 +108,7 @@ type MoaConfig struct {
 	SubagentMaxRunDuration string               `json:"subagent_max_run_duration,omitempty"`     // Max subagent run duration as Go duration string. Empty = use package default.
 	SubagentMaxConcurrent  int                  `json:"subagent_max_concurrent_async,omitempty"` // Max concurrent async subagents. 0 = use package default.
 	SubagentAllowedModels  []string             `json:"subagent_allowed_models,omitempty"`       // Model IDs a subagent may run under. Empty/absent = no restriction (opt-in).
+	CompactAt              int                  `json:"compact_at,omitempty"`                    // Default soft compaction threshold in tokens for sessions with none of their own. 0 = compact at the model window.
 }
 
 // IsMemoryEnabled returns whether cross-session memory is enabled.
@@ -138,6 +139,23 @@ func IsPersistentShellEnabled(cfg MoaConfig) bool {
 // They are enabled by default; MOA_NO_UPDATE_CHECK=1 is handled by pkg/release.
 func IsUpdateCheckEnabled(cfg MoaConfig) bool {
 	return cfg.UpdateCheck == nil || *cfg.UpdateCheck
+}
+
+// GetCompactAt returns the default soft compaction threshold in tokens, applied
+// to sessions — and to the subagents they spawn — that carry no threshold of
+// their own. 0 means automatic: compaction waits for the model's window, which
+// is the behaviour of every session before this setting existed.
+//
+// A negative value reads as unset rather than as an error: a hand-edited config
+// must not be able to hand the engine a threshold it would have to defend
+// against later. Values below CompactionSettings.MinCompactAt are deliberately
+// NOT clamped here — EffectiveWindow already raises them, and the floor depends
+// on reserve/keep values that belong to a session that may not exist yet.
+func GetCompactAt(cfg MoaConfig) int {
+	if cfg.CompactAt > 0 {
+		return cfg.CompactAt
+	}
+	return 0
 }
 
 // GetCacheTTL returns the prompt-cache TTL for the interactive agent. The
@@ -506,6 +524,11 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		// jargon on top of the names you set globally, rather than erasing them.
 		// Concatenated into a fresh slice so neither input is ever aliased.
 		STTVocabulary: concat(base.STTVocabulary, override.STTVocabulary),
+		// A project may set its own compaction default (its sessions tend to be
+		// longer or shorter than average); with none set the global one carries
+		// through. mergeConfigs builds the result field by field, so leaving this
+		// out would silently drop the global value at project level.
+		CompactAt: mergeScalar(base.CompactAt, override.CompactAt),
 	}
 	// MaxBudget: project can tighten but not disable a global budget.
 	if override.MaxBudget > 0 {

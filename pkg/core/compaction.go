@@ -6,6 +6,13 @@ type CompactionSettings struct {
 	ReserveTokens int  `json:"reserve_tokens"`       // keep free for model output + thinking
 	KeepRecent    int  `json:"keep_recent"`          // tokens of recent context to keep verbatim
 	CompactAt     int  `json:"compact_at,omitempty"` // soft threshold in tokens; 0 = use the model window
+	// DefaultCompactAt is the fallback threshold (the global config setting)
+	// used when this session has no CompactAt of its own. Kept as a separate
+	// field rather than folded into CompactAt because only CompactAt is the
+	// session's OWN choice and only CompactAt is persisted as session metadata:
+	// merging them would freeze today's global value into every session, so a
+	// later change to the global setting would never reach them.
+	DefaultCompactAt int `json:"default_compact_at,omitempty"`
 }
 
 // DefaultCompactionSettings provides sensible defaults.
@@ -13,6 +20,30 @@ var DefaultCompactionSettings = CompactionSettings{
 	Enabled:       true,
 	ReserveTokens: 16384,
 	KeepRecent:    20000,
+}
+
+// CompactionWithDefault returns the standard settings carrying globalCompactAt
+// as the fallback threshold. Callers build agents this way instead of assigning
+// DefaultCompactAt by hand so the global setting cannot be wired into one agent
+// construction site and forgotten in another.
+func CompactionWithDefault(globalCompactAt int) *CompactionSettings {
+	settings := DefaultCompactionSettings
+	settings.DefaultCompactAt = globalCompactAt
+	return &settings
+}
+
+// ResolveCompactAt picks the threshold to apply when the session value and the
+// global default come from different places — the parent agent and the config
+// file, as when spawning a subagent. Session value wins, then the global one,
+// then 0 meaning "compact at the model window".
+func ResolveCompactAt(sessionCompactAt, globalCompactAt int) int {
+	if sessionCompactAt > 0 {
+		return sessionCompactAt
+	}
+	if globalCompactAt > 0 {
+		return globalCompactAt
+	}
+	return 0
 }
 
 // CompactionPayload is the typed result of a compaction event.
@@ -44,13 +75,20 @@ func (s CompactionSettings) MinCompactAt() int {
 }
 
 // EffectiveWindow returns the context window to use for compaction decisions.
-// When CompactAt is set (>0) it caps the model's real window so compaction fires
-// earlier; it is clamped to maxInput, so an over-large value harmlessly degrades
-// to plain overflow protection rather than disabling compaction. It is also
-// floored so a too-low CompactAt can't cause per-turn compaction thrash.
+// When a threshold is set (>0) it caps the model's real window so compaction
+// fires earlier; it is clamped to maxInput, so an over-large value harmlessly
+// degrades to plain overflow protection rather than disabling compaction. It is
+// also floored so a too-low threshold can't cause per-turn compaction thrash.
+// The threshold is the session's own CompactAt, falling back to the global
+// DefaultCompactAt: session → global → model window, resolved in one place so
+// the floor and the clamp apply identically whichever level set the value.
 func (s CompactionSettings) EffectiveWindow(maxInput int) int {
-	if s.CompactAt > 0 && s.CompactAt < maxInput {
-		eff := s.CompactAt
+	at := s.CompactAt
+	if at <= 0 {
+		at = s.DefaultCompactAt
+	}
+	if at > 0 && at < maxInput {
+		eff := at
 		if floor := s.MinCompactAt(); eff < floor {
 			eff = floor
 		}

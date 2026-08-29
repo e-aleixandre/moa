@@ -1000,6 +1000,20 @@ func (a *Agent) CompactAt() int {
 	return a.config.Compaction.CompactAt
 }
 
+// EffectiveCompactAt returns the threshold actually in force for this agent, in
+// tokens: its own CompactAt when set, otherwise the inherited/global default,
+// 0 when neither applies (compact at the model window). Distinct from CompactAt,
+// which reports only what THIS session chose — a subagent, or a session running
+// under a global default, has no choice of its own but still compacts early.
+func (a *Agent) EffectiveCompactAt() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.config.Compaction == nil {
+		return 0
+	}
+	return core.ResolveCompactAt(a.config.Compaction.CompactAt, a.config.Compaction.DefaultCompactAt)
+}
+
 // CompactAtFloor returns the lowest threshold SetCompactAt will actually honor,
 // in tokens. Reads the agent's own compaction settings rather than the package
 // defaults, since a session may have been built with different reserve/keep
