@@ -54,46 +54,6 @@ func TestMessageTextAccumulationAllocations(t *testing.T) {
 	}
 }
 
-func newResponse(status string) *struct {
-	ID     string `json:"id"`
-	Model  string `json:"model"`
-	Status string `json:"status"`
-	Usage  *struct {
-		InputTokens        int `json:"input_tokens"`
-		OutputTokens       int `json:"output_tokens"`
-		TotalTokens        int `json:"total_tokens"`
-		InputTokensDetails *struct {
-			CachedTokens int `json:"cached_tokens"`
-		} `json:"input_tokens_details"`
-	} `json:"usage"`
-	Error *struct {
-		Message string `json:"message"`
-		Code    string `json:"code"`
-	} `json:"error"`
-	IncompleteDetails *struct {
-		Reason string `json:"reason"`
-	} `json:"incomplete_details"`
-	EndTurn *bool `json:"end_turn"`
-} {
-	return &struct {
-		ID     string `json:"id"`
-		Model  string `json:"model"`
-		Status string `json:"status"`
-		Usage  *struct {
-			InputTokens        int `json:"input_tokens"`
-			OutputTokens       int `json:"output_tokens"`
-			TotalTokens        int `json:"total_tokens"`
-			InputTokensDetails *struct {
-				CachedTokens int `json:"cached_tokens"`
-			} `json:"input_tokens_details"`
-		} `json:"usage"`
-		Error *struct {
-			Message string `json:"message"`
-			Code    string `json:"code"`
-		} `json:"error"`
-		IncompleteDetails *struct {
-			Reason string `json:"reason"`
-		} `json:"incomplete_details"`
-		EndTurn *bool `json:"end_turn"`
-	}{Status: status}
+func newResponse(status string) *response {
+	return &response{ID: "resp_1", Model: "gpt-5.6-terra", Status: status}
 }

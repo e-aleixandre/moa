@@ -35,37 +35,51 @@ type event struct {
 	ItemRaw     json.RawMessage `json:"-"` // full JSON of item (set during parsing)
 	Delta       string          `json:"delta,omitempty"`
 	OutputIndex int             `json:"output_index"`
-	Response    *struct {
-		ID     string `json:"id"`
-		Model  string `json:"model"`
-		Status string `json:"status"`
-		Usage  *struct {
-			InputTokens        int `json:"input_tokens"`
-			OutputTokens       int `json:"output_tokens"`
-			TotalTokens        int `json:"total_tokens"`
-			InputTokensDetails *struct {
-				CachedTokens int `json:"cached_tokens"`
-			} `json:"input_tokens_details"`
-		} `json:"usage"`
-		Error *struct {
-			Message string `json:"message"`
-			Code    string `json:"code"`
-		} `json:"error"`
-		IncompleteDetails *struct {
-			Reason string `json:"reason"`
-		} `json:"incomplete_details"`
-		// EndTurn mirrors codex's ResponseCompleted.end_turn (Option<bool>): the
-		// backend can mark a completed response as "not the end of the turn —
-		// resend the conversation as-is to continue". nil means the field was
-		// absent (the common case on the current backend). A *bool is required
-		// to tell absent (nil) from false.
-		EndTurn *bool `json:"end_turn"`
-	} `json:"response,omitempty"`
+	Response    *response       `json:"response,omitempty"`
 	// For function_call_arguments.done
 	Arguments string `json:"arguments,omitempty"`
 	// For error events
 	Message string `json:"message,omitempty"`
 	Code    string `json:"code,omitempty"`
+}
+
+// response is the response object carried by response.* events. It is a named
+// type because tests construct it directly: as an anonymous struct it had to be
+// spelled out again field by field, and any change here silently broke them.
+type response struct {
+	ID     string         `json:"id"`
+	Model  string         `json:"model"`
+	Status string         `json:"status"`
+	Usage  *responseUsage `json:"usage"`
+	Error  *struct {
+		Message string `json:"message"`
+		Code    string `json:"code"`
+	} `json:"error"`
+	IncompleteDetails *struct {
+		Reason string `json:"reason"`
+	} `json:"incomplete_details"`
+	// EndTurn mirrors codex's ResponseCompleted.end_turn (Option<bool>): the
+	// backend can mark a completed response as "not the end of the turn —
+	// resend the conversation as-is to continue". nil means the field was
+	// absent (the common case on the current backend). A *bool is required
+	// to tell absent (nil) from false.
+	EndTurn *bool `json:"end_turn"`
+}
+
+// responseUsage is the token accounting of a completed response. InputTokens is
+// the total and INCLUDES both the cached and the cache-written tokens, so the
+// three buckets have to be split apart before pricing.
+type responseUsage struct {
+	InputTokens        int `json:"input_tokens"`
+	OutputTokens       int `json:"output_tokens"`
+	TotalTokens        int `json:"total_tokens"`
+	InputTokensDetails *struct {
+		CachedTokens int `json:"cached_tokens"`
+		// CacheWriteTokens is billed at 1.25x the uncached input rate on
+		// GPT-5.6 and later. Absent on models with no cache-write charge
+		// (and on xAI), where it stays zero.
+		CacheWriteTokens int `json:"cache_write_tokens"`
+	} `json:"input_tokens_details"`
 }
 
 type item struct {
@@ -540,16 +554,28 @@ func (s *streamState) finalize(ev *event, ch chan<- core.AssistantEvent) bool {
 		s.message.StopReason = mapStatus(ev.Response.Status)
 		if ev.Response.Usage != nil {
 			u := ev.Response.Usage
-			// Responses API input_tokens INCLUDES cached tokens; the cost
-			// model bills Input and CacheRead as separate buckets (cache
-			// reads are ~10x cheaper), so split them out. Without this the
-			// whole prompt is billed at full input price — up to ~10x the
-			// real cost on cache-heavy runs, tripping max_budget early.
-			cached := 0
+			// Responses API input_tokens INCLUDES both cached and
+			// cache-written tokens; the cost model bills each as its own
+			// bucket. Cache reads are ~10x cheaper and writes cost 1.25x the
+			// uncached rate on GPT-5.6 and later, so split all three out.
+			// Without the read split the whole prompt is billed at full input
+			// price — up to ~10x the real cost on cache-heavy runs, tripping
+			// max_budget early; without the write split, every written token
+			// is undercharged by 25%.
+			cached, written := 0, 0
 			if u.InputTokensDetails != nil {
 				cached = u.InputTokensDetails.CachedTokens
+				written = u.InputTokensDetails.CacheWriteTokens
 			}
-			nonCached := u.InputTokens - cached
+			// Clamp so a provider inconsistency cannot make the ordinary
+			// bucket negative and refund tokens that were actually billed.
+			if written > u.InputTokens-cached {
+				written = u.InputTokens - cached
+			}
+			if written < 0 {
+				written = 0
+			}
+			nonCached := u.InputTokens - cached - written
 			if nonCached < 0 {
 				nonCached = 0
 			}
@@ -557,6 +583,7 @@ func (s *streamState) finalize(ev *event, ch chan<- core.AssistantEvent) bool {
 				Input:       nonCached,
 				Output:      u.OutputTokens,
 				CacheRead:   cached,
+				CacheWrite:  written,
 				TotalTokens: u.TotalTokens,
 			}
 		}
