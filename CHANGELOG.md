@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] - 2026-08-29
+
+### Added
+
+- A default auto-compaction threshold in Settings, under Context. Until now the
+  point at which a conversation compacts could only be set one session at a
+  time; the global value applies to every session that has none of its own, and
+  a session that does keeps deciding for itself. Subagents follow the same
+  order: the threshold of the conversation that spawned them, then the global
+  default. They previously ignored both and always compacted at the model's
+  window.
+- The threshold is set in tokens rather than a percentage, because the same
+  percentage means a different point on a 200k model than on a 1M one. A value
+  the engine cannot honour is not promised: below the floor (where compaction
+  would retrigger every turn) the control states the minimum up front and
+  reports the value it raised yours to. A value above the model's window
+  degrades to compacting at the window, so an oversized threshold never leaves
+  a session uncompacted.
+
 ## [0.33.0] - 2026-08-29
 
 ### Added
