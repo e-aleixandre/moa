@@ -5,6 +5,49 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] - 2026-08-29
+
+### Added
+
+- Interactive sessions now keep their prompt cache for an hour instead of five
+  minutes. A conversation routinely sits idle longer than five minutes, so the
+  provider's short window kept lapsing between turns and every resume rebuilt
+  the whole prefix at full input price. The longer window costs more per write
+  (2x input instead of 1.25x) and is still far cheaper than those rebuilds. Set
+  `cache_ttl` to `"5m"` to opt back in; subagents and one-shot calls keep the
+  short window, because their runs are short anyway.
+- OpenAI and xAI requests now carry a stable per-conversation cache key. Both
+  vendors hold cache entries on individual machines and use that key to route
+  requests sharing a prefix to the same one, so traffic that overflows to
+  another machine no longer misses a cache that is still valid. On xAI's
+  consumer proxy, a second turn went from 0 to 3584 cached tokens, cutting that
+  request's cost by 3.2x.
+
+### Fixed
+
+- A single oversized image no longer makes a conversation permanently
+  unsendable. The read tool measured the file on disk against the provider's
+  10 MB limit, but images travel base64-encoded, which adds about a third: a
+  9.9 MB screenshot passed the check and then failed on every later turn,
+  because history is replayed on each request. The limit now applies to the
+  encoded payload, the same check covers images returned by MCP tools, and a
+  history that already recorded one is repaired on replay by replacing the
+  block with a note.
+- Cache writes were undercharged on every provider this project uses.
+  Anthropic bills a write at 1.25x input for the five-minute window but 2x for
+  the one-hour window, and both were billed at the lower rate; OpenAI's
+  GPT-5.6 reports cache writes in their own field, which the Responses stream
+  never read, leaving those tokens in the ordinary bucket at 25% under their
+  real price. Both now bill from what the provider reports, which also
+  corrects `max_budget`, the session cost counter, and subagent stats.
+- The cache countdown in the UI reported a warm cache after it had gone cold.
+  It started at the end of a run, but the provider refreshes the window per
+  request and a long run sends its last request well before it finishes.
+- Responses from xAI's subscription backend showed a spurious model switch and
+  no cost. That backend spells a model `grok-4.6-build` where the API spells it
+  `grok-4.6` — same model, same pricing — and only one spelling was known, so
+  those responses resolved to nothing.
+
 ## [0.32.0] - 2026-08-28
 
 ### Removed
