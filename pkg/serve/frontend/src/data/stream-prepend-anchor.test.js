@@ -132,3 +132,53 @@ test('a viewport without a durable block still captures a scroll fallback', () =
   restorePrependAnchor(f.el, captured, false);
   expect(f.el.scrollTop).toBe(500);
 });
+
+// Reproduces the reported symptom: "I scroll to the top, older messages load,
+// and sometimes they appear BELOW me — I stay at the top and everything I was
+// reading ends up underneath."
+//
+// A restored subagent card carries no message ID, so its block is keyed by
+// position (`doc-3`). Prepending a page shifts every index, that ID names a
+// different block, and the captured anchor is gone — the restore path then
+// falls back to the raw scrollTop, which near the top means "stay at the top"
+// while the whole page lands above the reader's content.
+test('a positional block ID is never chosen as the scroll anchor', () => {
+  const { unstableBlockIDs } = require('./stream-model.js');
+  unstableBlockIDs.clear();
+  unstableBlockIDs.add('doc-3');
+
+  const seam = {
+    dataset: { streamAnchor: 'doc-seam-0' },
+    getBoundingClientRect: () => ({ top: 80, bottom: 280 }),
+  };
+  const subagentCard = {
+    dataset: { streamAnchor: 'doc-3' },
+    getBoundingClientRect: () => ({ top: 300, bottom: 420 }),
+  };
+  const durable = {
+    dataset: { streamAnchor: 'doc-bb5c52cd8b94b338-0' },
+    getBoundingClientRect: () => ({ top: 440, bottom: 900 }),
+  };
+  const el = {
+    scrollTop: 12,
+    getBoundingClientRect: () => ({ top: 0 }),
+    querySelectorAll: () => [seam, subagentCard, durable],
+  };
+
+  const snapshot = capturePrependAnchor(el);
+  expect(snapshot.id).toBe('doc-bb5c52cd8b94b338-0');
+
+  // After the prepend the positional ID names another block entirely; only a
+  // durable ID still resolves, which is what keeps the reader in place.
+  const moved = {
+    dataset: { streamAnchor: 'doc-bb5c52cd8b94b338-0' },
+    getBoundingClientRect: () => ({ top: 8440, bottom: 8900 }),
+  };
+  const after = {
+    scrollTop: 12,
+    getBoundingClientRect: () => ({ top: 0 }),
+    querySelectorAll: () => [moved],
+  };
+  expect(restorePrependAnchor(after, snapshot, false)).toBe(moved);
+  expect(after.scrollTop).toBe(8012);
+});

@@ -132,9 +132,21 @@ export const FANOUT_ACCENTS = ['sky', 'teal', 'mauve', 'peach', 'blue', 'lavende
 // projectStream is the single entry point. Given the store's `session` object
 // it returns the ordered block array described in the contract above. It never
 // mutates the input.
+// A block ID built from a message's position, not its identity. A prepend
+// shifts every index, so the same ID then names a different block: anchoring
+// scroll to one of these silently moves the reader to unrelated content.
+export const unstableBlockIDs = new Set();
+
+export function isStableBlockID(id) {
+  return !!id && !unstableBlockIDs.has(id);
+}
+
 export function projectStream(session) {
   if (!session) return [];
   const messages = Array.isArray(session.messages) ? session.messages : [];
+  // Positional IDs are only meaningful for the projection that produced them:
+  // the same index names a different block once messages are prepended.
+  unstableBlockIDs.clear();
 
   const blocks = [];
 
@@ -165,13 +177,18 @@ export function projectStream(session) {
   const compactionOrdinals = new Map();
 
   // Persisted messages identify blocks by message and type, plus an ordinal
-  // for multiple blocks of one type emitted from the same message. Legacy
-  // messages without an ID use their index: they cannot be paginated, so a
-  // prepend cannot shift their fallback identity.
+  // for multiple blocks of one type emitted from the same message. Messages
+  // without an ID fall back to their position, which a prepend shifts — the
+  // block keeps the ID of whatever now sits at that index. unstableBlockIDs
+  // records those so scroll anchoring can refuse to anchor to them.
   const blockOrdinals = new Map();
   const blockID = (type, msg, index) => {
     const msgID = msg?._msg_id || msg?.msg_id;
-    if (!msgID) return `${type}-${index}`;
+    if (!msgID) {
+      const positional = `${type}-${index}`;
+      unstableBlockIDs.add(positional);
+      return positional;
+    }
     const key = `${type}\u0000${msgID}`;
     const ordinal = blockOrdinals.get(key) || 0;
     blockOrdinals.set(key, ordinal + 1);

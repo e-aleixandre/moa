@@ -1,5 +1,7 @@
 // stream-prepend-anchor.js — element anchoring for backward transcript pages
 
+import { isStableBlockID } from './stream-model.js';
+
 function anchors(el) { return [...el.querySelectorAll('[data-stream-anchor]')]; }
 
 // The leading "Older messages…" marker is transcript chrome, not history: it is
@@ -14,10 +16,13 @@ function isHistoryAnchor(node) {
 // The first history block is the seam: an incoming page can continue the same
 // document, so projection re-keys that block to the earlier message it now
 // starts from and its identity does not survive the prepend. Every later block
-// does, so anchor to the one after the seam.
+// does — unless its ID is positional rather than identity-based, which a
+// prepend shifts just as surely. Skip the seam, then take the first block whose
+// identity actually survives the incoming page.
 function anchorNode(el) {
   const history = anchors(el).filter(isHistoryAnchor);
-  return history[1] || history[0];
+  const stable = history.slice(1).find(node => isStableBlockID(node.dataset.streamAnchor));
+  return stable || history[1] || history[0];
 }
 
 export function capturePrependAnchor(el) {
