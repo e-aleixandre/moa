@@ -262,6 +262,13 @@ func (a *Anthropic) handleMessageStart(data string, state *streamState) *core.As
 				OutputTokens int `json:"output_tokens"`
 				CacheRead    int `json:"cache_read_input_tokens"`
 				CacheCreate  int `json:"cache_creation_input_tokens"`
+				// cache_creation splits the write between the 5-minute and
+				// 1-hour windows, which are billed at 1.25x and 2x input.
+				// Absent on older responses; then the whole write is 5m.
+				CacheCreation *struct {
+					Ephemeral5m int `json:"ephemeral_5m_input_tokens"`
+					Ephemeral1h int `json:"ephemeral_1h_input_tokens"`
+				} `json:"cache_creation"`
 			} `json:"usage"`
 		} `json:"message"`
 	}
@@ -272,16 +279,26 @@ func (a *Anthropic) handleMessageStart(data string, state *streamState) *core.As
 		}
 	}
 
+	usage := &core.Usage{
+		Input:      payload.Message.Usage.InputTokens,
+		Output:     payload.Message.Usage.OutputTokens,
+		CacheRead:  payload.Message.Usage.CacheRead,
+		CacheWrite: payload.Message.Usage.CacheCreate,
+	}
+	if cc := payload.Message.Usage.CacheCreation; cc != nil {
+		usage.CacheWrite1h = cc.Ephemeral1h
+		// cache_creation_input_tokens is documented as the total, but trust the
+		// breakdown when it disagrees: the split is what gets billed.
+		if total := cc.Ephemeral5m + cc.Ephemeral1h; total > usage.CacheWrite {
+			usage.CacheWrite = total
+		}
+	}
+
 	state.message = core.Message{
-		Role:     "assistant",
-		Provider: "anthropic",
-		Model:    payload.Message.Model,
-		Usage: &core.Usage{
-			Input:      payload.Message.Usage.InputTokens,
-			Output:     payload.Message.Usage.OutputTokens,
-			CacheRead:  payload.Message.Usage.CacheRead,
-			CacheWrite: payload.Message.Usage.CacheCreate,
-		},
+		Role:      "assistant",
+		Provider:  "anthropic",
+		Model:     payload.Message.Model,
+		Usage:     usage,
 		Timestamp: time.Now().Unix(),
 	}
 

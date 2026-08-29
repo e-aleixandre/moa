@@ -412,3 +412,49 @@ func TestMapEvents_UnknownStopReason(t *testing.T) {
 		t.Errorf("unknown stop reason should pass through: %+v", done.Message)
 	}
 }
+
+// TestMessageStart_CacheCreationSplit locks in that the 1h/5m cache-write
+// breakdown is captured. Anthropic bills extended-window writes at 2x input
+// versus 1.25x for the short window, so dropping the split silently
+// understated the cost of every session running with cache_ttl "1h".
+func TestMessageStart_CacheCreationSplit(t *testing.T) {
+	a := New("test-key")
+	state := &streamState{}
+	a.mapEvent("message_start", `{"message":{"id":"m1","model":"claude-sonnet-5","usage":{
+		"input_tokens":10,"output_tokens":0,"cache_read_input_tokens":5000,
+		"cache_creation_input_tokens":1200,
+		"cache_creation":{"ephemeral_5m_input_tokens":200,"ephemeral_1h_input_tokens":1000}}}}`, state)
+
+	u := state.message.Usage
+	if u == nil {
+		t.Fatal("no usage captured")
+	}
+	if u.CacheWrite != 1200 {
+		t.Errorf("CacheWrite = %d, want 1200", u.CacheWrite)
+	}
+	if u.CacheWrite1h != 1000 {
+		t.Errorf("CacheWrite1h = %d, want 1000", u.CacheWrite1h)
+	}
+}
+
+// TestMessageStart_NoCacheCreationBreakdown covers a response without the
+// cache_creation object (5m-only sessions and older payloads): the write must
+// still be recorded, entirely at the base rate.
+func TestMessageStart_NoCacheCreationBreakdown(t *testing.T) {
+	a := New("test-key")
+	state := &streamState{}
+	a.mapEvent("message_start", `{"message":{"id":"m1","model":"claude-sonnet-5","usage":{
+		"input_tokens":10,"output_tokens":0,"cache_read_input_tokens":0,
+		"cache_creation_input_tokens":800}}}`, state)
+
+	u := state.message.Usage
+	if u == nil {
+		t.Fatal("no usage captured")
+	}
+	if u.CacheWrite != 800 {
+		t.Errorf("CacheWrite = %d, want 800", u.CacheWrite)
+	}
+	if u.CacheWrite1h != 0 {
+		t.Errorf("CacheWrite1h = %d, want 0", u.CacheWrite1h)
+	}
+}

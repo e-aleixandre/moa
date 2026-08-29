@@ -297,11 +297,16 @@ func WrapMessage(m Message) AgentMessage {
 
 // Usage tracks token consumption for a single LLM call.
 type Usage struct {
-	Input       int `json:"input"`
-	Output      int `json:"output"`
-	CacheRead   int `json:"cache_read"`
-	CacheWrite  int `json:"cache_write"`
-	TotalTokens int `json:"total_tokens"`
+	Input      int `json:"input"`
+	Output     int `json:"output"`
+	CacheRead  int `json:"cache_read"`
+	CacheWrite int `json:"cache_write"`
+	// CacheWrite1h is the subset of CacheWrite billed at the extended
+	// (1-hour) cache-write rate rather than the 5-minute one. Anthropic
+	// reports the split in cache_creation; providers without an extended
+	// window leave it zero, which prices the whole write at the base rate.
+	CacheWrite1h int `json:"cache_write_1h,omitempty"`
+	TotalTokens  int `json:"total_tokens"`
 }
 
 // RateLimit captures the unified rate-limit state a provider reports on each

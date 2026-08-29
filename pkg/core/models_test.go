@@ -310,6 +310,39 @@ func TestPricing_Cost(t *testing.T) {
 	}
 }
 
+// TestPricing_Cost_ExtendedCacheWrite covers the 1h/5m cache-write split. The
+// extended window bills at 2x input versus 1.25x for the short one, so pricing
+// the whole write at the base rate understated the cost of every 1h session.
+func TestPricing_Cost_ExtendedCacheWrite(t *testing.T) {
+	// Sonnet-shaped rates: 1.25x input for 5m, 2x for 1h.
+	p := &Pricing{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75, CacheWrite1h: 6}
+
+	// A write entirely into the 1h window bills at the extended rate.
+	if got, want := p.Cost(Usage{CacheWrite: 1_000_000, CacheWrite1h: 1_000_000}), 6.0; math.Abs(got-want) > 1e-9 {
+		t.Errorf("all-1h write: cost = %f, want %f", got, want)
+	}
+	// A mixed write splits: 400K at 6/M + 600K at 3.75/M = 2.4 + 2.25.
+	if got, want := p.Cost(Usage{CacheWrite: 1_000_000, CacheWrite1h: 400_000}), 4.65; math.Abs(got-want) > 1e-9 {
+		t.Errorf("mixed write: cost = %f, want %f", got, want)
+	}
+	// No split reported (5m session, or a provider that omits the breakdown):
+	// the whole write stays on the base rate, as before.
+	if got, want := p.Cost(Usage{CacheWrite: 1_000_000}), 3.75; math.Abs(got-want) > 1e-9 {
+		t.Errorf("no split: cost = %f, want %f", got, want)
+	}
+	// A model with no extended rate ignores the split rather than dropping the
+	// tokens: everything bills at CacheWrite.
+	noExt := &Pricing{Input: 3, CacheWrite: 3.75}
+	if got, want := noExt.Cost(Usage{CacheWrite: 1_000_000, CacheWrite1h: 1_000_000}), 3.75; math.Abs(got-want) > 1e-9 {
+		t.Errorf("no extended rate: cost = %f, want %f", got, want)
+	}
+	// An inconsistent provider report (1h > total) must not bill negative
+	// tokens at the base rate; the split is clamped to the total.
+	if got, want := p.Cost(Usage{CacheWrite: 500_000, CacheWrite1h: 1_000_000}), 3.0; math.Abs(got-want) > 1e-9 {
+		t.Errorf("clamped split: cost = %f, want %f", got, want)
+	}
+}
+
 func TestPricing_Cost_NilPricing(t *testing.T) {
 	var p *Pricing
 	cost := p.Cost(Usage{Input: 1000, Output: 500})

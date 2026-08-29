@@ -1031,6 +1031,7 @@ func childUsage(msgs []core.AgentMessage) *core.Usage {
 			total.Output += m.Usage.Output
 			total.CacheRead += m.Usage.CacheRead
 			total.CacheWrite += m.Usage.CacheWrite
+			total.CacheWrite1h += m.Usage.CacheWrite1h
 			total.TotalTokens += m.Usage.TotalTokens
 		}
 	}

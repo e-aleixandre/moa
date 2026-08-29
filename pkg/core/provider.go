@@ -114,7 +114,12 @@ type Pricing struct {
 	Input      float64 `json:"input"`       // $/M input tokens
 	Output     float64 `json:"output"`      // $/M output tokens
 	CacheRead  float64 `json:"cache_read"`  // $/M cached input tokens
-	CacheWrite float64 `json:"cache_write"` // $/M cache write tokens
+	CacheWrite float64 `json:"cache_write"` // $/M cache write tokens (5-minute window)
+	// CacheWrite1h is the $/M rate for writes into the extended 1-hour cache
+	// (Anthropic bills these at 2x input, versus 1.25x for the 5-minute
+	// window). Zero means the model has no extended window, and Usage's
+	// CacheWrite1h tokens — which will also be zero — fall back to CacheWrite.
+	CacheWrite1h float64 `json:"cache_write_1h,omitempty"`
 
 	// Tiers holds additional pricing tiers keyed by a context-length
 	// threshold, for providers that charge more once the prompt exceeds a
@@ -125,28 +130,36 @@ type Pricing struct {
 // PricingTier is a pricing tier that applies once the request's context
 // (input + cache-read tokens) reaches Threshold tokens.
 type PricingTier struct {
-	Threshold  int     `json:"threshold"`   // tier applies when Input+CacheRead >= this
-	Input      float64 `json:"input"`       // $/M input tokens
-	Output     float64 `json:"output"`      // $/M output tokens
-	CacheRead  float64 `json:"cache_read"`  // $/M cached input tokens
-	CacheWrite float64 `json:"cache_write"` // $/M cache write tokens
+	Threshold    int     `json:"threshold"`               // tier applies when Input+CacheRead >= this
+	Input        float64 `json:"input"`                   // $/M input tokens
+	Output       float64 `json:"output"`                  // $/M output tokens
+	CacheRead    float64 `json:"cache_read"`              // $/M cached input tokens
+	CacheWrite   float64 `json:"cache_write"`             // $/M cache write tokens (5-minute window)
+	CacheWrite1h float64 `json:"cache_write_1h,omitempty"` // $/M extended-window cache write tokens
 }
 
 // Cost calculates the USD cost for a given Usage, selecting the pricing
 // tier based on the request's total context (Input+CacheRead tokens) and
 // applying that tier's rates to the entire request.
+//
+// Cache writes are split: Usage.CacheWrite1h is the portion written into the
+// extended 1-hour window and is billed at the higher CacheWrite1h rate; the
+// remainder is billed at the 5-minute CacheWrite rate. When either the usage
+// split or the extended rate is absent, the whole write falls back to
+// CacheWrite, which is the pre-split behavior.
 func (p *Pricing) Cost(u Usage) float64 {
 	if p == nil {
 		return 0
 	}
 	rate := struct {
-		Input, Output, CacheRead, CacheWrite float64
-	}{p.Input, p.Output, p.CacheRead, p.CacheWrite}
+		Input, Output, CacheRead, CacheWrite, CacheWrite1h float64
+	}{p.Input, p.Output, p.CacheRead, p.CacheWrite, p.CacheWrite1h}
 
 	context := u.Input + u.CacheRead
 	for _, t := range p.Tiers {
 		if context >= t.Threshold {
 			rate.Input, rate.Output, rate.CacheRead, rate.CacheWrite = t.Input, t.Output, t.CacheRead, t.CacheWrite
+			rate.CacheWrite1h = t.CacheWrite1h
 		}
 	}
 
@@ -155,8 +168,21 @@ func (p *Pricing) Cost(u Usage) float64 {
 	if rate.CacheRead > 0 {
 		cost += float64(u.CacheRead) * rate.CacheRead / m
 	}
+	// Split the write between the extended and base windows. Guard against a
+	// CacheWrite1h larger than the reported total so a provider inconsistency
+	// can never produce a negative base-rate charge.
+	write1h := u.CacheWrite1h
+	if write1h > u.CacheWrite {
+		write1h = u.CacheWrite
+	}
+	if rate.CacheWrite1h <= 0 {
+		write1h = 0 // no extended rate known: bill everything at the base rate
+	}
+	if rate.CacheWrite1h > 0 && write1h > 0 {
+		cost += float64(write1h) * rate.CacheWrite1h / m
+	}
 	if rate.CacheWrite > 0 {
-		cost += float64(u.CacheWrite) * rate.CacheWrite / m
+		cost += float64(u.CacheWrite-write1h) * rate.CacheWrite / m
 	}
 	return cost
 }

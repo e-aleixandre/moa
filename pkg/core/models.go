@@ -13,27 +13,28 @@ var knownModels = map[string]Model{
 		ID: "claude-fable-5", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Fable 5", MaxInput: 1_000_000, MaxOutput: 131072,
 		// 90% prompt-cache discount on input applies (cache read ~= Input*0.1).
-		Pricing: &Pricing{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5},
+		// Cache writes: 1.25x input for the 5m window, 2x for the 1h window.
+		Pricing: &Pricing{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5, CacheWrite1h: 20},
 	},
 	"claude-opus-5": {
 		ID: "claude-opus-5", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Opus 5", MaxInput: 1_000_000, MaxOutput: 131072,
-		Pricing: &Pricing{Input: 5, Output: 25, CacheRead: 0.5, CacheWrite: 6.25},
+		Pricing: &Pricing{Input: 5, Output: 25, CacheRead: 0.5, CacheWrite: 6.25, CacheWrite1h: 10},
 	},
 	"claude-opus-4-8": {
 		ID: "claude-opus-4-8", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Opus 4.8", MaxInput: 1_000_000, MaxOutput: 131072,
-		Pricing: &Pricing{Input: 5, Output: 25, CacheRead: 0.5, CacheWrite: 6.25},
+		Pricing: &Pricing{Input: 5, Output: 25, CacheRead: 0.5, CacheWrite: 6.25, CacheWrite1h: 10},
 	},
 	"claude-sonnet-5": {
 		ID: "claude-sonnet-5", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Sonnet 5", MaxInput: 1_000_000, MaxOutput: 131072,
-		Pricing: &Pricing{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75},
+		Pricing: &Pricing{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75, CacheWrite1h: 6},
 	},
 	"claude-haiku-4-5-20251001": {
 		ID: "claude-haiku-4-5-20251001", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Haiku 4.5", MaxInput: 200_000, MaxOutput: 65536,
-		Pricing: &Pricing{Input: 1, Output: 5, CacheRead: 0.1, CacheWrite: 1.25},
+		Pricing: &Pricing{Input: 1, Output: 5, CacheRead: 0.1, CacheWrite: 1.25, CacheWrite1h: 2},
 	},
 
 	// --- OpenAI ---

@@ -349,6 +349,7 @@ func statsFrom(runCost float64, msgs []core.AgentMessage) VerifyStats {
 			usage.Output += m.Usage.Output
 			usage.CacheRead += m.Usage.CacheRead
 			usage.CacheWrite += m.Usage.CacheWrite
+			usage.CacheWrite1h += m.Usage.CacheWrite1h
 			usage.TotalTokens += m.Usage.TotalTokens
 		}
 	}
