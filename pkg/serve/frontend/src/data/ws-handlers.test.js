@@ -1732,3 +1732,17 @@ test('a live sync subagent card mutates from running to its outcome', () => {
   expect(projectStream(store.get().sessions.s1).flatMap(b => (b.blocks || []).flatMap(i => i.agents || [])))
     .toEqual([expect.objectContaining({ id: 'sa-sync', state: 'done', openable: true })]);
 });
+
+test('a compacted child projects its summary as a compaction card', () => {
+  // Without this the summary reached the stream as a plain message: the child's
+  // own words rendered as if somebody had written them, and the parent's card
+  // was nowhere.
+  const out = normalizeConversationProjection([
+    { id: 'm1', role: 'user', text: 'investigate the parser' },
+    { id: 'm2', role: 'compaction_summary', text: 'previously: mapped the parser' },
+  ]);
+  const card = out.find(m => m._type === 'compaction_marker');
+  expect(card).toBeTruthy();
+  expect(card.summary).toBe('previously: mapped the parser');
+  expect(out.some(m => m.role === 'compaction_summary')).toBe(false);
+});

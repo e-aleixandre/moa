@@ -1672,3 +1672,29 @@ func TestHandleSend_ReturnsEffectiveMsgID(t *testing.T) {
 		t.Fatalf("msg_id = %q, want a freshly minted ID", reused)
 	}
 }
+
+func TestSubagentConversationShowsCompactionSummary(t *testing.T) {
+	// A child that compacted used to render as a conversation with an
+	// unexplained gap: the summary was filtered out as an internal record, so
+	// later turns referenced work that was nowhere on screen.
+	msgs := []core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage("investigate the parser")),
+		{Message: core.Message{Role: "compaction_summary",
+			Content: []core.Content{core.TextContent("previously: mapped the parser")}}},
+		{Message: core.Message{Role: "assistant",
+			Content: []core.Content{core.TextContent("continuing from there")}}},
+	}
+	got := safeSubagentConversationMessages(msgs)
+	var summary *ConversationMessage
+	for i := range got.messages {
+		if got.messages[i].Role == "compaction_summary" {
+			summary = &got.messages[i]
+		}
+	}
+	if summary == nil {
+		t.Fatal("compaction summary missing from the child conversation")
+	}
+	if summary.Text != "previously: mapped the parser" {
+		t.Fatalf("summary text not projected, got %q", summary.Text)
+	}
+}
