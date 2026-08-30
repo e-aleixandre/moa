@@ -273,9 +273,3 @@ func Execute(ctx context.Context, cwd string) (Result, error) {
 	}
 	return Run(ctx, cwd, *cfg), nil
 }
-
-// ExecuteWithConfig runs verification with a pre-loaded config.
-// Used by the tool to support check filtering.
-func ExecuteWithConfig(ctx context.Context, cwd string, cfg Config) Result {
-	return Run(ctx, cwd, cfg)
-}

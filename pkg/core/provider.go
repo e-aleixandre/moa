@@ -237,16 +237,6 @@ func ThinkingLevelOptions() string {
 	return s
 }
 
-// ThinkingLevelsForModel returns the levels the selected model accepts. Unknown
-// models retain the common vocabulary; only verified constrained models narrow
-// it. This keeps model switching and persisted session state deterministic.
-func ThinkingLevelsForModel(model Model) []string {
-	if model.Provider == "xai" {
-		return []string{"low", "medium", "high"}
-	}
-	return ThinkingLevels
-}
-
 // EffectiveThinkingLevel resolves a persisted level for a model. xAI requires
 // reasoning and only accepts low/medium/high; other providers keep the value.
 func EffectiveThinkingLevel(model Model, level string) (string, error) {

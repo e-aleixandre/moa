@@ -418,15 +418,6 @@ func (r *SessionRuntime) WaitSettled(ctx context.Context) bool {
 	}
 }
 
-// IsQuiescent reports, without blocking, whether the session is idle enough to
-// mutate its live tool set: not running, not awaiting a permission decision, and
-// with no background work pending. Callers that must defer a tool-set change
-// (e.g. an MCP toggle) until it is safe use this to decide apply-now vs pending.
-func (r *SessionRuntime) IsQuiescent() bool {
-	state := r.State.Current()
-	return state != StateRunning && state != StatePermission && !r.sctx.hasBackgroundWork()
-}
-
 // DoIfQuiescent runs fn atomically with respect to run-start if the session is
 // quiescent, returning whether it ran. It holds the state lock across fn (via
 // StateMachine.DoIfIdle) so a run cannot begin between the quiescence check and

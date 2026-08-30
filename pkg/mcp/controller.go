@@ -248,33 +248,6 @@ func clonePolicy(p core.MCPDisablePolicy) core.MCPDisablePolicy {
 	}
 }
 
-// SessionDisabled returns the server names currently vetoed in SESSION scope.
-func (c *Controller) SessionDisabled() []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	out := make([]string, 0, len(c.policy.Session))
-	for name := range c.policy.Session {
-		out = append(out, name)
-	}
-	return out
-}
-
-// SetSessionDisabled replaces the SESSION-scope veto set wholesale (global and
-// project scopes are untouched). It does not reconcile; the caller reconciles at
-// quiescence. Used by single-controller frontends to swap the
-// process-memory session scope when the active conversation changes.
-func (c *Controller) SetSessionDisabled(names []string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	set := make(map[string]struct{}, len(names))
-	for _, n := range names {
-		if n != "" {
-			set[n] = struct{}{}
-		}
-	}
-	c.policy.Session = set
-}
-
 // Restart restarts one server and re-syncs its tools by exact name. It refuses a
 // server the policy wants disabled — whether already applied (Manager returns
 // ErrServerDisabled) or still pending a deferred reconcile — so restart never

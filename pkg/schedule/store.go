@@ -60,14 +60,6 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
-// Load is an alias for Open.
-func Load(path string) (*Store, error) {
-	return Open(path)
-}
-
-// Path returns the file used by the store.
-func (s *Store) Path() string { return s.path }
-
 // Load replaces the in-memory records with those in the store file. A missing
 // file is treated as an empty store.
 func (s *Store) Load() error {
@@ -104,14 +96,6 @@ func (s *Store) Load() error {
 	s.schedules = recordsByID
 	s.mu.Unlock()
 	return nil
-}
-
-// Save writes the complete store atomically.
-func (s *Store) Save() error {
-	s.mu.RLock()
-	records := s.recordsLocked()
-	s.mu.RUnlock()
-	return save(s.path, records)
 }
 
 // Create persists record and returns its fully populated form. ID,

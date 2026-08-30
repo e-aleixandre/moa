@@ -55,9 +55,6 @@ func (i Info) String() string {
 	return fmt.Sprintf("%s (commit %s, built %s)", i.DisplayVersion(), commit, date)
 }
 
-// IsRelease reports whether this build has a valid semantic release version.
-func (i Info) IsRelease() bool { _, ok := ParseSemver(i.Version); return ok }
-
 // Semver is a parsed semantic version. Build metadata is ignored for ordering.
 type Semver struct {
 	Major, Minor, Patch int

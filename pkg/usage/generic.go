@@ -282,15 +282,6 @@ func (m *MultiPoller) observedSnapshot(provider string) *Snapshot {
 	return cloneSnapshot(m.observed[provider])
 }
 
-func (m *MultiPoller) Get(ctx context.Context) map[string]*Snapshot {
-	out := map[string]*Snapshot{}
-	for name, p := range m.Pollers {
-		if s, _ := p.Get(ctx); s != nil {
-			out[name] = s
-		}
-	}
-	return out
-}
 func (m *MultiPoller) GetAll(ctx context.Context) (map[string]*Snapshot, map[string]ProviderStatus) {
 	snaps := map[string]*Snapshot{}
 	statuses := map[string]ProviderStatus{}

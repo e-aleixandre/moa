@@ -167,13 +167,6 @@ func (g *Gate) AddAllow(pattern string) {
 	g.mu.Unlock()
 }
 
-// SetEvaluator replaces the AI evaluator (for runtime mode switches).
-func (g *Gate) SetEvaluator(e *Evaluator) {
-	g.mu.Lock()
-	g.evaluator = e
-	g.mu.Unlock()
-}
-
 // AddRule appends a natural language rule (for auto mode).
 func (g *Gate) AddRule(rule string) {
 	g.mu.Lock()

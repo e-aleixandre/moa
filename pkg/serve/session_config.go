@@ -241,30 +241,3 @@ func (m *Manager) subagentStoreFor(sessionID string) *session.SubagentStore {
 	}
 	return sess.persister.subagentStore(sessionID)
 }
-
-// ListSubagentTranscripts returns the persisted subagent transcripts for a
-// session (newest-finished first). Returns ErrNotFound if the session isn't
-// active or has no persistence.
-func (m *Manager) ListSubagentTranscripts(sessionID string) ([]session.SubagentTranscript, error) {
-	store := m.subagentStoreFor(sessionID)
-	if store == nil {
-		return nil, ErrNotFound
-	}
-	return store.List()
-}
-
-// GetSubagentTranscript loads one persisted transcript by jobID.
-func (m *Manager) GetSubagentTranscript(sessionID, jobID string) (*session.SubagentTranscript, error) {
-	store := m.subagentStoreFor(sessionID)
-	if store == nil {
-		return nil, ErrNotFound
-	}
-	t, err := store.Load(jobID)
-	if err != nil {
-		if errors.Is(err, session.ErrNotFound) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	return t, nil
-}

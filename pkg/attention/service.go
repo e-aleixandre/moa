@@ -345,12 +345,6 @@ func (s *Service) Ack(itemID string) {
 	s.sendCtrl(ctrlMsg{kind: ctrlAck, ack: itemID})
 }
 
-// AckTermination confirms that the guardian has spoken a durable run
-// termination. Until this acknowledgement, every init replays it.
-func (s *Service) AckTermination(terminationID string) {
-	s.sendCtrl(ctrlMsg{kind: ctrlAckTermination, termAck: terminationID})
-}
-
 // AckForClient acknowledges an item only if c is still the active guardian.
 // It prevents a superseded socket from issuing commands after replacement.
 func (s *Service) AckForClient(c ClientSink, itemID string) bool {
