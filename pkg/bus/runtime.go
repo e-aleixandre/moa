@@ -273,7 +273,6 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		thinking:       cfg.Agent.ThinkingLevel(),
 		permissionMode: permission.ModeYolo,
 		gateConfig:     clonePermissionConfig(cfg.GateConfig),
-		tasks:          tasks.State{WidgetMode: tasks.WidgetAll},
 	}
 	if cfg.Gate != nil {
 		rt.defaults.permissionMode = cfg.Gate.Mode()

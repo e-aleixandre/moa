@@ -64,23 +64,6 @@ func TestMarkDone(t *testing.T) {
 	}
 }
 
-func TestAllDone(t *testing.T) {
-	s := NewStore()
-	if s.AllDone() {
-		t.Fatal("AllDone should be false with no tasks")
-	}
-
-	s.Create("A", "", nil)
-	if s.AllDone() {
-		t.Fatal("AllDone should be false with pending tasks")
-	}
-
-	s.MarkDone(1)
-	if !s.AllDone() {
-		t.Fatal("AllDone should be true when all done")
-	}
-}
-
 func TestUpdate(t *testing.T) {
 	s := NewStore()
 	s.Create("Original", "old desc", nil)
@@ -122,18 +105,6 @@ func TestReset(t *testing.T) {
 	}
 }
 
-func TestWidgetMode(t *testing.T) {
-	s := NewStore()
-	if s.GetWidgetMode() != WidgetAll {
-		t.Fatalf("expected default WidgetAll, got %q", s.GetWidgetMode())
-	}
-
-	s.SetWidgetMode(WidgetCurrent)
-	if s.GetWidgetMode() != WidgetCurrent {
-		t.Fatalf("expected WidgetCurrent, got %q", s.GetWidgetMode())
-	}
-}
-
 func TestTimestamps(t *testing.T) {
 	s := NewStore()
 	s.Create("Timestamped", "", nil)
@@ -157,7 +128,6 @@ func TestSaveRestoreState(t *testing.T) {
 	s := NewStore()
 	s.Create("A", "desc", nil)
 	s.MarkDone(1)
-	s.SetWidgetMode(WidgetCurrent)
 
 	meta := s.SaveToMetadata()
 
@@ -167,23 +137,6 @@ func TestSaveRestoreState(t *testing.T) {
 	tasks := s2.Tasks()
 	if len(tasks) != 1 || tasks[0].Status != "done" {
 		t.Fatalf("expected 1 done task, got %v", tasks)
-	}
-	if s2.GetWidgetMode() != WidgetCurrent {
-		t.Fatalf("expected WidgetCurrent, got %q", s2.GetWidgetMode())
-	}
-}
-
-func TestRestoreInvalidWidgetMode(t *testing.T) {
-	s := NewStore()
-	s.RestoreState(State{WidgetMode: "bogus"})
-	if s.GetWidgetMode() != WidgetAll {
-		t.Fatalf("expected WidgetAll for invalid mode, got %q", s.GetWidgetMode())
-	}
-
-	s2 := NewStore()
-	s2.RestoreState(State{})
-	if s2.GetWidgetMode() != WidgetAll {
-		t.Fatalf("expected WidgetAll for empty mode, got %q", s2.GetWidgetMode())
 	}
 }
 

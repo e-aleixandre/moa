@@ -9,15 +9,6 @@ import (
 	"time"
 )
 
-// WidgetMode controls how the task widget is displayed.
-type WidgetMode string
-
-const (
-	WidgetAll     WidgetMode = "all"
-	WidgetCurrent WidgetMode = "current"
-	WidgetHidden  WidgetMode = "hidden"
-)
-
 // Task tracks a unit of work.
 type Task struct {
 	ID          int    `json:"id"`
@@ -31,9 +22,8 @@ type Task struct {
 
 // State is the serializable snapshot of the task store.
 type State struct {
-	Tasks      []Task     `json:"tasks"`
-	NextTaskID int        `json:"next_task_id"`
-	WidgetMode WidgetMode `json:"widget_mode,omitempty"`
+	Tasks      []Task `json:"tasks"`
+	NextTaskID int    `json:"next_task_id"`
 }
 
 // Store manages tasks with thread-safe access.
@@ -44,9 +34,7 @@ type Store struct {
 
 // NewStore creates an empty task store.
 func NewStore() *Store {
-	return &Store{
-		state: State{WidgetMode: WidgetAll},
-	}
+	return &Store{}
 }
 
 // Tasks returns a copy of the current task list.
@@ -75,26 +63,18 @@ func (s *Store) progress() (done, total int) {
 	return
 }
 
-// AllDone returns true if all tasks are complete and there's at least one task.
-func (s *Store) AllDone() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	done, total := s.progress()
-	return total > 0 && done == total
-}
-
 // Create adds a new task. Returns the created task.
 func (s *Store) Create(title, description string, dependsOn []int) Task {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state.NextTaskID++
 	t := Task{
-		ID:        s.state.NextTaskID,
-		Title:     title,
+		ID:          s.state.NextTaskID,
+		Title:       title,
 		Description: description,
-		Status:    "pending",
-		DependsOn: dependsOn,
-		CreatedAt: time.Now().UnixMilli(),
+		Status:      "pending",
+		DependsOn:   dependsOn,
+		CreatedAt:   time.Now().UnixMilli(),
 	}
 	s.state.Tasks = append(s.state.Tasks, t)
 	return t
@@ -165,20 +145,6 @@ func (s *Store) Reset() {
 	s.mu.Unlock()
 }
 
-// WidgetMode returns the current widget display mode.
-func (s *Store) GetWidgetMode() WidgetMode {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.state.WidgetMode
-}
-
-// SetWidgetMode changes the widget display mode.
-func (s *Store) SetWidgetMode(mode WidgetMode) {
-	s.mu.Lock()
-	s.state.WidgetMode = mode
-	s.mu.Unlock()
-}
-
 // SaveState returns the serializable state for session persistence.
 func (s *Store) SaveState() State {
 	s.mu.Lock()
@@ -194,12 +160,6 @@ func (s *Store) RestoreState(st State) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state = st
-	switch s.state.WidgetMode {
-	case WidgetAll, WidgetCurrent, WidgetHidden:
-		// valid
-	default:
-		s.state.WidgetMode = WidgetAll
-	}
 }
 
 func (s *Store) find(id int) *Task {
@@ -247,11 +207,6 @@ func StateFromMetadata(meta map[string]any) (State, bool) {
 	var st State
 	if err := json.Unmarshal(data, &st); err != nil {
 		return State{}, false
-	}
-	switch st.WidgetMode {
-	case WidgetAll, WidgetCurrent, WidgetHidden:
-	default:
-		st.WidgetMode = WidgetAll
 	}
 	return st, true
 }
