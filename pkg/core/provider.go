@@ -193,13 +193,23 @@ type StreamOptions struct {
 	MaxTokens      *int     `json:"max_tokens,omitempty"`
 	APIKey         string   `json:"-"`
 	ThinkingLevel  string   `json:"thinking_level,omitempty"`
-	CacheRetention string   `json:"cache_retention,omitempty"`
+	// CacheRetention selects the prompt-cache TTL: "" is the provider default
+	// (5 minutes), "1h" opts into the long TTL, and CacheOff suppresses cache
+	// writes entirely.
+	CacheRetention string `json:"cache_retention,omitempty"`
 	// PromptCacheKey identifies the conversation this request belongs to, so
 	// requests sharing a prefix are routed to the machine holding its cache.
 	// Consumed by the Responses providers (OpenAI, xAI); Anthropic has no
 	// equivalent and ignores it.
 	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
+
+// CacheOff is the CacheRetention value for a request whose prefix will never
+// be reused. A cache write is billed at a premium over plain input, so paying
+// it for an entry no later request can hit is pure cost: conversation turns
+// share a prefix and benefit, one-shot requests built from a different system
+// prompt and a flattened transcript do not.
+const CacheOff = "off"
 
 // ThinkingLevels is the canonical list of valid thinking levels.
 // All validation and UI should reference this slice — not hardcoded strings.

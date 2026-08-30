@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
@@ -844,5 +845,70 @@ func TestSupportsDocuments(t *testing.T) {
 	a := New("sk-ant-api03-test")
 	if !a.SupportsDocuments() {
 		t.Error("expected SupportsDocuments to be true for Anthropic")
+	}
+}
+
+// TestCacheBreakpoints_OffOmitsEveryWrite covers the compaction request: its
+// prefix is single-use, so asking Anthropic to cache it bills the write premium
+// for an entry no later request can hit. "off" must leave no cache_control
+// anywhere in the body while the rest of the request is unchanged.
+func TestCacheBreakpoints_OffOmitsEveryWrite(t *testing.T) {
+	req := core.Request{
+		Model:  core.Model{ID: "claude-sonnet-4-6"},
+		System: "You are a conversation summarizer.",
+		Messages: []core.Message{
+			core.NewUserMessage("Summarize this transcript."),
+		},
+		Tools: []core.ToolSpec{
+			{Name: "bash", Description: "Run commands", Parameters: json.RawMessage(`{"type":"object"}`)},
+		},
+		Options: core.StreamOptions{CacheRetention: core.CacheOff},
+	}
+
+	data, err := buildRequestBody(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("cache_control")) {
+		t.Fatalf("cache_control present with CacheOff: a single-use prefix must not be written to cache\n%s", data)
+	}
+
+	// The request must still be well-formed and complete: opting out of cache
+	// writes changes billing, never what the model is asked.
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["model"] != "claude-sonnet-4-6" {
+		t.Errorf("model = %v", body["model"])
+	}
+	if msgs, ok := body["messages"].([]any); !ok || len(msgs) != 1 {
+		t.Errorf("messages = %v, want the single user message", body["messages"])
+	}
+	if tools, ok := body["tools"].([]any); !ok || len(tools) != 1 {
+		t.Errorf("tools = %v, want the tool to survive", body["tools"])
+	}
+	if body["system"] == nil {
+		t.Error("system prompt must survive")
+	}
+}
+
+// TestCacheBreakpoints_DefaultAndHourStillWrite guards the other side: only the
+// explicit opt-out suppresses writes, so ordinary turns keep their cache.
+func TestCacheBreakpoints_DefaultAndHourStillWrite(t *testing.T) {
+	for _, ttl := range []string{"", "1h"} {
+		req := core.Request{
+			Model:    core.Model{ID: "claude-sonnet-4-6"},
+			System:   "You are helpful.",
+			Messages: []core.Message{core.NewUserMessage("Hello")},
+			Options:  core.StreamOptions{CacheRetention: ttl},
+		}
+		data, err := buildRequestBody(req, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(data, []byte("cache_control")) {
+			t.Fatalf("CacheRetention %q dropped cache_control: conversation turns share a prefix and must keep caching", ttl)
+		}
 	}
 }

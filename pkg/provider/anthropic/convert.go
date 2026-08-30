@@ -557,6 +557,12 @@ func resolveThinking(req core.Request) *thinkingConfig {
 // the default 5-minute ephemeral cache. The three breakpoints share one map
 // value; it is never mutated after assignment, so sharing the reference is safe.
 func addCacheBreakpoints(ar *anthropicRequest, ttl string) {
+	// A breakpoint is what asks Anthropic to write the prefix to cache, and a
+	// write is billed above plain input. A caller that knows its prefix is
+	// single-use opts out rather than pay for an entry nothing can hit.
+	if ttl == core.CacheOff {
+		return
+	}
 	cc := map[string]any{"type": "ephemeral"}
 	if ttl == "1h" {
 		cc["ttl"] = "1h"

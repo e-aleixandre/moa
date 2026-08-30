@@ -85,7 +85,10 @@ func Generate(ctx context.Context, provider core.Provider, model core.Model, mes
 		Model:    model,
 		System:   systemPrompt,
 		Messages: []core.Message{core.NewUserMessage("<conversation>\n" + serialized + "\n</conversation>\n\nWrite the handoff brief.")},
-		Options:  core.StreamOptions{MaxTokens: &maxTokens},
+		// Same shape as compaction: a private system prompt over a flattened
+		// transcript, sent once. Nothing shares this prefix, so a cache write
+		// would be billed for an entry with no possible reader.
+		Options: core.StreamOptions{MaxTokens: &maxTokens, CacheRetention: core.CacheOff},
 	}
 	ch, err := provider.Stream(ctx, request)
 	if err != nil {

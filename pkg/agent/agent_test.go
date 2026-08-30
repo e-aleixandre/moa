@@ -3276,3 +3276,46 @@ func TestCheckpointReader_NilWithoutSlot(t *testing.T) {
 		t.Fatal("no slot configured should yield no reader")
 	}
 }
+
+// TestCompact_OptsOutOfCacheWrites pins the billing contract at the caller.
+// Compaction builds a one-shot prefix (summarizer system prompt, no tools,
+// transcript flattened into a single user message) that no later request can
+// share, so asking the provider to cache it pays the cache-write premium for an
+// entry with no possible reader. The routing key must still travel.
+func TestCompact_OptsOutOfCacheWrites(t *testing.T) {
+	var got core.Request
+	capture := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		got = req
+		return simpleTextResponse("SUMMARY")(req)
+	}
+
+	ag, err := New(AgentConfig{
+		Provider:            NewMockProvider(capture),
+		Model:               core.Model{ID: "test-model", Provider: "mock", MaxInput: 100},
+		SystemPrompt:        "test",
+		Tools:               core.NewRegistry(),
+		MaxTurns:            10,
+		MaxToolCallsPerTurn: 5,
+		MaxRunDuration:      30 * time.Second,
+		Compaction:          &core.CompactionSettings{Enabled: true, ReserveTokens: 10, KeepRecent: 10},
+		CacheTTL:            "1h",
+		PromptCacheKey:      "session-abc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 30; i++ {
+		ag.state.Messages = append(ag.state.Messages,
+			core.WrapMessage(core.NewUserMessage(fmt.Sprintf("message number %d", i))))
+	}
+
+	if _, err := ag.Compact(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if got.Options.CacheRetention != core.CacheOff {
+		t.Errorf("CacheRetention = %q, want %q: the session TTL must not make compaction pay for a single-use cache entry", got.Options.CacheRetention, core.CacheOff)
+	}
+	if got.Options.PromptCacheKey != "session-abc" {
+		t.Errorf("PromptCacheKey = %q, want session-abc: routing belongs to the conversation and survives the opt-out", got.Options.PromptCacheKey)
+	}
+}

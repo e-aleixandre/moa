@@ -1232,9 +1232,13 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	toolSpecs := a.tools.Specs()
 	estimate := core.EstimateContextTokens(msgs, a.config.SystemPrompt, toolSpecs, epoch)
 
-	// Compaction runs against a different prefix, so it will likely miss the
-	// cache — but it belongs to this conversation and must route with it.
-	streamOpts := core.StreamOptions{ThinkingLevel: a.config.ThinkingLevel, PromptCacheKey: a.config.PromptCacheKey}
+	// Compaction runs against a different prefix — its own system prompt, no
+	// tools, the transcript flattened into one user message — so it cannot hit
+	// the conversation's cache, and nothing can hit its own: that prefix is
+	// never repeated. Writing it would pay the cache-write premium for an entry
+	// with no possible reader. The cache key still travels: the request belongs
+	// to this conversation and must route with it.
+	streamOpts := core.StreamOptions{ThinkingLevel: a.config.ThinkingLevel, PromptCacheKey: a.config.PromptCacheKey, CacheRetention: core.CacheOff}
 	result, compacted, err := compaction.Compact(
 		ctx, provider, model, streamOpts,
 		msgs, estimate.Tokens, settings.EffectiveWindow(model.MaxInput), *settings, focus,
