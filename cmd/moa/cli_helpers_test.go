@@ -148,3 +148,38 @@ func TestRefreshingProvider_UsesLatestKeyEachRequest(t *testing.T) {
 		t.Fatalf("api keys passed = %#v, want %#v", got, want)
 	}
 }
+
+// TestBuildProvider_ExpiredOAuthStillBuilds reproduces the lockout: with the
+// default model on Anthropic and a refresh token the server rejects, building
+// the provider failed, so creating a session — and reopening an existing one —
+// returned 500. From a phone that left no way back in.
+//
+// The key fetched at build time is never used anyway: refreshingProvider gets a
+// fresh one per Stream. So the session must open, and sending must be what
+// reports the dead credential.
+func TestBuildProvider_ExpiredOAuthStillBuilds(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	store := newTestAuthStore(t)
+	// Expired access plus a refresh token the server will reject: GetAPIKey
+	// attempts a refresh and fails, exactly as it did in production.
+	if err := store.Set("anthropic", auth.Credential{
+		Type:    "oauth",
+		Access:  "dead-access",
+		Refresh: "rotated-away",
+		Expires: time.Now().Add(-time.Hour).UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := store.GetAPIKey("anthropic"); err == nil {
+		t.Fatal("precondition: GetAPIKey should fail with an expired refresh token")
+	}
+
+	built, err := buildProvider(core.Model{Provider: "anthropic", ID: "claude-opus-4"}, store)
+	if err != nil {
+		t.Fatalf("buildProvider returned %v: a session must still open with dead credentials", err)
+	}
+	if built.Provider == nil {
+		t.Fatal("buildProvider returned no provider: the session would have nothing to send with")
+	}
+}

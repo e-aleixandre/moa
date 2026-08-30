@@ -156,7 +156,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "warning: unrecognized model %q — context management disabled\n", *modelFlag)
 	}
 
-	// Build provider for the resolved model.
+	// Build provider for the resolved model. A one-shot run has nowhere to
+	// recover to, so bad credentials are worth reporting up front here — unlike
+	// serve, where the session must still open.
+	if _, _, kerr := authStore.GetAPIKey(providerNameForModel(resolvedModel)); kerr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", kerr)
+		os.Exit(1)
+	}
 	providerBuild, err := buildProvider(resolvedModel, authStore)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
