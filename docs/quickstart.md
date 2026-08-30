@@ -90,6 +90,12 @@ uses a shared public Grok Build client and a private consumer proxy, so it is
 best-effort rather than a promised public xAI API integration. If both are set,
 `XAI_API_KEY` takes precedence over the stored xAI OAuth login.
 
+An expired login does not lock you out of Serve: sessions still open and
+existing ones still reopen, and the failure appears when you send a message,
+naming the provider to sign in to again. Switching that session to a model from
+a provider that is still authenticated is enough to keep working. A one-shot CLI
+run reports the problem before it starts, since it has nothing to fall back to.
+
 For voice input (web UI):
 
 ```bash

@@ -5,6 +5,35 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.2] - 2026-08-30
+
+### Fixed
+
+- A session now opens even when its provider credentials have expired. The
+  default model is Anthropic, so a dead refresh token meant no session could
+  be created and no existing one reopened — the request failed before the
+  conversation existed. From a phone that is a lockout, with no way to switch
+  provider or sign in again. The credential was never the one actually used,
+  since a fresh key is requested per message, so the failure now surfaces on
+  send, where the token is really needed. One-shot CLI runs still fail up
+  front: they have nowhere to recover to.
+- Refreshing one provider no longer overwrites another's credentials. Saving
+  writes the whole credential file, but a refresh only re-read the provider it
+  was refreshing, so refreshing xAI could write back a stale copy of the
+  Anthropic tokens. Anthropic rotates its refresh token on every use and
+  invalidates the old one immediately, which turned that stale copy into a
+  forced re-login.
+
+### Removed
+
+- Roughly 1,250 lines of unreachable code: functions with no caller anywhere
+  (including tests), the task widget mode that was stored and normalised but
+  never read, a second message queue only tests ever pushed to, and an
+  in-place session restoration path that nothing reached — resuming builds a
+  fresh runtime instead. Two of these were parallel implementations of
+  something the live code already did, which is the shape that drifts apart
+  and produces bugs.
+
 ## [0.34.1] - 2026-08-30
 
 ### Fixed
