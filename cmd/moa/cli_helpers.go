@@ -49,9 +49,14 @@ func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult
 		providerName = "anthropic"
 	}
 
+	// Deliberately not fatal. The key fetched here is never the one used:
+	// refreshingProvider asks for a fresh one on every Stream. Failing the
+	// build meant expired credentials blocked creating a session and even
+	// reopening an existing one, which left no way back in from a phone. The
+	// honest failure belongs at send time, where the token is really needed.
 	apiKey, isOAuth, err := authStore.GetAPIKey(providerName)
 	if err != nil {
-		return ProviderBuildResult{}, err
+		apiKey, isOAuth = "", authStore.CredentialKind(providerName) == "oauth"
 	}
 
 	cfg := provider.Config{
@@ -170,4 +175,13 @@ func resolvePrompt(p string) (string, error) {
 	}
 
 	return "", fmt.Errorf("no prompt provided: use -p \"text\", -p @file, or pipe to stdin")
+}
+
+// providerNameForModel is the provider a model authenticates against, with the
+// same default buildProvider applies.
+func providerNameForModel(model core.Model) string {
+	if model.Provider == "" {
+		return "anthropic"
+	}
+	return model.Provider
 }
