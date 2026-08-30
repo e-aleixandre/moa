@@ -303,6 +303,16 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 		return nil
 	})
 
+	b.OnCommand(func(cmd SetDefaultCompactAt) error {
+		if cmd.Tokens < 0 {
+			return fmt.Errorf("compaction threshold cannot be negative")
+		}
+		// Deliberately not gated on "agent is running": a global threshold must
+		// reach long runs, which are the ones that overflow.
+		sctx.Agent.SetDefaultCompactAt(cmd.Tokens)
+		return nil
+	})
+
 	b.OnCommand(func(cmd ClearSession) error {
 		if sctx.treeSyncer != nil {
 			if err := sctx.treeSyncer.ResetAndClear(); err != nil {
@@ -594,6 +604,10 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 
 	b.OnQuery(func(q GetCompactAt) (int, error) {
 		return sctx.Agent.CompactAt(), nil
+	})
+
+	b.OnQuery(func(q GetEffectiveCompactAt) (int, error) {
+		return sctx.Agent.EffectiveCompactAt(), nil
 	})
 
 	b.OnQuery(func(q GetCompactAtFloor) (int, error) {

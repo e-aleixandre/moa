@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -66,9 +67,36 @@ func handleCompactAtPatch(w http.ResponseWriter, r *http.Request, mgr *Manager) 
 		http.Error(w, "failed to save compaction threshold", http.StatusInternalServerError)
 		return
 	}
+	// The setting is global and live: it applies to every conversation, open or
+	// not, old or new. Saving the file alone only covers sessions built later —
+	// a resident agent captured the previous value when it was constructed and
+	// would keep using it for as long as it stays loaded, which on this server
+	// is days.
+	mgr.applyDefaultCompactAt(tokens)
 	writeJSON(w, http.StatusOK, currentCompactAtPolicy(tokens))
 }
 
 func currentCompactAtPolicy(tokens int) compactAtPolicy {
 	return compactAtPolicy{CompactAt: tokens, Min: core.DefaultCompactionSettings.MinCompactAt()}
+}
+
+// applyDefaultCompactAt pushes the global threshold into every session already
+// resident in memory. Sessions built after this point read the saved config, so
+// only the loaded ones need telling; a session that chose its own compact_at
+// keeps it, because the agent stores the two separately and its own value wins.
+func (m *Manager) applyDefaultCompactAt(tokens int) {
+	m.mu.RLock()
+	loaded := make([]*ManagedSession, 0, len(m.sessions))
+	for _, sess := range m.sessions {
+		loaded = append(loaded, sess)
+	}
+	m.mu.RUnlock()
+
+	for _, sess := range loaded {
+		if sess.runtime == nil || sess.runtime.Bus == nil {
+			continue
+		}
+		// Best effort: one unreachable session must not stop the rest.
+		_ = sess.runtime.Bus.Execute(bus.SetDefaultCompactAt{SessionID: sess.ID, Tokens: tokens})
+	}
 }

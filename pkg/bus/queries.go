@@ -50,6 +50,11 @@ type GetCompactAt struct{ SessionID string }
 // Handler returns: int
 type GetCompactAtFloor struct{ SessionID string }
 
+// GetEffectiveCompactAt returns the threshold actually in force: the session's
+// own choice when it made one, otherwise the global default it currently holds.
+// Distinct from GetCompactAt, which reports only what this session chose.
+type GetEffectiveCompactAt struct{ SessionID string }
+
 // GetSessionCost returns the accumulated session cost in USD (main run + subagents).
 // Handler returns: float64
 type GetSessionCost struct{ SessionID string }

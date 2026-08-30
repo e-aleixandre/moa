@@ -43,6 +43,8 @@ type AgentController interface {
 	SetThinkingLevel(level string) error
 	SetSystemPrompt(prompt string) error
 	SetCompactAt(tokens int) error
+	SetDefaultCompactAt(tokens int)
+	EffectiveCompactAt() int
 	SetMaxBudget(v float64) error
 	Reset() error
 	Compact(ctx context.Context, focus string) (*core.CompactionPayload, error)

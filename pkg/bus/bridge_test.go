@@ -71,9 +71,10 @@ type fakeAgent struct {
 
 	setThinkingErr error
 
-	systemPrompt string
-	compactAt    int
-	maxBudget    float64
+	systemPrompt     string
+	compactAt        int
+	defaultCompactAt int
+	maxBudget        float64
 
 	// Send behavior
 	sendCalled  bool
@@ -438,6 +439,23 @@ func (f *fakeAgent) SetCompactAt(tokens int) error {
 	defer f.mu.Unlock()
 	f.compactAt = tokens
 	return nil
+}
+
+func (f *fakeAgent) SetDefaultCompactAt(tokens int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.defaultCompactAt = tokens
+}
+
+// EffectiveCompactAt mirrors the real agent: the session's own choice wins,
+// otherwise the global default it currently holds.
+func (f *fakeAgent) EffectiveCompactAt() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.compactAt > 0 {
+		return f.compactAt
+	}
+	return f.defaultCompactAt
 }
 
 func (f *fakeAgent) CompactAt() int {

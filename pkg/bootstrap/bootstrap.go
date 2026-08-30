@@ -626,15 +626,20 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 }
 
 // inheritedCompactAt resolves the compaction threshold a subagent spawned from
-// sess should run under: the parent's own choice when it made one, otherwise
-// globalCompactAt. Split out of the closure so the rule can be tested without
+// sess should run under. It reads the parent's EFFECTIVE value — its own choice
+// when it made one, otherwise the global default it currently holds — because a
+// global change is pushed into loaded agents, so the parent is the live source.
+// globalCompactAt is only the fallback for a session with no agent yet: it was
+// captured when the process built this session and is stale on a server that
+// stays up for days. Split out of the closure so the rule can be tested without
 // standing up a whole session.
 func inheritedCompactAt(sess *Session, globalCompactAt int) int {
-	var sessionCompactAt int
 	if a := sess.agentHolder.Load(); a != nil {
-		sessionCompactAt = a.CompactAt()
+		if effective := a.EffectiveCompactAt(); effective > 0 {
+			return effective
+		}
 	}
-	return core.ResolveCompactAt(sessionCompactAt, globalCompactAt)
+	return core.ResolveCompactAt(0, globalCompactAt)
 }
 
 // FormatSubagentNotification produces the text injected into the agent's

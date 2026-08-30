@@ -3372,3 +3372,52 @@ func TestAutoCompact_OptsOutOfCacheWrites(t *testing.T) {
 		t.Errorf("PromptCacheKey = %q, want session-abc", compactReq.Options.PromptCacheKey)
 	}
 }
+
+// TestGlobalCompactAtReachesRunningAgent reproduces the production bug: the
+// owner set compact_at to 300k at 19:43 while a session loaded at 19:02 kept
+// running. That session — and every subagent it spawned — held the value
+// captured at construction (0), so it would only compact at the full 1M window.
+// A subagent reached 37% of a 1M window ($29) without compacting, while its
+// threshold said 283,616 tokens.
+//
+// The setting is global and immediate: it must reach agents already loaded,
+// including one mid-run, without overwriting a session's own explicit choice.
+func TestGlobalCompactAtReachesRunningAgent(t *testing.T) {
+	ag, err := New(AgentConfig{
+		Provider:            NewMockProvider(),
+		Model:               core.Model{ID: "m", Provider: "mock", MaxInput: 1_000_000},
+		SystemPrompt:        "test",
+		Tools:               core.NewRegistry(),
+		MaxTurns:            10,
+		MaxToolCallsPerTurn: 5,
+		MaxRunDuration:      30 * time.Second,
+		// Built before the owner touched Settings: no global threshold yet.
+		Compaction: core.CompactionWithDefault(0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ag.EffectiveCompactAt(); got != 0 {
+		t.Fatalf("precondition: EffectiveCompactAt = %d, want 0", got)
+	}
+
+	ag.SetDefaultCompactAt(300_000)
+
+	if got := ag.EffectiveCompactAt(); got != 300_000 {
+		t.Fatalf("EffectiveCompactAt = %d, want 300000: a global change must reach a session that was already open", got)
+	}
+	// A session that never chose its own value must not gain one: the global
+	// default is what changed, and it has to keep tracking future changes.
+	if got := ag.CompactAt(); got != 0 {
+		t.Errorf("CompactAt = %d, want 0: the global default must not be recorded as the session's own choice", got)
+	}
+
+	// An explicit session choice still wins over the global default.
+	if err := ag.SetCompactAt(120_000); err != nil {
+		t.Fatal(err)
+	}
+	ag.SetDefaultCompactAt(500_000)
+	if got := ag.EffectiveCompactAt(); got != 120_000 {
+		t.Errorf("EffectiveCompactAt = %d, want 120000: an explicit session threshold outranks the global default", got)
+	}
+}

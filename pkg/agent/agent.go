@@ -968,6 +968,26 @@ func (a *Agent) SetThinkingLevel(level string) error {
 	return nil
 }
 
+// SetDefaultCompactAt updates the GLOBAL fallback threshold, leaving the
+// session's own choice untouched. Unlike SetCompactAt it is allowed while the
+// agent is running: the setting is meant to reach every conversation the moment
+// it changes, and a long run is exactly the case that needs it. The loop reads
+// a.config.Compaction through a pointer it captured at run start, so this
+// replaces the struct (copy-on-write) rather than mutating the shared value.
+func (a *Agent) SetDefaultCompactAt(tokens int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	settings := core.DefaultCompactionSettings
+	if a.config.Compaction != nil {
+		settings = *a.config.Compaction
+	}
+	if settings.DefaultCompactAt == tokens {
+		return
+	}
+	settings.DefaultCompactAt = tokens
+	a.config.Compaction = &settings
+}
+
 // SetCompactAt sets the soft compaction threshold in tokens. When >0, the agent
 // compacts once context exceeds this many tokens (clamped to the model window),
 // instead of waiting for the full window. 0 restores the default (window-based)
@@ -1586,7 +1606,14 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		convertToLLM:        a.config.ConvertToLLM,
 		materializeContent:  a.materializeContent(),
 		permissionCheck:     permissionCheck,
-		compaction:          a.config.Compaction,
+		// A function, not the pointer: SetDefaultCompactAt replaces the struct
+		// copy-on-write, so a run in flight must re-read it to see a global
+		// threshold change.
+		compaction: func() *core.CompactionSettings {
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			return a.config.Compaction
+		},
 		// A prepare-compact run writes the checkpoint and is then discarded by
 		// restoreConversation, so an auto-compaction inside it must not consume
 		// the slot: doing so would clear the checkpoint the real compaction is

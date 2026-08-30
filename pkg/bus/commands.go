@@ -174,6 +174,15 @@ type SetCompactAt struct {
 	Tokens    int
 }
 
+// SetDefaultCompactAt applies the GLOBAL compaction threshold to a loaded
+// session. The setting is global and immediate, so it reaches conversations
+// that were already open — including one mid-run — without touching a session's
+// own explicit choice, which still wins.
+type SetDefaultCompactAt struct {
+	SessionID string
+	Tokens    int
+}
+
 // ---------------------------------------------------------------------------
 // Path policy
 // ---------------------------------------------------------------------------

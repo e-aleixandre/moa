@@ -114,7 +114,11 @@ type loopConfig struct {
 	permissionCheck func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision
 
 	// Compaction
-	compaction *core.CompactionSettings
+	// compaction is read through a function, not captured once: the global
+	// threshold can change mid-run (Settings applies to every conversation, open
+	// or not), and a long run is exactly when that matters. Returns nil when
+	// compaction is disabled.
+	compaction func() *core.CompactionSettings
 	// readCheckpoint returns the ephemeral session checkpoint to append to an
 	// automatic compaction summary, and a callback to clear it once consumed.
 	// Nil when no checkpoint slot is wired.
@@ -218,12 +222,18 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Skipped on a pause_turn resubmit: the continuation must resend the
 		// paused conversation as-is, and compacting it away here would drop the
 		// message the model is waiting to continue.
-		if !justPaused && cfg.compaction != nil && cfg.compaction.Enabled && cfg.model.MaxInput > 0 {
+		// Read the settings fresh on every iteration: a global threshold change
+		// must reach a run already in flight.
+		var compactionSettings *core.CompactionSettings
+		if cfg.compaction != nil {
+			compactionSettings = cfg.compaction()
+		}
+		if !justPaused && compactionSettings != nil && compactionSettings.Enabled && cfg.model.MaxInput > 0 {
 			estimate := core.EstimateContextTokens(
 				cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch,
 			)
-			window := cfg.compaction.EffectiveWindow(cfg.model.MaxInput)
-			if core.ShouldCompact(estimate.Tokens, window, *cfg.compaction) {
+			window := compactionSettings.EffectiveWindow(cfg.model.MaxInput)
+			if core.ShouldCompact(estimate.Tokens, window, *compactionSettings) {
 				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventCompactionStart})
 
 				// Same one-shot prefix as the manual path: the summarizer's own
@@ -236,7 +246,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 				result, compacted, err := compaction.Compact(
 					ctx, cfg.provider, cfg.model, compactOpts,
-					cfg.state.Messages, estimate.Tokens, window, *cfg.compaction, "",
+					cfg.state.Messages, estimate.Tokens, window, *compactionSettings, "",
 				)
 				if err != nil {
 					// Non-fatal: log and continue with full context.
