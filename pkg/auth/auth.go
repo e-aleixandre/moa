@@ -123,6 +123,36 @@ func (s *Store) loadFromDisk() (map[string]Credential, error) {
 	return m, nil
 }
 
+// adoptDisk replaces the in-memory map with the on-disk file. Callers must
+// already hold the inter-process file lock: a later save() writes the whole
+// map, so adopting only one provider would clobber a sibling's rotation of
+// another. Anthropic (and others) rotate the refresh token on every use;
+// overwriting the new one with a stale copy is a forced re-login.
+func (s *Store) adoptDisk() {
+	disk, err := s.loadFromDisk()
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	s.data = disk
+	s.mu.Unlock()
+}
+
+func oauthCredential(previous Credential, refreshed *OAuthCredentials) (Credential, error) {
+	refresh := refreshed.Refresh
+	if refresh == "" {
+		refresh = previous.Refresh
+	}
+	if refresh == "" {
+		return Credential{}, fmt.Errorf("refresh response missing refresh token")
+	}
+	account := refreshed.AccountID
+	if account == "" {
+		account = previous.AccountID
+	}
+	return Credential{Type: "oauth", Access: refreshed.Access, Refresh: refresh, Expires: refreshed.Expires, AccountID: account}, nil
+}
+
 func (s *Store) save() error {
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -262,15 +292,16 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 		var result Credential
 		var saveErr error
 		err := s.withFileLock(func() error {
-			// Reload only after owning the inter-process lock. This makes refresh
-			// token rotation safe even when CLI and serve expire simultaneously.
-			if disk, derr := s.loadFromDisk(); derr == nil {
-				if dc, found := disk[provider]; found && dc.Type == "oauth" {
-					cred = dc
-					s.mu.Lock()
-					s.data[provider] = dc
-					s.mu.Unlock()
-				}
+			// Reload the whole file after owning the inter-process lock. A
+			// sibling (CLI + serve) may have rotated a *different* provider;
+			// save() writes every credential, so adopting only this key would
+			// put the sibling's new refresh token back to a stale copy.
+			s.adoptDisk()
+			s.mu.RLock()
+			cred, ok = s.data[provider]
+			s.mu.RUnlock()
+			if !ok || cred.Type != "oauth" {
+				return fmt.Errorf("no credentials for provider %q", provider)
 			}
 			if time.Now().UnixMilli() < cred.Expires {
 				result = cred
@@ -280,7 +311,10 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 			if err != nil {
 				return err
 			}
-			result = Credential{Type: "oauth", Access: refreshed.Access, Refresh: refreshed.Refresh, Expires: refreshed.Expires, AccountID: refreshed.AccountID}
+			result, err = oauthCredential(cred, refreshed)
+			if err != nil {
+				return err
+			}
 			s.mu.Lock()
 			s.data[provider] = result
 			saveErr = s.save()
@@ -330,13 +364,12 @@ func (s *Store) RefreshOAuthIfCurrent(provider, rejected string) (string, error)
 	}
 	var result Credential
 	err := s.withFileLock(func() error {
-		if disk, derr := s.loadFromDisk(); derr == nil {
-			if dc, found := disk[provider]; found && dc.Type == "oauth" {
-				cred = dc
-				s.mu.Lock()
-				s.data[provider] = dc
-				s.mu.Unlock()
-			}
+		s.adoptDisk()
+		s.mu.RLock()
+		cred, ok = s.data[provider]
+		s.mu.RUnlock()
+		if !ok || cred.Type != "oauth" {
+			return fmt.Errorf("no OAuth credentials for provider %q", provider)
 		}
 		if cred.Access != rejected {
 			result = cred
@@ -356,7 +389,10 @@ func (s *Store) RefreshOAuthIfCurrent(provider, rejected string) (string, error)
 			s.mu.Unlock()
 			return err
 		}
-		result = Credential{Type: "oauth", Access: refreshed.Access, Refresh: refreshed.Refresh, Expires: refreshed.Expires, AccountID: refreshed.AccountID}
+		result, err = oauthCredential(cred, refreshed)
+		if err != nil {
+			return err
+		}
 		s.mu.Lock()
 		s.data[provider] = result
 		err = s.save()

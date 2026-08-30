@@ -311,6 +311,87 @@ func TestStore_GetAPIKey_CrossStoreRefreshLock(t *testing.T) {
 	}
 }
 
+func TestStore_RefreshDoesNotClobberSiblingProvider(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "auth.json")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("XAI_API_KEY", "")
+
+	store := NewStore(path)
+	if err := store.Set("anthropic", Credential{
+		Type: "oauth", Access: "ant-stale", Refresh: "ant-refresh-stale",
+		Expires: time.Now().Add(time.Hour).UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set("xai", Credential{
+		Type: "oauth", Access: "xai-old", Refresh: "xai-refresh",
+		Expires: time.Now().Add(-time.Minute).UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A sibling already rotated Anthropic on disk. Serve still holds the stale
+	// copy in memory and is about to refresh xAI — that save used to write the
+	// whole map and revert Anthropic to the already-rotated refresh token.
+	sibling := NewStore(path)
+	if err := sibling.Set("anthropic", Credential{
+		Type: "oauth", Access: "ant-fresh", Refresh: "ant-refresh-fresh",
+		Expires: time.Now().Add(2 * time.Hour).UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	store.refresh = func(provider, refreshToken string) (*OAuthCredentials, error) {
+		if provider != "xai" || refreshToken != "xai-refresh" {
+			t.Fatalf("refresh %s/%s", provider, refreshToken)
+		}
+		return &OAuthCredentials{
+			Access:  "xai-new",
+			Refresh: "xai-refresh-new",
+			Expires: time.Now().Add(time.Hour).UnixMilli(),
+		}, nil
+	}
+
+	key, isOAuth, err := store.GetAPIKey("xai")
+	if err != nil || !isOAuth || key != "xai-new" {
+		t.Fatalf("xai GetAPIKey = %q oauth=%v err=%v", key, isOAuth, err)
+	}
+
+	disk, err := store.loadFromDisk()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disk["anthropic"].Refresh != "ant-refresh-fresh" || disk["anthropic"].Access != "ant-fresh" {
+		t.Fatalf("anthropic clobbered: %+v", disk["anthropic"])
+	}
+	if disk["xai"].Refresh != "xai-refresh-new" {
+		t.Fatalf("xai not persisted: %+v", disk["xai"])
+	}
+}
+
+func TestOAuthCredentialKeepsPreviousRefreshWhenOmitted(t *testing.T) {
+	previous := Credential{Type: "oauth", Access: "old", Refresh: "keep-me", AccountID: "acct"}
+	got, err := oauthCredential(previous, &OAuthCredentials{
+		Access:  "new",
+		Refresh: "",
+		Expires: 123,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Refresh != "keep-me" || got.Access != "new" || got.AccountID != "acct" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestOAuthCredentialRejectsMissingRefresh(t *testing.T) {
+	_, err := oauthCredential(Credential{Type: "oauth"}, &OAuthCredentials{Access: "new", Expires: 1})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
 // TestStore_PeekOAuthToken verifies the read-only usage getter: it reports the
 // OAuth/validity state without ever triggering a refresh (which would rotate the
 // shared refresh token from a read-only caller).
