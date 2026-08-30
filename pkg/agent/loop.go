@@ -226,8 +226,16 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			if core.ShouldCompact(estimate.Tokens, window, *cfg.compaction) {
 				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventCompactionStart})
 
+				// Same one-shot prefix as the manual path: the summarizer's own
+				// system prompt over a flattened transcript, which nothing else
+				// shares. Inheriting the session's cache TTL here would bill a
+				// cache write — at 2x under the 1h TTL — for an entry no later
+				// request can read. Routing (PromptCacheKey) is preserved.
+				compactOpts := cfg.streamOpts
+				compactOpts.CacheRetention = core.CacheOff
+
 				result, compacted, err := compaction.Compact(
-					ctx, cfg.provider, cfg.model, cfg.streamOpts,
+					ctx, cfg.provider, cfg.model, compactOpts,
 					cfg.state.Messages, estimate.Tokens, window, *cfg.compaction, "",
 				)
 				if err != nil {

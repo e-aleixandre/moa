@@ -3319,3 +3319,56 @@ func TestCompact_OptsOutOfCacheWrites(t *testing.T) {
 		t.Errorf("PromptCacheKey = %q, want session-abc: routing belongs to the conversation and survives the opt-out", got.Options.PromptCacheKey)
 	}
 }
+
+// TestAutoCompact_OptsOutOfCacheWrites covers the path that actually runs in
+// production. Automatic compaction happens inside a run and reuses the run's
+// stream options, which carry the session's cache TTL: without an explicit
+// opt-out it billed a cache write — 2x under the owner's 1h TTL — for the
+// summarizer's single-use prefix. Manual /compact is a different call site, so
+// a test that only covers Agent.Compact leaves this one green while broken.
+func TestAutoCompact_OptsOutOfCacheWrites(t *testing.T) {
+	var compactReq core.Request
+	seen := 0
+	handler := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		seen++
+		// The summarizer call is the one with no tools and its own system prompt.
+		if len(req.Tools) == 0 && req.System != "test" {
+			compactReq = req
+			return simpleTextResponse("SUMMARY")(req)
+		}
+		return simpleTextResponse("done")(req)
+	}
+
+	ag, err := New(AgentConfig{
+		Provider:            NewMockProvider(handler, handler, handler),
+		Model:               core.Model{ID: "test-model", Provider: "mock", MaxInput: 100},
+		SystemPrompt:        "test",
+		Tools:               core.NewRegistry(),
+		MaxTurns:            10,
+		MaxToolCallsPerTurn: 5,
+		MaxRunDuration:      30 * time.Second,
+		Compaction:          &core.CompactionSettings{Enabled: true, ReserveTokens: 10, KeepRecent: 10},
+		CacheTTL:            "1h",
+		PromptCacheKey:      "session-abc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 40; i++ {
+		ag.state.Messages = append(ag.state.Messages,
+			core.WrapMessage(core.NewUserMessage(fmt.Sprintf("message number %d", i))))
+	}
+
+	if _, err := ag.Send(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	if compactReq.Model.ID == "" {
+		t.Fatalf("automatic compaction never reached the provider (%d calls); the test cannot prove anything", seen)
+	}
+	if compactReq.Options.CacheRetention != core.CacheOff {
+		t.Errorf("CacheRetention = %q, want %q: automatic compaction inherited the session TTL and paid a cache write for a single-use prefix", compactReq.Options.CacheRetention, core.CacheOff)
+	}
+	if compactReq.Options.PromptCacheKey != "session-abc" {
+		t.Errorf("PromptCacheKey = %q, want session-abc", compactReq.Options.PromptCacheKey)
+	}
+}
