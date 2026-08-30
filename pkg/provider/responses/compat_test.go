@@ -7,7 +7,7 @@ func buildRequestBody(req core.Request, supportsDocuments, supportsMaxOutputToke
 }
 func mapReasoningEffort(level string) string { return MapReasoningEffort(level, nil) }
 func convertMessage(msg core.Message, supportsDocuments bool, modelID string, msgIndex int) []map[string]any {
-	return convertMessageForDialect(msg, supportsDocuments, "openai", modelID, msgIndex)
+	return convertMessageForDialect(msg, Dialect{Provider: "openai", Model: modelID, SupportsDocuments: supportsDocuments}, msgIndex)
 }
 func convertAssistantMessage(msg core.Message, modelID string, msgIndex int) []map[string]any {
 	return convertAssistantMessageForDialect(msg, "openai", modelID, msgIndex)

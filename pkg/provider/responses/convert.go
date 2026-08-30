@@ -27,6 +27,13 @@ type responsesRequest struct {
 	// same cache. Omitted when empty: an empty string would lump every
 	// unidentified request into one routing group.
 	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
+	// PromptCacheOptions selects implicit vs explicit-only caching on GPT-5.6+.
+	// Omitted on earlier models and on xAI, which reject the field.
+	PromptCacheOptions *promptCacheOptions `json:"prompt_cache_options,omitempty"`
+}
+
+type promptCacheOptions struct {
+	Mode string `json:"mode,omitempty"`
 }
 
 type reasoning struct {
@@ -38,13 +45,14 @@ type reasoning struct {
 // It intentionally contains protocol features only; URLs, credentials and retry
 // policies stay in the owning provider.
 type Dialect struct {
-	Provider                  string
-	Model                     string
-	SupportsDocuments         bool
-	SupportsMaxOutputTokens   bool
-	SupportsParallelToolCalls bool
-	SupportsPromptCacheKey    bool
-	AllowedReasoningEfforts   []string
+	Provider                         string
+	Model                            string
+	SupportsDocuments                bool
+	SupportsMaxOutputTokens          bool
+	SupportsParallelToolCalls        bool
+	SupportsPromptCacheKey           bool
+	SupportsExplicitCacheBreakpoints bool
+	AllowedReasoningEfforts          []string
 }
 
 // BuildRequestBody encodes a stateless streaming Responses API request.
@@ -58,7 +66,21 @@ func BuildRequestBody(req core.Request, dialect Dialect) ([]byte, error) {
 		ParallelToolCalls: dialect.SupportsParallelToolCalls,
 	}
 
-	r.Input = convertMessages(req.Messages, dialect.SupportsDocuments, dialect.Provider, dialect.Model)
+	r.Input = convertMessages(req.Messages, dialect)
+
+	if dialect.SupportsExplicitCacheBreakpoints {
+		// GPT-5.6+ places a single implicit breakpoint at the latest user/tool
+		// message. A mismatch anywhere in the prefix then misses tools,
+		// instructions and history together. Explicit breakpoints keep those
+		// stable prefixes readable; implicit mode is kept so the latest
+		// message still writes. Top-level `instructions` cannot carry a
+		// breakpoint, so the system prompt moves into a developer input item.
+		r.PromptCacheOptions = &promptCacheOptions{Mode: "implicit"}
+		if r.Instructions != "" {
+			r.Input = prependDeveloperInstructions(r.Input, r.Instructions)
+			r.Instructions = ""
+		}
+	}
 
 	if len(req.Tools) > 0 {
 		r.Tools = convertToolSpecs(req.Tools)
@@ -123,45 +145,60 @@ func MapReasoningEffort(level string, allowed []string) string {
 }
 
 // convertMessages maps core messages to Responses API input format.
-// supportsDocuments gates native "document" blocks: when false (e.g. the codex
-// OAuth path), any persisted document block is degraded to a text note instead
-// of being emitted as an input_file the provider would reject or silently drop.
-// modelID is the target model of THIS request; assistant items produced by a
-// different model omit their provider-assigned output-item ids to avoid pairing
-// validation errors (see convertAssistantMessage).
-func convertMessages(msgs []core.Message, supportsDocuments bool, provider, modelID string) []map[string]any {
+// dialect.SupportsDocuments gates native "document" blocks: when false (e.g.
+// the codex OAuth path), any persisted document block is degraded to a text
+// note instead of being emitted as an input_file the provider would reject or
+// silently drop. dialect.Model is the target model of THIS request; assistant
+// items produced by a different model omit their provider-assigned output-item
+// ids to avoid pairing validation errors (see convertAssistantMessage).
+func convertMessages(msgs []core.Message, dialect Dialect) []map[string]any {
 	var result []map[string]any
 
 	for i, msg := range msgs {
-		items := convertMessageForDialect(msg, supportsDocuments, provider, modelID, i)
+		items := convertMessageForDialect(msg, dialect, i)
 		result = append(result, items...)
 	}
 
 	return result
 }
 
-func convertMessageForDialect(msg core.Message, supportsDocuments bool, provider, modelID string, msgIndex int) []map[string]any {
+func convertMessageForDialect(msg core.Message, dialect Dialect, msgIndex int) []map[string]any {
 	switch msg.Role {
 	case "user":
+		content := convertUserContent(msg.Content, dialect.SupportsDocuments)
+		if dialect.SupportsExplicitCacheBreakpoints {
+			markLastInputTextBreakpoint(content)
+		}
 		return []map[string]any{
 			{
 				"role":    "user",
-				"content": convertUserContent(msg.Content, supportsDocuments),
+				"content": content,
 			},
 		}
 
 	case "assistant":
-		return convertAssistantMessageForDialect(msg, provider, modelID, msgIndex)
+		return convertAssistantMessageForDialect(msg, dialect.Provider, dialect.Model, msgIndex)
 
 	case "tool_result":
 		text := extractTextParts(msg.Content)
-		return []map[string]any{
-			{
-				"type":    "function_call_output",
-				"call_id": msg.ToolCallID,
-				"output":  text,
-			},
+		item := map[string]any{
+			"type":    "function_call_output",
+			"call_id": msg.ToolCallID,
 		}
+		if dialect.SupportsExplicitCacheBreakpoints {
+			// Array form is what lets a tool result carry a breakpoint; the
+			// string form used without the flag is still accepted by the API.
+			item["output"] = []map[string]any{
+				{
+					"type":                    "input_text",
+					"text":                    text,
+					"prompt_cache_breakpoint": explicitCacheBreakpoint(),
+				},
+			}
+		} else {
+			item["output"] = text
+		}
+		return []map[string]any{item}
 
 	default:
 		return nil
@@ -340,4 +377,33 @@ func convertToolSpecs(specs []core.ToolSpec) []map[string]any {
 		result = append(result, tool)
 	}
 	return result
+}
+
+func explicitCacheBreakpoint() map[string]any {
+	return map[string]any{"mode": "explicit"}
+}
+
+func prependDeveloperInstructions(input []map[string]any, text string) []map[string]any {
+	dev := map[string]any{
+		"role": "developer",
+		"content": []map[string]any{
+			{
+				"type":                    "input_text",
+				"text":                    text,
+				"prompt_cache_breakpoint": explicitCacheBreakpoint(),
+			},
+		},
+	}
+	out := make([]map[string]any, 0, len(input)+1)
+	out = append(out, dev)
+	return append(out, input...)
+}
+
+func markLastInputTextBreakpoint(parts []map[string]any) {
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i]["type"] == "input_text" {
+			parts[i]["prompt_cache_breakpoint"] = explicitCacheBreakpoint()
+			return
+		}
+	}
 }
