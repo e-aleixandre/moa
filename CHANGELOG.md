@@ -5,6 +5,35 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.1] - 2026-08-30
+
+### Fixed
+
+- The global auto-compaction threshold now reaches sessions that were already
+  open, including one mid-answer. Saving the setting only wrote it to disk, so
+  agents already in memory kept the value they were built with — on a server
+  that stays up for days, that meant the conversations actually in use never
+  saw the change. One subagent ran to 37% of a 1M-token window without
+  compacting while its threshold said 300k. A session's own explicit threshold
+  still wins and is never overwritten.
+- Opening a long conversation no longer stacks every past subagent card at the
+  top of the transcript. Cards were restored from their own record, which
+  outlives the messages the client is sent, so a card whose launch row fell
+  outside the loaded window had nothing to attach to and piled up detached.
+- Loading older messages no longer jumps the scroll position. The anchor could
+  latch onto a block whose ID encodes its position in the transcript, and
+  prepending messages renumbers those, so the view restored to whatever block
+  had inherited the ID.
+
+### Changed
+
+- Compaction no longer pays to write its prompt into the provider cache. The
+  summarizer sends a one-off request — the whole conversation flattened into a
+  single message, its own system prompt, no tools — so the prefix it writes can
+  never be read back, and every compaction was paying the cache-write premium
+  for nothing. Both the manual and automatic paths opt out; `/handoff` keeps
+  caching, because its prefix genuinely repeats.
+
 ## [0.34.0] - 2026-08-29
 
 ### Added
