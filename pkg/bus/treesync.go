@@ -248,19 +248,3 @@ func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 		ts.synced[e.Payload.SummaryMsgID] = struct{}{}
 	}
 }
-
-// Reset re-points the syncer at a new tree and sync baseline. Used when the
-// runtime loads a different session in place, where the
-// cached tree pointer and lastSyncCount would otherwise still reference the
-// previous session.
-func (ts *TreeSyncer) Reset(tree *session.Tree, syncCount int) {
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
-	ts.tree = tree
-	ts.synced = make(map[string]struct{})
-	for _, msg := range tree.AllMessages() {
-		if msg.MsgID != "" {
-			ts.synced[msg.MsgID] = struct{}{}
-		}
-	}
-}

@@ -174,14 +174,6 @@ type SessionContext struct {
 	// cheapest correct thing here.
 	liveTools []LiveToolCall
 
-	// persistPaused suppresses persistence-reactor snapshots while a session is
-	// being restored in place. The final complete state is saved explicitly by
-	// SessionRuntime.SwitchSession.
-	persistPaused atomic.Bool
-	// persistMu prevents a snapshot already in progress from crossing the
-	// persister rebind during a session switch.
-	persistMu sync.RWMutex
-
 	// treeSyncer is set by RegisterTreeSyncer; nil in tests that don't register
 	// one. GetDisplayMessages uses it to append the in-flight turn (agent
 	// messages not yet synced to the tree) so a mid-run reconnect snapshot is
@@ -614,8 +606,7 @@ func (sctx *SessionContext) resetSessionCost() {
 	sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: 0, RunUSD: 0})
 }
 
-// clearSessionCost resets the total without publishing an event. A transactional
-// session switch uses it so observers see only the final SessionLoaded event.
+// clearSessionCost resets the total without publishing an event.
 func (sctx *SessionContext) clearSessionCost() {
 	sctx.costMu.Lock()
 	sctx.sessionCost = 0

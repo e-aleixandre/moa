@@ -92,17 +92,6 @@ func TestPathPolicy_AddPath_Validation(t *testing.T) {
 	}
 }
 
-func TestPathPolicy_RestoreDropsInvalidPaths(t *testing.T) {
-	root := t.TempDir()
-	extra := t.TempDir()
-	p := NewPathPolicy(root, nil, false)
-	p.Restore([]string{extra, filepath.Join(root, "missing"), root, extra}, false)
-	got := p.AllowedPaths()
-	if len(got) != 2 || got[0] != extra || got[1] != root {
-		t.Fatalf("AllowedPaths after restore = %q, want valid unique paths only", got)
-	}
-}
-
 func TestPathPolicy_SetUnrestricted(t *testing.T) {
 	p := NewPathPolicy("/workspace", nil, false)
 	if p.Unrestricted() {

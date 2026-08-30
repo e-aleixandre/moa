@@ -26,14 +26,6 @@ type TreePersister interface {
 	SnapshotTree(entries []session.Entry, leafID string, metadata map[string]any) error
 }
 
-// SessionRebinder is an optional SessionPersister capability: re-point it at a
-// different session so subsequent snapshots write there. A single long-lived
-// runtime uses it to switch sessions without re-registering the
-// persistence reactor.
-type SessionRebinder interface {
-	RebindSession(sess *session.Session)
-}
-
 // collectMetadata gathers all session metadata for persistence, in the
 // map[string]any format of session.Session.Metadata.
 func collectMetadata(sctx *SessionContext) map[string]any {
@@ -94,18 +86,8 @@ func RegisterPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersi
 	tp, hasTree := p.(TreePersister)
 
 	save := func() {
-		sctx.persistMu.RLock()
-		defer sctx.persistMu.RUnlock()
-		if sctx.persistPaused.Load() {
-			return
-		}
 		mu.Lock()
 		defer mu.Unlock()
-		// A switch may have started while this event was waiting for the save
-		// mutex. Check again so it cannot snapshot mixed old/new session state.
-		if sctx.persistPaused.Load() {
-			return
-		}
 		meta := collectMetadata(sctx)
 
 		// Prefer tree-based persistence when available (even if empty, to clear v2 fields)
