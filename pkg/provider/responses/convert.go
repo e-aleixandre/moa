@@ -75,6 +75,13 @@ func BuildRequestBody(req core.Request, dialect Dialect) ([]byte, error) {
 		// stable prefixes readable; implicit mode is kept so the latest
 		// message still writes. Top-level `instructions` cannot carry a
 		// breakpoint, so the system prompt moves into a developer input item.
+		//
+		// Markers are cheap to declare: OpenAI considers up to 50 of them for
+		// reads. Only four writes are created per request (implicit uses one),
+		// so extra markers do not each incur a cache-write charge. Marking
+		// every user/tool boundary is what the caching guide recommends for
+		// multi-turn agents, so a later mismatch still hits the longest
+		// surviving prefix.
 		r.PromptCacheOptions = &promptCacheOptions{Mode: "implicit"}
 		if r.Instructions != "" {
 			r.Input = prependDeveloperInstructions(r.Input, r.Instructions)
