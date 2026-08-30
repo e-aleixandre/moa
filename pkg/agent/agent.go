@@ -347,13 +347,11 @@ type Agent struct {
 
 	steers     steerQueue          // inspectable queue, drained by agentLoop between steps
 	waitSteers steerWaitInterrupts // wakes an active wait when a user steer arrives
-	// Nested locking always starts with steerMu, then takes mu, followUpMu, or
-	// the queue mutex. No path takes one of those locks and then steerMu.
+	// Nested locking always starts with steerMu, then takes mu or the queue
+	// mutex. No path takes one of those locks and then steerMu.
 	steerMu     sync.Mutex // serializes stop, queued-message admission, and delivery
 	aborting    bool       // rejects queued messages until a newly-started run owns them
 	runTerminal bool       // rejects queued messages after the final drain, before run cleanup
-	followUpMu  sync.Mutex
-	followUps   []string // consumed after agentLoop returns in execute()
 
 	lastRunCost float64 // USD cost of the most recent execute(), guarded by mu
 	// lastRunTimedOut records whether the most recent execute() ended because
@@ -375,10 +373,10 @@ type AgentConfig struct {
 	// PromptCacheKey identifies this agent's conversation for cache routing on
 	// the Responses providers (OpenAI, xAI). Empty omits the field entirely.
 	PromptCacheKey string
-	MaxTokens     int    // Max output tokens per LLM call. 0 = shared model-aware default.
-	Tools         *core.Registry
-	Extensions    []extension.Extension
-	WorkspaceRoot string
+	MaxTokens      int // Max output tokens per LLM call. 0 = shared model-aware default.
+	Tools          *core.Registry
+	Extensions     []extension.Extension
+	WorkspaceRoot  string
 
 	// Guardrails
 	MaxTurns            int           // Default: 50. 0 = unlimited.
@@ -1370,32 +1368,6 @@ func (a *Agent) PendingSteers() []core.SteerItem {
 	return out
 }
 
-// Enqueue queues a message for post-turn delivery. It will be processed after
-// the current agent turn completes, triggering a new turn. Returns false when
-// the ending run can no longer consume it.
-func (a *Agent) Enqueue(msg string) bool {
-	a.steerMu.Lock()
-	defer a.steerMu.Unlock()
-	if a.aborting || a.runTerminal {
-		return false
-	}
-	a.followUpMu.Lock()
-	defer a.followUpMu.Unlock()
-	a.followUps = append(a.followUps, msg)
-	return true
-}
-
-func (a *Agent) drainFollowUps() []string {
-	a.followUpMu.Lock()
-	defer a.followUpMu.Unlock()
-	if len(a.followUps) == 0 {
-		return nil
-	}
-	msgs := a.followUps
-	a.followUps = nil
-	return msgs
-}
-
 // Abort cancels the current run.
 func (a *Agent) Abort() {
 	a.steerMu.Lock()
@@ -1646,27 +1618,16 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 			err = ctx.Err()
 			break
 		}
-		followUps := a.drainFollowUps()
 		steered := a.steers.drainUntilBarrier()
-		if len(followUps) == 0 && len(steered) == 0 {
+		if len(steered) == 0 {
 			// Closing admission under the same lock as the final empty drain
 			// prevents a producer from being accepted after the consumer exits.
 			a.runTerminal = true
 			a.steerMu.Unlock()
 			break
 		}
-		// Deterministic order: follow-ups first, then steered.
 		// Lock each append: external readers (Messages/CompactionEpoch) may run
 		// concurrently until the deferred cancel-cleanup clears a.cancel.
-		for _, msg := range followUps {
-			a.mu.Lock()
-			um := core.WrapMessage(core.NewUserMessage(msg))
-			um.EnsureMsgID()
-			mid := um.MsgID
-			a.state.Messages = append(a.state.Messages, um)
-			a.mu.Unlock()
-			cfg.emitter.Emit(core.AgentEvent{Type: core.AgentEventSteer, MsgID: mid, Text: msg})
-		}
 		for _, item := range steered {
 			a.mu.Lock()
 			um := core.WrapMessage(steerMessage(item))

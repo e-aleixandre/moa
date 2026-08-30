@@ -184,51 +184,6 @@ func TestSteerEventCarriesContent(t *testing.T) {
 	}
 }
 
-func TestFollowUpTriggersNewTurn(t *testing.T) {
-	provider := NewMockProvider(
-		simpleTextResponse("First answer."),
-		simpleTextResponse("Second answer."),
-	)
-	ag := newTestAgent(provider)
-
-	// Subscribe to agent_start events to count agentLoop invocations.
-	var startCount int
-	var mu sync.Mutex
-	ag.Subscribe(func(e core.AgentEvent) {
-		if e.Type == core.AgentEventStart {
-			mu.Lock()
-			startCount++
-			mu.Unlock()
-		}
-	})
-
-	// Enqueue before running — follow-up will be consumed after first turn.
-	ag.Enqueue("follow up question")
-
-	msgs, err := ag.Run(context.Background(), "initial question")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Expected: user(initial), assistant(first), user(follow-up), assistant(second)
-	if len(msgs) != 4 {
-		t.Fatalf("expected 4 messages, got %d: %v", len(msgs), roles(msgs))
-	}
-	if msgs[2].Role != "user" || msgs[2].Content[0].Text != "follow up question" {
-		t.Fatalf("expected follow-up at index 2, got %s: %q", msgs[2].Role, firstText(msgs[2]))
-	}
-	if msgs[3].Content[0].Text != "Second answer." {
-		t.Fatalf("expected 'Second answer.' at index 3, got %q", firstText(msgs[3]))
-	}
-
-	// Verify agentLoop was called twice (two agent_start events).
-	pollUntilAgent(t, 2*time.Second, "2 agent_start events", func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return startCount >= 2
-	})
-}
-
 func TestFollowUpDoesNothingWhenEmpty(t *testing.T) {
 	provider := NewMockProvider(simpleTextResponse("Only answer."))
 	ag := newTestAgent(provider)
@@ -251,12 +206,6 @@ func TestQueuedMessageRejectedAfterFinalDrain(t *testing.T) {
 			name: "Steer",
 			admit: func(ag *Agent) bool {
 				return ag.Steer(core.SteerItem{ID: "too-late", Text: "too late"})
-			},
-		},
-		{
-			name: "Enqueue",
-			admit: func(ag *Agent) bool {
-				return ag.Enqueue("too late")
 			},
 		},
 	}
@@ -300,12 +249,6 @@ func TestQueuedMessageRejectedAfterFinalDrain(t *testing.T) {
 			if got := ag.QueueLen(); got != 0 {
 				t.Fatalf("queue length = %d after rejected %s; want 0", got, tt.name)
 			}
-			ag.followUpMu.Lock()
-			followUps := len(ag.followUps)
-			ag.followUpMu.Unlock()
-			if followUps != 0 {
-				t.Fatalf("follow-up queue length = %d after rejected %s; want 0", followUps, tt.name)
-			}
 
 			releaseOnce.Do(func() { close(releaseEnd) })
 			select {
@@ -335,62 +278,6 @@ func TestSteerDropsWhenChannelFull(t *testing.T) {
 	case <-done:
 	case <-time.After(1 * time.Second):
 		t.Fatal("Steer blocked on full channel")
-	}
-}
-
-func TestSteerAndFollowUpCombined(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	blockTool := core.Tool{
-		Name:       "block",
-		Parameters: json.RawMessage(`{"type":"object"}`),
-		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
-			close(started)
-			<-release
-			return core.TextResult("done"), nil
-		},
-	}
-
-	provider := NewMockProvider(
-		toolCallResponse("tc-1", "block", nil),
-		simpleTextResponse("After steer."),    // response to steer
-		simpleTextResponse("After followup."), // response to follow-up
-	)
-	ag := newTestAgent(provider, blockTool)
-
-	done := make(chan struct{})
-	var msgs []core.AgentMessage
-	var runErr error
-	go func() {
-		defer close(done)
-		msgs, runErr = ag.Run(context.Background(), "go")
-	}()
-
-	<-started
-	if !ag.Steer(core.SteerItem{ID: "steer-1", Text: "steer msg"}) {
-		t.Fatal("active Steer was rejected")
-	}
-	if !ag.Enqueue("followup msg") {
-		t.Fatal("active Enqueue was rejected")
-	}
-	close(release)
-	<-done
-
-	if runErr != nil {
-		t.Fatal(runErr)
-	}
-
-	// Steer arrives first (inter-step), follow-up after the turn ends.
-	// Expected: user(go), assistant(tc), tool_result, user(steer), assistant(after steer),
-	//           user(followup), assistant(after followup)
-	if len(msgs) != 7 {
-		t.Fatalf("expected 7 messages, got %d: %v", len(msgs), roles(msgs))
-	}
-	if msgs[3].Role != "user" || msgs[3].Content[0].Text != "steer msg" {
-		t.Fatalf("expected steer at index 3, got %s: %q", msgs[3].Role, firstText(msgs[3]))
-	}
-	if msgs[5].Role != "user" || msgs[5].Content[0].Text != "followup msg" {
-		t.Fatalf("expected follow-up at index 5, got %s: %q", msgs[5].Role, firstText(msgs[5]))
 	}
 }
 
@@ -459,67 +346,6 @@ func TestSteerTextOnlyTurnStillInjected(t *testing.T) {
 	}
 	if msgs[2].Role != "user" || msgs[2].Content[0].Text != "text-only steer" {
 		t.Fatalf("expected steer at index 2, got %s: %q", msgs[2].Role, firstText(msgs[2]))
-	}
-}
-
-func TestExecuteDrainsBothFollowUpsAndSteer(t *testing.T) {
-	// Both a follow-up and a steer are queued. Both must be drained
-	// by the execute() outer loop, with follow-ups first.
-	streaming := make(chan struct{})
-	release := make(chan struct{})
-	delayedTextResponse := func(text string) func(req core.Request) (<-chan core.AssistantEvent, error) {
-		return func(req core.Request) (<-chan core.AssistantEvent, error) {
-			ch := make(chan core.AssistantEvent, 10)
-			go func() {
-				defer close(ch)
-				msg := core.Message{
-					Role:       "assistant",
-					Content:    []core.Content{core.TextContent(text)},
-					StopReason: "end_turn",
-				}
-				ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
-				close(streaming)
-				<-release
-				ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
-			}()
-			return ch, nil
-		}
-	}
-
-	provider := NewMockProvider(
-		delayedTextResponse("first"),
-		simpleTextResponse("after both"),
-	)
-	ag := newTestAgent(provider)
-
-	done := make(chan struct{})
-	var msgs []core.AgentMessage
-	var runErr error
-	go func() {
-		defer close(done)
-		msgs, runErr = ag.Run(context.Background(), "go")
-	}()
-
-	<-streaming
-	ag.Enqueue("followup msg")
-	ag.Steer(core.SteerItem{ID: "steer-1", Text: "steer msg"})
-	close(release)
-	<-done
-
-	if runErr != nil {
-		t.Fatal(runErr)
-	}
-
-	// Expected: user(go), assistant(first), user(followup), user(steer), assistant(after both)
-	if len(msgs) != 5 {
-		t.Fatalf("expected 5 messages, got %d: %v", len(msgs), roles(msgs))
-	}
-	// Follow-ups come before steers (deterministic order).
-	if msgs[2].Content[0].Text != "followup msg" {
-		t.Fatalf("expected followup at index 2, got %q", firstText(msgs[2]))
-	}
-	if msgs[3].Content[0].Text != "steer msg" {
-		t.Fatalf("expected steer at index 3, got %q", firstText(msgs[3]))
 	}
 }
 
