@@ -4,7 +4,6 @@ package git
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -16,6 +15,11 @@ const cmdTimeout = 2 * time.Second
 // Context returns a human-readable summary of the git state for cwd.
 // Returns "" if cwd is not in a git repo or git is not available.
 // Never returns an error — failures are silent.
+//
+// Uncommitted porcelain is intentionally omitted: it changes as the agent
+// works, and GPT-5.6 implicit prompt cache misses the entire prefix when
+// any earlier instructions byte changes. Branch and last commit are enough
+// to orient the model; it can run git status for the dirty tree.
 func Context(cwd string) string {
 	if !isRepo(cwd) {
 		return ""
@@ -25,16 +29,6 @@ func Context(cwd string) string {
 
 	if branch := run(cwd, "rev-parse", "--abbrev-ref", "HEAD"); branch != "" {
 		parts = append(parts, "Branch: "+branch)
-	}
-
-	if status := run(cwd, "status", "--porcelain"); status != "" {
-		lines := strings.Split(strings.TrimSpace(status), "\n")
-		if len(lines) <= 10 {
-			parts = append(parts, fmt.Sprintf("Uncommitted changes (%d files):\n%s", len(lines), status))
-		} else {
-			parts = append(parts, fmt.Sprintf("Uncommitted changes (%d files, showing first 10):\n%s",
-				len(lines), strings.Join(lines[:10], "\n")))
-		}
 	}
 
 	if lastCommit := run(cwd, "log", "--oneline", "-1"); lastCommit != "" {

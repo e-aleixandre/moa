@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -140,8 +141,31 @@ func TestBuildSystemPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "Current date") {
 		t.Error("expected date")
 	}
+	if strings.Contains(prompt, "Current date and time") {
+		t.Error("clock in the prompt restamps every rebuild and busts GPT-5.6 cache")
+	}
 	if !strings.Contains(prompt, "/test/cwd") {
 		t.Error("expected CWD in prompt")
+	}
+}
+
+func TestBuildSystemPrompt_PinnedTailIsStable(t *testing.T) {
+	now := time.Date(2026, 8, 30, 21, 0, 0, 0, time.UTC)
+	git := "Branch: main\nLast commit: abc def"
+	opts := SystemPromptOptions{CWD: "/test", Now: now, Git: &git}
+	a := BuildSystemPrompt(opts)
+	b := BuildSystemPrompt(opts)
+	if a != b {
+		t.Fatal("pinned date/git must produce identical prompts")
+	}
+	if !strings.Contains(a, "Current date: Sunday, August 30, 2026") {
+		t.Fatalf("date line: %q", a[strings.LastIndex(a, "Current date:"):])
+	}
+	if strings.Contains(a, "PM") || strings.Contains(a, "21:00") {
+		t.Fatal("time of day leaked into the date line")
+	}
+	if !strings.Contains(a, git) {
+		t.Fatal("expected pinned git section")
 	}
 }
 

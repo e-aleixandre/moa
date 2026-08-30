@@ -20,6 +20,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/attachment"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/git"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/memory"
@@ -573,6 +574,12 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	sess.Goal = goal.New()
 
 	// 11. System prompt (after ALL tools registered).
+	// Pin date and git so a later MCP rebuild with a different tool set does
+	// not also restamp the tail — GPT-5.6 implicit cache misses the whole
+	// prefix on any instructions change. Porcelain is already omitted from
+	// git.Context; the snapshot is the branch + last commit at session start.
+	promptNow := time.Now()
+	promptGit := git.Context(cfg.CWD)
 	sess.BuildBasePrompt = func(specs []core.ToolSpec) string {
 		return agentcontext.BuildSystemPrompt(agentcontext.SystemPromptOptions{
 			AgentsMD:    agentsMD,
@@ -581,6 +588,8 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			HasVerify:   hasVerify,
 			MemoryIndex: memoryIndex,
 			SkillsIndex: skillsIndex,
+			Now:         promptNow,
+			Git:         &promptGit,
 		})
 	}
 	systemPrompt := sess.BuildBasePrompt(toolReg.Specs())

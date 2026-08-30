@@ -49,17 +49,18 @@ func TestContext_WithDirtyFiles(t *testing.T) {
 	mustRun(t, dir, "git", "add", ".")
 	mustRun(t, dir, "git", "commit", "-m", "initial")
 
-	// Create dirty file.
+	// Create dirty file. Porcelain must not appear: it churns every edit and
+	// would miss the GPT-5.6 prompt cache on the next rebuild.
 	if err := os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("dirty"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	result := Context(dir)
-	if !strings.Contains(result, "Uncommitted changes") {
-		t.Error("expected uncommitted changes")
+	if strings.Contains(result, "Uncommitted") || strings.Contains(result, "dirty.txt") {
+		t.Errorf("porcelain must stay out of the prompt: %q", result)
 	}
-	if !strings.Contains(result, "dirty.txt") {
-		t.Error("expected dirty.txt in changes")
+	if !strings.Contains(result, "Branch:") || !strings.Contains(result, "Last commit:") {
+		t.Errorf("expected stable branch/commit, got %q", result)
 	}
 }
 
