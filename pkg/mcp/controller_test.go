@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -137,6 +138,49 @@ func TestControllerReconcileIdempotent(t *testing.T) {
 	c.Reconcile(context.Background())
 	if *refreshes != before {
 		t.Fatal("no-op reconcile should not refresh the prompt")
+	}
+}
+
+func TestControllerRestartSameToolsDoesNotRefresh(t *testing.T) {
+	if !procGroupSupported {
+		t.Skip("restart is unsupported on this platform")
+	}
+	c, _, refreshes := newTestController(t, map[string]core.MCPServer{
+		"ping": helperServerConfig(""),
+	}, nil, core.MCPDisablePolicy{})
+	if !waitForState(t, c.mgr, "ping", StateReady, 5*time.Second) {
+		t.Fatal("not ready")
+	}
+	before := *refreshes
+	if _, err := c.Restart(context.Background(), "ping"); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if !waitForState(t, c.mgr, "ping", StateReady, 5*time.Second) {
+		t.Fatal("not ready after restart")
+	}
+	if *refreshes != before {
+		t.Fatalf("restart with identical tools refreshed the prompt %d times; that restamps time/git and busts the GPT-5.6 cache", *refreshes-before)
+	}
+}
+
+func TestSpecsFingerprintIgnoresJSONKeyOrder(t *testing.T) {
+	a := []core.ToolSpec{{
+		Name: "t", Description: "d",
+		Parameters: json.RawMessage(`{"type":"object","properties":{"z":{"type":"string"},"a":{"type":"number"}}}`),
+	}}
+	b := []core.ToolSpec{{
+		Name: "t", Description: "d",
+		Parameters: json.RawMessage(`{"properties":{"a":{"type":"number"},"z":{"type":"string"}},"type":"object"}`),
+	}}
+	if specsFingerprint(a) != specsFingerprint(b) {
+		t.Fatal("equivalent schemas with different key order must fingerprint equal")
+	}
+	c := []core.ToolSpec{{
+		Name: "t", Description: "other",
+		Parameters: json.RawMessage(`{"type":"object"}`),
+	}}
+	if specsFingerprint(a) == specsFingerprint(c) {
+		t.Fatal("different description must fingerprint different")
 	}
 }
 
