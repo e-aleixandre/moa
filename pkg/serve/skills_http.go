@@ -96,6 +96,14 @@ func runSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (*Comma
 	if err := sess.runtime.Bus.Execute(bus.AppendToConversation{SessionID: sess.ID, Message: msg}); err != nil {
 		return nil, err
 	}
+	// Appending mutates the agent's state in memory; persistence and the web's
+	// re-render both hang off the re-sync that CommandExecuted triggers. Without
+	// this the skill is loaded for the live run but lost on restart.
+	sess.runtime.Bus.Publish(bus.CommandExecuted{
+		SessionID: sess.ID,
+		Command:   "skill",
+		Messages:  sess.runtime.Context().Agent.Messages(),
+	})
 	return &CommandResult{OK: true, Message: "loaded skill: " + s.Name}, nil
 }
 
