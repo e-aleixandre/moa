@@ -55,6 +55,7 @@ type fakeAgent struct {
 	model            core.Model
 	thinkingLevel    string
 	compactStrategy  string
+	fast             bool
 	messages         []core.AgentMessage
 	compactionEpoch  int
 	resetCalled      bool
@@ -446,6 +447,18 @@ func (f *fakeAgent) SetCompactStrategy(strategy string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.compactStrategy = strategy
+}
+
+func (f *fakeAgent) Fast() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.fast
+}
+
+func (f *fakeAgent) SetFast(on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fast = on
 }
 
 func (f *fakeAgent) SetDefaultCompactAt(tokens int) {

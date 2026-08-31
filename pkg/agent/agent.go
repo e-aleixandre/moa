@@ -370,6 +370,10 @@ type AgentConfig struct {
 	SystemPrompt  string
 	ThinkingLevel string
 	CacheTTL      string // Prompt-cache TTL: "" (5m default) or "1h". Interactive agent only.
+	// Fast serves this session's requests at a premium speed and price, when
+	// the model supports it. Per session, not global: it is worth paying for
+	// on the conversation you are waiting on, not on every one at once.
+	Fast bool
 	// PromptCacheKey identifies this agent's conversation for cache routing on
 	// the Responses providers (OpenAI, xAI). Empty omits the field entirely.
 	PromptCacheKey string
@@ -1102,6 +1106,24 @@ func (a *Agent) ThinkingLevel() string {
 	return a.config.ThinkingLevel
 }
 
+// Fast reports whether this session buys premium speed.
+func (a *Agent) Fast() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.config.Fast
+}
+
+// SetFast turns premium speed on or off for this session. Unlike a model or
+// thinking change it is allowed while the agent is running: the setting is
+// read when the next request is built, and a turn already in flight keeps the
+// speed it was sent at. Turning it off mid-run is also how the provider's
+// fallback reports that the account cannot pay for it.
+func (a *Agent) SetFast(on bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.config.Fast = on
+}
+
 // SystemPrompt returns the current system prompt.
 func (a *Agent) SystemPrompt() string {
 	a.mu.Lock()
@@ -1547,6 +1569,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		ThinkingLevel:  a.config.ThinkingLevel,
 		CacheRetention: a.config.CacheTTL,
 		PromptCacheKey: a.config.PromptCacheKey,
+		Fast:           a.config.Fast,
 	}
 	if a.config.MaxTokens > 0 {
 		mt := a.config.MaxTokens
