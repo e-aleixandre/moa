@@ -35,7 +35,7 @@ Conditionally registered:
 | `web_search` | `brave_api_key` is configured |
 | `ask_user` | The web UI is active (not headless) |
 | `verify` | always |
-| `load_skill` | At least one skill is discovered in `.moa/skills/` or `~/.config/moa/skills/` |
+| `load_skill` | always (skills are discovered per call, so one written mid-session is loadable) |
 
 ## Tool selection guidance
 
