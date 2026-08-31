@@ -14,13 +14,16 @@ const skillFile = "SKILL.md"
 
 // FormatIndex returns a pre-formatted skills index for the system prompt.
 // Returns empty string if there are no skills.
+//
+// Skills the model may not invoke are left out entirely: listing one would spend
+// prompt tokens on every request of the session to advertise something the model
+// cannot call. Those are reached by the user typing "/<name>".
 func FormatIndex(skills []Skill) string {
-	if len(skills) == 0 {
-		return ""
-	}
 	var sb strings.Builder
-	sb.WriteString("Available skills (use the load_skill tool to load when relevant):\n")
 	for _, s := range skills {
+		if !s.ModelInvocable() {
+			continue
+		}
 		sb.WriteString("- ")
 		sb.WriteString(s.Name)
 		sb.WriteString(": ")
@@ -31,7 +34,10 @@ func FormatIndex(skills []Skill) string {
 		}
 		sb.WriteString("\n")
 	}
-	return sb.String()
+	if sb.Len() == 0 {
+		return ""
+	}
+	return "Available skills (use the load_skill tool to load when relevant):\n" + sb.String()
 }
 
 // Skill represents a loadable knowledge pack.
@@ -40,7 +46,19 @@ type Skill struct {
 	DisplayName string // from first # heading in SKILL.md
 	Description string // first paragraph after heading
 	Dir         string // absolute path to skill directory
+
+	// DisableModelInvocation keeps the skill out of the system prompt index and
+	// out of the model's reach: only the user invokes it, with "/<name>". Use it
+	// for skills that are occasionally useful but would otherwise cost tokens on
+	// every request.
+	DisableModelInvocation bool
+	// UserInvocable is false for skills that are background knowledge rather than
+	// an action worth offering in the slash menu. Defaults to true.
+	UserInvocable bool
 }
+
+// ModelInvocable reports whether the model may load this skill on its own.
+func (s Skill) ModelInvocable() bool { return !s.DisableModelInvocation }
 
 // Discover scans skill directories and returns available skills.
 // Project-level skills (.moa/skills/) override global ones (~/.config/moa/skills/)
@@ -64,13 +82,15 @@ func Discover(cwd string) []Skill {
 	return result
 }
 
-// Load reads the full SKILL.md content for a skill.
+// Load reads the full SKILL.md content for a skill, without its frontmatter:
+// the header configures moa, and feeding it to the model would spend tokens on
+// keys it cannot act on.
 func Load(s Skill) (string, error) {
 	data, err := os.ReadFile(filepath.Join(s.Dir, skillFile))
 	if err != nil {
 		return "", err
 	}
-	return string(data), nil
+	return stripFrontmatter(string(data)), nil
 }
 
 // scanDir reads all <dir>/<name>/SKILL.md entries and adds them to the map.
@@ -93,11 +113,14 @@ func scanDir(dir string, out map[string]Skill) {
 		if displayName == "" {
 			displayName = name
 		}
+		fm := parseFrontmatter(path)
 		out[name] = Skill{
-			Name:        name,
-			DisplayName: displayName,
-			Description: desc,
-			Dir:         absDir,
+			Name:                   name,
+			DisplayName:            displayName,
+			Description:            desc,
+			Dir:                    absDir,
+			DisableModelInvocation: fm.boolField("disable-model-invocation", false),
+			UserInvocable:          fm.boolField("user-invocable", true),
 		}
 	}
 }
@@ -112,6 +135,21 @@ func parseSkillHeader(path string) (displayName, description string) {
 
 	scanner := bufio.NewScanner(f)
 	foundHeading := false
+
+	// A frontmatter block is configuration, not content: skip past it so the
+	// heading below it is still found.
+	if scanner.Scan() {
+		if strings.TrimSpace(scanner.Text()) == "---" {
+			for scanner.Scan() {
+				if strings.TrimSpace(scanner.Text()) == "---" {
+					break
+				}
+			}
+		} else if trimmed := strings.TrimSpace(scanner.Text()); strings.HasPrefix(trimmed, "# ") {
+			displayName = strings.TrimSpace(trimmed[2:])
+			foundHeading = true
+		}
+	}
 
 	for scanner.Scan() {
 		line := scanner.Text()
