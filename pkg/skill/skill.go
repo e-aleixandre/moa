@@ -82,15 +82,29 @@ func Discover(cwd string) []Skill {
 	return result
 }
 
+// maxSkillBytes caps how much of a SKILL.md is loaded. A skill's content is
+// copied into the conversation and stays there, so an oversized file would
+// silently eat the context window. The cap matches the read tool's text
+// ceiling; skills are meant to be concise, and reference material belongs in
+// supporting files the agent reads on demand.
+const maxSkillBytes = 50 * 1024
+
 // Load reads the full SKILL.md content for a skill, without its frontmatter:
 // the header configures moa, and feeding it to the model would spend tokens on
 // keys it cannot act on.
+//
+// Content past the cap is truncated with a marker rather than refused, so an
+// oversized skill still works instead of failing at the moment it is invoked.
 func Load(s Skill) (string, error) {
 	data, err := os.ReadFile(filepath.Join(s.Dir, skillFile))
 	if err != nil {
 		return "", err
 	}
-	return stripFrontmatter(string(data)), nil
+	body := stripFrontmatter(string(data))
+	if len(body) > maxSkillBytes {
+		body = body[:maxSkillBytes] + "\n\n[skill truncated: over 50KB]\n"
+	}
+	return body, nil
 }
 
 // scanDir reads all <dir>/<name>/SKILL.md entries and adds them to the map.

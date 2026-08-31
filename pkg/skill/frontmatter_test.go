@@ -197,3 +197,21 @@ func TestNewTool_RefusesSkillsTheModelCannotInvoke(t *testing.T) {
 		t.Error("loading a user-only skill should be an error result")
 	}
 }
+
+// A skill's content is copied into the conversation and stays there, so an
+// oversized file would silently eat the context window.
+func TestLoad_TruncatesAnOversizedSkill(t *testing.T) {
+	root, dir := newSkillDir(t)
+	writeSkill(t, dir, "big", "# Big\n\n"+strings.Repeat("x", maxSkillBytes+1000)+"\n")
+
+	body, err := Load(Discover(root)[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) > maxSkillBytes+100 {
+		t.Errorf("oversized skill was not truncated: %d bytes", len(body))
+	}
+	if !strings.Contains(body, "[skill truncated") {
+		t.Error("truncation happened without telling the reader")
+	}
+}
