@@ -1,6 +1,11 @@
 package bus
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"testing"
+)
 
 func TestClassifyCommand_Policies(t *testing.T) {
 	cases := []struct {
@@ -97,27 +102,40 @@ func TestQueuePolicyString(t *testing.T) {
 // added here and the mirror had to follow. This pins the set so a future
 // addition fails here instead of silently disagreeing with the UI.
 func TestQueuePolicy_MirrorsTheFrontendTable(t *testing.T) {
-	want := map[string]QueuePolicy{
-		"compact":         PolicyQueue,
-		"prepare-compact": PolicyQueue,
-		"clear":           PolicyQueue,
-		"model":           PolicyQueue,
-		"thinking":        PolicyQueue,
-		"verify":          PolicyQueue,
-		"reload":          PolicyQueue,
-		"handoff":         PolicyReject,
-		"undo":            PolicyReject,
-		"branch":          PolicyReject,
-		"back":            PolicyReject,
-		"plan":            PolicyReject,
+	// Read the mirror rather than restating it: a hand-copied expectation here
+	// passes while the two tables disagree, which is the one thing this test
+	// exists to catch. A command queued by the server but missing from the JS
+	// set is rejected in the composer before it is ever sent.
+	src, err := os.ReadFile(filepath.Join("..", "serve", "frontend", "src", "data", "util", "command-policy.js"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(queuePolicyByName) != len(want) {
-		t.Errorf("the policy table changed (%d entries, expected %d): update pkg/serve/frontend/src/data/util/command-policy.js to match",
-			len(queuePolicyByName), len(want))
+	frontend := map[string]QueuePolicy{}
+	for _, set := range []struct {
+		name   string
+		policy QueuePolicy
+	}{{"QUEUE", PolicyQueue}, {"REJECT", PolicyReject}} {
+		re := regexp.MustCompile(`(?s)const ` + set.name + ` = new Set\(\[(.*?)\]\)`)
+		m := re.FindSubmatch(src)
+		if m == nil {
+			t.Fatalf("could not find the %s set in command-policy.js", set.name)
+		}
+		for _, q := range regexp.MustCompile(`'([^']+)'`).FindAllSubmatch(m[1], -1) {
+			frontend[string(q[1])] = set.policy
+		}
 	}
-	for name, policy := range want {
+
+	if len(queuePolicyByName) != len(frontend) {
+		t.Errorf("the tables disagree: %d entries in Go, %d in command-policy.js", len(queuePolicyByName), len(frontend))
+	}
+	for name, policy := range frontend {
 		if got := queuePolicyByName[name]; got != policy {
-			t.Errorf("%s: policy %v, want %v", name, got, policy)
+			t.Errorf("%s: %v in Go, %v in command-policy.js", name, got, policy)
+		}
+	}
+	for name := range queuePolicyByName {
+		if _, ok := frontend[name]; !ok {
+			t.Errorf("%s is in the Go table but missing from command-policy.js", name)
 		}
 	}
 }
