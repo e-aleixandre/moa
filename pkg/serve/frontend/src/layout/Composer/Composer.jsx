@@ -70,7 +70,7 @@ const MAX_HISTORY = 100;
 // deliberately DISTINCT from the old SPA's `moa-draft-` so the two frontends
 // don't clobber each other's drafts while they coexist under /next.
 export function Composer({ sessionId, session, shortPlaceholder = false, steer = null, onSecret }) {
-  const skills = useSessionSkills(sessionId);
+  const { skills, refreshSkills } = useSessionSkills(sessionId);
   const textareaRef = useRef(null);
   const attachInputRef = useRef(null);
   const sessionState = session?.state;
@@ -237,9 +237,12 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   const updateSuggestions = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
+    // Typing "/" is the moment the list matters: re-read it (throttled) so a
+    // skill created while this session was open can appear without a restart.
+    if (el.value.startsWith('/')) refreshSkills();
     setCmdSuggestions(slashSuggestions(el.value, el.selectionStart, goalFlags, skills));
     setCmdCursor(0);
-  }, [goalFlags, skills]);
+  }, [goalFlags, skills, refreshSkills]);
 
   // --- File suggestions (@mention) ---
   const cancelFileRequest = useCallback(() => {
