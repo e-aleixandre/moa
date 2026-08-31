@@ -773,7 +773,7 @@ export async function openPersistedSubagent(id, jobId, opts = {}) {
     thinking: t.thinking || 'off',
     status: t.status || 'completed',
     async: !!t.async,
-    messages: normalizeConversationProjection(transcript),
+    messages: normalizeConversationProjection(transcript, `/api/sessions/${id}/subagents/${jobId}`),
     streamingText: null,
     thinkingText: null,
     usage,

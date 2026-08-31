@@ -1,7 +1,36 @@
+import { useEffect, useState } from "preact/hooks";
 import { DiffBlock } from "../../components/DiffBlock/DiffBlock.jsx";
 import { CodeBlock } from "../../components/CodeBlock/CodeBlock.jsx";
 import { AskUserDetail } from "../../components/AskUserCard/AskUserDetail.jsx";
+import { api } from "../api.js";
+import { toolPreview } from "../util/format.js";
 import { mapToolToKind } from "../util/tool-kind.js";
+
+export function projectedToolDetailNode(tool, path, detail) {
+  const preview = toolPreview(tool, detail?.args, detail?.output, 'done');
+  if (!preview?.text) return <div className="doc-mono tg-input">No output</div>;
+  if (preview.kind === 'diff') {
+    return <DiffBlock className="flush" diffText={preview.text} filename={path || detail?.args?.path || ''} />;
+  }
+  return <CodeBlock className="flush" code={preview.text} lang="bash" showHeader={false} />;
+}
+
+export function ProjectedToolDetail({ url, tool, path }) {
+  const [detail, setDetail] = useState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    api('GET', url).then((value) => {
+      if (active) setDetail(value || {});
+    }).catch(() => {
+      if (active) setFailed(true);
+    });
+    return () => { active = false; };
+  }, [url]);
+  if (failed) return <div className="doc-mono tg-input">Could not load output</div>;
+  if (!detail) return <div className="doc-mono tg-input">Loading…</div>;
+  return projectedToolDetailNode(tool, path, detail);
+}
 
 function inputDetailNode(inputText, output, prompt = null) {
   return (
@@ -34,11 +63,14 @@ export function fuseLedgerDetails(rows, siblingDiff) {
   }
   return rows.map((row, i) => {
     if (row.live) return row; // the live row never carries a static detail
+    const lazyOutput = row.detailUrl
+      ? <ProjectedToolDetail url={row.detailUrl} tool={row.tool} path={row.arg?.text || ''} />
+      : null;
     const output = i === diffRowIndex
       ? <DiffBlock className="flush" diffText={siblingDiff.diffText} filename={siblingDiff.filename} />
       : row.body
         ? <CodeBlock className="flush" code={row.body} lang="bash" showHeader={false} />
-        : null;
+        : lazyOutput;
     if (row.askUser) {
       return {
         ...row,

@@ -84,14 +84,14 @@ export function rowSignature(row) {
 // are never rewritten nor dropped, so deltas that landed while the request was
 // in flight survive untouched, and every message ends up rendered once —
 // always from the live copy, which is the fresher of the two.
-export function mergeSubagentTranscript(fetched, live) {
+export function mergeSubagentTranscript(fetched, live, toolDetailBase = '') {
   const current = Array.isArray(live) ? live : [];
   const unmatched = new Map();
   for (const row of current) {
     const signature = rowSignature(row);
     unmatched.set(signature, (unmatched.get(signature) || 0) + 1);
   }
-  const rows = normalizeConversationProjection(fetched || []);
+  const rows = normalizeConversationProjection(fetched || [], toolDetailBase);
   const prefix = [];
   for (let i = rows.length - 1; i >= 0; i--) {
     const signature = rowSignature(rows[i]);
@@ -156,7 +156,14 @@ export async function hydrateSubagentTranscript(id, jobId, isActive = () => true
         ...now,
         transcriptHydrating: false,
         ...(applied
-          ? { messages: mergeSubagentTranscript(items, now.messages || []), transcriptHydrated: true }
+          ? {
+            messages: mergeSubagentTranscript(
+              items,
+              now.messages || [],
+              `/api/sessions/${id}/subagents/${jobId}`,
+            ),
+            transcriptHydrated: true,
+          }
           : {}),
       },
     },

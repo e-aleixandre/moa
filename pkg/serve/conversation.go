@@ -70,11 +70,13 @@ type conversationSnapshot struct {
 }
 
 type conversationToolDetail struct {
-	output string
+	output    string
+	arguments map[string]any
 }
 
 type conversationToolDetailResponse struct {
-	Output string `json:"output"`
+	Output string         `json:"output"`
+	Args   map[string]any `json:"args,omitempty"`
 }
 
 type conversationProjection struct {
@@ -126,7 +128,7 @@ func handleConversationMessages(m *Manager) http.HandlerFunc {
 				http.Error(w, "tool item not found", http.StatusNotFound)
 				return
 			}
-			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output})
+			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output, Args: toolDetail.arguments})
 			return
 		}
 		beforeID := ""

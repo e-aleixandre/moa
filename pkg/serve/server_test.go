@@ -1491,8 +1491,8 @@ func TestSubagentTranscriptEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close() //nolint:errcheck
-	if detail.Output != "private tool output" {
-		t.Fatalf("read item detail = %+v, want read output only", detail)
+	if detail.Output != "private tool output" || detail.Args["path"] != "safe.txt" || detail.Args["secret"] != "private argument" {
+		t.Fatalf("read item detail = %+v, want output and full arguments", detail)
 	}
 
 	// GET missing → 404
@@ -1531,6 +1531,28 @@ func TestSafeSubagentConversationMessagesOmitsThinkingToolAssistantTurn(t *testi
 	item := projection.messages[0]
 	if item.Role != "tool" || item.ID != "tool:assistant:1" || item.Tool != "bash" || item.Status != "ok" {
 		t.Fatalf("tool item = %#v", item)
+	}
+}
+
+func TestSafeSubagentConversationMessagesKeepsLargeFileToolPaths(t *testing.T) {
+	const editPath = "/workspace/pkg/serve/frontend/src/large-edit.js"
+	const writePath = "/workspace/pkg/serve/frontend/src/large-write.js"
+	projection := safeSubagentConversationMessages([]core.AgentMessage{
+		{Message: core.Message{MsgID: "assistant", Role: "assistant", Content: []core.Content{
+			core.ToolCallContent("edit-call", "edit", map[string]any{
+				"path": editPath, "oldText": strings.Repeat("old", 300), "newText": strings.Repeat("new", 300),
+			}),
+			core.ToolCallContent("write-call", "write", map[string]any{
+				"path": writePath, "content": strings.Repeat("content", 300),
+			}),
+		}}},
+	})
+
+	if got := projection.messages[0].Target; got != editPath {
+		t.Fatalf("large edit target = %q, want %q", got, editPath)
+	}
+	if got := projection.messages[1].Target; got != writePath {
+		t.Fatalf("large write target = %q, want %q", got, writePath)
 	}
 }
 

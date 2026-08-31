@@ -317,11 +317,11 @@ test('handleWsInit rejects a delta after any unidentifiable local row', () => {
   expect(store.get().sessions.s1.messages).toEqual([]);
 });
 
-test('normalizeConversationProjection preserves persisted tool activity', async () => {
+test('normalizeConversationProjection preserves persisted tool activity and its detail endpoint', async () => {
   const [tool] = normalizeConversationProjection([{
     id: 'tool:child:0', role: 'tool', tool: 'bash', action: 'bash',
     target: '{"command":"go test ./pkg/serve --token complete"}', status: 'ok',
-  }]);
+  }], '/api/sessions/s1/subagents/sa-1');
 
   expect(tool).toMatchObject({
     _type: 'tool_start',
@@ -330,7 +330,20 @@ test('normalizeConversationProjection preserves persisted tool activity', async 
     args: { command: 'go test ./pkg/serve --token complete' },
     activity: { action: 'bash', target: '{"command":"go test ./pkg/serve --token complete"}' },
     status: 'done',
+    detailUrl: '/api/sessions/s1/subagents/sa-1?detail=full&item_id=tool%3Achild%3A0',
   });
+});
+
+test('normalizeConversationProjection maps bounded edit and write targets back to paths', () => {
+  const tools = normalizeConversationProjection([
+    { id: 'edit', role: 'tool', tool: 'edit', target: '/workspace/edit.go', status: 'ok' },
+    { id: 'write', role: 'tool', tool: 'write', target: '/workspace/write.go', status: 'ok' },
+  ]);
+
+  expect(tools.map((tool) => tool.args)).toEqual([
+    { path: '/workspace/edit.go' },
+    { path: '/workspace/write.go' },
+  ]);
 });
 
 test('normalizeConversationProjection preserves parent provenance for a terminal subagent', () => {

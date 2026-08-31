@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { fuseLedgerDetails } from './ledger-details.jsx';
+import { fuseLedgerDetails, ProjectedToolDetail, projectedToolDetailNode } from './ledger-details.jsx';
 import { AskUserDetail } from '../../components/AskUserCard/AskUserDetail.jsx';
 
 // fuseLedgerDetails is the shared (desktop + mobile) step that attaches inline
@@ -23,6 +23,12 @@ function detailText(node) {
   if (typeof node === 'string') return node;
   if (Array.isArray(node)) return node.map(detailText).join('');
   return node.props?.code || detailText(node.props?.children);
+}
+
+function hasNodeType(node, type) {
+  if (node == null || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some((child) => hasNodeType(child, type));
+  return node.type === type || hasNodeType(node.props?.children, type);
 }
 
 test('a diff sibling fuses into the LAST edit row only', () => {
@@ -91,6 +97,21 @@ test('a non-bash output-only row remains an output detail', () => {
 test('a body-less non-edit row gets no detail', () => {
   const out = fuseLedgerDetails([row('read', { id: 'r1' })], null);
   expect(out[0].detail).toBeUndefined();
+});
+
+test('a projected bash row lazily exposes its persisted output', () => {
+  const out = fuseLedgerDetails([
+    row('bash', { command: 'go test ./...', detailUrl: '/tool-detail' }),
+  ], null);
+  expect(out[0].detail).toBeTruthy();
+  expect(detailText(out[0].detail.node)).toContain('$ go test ./...');
+  expect(hasNodeType(out[0].detail.node, ProjectedToolDetail)).toBe(true);
+});
+
+test('a loaded projected bash detail renders its output', () => {
+  const node = projectedToolDetailNode('bash', '', { args: { command: 'go test ./...' }, output: 'PASS' });
+  expect(detailText(node)).toBe('PASS');
+  expect(detailClasses(node)).toContain('flush');
 });
 
 test('an answered ask_user row gets a dedicated Q&A detail', () => {

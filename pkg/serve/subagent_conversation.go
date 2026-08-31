@@ -103,7 +103,7 @@ func handleSubagentConversation(m *Manager) http.HandlerFunc {
 				http.Error(w, "tool item not found", http.StatusNotFound)
 				return
 			}
-			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output})
+			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output, Args: toolDetail.arguments})
 			return
 		}
 		beforeID := ""
@@ -321,7 +321,7 @@ func safeSubagentConversationMessages(messages []core.AgentMessage) conversation
 			if block.Type != "tool_call" {
 				continue
 			}
-			action, target := conversationToolActivity(block.ToolName, block.Arguments)
+			action, target := subagentConversationToolActivity(block.ToolName, block.Arguments)
 			toolID := fmt.Sprintf("tool:%s:%d", id, blockIndex)
 			item := ConversationMessage{ID: toolID, Role: "tool", Tool: block.ToolName, Action: action, Target: target, Status: "pending", Timestamp: conversationTimestamp(msg.Timestamp)}
 			if result, found := results[block.ToolCallID]; found {
@@ -329,14 +329,23 @@ func safeSubagentConversationMessages(messages []core.AgentMessage) conversation
 				if result.Timestamp > 0 {
 					item.Timestamp = conversationTimestamp(result.Timestamp)
 				}
-				details[toolID] = conversationToolDetailFromResult(result)
+				detail := conversationToolDetailFromResult(result)
+				detail.arguments = block.Arguments
+				details[toolID] = detail
 			} else {
-				details[toolID] = conversationToolDetail{}
+				details[toolID] = conversationToolDetail{arguments: block.Arguments}
 			}
 			out = append(out, item)
 		}
 	}
 	return conversationProjection{messages: out, toolDetails: details}
+}
+
+func subagentConversationToolActivity(name string, args map[string]any) (action, target string) {
+	if name == "edit" || name == "write" {
+		return name, conversationToolText(conversationToolString(args, "path"))
+	}
+	return conversationToolActivity(name, args)
 }
 
 // isVisibleSubagentConversationMessage admits ordinary turns and the one

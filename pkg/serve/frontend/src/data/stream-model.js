@@ -620,6 +620,7 @@ function toLedgerRow(msg) {
     status,
     id: msg.tool_call_id,
   };
+  if (msg.detailUrl) row.detailUrl = msg.detailUrl;
   const inputLine = toolInputLine(name, msg.args);
   if (inputLine) row.inputLine = inputLine;
   if (name.toLowerCase() === 'ask_user') {

@@ -278,7 +278,7 @@ function subagentTaskIdentity(task) {
 // persisted subagents to MessageList's established render model. Tool result
 // output is outside the default transcript budget, but action and target are
 // retained so persisted activity is as informative as live activity.
-export function normalizeConversationProjection(raw) {
+export function normalizeConversationProjection(raw, toolDetailBase = '') {
   return (raw || []).map(item => {
     if (item.role === 'tool') {
       const status = item.status === 'ok' ? 'done'
@@ -292,6 +292,9 @@ export function normalizeConversationProjection(raw) {
         activity: { action: item.action || '', target: item.target || '' },
         status,
         result: null,
+        ...(toolDetailBase && item.id
+          ? { detailUrl: `${toolDetailBase}?detail=full&item_id=${encodeURIComponent(item.id)}` }
+          : {}),
       };
     }
     return {
@@ -314,6 +317,8 @@ function projectionToolArgs(item) {
   if (!target) return {};
   switch (item.tool) {
     case 'bash': return { command: target };
+    case 'edit':
+    case 'write': return { path: target };
     case 'fetch_content': return { url: target };
     case 'subagent': return { task: target };
     case 'web_search': return { query: target };
