@@ -120,6 +120,9 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		SupportsParallelToolCalls:        o.endpoint == apiEndpoint,
 		SupportsPromptCacheKey:           true,
 		SupportsExplicitCacheBreakpoints: o.supportsExplicitCacheBreakpoints(req.Model.ID),
+		// The Codex transport rejects service_tier outright; only the public
+		// API prices a priority tier.
+		SupportsServiceTier: o.endpoint == apiEndpoint,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("openai: building request: %w", err)

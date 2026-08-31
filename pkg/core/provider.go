@@ -202,6 +202,12 @@ type StreamOptions struct {
 	// Consumed by the Responses providers (OpenAI, xAI); Anthropic has no
 	// equivalent and ignores it.
 	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
+	// Fast asks the provider to serve this request at a premium speed and
+	// price. Each provider spells it differently — Anthropic takes a beta
+	// header plus `speed`, the Responses providers a `service_tier` — and a
+	// provider that has no such notion, or a model that doesn't support it,
+	// ignores the flag rather than failing.
+	Fast bool `json:"fast,omitempty"`
 }
 
 // CacheOff is the CacheRetention value for a request whose prefix will never

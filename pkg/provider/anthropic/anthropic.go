@@ -78,6 +78,8 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		return nil, fmt.Errorf("anthropic: building request: %w", err)
 	}
 
+	fastMode := req.Options.Fast && core.SupportsFast(req.Model.ID)
+
 	buildReq := func() (*http.Request, error) {
 		r, err := http.NewRequestWithContext(ctx, "POST", a.baseURL+"/v1/messages", bytes.NewReader(body))
 		if err != nil {
@@ -87,16 +89,33 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		r.Header.Set("anthropic-version", "2023-06-01")
 		if oauthMode {
 			r.Header.Set("Authorization", "Bearer "+apiKey)
-			r.Header.Set("anthropic-beta", "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14")
+			betas := "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
+			if fastMode {
+				betas += "," + fastModeBeta
+			}
+			r.Header.Set("anthropic-beta", betas)
 			r.Header.Set("User-Agent", "claude-cli/"+claudeCodeVersion)
 			r.Header.Set("x-app", "cli")
 		} else {
 			r.Header.Set("X-API-Key", apiKey)
+			if fastMode {
+				r.Header.Set("anthropic-beta", fastModeBeta)
+			}
 		}
 		return r, nil
 	}
 
-	resp, err := retry.Do(ctx, a.client, buildReq, retry.DefaultPolicy, nil)
+	policy := retry.DefaultPolicy
+	if fastMode {
+		// A fast-mode request rejected for want of usage credits will be
+		// rejected again a second later: retrying it five times with backoff
+		// only delays the fallback to standard speed by half a minute.
+		policy.Retryable = func(resp *http.Response, body []byte) bool {
+			return resp.StatusCode != http.StatusTooManyRequests || !isFastModeUnavailable(body)
+		}
+	}
+
+	resp, err := retry.Do(ctx, a.client, buildReq, policy, nil)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: %w", err)
 	}
@@ -105,6 +124,16 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close() //nolint:errcheck
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		// Fast mode is a paid upgrade, and an account without usage credits is
+		// refused it while its ordinary quota still works. Falling back keeps
+		// the turn alive at standard speed instead of failing the request the
+		// user actually asked for; the caller turns the setting off so the
+		// next turn doesn't pay this round trip again.
+		if fastMode && resp.StatusCode == http.StatusTooManyRequests && isFastModeUnavailable(errBody) {
+			slowReq := req
+			slowReq.Options.Fast = false
+			return a.Stream(ctx, slowReq)
+		}
 		return nil, fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, string(errBody))
 	}
 
@@ -577,4 +606,13 @@ func (state *streamState) materializeContentBlock() {
 		state.message.Content[state.contentIdx].Thinking = state.thinkingAccum.String()
 		state.message.Content[state.contentIdx].ThinkingSignature = state.signatureAccum.String()
 	}
+}
+
+// isFastModeUnavailable reports whether a 429 rejected fast mode itself rather
+// than throttling the account. The API answers a fast-mode request from an
+// account without usage credits with "Usage credits are required for fast
+// mode." — a verdict that will not change on a retry, unlike an ordinary rate
+// limit.
+func isFastModeUnavailable(body []byte) bool {
+	return bytes.Contains(bytes.ToLower(body), []byte("fast mode"))
 }
