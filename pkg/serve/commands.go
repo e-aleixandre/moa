@@ -118,6 +118,12 @@ func (m *Manager) ExecCommand(sessionID, rawCommand, id string) (*CommandResult,
 
 	handler, ok := commandRegistry[cmd]
 	if !ok {
+		// Not a built-in: it may be a user-invocable skill. Skills are resolved
+		// after the registry so one can never shadow a command the user relies
+		// on; a colliding skill is reached as "/skill:<name>".
+		if s, found := findInvocableSkill(sess.CWD, cmd); found {
+			return runSkillCommand(sess, s, args)
+		}
 		return &CommandResult{OK: false, Message: "unknown command: /" + cmd}, nil
 	}
 
