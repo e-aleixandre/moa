@@ -11,8 +11,9 @@ import { activityPhase } from "../../data/util/activity.js";
 // panel, NOT the whole accounting dump.
 //
 // Level 1 (this line): the context ring + session cost (leading the line, same
-// side as the mobile line), per-run tokens, the permission chip, and the modes
-// that are currently ACTIVE (goal/tasks) plus the on-extra alert. The
+// side as the mobile line), per-run tokens, the permission chip, fast mode
+// when it's on, and the modes that are currently ACTIVE (goal/tasks) plus the
+// on-extra alert. The
 // foreground run's ACTIVITY is not here: it lives in the NowLine above the
 // composer, in both densities. `task` survives for the consumers whose subject
 // is NOT the focused run — the subagent strip (a child's activity, which can be
@@ -129,6 +130,15 @@ export function StatusStrip({
       ) : (
         <span class={`perm-chip perm-${perm.mode}`} title={`Permission mode: ${perm.mode}`}>
           {perm.mode}
+        </span>
+      )}
+
+      {/* Fast mode is session state, like the permission chip, so it reads as
+          one: a word, not a glyph, and only while it's on. Same place and
+          wording as the mobile line. */}
+      {session?.fast && (
+        <span class="status-strip-fast" aria-label="Fast mode on — this session is billed at a premium rate">
+          fast
         </span>
       )}
 

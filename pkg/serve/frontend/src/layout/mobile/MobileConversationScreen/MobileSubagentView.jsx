@@ -158,6 +158,7 @@ function BranchStatusLine({ session, view }) {
       modelAccent={modelAccent(view.model)}
       thinking={view.thinking}
       perm={session.permissionMode || "yolo"}
+      fast={!!session.fast}
       tokensUp={(usage && usage.inputTokens) || 0}
       tokensDown={(usage && usage.outputTokens) || 0}
     />
