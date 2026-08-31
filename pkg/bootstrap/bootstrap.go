@@ -504,6 +504,18 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		Headless:          cfg.Headless,
 	}
 
+	// Pin date and git once for the session. Parent rebuilds (MCP) and
+	// sibling subagents all reuse this snapshot so GPT-5.6 can read the
+	// shared instructions prefix; a live clock or last-commit restamp
+	// would miss it. Porcelain is already omitted from git.Context.
+	promptNow := time.Now()
+	promptGit := git.Context(cfg.CWD)
+	promptBuilder := func(opts agentcontext.SystemPromptOptions) string {
+		opts.Now = promptNow
+		opts.Git = &promptGit
+		return agentcontext.BuildSystemPrompt(opts)
+	}
+
 	// 10. Subagents.
 	subagentJobs, err := subagent.RegisterAll(toolReg, subagent.Config{
 		DefaultModel: cfg.Model,
@@ -535,6 +547,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		WorkspaceRoot:       cfg.CWD,
 		SkillsIndex:         skillsIndex,
 		MemoryIndex:         memoryIndex,
+		PromptBuilder:       promptBuilder,
 		PromptCacheKey:      core.PromptCacheKey(cfg.SessionID),
 		BashState:           bashState,
 		AttachmentScope:     cfg.AttachmentScope,
@@ -574,22 +587,14 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	sess.Goal = goal.New()
 
 	// 11. System prompt (after ALL tools registered).
-	// Pin date and git so a later MCP rebuild with a different tool set does
-	// not also restamp the tail — GPT-5.6 implicit cache misses the whole
-	// prefix on any instructions change. Porcelain is already omitted from
-	// git.Context; the snapshot is the branch + last commit at session start.
-	promptNow := time.Now()
-	promptGit := git.Context(cfg.CWD)
 	sess.BuildBasePrompt = func(specs []core.ToolSpec) string {
-		return agentcontext.BuildSystemPrompt(agentcontext.SystemPromptOptions{
+		return promptBuilder(agentcontext.SystemPromptOptions{
 			AgentsMD:    agentsMD,
 			Tools:       specs,
 			CWD:         cfg.CWD,
 			HasVerify:   hasVerify,
 			MemoryIndex: memoryIndex,
 			SkillsIndex: skillsIndex,
-			Now:         promptNow,
-			Git:         &promptGit,
 		})
 	}
 	systemPrompt := sess.BuildBasePrompt(toolReg.Specs())
