@@ -12,7 +12,7 @@ export const POLICY_QUEUE = 'queue';
 export const POLICY_REJECT = 'reject';
 
 // Rewrite/reconfigure the run — must wait for idle (enqueued as a barrier).
-const QUEUE = new Set(['compact', 'clear', 'model', 'thinking', 'verify']);
+const QUEUE = new Set(['compact', 'clear', 'model', 'thinking', 'verify', 'reload']);
 // Mode transitions / destructive rewind — refused while busy.
 const REJECT = new Set(['handoff', 'undo', 'branch', 'back', 'plan']);
 
