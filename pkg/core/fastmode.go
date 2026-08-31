@@ -43,6 +43,11 @@ func FastNote(modelID string) string {
 	if !ok {
 		return ""
 	}
+	// A model that can't serve fast mode has no price to quote: returning its
+	// provider's wording would price an option this model doesn't offer.
+	if !SupportsFast(m.ID) {
+		return ""
+	}
 	switch m.Provider {
 	case "anthropic":
 		return "2.5× faster · billed as separate usage credits"

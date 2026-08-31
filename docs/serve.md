@@ -347,6 +347,7 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/sessions/{id}/history?before={msg_id}&limit={n}` | Chronological, lossless display-history page before a message ID; the page size is an objective and can grow to keep tool calls with their results |
 | `GET /api/model-preferences` · `PATCH /api/model-preferences` | Read or pin/unpin models in the owner's global preferences |
 | `GET /api/compact-strategy` · `PATCH /api/compact-strategy` | Read or set what the agent gets before an automatic compaction (`plain`, `notify`, `prepare`) |
+| `GET /api/sessions/{id}/fast` · `PATCH /api/sessions/{id}/fast` | Read or set fast mode for one session; the reply also says whether the current model can serve it and what it costs there |
 | `POST /api/sessions/{id}/secrets` | Stage a short-lived secret batch; returns its directory and aliases, never values |
 | `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |

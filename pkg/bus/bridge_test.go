@@ -2554,6 +2554,35 @@ func TestHandler_SwitchModel_Unknown(t *testing.T) {
 	}
 }
 
+// Switching to a model that can't serve fast mode must turn it off: the
+// provider would drop the flag anyway, and a session left marked fast would
+// claim a speed it isn't getting — and, worse, could resume charging the
+// premium the moment a capable model came back.
+func TestHandler_SwitchModel_TurnsOffFastOnUnsupportedModel(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{model: core.Model{ID: "claude-opus-5", Provider: "anthropic"}, thinkingLevel: "medium", fast: true}
+	sctx := newTestSessionContext(b, fa)
+	sctx.ProviderFactory = func(m core.Model) (core.Provider, error) { return errProvider{}, nil }
+	RegisterHandlers(sctx)
+
+	if err := b.Execute(SwitchModel{ModelSpec: "haiku"}); err != nil {
+		t.Fatalf("switch to haiku: %v", err)
+	}
+	if fa.Fast() {
+		t.Error("fast mode still on after switching to a model that does not support it")
+	}
+
+	// And it must not come back on its own when a capable model returns:
+	// re-arming silently would bill the premium nobody asked for again.
+	if err := b.Execute(SwitchModel{ModelSpec: "opus"}); err != nil {
+		t.Fatalf("switch back to opus: %v", err)
+	}
+	if fa.Fast() {
+		t.Error("fast mode re-armed itself on returning to a capable model")
+	}
+}
+
 func TestHandler_SwitchModel_CustomProviderModel(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()

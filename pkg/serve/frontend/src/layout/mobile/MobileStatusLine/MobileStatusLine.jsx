@@ -11,7 +11,7 @@ import {
   money,
 } from "../../../data/util/usage-pills.js";
 import { deriveModelSpecs, matchSelectedModel, modelAccent } from "../../../data/selectors.js";
-import { configureSession } from "../../../data/session-actions.js";
+import { configureSession, setSessionFast } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { modelCodename, shortModel, fmtTokens } from "../../../data/util/format.js";
 import { copyToClipboard } from "../../../data/util/format.js";
@@ -331,6 +331,7 @@ export function MobileStatusLine({ session, usage }) {
       modelLabel="Model and thinking — change"
       thinking={thinking}
       perm={hasSession ? permMode : null}
+      fast={hasSession && !!session.fast}
       mcp={hasSession ? session.mcp : null}
       onMcp={() => setMcpOpen(true)}
       mcpOpen={mcpOpen}
@@ -382,6 +383,10 @@ export function MobileStatusLine({ session, usage }) {
                 }));
             }}
             onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
+            fast={!!session.fast}
+            fastSupported={!!session.fastSupported}
+            fastNote={session.fastNote || ""}
+            onFastChange={(value) => setSessionFast(session.id, value)}
           />
 
         </MobileSheet>

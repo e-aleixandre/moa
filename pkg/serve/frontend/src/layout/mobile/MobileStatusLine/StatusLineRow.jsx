@@ -27,6 +27,7 @@ export function StatusLineRow({
   modelLabel,
   thinking = "off",
   perm,
+  fast = false,
   mcp,
   onMcp,
   mcpOpen,
@@ -138,6 +139,16 @@ export function StatusLineRow({
             </span>
           </span>
         ))}
+
+      {/* Fast mode is a session state, like the permission chip, so it reads
+          as one: a word, not a glyph. It sits after the permission chip and
+          before the spacer, in room that is already empty, so switching it on
+          doesn't shift anything else on a 364px line. */}
+      {fast && (
+        <span class="msl-fast" aria-label="Fast mode on — this session is billed at a premium rate">
+          fast
+        </span>
+      )}
 
       <span class="msl-spacer" aria-hidden="true" />
 

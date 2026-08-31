@@ -28,7 +28,7 @@ import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
-import { configureSession, closeSession, deleteSession, openPersistedSubagent, openBashJob, resumeSession, rewindToMessage } from "../../data/session-actions.js";
+import { configureSession, closeSession, deleteSession, openPersistedSubagent, openBashJob, resumeSession, rewindToMessage , setSessionFast } from "../../data/session-actions.js";
 import "./ConversationScreen.css";
 
 // ConversationScreen — root organism AND container of the desktop conversation
@@ -321,6 +321,10 @@ export function ConversationScreen({ version }) {
               }));
           }}
           onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
+        fast={!!session.fast}
+        fastSupported={!!session.fastSupported}
+        fastNote={session.fastNote || ""}
+        onFastChange={(value) => setSessionFast(session.id, value)}
         />
       </div>
     );

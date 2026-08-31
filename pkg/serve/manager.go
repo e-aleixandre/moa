@@ -245,6 +245,11 @@ type SessionInfo struct {
 	Model              string       `json:"model"`
 	Provider           string       `json:"provider"`
 	Thinking           string       `json:"thinking"`
+	// Fast is whether this session buys premium speed, and FastSupported
+	// whether the model it is on can serve it at all.
+	Fast          bool   `json:"fast,omitempty"`
+	FastSupported bool   `json:"fast_supported,omitempty"`
+	FastNote      string `json:"fast_note,omitempty"`
 	CWD                string       `json:"cwd"`
 	Created            time.Time    `json:"created"`
 	Updated            time.Time    `json:"updated"`
@@ -385,6 +390,11 @@ func (s *ManagedSession) info() SessionInfo {
 	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
 	compactAtMin, _ := bus.QueryTyped[bus.GetCompactAtFloor, int](b, bus.GetCompactAtFloor{})
 
+	fastOn := false
+	if agent := s.runtime.Context().Agent; agent != nil {
+		fastOn = agent.Fast()
+	}
+
 	mcpSummary := s.mcpSummary()
 
 	s.mu.Lock()
@@ -397,6 +407,9 @@ func (s *ManagedSession) info() SessionInfo {
 		Model:          modelDisplayName(model),
 		Provider:       model.Provider,
 		Thinking:       thinking,
+		Fast:           fastOn,
+		FastSupported:  core.SupportsFast(model.ID),
+		FastNote:       core.FastNote(model.ID),
 		CWD:            s.CWD,
 		Created:        s.Created,
 		Updated:        s.Updated,

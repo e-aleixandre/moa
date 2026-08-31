@@ -32,6 +32,9 @@ type InitData struct {
 	CompactAt          int                 `json:"compact_at,omitempty"`
 	CompactAtMin       int                 `json:"compact_at_min,omitempty"`
 	PermissionMode     string              `json:"permission_mode"`
+	Fast               bool                `json:"fast"`
+	FastSupported      bool                `json:"fast_supported"`
+	FastNote           string              `json:"fast_note,omitempty"`
 	PathScope          string              `json:"path_scope,omitempty"`
 	PendingPermission  *PermissionData     `json:"pending_permission,omitempty"`
 	PendingAsk         *AskData            `json:"pending_ask,omitempty"`
@@ -376,6 +379,12 @@ type ConfigChangeData struct {
 	// ContextWindow carries a model switch's new input window, the denominator
 	// for every context percentage the client shows.
 	ContextWindow int `json:"context_window,omitempty"`
+	// Fast and its companions ride on a model switch. Not omitempty: false is
+	// the meaningful value when a switch turns fast mode off, and omitting it
+	// would leave the client showing a premium it is no longer paying for.
+	Fast          bool   `json:"fast"`
+	FastSupported bool   `json:"fast_supported"`
+	FastNote      string `json:"fast_note,omitempty"`
 }
 
 // SubagentCountData is sent when async subagent jobs start/finish.

@@ -209,12 +209,53 @@ function ProviderList({ groups, selected, onOpen }) {
   );
 }
 
+// FastRow — the speed switch, sibling to the thinking stepper: one buys depth,
+// the other buys time. A two-state toggle rather than a segmented control,
+// because the options are not peers — standard is the default and fast is an
+// opt-in that costs more. On a model that can't serve it the row stays visible
+// but disabled: hiding it would make the option seem to come and go, leaving
+// you to memorise which models have it.
+function FastRow({ value, supported, note, onChange }) {
+  const on = value && supported;
+  return (
+    <div class="fast-block">
+      <div class="fast-lbl" id="model-selector-fast-label">
+        Fast <b class={on ? "on" : ""}>{on ? "ON" : "OFF"}</b>
+      </div>
+      <button
+        type="button"
+        class={`fast-toggle${on ? " is-on" : ""}`}
+        role="switch"
+        aria-checked={on}
+        aria-labelledby="model-selector-fast-label"
+        aria-describedby="model-selector-fast-note"
+        disabled={!supported || !onChange}
+        onClick={onChange ? () => onChange(!on) : undefined}
+      >
+        <span class="fast-track" aria-hidden="true">
+          <span class="fast-knob" />
+        </span>
+        <span class="fast-text">{supported ? "Same model, less waiting" : "Not available on this model"}</span>
+      </button>
+      {supported && note && (
+        <p class="fast-note" id="model-selector-fast-note">
+          {note}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function ModelSelector({
   models = [],
   selected,
   thinking = "off",
+  fast = false,
+  fastSupported = false,
+  fastNote = "",
   onSelect,
   onThinkingChange,
+  onFastChange,
   embedded = false,
   sessionModel,
   sessionProvider,
@@ -318,6 +359,7 @@ export function ModelSelector({
         onChange={onThinkingChange}
         levels={(selectedSpec?.provider === "xai" || sessionProvider === "xai") ? ["low", "medium", "high"] : undefined}
       />
+      <FastRow value={fast} supported={fastSupported} note={fastNote} onChange={onFastChange} />
       {!!sessionModel && (
         <CurrentModelRow
           spec={selectedSpec}

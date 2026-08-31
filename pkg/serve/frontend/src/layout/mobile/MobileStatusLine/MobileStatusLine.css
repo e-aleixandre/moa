@@ -160,6 +160,20 @@
   flex: none;
 }
 
+/* ── Fast mode (after the permission chip) — shown only while the session buys
+   premium speed. A word rather than an icon: the line already asks you to read
+   `yolo`, and a glyph would be one more code to learn. Yellow because every
+   other hue here is spoken for — the model name carries the provider, the
+   permission chip its own scale — and because it reads as "mind this". It sits
+   in room the line already leaves empty, so turning it on shifts nothing. ── */
+.mstatusline .msl-fast {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--yellow);
+  margin-left: var(--space-2);
+}
+
 /* ── MCP health (RIGHT, before the token heartbeat) — present only when the
    session has servers. A plug + count; the alert variant turns red so a crashed
    server is glanceable without opening the sheet. It is the door onto the MCP

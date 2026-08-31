@@ -608,6 +608,9 @@ export function handleWsInit(id, data) {
     compactAt: data.compact_at || 0,
     compactAtMin: data.compact_at_min || 0,
     permissionMode: data.permission_mode || 'yolo',
+    fast: !!data.fast,
+    fastSupported: !!data.fast_supported,
+    fastNote: data.fast_note || '',
     pendingPerm: data.pending_permission || null,
     pendingAsk: data.pending_ask || null,
     // The server's steer queue is authoritative and shared across all of this
@@ -1274,6 +1277,11 @@ export function handleWsConfigChange(id, data) {
     provider: data.provider || sess?.provider,
     thinking: data.thinking || sess?.thinking,
   };
+  // Fast mode travels with the model: whether it is on, and whether the model
+  // it is now on can serve it at all — a model switch can take the option away.
+  if (data.fast !== undefined) patch.fast = data.fast;
+  if (data.fast_supported !== undefined) patch.fastSupported = data.fast_supported;
+  if (data.fast_note !== undefined) patch.fastNote = data.fast_note;
   if (data.permission_mode) {
     patch.permissionMode = data.permission_mode;
   }

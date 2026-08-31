@@ -55,6 +55,94 @@
   color: var(--peach);
 }
 
+/* ── Fast mode — same shape as the thinking block above it (label with the
+   current value, control, then a note), so the two read as one pair of knobs:
+   one buys depth, the other buys time. Yellow marks it as the paid option, the
+   same hue the status line uses once it is on. ── */
+.model-selector .fast-block {
+  margin-bottom: var(--space-4);
+}
+
+.model-selector .fast-lbl {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+  margin-bottom: var(--space-2);
+}
+
+.model-selector .fast-lbl b {
+  color: var(--overlay0);
+  font-weight: var(--weight-semibold);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+}
+
+.model-selector .fast-lbl b.on {
+  color: var(--yellow);
+}
+
+.model-selector .fast-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  background: var(--mantle);
+  border: 0;
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+  text-align: left;
+}
+
+.model-selector:not(.model-selector--embedded) .fast-toggle {
+  background: var(--base);
+}
+
+.model-selector .fast-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.model-selector .fast-track {
+  flex: none;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--surface0);
+  padding: 2px;
+  transition: background var(--duration) var(--ease);
+}
+
+.model-selector .fast-toggle.is-on .fast-track {
+  background: var(--yellow);
+}
+
+.model-selector .fast-knob {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform var(--duration) var(--ease);
+}
+
+.model-selector .fast-toggle.is-on .fast-knob {
+  background: var(--crust);
+  transform: translateX(14px);
+}
+
+.model-selector .fast-note {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+}
+
 .model-selector .think-steps {
   background: var(--mantle);
 }

@@ -260,6 +260,7 @@ func wsEventFromBus(event any) (Event, bool) {
 			Model: e.Model, Provider: e.Provider, Thinking: e.Thinking,
 			PermissionMode: e.PermissionMode, PathScope: e.PathScope,
 			CompactAt: e.CompactAt, ContextWindow: e.ContextWindow,
+			Fast: e.Fast, FastSupported: e.FastSupported, FastNote: e.FastNote,
 		}}, true
 	case bus.GoalChanged:
 		return Event{Type: "goal_change", Data: GoalChangeData{
@@ -563,6 +564,10 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
 	compactAtMin, _ := bus.QueryTyped[bus.GetCompactAtFloor, int](b, bus.GetCompactAtFloor{})
 	initModel, _ := bus.QueryTyped[bus.GetModel, core.Model](b, bus.GetModel{})
+	initFast := false
+	if agent := sess.runtime.Context().Agent; agent != nil {
+		initFast = agent.Fast()
+	}
 	permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](b, bus.GetPermissionMode{})
 	pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](b, bus.GetPendingApproval{})
 	taskList, _ := bus.QueryTyped[bus.GetTasks, []tasks.Task](b, bus.GetTasks{})
@@ -592,6 +597,9 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		CompactAt:          compactAt,
 		CompactAtMin:       compactAtMin,
 		PermissionMode:     permMode,
+		Fast:               initFast,
+		FastSupported:      core.SupportsFast(initModel.ID),
+		FastNote:           core.FastNote(initModel.ID),
 		Tasks:              taskList,
 		PathScope:          pathInfo.Scope,
 		CostUSD:            cost,
