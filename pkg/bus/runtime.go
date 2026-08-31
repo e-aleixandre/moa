@@ -173,7 +173,9 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 	// Goal mode: rebuild system prompt (inject/remove directive) and announce.
 	if cfg.Goal != nil {
 		cfg.Goal.SetOnChange(func(active bool) {
-			rebuildSystemPrompt(sctx)
+			// Goal transitions happen between runs; a refusal is not actionable
+			// from a change callback.
+			_ = rebuildSystemPrompt(sctx)
 			sctx.Bus.Publish(goalChangedEvent(sctx.SessionID, cfg.Goal.Info()))
 		})
 	}
@@ -387,20 +389,22 @@ func (r *SessionRuntime) Context() *SessionContext {
 // RefreshBaseSystemPrompt sets a freshly built base system prompt and re-applies
 // it, composing goal fragments on top. Callers use it after the tool set
 // changes at runtime (e.g. an MCP server is enabled or disabled) so the model is
-// never told about a tool that is no longer registered. It must be called while
-// the agent is not running; the MCP controller only reconciles at quiescence,
-// which guarantees that.
-func (r *SessionRuntime) RefreshBaseSystemPrompt(base string) {
+// never told about a tool that is no longer registered.
+//
+// It reports whether the prompt reached the agent: SetSystemPrompt refuses while
+// a run is in flight, and a caller that has already recorded the new state needs
+// to know it did not take, or the change is silently lost. Callers that cannot
+// fail meaningfully may ignore it.
+func (r *SessionRuntime) RefreshBaseSystemPrompt(base string) error {
 	if r.sctx.Agent == nil {
-		return
+		return fmt.Errorf("session has no agent")
 	}
 	r.sctx.BaseSystemPrompt = base
 	// rebuildSystemPrompt re-applies BaseSystemPrompt + goal fragments, but
 	// it is a no-op when neither mode is active — in that case set the base
 	// prompt directly so a plain session still picks up the new tool list.
 	if r.sctx.Goal == nil {
-		_ = r.sctx.Agent.SetSystemPrompt(base)
-		return
+		return r.sctx.Agent.SetSystemPrompt(base)
 	}
-	rebuildSystemPrompt(r.sctx)
+	return rebuildSystemPrompt(r.sctx)
 }

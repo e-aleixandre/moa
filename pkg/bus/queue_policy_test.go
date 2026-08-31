@@ -91,3 +91,33 @@ func TestQueuePolicyString(t *testing.T) {
 		t.Fatal("QueuePolicy.String mismatch")
 	}
 }
+
+// The frontend mirrors this table in command-policy.js to decide whether a
+// command typed mid-run is queued or refused. They drifted before: /reload was
+// added here and the mirror had to follow. This pins the set so a future
+// addition fails here instead of silently disagreeing with the UI.
+func TestQueuePolicy_MirrorsTheFrontendTable(t *testing.T) {
+	want := map[string]QueuePolicy{
+		"compact":         PolicyQueue,
+		"prepare-compact": PolicyQueue,
+		"clear":           PolicyQueue,
+		"model":           PolicyQueue,
+		"thinking":        PolicyQueue,
+		"verify":          PolicyQueue,
+		"reload":          PolicyQueue,
+		"handoff":         PolicyReject,
+		"undo":            PolicyReject,
+		"branch":          PolicyReject,
+		"back":            PolicyReject,
+		"plan":            PolicyReject,
+	}
+	if len(queuePolicyByName) != len(want) {
+		t.Errorf("the policy table changed (%d entries, expected %d): update pkg/serve/frontend/src/data/util/command-policy.js to match",
+			len(queuePolicyByName), len(want))
+	}
+	for name, policy := range want {
+		if got := queuePolicyByName[name]; got != policy {
+			t.Errorf("%s: policy %v, want %v", name, got, policy)
+		}
+	}
+}

@@ -14,6 +14,9 @@ type reloadOutcome struct {
 	Title     string   `json:"title,omitempty"`
 	Changed   []string `json:"changed,omitempty"`
 	Queued    bool     `json:"queued,omitempty"`
+	// Err is set when the session could not be reached at all, e.g. its queue
+	// was full or its bus had closed.
+	Err string `json:"err,omitempty"`
 }
 
 // reloadSession re-reads the on-disk prompt inputs and, if any changed, rebuilds
@@ -38,7 +41,7 @@ func (s *ManagedSession) reloadSession() []string {
 		return nil
 	}
 
-	changed := src.Reload()
+	changed, revert := src.Reload()
 	if len(changed) == 0 {
 		// Nothing to do, and nothing to pay: leaving the prompt untouched keeps
 		// the cached prefix valid.
@@ -49,7 +52,14 @@ func (s *ManagedSession) reloadSession() []string {
 	for _, c := range changed {
 		labels = append(labels, c.Label)
 	}
-	s.runtime.RefreshBaseSystemPrompt(build(reg.Specs()))
+	if err := s.runtime.RefreshBaseSystemPrompt(build(reg.Specs())); err != nil {
+		// A run started between the idle check and here, so the prompt was
+		// refused. Put the recorded state back: otherwise this reports success,
+		// the session keeps the old prompt, and the next reload sees no
+		// difference and does nothing.
+		revert()
+		return nil
+	}
 	return labels
 }
 
@@ -59,13 +69,15 @@ func (s *ManagedSession) reloadSession() []string {
 // in each one: which files changed where, and which sessions were busy and will
 // pick it up when they settle.
 func formatReloadReport(outcomes []reloadOutcome) string {
-	var applied, queued []string
+	var applied, queued, failed []string
 	for _, o := range outcomes {
 		name := o.Title
 		if name == "" {
 			name = o.SessionID
 		}
 		switch {
+		case o.Err != "":
+			failed = append(failed, fmt.Sprintf("%s (%s)", name, o.Err))
 		case o.Queued:
 			queued = append(queued, name)
 		case len(o.Changed) > 0:
@@ -73,7 +85,7 @@ func formatReloadReport(outcomes []reloadOutcome) string {
 		}
 	}
 
-	if len(applied) == 0 && len(queued) == 0 {
+	if len(applied) == 0 && len(queued) == 0 && len(failed) == 0 {
 		return "Nothing changed on disk."
 	}
 
@@ -88,6 +100,12 @@ func formatReloadReport(outcomes []reloadOutcome) string {
 		fmt.Fprintf(&b, "Queued for %d busy session(s), applied when they settle:\n", len(queued))
 		for _, q := range queued {
 			fmt.Fprintf(&b, "  - %s\n", q)
+		}
+	}
+	if len(failed) > 0 {
+		fmt.Fprintf(&b, "Could not reach %d session(s):\n", len(failed))
+		for _, f := range failed {
+			fmt.Fprintf(&b, "  - %s\n", f)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
@@ -121,13 +139,20 @@ func cmdReload(m *Manager, sess *ManagedSession, _ []string) (*CommandResult, er
 		if requireIdle(other) != nil {
 			// Busy: queue the barrier on that session's own rail. It runs at
 			// its next idle point, in send order with anything else queued.
-			if err := other.runtime.Bus.Execute(bus.QueueCommand{
+			err := other.runtime.Bus.Execute(bus.QueueCommand{
 				ID:  core.NewSteerID(),
 				Raw: "/reload",
-			}); err == nil {
+			})
+			if err != nil {
+				// A full queue or a closed bus means this session will not pick
+				// the reload up. Say so: silently dropping it is how a session
+				// ends up running on instructions the user believes they
+				// changed.
+				out.Err = err.Error()
+			} else {
 				out.Queued = true
-				outcomes = append(outcomes, out)
 			}
+			outcomes = append(outcomes, out)
 			continue
 		}
 		out.Changed = other.reloadSession()

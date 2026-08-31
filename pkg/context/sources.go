@@ -59,9 +59,14 @@ type Changed struct {
 // Nothing changed is the common case — a reload run "just in case" — and it
 // must stay free: callers use an empty result to leave the conversation, and
 // its cached prompt prefix, completely untouched.
-func (s *Sources) Reload() []Changed {
+//
+// The returned revert function restores the previous values. A caller that
+// records the new state and then fails to apply it would report success while
+// leaving the session on the old prompt, and the next reload would see no
+// difference and do nothing — the change lost for good.
+func (s *Sources) Reload() (changed []Changed, revert func()) {
 	if s == nil {
-		return nil
+		return nil, func() {}
 	}
 	agentsMD, _ := LoadAgentsMD(s.cwd, "")
 	skillsIndex := skill.FormatIndex(skill.Discover(s.cwd))
@@ -73,7 +78,7 @@ func (s *Sources) Reload() []Changed {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var changed []Changed
+	prev := struct{ agentsMD, skillsIndex, memoryIndex string }{s.agentsMD, s.skillsIndex, s.memoryIndex}
 	if agentsMD != s.agentsMD {
 		changed = append(changed, Changed{Label: "AGENTS.md", Content: agentsMD})
 		s.agentsMD = agentsMD
@@ -86,5 +91,9 @@ func (s *Sources) Reload() []Changed {
 		changed = append(changed, Changed{Label: "Memory index", Content: memoryIndex})
 		s.memoryIndex = memoryIndex
 	}
-	return changed
+	return changed, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.agentsMD, s.skillsIndex, s.memoryIndex = prev.agentsMD, prev.skillsIndex, prev.memoryIndex
+	}
 }

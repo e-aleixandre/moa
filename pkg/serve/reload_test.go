@@ -218,3 +218,76 @@ func TestReload_QueuesForABusySession(t *testing.T) {
 	}
 	t.Error("the queued reload never applied after the session settled")
 }
+
+// A reload that cannot be applied must not record the new state: reporting
+// success while the session keeps the old prompt would make the next reload see
+// no difference and do nothing, losing the change for good.
+func TestReload_DoesNotSwallowTheChangeWhenTheAgentRefuses(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	release := make(chan struct{})
+	provider := newMockProvider(func(_ context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		<-release
+		return simpleResponse("done"), nil
+	})
+	mgr := newTestManager(t, ctx, provider)
+
+	cwd := t.TempDir()
+	writeAgentsMD(t, cwd, "- One.\n")
+	sess, err := mgr.CreateSession(CreateOpts{CWD: cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, _, err := mgr.Send(sess.ID, "work", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 2*time.Second, "running", func() bool {
+		return sessState(sess) == StateRunning
+	})
+
+	writeAgentsMD(t, cwd, "- One.\n- Two.\n")
+	// Reload straight at the session while it runs: SetSystemPrompt refuses.
+	if changed := sess.reloadSession(); len(changed) != 0 {
+		t.Errorf("a refused reload reported success: %v", changed)
+	}
+
+	close(release)
+	pollUntil(t, 3*time.Second, "idle", func() bool {
+		return sessState(sess) == StateIdle
+	})
+
+	// The change must still be pending, not swallowed by the first attempt.
+	if changed := sess.reloadSession(); len(changed) == 0 {
+		t.Fatal("the change was lost: a retry saw nothing to do")
+	}
+	if !strings.Contains(sess.runtime.Context().Agent.SystemPrompt(), "Two") {
+		t.Error("the retry reported changes but did not apply them")
+	}
+}
+
+// A new skill has to reach the prompt index too, not just AGENTS.md.
+func TestReload_PicksUpANewSkill(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("ok")))
+
+	cwd := t.TempDir()
+	sess, err := mgr.CreateSession(CreateOpts{CWD: cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestSkill(t, cwd, "deploy", "# Deploy — how to ship\n\nBody.\n")
+	res, err := mgr.ExecCommand(sess.ID, "/reload", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Message, "Skills") {
+		t.Errorf("the report should name the skills index, got: %s", res.Message)
+	}
+	if !strings.Contains(sess.runtime.Context().Agent.SystemPrompt(), "deploy") {
+		t.Error("a skill created mid-session never reached the prompt index")
+	}
+}

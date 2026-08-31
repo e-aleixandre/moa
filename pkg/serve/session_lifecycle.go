@@ -1237,7 +1237,10 @@ func (s *ManagedSession) wireMCPRefresh() {
 		return
 	}
 	ctrl.SetRefreshPrompt(func() {
-		rt.RefreshBaseSystemPrompt(build(reg.Specs()))
+		// The MCP controller only reconciles at quiescence, so the agent is not
+		// running; a refusal here would mean the tool list and the prompt
+		// disagree, which the next reconcile corrects.
+		_ = rt.RefreshBaseSystemPrompt(build(reg.Specs()))
 	})
 	if mgr != nil {
 		// Fired from a manager goroutine on any server transition. We recompute
