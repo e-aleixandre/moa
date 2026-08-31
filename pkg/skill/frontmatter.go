@@ -33,20 +33,28 @@ func (f frontmatter) boolField(key string, def bool) bool {
 // stripFrontmatter removes the leading "---" block from skill content. The
 // opening marker must be the file's first line, so a document that starts with
 // a horizontal rule keeps all of its text.
+//
+// Line endings are normalized first: a CRLF file whose flags parse correctly
+// but whose header is handed to the model would be the worst of both.
 func stripFrontmatter(content string) string {
-	rest, ok := strings.CutPrefix(content, "---\n")
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	rest, ok := strings.CutPrefix(normalized, "---\n")
 	if !ok {
 		return content
 	}
-	_, body, ok := strings.Cut(rest, "\n---")
-	if !ok {
-		// Unterminated block: it was never frontmatter, keep the text as is.
-		return content
+	for {
+		line, after, found := strings.Cut(rest, "\n")
+		if !found {
+			// Unterminated block: it was never frontmatter, keep the text.
+			return content
+		}
+		// Only a line that is exactly "---" closes the block, matching the
+		// parser; "---x" is content.
+		if strings.TrimRight(line, " \t") == "---" {
+			return after
+		}
+		rest = after
 	}
-	if _, after, ok := strings.Cut(body, "\n"); ok {
-		return after
-	}
-	return ""
 }
 
 // parseFrontmatter reads the YAML block delimited by "---" at the very top of

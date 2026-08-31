@@ -10,9 +10,16 @@ import (
 )
 
 // NewTool creates the load_skill tool that lets the agent load skill content on demand.
+//
+// Skills the model may not invoke are excluded from the tool's set, not just
+// from the prompt index: hiding a name the tool still honours would leave
+// "only the user invokes this" as a suggestion rather than a rule.
 func NewTool(skills []Skill) core.Tool {
 	byName := make(map[string]Skill, len(skills))
 	for _, s := range skills {
+		if !s.ModelInvocable() {
+			continue
+		}
 		byName[s.Name] = s
 	}
 

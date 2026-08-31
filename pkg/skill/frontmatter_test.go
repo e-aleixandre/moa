@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,5 +138,62 @@ func TestDiscover_ReadsHeadingBelowFrontmatter(t *testing.T) {
 	}
 	if s.Description != "The description." {
 		t.Errorf("Description = %q, want %q", s.Description, "The description.")
+	}
+}
+
+// A CRLF file whose flags parse but whose header reaches the model would be the
+// worst of both outcomes.
+func TestLoad_StripsFrontmatterFromCRLFFile(t *testing.T) {
+	_, dir := newSkillDir(t)
+	writeSkill(t, dir, "s", "---\r\ndisable-model-invocation: true\r\n---\r\n# Title\r\n\r\nBody.\r\n")
+
+	skills := Discover(filepath.Dir(filepath.Dir(dir)))
+	if !skills[0].DisableModelInvocation {
+		t.Error("CRLF frontmatter was not parsed")
+	}
+	body, err := Load(skills[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(body, "disable-model-invocation") {
+		t.Errorf("CRLF frontmatter reached the model:\n%q", body)
+	}
+}
+
+// Only a line that is exactly "---" closes the block; "---x" is content.
+func TestLoad_ClosingMarkerMustBeExact(t *testing.T) {
+	root, dir := newSkillDir(t)
+	content := "---\nkey: value\n---x\n# Title\n\nBody.\n"
+	writeSkill(t, dir, "s", content)
+
+	body, err := Load(Discover(root)[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != content {
+		t.Errorf("an unterminated block was treated as frontmatter:\n%q", body)
+	}
+}
+
+// The model must not be able to load a skill reserved for the user: hiding the
+// name while the tool still honours it would make the rule a suggestion.
+func TestNewTool_RefusesSkillsTheModelCannotInvoke(t *testing.T) {
+	root, dir := newSkillDir(t)
+	writeSkill(t, dir, "landing", "---\ndisable-model-invocation: true\n---\n# Landing\n\nSecret body.\n")
+
+	tool := NewTool(Discover(root))
+	res, err := tool.Execute(context.Background(), map[string]any{"name": "landing"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	for _, c := range res.Content {
+		text += c.Text
+	}
+	if strings.Contains(text, "Secret body") {
+		t.Errorf("the model loaded a user-only skill:\n%s", text)
+	}
+	if !res.IsError {
+		t.Error("loading a user-only skill should be an error result")
 	}
 }
