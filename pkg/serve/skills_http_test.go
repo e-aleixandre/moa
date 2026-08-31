@@ -126,3 +126,38 @@ func TestRenderSkillBody(t *testing.T) {
 		}
 	})
 }
+
+// Command lookup ignores case, so a skill named "Compact" collides with
+// /compact just as "compact" does.
+func TestSkillCommands_CollisionIgnoresCase(t *testing.T) {
+	cwd := t.TempDir()
+	writeTestSkill(t, cwd, "Compact", "# C\n\nBody.\n")
+
+	got := skillCommands(skill.Discover(cwd))
+	if len(got) != 1 || got[0].Name != "skill:Compact" {
+		t.Fatalf("a differently-cased skill escaped the collision rule: %+v", got)
+	}
+	if _, ok := findInvocableSkill(cwd, "Compact"); ok {
+		t.Error("/Compact resolved to the skill instead of the built-in command")
+	}
+	if _, ok := findInvocableSkill(cwd, "skill:compact"); !ok {
+		t.Error("the prefixed form should resolve regardless of case")
+	}
+}
+
+// A name that cannot survive the command line must not be advertised: the menu
+// would show an entry that does nothing.
+func TestSkillCommands_SkipsUnusableNames(t *testing.T) {
+	cwd := t.TempDir()
+	// Already prefixed: indistinguishable from a prefixed collision.
+	writeTestSkill(t, cwd, "skill:deploy", "# D\n\nBody.\n")
+	// Whitespace: the command parser splits on it.
+	writeTestSkill(t, cwd, "two words", "# T\n\nBody.\n")
+
+	if got := skillCommands(skill.Discover(cwd)); len(got) != 0 {
+		t.Errorf("unusable names were offered: %+v", got)
+	}
+	if _, ok := findInvocableSkill(cwd, "skill:deploy"); ok {
+		t.Error("a skill literally named skill:deploy must not resolve")
+	}
+}

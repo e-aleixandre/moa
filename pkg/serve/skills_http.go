@@ -20,6 +20,9 @@ type SkillCommand struct {
 	Description string `json:"description"`
 }
 
+// skillCommandPrefix marks a skill whose own name is taken by a built-in.
+const skillCommandPrefix = "skill:"
+
 // reservedCommandNames are names a skill may not take over: the server's
 // command registry plus the commands a frontend implements on its own (/secret
 // never reaches the server — the composer turns it into a stashed value).
@@ -30,6 +33,28 @@ var reservedCommandNames = func() map[string]bool {
 	}
 	return names
 }()
+
+// invocableAs returns the slash name for a skill, and whether it can be
+// invoked at all.
+//
+// A name is unusable when it cannot survive the round trip through the command
+// line: whitespace would be split by the parser, and a name already carrying
+// the disambiguation prefix could not be told apart from a prefixed collision.
+// Advertising such a skill would show an entry that does nothing when clicked.
+func invocableAs(s skill.Skill) (string, bool) {
+	if s.Name == "" || strings.ContainsAny(s.Name, " \t\n") {
+		return "", false
+	}
+	if strings.HasPrefix(strings.ToLower(s.Name), skillCommandPrefix) {
+		return "", false
+	}
+	// Command lookup is case-insensitive, so a skill named "Compact" collides
+	// with /compact just as "compact" does.
+	if reservedCommandNames[strings.ToLower(s.Name)] {
+		return skillCommandPrefix + s.Name, true
+	}
+	return s.Name, true
+}
 
 // skillCommands turns discovered skills into slash-menu entries.
 //
@@ -43,9 +68,9 @@ func skillCommands(skills []skill.Skill) []SkillCommand {
 		if !s.UserInvocable {
 			continue
 		}
-		name := s.Name
-		if reservedCommandNames[name] {
-			name = "skill:" + s.Name
+		name, ok := invocableAs(s)
+		if !ok {
+			continue
 		}
 		desc := s.Description
 		if desc == "" {
@@ -62,10 +87,15 @@ func skillCommands(skills []skill.Skill) []SkillCommand {
 //
 // Discovery reads the directory on every call rather than a set captured when
 // the session was built, so a skill created mid-session is invocable right away.
-func findInvocableSkill(cwd, name string) (skill.Skill, bool) {
-	bare := strings.TrimPrefix(name, "skill:")
+func findInvocableSkill(cwd, typed string) (skill.Skill, bool) {
+	want := strings.ToLower(typed)
 	for _, s := range skill.Discover(cwd) {
-		if s.Name == bare && s.UserInvocable {
+		if !s.UserInvocable {
+			continue
+		}
+		// Match against the name the skill is actually offered under, so the
+		// menu and the parser can never disagree.
+		if name, ok := invocableAs(s); ok && strings.ToLower(name) == want {
 			return s, true
 		}
 	}
