@@ -186,9 +186,6 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	// paused message and lose the continuation).
 	pauseResubmits := 0
 	justPaused := false
-	// One notice per run: repeating it every iteration would nag, and the agent
-	// has already had its chance to act on the first one.
-	compactionWarned := false
 	// Which compaction epoch has already had its preparation turn.
 	preparedEpoch := -1
 
@@ -256,10 +253,22 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// The notice states what to do, not just the number: told only how
 			// many tokens remained, the model carried on as if nothing had
 			// changed in every measured run.
-			if !compactionWarned && strategyAllowsNotice(cfg) {
+			if strategyAllowsNotice(cfg) && !alreadyWarned(cfg.state.Messages) {
 				if warn, remaining := core.ShouldWarnBeforeCompact(estimate.Tokens, window, *compactionSettings); warn {
-					cfg.state.Messages = append(cfg.state.Messages, compactionNotice(remaining))
-					compactionWarned = true
+					// appendState, not a bare append: it takes stateMu and
+					// assigns the MsgID the tree needs to sync this message
+					// under a stable identity.
+					notice := compactionNotice(remaining)
+					notice.EnsureMsgID()
+					cfg.appendState(notice)
+					// Announce it: without an event the notice only shows up on
+					// the next reload, and a client watching live would see the
+					// agent react to something that was not there.
+					emitLifecycle(cfg, core.AgentEvent{
+						Type:    core.AgentEventUserMessage,
+						Message: notice,
+						MsgID:   notice.MsgID,
+					})
 				}
 			}
 

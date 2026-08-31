@@ -12,13 +12,16 @@ import (
 )
 
 // prepareHarness builds an agent whose context is already over the compaction
-// threshold, so the next run compacts immediately.
+// threshold, so the next send compacts on its first iteration.
+//
+// The transcript is filled directly rather than driven through turns: how many
+// responses a run consumes changes as soon as anything adds a message (the
+// notice does), and a harness that depends on that count breaks for reasons
+// that have nothing to do with what is being tested.
 func prepareHarness(t *testing.T, strategy string, responses ...func(core.Request) (<-chan core.AssistantEvent, error)) (*Agent, *seenRequests) {
 	t.Helper()
 	slot := &sessioncheckpoint.Slot{}
 	seen := &seenRequests{}
-	// Record what the provider is actually asked, which is the only place the
-	// preparation turn is observable from outside.
 	recorded := make([]func(core.Request) (<-chan core.AssistantEvent, error), len(responses))
 	for i, resp := range responses {
 		recorded[i] = func(req core.Request) (<-chan core.AssistantEvent, error) {
@@ -50,24 +53,20 @@ func prepareHarness(t *testing.T, strategy string, responses ...func(core.Reques
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Already over the threshold: the next send compacts straight away.
+	for i := 0; i < 6; i++ {
+		ag.state.Messages = append(ag.state.Messages,
+			core.WrapMessage(core.NewUserMessage(strings.Repeat("filler ", 120))),
+			core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent(strings.Repeat("reply ", 120))}}),
+		)
+	}
 	return ag, seen
 }
 
-// fillThenCompact drives two turns: the first fills the context window, and the
-// second is where the loop sees it is over the threshold and compacts. The
-// check runs at the top of an iteration, so it takes a second send to reach it.
-func fillThenCompact(t *testing.T, ag *Agent) {
+// compactNow drives the single send that crosses the threshold.
+func compactNow(t *testing.T, ag *Agent) {
 	t.Helper()
-	if _, err := ag.Run(context.Background(), "hello"); err != nil {
-		t.Fatal(err)
-	}
-	// The threshold check runs at the top of an iteration, against the context
-	// as it stood before the previous response landed: it takes a further send
-	// to reach the check with a full window.
-	if _, err := ag.Send(context.Background(), "continue"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ag.Send(context.Background(), "and again"); err != nil {
+	if _, err := ag.Send(context.Background(), "carry on"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -108,13 +107,11 @@ func (s *seenRequests) asksToPrepare() bool {
 // before the summary replaces it.
 func TestAutoPrepare_RunsBeforeCompaction(t *testing.T) {
 	ag, seen := prepareHarness(t, core.CompactPrepare,
-		largeTextResponse(strings.Repeat("x", 2000), &core.Usage{TotalTokens: 900}), // fills the window
-		simpleTextResponse("still going"),
 		simpleTextResponse("prepared: noted the findings"), // preparation turn
 		simpleTextResponse("## Goal\nsummary"),             // summarizer
 		simpleTextResponse("carrying on"),                  // turn after compaction
 	)
-	fillThenCompact(t, ag)
+	compactNow(t, ag)
 	if !seen.asksToPrepare() {
 		t.Fatal("the agent was never asked to prepare before its context was summarized")
 	}
@@ -147,7 +144,7 @@ func TestAutoPrepare_DoesNotLeakIntoTheConversation(t *testing.T) {
 		simpleTextResponse("## Goal\nsummary"),
 		simpleTextResponse("carrying on"),
 	)
-	fillThenCompact(t, ag)
+	compactNow(t, ag)
 	for _, m := range ag.Messages() {
 		for _, c := range m.Content {
 			if strings.Contains(c.Text, "Prepare this conversation for imminent compaction") {
@@ -161,12 +158,10 @@ func TestAutoPrepare_DoesNotLeakIntoTheConversation(t *testing.T) {
 func TestAutoPrepare_OnlyUnderPrepareStrategy(t *testing.T) {
 	for _, strategy := range []string{core.CompactPlain, core.CompactNotify} {
 		ag, seen := prepareHarness(t, strategy,
-			largeTextResponse(strings.Repeat("x", 2000), &core.Usage{TotalTokens: 900}),
-			simpleTextResponse("still going"),
 			simpleTextResponse("## Goal\nsummary"),
 			simpleTextResponse("carrying on"),
 		)
-		fillThenCompact(t, ag)
+		compactNow(t, ag)
 		if seen.asksToPrepare() {
 			t.Errorf("strategy %q took a preparation turn it did not ask for", strategy)
 		}
@@ -179,13 +174,11 @@ func TestAutoPrepare_FailureStillCompacts(t *testing.T) {
 	// One response only: the preparation turn consumes it, the summarizer then
 	// gets an error from the exhausted mock.
 	ag, _ := prepareHarness(t, core.CompactPrepare,
-		largeTextResponse(strings.Repeat("x", 2000), &core.Usage{TotalTokens: 900}),
-		simpleTextResponse("still going"),
 		simpleTextResponse("prepared"),
 		simpleTextResponse("## Goal\nsummary"),
 		simpleTextResponse("carrying on"),
 	)
-	fillThenCompact(t, ag)
+	compactNow(t, ag)
 	if ag.state.CompactionEpoch == 0 {
 		t.Error("the conversation was never compacted")
 	}

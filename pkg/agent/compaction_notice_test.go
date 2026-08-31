@@ -195,3 +195,61 @@ func TestShouldWarnBeforeCompact_BandSurvivesASmallWindow(t *testing.T) {
 		t.Errorf("warned with %d tokens remaining", remaining)
 	}
 }
+
+// Reproduces what happened in production: the agent was warned, the user
+// replied, and the notice appeared again right after — twice in the transcript
+// with the user's message in between.
+//
+// Every user message starts a new run, so a per-run flag re-warned on each turn
+// for as long as the context stayed in the band.
+func TestCompactionNotice_NotRepeatedOnTheNextUserTurn(t *testing.T) {
+	prov := NewMockProvider(
+		simpleTextResponse("one"),
+		simpleTextResponse("two"),
+		simpleTextResponse("three"),
+	)
+	reg := core.NewRegistry()
+	if err := reg.Register(core.Tool{
+		Name: "memory", Description: "save", Effect: core.EffectReadOnly,
+		Parameters: []byte(`{"type":"object"}`),
+		Execute: func(_ context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+			return core.TextResult("saved"), nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 10, KeepRecent: 200}
+	ag, err := New(AgentConfig{
+		Provider:            prov,
+		Model:               core.Model{ID: "test", MaxInput: 1000},
+		Compaction:          &settings,
+		CompactStrategy:     core.CompactNotify,
+		Tools:               reg,
+		MaxTurns:            10,
+		MaxToolCallsPerTurn: 5,
+		MaxRunDuration:      30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Inside the warning band, but not over the threshold.
+	ag.state.Messages = append(ag.state.Messages, core.WrapMessage(core.NewUserMessage(strings.Repeat("filler ", 480))))
+
+	if _, err := ag.Send(context.Background(), "go on"); err != nil {
+		t.Fatal(err)
+	}
+	// The user answers: a second run, with the context still in the band.
+	if _, err := ag.Send(context.Background(), "understood, carry on"); err != nil {
+		t.Fatal(err)
+	}
+
+	notices := 0
+	for _, m := range ag.Messages() {
+		if m.Custom != nil && m.Custom["source"] == "compaction_notice" {
+			notices++
+		}
+	}
+	if notices != 1 {
+		t.Errorf("warned %d times across two turns; the agent only needs telling once", notices)
+	}
+}

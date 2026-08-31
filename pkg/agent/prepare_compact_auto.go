@@ -88,3 +88,20 @@ func runAutoPrepare(ctx context.Context, cfg *loopConfig, slot *sessioncheckpoin
 func strategyIsPrepare(cfg *loopConfig) bool {
 	return cfg.compactStrategy != nil && cfg.compactStrategy() == core.CompactPrepare
 }
+
+// alreadyWarned reports whether the conversation already carries a compaction
+// notice since the last compaction.
+//
+// The state that matters is the transcript, not the run: every user message
+// starts a new run, so a per-run flag warned again on each of them while the
+// context stayed in the band — which is what happened in production, twice in a
+// row with the user's message in between. A compaction clears the history the
+// notice lived in, so the next fill warns again on its own.
+func alreadyWarned(msgs []core.AgentMessage) bool {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Custom != nil && msgs[i].Custom["source"] == "compaction_notice" {
+			return true
+		}
+	}
+	return false
+}
