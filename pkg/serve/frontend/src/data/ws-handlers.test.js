@@ -1732,3 +1732,27 @@ test('a live sync subagent card mutates from running to its outcome', () => {
   expect(projectStream(store.get().sessions.s1).flatMap(b => (b.blocks || []).flatMap(i => i.agents || [])))
     .toEqual([expect.objectContaining({ id: 'sa-sync', state: 'done', openable: true })]);
 });
+
+// Invoking a skill appends an ordinary message. Without handling the event the
+// row only appears on the next reload, so it looks like nothing happened.
+test('handleWsCommand appends the message of a loaded skill', () => {
+  seedSession('s1');
+  handleWsCommand('s1', {
+    command: 'skill',
+    messages: [{ msg_id: 'm-skill-1', role: 'user', content: [{ type: 'text', text: '# Deploy' }] }],
+  });
+  const msgs = store.get().sessions.s1.messages;
+  expect(msgs.some((m) => m._msg_id === 'm-skill-1')).toBe(true);
+});
+
+test('handleWsCommand does not duplicate a skill message already present', () => {
+  seedSession('s1');
+  const payload = {
+    command: 'skill',
+    messages: [{ msg_id: 'm-skill-2', role: 'user', content: [{ type: 'text', text: '# Deploy' }] }],
+  };
+  handleWsCommand('s1', payload);
+  handleWsCommand('s1', payload);
+  const hits = store.get().sessions.s1.messages.filter((m) => m._msg_id === 'm-skill-2');
+  expect(hits).toHaveLength(1);
+});

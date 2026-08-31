@@ -112,3 +112,44 @@ func ShouldCompact(contextTokens, contextWindow int, settings CompactionSettings
 	}
 	return contextTokens > effective
 }
+
+// compactionWarnRatio is how full the context has to be before the agent is
+// warned. At 85% there is room for a few more turns — enough to write something
+// down — while still being late enough that most runs never see the notice.
+const compactionWarnRatio = 0.85
+
+// minWarnBandTokens is the smallest useful warning band. The ratio alone leaves
+// a band proportional to the window, and with a low threshold that band gets
+// narrower than a single tool result: measured against a real server at
+// compact_at=45k the band was 4.3k tokens while reading one 1800-line file cost
+// 5.4k, so the context jumped from under the band to over the threshold and the
+// agent was never warned. Below this size the band is widened instead.
+const minWarnBandTokens = 20_000
+
+// ShouldWarnBeforeCompact reports whether the agent is close enough to the
+// compaction threshold to be told about it, and how many tokens remain.
+//
+// An automatic compaction arrives with no warning mid-task, so whatever the
+// agent had worked out but not written down is replaced by a summary. This is
+// what gives it the chance to persist it first.
+func ShouldWarnBeforeCompact(contextTokens, contextWindow int, settings CompactionSettings) (warn bool, remaining int) {
+	if !settings.Enabled || contextWindow <= 0 {
+		return false, 0
+	}
+	effective := contextWindow - settings.ReserveTokens
+	if effective <= 0 {
+		return false, 0
+	}
+	// Past the threshold it is too late to warn: compaction happens this turn.
+	if contextTokens > effective {
+		return false, 0
+	}
+	band := float64(effective) * (1 - compactionWarnRatio)
+	if band < minWarnBandTokens {
+		band = minWarnBandTokens
+	}
+	if float64(effective-contextTokens) > band {
+		return false, 0
+	}
+	return true, effective - contextTokens
+}

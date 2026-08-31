@@ -40,6 +40,13 @@ type SystemPromptOptions struct {
 	HasVerify   bool            // .moa/verify.json was loaded
 	MemoryIndex string          // pre-formatted memory index (one line per fact)
 	SkillsIndex string          // pre-formatted skills index
+	// Now, if non-zero, is the clock used for the date line. Zero means time.Now.
+	// Callers that rebuild the prompt (MCP tool-set changes) should pin this so
+	// a later rebuild does not restamp the date and miss the GPT-5.6 cache.
+	Now time.Time
+	// Git, if non-nil, is the git section as-is (empty means omit it). Nil
+	// means look up git.Context(CWD) live.
+	Git *string
 }
 
 // BuildSystemPrompt constructs the system prompt from components.
@@ -227,16 +234,26 @@ Never commit, push, amend or rewrite history unless the user explicitly asks. Wh
 		sb.WriteString("\n\n")
 	}
 
-	// Current date/time and working directory
+	// Current date and working directory. Date only — a clock here would
+	// change every rebuild and, on GPT-5.6, miss the entire implicit cache.
 	cwd := opts.CWD
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	fmt.Fprintf(&sb, "Current date and time: %s\n", time.Now().Format("Monday, January 2, 2006 at 3:04:05 PM MST"))
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	fmt.Fprintf(&sb, "Current date: %s\n", now.Format("Monday, January 2, 2006"))
 	fmt.Fprintf(&sb, "Current working directory: %s\n", cwd)
 
-	// Git context (injected by bootstrap if available)
-	if gitCtx := git.Context(cwd); gitCtx != "" {
+	gitCtx := ""
+	if opts.Git != nil {
+		gitCtx = *opts.Git
+	} else {
+		gitCtx = git.Context(cwd)
+	}
+	if gitCtx != "" {
 		sb.WriteString("\n## Git\n\n")
 		sb.WriteString(gitCtx)
 		sb.WriteString("\n")

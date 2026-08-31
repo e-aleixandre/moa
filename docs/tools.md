@@ -35,7 +35,7 @@ Conditionally registered:
 | `web_search` | `brave_api_key` is configured |
 | `ask_user` | The web UI is active (not headless) |
 | `verify` | always |
-| `load_skill` | At least one skill is discovered in `.moa/skills/` or `~/.config/moa/skills/` |
+| `load_skill` | always (skills are discovered per call, so one written mid-session is loadable) |
 
 ## Tool selection guidance
 
@@ -221,8 +221,11 @@ the parent's numbers, and have **no** budget/`$` cap of their own):
 | Max run duration | 10m | `subagent_max_run_duration` (Go duration, e.g. `"15m"`) |
 | Max concurrent async jobs | 5 | `subagent_max_concurrent_async` |
 
-Context compaction is enabled for children, with the same defaults as the main
-session, so a long-running child won't fail by exhausting its turn budget.
+Context compaction is enabled for children, with the same threshold as the main
+session, so a long-running child won't fail by exhausting its turn budget. What
+a child never gets is the pre-compaction step (`compact_strategy`): it has
+neither `memory` nor the ephemeral checkpoint to write to, so a warning could
+only produce stray files, and its findings already travel back in its report.
 
 Children cannot spawn their own subagents, use `memory`, or call `ask_user`.
 

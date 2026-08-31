@@ -522,6 +522,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			mcpController:   bs.MCPController,
 			mcpPolicy:       bs.MCPPolicy,
 			buildBasePrompt: bs.BuildBasePrompt,
+			promptSources:   bs.Sources,
 			UntrustedMCP:    bs.UntrustedMCP,
 		},
 		sharedFiles:     shared,
@@ -533,6 +534,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// re-applied to the agent. bs.BuildBasePrompt captures the same inputs used
 	// at construction.
 	sess.wireMCPRefresh()
+	// Let a queued /reload barrier rebuild the prompt at the session's next idle
+	// point: the serve layer owns the tool registry and the prompt builder, the
+	// bus only knows it has to ask.
+	sess.runtime.Context().ReloadPrompt = sess.reloadSession
 	if opts != nil {
 		sess.TitleSource = opts.titleSource
 		// A resumed session with prior history has already lived past its first
@@ -1232,7 +1237,10 @@ func (s *ManagedSession) wireMCPRefresh() {
 		return
 	}
 	ctrl.SetRefreshPrompt(func() {
-		rt.RefreshBaseSystemPrompt(build(reg.Specs()))
+		// The MCP controller only reconciles at quiescence, so the agent is not
+		// running; a refusal here would mean the tool list and the prompt
+		// disagree, which the next reconcile corrects.
+		_ = rt.RefreshBaseSystemPrompt(build(reg.Specs()))
 	})
 	if mgr != nil {
 		// Fired from a manager goroutine on any server transition. We recompute

@@ -89,6 +89,14 @@ func (o *OpenAI) SupportsDocuments() bool { return o.endpoint == apiEndpoint }
 // ("Unsupported parameter: max_output_tokens").
 func (o *OpenAI) supportsMaxOutputTokens() bool { return o.endpoint == apiEndpoint }
 
+// supportsExplicitCacheBreakpoints is true only on the public Responses API
+// for GPT-5.6+. The ChatGPT OAuth backend has not been shown to accept
+// prompt_cache_options or prompt_cache_breakpoint; the official Codex client
+// does not send them.
+func (o *OpenAI) supportsExplicitCacheBreakpoints(modelID string) bool {
+	return o.endpoint == apiEndpoint && modelSupportsExplicitCacheBreakpoints(modelID)
+}
+
 // Stream sends a request and returns a channel of normalized AssistantEvents.
 func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
 	apiKey := o.apiKey
@@ -99,7 +107,20 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 	// prompt_cache_key is accepted by both transports: the official Codex
 	// client sends it to the same ChatGPT OAuth backend, unlike
 	// max_output_tokens which that backend rejects.
-	body, err := responses.BuildRequestBody(req, responses.Dialect{Provider: "openai", Model: req.Model.ID, SupportsDocuments: o.SupportsDocuments(), SupportsMaxOutputTokens: o.supportsMaxOutputTokens(), SupportsParallelToolCalls: o.endpoint == apiEndpoint, SupportsPromptCacheKey: true})
+	//
+	// Explicit breakpoints are the opposite: Codex's ResponsesApiRequest has
+	// prompt_cache_key but not prompt_cache_options / prompt_cache_breakpoint,
+	// and /codex/responses 400s on unsupported fields. Keep them on the
+	// public API only.
+	body, err := responses.BuildRequestBody(req, responses.Dialect{
+		Provider:                         "openai",
+		Model:                            req.Model.ID,
+		SupportsDocuments:                o.SupportsDocuments(),
+		SupportsMaxOutputTokens:          o.supportsMaxOutputTokens(),
+		SupportsParallelToolCalls:        o.endpoint == apiEndpoint,
+		SupportsPromptCacheKey:           true,
+		SupportsExplicitCacheBreakpoints: o.supportsExplicitCacheBreakpoints(req.Model.ID),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("openai: building request: %w", err)
 	}

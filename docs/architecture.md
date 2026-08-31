@@ -157,6 +157,16 @@ automatic paths append it. It is ephemeral — consumed once, cleared by
 generation so a checkpoint written mid-compaction is not lost, and never
 consumed by a failed or cancelled compaction.
 
+An automatic compaction arrives mid-task with no warning, so the agent can be
+holding findings it never wrote down. `compact_strategy` decides what it gets
+first: `plain` summarizes silently, `notify` (the default) reminds it that the
+threshold is near and to persist anything that only exists in the conversation,
+and `prepare` gives it a full turn to do so. The notice costs nothing — it rides
+on the next request — while `prepare` costs a request. Both apply only to
+*automatic* compaction: `/compact` is a deliberate act and is left alone, and
+`/prepare-compact` is the manual form of the same turn. Subagents are excluded
+under every setting.
+
 Compaction is lossy by construction. The full transcript remains on disk: the
 session log is append-only, so a summarized session can still be inspected in
 full after the fact.

@@ -20,6 +20,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/attachment"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/git"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/memory"
@@ -157,11 +158,15 @@ type Session struct {
 	SkillsIndex   string
 	SystemPrompt  string
 	// BuildBasePrompt regenerates the base system prompt from a tool-spec set,
-	// capturing the same inputs (AgentsMD, CWD, verify, indexes) used at
-	// construction. The MCP controller uses it to rebuild the prompt after a
-	// server is enabled/disabled, so the model is never told about a tool that
-	// is no longer registered.
-	BuildBasePrompt   func([]core.ToolSpec) string
+	// reading the on-disk inputs (AGENTS.md, skill and memory indexes) through
+	// Sources so a rebuild reflects a reload rather than the values the session
+	// started with. The MCP controller uses it after a server is
+	// enabled/disabled, so the model is never told about a tool that is no
+	// longer registered.
+	BuildBasePrompt func([]core.ToolSpec) string
+	// Sources holds those on-disk inputs, so /reload can re-read them without
+	// restarting the session.
+	Sources           *agentcontext.Sources
 	MemoryStore       *memory.Store
 	SessionCheckpoint *sessioncheckpoint.Slot
 	HasVerify         bool
@@ -469,9 +474,14 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// 8. Skills.
 	skills := skill.Discover(cfg.CWD)
 	skillsIndex := skill.FormatIndex(skills)
-	if len(skills) > 0 {
-		core.RegisterOrLog(toolReg, skill.NewTool(skills))
-	}
+	// Register unconditionally: skills are discovered from disk on every call,
+	// so a user who writes their first skill mid-session can load it. Gating on
+	// the count at startup left the tool missing exactly when it was new.
+	core.RegisterOrLog(toolReg, skill.NewTool(cfg.CWD))
+
+	// One holder for the on-disk prompt inputs, shared by the base prompt
+	// builder and by subagents, so a reload reaches every consumer at once.
+	promptSources := agentcontext.NewSources(cfg.CWD, memStore, agentsMD, skillsIndex, memoryIndex)
 
 	// 9. Ask user bridge.
 	var askBridge *askuser.Bridge
@@ -501,6 +511,18 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		CWD:               cfg.CWD,
 		UntrustedMCP:      untrustedMCP,
 		Headless:          cfg.Headless,
+	}
+
+	// Pin date and git once for the session. Parent rebuilds (MCP) and
+	// sibling subagents all reuse this snapshot so GPT-5.6 can read the
+	// shared instructions prefix; a live clock or last-commit restamp
+	// would miss it. Porcelain is already omitted from git.Context.
+	promptNow := time.Now()
+	promptGit := git.Context(cfg.CWD)
+	promptBuilder := func(opts agentcontext.SystemPromptOptions) string {
+		opts.Now = promptNow
+		opts.Git = &promptGit
+		return agentcontext.BuildSystemPrompt(opts)
 	}
 
 	// 10. Subagents.
@@ -534,6 +556,8 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		WorkspaceRoot:       cfg.CWD,
 		SkillsIndex:         skillsIndex,
 		MemoryIndex:         memoryIndex,
+		Sources:             promptSources,
+		PromptBuilder:       promptBuilder,
 		PromptCacheKey:      core.PromptCacheKey(cfg.SessionID),
 		BashState:           bashState,
 		AttachmentScope:     cfg.AttachmentScope,
@@ -574,7 +598,11 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 
 	// 11. System prompt (after ALL tools registered).
 	sess.BuildBasePrompt = func(specs []core.ToolSpec) string {
-		return agentcontext.BuildSystemPrompt(agentcontext.SystemPromptOptions{
+		// Read through Sources rather than the values captured above: a reload
+		// updates them, and a later rebuild (an MCP server toggling, a
+		// compaction) must not reinstate the prompt the session started with.
+		agentsMD, skillsIndex, memoryIndex := promptSources.Snapshot()
+		return promptBuilder(agentcontext.SystemPromptOptions{
 			AgentsMD:    agentsMD,
 			Tools:       specs,
 			CWD:         cfg.CWD,
@@ -583,6 +611,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			SkillsIndex: skillsIndex,
 		})
 	}
+	sess.Sources = promptSources
 	systemPrompt := sess.BuildBasePrompt(toolReg.Specs())
 	sess.SystemPrompt = systemPrompt
 
@@ -595,6 +624,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		CacheTTL:            core.GetCacheTTL(moaCfg),
 		PromptCacheKey:      core.PromptCacheKey(cfg.SessionID),
 		Tools:               toolReg,
+		CompactStrategy:     core.GetCompactStrategy(moaCfg),
 		WorkspaceRoot:       cfg.CWD,
 		MaxTurns:            maxTurns,
 		MaxToolCallsPerTurn: maxToolCallsPerTurn,

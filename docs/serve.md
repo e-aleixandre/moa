@@ -162,7 +162,7 @@ You don't have to wait for a run to finish before lining up your next move. What
 
 - **Messages** typed mid-run are *steered* onto a queue and delivered to the agent between steps of the current run (or, if they arrive after the run ends, they start the next one). If the agent is blocked in `bash_wait` or `subagent_wait`, a message wakes that wait immediately while its background job continues. They show up as a **queued** chip above the composer.
 - **Slash commands** typed mid-run are classified by what they do:
-  - **Queued** (`/compact`, `/clear`, `/model`, `/thinking`, `/verify`, `/goal <objective>`) — these rewrite or reconfigure the conversation, so they can't run in the middle of a live turn. They wait in the queue as a **command** chip and run at the next idle point, in order relative to your messages. So `message → /compact → message` compacts *after* the first message lands and *before* the second.
+  - **Queued** (`/compact`, `/prepare-compact`, `/clear`, `/model`, `/thinking`, `/verify`, `/reload`, `/goal <objective>`) — these rewrite or reconfigure the conversation, so they can't run in the middle of a live turn. They wait in the queue as a **command** chip and run at the next idle point, in order relative to your messages. So `message → /compact → message` compacts *after* the first message lands and *before* the second.
   - **Instant** (`/rename`, `/permissions`, `/path`, `/tasks`, `/schedule`, `/goal status`, `/goal stop`) — these only touch side state, so they run immediately without waiting.
   - **Rejected** (`/handoff`, `/undo`, `/branch`, `/back`, `/plan`) — these only make sense against a settled conversation and are rejected while the agent is working (the `reject` queue policy); stop the run first. `/handoff` also requires an empty message queue so its generated brief cannot omit queued context.
 - **Attachments** can be added to a mid-run message too (the paperclip is no longer disabled while a run is in flight); the image/file rides along with the steered message.
@@ -170,6 +170,48 @@ You don't have to wait for a run to finish before lining up your next move. What
 - **Stopping**: pressing Stop/`Esc` while a run is in flight dumps whatever was queued back into the composer, so nothing you lined up is silently lost.
 
 `/clear` while a run is queued behind it starts a fresh conversation but keeps the items queued after it — they belong to the new conversation.
+
+## Skills and `/reload`
+
+A **skill** is a folder with a `SKILL.md` in `.moa/skills/<name>/` (project) or
+`~/.config/moa/skills/<name>/` (global). Its first heading is the title, and a
+one-line description follows it.
+
+By default a skill is listed in the system prompt so the agent can pull it in
+with `load_skill`, and you can invoke it yourself by typing `/<name>`. Arguments
+land wherever you write `$ARGUMENTS`; if the file has no placeholder they are
+appended at the end. Invoking a skill drops its content into the conversation as
+a message — nothing runs.
+
+Optional frontmatter at the top of `SKILL.md` narrows who can invoke it:
+
+```yaml
+---
+disable-model-invocation: true   # only you, via /<name>
+user-invocable: false            # only the agent, via load_skill
+---
+```
+
+`disable-model-invocation` also keeps the skill out of the system prompt
+entirely, so a skill you use once a month costs nothing the rest of the time.
+
+If a skill is named after a built-in command, the **command wins**: a file
+dropped in a skills directory cannot take over `/compact` or `/undo`. The skill
+is still reachable as `/skill:<name>`, and both appear in the slash menu.
+
+**`/reload`** re-reads `AGENTS.md`, the skill index and the memory index, and
+rebuilds the system prompt of every open session — they all read the same files.
+Use it after editing `AGENTS.md`: without it a session keeps the instructions it
+started with, which on a long-lived session can be days old.
+
+Editing the *body* of a skill needs no reload (it is read from disk each time);
+`/reload` is for the index, so a newly created or deleted skill is noticed. A
+`SKILL.md` is capped at 50 KB when loaded, truncated with a notice rather than
+rejected — the same contract as `read`.
+
+The reload is silent — the agent gets the new instructions, not an announcement
+about them — and a busy session applies it as soon as it settles. It reports what
+changed in each session, and does nothing at all when the files are unchanged.
 
 ## Plan usage
 
@@ -304,6 +346,7 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/usage` | Usage/cost readout |
 | `GET /api/sessions/{id}/history?before={msg_id}&limit={n}` | Chronological, lossless display-history page before a message ID; the page size is an objective and can grow to keep tool calls with their results |
 | `GET /api/model-preferences` · `PATCH /api/model-preferences` | Read or pin/unpin models in the owner's global preferences |
+| `GET /api/compact-strategy` · `PATCH /api/compact-strategy` | Read or set what the agent gets before an automatic compaction (`plain`, `notify`, `prepare`) |
 | `POST /api/sessions/{id}/secrets` | Stage a short-lived secret batch; returns its directory and aliases, never values |
 | `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |

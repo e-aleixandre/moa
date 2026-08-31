@@ -375,8 +375,12 @@ type AgentConfig struct {
 	PromptCacheKey string
 	MaxTokens      int // Max output tokens per LLM call. 0 = shared model-aware default.
 	Tools          *core.Registry
-	Extensions     []extension.Extension
-	WorkspaceRoot  string
+	// CompactStrategy is what the agent gets before an automatic compaction:
+	// core.CompactPlain, CompactNotify or CompactPrepare. Empty behaves as
+	// plain, so an embedder that never sets it keeps today's behaviour.
+	CompactStrategy string
+	Extensions      []extension.Extension
+	WorkspaceRoot   string
 
 	// Guardrails
 	MaxTurns            int           // Default: 50. 0 = unlimited.
@@ -1596,6 +1600,26 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 			}
 			return a.checkpointReader()
 		}(),
+		// Nil for a subagent: a child has neither memory nor the ephemeral
+		// checkpoint, so a warning could only prompt stray files. Its findings
+		// already travel back in the report it returns.
+		compactStrategy: func() string {
+			if _, ok := a.tools.Get("memory"); !ok {
+				return core.CompactPlain
+			}
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			return a.config.CompactStrategy
+		},
+		// Nil during a manual prepare-compact run: that turn is already the
+		// preparation, and letting its own auto-compaction prepare again would
+		// nest one inside the other.
+		checkpointSlot: func() *sessioncheckpoint.Slot {
+			if allowCheckpoint {
+				return nil
+			}
+			return a.config.SessionCheckpoint
+		}(),
 		drainSteers:       a.steers.drainUntilBarrier,
 		settleSteers:      a.steers.settle,
 		registerSteerWait: a.registerSteerWait,
@@ -1769,4 +1793,13 @@ func (a *Agent) checkpointReader() func() (string, func()) {
 		}
 		return text, func() { slot.ClearIfGeneration(gen) }
 	}
+}
+
+// SetCompactStrategy changes what the agent gets before an automatic
+// compaction. Safe during a run: the loop reads it per iteration, so a change
+// reaches a conversation already in flight.
+func (a *Agent) SetCompactStrategy(strategy string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.config.CompactStrategy = strategy
 }

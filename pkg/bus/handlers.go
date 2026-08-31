@@ -24,15 +24,17 @@ import (
 
 // rebuildSystemPrompt recomposes the agent's system prompt from the base prompt
 // plus the active goal directive. Called after a goal mode transition.
-func rebuildSystemPrompt(sctx *SessionContext) {
+func rebuildSystemPrompt(sctx *SessionContext) error {
 	if sctx.Goal == nil {
-		return
+		return nil
 	}
 	prompt := sctx.BaseSystemPrompt
 	if sctx.Goal != nil && sctx.Goal.Active() {
 		prompt += "\n\n" + goal.GoalDirective(sctx.Goal.Info())
 	}
-	_ = sctx.Agent.SetSystemPrompt(prompt)
+	// Returned rather than dropped: SetSystemPrompt refuses mid-run, and a
+	// caller that already recorded the new state has to know it did not take.
+	return sctx.Agent.SetSystemPrompt(prompt)
 }
 
 // RegisterHandlers registers command and query handlers for a session on its bus.
@@ -156,6 +158,17 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 		// would never revisit it. A no-op while a run is in flight; at idle it
 		// executes the barrier at once.
 		requestPump(sctx)
+		return nil
+	})
+
+	b.OnCommand(func(cmd ReloadPromptSources) error {
+		// Nil outside serve (CLI, tests), where nothing owns a prompt builder.
+		// Treated as done rather than as a failure: the barrier would otherwise
+		// be retried forever against a session that can never satisfy it.
+		if sctx.ReloadPrompt == nil {
+			return nil
+		}
+		sctx.ReloadPrompt()
 		return nil
 	})
 
@@ -1968,7 +1981,10 @@ func stopGoal(sctx *SessionContext, reason string) {
 			if !alreadyFired {
 				_ = sctx.Agent.SetCompactAt(prev)
 				_ = sctx.Agent.SetMaxBudget(prevBudget)
-				rebuildSystemPrompt(sctx) // re-apply now that the goal directive is gone
+				// Re-apply now that the goal directive is gone. Runs at the end
+				// of a goal, where the agent is not running; nothing here could
+				// act on a refusal anyway.
+				_ = rebuildSystemPrompt(sctx)
 			}
 			mu.Lock()
 			tearDown()

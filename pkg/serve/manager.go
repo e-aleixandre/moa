@@ -21,6 +21,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/attention"
 	"github.com/e-aleixandre/moa/pkg/bus"
+	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/files"
 	"github.com/e-aleixandre/moa/pkg/mcp"
@@ -216,7 +217,10 @@ type serveInfra struct {
 	// buildBasePrompt rebuilds the base system prompt from a tool-spec set. Kept
 	// so a manager swap (reloadMCP) can rewire a fresh controller's refresh.
 	buildBasePrompt func([]core.ToolSpec) string
-	UntrustedMCP    bool
+	// promptSources holds the on-disk prompt inputs (AGENTS.md, skill and
+	// memory indexes) so /reload can re-read them for a live session.
+	promptSources *agentcontext.Sources
+	UntrustedMCP  bool
 }
 
 // MCPSummary is the glanceable MCP health for the status line. Total counts all

@@ -10,13 +10,13 @@ Moa is a coding agent runtime in Go. One core, two interfaces: web UI and headle
 - **Sessions**: persist, resume, browse previous conversations
 - **Subagents**: spawn child agents, sync or async
 - **Memory**: cross-session persistent project notes
-- **Skills**: loadable knowledge packs discovered from `.moa/skills/` or `~/.config/moa/skills/`, pulled in on demand via the `load_skill` tool
+- **Skills**: loadable knowledge packs discovered from `.moa/skills/` or `~/.config/moa/skills/`. The agent pulls one in with `load_skill`; you can invoke one yourself with `/<name>`
 - **Budget & limits**: per-run USD caps, turn limits, duration limits
 - **Checkpoint / undo**: revert file changes per agent turn
 - **Context compaction**: automatic summarization when context grows large
 - **MCP**: connect external tool servers
 - **Voice input**: in the web UI
-- **AGENTS.md**: project instructions discovered automatically from working directory
+- **AGENTS.md**: project instructions discovered automatically from working directory; `/reload` re-reads them in an open session
 - **Multi-provider**: Anthropic, OpenAI, and xAI Grok, with model aliases for quick switching
 
 ## How it works

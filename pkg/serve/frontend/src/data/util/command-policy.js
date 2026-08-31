@@ -12,7 +12,7 @@ export const POLICY_QUEUE = 'queue';
 export const POLICY_REJECT = 'reject';
 
 // Rewrite/reconfigure the run — must wait for idle (enqueued as a barrier).
-const QUEUE = new Set(['compact', 'clear', 'model', 'thinking', 'verify']);
+const QUEUE = new Set(['compact', 'prepare-compact', 'clear', 'model', 'thinking', 'verify', 'reload']);
 // Mode transitions / destructive rewind — refused while busy.
 const REJECT = new Set(['handoff', 'undo', 'branch', 'back', 'plan']);
 
@@ -33,9 +33,13 @@ function splitCommand(raw) {
 // classifyCommand returns the queue policy for a raw slash command issued while
 // busy. goal is argument-dependent: "goal"/"goal status"/"goal stop" run
 // instantly; "goal <objective>" (or "goal start") starts a run and must wait.
-export function classifyCommand(raw) {
+export function classifyCommand(raw, skills) {
   const [name, rest] = splitCommand(raw);
   if (!name) return POLICY_INSTANT;
+  // Loading a skill appends to the conversation, which the server refuses
+  // mid-run. Classify it here so the user gets the "can't run now" toast
+  // instead of a bare error from a request that was never going to work.
+  if ((skills || []).some((s) => s.name.toLowerCase() === name)) return POLICY_REJECT;
   if (name === 'goal') {
     const fields = rest.split(/\s+/).filter(Boolean);
     if (fields.length === 0) return POLICY_INSTANT;

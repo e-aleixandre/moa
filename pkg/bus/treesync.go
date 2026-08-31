@@ -205,8 +205,19 @@ func (ts *TreeSyncer) syncMessages() {
 	}
 }
 
+// isHiddenInternalPrompt reports whether a message is moa talking to itself.
+// These ride as user-role messages because providers accept no other role
+// mid-conversation, but showing them in the transcript would attribute to the
+// user words they never wrote.
 func isHiddenInternalPrompt(msg core.AgentMessage) bool {
-	return msg.Role == "user" && msg.Custom != nil && msg.Custom["source"] == "prepare_compact"
+	if msg.Role != "user" || msg.Custom == nil {
+		return false
+	}
+	switch msg.Custom["source"] {
+	case "prepare_compact", "compaction_notice":
+		return true
+	}
+	return false
 }
 
 func messageSyncID(msg core.AgentMessage, index int) string {

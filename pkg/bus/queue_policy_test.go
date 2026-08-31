@@ -1,6 +1,11 @@
 package bus
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"testing"
+)
 
 func TestClassifyCommand_Policies(t *testing.T) {
 	cases := []struct {
@@ -89,5 +94,48 @@ func TestSplitCommand(t *testing.T) {
 func TestQueuePolicyString(t *testing.T) {
 	if PolicyInstant.String() != "instant" || PolicyQueue.String() != "queue" || PolicyReject.String() != "reject" {
 		t.Fatal("QueuePolicy.String mismatch")
+	}
+}
+
+// The frontend mirrors this table in command-policy.js to decide whether a
+// command typed mid-run is queued or refused. They drifted before: /reload was
+// added here and the mirror had to follow. This pins the set so a future
+// addition fails here instead of silently disagreeing with the UI.
+func TestQueuePolicy_MirrorsTheFrontendTable(t *testing.T) {
+	// Read the mirror rather than restating it: a hand-copied expectation here
+	// passes while the two tables disagree, which is the one thing this test
+	// exists to catch. A command queued by the server but missing from the JS
+	// set is rejected in the composer before it is ever sent.
+	src, err := os.ReadFile(filepath.Join("..", "serve", "frontend", "src", "data", "util", "command-policy.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	frontend := map[string]QueuePolicy{}
+	for _, set := range []struct {
+		name   string
+		policy QueuePolicy
+	}{{"QUEUE", PolicyQueue}, {"REJECT", PolicyReject}} {
+		re := regexp.MustCompile(`(?s)const ` + set.name + ` = new Set\(\[(.*?)\]\)`)
+		m := re.FindSubmatch(src)
+		if m == nil {
+			t.Fatalf("could not find the %s set in command-policy.js", set.name)
+		}
+		for _, q := range regexp.MustCompile(`'([^']+)'`).FindAllSubmatch(m[1], -1) {
+			frontend[string(q[1])] = set.policy
+		}
+	}
+
+	if len(queuePolicyByName) != len(frontend) {
+		t.Errorf("the tables disagree: %d entries in Go, %d in command-policy.js", len(queuePolicyByName), len(frontend))
+	}
+	for name, policy := range frontend {
+		if got := queuePolicyByName[name]; got != policy {
+			t.Errorf("%s: %v in Go, %v in command-policy.js", name, got, policy)
+		}
+	}
+	for name := range queuePolicyByName {
+		if _, ok := frontend[name]; !ok {
+			t.Errorf("%s is in the Go table but missing from command-policy.js", name)
+		}
 	}
 }

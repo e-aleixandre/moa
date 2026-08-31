@@ -109,6 +109,40 @@ type MoaConfig struct {
 	SubagentMaxConcurrent  int                  `json:"subagent_max_concurrent_async,omitempty"` // Max concurrent async subagents. 0 = use package default.
 	SubagentAllowedModels  []string             `json:"subagent_allowed_models,omitempty"`       // Model IDs a subagent may run under. Empty/absent = no restriction (opt-in).
 	CompactAt              int                  `json:"compact_at,omitempty"`                    // Default soft compaction threshold in tokens for sessions with none of their own. 0 = compact at the model window.
+	CompactStrategy        string               `json:"compact_strategy,omitempty"`              // What happens before an automatic compaction: "plain", "notify" (default) or "prepare". See GetCompactStrategy.
+}
+
+// Compaction strategies: what the agent gets before its context is summarized.
+//
+// An automatic compaction arrives mid-task with no warning, so anything the
+// agent had worked out but not yet written down is replaced by a summary.
+const (
+	// CompactPlain summarizes with no warning. What the agent was holding
+	// survives only insofar as the summarizer captured it.
+	CompactPlain = "plain"
+	// CompactNotify tells the agent the threshold is near and to persist
+	// anything that exists only in the conversation. Costs no extra request:
+	// the notice rides on the next message.
+	CompactNotify = "notify"
+	// CompactPrepare gives the agent a full turn to prepare before compacting
+	// (the /prepare-compact path). More thorough — it can use the ephemeral
+	// checkpoint — but costs a request and may write files.
+	CompactPrepare = "prepare"
+)
+
+// GetCompactStrategy returns the configured pre-compaction strategy.
+//
+// Defaults to notify: it is free, and measured against the real API an agent
+// holding unsaved findings persisted them in 6 of 6 runs, while one with
+// nothing pending wrote nothing — the notice alone (without telling it what to
+// do) changed nothing in 6 of 6.
+func GetCompactStrategy(cfg MoaConfig) string {
+	switch cfg.CompactStrategy {
+	case CompactPlain, CompactNotify, CompactPrepare:
+		return cfg.CompactStrategy
+	default:
+		return CompactNotify
+	}
 }
 
 // IsMemoryEnabled returns whether cross-session memory is enabled.
@@ -777,14 +811,16 @@ func PromptCacheKey(sessionID string) string {
 	return "moa:session:" + sessionID
 }
 
-// SubagentPromptCacheKey derives a child's cache key from its parent session
-// and job id. A child is a separate conversation — its own system prompt, tools
-// and history — so it shares no reusable prefix with its parent and must not
-// share its routing group. The parent id is included because job ids are only
-// unique within one session's job store.
-func SubagentPromptCacheKey(parentKey, jobID string) string {
-	if parentKey == "" || jobID == "" {
+// SubagentPromptCacheKey derives a child's cache key from its parent session.
+// Children of one session share the key: GPT-5.6 still reads a matching
+// instructions+tools prefix on a sibling's first request (measured on disk:
+// terra subagents ~49% first-request hits without a key, via prefix-hash
+// routing). A per-job suffix would pin each child to its own machine and
+// throw that away. The parent stays on a different key because its tool set
+// (subagent, ask_user, …) is not the child's.
+func SubagentPromptCacheKey(parentKey string) string {
+	if parentKey == "" {
 		return ""
 	}
-	return parentKey + ":subagent:" + jobID
+	return parentKey + ":subagent"
 }

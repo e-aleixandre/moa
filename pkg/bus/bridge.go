@@ -44,6 +44,9 @@ type AgentController interface {
 	SetSystemPrompt(prompt string) error
 	SetCompactAt(tokens int) error
 	SetDefaultCompactAt(tokens int)
+	// SetCompactStrategy changes what the agent gets before an automatic
+	// compaction (plain / notify / prepare).
+	SetCompactStrategy(strategy string)
 	EffectiveCompactAt() int
 	SetMaxBudget(v float64) error
 	Reset() error
@@ -107,6 +110,12 @@ type SessionContext struct {
 
 	ProviderFactory  func(core.Model) (core.Provider, error)
 	BaseSystemPrompt string
+
+	// ReloadPrompt re-reads the on-disk prompt inputs and rebuilds the base
+	// system prompt. Set by the serve layer, which owns the tool registry and
+	// the prompt builder; nil in tests and in the CLI. Returns the names of the
+	// inputs that changed, empty when nothing did.
+	ReloadPrompt func() []string
 
 	// goalPrevCompactAt is the CompactAt threshold captured when goal mode
 	// started, restored when it ends. Written by EnterGoal before any goal run,

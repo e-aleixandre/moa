@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -275,8 +277,16 @@ func (c *Controller) Restart(ctx context.Context, name string) (ServerStatus, er
 	if err != nil {
 		return st, err
 	}
+	// Compare the full registry before/after this server's resync — not a
+	// fingerprint taken at NewController, which runs in bootstrap before
+	// skills/ask-user/subagents are registered. BuildSystemPrompt stamps
+	// time.Now() and git status; on GPT-5.6 that misses the entire implicit
+	// cache, so a restart that brings back the same tools must not refresh.
+	before := specsFingerprint(c.reg.Specs())
 	c.resyncServer(name)
-	c.refresh()
+	if specsFingerprint(c.reg.Specs()) != before {
+		c.refresh()
+	}
 	return st, nil
 }
 
@@ -366,6 +376,37 @@ func (c *Controller) refresh() {
 	if c.refreshPrompt != nil {
 		c.refreshPrompt()
 	}
+}
+
+// specsFingerprint is a stable identity of the tool list the system prompt
+// is built from. Parameters are canonicalized so equivalent JSON with
+// different key order or whitespace does not look like a tool-set change.
+func specsFingerprint(specs []core.ToolSpec) string {
+	var b strings.Builder
+	for _, s := range specs {
+		b.WriteString(s.Name)
+		b.WriteByte(0)
+		b.WriteString(s.Description)
+		b.WriteByte(0)
+		b.WriteString(canonicalJSON(s.Parameters))
+		b.WriteByte(0)
+	}
+	return b.String()
+}
+
+func canonicalJSON(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return string(raw)
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return string(raw)
+	}
+	return string(out)
 }
 
 // currentToolNames returns the exact registered tool names for one server, from

@@ -29,6 +29,12 @@ mock.module("preact/hooks", () => ({
   useState(initial) { return [typeof initial === "function" ? initial() : initial, () => {}]; },
 }));
 
+// The slash menu's skills come from the server; this suite exercises the
+// composer's own behaviour, so keep it off the network.
+mock.module("../../hooks/useSessionSkills.js", () => ({
+  useSessionSkills: () => ({ skills: [], refreshSkills() {} }),
+}));
+
 mock.module("../../hooks/useVoiceGesture.js", () => ({
   useVoiceGesture: (options) => {
     voiceOptions = options;

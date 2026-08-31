@@ -43,3 +43,9 @@ test('leading slash is optional and case-insensitive; empty is instant', () => {
   expect(classifyCommand('')).toBe(POLICY_INSTANT);
   expect(classifyCommand('/')).toBe(POLICY_INSTANT);
 });
+
+// /reload rebuilds the system prompt, which the agent captures when a run
+// starts: it has to wait for idle rather than be refused or run mid-flight.
+test('/reload queues while the session is busy', () => {
+  expect(classifyCommand('/reload')).toBe(POLICY_QUEUE);
+});

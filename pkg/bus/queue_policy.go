@@ -52,7 +52,9 @@ var queuePolicyByName = map[string]QueuePolicy{
 	"model":           PolicyQueue,
 	"thinking":        PolicyQueue,
 	"verify":          PolicyQueue,
-	"handoff":         PolicyReject,
+	// Rebuilds the system prompt, which the agent captures when a run starts.
+	"reload":  PolicyQueue,
+	"handoff": PolicyReject,
 
 	// Mode transitions / destructive rewind — refused while busy.
 	"undo":   PolicyReject,
