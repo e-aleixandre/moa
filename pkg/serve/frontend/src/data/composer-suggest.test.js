@@ -107,3 +107,30 @@ test('normalizeDashes rewrites a leading em/en-dash token into --', () => {
 test('normalizeDashes leaves prose em-dashes untouched', () => {
   expect(normalizeDashes('word\u2014word')).toBe('word\u2014word');
 });
+
+// --- skills in the slash menu ---
+
+test('slash menu lists a session skill after the built-ins', () => {
+  const skills = [{ name: 'deploy', skill: 'deploy', description: 'Ship it' }];
+  const out = slashSuggestions('/dep', 4, [], skills);
+  expect(out.length).toBe(1);
+  expect(out[0].name).toBe('deploy');
+  expect(out[0].__skill).toBe(true);
+});
+
+// A skill must never displace a command: the server resolves skills only after
+// the registry, and the menu has to show the same precedence.
+test('a colliding skill appears under skill: while the command keeps its name', () => {
+  const skills = [{ name: 'skill:compact', skill: 'compact', description: 'A skill' }];
+  const names = slashSuggestions('/c', 2, [], skills).map((c) => c.name);
+  expect(names).toContain('compact');
+  const all = slashSuggestions('/', 1, [], skills).map((c) => c.name);
+  expect(all).toContain('skill:compact');
+  // The built-in comes first: same precedence the server applies.
+  expect(all.indexOf('compact')).toBeLessThan(all.indexOf('skill:compact'));
+});
+
+test('slash menu still works with no skills', () => {
+  expect(slashSuggestions('/comp', 5, [], []).length).toBe(1);
+  expect(slashSuggestions('/comp', 5, []).length).toBe(1);
+});
