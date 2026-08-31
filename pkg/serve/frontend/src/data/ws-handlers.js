@@ -1923,6 +1923,16 @@ export function handleWsCommand(id, data) {
       const fresh = markers.filter(marker => marker._msg_id && !known.has(marker._msg_id));
       if (fresh.length > 0) updateSession(id, { messages: [...sess.messages, ...fresh] });
     }
+  } else if (data.command === 'skill') {
+    // A skill loaded by the user is an ordinary message appended to the
+    // conversation. Without this the row only shows up on the next reload, so
+    // invoking a skill looks like nothing happened.
+    const sess = store.get().sessions[id];
+    if (sess && data.messages) {
+      const known = new Set(sess.messages.map(message => message?._msg_id).filter(Boolean));
+      const fresh = normalizeHistory(data.messages).filter(row => row._msg_id && !known.has(row._msg_id));
+      if (fresh.length > 0) updateSession(id, { messages: [...sess.messages, ...fresh] });
+    }
   } else if (data.command === 'branch') {
     // Branch switched — reload messages from new branch path.
     if (data.messages) {

@@ -26,9 +26,18 @@ export const COMMANDS = [
 
 // filterCommands returns the commands whose name starts with `filter`
 // (case-insensitive). Empty filter matches everything (typing just "/").
-export function filterCommands(filter) {
+//
+// `skills` are the session's user-invocable skills, fetched from the server.
+// They are listed after the built-ins: the server resolves an unknown slash
+// command against skills only, so a skill can never shadow a command, and the
+// menu shows the same precedence.
+export function filterCommands(filter, skills) {
   const f = (filter || '').toLowerCase();
-  return COMMANDS.filter((c) => c.name.startsWith(f));
+  const builtins = COMMANDS.filter((c) => c.name.startsWith(f));
+  const skillEntries = (skills || [])
+    .filter((s) => s.name.startsWith(f))
+    .map((s) => ({ name: s.name, desc: s.description || '', __skill: true }));
+  return builtins.concat(skillEntries);
 }
 
 // filterGoalFlags returns the /goal flags matching `token` (must start with
@@ -60,7 +69,7 @@ export function tokenAtCursor(value, cursor) {
 // textarea value + cursor position, mirroring InputBar's updateSuggestions.
 // Returns null (hide the popup) or an array of suggestion entries (command
 // entries, or __flag entries for "/goal --...").
-export function slashSuggestions(value, cursor, goalFlags) {
+export function slashSuggestions(value, cursor, goalFlags, skills) {
   if (!value.startsWith('/') || value.includes('\n')) return null;
   const afterSlash = value.slice(1);
   if (afterSlash.includes(' ')) {
@@ -73,7 +82,7 @@ export function slashSuggestions(value, cursor, goalFlags) {
     }
     return null;
   }
-  const matches = filterCommands(afterSlash);
+  const matches = filterCommands(afterSlash, skills);
   return matches.length > 0 ? matches : null;
 }
 

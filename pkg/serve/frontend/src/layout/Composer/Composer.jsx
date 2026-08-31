@@ -13,6 +13,7 @@ import { combineQueueText, droppedImageCount, queueSummary, recallActivates, sen
 import {
   slashSuggestions, findMentionToken, computeMentionInsertion, normalizeDashes,
 } from "../../data/composer-suggest.js";
+import { useSessionSkills } from '../../hooks/useSessionSkills.js';
 import { interceptSecretCommand } from "../../data/secrets.js";
 import { loadDraft, saveDraft } from "../../data/composer-draft.js";
 import { classifyCommand, POLICY_QUEUE, POLICY_REJECT } from "../../data/util/command-policy.js";
@@ -69,6 +70,7 @@ const MAX_HISTORY = 100;
 // deliberately DISTINCT from the old SPA's `moa-draft-` so the two frontends
 // don't clobber each other's drafts while they coexist under /next.
 export function Composer({ sessionId, session, shortPlaceholder = false, steer = null, onSecret }) {
+  const { skills, refreshSkills } = useSessionSkills(sessionId);
   const textareaRef = useRef(null);
   const attachInputRef = useRef(null);
   const sessionState = session?.state;
@@ -235,9 +237,12 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   const updateSuggestions = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
-    setCmdSuggestions(slashSuggestions(el.value, el.selectionStart, goalFlags));
+    // Typing "/" is the moment the list matters: re-read it (throttled) so a
+    // skill created while this session was open can appear without a restart.
+    if (el.value.startsWith('/')) refreshSkills();
+    setCmdSuggestions(slashSuggestions(el.value, el.selectionStart, goalFlags, skills));
     setCmdCursor(0);
-  }, [goalFlags]);
+  }, [goalFlags, skills, refreshSkills]);
 
   // --- File suggestions (@mention) ---
   const cancelFileRequest = useCallback(() => {
@@ -549,7 +554,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
       let optimisticCmd = null;
       let cmdId = '';
       if (occupied || queueNonEmpty) {
-        const policy = classifyCommand(normalized);
+        const policy = classifyCommand(normalized, skills);
         if (policy === POLICY_REJECT) {
           addToast({ title: 'Cannot run this now', detail: `${normalized.split(/\s+/)[0]} can't run while the agent is working — stop it first.`, type: 'attention' });
           return;

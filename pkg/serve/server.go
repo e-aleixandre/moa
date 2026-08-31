@@ -141,6 +141,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", withGzip(handleSubagentConversation(manager)))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/mcp", handleMCPStatus(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/skills", handleSessionSkills(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/mcp/{server}", handleMCPToggle(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/mcp/{server}/restart", handleMCPRestart(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
