@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/compaction"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
@@ -123,6 +125,13 @@ type loopConfig struct {
 	// automatic compaction summary, and a callback to clear it once consumed.
 	// Nil when no checkpoint slot is wired.
 	readCheckpoint func() (string, func())
+	// compactStrategy is what the agent gets before an automatic compaction:
+	// core.CompactPlain, CompactNotify or CompactPrepare. Read per iteration so
+	// a settings change reaches a run already in flight.
+	compactStrategy func() string
+	// checkpointSlot is the ephemeral checkpoint an automatic preparation turn
+	// writes to. Nil when no slot is wired, which disables prepare.
+	checkpointSlot *sessioncheckpoint.Slot
 
 	// Steering messages injected between steps
 	drainSteers func() []core.SteerItem
@@ -177,6 +186,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	// paused message and lose the continuation).
 	pauseResubmits := 0
 	justPaused := false
+	// One notice per run: repeating it every iteration would nag, and the agent
+	// has already had its chance to act on the first one.
+	compactionWarned := false
+	// Which compaction epoch has already had its preparation turn.
+	preparedEpoch := -1
 
 	// OpenAI end_turn:false continuations (StopReason "continue"): count
 	// consecutive no-progress continuations, and re-sample once on a typed empty
@@ -233,8 +247,38 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch,
 			)
 			window := compactionSettings.EffectiveWindow(cfg.model.MaxInput)
+
+			// Warn before the threshold, not at it: an automatic compaction
+			// arrives mid-task and replaces with a summary whatever the agent
+			// worked out but never wrote down. Warning once, a few turns
+			// earlier, is what gives it the chance to persist it.
+			//
+			// The notice states what to do, not just the number: told only how
+			// many tokens remained, the model carried on as if nothing had
+			// changed in every measured run.
+			if !compactionWarned && strategyAllowsNotice(cfg) {
+				if warn, remaining := core.ShouldWarnBeforeCompact(estimate.Tokens, window, *compactionSettings); warn {
+					cfg.state.Messages = append(cfg.state.Messages, compactionNotice(remaining))
+					compactionWarned = true
+				}
+			}
+
 			if core.ShouldCompact(estimate.Tokens, window, *compactionSettings) {
 				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventCompactionStart})
+
+				// Give the agent a turn to write down what only exists in this
+				// conversation, before the summary replaces it. Once per
+				// compaction epoch: a run that compacts twice prepares twice,
+				// but a single compaction never prepares in a loop.
+				if strategyIsPrepare(cfg) && preparedEpoch != cfg.state.CompactionEpoch+1 {
+					preparedEpoch = cfg.state.CompactionEpoch + 1
+					if err := runAutoPrepare(ctx, cfg, cfg.checkpointSlot); err != nil {
+						// Non-fatal: losing the preparation is bad, losing the
+						// compaction with it would be worse — the context is
+						// already over the threshold.
+						slog.Warn("auto prepare-compact failed; compacting without it", "error", err)
+					}
+				}
 
 				// Same one-shot prefix as the manual path: the summarizer's own
 				// system prompt over a flattened transcript, which nothing else
@@ -1251,4 +1295,47 @@ func toolResultMessage(tc core.Content, result core.Result, isError bool, reject
 		msg.Custom["rejected"] = true
 	}
 	return msg
+}
+
+// strategyAllowsNotice reports whether this run should warn the agent before an
+// automatic compaction.
+//
+// Subagents never do: they cannot write memory or the ephemeral checkpoint
+// (both are excluded from a child's tool set), so the only thing a warning
+// could prompt is stray files in the workspace. A child's findings already have
+// a durable home — the report it returns to its parent.
+func strategyAllowsNotice(cfg *loopConfig) bool {
+	if cfg.compactStrategy == nil {
+		return false
+	}
+	switch cfg.compactStrategy() {
+	case core.CompactNotify, core.CompactPrepare:
+		return true
+	}
+	return false
+}
+
+// compactionNotice is the message the agent sees as its context fills up.
+//
+// It rides as a user-role message with an internal marker: providers only
+// accept user and assistant roles mid-conversation, and the marker is what
+// lets the UI and the transcript tell it apart from something the user typed.
+func compactionNotice(remaining int) core.AgentMessage {
+	text := fmt.Sprintf(
+		"<system-reminder>\nContext is close to the compaction threshold: about %s tokens remain before this conversation is automatically summarized. Everything not written down will be replaced by that summary.\n\n"+
+			"If you are holding findings, decisions or partial results that only exist in this conversation, persist them now — a file, memory, or the task list — before continuing. If there is nothing worth keeping, carry on without comment.\n</system-reminder>",
+		humanizeTokens(remaining),
+	)
+	msg := core.WrapMessage(core.NewUserMessage(text))
+	msg.Custom = map[string]any{"source": "compaction_notice", "internal": true}
+	return msg
+}
+
+// humanizeTokens renders a token count the way a person would say it, so the
+// model reads a magnitude rather than parsing digits.
+func humanizeTokens(n int) string {
+	if n >= 1000 {
+		return fmt.Sprintf("%dk", n/1000)
+	}
+	return fmt.Sprintf("%d", n)
 }

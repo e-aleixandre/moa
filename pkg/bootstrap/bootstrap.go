@@ -624,6 +624,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		CacheTTL:            core.GetCacheTTL(moaCfg),
 		PromptCacheKey:      core.PromptCacheKey(cfg.SessionID),
 		Tools:               toolReg,
+		CompactStrategy:     core.GetCompactStrategy(moaCfg),
 		WorkspaceRoot:       cfg.CWD,
 		MaxTurns:            maxTurns,
 		MaxToolCallsPerTurn: maxToolCallsPerTurn,
