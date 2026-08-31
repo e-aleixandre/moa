@@ -72,7 +72,9 @@ func TestAgentMessage_IsLLMMessage(t *testing.T) {
 		{"assistant", true},
 		{"tool_result", true},
 		{"custom", false},
-		{"system", false},
+		// Mid-conversation notices ride as "system"; dropping them here would
+		// mean a reloaded AGENTS.md never reaches the model.
+		{"system", true},
 		{"", false},
 	}
 	for _, tt := range tests {
