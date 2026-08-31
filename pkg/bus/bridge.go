@@ -44,6 +44,9 @@ type AgentController interface {
 	SetSystemPrompt(prompt string) error
 	SetCompactAt(tokens int) error
 	SetDefaultCompactAt(tokens int)
+	// SetCompactStrategy changes what the agent gets before an automatic
+	// compaction (plain / notify / prepare).
+	SetCompactStrategy(strategy string)
 	EffectiveCompactAt() int
 	SetMaxBudget(v float64) error
 	Reset() error
