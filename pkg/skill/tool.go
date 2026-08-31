@@ -4,23 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
-// NewTool creates the load_skill tool that lets the agent load skill content on demand.
+// NewTool creates the load_skill tool that lets the agent load skill content on
+// demand, discovering skills from cwd on every call.
 //
-// Skills the model may not invoke are excluded from the tool's set, not just
-// from the prompt index: hiding a name the tool still honours would leave
-// "only the user invokes this" as a suggestion rather than a rule.
-func NewTool(skills []Skill) core.Tool {
-	byName := make(map[string]Skill, len(skills))
-	for _, s := range skills {
-		if !s.ModelInvocable() {
-			continue
+// Reading disk per call rather than capturing a set keeps the tool honest about
+// a workspace that changes while the session is open: a skill written minutes
+// ago is loadable, and one deleted is gone.
+//
+// Skills the model may not invoke are excluded, not just hidden from the prompt
+// index: honouring a name it was not offered would leave "only the user invokes
+// this" as a suggestion rather than a rule.
+func NewTool(cwd string) core.Tool {
+	modelInvocable := func() map[string]Skill {
+		byName := map[string]Skill{}
+		for _, s := range Discover(cwd) {
+			if s.ModelInvocable() {
+				byName[s.Name] = s
+			}
 		}
-		byName[s.Name] = s
+		return byName
 	}
 
 	return core.Tool{
@@ -44,11 +52,16 @@ func NewTool(skills []Skill) core.Tool {
 				return core.ErrorResult("name is required"), nil
 			}
 
+			byName := modelInvocable()
 			s, ok := byName[name]
 			if !ok {
-				var available []string
-				for _, sk := range skills {
-					available = append(available, sk.Name)
+				available := make([]string, 0, len(byName))
+				for n := range byName {
+					available = append(available, n)
+				}
+				sort.Strings(available)
+				if len(available) == 0 {
+					return core.ErrorResult(fmt.Sprintf("skill %q not found: this workspace has no skills", name)), nil
 				}
 				return core.ErrorResult(fmt.Sprintf(
 					"skill %q not found. Available skills: %s",

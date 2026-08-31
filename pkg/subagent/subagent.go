@@ -67,6 +67,10 @@ type Config struct {
 	WorkspaceRoot          string // CWD passed to system prompt builder
 	SkillsIndex            string // pre-formatted skills index for system prompt
 	MemoryIndex            string // pre-formatted memory index (one line per fact)
+	// Sources, when set, supersedes AgentsMD/SkillsIndex/MemoryIndex: children
+	// spawned after a /reload must inherit what the parent knows now, not the
+	// prompt inputs captured when the session was built.
+	Sources *agentcontext.Sources
 
 	// PromptCacheKey is the PARENT's cache-routing key. Children of the same
 	// session share one derived key: they reuse the same instructions+tools
@@ -331,7 +335,11 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			if promptBuilder == nil {
 				promptBuilder = agentcontext.BuildSystemPrompt
 			}
-			systemPrompt := buildSystemPrompt(promptBuilder, cfg.AgentsMD, childReg.Specs(), cfg.WorkspaceRoot, cfg.SkillsIndex, cfg.MemoryIndex)
+			agentsMD, skillsIndex, memoryIndex := cfg.AgentsMD, cfg.SkillsIndex, cfg.MemoryIndex
+			if cfg.Sources != nil {
+				agentsMD, skillsIndex, memoryIndex = cfg.Sources.Snapshot()
+			}
+			systemPrompt := buildSystemPrompt(promptBuilder, agentsMD, childReg.Specs(), cfg.WorkspaceRoot, skillsIndex, memoryIndex)
 
 			if getBool(params, "async") {
 				if err := ctx.Err(); err != nil {

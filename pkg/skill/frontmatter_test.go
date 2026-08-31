@@ -181,7 +181,7 @@ func TestNewTool_RefusesSkillsTheModelCannotInvoke(t *testing.T) {
 	root, dir := newSkillDir(t)
 	writeSkill(t, dir, "landing", "---\ndisable-model-invocation: true\n---\n# Landing\n\nSecret body.\n")
 
-	tool := NewTool(Discover(root))
+	tool := NewTool(root)
 	res, err := tool.Execute(context.Background(), map[string]any{"name": "landing"}, nil)
 	if err != nil {
 		t.Fatal(err)
