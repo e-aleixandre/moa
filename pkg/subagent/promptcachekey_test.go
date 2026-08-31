@@ -7,12 +7,8 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
-// TestChildAgentUsesOwnCacheKey verifies a child's requests carry a routing key
-// derived from the parent's plus its job id, never the parent's own.
-//
-// A child is a separate conversation — its own system prompt, tools and history
-// — so it shares no reusable prefix with its parent. Routing both to the same
-// machine would concentrate unrelated traffic with no chance of a cache hit.
+// TestChildAgentUsesOwnCacheKey: the child is pinned to the session's
+// subagent group, not the parent's key and not a per-job suffix.
 func TestChildAgentUsesOwnCacheKey(t *testing.T) {
 	parentKey := core.PromptCacheKey("sess-abc")
 
@@ -33,7 +29,7 @@ func TestChildAgentUsesOwnCacheKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if want := "moa:session:sess-abc:subagent:sa-999"; seen != want {
+	if want := "moa:session:sess-abc:subagent"; seen != want {
 		t.Errorf("child request key = %q, want %q", seen, want)
 	}
 	if seen == parentKey {

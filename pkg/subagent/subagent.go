@@ -68,10 +68,12 @@ type Config struct {
 	SkillsIndex            string // pre-formatted skills index for system prompt
 	MemoryIndex            string // pre-formatted memory index (one line per fact)
 
-	// PromptCacheKey is the PARENT's cache-routing key. Each child derives its
-	// own from it plus the job id: a child is a separate conversation with its
-	// own system prompt, tools and history, so it shares no reusable prefix
-	// with the parent and must not share its routing group. Empty = no key.
+	// PromptCacheKey is the PARENT's cache-routing key. Children of the same
+	// session share one derived key: they reuse the same instructions+tools
+	// prefix (measured: ~half of gpt-5.6-terra first requests already hit),
+	// so splitting by job id would send siblings to different machines and
+	// miss that prefix. Still distinct from the parent, whose tool set differs.
+	// Empty = no key.
 	PromptCacheKey string
 
 	// BashState, when non-nil, is the per-agent persistent shell state. The
@@ -1121,7 +1123,7 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 		Model:          model,
 		SystemPrompt:   systemPrompt,
 		ThinkingLevel:  effectiveThinking,
-		PromptCacheKey: core.SubagentPromptCacheKey(cfg.PromptCacheKey, jobID),
+		PromptCacheKey: core.SubagentPromptCacheKey(cfg.PromptCacheKey),
 		Tools:          childReg,
 		MaxTurns:       maxTurns,
 		MaxRunDuration: runDuration,

@@ -777,14 +777,16 @@ func PromptCacheKey(sessionID string) string {
 	return "moa:session:" + sessionID
 }
 
-// SubagentPromptCacheKey derives a child's cache key from its parent session
-// and job id. A child is a separate conversation — its own system prompt, tools
-// and history — so it shares no reusable prefix with its parent and must not
-// share its routing group. The parent id is included because job ids are only
-// unique within one session's job store.
-func SubagentPromptCacheKey(parentKey, jobID string) string {
-	if parentKey == "" || jobID == "" {
+// SubagentPromptCacheKey derives a child's cache key from its parent session.
+// Children of one session share the key: GPT-5.6 still reads a matching
+// instructions+tools prefix on a sibling's first request (measured on disk:
+// terra subagents ~49% first-request hits without a key, via prefix-hash
+// routing). A per-job suffix would pin each child to its own machine and
+// throw that away. The parent stays on a different key because its tool set
+// (subagent, ask_user, …) is not the child's.
+func SubagentPromptCacheKey(parentKey string) string {
+	if parentKey == "" {
 		return ""
 	}
-	return parentKey + ":subagent:" + jobID
+	return parentKey + ":subagent"
 }
