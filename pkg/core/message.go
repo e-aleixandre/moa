@@ -286,14 +286,8 @@ type AgentMessage struct {
 }
 
 // IsLLMMessage returns true if this message should be sent to the LLM.
-//
-// "system" is included: it carries mid-conversation notices (a reloaded
-// AGENTS.md, a new memory index) that only matter if the model actually reads
-// them. Providers place it under their own rules — Anthropic requires it to
-// follow a user message — so the conversion layer, not this predicate, decides
-// how it is rendered.
 func (m AgentMessage) IsLLMMessage() bool {
-	return m.Role == "user" || m.Role == "assistant" || m.Role == "tool_result" || m.Role == "system"
+	return m.Role == "user" || m.Role == "assistant" || m.Role == "tool_result"
 }
 
 // WrapMessage converts a Message to an AgentMessage.

@@ -912,21 +912,3 @@ func TestCacheBreakpoints_DefaultAndHourStillWrite(t *testing.T) {
 		}
 	}
 }
-
-// A mid-conversation notice must reach the model. Sending role "system"
-// verbatim is rejected by the API when it follows an assistant turn, which is
-// exactly where a reload lands, so it travels as a user turn.
-func TestConvertMessage_SystemNoticeRidesAsUser(t *testing.T) {
-	msg := core.Message{
-		Role:    "system",
-		Content: []core.Content{core.TextContent("<system-reminder>AGENTS.md reloaded.</system-reminder>")},
-	}
-
-	got := convertMessage(msg, false, nil)
-	if got == nil {
-		t.Fatal("a system notice was dropped before reaching the provider")
-	}
-	if got["role"] != "user" {
-		t.Errorf("system notice sent with role %v; the API rejects it unless it follows a user message", got["role"])
-	}
-}

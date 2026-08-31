@@ -296,22 +296,6 @@ func convertMessage(msg core.Message, isOAuth bool, retire *imageRetirer) map[st
 			"content": []any{block},
 		}
 
-	case "system":
-		// A mid-conversation notice. Sending role "system" verbatim is not an
-		// option: the API rejects it unless it follows a user message, and a
-		// reload lands at an idle point — usually right after an assistant
-		// turn — so it would fail exactly when it is used (verified: HTTP 400,
-		// "role 'system' must follow a 'user' message").
-		//
-		// Render it as a user turn instead; the notice carries its own
-		// <system-reminder> marker in the text, and the model does act on it —
-		// a rule added by a reload changed the output as much as rebuilding
-		// the whole system prompt would have.
-		return map[string]any{
-			"role":    "user",
-			"content": convertContentBlocks(msg.Content, retire),
-		}
-
 	default:
 		return nil // Skip unknown roles
 	}

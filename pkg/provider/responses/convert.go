@@ -207,22 +207,6 @@ func convertMessageForDialect(msg core.Message, dialect Dialect, msgIndex int) [
 		}
 		return []map[string]any{item}
 
-	case "system":
-		// A mid-conversation notice, rendered as a user turn for the same
-		// reason as in the Anthropic conversion: placement rules for a real
-		// system role vary per provider, and the notice carries its own marker
-		// in the text, so the model can tell it apart without the role.
-		content := convertUserContent(msg.Content, dialect.SupportsDocuments)
-		if dialect.SupportsExplicitCacheBreakpoints {
-			markLastInputTextBreakpoint(content)
-		}
-		return []map[string]any{
-			{
-				"role":    "user",
-				"content": content,
-			},
-		}
-
 	default:
 		return nil
 	}
