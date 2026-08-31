@@ -97,7 +97,17 @@ export function normalizeHistory(raw, liveSubagents = []) {
         modifiedFiles: Array.isArray(msg.custom.modified_files) ? msg.custom.modified_files.filter(f => typeof f === 'string') : [],
       });
     } else if (msg.role === 'user') {
-      if (msg.custom?.source === 'secret_batch') {
+      if (msg.custom?.source === 'compaction_notice') {
+        // moa talking to itself. It rides as a user message because providers
+        // accept no other role mid-conversation, but rendering it as one puts
+        // a <system-reminder> block in the transcript under the user's name.
+        result.push({
+          _type: 'system',
+          _msg_id: msg.msg_id,
+          timestamp: msg.timestamp,
+          text: '⚠ Context filling up — asked the agent to save unsaved work',
+        });
+      } else if (msg.custom?.source === 'secret_batch') {
         result.push({
           _type: 'secret_batch',
           _msg_id: msg.msg_id,
@@ -1788,6 +1798,16 @@ export function handleWsUserMessage(id, data) {
   // while its live/terminal job exists, rendering this envelope as another
   // user turn would duplicate the terminal outcome and diverge from reload.
 	if (isStructuredSubagentNotification(sess, data.text || '')) return;
+  // moa's own reminder, not something the user typed: same thin system line
+  // the reloaded transcript shows, instead of a user turn full of markup.
+  if (data.custom?.source === 'compaction_notice') {
+    updateSession(id, { messages: [...messages, {
+      _type: 'system',
+      _msg_id: data.msg_id || undefined,
+      text: '⚠ Context filling up — asked the agent to save unsaved work',
+    }] });
+    return;
+  }
 	const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, content, custom: data.custom };
 	updateSession(id, { messages: [...messages, userMsg] });
 }
