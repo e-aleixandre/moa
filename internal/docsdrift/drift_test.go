@@ -132,7 +132,7 @@ func actualToolNames(t *testing.T) map[string]bool {
 	if err := reg.Register(verify.NewTool(workspace, nil)); err != nil {
 		t.Fatalf("register verify: %v", err)
 	}
-	if err := reg.Register(skill.NewTool([]skill.Skill{{Name: "example"}})); err != nil {
+	if err := reg.Register(skill.NewTool(workspace)); err != nil {
 		t.Fatalf("register load_skill: %v", err)
 	}
 	if err := reg.Register(askuser.NewTool(askuser.NewBridge())); err != nil {

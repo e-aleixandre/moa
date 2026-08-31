@@ -35,6 +35,7 @@ var commandRegistry = map[string]commandHandler{
 	"verify":          cmdVerify,
 	"rename":          cmdRename,
 	"schedule":        cmdSchedule,
+	"reload":          cmdReload,
 }
 
 func cmdSchedule(m *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {

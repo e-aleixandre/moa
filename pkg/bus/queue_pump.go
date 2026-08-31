@@ -257,6 +257,8 @@ func executeBarrier(sctx *SessionContext, raw string) error {
 		return sctx.Bus.Execute(SetThinking{SessionID: sctx.SessionID, Level: level})
 	case "goal":
 		return executeQueuedGoal(sctx, rest)
+	case "reload":
+		return sctx.Bus.Execute(ReloadPromptSources{SessionID: sctx.SessionID})
 	case "verify":
 		return sctx.Bus.Execute(RunManualVerify{SessionID: sctx.SessionID, Dir: strings.TrimSpace(rest)})
 	}

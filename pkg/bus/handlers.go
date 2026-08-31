@@ -159,6 +159,15 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 		return nil
 	})
 
+	b.OnCommand(func(cmd ReloadPromptSources) error {
+		// Nil outside serve (CLI, tests): there is no prompt builder to call.
+		if sctx.ReloadPrompt == nil {
+			return nil
+		}
+		sctx.ReloadPrompt()
+		return nil
+	})
+
 	b.OnCommand(func(cmd RunManualVerify) error {
 		if err := RequireManualVerifyAllowed(sctx.Bus); err != nil {
 			return err

@@ -333,3 +333,13 @@ type ResolveAskUser struct {
 	AskID     string
 	Answers   []string
 }
+
+// ReloadPromptSources re-reads AGENTS.md, the skills index and the memory index
+// and rebuilds the base system prompt.
+//
+// It exists as a bus command so a busy session can queue it as a barrier: the
+// agent captures the system prompt when a run starts, so it can only be swapped
+// at an idle point.
+type ReloadPromptSources struct {
+	SessionID string
+}
