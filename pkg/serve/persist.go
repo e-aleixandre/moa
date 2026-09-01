@@ -22,6 +22,10 @@ type servePersister struct {
 	// scratch on every snapshot, so without this the keys would vanish on the
 	// first save after creation.
 	preserved map[string]any
+	// subagents is created on first use and kept: the store memoizes the
+	// sidecar summaries it read, so a fresh instance per call would decode
+	// every transcript header again on each WebSocket init.
+	subagents *session.SubagentStore
 }
 
 func newServePersister(persisted *session.Session, store *session.FileStore, titleFn func() string) *servePersister {
@@ -153,7 +157,10 @@ func (sp *servePersister) subagentStore(sessionID string) *session.SubagentStore
 	if sp.deleted || sp.store == nil {
 		return nil
 	}
-	return session.NewSubagentStore(sp.store.Dir(), sessionID)
+	if sp.subagents == nil {
+		sp.subagents = session.NewSubagentStore(sp.store.Dir(), sessionID)
+	}
+	return sp.subagents
 }
 
 // sessionDir returns the directory holding this session's json file, or "".
