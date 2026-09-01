@@ -9,7 +9,7 @@
 // store in sync with the browser Back/Forward buttons.
 //
 // SCOPE: only the in-product hop (conversation ⇄ grid) goes through here. The
-// design galleries (?view=catalog|live|subagent|mobile) stay plain <a> links —
+// design galleries (?view=catalog|live|subagent|mobile|desktop) stay plain <a> links —
 // they are dev-only and a reload there is fine (they need the bootstrap anyway).
 //
 // COEXISTENCE WITH overlay-history.js: that module pushes a same-URL "guard"
