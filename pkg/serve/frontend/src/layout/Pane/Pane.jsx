@@ -1,4 +1,4 @@
-import { Rewind, Maximize2, X, GripHorizontal, Columns2, Rows2 } from "lucide-preact";
+import { Maximize2, X, GripHorizontal, Columns2, Rows2 } from "lucide-preact";
 import { StateDot, IconButton } from "../../primitives/index.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import "./Pane.css";
@@ -36,7 +36,6 @@ export function Pane({
   variant = "normal",
   titleTone,
   onTitleClick,
-  onRewind,
   onMaximize,
   onClose,
   children,
@@ -122,9 +121,6 @@ export function Pane({
         {path && <span class="p-path">{path}</span>}
 
         <div class="p-tools">
-          <IconButton label="Rewind" onClick={onRewind}>
-            <Rewind size={15} />
-          </IconButton>
           {onSplitRight && (
             <IconButton label="Split right" onClick={onSplitRight}>
               <Columns2 size={15} />

@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "preact/hooks";
-import { Spine } from "../Spine/Spine.jsx";
 import { ChatHead } from "../ChatHead/ChatHead.jsx";
 import { Stream } from "../Stream/Stream.jsx";
 import { LiveDock } from "../LiveDock/LiveDock.jsx";
@@ -10,109 +9,43 @@ import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { NowLine } from "../NowLine/NowLine.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
-import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, UsagePanel, Sheet, GlobalSettings } from "../../components/index.js";
+import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, UsagePanel, Sheet } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
-import { openSession } from "../../data/tile-actions.js";
 import { navigate } from "../../data/router.js";
 import { openPalette } from "../../data/palette.js";
-import { setGroupByProject } from "../../data/drawer.js";
 import { registerOverlay } from "../../data/overlays.js";
-import { shortModel, shortPath, modelCodename, sessionDisplayDotState, sessionTitle } from "../../data/util/format.js";
+import { shortModel, shortPath, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { activityPhase } from "../../data/util/activity.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
-import { configureSession, closeSession, deleteSession, openPersistedSubagent, openBashJob, resumeSession, rewindToMessage , setSessionFast } from "../../data/session-actions.js";
+import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast } from "../../data/session-actions.js";
 import "./ConversationScreen.css";
 
-// ConversationScreen — root organism AND container of the desktop conversation
-// screen. Wiring pattern: ONE component per screen subscribes to the store, derives the
-// focused session, and passes real props DOWN to the presentational children
-// (Spine/Stream/StatusStrip). The children stay dumb — they never read
-// the store themselves. App owns the bootstrap (polling/WS/version); this
-// container owns only the read-side projection.
+// ConversationScreen — the desktop conversation column. Spine lives in
+// DesktopShell; this container subscribes to the store, derives the focused
+// session, and passes props down to ChatHead / Stream / StatusStrip.
 //
 // Three states: LOADING (sessions not fetched yet), EMPTY (no focused session),
 // and a normal shown session.
-
-
-// spineSessions splits the store's sessions into open and saved lists.
-// Open = not 'saved', newest first. Saved stays its own quieter group.
-// `when` is a coarse relative age; `brief` is only a live status, never "idle".
-function relAge(updated) {
-  if (!updated) return "";
-  const diff = Date.now() - updated;
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return "now";
-  if (min < 60) return `${min}m`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.floor(h / 24);
-  return `${d}d`;
-}
-
-function spineBrief(sess) {
-  const dot = sessionDisplayDotState(sess);
-  if (dot === "permission") return "Needs you";
-  if (dot === "error") return sess.error || "Error";
-  if (dot === "unseen") return "New result";
-  if (sess.briefProgress) return sess.briefProgress;
-  if (sess.briefAttempting) return sess.briefAttempting;
-  if (sess.state === "running") return "Working…";
-  return "";
-}
-
-function toSpineRow(s, extra = {}) {
-  const brief = spineBrief(s);
-  return {
-    id: s.id,
-    title: sessionTitle(s),
-    state: sessionDisplayDotState(s),
-    unseen: !!s.unseen,
-    when: relAge(s.updated),
-    brief,
-    path: brief ? "" : (shortPath(s.cwd) || s.cwd || ""),
-    origin: s.origin || undefined,
-    cwd: s.cwd || "",
-    updated: s.updated || 0,
-    ...extra,
-  };
-}
-
-function spineSessions(sessions) {
-  const all = Object.values(sessions);
-  const active = all
-    .filter((s) => s.state !== "saved")
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => toSpineRow(s));
-  const saved = all
-    .filter((s) => s.state === "saved")
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => toSpineRow(s, { saved: true }));
-  return { active, saved };
-}
 
 function fmtSpend(costUSD) {
   if (!costUSD || costUSD <= 0) return undefined;
   return fmtCost(costUSD);
 }
 
-export function ConversationScreen({ version }) {
+export function ConversationScreen() {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
-  // Global Settings sheet (spine ⚙) — device-wide, not per-session. Shared body
-  // with mobile so desktop is no longer a stub.
-  const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
 
   const session = focusedSession(state);
   const activeId = focusedSessionId(state);
-  const { active, saved } = spineSessions(state.sessions);
   const loaded = state.sessionsLoaded;
 
   // Activity clock: while the focused session shows live activity, tick once a
@@ -128,10 +61,6 @@ export function ConversationScreen({ version }) {
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
   }, [activityActive]);
-
-  // onSelectSession routes a Spine click to the focused tile (desktop) via
-  // openSession, which leaves the tile showing that session.
-  const onSelectSession = (id) => { openSession(id); };
 
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
   // The dock is the permanent home for live ASYNC work (async subagents + bash)
@@ -216,24 +145,6 @@ export function ConversationScreen({ version }) {
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [mcpOpen]);
-
-  const spine = (
-    <Spine
-      version={version}
-      activeSessions={active}
-      savedSessions={saved}
-      activeId={activeId}
-      groupByProject={state.groupByProject}
-      onGroupByProject={setGroupByProject}
-      onSelectSession={onSelectSession}
-      onNewSession={() => openPalette("create")}
-      onSearch={() => openPalette("search")}
-      onSettings={() => setGlobalSettingsOpen(true)}
-      onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
-      onReopenSession={(id) => { resumeSession(id).catch(() => {}); }}
-      onDeleteSession={(id) => { deleteSession(id).catch(() => {}); }}
-    />
-  );
 
   let body;
   if (!loaded) {
@@ -409,8 +320,7 @@ export function ConversationScreen({ version }) {
   }
 
   return (
-    <div class="conversation-screen">
-      {spine}
+    <>
       <main class="conversation-main">{body}</main>
       {session && (
         <RewindTimeline
@@ -419,14 +329,6 @@ export function ConversationScreen({ version }) {
           sessionId={session.id}
         />
       )}
-      <Sheet
-        open={globalSettingsOpen}
-        onClose={() => setGlobalSettingsOpen(false)}
-        title="Settings"
-        class="global-settings-sheet"
-      >
-        <GlobalSettings soundEnabled={state.soundEnabled} version={version} />
-      </Sheet>
       {session && (
         <Sheet open={secretAliases !== null} onClose={() => setSecretAliases(null)} title="Send secrets">
           <SecretBatch
@@ -437,6 +339,6 @@ export function ConversationScreen({ version }) {
           />
         </Sheet>
       )}
-    </div>
+    </>
   );
 }

@@ -159,7 +159,7 @@
 /* Cost segment as the Usage panel trigger. Compact visual, but a ≥44px hit
    area via a pseudo-element (the same technique used elsewhere). Dotted
    underline on hover (desktop) signals it opens the panel. */
-.status-strip .status-strip-spend-btn {
+.status-strip .status-strip-usage-btn {
   position: relative;
   border: 0;
   background: none;
@@ -168,24 +168,12 @@
   color: inherit;
   cursor: pointer;
 }
-
-.status-strip .status-strip-spend-btn::after {
+.status-strip .status-strip-usage-btn::after {
   content: "";
   position: absolute;
   inset: -14px -8px;
 }
-
-.status-strip .status-strip-spend-btn b {
-  border-bottom: 1px dotted transparent;
-}
-
-@media (hover: hover) {
-  .status-strip .status-strip-spend-btn:hover b {
-    border-bottom-color: var(--overlay1);
-  }
-}
-
-.status-strip .status-strip-spend-btn:focus-visible {
+.status-strip .status-strip-usage-btn:focus-visible {
   outline: 2px solid var(--lavender);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
@@ -297,3 +285,21 @@
 
 /* Task progress counter. */
 .status-strip .status-strip-pill.tasks { color: var(--subtext1); background: var(--surface0); }
+
+.status-strip.is-compact {
+  flex-wrap: nowrap;
+  max-width: none;
+  margin: 0;
+  padding: 7px var(--space-2) 3px;
+  gap: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.status-strip.is-compact::-webkit-scrollbar { display: none; }
+
+.status-strip.is-compact .status-strip-div {
+  flex: none;
+  width: 1px;
+  height: 12px;
+  background: var(--surface1);
+}

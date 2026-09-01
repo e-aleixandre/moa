@@ -269,15 +269,15 @@ export async function loadSessions() {
     retainAttentionArrivals(validIds);
     const currentState = store.get();
     let tree = currentState.tileTree;
-    let changed = false;
+    let treeChanged = false;
     for (const sid of allSessionIds(tree)) {
       if (!validIds.has(sid)) {
         tree = clearSession(tree, sid);
-        changed = true;
+        treeChanged = true;
       }
     }
-    if (changed) setState({ tileTree: tree });
-    afterVisibilityChange();
+    if (treeChanged) setState({ tileTree: tree });
+    if (sessionsChanged || treeChanged) afterVisibilityChange();
   } catch (e) {
     console.error('loadSessions failed:', e);
   }
@@ -285,11 +285,10 @@ export async function loadSessions() {
 
 export function startPolling() {
   stopPolling();
-  // On mobile only one session is visible (and WS-backed); the poll just keeps
-  // the list and hidden sessions fresh, and push covers anything urgent — so a
-  // slower cadence saves battery/data. The foreground handler refreshes on
-  // return, so a stale gap while backgrounded doesn't matter.
-  const interval = store.get().isMobile ? 15000 : 3000;
+  // Desktop still polls hidden panes; 10s is enough for the roster (WS already
+  // owns the visible ones). Mobile is slower: one visible session, push for
+  // anything urgent, and a foreground handler on return.
+  const interval = store.get().isMobile ? 15000 : 10000;
   pollTimer = setInterval(loadSessions, interval);
 }
 
@@ -304,9 +303,21 @@ let usageTimer = null;
 export async function loadUsage() {
   try {
     const usage = await api('GET', '/api/usage');
+    const prev = store.get().usage;
+    if (usageUnchanged(prev, usage)) return;
     setState({ usage });
   } catch (e) {
     console.error('loadUsage failed:', e);
+  }
+}
+
+function usageUnchanged(prev, next) {
+  if (prev === next) return true;
+  if (!prev || !next) return false;
+  try {
+    return JSON.stringify(prev) === JSON.stringify(next);
+  } catch {
+    return false;
   }
 }
 

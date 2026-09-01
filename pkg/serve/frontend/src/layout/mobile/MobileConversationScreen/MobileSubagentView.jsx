@@ -2,7 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { ChevronLeft, GitFork, X, Check, Copy, Info } from "lucide-preact";
 import { RunModeChip } from "../../../components/index.js";
 import { Composer } from "../../Composer/Composer.jsx";
-import { StatusLineRow } from "../MobileStatusLine/StatusLineRow.jsx";
+import { StatusStrip } from "../../StatusStrip/StatusStrip.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { subagentView, canPromote } from "../../../data/subagent-view-model.js";
 import { fmtTokens, copyToClipboard, sessionTitle } from "../../../data/util/format.js";
@@ -22,7 +22,7 @@ import "./MobileSubagentView.css";
 // MobileSubagentView — full-screen push counterpart of the desktop SubagentView
 //. It is the parent screen with a different subject: same now-line
 // above the composer, same composer pill, same status line below it
-// (StatusLineRow) — except every number in that line is the CHILD's (its own
+// (StatusStrip) — except every number in that line is the CHILD's (its own
 // context window, spend, model, effort and tokens), because a screen zoomed
 // into a branch that reported the trunk's figures would be describing something
 // you can't see. Nothing in the line is a door: a child's model or effort isn't
@@ -121,7 +121,7 @@ export function MobileSubagentView({ session, jobId, onBack }) {
               key={`steer-${jobId}`}
               sessionId={session.id}
               session={session}
-              shortPlaceholder
+              compact
               steer={{
                 jobId,
                 name: view.name,
@@ -150,17 +150,20 @@ export function MobileSubagentView({ session, jobId, onBack }) {
 function BranchStatusLine({ session, view }) {
   const usage = view.usage;
   return (
-    <StatusLineRow
-      contextPercent={view.contextPercent}
-      contextLabel={`Subagent context ${view.contextPercent}% used`}
-      cost={usage && usage.costUSD > 0 ? fmtCost(usage.costUSD) : undefined}
-      model={view.model}
-      modelAccent={modelAccent(view.model)}
-      thinking={view.thinking}
-      perm={session.permissionMode || "yolo"}
-      fast={!!session.fast}
+    <StatusStrip
+      compact
+      ctxPercent={view.contextPercent}
       tokensUp={(usage && usage.inputTokens) || 0}
       tokensDown={(usage && usage.outputTokens) || 0}
+      spend={usage && usage.costUSD > 0 ? fmtCost(usage.costUSD) : undefined}
+      session={{
+        permissionMode: session.permissionMode,
+        fast: session.fast,
+      }}
+      showTokens
+      modelName={view.model}
+      modelAccent={modelAccent(view.model)}
+      thinking={view.thinking || "off"}
     />
   );
 }

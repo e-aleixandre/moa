@@ -16,7 +16,7 @@ import { addToast } from "../../../data/notifications.js";
 import { modelCodename, shortModel, fmtTokens } from "../../../data/util/format.js";
 import { copyToClipboard } from "../../../data/util/format.js";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
-import { StatusLineRow } from "./StatusLineRow.jsx";
+import { StatusStrip } from "../../StatusStrip/StatusStrip.jsx";
 import { McpPanel } from "../../../components/McpPanel/McpPanel.jsx";
 import "./MobileStatusLine.css";
 
@@ -48,10 +48,7 @@ import "./MobileStatusLine.css";
 // carries the cross-session attention dot. One door per destination, and the
 // one that switches session belongs next to the session's own name.
 //
-// The line's FACE — ring, cost, model, permission, tokens — is StatusLineRow,
-// shared with the subagent view so the two screens wear one line rather than
-// two that resemble each other. This component owns what makes it the trunk's:
-// the session's data, and the doors.
+// The line's FACE is StatusStrip, the same component as desktop and grid.
 //
 // Every destination lays out real shared data (usageForSession / ModelSelector /
 // the canonical MODES / configureSession) in the mock's visual structure. Global
@@ -317,32 +314,24 @@ export function MobileStatusLine({ session, usage }) {
   };
 
   return (
-    <StatusLineRow
-      contextPercent={hasCtx ? ctx : undefined}
-      contextLabel={
-        spend
-          ? `Context ${ctx}% used, ~${spend} spent — open context and usage`
-          : `Context ${ctx}% used — open context and usage`
-      }
-      cost={spend}
-      spendLevel={model.spendLevel || "normal"}
-      model={hasSession ? modelName : ""}
-      modelAccent={hasSession ? modelAccent(session.model) : "lavender"}
-      modelLabel="Model and thinking — change"
-      thinking={thinking}
-      perm={hasSession ? permMode : null}
-      fast={hasSession && !!session.fast}
-      mcp={hasSession ? session.mcp : null}
-      onMcp={() => setMcpOpen(true)}
-      mcpOpen={mcpOpen}
+    <StatusStrip
+      compact
+      ctxPercent={hasCtx ? ctx : undefined}
       tokensUp={hasTokens ? tokensUp : 0}
       tokensDown={hasTokens ? tokensDown : 0}
-      onContext={() => setUsageOpen(true)}
-      onModel={() => setSessionOpen(true)}
-      onPerm={() => setPermsOpen(true)}
-      contextOpen={usageOpen}
-      modelOpen={sessionOpen}
+      spend={spend}
+      session={session}
+      usage={usage}
+      onOpenUsage={hasSession ? () => setUsageOpen(true) : undefined}
+      onOpenMcp={hasSession ? () => setMcpOpen(true) : undefined}
+      onPerm={hasSession ? () => setPermsOpen(true) : undefined}
       permOpen={permsOpen}
+      showTokens
+      modelName={modelName}
+      modelAccent={hasSession ? modelAccent(session.model) : "lavender"}
+      thinking={thinking}
+      onModel={hasSession ? () => setSessionOpen(true) : undefined}
+      modelOpen={sessionOpen}
     >
       {hasSession && (
         <MobileSheet
@@ -433,6 +422,6 @@ export function MobileStatusLine({ session, usage }) {
           <McpPanel sessionId={session.id} mcpTick={session.mcpTick} variant="sheet" />
         </MobileSheet>
       )}
-    </StatusLineRow>
+    </StatusStrip>
   );
 }

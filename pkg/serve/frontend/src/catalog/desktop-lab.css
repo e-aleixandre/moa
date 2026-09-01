@@ -47,11 +47,10 @@
   box-shadow: var(--shadow-lg);
 }
 
-/* ConversationScreen is 100vh in production. Inside this frame that would
-   be the phone's viewport; pin it to the frame instead. */
-.desktop-lab-frame .conversation-screen,
-.desktop-lab-frame .mconv,
-.desktop-lab-frame .pane-grid-screen {
+/* DesktopShell is 100vh in production. Inside this frame that would
+   be the browser viewport; pin it to the frame instead. */
+.desktop-lab-frame .desktop-shell,
+.desktop-lab-frame .mconv {
   height: 100%;
   width: 100%;
   max-height: 100%;

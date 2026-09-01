@@ -69,7 +69,7 @@ const MAX_HISTORY = 100;
 // backgrounded PWAs freely) doesn't lose what you were typing. The prefix is
 // deliberately DISTINCT from the old SPA's `moa-draft-` so the two frontends
 // don't clobber each other's drafts while they coexist under /next.
-export function Composer({ sessionId, session, shortPlaceholder = false, steer = null, onSecret }) {
+export function Composer({ sessionId, session, shortPlaceholder = false, compact = false, steer = null, onSecret }) {
   const { skills, refreshSkills } = useSessionSkills(sessionId);
   const textareaRef = useRef(null);
   const attachInputRef = useRef(null);
@@ -990,22 +990,23 @@ export function Composer({ sessionId, session, shortPlaceholder = false, steer =
   const cacheExpired = cacheExpiresAt > 0 && !busy && nowTick >= cacheExpiresAt;
 
   const summary = steer ? null : queueSummary(pendingSteers);
+  const short = compact || shortPlaceholder;
   // shortPlaceholder (mobile): the multi-line keyboard hint doesn't fit the
   // single-line pill and reads noisy on a phone — use the short prompt.
-  const idlePlaceholder = shortPlaceholder
+  const idlePlaceholder = short
     ? "Message moa…"
     : `Message moa — Enter to send, ⇧Enter for a new line, ${formatShortcut("Enter", { mod: true })} to queue…`;
   // Steer mode uses the standard busy placeholder because its header identifies
   // the subagent. Busy (parent run) copy states that Enter STEERS without stopping —
   // the persistent Send button already signals "you can always talk to it", so
   // the copy names the consequence. Mobile's pill has no room for the long form.
-  const busyPlaceholder = shortPlaceholder
+  const busyPlaceholder = short
     ? "Steer — it keeps working…"
     : "Steer the agent — ⏎ sends while it works, it won't stop it…";
   const placeholder = (steer || busy) ? busyPlaceholder : idlePlaceholder;
 
   return (
-    <div class="composer-wrap">
+    <div class={`composer-wrap${compact ? " is-compact" : ""}`}>
       {cacheExpired && (
         <div class="cache-warn" title="The prompt cache for this conversation has expired. Your next message will pay for a fresh cache write (more expensive).">
           <span class="cache-warn-dot" />

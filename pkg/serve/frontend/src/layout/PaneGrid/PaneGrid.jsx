@@ -5,6 +5,7 @@ import { Pane } from "../Pane/Pane.jsx";
 import { Stream } from "../Stream/Stream.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
+import { NowLine } from "../NowLine/NowLine.jsx";
 import { LiveDock } from "../LiveDock/LiveDock.jsx";
 import {
   McpBanner, PermissionPrompt, AskUserPrompt, UsagePanel, ModelSelector,
@@ -25,7 +26,6 @@ import { openPersistedSubagent, openBashJob, configureSession, setSessionFast } 
 import { modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
 import { shortModel, shortPath, sessionDisplayDotState, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
-import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
 import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
@@ -105,21 +105,11 @@ function ResizeHandle({ path, direction }) {
 export function ConnectedPane({ node, state, tileIndex, onSecret }) {
   const tileId = node.id;
   const session = node.sessionId ? state.sessions[node.sessionId] : null;
-  const [nowMs, setNowMs] = useState(Date.now());
   const focused = state.focusedTile === tileId;
   const [dragOver, setDragOver] = useState(false);
   const paneRef = useRef(null);
   const canClose = getTileCount() > 1;
   const attention = session && (session.state === "permission" || session.state === "error");
-  const phase = session ? activityPhase(session) : null;
-  const workIsLive = phase === "thinking" || phase === "working";
-
-  useEffect(() => {
-    if (!workIsLive) return undefined;
-    setNowMs(Date.now());
-    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [workIsLive]);
 
   // --- HTML5 drag source (desktop) ---
   const handleDragStart = useCallback((e) => {
@@ -327,11 +317,6 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
     );
   }
 
-  const activity = activityText(session);
-  const task = workIsLive && session.runStartedAtMs
-    ? `${activity} · ${formatElapsed(Math.max(0, nowMs - session.runStartedAtMs))}`
-    : activity;
-
   const blocks = projectStream(session);
   const liveAgents = liveTrayAgents(session);
   const dotState = sessionDisplayDotState(session);
@@ -392,7 +377,12 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
       onMaximize={handleMaximize}
       blocking={blocking}
       bodyLive
-      composer={<Composer key={session.id} sessionId={session.id} session={session} onSecret={(aliases) => onSecret(session.id, aliases)} />}
+      composer={(
+        <>
+          <NowLine session={session} />
+          <Composer key={session.id} sessionId={session.id} session={session} compact onSecret={(aliases) => onSecret(session.id, aliases)} />
+        </>
+      )}
       dock={liveAgents.length > 0 && (
         <LiveDock
           agents={liveAgents}
@@ -410,10 +400,10 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
       status={(
         <div class="status-strip-anchor pane-status-anchor" ref={stripAnchorRef}>
           <StatusStrip
+            compact
             ctxPercent={session.contextPercent}
             tokensUp={session.runTokensUp}
             tokensDown={session.runTokensDown}
-            task={task}
             spend={fmtCost(session.costUSD)}
             session={session}
             usage={state.usage}

@@ -22,7 +22,7 @@ import "./MobileComposer.css";
 export function MobileComposer({ session, usage, onSecret }) {
   return (
     <div class="mcomposer">
-      <Composer sessionId={session.id} session={session} shortPlaceholder onSecret={onSecret} />
+      <Composer sessionId={session.id} session={session} compact onSecret={onSecret} />
       <MobileStatusLine session={session} usage={usage} />
     </div>
   );

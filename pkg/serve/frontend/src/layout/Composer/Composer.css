@@ -441,3 +441,104 @@
   .composer-wrap .composer-send .spin { animation: none; }
   .composer-wrap .voice-lock-hint { animation: none; }
 }
+
+/* Compact density — phone and grid panes. Same Composer, one-row pill. */
+.composer-wrap.is-compact {
+  max-width: none;
+}
+
+.composer-wrap.is-compact .composer {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  padding: 6px;
+  border-radius: 16px;
+  box-shadow: none;
+}
+
+.composer-wrap.is-compact .composer:focus-within {
+  border-color: var(--mauve);
+  box-shadow: none;
+}
+
+.composer-wrap.is-compact .composer-bar {
+  display: contents;
+  padding: 0;
+}
+
+.composer-wrap.is-compact .composer-textarea {
+  grid-row: 1;
+  grid-column: 2;
+  min-height: 36px;
+  padding: 6px 4px;
+}
+
+.composer-wrap.is-compact .composer-btn-attach {
+  grid-row: 1;
+  grid-column: 1;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  color: var(--overlay1);
+}
+
+.composer-wrap.is-compact .composer-btn-slash {
+  display: none;
+}
+
+.composer-wrap.is-compact .composer-send {
+  grid-row: 1;
+  margin-left: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+}
+
+.composer-wrap.is-compact .composer-send-wrap {
+  grid-row: 1;
+  grid-column: 3;
+  margin-left: 0;
+}
+
+.composer-wrap.is-compact .composer.has-stop .composer-send-wrap {
+  grid-column: 4;
+}
+
+.composer-wrap.is-compact .composer.has-stop {
+  grid-template-columns: auto 1fr auto auto;
+}
+
+.composer-wrap.is-compact .composer-stop-ghost {
+  grid-row: 1;
+  grid-column: 3;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  margin-left: 0;
+}
+
+.composer-wrap.is-compact .composer-stop-ghost::after {
+  inset: -8px -4px;
+}
+
+.composer-wrap.is-compact .composer.has-stop .composer-send {
+  position: relative;
+}
+
+.composer-wrap.is-compact .composer.has-stop .composer-send::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+
+.composer-wrap.is-compact .composer.is-busy .steer-hint {
+  display: none;
+}
+
+.composer-wrap.is-compact .queue-note {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2);
+}

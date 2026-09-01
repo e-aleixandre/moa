@@ -1,7 +1,7 @@
 import { render } from "preact";
 import { useState, useEffect } from "preact/hooks";
 import "./index.css";
-import { ConversationScreen, PaneGridScreen, MobileConversationScreen } from "./layout/index.js";
+import { ConversationScreen, PaneGridScreen, MobileConversationScreen, DesktopShell } from "./layout/index.js";
 import { ToastContainer, CommandPalette } from "./components/index.js";
 import { store } from "./data/store.js";
 import { bindRouter } from "./data/router.js";
@@ -100,13 +100,17 @@ function CatalogApp() {
   } else if (view === "grid") {
     body = (
       <DesktopLab>
-        <PaneGridScreen />
+        <DesktopShell>
+          <PaneGridScreen />
+        </DesktopShell>
       </DesktopLab>
     );
   } else {
     body = (
       <DesktopLab>
-        <ConversationScreen />
+        <DesktopShell>
+          <ConversationScreen />
+        </DesktopShell>
       </DesktopLab>
     );
   }

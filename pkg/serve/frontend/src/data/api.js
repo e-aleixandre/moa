@@ -172,11 +172,11 @@ function commitCursorAcknowledgement(sessionId, throughSeq, namespace) {
   const session = store.get().sessions[sessionId];
   if (!session || session.attentionNamespace !== namespace) return;
   const ackedThroughSeq = Math.max(session.ackedThroughSeq || 0, throughSeq);
+  const unseen = (session.unseenSeq || 0) > ackedThroughSeq ? session.unseen : false;
+  if (session.ackedThroughSeq === ackedThroughSeq && session.unseen === unseen) return;
   updateSession(sessionId, {
     ackedThroughSeq,
-    // A later occurrence remains lit while a delayed acknowledgement for an
-    // earlier cursor arrives (the init-cut race).
-    unseen: (session.unseenSeq || 0) > ackedThroughSeq ? session.unseen : false,
+    unseen,
   });
 }
 

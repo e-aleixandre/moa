@@ -116,6 +116,15 @@ export const store = {
 
 export function setState(patch) {
   const next = typeof patch === 'function' ? patch(state) : patch;
+  if (!next || typeof next !== 'object') return;
+  let changed = false;
+  for (const key of Object.keys(next)) {
+    if (!Object.is(state[key], next[key])) {
+      changed = true;
+      break;
+    }
+  }
+  if (!changed) return;
   const previous = state;
   state = { ...state, ...next };
   if (state.sessions !== previous.sessions) {

@@ -15,24 +15,8 @@ import { activityPhase } from "../../data/util/activity.js";
 // in the header), per-run tokens, the permission chip, fast mode when it's on,
 // and the modes that are currently ACTIVE (goal/tasks) plus the on-extra alert.
 // The foreground run's ACTIVITY is not here: it lives in the NowLine above the
-// composer, in both densities. `task` survives for the consumers whose subject
-// is NOT the focused run — the subagent strip (a child's activity, which can be
-// live while the parent sits idle, hence `taskLive`), the panes and the catalog.
-// Level 2 (the full accounting: cost breakdown, tokens, detailed context, plan
-// windows, extra) lives in the UsagePanel, opened by tapping the cost segment.
-//
-// The DECISIONS about what is level 1 vs level 2 live in the pure
-// statusStripModel (data/util/status-strip-model.js); this component only
-// RENDERS the model it returns. The connected container (ConversationScreen)
-// passes the full `session` and the global `usage` snapshot (from /api/usage);
-// `onOpenUsage` (optional) turns the cost segment into the Usage panel trigger;
-// `showTokens` (default true) is set false by compact densities (pane/mobile),
-// where tokens drop to level 2.
-//
-// Every datum arrives as a prop, and each control is a control only when its
-// handler is passed — which is what lets the subagent view wear this same strip
-// read-only, measuring the CHILD (its context, its tokens, its spend) instead
-// of the session.
+// composer. Compact density (phone, grid pane) is the same line with less
+// padding and without goal/tasks pills.
 export function StatusStrip({
   ctxPercent,
   tokensUp,
@@ -42,9 +26,12 @@ export function StatusStrip({
   session,
   usage,
   taskLive,
+  compact = false,
   onOpenUsage,
   onOpenMcp,
   onPermChange,
+  onPerm,
+  permOpen,
   permBusy = false,
   showTokens = true,
   modelName,
@@ -54,6 +41,7 @@ export function StatusStrip({
   modelOpen,
   modelPopover,
   modelAnchorRef,
+  children,
 }) {
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
   const hasTokens = tokensUp != null && tokensDown != null;
@@ -77,52 +65,49 @@ export function StatusStrip({
   const costTrigger = !!onOpenUsage;
 
   return (
-    <div class="status-strip">
+    <div class={`status-strip${compact ? " is-compact" : ""}`}>
       {/* LEFT: context + cost lead the line, matching the mobile line so the same
           datum sits on the same side in both densities. They share a segment
           because the cost is the door to the same Usage panel the ring explains. */}
-      {(hasCtx || hasSpend) && (
-        <span class="status-strip-usage">
-          {hasCtx && (
-            <span class="status-strip-ctx">
-              <span class="status-strip-ring" style={ringStyle} aria-hidden="true" />
-              ctx {ctxPercent}%
-            </span>
-          )}
-
-          {/* Cost segment — the Usage panel trigger when onOpenUsage is supplied.
-              Falls back to plain text otherwise (galleries / other consumers). */}
-          {hasSpend ? (
-            costTrigger ? (
-              <button
-                type="button"
-                class={`status-strip-spend status-strip-spend-btn spend-${strip.spendLevel || "normal"}`}
-                onClick={onOpenUsage}
-                aria-label="Show usage"
-                title="Estimated session cost"
-              >
-                {/* The tilde marks an estimated accumulated session cost. */}
-                <b>~{spend}</b>
-              </button>
-            ) : (
+      {(hasCtx || hasSpend || costTrigger) && (() => {
+        const body = (
+          <>
+            {hasCtx && (
+              <span class="status-strip-ctx">
+                <span class="status-strip-ring" style={ringStyle} aria-hidden="true" />
+                {compact ? `${ctxPercent}%` : `ctx ${ctxPercent}%`}
+              </span>
+            )}
+            {hasSpend ? (
               <span class={`status-strip-spend spend-${strip.spendLevel || "normal"}`}>
                 <b>~{spend}</b>
               </span>
-            )
-          ) : (
-            costTrigger && (
-              <button
-                type="button"
-                class="status-strip-gauge"
-                onClick={onOpenUsage}
-                aria-label="Show usage"
-                title="Show usage"
-              >
-                <Gauge />
-              </button>
-            )
-          )}
-        </span>
+            ) : (
+              costTrigger && (
+                <span class="status-strip-gauge" aria-hidden="true">
+                  <Gauge />
+                </span>
+              )
+            )}
+          </>
+        );
+        return costTrigger ? (
+          <button
+            type="button"
+            class="status-strip-usage status-strip-usage-btn"
+            onClick={onOpenUsage}
+            aria-label="Show usage"
+            title="Context and session cost"
+          >
+            {body}
+          </button>
+        ) : (
+          <span class="status-strip-usage">{body}</span>
+        );
+      })()}
+
+      {compact && (hasCtx || hasSpend) && modelName && (
+        <span class="status-strip-div" aria-hidden="true" />
       )}
 
       {/* Then the activity, the permission chip and the currently-active modes. */}
@@ -145,11 +130,26 @@ export function StatusStrip({
         </span>
       )}
 
+      {compact && modelName && (
+        <span class="status-strip-div" aria-hidden="true" />
+      )}
+
       {/* Permission chip — a control (subphase b): tap opens a 3-option menu
           (never cycles). onPermChange is optional so gallery/other consumers can
           render it read-only; without it, it's the same chip as a plain span, so
           the read-only line looks identical to the interactive one. */}
-      {onPermChange ? (
+      {onPerm ? (
+        <button
+          type="button"
+          class={`perm-chip perm-${perm.mode}`}
+          onClick={onPerm}
+          aria-haspopup="dialog"
+          aria-expanded={permOpen}
+          aria-label={`Permission mode: ${perm.mode}`}
+        >
+          {perm.mode}
+        </button>
+      ) : onPermChange ? (
         <PermissionControl mode={perm.mode} disabled={permBusy} onChange={onPermChange} />
       ) : (
         <span class={`perm-chip perm-${perm.mode}`} title={`Permission mode: ${perm.mode}`}>
@@ -168,14 +168,14 @@ export function StatusStrip({
 
       {/* Active modes — only rendered when the model reports them (off modes
           are omitted upstream). */}
-      {modes.goal && (
+      {!compact && modes.goal && (
         <span class="status-strip-pill goal" title={modes.goal.objective || "Goal active"}>
           <Target />
           {modes.goal.verifying ? "goal · verifying…" : `goal${modes.goal.iteration ? ` ${modes.goal.iteration}` : ""}`}
         </span>
       )}
 
-      {modes.tasks && (
+      {!compact && modes.tasks && (
         <span class="status-strip-pill tasks">
           <ClipboardList />
           {modes.tasks.done}/{modes.tasks.total}
@@ -233,6 +233,7 @@ export function StatusStrip({
           <span class="status-strip-tokens"><TokenFlow up={tokensUp} down={tokensDown} variant="strip" /></span>
         )}
       </span>
+      {children}
     </div>
   );
 }
