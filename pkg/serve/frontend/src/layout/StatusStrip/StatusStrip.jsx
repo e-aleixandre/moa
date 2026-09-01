@@ -4,6 +4,7 @@ import { statusStripModel } from "../../data/util/status-strip-model.js";
 import { PermissionControl } from "../../components/PermissionControl/PermissionControl.jsx";
 import { ModelPill, TokenFlow } from "../../components/index.js";
 import { activityPhase } from "../../data/util/activity.js";
+import { tokenFlowVariant } from "./status-strip-view-model.js";
 
 // StatusStrip — mono strip under the composer: the app's bottom telemetry line,
 // mirroring the TUI statusline. This is the TWO-LEVEL redesign (TELEMETRY-
@@ -230,7 +231,7 @@ export function StatusStrip({
           );
         })()}
         {showTokens && hasTokens && (
-          <span class="status-strip-tokens"><TokenFlow up={tokensUp} down={tokensDown} variant={compact ? "compact" : "strip"} /></span>
+          <span class="status-strip-tokens"><TokenFlow up={tokensUp} down={tokensDown} variant={tokenFlowVariant(compact)} /></span>
         )}
       </span>
       {children}
