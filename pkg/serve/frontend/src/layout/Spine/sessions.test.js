@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { spineSessions, paneBadges, focusedTileSessionId, sessionRowBrief } from "./sessions.js";
+import { spineSessions, paneBadges, focusedTileSessionId, sessionRowBrief, selectDesktopChrome, __resetDesktopChromeForTests } from "./sessions.js";
 
 test("open sessions sort newest first and keep saved in their own list", () => {
   const { active, saved } = spineSessions({
@@ -46,4 +46,43 @@ test("grid badges attach only when the session sits in a pane", () => {
   expect(active.find((s) => s.id === "a").pane).toBe("P1");
   expect(active.find((s) => s.id === "c").pane).toBeUndefined();
   expect(focusedTileSessionId({ tileTree: tree, focusedTile: "t2" })).toBe("b");
+});
+
+test("selectDesktopChrome reuses the snapshot when only streaming text changes", () => {
+  __resetDesktopChromeForTests();
+  const a = {
+    id: "a", title: "A", state: "running", updated: Date.now(), cwd: "/x",
+    briefProgress: "Working…",
+  };
+  const state = {
+    view: null, isMobile: false, groupByProject: false, soundEnabled: true,
+    tileTree: { type: "tile", id: 1, sessionId: "a" }, focusedTile: 1,
+    sessions: { a },
+  };
+  const first = selectDesktopChrome(state);
+  const second = selectDesktopChrome({
+    ...state,
+    sessions: { a: { ...a, streamingText: "hello", runTokensUp: 12 } },
+  });
+  expect(second).toBe(first);
+  expect(first.active[0].id).toBe("a");
+  expect(first.active[0].brief).toBe("Working…");
+});
+
+test("selectDesktopChrome replaces the snapshot when the brief or title changes", () => {
+  __resetDesktopChromeForTests();
+  const a = { id: "a", title: "A", state: "running", updated: Date.now(), cwd: "/x" };
+  const state = {
+    view: null, isMobile: false, groupByProject: false, soundEnabled: true,
+    tileTree: { type: "tile", id: 1, sessionId: "a" }, focusedTile: 1,
+    sessions: { a },
+  };
+  const first = selectDesktopChrome(state);
+  const second = selectDesktopChrome({
+    ...state,
+    sessions: { a: { ...a, title: "Renamed", state: "permission" } },
+  });
+  expect(second).not.toBe(first);
+  expect(second.active[0].title).toBe("Renamed");
+  expect(second.active[0].brief).toBe("Needs you");
 });

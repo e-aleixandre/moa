@@ -13,7 +13,8 @@ import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, UsagePanel, Sheet } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
-import { store, updateSession } from "../../data/store.js";
+import { updateSession } from "../../data/store.js";
+import { useStore } from "../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
 import { navigate } from "../../data/router.js";
@@ -21,7 +22,6 @@ import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { shortModel, shortPath, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
-import { activityPhase } from "../../data/util/activity.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
@@ -43,26 +43,10 @@ function fmtSpend(costUSD) {
 }
 
 export function ConversationScreen() {
-  const [state, setState] = useState(store.get());
-  useEffect(() => store.subscribe(setState), []);
-
-  const session = focusedSession(state);
-  const activeId = focusedSessionId(state);
-  const loaded = state.sessionsLoaded;
-
-  // Activity clock: while the focused session shows live activity, tick once a
-  // second so the NowLine's elapsed timer advances on its own. The timer origin
-  // is the server-stamped runStartedAtMs (read inside NowLine), not this clock —
-  // the clock only supplies "now", and NowLine reuses it instead of starting a
-  // second interval for the same tick.
-  const activityActive = activityPhase(session) !== null;
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    if (!activityActive) return;
-    setNowMs(Date.now());
-    const t = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [activityActive]);
+  const session = useStore(focusedSession);
+  const activeId = useStore(focusedSessionId);
+  const loaded = useStore((s) => s.sessionsLoaded);
+  const usage = useStore((s) => s.usage);
 
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
   // The dock is the permanent home for live ASYNC work (async subagents + bash)
@@ -327,7 +311,7 @@ export function ConversationScreen() {
                 the strip below keeps the standing telemetry (context, cost,
                 permissions, MCP, tokens). flex:none, so it pushes the stream up
                 instead of overlaying the composer. */}
-            <NowLine session={session} nowMs={nowMs} />
+            <NowLine session={session} />
             <Composer key={session.id} sessionId={session.id} session={session} onSecret={setSecretAliases} />
             <div class="status-strip-anchor" ref={usageAnchorRef}>
               <StatusStrip
@@ -336,7 +320,7 @@ export function ConversationScreen() {
                 tokensDown={session.runTokensDown}
                 spend={fmtSpend(session.costUSD)}
                 session={session}
-                usage={state.usage}
+                usage={usage}
                 onOpenUsage={() => setUsageOpen((v) => !v)}
                 onOpenMcp={() => setMcpOpen((v) => !v)}
                 onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
@@ -354,7 +338,7 @@ export function ConversationScreen() {
                 <div class="status-strip-usage-popover">
                   <UsagePanel
                     session={session}
-                    usage={state.usage}
+                    usage={usage}
                     ctxPercent={session.contextPercent}
                     costUSD={session.costUSD}
                   />

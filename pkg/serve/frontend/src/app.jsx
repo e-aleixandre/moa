@@ -4,6 +4,7 @@ import "./index.css";
 import { ConversationScreen, PaneGridScreen, MobileConversationScreen, DesktopShell } from "./layout/index.js";
 import { CommandPalette, ToastContainer, PulsePairingPanel } from "./components/index.js";
 import { store, setState as setStoreState } from "./data/store.js";
+import { useStore } from "./hooks/useStore.js";
 import { togglePalette, closePalette } from "./data/palette.js";
 import { bindRouter, navigate } from "./data/router.js";
 import { isPulsePairingOpen, subscribePulsePairing, closePulsePairing } from "./data/pulse-pairing-panel.js";
@@ -48,9 +49,8 @@ function checkBuild(result) {
 // the old SPA's App (pkg/serve/frontend/src/app.jsx).
 function useBootstrap() {
   const [version, setVersion] = useState(null);
-  const [state, setState] = useState(store.get());
-
-  useEffect(() => store.subscribe(setState), []);
+  const isMobile = useStore((s) => s.isMobile);
+  const sessionCount = useStore((s) => Object.keys(s.sessions).length);
 
   // Install the single popstate listener so the browser Back/Forward buttons
   // keep the store's `view` in sync with the URL (in-app conversation ⇄ grid
@@ -172,9 +172,9 @@ function useBootstrap() {
   // Re-fill tiles / re-select mobile when the layout or session count changes,
   // so a newly-loaded session lands in the focused tile automatically.
   useEffect(() => {
-    if (!state.isMobile) autoFillTiles();
+    if (!isMobile) autoFillTiles();
     else autoSelectMobile();
-  }, [state.isMobile, Object.keys(state.sessions).length]);
+  }, [isMobile, sessionCount]);
 
   // ⌘K / Ctrl+K — global command-palette toggle. Active in every view.
   // The chord always works, even inside the composer textarea (spec §6): we
@@ -230,24 +230,23 @@ function GlobalPairingPanel() {
 // 1-based index (null off the grid). The palette reads the session list from
 // the store itself, so this only supplies open/close + chassis context.
 function GlobalPalette() {
-  const [state, setState] = useState(store.get());
-  useEffect(() => store.subscribe(setState), []);
-
-  const context = globalPaletteContext(state);
-  let focusedPane = null;
-  if (context === "grid") {
-    const ids = allTileIdsSafe(state.tileTree);
-    const idx = ids.indexOf(state.focusedTile);
-    focusedPane = idx >= 0 ? idx + 1 : null;
-  }
+  const open = useStore((s) => s.paletteOpen);
+  const context = useStore(globalPaletteContext);
+  const focusedPane = useStore((s) => {
+    if (globalPaletteContext(s) !== "grid") return null;
+    const ids = allTileIdsSafe(s.tileTree);
+    const idx = ids.indexOf(s.focusedTile);
+    return idx >= 0 ? idx + 1 : null;
+  });
+  const initialStep = useStore((s) => s.paletteStep);
 
   return (
     <CommandPalette
-      open={state.paletteOpen}
+      open={open}
       onClose={closePalette}
       context={context}
       focusedPane={focusedPane}
-      initialStep={state.paletteStep}
+      initialStep={initialStep}
     />
   );
 }
@@ -265,17 +264,16 @@ function allTileIdsSafe(tree) {
 // is the pane grid. Design galleries are a separate catalog-app, not this one.
 function App() {
   const version = useBootstrap();
-  const [state, setState] = useState(store.get());
-  useEffect(() => store.subscribe(setState), []);
-  const view = state.view;
+  const isMobile = useStore((s) => s.isMobile);
+  const view = useStore((s) => s.view);
 
   // Every mobile surface supplies its own app scroller, irrespective of a
   // stale grid URL, so document scrolling must stay locked for all of them.
   useEffect(() => {
-    document.documentElement.classList.toggle("mobile-locked", shouldLockMobileDocument(state));
-  }, [state.isMobile, view]);
+    document.documentElement.classList.toggle("mobile-locked", shouldLockMobileDocument({ isMobile }));
+  }, [isMobile]);
 
-  if (state.isMobile) {
+  if (isMobile) {
     return (
       <>
         <MobileConversationScreen version={version} />

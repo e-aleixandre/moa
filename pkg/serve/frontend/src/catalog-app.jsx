@@ -1,9 +1,10 @@
 import { render } from "preact";
-import { useState, useEffect } from "preact/hooks";
+import { useEffect } from "preact/hooks";
 import "./index.css";
 import { ConversationScreen, PaneGridScreen, MobileConversationScreen, DesktopShell } from "./layout/index.js";
 import { ToastContainer, CommandPalette } from "./components/index.js";
 import { store } from "./data/store.js";
+import { useStore } from "./hooks/useStore.js";
 import { bindRouter } from "./data/router.js";
 import { closePalette } from "./data/palette.js";
 import { setMobile } from "./data/tile-actions.js";
@@ -51,8 +52,6 @@ function Nav({ current }) {
 }
 
 function useCatalogBootstrap() {
-  const [state, setState] = useState(store.get());
-  useEffect(() => store.subscribe(setState), []);
   useEffect(() => bindRouter(), []);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
@@ -65,22 +64,22 @@ function useCatalogBootstrap() {
 }
 
 function LabPalette() {
-  const [state, setState] = useState(store.get());
-  useEffect(() => store.subscribe(setState), []);
+  const open = useStore((s) => s.paletteOpen);
+  const step = useStore((s) => s.paletteStep);
   return (
     <CommandPalette
-      open={state.paletteOpen}
+      open={open}
       onClose={closePalette}
       context="conversation"
       focusedPane={null}
-      initialStep={state.paletteStep}
+      initialStep={step}
     />
   );
 }
 
 function CatalogApp() {
-  const state = useCatalogBootstrap();
-  const view = state.view || "desktop";
+  useCatalogBootstrap();
+  const view = useStore((s) => s.view || "desktop");
 
   useEffect(() => {
     document.documentElement.classList.remove("mobile-locked");
