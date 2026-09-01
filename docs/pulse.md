@@ -1,112 +1,110 @@
 # Moa Pulse
 
-> Definición de producto canónica: [`PULSE.md`][pulse-spec] del repositorio iOS.
-> Este documento resume el contrato de Serve que la hace posible.
+> Canonical product definition: [`PULSE.md`][pulse-spec] in the iOS repository.
+> This document summarizes the Serve contract that makes it possible.
 
 [pulse-spec]: https://github.com/e-aleixandre/moa-companion-ios/blob/feat/pulse-openai-realtime/PULSE.md
 
-## Qué es
+## What it is
 
-Pulse es el cliente iOS y futuro cliente CarPlay de `moa serve`: el intermediario
-por voz del propietario con todas sus conversaciones. Permite conocer el estado
-de las sesiones, leer conversaciones y actividad, y actuar sobre ellas desde
-lenguaje natural.
+Pulse is the iOS client and future CarPlay client for `moa serve`: the owner's
+voice intermediary with all their conversations. It lets them check the state
+of sessions, read conversations and activity, and act on them using natural
+language.
 
-El vertical inicial es una llamada continua y manos libres con OpenAI Realtime;
-el feed visual narrativo de sesiones y conversaciones es una fase posterior.
+The initial vertical is a continuous, hands-free call with OpenAI Realtime; the
+narrative visual feed of sessions and conversations is a later phase.
 
-## Límites de arquitectura
+## Architecture boundaries
 
-- Moa conserva la realidad canónica de sesiones, mensajes, eventos y acciones.
-- La API de Moa es genérica y la comparten Serve web y Pulse. No hay una
-  proyección ni endpoint de operaciones específico de Pulse; la lectura y las
-  acciones van por las rutas genéricas.
-- Las piezas Pulse-aware en Moa son el pairing de dispositivos, el broker de
-  client secrets Realtime, el canal guardián (`GET /api/pulse/guardian/ws`) y el
-  brief de sesión (`pkg/pulsebrief` + `pkg/serve/brief.go`).
-- El audio viaja directamente entre iPhone y OpenAI Realtime. Moa no lo recibe,
-  no lo proxya y no lo persiste.
-- Las tools de Realtime se ejecutan en la app Swift mediante llamadas tipadas a
-  la API genérica de Moa; el modelo no recibe la credencial de Moa ni HTTP libre.
+- Moa retains the canonical reality of sessions, messages, events, and actions.
+- Moa's API is generic and shared by Serve web and Pulse. There is no
+  Pulse-specific operations projection or endpoint; reads and actions use the
+  generic routes.
+- The Pulse-aware pieces in Moa are device pairing, the Realtime client secrets
+  broker, the guardian channel (`GET /api/pulse/guardian/ws`), and the session
+  brief (`pkg/pulsebrief` + `pkg/serve/brief.go`).
+- Audio travels directly between the iPhone and OpenAI Realtime. Moa does not
+  receive, proxy, or persist it.
+- Realtime tools run in the Swift app through typed calls to Moa's generic API;
+  the model receives neither the Moa credential nor unrestricted HTTP.
 
-## Acceso y contexto
+## Access and context
 
-Un dispositivo emparejado representa al propietario y puede usar la superficie
-API genérica completa de Serve, salvo administrar pairing. El modelo puede leer
-bajo demanda mensajes de usuario/asistente y actividad de tools de cualquier
-sesión; el propietario acepta que ese contexto llegue a OpenAI.
+A paired device represents the owner and can use Serve's full generic API
+surface, except to administer pairing. The model can read user/assistant
+messages and tool activity from any session on demand; the owner accepts that
+this context reaches OpenAI.
 
-El contrato de lectura prioriza presupuesto, no censura:
+The read contract prioritizes budget, not censorship:
 
-- los mensajes visibles se entregan completos, con límites defensivos;
-- la actividad de tools entrega de inicio `tool`, `action`, `target`, estado y
-  tiempo, con argumentos reales compactados en `target` a un máximo de 512 B,
-  pero sin salida completa. `bash` conserva el comando completo,
-  `fetch_content` la URL completa, los subagentes su `task`, y las tools
-  desconocidas o MCP sus argumentos como JSON compacto; `action` identifica la
-  tool (con `fetch_content` presentado como `fetch`);
-- la salida de una tool se consulta explícitamente con
-  `GET /api/sessions/{id}/messages?detail=full&item_id={tool-item-id}` y se
-  devuelve como un tail acotado, nunca ilimitado. El mismo `detail=full` está
-  disponible para tools de transcripts de subagente en
+- visible messages are delivered in full, with defensive limits;
+- tool activity initially delivers `tool`, `action`, `target`, status, and
+  time, with real arguments compacted into `target` to a maximum of 512 B, but
+  without full output. `bash` retains the full command, `fetch_content` the
+  full URL, subagents their `task`, and unknown or MCP tools their arguments as
+  compact JSON; `action` identifies the tool (with `fetch_content` presented
+  as `fetch`);
+- a tool's output is explicitly queried with
+  `GET /api/sessions/{id}/messages?detail=full&item_id={tool-item-id}` and
+  returned as a bounded tail, never unlimited. The same `detail=full` is
+  available for subagent transcript tools at
   `GET /api/sessions/{id}/subagents/{jobID}?detail=full&item_id={tool-item-id}`;
-- el historial se recupera incrementalmente.
+- history is retrieved incrementally.
 
-Los mensajes de agentes son contexto conversacional, no una afirmación
-verificada de estado por sí mismos.
+Agent messages are conversational context, not by themselves a verified claim
+of state.
 
-El frontend web usa esta proyección al abrir un subagente persistido; Pulse y
-futuros clientes deben usar los campos aditivos `action` y `target`.
+The web frontend uses this projection when opening a persisted subagent; Pulse
+and future clients must use the additive `action` and `target` fields.
 
-## Acciones
+## Actions
 
-Pulse actúa directamente contra las rutas genéricas de Moa: enviar o dirigir un
-mensaje, responder un `ask_user`, decidir un permiso, crear, retomar, cancelar
-o cerrar sesiones. No existe `prepare → review → confirm`: la conversación de
-voz es el contexto de confianza. El modelo solo pregunta cuando el destino es
-realmente ambiguo.
+Pulse acts directly against Moa's generic routes: send or steer a message,
+answer an `ask_user`, decide a permission, create, resume, cancel, or close
+sessions. There is no `prepare → review → confirm`: the voice conversation is
+the trust context. The model asks only when the target is genuinely ambiguous.
 
-### Attention y permisos
+### Attention and permissions
 
-`GET /api/attention` es una vista informativa de los elementos sin resolver de
-todas las sesiones, no un protocolo de aprobación. Para un permiso, Pulse puede
-leer `risk_level`, `risk_flags` y `verbatim` para informar al propietario y usa
-el `session_id` y `ref_id` del elemento con la ruta genérica de decisión de
-permisos. No hay una eco-confirmación que el cliente deba completar antes de
-esa decisión. En particular, `requires_verbatim_confirm` ya no forma parte del
-contrato de attention; Moa no tiene versionado formal de API y los clientes no
-deben depender de ese campo.
+`GET /api/attention` is an informational view of unresolved items across all
+sessions, not an approval protocol. For a permission, Pulse can read
+`risk_level`, `risk_flags`, and `verbatim` to inform the owner and uses the
+item's `session_id` and `ref_id` with the generic permission-decision route.
+There is no echo confirmation for the client to complete before that decision.
+In particular, `requires_verbatim_confirm` is no longer part of the attention
+contract; Moa has no formal API versioning and clients must not depend on that
+field.
 
-### Canal guardián
+### Guardian channel
 
-Además de `GET /api/attention` (pull informativo), existe un canal push
-específico de Pulse: `GET /api/pulse/guardian/ws` (`handleGuardianWebSocket` en
-`pkg/serve/guardian_ws.go`). A diferencia de los WebSocket genéricos de Serve,
-requiere un dispositivo emparejado: token o dueño de red no pueden suplantar a
-un handset revocable.
+In addition to `GET /api/attention` (informational pull), there is a
+Pulse-specific push channel: `GET /api/pulse/guardian/ws`
+(`handleGuardianWebSocket` in `pkg/serve/guardian_ws.go`). Unlike Serve's
+generic WebSockets, it requires a paired device: a network token or owner
+cannot impersonate a revocable handset.
 
-Es un canal de **un solo cliente activo** sobre el Attention Service
-(`pkg/attention`): `SetActiveClient` instala el sink y le envía de inmediato un
-`init` autoritativo; un nuevo cliente desplaza al anterior. El cliente confirma
-elementos con `ack` (`AckForClient`) y terminaciones de run con `ack_termination`
-(`AckTerminationForClient`), ambos válidos solo mientras sigue siendo el cliente
-activo; `get_status` re-pide el snapshot. El sink nunca bloquea al actor de
-attention: un peer saturado pierde la conexión y se repara con el siguiente
-`init`. Este canal es la base de la narración por voz y los controles de
-pantalla bloqueada del modo Guardián.
+It is a **single active client** channel over the Attention Service
+(`pkg/attention`): `SetActiveClient` installs the sink and immediately sends
+it an authoritative `init`; a new client displaces the previous one. The
+client acknowledges items with `ack` (`AckForClient`) and run terminations with
+`ack_termination` (`AckTerminationForClient`), both valid only while it remains
+the active client; `get_status` re-requests the snapshot. The sink never blocks
+the attention actor: a saturated peer loses the connection and recovers with
+the next `init`. This channel is the basis for voice narration and the locked
+screen controls of Guardian mode.
 
-## Fases
+## Phases
 
-1. **Base servidor** *(hecha):* eliminar Ops/operations heredados, autorizar al
-   dispositivo emparejado sobre la API genérica y exponer transcript con
-   actividad de tools.
-2. **Llamada usable** *(hecha):* tools Realtime, llamada continua con VAD,
-   reconexión, audio de fondo y Bluetooth.
-3. **Modo Guardián v2** *(implementado en el servidor):* Attention Service con
-   cola priorizada (`pkg/attention`), canal guardián de un solo cliente activo
-   (`GET /api/pulse/guardian/ws`), brief de sesión (`pkg/pulsebrief`) y el
-   soporte de narración/terminaciones que alimenta los controles de pantalla
-   bloqueada.
-4. **Feed visual** *(pendiente):* sesiones y conversaciones narrativas con las
-   mismas fuentes de datos que usan las tools.
-5. **CarPlay** *(pendiente).*
+1. **Server foundation** *(done):* remove legacy Ops/operations, authorize the
+   paired device over the generic API, and expose a transcript with tool
+   activity.
+2. **Usable call** *(done):* Realtime tools, continuous call with VAD,
+   reconnection, background audio, and Bluetooth.
+3. **Guardian mode v2** *(implemented on the server):* Attention Service with a
+   prioritized queue (`pkg/attention`), single-active-client guardian channel
+   (`GET /api/pulse/guardian/ws`), session brief (`pkg/pulsebrief`), and the
+   narration/termination support that feeds the locked-screen controls.
+4. **Visual feed** *(pending):* narrative sessions and conversations using the
+   same data sources used by the tools.
+5. **CarPlay** *(pending).*
