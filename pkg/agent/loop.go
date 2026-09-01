@@ -413,47 +413,78 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 
 		// Build request
-		req := core.Request{
-			Model:    cfg.model,
-			System:   cfg.systemPrompt,
-			Messages: llmMessages,
-			Tools:    toolSpecs,
-			Options:  cfg.requestOptions(),
-		}
+		baseMessages := llmMessages
+		var repairPartial *core.Message
+		var assistantMsg *core.Message
+		var streamErr error
+		emptyRetry := false
+		for attempt := 0; ; attempt++ {
+			reqMessages := baseMessages
+			if repairPartial != nil {
+				reqMessages = append(append([]core.Message{}, baseMessages...), *repairPartial, streamContinueHint())
+			}
+			req := core.Request{
+				Model:    cfg.model,
+				System:   cfg.systemPrompt,
+				Messages: reqMessages,
+				Tools:    toolSpecs,
+				Options:  cfg.requestOptions(),
+			}
 
-		// Stream from provider
-		ch, err := cfg.provider.Stream(ctx, req)
-		if err != nil {
-			loopErr = fmt.Errorf("provider: %w", err)
-			return loopErr
-		}
+			ch, err := cfg.provider.Stream(ctx, req)
+			if err != nil {
+				loopErr = fmt.Errorf("provider: %w", err)
+				return loopErr
+			}
 
-		// Consume stream, build assistant message, emit events
-		assistantMsg, err := consumeStream(ctx, ch, cfg.emitter)
-		if err != nil {
+			var consumeErr error
+			assistantMsg, consumeErr = consumeStream(ctx, ch, cfg.emitter)
+			if consumeErr == nil {
+				if repairPartial != nil {
+					assistantMsg = mergeAssistant(repairPartial, assistantMsg)
+				}
+				streamErr = nil
+				break
+			}
+
 			hasPartial := assistantMsg != nil && len(assistantMsg.Content) > 0
-			// A typed empty-response error (completed with no text/tool call and
-			// no continue signal) is often transient during polling. Re-sample
-			// the SAME request once — nothing is appended to the history, so the
-			// next iteration rebuilds the identical request — before surfacing
-			// it. Not a fabricated "continue": no message is injected.
 			var emptyErr *core.EmptyResponseError
-			if errors.As(err, &emptyErr) {
-				// An empty response can still bill input tokens; account for it
-				// so retries (and the eventual error) can't slip past the budget.
+			if errors.As(consumeErr, &emptyErr) {
 				addRunCost(cfg, emptyErr.Usage)
 				if !hasPartial && ctx.Err() == nil && emptyRetries < maxEmptyRetries {
 					emptyRetries++
-					inTurn = false
-					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
-					continue
+					emptyRetry = true
+					break
 				}
 			}
-			streamErr := fmt.Errorf("stream: %w", err)
-			// Preserve output the user has already seen whether the stream was
-			// cancelled or failed. A provider failure gets its own visible marker;
-			// cancellation keeps the existing interruption handling. Close any
-			// streamed tool calls because none of them will be executed.
+			streamErr = fmt.Errorf("stream: %w", consumeErr)
+			canRepair := ctx.Err() == nil &&
+				!hasStreamedToolCalls(assistantMsg) &&
+				isRetryableStreamError(streamErr) &&
+				attempt < maxStreamRepairs
+			if canRepair {
+				if hasPartial {
+					repairPartial = mergeAssistant(repairPartial, assistantMsg)
+				}
+				if waitErr := waitStreamRepair(ctx, attempt+1); waitErr != nil {
+					streamErr = fmt.Errorf("stream: %w", waitErr)
+					break
+				}
+				continue
+			}
+			break
+		}
+		if emptyRetry {
+			inTurn = false
+			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+			continue
+		}
+		if streamErr != nil {
+			hasPartial := assistantMsg != nil && len(assistantMsg.Content) > 0
+			if repairPartial != nil {
+				assistantMsg = mergeAssistant(repairPartial, assistantMsg)
+				hasPartial = assistantMsg != nil && len(assistantMsg.Content) > 0
+			}
 			if hasPartial {
 				assistantMsg.RequestedModel = cfg.model.ID
 				toolResultErr := "Tool result unavailable: the run was cancelled before a result was recorded."
@@ -469,6 +500,10 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				cfg.appendState(msgs...)
 			}
 			loopErr = streamErr
+			return loopErr
+		}
+		if assistantMsg == nil {
+			loopErr = fmt.Errorf("stream: empty assistant message")
 			return loopErr
 		}
 		// Keep the requested identity on this response. A provider can return a

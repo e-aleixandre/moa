@@ -94,7 +94,10 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
     prependAnchor.current = null;
     prependVersion.current = 0;
     olderHistoryArmed.current = true;
+    observedScrollHeight.current = 0;
     setShowNewBtn(false);
+    const el = containerRef.current;
+    if (el) el.scrollTop = 0;
     scrollToBottomNow();
   }, [sessionId, scrollToBottomNow]);
 

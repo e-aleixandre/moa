@@ -54,12 +54,13 @@ function docChildren(blocks, onOpenSubagent, visibleDone) {
         );
         break;
       case "ledger": {
-        // Fuse a diff sibling that immediately follows this ledger into its
-        // edit row (opens inside the card); don't render it standalone.
-        const next = blocks[i + 1];
-        const siblingDiff = next && next.type === "diff" ? next : null;
-        if (siblingDiff) i++; // consume it
-        const rows = fuseLedgerDetails(b.rows, siblingDiff);
+        // Fuse every diff sibling that follows this ledger into its edit
+        // rows (opens inside the card); don't render them standalone.
+        const siblingDiffs = [];
+        while (i + 1 < blocks.length && blocks[i + 1].type === "diff") {
+          siblingDiffs.push(blocks[++i]);
+        }
+        const rows = fuseLedgerDetails(b.rows, siblingDiffs);
         out.push(<ActivityLedger key={b.id} rows={rows} visibleDone={visibleDone} />);
         break;
       }

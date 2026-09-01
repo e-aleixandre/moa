@@ -31,12 +31,22 @@ function hasNodeType(node, type) {
   return node.type === type || hasNodeType(node.props?.children, type);
 }
 
-test('a diff sibling fuses into the LAST edit row only', () => {
+test('consecutive diffs fuse onto consecutive edit rows', () => {
+  const rows = [row('edit', { id: 'e1' }), row('edit', { id: 'e2' })];
+  const diffs = [
+    { type: 'diff', diffText: '@@ a', filename: 'a.go' },
+    { type: 'diff', diffText: '@@ b', filename: 'b.go' },
+  ];
+  const out = fuseLedgerDetails(rows, diffs);
+  expect(out[0].detail.node.props.diffText).toBe('@@ a');
+  expect(out[1].detail.node.props.diffText).toBe('@@ b');
+});
+
+test('a single diff sibling fuses into the LAST edit row', () => {
   const rows = [row('read'), row('edit', { id: 'e1' }), row('grep'), row('edit', { id: 'e2' })];
   const out = fuseLedgerDetails(rows, diff);
-  expect(out[1].detail).toBeUndefined(); // earlier edit untouched
-  expect(out[3].detail).toBeTruthy(); // last edit gets the diff
-  expect(out[3].detail.node).toBeTruthy();
+  expect(out[1].detail).toBeUndefined();
+  expect(out[3].detail).toBeTruthy();
   expect(out[0].detail).toBeUndefined();
   expect(out[2].detail).toBeUndefined();
 });

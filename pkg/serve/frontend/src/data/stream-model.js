@@ -65,12 +65,10 @@
 //
 //         { type:'diff', filename, diffText, startLine }
 //             A full-width diff for an edit that carries a REAL unified diff
-//             (headers ---/+++/@@). Emitted as a SIBLING right after the ledger
-//             that contains the edit row (so it shows full width, as in the
-//             mockup). An edit-with-diff therefore closes its ledger; tools
-//             after it open a new ledger. Edits WITHOUT a server unified diff
-//             emit no diff block — just their ledger row — so DiffBlock never
-//             gets an unparseable fallback and renders empty.
+//             (headers ---/+++/@@). Emitted as a SIBLING after the ledger so
+//             ConversationStream can fuse each diff into its edit row.
+//             Consecutive tools, including edits with diffs, stay in ONE ledger.
+//             Edits WITHOUT a server unified diff emit no diff block.
 //
 //         { type:'file', file:{name,size,mime,url} }
 //             A full-width download card for a FINISHED send_file call whose
@@ -299,13 +297,13 @@ export function projectStream(session) {
       }
       currentLedger.rows.push(toLedgerRow(msg));
 
-      // An edit carrying a real unified diff emits a full-width sibling and
-      // closes the ledger so subsequent tools open a new one below the diff.
+      // An edit carrying a real unified diff emits a sibling for fusion into
+      // that row. It must not close the ledger: consecutive edits belong in
+      // the same tool-group card.
       const diff = toDiffBlock(msg);
       if (diff) {
         diff.id = blockID('diff', msg, i);
         doc.blocks.push(diff);
-        closeLedger();
       }
 
       // A finished send_file result renders as a download card, sibling to

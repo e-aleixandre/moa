@@ -17,21 +17,21 @@ func TestStreamErrorPersistsPartialTextAndThinking(t *testing.T) {
 		ch := make(chan core.AssistantEvent, 3)
 		ch <- core.AssistantEvent{Type: core.ProviderEventThinkingDelta, Delta: "valuable reasoning"}
 		ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "valuable partial"}
-		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: errors.New("connection lost")}
+		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: errors.New("HTTP 400: boom")}
 		close(ch)
 		return ch, nil
 	})
 	ag := newTestAgent(provider)
 
 	msgs, err := ag.Run(context.Background(), "start")
-	if err == nil || !strings.Contains(err.Error(), "connection lost") {
-		t.Fatalf("Run error = %v, want connection lost", err)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 400: boom") {
+		t.Fatalf("Run error = %v, want HTTP 400", err)
 	}
 	if len(msgs) != 2 || msgs[1].Role != "assistant" {
 		t.Fatalf("partial stream message was not persisted: %+v", msgs)
 	}
 	got := msgs[1].Content
-	if len(got) != 3 || got[0].Thinking != "valuable reasoning" || got[1].Text != "valuable partial" || got[2].Text != "(stopped: stream: connection lost)" {
+	if len(got) != 3 || got[0].Thinking != "valuable reasoning" || got[1].Text != "valuable partial" || got[2].Text != "(stopped: stream: HTTP 400: boom)" {
 		t.Fatalf("persisted partial stream content = %+v, want thinking, text, and stream error marker", got)
 	}
 }

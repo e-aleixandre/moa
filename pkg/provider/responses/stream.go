@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -219,6 +220,15 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 		}
 		// For output_item.done events, preserve the raw JSON of the item so we
 		// can store it verbatim as ThinkingSignature (avoids losing unknown fields).
+		if ev.Type == eventError && strings.TrimSpace(ev.Message) == "" && strings.TrimSpace(ev.Code) == "" {
+			payload := data
+			if len(payload) > 4096 {
+				payload = payload[:4096]
+			}
+			slog.Warn("provider stream error without code or message",
+				"provider", provider,
+				"payload", payload)
+		}
 		if ev.Type == eventOutputItemDone {
 			var raw struct {
 				Item json.RawMessage `json:"item"`

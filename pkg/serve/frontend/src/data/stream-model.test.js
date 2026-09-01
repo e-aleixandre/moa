@@ -126,15 +126,25 @@ test('a done edit keeps backend-numbered sibling rows clean for DiffBlock', () =
   ]);
 });
 
-test('a diff closes its ledger so later tools open a new one', () => {
+test('consecutive edits with diffs stay in one ledger', () => {
+  const s = session([
+    tool('e1', 'edit', { path: 'a.js' }, 'done', '@@ -1,1 +1,1 @@\n-a\n+b', { start_line: 1 }),
+    tool('e2', 'edit', { path: 'b.js' }, 'done', '@@ -1,1 +1,1 @@\n-c\n+d', { start_line: 1 }),
+    tool('t3', 'read', { path: 'y.js' }),
+  ]);
+  const doc = projectStream(s)[0];
+  expect(doc.blocks.map(b => b.type)).toEqual(['ledger', 'diff', 'diff']);
+  expect(doc.blocks[0].rows.map(r => r.id)).toEqual(['e1', 'e2', 't3']);
+});
+
+test('a diff does not split later tools into a new ledger', () => {
   const s = session([
     tool('e1', 'edit', { path: 'x.js' }, 'done', '@@ -1,1 +1,1 @@\n-a\n+b', { start_line: 1 }),
     tool('t2', 'read', { path: 'y.js' }),
   ]);
   const doc = projectStream(s)[0];
-  expect(doc.blocks.map(b => b.type)).toEqual(['ledger', 'diff', 'ledger']);
-  expect(doc.blocks[0].rows[0].id).toBe('e1');
-  expect(doc.blocks[2].rows[0].id).toBe('t2');
+  expect(doc.blocks.map(b => b.type)).toEqual(['ledger', 'diff']);
+  expect(doc.blocks[0].rows.map(r => r.id)).toEqual(['e1', 't2']);
 });
 
 test('an edit WITHOUT a server unified diff emits no diff block (only its ledger row)', () => {

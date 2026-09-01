@@ -46,28 +46,38 @@ function inputDetailNode(inputText, output, prompt = null) {
 }
 
 // fuseLedgerDetails — attach inline detail nodes to a projectStream ledger's
-// rows so they open INSIDE the unified tool-group card (no nested card): the
-// edit's unified `diff` sibling (projectStream emits it right after the ledger)
-// fuses into that ledger's LAST edit row. Supported tool input lines precede
+// rows so they open INSIDE the unified tool-group card (no nested card).
+// Consecutive `diff` siblings fuse onto edit rows in order (one diff → last
+// edit, for older single-sibling callers). Supported tool input lines precede
 // their output; other rows carrying a text `body` get an output detail. Bash
 // commands precede their output in the same panel. Diffs/outputs
 // render BORDERLESS (className="flush") since the .tg-detail panel is the only
 // surface. Shared by the desktop Stream and mobile MobileStream so both fuse
 // identically (parity). Returns rows, each possibly with a `detail:{node}`.
 export function fuseLedgerDetails(rows, siblingDiff) {
-  let diffRowIndex = -1;
-  if (siblingDiff) {
-    for (let i = rows.length - 1; i >= 0; i--) {
-      if (mapToolToKind(rows[i].tool) === "edit") { diffRowIndex = i; break; }
-    }
+  const diffs = Array.isArray(siblingDiff) ? siblingDiff.filter(Boolean) : (siblingDiff ? [siblingDiff] : []);
+  const editIndexes = [];
+  for (let i = 0; i < rows.length; i++) {
+    if (mapToolToKind(rows[i].tool) === "edit") editIndexes.push(i);
+  }
+  const diffByRow = new Map();
+  if (diffs.length === 1 && editIndexes.length > 0) {
+    diffByRow.set(editIndexes[editIndexes.length - 1], diffs[0]);
+  } else {
+    const start = Math.max(0, editIndexes.length - diffs.length);
+    diffs.forEach((diff, k) => {
+      const idx = editIndexes[start + k];
+      if (idx != null) diffByRow.set(idx, diff);
+    });
   }
   return rows.map((row, i) => {
     if (row.live) return row; // the live row never carries a static detail
+    const fused = diffByRow.get(i);
     const lazyOutput = row.detailUrl
       ? <ProjectedToolDetail url={row.detailUrl} tool={row.tool} path={row.arg?.text || ''} />
       : null;
-    const output = i === diffRowIndex
-      ? <DiffBlock className="flush" diffText={siblingDiff.diffText} filename={siblingDiff.filename} />
+    const output = fused
+      ? <DiffBlock className="flush" diffText={fused.diffText} filename={fused.filename} />
       : row.body
         ? <CodeBlock className="flush" code={row.body} lang="bash" showHeader={false} />
         : lazyOutput;

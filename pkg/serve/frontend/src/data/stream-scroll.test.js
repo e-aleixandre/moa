@@ -138,6 +138,13 @@ test("a session change forces the new transcript to its bottom", () => {
   expect(el.scrollTop).toBe(1100);
 });
 
+test("a session change drops a leftover offset past the new transcript", () => {
+  const el = scroller({ scrollTop: 19200, scrollHeight: 800, clientHeight: 700 });
+  el.scrollTop = 0;
+  el.scrollTop = bottomScrollTop(el.scrollHeight, el.clientHeight);
+  expect(el.scrollTop).toBe(100);
+});
+
 test("the 80 pixel following threshold is evaluated before content grows", () => {
   expect(AT_BOTTOM_PX).toBe(80);
 
