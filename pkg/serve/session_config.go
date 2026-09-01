@@ -19,6 +19,24 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 	if !ok {
 		return nil, ErrNotFound
 	}
+	// Match Send and ExecCommand: a close cannot unload the runtime while this
+	// configuration operation is querying or changing it.
+	sess.lifecycle.RLock()
+	defer sess.lifecycle.RUnlock()
+	if sess.closing.Load() {
+		return nil, ErrNotFound
+	}
+	// Keep the whole operation ordered with fast-mode PATCHes. In particular,
+	// SwitchModel's fast-mode clamp and ConfigChanged event cannot be separated
+	// from a PATCH's model lookup and SetFast event.
+	if sess.beforeFastConfigLock != nil {
+		sess.beforeFastConfigLock()
+	}
+	sess.fastConfigMu.Lock()
+	defer sess.fastConfigMu.Unlock()
+	if sess.afterFastConfigLock != nil {
+		sess.afterFastConfigLock()
+	}
 
 	state := sess.runtime.State.Current()
 	if state == bus.StateRunning || state == bus.StatePermission {

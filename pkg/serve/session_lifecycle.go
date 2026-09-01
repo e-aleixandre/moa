@@ -852,6 +852,9 @@ func (m *Manager) CloseSession(id string) error {
 	// A Send that was admitted while this close waited may have a very fast
 	// provider and return to idle before we inspect the runtime; its acceptance
 	// still wins this race.
+	if m.beforeCloseSessionLifecycleLock != nil {
+		m.beforeCloseSessionLifecycleLock()
+	}
 	sess.lifecycle.Lock()
 	defer sess.lifecycle.Unlock()
 	if sess.sendGeneration.Load() != sendGeneration {

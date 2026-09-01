@@ -157,6 +157,15 @@ type ManagedSession struct {
 	// check and the teardown. Checking `closing` alone is not enough: the check
 	// and the run-start are two steps, and this is what makes them one.
 	lifecycle sync.RWMutex
+	// fastConfigMu serializes fast-mode changes with configuration changes that
+	// can replace the model. This keeps the model used to clamp fast mode, the
+	// agent state, and the ConfigChanged event in one ordered operation.
+	fastConfigMu sync.Mutex
+	// beforeFastConfigLock and afterFastConfigLock are test hooks around the
+	// fast/configuration serialization boundary.
+	beforeFastConfigLock func()
+	// afterFastConfigLock is a test hook called while fastConfigMu is held.
+	afterFastConfigLock func()
 	// sendGeneration advances only after Send has accepted work, while it still
 	// holds lifecycle. CloseSession snapshots it before waiting for lifecycle's
 	// write lock: if a send it had to wait for settled unusually quickly, closing
@@ -636,6 +645,7 @@ type Manager struct {
 	afterAttentionMark                func()
 	beforeReadThroughAdvance          func()
 	attentionRuntimeDeactivateBlocked func()
+	beforeCloseSessionLifecycleLock   func()
 }
 
 func (m *Manager) initializeAttentionRuntimeLocked(sess *ManagedSession) {

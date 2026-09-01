@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -187,7 +189,7 @@ func TestListSessions_Empty(t *testing.T) {
 }
 
 func TestSessionFastPatchPublishesAndPersists(t *testing.T) {
-	srv, mgr, cancel := newTestServer(t)
+	srv, mgr, cancel := newTestServerWithRoot(t, t.TempDir())
 	defer cancel()
 
 	sess, err := mgr.CreateSession(CreateOpts{Model: "claude-opus-5"})
@@ -219,6 +221,13 @@ func TestSessionFastPatchPublishesAndPersists(t *testing.T) {
 		t.Fatal("PATCH did not publish ConfigChanged")
 	}
 	sess.runtime.Bus.Drain(2 * time.Second)
+	saved, _, err := session.FindSession(mgr.sessionBaseDir, sess.ID)
+	if err != nil {
+		t.Fatalf("load saved session before close: %v", err)
+	}
+	if fast, _ := saved.Metadata[session.MetaFast].(bool); !fast {
+		t.Fatalf("fast metadata before close = %#v, want true", saved.Metadata[session.MetaFast])
+	}
 
 	if err := mgr.CloseSession(sess.ID); err != nil {
 		t.Fatalf("close session: %v", err)
@@ -229,6 +238,204 @@ func TestSessionFastPatchPublishesAndPersists(t *testing.T) {
 	}
 	if !resumed.runtime.Context().Agent.Fast() {
 		t.Fatal("fast mode was not restored after resume")
+	}
+}
+
+type fastPatchResult struct {
+	status int
+}
+
+func startFastPatch(srv *httptest.Server, sessionID string, on bool) <-chan fastPatchResult {
+	done := make(chan fastPatchResult, 1)
+	go func() {
+		body := `{"fast":false}`
+		if on {
+			body = `{"fast":true}`
+		}
+		req, err := http.NewRequest(http.MethodPatch, srv.URL+"/api/sessions/"+sessionID+"/fast", strings.NewReader(body))
+		if err != nil {
+			done <- fastPatchResult{}
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Moa-Request", "1")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			done <- fastPatchResult{}
+			return
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		done <- fastPatchResult{status: resp.StatusCode}
+	}()
+	return done
+}
+
+func waitFastPatch(t *testing.T, done <-chan fastPatchResult) fastPatchResult {
+	t.Helper()
+	select {
+	case result := <-done:
+		return result
+	case <-time.After(time.Second):
+		t.Fatal("fast PATCH did not return")
+		return fastPatchResult{}
+	}
+}
+
+func TestSessionFastPatchSerializesWithModelSwitch(t *testing.T) {
+	srv, mgr, cancel := newTestServerWithRoot(t, t.TempDir())
+	defer cancel()
+
+	sess, err := mgr.CreateSession(CreateOpts{Model: "claude-opus-5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan bus.ConfigChanged, 2)
+	sess.runtime.Bus.Subscribe(func(e bus.ConfigChanged) { events <- e })
+
+	patchLocked := make(chan struct{})
+	releasePatch := make(chan struct{})
+	modelAtLock := make(chan struct{})
+	var beforeCalls atomic.Int32
+	var after sync.Once
+	sess.beforeFastConfigLock = func() {
+		if beforeCalls.Add(1) == 2 {
+			close(modelAtLock)
+		}
+	}
+	sess.afterFastConfigLock = func() {
+		after.Do(func() {
+			close(patchLocked)
+			<-releasePatch
+		})
+	}
+
+	patch := startFastPatch(srv, sess.ID, true)
+	<-patchLocked
+	modelDone := make(chan error, 1)
+	go func() {
+		modelDone <- func() error {
+			_, err := mgr.ReconfigureSession(sess.ID, "haiku", "")
+			return err
+		}()
+	}()
+	<-modelAtLock
+	close(releasePatch)
+
+	if result := waitFastPatch(t, patch); result.status != http.StatusOK {
+		t.Fatalf("fast PATCH status = %d, want %d", result.status, http.StatusOK)
+	}
+	select {
+	case err := <-modelDone:
+		if err != nil {
+			t.Fatalf("switch model: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("model switch did not return")
+	}
+	sess.runtime.Bus.Drain(time.Second)
+	first, second := <-events, <-events
+	if first.Fast == nil || !*first.Fast || first.Model != "" {
+		t.Fatalf("first ConfigChanged = %+v, want fast PATCH before model switch", first)
+	}
+	if second.Model == "" || second.Fast == nil || *second.Fast {
+		t.Fatalf("second ConfigChanged = %+v, want unsupported model switch with fast off", second)
+	}
+	if sess.runtime.Context().Agent.Fast() {
+		t.Fatal("fast remained enabled after switching to unsupported model")
+	}
+}
+
+func TestSessionFastPatchesPublishInLockOrder(t *testing.T) {
+	srv, mgr, cancel := newTestServerWithRoot(t, t.TempDir())
+	defer cancel()
+
+	sess, err := mgr.CreateSession(CreateOpts{Model: "claude-opus-5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan bus.ConfigChanged, 2)
+	sess.runtime.Bus.Subscribe(func(e bus.ConfigChanged) { events <- e })
+
+	firstLocked := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondAtLock := make(chan struct{})
+	var beforeCalls atomic.Int32
+	var after sync.Once
+	sess.beforeFastConfigLock = func() {
+		if beforeCalls.Add(1) == 2 {
+			close(secondAtLock)
+		}
+	}
+	sess.afterFastConfigLock = func() {
+		after.Do(func() {
+			close(firstLocked)
+			<-releaseFirst
+		})
+	}
+
+	first := startFastPatch(srv, sess.ID, true)
+	<-firstLocked
+	second := startFastPatch(srv, sess.ID, false)
+	<-secondAtLock
+	close(releaseFirst)
+	if result := waitFastPatch(t, first); result.status != http.StatusOK {
+		t.Fatalf("first fast PATCH status = %d, want %d", result.status, http.StatusOK)
+	}
+	if result := waitFastPatch(t, second); result.status != http.StatusOK {
+		t.Fatalf("second fast PATCH status = %d, want %d", result.status, http.StatusOK)
+	}
+	sess.runtime.Bus.Drain(time.Second)
+	firstEvent, secondEvent := <-events, <-events
+	if firstEvent.Fast == nil || !*firstEvent.Fast || secondEvent.Fast == nil || *secondEvent.Fast {
+		t.Fatalf("fast ConfigChanged order = %+v then %+v, want true then false", firstEvent, secondEvent)
+	}
+	if sess.runtime.Context().Agent.Fast() {
+		t.Fatal("final fast state = true, want false")
+	}
+}
+
+func TestSessionFastPatchBlocksCloseUntilItFinishes(t *testing.T) {
+	srv, mgr, cancel := newTestServerWithRoot(t, t.TempDir())
+	defer cancel()
+
+	sess, err := mgr.CreateSession(CreateOpts{Model: "claude-opus-5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchLocked := make(chan struct{})
+	releasePatch := make(chan struct{})
+	var after sync.Once
+	sess.afterFastConfigLock = func() {
+		after.Do(func() {
+			close(patchLocked)
+			<-releasePatch
+		})
+	}
+	closeAtLifecycle := make(chan struct{})
+	mgr.beforeCloseSessionLifecycleLock = func() { close(closeAtLifecycle) }
+
+	patch := startFastPatch(srv, sess.ID, true)
+	<-patchLocked
+	closed := make(chan error, 1)
+	go func() { closed <- mgr.CloseSession(sess.ID) }()
+	<-closeAtLifecycle
+	select {
+	case err := <-closed:
+		t.Fatalf("CloseSession returned while PATCH held lifecycle: %v", err)
+	default:
+	}
+	close(releasePatch)
+	if result := waitFastPatch(t, patch); result.status != http.StatusOK {
+		t.Fatalf("fast PATCH status = %d, want %d", result.status, http.StatusOK)
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("CloseSession after PATCH: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("CloseSession did not return after PATCH")
 	}
 }
 

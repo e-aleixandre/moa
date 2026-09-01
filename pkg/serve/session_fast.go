@@ -33,15 +33,26 @@ func handleSessionFast(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return
 		}
+		// The runtime can only be used while the lifecycle read lock is held.
+		// CloseSession takes the write lock before tearing it down, so `closing`
+		// is stable for the remainder of this request.
+		sess.lifecycle.RLock()
+		defer sess.lifecycle.RUnlock()
+		if sess.closing.Load() {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
 		agent := sess.runtime.Context().Agent
 		if agent == nil {
 			http.Error(w, "session not ready", http.StatusConflict)
 			return
 		}
-		model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
 
 		switch r.Method {
 		case http.MethodGet:
+			sess.fastConfigMu.Lock()
+			defer sess.fastConfigMu.Unlock()
+			model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
 			writeJSON(w, http.StatusOK, fastState(agent.Fast(), model))
 		case http.MethodPatch:
 			limitBody(w, r, maxJSONBodySize)
@@ -52,6 +63,18 @@ func handleSessionFast(mgr *Manager) http.HandlerFunc {
 				http.Error(w, "fast must be true or false", http.StatusBadRequest)
 				return
 			}
+			// Keep the model lookup, clamp, mutation, event, and response together.
+			// A SwitchModel uses this same lock, so the event always describes the
+			// state after the preceding configuration operation.
+			if sess.beforeFastConfigLock != nil {
+				sess.beforeFastConfigLock()
+			}
+			sess.fastConfigMu.Lock()
+			defer sess.fastConfigMu.Unlock()
+			if sess.afterFastConfigLock != nil {
+				sess.afterFastConfigLock()
+			}
+			model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
 			// Turning it on for a model that can't serve it is not an error —
 			// the provider drops the flag — but storing it would show the
 			// session as fast when it is not.
