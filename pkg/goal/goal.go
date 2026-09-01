@@ -66,8 +66,9 @@ type Goal struct {
 	stalled   int
 	spent     float64
 
-	// lastCommit is the HEAD hash seen at the previous iteration; the driver
-	// uses it to distinguish a productive iteration (new commit) from a stalled
+	// lastCommit is the repository's commit fingerprint seen at the previous
+	// iteration (the HEADs of every worktree, joined); the driver uses it to
+	// distinguish a productive iteration (a new commit anywhere) from a stalled
 	// one. Guarded by mu (see LastCommit/SetLastCommit).
 	lastCommit string
 
@@ -234,16 +235,17 @@ func (g *Goal) IncStalled() int {
 	return g.stalled
 }
 
-// LastCommit returns the HEAD commit hash recorded at the previous iteration.
+// LastCommit returns the repository commit fingerprint recorded at the previous
+// iteration.
 func (g *Goal) LastCommit() string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.lastCommit
 }
 
-// SetLastCommit records the HEAD commit hash for the next iteration's progress
-// check. Guarded by the Goal mutex so the driver goroutine and EnterGoal don't
-// race on it.
+// SetLastCommit records the repository commit fingerprint for the next
+// iteration's progress check. Guarded by the Goal mutex so the driver goroutine
+// and EnterGoal don't race on it.
 func (g *Goal) SetLastCommit(hash string) {
 	g.mu.Lock()
 	g.lastCommit = hash

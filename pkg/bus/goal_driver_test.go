@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -426,6 +427,98 @@ func TestGoalDriver_VerifierError_PausesWithoutRelaunch(t *testing.T) {
 	}
 }
 
+// TestGoalDriver_ExhaustedVerdict_PausesWithoutRecording is the regression
+// guard for the day-long goal that burned iterations 4-9: a verifier that never
+// reached a verdict (it ran out of inspection turns, twice) must NOT be treated
+// as "not done yet". The goal pauses, the maker is not relaunched, and nothing
+// is recorded as memory for a later verification.
+func TestGoalDriver_ExhaustedVerdict_PausesWithoutRecording(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newGoalDriverContext(b, fa, "")
+	dir := t.TempDir()
+	sctx.CWD = dir
+	// A verifier that only ever calls tools: it exhausts its turns in both
+	// rounds and reaches no verdict.
+	sctx.ProviderFactory = func(core.Model) (core.Provider, error) {
+		return toolLoopProvider{dir: dir}, nil
+	}
+	RegisterHandlers(sctx)
+
+	iterCh := make(chan GoalIterationEnded, 4)
+	b.Subscribe(func(e GoalIterationEnded) { iterCh <- e })
+	endedCh := make(chan GoalEnded, 4)
+	b.Subscribe(func(e GoalEnded) { endedCh <- e })
+
+	enterTestGoal(t, sctx, goal.Options{WorkDir: dir})
+	b.Publish(RunEnded{SessionID: "test-session", RunGen: 1, FinalText: "did work", Cost: 0.25})
+
+	iter := drainChan(iterCh, b, t)
+	if iter.Satisfied {
+		t.Fatal("an exhausted verifier is not a satisfied verdict")
+	}
+	if !strings.Contains(iter.Feedback, "could not reach a verdict") {
+		t.Fatalf("feedback should say no verdict was reached, got %q", iter.Feedback)
+	}
+	ended := drainChan(endedCh, b, t)
+	if !strings.Contains(ended.Reason, "verifier exhausted (paused)") {
+		t.Fatalf("expected a 'verifier exhausted (paused)' stop, got %q", ended.Reason)
+	}
+	if sctx.Goal.Active() {
+		t.Fatal("goal should pause when the verifier can't reach a verdict")
+	}
+	// The maker must NOT be relaunched with a non-verdict as "Continue".
+	if fa.wasSendCalled() {
+		t.Fatal("an exhausted verifier must not relaunch the maker")
+	}
+	// And nothing is recorded: a non-verdict fed to the next verification as
+	// EARLIER VERIFICATIONS is exactly what made the loop compound its mistake.
+	if prior := sctx.Goal.PriorVerdicts(); len(prior) != 0 {
+		t.Fatalf("an exhausted verifier must record no verdict, got %+v", prior)
+	}
+	// The maker's run cost is still charged to the goal budget.
+	if got := sctx.Goal.Spent(); got < 0.25 {
+		t.Fatalf("budget accounting must still happen, spent = %v", got)
+	}
+}
+
+// TestGoalExhaustedMarkerText: the UI wording for an unreachable verdict is
+// distinct from "not done yet" — the work wasn't judged unfinished, it wasn't
+// judged at all.
+func TestGoalExhaustedMarkerText(t *testing.T) {
+	got := goalExhaustedMarkerText(4, "the verifier ran out of turns twice")
+	if !strings.HasPrefix(got, "🎯 Goal iteration 4 — verifier could not reach a verdict") {
+		t.Fatalf("unexpected marker text: %q", got)
+	}
+	if strings.Contains(goalIterationMarkerText(4, false, ""), "could not reach") {
+		t.Fatal("the ordinary unsatisfied marker must keep its own wording")
+	}
+}
+
+// toolLoopProvider always answers with a tool call, so the verifier agent never
+// produces a verdict and exhausts its turn budget in every round.
+type toolLoopProvider struct{ dir string }
+
+func (p toolLoopProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	ch := make(chan core.AssistantEvent, 2)
+	// A unique tool-call id and path keep the doom-loop guard out of the way so
+	// the max-turns cap is what ends each round.
+	id := fmt.Sprintf("call_%d", time.Now().UnixNano())
+	msg := core.Message{
+		Role:       "assistant",
+		Content:    []core.Content{core.ToolCallContent(id, "ls", map[string]any{"path": p.dir})},
+		StopReason: "tool_use",
+		Usage:      &core.Usage{Input: 10, Output: 5, TotalTokens: 15},
+	}
+	go func() {
+		defer close(ch)
+		ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+		ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+	}()
+	return ch, nil
+}
+
 func TestGoalDriver_BudgetCeiling_Stops(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
@@ -537,6 +630,71 @@ func TestBuildGoalEvidence_IncludesDiffAndChecks(t *testing.T) {
 	// No .moa/verify.json → checks reported as "not run", not silently omitted.
 	if !strings.Contains(ev, "AUTOMATED CHECKS: not run") {
 		t.Fatalf("evidence should note that checks were not run, got:\n%s", ev)
+	}
+}
+
+// TestRepoHeads_SeesWorktreeCommits is the guard for the stalled-detection fix:
+// the maker often works inside a git worktree it created, so HEAD of the goal's
+// own directory never moves. repoHeads fingerprints every worktree's HEAD, so a
+// commit made in the linked worktree registers as progress.
+func TestRepoHeads_SeesWorktreeCommits(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "main")
+	if err := os.MkdirAll(main, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(wd string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = wd
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git(main, "init")
+	git(main, "config", "user.email", "t@t.t")
+	git(main, "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(main, "f.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(main, "add", ".")
+	git(main, "commit", "-m", "init")
+
+	// A sibling worktree, as the maker creates under the parent of the cwd.
+	wt := filepath.Join(dir, "feature")
+	git(main, "worktree", "add", "-b", "feature", wt)
+
+	before := repoHeads(context.Background(), main)
+	if before == "" {
+		t.Fatal("repoHeads should report the worktree HEADs")
+	}
+
+	// The commit lands in the worktree; main's own HEAD is untouched.
+	if err := os.WriteFile(filepath.Join(wt, "f.txt"), []byte("b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(wt, "config", "user.email", "t@t.t")
+	git(wt, "config", "user.name", "t")
+	git(wt, "commit", "-am", "work in the worktree")
+
+	mainHead := runGit(context.Background(), main, "rev-parse", "HEAD")
+	if mainHead == "" {
+		t.Fatal("expected a HEAD in the main worktree")
+	}
+	after := repoHeads(context.Background(), main)
+	if after == before {
+		t.Fatalf("a commit in a linked worktree must change the fingerprint (%q)", after)
+	}
+	if !strings.Contains(after, mainHead) {
+		t.Fatalf("fingerprint should still include the main worktree HEAD, got %q", after)
+	}
+}
+
+// TestRepoHeads_NotARepo: outside a git repository the fingerprint is empty, so
+// the driver falls back to HadEdits as the only progress signal.
+func TestRepoHeads_NotARepo(t *testing.T) {
+	if got := repoHeads(context.Background(), t.TempDir()); got != "" {
+		t.Fatalf("expected an empty fingerprint outside a repo, got %q", got)
 	}
 }
 

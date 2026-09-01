@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -97,10 +98,11 @@ func registerGoalHandlers(sctx *SessionContext) {
 			}
 			return err
 		}
-		// Baseline the commit so the driver's progress check has a reference for
-		// the first iteration (progress = new edits or a new commit).
+		// Baseline the commit state so the driver's progress check has a reference
+		// for the first iteration (progress = new edits or a new commit anywhere in
+		// the repository, including worktrees the maker creates).
 		if workDir != "" {
-			sctx.Goal.SetLastCommit(runGit(sctx.SessionCtx, workDir, "rev-parse", "HEAD"))
+			sctx.Goal.SetLastCommit(repoHeads(sctx.SessionCtx, workDir))
 		}
 		// Persistent start marker in the conversation (survives reload). Appended
 		// while the agent is still idle, before the first kick starts a run.
@@ -315,6 +317,29 @@ func registerGoalReactor(sctx *SessionContext) {
 				return
 			}
 
+			// An exhausted verifier never judged anything: it could not reach a
+			// verdict even after retrying with double the turns. That is not "not
+			// done yet" — relaunching the maker with it as feedback (and recording
+			// it as memory for the next verification) is what burned iterations 4-9
+			// of a day-long goal. Pause like the infrastructure path does, so a
+			// human decides. The budget accounting above already ran.
+			if verdict.Exhausted {
+				sctx.Bus.Publish(GoalIterationEnded{
+					SessionID: sctx.SessionID,
+					Iteration: it,
+					Satisfied: false,
+					Feedback:  verdict.Feedback,
+				})
+				appendGoalMarker(sctx, goalExhaustedMarkerText(it, verdict.Feedback), map[string]any{
+					"phase":     "iteration",
+					"iteration": it,
+					"satisfied": false,
+					"exhausted": true,
+				})
+				stopGoal(sctx, "verifier exhausted (paused): "+verdict.Feedback)
+				return
+			}
+
 			// Record this iteration's verdict so the next verification starts with
 			// memory of what was already found lacking, instead of judging cold.
 			sctx.Goal.RecordVerdict(it, verdict.Satisfied, verdict.Feedback)
@@ -347,9 +372,12 @@ func registerGoalReactor(sctx *SessionContext) {
 			// means the iteration made no forward progress (no file edits and no
 			// new commit), NOT merely that the global objective isn't finished: a
 			// long goal is legitimately "not done" for many productive iterations.
+			// The commit signal spans every worktree of the repository, because a
+			// maker that works in a worktree it created leaves the goal directory's
+			// own HEAD untouched.
 			var commit string
 			if dir := goalWorkDir(sctx, info); dir != "" {
-				commit = runGit(verifyCtx, dir, "rev-parse", "HEAD")
+				commit = repoHeads(verifyCtx, dir)
 			}
 			progressed := e.HadEdits || (commit != "" && commit != sctx.Goal.LastCommit())
 			sctx.Goal.SetLastCommit(commit)
@@ -399,6 +427,17 @@ func goalIterationMarkerText(iteration int, satisfied bool, feedback string) str
 	if satisfied {
 		verdict = "satisfied"
 	}
+	return goalMarkerText(iteration, verdict, feedback)
+}
+
+// goalExhaustedMarkerText is the marker for an iteration where the verifier
+// never reached a verdict. Deliberately worded apart from "not done yet": the
+// work was not judged unfinished, it was not judged at all.
+func goalExhaustedMarkerText(iteration int, feedback string) string {
+	return goalMarkerText(iteration, "verifier could not reach a verdict", feedback)
+}
+
+func goalMarkerText(iteration int, verdict, feedback string) string {
 	text := fmt.Sprintf("🎯 Goal iteration %d — %s", iteration, verdict)
 	if fb := strings.TrimSpace(feedback); fb != "" {
 		text += "\n" + fb
@@ -484,6 +523,30 @@ func appendGoalMarker(sctx *SessionContext, text string, custom map[string]any) 
 		return
 	}
 	publish()
+}
+
+// repoHeads returns a fingerprint of the repository's commit state: the HEAD of
+// every worktree (main + linked), sorted and joined. The goal's progress check
+// compares it across iterations, so a maker that commits inside a worktree it
+// created — HEAD of the goal's own directory never moving — still counts as
+// progress. Falls back to the plain HEAD of dir when `git worktree list` isn't
+// available, and to "" when git fails entirely (caller then relies on HadEdits).
+func repoHeads(ctx context.Context, dir string) string {
+	out := runGit(ctx, dir, "worktree", "list", "--porcelain")
+	if out == "" {
+		return runGit(ctx, dir, "rev-parse", "HEAD")
+	}
+	var heads []string
+	for _, line := range strings.Split(out, "\n") {
+		if h, ok := strings.CutPrefix(strings.TrimSpace(line), "HEAD "); ok {
+			heads = append(heads, h)
+		}
+	}
+	if len(heads) == 0 {
+		return runGit(ctx, dir, "rev-parse", "HEAD")
+	}
+	sort.Strings(heads)
+	return strings.Join(heads, ",")
 }
 
 // stopGoal ends goal mode: it exits the Goal (which removes the directive via

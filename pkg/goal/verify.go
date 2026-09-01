@@ -14,8 +14,11 @@ import (
 	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
-// DefaultVerifierSpec is the cheap, fast model used to judge the objective.
-const DefaultVerifierSpec = "haiku"
+// DefaultVerifierSpec is the cheap, fast model used to judge the objective. It
+// must be a model that can sustain a couple of dozen tool-using inspection
+// turns without losing the thread: a verifier that runs out of turns produces
+// no verdict at all, which is worse than a slightly pricier judge.
+const DefaultVerifierSpec = "luna"
 
 // DefaultVerifyTimeout bounds a whole verifier run (wall-clock, across all its
 // tool-using turns). Callers may override it (see VerifyConfig.Timeout); 0
@@ -26,10 +29,22 @@ const DefaultVerifyTimeout = 5 * time.Minute
 // the plan/state it's judging and checks a handful of requirements against the
 // real repo, so it needs a few turns but must not run away.
 const (
-	defaultVerifierMaxTurns = 10
+	// defaultVerifierMaxTurns must be generous enough for the verifier to read a
+	// plan and check its requirements one by one: with 10 turns, real goals
+	// systematically ran out mid-inspection and returned no verdict.
+	defaultVerifierMaxTurns = 25
 	// DefaultVerifierMaxBudget caps a single verifier run's spend (USD). Exported
 	// so the driver can clamp it against the goal's remaining budget pool.
-	DefaultVerifierMaxBudget = 0.50
+	//
+	// Sized against the default verifier: luna bills $0.20/Mtok input and
+	// $1.20/Mtok output (pkg/core/models.go). Assuming an uncached prompt that
+	// grows from ~20K to ~100K tokens over the run (~50K average) and ~1K output
+	// per turn, 25 turns cost ≈ 1.25M input ($0.25) + 25K output ($0.03) ≈ $0.28
+	// — inside $0.50. The exhaustion retry below, however, runs a second 50-turn
+	// round out of the SAME pool (≈ $0.6 on the same arithmetic), so the cap is
+	// raised modestly to cover both rounds; otherwise the retry would die on
+	// budget and hand the maker a verdict nobody ever reached.
+	DefaultVerifierMaxBudget = 1.00
 )
 
 // verifyMaxAttempts is how many times Verify retries a run that failed WITHOUT
@@ -41,10 +56,26 @@ const verifyMaxAttempts = 2
 // cheap single call, so retrying transient failures costs cents.
 const oneShotMaxAttempts = 3
 
+// verifyExhaustionRounds is how many full rounds the agentic verifier gets to
+// reach a verdict. Round 2 runs with double the turns after round 1 exhausted
+// its guardrails without judging anything.
+const verifyExhaustionRounds = 2
+
+// verifyRetryMinRemaining is the wall-clock slack the agentic verifier needs to
+// be worth retrying after an exhausted round. Below it, a second round would
+// just hit the shared deadline and burn tokens for nothing.
+const verifyRetryMinRemaining = 30 * time.Second
+
 // Verdict is the verifier's decision.
 type Verdict struct {
 	Satisfied bool   `json:"satisfied"`
 	Feedback  string `json:"feedback"`
+	// Exhausted marks a run that never actually judged the objective: it used up
+	// its inspection turns / wall-clock / got stuck, even after the retry. The
+	// Satisfied=false above is then a conservative placeholder, NOT a verdict —
+	// callers must not feed Feedback back to the maker as if it were one. It is
+	// never decoded from the model's JSON (json:"-").
+	Exhausted bool `json:"-"`
 }
 
 // VerifyStats reports what a verifier run consumed, so the driver can charge it
@@ -98,9 +129,12 @@ When you have reached a verdict, STOP calling tools and reply with ONLY this JSO
 // mode it makes a single tool-less call (legacy behaviour).
 //
 // It returns the verdict, stats about what the run consumed (for budgeting),
-// and an error only for genuine infrastructure failures — running out of
-// turns/budget/time yields a not-satisfied verdict with feedback, NOT an error,
-// so a healthy goal isn't paused just because the verifier was capped.
+// and an error only for genuine infrastructure failures. Running out of
+// turns/time/patience is not an error and not a verdict either: the agentic
+// path retries once with double the turns, and if that also fails to reach a
+// verdict it returns a not-satisfied Verdict with Exhausted set, so the caller
+// pauses instead of relaying a non-verdict to the maker. A budget cap keeps the
+// plain not-satisfied semantics — the goal's budget backstop settles that case.
 func Verify(ctx context.Context, cfg VerifyConfig) (Verdict, VerifyStats, error) {
 	if cfg.Factory == nil {
 		return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: nil provider factory")
@@ -161,21 +195,128 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 		maxBudget = 0
 	}
 
-	// A single wall-clock deadline bounds the WHOLE verifier call — every retry
-	// shares it, so the total never exceeds the configured timeout regardless of
-	// how many attempts run. The per-agent MaxRunDuration is left at 0 (unlimited)
-	// because this ctx is the authoritative bound.
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	user := buildVerifierPrompt(cfg.Objective, cfg.StatePath, cfg.Evidence, cfg.PriorFeedback)
 
-	// The budget pool is shared across retries: each attempt is capped at what's
-	// left, so recreating the agent can't re-grant the full budget.
+	// A single wall-clock instant bounds the WHOLE verifier call — every round
+	// and every retry inside it shares it, so the total never exceeds the
+	// configured timeout regardless of how many attempts run. Each round derives
+	// its own context from the PARENT with the time still left, so an exhausted
+	// round's spent context never bounds the next one. The per-agent
+	// MaxRunDuration is left at 0 (unlimited): these contexts are the bound.
+	deadline := time.Now().Add(timeout)
+
+	// The budget pool is shared across rounds: each one is capped at what's
+	// left, so a retry can't re-grant the full budget.
 	remainingBudget := maxBudget
-	// spentSoFar accumulates the real cost billed across every attempt so the
+	// spentSoFar accumulates the real cost billed across every round so the
 	// verdict we return charges the goal for all of it (including retried
 	// attempts that produced no assistant message but still billed usage).
+	var spentSoFar float64
+	var stats VerifyStats
+	turns := maxTurns
+	var lastCap error
+
+	// Round 1 judges the objective; round 2 exists only because running out of
+	// turns/time/patience is NOT a verdict — it's a verifier that never finished
+	// looking. Retrying once with double the turns is far cheaper than telling
+	// the maker "not done yet" on no evidence at all.
+	for round := 0; round < verifyExhaustionRounds; round++ {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			lastCap = context.DeadlineExceeded
+			break
+		}
+		if round > 0 && remaining < verifyRetryMinRemaining {
+			// Not enough wall-clock left for a second look: the retry would just
+			// burn tokens into the deadline.
+			break
+		}
+		roundCtx, cancel := context.WithTimeout(ctx, remaining)
+		verdict, roundStats, capErr, err := runVerifierRound(roundCtx, verifierRound{
+			prov:      prov,
+			model:     model,
+			reg:       reg,
+			workDir:   cfg.WorkDir,
+			user:      user,
+			maxTurns:  turns,
+			maxBudget: remainingBudget,
+		})
+		cancel()
+
+		spentSoFar += roundStats.CostUSD
+		remainingBudget = subtractBudget(remainingBudget, roundStats.CostUSD)
+		roundStats.CostUSD = spentSoFar
+		stats = roundStats
+
+		if err != nil {
+			return Verdict{}, stats, err
+		}
+		if capErr == nil {
+			return verdict, stats, nil
+		}
+		lastCap = capErr
+		// A budget cap is not worth retrying: the pool is what it is, so a second
+		// round would stop at the same place having spent the rest of the money.
+		if errors.Is(capErr, agent.ErrBudgetExceeded) {
+			break
+		}
+		turns *= 2
+	}
+
+	// Every round ended on a cap: no verdict was ever reached. Return the
+	// conservative not-satisfied placeholder as before, but flag it as exhausted
+	// so the driver can pause instead of feeding a non-verdict back to the maker.
+	// A budget cap keeps the old semantics: the goal's own budget backstop is
+	// what should settle that case.
+	exhausted := !errors.Is(lastCap, agent.ErrBudgetExceeded)
+	_, feedback := cappedRunFeedback(lastCap)
+	if exhausted {
+		feedback = exhaustedFeedback(lastCap)
+	}
+	return Verdict{Satisfied: false, Feedback: feedback, Exhausted: exhausted}, stats, nil
+}
+
+// exhaustedFeedback describes a verifier that never reached a verdict, for the
+// human reading the paused goal. It deliberately does NOT tell the maker to
+// "continue the work": nothing was judged, so there is no finding to act on.
+func exhaustedFeedback(err error) string {
+	reason := "ran out of inspection turns"
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		reason = "ran out of time"
+	case errors.Is(err, agent.ErrDoomLoop):
+		reason = "got stuck repeating the same inspection"
+	}
+	return "The verifier could not reach a verdict: it " + reason +
+		" twice (the second attempt had double the turns). This is not a judgement on the work — nothing was verified, so the goal is paused instead of continuing on a non-verdict."
+}
+
+// verifierRound is one attempt-set at reaching a verdict: a fixed turn budget
+// and money pool, retried internally only for transient failures.
+type verifierRound struct {
+	prov      core.Provider
+	model     core.Model
+	reg       *core.Registry
+	workDir   string
+	user      string
+	maxTurns  int
+	maxBudget float64
+}
+
+// runVerifierRound runs one round of the agentic verifier under ctx (which
+// carries the round's wall-clock bound), retrying only failures that produced
+// no assistant output at all.
+//
+// It returns the parsed verdict; the round's OWN cost/usage; capErr, non-nil
+// when the round ended on a guardrail cap (turns / budget / time / doom loop)
+// without reaching a verdict; and err for genuine infrastructure failures.
+func runVerifierRound(ctx context.Context, r verifierRound) (Verdict, VerifyStats, error, error) {
+	// The budget pool is shared across retries: each attempt is capped at what's
+	// left, so recreating the agent can't re-grant the full budget.
+	remainingBudget := r.maxBudget
+	// spentSoFar accumulates the real cost billed across every attempt of this
+	// round, including retried attempts that produced no assistant message but
+	// still billed usage.
 	var spentSoFar float64
 
 	var lastErr error
@@ -183,37 +324,35 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 		if err := ctx.Err(); err != nil {
 			// The shared deadline expired between attempts. If we already produced
 			// real output on an earlier attempt this wouldn't be reached; here it
-			// means we ran out of time — a cap, not an infrastructure failure, so
-			// the healthy goal keeps going rather than pausing.
+			// means we ran out of time — a cap, not an infrastructure failure.
 			if errors.Is(err, context.DeadlineExceeded) {
-				_, feedback := cappedRunFeedback(context.DeadlineExceeded)
-				return Verdict{Satisfied: false, Feedback: feedback}, VerifyStats{CostUSD: spentSoFar}, nil
+				return Verdict{}, VerifyStats{CostUSD: spentSoFar}, context.DeadlineExceeded, nil
 			}
-			return Verdict{}, VerifyStats{CostUSD: spentSoFar}, fmt.Errorf("goal verify: %w", err)
+			return Verdict{}, VerifyStats{CostUSD: spentSoFar}, nil, fmt.Errorf("goal verify: %w", err)
 		}
 
 		child, err := agent.New(agent.AgentConfig{
-			Provider:            prov,
-			Model:               model,
+			Provider:            r.prov,
+			Model:               r.model,
 			SystemPrompt:        verifierSystemPrompt,
 			ThinkingLevel:       "low",
-			Tools:               reg,
-			WorkspaceRoot:       cfg.WorkDir,
-			MaxTurns:            maxTurns,
+			Tools:               r.reg,
+			WorkspaceRoot:       r.workDir,
+			MaxTurns:            r.maxTurns,
 			MaxToolCallsPerTurn: 10,
 			MaxBudget:           remainingBudget,
-			// Compaction disabled: a 10-turn read-only verifier won't exhaust the
-			// context window, and a compaction call bills a summarization request
-			// that wouldn't be reflected in the returned assistant messages —
-			// i.e. cost the goal budget can't see. Keeping it off makes the
-			// returned stats the true, complete cost of the run.
+			// Compaction disabled: a read-only verifier of a few dozen turns won't
+			// exhaust the context window, and a compaction call bills a
+			// summarization request that wouldn't be reflected in the returned
+			// assistant messages — i.e. cost the goal budget can't see. Keeping it
+			// off makes the returned stats the true, complete cost of the run.
 			Compaction: &core.CompactionSettings{Enabled: false},
 		})
 		if err != nil {
-			return Verdict{}, VerifyStats{CostUSD: spentSoFar}, fmt.Errorf("goal verify: agent: %w", err)
+			return Verdict{}, VerifyStats{CostUSD: spentSoFar}, nil, fmt.Errorf("goal verify: agent: %w", err)
 		}
 
-		msgs, runErr := child.Run(ctx, user)
+		msgs, runErr := child.Run(ctx, r.user)
 		// child.RunCost() is the authoritative spend for this attempt (it counts
 		// empty/failed-turn usage the loop billed but never surfaced as a
 		// message). Accumulate it so the returned cost covers every attempt.
@@ -224,31 +363,30 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 		// The parent context was cancelled (goal stopped / new run took over):
 		// surface it so the driver bails instead of treating it as a verdict.
 		if errors.Is(ctx.Err(), context.Canceled) {
-			return Verdict{}, stats, fmt.Errorf("goal verify: %w", ctx.Err())
+			return Verdict{}, stats, nil, fmt.Errorf("goal verify: %w", ctx.Err())
 		}
-		// Our own total deadline expired mid-run: treat as a cap (not-satisfied),
-		// not an infrastructure failure, whether or not a turn completed.
+		// Our own deadline expired mid-run: a cap, not an infrastructure failure,
+		// whether or not a turn completed.
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			_, feedback := cappedRunFeedback(context.DeadlineExceeded)
-			return Verdict{Satisfied: false, Feedback: feedback}, stats, nil
+			return Verdict{}, stats, context.DeadlineExceeded, nil
 		}
 
 		hadOutput := hadRealAssistantTurn(msgs)
 
 		if runErr != nil {
 			// Running out of turns/budget/time (or a doom loop) is not an
-			// infrastructure failure: a capped verifier returns a not-satisfied
-			// verdict with feedback so the healthy goal keeps going, rather than
-			// pausing. A cap only counts if the verifier actually produced a real
-			// turn — a Stream that failed before any assistant output is an
-			// infrastructure failure (retried), even if it surfaces as a deadline.
+			// infrastructure failure: report it as a cap so the caller can retry
+			// with more room, or pause the goal. A cap only counts if the verifier
+			// actually produced a real turn — a Stream that failed before any
+			// assistant output is an infrastructure failure (retried), even if it
+			// surfaces as a deadline.
 			if hadOutput {
-				if capped, feedback := cappedRunFeedback(runErr); capped {
-					return Verdict{Satisfied: false, Feedback: feedback}, stats, nil
+				if capped, _ := cappedRunFeedback(runErr); capped {
+					return Verdict{}, stats, runErr, nil
 				}
 			} else {
 				// No real turn: transient/infrastructure failure — retry (within
-				// the shared deadline).
+				// the round's deadline).
 				lastErr = fmt.Errorf("goal verify: run: %w", runErr)
 				continue
 			}
@@ -262,9 +400,9 @@ func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cf
 		// extractJSONObject already tolerates prose/fences around the object, so
 		// a well-behaved verifier parses even without a dedicated reprompt (which
 		// we avoid — a second Send would re-grant fresh turn/budget caps).
-		return parseVerdict(out), stats, nil
+		return parseVerdict(out), stats, nil, nil
 	}
-	return Verdict{}, VerifyStats{CostUSD: spentSoFar}, lastErr
+	return Verdict{}, VerifyStats{CostUSD: spentSoFar}, nil, lastErr
 }
 
 // hadRealAssistantTurn reports whether a run produced a genuine assistant turn

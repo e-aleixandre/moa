@@ -268,7 +268,7 @@ type EnterGoal struct {
 	SessionID     string
 	Objective     string
 	CompactAt     int           // soft compaction threshold in tokens; 0 = leave unchanged
-	VerifierSpec  string        // model spec for the verifier; "" = default (haiku)
+	VerifierSpec  string        // model spec for the verifier; "" = default (luna)
 	MaxIterations int           // 0 = unlimited
 	MaxStalled    int           // 0 = default
 	Timeout       time.Duration // 0 = no wall-clock deadline

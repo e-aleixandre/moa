@@ -225,8 +225,10 @@ func TestVerify_PriorFeedbackInPrompt(t *testing.T) {
 }
 
 // TestVerify_MaxTurnsExhausted: a verifier that only ever calls tools runs out
-// of turns and yields a not-satisfied verdict (not an error). Distinct tool
-// calls avoid the doom-loop guard so we exercise the max-turns cap itself.
+// of turns. Exhaustion is not a verdict: it must retry once with double the
+// turns and, still finding nothing to judge, report Exhausted (not an error).
+// Distinct tool calls avoid the doom-loop guard so we exercise the max-turns
+// cap itself.
 func TestVerify_MaxTurnsExhausted(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
@@ -256,8 +258,97 @@ func TestVerify_MaxTurnsExhausted(t *testing.T) {
 	if v.Satisfied {
 		t.Fatal("a capped verifier must return not-satisfied")
 	}
+	if !v.Exhausted {
+		t.Fatal("a verifier that never reached a verdict must be flagged Exhausted")
+	}
 	if !strings.Contains(strings.ToLower(v.Feedback), "turn") {
 		t.Fatalf("feedback should mention running out of turns, got %q", v.Feedback)
+	}
+	// Two rounds: 3 turns then 6. The agent issues one provider call per turn,
+	// so the total proves the retry actually ran with a doubled budget rather
+	// than repeating the same capped round.
+	if prov.call != 3+6 {
+		t.Fatalf("expected 2 rounds of 3 and 6 turns (9 calls), got %d", prov.call)
+	}
+}
+
+// TestVerify_RetryAfterExhaustionReachesVerdict is the point of the retry: a
+// verifier that runs out of turns on the first round but reaches a verdict on
+// the second (which has double the turns) must return that real verdict, with
+// Exhausted false — no pause, no non-verdict handed to the maker.
+func TestVerify_RetryAfterExhaustionReachesVerdict(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"a", "b", "c", "d", "e"} {
+		if err := os.WriteFile(filepath.Join(dir, n+".txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Round 1 gets 2 turns and only ever calls tools; round 2 gets 4 turns and
+	// lands on the verdict at step 5.
+	prov := &scriptedProvider{steps: []scriptStep{
+		{toolName: "read", toolArgs: map[string]any{"path": filepath.Join(dir, "a.txt")}},
+		{toolName: "read", toolArgs: map[string]any{"path": filepath.Join(dir, "b.txt")}},
+		{toolName: "read", toolArgs: map[string]any{"path": filepath.Join(dir, "c.txt")}},
+		{toolName: "read", toolArgs: map[string]any{"path": filepath.Join(dir, "d.txt")}},
+		{text: `{"satisfied": true, "feedback": "found it on the second look"}`},
+	}}
+	factory := func(core.Model) (core.Provider, error) { return prov, nil }
+	cfg := baseCfg(factory, "obj")
+	cfg.WorkDir = dir
+	cfg.MaxTurns = 2
+
+	v, stats, err := Verify(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Verify failed: %v", err)
+	}
+	if !v.Satisfied || v.Feedback != "found it on the second look" {
+		t.Fatalf("the retry's real verdict must be returned, got %+v", v)
+	}
+	if v.Exhausted {
+		t.Fatal("a verdict reached on the retry is not exhausted")
+	}
+	if prov.call != 5 {
+		t.Fatalf("expected 2 + 3 calls across both rounds, got %d", prov.call)
+	}
+	// Cost must cover BOTH rounds, not just the one that produced the verdict.
+	model, _ := core.ResolveModel(DefaultVerifierSpec)
+	roundTwo := model.Pricing.Cost(core.Usage{Input: 30, Output: 15, TotalTokens: 45})
+	if stats.CostUSD <= roundTwo {
+		t.Fatalf("cost should include the exhausted first round, got %v (round 2 alone = %v)", stats.CostUSD, roundTwo)
+	}
+}
+
+// TestVerify_NoRetryWhenTimeIsShort: with barely any wall-clock left, the
+// second round is skipped rather than burning tokens into the deadline.
+func TestVerify_NoRetryWhenTimeIsShort(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"a", "b", "c"} {
+		if err := os.WriteFile(filepath.Join(dir, n+".txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prov := &scriptedProvider{steps: []scriptStep{
+		{toolName: "read", toolArgs: map[string]any{"path": filepath.Join(dir, "a.txt")}},
+		{toolName: "read", toolArgs: map[string]any{"path": filepath.Join(dir, "b.txt")}},
+		{toolName: "read", toolArgs: map[string]any{"path": filepath.Join(dir, "c.txt")}},
+	}}
+	factory := func(core.Model) (core.Provider, error) { return prov, nil }
+	cfg := baseCfg(factory, "obj")
+	cfg.WorkDir = dir
+	cfg.MaxTurns = 2
+	// Well under verifyRetryMinRemaining, so no time is left for a second look.
+	cfg.Timeout = 5 * time.Second
+
+	v, _, err := Verify(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Verify failed: %v", err)
+	}
+	if !v.Exhausted {
+		t.Fatal("a verifier that never reached a verdict must be flagged Exhausted")
+	}
+	// Only the first round's 2 turns ran.
+	if prov.call != 2 {
+		t.Fatalf("expected the retry to be skipped (2 calls), got %d", prov.call)
 	}
 }
 

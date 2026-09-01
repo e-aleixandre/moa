@@ -27,7 +27,7 @@
 | `pkg/verify/` | Run project verification checks |
 | `pkg/skill/` | Skill file loading |
 | `pkg/askuser/` | `ask_user` tool bridge to UI |
-| `pkg/goal/` | Autonomous maker→verifier loop toward an objective (`/goal`). The verifier is a read-only mini-agent (read/grep/find/ls) that inspects the repo to judge completion, and carries memory of its earlier verdicts across iterations; `--verify-oneshot` falls back to the legacy tool-less check. When the project defines `.moa/verify.json`, red checks are a hard gate — the goal can't be declared done while they fail, whatever the verdict says |
+| `pkg/goal/` | Autonomous maker→verifier loop toward an objective (`/goal`). The verifier is a read-only mini-agent (read/grep/find/ls, `luna` by default, 25 inspection turns) that inspects the repo to judge completion, and carries memory of its earlier verdicts across iterations; `--verify-oneshot` falls back to the legacy tool-less check. Exhausting its turns or time is not a verdict: it retries once with double the turns and, failing that, pauses the goal instead of relaying a non-verdict to the maker. When the project defines `.moa/verify.json`, red checks are a hard gate — the goal can't be declared done while they fail, whatever the verdict says |
 | `pkg/autotitle/` | Generates short session titles from the conversation via a cheap LLM call |
 | `pkg/pulsebrief/` | Generates a per-session status brief (attempting/progress) via a cheap same-vendor LLM call; feeds the web dashboard and Pulse voice (web/Pulse-only) |
 
