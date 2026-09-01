@@ -279,15 +279,18 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 		if sctx.Agent.Fast() && !core.SupportsFast(newModel.ID) {
 			sctx.Agent.SetFast(false)
 		}
+		fast := sctx.Agent.Fast()
+		fastSupported := core.SupportsFast(newModel.ID)
+		fastNote := core.FastNote(newModel.ID)
 		changed := ConfigChanged{
 			SessionID:     sctx.SessionID,
 			Model:         modelName,
 			Provider:      newModel.Provider,
 			Thinking:      sctx.Agent.ThinkingLevel(),
 			ContextWindow: newModel.MaxInput,
-			Fast:          sctx.Agent.Fast(),
-			FastSupported: core.SupportsFast(newModel.ID),
-			FastNote:      core.FastNote(newModel.ID),
+			Fast:          &fast,
+			FastSupported: &fastSupported,
+			FastNote:      &fastNote,
 		}
 		if at, ok := rescaleCompactAt(sctx, oldWindow, newModel.MaxInput); ok {
 			changed.CompactAt = &at

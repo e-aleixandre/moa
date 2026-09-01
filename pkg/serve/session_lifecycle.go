@@ -153,6 +153,7 @@ type buildOpts struct {
 	initialCompactionEpoch int
 	initialThinking        string // applied via SetThinking after construction
 	initialPermissionMode  string // applied via SetPermissionMode after construction
+	initialFast            bool   // applied during construction, before any request can run
 	titleSource            string // how the resumed title was set (session.TitleSource*)
 
 	// V2 session tree
@@ -184,6 +185,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	if modelSpec != "" {
 		model, _ = core.ResolveModel(modelSpec)
 	}
+	initialFast := opts != nil && opts.initialFast && core.SupportsFast(model.ID)
 
 	// Create provider.
 	prov, err := m.providerFactory(model)
@@ -237,6 +239,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		ExtraMCPServers:   extraMCPServers,
 		Ctx:               sessionCtx,
 		EnableAskUser:     true,
+		Fast:              initialFast,
 		BeforeWrite:       cpStore.Capture,
 		AttachmentScope:   attachScope,
 		OnAsyncJobChange: func(count int) {
@@ -1037,6 +1040,7 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 		initialMessages:        saved.Messages,
 		initialCompactionEpoch: saved.CompactionEpoch,
 		initialThinking:        savedThinking,
+		initialFast:            saved.FastMeta(),
 		initialEntries:         saved.Entries,
 		initialLeafID:          saved.LeafID,
 		initialMetadata:        saved.Metadata,

@@ -619,6 +619,62 @@ func TestLoop_ToolCallAndResult(t *testing.T) {
 	}
 }
 
+func TestLoop_FastFallbackDisablesLaterRequestsInSameRun(t *testing.T) {
+	var fastRequests []bool
+	provider := NewMockProvider(
+		func(req core.Request) (<-chan core.AssistantEvent, error) {
+			fastRequests = append(fastRequests, req.Options.Fast)
+			if req.Options.OnFastUnavailable == nil {
+				t.Fatal("fast request has no unavailable callback")
+			}
+			req.Options.OnFastUnavailable()
+			return toolCallResponse("tc-fast", "echo", map[string]any{"text": "hello"})(req)
+		},
+		func(req core.Request) (<-chan core.AssistantEvent, error) {
+			fastRequests = append(fastRequests, req.Options.Fast)
+			return simpleTextResponse("done")(req)
+		},
+	)
+	echo := core.Tool{Name: "echo", Execute: func(context.Context, map[string]any, func(core.Result)) (core.Result, error) {
+		return core.TextResult("ok"), nil
+	}}
+	model, _ := core.ResolveModel("claude-opus-5")
+	reg := core.NewRegistry()
+	if err := reg.Register(echo); err != nil {
+		t.Fatal(err)
+	}
+	ag, err := New(AgentConfig{Provider: provider, Model: model, Tools: reg, Fast: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fastUnavailable := make(chan core.AgentEvent, 2)
+	ag.Subscribe(func(e core.AgentEvent) {
+		if e.Type == core.AgentEventFastUnavailable {
+			fastUnavailable <- e
+		}
+	})
+	if _, err := ag.Run(context.Background(), "use echo"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := fmt.Sprint(fastRequests), "[true false]"; got != want {
+		t.Fatalf("request fast settings = %s, want %s", got, want)
+	}
+	if ag.Fast() {
+		t.Fatal("agent fast setting remained enabled after provider fallback")
+	}
+	select {
+	case <-fastUnavailable:
+	default:
+		t.Fatal("fast fallback did not emit AgentEventFastUnavailable")
+	}
+	select {
+	case <-fastUnavailable:
+		t.Fatal("fast fallback emitted more than one AgentEventFastUnavailable")
+	default:
+	}
+}
+
 func TestLoop_MaxTurnsExceeded(t *testing.T) {
 	// Provider always returns a tool call → infinite loop if no guardrail.
 	// Each call uses a different arg to avoid triggering doom loop detection.

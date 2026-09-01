@@ -93,11 +93,16 @@ func TestFastModeFallsBackToStandardSpeed(t *testing.T) {
 		`data: {"type":"message_stop"}` + "\n\n"
 
 	var speeds []any
+	callbackCalls := 0
+	callbackBeforeSlow := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &body)
 		speeds = append(speeds, body["speed"])
+		if body["speed"] != "fast" {
+			callbackBeforeSlow = callbackCalls == 1
+		}
 
 		if body["speed"] == "fast" {
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -114,7 +119,9 @@ func TestFastModeFallsBackToStandardSpeed(t *testing.T) {
 	ch, err := a.Stream(context.Background(), core.Request{
 		Model:    model,
 		Messages: []core.Message{core.NewUserMessage("hi")},
-		Options:  core.StreamOptions{Fast: true},
+		Options: core.StreamOptions{Fast: true, OnFastUnavailable: func() {
+			callbackCalls++
+		}},
 	})
 	if err != nil {
 		t.Fatalf("the turn failed instead of falling back to standard speed: %v", err)
@@ -133,5 +140,11 @@ func TestFastModeFallsBackToStandardSpeed(t *testing.T) {
 	}
 	if speeds[1] != nil {
 		t.Errorf("the retry still asked for speed=%v; it must drop fast mode or it is refused again", speeds[1])
+	}
+	if callbackCalls != 1 {
+		t.Errorf("fast-unavailable callback calls = %d, want 1", callbackCalls)
+	}
+	if !callbackBeforeSlow {
+		t.Error("fast-unavailable callback ran after the standard-speed retry")
 	}
 }

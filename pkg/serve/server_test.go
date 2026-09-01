@@ -186,6 +186,52 @@ func TestListSessions_Empty(t *testing.T) {
 	}
 }
 
+func TestSessionFastPatchPublishesAndPersists(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+
+	sess, err := mgr.CreateSession(CreateOpts{Model: "claude-opus-5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := make(chan bus.ConfigChanged, 1)
+	sess.runtime.Bus.Subscribe(func(e bus.ConfigChanged) { changed <- e })
+
+	resp := apiReq(t, srv, http.MethodPatch, "/api/sessions/"+sess.ID+"/fast", `{"fast":true}`)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH fast status = %d", resp.StatusCode)
+	}
+	var state sessionFastState
+	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if !state.Fast || !state.Supported {
+		t.Fatalf("PATCH response = %+v, want enabled supported fast mode", state)
+	}
+
+	select {
+	case e := <-changed:
+		if e.Fast == nil || !*e.Fast || e.FastSupported == nil || !*e.FastSupported || e.FastNote == nil {
+			t.Fatalf("PATCH ConfigChanged = %+v, want all explicit fast fields", e)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("PATCH did not publish ConfigChanged")
+	}
+	sess.runtime.Bus.Drain(2 * time.Second)
+
+	if err := mgr.CloseSession(sess.ID); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+	resumed, err := mgr.ResumeSession(sess.ID)
+	if err != nil {
+		t.Fatalf("resume session: %v", err)
+	}
+	if !resumed.runtime.Context().Agent.Fast() {
+		t.Fatal("fast mode was not restored after resume")
+	}
+}
+
 func TestCreateAndSend(t *testing.T) {
 	srv, mgr, cancel := newTestServer(t)
 	defer cancel()

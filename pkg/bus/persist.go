@@ -39,6 +39,7 @@ func collectMetadata(sctx *SessionContext) map[string]any {
 	if lvl := sctx.Agent.ThinkingLevel(); lvl != "" {
 		meta["thinking"] = lvl
 	}
+	meta[session.MetaFast] = sctx.Agent.Fast()
 	// The context limit is a per-session choice like model and thinking, so it
 	// has to outlive closing the session — otherwise it silently reverts to
 	// "auto" on the next resume, which is exactly the unattended case it exists

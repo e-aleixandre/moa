@@ -47,4 +47,7 @@ const (
 
 	AgentEventCompactionStart = "compaction_start"
 	AgentEventCompactionEnd   = "compaction_end"
+	// AgentEventFastUnavailable reports that a provider fell back from a
+	// rejected premium-speed request and disabled it for the session.
+	AgentEventFastUnavailable = "fast_unavailable"
 )

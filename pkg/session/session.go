@@ -87,6 +87,7 @@ const (
 	MetaPathScope      = "path_scope"
 	MetaAllowedPaths   = "allowed_paths"
 	MetaCompactAt      = "compact_at"
+	MetaFast           = "fast"
 	MetaOrigin         = "origin"
 	// Automation bookkeeping written by the Automation API. The callback fields
 	// are set at creation; the idempotency key is only written once the run's
@@ -203,6 +204,16 @@ func (s *Session) CompactAtMeta() int {
 		return int(v)
 	}
 	return 0
+}
+
+// FastMeta returns whether premium speed was enabled when this session was
+// last saved. Missing and malformed values preserve the historical default.
+func (s *Session) FastMeta() bool {
+	if s.Metadata == nil {
+		return false
+	}
+	fast, _ := s.Metadata[MetaFast].(bool)
+	return fast
 }
 
 // SetRuntimeMetadata persists the core session configuration (model, cwd,

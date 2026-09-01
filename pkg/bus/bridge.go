@@ -1172,6 +1172,10 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 			Err:               e.Error,
 			CostIncludedInRun: true,
 		}}
+
+	case core.AgentEventFastUnavailable:
+		fast := false
+		return []any{ConfigChanged{SessionID: sid, Fast: &fast}}
 	}
 	return nil
 }

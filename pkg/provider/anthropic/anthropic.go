@@ -132,6 +132,9 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		if fastMode && resp.StatusCode == http.StatusTooManyRequests && isFastModeUnavailable(errBody) {
 			slowReq := req
 			slowReq.Options.Fast = false
+			if req.Options.OnFastUnavailable != nil {
+				req.Options.OnFastUnavailable()
+			}
 			return a.Stream(ctx, slowReq)
 		}
 		return nil, fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, string(errBody))

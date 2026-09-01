@@ -130,11 +130,11 @@ type Pricing struct {
 // PricingTier is a pricing tier that applies once the request's context
 // (input + cache-read tokens) reaches Threshold tokens.
 type PricingTier struct {
-	Threshold    int     `json:"threshold"`               // tier applies when Input+CacheRead >= this
-	Input        float64 `json:"input"`                   // $/M input tokens
-	Output       float64 `json:"output"`                  // $/M output tokens
-	CacheRead    float64 `json:"cache_read"`              // $/M cached input tokens
-	CacheWrite   float64 `json:"cache_write"`             // $/M cache write tokens (5-minute window)
+	Threshold    int     `json:"threshold"`                // tier applies when Input+CacheRead >= this
+	Input        float64 `json:"input"`                    // $/M input tokens
+	Output       float64 `json:"output"`                   // $/M output tokens
+	CacheRead    float64 `json:"cache_read"`               // $/M cached input tokens
+	CacheWrite   float64 `json:"cache_write"`              // $/M cache write tokens (5-minute window)
 	CacheWrite1h float64 `json:"cache_write_1h,omitempty"` // $/M extended-window cache write tokens
 }
 
@@ -189,10 +189,10 @@ func (p *Pricing) Cost(u Usage) float64 {
 
 // StreamOptions configures an LLM request.
 type StreamOptions struct {
-	Temperature    *float64 `json:"temperature,omitempty"`
-	MaxTokens      *int     `json:"max_tokens,omitempty"`
-	APIKey         string   `json:"-"`
-	ThinkingLevel  string   `json:"thinking_level,omitempty"`
+	Temperature   *float64 `json:"temperature,omitempty"`
+	MaxTokens     *int     `json:"max_tokens,omitempty"`
+	APIKey        string   `json:"-"`
+	ThinkingLevel string   `json:"thinking_level,omitempty"`
 	// CacheRetention selects the prompt-cache TTL: "" is the provider default
 	// (5 minutes), "1h" opts into the long TTL, and CacheOff suppresses cache
 	// writes entirely.
@@ -208,6 +208,10 @@ type StreamOptions struct {
 	// provider that has no such notion, or a model that doesn't support it,
 	// ignores the flag rather than failing.
 	Fast bool `json:"fast,omitempty"`
+	// OnFastUnavailable is called when a provider rejects a fast request
+	// because the account cannot use the premium tier. It is process-local
+	// state coordination, never part of a provider payload.
+	OnFastUnavailable func() `json:"-"`
 }
 
 // CacheOff is the CacheRetention value for a request whose prefix will never

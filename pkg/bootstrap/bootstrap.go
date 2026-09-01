@@ -71,6 +71,7 @@ type SessionConfig struct {
 
 	// Agent tuning. Zero values use package defaults.
 	ThinkingLevel       string        // Default: "medium"
+	Fast                bool          // Premium speed for this session when the model supports it.
 	MaxTurns            int           // 0 = unlimited (default). Overrides config.json.
 	MaxToolCallsPerTurn int           // 0 = unlimited (default). Overrides config.json.
 	MaxRunDuration      time.Duration // 0 = unlimited (default). Overrides config.json.
@@ -633,6 +634,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		Model:               cfg.Model,
 		SystemPrompt:        systemPrompt,
 		ThinkingLevel:       cfg.ThinkingLevel,
+		Fast:                cfg.Fast,
 		CacheTTL:            core.GetCacheTTL(moaCfg),
 		PromptCacheKey:      core.PromptCacheKey(cfg.SessionID),
 		Tools:               toolReg,

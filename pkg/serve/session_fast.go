@@ -57,6 +57,14 @@ func handleSessionFast(mgr *Manager) http.HandlerFunc {
 			// session as fast when it is not.
 			on := *body.Fast && core.SupportsFast(model.ID)
 			agent.SetFast(on)
+			supported := core.SupportsFast(model.ID)
+			note := core.FastNote(model.ID)
+			sess.runtime.Bus.Publish(bus.ConfigChanged{
+				SessionID:     sess.ID,
+				Fast:          &on,
+				FastSupported: &supported,
+				FastNote:      &note,
+			})
 			writeJSON(w, http.StatusOK, fastState(on, model))
 		}
 	}

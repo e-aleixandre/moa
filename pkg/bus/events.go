@@ -368,9 +368,9 @@ type ConfigChanged struct {
 	// session still buys premium speed, whether the new model can serve it,
 	// and what it costs there. A switch to a model without fast mode turns
 	// it off, so the client must be told rather than left showing it on.
-	Fast          bool
-	FastSupported bool
-	FastNote      string
+	Fast          *bool
+	FastSupported *bool
+	FastNote      *string
 	// CompactAt is the new soft compaction threshold in tokens, set only on a
 	// threshold change. A pointer because 0 is itself a meaningful value ("use
 	// the model window"), so nil is the only way to say "unchanged" here.

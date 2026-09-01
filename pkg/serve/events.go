@@ -379,12 +379,12 @@ type ConfigChangeData struct {
 	// ContextWindow carries a model switch's new input window, the denominator
 	// for every context percentage the client shows.
 	ContextWindow int `json:"context_window,omitempty"`
-	// Fast and its companions ride on a model switch. Not omitempty: false is
-	// the meaningful value when a switch turns fast mode off, and omitting it
-	// would leave the client showing a premium it is no longer paying for.
-	Fast          bool   `json:"fast"`
-	FastSupported bool   `json:"fast_supported"`
-	FastNote      string `json:"fast_note,omitempty"`
+	// Fast fields are pointers because config_change is a patch. Nil means this
+	// event did not change the field, while false and an empty note are both
+	// meaningful model-switch values.
+	Fast          *bool   `json:"fast,omitempty"`
+	FastSupported *bool   `json:"fast_supported,omitempty"`
+	FastNote      *string `json:"fast_note,omitempty"`
 }
 
 // SubagentCountData is sent when async subagent jobs start/finish.

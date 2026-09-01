@@ -1493,6 +1493,9 @@ func TestHandler_SetThinking(t *testing.T) {
 	if e.Thinking != "high" {
 		t.Fatalf("ConfigChanged.Thinking = %q", e.Thinking)
 	}
+	if e.Fast != nil || e.FastSupported != nil || e.FastNote != nil {
+		t.Fatalf("thinking ConfigChanged unexpectedly carried fast fields: %+v", e)
+	}
 }
 
 func TestHandler_ClearSession(t *testing.T) {
@@ -2565,12 +2568,18 @@ func TestHandler_SwitchModel_TurnsOffFastOnUnsupportedModel(t *testing.T) {
 	sctx := newTestSessionContext(b, fa)
 	sctx.ProviderFactory = func(m core.Model) (core.Provider, error) { return errProvider{}, nil }
 	RegisterHandlers(sctx)
+	changed := make(chan ConfigChanged, 2)
+	b.Subscribe(func(e ConfigChanged) { changed <- e })
 
 	if err := b.Execute(SwitchModel{ModelSpec: "haiku"}); err != nil {
 		t.Fatalf("switch to haiku: %v", err)
 	}
 	if fa.Fast() {
 		t.Error("fast mode still on after switching to a model that does not support it")
+	}
+	first := drainChan(changed, b, t)
+	if first.Fast == nil || *first.Fast || first.FastSupported == nil || *first.FastSupported || first.FastNote == nil {
+		t.Fatalf("unsupported model switch fast patch = %+v, want explicit false fields", first)
 	}
 
 	// And it must not come back on its own when a capable model returns:
@@ -2580,6 +2589,10 @@ func TestHandler_SwitchModel_TurnsOffFastOnUnsupportedModel(t *testing.T) {
 	}
 	if fa.Fast() {
 		t.Error("fast mode re-armed itself on returning to a capable model")
+	}
+	second := drainChan(changed, b, t)
+	if second.Fast == nil || *second.Fast || second.FastSupported == nil || !*second.FastSupported || second.FastNote == nil {
+		t.Fatalf("supported model switch fast patch = %+v, want explicit fields", second)
 	}
 }
 

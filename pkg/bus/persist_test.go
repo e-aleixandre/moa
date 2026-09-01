@@ -321,6 +321,15 @@ func TestCollectMetadata_WithThinking(t *testing.T) {
 	}
 }
 
+func TestCollectMetadata_Fast(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContext(b, &fakeAgent{fast: true})
+	if got := collectMetadata(sctx)[session.MetaFast]; got != true {
+		t.Fatalf("fast metadata = %v, want true", got)
+	}
+}
+
 func TestCollectMetadata_CWD(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()

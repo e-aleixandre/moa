@@ -1124,6 +1124,19 @@ func (a *Agent) SetFast(on bool) {
 	a.config.Fast = on
 }
 
+// disableFast turns off premium speed and reports whether it changed. The
+// provider fallback uses this instead of SetFast so one rejected request emits
+// one state-change event, even if callbacks are retried by an implementation.
+func (a *Agent) disableFast() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.config.Fast {
+		return false
+	}
+	a.config.Fast = false
+	return true
+}
+
 // SystemPrompt returns the current system prompt.
 func (a *Agent) SystemPrompt() string {
 	a.mu.Lock()
@@ -1569,7 +1582,11 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		ThinkingLevel:  a.config.ThinkingLevel,
 		CacheRetention: a.config.CacheTTL,
 		PromptCacheKey: a.config.PromptCacheKey,
-		Fast:           a.config.Fast,
+		OnFastUnavailable: func() {
+			if a.disableFast() {
+				a.emitter.Emit(core.AgentEvent{Type: core.AgentEventFastUnavailable})
+			}
+		},
 	}
 	if a.config.MaxTokens > 0 {
 		mt := a.config.MaxTokens
@@ -1599,6 +1616,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		model:               a.config.Model,
 		systemPrompt:        a.config.SystemPrompt + extraPrompt,
 		streamOpts:          streamOpts,
+		fast:                a.Fast,
 		maxTurns:            a.config.MaxTurns,
 		maxToolCallsPerTurn: a.config.MaxToolCallsPerTurn,
 		maxBudget:           a.config.MaxBudget,

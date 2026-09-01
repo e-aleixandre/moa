@@ -100,6 +100,9 @@ type loopConfig struct {
 	model        core.Model
 	systemPrompt string
 	streamOpts   core.StreamOptions
+	// fast is read per provider request because a provider can disable the
+	// session setting while this run is still processing tool calls.
+	fast func() bool
 
 	// Guardrails
 	maxTurns            int
@@ -143,6 +146,14 @@ type loopConfig struct {
 	registerSteerWait func(context.CancelCauseFunc) func()
 	// steerMu makes cancellation and the post-tool delivery boundary atomic.
 	steerMu *sync.Mutex
+}
+
+func (cfg *loopConfig) requestOptions() core.StreamOptions {
+	opts := cfg.streamOpts
+	if cfg.fast != nil {
+		opts.Fast = cfg.fast()
+	}
+	return opts
 }
 
 // emitLifecycle emits a lifecycle event to both the emitter (subscribers)
@@ -294,7 +305,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				// shares. Inheriting the session's cache TTL here would bill a
 				// cache write — at 2x under the 1h TTL — for an entry no later
 				// request can read. Routing (PromptCacheKey) is preserved.
-				compactOpts := cfg.streamOpts
+				compactOpts := cfg.requestOptions()
 				compactOpts.CacheRetention = core.CacheOff
 
 				result, compacted, err := compaction.Compact(
@@ -407,7 +418,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			System:   cfg.systemPrompt,
 			Messages: llmMessages,
 			Tools:    toolSpecs,
-			Options:  cfg.streamOpts,
+			Options:  cfg.requestOptions(),
 		}
 
 		// Stream from provider

@@ -160,6 +160,17 @@ func TestTranslateAgentEvent_ToolExecEnd_TasksUpdate(t *testing.T) {
 	}
 }
 
+func TestTranslateAgentEvent_FastUnavailablePublishesExplicitFalse(t *testing.T) {
+	events := TranslateAgentEvent("s", 1, core.AgentEvent{Type: core.AgentEventFastUnavailable}, nil)
+	if len(events) != 1 {
+		t.Fatalf("events = %v, want one ConfigChanged", events)
+	}
+	changed, ok := events[0].(ConfigChanged)
+	if !ok || changed.Fast == nil || *changed.Fast {
+		t.Fatalf("event = %#v, want ConfigChanged with Fast false", events[0])
+	}
+}
+
 func TestIsLossyEvent_SubagentUsage(t *testing.T) {
 	if !isLossyEvent(SubagentUsage{SessionID: "s", JobID: "job1"}) {
 		t.Error("isLossyEvent(SubagentUsage) = false, want true")
