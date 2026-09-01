@@ -1462,8 +1462,11 @@ func sanitizeResumeTranscript(msgs []core.AgentMessage) []core.AgentMessage {
 			cut = i // drop this assistant turn and everything after it
 			continue
 		}
-		// Stop at the first turn from the end that is fully satisfied.
-		if m.Role == "assistant" {
+		// Stop at the first turn from the end that is fully satisfied. A
+		// compaction_summary is such a boundary: compaction replaces the turns
+		// it summarised, so tool_calls before it can no longer be matched and
+		// walking further back would discard the whole history.
+		if m.Role == "assistant" || m.Role == "compaction_summary" {
 			break
 		}
 	}
@@ -1472,9 +1475,12 @@ func sanitizeResumeTranscript(msgs []core.AgentMessage) []core.AgentMessage {
 	// A replayable conversation must begin with a user message (a leading
 	// tool_result or assistant is an invalid payload, and providers reject a
 	// history that doesn't start with user). Drop any leading non-user messages
-	// — e.g. a transcript that was itself persisted mid-conversation.
+	// — e.g. a transcript that was itself persisted mid-conversation. A
+	// compaction_summary also opens a valid replay: the agent loop converts it
+	// into a user turn before the request is built, so a child that compacted
+	// mid-run resumes from its summary the way the parent already does.
 	start := 0
-	for start < len(out) && out[start].Role != "user" {
+	for start < len(out) && out[start].Role != "user" && out[start].Role != "compaction_summary" {
 		start++
 	}
 	return out[start:]

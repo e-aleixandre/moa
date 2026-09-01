@@ -294,6 +294,17 @@ export function normalizeConversationProjection(raw) {
         result: null,
       };
     }
+    if (item.role === 'compaction_summary') {
+      // The child's compaction reaches the stream as the same marker the parent
+      // emits, so both render one card instead of leaving an unexplained gap.
+      // Children persist only the summary text — no token or file counts — and
+      // the card already omits what is absent.
+      return {
+        _type: 'compaction_marker',
+        _msg_id: item.id,
+        summary: item.text || '',
+      };
+    }
     return {
       role: item.role,
       _msg_id: item.id,

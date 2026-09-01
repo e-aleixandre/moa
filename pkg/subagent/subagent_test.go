@@ -3239,3 +3239,46 @@ func resultText(res *core.Result) string {
 	}
 	return b.String()
 }
+
+func TestSanitizeResumeKeepsCompactionSummary(t *testing.T) {
+	// A child that compacted mid-run starts its transcript with a
+	// compaction_summary instead of the original user task, and the summary
+	// replaced the tool_results that matched earlier tool_calls. Both traits
+	// used to erase the whole history: the orphan trim walked back to the top
+	// and the leading-role trim dropped what was left, so resuming a compacted
+	// child reported an empty transcript. The summary is a replayable opener —
+	// the agent loop already renders it as a user turn.
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "compaction_summary",
+			Content: []core.Content{core.TextContent("previously: mapped the parser")}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			core.ToolCallContent("call-1", "read", nil)}}},
+		{Message: core.Message{Role: "tool_result", ToolCallID: "call-1", ToolName: "read",
+			Content: []core.Content{core.TextContent("file body")}}},
+	}
+	clean := sanitizeResumeTranscript(msgs)
+	if len(clean) != 3 {
+		t.Fatalf("compacted transcript must survive resume, got %d of 3 messages", len(clean))
+	}
+	if clean[0].Role != "compaction_summary" {
+		t.Fatalf("replay must open with the summary, got %q", clean[0].Role)
+	}
+}
+
+func TestSanitizeResumeTrimsOrphanAfterCompactionSummary(t *testing.T) {
+	// Keeping the summary must not weaken the orphan trim that protects the
+	// provider payload: a trailing tool_call with no result is still dropped.
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "compaction_summary",
+			Content: []core.Content{core.TextContent("previously: mapped the parser")}}},
+		{Message: core.Message{Role: "assistant", Content: []core.Content{
+			core.ToolCallContent("call-1", "read", nil)}}},
+	}
+	clean := sanitizeResumeTranscript(msgs)
+	if len(clean) != 1 {
+		t.Fatalf("orphan tool_call must be trimmed, got %d messages", len(clean))
+	}
+	if clean[0].Role != "compaction_summary" {
+		t.Fatalf("expected the summary to remain, got %q", clean[0].Role)
+	}
+}

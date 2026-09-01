@@ -301,6 +301,19 @@ func safeSubagentConversationMessages(messages []core.AgentMessage) conversation
 			id = fmt.Sprintf("%s~%d", baseID, duplicate)
 		}
 		seenIDs[baseID]++
+		// A compacted child would otherwise show an unexplained gap: turns that
+		// reference work with nothing before them. The summary is emitted as its
+		// own role so the client renders the same card the parent shows, never as
+		// a message somebody wrote. Children persist the summary text alone, so
+		// the parent's token and file counts have no equivalent here.
+		if msg.Role == "compaction_summary" {
+			summary, _, truncated := safeDisplayText(msg.Content)
+			out = append(out, ConversationMessage{
+				ID: id, Role: msg.Role, Text: summary, Truncated: truncated,
+				Timestamp: conversationTimestamp(msg.Timestamp),
+			})
+			continue
+		}
 		text, omitted, truncated := safeDisplayText(msg.Content)
 		if shouldShowConversationMessage(msg.Role, text, omitted, msg.Content) {
 			item := ConversationMessage{ID: id, Role: msg.Role, Text: text, Omitted: omitted, Truncated: truncated, Timestamp: conversationTimestamp(msg.Timestamp)}
@@ -339,11 +352,14 @@ func safeSubagentConversationMessages(messages []core.AgentMessage) conversation
 	return conversationProjection{messages: out, toolDetails: details}
 }
 
-// isVisibleSubagentConversationMessage admits ordinary turns and the one
-// provenance-tagged turn that is part of a child's conversation. Other Custom
-// messages are internal transcript records (such as compaction turns and
-// markers), not owner-facing conversation.
+// isVisibleSubagentConversationMessage admits ordinary turns, the one
+// provenance-tagged turn that is part of a child's conversation, and the
+// compaction summary. Other Custom messages are internal transcript records
+// (such as compaction markers), not owner-facing conversation.
 func isVisibleSubagentConversationMessage(msg core.AgentMessage) bool {
+	if msg.Role == "compaction_summary" {
+		return true
+	}
 	if msg.Role != "user" && msg.Role != "assistant" {
 		return false
 	}
