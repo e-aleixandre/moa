@@ -58,6 +58,45 @@ func TestDisplayMessages_IncludesInFlightTurn(t *testing.T) {
 	}
 }
 
+func TestTreeSyncer_SnapshotPathIncludesInFlightTailWithoutMutatingTree(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.Tree = session.NewTree()
+	RegisterHandlers(sctx)
+	ts := RegisterTreeSyncer(b, sctx)
+
+	fa.mu.Lock()
+	fa.messages = []core.AgentMessage{msg("user", "synced")}
+	fa.mu.Unlock()
+	b.Publish(RunEnded{SessionID: sctx.SessionID})
+	b.Drain(time.Second)
+
+	fa.mu.Lock()
+	fa.messages = append(fa.messages, msgWithID("assistant", "in flight", "m-inflight"))
+	fa.mu.Unlock()
+
+	entries := ts.SnapshotPath()
+	if len(entries) != 2 || messageText(entries[1].Message) != "in flight" {
+		t.Fatalf("snapshot entries = %#v, want synced path plus in-flight tail", entries)
+	}
+	if entries[1].Type != session.EntryMessage {
+		t.Fatalf("tail type = %q, want message", entries[1].Type)
+	}
+	if entries[1].ID != "m-inflight" {
+		t.Fatalf("tail ID = %q, want m-inflight", entries[1].ID)
+	}
+	path := sctx.Tree.Path()
+	if len(path) != 1 || messageText(path[0].Message) != "synced" {
+		t.Fatalf("snapshot mutated tree path: %#v", path)
+	}
+	if got := ts.DisplayMessages(); len(got) != 2 {
+		t.Fatalf("snapshot changed sync baseline: display has %d messages, want 2", len(got))
+	}
+}
+
 func TestClearSessionRejectsDeltaBeforeAsyncTreeSync(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()

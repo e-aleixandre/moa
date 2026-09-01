@@ -35,7 +35,7 @@ Conditionally registered:
 | `web_search` | `brave_api_key` is configured |
 | `ask_user` | The web UI is active (not headless) |
 | `verify` | always |
-| `load_skill` | always (skills are discovered per call, so one written mid-session is loadable) |
+| `load_skill` | always (skills are discovered per call, so one written mid-session is loadable). Most skills return their content; `context: fork` runs an isolated subagent instead |
 
 ## Tool selection guidance
 
@@ -227,7 +227,8 @@ a child never gets is the pre-compaction step (`compact_strategy`): it has
 neither `memory` nor the ephemeral checkpoint to write to, so a warning could
 only produce stray files, and its findings already travel back in its report.
 
-Children cannot spawn their own subagents, use `memory`, or call `ask_user`.
+Children cannot spawn their own subagents, use `memory`, call `ask_user`, or
+use `checkpoint`. A child started by a forked skill has that same denylist.
 
 ### Cost & persistence
 

@@ -11,6 +11,7 @@ import (
 // newSkillDir returns a workspace whose .moa/skills is ready for writeSkill.
 func newSkillDir(t *testing.T) (root, skillsDir string) {
 	t.Helper()
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	root = t.TempDir()
 	skillsDir = filepath.Join(root, ".moa", "skills")
 	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
@@ -71,6 +72,43 @@ func TestDiscover_ParsesInvocationFrontmatter(t *testing.T) {
 	// every skill written before this feature behaved.
 	if byName["plain"].DisableModelInvocation || !byName["plain"].UserInvocable {
 		t.Errorf("plain skill changed behaviour: %+v", byName["plain"])
+	}
+}
+
+func TestDiscover_ParsesForkFrontmatter(t *testing.T) {
+	root, dir := newSkillDir(t)
+	writeSkill(t, dir, "forked", "---\ncontext: fork\nbackground: true\nparent-transcript: snapshot\n---\n# Forked\n\nBody.\n")
+	writeSkill(t, dir, "plain", "# Plain\n\nBody.\n")
+	writeSkill(t, dir, "inline-bg", "---\nbackground: true\n---\n# Inline\n\nBody.\n")
+
+	byName := map[string]Skill{}
+	for _, s := range Discover(root) {
+		byName[s.Name] = s
+	}
+
+	f := byName["forked"]
+	if !f.IsFork() {
+		t.Error("context: fork was not parsed")
+	}
+	if !f.Background {
+		t.Error("background: true was not parsed")
+	}
+	if !f.WantsParentSnapshot() {
+		t.Error("parent-transcript: snapshot was not parsed")
+	}
+
+	plain := byName["plain"]
+	if plain.IsFork() || plain.Background || plain.WantsParentSnapshot() {
+		t.Errorf("plain skill changed behaviour: %+v", plain)
+	}
+
+	// background without context: fork must not turn an inline skill into a fork.
+	inline := byName["inline-bg"]
+	if inline.IsFork() {
+		t.Error("background without context: fork must stay inline")
+	}
+	if !inline.Background {
+		t.Error("background: true should still parse when the skill is inline")
 	}
 }
 

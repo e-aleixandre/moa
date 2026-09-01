@@ -19,11 +19,11 @@ func writeSkill(t *testing.T, base, name, content string) {
 }
 
 func TestDiscover_ProjectAndGlobal(t *testing.T) {
-	home := t.TempDir()
+	configDir := t.TempDir()
 	cwd := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv("MOA_CONFIG_DIR", configDir)
 
-	globalDir := filepath.Join(home, ".config", "moa", "skills")
+	globalDir := filepath.Join(configDir, "skills")
 	projectDir := filepath.Join(cwd, ".moa", "skills")
 
 	writeSkill(t, globalDir, "shared", "# Shared Global\n\nGlobal version.\n")
@@ -55,7 +55,7 @@ func TestDiscover_ProjectAndGlobal(t *testing.T) {
 
 func TestDiscover_Empty(t *testing.T) {
 	cwd := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	skills := Discover(cwd)
 	if len(skills) != 0 {
 		t.Errorf("expected 0 skills, got %d", len(skills))
@@ -64,7 +64,7 @@ func TestDiscover_Empty(t *testing.T) {
 
 func TestDiscover_ParsesHeading(t *testing.T) {
 	cwd := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 
 	writeSkill(t, filepath.Join(cwd, ".moa", "skills"), "go-testing",
 		"# Go Testing Best Practices\n\nComprehensive guide for Go tests.\n\n- Use table-driven tests\n")
@@ -87,7 +87,7 @@ func TestDiscover_ParsesHeading(t *testing.T) {
 
 func TestDiscover_NoHeading(t *testing.T) {
 	cwd := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 
 	writeSkill(t, filepath.Join(cwd, ".moa", "skills"), "plain",
 		"Just some instructions without a heading.\n")
@@ -104,7 +104,7 @@ func TestDiscover_NoHeading(t *testing.T) {
 
 func TestDiscover_SkipsNonDirs(t *testing.T) {
 	cwd := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 
 	skillsDir := filepath.Join(cwd, ".moa", "skills")
 	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
@@ -123,7 +123,7 @@ func TestDiscover_SkipsNonDirs(t *testing.T) {
 
 func TestDiscover_SkipsDirWithoutSkillMD(t *testing.T) {
 	cwd := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 
 	// Create a directory with no SKILL.md
 	dir := filepath.Join(cwd, ".moa", "skills", "empty-skill")
@@ -139,7 +139,7 @@ func TestDiscover_SkipsDirWithoutSkillMD(t *testing.T) {
 
 func TestDiscover_Sorted(t *testing.T) {
 	cwd := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 
 	projectDir := filepath.Join(cwd, ".moa", "skills")
 	writeSkill(t, projectDir, "zulu", "# Zulu\n")
@@ -157,6 +157,7 @@ func TestDiscover_Sorted(t *testing.T) {
 
 func TestLoad(t *testing.T) {
 	cwd := t.TempDir()
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	content := "# Docker\n\nUse multi-stage builds.\n"
 	writeSkill(t, filepath.Join(cwd, ".moa", "skills"), "docker", content)
 
@@ -176,7 +177,7 @@ func TestLoad(t *testing.T) {
 
 func TestParseSkillHeader_DescriptionStopsAtList(t *testing.T) {
 	cwd := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 
 	writeSkill(t, filepath.Join(cwd, ".moa", "skills"), "test-skill",
 		"# My Skill\n\n- item one\n- item two\n")
@@ -217,7 +218,7 @@ func TestFormatIndex_Empty(t *testing.T) {
 
 func TestParseSkillHeader_MultiLineDescription(t *testing.T) {
 	cwd := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 
 	writeSkill(t, filepath.Join(cwd, ".moa", "skills"), "multi",
 		"# Multi\n\nFirst line of description\nsecond line of description.\n\nAnother paragraph.\n")

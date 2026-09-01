@@ -452,6 +452,25 @@ func (sctx *SessionContext) StreamingAggregate() (text, thinking, msgID string) 
 	return string(sctx.streamText), string(sctx.streamThinking), sctx.streamMsgID
 }
 
+// SnapshotTranscriptPath returns the active transcript branch, including a
+// visible in-flight turn when a TreeSyncer is present. It is a snapshot only:
+// it never mutates the tree or the sync baseline.
+func (sctx *SessionContext) SnapshotTranscriptPath() []session.Entry {
+	if sctx == nil || sctx.Tree == nil {
+		return nil
+	}
+	if sctx.treeSyncer != nil {
+		return sctx.treeSyncer.SnapshotPath()
+	}
+
+	path := sctx.Tree.Path()
+	entries := make([]session.Entry, len(path))
+	for i, entry := range path {
+		entries[i] = session.DeepCopyEntry(entry)
+	}
+	return entries
+}
+
 // SnapshotInFlightWithCut atomically captures the in-flight streaming aggregate
 // AND the live tool-call registry together with the current bus sequence, all
 // under streamMu. bridgeEvent holds streamMu across the mutation AND the derived

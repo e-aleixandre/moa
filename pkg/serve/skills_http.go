@@ -1,12 +1,15 @@
 package serve
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/e-aleixandre/moa/pkg/bootstrap"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
-
+	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/skill"
 )
 
@@ -102,14 +105,17 @@ func findInvocableSkill(cwd, typed string) (skill.Skill, bool) {
 	return skill.Skill{}, false
 }
 
-// runSkillCommand loads a skill into the conversation as a user message.
-//
-// The content enters the transcript rather than the system prompt: it is what
-// the user asked for now, it stays visible in the conversation, and it leaves
-// the cached prefix untouched.
+// runSkillCommand handles a user slash-invocation of a skill. Inline skills
+// enter the transcript as a user message rather than the system prompt: it is
+// what the user asked for now, it stays visible in the conversation, and it
+// leaves the cached prefix untouched. Forked skills spawn an isolated child
+// instead and do not put SKILL.md into the parent conversation.
 func runSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (*CommandResult, error) {
 	if err := requireIdle(sess); err != nil {
 		return nil, err
+	}
+	if s.IsFork() {
+		return runForkedSkillCommand(sess, s, args)
 	}
 	body, err := skill.Load(s)
 	if err != nil {
@@ -119,7 +125,7 @@ func runSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (*Comma
 	msg := core.AgentMessage{
 		Message: core.Message{
 			Role:    "user",
-			Content: []core.Content{core.TextContent(renderSkillBody(body, args))},
+			Content: []core.Content{core.TextContent(skill.RenderBody(body, args))},
 		},
 		Custom: map[string]any{"skill": s.Name},
 	}
@@ -135,25 +141,6 @@ func runSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (*Comma
 		Messages:  sess.runtime.Context().Agent.Messages(),
 	})
 	return &CommandResult{OK: true, Message: "loaded skill: " + s.Name}, nil
-}
-
-// renderSkillBody substitutes the invocation's arguments into the skill.
-//
-// A skill that declares no placeholder still receives what the user typed,
-// appended as a trailing line: dropping it silently would lose the only part of
-// the invocation the user wrote by hand.
-func renderSkillBody(body string, args []string) string {
-	joined := strings.Join(args, " ")
-	if strings.Contains(body, "$ARGUMENTS") {
-		return strings.ReplaceAll(body, "$ARGUMENTS", joined)
-	}
-	if joined == "" {
-		return body
-	}
-	if !strings.HasSuffix(body, "\n") {
-		body += "\n"
-	}
-	return body + "\nARGUMENTS: " + joined + "\n"
 }
 
 // handleSessionSkills lists the skills the user may invoke in a session.
@@ -172,4 +159,70 @@ func handleSessionSkills(mgr *Manager) http.HandlerFunc {
 			"skills": skillCommands(skill.Discover(sess.CWD)),
 		})
 	}
+}
+
+// runForkedSkillCommand launches a forked skill as an isolated subagent and
+// does not put SKILL.md into the parent conversation.
+//
+// Slash forks are always async: ExecCommand holds the session lifecycle lock,
+// so waiting on a foreground child here would block close/delete. A non-
+// background fork still notifies the idle parent through the usual subagent
+// completion path; a background fork stays silent.
+func runForkedSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (*CommandResult, error) {
+	sub, ok := sess.infra.toolReg.Get("subagent")
+	if !ok || sub.Execute == nil {
+		return &CommandResult{OK: false, Message: "forked skills require a subagent runtime"}, nil
+	}
+	ctx := context.Background()
+	if sess.infra.sessionCtx != nil {
+		ctx = sess.infra.sessionCtx
+	}
+	res, err := skill.LaunchFork(ctx, s, args, skill.ToolConfig{
+		Fork:     bootstrap.NewSkillFork(sub),
+		Snapshot: func() (string, error) { return snapshotParentTranscript(sess) },
+	}, true, !s.Background, nil)
+	if err != nil {
+		return nil, err
+	}
+	text := ""
+	for _, c := range res.Content {
+		text += c.Text
+	}
+	if res.IsError {
+		return &CommandResult{OK: false, Message: text}, nil
+	}
+	jobID, _ := res.Custom["subagent_job_id"].(string)
+	msg := "started skill: " + s.Name
+	if jobID != "" {
+		msg += "\nJob ID: " + jobID
+	} else if text != "" {
+		msg += "\n" + text
+	}
+	return &CommandResult{OK: true, Message: msg}, nil
+}
+
+// snapshotParentTranscript freezes the active tree branch together with any
+// visible agent messages that have not reached RunEnded yet. Moa writes it once
+// next to the session and does not rewrite it; it does not read live session JSON.
+func snapshotParentTranscript(sess *ManagedSession) (string, error) {
+	if sess == nil || sess.runtime == nil {
+		return "", fmt.Errorf("parent transcript snapshot is not available")
+	}
+	sctx := sess.runtime.Context()
+	if sctx == nil || sctx.Tree == nil {
+		return "", fmt.Errorf("parent transcript snapshot requires a session tree")
+	}
+	if sess.persister == nil {
+		return "", fmt.Errorf("parent transcript snapshot is not available")
+	}
+	sessionDir := sess.persister.sessionDir()
+	if sessionDir == "" {
+		return "", fmt.Errorf("parent transcript snapshot is not available")
+	}
+	dir := session.TranscriptSnapshotDir(sessionDir, sess.ID)
+	path, err := session.WriteTranscriptSnapshot(dir, sctx.SnapshotTranscriptPath())
+	if err != nil {
+		return "", err
+	}
+	return path, nil
 }

@@ -396,6 +396,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			}
 			return subagent.ResumedTranscript{Messages: t.Messages, Model: t.Model, Thinking: t.Thinking}, nil
 		},
+		SnapshotTranscript: func() (string, error) {
+			return snapshotParentTranscript(sess)
+		},
 	})
 	if err != nil {
 		sessionCancel()
@@ -758,6 +761,9 @@ func (m *Manager) deleteSession(id string) error {
 			}
 			// Remove the side directory of persisted subagent transcripts.
 			if err := session.NewSubagentStore(store.Dir(), id).Remove(); err != nil && !os.IsNotExist(err) {
+				deleteErrs = append(deleteErrs, err)
+			}
+			if err := session.RemoveTranscriptSnapshots(store.Dir(), id); err != nil && !os.IsNotExist(err) {
 				deleteErrs = append(deleteErrs, err)
 			}
 		}

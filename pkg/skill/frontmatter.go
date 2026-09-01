@@ -30,6 +30,14 @@ func (f frontmatter) boolField(key string, def bool) bool {
 	return def
 }
 
+// field returns a trimmed frontmatter value, or "" when the key is absent.
+func (f frontmatter) field(key string) string {
+	if f == nil {
+		return ""
+	}
+	return strings.TrimSpace(f[key])
+}
+
 // stripFrontmatter removes the leading "---" block from skill content. The
 // opening marker must be the file's first line, so a document that starts with
 // a horizontal rule keeps all of its text.

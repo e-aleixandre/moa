@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -352,6 +354,93 @@ func TestBuildChildRegistryRejectsEmptyAndUnknownTools(t *testing.T) {
 	_, errRes = buildChildRegistry(parent, map[string]any{"tools": []any{"read", "missing"}})
 	if errRes == nil || !strings.Contains(textOf(*errRes), "unknown tool: missing") {
 		t.Fatalf("expected unknown tool error, got %v", errRes)
+	}
+}
+
+func TestBuildChildRegistry_SnapshotReadCapabilityIsExact(t *testing.T) {
+	workspace := t.TempDir()
+	snapshotDir := t.TempDir()
+	snapshot := filepath.Join(snapshotDir, "snapshot.md")
+	sibling := filepath.Join(snapshotDir, "sibling.md")
+	if err := os.WriteFile(snapshot, []byte("parent evidence"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sibling, []byte("not granted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policy := tool.NewPathPolicy(workspace, nil, false)
+	cfg := tool.ToolConfig{WorkspaceRoot: workspace, PathPolicy: policy}
+	parent := core.NewRegistry()
+	for _, candidate := range []core.Tool{tool.NewRead(cfg), tool.NewWrite(cfg), tool.NewEdit(cfg)} {
+		if err := parent.Register(candidate); err != nil {
+			t.Fatal(err)
+		}
+	}
+	allowedBefore := policy.AllowedPaths()
+
+	parentRead, _ := parent.Get("read")
+	denied, err := parentRead.Execute(context.Background(), map[string]any{"path": snapshot}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !denied.IsError {
+		t.Fatal("parent read unexpectedly has snapshot access")
+	}
+
+	child, errResult := buildChildRegistry(parent, map[string]any{"tools": []any{"read", "write", "edit"}}, []string{snapshot})
+	if errResult != nil {
+		t.Fatalf("build child registry: %s", textOf(*errResult))
+	}
+	read, _ := child.Get("read")
+	granted, err := read.Execute(context.Background(), map[string]any{"path": snapshot}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if granted.IsError || !strings.Contains(granted.Content[0].Text, "parent evidence") {
+		t.Fatalf("child exact snapshot read = %+v", granted)
+	}
+	denied, err = read.Execute(context.Background(), map[string]any{"path": sibling}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !denied.IsError {
+		t.Fatal("child read unexpectedly accessed snapshot sibling")
+	}
+
+	write, _ := child.Get("write")
+	denied, err = write.Execute(context.Background(), map[string]any{"path": snapshot, "content": "overwrite"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !denied.IsError {
+		t.Fatal("child write unexpectedly accessed snapshot")
+	}
+	edit, _ := child.Get("edit")
+	denied, err = edit.Execute(context.Background(), map[string]any{"path": snapshot, "oldText": "parent", "newText": "child"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !denied.IsError {
+		t.Fatal("child edit unexpectedly accessed snapshot")
+	}
+	if got := policy.AllowedPaths(); strings.Join(got, "\x00") != strings.Join(allowedBefore, "\x00") {
+		t.Fatalf("snapshot capability changed parent AllowedPaths: got %v, want %v", got, allowedBefore)
+	}
+}
+
+func TestBuildChildRegistry_DoesNotAddReadForSnapshotCapability(t *testing.T) {
+	parent := core.NewRegistry()
+	for _, candidate := range []core.Tool{{Name: "read"}, {Name: "grep"}} {
+		if err := parent.Register(candidate); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg, errResult := buildChildRegistry(parent, map[string]any{"tools": []any{"grep"}}, []string{"/some/snapshot.md"})
+	if errResult != nil {
+		t.Fatalf("build child registry: %s", textOf(*errResult))
+	}
+	if _, ok := reg.Get("read"); ok {
+		t.Fatal("snapshot capability added read although the child did not select it")
 	}
 }
 
@@ -2429,6 +2518,118 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("OnChildEnd did not publish natural async terminal outcome")
 	}
+}
+
+func TestSubagentNotifyFalseSuppressesOnAsyncComplete(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := newMockProvider(gateResponse(started, release, "silent child"))
+
+	var mu sync.Mutex
+	completeN := 0
+	ended := make(chan struct{}, 1)
+	cfg := Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
+			mu.Lock()
+			completeN++
+			mu.Unlock()
+		},
+		OnChildStart: func(jobID, task, model, thinking, origin string, async bool, startedAt time.Time, accent int) {
+			if !async {
+				t.Error("background job should start as async")
+			}
+		},
+		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) {
+			ended <- struct{}{}
+		},
+	}
+	sub, _, _, jobs := newSubagentToolsWithStore(t, cfg)
+
+	res, err := sub.Execute(context.Background(), map[string]any{
+		"task": "quiet", "async": true, "notify": false,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatal(textOf(res))
+	}
+	got := textOf(res)
+	if strings.Contains(got, "You'll also be notified") {
+		t.Fatalf("silent spawn still promised a notification:\n%s", got)
+	}
+	if strings.Contains(got, "Use subagent_wait to block") {
+		t.Fatalf("silent spawn invited the parent to wait:\n%s", got)
+	}
+	if !strings.Contains(got, "Continue the original task") {
+		t.Fatalf("silent spawn should tell the parent to continue the original task:\n%s", got)
+	}
+	jobID := jobIDFromResult(t, res)
+	<-started
+	close(release)
+
+	select {
+	case <-ended:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnChildEnd should still fire when notify is false")
+	}
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	n := completeN
+	mu.Unlock()
+	if n != 0 {
+		t.Fatalf("OnAsyncComplete fired %d times with notify=false, want 0", n)
+	}
+
+	snap, delivered, err := jobs.wait(context.Background(), jobID, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Status != statusCompleted || snap.Result != "silent child" {
+		t.Fatalf("wait = %+v", snap)
+	}
+	if !delivered {
+		t.Fatal("wait should own the result when the async notification was suppressed")
+	}
+}
+
+func TestSubagentNotifyDefaultStillNotifies(t *testing.T) {
+	provider := newMockProvider(textResponse("normal child"))
+	var mu sync.Mutex
+	completeN := 0
+	cfg := Config{
+		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+		AppCtx:          context.Background(),
+		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
+			mu.Lock()
+			completeN++
+			mu.Unlock()
+		},
+	}
+	sub, _, _ := newSubagentTools(t, cfg)
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "t", "async": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatal(textOf(res))
+	}
+	got := textOf(res)
+	if !strings.Contains(got, "Use subagent_wait to block") {
+		t.Fatalf("default async spawn should still invite wait:\n%s", got)
+	}
+	if !strings.Contains(got, "You'll also be notified") {
+		t.Fatalf("default async spawn should still promise a notification:\n%s", got)
+	}
+	waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return completeN == 1
+	})
 }
 
 // TestSubagentWaitFastPathToolReturnsAck verifies the subagent_wait TOOL emits
