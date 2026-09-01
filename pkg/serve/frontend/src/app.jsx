@@ -1,6 +1,5 @@
 import { render } from "preact";
 import { useState, useEffect } from "preact/hooks";
-import { lazy, Suspense } from "preact/compat";
 import "./index.css";
 import { ConversationScreen, PaneGridScreen, MobileConversationScreen } from "./layout/index.js";
 import { CommandPalette, ToastContainer, PulsePairingPanel } from "./components/index.js";
@@ -22,138 +21,12 @@ import {
   setMobile, autoFillTiles, autoSelectMobile, openSession, afterVisibilityChange,
 } from "./data/tile-actions.js";
 
-// Galleries are development/reference surfaces, never part of the production
-// startup graph. Dynamic imports retain direct ?view=… access while keeping
-// their specimens and CSS out of app.js/app.css.
-const loadCatalog = () => import("./catalog-entry.js");
-const Catalog = lazy(() => loadCatalog().then((m) => ({ default: m.Catalog })));
-const LiveStatesGallery = lazy(() => loadCatalog().then((m) => ({ default: m.LiveStatesGallery })));
-const MobileGallery = lazy(() => loadCatalog().then((m) => ({ default: m.MobileGallery })));
-const SubagentGallery = lazy(() => loadCatalog().then((m) => ({ default: m.SubagentGallery })));
-const DesktopLab = lazy(() => loadCatalog().then((m) => ({ default: m.DesktopLab })));
+// Design galleries live in catalog-app.jsx and are served by `npm run catalog`.
+// They are not imported here so they never enter the production bundle.
 
-function GalleryLoad({ children }) {
-  useEffect(() => {
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = new URL("./catalog-entry.css", import.meta.url).href;
-    document.head.appendChild(link);
-    return () => link.remove();
-  }, []);
-  return <Suspense fallback={<div class="conversation-placeholder">Loading gallery…</div>}>{children}</Suspense>;
-}
-
-const welcomeStyle = {
-  maxWidth: "640px",
-  margin: "0 auto",
-  padding: "var(--space-12) var(--space-6) var(--space-6)",
-  textAlign: "center",
-};
-
-function Welcome() {
-  return (
-    <div style={welcomeStyle}>
-      <h1
-        style={{
-          fontSize: "var(--text-2xl)",
-          fontWeight: "var(--weight-semibold)",
-          letterSpacing: "var(--tracking-tight)",
-          color: "var(--peach)",
-        }}
-      >
-        moa · next
-      </h1>
-      <p
-        style={{
-          fontSize: "var(--text-md)",
-          color: "var(--subtext0)",
-          lineHeight: "var(--leading-relaxed)",
-          marginTop: "var(--space-3)",
-        }}
-      >
-        Scaffold for the new web frontend (Phase 0). Used to verify that the
-        design tokens load correctly before building anything else.
-      </p>
-      <a
-        href="?view=catalog"
-        style={{
-          display: "inline-block",
-          marginTop: "var(--space-5)",
-          fontSize: "var(--text-sm)",
-          color: "var(--lavender)",
-        }}
-      >
-        View primitives catalog →
-      </a>
-    </div>
-  );
-}
-
-function CatalogScreen() {
-  return (
-    <>
-      <div style={{ textAlign: "center", padding: "var(--space-3) 0 0" }}>
-        <a
-          href="?"
-          style={{ fontSize: "var(--text-sm)", color: "var(--lavender)" }}
-        >
-          ← Back to conversation screen
-        </a>
-      </div>
-      <Welcome />
-      <Catalog />
-    </>
-  );
-}
-
-// GALLERIES — the mock-driven design galleries (catalog / grid / live / mobile).
-// Reachable by direct URL only (?view=…); see GALLERY_LINKS below for the
-// discreet footer nav rendered ONLY on the galleries, never on the real
-// conversation/grid screens (no floating ViewSwitch over live UI).
-const GALLERY_LINKS = [
-  { key: "catalog", label: "Catalog", href: "?view=catalog" },
-  { key: "live", label: "Live states", href: "?view=live" },
-  { key: "subagent", label: "Subagent", href: "?view=subagent" },
-  { key: "mobile", label: "Mobile", href: "?view=mobile" },
-  { key: "desktop", label: "Desktop", href: "?view=desktop" },
-];
-
-const galleryNavStyle = {
-  display: "flex",
-  justifyContent: "center",
-  gap: "var(--space-4)",
-  padding: "var(--space-4)",
-  borderTop: "1px solid var(--surface0)",
-  fontSize: "var(--text-sm)",
-};
-
-// GalleryNav — the discreet, non-intrusive way to move between galleries. It
-// is a static footer strip (not a floating overlay), so it never covers the
-// design being reviewed and never appears over the real product screens.
-function GalleryNav({ current }) {
-  return (
-    <nav style={galleryNavStyle} aria-label="Galleries">
-      <a href="?" style={{ color: "var(--overlay1)" }}>← Conversation</a>
-      {GALLERY_LINKS.map((v) => (
-        <a
-          key={v.key}
-          href={v.href}
-          aria-current={v.key === current ? "page" : undefined}
-          style={{ color: v.key === current ? "var(--peach)" : "var(--lavender)" }}
-        >
-          {v.label}
-        </a>
-      ))}
-    </nav>
-  );
-}
-
-// view — selects the screen. Absence (or an unknown value) shows the REAL,
-// store-connected conversation screen. `?view=grid` opens the real pane
-// grid. `?view=catalog|live|subagent|mobile` open the mock galleries with their
-// GalleryNav. The value lives in the store (seeded from the URL) so the
-// conversation ⇄ grid hop flips it in place via the router (data/router.js)
-// with no full-page reload; consumers read state.view reactively.
+// view — selects the screen. Absence (or an unknown value) shows the conversation.
+// `?view=grid` opens the pane grid. The value lives in the store (seeded from
+// the URL) so the conversation ⇄ grid hop flips it in place via the router.
 
 // checkBuild reacts to a /api/version response: reload when the page is running
 // a bundle the server has replaced, and fall back to telling the user when even
@@ -373,11 +246,8 @@ function allTileIdsSafe(tree) {
   return tree.children.flatMap(allTileIdsSafe);
 }
 
-// App — routes to the selected screen. The conversation screen is the default
-// and the only store-connected one; galleries stay mock. Bootstrap runs for every
-// view so returning to "?" keeps a live store, but galleries just don't consume
-// it. The command palette mounts over the REAL screens only (never the mock
-// galleries).
+// App — routes to the selected screen. Conversation is the default; `?view=grid`
+// is the pane grid. Design galleries are a separate catalog-app, not this one.
 function App() {
   const version = useBootstrap();
   const [state, setState] = useState(store.get());
@@ -385,59 +255,11 @@ function App() {
   const view = state.view;
 
   // Lock the document only for application screens that supply their own
-  // mobile scroller. Catalog and gallery routes are long reference documents.
+  // mobile scroller (conversation). The grid is a desktop layout.
   useEffect(() => {
-    const gallery = view === "catalog" || view === "live" || view === "subagent" || view === "mobile" || view === "desktop";
-    document.documentElement.classList.toggle("mobile-locked", state.isMobile && !gallery);
+    document.documentElement.classList.toggle("mobile-locked", state.isMobile && view !== "grid");
   }, [state.isMobile, view]);
 
-  if (view === "catalog") {
-    return (
-      <>
-      <GalleryLoad><CatalogScreen /></GalleryLoad>
-        <GalleryNav current="catalog" />
-      </>
-    );
-  }
-  if (view === "live") {
-    return (
-      <>
-        <GalleryLoad><LiveStatesGallery /></GalleryLoad>
-        <GalleryNav current="live" />
-      </>
-    );
-  }
-  if (view === "subagent") {
-    return (
-      <>
-        <GalleryLoad><SubagentGallery /></GalleryLoad>
-        <GalleryNav current="subagent" />
-      </>
-    );
-  }
-  if (view === "mobile") {
-    return (
-      <>
-        <GalleryLoad><MobileGallery /></GalleryLoad>
-        <GalleryNav current="mobile" />
-      </>
-    );
-  }
-  if (view === "desktop") {
-    // The real ConversationScreen, framed. Not a mock: whatever ChatHead and
-    // the status strip do in production is what this page shows.
-    return (
-      <>
-        <GalleryLoad>
-          <DesktopLab>
-            <ConversationScreen version={version} />
-          </DesktopLab>
-        </GalleryLoad>
-        <GalleryNav current="desktop" />
-        <ToastContainer />
-      </>
-    );
-  }
   if (view === "grid") {
     // Real, store-connected pane grid — no ViewSwitch overlay.
     return (

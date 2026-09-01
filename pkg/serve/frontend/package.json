@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "build": "node esbuild.mjs --prune",
-    "watch": "node esbuild.mjs --watch"
+    "watch": "node esbuild.mjs --watch",
+    "catalog": "node catalog-serve.mjs"
   },
   "dependencies": {
     "dompurify": "^3.4.12",

@@ -370,6 +370,18 @@ cd pkg/serve/frontend && node esbuild.mjs --prune   # or: bun esbuild.mjs --prun
 MOA_SERVE_STATIC_DIR=pkg/serve/static moa serve
 ```
 
+The design lab (token catalog, framed desktop/phone/grid of the real screens)
+is not in the binary. It is a separate frontend:
+
+```bash
+cd pkg/serve/frontend && npm run catalog
+# http://127.0.0.1:7300/?view=desktop  — also binds Tailscale
+```
+
+A change to ChatHead or the status strip shows up there on reload because the
+lab mounts those components, not a copy. It does not talk to a running moa;
+the conversation it shows is a frozen specimen.
+
 The build output is one tree: the app bundle plus the assets the PWA references
 absolutely at the root — the service worker (`/sw.js`, which push runs through),
 the icons and the manifest.
