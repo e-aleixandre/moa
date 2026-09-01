@@ -157,8 +157,8 @@ type Store struct {
 	codebaseKey  string
 	// legacyProjectRoot is ~/.config/moa/projects/<ProjectHash>: where project
 	// memory lived while a project was identified by its path, and where the v1
-	// MEMORY.md was left. Only the migrations in migrate_codebase.go and
-	// MigrateV1IfNeeded look at it; nothing reads facts from there at runtime.
+	// MEMORY.md was left. Only MigrateV1IfNeeded looks at it; nothing reads
+	// facts from there at runtime.
 	legacyProjectRoot string
 }
 
@@ -432,7 +432,7 @@ func v1Fact(body string) Memory {
 // The flat file is looked for under the path-keyed project directory because
 // that is the only place v1 ever wrote it; the fact it becomes is written to
 // the current (codebase-keyed) directory like any other. It must therefore run
-// after the codebase migration — see Migrate.
+// at startup — see Migrate.
 func (s *Store) MigrateV1IfNeeded() error {
 	v1Path := filepath.Join(s.legacyProjectRoot, "MEMORY.md")
 	data, err := os.ReadFile(v1Path)
@@ -773,4 +773,10 @@ func syncDir(dir string) error {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// Migrate brings this store's project scope up to date. Call it once, at
+// startup, before reading anything.
+func (s *Store) Migrate() error {
+	return s.MigrateV1IfNeeded()
 }
