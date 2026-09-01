@@ -1,15 +1,13 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { Plus } from "lucide-preact";
-import { store } from "../../../data/store.js";
 import { updateSession } from "../../../data/store.js";
-import { projectStream } from "../../../data/stream-model.js";
+import { useStore } from "../../../hooks/useStore.js";
+import { projectStream, liveTrayAgents } from "../../../data/stream-model.js";
 import { focusedSession, focusedSessionId } from "../../../data/selectors.js";
 import { setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
-import { shortPath, sessionDisplayDotState, sessionTitle } from "../../../data/util/format.js";
-import { activityPhase } from "../../../data/util/activity.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
@@ -22,8 +20,7 @@ import { MobileNowLine } from "./MobileNowLine.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import { MobileBashJobView } from "./MobileBashJobView.jsx";
 import { LiveDock } from "../../LiveDock/LiveDock.jsx";
-import { liveTrayAgents } from "../../../data/stream-model.js";
-import { aggregateAttention, newResultSessions } from "./attention-model.js";
+import { selectMobileChrome } from "./chrome.js";
 import "./MobileConversationScreen.css";
 
 // MobileConversationScreen — the CONNECTED root container of the mobile
@@ -51,136 +48,24 @@ import "./MobileConversationScreen.css";
 // denser). No data logic is duplicated. The mock specimen used by the design
 // gallery lives in mobile-gallery.jsx (see MobileConversationSpecimen).
 
-// relAge — coarse relative age from an `updated` epoch (mirrors the desktop
-// ConversationScreen's spineSessions helper; kept local to avoid a shared
-// import churn). "now" under a minute, then m/h/d.
-function relAge(updated) {
-  if (!updated) return "";
-  const diff = Date.now() - updated;
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return "now";
-  if (min < 60) return `${min}m`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.floor(h / 24);
-  return `${d}d`;
-}
-
-// sessionBrief derives the drawer card's "last" line from the real session
-// fields the /api/sessions poll carries: the server-owned brief (progress →
-// attempting) when present, else the live activity label, else the raw state.
-// There is NO per-session "last message" field in the poll model, so we DO NOT
-// invent a summary — we degrade to the brief, then to the activity/state.
-// Saved sessions render NO brief (return ""): the grey StateDot and the drawer's
-// group counter already carry the "saved" state, so a "Saved" line is redundant.
-// TODO: a true last-message preview would need the projection or the API
-// to carry one; not added here (out of scope, would touch the backend/model).
-function sessionBrief(sess) {
-  if (sess.briefProgress) return sess.briefProgress;
-  if (sess.briefAttempting) return sess.briefAttempting;
-  if (sess.error) return sess.error;
-  const phase = activityPhase(sess);
-  if (phase === "waiting") return "Waiting for you";
-  if (sess.state === "running") return "Working…";
-  if (sess.state === "saved") return "";
-  return sess.state || "idle";
-}
-
-// drawerSessions builds the drawer's two groups — active (newest first) and
-// saved — kept apart rather than concatenated because the drawer labels them
-// separately, exactly as the desktop Spine does.
-function drawerSessions(sessions, activeId) {
-  const all = Object.values(sessions);
-  const active = all
-    .filter((s) => s.state !== "saved")
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0));
-  const saved = all
-    .filter((s) => s.state === "saved")
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0));
-  const toCard = (s) => {
-    const dotState = sessionDisplayDotState(s);
-    const needs = dotState === "permission";
-    return {
-      id: s.id,
-      title: sessionTitle(s),
-      state: dotState,
-      when: relAge(s.updated),
-      last: sessionBrief(s),
-      needsLabel: needs ? "Needs you:" : undefined,
-      path: shortPath(s.cwd) || s.cwd || "",
-      unseen: !!s.unseen,
-      active: s.id === activeId,
-      saved: s.state === "saved",
-      origin: s.origin || undefined,
-      cwd: s.cwd || "",
-      updated: s.updated || 0,
-    };
-  };
-  const newResults = newResultSessions(active);
-  const remainingActive = active.filter((s) => !newResults.includes(s));
-  return {
-    newResults: newResults.map(toCard),
-    active: remainingActive.map(toCard),
-    saved: saved.map(toCard),
-    activeCount: active.length,
-    savedCount: saved.length,
-  };
-}
-
-// drawerProjects — the folders you already have sessions in, most recent first.
-// That list IS the mobile "pick a project" surface: no directory explorer here
-// (see NewSessionView), so the only thing that matters is that a folder you have
-// worked in is one tap away.
-function drawerProjects(sessions) {
-  const byCwd = {};
-  for (const s of Object.values(sessions)) {
-    const cwd = s.cwd || "";
-    if (!cwd) continue;
-    const updated = s.updated || 0;
-    if (!byCwd[cwd] || updated > byCwd[cwd].updated) byCwd[cwd] = { cwd, updated };
-  }
-  return Object.values(byCwd).sort((a, b) => b.updated - a.updated);
-}
-
-// recentSavedSessions builds the 3 most-recent saved sessions for the empty
-// state's RECENT list (EMPTY-STATE-SPEC §2.2). Same card fields the drawer uses,
-// trimmed to what the compact row shows.
-function recentSavedSessions(sessions, limit = 3) {
-  return Object.values(sessions)
-    .filter((s) => s.state === "saved")
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .slice(0, limit)
-    .map((s) => ({
-      id: s.id,
-      title: sessionTitle(s),
-      when: relAge(s.updated),
-      path: shortPath(s.cwd) || s.cwd || "",
-    }));
-}
-
 export function MobileConversationScreen({ version = null }) {
-  const [state, setState] = useState(store.get());
-  useEffect(() => store.subscribe(setState), []);
+  return (
+    <div class="mconv">
+      <MobileConversationBody />
+      <MobileSessionChrome version={version} />
+    </div>
+  );
+}
+
+function MobileConversationBody() {
+  const session = useStore(focusedSession);
+  const activeId = useStore(focusedSessionId);
+  const loaded = useStore((s) => s.sessionsLoaded);
+  const usage = useStore((s) => s.usage);
+  const chrome = useStore(selectMobileChrome);
 
   const [rewindOpen, setRewindOpen] = useState(false);
   const [secretAliases, setSecretAliases] = useState(null);
-  // Global Settings bottom-sheet, reached from the drawer footer via a sheet
-  // HANDOFF: tapping ⚙ closes the drawer, and only once the drawer's leave
-  // animation has settled (onClosed) does the Settings sheet slide up — one
-  // overlay at a time, never stacked (same pattern as the status line's Rewind
-  // handoff). A plain drawer close leaves the pending flag false and hands
-  // nothing off. Closing Settings returns to the conversation, not the drawer.
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsPendingRef = useRef(false);
-
-  const session = focusedSession(state);
-  const activeId = focusedSessionId(state);
-  const loaded = state.sessionsLoaded;
-  // The drawer's open/step state lives in the store (data/drawer.js): the
-  // empty state below and the command palette both open it, so it can't be
-  // local to this component any more.
-  const drawerOpen = state.drawerOpen;
-  const setDrawerOpen = (next) => (next ? openDrawer("list") : closeDrawer());
 
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
   // The dock is the permanent home for live ASYNC work (async subagents + bash)
@@ -228,48 +113,18 @@ export function MobileConversationScreen({ version = null }) {
   }, []);
 
   const onSelectFromDrawer = (id) => { setActiveSession(id); closeDrawer(); };
-  // Creating a session on a phone happens in ONE place: the drawer's "new"
-  // screen. The empty state's button opens that, it does not stand up a second
-  // create flow (the palette's create step is the desktop's, where ⌘K lives).
   const onNew = () => openDrawer("new");
-  // From inside the drawer, creating is done in place (NewSessionView) — this
-  // just performs it and closes.
-  const onCreate = (cwd) => {
-    closeDrawer();
-    createSession({ cwd }).catch((e) =>
-      addToast({ title: "Could not create session", detail: String(e.message || e), type: "error" })
-    );
-  };
-  const onSettingsFromDrawer = () => {
-    settingsPendingRef.current = true;
-    closeDrawer();
-  };
-  const onDrawerClosed = () => {
-    if (!settingsPendingRef.current) return;
-    settingsPendingRef.current = false;
-    setSettingsOpen(true);
-  };
 
   useEffect(() => { setRewindOpen(false); }, [activeId]);
   useEffect(() => { setSecretAliases(null); }, [activeId]);
 
-  // Aggregate cross-session attention for the title chip's dot: OTHER sessions
-  // blocked on the user (excludes the active one, whose block is the inline
-  // PermissionPrompt in the conversation).
-  const attention = aggregateAttention(state.sessions, activeId);
-  const {
-    newResults,
-    active: drawerActive,
-    saved: drawerSaved,
-    activeCount,
-    savedCount,
-  } = drawerSessions(state.sessions, activeId);
+  const { recentSaved, activeCount, savedCount } = chrome;
 
   let body;
   if (!loaded) {
     body = <div class="mconv-placeholder">Loading sessions…</div>;
   } else if (!session) {
-    const recents = recentSavedSessions(state.sessions);
+    const recents = recentSaved;
     const totalCount = activeCount + savedCount;
     if (totalCount === 0) {
       // First run — no sessions at all (EMPTY-STATE-SPEC §2.4). New is primary.
@@ -391,60 +246,15 @@ export function MobileConversationScreen({ version = null }) {
             />
           )}
           <MobileNowLine session={session} />
-          <MobileComposer key={session.id} session={session} usage={state.usage} onSecret={setSecretAliases} />
+          <MobileComposer key={session.id} session={session} usage={usage} onSecret={setSecretAliases} />
         </>
       );
     }
   }
 
   return (
-    <div class="mconv">
+    <>
       {body}
-
-      {/* The title chip floats over the transcript and is the door to the
-          session list. It is hidden inside a subagent or a background job,
-          each a full-screen push carrying its own header and its own way
-          back. */}
-      {session && !session.viewingSubagent && !session.viewingBashJob && (
-        <MobileTitleChip
-          title={sessionTitle(session)}
-          attention={attention}
-          open={drawerOpen}
-          onToggle={setDrawerOpen}
-        />
-      )}
-
-      <SessionDrawer
-        open={drawerOpen}
-        step={state.drawerStep}
-        onClose={() => setDrawerOpen(false)}
-        onClosed={onDrawerClosed}
-        active={drawerActive}
-        newResults={newResults}
-        saved={drawerSaved}
-        activeCount={activeCount}
-        savedCount={savedCount}
-        projects={drawerProjects(state.sessions)}
-        onSelect={onSelectFromDrawer}
-        onCreate={onCreate}
-        onSettings={onSettingsFromDrawer}
-        version={version}
-        onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
-        onReopenSession={(id) => { resumeSession(id).catch(() => {}); }}
-        onDeleteSession={(id) => { deleteSession(id).catch(() => {}); }}
-        groupByProject={state.groupByProject}
-        drawerCollapsed={state.drawerCollapsed}
-        onGroupByProject={setGroupByProject}
-        onToggleProject={setDrawerProjectCollapsed}
-      />
-      <MobileSheet
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        title="Settings"
-        scope="everywhere"
-      >
-        <GlobalSettings soundEnabled={state.soundEnabled} version={version} />
-      </MobileSheet>
       {session && (
         <MobileSheet
           open={secretAliases !== null}
@@ -467,6 +277,73 @@ export function MobileConversationScreen({ version = null }) {
           sessionId={session.id}
         />
       )}
-    </div>
+    </>
+  );
+}
+
+function MobileSessionChrome({ version }) {
+  const chrome = useStore(selectMobileChrome);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsPendingRef = useRef(false);
+  const setDrawerOpen = (next) => (next ? openDrawer("list") : closeDrawer());
+  const onSelectFromDrawer = (id) => { setActiveSession(id); closeDrawer(); };
+  const onCreate = (cwd) => {
+    closeDrawer();
+    createSession({ cwd }).catch((e) =>
+      addToast({ title: "Could not create session", detail: String(e.message || e), type: "error" })
+    );
+  };
+  const onSettingsFromDrawer = () => {
+    settingsPendingRef.current = true;
+    closeDrawer();
+  };
+  const onDrawerClosed = () => {
+    if (!settingsPendingRef.current) return;
+    settingsPendingRef.current = false;
+    setSettingsOpen(true);
+  };
+
+  return (
+    <>
+      {chrome.showChip && (
+        <MobileTitleChip
+          title={chrome.title}
+          attention={chrome.attention}
+          open={chrome.drawerOpen}
+          onToggle={setDrawerOpen}
+        />
+      )}
+      <SessionDrawer
+        open={chrome.drawerOpen}
+        step={chrome.drawerStep}
+        onClose={() => setDrawerOpen(false)}
+        onClosed={onDrawerClosed}
+        active={chrome.active}
+        newResults={chrome.newResults}
+        saved={chrome.saved}
+        activeCount={chrome.activeCount}
+        savedCount={chrome.savedCount}
+        projects={chrome.projects}
+        onSelect={onSelectFromDrawer}
+        onCreate={onCreate}
+        onSettings={onSettingsFromDrawer}
+        version={version}
+        onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
+        onReopenSession={(id) => { resumeSession(id).catch(() => {}); }}
+        onDeleteSession={(id) => { deleteSession(id).catch(() => {}); }}
+        groupByProject={chrome.groupByProject}
+        drawerCollapsed={chrome.drawerCollapsed}
+        onGroupByProject={setGroupByProject}
+        onToggleProject={setDrawerProjectCollapsed}
+      />
+      <MobileSheet
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        title="Settings"
+        scope="everywhere"
+      >
+        <GlobalSettings soundEnabled={chrome.soundEnabled} version={version} />
+      </MobileSheet>
+    </>
   );
 }

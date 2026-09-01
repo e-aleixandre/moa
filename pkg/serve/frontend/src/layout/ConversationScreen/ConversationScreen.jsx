@@ -21,7 +21,6 @@ import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { shortModel, shortPath, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
-import { activityPhase } from "../../data/util/activity.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
@@ -46,20 +45,6 @@ export function ConversationScreen() {
   const activeId = useStore(focusedSessionId);
   const loaded = useStore((s) => s.sessionsLoaded);
   const usage = useStore((s) => s.usage);
-
-  // Activity clock: while the focused session shows live activity, tick once a
-  // second so the NowLine's elapsed timer advances on its own. The timer origin
-  // is the server-stamped runStartedAtMs (read inside NowLine), not this clock —
-  // the clock only supplies "now", and NowLine reuses it instead of starting a
-  // second interval for the same tick.
-  const activityActive = activityPhase(session) !== null;
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    if (!activityActive) return;
-    setNowMs(Date.now());
-    const t = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [activityActive]);
 
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
   // The dock is the permanent home for live ASYNC work (async subagents + bash)
@@ -273,7 +258,7 @@ export function ConversationScreen() {
                 the strip below keeps the standing telemetry (context, cost,
                 permissions, MCP, tokens). flex:none, so it pushes the stream up
                 instead of overlaying the composer. */}
-            <NowLine session={session} nowMs={nowMs} />
+            <NowLine session={session} />
             <Composer key={session.id} sessionId={session.id} session={session} onSecret={setSecretAliases} />
             <div class="status-strip-anchor" ref={usageAnchorRef}>
               <StatusStrip
