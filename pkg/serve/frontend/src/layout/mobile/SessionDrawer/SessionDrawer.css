@@ -75,6 +75,7 @@
   font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--text);
+  margin-right: auto;
 }
 
 .sdrawer-head .sdrawer-count {
@@ -83,24 +84,28 @@
   color: var(--overlay1);
 }
 
-/* New session — a quiet icon affordance in the header, where the list's own
-   "add one more" belongs. */
+/* New session — a real button, same job as the desktop Spine. */
 .sdrawer-new {
-  margin-left: auto;
   flex: none;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--surface2);
+  gap: var(--space-2);
+  margin: 0 12px 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--surface1);
+  border-radius: 10px;
   background: var(--surface0);
-  color: var(--subtext0);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   cursor: pointer;
 }
 .sdrawer-new:hover,
 .sdrawer-new:active {
+  background: var(--surface1);
+  border-color: var(--surface2);
   color: var(--text);
 }
 .sdrawer-new:focus-visible {
@@ -221,7 +226,37 @@
 
 .sdcard-slot .session-row {
   width: 100%;
-  background: var(--base);
+  background: transparent;
+  border-color: transparent;
+  border-radius: 8px;
+  min-width: 0;
+}
+.sdcard-slot .session-row.variant-card:hover,
+.sdcard-slot .session-row.variant-card.on {
+  background: var(--surface0);
+  border-color: transparent;
+}
+.sdcard-slot .session-row.variant-card.needs-yellow,
+.sdcard-slot .session-row.variant-card.needs-red {
+  background: transparent;
+}
+.sdcard-slot .session-row.variant-card.needs-yellow:hover,
+.sdcard-slot .session-row.variant-card.needs-red:hover,
+.sdcard-slot .session-row.variant-card.needs-yellow.on,
+.sdcard-slot .session-row.variant-card.needs-red.on {
+  background: var(--surface0);
+}
+.sdcard-slot .session-row.variant-card.needs-yellow .r1,
+.sdcard-slot .session-row.variant-card.needs-yellow .r2,
+.sdcard-slot .session-row.variant-card.needs-red .r1,
+.sdcard-slot .session-row.variant-card.needs-red .r2 {
+  color: var(--text);
+}
+.sdcard-slot .session-row.variant-card.needs-yellow .brief {
+  color: var(--yellow);
+}
+.sdcard-slot .session-row.variant-card.needs-red .brief {
+  color: var(--red);
 }
 
 /* Reserve the top-right corner the ⋯ button occupies, so the age never slides

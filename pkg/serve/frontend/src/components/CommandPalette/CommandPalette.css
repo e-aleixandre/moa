@@ -158,18 +158,22 @@
 
 /* action rows */
 .row .act-ic {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+  width: 20px;
+  height: 20px;
+  border-radius: 0;
   flex: none;
   display: grid;
   place-items: center;
-  background: var(--peach-dim);
-  color: var(--peach);
+  background: transparent;
+  color: var(--overlay1);
 }
-.row .act-ic.mauve { background: var(--mauve-dim); color: var(--mauve); }
-.row .act-ic.blue { background: var(--blue-dim); color: var(--blue); }
-.row .act-ic.grey { background: color-mix(in srgb, var(--surface0) 70%, transparent); color: var(--overlay1); }
+.row .act-ic.mauve,
+.row .act-ic.blue,
+.row .act-ic.grey { background: transparent; color: var(--overlay1); }
+.row.sel .act-ic,
+.row.sel .act-ic.mauve,
+.row.sel .act-ic.blue,
+.row.sel .act-ic.grey { color: var(--text); }
 .row .act-name {
   flex: 1;
   font-size: 13.5px;
@@ -185,16 +189,17 @@
 
 /* directory / project rows */
 .row .dir-ic {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+  width: 20px;
+  height: 20px;
+  border-radius: 0;
   flex: none;
   display: grid;
   place-items: center;
-  background: var(--blue-dim);
-  color: var(--blue);
+  background: transparent;
+  color: var(--overlay1);
 }
-.row .dir-ic.grey { background: color-mix(in srgb, var(--surface0) 70%, transparent); color: var(--overlay1); }
+.row .dir-ic.grey { background: transparent; color: var(--overlay1); }
+.row.sel .dir-ic { color: var(--text); }
 .row .path {
   font-family: var(--mono);
   font-size: 12.5px;
