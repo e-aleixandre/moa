@@ -47,7 +47,11 @@ func (m *Manager) generateAutoTitle(sess *ManagedSession) {
 	// Tie generation to the session context so deleting the session aborts it.
 	title, err := autotitle.Generate(sess.infra.sessionCtx, m.providerFactory, sess.autoTitleModel, msgs)
 	if err != nil {
-		slog.Debug("autotitle: generation failed", "session", sess.ID, "error", err)
+		// Release the one-shot guard so the next successful run tries again:
+		// an overloaded auxiliary model must not leave the truncated first
+		// message as the title for good.
+		sess.autoTitled.Store(false)
+		slog.Warn("autotitle: generation failed", "session", sess.ID, "error", err)
 		return
 	}
 	if sess.deleted.Load() {
