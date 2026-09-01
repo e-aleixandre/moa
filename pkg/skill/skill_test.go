@@ -53,6 +53,81 @@ func TestDiscover_ProjectAndGlobal(t *testing.T) {
 	}
 }
 
+func TestDiscover_GlobalSkillDirectorySymlink(t *testing.T) {
+	configDir := t.TempDir()
+	cwd := t.TempDir()
+	t.Setenv("MOA_CONFIG_DIR", configDir)
+
+	sources := t.TempDir()
+	writeSkill(t, sources, "source", "# Linked Skill\n\nLoaded through the activation directory.\n")
+	globalDir := filepath.Join(configDir, "skills")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(sources, "source"), filepath.Join(globalDir, "linked")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	skills := Discover(cwd)
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if skills[0].Name != "linked" || skills[0].DisplayName != "Linked Skill" {
+		t.Fatalf("linked skill = %+v", skills[0])
+	}
+	loaded, err := Load(skills[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(loaded, "Loaded through the activation directory.") {
+		t.Fatalf("linked skill content not loaded: %q", loaded)
+	}
+}
+
+func TestDiscover_GlobalSkillSymlinkSkipsBrokenAndFileTargets(t *testing.T) {
+	configDir := t.TempDir()
+	cwd := t.TempDir()
+	t.Setenv("MOA_CONFIG_DIR", configDir)
+	globalDir := filepath.Join(configDir, "skills")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fileTarget := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(fileTarget, []byte("# Not a directory\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(fileTarget, filepath.Join(globalDir, "file-link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), filepath.Join(globalDir, "broken")); err != nil {
+		t.Fatal(err)
+	}
+
+	if skills := Discover(cwd); len(skills) != 0 {
+		t.Fatalf("invalid symlink targets discovered as skills: %+v", skills)
+	}
+}
+
+func TestDiscover_ProjectSkillDirectorySymlinkIsIgnored(t *testing.T) {
+	configDir := t.TempDir()
+	cwd := t.TempDir()
+	t.Setenv("MOA_CONFIG_DIR", configDir)
+
+	sources := t.TempDir()
+	writeSkill(t, sources, "source", "# External Project Skill\n")
+	projectDir := filepath.Join(cwd, ".moa", "skills")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(sources, "source"), filepath.Join(projectDir, "external")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if skills := Discover(cwd); len(skills) != 0 {
+		t.Fatalf("project symlink escaped the checkout: %+v", skills)
+	}
+}
+
 func TestDiscover_Empty(t *testing.T) {
 	cwd := t.TempDir()
 	t.Setenv("MOA_CONFIG_DIR", t.TempDir())

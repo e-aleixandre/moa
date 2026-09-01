@@ -89,11 +89,12 @@ func Discover(cwd string) []Skill {
 
 	// Global skills (lower priority).
 	if dir := core.ConfigSubdir("skills"); dir != "" {
-		scanDir(dir, skills)
+		scanDir(dir, skills, true)
 	}
 
-	// Project skills (higher priority — overwrites global by name).
-	scanDir(filepath.Join(cwd, ".moa", "skills"), skills)
+	// Project skill entries remain ordinary directories. Activation links are
+	// reserved for the user-controlled global skills directory.
+	scanDir(filepath.Join(cwd, ".moa", "skills"), skills, false)
 
 	result := make([]Skill, 0, len(skills))
 	for _, s := range skills {
@@ -148,13 +149,31 @@ func RenderBody(body string, args []string) string {
 }
 
 // scanDir reads all <dir>/<name>/SKILL.md entries and adds them to the map.
-func scanDir(dir string, out map[string]Skill) {
+// Global skill directories may be symlinks so ~/.config/moa/skills can act as
+// an activation registry without mixing third-party checkouts into a personal
+// skills repository. Project symlinks are deliberately not followed.
+func scanDir(dir string, out map[string]Skill, followSymlinks bool) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
+		mode := e.Type()
+		// Some filesystems report DT_UNKNOWN. Info performs the fallback stat
+		// needed to distinguish a real directory from a symlink there.
+		if mode == 0 {
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			mode = info.Mode()
+		}
+		isDir := mode.IsDir()
+		if !isDir && followSymlinks && mode&os.ModeSymlink != 0 {
+			info, err := os.Stat(filepath.Join(dir, e.Name()))
+			isDir = err == nil && info.IsDir()
+		}
+		if !isDir {
 			continue
 		}
 		name := e.Name()

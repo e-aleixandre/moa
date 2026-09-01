@@ -177,6 +177,15 @@ A **skill** is a folder with a `SKILL.md` in `.moa/skills/<name>/` (project) or
 `~/.config/moa/skills/<name>/` (global). Its first heading is the title, and a
 one-line description follows it.
 
+Global skill folders may be symbolic links. This lets
+`~/.config/moa/skills/` act as an activation directory while personal and
+third-party skills remain in separate repositories. The link name is the
+installed skill name. Symbolic-link activation is supported only in the global
+skills directory; entries directly under a project's `.moa/skills/` must be
+ordinary directories. Unlike `AGENTS.md`, project skills are read only from the
+session's exact CWD; Moa does not search parent directories for
+`.moa/skills/`.
+
 By default a skill is listed in the system prompt so the agent can pull it in
 with `load_skill`, and you can invoke it yourself by typing `/<name>`. Arguments
 land wherever you write `$ARGUMENTS`; if the file has no placeholder they are
