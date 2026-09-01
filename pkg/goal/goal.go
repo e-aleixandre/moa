@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -295,7 +297,9 @@ func ensureStateFile(path, objective string) error {
 	return nil
 }
 
-const stateTemplate = `## En curso (qué toca ahora)
+const stateTemplate = `WORKDIR: (absolute path — set this if you work in another directory or worktree; the verifier evaluates there)
+
+## En curso (qué toca ahora)
 
 ## Hecho (mejora → commit)
 
@@ -305,3 +309,36 @@ const stateTemplate = `## En curso (qué toca ahora)
 
 ## Notas durables
 `
+
+var stateWorkDirLine = regexp.MustCompile(`^WORKDIR:\s*(.+)$`)
+
+// ParseStateWorkDir returns the first absolute or home-relative WORKDIR in a
+// state file. Invalid values, including the template placeholder, are ignored.
+func ParseStateWorkDir(statePath string) string {
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		match := stateWorkDirLine.FindStringSubmatch(line)
+		if len(match) == 0 {
+			continue
+		}
+		dir := strings.TrimSpace(match[1])
+		if strings.HasPrefix(dir, "/") {
+			return dir
+		}
+		if strings.HasPrefix(dir, "~") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return ""
+			}
+			if dir == "~" {
+				return home
+			}
+			return filepath.Join(home, strings.TrimPrefix(dir, "~"))
+		}
+		return ""
+	}
+	return ""
+}

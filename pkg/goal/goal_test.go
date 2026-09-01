@@ -193,3 +193,33 @@ func TestEnter_StoresWorkDir(t *testing.T) {
 		t.Fatalf("WorkDir = %q, want /tmp/wt-foo", got)
 	}
 }
+
+func TestParseStateWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "STATE.md")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "absent", content: "## En curso\n", want: ""},
+		{name: "placeholder ignored", content: stateTemplate, want: ""},
+		{name: "absolute value", content: "WORKDIR: /tmp/feature-worktree\n", want: "/tmp/feature-worktree"},
+		{name: "home expansion", content: "WORKDIR: ~/feature-worktree\n", want: filepath.Join(home, "feature-worktree")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(statePath, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got := ParseStateWorkDir(statePath); got != tc.want {
+				t.Errorf("ParseStateWorkDir() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

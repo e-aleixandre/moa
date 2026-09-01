@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -663,7 +664,29 @@ func goalWorkDir(sctx *SessionContext, info goal.Info) string {
 	if info.WorkDir != "" {
 		return info.WorkDir
 	}
+	if stateDir := goal.ParseStateWorkDir(info.StatePath); stateDir != "" {
+		real, err := filepath.EvalSymlinks(stateDir)
+		if err != nil {
+			warnRejectedGoalWorkDir(stateDir, err.Error())
+		} else if fileInfo, err := os.Stat(real); err != nil {
+			warnRejectedGoalWorkDir(stateDir, err.Error())
+		} else if !fileInfo.IsDir() {
+			warnRejectedGoalWorkDir(stateDir, "not a directory")
+		} else if sctx.PathPolicy != nil && !sctx.PathPolicy.IsAllowed(real) {
+			warnRejectedGoalWorkDir(stateDir, "outside allowed paths")
+		} else {
+			return real
+		}
+	}
 	return sctx.CWD
+}
+
+var rejectedGoalWorkDirs sync.Map
+
+func warnRejectedGoalWorkDir(dir, reason string) {
+	if _, loaded := rejectedGoalWorkDirs.LoadOrStore(dir, struct{}{}); !loaded {
+		slog.Warn("goal: ignoring STATE.md WORKDIR", "workdir", dir, "reason", reason)
+	}
 }
 
 // goalRelaunch sends the next iteration's prompt if the agent is idle/error.
@@ -748,6 +771,7 @@ type goalCheckGate struct {
 func buildGoalEvidence(ctx context.Context, cwd, finalText string) (string, goalCheckGate) {
 	var b strings.Builder
 	var gate goalCheckGate
+	fmt.Fprintf(&b, "EVALUATED IN: %s\n\n", cwd)
 	if strings.TrimSpace(finalText) != "" {
 		b.WriteString("WORKER'S FINAL MESSAGE:\n")
 		b.WriteString(finalText)

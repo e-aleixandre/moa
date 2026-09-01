@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 func TestEnterGoalResolvesRelativeStatePathPerSessionCWD(t *testing.T) {
@@ -63,5 +64,36 @@ func TestEnterGoalResolvesRelativeStatePathPerSessionCWD(t *testing.T) {
 				t.Fatal("goal setup run did not finish")
 			}
 		})
+	}
+}
+
+func TestGoalWorkDir_UsesAllowedStateWorkDir(t *testing.T) {
+	root := t.TempDir()
+	workDir := filepath.Join(root, "feature")
+	if err := os.Mkdir(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(root, "STATE.md")
+	if err := os.WriteFile(statePath, []byte("WORKDIR: "+workDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sctx := &SessionContext{CWD: root, PathPolicy: tool.NewPathPolicy(root, nil, false)}
+	if got := goalWorkDir(sctx, goal.Info{StatePath: statePath}); got != workDir {
+		t.Errorf("goalWorkDir() = %q, want %q", got, workDir)
+	}
+}
+
+func TestGoalWorkDir_FallsBackForStateWorkDirOutsidePolicy(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	statePath := filepath.Join(root, "STATE.md")
+	if err := os.WriteFile(statePath, []byte("WORKDIR: "+outside+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sctx := &SessionContext{CWD: root, PathPolicy: tool.NewPathPolicy(root, nil, false)}
+	if got := goalWorkDir(sctx, goal.Info{StatePath: statePath}); got != root {
+		t.Errorf("goalWorkDir() = %q, want fallback %q", got, root)
 	}
 }

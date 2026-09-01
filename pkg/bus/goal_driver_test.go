@@ -624,6 +624,9 @@ func TestBuildGoalEvidence_IncludesDiffAndChecks(t *testing.T) {
 	}
 
 	ev, _ := buildGoalEvidence(context.Background(), dir, "I changed the file")
+	if !strings.HasPrefix(ev, "EVALUATED IN: "+dir+"\n") {
+		t.Fatalf("evidence should identify its directory, got:\n%s", ev)
+	}
 	if !strings.Contains(ev, "DIFF vs HEAD") || !strings.Contains(ev, "MODIFIED CONTENT") {
 		t.Fatalf("evidence should contain the real diff, got:\n%s", ev)
 	}
