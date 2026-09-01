@@ -328,9 +328,10 @@ export function shortModel(model) {
 // MODEL_CODENAMES — the friendly one-word names moa gives its models across
 // providers. Detected as a substring of the model string (case-insensitive) and
 // rendered capitalized, so "Claude Opus 4.8" → "Opus", "Claude Fable 5" →
-// "Fable", "GPT-5.6 Sol" → "Sol". None is a substring of another, so order
-// doesn't matter. Anthropic: opus/sonnet/haiku/fable; OpenAI: sol/terra/luna.
-const MODEL_CODENAMES = ['opus', 'sonnet', 'haiku', 'fable', 'sol', 'terra', 'luna'];
+// "Fable", "GPT-5.6 Sol" → "Sol", "Grok 4.6" → "Grok". None is a substring of
+// another, so order doesn't matter. Anthropic: opus/sonnet/haiku/fable;
+// OpenAI: sol/terra/luna; xAI: grok.
+const MODEL_CODENAMES = ['opus', 'sonnet', 'haiku', 'fable', 'sol', 'terra', 'luna', 'grok'];
 
 /** modelCodename → the friendly one-word model name (capitalized) when the model
  *  string carries a known codename; "" when it doesn't (caller falls back). */

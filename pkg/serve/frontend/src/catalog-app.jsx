@@ -60,7 +60,6 @@ function useCatalogBootstrap() {
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
-  return state;
 }
 
 function LabPalette() {

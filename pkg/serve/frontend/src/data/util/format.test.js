@@ -186,6 +186,8 @@ test('modelCodename: capitalizes a known codename anywhere in the string', () =>
   expect(modelCodename('Claude Sonnet 5')).toBe('Sonnet');
   expect(modelCodename('GPT-5.6 Sol')).toBe('Sol');
   expect(modelCodename('gpt-5.6-terra')).toBe('Terra');
+  expect(modelCodename('Grok 4.6')).toBe('Grok');
+  expect(modelCodename('xai/grok-4.6')).toBe('Grok');
   expect(modelCodename('anthropic/claude-opus-4-8')).toBe('Opus');
 });
 

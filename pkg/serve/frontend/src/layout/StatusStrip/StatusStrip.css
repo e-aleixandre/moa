@@ -304,3 +304,15 @@
   height: 12px;
   background: var(--surface1);
 }
+
+/* Compact is the phone/grid density: keep the doors packed. Desktop's
+   margin-left: auto on the telemetry group leaves a hole between yolo and MCP. */
+.status-strip.is-compact .status-strip-right {
+  margin-left: var(--space-2);
+}
+
+.status-strip.is-compact .status-strip-model .model-pill {
+  padding: 2px 0;
+  font-size: inherit;
+  gap: 6px;
+}
