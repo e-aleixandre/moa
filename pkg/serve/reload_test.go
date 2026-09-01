@@ -243,19 +243,26 @@ func TestReload_DoesNotSwallowTheChangeWhenTheAgentRefuses(t *testing.T) {
 	if _, _, _, err := mgr.Send(sess.ID, "work", nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	pollUntil(t, 2*time.Second, "running", func() bool {
-		return sessState(sess) == StateRunning
+	// SetSystemPrompt keys off Agent.cancel, claimed inside execute after
+	// reserveRunSlot has already moved the session to StateRunning. Waiting
+	// only for the session state lets this reload slip through, apply the
+	// edit, and make the retry look like the change was swallowed.
+	pollUntil(t, 2*time.Second, "agent running", func() bool {
+		return sess.runtime.Context().Agent.IsRunning()
 	})
 
 	writeAgentsMD(t, cwd, "- One.\n- Two.\n")
 	// Reload straight at the session while it runs: SetSystemPrompt refuses.
 	if changed := sess.reloadSession(); len(changed) != 0 {
-		t.Errorf("a refused reload reported success: %v", changed)
+		t.Fatalf("a refused reload reported success: %v", changed)
+	}
+	if strings.Contains(sess.runtime.Context().Agent.SystemPrompt(), "Two") {
+		t.Fatal("a refused reload still applied the new prompt")
 	}
 
 	close(release)
 	pollUntil(t, 3*time.Second, "idle", func() bool {
-		return sessState(sess) == StateIdle
+		return sessState(sess) == StateIdle && !sess.runtime.Context().Agent.IsRunning()
 	})
 
 	// The change must still be pending, not swallowed by the first attempt.
@@ -271,6 +278,7 @@ func TestReload_DoesNotSwallowTheChangeWhenTheAgentRefuses(t *testing.T) {
 func TestReload_PicksUpANewSkill(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("ok")))
 
 	cwd := t.TempDir()

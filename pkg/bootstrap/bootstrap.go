@@ -139,6 +139,12 @@ type SessionConfig struct {
 	// The caller wires this to its transcript store (see pkg/serve's
 	// SubagentStore).
 	SubagentTranscriptLoader func(jobID string) (subagent.ResumedTranscript, error)
+
+	// SnapshotTranscript freezes the parent's active conversation branch and
+	// returns an absolute path the child can read. Nil in the CLI: a forked
+	// skill that asks for parent-transcript: snapshot then errors instead of
+	// inventing a complete history.
+	SnapshotTranscript func() (path string, err error)
 }
 
 // Session is a fully wired session ready for agent.Run/Send.
@@ -471,13 +477,10 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		})
 	}
 
-	// 8. Skills.
+	// 8. Skills index. load_skill is registered after subagents so it can launch
+	// isolated children through the subagent tool without an import cycle.
 	skills := skill.Discover(cfg.CWD)
 	skillsIndex := skill.FormatIndex(skills)
-	// Register unconditionally: skills are discovered from disk on every call,
-	// so a user who writes their first skill mid-session can load it. Gating on
-	// the count at startup left the tool missing exactly when it was new.
-	core.RegisterOrLog(toolReg, skill.NewTool(cfg.CWD))
 
 	// One holder for the on-disk prompt inputs, shared by the base prompt
 	// builder and by subagents, so a reload reaches every consumer at once.
@@ -596,6 +599,15 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 
 	sess.Goal = goal.New()
 
+	// load_skill is registered after subagents so forked skills can spawn
+	// isolated children. Discovery still happens per call, so a skill written
+	// mid-session is loadable without a restart.
+	subTool, _ := toolReg.Get("subagent")
+	core.RegisterOrLog(toolReg, skill.NewTool(cfg.CWD, skill.ToolConfig{
+		Fork:     NewSkillFork(subTool),
+		Snapshot: cfg.SnapshotTranscript,
+	}))
+
 	// 11. System prompt (after ALL tools registered).
 	sess.BuildBasePrompt = func(specs []core.ToolSpec) string {
 		// Read through Sources rather than the values captured above: a reload
@@ -670,6 +682,27 @@ func inheritedCompactAt(sess *Session, globalCompactAt int) int {
 		}
 	}
 	return core.ResolveCompactAt(0, globalCompactAt)
+}
+
+// NewSkillFork returns the callback load_skill uses to spawn an isolated child
+// through the existing subagent tool. notify is not in the public schema; a
+// normal subagent call still notifies. Nested forks are refused in LaunchFork
+// because every child already carries an AgentID.
+func NewSkillFork(sub core.Tool) skill.ForkFunc {
+	return func(ctx context.Context, req skill.ForkRequest, onUpdate func(core.Result)) (core.Result, error) {
+		if sub.Execute == nil {
+			return core.ErrorResult("forked skills require a subagent runtime"), nil
+		}
+		params := map[string]any{"task": req.Task}
+		if req.Async {
+			params["async"] = true
+		}
+		if !req.Notify {
+			params["notify"] = false
+		}
+		ctx = subagent.WithReadOnlyFiles(ctx, req.ReadOnlyFiles)
+		return sub.Execute(ctx, params, onUpdate)
+	}
 }
 
 // FormatSubagentNotification produces the text injected into the agent's

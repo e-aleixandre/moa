@@ -107,6 +107,36 @@ func (ts *TreeSyncer) DisplayMessages() []core.AgentMessage {
 	return ts.appendInFlightTail(ts.tree.AllMessages())
 }
 
+// SnapshotPath returns a private copy of the active tree branch plus the
+// unsynced, visible agent-message tail. Unlike syncMessages, this is a pure
+// projection: taking a snapshot while a run is in flight must not make that
+// turn durable or advance the sync baseline.
+func (ts *TreeSyncer) SnapshotPath() []session.Entry {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	path := ts.tree.Path()
+	entries := make([]session.Entry, 0, len(path))
+	for _, entry := range path {
+		entries = append(entries, session.DeepCopyEntry(entry))
+	}
+	for i, msg := range ts.sctx.Agent.Messages() {
+		if _, ok := ts.synced[messageSyncID(msg, i)]; ok || isHiddenInternalPrompt(msg) {
+			continue
+		}
+		entry := session.Entry{
+			ID:      msg.MsgID,
+			Type:    session.EntryMessage,
+			Message: session.DeepCopyMessage(msg),
+		}
+		if msg.Timestamp != 0 {
+			entry.Timestamp = time.Unix(msg.Timestamp, 0)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
 // DisplayMessagesSince returns the durable tree suffix after entryID plus the
 // current in-flight tail, and the timestamp of the anchor entry itself. It
 // validates the token against the tree, rather than the lossy event stream, so

@@ -55,10 +55,31 @@ type Skill struct {
 	// UserInvocable is false for skills that are background knowledge rather than
 	// an action worth offering in the slash menu. Defaults to true.
 	UserInvocable bool
+
+	// Context is "fork" to run the skill in an isolated subagent with no
+	// inherited messages. Any other value (including empty) loads the body
+	// inline, which is how every skill behaved before this field existed.
+	Context string
+	// Background, when true with Context=="fork", launches the child without
+	// blocking and without notifying the parent when it finishes. Ignored for
+	// inline skills. Defaults to false.
+	Background bool
+	// ParentTranscript is "snapshot" to freeze the parent's active transcript
+	// branch and hand the child a path to that file. Defaults to none.
+	ParentTranscript string
 }
 
 // ModelInvocable reports whether the model may load this skill on its own.
 func (s Skill) ModelInvocable() bool { return !s.DisableModelInvocation }
+
+// IsFork reports whether the skill runs as an isolated subagent.
+func (s Skill) IsFork() bool { return strings.EqualFold(s.Context, "fork") }
+
+// WantsParentSnapshot reports whether a forked skill should receive a frozen
+// copy of the parent's active transcript branch.
+func (s Skill) WantsParentSnapshot() bool {
+	return s.IsFork() && strings.EqualFold(s.ParentTranscript, "snapshot")
+}
 
 // Discover scans skill directories and returns available skills.
 // Project-level skills (.moa/skills/) override global ones (~/.config/moa/skills/)
@@ -107,6 +128,25 @@ func Load(s Skill) (string, error) {
 	return body, nil
 }
 
+// RenderBody substitutes the invocation's arguments into the skill.
+//
+// A skill that declares no placeholder still receives what the user typed,
+// appended as a trailing line: dropping it silently would lose the only part of
+// the invocation the user wrote by hand.
+func RenderBody(body string, args []string) string {
+	joined := strings.Join(args, " ")
+	if strings.Contains(body, "$ARGUMENTS") {
+		return strings.ReplaceAll(body, "$ARGUMENTS", joined)
+	}
+	if joined == "" {
+		return body
+	}
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	return body + "\nARGUMENTS: " + joined + "\n"
+}
+
 // scanDir reads all <dir>/<name>/SKILL.md entries and adds them to the map.
 func scanDir(dir string, out map[string]Skill) {
 	entries, err := os.ReadDir(dir)
@@ -135,6 +175,9 @@ func scanDir(dir string, out map[string]Skill) {
 			Dir:                    absDir,
 			DisableModelInvocation: fm.boolField("disable-model-invocation", false),
 			UserInvocable:          fm.boolField("user-invocable", true),
+			Context:                fm.field("context"),
+			Background:             fm.boolField("background", false),
+			ParentTranscript:       fm.field("parent-transcript"),
 		}
 	}
 }

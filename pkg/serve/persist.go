@@ -155,3 +155,13 @@ func (sp *servePersister) subagentStore(sessionID string) *session.SubagentStore
 	}
 	return session.NewSubagentStore(sp.store.Dir(), sessionID)
 }
+
+// sessionDir returns the directory holding this session's json file, or "".
+func (sp *servePersister) sessionDir() string {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.deleted || sp.store == nil {
+		return ""
+	}
+	return sp.store.Dir()
+}

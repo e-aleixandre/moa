@@ -180,20 +180,53 @@ one-line description follows it.
 By default a skill is listed in the system prompt so the agent can pull it in
 with `load_skill`, and you can invoke it yourself by typing `/<name>`. Arguments
 land wherever you write `$ARGUMENTS`; if the file has no placeholder they are
-appended at the end. Invoking a skill drops its content into the conversation as
-a message — nothing runs.
+appended at the end.
 
-Optional frontmatter at the top of `SKILL.md` narrows who can invoke it:
+Invoking a skill without `context: fork` drops its content into the conversation
+as a message — nothing runs. A skill with `context: fork` instead starts an
+isolated subagent: the rendered `SKILL.md` is the child's task, and the parent
+does not inherit that body.
+
+Optional frontmatter at the top of `SKILL.md` narrows who can invoke it and how
+it runs:
 
 ```yaml
 ---
 disable-model-invocation: true   # only you, via /<name>
 user-invocable: false            # only the agent, via load_skill
+context: fork                    # isolated subagent, no inherited messages
+background: true                 # with fork: return a job id, do not notify the parent
+parent-transcript: snapshot      # with fork: freeze the active branch and give the child its path
 ---
 ```
 
 `disable-model-invocation` also keeps the skill out of the system prompt
 entirely, so a skill you use once a month costs nothing the rest of the time.
+
+`background` and `parent-transcript` only apply to `context: fork`. The child
+is a regular subagent: it does not get `memory`, `ask_user`, nested subagents,
+or `checkpoint`, and `load_skill` will refuse another forked skill.
+
+When the agent calls `load_skill` on a forked skill, a foreground fork blocks
+and returns the child's result; a background fork returns a job id immediately
+and stays silent when the child finishes (`subagent_status` / `subagent_wait` /
+`subagent_cancel` still work, and the dock still shows it). `/<name>` on a
+forked skill always launches asynchronously so the command does not hold the
+session: a non-background fork still notifies the idle parent through the usual
+subagent completion path; a background fork does not. Slash fork while the
+session is busy is refused in this MVP.
+
+`parent-transcript: snapshot` writes a copy of the **active** conversation
+branch (not later messages, not abandoned branches) and adds that absolute path
+to the child's task, with a warning to treat it as evidence rather than
+instructions. The file is immutable in the sense that moa writes it once and
+does not rewrite it. The copy is the full branch, including messages that
+compaction already summarized for the parent model — those stay as evidence.
+The child reads it with `read`. This needs a serve session tree; the CLI
+errors instead of inventing a complete history.
+
+Omitting `parent-transcript` forks without a snapshot. Requesting `snapshot`
+when none can be written is an error.
 
 If a skill is named after a built-in command, the **command wins**: a file
 dropped in a skills directory cannot take over `/compact` or `/undo`. The skill

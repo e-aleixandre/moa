@@ -759,6 +759,7 @@ func DeleteByID(baseDir, id string) error {
 		if err := store.Delete(id); err == nil {
 			// Also remove the subagent transcript side directory, if any.
 			_ = os.RemoveAll(filepath.Join(baseDir, e.Name(), id+".subagents"))
+			_ = RemoveTranscriptSnapshots(filepath.Join(baseDir, e.Name()), id)
 			return nil
 		}
 	}

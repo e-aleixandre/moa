@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -52,6 +54,21 @@ var excludedTools = map[string]bool{
 	"subagent_steer":  true,
 	"memory":          true,
 	"ask_user":        true,
+}
+
+type readOnlyFilesKey struct{}
+
+// WithReadOnlyFiles passes file-specific read capability to a child launch.
+// It is deliberately context-bound rather than a subagent tool parameter: the
+// model must not be able to request arbitrary paths for its child.
+func WithReadOnlyFiles(ctx context.Context, files []string) context.Context {
+	copy := append([]string(nil), files...)
+	return context.WithValue(ctx, readOnlyFilesKey{}, copy)
+}
+
+func readOnlyFilesFromContext(ctx context.Context) []string {
+	files, _ := ctx.Value(readOnlyFilesKey{}).([]string)
+	return append([]string(nil), files...)
 }
 
 type Config struct {
@@ -298,7 +315,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			}
 			originToolCallID := core.ToolCallIDFromContext(ctx)
 
-			childReg, errResult := buildChildRegistry(cfg.ParentTools, params)
+			childReg, errResult := buildChildRegistry(cfg.ParentTools, params, readOnlyFilesFromContext(ctx))
 			if errResult != nil {
 				return *errResult, nil
 			}
@@ -359,6 +376,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				// its job ID so every child tool execution, including async bash,
 				// carries its owner. runJob drops the snapshot when it finishes.
 				jobCtx = core.WithAgentID(jobCtx, job.id)
+				applySpawnFlags(job, params)
 				if cfg.BashState != nil {
 					cfg.BashState.Seed(job.id, core.AgentIDFromContext(ctx))
 				}
@@ -370,7 +388,11 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 					go generateTitle(cfg, jobs, job.id, task)
 				}
 				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil, true)
-				return taggedWithJob(core.TextResult("Subagent started in background.\nJob ID: "+job.id+"\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."), job.id), nil
+				started := "Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."
+				if !jobNotifiesParent(job) {
+					started = "Subagent continues in the background.\nJob ID: " + job.id + "\nContinue the original task; do not wait for it. subagent_status and subagent_wait remain available if you need them."
+				}
+				return taggedWithJob(core.TextResult(started), job.id), nil
 			}
 
 			// Sync: the child still runs in its own goroutine (unified with
@@ -389,6 +411,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			// their owner. runJob drops the
 			// snapshot when it finishes.
 			jobCtx = core.WithAgentID(jobCtx, job.id)
+			applySpawnFlags(job, params)
 			if cfg.BashState != nil {
 				cfg.BashState.Seed(job.id, core.AgentIDFromContext(ctx))
 			}
@@ -1169,7 +1192,7 @@ func resolveChildCompactAt(cfg Config) int {
 	return cfg.InheritedCompactAt()
 }
 
-func buildChildRegistry(parent *core.Registry, params map[string]any) (*core.Registry, *core.Result) {
+func buildChildRegistry(parent *core.Registry, params map[string]any, readOnlyFiles ...[]string) (*core.Registry, *core.Result) {
 	if parent == nil {
 		res := core.ErrorResult("subagent parent tools are not configured")
 		return nil, &res
@@ -1181,6 +1204,15 @@ func buildChildRegistry(parent *core.Registry, params map[string]any) (*core.Reg
 			continue
 		}
 		allowed[t.Name] = t
+	}
+
+	var files []string
+	if len(readOnlyFiles) > 0 {
+		files = append([]string(nil), readOnlyFiles[0]...)
+	}
+	readTool := allowed["read"]
+	if len(files) > 0 && readTool.Name != "" {
+		allowed["read"] = snapshotReadTool(readTool, files)
 	}
 
 	reg := core.NewRegistry()
@@ -1230,6 +1262,67 @@ func buildChildRegistry(parent *core.Registry, params map[string]any) (*core.Reg
 		core.RegisterOrLog(reg, t)
 	}
 	return reg, nil
+}
+
+// snapshotReadTool grants a child read access to exactly the existing files
+// named by a parent snapshot. Every other request remains subject to the
+// inherited read tool and its parent policy.
+func snapshotReadTool(inherited core.Tool, files []string) core.Tool {
+	privateReads := make(map[string]core.Tool)
+	for _, path := range files {
+		canonical, ok := canonicalExistingPath(path)
+		if !ok {
+			continue
+		}
+		dir := filepath.Dir(canonical)
+		privateReads[canonical] = tool.NewRead(tool.ToolConfig{
+			WorkspaceRoot: dir,
+			PathPolicy:    tool.NewPathPolicy(dir, nil, false),
+		})
+	}
+	if len(privateReads) == 0 {
+		return inherited
+	}
+
+	wrapped := inherited
+	wrapped.Execute = func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
+		path, _ := params["path"].(string)
+		if canonical, ok := canonicalExistingPath(path); ok {
+			if read, granted := privateReads[canonical]; granted {
+				copy := make(map[string]any, len(params))
+				for key, value := range params {
+					copy[key] = value
+				}
+				copy["path"] = canonical
+				return read.Execute(ctx, copy, onUpdate)
+			}
+		}
+		return inherited.Execute(ctx, params, onUpdate)
+	}
+	return wrapped
+}
+
+// canonicalExistingPath resolves every symlink in a path and accepts only an
+// existing regular file. The snapshot is created before this capability is
+// handed off, so rejecting a path that disappears or cannot be resolved never
+// turns an ancestor directory into a broader grant.
+func canonicalExistingPath(path string) (string, bool) {
+	if strings.TrimSpace(path) == "" {
+		return "", false
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	canonical, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Stat(canonical)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", false
+	}
+	return filepath.Clean(canonical), true
 }
 
 // resolveModel picks the child's model. allowedModels is the opt-in allowlist
@@ -1634,4 +1727,34 @@ func getBool(params map[string]any, key string) bool {
 	}
 	b, ok := v.(bool)
 	return ok && b
+}
+
+// getBoolDefault reads a boolean parameter, falling back to def when the key is
+// absent or not a bool. Used for internal flags (notify) whose public default
+// must stay true even though they are omitted from the schema.
+func getBoolDefault(params map[string]any, key string, def bool) bool {
+	v, ok := params[key]
+	if !ok {
+		return def
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return def
+	}
+	return b
+}
+
+// applySpawnFlags copies internal, non-schema spawn options onto the job.
+// notify defaults true so a public subagent call is unchanged.
+func applySpawnFlags(job *job, params map[string]any) {
+	notify := getBoolDefault(params, "notify", true)
+	job.mu.Lock()
+	job.notifyParent = notify
+	job.mu.Unlock()
+}
+
+func jobNotifiesParent(job *job) bool {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	return job.notifyParent
 }
