@@ -88,3 +88,21 @@
   left: auto;
   right: max(var(--space-4), calc(50% - 422px + var(--space-2)));
 }
+
+/* A short desktop conversation column clips its descendants. The model list
+   is therefore portalled to body and positioned from its strip badge. */
+.conversation-model-popover {
+  position: fixed;
+  right: auto;
+  z-index: var(--z-overlay);
+  max-width: calc(100vw - var(--space-4));
+}
+
+.conversation-model-popover .model-selector {
+  box-sizing: border-box;
+  max-height: calc(100vh - var(--space-4));
+}
+
+.conversation-model-popover .model-selector-view {
+  max-height: min(430px, calc(100vh - 250px));
+}

@@ -230,7 +230,7 @@ export function StatusStrip({
           );
         })()}
         {showTokens && hasTokens && (
-          <span class="status-strip-tokens"><TokenFlow up={tokensUp} down={tokensDown} variant="strip" /></span>
+          <span class="status-strip-tokens"><TokenFlow up={tokensUp} down={tokensDown} variant={compact ? "compact" : "strip"} /></span>
         )}
       </span>
       {children}

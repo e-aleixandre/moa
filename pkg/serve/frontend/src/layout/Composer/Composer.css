@@ -477,8 +477,8 @@
 .composer-wrap.is-compact .composer-btn-attach {
   grid-row: 1;
   grid-column: 1;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--radius-md);
   color: var(--overlay1);
 }
@@ -490,8 +490,8 @@
 .composer-wrap.is-compact .composer-send {
   grid-row: 1;
   margin-left: 0;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border-radius: 12px;
 }
 

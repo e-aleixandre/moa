@@ -13,7 +13,7 @@ function relAge(updated) {
   return `${d}d`;
 }
 
-function spineBrief(sess) {
+export function sessionRowBrief(sess) {
   const dot = sessionDisplayDotState(sess);
   if (dot === "permission") return "Needs you";
   if (dot === "error") return sess.error || "Error";
@@ -25,7 +25,7 @@ function spineBrief(sess) {
 }
 
 function toSpineRow(s, extra = {}) {
-  const brief = spineBrief(s);
+  const brief = sessionRowBrief(s);
   return {
     id: s.id,
     title: sessionTitle(s),

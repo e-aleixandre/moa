@@ -50,10 +50,10 @@ export function GridToolbar({
         })}
       </div>
 
-      <button type="button" class="gt-btn" onClick={onSplitRight} title="Split right">
+      <button type="button" class="gt-btn" onClick={onSplitRight} title="Split right" aria-label="Split right">
         <SquareSplitHorizontal size={13} aria-hidden="true" /> split
       </button>
-      <button type="button" class="gt-btn" onClick={onSplitDown} title="Split down">
+      <button type="button" class="gt-btn" onClick={onSplitDown} title="Split down" aria-label="Split down">
         <SquareSplitVertical size={13} aria-hidden="true" /> split
       </button>
 

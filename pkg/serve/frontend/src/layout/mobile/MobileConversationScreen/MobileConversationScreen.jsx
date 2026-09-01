@@ -3,13 +3,12 @@ import { Plus } from "lucide-preact";
 import { store } from "../../../data/store.js";
 import { updateSession } from "../../../data/store.js";
 import { projectStream } from "../../../data/stream-model.js";
-import { focusedSession, focusedSessionId } from "../../../data/selectors.js";
+import { focusedSessionId } from "../../../data/selectors.js";
 import { setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { shortPath, sessionDisplayDotState, sessionTitle } from "../../../data/util/format.js";
-import { activityPhase } from "../../../data/util/activity.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
@@ -24,6 +23,7 @@ import { MobileBashJobView } from "./MobileBashJobView.jsx";
 import { LiveDock } from "../../LiveDock/LiveDock.jsx";
 import { liveTrayAgents } from "../../../data/stream-model.js";
 import { aggregateAttention, newResultSessions } from "./attention-model.js";
+import { sessionRowBrief } from "../../Spine/sessions.js";
 import "./MobileConversationScreen.css";
 
 // MobileConversationScreen — the CONNECTED root container of the mobile
@@ -66,24 +66,10 @@ function relAge(updated) {
   return `${d}d`;
 }
 
-// sessionBrief derives the drawer card's "last" line from the real session
-// fields the /api/sessions poll carries: the server-owned brief (progress →
-// attempting) when present, else the live activity label, else the raw state.
-// There is NO per-session "last message" field in the poll model, so we DO NOT
-// invent a summary — we degrade to the brief, then to the activity/state.
-// Saved sessions render NO brief (return ""): the grey StateDot and the drawer's
-// group counter already carry the "saved" state, so a "Saved" line is redundant.
-// TODO: a true last-message preview would need the projection or the API
-// to carry one; not added here (out of scope, would touch the backend/model).
+// The drawer shares the Spine's card projection. In particular idle is a quiet
+// two-line title/path row, while live and attention state owns the second line.
 function sessionBrief(sess) {
-  if (sess.briefProgress) return sess.briefProgress;
-  if (sess.briefAttempting) return sess.briefAttempting;
-  if (sess.error) return sess.error;
-  const phase = activityPhase(sess);
-  if (phase === "waiting") return "Waiting for you";
-  if (sess.state === "running") return "Working…";
-  if (sess.state === "saved") return "";
-  return sess.state || "idle";
+  return sessionRowBrief(sess);
 }
 
 // drawerSessions builds the drawer's two groups — active (newest first) and
@@ -99,15 +85,14 @@ function drawerSessions(sessions, activeId) {
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
   const toCard = (s) => {
     const dotState = sessionDisplayDotState(s);
-    const needs = dotState === "permission";
+    const last = sessionBrief(s);
     return {
       id: s.id,
       title: sessionTitle(s),
       state: dotState,
       when: relAge(s.updated),
-      last: sessionBrief(s),
-      needsLabel: needs ? "Needs you:" : undefined,
-      path: shortPath(s.cwd) || s.cwd || "",
+      last,
+      path: last ? "" : (shortPath(s.cwd) || s.cwd || ""),
       unseen: !!s.unseen,
       active: s.id === activeId,
       saved: s.state === "saved",
@@ -158,7 +143,12 @@ function recentSavedSessions(sessions, limit = 3) {
     }));
 }
 
-export function MobileConversationScreen({ version = null }) {
+export function mobileFocusedSession(state, forceMobile = false) {
+  const id = forceMobile ? state.activeSession || null : focusedSessionId(state);
+  return { id, session: id ? state.sessions[id] || null : null };
+}
+
+export function MobileConversationScreen({ version = null, forceMobile = false }) {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
 
@@ -173,8 +163,7 @@ export function MobileConversationScreen({ version = null }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsPendingRef = useRef(false);
 
-  const session = focusedSession(state);
-  const activeId = focusedSessionId(state);
+  const { session, id: activeId } = mobileFocusedSession(state, forceMobile);
   const loaded = state.sessionsLoaded;
   // The drawer's open/step state lives in the store (data/drawer.js): the
   // empty state below and the command palette both open it, so it can't be

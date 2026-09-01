@@ -52,7 +52,7 @@ function SessionDrawerCard({ session, hidePath = false, onSelect, onCloseSession
     ? needsLabel
       ? <><b class="sdcard-needs-label">{needsLabel} </b>{last}</>
       : last
-    : null;
+    : needsLabel ? <b class="sdcard-needs-label">{needsLabel}</b> : null;
   return (
     <div class="sdcard-slot">
       <SessionRow
@@ -64,7 +64,7 @@ function SessionDrawerCard({ session, hidePath = false, onSelect, onCloseSession
         when={when}
         origin={origin}
         brief={brief}
-        path={hidePath ? undefined : path}
+        path={hidePath || brief ? undefined : path}
         onClick={() => onSelect?.(id)}
       />
       <SessionCardMenu

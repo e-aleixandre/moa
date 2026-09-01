@@ -21,7 +21,7 @@ mock.module('preact/hooks', () => ({
 }));
 mock.module('../../../util/sanitize.js', () => ({ sanitizeHtml(html) { return html; } }));
 
-const { MobileConversationScreen } = await import('./MobileConversationScreen.jsx');
+const { MobileConversationScreen, mobileFocusedSession } = await import('./MobileConversationScreen.jsx');
 const { setState } = await import('../../../data/store.js');
 const { ConversationScreen } = await import('../../ConversationScreen/ConversationScreen.jsx');
 const { Spine } = await import('../../Spine/Spine.jsx');
@@ -141,6 +141,31 @@ test('session display colours remain urgent after their attention was seen', () 
   expect(sessionDisplayDotState({ state: 'error', unseen: false })).toBe('error');
   expect(sessionDisplayDotState({ state: 'permission', unseen: false })).toBe('permission');
   expect(sessionDisplayDotState({ state: 'running', pendingAsk: { id: 'a1' }, unseen: false })).toBe('permission');
+});
+
+test('the phone lab follows activeSession even in a desktop viewport', () => {
+  const state = {
+    isMobile: false,
+    activeSession: 'phone',
+    sessions: { phone: { id: 'phone' }, desktop: { id: 'desktop' } },
+    tileTree: { type: 'tile', id: 1, sessionId: 'desktop' },
+    focusedTile: 1,
+  };
+  expect(mobileFocusedSession(state, true)).toMatchObject({ id: 'phone', session: { id: 'phone' } });
+  expect(mobileFocusedSession(state, false)).toMatchObject({ id: 'desktop', session: { id: 'desktop' } });
+});
+
+test('drawer cards suppress paths when their second line is a brief or Needs you', () => {
+  const tree = MobileConversationScreen({});
+  const drawer = componentNode(tree, 'SessionDrawer');
+  const drawerTree = drawer.type({ ...drawer.props, open: true, active: [{
+    id: 'permission', title: 'Deploy', state: 'permission', last: 'Needs you', path: '/repo',
+  }], activeCount: 1 });
+  const card = componentNode(drawerTree, 'SessionDrawerCard');
+  const cardTree = card.type(card.props);
+  const row = componentNode(cardTree, 'SessionRow');
+  expect(row.props.brief).toBe('Needs you');
+  expect(row.props.path).toBeUndefined();
 });
 
 test('the closed mobile screen mounts its sheet and an opened drawer without render-time errors', () => {

@@ -5,9 +5,10 @@ import { ConversationScreen, PaneGridScreen, MobileConversationScreen, DesktopSh
 import { CommandPalette, ToastContainer, PulsePairingPanel } from "./components/index.js";
 import { store, setState as setStoreState } from "./data/store.js";
 import { togglePalette, closePalette } from "./data/palette.js";
-import { bindRouter } from "./data/router.js";
+import { bindRouter, navigate } from "./data/router.js";
 import { isPulsePairingOpen, subscribePulsePairing, closePulsePairing } from "./data/pulse-pairing-panel.js";
 import { hasBlockingOverlay } from "./data/overlays.js";
+import { globalPaletteContext, isDesktopGridShortcut, shouldLockMobileDocument } from "./data/app-layout.js";
 import {
   loadSessions, startPolling, stopPolling,
   startUsagePolling, stopUsagePolling,
@@ -195,6 +196,20 @@ function useBootstrap() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // ⌘G / Ctrl+G — the grid button advertises this desktop shortcut. Keep it
+  // below transient overlays, and leave the mobile drawer's keyboard entirely
+  // alone even when a hardware keyboard is attached.
+  useEffect(() => {
+    const onKey = (e) => {
+      const state = store.get();
+      if (!isDesktopGridShortcut(e, state, hasBlockingOverlay())) return;
+      e.preventDefault();
+      if (state.view !== "grid") navigate("grid");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return version;
 }
 
@@ -218,7 +233,7 @@ function GlobalPalette() {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
 
-  const context = state.view === "grid" ? "grid" : state.isMobile ? "mobile" : "conversation";
+  const context = globalPaletteContext(state);
   let focusedPane = null;
   if (context === "grid") {
     const ids = allTileIdsSafe(state.tileTree);
@@ -254,10 +269,10 @@ function App() {
   useEffect(() => store.subscribe(setState), []);
   const view = state.view;
 
-  // Lock the document only for application screens that supply their own
-  // mobile scroller (conversation). The grid is a desktop layout.
+  // Every mobile surface supplies its own app scroller, irrespective of a
+  // stale grid URL, so document scrolling must stay locked for all of them.
   useEffect(() => {
-    document.documentElement.classList.toggle("mobile-locked", state.isMobile && view !== "grid");
+    document.documentElement.classList.toggle("mobile-locked", shouldLockMobileDocument(state));
   }, [state.isMobile, view]);
 
   if (state.isMobile) {

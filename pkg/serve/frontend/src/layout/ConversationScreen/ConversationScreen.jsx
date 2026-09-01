@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState, useEffect, useRef, useCallback, useLayoutEffect } from "preact/hooks";
+import { createPortal } from "preact/compat";
 import { ChatHead } from "../ChatHead/ChatHead.jsx";
 import { Stream } from "../Stream/Stream.jsx";
 import { LiveDock } from "../LiveDock/LiveDock.jsx";
@@ -26,6 +27,7 @@ import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
 import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast } from "../../data/session-actions.js";
+import { positionModelPopover } from "../PaneGrid/model-popover-position.js";
 import "./ConversationScreen.css";
 
 // ConversationScreen — the desktop conversation column. Spine lives in
@@ -72,6 +74,8 @@ export function ConversationScreen() {
   const [modelOpen, setModelOpen] = useState(false);
   const [models, setModels] = useState(null); // null = not fetched yet
   const modelAnchorRef = useRef(null);
+  const modelPopoverRef = useRef(null);
+  const [modelPopoverPosition, setModelPopoverPosition] = useState(null);
   useEffect(() => {
     if (!modelOpen || models) return;
     api("GET", "/api/models").then(setModels).catch(() => setModels([]));
@@ -80,7 +84,9 @@ export function ConversationScreen() {
     if (!modelOpen) return;
     const unregister = registerOverlay("conv-model-popover");
     const onDocDown = (e) => {
-      if (modelAnchorRef.current && !modelAnchorRef.current.contains(e.target)) setModelOpen(false);
+      const target = e.target;
+      if (modelAnchorRef.current?.contains(target) || modelPopoverRef.current?.contains(target)) return;
+      setModelOpen(false);
     };
     const onKeyDown = (e) => { if (e.key === "Escape") setModelOpen(false); };
     document.addEventListener("mousedown", onDocDown);
@@ -91,6 +97,38 @@ export function ConversationScreen() {
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [modelOpen]);
+
+  const placeModelPopover = useCallback(() => {
+    const anchor = modelAnchorRef.current?.getBoundingClientRect();
+    const popover = modelPopoverRef.current?.getBoundingClientRect();
+    if (!anchor || !popover) return;
+    setModelPopoverPosition(positionModelPopover(anchor, popover, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!modelOpen) {
+      setModelPopoverPosition(null);
+      return undefined;
+    }
+    placeModelPopover();
+    window.addEventListener("resize", placeModelPopover);
+    window.addEventListener("scroll", placeModelPopover, true);
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(placeModelPopover);
+    if (observer) {
+      if (modelAnchorRef.current) observer.observe(modelAnchorRef.current);
+      if (modelPopoverRef.current) observer.observe(modelPopoverRef.current);
+    }
+    return () => {
+      window.removeEventListener("resize", placeModelPopover);
+      window.removeEventListener("scroll", placeModelPopover, true);
+      observer?.disconnect();
+    };
+  }, [modelOpen, placeModelPopover]);
 
   // Close popovers when the focused session changes.
   useEffect(() => {
@@ -190,8 +228,16 @@ export function ConversationScreen() {
       if (returnView === "grid") navigate("grid");
     };
 
-    const modelPopover = modelOpen && (
-      <div class="head-popover">
+    const modelPopover = modelOpen && typeof document !== "undefined" && document.body && createPortal(
+      <div
+        class="head-popover conversation-model-popover"
+        ref={modelPopoverRef}
+        style={{
+          left: modelPopoverPosition?.left,
+          top: modelPopoverPosition?.top,
+          visibility: modelPopoverPosition ? undefined : "hidden",
+        }}
+      >
         <ModelSelector
           models={specs}
           selected={selectedModel}
@@ -213,7 +259,8 @@ export function ConversationScreen() {
         fastNote={session.fastNote || ""}
         onFastChange={(value) => setSessionFast(session.id, value)}
         />
-      </div>
+      </div>,
+      document.body,
     );
 
     body = (

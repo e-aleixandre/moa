@@ -94,7 +94,7 @@ function CatalogApp() {
   else if (view === "mobile") {
     body = (
       <PhoneLab>
-        <MobileConversationScreen />
+        <MobileConversationScreen forceMobile />
       </PhoneLab>
     );
   } else if (view === "grid") {

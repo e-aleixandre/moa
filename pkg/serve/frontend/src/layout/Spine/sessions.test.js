@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { spineSessions, paneBadges, focusedTileSessionId } from "./sessions.js";
+import { spineSessions, paneBadges, focusedTileSessionId, sessionRowBrief } from "./sessions.js";
 
 test("open sessions sort newest first and keep saved in their own list", () => {
   const { active, saved } = spineSessions({
@@ -19,6 +19,11 @@ test("a permission paints Needs you in the brief, not as idle chrome", () => {
   });
   expect(active[0].brief).toBe("Needs you");
   expect(active[0].path).toBe("");
+});
+
+test("idle has no brief, while attention owns the second line", () => {
+  expect(sessionRowBrief({ state: "idle" })).toBe("");
+  expect(sessionRowBrief({ state: "permission" })).toBe("Needs you");
 });
 
 test("grid badges attach only when the session sits in a pane", () => {
