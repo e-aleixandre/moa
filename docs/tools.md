@@ -93,20 +93,25 @@ Only an **index** — one line per fact — is injected into the prompt; full bo
 are read on demand. The index has a byte budget, and each scope gets a reserved
 share of it with the leftover rolling over in both directions. Without that
 reservation the more numerous project facts crowd out the global ones entirely,
-which is the wrong trade: global facts are standing instructions and user
-preferences, the ones that do not expire.
+which is the wrong trade: a small cross-project fact should not disappear only
+because one repository has many project facts.
 
-Memory is for non-obvious facts with an explicit lifecycle. It is not a task
-tracker and not a scratchpad. Every write must declare either
+Memory is a last resort for a small, non-secret fact that is costly to
+reconstruct and has no discoverable canonical source. A short pointer to an
+external canonical source can be appropriate; copying that source into memory
+is not. Memory is not a task tracker, scratchpad, instruction file, workflow
+library, or secret store. Every write must declare either
 `invalidate_when`, a single-line natural-language condition under which the
 fact stops being true, or `durable: true` for a genuinely permanent fact. The
 condition must be independently checkable now against a concrete source, not a
 judgment about relevance: for example, "when issue #84 is closed", "when `git
 log` shows branch X is merged", or "when port 3306 on that host responds
 again". "When it is no longer relevant" is not a valid condition. Use
-`durable: true` for user preferences, repository conventions, and procedures.
-If an identifiable event could make a fact false, use `invalidate_when`
-instead of `durable`.
+`durable: true` only for an otherwise eligible fact with no identifiable
+invalidating event. Lifecycle is required, but it does not make rules,
+preferences, procedures, task state, secrets, or copied project knowledge
+eligible. If an identifiable event could make a fact false, use
+`invalidate_when` instead of `durable`.
 When reading a fact with an invalidation condition, delete it if you can verify
 that the condition has occurred.
 
@@ -126,13 +131,21 @@ whole bodies. It takes `query`, an optional `regex` flag (Go/RE2), `limit`
 
 Other memory rules:
 
-- **Anything verifiable by looking at the repository does not belong here.** A
-  fact should point at the code rather than restate it, or it will quietly go
-  stale as the code changes.
+- **Anything with a discoverable canonical source does not belong here.** Read
+  or reference AGENTS.md, skills, code, tests, configuration, documentation,
+  scripts, tool definitions, issues, or other versioned artifacts instead of
+  restating them.
+- Standing rules, preferences, conventions and prohibitions belong in
+  `AGENTS.md`. Reusable workflows belong in skills; executable procedures
+  belong in scripts or registered tools.
+- Credentials, tokens, keys, private signed URLs and other secrets belong in
+  protected configuration, environment variables or a secret manager, never
+  in memory.
 - Prefer updating an existing fact over adding a near-duplicate, and delete
-  facts that have become wrong.
-- Current task state, progress notes and handoffs are not memories — they die
-  with the work. Use the session checkpoint or the task tracker.
+  facts that have become wrong, expired, or gained a canonical source.
+- Current task state, progress notes and handoffs are not memories. Use the task
+  tracker, or the session checkpoint only for active, non-reconstructible
+  pre-compaction state.
 
 Project facts written before 0.25 lived under `~/.config/moa/projects/<hash>/`,
 keyed by the path of the working directory. moa copies them into the

@@ -23,14 +23,16 @@ func NewMemory(cfg ToolConfig) core.Tool {
 	return core.Tool{
 		Name:  "memory",
 		Label: "Memory",
-		Description: "Manage persistent memory as small, single-fact notes. Only the index (one line per " +
-			"fact) is in your context; search or read a fact's full text on demand. Each fact declares a " +
-			"scope: \"global\" facts apply to every project, \"project\" facts only to this one. " +
-			"Facts default to ephemeral: save each with a checkable expiry condition, unless it is genuinely " +
-			"permanent (such as a user preference, repository convention, or procedure). When reading a fact " +
-			"with an expiry condition, delete it if you can verify that condition has happened. Update the existing " +
-			"fact instead of duplicating, and delete facts that become wrong. Refer to a fact by its " +
-			"canonical id from the index (e.g. \"project/uses-docker\" or \"global/prefers-tabs\").",
+		Description: "Manage narrowly scoped cross-session memory as small, single-fact notes. Use it only for " +
+			"non-secret facts that are costly to reconstruct and have no discoverable canonical source; do not " +
+			"store rules, preferences, procedures, task state, credentials, or copies of project knowledge. " +
+			"Only the index (one line per fact) is in your context; search or read a fact's full text on demand. " +
+			"Each fact declares a scope: \"global\" facts apply to every project, \"project\" facts only to this one. " +
+			"Every write requires a checkable expiry condition or an explicit durable declaration, but lifecycle " +
+			"does not make an otherwise ineligible fact appropriate. When reading a fact with an expiry condition, " +
+			"delete it if you can verify that condition has happened. Update the existing fact instead of duplicating, " +
+			"and delete facts that become wrong. Refer to a fact by its " +
+			"canonical id from the index (e.g. \"project/external-benchmark\" or \"global/vendor-limit\").",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -82,7 +84,7 @@ func NewMemory(cfg ToolConfig) core.Tool {
 				},
 				"durable": {
 					"type": "boolean",
-					"description": "For write, explicitly mark a fact with no known expiry condition as permanent. Use only for durable preferences, repository conventions, or procedures; if an identifiable event could make the fact false, use invalidate_when instead. Mutually exclusive with invalidate_when."
+					"description": "For write, explicitly mark an eligible fact with no known expiry condition as permanent. This declares lifecycle only; it does not make rules, procedures, task state, secrets, or copied project knowledge eligible. If an identifiable event could make the fact false, use invalidate_when instead. Mutually exclusive with invalidate_when."
 				}
 			},
 			"required": ["action"]

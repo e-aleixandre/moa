@@ -29,7 +29,7 @@ var toolSnippets = map[string]string{
 	"subagent_cancel": "Cancel a running async subagent job.",
 	"subagent_steer":  "Send a message to a RUNNING subagent: extra instructions or a correction, read between its steps.",
 	"verify":          "Run project verification checks (build, test, lint) from .moa/verify.json.",
-	"memory":          "Manage cross-session memory as single-fact notes (list/search/read/write/delete). Only the index is in context; search or read facts on demand.",
+	"memory":          "Manage narrowly scoped cross-session memory as single-fact notes. Do not store rules, procedures, task state, secrets, or copies of project knowledge.",
 }
 
 // SystemPromptOptions configures system prompt generation.
@@ -143,10 +143,20 @@ func BuildSystemPrompt(opts SystemPromptOptions) string {
 
 	// Memory
 	if toolSet["memory"] {
-		sb.WriteString(`- Use memory for what you discover while working and would need again only occasionally: access details, gotchas, root causes, invariants of a project. Only the index is paid for every turn, so keep each hook short and read a fact when its line is relevant; update existing facts instead of duplicating them, and delete facts that become wrong.
-- The user's standing rules about how to work (conventions, preferences, procedures, prohibitions) belong in AGENTS.md, not in memory. They are the user's: propose a change and let them decide, never write it yourself.
-- A work journal — progress, handoffs, current task state, pre-compaction notes — is not memory. Write it to project files; where it lives and whether it is versioned is the user's call.
+		sb.WriteString(`- Memory is a last resort for one small cross-session fact: it must be non-secret, costly or hard to reconstruct, and have no discoverable canonical source. A pointer to an external canonical source can be appropriate; do not copy the source into memory. Declaring durable or invalidate_when is required but does not make an otherwise ineligible fact appropriate. Keep each index hook short.
+- Do not put rules, preferences, conventions, prohibitions, or procedures in memory. Standing instructions belong in AGENTS.md; propose the change and let the user decide, never write it yourself. Use existing scripts or registered tools for executable procedures.
+- Never put credentials, tokens, keys, private signed URLs, or other secrets in memory. Use protected configuration, environment variables, or a secret manager instead.
+- Do not duplicate facts whose canonical source is AGENTS.md, a skill, code, tests, configuration, documentation, scripts, tool definitions, issues, or another versioned artifact. Read or reference that source instead.
 `)
+		if toolSet["load_skill"] {
+			sb.WriteString("- When a matching skill exists for a reusable workflow, load it instead of recreating or remembering the procedure.\n")
+		}
+		if toolSet["tasks"] {
+			sb.WriteString("- Backlog, current task state, and handoffs are not memory. Use tasks for task tracking or a tracker chosen by the user.\n")
+		} else {
+			sb.WriteString("- Backlog, current task state, and handoffs are not memory. Use a tracker chosen by the user.\n")
+		}
+		sb.WriteString("- Update an existing fact instead of duplicating it. Delete facts that become wrong or whose invalidation condition has happened; once a canonical source replaces a fact, confirm the source and delete the duplicate.\n")
 	}
 	if toolSet["checkpoint"] {
 		sb.WriteString("- Use the checkpoint tool as a session-local ephemeral slot for active, non-reconstructible progress when preparing to compact; it is not durable memory.\n")

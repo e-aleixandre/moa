@@ -249,11 +249,11 @@ func IndexStatusOf(mems []Memory) IndexStatus {
 	if len(mems) == 0 {
 		return IndexStatus{BudgetBytes: maxIndexBytes}
 	}
-	// Global facts are cross-project preferences and standing user
-	// instructions; project facts are far more numerous and churn faster.
+	// Global facts apply across projects; project facts are far more numerous
+	// and churn faster.
 	// A single ordered budget starved globals completely (measured: 0 of 28
 	// globals reached the prompt with 102 project facts present), which
-	// silently dropped standing instructions. Reserve a share of the budget
+	// silently dropped cross-project facts. Reserve a share of the budget
 	// for globals, then let project facts use whatever is left.
 	var globals, projects []Memory
 	for _, m := range mems {
@@ -360,7 +360,7 @@ func (s *Store) Write(m Memory) (string, error) {
 	}
 	durable := m.Lifecycle == LifecycleDurable
 	if m.InvalidateWhen == "" && !durable {
-		return "", errors.New("memory must declare its lifecycle: an ephemeral fact needs invalidate_when with a condition another agent can check without asking the user (for example, \"when issue #84 is closed\"), while a permanent fact needs durable: true (for example, a user preference)")
+		return "", errors.New("memory must declare its lifecycle: an ephemeral fact needs invalidate_when with a condition another agent can check without asking the user (for example, \"when issue #84 is closed\"), while an otherwise eligible fact with no identifiable invalidating event needs durable: true")
 	}
 	if m.InvalidateWhen != "" && durable {
 		return "", errors.New("invalidate_when and durable are mutually exclusive: declare either a checkable expiry condition or durable: true")

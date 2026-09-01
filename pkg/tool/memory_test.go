@@ -38,6 +38,28 @@ func runMem(t *testing.T, tool core.Tool, params map[string]any) core.Result {
 	return r
 }
 
+func TestMemory_DescriptionDefinesEligibility(t *testing.T) {
+	cfg, _ := newMemoryTool(t)
+	tool := NewMemory(cfg)
+
+	for _, want := range []string{
+		"non-secret facts",
+		"do not store rules, preferences, procedures, task state, credentials",
+		"lifecycle does not make an otherwise ineligible fact appropriate",
+	} {
+		if !strings.Contains(tool.Description, want) {
+			t.Fatalf("memory description missing %q", want)
+		}
+	}
+	params := string(tool.Parameters)
+	if strings.Contains(params, "durable preferences, repository conventions, or procedures") {
+		t.Fatal("durable schema still presents ineligible content as memory")
+	}
+	if !strings.Contains(params, "This declares lifecycle only") {
+		t.Fatal("durable schema must distinguish lifecycle from eligibility")
+	}
+}
+
 func TestMemory_ListEmpty(t *testing.T) {
 	cfg, _ := newMemoryTool(t)
 	tool := NewMemory(cfg)
@@ -53,29 +75,29 @@ func TestMemory_WriteReadList(t *testing.T) {
 
 	r := runMem(t, tool, map[string]any{
 		"action":          "write",
-		"name":            "uses-docker",
-		"description":     "builds run in docker",
+		"name":            "measured-baseline",
+		"description":     "external benchmark baseline",
 		"scope":           "project",
-		"content":         "Always build with docker compose.",
-		"invalidate_when": "when issue #84 tracking the Docker migration is closed",
+		"content":         "The external benchmark measured 42 ms.",
+		"invalidate_when": "when the external benchmark is rerun",
 	})
 	if r.IsError {
 		t.Fatalf("write failed: %q", resultText(r))
 	}
 	// Confirmation should surface the canonical id for later reads.
-	if !strings.Contains(resultText(r), "project/uses-docker") {
+	if !strings.Contains(resultText(r), "project/measured-baseline") {
 		t.Errorf("write confirmation missing id: %q", resultText(r))
 	}
 
 	// Read it back by canonical id.
-	r = runMem(t, tool, map[string]any{"action": "read", "id": "project/uses-docker"})
-	if !strings.Contains(resultText(r), "docker compose") || !strings.Contains(resultText(r), "Invalidate when: when issue #84 tracking the Docker migration is closed") {
+	r = runMem(t, tool, map[string]any{"action": "read", "id": "project/measured-baseline"})
+	if !strings.Contains(resultText(r), "42 ms") || !strings.Contains(resultText(r), "Invalidate when: when the external benchmark is rerun") {
 		t.Errorf("read missing body: %q", resultText(r))
 	}
 
 	// List shows it with its description, never the expiry condition.
 	r = runMem(t, tool, map[string]any{"action": "list"})
-	if !strings.Contains(resultText(r), "project/uses-docker") || !strings.Contains(resultText(r), "builds run in docker") || strings.Contains(resultText(r), "Docker migration") {
+	if !strings.Contains(resultText(r), "project/measured-baseline") || !strings.Contains(resultText(r), "external benchmark baseline") || strings.Contains(resultText(r), "benchmark is rerun") {
 		t.Errorf("list missing entry: %q", resultText(r))
 	}
 }
@@ -84,11 +106,11 @@ func TestMemory_WriteRoutesGlobal(t *testing.T) {
 	cfg, store := newMemoryTool(t)
 	tool := NewMemory(cfg)
 	runMem(t, tool, map[string]any{
-		"action": "write", "name": "prefers-tabs", "description": "tabs",
-		"scope": "global", "content": "The user prefers tabs.", "durable": true,
+		"action": "write", "name": "external-constraint", "description": "external constraint",
+		"scope": "global", "content": "A non-public external constraint applies.", "durable": true,
 	})
 	// scope: global → global directory.
-	if _, ok, _ := store.Read("global/prefers-tabs"); !ok {
+	if _, ok, _ := store.Read("global/external-constraint"); !ok {
 		t.Error("global fact should be readable at global scope")
 	}
 }
@@ -169,12 +191,12 @@ func TestMemory_Search(t *testing.T) {
 	cfg, _ := newMemoryTool(t)
 	tool := NewMemory(cfg)
 	runMem(t, tool, map[string]any{
-		"action": "write", "name": "docker-setup", "description": "how builds run",
-		"scope": "project", "content": "Long body about docker compose.", "durable": true,
+		"action": "write", "name": "external-lab-result", "description": "external lab result",
+		"scope": "project", "content": "The external lab measured docker startup.", "invalidate_when": "when the lab measurement is repeated",
 	})
 	runMem(t, tool, map[string]any{
-		"action": "write", "name": "prefers-tabs", "description": "indentation",
-		"scope": "global", "content": "The user prefers tabs, not docker.", "durable": true,
+		"action": "write", "name": "cross-project-observation", "description": "cross-project observation",
+		"scope": "global", "content": "A cross-project observation also mentions docker.", "invalidate_when": "when the external observation is revalidated",
 	})
 
 	r := runMem(t, tool, map[string]any{"action": "search", "query": "docker"})
@@ -182,7 +204,7 @@ func TestMemory_Search(t *testing.T) {
 	if r.IsError {
 		t.Fatalf("search failed: %q", out)
 	}
-	if !strings.Contains(out, "project/docker-setup") || !strings.Contains(out, "global/prefers-tabs") {
+	if !strings.Contains(out, "project/external-lab-result") || !strings.Contains(out, "global/cross-project-observation") {
 		t.Errorf("search should span both scopes: %q", out)
 	}
 	if !strings.Contains(out, "2 matching memories") {

@@ -24,8 +24,18 @@ func TestBuildSystemPrompt_CustomToolDescRuneBoundary(t *testing.T) {
 }
 
 func TestBuildSystemPrompt_MemoryAndCheckpointGuidanceWithoutIndex(t *testing.T) {
-	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: []core.ToolSpec{{Name: "memory"}, {Name: "checkpoint"}}, CWD: "/test"})
-	for _, want := range []string{"Use memory for what you discover while working", "belong in AGENTS.md, not in memory", "A work journal", "checkpoint tool as a session-local ephemeral slot", "when preparing to compact"} {
+	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: []core.ToolSpec{{Name: "memory"}, {Name: "checkpoint"}, {Name: "load_skill"}, {Name: "tasks"}}, CWD: "/test"})
+	for _, want := range []string{
+		"Memory is a last resort",
+		"durable or invalidate_when is required but does not make",
+		"Standing instructions belong in AGENTS.md",
+		"Never put credentials",
+		"canonical source",
+		"matching skill exists",
+		"Use tasks for task tracking",
+		"checkpoint tool as a session-local ephemeral slot",
+		"when preparing to compact",
+	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q", want)
 		}
@@ -317,12 +327,18 @@ func TestBuildSystemPrompt_MemoryGuideline(t *testing.T) {
 		{Name: "memory", Description: "Memory tool"},
 	}
 	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test"})
-	if !strings.Contains(prompt, "Use memory for what you discover while working") {
-		t.Error("expected memory guideline when memory tool is available")
+	if !strings.Contains(prompt, "Memory is a last resort") {
+		t.Error("expected memory eligibility guideline when memory tool is available")
 	}
-	// The journal rule must stay generic: the directory is a user convention,
-	// not something the product names.
+	// Task tracking guidance must stay generic: the tracker location is a user
+	// convention, not something the product names.
 	if strings.Contains(prompt, "tmp/") {
 		t.Error("prompt must not prescribe a concrete journal directory")
+	}
+	if strings.Contains(prompt, "matching skill exists") || strings.Contains(prompt, "Use tasks for task tracking") {
+		t.Error("prompt must not recommend unavailable tools")
+	}
+	if !strings.Contains(prompt, "Use a tracker chosen by the user") {
+		t.Error("prompt should provide a task-state fallback when tasks is unavailable")
 	}
 }

@@ -320,4 +320,4 @@ expecting moa to tell them apart.
 
 ## `AGENTS.md`
 
-Moa discovers `AGENTS.md` files from the working directory upward and from `~/.config/moa/`. Their content is injected into the system prompt as project instructions. This is the main way to give the agent persistent context about your project.
+Moa discovers `AGENTS.md` files from the working directory upward and from `~/.config/moa/`. Their content is injected into the system prompt as project instructions. This is the main way to give the agent persistent rules, preferences, conventions and prohibitions. Reusable workflows belong in skills and executable procedures in scripts or registered tools; do not put either category in memory.
