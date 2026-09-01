@@ -5,6 +5,79 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] - 2026-09-01
+
+### Added
+
+- Fable 5.1, now the top Anthropic model, with the `fable` alias pointing at
+  it. Its thinking cannot be switched off, so the selector no longer offers Off
+  for it and a session that had Off selected runs at high instead of silently
+  asking for something the model will not do.
+- Fast mode, a per-session switch that buys a faster answer at a higher price.
+  It sits under the thinking stepper — the other knob that changes what a turn
+  costs, one buying depth and the other time — with the premium written under
+  it, so the bill is visible at the moment of choosing. Unlike the model and
+  the thinking level it can be flipped while the agent is running, which is
+  exactly when the speed is worth paying for. Support is per model rather than
+  per provider: on a model that cannot serve it the row stays visible but
+  disabled, so the option does not seem to come and go, and switching to such a
+  model turns fast off rather than re-arming a paid premium later on your
+  behalf. When the account has no usage credits the provider refuses fast mode
+  while ordinary quota still works, and the turn is re-sent at standard speed
+  instead of failing. The status line shows the word `fast` in the same place
+  and colour on phone and desktop.
+- Skills can now run as an isolated subagent instead of dropping their text
+  into the conversation. `context: fork` in the frontmatter starts a child
+  whose task is the rendered `SKILL.md`, so a long procedure no longer costs
+  the parent its context; `background: true` returns a job id and stays quiet
+  when the child finishes, for work you do not want to be interrupted by; and
+  `parent-transcript: snapshot` hands the child a frozen copy of the current
+  conversation branch to read as evidence.
+- Global skill folders may be symbolic links, so `~/.config/moa/skills/` can
+  act as an activation directory while the skills themselves live in their own
+  repositories — installing one is a link, removing it is deleting the link.
+
+### Changed
+
+- A session opens without waiting for its MCP servers. A slow handshake used to
+  hold the whole session behind it; the tools now register at the next idle
+  point, so the conversation is usable immediately and a server that connects
+  mid-answer cannot change the tool set under a turn already in flight.
+- A stream cut by a transport error retries on its own, up to twice, instead of
+  leaving a half-written answer waiting for you to type "continue".
+- A subagent that compacted mid-run can be resumed again. Compaction replaces
+  the child's opening task with a summary, which the resume path read as a
+  corrupt transcript and refused — so the long conversations, the only ones
+  that compact, were exactly the ones whose work could not be recovered. That
+  summary now also reaches the child's conversation as the same compaction card
+  the parent shows, instead of leaving an unexplained gap where the earlier
+  work should be.
+- Quieter session chrome on desktop and mobile. The conversation header is a
+  title again rather than a toolbar, creating a session is a plus in that
+  header instead of a full-width button competing with the active row, the jump
+  control shows its ⌘K shortcut so it can be discovered, sidebar and drawer
+  rows are two plain lines, and the mobile status line packs MCP and token
+  counts back on the right instead of leaving a hole.
+- Grok is shown by its short alias in the status line, like the other models,
+  instead of its full display name.
+- The documentation was checked against the code: thinking levels, shortcuts,
+  tool tables and the state directory no longer describe behaviour that
+  changed, fast mode and MCP background start are covered, and there is a path
+  for someone opening moa for the first time — what a first `serve` needs, the
+  OAuth callback step and a troubleshooting section.
+
+### Fixed
+
+- MCP tools no longer go missing for a whole session. A server whose handshake
+  finished in the moment between starting and being wired up was never
+  reconciled, so its tools simply never appeared and only a restart brought
+  them back.
+- A partial answer rebuilt after a stream cut keeps its timestamp, so it no
+  longer sorts out of place in the transcript.
+- Anthropic requests announce a current client version. The API began rejecting
+  the old one outright, which surfaced as sessions failing with a complaint
+  that the version was too old.
+
 ## [0.34.2] - 2026-08-30
 
 ### Fixed
