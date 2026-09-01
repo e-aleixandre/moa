@@ -88,6 +88,9 @@ function normalizeSessionInfo(info, existing, visible) {
     model: wsOwns ? existing.model : info.model,
     provider: wsOwns ? existing.provider : info.provider,
     thinking: wsOwns ? existing.thinking : (info.thinking || ''),
+    fast: wsOwns ? existing.fast : !!info.fast,
+    fastSupported: wsOwns ? existing.fastSupported : !!info.fast_supported,
+    fastNote: wsOwns ? existing.fastNote : (info.fast_note || ''),
     cwd: info.cwd,
     updated: info.updated ? Date.parse(info.updated) : (existing ? existing.updated : 0),
     cacheExpiresAt: cacheExpiresAtMs(info.cache_expires_at),
@@ -773,7 +776,7 @@ export async function openPersistedSubagent(id, jobId, opts = {}) {
     thinking: t.thinking || 'off',
     status: t.status || 'completed',
     async: !!t.async,
-    messages: normalizeConversationProjection(transcript),
+    messages: normalizeConversationProjection(transcript, `/api/sessions/${id}/subagents/${jobId}`),
     streamingText: null,
     thinkingText: null,
     usage,
@@ -845,6 +848,22 @@ export async function configureSession(id, { model, thinking, permissionMode, co
     if (res.permission_mode) patch.permissionMode = res.permission_mode;
     if (res.compact_at != null) patch.compactAt = res.compact_at;
     updateSession(id, patch);
+  }
+  return res;
+}
+
+// setSessionFast turns premium speed on or off for one session. It has its own
+// endpoint rather than riding on configureSession because that one refuses
+// while the agent is running — a restriction fast mode doesn't share, since it
+// is only read when the next request is built.
+export async function setSessionFast(id, fast) {
+  const res = await api('PATCH', `/api/sessions/${id}/fast`, { fast });
+  if (res) {
+    updateSession(id, {
+      fast: res.fast,
+      fastSupported: res.supported,
+      fastNote: res.note || '',
+    });
   }
   return res;
 }

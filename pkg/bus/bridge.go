@@ -47,6 +47,10 @@ type AgentController interface {
 	// SetCompactStrategy changes what the agent gets before an automatic
 	// compaction (plain / notify / prepare).
 	SetCompactStrategy(strategy string)
+	// Fast reports whether this session buys premium speed, and SetFast
+	// changes it. Allowed while running: the next request reads it.
+	Fast() bool
+	SetFast(on bool)
 	EffectiveCompactAt() int
 	SetMaxBudget(v float64) error
 	Reset() error

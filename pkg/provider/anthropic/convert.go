@@ -14,6 +14,10 @@ const (
 	claudeCodeSystemPreamble = "You are Claude Code, Anthropic's official CLI for Claude."
 )
 
+// fastModeBeta opts a request into fast mode. Without it the API rejects the
+// `speed` field outright ("speed: Extra inputs are not permitted").
+const fastModeBeta = "fast-mode-2026-02-01"
+
 // Claude Code canonical tool names (must match exactly for OAuth).
 var claudeCodeTools = []string{
 	"Read", "Write", "Edit", "Bash", "Grep", "Glob",
@@ -61,6 +65,9 @@ type anthropicRequest struct {
 	Stream       bool             `json:"stream"`
 	Thinking     *thinkingConfig  `json:"thinking,omitempty"`
 	OutputConfig *outputConfig    `json:"output_config,omitempty"`
+	// Speed is "fast" to buy latency at a premium, and is only accepted
+	// alongside the fast-mode beta header and on an Opus model.
+	Speed string `json:"speed,omitempty"`
 }
 
 type thinkingConfig struct {
@@ -80,6 +87,9 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 		Model:     req.Model.ID,
 		MaxTokens: resolveMaxTokens(req),
 		Stream:    true,
+	}
+	if req.Options.Fast && core.SupportsFast(req.Model.ID) {
+		ar.Speed = "fast"
 	}
 
 	// System prompt — OAuth requires Claude Code preamble

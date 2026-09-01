@@ -79,6 +79,7 @@ func (x *XAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assista
 		// api.x.ai, and the consumer proxy was verified to accept it against
 		// the live endpoint (HTTP 200, and cached_tokens came back non-zero).
 		SupportsPromptCacheKey:  true,
+		SupportsServiceTier:     true,
 		AllowedReasoningEfforts: []string{"low", "medium", "high"},
 	})
 	if err != nil {

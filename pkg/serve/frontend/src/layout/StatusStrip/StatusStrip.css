@@ -248,6 +248,14 @@
   height: 11px;
 }
 
+/* Fast mode — after the permission chip, same word and hue as the mobile
+   line, so turning it on here doesn't invent a second code to learn. The
+   strip is already mono and xs, so color is the only extra. */
+.status-strip .status-strip-fast {
+  flex: none;
+  color: var(--yellow);
+}
+
 /* Permission mode */
 .status-strip .status-strip-pill.perm-yolo { color: var(--maroon); background: var(--maroon-dim); }
 .status-strip .status-strip-pill.perm-ask { color: var(--yellow); background: var(--yellow-dim); }

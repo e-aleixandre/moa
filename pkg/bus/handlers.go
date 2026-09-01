@@ -272,12 +272,22 @@ func registerHandlers(sctx *SessionContext, launchAutoVerify func(func())) {
 		if modelName == "" {
 			modelName = newModel.ID
 		}
+		// A model that can't serve fast mode silently drops the flag, so a
+		// session left marked fast would claim a speed it isn't getting.
+		// Turning it off here also means coming back to a capable model
+		// doesn't quietly resume paying the premium.
+		if sctx.Agent.Fast() && !core.SupportsFast(newModel.ID) {
+			sctx.Agent.SetFast(false)
+		}
 		changed := ConfigChanged{
 			SessionID:     sctx.SessionID,
 			Model:         modelName,
 			Provider:      newModel.Provider,
 			Thinking:      sctx.Agent.ThinkingLevel(),
 			ContextWindow: newModel.MaxInput,
+			Fast:          sctx.Agent.Fast(),
+			FastSupported: core.SupportsFast(newModel.ID),
+			FastNote:      core.FastNote(newModel.ID),
 		}
 		if at, ok := rescaleCompactAt(sctx, oldWindow, newModel.MaxInput); ok {
 			changed.CompactAt = &at

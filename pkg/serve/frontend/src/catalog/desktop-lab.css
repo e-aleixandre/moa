@@ -1,0 +1,46 @@
+/* DesktopLab — a laptop-sized window around the real ConversationScreen.
+   The screen itself is not restyled; only its height is pinned to the frame
+   so 100vh (the phone) does not blow the layout. */
+
+.desktop-lab {
+  padding: var(--space-4) 0 var(--space-6);
+  background: var(--crust);
+}
+
+.desktop-lab-note {
+  margin: 0 auto var(--space-3);
+  padding: 0 var(--space-4);
+  max-width: 40rem;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
+  text-align: center;
+}
+
+.desktop-lab-stage {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.desktop-lab-slot {
+  flex: none;
+  overflow: hidden;
+}
+
+.desktop-lab-frame {
+  width: 1280px;
+  height: 800px;
+  transform-origin: top left;
+  overflow: hidden;
+  background: var(--base);
+  border: 1px solid var(--surface1);
+  box-shadow: var(--shadow-lg);
+}
+
+/* ConversationScreen is 100vh in production. Inside this frame that would
+   be the phone's viewport; pin it to the frame instead. */
+.desktop-lab-frame .conversation-screen {
+  height: 100%;
+  width: 100%;
+}

@@ -30,6 +30,10 @@ type responsesRequest struct {
 	// PromptCacheOptions selects implicit vs explicit-only caching on GPT-5.6+.
 	// Omitted on earlier models and on xAI, which reject the field.
 	PromptCacheOptions *promptCacheOptions `json:"prompt_cache_options,omitempty"`
+	// ServiceTier buys latency at a premium. The wire value is "priority" on
+	// both transports: "fast" is the name the UIs give it, and the API
+	// rejects it as an unknown tier.
+	ServiceTier string `json:"service_tier,omitempty"`
 }
 
 type promptCacheOptions struct {
@@ -52,6 +56,7 @@ type Dialect struct {
 	SupportsParallelToolCalls        bool
 	SupportsPromptCacheKey           bool
 	SupportsExplicitCacheBreakpoints bool
+	SupportsServiceTier              bool
 	AllowedReasoningEfforts          []string
 }
 
@@ -115,6 +120,10 @@ func BuildRequestBody(req core.Request, dialect Dialect) ([]byte, error) {
 
 	if effort := MapReasoningEffort(req.Options.ThinkingLevel, dialect.AllowedReasoningEfforts); effort != "" {
 		r.Reasoning = &reasoning{Effort: effort, Summary: "auto"}
+	}
+
+	if req.Options.Fast && dialect.SupportsServiceTier && core.SupportsFast(req.Model.ID) {
+		r.ServiceTier = "priority"
 	}
 
 	return json.Marshal(r)

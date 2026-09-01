@@ -30,6 +30,7 @@ const Catalog = lazy(() => loadCatalog().then((m) => ({ default: m.Catalog })));
 const LiveStatesGallery = lazy(() => loadCatalog().then((m) => ({ default: m.LiveStatesGallery })));
 const MobileGallery = lazy(() => loadCatalog().then((m) => ({ default: m.MobileGallery })));
 const SubagentGallery = lazy(() => loadCatalog().then((m) => ({ default: m.SubagentGallery })));
+const DesktopLab = lazy(() => loadCatalog().then((m) => ({ default: m.DesktopLab })));
 
 function GalleryLoad({ children }) {
   useEffect(() => {
@@ -114,6 +115,7 @@ const GALLERY_LINKS = [
   { key: "live", label: "Live states", href: "?view=live" },
   { key: "subagent", label: "Subagent", href: "?view=subagent" },
   { key: "mobile", label: "Mobile", href: "?view=mobile" },
+  { key: "desktop", label: "Desktop", href: "?view=desktop" },
 ];
 
 const galleryNavStyle = {
@@ -385,7 +387,7 @@ function App() {
   // Lock the document only for application screens that supply their own
   // mobile scroller. Catalog and gallery routes are long reference documents.
   useEffect(() => {
-    const gallery = view === "catalog" || view === "live" || view === "subagent" || view === "mobile";
+    const gallery = view === "catalog" || view === "live" || view === "subagent" || view === "mobile" || view === "desktop";
     document.documentElement.classList.toggle("mobile-locked", state.isMobile && !gallery);
   }, [state.isMobile, view]);
 
@@ -418,6 +420,21 @@ function App() {
       <>
         <GalleryLoad><MobileGallery /></GalleryLoad>
         <GalleryNav current="mobile" />
+      </>
+    );
+  }
+  if (view === "desktop") {
+    // The real ConversationScreen, framed. Not a mock: whatever ChatHead and
+    // the status strip do in production is what this page shows.
+    return (
+      <>
+        <GalleryLoad>
+          <DesktopLab>
+            <ConversationScreen version={version} />
+          </DesktopLab>
+        </GalleryLoad>
+        <GalleryNav current="desktop" />
+        <ToastContainer />
       </>
     );
   }

@@ -21,7 +21,7 @@ import { navigate } from "../../data/router.js";
 import { allTileIds } from "../../data/tileTree.js";
 import { getTileCount, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
-import { openPersistedSubagent, openBashJob, configureSession } from "../../data/session-actions.js";
+import { openPersistedSubagent, openBashJob, configureSession, setSessionFast } from "../../data/session-actions.js";
 import { modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
 import { shortModel, shortPath, sessionDisplayDotState, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
@@ -373,6 +373,10 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
             }));
         }}
         onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
+        fast={!!session.fast}
+        fastSupported={!!session.fastSupported}
+        fastNote={session.fastNote || ""}
+        onFastChange={(value) => setSessionFast(session.id, value)}
       />
     </div>,
     document.body,
