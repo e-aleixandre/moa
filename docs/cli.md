@@ -72,7 +72,7 @@ See [Web UI](./serve.md) for details.
 | `sonnet` | `claude-sonnet-5` |
 | `opus` | `claude-opus-5` |
 | `haiku` | `claude-haiku-4-5-20251001` |
-| `fable` | `claude-fable-5` |
+| `fable` | `claude-fable-5-1` |
 | `codex` | `gpt-5.3-codex` |
 | `codex-spark` | `gpt-5.3-codex-spark` |
 | `codex-5.2` | `gpt-5.2-codex` |

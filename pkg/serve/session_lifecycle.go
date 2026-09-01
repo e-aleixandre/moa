@@ -125,9 +125,10 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	persisted.SetRuntimeMetadata(bootstrap.FullModelSpec(model), sess.CWD, permMode, thinking)
 	if err := store.Save(persisted); err != nil {
 		if sess.infra.mcpMgr != nil {
-			sess.infra.mcpMgr.Close()
+			sess.closeMCP()
+		} else if sess.infra.sessionCancel != nil {
+			sess.infra.sessionCancel()
 		}
-		sess.infra.sessionCancel()
 		sess.runtime.Close()
 		return nil, fmt.Errorf("create session persistence: %w", err)
 	}
@@ -739,12 +740,11 @@ func (m *Manager) deleteSession(id string) error {
 	// Serialize with reload so a manager swapped in after closing begins cannot
 	// escape teardown and leave its child processes alive.
 	sess.mcpLifecycleMu.Lock()
-	if sess.infra.mcpMgr != nil {
-		sess.infra.mcpMgr.Close()
-	}
+	sess.closeMCP()
 	sess.mcpLifecycleMu.Unlock()
 
 	// Cancel session context — stops bridges, subagent jobs, and in-flight runs.
+	// closeMCP already cancelled it; this is idempotent.
 	sess.infra.sessionCancel()
 
 	// Close runtime — stops bridges, aborts agent, closes bus.
@@ -935,9 +935,7 @@ func (m *Manager) CloseSession(id string) error {
 	m.forgetSecretBatches(id)
 	// Serialize with reload so teardown closes whichever manager won the swap.
 	sess.mcpLifecycleMu.Lock()
-	if sess.infra.mcpMgr != nil {
-		sess.infra.mcpMgr.Close()
-	}
+	sess.closeMCP()
 	sess.mcpLifecycleMu.Unlock()
 	sess.infra.sessionCancel()
 	// Close drains the bus's async persistence reactor, so no delayed save can
@@ -1223,12 +1221,18 @@ func (s *ManagedSession) mcpSummary() *MCPSummary {
 			sum.Disabled++
 		case mcp.StateReady:
 			sum.Ready++
+		case mcp.StateStarting, mcp.StateRestarting, mcp.StateDisabling:
+			sum.Pending++
 		case mcp.StateFailed, mcp.StateExited:
-			// Enabled but not ready; starting is transient, failed/exited alerts.
 			sum.Unhealthy++
 		}
 		if st.PendingAction != "" {
-			sum.Pending++
+			switch st.State {
+			case mcp.StateStarting, mcp.StateRestarting, mcp.StateDisabling:
+				// Already counted as Pending from the transient state.
+			default:
+				sum.Pending++
+			}
 		}
 	}
 	return sum
@@ -1256,10 +1260,17 @@ func (s *ManagedSession) wireMCPRefresh() {
 		_ = rt.RefreshBaseSystemPrompt(build(reg.Specs()))
 	})
 	if mgr != nil {
-		// Fired from a manager goroutine on any server transition. We recompute
-		// the summary (cheap) and publish; the bus fan-out is asynchronous, so
-		// this never blocks the manager's lifecycle work.
-		mgr.OnChange(func(mcp.ServerStatus) { s.publishMCPChanged() })
+		// Fired from a manager goroutine. Tool/prompt sync is deferred to
+		// quiescence so a handshake finishing mid-turn cannot mutate the live
+		// tool set. The bus publish is cheap and always live.
+		mgr.OnChange(func(st mcp.ServerStatus) {
+			s.publishMCPChanged()
+			switch st.State {
+			case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled:
+				name := st.Name
+				go s.scheduleMCPToolSync(name)
+			}
+		})
 	}
 }
 
@@ -1279,6 +1290,70 @@ func (s *ManagedSession) publishMCPChanged() {
 		Unhealthy: sum.Unhealthy,
 		Pending:   sum.Pending,
 	})
+}
+
+// scheduleMCPToolSync registers one server's tools (and refreshes the prompt)
+// at quiescence. A handshake that finishes during a turn is queued onto the
+// existing deferred-reconcile worker so the live tool set does not change
+// mid-request.
+func (s *ManagedSession) scheduleMCPToolSync(name string) {
+	if name == "" || s.closing.Load() {
+		return
+	}
+	s.pendingMCPMu.Lock()
+	if s.pendingMCPSync == nil {
+		s.pendingMCPSync = map[string]struct{}{}
+	}
+	s.pendingMCPSync[name] = struct{}{}
+	s.pendingMCPMu.Unlock()
+	applied, hasCtrl := s.mcpApplyToolSync()
+	if !hasCtrl {
+		return
+	}
+	if !applied {
+		s.armMCPReconcile()
+	}
+}
+
+func (s *ManagedSession) mcpApplyToolSync() (applied, hasCtrl bool) {
+	s.mcpLifecycleMu.Lock()
+	defer s.mcpLifecycleMu.Unlock()
+	if s.closing.Load() {
+		return false, false
+	}
+	s.mu.Lock()
+	ctrl := s.infra.mcpController
+	s.mu.Unlock()
+	if ctrl == nil {
+		return false, false
+	}
+	return s.runtime.DoIfQuiescent(func() { s.applyPendingMCPToolSync(ctrl) }), true
+}
+
+func (s *ManagedSession) applyPendingMCPToolSync(ctrl *mcp.Controller) {
+	s.pendingMCPMu.Lock()
+	names := make([]string, 0, len(s.pendingMCPSync))
+	for n := range s.pendingMCPSync {
+		names = append(names, n)
+	}
+	s.pendingMCPSync = nil
+	s.pendingMCPMu.Unlock()
+	for _, n := range names {
+		ctrl.SyncServer(n)
+	}
+}
+
+// closeMCP cancels the session context first so an in-flight handshake
+// aborts, then closes the manager. Clearing OnChange prevents a closing
+// manager's Exited notification from unregistering tools on a replacement.
+func (s *ManagedSession) closeMCP() {
+	if s.infra.sessionCancel != nil {
+		s.infra.sessionCancel()
+	}
+	if s.infra.mcpMgr != nil {
+		s.infra.mcpMgr.OnChange(nil)
+		s.infra.mcpMgr.Close()
+	}
 }
 
 // RestartMCPServer restarts a single MCP server for this session and re-syncs
@@ -1354,6 +1429,9 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 		// Honor the session's disable policy on reload too, so a vetoed server
 		// isn't spawned just because the project's .mcp.json became trusted.
 		newMgr.Start(s.infra.sessionCtx, merged, reloadPolicy.DisabledSet())
+		waitCtx, cancel := context.WithTimeout(s.infra.sessionCtx, 16*time.Second)
+		_ = newMgr.WaitSettled(waitCtx)
+		cancel()
 		newTools = newMgr.Tools()
 	}
 
@@ -1400,6 +1478,7 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 		// Cleanup old manager after the swap (still inside the barrier: closing it
 		// can't race a run that was blocked from starting).
 		if oldMgr != nil {
+			oldMgr.OnChange(nil)
 			oldMgr.Close()
 		}
 	})

@@ -147,6 +147,104 @@ func TestBuildRequestBody_WithThinkingAdaptive(t *testing.T) {
 	}
 }
 
+func TestBuildRequestBody_Fable51UsesAdaptiveThinking(t *testing.T) {
+	req := core.Request{
+		Model: core.Model{ID: "claude-fable-5-1"},
+		Messages: []core.Message{
+			core.NewUserMessage("Think hard"),
+		},
+		Options: core.StreamOptions{
+			ThinkingLevel: "high",
+		},
+	}
+
+	data, err := buildRequestBody(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+
+	thinking, ok := body["thinking"].(map[string]any)
+	if !ok {
+		t.Fatal("expected thinking config")
+	}
+	if thinking["type"] != "adaptive" {
+		t.Errorf("thinking type: got %v, want adaptive", thinking["type"])
+	}
+	outputConfig, ok := body["output_config"].(map[string]any)
+	if !ok {
+		t.Fatal("expected output_config with effort")
+	}
+	if outputConfig["effort"] != "high" {
+		t.Errorf("effort: got %v, want high", outputConfig["effort"])
+	}
+}
+
+func TestBuildRequestBody_Fable51OffStillSendsAdaptiveHigh(t *testing.T) {
+	req := core.Request{
+		Model: core.Model{ID: "claude-fable-5-1", Provider: "anthropic"},
+		Messages: []core.Message{
+			core.NewUserMessage("Think hard"),
+		},
+		Options: core.StreamOptions{
+			ThinkingLevel: "off",
+		},
+	}
+
+	data, err := buildRequestBody(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+
+	thinking, ok := body["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "adaptive" {
+		t.Fatalf("thinking = %v, want adaptive (always on)", body["thinking"])
+	}
+	outputConfig, ok := body["output_config"].(map[string]any)
+	if !ok || outputConfig["effort"] != "high" {
+		t.Fatalf("output_config = %v, want effort high", body["output_config"])
+	}
+}
+
+func TestBuildRequestBody_Fable5KeepsManualThinking(t *testing.T) {
+	req := core.Request{
+		Model: core.Model{ID: "claude-fable-5"},
+		Messages: []core.Message{
+			core.NewUserMessage("Think hard"),
+		},
+		Options: core.StreamOptions{
+			ThinkingLevel: "high",
+		},
+	}
+
+	data, err := buildRequestBody(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+
+	thinking, ok := body["thinking"].(map[string]any)
+	if !ok {
+		t.Fatal("expected thinking config")
+	}
+	if thinking["type"] != "enabled" {
+		t.Errorf("thinking type: got %v, want enabled (manual)", thinking["type"])
+	}
+}
+
 func TestBuildRequestBody_WithThinkingManualLegacy(t *testing.T) {
 	req := core.Request{
 		Model: core.Model{ID: "claude-sonnet-4-5"},

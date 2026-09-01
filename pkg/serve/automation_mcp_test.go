@@ -20,6 +20,18 @@ import (
 	"github.com/e-aleixandre/moa/pkg/session"
 )
 
+func waitMCPSettled(t *testing.T, mgr *mcp.Manager) {
+	t.Helper()
+	if mgr == nil {
+		t.Fatal("no MCP manager")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := mgr.WaitSettled(ctx); err != nil {
+		t.Fatalf("WaitSettled: %v status=%+v", err, mgr.Status())
+	}
+}
+
 // newRelayMCPServer starts a streamable-HTTP MCP server exposing one
 // "mark_task_done" tool — the shape a Linear-style relay would have.
 func newRelayMCPServer(t *testing.T) string {
@@ -70,6 +82,7 @@ func TestAutomationRunWithPerRunMCPServer(t *testing.T) {
 
 	// The server arrives through the normal manager, so it is visible to the
 	// MCP panel exactly like a configured one.
+	waitMCPSettled(t, sess.infra.mcpMgr)
 	status := sess.infra.mcpMgr.Status()
 	if len(status) != 1 || status[0].Name != "relay" || status[0].State != mcp.StateReady {
 		t.Fatalf("MCP status = %+v, want one ready relay", status)
@@ -79,15 +92,14 @@ func TestAutomationRunWithPerRunMCPServer(t *testing.T) {
 	}
 
 	// And the tool is agent-visible in the session's registry.
-	var found bool
-	for _, spec := range sess.infra.toolReg.Specs() {
-		if strings.Contains(spec.Name, "mark_task_done") {
-			found = true
+	pollUntil(t, 5*time.Second, "per-run MCP tool registered", func() bool {
+		for _, spec := range sess.infra.toolReg.Specs() {
+			if strings.Contains(spec.Name, "mark_task_done") {
+				return true
+			}
 		}
-	}
-	if !found {
-		t.Fatal("per-run MCP tool is not registered on the session")
-	}
+		return false
+	})
 
 	// The untrusted-MCP gate is about a project .mcp.json, not about servers the
 	// operator's own token attached: it must stay off.
@@ -145,6 +157,7 @@ func TestAutomationPerRunMCPServersSurviveResume(t *testing.T) {
 	if resumed.infra.mcpMgr == nil {
 		t.Fatal("resumed session has no MCP manager")
 	}
+	waitMCPSettled(t, resumed.infra.mcpMgr)
 	status := resumed.infra.mcpMgr.Status()
 	if len(status) != 1 || status[0].Name != "relay" || status[0].State != mcp.StateReady {
 		t.Fatalf("resumed MCP status = %+v, want a ready relay", status)
@@ -379,6 +392,7 @@ func TestAutomationMCPCommandAliasVariants(t *testing.T) {
 		if !ok {
 			t.Fatal("session not found")
 		}
+		waitMCPSettled(t, sess.infra.mcpMgr)
 		status := sess.infra.mcpMgr.Status()
 		if len(status) != 1 || status[0].Name != "relay" || status[0].State != mcp.StateReady {
 			t.Fatalf("MCP status = %+v, want one ready url-based relay", status)
@@ -530,6 +544,7 @@ func TestAutomationResumeConfiguredServerWinsOverPerRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
+	waitMCPSettled(t, resumed.infra.mcpMgr)
 	status := resumed.infra.mcpMgr.Status()
 	if len(status) != 1 || status[0].Name != "relay" {
 		t.Fatalf("resumed MCP status = %+v, want a single relay", status)

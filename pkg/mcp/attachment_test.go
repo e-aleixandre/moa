@@ -108,7 +108,7 @@ func TestMCPWrapperObeysTheInvocationContext(t *testing.T) {
 	scope := newTestScope(t, storeDir)
 
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{"pics": imageHelperConfig()}, nil)
+	startWait(t, mgr, map[string]core.MCPServer{"pics": imageHelperConfig()}, nil)
 	defer mgr.Close()
 
 	shared := imageTool(t, mgr)
@@ -147,13 +147,13 @@ func TestMCPWrapperStillObeysContextAfterReload(t *testing.T) {
 	scope := newTestScope(t, storeDir)
 
 	oldMgr := NewManager(nil, "")
-	oldMgr.Start(context.Background(), map[string]core.MCPServer{"pics": imageHelperConfig()}, nil)
+	startWait(t, oldMgr, map[string]core.MCPServer{"pics": imageHelperConfig()}, nil)
 	_ = imageTool(t, oldMgr)
 	oldMgr.Close()
 
 	// Exactly what reloadMCP does: a fresh manager, fresh wrappers.
 	newMgr := NewManager(nil, "")
-	newMgr.Start(context.Background(), map[string]core.MCPServer{"pics": imageHelperConfig()}, nil)
+	startWait(t, newMgr, map[string]core.MCPServer{"pics": imageHelperConfig()}, nil)
 	defer newMgr.Close()
 
 	reloaded := imageTool(t, newMgr)

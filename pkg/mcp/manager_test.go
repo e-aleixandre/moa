@@ -83,12 +83,50 @@ func helperServerConfig(pidFile string) core.MCPServer {
 	}
 }
 
+func TestManagerStartDoesNotWaitForHandshake(t *testing.T) {
+	mgr := NewManager(nil, "")
+	t0 := time.Now()
+	mgr.Start(context.Background(), map[string]core.MCPServer{
+		"slow": {Command: "sleep", Args: []string{"10"}},
+	}, nil)
+	defer mgr.Close()
+	if elapsed := time.Since(t0); elapsed > 200*time.Millisecond {
+		t.Fatalf("Start blocked for %s, want return while the handshake is in flight", elapsed)
+	}
+	st := mgr.Status()
+	if len(st) != 1 || st[0].Name != "slow" || st[0].State != StateStarting {
+		t.Fatalf("status after Start = %+v, want starting slow", st)
+	}
+	if !st[0].StartedAt.IsZero() {
+		t.Fatalf("StartedAt = %v, want zero until the server actually connects", st[0].StartedAt)
+	}
+}
+
+func TestManagerCloseAbortsInFlightStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	mgr := NewManager(nil, "")
+	mgr.Start(ctx, map[string]core.MCPServer{
+		"slow": {Command: "sleep", Args: []string{"10"}},
+	}, nil)
+	cancel()
+	t0 := time.Now()
+	mgr.Close()
+	if elapsed := time.Since(t0); elapsed > 2*time.Second {
+		t.Fatalf("Close blocked for %s after cancel, want handshake abort", elapsed)
+	}
+}
+
 func TestManagerStatusAfterStart(t *testing.T) {
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"ping": helperServerConfig(""),
 	}, nil)
 	defer mgr.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := mgr.WaitSettled(ctx); err != nil {
+		t.Fatalf("WaitSettled: %v", err)
+	}
 
 	st := mgr.Status()
 	if len(st) != 1 {
@@ -104,7 +142,7 @@ func TestManagerStatusAfterStart(t *testing.T) {
 
 func TestManagerStatusFailedServer(t *testing.T) {
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"broken": {Command: "definitely-not-a-real-binary-xyz"},
 	}, nil)
 	defer mgr.Close()
@@ -133,7 +171,7 @@ func TestManagerDetectsServerExit(t *testing.T) {
 	changes := make(chan ServerStatus, 16)
 	mgr.OnChange(func(s ServerStatus) { changes <- s })
 
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"ping": helperServerConfig(pidFile),
 	}, nil)
 	defer mgr.Close()
@@ -195,7 +233,7 @@ func TestManagerDetectsServerExit(t *testing.T) {
 func TestManagerRestartServer(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"ping": helperServerConfig(pidFile),
 	}, nil)
 	defer mgr.Close()
@@ -230,7 +268,7 @@ func TestManagerRestartServer(t *testing.T) {
 
 func TestManagerRestartUnknownServer(t *testing.T) {
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), nil, nil)
+	startWait(t, mgr, nil, nil)
 	defer mgr.Close()
 	if _, err := mgr.RestartServer(context.Background(), "nope"); !errors.Is(err, ErrUnknownServer) {
 		t.Fatalf("err = %v, want ErrUnknownServer", err)
@@ -240,7 +278,7 @@ func TestManagerRestartUnknownServer(t *testing.T) {
 func TestManagerStartInitiallyDisabled(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"ping": helperServerConfig(pidFile),
 	}, map[string]bool{"ping": true})
 	defer mgr.Close()
@@ -267,7 +305,7 @@ func TestManagerStartInitiallyDisabled(t *testing.T) {
 
 func TestManagerRestartDisabledServerRefused(t *testing.T) {
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"ping": helperServerConfig(""),
 	}, map[string]bool{"ping": true})
 	defer mgr.Close()
@@ -280,7 +318,7 @@ func TestManagerRestartDisabledServerRefused(t *testing.T) {
 func TestManagerEnableThenDisable(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"ping": helperServerConfig(pidFile),
 	}, map[string]bool{"ping": true})
 	defer mgr.Close()
@@ -328,7 +366,7 @@ func TestManagerEnableThenDisable(t *testing.T) {
 
 func TestManagerEnableIdempotent(t *testing.T) {
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"ping": helperServerConfig(""),
 	}, nil) // starts enabled
 	defer mgr.Close()
@@ -348,7 +386,7 @@ func TestManagerEnableIdempotent(t *testing.T) {
 
 func TestManagerDisableIdempotent(t *testing.T) {
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"ping": helperServerConfig(""),
 	}, map[string]bool{"ping": true})
 	defer mgr.Close()
@@ -415,7 +453,7 @@ func processAlive(pid int) bool {
 func TestManagerConcurrentRestartsNoOrphan(t *testing.T) {
 	pidLog := filepath.Join(t.TempDir(), "pids")
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"ping": pidTrackingConfig(pidLog),
 	}, nil)
 
@@ -468,7 +506,7 @@ func TestManagerCloseRacingRestartNoOrphan(t *testing.T) {
 	for attempt := 0; attempt < 5; attempt++ {
 		pidLog := filepath.Join(t.TempDir(), "pids")
 		mgr := NewManager(nil, "")
-		mgr.Start(context.Background(), map[string]core.MCPServer{
+		startWait(t, mgr, map[string]core.MCPServer{
 			"ping": pidTrackingConfig(pidLog),
 		}, nil)
 
@@ -538,7 +576,7 @@ func TestManagerStartsServerInConfiguredCWD(t *testing.T) {
 	cwd := t.TempDir()
 	output := filepath.Join(t.TempDir(), "server-cwd")
 	mgr := NewManager(nil, cwd)
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"cwd-helper": {
 			Command: os.Args[0],
 			Args:    []string{"-test.run=^TestMCPHelperProcess$", "--"},

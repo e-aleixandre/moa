@@ -95,7 +95,10 @@ func (s *ManagedSession) mcpReconcileNow() (applied, hasCtrl bool) {
 	if ctrl == nil {
 		return false, false
 	}
-	return s.runtime.DoIfQuiescent(func() { ctrl.Reconcile(ctx) }), true
+	return s.runtime.DoIfQuiescent(func() {
+		ctrl.Reconcile(ctx)
+		s.applyPendingMCPToolSync(ctrl)
+	}), true
 }
 
 // armMCPReconcile schedules a one-shot reconcile of this session's MCP policy at

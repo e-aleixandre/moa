@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Check, ChevronLeft, ChevronRight, Search, Star, X } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
+import { clampThinkingLevel, thinkingLevelsFor } from "../../data/selectors.js";
 import { Segmented } from "../Segmented/Segmented.jsx";
 import {
   groupByProvider,
@@ -355,9 +356,9 @@ export function ModelSelector({
     <div class={`model-selector${embedded ? " model-selector--embedded" : ""}`} {...rest}>
       {!embedded && <div class="sel-head">Model &amp; thinking</div>}
       <ThinkingStepper
-        value={thinking}
+        value={clampThinkingLevel(thinking, thinkingLevelsFor(selectedSpec, sessionProvider))}
         onChange={onThinkingChange}
-        levels={(selectedSpec?.provider === "xai" || sessionProvider === "xai") ? ["low", "medium", "high"] : undefined}
+        levels={thinkingLevelsFor(selectedSpec, sessionProvider)}
       />
       <FastRow value={fast} supported={fastSupported} note={fastNote} onChange={onFastChange} />
       {!!sessionModel && (

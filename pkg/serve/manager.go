@@ -194,6 +194,8 @@ type ManagedSession struct {
 	// exiting is never dropped.
 	mcpReconcilePending atomic.Bool
 	mcpReconcileDirty   atomic.Bool
+	pendingMCPMu        sync.Mutex
+	pendingMCPSync      map[string]struct{}
 	// mcpLifecycleMu serializes every MCP lifecycle operation for this session —
 	// reconcile (immediate and deferred), restart, and reload — so they never
 	// mutate the shared tool registry or the manager/controller concurrently. It
@@ -248,27 +250,27 @@ type MCPSummary struct {
 
 // SessionInfo is the public representation returned by List/Get endpoints.
 type SessionInfo struct {
-	ID                 string       `json:"id"`
-	Title              string       `json:"title"`
-	State              SessionState `json:"state"`
-	Model              string       `json:"model"`
-	Provider           string       `json:"provider"`
-	Thinking           string       `json:"thinking"`
+	ID       string       `json:"id"`
+	Title    string       `json:"title"`
+	State    SessionState `json:"state"`
+	Model    string       `json:"model"`
+	Provider string       `json:"provider"`
+	Thinking string       `json:"thinking"`
 	// Fast is whether this session buys premium speed, and FastSupported
 	// whether the model it is on can serve it at all.
-	Fast          bool   `json:"fast,omitempty"`
-	FastSupported bool   `json:"fast_supported,omitempty"`
-	FastNote      string `json:"fast_note,omitempty"`
-	CWD                string       `json:"cwd"`
-	Created            time.Time    `json:"created"`
-	Updated            time.Time    `json:"updated"`
-	Origin             string       `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
-	Error              string       `json:"error,omitempty"`
-	Unseen             bool         `json:"unseen"`
-	UnseenSeq          uint64       `json:"unseen_seq,omitempty"`
-	ServerInstance     string       `json:"server_instance"`
-	AttentionNamespace string       `json:"attention_namespace,omitempty"`
-	UntrustedMCP       bool         `json:"untrusted_mcp,omitempty"`
+	Fast               bool      `json:"fast,omitempty"`
+	FastSupported      bool      `json:"fast_supported,omitempty"`
+	FastNote           string    `json:"fast_note,omitempty"`
+	CWD                string    `json:"cwd"`
+	Created            time.Time `json:"created"`
+	Updated            time.Time `json:"updated"`
+	Origin             string    `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
+	Error              string    `json:"error,omitempty"`
+	Unseen             bool      `json:"unseen"`
+	UnseenSeq          uint64    `json:"unseen_seq,omitempty"`
+	ServerInstance     string    `json:"server_instance"`
+	AttentionNamespace string    `json:"attention_namespace,omitempty"`
+	UntrustedMCP       bool      `json:"untrusted_mcp,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
 	// whether any is unhealthy, so the indicator can appear only when servers
 	// exist and turn red when one has failed or exited. The full per-server

@@ -10,6 +10,7 @@ func TestSupportsFast(t *testing.T) {
 	}{
 		{"claude-opus-5", true, "Anthropic serves fast mode on Opus"},
 		{"claude-opus-4-8", true, "Anthropic serves fast mode on Opus"},
+		{"claude-fable-5-1", false, "Fable answers: does not support the `speed` parameter"},
 		{"claude-sonnet-5", false, "Sonnet answers: does not support the `speed` parameter"},
 		{"claude-haiku-4-5-20251001", false, "Haiku answers: does not support the `speed` parameter"},
 		{"gpt-5.6", true, "OpenAI prices a priority tier on the 5.4 generation onwards"},

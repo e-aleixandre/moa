@@ -106,6 +106,24 @@ export function nextThinkingLevel(level, levels = THINKING_CYCLE) {
   return cycle[(from + 1) % cycle.length];
 }
 
+// thinkingLevelsFor is the selector's option list for the current model.
+// Undefined means the full THINKING_CYCLE. xAI cannot persist off/xhigh;
+// Fable 5.1 thinks on every turn so off is not a real setting.
+export function thinkingLevelsFor(spec, sessionProvider) {
+  const provider = spec?.provider || sessionProvider;
+  if (provider === "xai") return ["low", "medium", "high"];
+  const id = String(spec?.catalogId || spec?.id || "").toLowerCase();
+  if (id.includes("fable-5-1") || id.includes("fable-5.1")) {
+    return ["low", "medium", "high", "xhigh"];
+  }
+  return undefined;
+}
+
+export function clampThinkingLevel(level, levels) {
+  if (!levels || levels.includes(level)) return level || "off";
+  return levels.includes("high") ? "high" : levels[0];
+}
+
 // matchSelectedModel finds the spec whose display name matches the session's
 // current model string (session.model is the display name the backend reports,
 // e.g. "GPT-5.6 Sol" — not the "provider/id" spec).

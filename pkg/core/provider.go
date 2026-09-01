@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Provider streams LLM responses. Each provider (Anthropic, OpenAI, etc.)
@@ -247,25 +248,40 @@ func ThinkingLevelOptions() string {
 	return s
 }
 
+// ThinkingAlwaysOn reports whether a model thinks on every turn. Off is not a
+// real setting there: the API still thinks, at its default effort (high).
+func ThinkingAlwaysOn(model Model) bool {
+	id := strings.ToLower(model.ID)
+	if resolved, ok := ResolveModel(model.ID); ok {
+		id = strings.ToLower(resolved.ID)
+	}
+	return strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1")
+}
+
 // EffectiveThinkingLevel resolves a persisted level for a model. xAI requires
-// reasoning and only accepts low/medium/high; other providers keep the value.
+// reasoning and only accepts low/medium/high. Models whose thinking cannot be
+// turned off promote "off" to the API default ("high"). Other providers keep
+// the value.
 func EffectiveThinkingLevel(model Model, level string) (string, error) {
-	if model.Provider != "xai" {
-		if !IsValidThinkingLevel(level) {
-			return "", fmt.Errorf("invalid thinking level %q", level)
+	if model.Provider == "xai" {
+		switch level {
+		case "off", "minimal", "low":
+			return "low", nil
+		case "medium":
+			return "medium", nil
+		case "high", "xhigh":
+			return "high", nil
+		default:
+			return "", fmt.Errorf("invalid xAI thinking level %q (choose: low, medium, high)", level)
 		}
-		return level, nil
 	}
-	switch level {
-	case "off", "minimal", "low":
-		return "low", nil
-	case "medium":
-		return "medium", nil
-	case "high", "xhigh":
+	if !IsValidThinkingLevel(level) {
+		return "", fmt.Errorf("invalid thinking level %q", level)
+	}
+	if ThinkingAlwaysOn(model) && level == "off" {
 		return "high", nil
-	default:
-		return "", fmt.Errorf("invalid xAI thinking level %q (choose: low, medium, high)", level)
 	}
+	return level, nil
 }
 
 // AssistantEvent is emitted by providers during streaming.

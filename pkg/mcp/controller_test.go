@@ -18,7 +18,7 @@ import (
 func newTestController(t *testing.T, servers map[string]core.MCPServer, initiallyDisabled map[string]bool, policy core.MCPDisablePolicy) (*Controller, *core.Registry, *int) {
 	t.Helper()
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), servers, initiallyDisabled)
+	startWait(t, mgr, servers, initiallyDisabled)
 	reg := core.NewRegistry()
 	for _, tl := range mgr.Tools() {
 		core.RegisterOrLog(reg, tl)
@@ -224,7 +224,7 @@ func TestControllerRestartRefusesPendingDisable(t *testing.T) {
 // build only exercises the current platform's branch.
 func TestRestartPlatformGate(t *testing.T) {
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"ping": helperServerConfig(""),
 	}, nil)
 	defer mgr.Close()

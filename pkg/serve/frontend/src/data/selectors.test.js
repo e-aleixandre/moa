@@ -1,6 +1,6 @@
 // selectors.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { deriveModelSpecs, matchSelectedModel, modelAccent, nextThinkingLevel } from './selectors.js';
+import { clampThinkingLevel, deriveModelSpecs, matchSelectedModel, modelAccent, nextThinkingLevel, thinkingLevelsFor } from './selectors.js';
 
 test('deriveModelSpecs: known codename splits into codename + version/context subline', () => {
   const specs = deriveModelSpecs([
@@ -79,4 +79,19 @@ test('nextThinkingLevel: unknown level starts the cycle at "low"', () => {
 test('nextThinkingLevel: Grok cycles only supported persisted levels', () => {
   expect(nextThinkingLevel('low', ['low', 'medium', 'high'])).toBe('medium');
   expect(nextThinkingLevel('high', ['low', 'medium', 'high'])).toBe('low');
+});
+
+test('thinkingLevelsFor: Fable 5.1 cannot turn thinking off; Fable 5 and Opus still can', () => {
+  expect(thinkingLevelsFor({ catalogId: 'claude-fable-5-1', provider: 'anthropic' })).toEqual([
+    'low', 'medium', 'high', 'xhigh',
+  ]);
+  expect(thinkingLevelsFor({ catalogId: 'claude-fable-5', provider: 'anthropic' })).toBeUndefined();
+  expect(thinkingLevelsFor({ catalogId: 'claude-opus-5', provider: 'anthropic' })).toBeUndefined();
+  expect(thinkingLevelsFor({ catalogId: 'grok-4.6', provider: 'xai' })).toEqual(['low', 'medium', 'high']);
+});
+
+test('clampThinkingLevel: off on an always-on model becomes high', () => {
+  expect(clampThinkingLevel('off', ['low', 'medium', 'high', 'xhigh'])).toBe('high');
+  expect(clampThinkingLevel('medium', ['low', 'medium', 'high', 'xhigh'])).toBe('medium');
+  expect(clampThinkingLevel('off', undefined)).toBe('off');
 });

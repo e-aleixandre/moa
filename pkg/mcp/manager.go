@@ -161,10 +161,10 @@ func (m *Manager) OnChange(fn func(ServerStatus)) {
 	m.mu.Unlock()
 }
 
-// Start spawns all configured MCP servers in parallel, performs the handshake,
-// and discovers tools. Servers that fail to start are recorded as failed and
-// skipped (non-fatal) — they still appear in Status so the UI can show the
-// error and offer a restart.
+// Start registers every configured server and begins connecting them in the
+// background. It returns without waiting for the handshake: a slow server
+// (Playwright spawning Chromium) must not block opening a saved session.
+// Call WaitSettled when the caller needs tools or a terminal state.
 //
 // initiallyDisabled names servers that are configured but must not be spawned:
 // they get a StateDisabled placeholder (visible in Status, no process, no
@@ -185,42 +185,85 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, 
 	}
 	sortStrings(names)
 
-	results := make([]*serverSession, len(names))
-	var wg sync.WaitGroup
-	for i, name := range names {
-		if initiallyDisabled[name] {
-			// No process for a disabled server; a placeholder keeps it visible
-			// and enable-able.
-			results[i] = newDisabledSession(name)
-			continue
-		}
-		wg.Add(1)
-		go func(i int, name string) {
-			defer wg.Done()
-			results[i] = m.dialServer(ctx, name, servers[name])
-		}(i, name)
-	}
-	wg.Wait()
-
+	now := time.Now()
+	sessions := make([]*serverSession, len(names))
 	m.mu.Lock()
-	for _, sess := range results {
+	for i, name := range names {
+		var sess *serverSession
+		if initiallyDisabled[name] {
+			sess = newDisabledSession(name)
+		} else {
+			sess = &serverSession{name: name, state: StateStarting, changedAt: now}
+		}
+		sessions[i] = sess
 		m.servers = append(m.servers, sess)
-		m.byName[sess.name] = sess
+		m.byName[name] = sess
 	}
 	m.mu.Unlock()
 
-	for _, sess := range results {
+	for i, name := range names {
+		sess := sessions[i]
 		st := sess.status()
-		switch st.State {
-		case StateReady:
-			m.logger.Info("MCP server connected", "server", st.Name, "tools", st.ToolCount)
-		case StateDisabled:
+		if st.State == StateDisabled {
 			m.logger.Info("MCP server disabled", "server", st.Name)
-		default:
-			m.logger.Warn("MCP server failed to start", "server", st.Name, "error", st.Error)
+			m.notify(st)
+			continue
 		}
 		m.notify(st)
+		cfg := servers[name]
+		go m.finishStart(ctx, sess, cfg)
 	}
+}
+
+// WaitSettled blocks until every server has left a transient state
+// (starting/restarting/disabling), or ctx is done. Failed and ready both count
+// as settled: the handshake finished, even if it failed.
+func (m *Manager) WaitSettled(ctx context.Context) error {
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if m.settled() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (m *Manager) settled() bool {
+	for _, st := range m.Status() {
+		switch st.State {
+		case StateStarting, StateRestarting, StateDisabling:
+			return false
+		}
+	}
+	return true
+}
+
+func (m *Manager) finishStart(ctx context.Context, sess *serverSession, cfg core.MCPServer) {
+	sess.lifecycle.Lock()
+	defer sess.lifecycle.Unlock()
+
+	m.mu.Lock()
+	closed := m.closed
+	m.mu.Unlock()
+	if closed {
+		return
+	}
+
+	if err := m.connect(ctx, sess, cfg); err != nil {
+		sess.setFailed(err.Error())
+		st := sess.status()
+		m.logger.Warn("MCP server failed to start", "server", st.Name, "error", st.Error)
+		m.notify(st)
+		return
+	}
+	st := sess.status()
+	m.logger.Info("MCP server connected", "server", st.Name, "tools", st.ToolCount)
+	m.notify(st)
 }
 
 // newDisabledSession builds a placeholder for a configured-but-disabled server:
@@ -228,17 +271,6 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, 
 func newDisabledSession(name string) *serverSession {
 	now := time.Now()
 	return &serverSession{name: name, state: StateDisabled, changedAt: now}
-}
-
-// dialServer connects one server and returns a serverSession recording the
-// outcome (ready or failed). It never returns nil: a failed dial still yields a
-// placeholder session so the server is visible and restartable.
-func (m *Manager) dialServer(ctx context.Context, name string, cfg core.MCPServer) *serverSession {
-	sess := &serverSession{name: name}
-	if err := m.connect(ctx, sess, cfg); err != nil {
-		sess.setFailed(err.Error())
-	}
-	return sess
 }
 
 // connect starts the server (subprocess for a command-based one, nothing to

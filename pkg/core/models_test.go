@@ -77,6 +77,24 @@ func TestGrok46Pricing(t *testing.T) {
 	}
 }
 
+func TestFable51Pricing(t *testing.T) {
+	model, ok := ResolveModel("fable")
+	if !ok || model.ID != "claude-fable-5-1" || model.Pricing == nil {
+		t.Fatalf("fable alias = %+v, %v; want claude-fable-5-1", model, ok)
+	}
+	p := model.Pricing
+	if model.MaxInput != 1_000_000 || model.MaxOutput != 131072 ||
+		p.Input != 10 || p.Output != 50 || p.CacheRead != 0.25 ||
+		p.CacheWrite != 12.5 || p.CacheWrite1h != 20 {
+		t.Fatalf("Fable 5.1 definition = %+v, pricing = %+v", model, p)
+	}
+	// Previous generation stays reachable by ID at the old cache-read price.
+	prev, ok := ResolveModel("claude-fable-5")
+	if !ok || prev.Pricing == nil || prev.Pricing.CacheRead != 1 {
+		t.Fatalf("claude-fable-5 = %+v, %v; want cache read $1", prev, ok)
+	}
+}
+
 func mustPricing(t *testing.T, id string) *Pricing {
 	t.Helper()
 	m, ok := ResolveModel(id)
@@ -130,6 +148,33 @@ func TestEffectiveThinkingLevel_Grok(t *testing.T) {
 	}
 	if _, err := EffectiveThinkingLevel(model, "unknown"); err == nil {
 		t.Fatal("unknown Grok level must fail")
+	}
+}
+
+func TestEffectiveThinkingLevel_Fable51AlwaysOn(t *testing.T) {
+	model, ok := ResolveModel("claude-fable-5-1")
+	if !ok {
+		t.Fatal("claude-fable-5-1 must resolve")
+	}
+	if !ThinkingAlwaysOn(model) || !ThinkingAlwaysOn(Model{ID: "fable"}) {
+		t.Fatal("Fable 5.1 thinking is always on")
+	}
+	got, err := EffectiveThinkingLevel(model, "off")
+	if err != nil || got != "high" {
+		t.Fatalf("off = %q, %v; want high (API default)", got, err)
+	}
+	for _, level := range []string{"low", "medium", "high", "xhigh"} {
+		got, err := EffectiveThinkingLevel(model, level)
+		if err != nil || got != level {
+			t.Errorf("EffectiveThinkingLevel(%q) = %q, %v; want unchanged", level, got, err)
+		}
+	}
+	prev, _ := ResolveModel("claude-fable-5")
+	if ThinkingAlwaysOn(prev) {
+		t.Fatal("Fable 5 still allows thinking off")
+	}
+	if got, err := EffectiveThinkingLevel(prev, "off"); err != nil || got != "off" {
+		t.Fatalf("Fable 5 off = %q, %v; want off", got, err)
 	}
 }
 
@@ -437,7 +482,7 @@ func TestResolveModel_CaseAndSpaceInsensitive(t *testing.T) {
 		"Terra":           "gpt-5.6-terra",
 		"Luna":            "gpt-5.6-luna",
 		"Opus":            "claude-opus-5",
-		"Fable":           "claude-fable-5",
+		"Fable":           "claude-fable-5-1",
 		" sol ":           "gpt-5.6-sol",
 		"openai/Sol":      "gpt-5.6-sol",
 		"ANTHROPIC/Opus":  "claude-opus-5",

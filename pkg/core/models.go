@@ -9,6 +9,13 @@ import (
 // Known models with context window sizes and API details.
 var knownModels = map[string]Model{
 	// --- Anthropic ---
+	"claude-fable-5-1": {
+		ID: "claude-fable-5-1", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Fable 5.1", MaxInput: 1_000_000, MaxOutput: 131072,
+		// Same input/output as Fable 5; cache reads are a quarter of that
+		// model's ($0.25 vs $1). Writes stay 1.25x / 2x of input.
+		Pricing: &Pricing{Input: 10, Output: 50, CacheRead: 0.25, CacheWrite: 12.5, CacheWrite1h: 20},
+	},
 	"claude-fable-5": {
 		ID: "claude-fable-5", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Fable 5", MaxInput: 1_000_000, MaxOutput: 131072,
@@ -140,7 +147,7 @@ var modelAliases = map[string]string{
 	"sonnet": "claude-sonnet-5",
 	"opus":   "claude-opus-5",
 	"haiku":  "claude-haiku-4-5-20251001",
-	"fable":  "claude-fable-5",
+	"fable":  "claude-fable-5-1",
 	// OpenAI
 	"codex":       "gpt-5.3-codex",
 	"codex-spark": "gpt-5.3-codex-spark",
@@ -296,10 +303,12 @@ type ModelEntry struct {
 // modelDisplayOrder is the explicit order models appear in selectors (web
 // dropdown). Grouped by provider, and within each provider roughly by
 // generation and then by capability/power — not strict release date (e.g.
-// Fable 5 before Opus 5 before Sonnet 5, and GPT-5.6 Sol before Terra before
-// Luna). Models not listed here fall to the end, in provider-then-name order.
+// Fable 5.1 before Fable 5 before Opus 5 before Sonnet 5, and GPT-5.6 Sol
+// before Terra before Luna). Models not listed here fall to the end, in
+// provider-then-name order.
 var modelDisplayOrder = []string{
 	// Anthropic
+	"claude-fable-5-1",
 	"claude-fable-5",
 	"claude-opus-5",
 	"claude-sonnet-5",

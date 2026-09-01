@@ -277,6 +277,24 @@ func (c *Controller) Restart(ctx context.Context, name string) (ServerStatus, er
 	if err != nil {
 		return st, err
 	}
+	c.syncServerLocked(name)
+	return st, nil
+}
+
+// SyncServer rewrites one server's tools in the registry to match the manager.
+// Used when a server finishes its initial connect in the background (Start no
+// longer waits for the handshake). Safe to call from OnChange via a new
+// goroutine so it does not deadlock against Restart/Reconcile holding c.op.
+func (c *Controller) SyncServer(name string) {
+	if c == nil {
+		return
+	}
+	c.op.Lock()
+	defer c.op.Unlock()
+	c.syncServerLocked(name)
+}
+
+func (c *Controller) syncServerLocked(name string) {
 	// Compare the full registry before/after this server's resync — not a
 	// fingerprint taken at NewController, which runs in bootstrap before
 	// skills/ask-user/subagents are registered. BuildSystemPrompt stamps
@@ -287,7 +305,6 @@ func (c *Controller) Restart(ctx context.Context, name string) (ServerStatus, er
 	if specsFingerprint(c.reg.Specs()) != before {
 		c.refresh()
 	}
-	return st, nil
 }
 
 // SetPolicy replaces the disable policy and reconciles the manager to match.

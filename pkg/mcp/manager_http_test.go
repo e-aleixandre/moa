@@ -46,7 +46,7 @@ func TestManagerRemoteServerLifecycle(t *testing.T) {
 	url, _ := newRemoteTestServer(t)
 
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"remote": {URL: url},
 	}, nil)
 	defer mgr.Close()
@@ -95,7 +95,7 @@ func TestManagerRemoteServerHeaders(t *testing.T) {
 	url, lastAuth := newRemoteTestServer(t)
 
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"remote": {URL: url, Headers: map[string]string{"Authorization": "Bearer s3cret"}},
 	}, nil)
 	defer mgr.Close()
@@ -112,7 +112,7 @@ func TestManagerRemoteServerDisableEnable(t *testing.T) {
 	url, _ := newRemoteTestServer(t)
 
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"remote": {URL: url},
 	}, nil)
 	defer mgr.Close()
@@ -141,7 +141,7 @@ func TestManagerRemoteServerUnreachable(t *testing.T) {
 	srv.Close()
 
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"remote": {URL: url},
 	}, nil)
 	defer mgr.Close()
@@ -154,7 +154,7 @@ func TestManagerRemoteServerUnreachable(t *testing.T) {
 
 func TestManagerRejectsInvalidServerConfig(t *testing.T) {
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"both": {Command: "echo", URL: "https://example.com/mcp"},
 		"none": {},
 	}, nil)
@@ -182,7 +182,7 @@ func TestRemoteClientDoesNotFollowRedirects(t *testing.T) {
 	defer first.Close()
 
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{
+	startWait(t, mgr, map[string]core.MCPServer{
 		"remote": {URL: first.URL, Headers: map[string]string{"Authorization": "Bearer s3cret"}},
 	}, nil)
 	defer mgr.Close()
@@ -233,6 +233,14 @@ func TestRemoteBlackholeDoesNotHang(t *testing.T) {
 	mgr := NewManager(nil, "")
 	start := time.Now()
 	mgr.Start(context.Background(), map[string]core.MCPServer{"remote": {URL: url}}, nil)
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Fatalf("Start blocked for %v, want return while the handshake is in flight", elapsed)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := mgr.WaitSettled(ctx); err != nil {
+		t.Fatalf("WaitSettled: %v status=%+v", err, mgr.Status())
+	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Fatalf("connect took %v, want it bounded by the response-header timeout", elapsed)
 	}
@@ -275,7 +283,7 @@ func TestRemoteToolCallGetsADeadline(t *testing.T) {
 	t.Cleanup(httpServer.Close)
 
 	mgr := NewManager(nil, "")
-	mgr.Start(context.Background(), map[string]core.MCPServer{"remote": {URL: httpServer.URL}}, nil)
+	startWait(t, mgr, map[string]core.MCPServer{"remote": {URL: httpServer.URL}}, nil)
 	defer mgr.Close()
 
 	tools := mgr.Tools()

@@ -119,7 +119,11 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 
 	// Thinking
 	if supportsAdaptiveThinking(req.Model.ID) {
-		if effort := resolveEffort(req.Options.ThinkingLevel, req.Model.ID); effort != "" {
+		effort := resolveEffort(req.Options.ThinkingLevel, req.Model.ID)
+		if effort == "" && core.ThinkingAlwaysOn(req.Model) {
+			effort = "high"
+		}
+		if effort != "" {
 			ar.Thinking = &thinkingConfig{Type: "adaptive"}
 			ar.OutputConfig = &outputConfig{Effort: effort}
 		}
@@ -510,10 +514,13 @@ func resolveMaxTokens(req core.Request) int {
 }
 
 // supportsAdaptiveThinking reports whether a model supports Anthropic adaptive
-// thinking (Opus 5, Opus 4.8 and Sonnet 5). Haiku 4.5 uses manual extended thinking.
+// thinking (Fable 5.1, Opus 5, Opus 4.8 and Sonnet 5). Haiku 4.5 and Fable 5
+// use manual extended thinking.
 func supportsAdaptiveThinking(modelID string) bool {
 	id := strings.ToLower(modelID)
-	return strings.Contains(id, "opus-5") ||
+	return strings.Contains(id, "fable-5-1") ||
+		strings.Contains(id, "fable-5.1") ||
+		strings.Contains(id, "opus-5") ||
 		strings.Contains(id, "opus-4-8") ||
 		strings.Contains(id, "opus-4.8") ||
 		strings.Contains(id, "sonnet-5")

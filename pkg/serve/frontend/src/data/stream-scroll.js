@@ -57,7 +57,9 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
 
   const checkScroll = useCallback(() => {
     const el = containerRef.current;
-    if (!el) return;
+    // Session switches and follow-pins write scrollTop; those events must not
+    // be read as the reader leaving the tail (iOS delivers them after the write).
+    if (!el || programmaticScroll.current) return;
     const atBottom = isAtBottom(el.scrollTop, el.scrollHeight, el.clientHeight);
     stickToBottom.current = atBottom;
     setShowNewBtn(!atBottom);
@@ -97,9 +99,19 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
     observedScrollHeight.current = 0;
     setShowNewBtn(false);
     const el = containerRef.current;
-    if (el) el.scrollTop = 0;
-    scrollToBottomNow();
-  }, [sessionId, scrollToBottomNow]);
+    programmaticScroll.current = true;
+    if (el) {
+      // Drop a leftover offset from the previous transcript, then pin to this
+      // one's bottom. Both writes are programmatic so onScroll cannot unstick.
+      el.scrollTop = 0;
+      el.scrollTop = bottomScrollTop(el.scrollHeight, el.clientHeight);
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        programmaticScroll.current = false;
+      });
+    });
+  }, [sessionId]);
 
   // Restore the first visible durable block after a history prepend. This lives
   // beside the shared resize policy so desktop and mobile cannot diverge.
