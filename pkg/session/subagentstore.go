@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -48,6 +49,15 @@ type SubagentTranscript struct {
 // side directory: <session dir>/<sessionID>.subagents/<jobID>.json.
 type SubagentStore struct {
 	dir string
+
+	summaryMu    sync.Mutex
+	summarySig   map[string]summaryFileSig
+	summaryCache []SubagentTranscript
+}
+
+type summaryFileSig struct {
+	size    int64
+	modNano int64
 }
 
 // NewSubagentStore returns a store rooted at "<sessionDir>/<sessionID>.subagents".
@@ -141,14 +151,43 @@ func (s *SubagentStore) List() ([]SubagentTranscript, error) {
 // not need to allocate every child conversation merely to show its metadata.
 // Missing directories and unreadable headers keep List's established result:
 // an empty slice and skipped sidecars, respectively.
+//
+// The decoded headers are reused while every sidecar's size and mtime stay
+// unchanged: WebSocket init asks for this list on every reconnect, and
+// decoding the same files again was the dominant heap cost of those payloads.
 func (s *SubagentStore) ListSummaries() ([]SubagentTranscript, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
+			s.summaryMu.Lock()
+			s.summarySig = nil
+			s.summaryCache = nil
+			s.summaryMu.Unlock()
 			return nil, nil
 		}
 		return nil, fmt.Errorf("session: subagent list: %w", err)
 	}
+
+	sig := make(map[string]summaryFileSig, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		sig[e.Name()] = summaryFileSig{size: info.Size(), modNano: info.ModTime().UnixNano()}
+	}
+
+	s.summaryMu.Lock()
+	if summarySigEqual(s.summarySig, sig) {
+		out := cloneSubagentSummaries(s.summaryCache)
+		s.summaryMu.Unlock()
+		return out, nil
+	}
+	s.summaryMu.Unlock()
+
 	var out []SubagentTranscript
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
@@ -167,7 +206,34 @@ func (s *SubagentStore) ListSummaries() ([]SubagentTranscript, error) {
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].FinishedAt.After(out[j].FinishedAt)
 	})
+
+	s.summaryMu.Lock()
+	s.summarySig = sig
+	s.summaryCache = cloneSubagentSummaries(out)
+	s.summaryMu.Unlock()
 	return out, nil
+}
+
+func summarySigEqual(a, b map[string]summaryFileSig) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for name, want := range b {
+		got, ok := a[name]
+		if !ok || got != want {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneSubagentSummaries(in []SubagentTranscript) []SubagentTranscript {
+	if in == nil {
+		return nil
+	}
+	out := make([]SubagentTranscript, len(in))
+	copy(out, in)
+	return out
 }
 
 // LegacyResult reads the final assistant text from one legacy transcript
@@ -403,10 +469,17 @@ func discardJSONValue(dec *json.Decoder) error {
 	return err
 }
 
+// summaryReadHook is set by tests to count how often a sidecar is decoded.
+var summaryReadHook func(path string)
+
 // readSubagentSummary streams the header fields of a transcript and stops at
 // messages. SubagentTranscript deliberately keeps Messages last so every
 // persisted header is available before the potentially large conversation.
+
 func readSubagentSummary(path string) (SubagentTranscript, error) {
+	if summaryReadHook != nil {
+		summaryReadHook(path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return SubagentTranscript{}, err

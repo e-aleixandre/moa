@@ -4,6 +4,7 @@ import {
   ArrowLeft, Folder, FolderOpen, ChevronRight, Smartphone, Check,
 } from "lucide-preact";
 import { store } from "../../data/store.js";
+import { useStore } from "../../hooks/useStore.js";
 import { api } from "../../data/api.js";
 import { closePalette } from "../../data/palette.js";
 import { openDrawer } from "../../data/drawer.js";
@@ -167,12 +168,14 @@ function Highlight({ text, query }) {
 }
 
 const CAP_NO_QUERY = 8; // spec §2 — cap the no-query session list; scroll for more
+const PALETTE_CLOSED = Object.freeze({ sessions: {}, tileTree: null, focusedTile: null });
 
 // CommandPalette — the ⌘K palette. One ranked list of sessions + actions
 // (no modes), plus a create-session step. Mounted ONCE globally in app.jsx,
 // outside the view switch, so it's the same organism over conversation / grid /
-// mobile. It subscribes to the store itself for the live session list (never
-// takes sessions by prop) so per-poll changes reflect without a parent re-render.
+// mobile. While open it reads the live session list from the store; while
+// closed the selector returns a frozen empty snapshot so a stream token does
+// not rebuild the palette.
 export function CommandPalette({
   open,
   onClose,
@@ -180,8 +183,8 @@ export function CommandPalette({
   focusedPane = null,
   initialStep = "search",
 }) {
-  const [state, setState] = useState(store.get());
-  useEffect(() => store.subscribe(setState), []);
+  const live = useStore((s) => (open ? s : null));
+  const state = live || PALETTE_CLOSED;
 
   const [step, setStep] = useState(initialStep);
   const [query, setQuery] = useState("");

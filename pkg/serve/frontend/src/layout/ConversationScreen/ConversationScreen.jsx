@@ -12,7 +12,8 @@ import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, UsagePanel, Sheet } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
-import { store, updateSession } from "../../data/store.js";
+import { updateSession } from "../../data/store.js";
+import { useStore } from "../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
 import { navigate } from "../../data/router.js";
@@ -41,12 +42,10 @@ function fmtSpend(costUSD) {
 }
 
 export function ConversationScreen() {
-  const [state, setState] = useState(store.get());
-  useEffect(() => store.subscribe(setState), []);
-
-  const session = focusedSession(state);
-  const activeId = focusedSessionId(state);
-  const loaded = state.sessionsLoaded;
+  const session = useStore(focusedSession);
+  const activeId = useStore(focusedSessionId);
+  const loaded = useStore((s) => s.sessionsLoaded);
+  const usage = useStore((s) => s.usage);
 
   // Activity clock: while the focused session shows live activity, tick once a
   // second so the NowLine's elapsed timer advances on its own. The timer origin
@@ -283,7 +282,7 @@ export function ConversationScreen() {
                 tokensDown={session.runTokensDown}
                 spend={fmtSpend(session.costUSD)}
                 session={session}
-                usage={state.usage}
+                usage={usage}
                 onOpenUsage={() => setUsageOpen((v) => !v)}
                 onOpenMcp={() => setMcpOpen((v) => !v)}
                 onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
@@ -301,7 +300,7 @@ export function ConversationScreen() {
                 <div class="status-strip-usage-popover">
                   <UsagePanel
                     session={session}
-                    usage={state.usage}
+                    usage={usage}
                     ctxPercent={session.contextPercent}
                     costUSD={session.costUSD}
                   />

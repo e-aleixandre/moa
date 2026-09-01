@@ -1,3 +1,4 @@
+import { focusedSessionId } from "../../data/selectors.js";
 import { sessionDisplayDotState, sessionTitle, shortPath } from "../../data/util/format.js";
 import { allTileIds, findTile } from "../../data/tileTree.js";
 
@@ -69,4 +70,47 @@ export function paneBadges(tileTree) {
 export function focusedTileSessionId(state) {
   const t = findTile(state.tileTree, state.focusedTile);
   return t ? t.sessionId : null;
+}
+
+function spineRowSig(row) {
+  return [
+    row.id, row.title, row.state, row.unseen ? 1 : 0, row.when, row.brief,
+    row.path, row.origin || "", row.pane || "", row.saved ? 1 : 0,
+  ].join("\0");
+}
+
+function spineListSig(list) {
+  return (list || []).map(spineRowSig).join("\n");
+}
+
+function desktopChromeEqual(a, b) {
+  return a.activeId === b.activeId
+    && a.groupByProject === b.groupByProject
+    && a.soundEnabled === b.soundEnabled
+    && spineListSig(a.active) === spineListSig(b.active)
+    && spineListSig(a.saved) === spineListSig(b.saved);
+}
+
+// selectDesktopChrome — roster the sidebar actually paints. Streaming text,
+// tokens and messages are not on a row, so a token on any session returns the
+// previous object (Object.is) and DesktopShell does not re-render.
+export function selectDesktopChrome(state) {
+  const inGrid = state.view === "grid";
+  const paneOf = inGrid ? paneBadges(state.tileTree) : undefined;
+  const { active, saved } = spineSessions(state.sessions, paneOf);
+  const next = {
+    active,
+    saved,
+    activeId: inGrid ? focusedTileSessionId(state) : focusedSessionId(state),
+    groupByProject: !!state.groupByProject,
+    soundEnabled: !!state.soundEnabled,
+  };
+  const prev = selectDesktopChrome._prev;
+  if (prev && desktopChromeEqual(prev, next)) return prev;
+  selectDesktopChrome._prev = next;
+  return next;
+}
+
+export function __resetDesktopChromeForTests() {
+  selectDesktopChrome._prev = null;
 }

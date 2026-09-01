@@ -267,3 +267,51 @@ func TestSubagentStore_ListSummariesSkipsCorruptHeader(t *testing.T) {
 		t.Fatalf("ListSummaries = %#v, want only valid sidecar", summaries)
 	}
 }
+
+func TestSubagentStore_ListSummariesReusesUnchangedSidecars(t *testing.T) {
+	s := NewSubagentStore(t.TempDir(), "sess1")
+	in := sampleTranscript("sa-cache")
+	in.FinishedAt = time.Unix(100, 0)
+	if err := s.Save(in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	var reads int
+	summaryReadHook = func(string) { reads++ }
+	t.Cleanup(func() { summaryReadHook = nil })
+
+	first, err := s.ListSummaries()
+	if err != nil {
+		t.Fatalf("ListSummaries: %v", err)
+	}
+	if reads != 1 {
+		t.Fatalf("first ListSummaries decoded %d files, want 1", reads)
+	}
+
+	second, err := s.ListSummaries()
+	if err != nil {
+		t.Fatalf("ListSummaries cache hit: %v", err)
+	}
+	if reads != 1 {
+		t.Fatalf("unchanged ListSummaries decoded %d files, want 1", reads)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("cached summaries differ\n got: %#v\nwant: %#v", second, first)
+	}
+
+	updated := in
+	updated.Title = "changed"
+	if err := s.Save(updated); err != nil {
+		t.Fatalf("Save update: %v", err)
+	}
+	third, err := s.ListSummaries()
+	if err != nil {
+		t.Fatalf("ListSummaries after Save: %v", err)
+	}
+	if reads != 2 {
+		t.Fatalf("ListSummaries after Save decoded %d files, want 2", reads)
+	}
+	if len(third) != 1 || third[0].Title != "changed" {
+		t.Fatalf("ListSummaries after Save = %#v, want updated title", third)
+	}
+}

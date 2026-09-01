@@ -21,6 +21,7 @@ import {
 import { navigate } from "../../data/router.js";
 import { allTileIds } from "../../data/tileTree.js";
 import { getTileCount, updateSession } from "../../data/store.js";
+import { useStore } from "../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { openPersistedSubagent, openBashJob, configureSession, setSessionFast } from "../../data/session-actions.js";
 import { modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
@@ -102,10 +103,12 @@ function ResizeHandle({ path, direction }) {
 // ConnectedPane — a leaf tile bound to a real session (or empty). Wires the
 // Pane's optional connected props to the tile actions and mounts the live Stream +
 // Composer (+ blocking) when a session is assigned.
-export function ConnectedPane({ node, state, tileIndex, onSecret }) {
+export function ConnectedPane({ node, tileIndex, onSecret }) {
   const tileId = node.id;
-  const session = node.sessionId ? state.sessions[node.sessionId] : null;
-  const focused = state.focusedTile === tileId;
+  const sessionId = node.sessionId || null;
+  const session = useStore((s) => (sessionId ? s.sessions[sessionId] : null));
+  const focused = useStore((s) => s.focusedTile === tileId);
+  const usage = useStore((s) => s.usage);
   const [dragOver, setDragOver] = useState(false);
   const paneRef = useRef(null);
   const canClose = getTileCount() > 1;
@@ -406,7 +409,7 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
             tokensDown={session.runTokensDown}
             spend={fmtCost(session.costUSD)}
             session={session}
-            usage={state.usage}
+            usage={usage}
             onOpenUsage={() => {
               setMcpOpen(false);
               setModelOpen(false);
@@ -436,7 +439,7 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
             <div class="status-strip-usage-popover">
               <UsagePanel
                 session={session}
-                usage={state.usage}
+                usage={usage}
                 ctxPercent={session.contextPercent}
                 costUSD={session.costUSD}
               />
@@ -460,12 +463,11 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
 
 // TileNode — recursive render of the tree. `path` accumulates the split path
 // used by resizeSplit (setRatioAtPath).
-function TileNode({ node, state, path, tileIndexMap, onSecret }) {
+function TileNode({ node, path, tileIndexMap, onSecret }) {
   if (node.type === "tile") {
     return (
       <ConnectedPane
         node={node}
-        state={state}
         tileIndex={tileIndexMap.get(node.id) ?? 0}
         onSecret={onSecret}
       />
@@ -479,31 +481,31 @@ function TileNode({ node, state, path, tileIndexMap, onSecret }) {
   return (
     <div class={`split ${isH ? "split-h" : "split-v"}`}>
       <div class="split-pane" style={{ flex: ra }}>
-        <TileNode node={a} state={state} path={[...path, 0]} tileIndexMap={tileIndexMap} onSecret={onSecret} />
+        <TileNode node={a} path={[...path, 0]} tileIndexMap={tileIndexMap} onSecret={onSecret} />
       </div>
       <ResizeHandle path={path} direction={node.direction} />
       <div class="split-pane" style={{ flex: rb }}>
-        <TileNode node={b} state={state} path={[...path, 1]} tileIndexMap={tileIndexMap} onSecret={onSecret} />
+        <TileNode node={b} path={[...path, 1]} tileIndexMap={tileIndexMap} onSecret={onSecret} />
       </div>
     </div>
   );
 }
 
-export function PaneGrid({ state }) {
+export function PaneGrid() {
+  const tileTree = useStore((s) => s.tileTree);
   const [secretBatch, setSecretBatch] = useState(null);
   const tileIndexMap = useMemo(() => {
-    const ids = allTileIds(state.tileTree);
+    const ids = allTileIds(tileTree);
     const m = new Map();
     ids.forEach((id, i) => m.set(id, i));
     return m;
-  }, [state.tileTree]);
+  }, [tileTree]);
 
   return (
     <>
       <div class="pane-grid">
         <TileNode
-          node={state.tileTree}
-          state={state}
+          node={tileTree}
           path={[]}
           tileIndexMap={tileIndexMap}
           onSecret={(sessionId, aliases) => setSecretBatch({ sessionId, aliases })}
