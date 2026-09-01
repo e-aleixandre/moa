@@ -8,9 +8,7 @@
 // URL via pushState so nothing reloads, and a single popstate listener keeps the
 // store in sync with the browser Back/Forward buttons.
 //
-// SCOPE: only the in-product hop (conversation ⇄ grid) goes through here. The
-// design galleries (?view=catalog|live|subagent|mobile|desktop) stay plain <a> links —
-// they are dev-only and a reload there is fine (they need the bootstrap anyway).
+// SCOPE: only the in-product hop (conversation ⇄ grid) goes through here.
 //
 // COEXISTENCE WITH overlay-history.js: that module pushes a same-URL "guard"
 // entry for open overlays and pops it on Back. Our popstate handler re-derives

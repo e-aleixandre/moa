@@ -193,10 +193,9 @@ function publishBuild(outputFiles) {
 }
 
 const config = {
-  entryPoints: ["src/app.jsx", "src/catalog-entry.js"],
+  entryPoints: ["src/app.jsx"],
   bundle: true,
   splitting: true,
-  external: ["./catalog-entry.js"],
   outdir,
   write: false,
   format: "esm",

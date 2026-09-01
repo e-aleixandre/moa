@@ -29,7 +29,11 @@ test('mobile title chip keeps its dialog ARIA and hides decorative attention', (
   expect(mobileTitleChipLabel('Build', { urgent: 1, error: 1 })).toBe('Build — sessions; 1 other session need attention');
 });
 
-test('catalog CSS is resolved next to the running bundle', () => {
+test('the production app does not import the design catalog', () => {
   const app = readFileSync(new URL('../../../app.jsx', import.meta.url), 'utf8');
-  expect(app).toContain('new URL("./catalog-entry.css", import.meta.url).href');
+  expect(app).not.toMatch(/from ["']\.\/catalog-entry/);
+  expect(app).not.toMatch(/from ["']\.\/catalog-app/);
+  expect(app).not.toMatch(/import\(["']\.\/catalog-entry/);
+  const catalog = readFileSync(new URL('../../../catalog-app.jsx', import.meta.url), 'utf8');
+  expect(catalog).toContain('./catalog/catalog.jsx');
 });
