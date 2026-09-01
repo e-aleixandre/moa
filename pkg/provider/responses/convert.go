@@ -122,11 +122,18 @@ func BuildRequestBody(req core.Request, dialect Dialect) ([]byte, error) {
 		r.Reasoning = &reasoning{Effort: effort, Summary: "auto"}
 	}
 
-	if req.Options.Fast && dialect.SupportsServiceTier && core.SupportsFast(req.Model.ID) {
+	if RequestsPriority(req, dialect) {
 		r.ServiceTier = "priority"
 	}
 
 	return json.Marshal(r)
+}
+
+// RequestsPriority reports whether BuildRequestBody will request the premium
+// Responses service tier. Providers pass this to stream consumption as the
+// fallback when an upstream response omits its service_tier echo.
+func RequestsPriority(req core.Request, dialect Dialect) bool {
+	return req.Options.Fast && dialect.SupportsServiceTier && core.SupportsFast(req.Model.ID)
 }
 
 // mapReasoningEffort maps our thinking levels to OpenAI reasoning effort.

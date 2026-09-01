@@ -117,6 +117,13 @@ CLI flag, and only some models can serve it:
 Turning it on for a model that cannot serve it is not an error: the setting is
 not stored, and the session stays at standard speed.
 
+The session cost (`cost_usd`, the budget guardrail) charges a fast request at
+the provider's premium: 2× on Anthropic ($10/$50 per MTok on Opus, cache
+multipliers on top), 2.5× on OpenAI and 2× on xAI. The multiplier applies only
+to turns the provider actually served at the premium tier — Anthropic reports
+`usage.speed`, OpenAI and xAI echo `service_tier` — so a turn that fell back to
+standard speed is billed as standard.
+
 ## Examples
 
 ```bash

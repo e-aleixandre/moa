@@ -290,10 +290,11 @@ func (a *Anthropic) handleMessageStart(data string, state *streamState) *core.As
 			ID    string `json:"id"`
 			Model string `json:"model"`
 			Usage struct {
-				InputTokens  int `json:"input_tokens"`
-				OutputTokens int `json:"output_tokens"`
-				CacheRead    int `json:"cache_read_input_tokens"`
-				CacheCreate  int `json:"cache_creation_input_tokens"`
+				InputTokens  int    `json:"input_tokens"`
+				OutputTokens int    `json:"output_tokens"`
+				CacheRead    int    `json:"cache_read_input_tokens"`
+				CacheCreate  int    `json:"cache_creation_input_tokens"`
+				Speed        string `json:"speed"`
 				// cache_creation splits the write between the 5-minute and
 				// 1-hour windows, which are billed at 1.25x and 2x input.
 				// Absent on older responses; then the whole write is 5m.
@@ -316,6 +317,7 @@ func (a *Anthropic) handleMessageStart(data string, state *streamState) *core.As
 		Output:     payload.Message.Usage.OutputTokens,
 		CacheRead:  payload.Message.Usage.CacheRead,
 		CacheWrite: payload.Message.Usage.CacheCreate,
+		Fast:       payload.Message.Usage.Speed == "fast",
 	}
 	if cc := payload.Message.Usage.CacheCreation; cc != nil {
 		usage.CacheWrite1h = cc.Ephemeral1h
@@ -558,7 +560,8 @@ func (a *Anthropic) handleMessageDelta(data string, state *streamState) *core.As
 			} `json:"stop_details"`
 		} `json:"delta"`
 		Usage struct {
-			OutputTokens int `json:"output_tokens"`
+			OutputTokens int     `json:"output_tokens"`
+			Speed        *string `json:"speed"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
@@ -580,6 +583,9 @@ func (a *Anthropic) handleMessageDelta(data string, state *streamState) *core.As
 	}
 	if state.message.Usage != nil {
 		state.message.Usage.Output = payload.Usage.OutputTokens
+		if payload.Usage.Speed != nil {
+			state.message.Usage.Fast = *payload.Usage.Speed == "fast"
+		}
 		state.message.Usage.TotalTokens = state.message.Usage.Input +
 			state.message.Usage.Output +
 			state.message.Usage.CacheRead +

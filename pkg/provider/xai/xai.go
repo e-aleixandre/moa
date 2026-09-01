@@ -72,7 +72,7 @@ func (x *XAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assista
 		return nil, fmt.Errorf("xai: invalid thinking level %q (choose: low, medium, high)", req.Options.ThinkingLevel)
 	}
 	req.Options.ThinkingLevel = thinking
-	body, err := responses.BuildRequestBody(req, responses.Dialect{
+	dialect := responses.Dialect{
 		Provider: "xai", Model: req.Model.ID,
 		SupportsDocuments: false, SupportsMaxOutputTokens: false, SupportsParallelToolCalls: true,
 		// Both xAI transports accept prompt_cache_key: it is documented for
@@ -81,7 +81,8 @@ func (x *XAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assista
 		SupportsPromptCacheKey:  true,
 		SupportsServiceTier:     true,
 		AllowedReasoningEfforts: []string{"low", "medium", "high"},
-	})
+	}
+	body, err := responses.BuildRequestBody(req, dialect)
 	if err != nil {
 		return nil, fmt.Errorf("xai: building request: %w", err)
 	}
@@ -142,11 +143,12 @@ func (x *XAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assista
 	// would keep the whole request — every image in base64 — reachable for as
 	// long as the SSE body is being consumed.
 	modelID := req.Model.ID
+	requestedPriority := responses.RequestsPriority(req, dialect)
 
 	go func() {
 		defer resp.Body.Close() //nolint:errcheck
 		defer close(ch)
-		responses.ConsumeStreamSanitized(ctx, sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute), ch, "xai", modelID)
+		responses.ConsumeStreamSanitizedWithPriority(ctx, sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute), ch, "xai", modelID, requestedPriority)
 	}()
 	return ch, nil
 }

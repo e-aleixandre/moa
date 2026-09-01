@@ -141,6 +141,14 @@ var knownModels = map[string]Model{
 	},
 }
 
+func init() {
+	for _, model := range knownModels {
+		if model.Pricing != nil && supportsFastModel(model) {
+			model.Pricing.FastMultiplier = FastCostMultiplier(model.Provider)
+		}
+	}
+}
+
 // Short aliases → full model ID.
 var modelAliases = map[string]string{
 	// Anthropic

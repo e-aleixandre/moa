@@ -2,6 +2,21 @@ package core
 
 import "strings"
 
+// FastCostMultiplier returns the premium-tier token-price multiplier for a
+// provider. Anthropic's fast-mode documentation table lists Opus 5 / 4.8 at
+// $10 input / $50 output versus $5 / $25 standard; OpenAI and xAI multipliers
+// come from their respective FastNote strings below.
+func FastCostMultiplier(provider string) float64 {
+	switch provider {
+	case "anthropic", "xai":
+		return 2
+	case "openai":
+		return 2.5
+	default:
+		return 1
+	}
+}
+
 // SupportsFast reports whether a model can be served in fast mode.
 //
 // Fast mode is the same model at a premium speed and price, and each provider
@@ -19,6 +34,10 @@ func SupportsFast(modelID string) bool {
 	if !ok {
 		return false
 	}
+	return supportsFastModel(m)
+}
+
+func supportsFastModel(m Model) bool {
 	switch m.Provider {
 	case "anthropic":
 		return strings.Contains(m.ID, "opus")

@@ -116,6 +116,9 @@ type Pricing struct {
 	Output     float64 `json:"output"`      // $/M output tokens
 	CacheRead  float64 `json:"cache_read"`  // $/M cached input tokens
 	CacheWrite float64 `json:"cache_write"` // $/M cache write tokens (5-minute window)
+	// FastMultiplier is the premium-tier price multiplier. Zero means this
+	// model does not support a premium tier.
+	FastMultiplier float64 `json:"fast_multiplier,omitempty"`
 	// CacheWrite1h is the $/M rate for writes into the extended 1-hour cache
 	// (Anthropic bills these at 2x input, versus 1.25x for the 5-minute
 	// window). Zero means the model has no extended window, and Usage's
@@ -184,6 +187,9 @@ func (p *Pricing) Cost(u Usage) float64 {
 	}
 	if rate.CacheWrite > 0 {
 		cost += float64(u.CacheWrite-write1h) * rate.CacheWrite / m
+	}
+	if u.Fast && p.FastMultiplier > 0 {
+		cost *= p.FastMultiplier
 	}
 	return cost
 }

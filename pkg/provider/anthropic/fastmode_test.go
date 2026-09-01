@@ -148,3 +148,17 @@ func TestFastModeFallsBackToStandardSpeed(t *testing.T) {
 		t.Error("fast-unavailable callback ran after the standard-speed retry")
 	}
 }
+
+func TestUsageFastTracksResponseSpeed(t *testing.T) {
+	a := New("test-key")
+	state := &streamState{}
+	a.mapEvent("message_start", `{"message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":1,"speed":"fast"}}}`, state)
+	if state.message.Usage == nil || !state.message.Usage.Fast {
+		t.Errorf("message_start speed=fast produced usage %+v, want Fast=true", state.message.Usage)
+	}
+
+	a.mapEvent("message_delta", `{"usage":{"output_tokens":1,"speed":"standard"}}`, state)
+	if state.message.Usage.Fast {
+		t.Error("message_delta speed=standard did not replace the prior premium-tier usage")
+	}
+}

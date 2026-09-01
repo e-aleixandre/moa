@@ -52,7 +52,10 @@ type response struct {
 	Model  string         `json:"model"`
 	Status string         `json:"status"`
 	Usage  *responseUsage `json:"usage"`
-	Error  *struct {
+	// ServiceTier is nil when the response omits the echo, which requires
+	// falling back to the tier requested for this stream.
+	ServiceTier *string `json:"service_tier"`
+	Error       *struct {
 		Message string `json:"message"`
 		Code    string `json:"code"`
 	} `json:"error"`
@@ -132,9 +135,10 @@ type slot struct {
 
 // streamState tracks the evolving message across SSE events.
 type streamState struct {
-	message        core.Message
-	started        bool
-	sanitizeErrors bool
+	message           core.Message
+	started           bool
+	sanitizeErrors    bool
+	requestedPriority bool
 
 	// slots holds the in-flight output items keyed by output_index.
 	slots map[int]*slot
@@ -151,17 +155,29 @@ func (s *streamState) getSlot(idx int, kind string) *slot {
 
 // consumeStream parses Responses API SSE and emits normalized AssistantEvents.
 func ConsumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, provider, model string) {
-	consumeStream(ctx, body, ch, provider, model, false)
+	ConsumeStreamWithPriority(ctx, body, ch, provider, model, false)
+}
+
+// ConsumeStreamWithPriority parses a Responses stream and records whether the
+// request asked for the priority tier when the response omits its tier echo.
+func ConsumeStreamWithPriority(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, provider, model string, requestedPriority bool) {
+	consumeStream(ctx, body, ch, provider, model, false, requestedPriority)
 }
 
 // ConsumeStreamSanitized parses a Responses stream without exposing upstream
 // error messages. Private compatibility backends can echo request metadata in
 // SSE errors, so their adapters use this stricter boundary.
 func ConsumeStreamSanitized(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, provider, model string) {
-	consumeStream(ctx, body, ch, provider, model, true)
+	ConsumeStreamSanitizedWithPriority(ctx, body, ch, provider, model, false)
 }
 
-func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, provider, model string, sanitizeErrors bool) {
+// ConsumeStreamSanitizedWithPriority is ConsumeStreamWithPriority without
+// exposing upstream error messages.
+func ConsumeStreamSanitizedWithPriority(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, provider, model string, requestedPriority bool) {
+	consumeStream(ctx, body, ch, provider, model, true, requestedPriority)
+}
+
+func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, provider, model string, sanitizeErrors, requestedPriority bool) {
 	state := &streamState{
 		message: core.Message{
 			Role:      "assistant",
@@ -169,8 +185,9 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 			Model:     model,
 			Timestamp: time.Now().Unix(),
 		},
-		slots:          make(map[int]*slot),
-		sanitizeErrors: sanitizeErrors,
+		slots:             make(map[int]*slot),
+		sanitizeErrors:    sanitizeErrors,
+		requestedPriority: requestedPriority,
 	}
 	sentTerminal := false
 
@@ -595,6 +612,10 @@ func (s *streamState) finalize(ev *event, ch chan<- core.AssistantEvent) bool {
 				CacheRead:   cached,
 				CacheWrite:  written,
 				TotalTokens: u.TotalTokens,
+				Fast:        s.requestedPriority,
+			}
+			if ev.Response.ServiceTier != nil {
+				s.message.Usage.Fast = *ev.Response.ServiceTier == "priority"
 			}
 		}
 		// Response.Model is the actual model used (e.g. "gpt-5.5"); Response.ID

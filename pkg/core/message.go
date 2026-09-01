@@ -301,6 +301,9 @@ type Usage struct {
 	Output     int `json:"output"`
 	CacheRead  int `json:"cache_read"`
 	CacheWrite int `json:"cache_write"`
+	// Fast reports that the provider actually served this request at its
+	// premium tier, rather than merely that it was requested.
+	Fast bool `json:"fast,omitempty"`
 	// CacheWrite1h is the subset of CacheWrite billed at the extended
 	// (1-hour) cache-write rate rather than the 5-minute one. Anthropic
 	// reports the split in cache_creation; providers without an extended

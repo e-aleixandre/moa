@@ -112,7 +112,7 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 	// prompt_cache_key but not prompt_cache_options / prompt_cache_breakpoint,
 	// and /codex/responses 400s on unsupported fields. Keep them on the
 	// public API only.
-	body, err := responses.BuildRequestBody(req, responses.Dialect{
+	dialect := responses.Dialect{
 		Provider:                         "openai",
 		Model:                            req.Model.ID,
 		SupportsDocuments:                o.SupportsDocuments(),
@@ -123,7 +123,8 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		// The Codex transport rejects service_tier outright; only the public
 		// API prices a priority tier.
 		SupportsServiceTier: o.endpoint == apiEndpoint,
-	})
+	}
+	body, err := responses.BuildRequestBody(req, dialect)
 	if err != nil {
 		return nil, fmt.Errorf("openai: building request: %w", err)
 	}
@@ -204,6 +205,7 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 	// would keep the whole request — every image in base64 — reachable for as
 	// long as the SSE body is being consumed.
 	modelID := req.Model.ID
+	requestedPriority := responses.RequestsPriority(req, dialect)
 
 	go func() {
 		defer resp.Body.Close() //nolint:errcheck
@@ -220,7 +222,7 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 			}
 		}
 		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))
-		responses.ConsumeStream(ctx, body, ch, "openai", modelID)
+		responses.ConsumeStreamWithPriority(ctx, body, ch, "openai", modelID, requestedPriority)
 	}()
 
 	return ch, nil

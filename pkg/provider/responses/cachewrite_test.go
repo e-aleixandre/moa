@@ -118,3 +118,41 @@ func TestConsumeStream_CacheWriteClamped(t *testing.T) {
 		t.Errorf("buckets sum to %d, want 10000 (input_tokens)", got)
 	}
 }
+
+func TestConsumeStream_ServiceTierControlsFastUsage(t *testing.T) {
+	cases := []struct {
+		name              string
+		serviceTier       string
+		requestedPriority bool
+		wantFast          bool
+	}{
+		{"response priority", `,"service_tier":"priority"`, false, true},
+		{"response default", `,"service_tier":"default"`, true, false},
+		{"missing tier falls back to request", ``, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sse := `data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1"}}
+
+data: {"type":"response.output_text.delta","output_index":0,"delta":"ok"}
+
+data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.6-terra","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}` + tc.serviceTier + `}}
+
+`
+			ch := make(chan core.AssistantEvent, 16)
+			go func() {
+				ConsumeStreamWithPriority(context.Background(), strings.NewReader(sse), ch, "openai", "gpt-5.6-terra", tc.requestedPriority)
+				close(ch)
+			}()
+			var usage *core.Usage
+			for event := range ch {
+				if event.Message != nil {
+					usage = event.Message.Usage
+				}
+			}
+			if usage == nil || usage.Fast != tc.wantFast {
+				t.Errorf("Usage.Fast = %v, want %v", usage != nil && usage.Fast, tc.wantFast)
+			}
+		})
+	}
+}

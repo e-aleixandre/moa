@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestSupportsFast(t *testing.T) {
 	cases := []struct {
@@ -35,5 +38,32 @@ func TestFastNoteDiffersPerProvider(t *testing.T) {
 	}
 	if opus == gpt {
 		t.Errorf("Anthropic and OpenAI share the note %q, but only Anthropic bills separate usage credits", opus)
+	}
+}
+
+func TestPricingCostFastMultiplier(t *testing.T) {
+	usage := Usage{Input: 1_000, Output: 2_000, CacheRead: 3_000, CacheWrite: 4_000}
+	cases := []struct {
+		model      string
+		multiplier float64
+	}{
+		{"claude-opus-5", 2},
+		{"gpt-5.6-terra", 2.5},
+		{"claude-sonnet-5", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			model, ok := ResolveModel(tc.model)
+			if !ok || model.Pricing == nil {
+				t.Fatalf("model %q has no pricing", tc.model)
+			}
+			standard := model.Pricing.Cost(usage)
+			fast := model.Pricing.Cost(Usage{
+				Input: usage.Input, Output: usage.Output, CacheRead: usage.CacheRead, CacheWrite: usage.CacheWrite, Fast: true,
+			})
+			if want := standard * tc.multiplier; math.Abs(fast-want) > 1e-12 {
+				t.Errorf("fast cost = %v, want %v (standard %v × %v)", fast, want, standard, tc.multiplier)
+			}
+		})
 	}
 }
