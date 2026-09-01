@@ -1003,19 +1003,21 @@ func TestSubagentInheritedDeadlineNotReportedAsChildTimeout(t *testing.T) {
 
 func TestSubagentGenericFailureSurfacesResumableMessage(t *testing.T) {
 	const cause = "stream: openai: unknown error"
-	provider := newMockProvider(func(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
+	fail := func(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
 		ch := make(chan core.AssistantEvent, 1)
 		ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("openai: unknown error")}
 		close(ch)
 		return ch, nil
-	})
+	}
+	provider := newMockProvider(fail, fail, fail)
 	var (
 		notifiedMu   sync.Mutex
 		notifiedTail string
 	)
 	sub, statusTool, _ := newSubagentTools(t, Config{
-		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
-		ProviderFactory: func(core.Model) (core.Provider, error) { return provider, nil },
+		DefaultModel:        core.Model{ID: "default", Provider: "mock"},
+		ProviderFactory:     func(core.Model) (core.Provider, error) { return provider, nil },
+		StreamRepairBackoff: []time.Duration{0, 0},
 		TranscriptLoader: func(string) (ResumedTranscript, error) {
 			return ResumedTranscript{Messages: []core.AgentMessage{core.WrapMessage(core.NewUserMessage("saved task"))}}, nil
 		},

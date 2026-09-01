@@ -436,6 +436,10 @@ type AgentConfig struct {
 	// Set to 0 to disable auto-drain.
 	DrainTimeout time.Duration
 
+	// StreamRepairBackoff optionally overrides the waits before stream repair
+	// attempts. Nil uses the production defaults.
+	StreamRepairBackoff []time.Duration
+
 	Logger *slog.Logger
 }
 
@@ -467,6 +471,11 @@ func New(cfg AgentConfig) (*Agent, error) {
 	if cfg.Compaction == nil {
 		defaults := core.DefaultCompactionSettings
 		cfg.Compaction = &defaults
+	}
+	if cfg.StreamRepairBackoff == nil {
+		cfg.StreamRepairBackoff = append([]time.Duration(nil), streamRepairBackoff...)
+	} else {
+		cfg.StreamRepairBackoff = append([]time.Duration(nil), cfg.StreamRepairBackoff...)
 	}
 
 	// Set up extension host
@@ -1616,6 +1625,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		model:               a.config.Model,
 		systemPrompt:        a.config.SystemPrompt + extraPrompt,
 		streamOpts:          streamOpts,
+		streamRepairBackoff: a.config.StreamRepairBackoff,
 		fast:                a.Fast,
 		maxTurns:            a.config.MaxTurns,
 		maxToolCallsPerTurn: a.config.MaxToolCallsPerTurn,

@@ -91,15 +91,16 @@ func (cfg *loopConfig) appendState(msgs ...core.AgentMessage) {
 
 // loopConfig holds all dependencies for the agent loop.
 type loopConfig struct {
-	provider     core.Provider
-	tools        *core.Registry
-	hooks        Hooks
-	emitter      *Emitter
-	state        *AgentState
-	stateMu      *sync.Mutex // guards writes to *state (shared with Agent.mu)
-	model        core.Model
-	systemPrompt string
-	streamOpts   core.StreamOptions
+	provider            core.Provider
+	tools               *core.Registry
+	hooks               Hooks
+	emitter             *Emitter
+	state               *AgentState
+	stateMu             *sync.Mutex // guards writes to *state (shared with Agent.mu)
+	model               core.Model
+	systemPrompt        string
+	streamOpts          core.StreamOptions
+	streamRepairBackoff []time.Duration
 	// fast is read per provider request because a provider can disable the
 	// session setting while this run is still processing tool calls.
 	fast func() bool
@@ -466,7 +467,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				if hasPartial {
 					repairPartial = mergeAssistant(repairPartial, assistantMsg)
 				}
-				if waitErr := waitStreamRepair(ctx, attempt+1); waitErr != nil {
+				if waitErr := waitStreamRepair(ctx, attempt+1, cfg.streamRepairBackoff); waitErr != nil {
 					streamErr = fmt.Errorf("stream: %w", waitErr)
 					break
 				}
@@ -797,7 +798,8 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 		if partialText.Len() == 0 && partialThinking.Len() == 0 && len(partialToolCalls) == 0 {
 			return nil
 		}
-		partial := &core.Message{Role: "assistant"}
+		partial := &core.Message{Role: "assistant", Timestamp: time.Now().Unix()}
+		partial.EnsureMsgID()
 		if partialThinking.Len() > 0 {
 			partial.Content = append(partial.Content, core.Content{
 				Type:     "thinking",

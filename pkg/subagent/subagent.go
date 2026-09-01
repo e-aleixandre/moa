@@ -96,6 +96,9 @@ type Config struct {
 	// miss that prefix. Still distinct from the parent, whose tool set differs.
 	// Empty = no key.
 	PromptCacheKey string
+	// StreamRepairBackoff optionally overrides the waits before stream repair
+	// attempts for child agents. Nil uses the agent production defaults.
+	StreamRepairBackoff []time.Duration
 
 	// BashState, when non-nil, is the per-agent persistent shell state. The
 	// subagent seeds an isolated copy for the child (subshell semantics) and
@@ -1150,14 +1153,15 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 		return nil, err
 	}
 	return agent.New(agent.AgentConfig{
-		Provider:       provider,
-		Model:          model,
-		SystemPrompt:   systemPrompt,
-		ThinkingLevel:  effectiveThinking,
-		PromptCacheKey: core.SubagentPromptCacheKey(cfg.PromptCacheKey),
-		Tools:          childReg,
-		MaxTurns:       maxTurns,
-		MaxRunDuration: runDuration,
+		Provider:            provider,
+		Model:               model,
+		SystemPrompt:        systemPrompt,
+		ThinkingLevel:       effectiveThinking,
+		PromptCacheKey:      core.SubagentPromptCacheKey(cfg.PromptCacheKey),
+		StreamRepairBackoff: cfg.StreamRepairBackoff,
+		Tools:               childReg,
+		MaxTurns:            maxTurns,
+		MaxRunDuration:      runDuration,
 		// Explicitly passed, never inherited: the child's context derives from
 		// cfg.AppCtx (see the jobCtx derivations in the subagent tool), not from
 		// the parent's tool call, so the capability must travel through the

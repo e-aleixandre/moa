@@ -126,6 +126,52 @@ func TestAutomationRunWithPerRunMCPServer(t *testing.T) {
 	}
 }
 
+func TestWireMCPRefreshSyncsServerReadyBeforeCallback(t *testing.T) {
+	relayURL := newRelayMCPServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	provider := newMockProvider(simpleResponseHandler("hi"))
+	mgr := newTestManagerWithConfig(t, ctx, provider, t.TempDir(), core.MoaConfig{
+		DisableSandbox: true,
+		MCPServers: map[string]core.MCPServer{
+			"relay": {URL: relayURL},
+		},
+	})
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	waitMCPSettled(t, sess.infra.mcpMgr)
+	pollUntil(t, 5*time.Second, "initial MCP tool registration", func() bool {
+		for _, spec := range sess.infra.toolReg.Specs() {
+			if strings.Contains(spec.Name, "mark_task_done") {
+				return true
+			}
+		}
+		return false
+	})
+
+	// Simulate the construction gap: the server is already ready, its original
+	// callback was not observing the transition, and its tools are absent.
+	sess.infra.mcpMgr.OnChange(nil)
+	for _, registered := range sess.infra.toolReg.All() {
+		if strings.HasPrefix(registered.Name, mcp.ServerToolPrefix("relay")) {
+			sess.infra.toolReg.Unregister(registered.Name)
+		}
+	}
+
+	sess.wireMCPRefresh()
+	pollUntil(t, 5*time.Second, "MCP tool sync after ready-state sweep", func() bool {
+		for _, spec := range sess.infra.toolReg.Specs() {
+			if strings.Contains(spec.Name, "mark_task_done") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
 func TestAutomationPerRunMCPServersSurviveResume(t *testing.T) {
 	relayURL := newRelayMCPServer(t)
 	srv, mgr := newAutomationTestServer(t, testAutomationToken)

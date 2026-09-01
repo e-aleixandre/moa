@@ -1271,6 +1271,15 @@ func (s *ManagedSession) wireMCPRefresh() {
 				go s.scheduleMCPToolSync(name)
 			}
 		})
+		// Start begins handshakes before the session runtime exists. Reconcile
+		// terminal servers which completed during that gap because OnChange only
+		// observes transitions after it is registered.
+		for _, st := range mgr.Status() {
+			switch st.State {
+			case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled:
+				go s.scheduleMCPToolSync(st.Name)
+			}
+		}
 	}
 }
 

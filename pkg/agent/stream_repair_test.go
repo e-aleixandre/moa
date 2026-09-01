@@ -63,7 +63,7 @@ func TestStreamRepairContinuesPartialWithoutUserSigue(t *testing.T) {
 				}
 			}
 			ch := make(chan core.AssistantEvent, 2)
-			msg := core.Message{Role: "assistant", Content: []core.Content{core.TextContent(" world")}, StopReason: "end_turn"}
+			msg := core.Message{Role: "assistant", Content: []core.Content{core.TextContent(" world")}, StopReason: "end_turn", Timestamp: time.Now().Unix()}
 			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
 			close(ch)
 			return ch, nil
@@ -86,6 +86,9 @@ func TestStreamRepairContinuesPartialWithoutUserSigue(t *testing.T) {
 	got := joinText(assistant.Content)
 	if !strings.Contains(got, "Hello") || !strings.Contains(got, "world") {
 		t.Fatalf("merged assistant = %+v, want Hello + world", assistant.Content)
+	}
+	if assistant.Timestamp == 0 {
+		t.Fatal("repaired assistant timestamp is zero")
 	}
 	for _, m := range msgs {
 		if m.Role == "user" && strings.Contains(joinText(m.Content), "transport error") {

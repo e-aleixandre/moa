@@ -68,15 +68,18 @@ func isRetryableStreamError(err error) bool {
 	}
 }
 
-func waitStreamRepair(ctx context.Context, attempt int) error {
+func waitStreamRepair(ctx context.Context, attempt int, backoff []time.Duration) error {
 	if attempt <= 0 {
 		return nil
 	}
-	idx := attempt - 1
-	if idx >= len(streamRepairBackoff) {
-		idx = len(streamRepairBackoff) - 1
+	if len(backoff) == 0 {
+		return nil
 	}
-	d := streamRepairBackoff[idx]
+	idx := attempt - 1
+	if idx >= len(backoff) {
+		idx = len(backoff) - 1
+	}
+	d := backoff[idx]
 	if d <= 0 {
 		return ctx.Err()
 	}
@@ -110,6 +113,15 @@ func mergeAssistant(a, b *core.Message) *core.Message {
 	}
 	if b.Model != "" {
 		out.Model = b.Model
+	}
+	if b.Timestamp != 0 {
+		out.Timestamp = b.Timestamp
+	}
+	if b.MsgID != "" {
+		out.MsgID = b.MsgID
+	}
+	if b.ErrorMessage != "" {
+		out.ErrorMessage = b.ErrorMessage
 	}
 	return &out
 }
