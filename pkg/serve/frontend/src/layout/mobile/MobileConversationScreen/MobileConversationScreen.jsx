@@ -148,6 +148,18 @@ export function mobileFocusedSession(state, forceMobile = false) {
   return { id, session: id ? state.sessions[id] || null : null };
 }
 
+export function selectMobileDrawerSession(session, { resume, activate, close }) {
+  if (!session) return Promise.resolve();
+  if (session.state !== "saved") {
+    activate(session.id);
+    close();
+    return Promise.resolve();
+  }
+  return resume(session.id)
+    .then(close)
+    .catch(() => {});
+}
+
 export function MobileConversationScreen({ version = null, forceMobile = false }) {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
@@ -216,7 +228,11 @@ export function MobileConversationScreen({ version = null, forceMobile = false }
     };
   }, []);
 
-  const onSelectFromDrawer = (id) => { setActiveSession(id); closeDrawer(); };
+  const onSelectFromDrawer = (id) => selectMobileDrawerSession(state.sessions[id], {
+    resume: resumeSession,
+    activate: setActiveSession,
+    close: closeDrawer,
+  });
   // Creating a session on a phone happens in ONE place: the drawer's "new"
   // screen. The empty state's button opens that, it does not stand up a second
   // create flow (the palette's create step is the desktop's, where ⌘K lives).

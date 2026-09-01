@@ -276,9 +276,12 @@
    lives in the header, so what is left here is the one thing that is neither:
    preferences that apply everywhere. */
 .sdrawer-foot {
+  position: relative;
+  z-index: 1;
   flex: none;
   display: flex;
   align-items: stretch;
+  background: var(--mantle);
   border-top: 1px solid var(--surface0);
 }
 

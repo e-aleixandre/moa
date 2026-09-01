@@ -21,7 +21,7 @@ mock.module('preact/hooks', () => ({
 }));
 mock.module('../../../util/sanitize.js', () => ({ sanitizeHtml(html) { return html; } }));
 
-const { MobileConversationScreen, mobileFocusedSession } = await import('./MobileConversationScreen.jsx');
+const { MobileConversationScreen, mobileFocusedSession, selectMobileDrawerSession } = await import('./MobileConversationScreen.jsx');
 const { setState } = await import('../../../data/store.js');
 const { ConversationScreen } = await import('../../ConversationScreen/ConversationScreen.jsx');
 const { Spine } = await import('../../Spine/Spine.jsx');
@@ -153,6 +153,34 @@ test('the phone lab follows activeSession even in a desktop viewport', () => {
   };
   expect(mobileFocusedSession(state, true)).toMatchObject({ id: 'phone', session: { id: 'phone' } });
   expect(mobileFocusedSession(state, false)).toMatchObject({ id: 'desktop', session: { id: 'desktop' } });
+});
+
+test('a saved drawer session resumes before the drawer closes', async () => {
+  const calls = [];
+  await selectMobileDrawerSession(
+    { id: 'saved', state: 'saved' },
+    {
+      resume: async (id) => { calls.push(`resume:${id}`); },
+      activate: (id) => calls.push(`activate:${id}`),
+      close: () => calls.push('close'),
+    },
+  );
+
+  expect(calls).toEqual(['resume:saved', 'close']);
+});
+
+test('an open drawer session activates directly', async () => {
+  const calls = [];
+  await selectMobileDrawerSession(
+    { id: 'open', state: 'idle' },
+    {
+      resume: (id) => calls.push(`resume:${id}`),
+      activate: (id) => calls.push(`activate:${id}`),
+      close: () => calls.push('close'),
+    },
+  );
+
+  expect(calls).toEqual(['activate:open', 'close']);
 });
 
 test('drawer cards suppress paths when their second line is a brief or Needs you', () => {

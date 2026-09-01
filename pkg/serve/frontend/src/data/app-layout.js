@@ -12,7 +12,15 @@ export function shouldLockMobileDocument(state) {
 
 export function isDesktopGridShortcut(event, state, blockingOverlay) {
   return !state.isMobile
+    && !state.paletteOpen
     && !blockingOverlay
     && (event.metaKey || event.ctrlKey)
     && String(event.key).toLowerCase() === "g";
+}
+
+export function isPaneFocusShortcut(event, state, blockingOverlay) {
+  return !state.paletteOpen
+    && !blockingOverlay
+    && (event.metaKey || event.ctrlKey || event.altKey)
+    && /^[1-9]$/.test(String(event.key));
 }

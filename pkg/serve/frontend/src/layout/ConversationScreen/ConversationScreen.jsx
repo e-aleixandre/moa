@@ -257,7 +257,13 @@ export function ConversationScreen() {
         fast={!!session.fast}
         fastSupported={!!session.fastSupported}
         fastNote={session.fastNote || ""}
-        onFastChange={(value) => setSessionFast(session.id, value)}
+        onFastChange={(value) => {
+          setSessionFast(session.id, value).catch((error) => addToast({
+            title: "Could not change fast mode",
+            detail: String(error.message || error),
+            type: "error",
+          }));
+        }}
         />
       </div>,
       document.body,

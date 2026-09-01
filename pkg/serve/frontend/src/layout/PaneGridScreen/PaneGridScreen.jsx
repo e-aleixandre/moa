@@ -5,6 +5,8 @@ import { store } from "../../data/store.js";
 import { allTileIds, allSessionIds, findTile, tileCount, treeShape, presetTree } from "../../data/tileTree.js";
 import { PRESETS } from "../../data/layoutPresets.js";
 import { applyPreset, addPane, focusTileByIndex, focusTile } from "../../data/tile-actions.js";
+import { hasBlockingOverlay } from "../../data/overlays.js";
+import { isPaneFocusShortcut } from "../../data/app-layout.js";
 import "./PaneGridScreen.css";
 
 // PaneGridScreen — the grid column. Spine lives in DesktopShell; this owns
@@ -41,8 +43,7 @@ export function PaneGridScreen() {
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key < "1" || e.key > "9") return;
-      if (!(e.metaKey || e.ctrlKey || e.altKey)) return;
+      if (!isPaneFocusShortcut(e, store.get(), hasBlockingOverlay())) return;
       e.preventDefault();
       focusTileByIndex(parseInt(e.key, 10) - 1);
     };

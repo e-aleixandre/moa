@@ -29,6 +29,7 @@ import { fmtCost } from "../../data/util/usage-pills.js";
 import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
+import { registerOverlay } from "../../data/overlays.js";
 import { positionModelPopover } from "./model-popover-position.js";
 import "./PaneGrid.css";
 
@@ -224,6 +225,12 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
     api("GET", "/api/models").then(setModels).catch(() => setModels([]));
   }, [modelOpen, models]);
 
+  useEffect(() => {
+    if (!modelOpen) return undefined;
+    const unregister = registerOverlay(`pane-model-popover-${tileId}`);
+    return () => unregister();
+  }, [modelOpen, tileId]);
+
   const placeModelPopover = useCallback(() => {
     const anchor = modelAnchorRef.current?.getBoundingClientRect();
     const popover = modelPopoverRef.current?.getBoundingClientRect();
@@ -361,7 +368,13 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
         fast={!!session.fast}
         fastSupported={!!session.fastSupported}
         fastNote={session.fastNote || ""}
-        onFastChange={(value) => setSessionFast(session.id, value)}
+        onFastChange={(value) => {
+          setSessionFast(session.id, value).catch((error) => addToast({
+            title: "Could not change fast mode",
+            detail: String(error.message || error),
+            type: "error",
+          }));
+        }}
       />
     </div>,
     document.body,
