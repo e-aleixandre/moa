@@ -25,13 +25,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
+  gap: 4px;
   height: 28px;
+  padding: 0 6px 0 5px;
   border: 0;
   border-radius: var(--radius-md);
   background: none;
   color: var(--overlay1);
   cursor: pointer;
+}
+
+.spine .spine-jump .kbd {
+  font-size: var(--text-nano);
+  padding: 0 4px;
+  line-height: 1.5;
+  border-bottom-width: 1px;
+  color: inherit;
 }
 
 .spine .spine-jump:hover {
@@ -45,31 +54,41 @@
 }
 
 .spine .spine-new {
-  margin: 0 var(--space-3) var(--space-3);
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  width: calc(100% - 2 * var(--space-3));
-  min-height: 34px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--surface1);
-  border-radius: 8px;
-  background: var(--surface0);
-  color: var(--text);
-  font-family: var(--font);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--overlay1);
   cursor: pointer;
 }
 
-.spine .spine-new:hover {
-  background: var(--surface1);
-  border-color: var(--surface2);
+.spine .spine-new:hover,
+.spine .spine-new:active {
+  background: var(--surface0);
+  color: var(--text);
 }
 
 .spine .spine-new:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+}
+
+.spine .spine-empty-new {
+  position: relative;
+  align-self: flex-start;
+  margin: 0 var(--space-4);
+  padding: 8px 2px;
+  border: 0;
+  background: none;
+  color: var(--mauve);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
 }
 
 .spine .ver {
@@ -228,10 +247,6 @@
 
 .spine .session-row.variant-card.needs-red .brief {
   color: var(--red);
-}
-
-.spine .session-row.variant-card.on .r1 .title {
-  color: var(--text);
 }
 
 .spine .spine-foot {

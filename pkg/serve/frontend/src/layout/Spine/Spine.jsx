@@ -1,6 +1,6 @@
 import { Search, Plus, Settings, MoreHorizontal, Check } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { IconButton } from "../../primitives/index.js";
+import { IconButton, Kbd } from "../../primitives/index.js";
 import { SessionCardMenu, SessionRow } from "../../components/index.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { groupProjectSessions, hiddenProjectSavedCount, visibleProjectSessions } from "../../data/util/project-sessions.js";
@@ -120,17 +120,21 @@ export function Spine({
       <div class="spine-head">
         <span class="wordmark">moa</span>
         <button type="button" class="spine-jump" onClick={onSearch} aria-label={`Jump to session ${formatShortcut("K", { mod: true })}`} title={`Jump to session ${formatShortcut("K", { mod: true })}`}>
-          <Search size={14} aria-hidden="true" />
+          <Search size={13} aria-hidden="true" />
+          <Kbd>{formatShortcut("K", { mod: true })}</Kbd>
+        </button>
+        <button type="button" class="spine-new" aria-label="New session" onClick={onNewSession}>
+          <Plus size={14} aria-hidden="true" />
         </button>
         <SpineGroupMenu groupByProject={groupByProject} onChange={onGroupByProject} />
       </div>
 
-      <button type="button" class="spine-new" onClick={onNewSession}>
-        <Plus size={14} aria-hidden="true" />
-        New session
-      </button>
-
       <div class="spine-sessions">
+        {activeSessions.length === 0 && savedSessions.length === 0 && (
+          <button type="button" class="spine-empty-new" onClick={onNewSession}>
+            + New session
+          </button>
+        )}
         {groupByProject ? projectSections.map((section) => {
           const expanded = expandedProjects.has(section.key);
           const shownSessions = visibleProjectSessions(section, expanded);

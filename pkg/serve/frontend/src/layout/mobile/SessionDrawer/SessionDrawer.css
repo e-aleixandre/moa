@@ -84,28 +84,29 @@
   color: var(--overlay1);
 }
 
-/* New session — a real button, same job as the desktop Spine. */
+/* New session — a list tool, not a row. Optical 28px; 44px reach via ::after. */
 .sdrawer-new {
+  position: relative;
   flex: none;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  margin: 0 12px 8px;
-  min-height: 44px;
-  padding: 0 14px;
-  border: 1px solid var(--surface1);
-  border-radius: 10px;
-  background: var(--surface0);
-  color: var(--text);
-  font-family: var(--font);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--overlay1);
   cursor: pointer;
+}
+.sdrawer-new::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
 }
 .sdrawer-new:hover,
 .sdrawer-new:active {
-  background: var(--surface1);
-  border-color: var(--surface2);
+  background: var(--surface0);
   color: var(--text);
 }
 .sdrawer-new:focus-visible {
@@ -113,11 +114,35 @@
   outline-offset: var(--focus-ring-offset);
 }
 
+/* Empty drawer only: the instruction the header glyph can't carry alone. */
+.sdrawer-empty-new {
+  position: relative;
+  align-self: flex-start;
+  padding: 10px 4px;
+  border: 0;
+  background: none;
+  color: var(--mauve);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.sdrawer-empty-new::after {
+  content: "";
+  position: absolute;
+  inset: -6px -8px;
+}
+
 .sdrawer-more-wrap { position: relative; flex: none; }
 .sdrawer-more {
+  position: relative;
   display: inline-flex; align-items: center; justify-content: center;
-  width: 44px; height: 44px; margin: -8px; border: 0; border-radius: var(--radius-md);
+  width: 28px; height: 28px; border: 0; border-radius: var(--radius-md);
   background: none; color: var(--overlay1); cursor: pointer;
+}
+.sdrawer-more::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
 }
 .sdrawer-more:hover, .sdrawer-more:active { background: var(--surface0); color: var(--text); }
 .sdrawer-more:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }

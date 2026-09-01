@@ -370,6 +370,14 @@ export function SessionDrawer({
                   ? `${hitCount} ${hitCount === 1 ? "match" : "matches"}`
                   : `${activeCount} open · ${savedCount} saved`}
               </span>
+              <button
+                type="button"
+                class="sdrawer-new"
+                aria-label="New session"
+                onClick={() => setView("new")}
+              >
+                <Plus size={16} aria-hidden="true" />
+              </button>
               <DrawerGroupMenu groupByProject={groupByProject} onChange={onGroupByProject} />
             </div>
 
@@ -387,16 +395,19 @@ export function SessionDrawer({
               />
             </div>
 
-            <button
-              type="button"
-              class="sdrawer-new"
-              onClick={() => setView("new")}
-            >
-              <Plus size={15} aria-hidden="true" />
-              New session
-            </button>
-
             <div class="sdrawer-list">
+              {!q && hitCount === 0 && (
+                <button
+                  type="button"
+                  class="sdrawer-empty-new"
+                  onClick={() => setView("new")}
+                >
+                  + New session
+                </button>
+              )}
+              {q && hitCount === 0 && (
+                <span class="sdrawer-note">No session matches “{query}”</span>
+              )}
               {shownNew.length > 0 && <>
                 <span class="sdrawer-group sdrawer-group-new">New results · {shownNew.length}</span>
                 {shownNew.slice(0, showAllNew ? undefined : 3).map((s) => card(s))}
@@ -420,9 +431,6 @@ export function SessionDrawer({
                   </div>}
                 </section>;
               }) : <>{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{savedPreview.visible.map((s) => card(s))}{savedPreview.hidden > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setShowAllSaved(true)}>Show all {shownSaved.length} saved</button>}</>}
-              {q && hitCount === 0 && (
-                <span class="sdrawer-note">No session matches “{query}”</span>
-              )}
             </div>
 
             <div class="sdrawer-foot">
