@@ -25,7 +25,7 @@ const endpoint = "https://api.anthropic.com/api/oauth/usage"
 // userAgent identifies as the Claude Code CLI. The usage endpoint throttles
 // unknown clients aggressively, so this must look like Claude Code. Keep the
 // version loosely in sync with the identity used by the anthropic provider.
-const userAgent = "claude-code/2.1.62"
+const userAgent = "claude-code/2.1.257"
 
 // Window is a single rate-limit window (e.g. the 5-hour session window or the
 // weekly window). Utilization is a percentage in [0, 100].

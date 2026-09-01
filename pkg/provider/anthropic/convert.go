@@ -10,7 +10,7 @@ import (
 
 // Claude Code identity — required for OAuth tokens (Claude Max).
 const (
-	claudeCodeVersion        = "2.1.62"
+	claudeCodeVersion        = "2.1.257"
 	claudeCodeSystemPreamble = "You are Claude Code, Anthropic's official CLI for Claude."
 )
 
