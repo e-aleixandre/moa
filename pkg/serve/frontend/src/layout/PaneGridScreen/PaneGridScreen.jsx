@@ -8,7 +8,7 @@ import { PRESETS } from "../../data/layoutPresets.js";
 import { applyPreset, addPane, focusTileByIndex, focusTile, openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
 import { setGroupByProject } from "../../data/drawer.js";
-import { sessionDisplayDotState, sessionTitle } from "../../data/util/format.js";
+import { sessionDisplayDotState, sessionTitle, shortPath } from "../../data/util/format.js";
 import { Sheet, GlobalSettings } from "../../components/index.js";
 import "./PaneGridScreen.css";
 
@@ -32,25 +32,43 @@ function relAge(updated) {
   return `${d}d`;
 }
 
+function spineBrief(sess) {
+  const dot = sessionDisplayDotState(sess);
+  if (dot === "permission") return "Needs you";
+  if (dot === "error") return sess.error || "Error";
+  if (dot === "unseen") return "New result";
+  if (sess.briefProgress) return sess.briefProgress;
+  if (sess.briefAttempting) return sess.briefAttempting;
+  if (sess.state === "running") return "Working…";
+  return "";
+}
+
 function spineSessions(sessions, paneOf) {
   const all = Object.values(sessions);
-  const active = all
-    .filter((s) => s.state !== "saved")
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({
+  const row = (s, extra = {}) => {
+    const brief = spineBrief(s);
+    return {
       id: s.id,
-      cwd: s.cwd || "", updated: s.updated || 0,
       title: sessionTitle(s),
       state: sessionDisplayDotState(s),
       unseen: !!s.unseen,
-      meta: relAge(s.updated),
-      pane: paneOf.get(s.id) || undefined,
+      when: relAge(s.updated),
+      brief,
+      path: brief ? "" : (shortPath(s.cwd) || s.cwd || ""),
       origin: s.origin || undefined,
-    }));
+      cwd: s.cwd || "",
+      updated: s.updated || 0,
+      ...extra,
+    };
+  };
+  const active = all
+    .filter((s) => s.state !== "saved")
+    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
+    .map((s) => row(s, { pane: paneOf.get(s.id) || undefined }));
   const saved = all
     .filter((s) => s.state === "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({ id: s.id, title: sessionTitle(s), meta: relAge(s.updated), origin: s.origin || undefined, cwd: s.cwd || "", updated: s.updated || 0, saved: true }));
+    .map((s) => row(s, { saved: true }));
   return { active, saved };
 }
 

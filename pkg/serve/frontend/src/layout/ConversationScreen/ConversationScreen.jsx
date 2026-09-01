@@ -10,7 +10,7 @@ import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { NowLine } from "../NowLine/NowLine.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
-import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings, UsagePanel, Sheet, GlobalSettings } from "../../components/index.js";
+import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, UsagePanel, Sheet, GlobalSettings } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
@@ -34,7 +34,7 @@ import "./ConversationScreen.css";
 // ConversationScreen — root organism AND container of the desktop conversation
 // screen. Wiring pattern: ONE component per screen subscribes to the store, derives the
 // focused session, and passes real props DOWN to the presentational children
-// (Spine/ChatHead/Stream/StatusStrip). The children stay dumb — they never read
+// (Spine/Stream/StatusStrip). The children stay dumb — they never read
 // the store themselves. App owns the bootstrap (polling/WS/version); this
 // container owns only the read-side projection.
 //
@@ -42,11 +42,9 @@ import "./ConversationScreen.css";
 // and a normal shown session.
 
 
-// spineSessions splits the store's sessions into the Spine's ACTIVE and SAVED
-// lists. Active = not 'saved', ordered by `updated` desc.
-// Saved = state 'saved'. Titles fall back to "Untitled" for a not-yet-titled session.
-// still renders. `meta` is a coarse relative age placeholder derived from
-// `updated` (full relative-time formatting is a later polish, kept simple here).
+// spineSessions splits the store's sessions into open and saved lists.
+// Open = not 'saved', newest first. Saved stays its own quieter group.
+// `when` is a coarse relative age; `brief` is only a live status, never "idle".
 function relAge(updated) {
   if (!updated) return "";
   const diff = Date.now() - updated;
@@ -59,24 +57,44 @@ function relAge(updated) {
   return `${d}d`;
 }
 
+function spineBrief(sess) {
+  const dot = sessionDisplayDotState(sess);
+  if (dot === "permission") return "Needs you";
+  if (dot === "error") return sess.error || "Error";
+  if (dot === "unseen") return "New result";
+  if (sess.briefProgress) return sess.briefProgress;
+  if (sess.briefAttempting) return sess.briefAttempting;
+  if (sess.state === "running") return "Working…";
+  return "";
+}
+
+function toSpineRow(s, extra = {}) {
+  const brief = spineBrief(s);
+  return {
+    id: s.id,
+    title: sessionTitle(s),
+    state: sessionDisplayDotState(s),
+    unseen: !!s.unseen,
+    when: relAge(s.updated),
+    brief,
+    path: brief ? "" : (shortPath(s.cwd) || s.cwd || ""),
+    origin: s.origin || undefined,
+    cwd: s.cwd || "",
+    updated: s.updated || 0,
+    ...extra,
+  };
+}
+
 function spineSessions(sessions) {
   const all = Object.values(sessions);
   const active = all
     .filter((s) => s.state !== "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({
-      id: s.id,
-      cwd: s.cwd || "", updated: s.updated || 0,
-      title: sessionTitle(s),
-      state: sessionDisplayDotState(s),
-      unseen: !!s.unseen,
-      meta: relAge(s.updated),
-      origin: s.origin || undefined,
-    }));
+    .map((s) => toSpineRow(s));
   const saved = all
     .filter((s) => s.state === "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({ id: s.id, title: sessionTitle(s), meta: relAge(s.updated), origin: s.origin || undefined, cwd: s.cwd || "", updated: s.updated || 0, saved: true }));
+    .map((s) => toSpineRow(s, { saved: true }));
   return { active, saved };
 }
 
@@ -121,7 +139,7 @@ export function ConversationScreen({ version }) {
   // inline in the delegation block instead.
   const liveAgents = session ? liveTrayAgents(session) : [];
 
-  // --- Model selector popover (ChatHead's ModelPill) ---
+  // --- Model selector popover (StatusStrip's ModelPill) ---
   const [modelOpen, setModelOpen] = useState(false);
   const [models, setModels] = useState(null); // null = not fetched yet
   const modelAnchorRef = useRef(null);
@@ -145,54 +163,12 @@ export function ConversationScreen({ version }) {
     };
   }, [modelOpen]);
 
-  // --- Session settings popover (ChatHead's MoreHorizontal) ---
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsAnchorRef = useRef(null);
-  useEffect(() => {
-    if (!settingsOpen) return;
-    const unregister = registerOverlay("conv-settings-popover");
-    const onDocDown = (e) => {
-      if (settingsAnchorRef.current && !settingsAnchorRef.current.contains(e.target)) setSettingsOpen(false);
-    };
-    const onKeyDown = (e) => { if (e.key === "Escape") setSettingsOpen(false); };
-    document.addEventListener("mousedown", onDocDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      unregister();
-      document.removeEventListener("mousedown", onDocDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [settingsOpen]);
-  // Close both popovers when the focused session changes, so a stale popover
-  // from a different session doesn't linger visually.
+  // Close popovers when the focused session changes.
   useEffect(() => {
     setModelOpen(false);
-    setSettingsOpen(false);
-    setNotifOpen(false);
   }, [activeId]);
 
-  // --- Notifications popover (ChatHead's Bell) — device-wide push + sound.
-  // Not session-scoped, but anchored in the head next to the other popovers so
-  // it inherits the same click-outside + Escape wiring.
-  const [notifOpen, setNotifOpen] = useState(false);
-  const notifAnchorRef = useRef(null);
-  useEffect(() => {
-    if (!notifOpen) return;
-    const unregister = registerOverlay("conv-notif-popover");
-    const onDocDown = (e) => {
-      if (notifAnchorRef.current && !notifAnchorRef.current.contains(e.target)) setNotifOpen(false);
-    };
-    const onKeyDown = (e) => { if (e.key === "Escape") setNotifOpen(false); };
-    document.addEventListener("mousedown", onDocDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      unregister();
-      document.removeEventListener("mousedown", onDocDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [notifOpen]);
-
-  // --- Rewind timeline sheet (ChatHead/MobileHeader's Rewind button) ---
+  // --- Rewind timeline sheet ---
   const [rewindOpen, setRewindOpen] = useState(false);
   const [secretAliases, setSecretAliases] = useState(null);
   useEffect(() => { setRewindOpen(false); }, [activeId]);
@@ -329,54 +305,12 @@ export function ConversationScreen({ version }) {
       </div>
     );
 
-    const settingsPopover = settingsOpen && (
-      <div class="head-popover session-settings-popover">
-        {settingsBusy && (
-          <div class="session-settings-busy">Settings locked while agent is running</div>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="session-settings-close"
-          onClick={() => {
-            // closeSession toasts on refusal (409 while the session still
-            // works); swallow the rejection here so it isn't an unhandled one.
-            closeSession(session.id).catch(() => {}).finally(() => setSettingsOpen(false));
-          }}
-        >
-          Close session
-        </Button>
-      </div>
-    );
-
-    const notifPopover = notifOpen && (
-      <div class="head-popover">
-        <NotificationSettings soundEnabled={state.soundEnabled} />
-      </div>
-    );
-
     body = (
       <>
         <ChatHead
           title={sessionTitle(session)}
-          state={session.state || "idle"}
           path={shortPath(session.cwd) || session.cwd || ""}
-          model={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
-          modelAccent={modelAccent(session.model)}
-          thinkingLevel={thinking}
-          onTitleClick={() => { /* 5x: rename / session menu */ }}
           onGridToggle={() => navigate("grid")}
-          onRewind={() => setRewindOpen(true)}
-          rewindDisabled={settingsBusy}
-          onNotifications={() => setNotifOpen((v) => !v)}
-          onSessionSettings={() => setSettingsOpen((v) => !v)}
-          onModelClick={() => setModelOpen((v) => !v)}
-          modelPopover={modelPopover}
-          settingsPopover={settingsPopover}
-          notifPopover={notifPopover}
-          modelAnchorRef={modelAnchorRef}
-          settingsAnchorRef={settingsAnchorRef}
-          notifAnchorRef={notifAnchorRef}
         />
         {viewingSub ? (
           <SubagentView
@@ -444,6 +378,13 @@ export function ConversationScreen({ version }) {
                 onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
                 permBusy={settingsBusy}
                 showTokens={true}
+                modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
+                modelAccent={modelAccent(session.model)}
+                thinking={thinking}
+                onModel={() => setModelOpen((v) => !v)}
+                modelOpen={modelOpen}
+                modelPopover={modelPopover}
+                modelAnchorRef={modelAnchorRef}
               />
               {usageOpen && (
                 <div class="status-strip-usage-popover">

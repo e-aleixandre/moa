@@ -256,6 +256,33 @@
   color: var(--yellow);
 }
 
+.status-strip .status-strip-model {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.status-strip .status-strip-model .head-popover {
+  position: absolute;
+  top: auto;
+  right: auto;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+}
+
+.status-strip .status-strip-model .model-pill {
+  padding: 1px var(--space-2);
+  font-size: var(--text-xs);
+  background: transparent;
+  border-color: transparent;
+}
+
+.status-strip .status-strip-model .model-pill:hover {
+  border-color: var(--surface1);
+  background: var(--surface0);
+}
+
 /* Permission mode */
 .status-strip .status-strip-pill.perm-yolo { color: var(--maroon); background: var(--maroon-dim); }
 .status-strip .status-strip-pill.perm-ask { color: var(--yellow); background: var(--yellow-dim); }

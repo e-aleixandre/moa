@@ -76,10 +76,8 @@
 }
 
 /* status-strip-anchor — positions the Usage panel popover relative to the
-   StatusStrip (level 2 telemetry, TELEMETRY-SETTINGS-REDESIGN §2). The strip
-   itself centers its content in a 844px column with auto margins; the anchor
-   is a zero-cost relative wrapper so the popover can drop right above the cost
-   segment (bottom-right of the line). */
+   StatusStrip. The strip centers its content in a 844px column with auto
+   margins; the anchor is a relative wrapper so the popover opens above the cost. */
 .conversation-screen .status-strip-anchor {
   position: relative;
   flex: none;

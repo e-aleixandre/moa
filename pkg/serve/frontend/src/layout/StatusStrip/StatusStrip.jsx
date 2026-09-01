@@ -2,7 +2,7 @@ import "./StatusStrip.css";
 import { ClipboardList, Flame, Target, Gauge, Plug, AlertTriangle } from "lucide-preact";
 import { statusStripModel } from "../../data/util/status-strip-model.js";
 import { PermissionControl } from "../../components/PermissionControl/PermissionControl.jsx";
-import { TokenFlow } from "../../components/TokenFlow/TokenFlow.jsx";
+import { ModelPill, TokenFlow } from "../../components/index.js";
 import { activityPhase } from "../../data/util/activity.js";
 
 // StatusStrip — mono strip under the composer: the app's bottom telemetry line,
@@ -11,10 +11,10 @@ import { activityPhase } from "../../data/util/activity.js";
 // panel, NOT the whole accounting dump.
 //
 // Level 1 (this line): the context ring + session cost (leading the line, same
-// side as the mobile line), per-run tokens, the permission chip, fast mode
-// when it's on, and the modes that are currently ACTIVE (goal/tasks) plus the
-// on-extra alert. The
-// foreground run's ACTIVITY is not here: it lives in the NowLine above the
+// side as the mobile line), the model (same pill as mobile, here instead of
+// in the header), per-run tokens, the permission chip, fast mode when it's on,
+// and the modes that are currently ACTIVE (goal/tasks) plus the on-extra alert.
+// The foreground run's ACTIVITY is not here: it lives in the NowLine above the
 // composer, in both densities. `task` survives for the consumers whose subject
 // is NOT the focused run — the subagent strip (a child's activity, which can be
 // live while the parent sits idle, hence `taskLive`), the panes and the catalog.
@@ -47,6 +47,13 @@ export function StatusStrip({
   onPermChange,
   permBusy = false,
   showTokens = true,
+  modelName,
+  modelAccent = "lavender",
+  thinking = "off",
+  onModel,
+  modelOpen,
+  modelPopover,
+  modelAnchorRef,
 }) {
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
   const hasTokens = tokensUp != null && tokensDown != null;
@@ -54,8 +61,8 @@ export function StatusStrip({
     ? { background: `conic-gradient(var(--teal) 0 ${ctxPercent}%, var(--surface0) ${ctxPercent}% 100%)` }
     : undefined;
 
-  const model = statusStripModel(session, usage);
-  const { perm, modes, alerts } = model;
+  const strip = statusStripModel(session, usage);
+  const { perm, modes, alerts } = strip;
 
   const hasSpend = !!spend;
   const phase = activityPhase(session);
@@ -89,7 +96,7 @@ export function StatusStrip({
             costTrigger ? (
               <button
                 type="button"
-                class={`status-strip-spend status-strip-spend-btn spend-${model.spendLevel || "normal"}`}
+                class={`status-strip-spend status-strip-spend-btn spend-${strip.spendLevel || "normal"}`}
                 onClick={onOpenUsage}
                 aria-label="Show usage"
                 title="Estimated session cost"
@@ -98,7 +105,7 @@ export function StatusStrip({
                 <b>~{spend}</b>
               </button>
             ) : (
-              <span class={`status-strip-spend spend-${model.spendLevel || "normal"}`}>
+              <span class={`status-strip-spend spend-${strip.spendLevel || "normal"}`}>
                 <b>~{spend}</b>
               </span>
             )
@@ -120,6 +127,23 @@ export function StatusStrip({
 
       {/* Then the activity, the permission chip and the currently-active modes. */}
       {task && <span class={`status-strip-task work${workIsLive ? " is-live" : ""}`}>{task}</span>}
+
+      {modelName && (
+        <span class="status-strip-model" ref={modelAnchorRef}>
+          <ModelPill
+            model={modelName}
+            accent={modelAccent}
+            variant="bars"
+            level={thinking}
+            readOnly={!onModel}
+            onClick={onModel}
+            aria-haspopup={onModel ? "dialog" : undefined}
+            aria-expanded={onModel ? modelOpen : undefined}
+            aria-label="Model & thinking"
+          />
+          {modelPopover}
+        </span>
+      )}
 
       {/* Permission chip — a control (subphase b): tap opens a 3-option menu
           (never cycles). onPermChange is optional so gallery/other consumers can

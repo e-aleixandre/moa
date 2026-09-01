@@ -1,10 +1,11 @@
 import { useEffect, useState } from "preact/hooks";
 import { ArrowLeft, GitFork, X, Check, Copy, Info } from "lucide-preact";
 import { Spinner, Kbd, IconButton } from "../../primitives/index.js";
-import { ModelPill, RunModeChip, SubagentDetails } from "../../components/index.js";
+import { RunModeChip, SubagentDetails } from "../../components/index.js";
 import { Stream } from "../Stream/Stream.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { Composer } from "../Composer/Composer.jsx";
+import "../NowLine/NowLine.css";
 import { subagentView, canPromote } from "../../data/subagent-view-model.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { fmtTokens, copyToClipboard, sessionTitle } from "../../data/util/format.js";
@@ -119,15 +120,6 @@ export function SubagentView({ session, jobId, onBack }) {
           <IconButton label="Subagent details" onClick={() => setDetailsOpen(true)}>
             <Info size={15} />
           </IconButton>
-          {view.model && (
-            <ModelPill
-              model={view.model}
-              level={view.thinking}
-              accent={modelAccent(view.model)}
-              variant="glyph"
-              readOnly
-            />
-          )}
           <RunModeChip async={view.async} canPromote={canPromote(view)} onPromote={onPromote} />
           <Kbd>esc</Kbd>
         </div>
@@ -164,18 +156,28 @@ export function SubagentView({ session, jobId, onBack }) {
       {view.terminal ? (
         <OutcomeBanner view={view} onBack={onBack} />
       ) : (
-        <Composer
-          key={`steer-${jobId}`}
-          sessionId={session.id}
-          session={session}
-          steer={{
-            jobId,
-            name: view.name,
-            onRebound: onBack,
-            onStop: onCancel,
-            stopArmed: confirmCancel,
-          }}
-        />
+        <>
+          {(view.action || view.elapsed) && (
+            <div class="nowline" role="status" aria-live="polite">
+              <span class="nowline-act">
+                <span class="txt is-live">{view.action || "working"}</span>
+              </span>
+              {view.elapsed && <span class="nowline-elapsed">{view.elapsed}</span>}
+            </div>
+          )}
+          <Composer
+            key={`steer-${jobId}`}
+            sessionId={session.id}
+            session={session}
+            steer={{
+              jobId,
+              name: view.name,
+              onRebound: onBack,
+              onStop: onCancel,
+              stopArmed: confirmCancel,
+            }}
+          />
+        </>
       )}
       <BranchStrip session={session} view={view} />
       <Sheet open={detailsOpen} onClose={() => setDetailsOpen(false)} title="Subagent details">
@@ -185,26 +187,28 @@ export function SubagentView({ session, jobId, onBack }) {
   );
 }
 
-// BranchStrip — the parent's own StatusStrip, measuring the branch: the
-// child's activity, its context window, its tokens and its spend. The
-// permission chip is the session's, because that is the policy the child's
-// tools run under; everything else describes the child, and nothing is a
-// control, since a child's settings are not changed from inside it.
+// BranchStrip — the same StatusStrip as the parent conversation. Numbers are
+// the child's (context, spend, model, tokens); permission and fast are the
+// session's, because that is the policy the child's tools run under. Nothing
+// is a door: a child's settings are not changed from inside it. Goal/tasks
+// stay off this line — they belong to the parent run.
 function BranchStrip({ session, view }) {
   const usage = view.usage;
-  const activity = view.terminal
-    ? view.outcome
-    : `${view.action || "working"}${view.elapsed ? ` · ${view.elapsed}` : ""}`;
   return (
     <div class="sa-strip">
       <StatusStrip
         ctxPercent={view.contextPercent}
         tokensUp={(usage && usage.inputTokens) || 0}
         tokensDown={(usage && usage.outputTokens) || 0}
-        task={activity}
-        taskLive={!view.terminal}
         spend={usage && usage.costUSD > 0 ? fmtCost(usage.costUSD) : undefined}
-        session={session}
+        session={{
+          permissionMode: session.permissionMode,
+          fast: session.fast,
+        }}
+        showTokens={true}
+        modelName={view.model}
+        modelAccent={modelAccent(view.model)}
+        thinking={view.thinking || "off"}
       />
     </div>
   );

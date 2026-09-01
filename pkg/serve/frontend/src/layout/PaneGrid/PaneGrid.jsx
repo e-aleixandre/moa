@@ -191,7 +191,7 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
     const t = e.target;
     if (t && t.closest && t.closest(
       'input, textarea, [contenteditable="true"], .ask-user-card, .composer, '
-      + '.status-strip, .status-strip-anchor, .p-model-btn, .p-model-wrap, '
+      + '.status-strip, .status-strip-anchor, '
       + '.p-tools, .head-popover, .status-strip-usage-popover, button, a, [role="menu"]'
     )) {
       focusTile(tileId, { focusInput: false });
@@ -388,18 +388,8 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
       title={sessionTitle(session)}
       state={dotState}
       path={shortPath(session.cwd) || session.cwd || ""}
-      model={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
-      modelAccent={modelAccent(session.model)}
-      thinkingLevel={thinking}
       attention={attention}
       onMaximize={handleMaximize}
-      onModelClick={() => {
-        setUsageOpen(false);
-        setMcpOpen(false);
-        setModelOpen((v) => !v);
-      }}
-      modelPopover={modelPopover}
-      modelAnchorRef={modelAnchorRef}
       blocking={blocking}
       bodyLive
       composer={<Composer key={session.id} sessionId={session.id} session={session} onSecret={(aliases) => onSecret(session.id, aliases)} />}
@@ -440,6 +430,17 @@ export function ConnectedPane({ node, state, tileIndex, onSecret }) {
             onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
             permBusy={settingsBusy}
             showTokens
+            modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
+            modelAccent={modelAccent(session.model)}
+            thinking={thinking}
+            onModel={() => {
+              setUsageOpen(false);
+              setMcpOpen(false);
+              setModelOpen((v) => !v);
+            }}
+            modelOpen={modelOpen}
+            modelPopover={modelPopover}
+            modelAnchorRef={modelAnchorRef}
           />
           {usageOpen && (
             <div class="status-strip-usage-popover">
