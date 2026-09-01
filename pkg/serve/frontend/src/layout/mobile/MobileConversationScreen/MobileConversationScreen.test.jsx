@@ -36,6 +36,11 @@ function componentNode(node, name) {
   }
   if (!node || typeof node !== 'object') return null;
   if (node.type?.name === name) return node;
+  // The screen was split into function components (body, chrome). Render
+  // through them to keep reaching the overlays; the hook shim makes it safe.
+  if (typeof node.type === 'function' && node.type.name.startsWith('Mobile')) {
+    return componentNode(node.type(node.props), name);
+  }
   return componentNode(node.props?.children, name);
 }
 
