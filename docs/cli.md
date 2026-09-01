@@ -6,7 +6,7 @@
 |------|---------|-------------|
 | `-p` | | Prompt text, or `@file` to read from file |
 | `-model` | `sonnet` | Model alias or `provider/model-id` |
-| `-thinking` | `medium` | `off`, `low`, `medium`, `high`, `xhigh` (xAI Grok accepts `low`, `medium`, or `high`) |
+| `-thinking` | `medium` | `off`, `low`, `medium`, `high`, `xhigh` — see [Thinking levels](#thinking-levels) |
 | `-max-turns` | 0 (unlimited) | Max agent turns per run |
 | `-max-budget` | from config | Max USD spend per run (`-1` sentinel = use `config.json`; an explicit `0` means unlimited) |
 | `-yolo` | false | Disable sandbox and all permissions |
@@ -87,7 +87,35 @@ See [Web UI](./serve.md) for details.
 | `gpt5.5` | `gpt-5.5` |
 | `gpt5-mini` | `gpt-5.4-mini` |
 
-You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
+You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-4-8`, `grok-4.5`. Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
+
+## Thinking levels
+
+`off`, `low`, `medium`, `high`, `xhigh` are the canonical levels, but what a
+model does with them differs:
+
+- **xAI Grok** requires reasoning: `off`/`low` collapse to `low`, `xhigh` to
+  `high`. Only `low`, `medium`, `high` are distinct there.
+- **Claude Fable 5.1** thinks on every turn. `off` is not a real setting for it
+  and is promoted to `high`; the web selector hides the option.
+- **`xhigh`** only reaches a higher tier on Anthropic Opus models. Every other
+  Anthropic model caps it at `high`. OpenAI models accept `xhigh` as its own
+  effort level.
+
+## Fast mode
+
+Fast mode buys premium speed at a premium price on the same model. It is a
+per-session switch in the web UI (`GET`/`PATCH /api/sessions/{id}/fast`), not a
+CLI flag, and only some models can serve it:
+
+| Provider | Models that support it | What it costs |
+|---|---|---|
+| Anthropic | Opus models only | 2.5× faster, billed as separate usage credits |
+| OpenAI | `gpt-5.4`, `gpt-5.5` and `gpt-5.6` generations (not the codex or mini variants) | 1.5× faster, burns credits 2.5× |
+| xAI | the whole catalogue | priority queue, 2× the token rate |
+
+Turning it on for a model that cannot serve it is not an error: the setting is
+not stored, and the session stays at standard speed.
 
 ## Examples
 

@@ -158,6 +158,7 @@ Authenticate with an existing subscription:
 ```bash
 moa --login anthropic   # Claude Pro/Max OAuth
 moa --login openai      # ChatGPT Plus/Pro OAuth, or choose an API key
+moa --login xai         # SuperGrok/X OAuth device flow
 ```
 
 Or provide an API key directly:
@@ -166,6 +167,8 @@ Or provide an API key directly:
 export ANTHROPIC_API_KEY="..."
 # or:
 export OPENAI_API_KEY="..."
+# or:
+export XAI_API_KEY="..."
 ```
 
 Start the web UI:
@@ -180,7 +183,7 @@ with Tailscale:
 
 ```bash
 export MOA_SERVE_TOKEN="<a-long-random-secret>"
-./bin/moa serve --host 0.0.0.0
+moa serve --host 0.0.0.0
 ```
 
 Open the server's Tailscale IP from the phone. See the
@@ -211,7 +214,7 @@ The token is defense in depth, not a replacement for an appropriate network boun
 The browser and the headless CLI share the same agent core and session model.
 
 ```bash
-./bin/moa -p "fix the tests"    # one-shot, headless
+moa -p "fix the tests"    # one-shot, headless
 ```
 
 See the [CLI Reference](docs/cli.md).
@@ -224,11 +227,13 @@ the same markdown that lives in `docs/` here, so either place works:
 | Document | Reference |
 |---|---|
 | [Overview](docs/overview.md) | Capabilities, interfaces, runtime flow, and storage |
-| [Quickstart](docs/quickstart.md) | Requirements, build, authentication, and first run |
+| [Quickstart](docs/quickstart.md) | Requirements, build, authentication, first run, and troubleshooting |
 | [Web UI](docs/serve.md) | Serve, panes, mobile use, attachments, voice, and security |
-| [CLI Reference](docs/cli.md) | Commands, flags, model aliases, and examples |
+| [CLI Reference](docs/cli.md) | Commands, flags, model aliases, thinking levels, and fast mode |
 | [Configuration](docs/configuration.md) | Config files, permissions, sandboxing, models, and MCP |
 | [Tools](docs/tools.md) | Built-in tools, custom tools, subagents, and verification |
+| [Automation](docs/automation.md) | Inbound HTTP API for webhooks, cron and CI, with callbacks |
+| [Pulse](docs/pulse.md) | The iOS voice companion and the Serve contract behind it |
 | [Architecture](docs/architecture.md) | Package map, event bus, and runtime design |
 | [Releases](docs/releases.md) | Versioning, release process, and update checks |
 

@@ -113,10 +113,11 @@ global config and a project's jargon in its `.moa/config.json`:
 | `auto_title_model` | string | Model for automatic session titles: `auto` (default), `off`, or a valid model spec/alias. Auto may send a snippet of **any session’s transcript** — not only sessions already on that vendor — to the selected available auxiliary provider: OpenAI Luna when normal OpenAI completion credentials exist, otherwise Anthropic Haiku. Thus an Anthropic/xAI session can be sent to OpenAI, or an OpenAI/xAI session to Anthropic when Haiku is the fallback. Privacy-sensitive users should choose an explicit same-provider model or `off`. |
 | `session_brief_model` | string | Model for web/Pulse session status briefs: `auto` (default), `off`, or a valid model spec/alias. Auto has the same cross-provider behavior as titles: a snippet of any session transcript can be sent to Luna, or to Haiku when it is the available fallback. Choose an explicit same-provider model or `off` when that is not acceptable. |
 
-The xAI models are `grok-4.6` (also available as `grok`) and `grok-4.5`. Their
-supported thinking levels are `low`, `medium`, and `high`. A provider-qualified
-custom model such as `xai/<model-id>` is accepted, but Moa has no context-window
-or pricing metadata for it unless it is in the built-in model registry.
+The xAI models are `grok-4.6` (also available as `grok`) and `grok-4.5`. They
+always reason: see [Thinking levels](./cli.md#thinking-levels). A
+provider-qualified custom model such as `xai/<model-id>` is accepted, but Moa
+has no context-window or pricing metadata for it unless it is in the built-in
+model registry.
 
 ### MCP servers
 
@@ -180,6 +181,13 @@ Project-specific files live in `<cwd>/.moa/`:
 | `config.json` | Project config (merged with global) |
 | `verify.json` | Verification commands for the `verify` tool |
 | `tools/*.json` | Custom [script tools](./tools.md#custom-script-tools) |
+| `skills/<name>/SKILL.md` | Project [skills](./serve.md#skills-and-reload) |
+
+`config.json` and `tools/*.json` are only loaded for directories listed in the
+global `trusted_project_paths`; `.mcp.json` needs `trusted_mcp_paths`. Until a
+path is trusted, moa uses the global config alone. In the web UI, the MCP banner
+offers **Trust & Load** to add the current directory to `trusted_mcp_paths`;
+`trusted_project_paths` is edited by hand in `~/.config/moa/config.json`.
 
 ## Your project state
 
@@ -255,17 +263,18 @@ when it is about the project itself and should reach everyone who clones it.
 | Variable | Purpose |
 |----------|---------|
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` | Provider credentials (see [Quickstart](./quickstart.md)). An environment key takes precedence over the stored credential for that provider; in particular, `XAI_API_KEY` selects the metered `api.x.ai` API-key route and eclipses a stored xAI OAuth login. |
-| `MOA_CONFIG_DIR` | Moves everything moa stores about itself (default `~/.config/moa`): `config.json`, credentials, sessions, skills, prompts, memory, attachments. See [Running two instances](#running-two-instances) |
+| `MOA_CONFIG_DIR` | Moves everything moa stores about itself (default `~/.config/moa`): `config.json`, credentials, sessions, skills, memory, attachments. See [Running two instances](#running-two-instances) |
 | `MOA_SERVE_TOKEN` | Shared secret for `moa serve` opt-in authentication; equivalent to `--token` (see [Web UI](./serve.md#security)) |
 | `MOA_AUTOMATION_TOKEN` | Shared secret enabling the inbound [Automation API](./automation.md); equivalent to `--automation-token`. Separate from `MOA_SERVE_TOKEN` |
 | `MOA_NO_UPDATE_CHECK=1` | Disables the best-effort GitHub release check for this process |
 | `MOA_ATTACHMENTS_DIR` | Base directory for `moa serve` attachment staging (default `/tmp/moa-<uid>`); detailed in [Web UI](./serve.md) |
+| `MOA_SERVE_STATIC_DIR` | Serve the web UI from this directory instead of the build embedded in the binary; for frontend development (see [Web UI](./serve.md#frontend-development)) |
 
 ## Running two instances
 
 Everything moa keeps about itself lives in one directory, `~/.config/moa` by
 default. `MOA_CONFIG_DIR` moves all of it — config, credentials, sessions,
-skills, prompts, memory, attachments — so two instances can run on one machine
+skills, memory, attachments — so two instances can run on one machine
 without sharing anything:
 
 ```bash
@@ -287,7 +296,7 @@ cp ~/.config/moa/auth.json ~/.config/moa-work/
 
 If you were already setting `MOA_CONFIG_DIR` before moa 0.24, note that it used
 to move only part of the state: credentials and attachments followed it, while
-`config.json`, sessions, skills and prompts stayed in the home directory. Now
+`config.json`, sessions and skills stayed in the home directory. Now
 that all of it moves together, that leftover state is no longer read — move the
 files you still want into the override directory.
 
@@ -301,7 +310,7 @@ bug.
 Give each account its own checkout as well. A single checkout shared through
 group permissions does not currently work: moa writes `<project>/.moa/` with
 private permissions, so whoever triggers the first write owns it and the other
-account can no longer read the project's `verify.json`, skills or prompts.
+account can no longer read the project's `verify.json`, skills or script tools.
 
 Moa is a single-user tool by design. It has no notion of who is asking: no
 per-user permissions, no ownership on sessions, no way to scope what one

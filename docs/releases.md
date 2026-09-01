@@ -36,11 +36,8 @@ installation telemetry is sent. Disable it with `"update_check": false` in
 Moa config or `MOA_NO_UPDATE_CHECK=1`. Update notices only link to the release;
 they never download, install, or restart Moa.
 
-Installing an update is always an explicit act: `moa update` downloads the
-release archive, verifies its SHA-256 against the release `checksums.txt`,
-replaces the binary, and stops there — it never restarts anything. Because it
-serves an explicit request it ignores `MOA_NO_UPDATE_CHECK`, and it refuses to
-touch binaries owned by Homebrew or Nix.
+Installing an update is always an explicit act, and never restarts anything:
+see [`moa update`](./cli.md#update-subcommand).
 
 ## Distribution channels
 

@@ -26,6 +26,8 @@ Always registered:
 | `subagent_cancel` | Cancel a running async subagent |
 | `subagent_steer` | Send instructions or a correction to a subagent that is still running |
 | `tasks` | Track implementation tasks |
+| `verify` | Run the project's [verification checks](#verify) |
+| `load_skill` | Load a [skill](./serve.md#skills-and-reload) by name. Skills are discovered per call, so one written mid-session is loadable. Most skills return their content; `context: fork` runs an isolated subagent instead |
 | `moa_docs` | Read moa's own documentation (this page included), embedded in the binary |
 
 Conditionally registered:
@@ -34,8 +36,12 @@ Conditionally registered:
 |------|-----------|
 | `web_search` | `brave_api_key` is configured |
 | `ask_user` | The web UI is active (not headless) |
-| `verify` | always |
-| `load_skill` | always (skills are discovered per call, so one written mid-session is loadable). Most skills return their content; `context: fork` runs an isolated subagent instead |
+
+In a `moa serve` session the agent also gets `send_file`, which hands you a file
+as a download card in the chat — see
+[Files sent by the agent](./serve.md#files-sent-by-the-agent). Custom
+[script tools](#custom-script-tools) and [MCP](./configuration.md#mcp-servers)
+tools are registered on top of all of this.
 
 ## Tool selection guidance
 

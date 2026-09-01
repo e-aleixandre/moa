@@ -17,7 +17,7 @@ Moa is a coding agent runtime in Go. One core, two interfaces: web UI and headle
 - **MCP**: connect external tool servers
 - **Voice input**: in the web UI
 - **AGENTS.md**: project instructions discovered automatically from working directory; `/reload` re-reads them in an open session
-- **Multi-provider**: Anthropic, OpenAI, and xAI Grok, with model aliases for quick switching
+- **Multi-provider**: Anthropic, OpenAI, and xAI Grok, with model aliases for quick switching, per-model [thinking levels](./cli.md#thinking-levels) and an optional [fast mode](./cli.md#fast-mode)
 
 ## How it works
 
@@ -31,13 +31,15 @@ That same loop powers both interfaces.
 
 ## Storage
 
-All state lives under `~/.config/moa/`:
+All state lives under `~/.config/moa/` (or `MOA_CONFIG_DIR`):
 
 | Path | Contents |
 |------|----------|
 | `config.json` | Global config |
-| `auth.json` | Provider credentials |
+| `auth.json` | Provider credentials (mode `0600`) |
 | `sessions/` | Saved sessions |
+| `schedules.json` | Durable one-shot schedules (`/schedule`) |
+| `projects/<hash>/state.json` | [Your project state](./configuration.md#your-project-state): saved approvals, MCP vetoes, your own per-project settings |
 | `attachments/v1/` | Image and document bytes referenced by sessions, deduplicated by content |
 | `skills/` | Global skill packs (`<name>/SKILL.md`) |
 | `global/memory/` | Global memory facts (scope: global) |
@@ -55,5 +57,7 @@ Project-level config goes in `<cwd>/.moa/` — see [Configuration](./configurati
 
 - [Quickstart](./quickstart.md) — get running in 2 minutes
 - [Configuration](./configuration.md) — all config options
+- [Tools](./tools.md) — what the agent can do
+- [Web UI](./serve.md) — `moa serve`, skills and security
 - [Architecture](./architecture.md) — how it's built
 - [Releases](./releases.md) — release conventions and checklist

@@ -13,8 +13,9 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Session persistence and resume
 - Streaming output over WebSocket
 - Permission prompts and cancel
-- Subagents, MCP
+- Subagents, MCP (see [MCP servers](#mcp-servers))
 - Model and thinking reconfiguration per session, with pinned-model shortcuts and provider drill-down
+- Per-session [fast mode](./cli.md#fast-mode) on the models that support it
 - Queue commands and messages while the agent is working (strict send order)
 - Per-session cost readout (main run + subagents)
 - Account plan-usage panel when a supported subscription OAuth login is active
@@ -40,13 +41,15 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 
 | Shortcut | Action |
 |----------|--------|
-| `⌘K` / `Alt+K` | Open session palette |
+| `⌘K` / `Ctrl+K` | Open session palette |
+| `⌘G` / `Ctrl+G` | Open the pane grid (desktop) |
 | `⌘1..9` / `Alt+1..9` | Focus pane by number |
 | `⌘.` / `Alt+.` | Toggle voice input |
-| `⌘O` / `Alt+O` | Toggle the session overview (mobile) |
 | `Esc` | Close palette / go back |
+| `[` / `]` | Cycle sibling subagents while viewing one |
 
-On non-Mac platforms, `Alt` replaces `⌘` to avoid browser shortcut conflicts.
+On non-Mac platforms the labels show `Alt` instead of `⌘`; the palette and grid
+chords also accept `Ctrl`.
 
 ## Session palette
 
@@ -255,6 +258,26 @@ The reload is silent — the agent gets the new instructions, not an announcemen
 about them — and a busy session applies it as soon as it settles. It reports what
 changed in each session, and does nothing at all when the files are unchanged.
 
+## MCP servers
+
+A session lists its configured [MCP servers](configuration.md#mcp-servers) in
+the MCP panel, with each server's state, tool count and error, and buttons to
+enable, disable or restart it.
+
+Opening a session does **not** wait for the MCP handshake: servers connect in
+the background (in parallel, with a 15-second start timeout each), so one slow
+server — Playwright spawning Chromium, for example — cannot delay reopening a
+saved session. Consequences worth knowing:
+
+- A server's tools appear once its handshake finishes. If that lands mid-turn,
+  registration is deferred to the next idle point, so the tool set never changes
+  underneath a running request — the tools arrive for the following turn.
+- A server that fails to start is reported as failed in the panel and simply
+  contributes no tools; the session works without it.
+- Disabling a server with the `project` scope is recorded in
+  [your project state](configuration.md#your-project-state), not in the
+  repository.
+
 ## Plan usage
 
 The web usage panel can show provider-qualified subscription plan quota. For
@@ -389,7 +412,12 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/sessions/{id}/history?before={msg_id}&limit={n}` | Chronological, lossless display-history page before a message ID; the page size is an objective and can grow to keep tool calls with their results |
 | `GET /api/model-preferences` · `PATCH /api/model-preferences` | Read or pin/unpin models in the owner's global preferences |
 | `GET /api/compact-strategy` · `PATCH /api/compact-strategy` | Read or set what the agent gets before an automatic compaction (`plain`, `notify`, `prepare`) |
-| `GET /api/sessions/{id}/fast` · `PATCH /api/sessions/{id}/fast` | Read or set fast mode for one session; the reply also says whether the current model can serve it and what it costs there |
+| `GET /api/sessions/{id}/fast` · `PATCH /api/sessions/{id}/fast` | Read or set [fast mode](./cli.md#fast-mode) for one session; the reply also says whether the current model can serve it (`supported`) and what it costs there (`note`). Allowed while the agent is running |
+| `GET /api/models` · `GET /api/subagent-models` · `PATCH /api/subagent-models` | Known models, and the models subagents are allowed to run under |
+| `GET /api/compact-at` · `PATCH /api/compact-at` | Read or set the default auto-compaction threshold |
+| `GET /api/commands` | The built-in slash commands and their arguments |
+| `GET /api/attention` | Cross-session snapshot of unresolved attention items |
+| `POST /api/transcribe` | Speech-to-text for voice input |
 | `POST /api/sessions/{id}/secrets` | Stage a short-lived secret batch; returns its directory and aliases, never values |
 | `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |
