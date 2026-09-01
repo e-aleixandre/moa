@@ -1,0 +1,10 @@
+.desktop-shell {
+  display: grid;
+  grid-template-columns: var(--spine-width) 1fr;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+  background: var(--base);
+  color: var(--text);
+  font-family: var(--font);
+}

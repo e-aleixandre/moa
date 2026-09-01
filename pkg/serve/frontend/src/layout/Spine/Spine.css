@@ -10,39 +10,72 @@
 .spine .spine-head {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-4) var(--space-3);
-}
-
-.spine .logo {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--peach), var(--mauve));
-  display: grid;
-  place-items: center;
-  color: var(--crust);
-  font-weight: var(--weight-bold);
-  font-size: var(--text-md);
-  letter-spacing: var(--tracking-tight);
-  box-shadow: 0 0 18px color-mix(in srgb, var(--mauve) 30%, transparent);
-  flex: none;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) var(--space-2);
 }
 
 .spine .wordmark {
   font-weight: var(--weight-semibold);
   font-size: var(--text-md);
   letter-spacing: 0.3px;
+  margin-right: auto;
+}
+
+.spine .spine-jump {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--overlay1);
+  cursor: pointer;
+}
+
+.spine .spine-jump:hover {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.spine .spine-jump:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.spine .spine-new {
+  margin: 0 var(--space-3) var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: calc(100% - 2 * var(--space-3));
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--surface1);
+  border-radius: 8px;
+  background: var(--surface0);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.spine .spine-new:hover {
+  background: var(--surface1);
+  border-color: var(--surface2);
+}
+
+.spine .spine-new:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .spine .ver {
-  margin-left: auto;
   font-family: var(--mono);
   font-size: var(--text-nano);
   color: var(--overlay0);
-  background: var(--surface0);
-  border-radius: var(--radius-sm);
-  padding: 2px var(--space-2);
 }
 .spine-group-wrap { position: relative; flex: none; }
 .spine-group-more { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-md); background: none; color: var(--overlay1); cursor: pointer; }
@@ -68,35 +101,6 @@
   outline-offset: var(--focus-ring-offset);
 }
 
-.spine .spine-search {
-  margin: 2px var(--space-3) var(--space-3);
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  background: var(--base);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-md);
-  padding: 7px var(--space-3);
-  color: var(--overlay1);
-  font-family: var(--font);
-  font-size: var(--text-base);
-  cursor: pointer;
-  transition: border-color var(--duration) var(--ease);
-}
-
-.spine .spine-search:hover {
-  border-color: var(--surface1);
-}
-
-.spine .spine-search:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.spine .spine-search .kbd {
-  margin-left: auto;
-}
-
 .spine .spine-sessions {
   flex: 1;
   overflow-y: auto;
@@ -116,7 +120,7 @@
 .spine .spine-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 2px;
   margin-bottom: var(--space-2);
 }
 .spine .spine-project-path { margin: -2px var(--space-1) var(--space-1); font-family: var(--mono); font-size: var(--text-nano); color: var(--overlay0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -148,34 +152,86 @@
   pointer-events: auto;
 }
 .spine .spine-session-card .session-row.variant-card .session-row-hit {
-  padding-right: 40px;
+  padding: 8px 36px 8px 10px;
+  gap: 2px;
 }
 
-.spine .new-session {
-  margin: var(--space-1) var(--space-3) var(--space-3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  border: 1px dashed var(--surface1);
-  border-radius: var(--radius-md);
+/* A list of conversations, not a stack of cards. Two lines: title+time, then
+   one quiet line of what is happening (or the path, if nothing is). */
+.spine .session-row.variant-card {
   background: transparent;
-  padding: var(--space-2);
+  border-color: transparent;
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.spine .session-row.variant-card:hover {
+  background: var(--surface0);
+  border-color: transparent;
+}
+
+.spine .session-row.variant-card.on {
+  background: var(--surface0);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.spine .session-row.variant-card .r1 {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+.spine .session-row.variant-card .r1 .title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.spine .session-row.variant-card .when {
+  font-size: var(--text-nano);
+  color: var(--overlay0);
+}
+
+.spine .session-row.variant-card .brief,
+.spine .session-row.variant-card .path {
+  padding-left: 18px;
+  font-size: var(--text-xs);
   color: var(--overlay1);
-  font-family: var(--font);
-  font-size: var(--text-base);
-  cursor: pointer;
-  transition: border-color var(--duration) var(--ease), color var(--duration) var(--ease);
 }
 
-.spine .new-session:hover {
-  border-color: var(--mauve);
-  color: var(--mauve);
+.spine .session-row.variant-card .r2 {
+  display: none;
 }
 
-.spine .new-session:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
+.spine .session-row.variant-card.needs-yellow,
+.spine .session-row.variant-card.needs-red {
+  background: transparent;
+}
+
+.spine .session-row.variant-card.needs-yellow:hover,
+.spine .session-row.variant-card.needs-red:hover,
+.spine .session-row.variant-card.needs-yellow.on,
+.spine .session-row.variant-card.needs-red.on {
+  background: var(--surface0);
+}
+
+.spine .session-row.variant-card.needs-yellow .r1,
+.spine .session-row.variant-card.needs-yellow .r2,
+.spine .session-row.variant-card.needs-red .r1,
+.spine .session-row.variant-card.needs-red .r2 {
+  color: var(--text);
+}
+
+.spine .session-row.variant-card.needs-yellow .brief {
+  color: var(--yellow);
+}
+
+.spine .session-row.variant-card.needs-red .brief {
+  color: var(--red);
+}
+
+.spine .session-row.variant-card.on .r1 .title {
+  color: var(--text);
 }
 
 .spine .spine-foot {
@@ -188,6 +244,6 @@
   color: var(--overlay1);
 }
 
-.spine .spine-foot .icon-button {
+.spine .spine-foot > .icon-button {
   margin-left: auto;
 }

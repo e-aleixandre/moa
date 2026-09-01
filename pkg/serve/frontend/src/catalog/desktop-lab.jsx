@@ -16,17 +16,33 @@ export function scaleForViewport(viewportWidth, frameWidth = DESKTOP_LAB_WIDTH, 
   return Math.min(1, (viewportWidth - gutter) / frameWidth);
 }
 
+// Unzoomed layout width. Pinch-zoom shrinks the visual viewport (and, on some
+// browsers, innerWidth with it). Fitting to that width undoes the zoom: the
+// chrome grows and the frame stays the same size. Prefer the larger of
+// innerWidth and visualViewport.width × scale.
+export function layoutWidth(innerWidth, visualWidth, visualScale) {
+  const fromVisual = visualWidth && visualScale ? visualWidth * visualScale : 0;
+  return Math.max(innerWidth || 0, fromVisual);
+}
+
 export function ScreenLab({ width, height, note, children }) {
-  const fit = () => (typeof window === "undefined" ? 1 : scaleForViewport(window.innerWidth, width));
+  const fit = () => {
+    if (typeof window === "undefined") return 1;
+    const vv = window.visualViewport;
+    return scaleForViewport(layoutWidth(window.innerWidth, vv?.width, vv?.scale), width);
+  };
   const [scale, setScale] = useState(fit);
   useLayoutEffect(() => {
-    const onFit = () => setScale(fit());
+    const onFit = () => {
+      const next = fit();
+      setScale((prev) => (prev === next ? prev : next));
+    };
     onFit();
     window.addEventListener("resize", onFit);
-    window.visualViewport?.addEventListener("resize", onFit);
+    window.addEventListener("orientationchange", onFit);
     return () => {
       window.removeEventListener("resize", onFit);
-      window.visualViewport?.removeEventListener("resize", onFit);
+      window.removeEventListener("orientationchange", onFit);
     };
   }, [width]);
 

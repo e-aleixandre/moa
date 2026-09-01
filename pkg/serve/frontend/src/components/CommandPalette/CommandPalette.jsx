@@ -410,7 +410,7 @@ export function CommandPalette({
     }
     const cappedSessions = q ? sessRows : sessRows.slice(0, CAP_NO_QUERY);
     if (cappedSessions.length) {
-      out.push({ kind: "group", label: q ? "Sessions" : "Sessions · recent" });
+      out.push({ kind: "group", label: q ? "Sessions" : "Recent" });
       out.push(...cappedSessions);
     }
 
@@ -757,17 +757,30 @@ export function CommandPalette({
       onClick: () => { setSelectedIdx(si); requestAnimationFrame(() => activateSelectedFor(si)); },
     };
     if (it.kind === "session") {
+      if (isMobile) {
+        return (
+          <div {...common} key={it.id}>
+            <span class={`state-dot ${it.dotState}`} />
+            <span class="name"><Highlight text={it.title} query={query.toLowerCase().trim()} /></span>
+            <span class="cwd">{it.cwdLabel}</span>
+            {it.when && <span class="when">{it.when}</span>}
+          </div>
+        );
+      }
+      const live = it.live?.text;
+      const useful = live && live !== "idle" && live !== "saved";
+      const sub = useful ? live : (it.cwdLabel || "");
       return (
         <div {...common} key={it.id}>
           <span class={`state-dot ${it.dotState}`} />
-          <span class="name"><Highlight text={it.title} query={query.toLowerCase().trim()} /></span>
-          {!isMobile && it.live && (
-            <span class={`live${it.live.tone ? " " + it.live.tone : ""}`}>{it.live.text}</span>
-          )}
+          <span class="pal-sess">
+            <span class="name"><Highlight text={it.title} query={query.toLowerCase().trim()} /></span>
+            {sub && (
+              <span class={`live${it.live?.tone ? " " + it.live.tone : ""}`}>{sub}</span>
+            )}
+          </span>
           {it.paneN && <span class="badge pane">P{it.paneN}</span>}
-          <span class="cwd">{it.cwdLabel}</span>
           {it.when && <span class="when">{it.when}</span>}
-          {!isMobile && <CornerDownLeft class="enter" size={14} />}
         </div>
       );
     }

@@ -1,78 +1,38 @@
-import { Rewind, Bell, MoreHorizontal } from "lucide-preact";
-import { StateDot, Kbd, IconButton } from "../../primitives/index.js";
-import { ModelPill } from "../../components/index.js";
+import { Kbd } from "../../primitives/index.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import "./ChatHead.css";
 
-// ChatHead — main column header: session breadcrumb
-// (state + title + path) and actions (model, grid toggle, rewind,
-// notifications, session settings).
+// ChatHead — the conversation's name. Rewind lives on each user message.
+// Model and permissions live on the status strip.
 export function ChatHead({
   title = "ws race fix",
-  state = "running",
   path = "~/dev/moa/main",
-  model = "sol",
-  modelAccent = "lavender",
-  thinkingLevel = "high",
   onTitleClick,
   onGridToggle,
-  onRewind,
-  rewindDisabled = false,
-  onNotifications,
-  onSessionSettings,
-  onModelClick,
-  modelPopover,
   settingsPopover,
-  notifPopover,
-  modelAnchorRef,
   settingsAnchorRef,
-  notifAnchorRef,
 }) {
+  const Title = onTitleClick ? "button" : "span";
   return (
     <header class="chat-head">
-      <div class="crumb">
-        <StateDot state={state} size={9} />
-        <button type="button" class="crumb-title" onClick={onTitleClick}>
+      <div class="crumb" ref={settingsAnchorRef}>
+        <Title type={onTitleClick ? "button" : undefined} class="crumb-title" onClick={onTitleClick}>
           {title}
-        </button>
-        <span class="crumb-caret" aria-hidden="true">▾</span>
-        <span class="crumb-path">{path}</span>
+        </Title>
+        {onTitleClick && <span class="crumb-caret" aria-hidden="true">▾</span>}
+        {path && <span class="crumb-path">{path}</span>}
+        {settingsPopover}
       </div>
 
-      <div class="head-actions">
-        <div class="head-anchor" ref={modelAnchorRef}>
-          <ModelPill
-            model={model}
-            accent={modelAccent}
-            variant="bars"
-            level={thinkingLevel}
-            onClick={onModelClick}
-          />
-          {modelPopover}
+      {onGridToggle && (
+        <div class="head-actions">
+          <button type="button" class="grid-toggle" onClick={onGridToggle} title="Back to the grid — this session stays in pane 1">
+            <span class="mini" aria-hidden="true"><i /><i /><i /></span>
+            grid
+            <Kbd>{formatShortcut("G", { mod: true })}</Kbd>
+          </button>
         </div>
-
-        <button type="button" class="grid-toggle" onClick={onGridToggle} title="Back to the grid — this session stays in pane 1">
-          <span class="mini" aria-hidden="true"><i /><i /><i /></span>
-          grid
-          <Kbd>{formatShortcut("G", { mod: true })}</Kbd>
-        </button>
-
-        <IconButton label="Rewind" onClick={onRewind} disabled={rewindDisabled}>
-          <Rewind size={15} />
-        </IconButton>
-        <div class="head-anchor" ref={notifAnchorRef}>
-          <IconButton label="Notifications" onClick={onNotifications}>
-            <Bell size={15} />
-          </IconButton>
-          {notifPopover}
-        </div>
-        <div class="head-anchor" ref={settingsAnchorRef}>
-          <IconButton label="Session settings" onClick={onSessionSettings}>
-            <MoreHorizontal size={15} />
-          </IconButton>
-          {settingsPopover}
-        </div>
-      </div>
+      )}
     </header>
   );
 }

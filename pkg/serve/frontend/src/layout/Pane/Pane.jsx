@@ -1,17 +1,10 @@
-import { Rewind, Maximize2, X, GripHorizontal, Columns2, Rows2 } from "lucide-preact";
-import { StateDot, IconButton, ThinkingMeter } from "../../primitives/index.js";
+import { Maximize2, X, GripHorizontal, Columns2, Rows2 } from "lucide-preact";
+import { StateDot, IconButton } from "../../primitives/index.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import "./Pane.css";
 
-// Pane — a single grid panel. Reuses StateDot/IconButton/
-// ThinkingMeter from the primitives; the header reproduces ChatHead's
-// compact pattern but denser (this lives in a grid, not in the main
-// column).
-//
-// The mono model badge ("sol ▰▰▱▱" in the mockup) is built with
-// ThinkingMeter variant="glyph" instead of literal text: this way the
-// thinking level stays accessible/real instead of a static string, and the
-// level logic already living in the primitive isn't duplicated.
+// Pane — a single grid panel. Title and path in the header; model and
+// thinking live on the status strip, same as the conversation screen.
 //
 // `footer` — optional slot for the pane's pulse ("● streaming",
 // "waiting 0:42"…), like in the "grid alive" section of the live
@@ -39,19 +32,12 @@ export function Pane({
   title,
   path,
   state = "idle",
-  model,
-  modelAccent = "lavender",
-  thinkingLevel = "off",
   focused = false,
   variant = "normal",
   titleTone,
   onTitleClick,
-  onRewind,
   onMaximize,
   onClose,
-  onModelClick,
-  modelPopover,
-  modelAnchorRef,
   children,
   footer,
   hideComposer = false,
@@ -133,32 +119,8 @@ export function Pane({
           {title || "Empty"}
         </button>
         {path && <span class="p-path">{path}</span>}
-        {model && (
-          onModelClick ? (
-            <div class="p-model-wrap" ref={modelAnchorRef}>
-              <button
-                type="button"
-                class="p-model p-model-btn"
-                onClick={(e) => { e.stopPropagation(); onModelClick(e); }}
-                aria-label="Model and thinking — change"
-                aria-expanded={!!modelPopover}
-                aria-haspopup="dialog"
-              >
-                {model} <ThinkingMeter variant="glyph" level={thinkingLevel} label={`Thinking: ${thinkingLevel}`} />
-              </button>
-              {modelPopover}
-            </div>
-          ) : (
-            <span class="p-model">
-              {model} <ThinkingMeter variant="glyph" level={thinkingLevel} label={`Thinking: ${thinkingLevel}`} />
-            </span>
-          )
-        )}
 
         <div class="p-tools">
-          <IconButton label="Rewind" onClick={onRewind}>
-            <Rewind size={15} />
-          </IconButton>
           {onSplitRight && (
             <IconButton label="Split right" onClick={onSplitRight}>
               <Columns2 size={15} />

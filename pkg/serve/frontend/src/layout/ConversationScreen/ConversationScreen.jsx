@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "preact/hooks";
-import { Spine } from "../Spine/Spine.jsx";
 import { ChatHead } from "../ChatHead/ChatHead.jsx";
 import { Stream } from "../Stream/Stream.jsx";
 import { LiveDock } from "../LiveDock/LiveDock.jsx";
@@ -10,91 +9,43 @@ import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { NowLine } from "../NowLine/NowLine.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
-import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, NotificationSettings, UsagePanel, Sheet, GlobalSettings } from "../../components/index.js";
+import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, UsagePanel, Sheet } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { store, updateSession } from "../../data/store.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
-import { openSession } from "../../data/tile-actions.js";
 import { navigate } from "../../data/router.js";
 import { openPalette } from "../../data/palette.js";
-import { setGroupByProject } from "../../data/drawer.js";
 import { registerOverlay } from "../../data/overlays.js";
-import { shortModel, shortPath, modelCodename, sessionDisplayDotState, sessionTitle } from "../../data/util/format.js";
+import { shortModel, shortPath, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { activityPhase } from "../../data/util/activity.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
-import { configureSession, closeSession, deleteSession, openPersistedSubagent, openBashJob, resumeSession, rewindToMessage , setSessionFast } from "../../data/session-actions.js";
+import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast } from "../../data/session-actions.js";
 import "./ConversationScreen.css";
 
-// ConversationScreen — root organism AND container of the desktop conversation
-// screen. Wiring pattern: ONE component per screen subscribes to the store, derives the
-// focused session, and passes real props DOWN to the presentational children
-// (Spine/ChatHead/Stream/StatusStrip). The children stay dumb — they never read
-// the store themselves. App owns the bootstrap (polling/WS/version); this
-// container owns only the read-side projection.
+// ConversationScreen — the desktop conversation column. Spine lives in
+// DesktopShell; this container subscribes to the store, derives the focused
+// session, and passes props down to ChatHead / Stream / StatusStrip.
 //
 // Three states: LOADING (sessions not fetched yet), EMPTY (no focused session),
 // and a normal shown session.
-
-
-// spineSessions splits the store's sessions into the Spine's ACTIVE and SAVED
-// lists. Active = not 'saved', ordered by `updated` desc.
-// Saved = state 'saved'. Titles fall back to "Untitled" for a not-yet-titled session.
-// still renders. `meta` is a coarse relative age placeholder derived from
-// `updated` (full relative-time formatting is a later polish, kept simple here).
-function relAge(updated) {
-  if (!updated) return "";
-  const diff = Date.now() - updated;
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return "now";
-  if (min < 60) return `${min}m`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.floor(h / 24);
-  return `${d}d`;
-}
-
-function spineSessions(sessions) {
-  const all = Object.values(sessions);
-  const active = all
-    .filter((s) => s.state !== "saved")
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({
-      id: s.id,
-      cwd: s.cwd || "", updated: s.updated || 0,
-      title: sessionTitle(s),
-      state: sessionDisplayDotState(s),
-      unseen: !!s.unseen,
-      meta: relAge(s.updated),
-      origin: s.origin || undefined,
-    }));
-  const saved = all
-    .filter((s) => s.state === "saved")
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({ id: s.id, title: sessionTitle(s), meta: relAge(s.updated), origin: s.origin || undefined, cwd: s.cwd || "", updated: s.updated || 0, saved: true }));
-  return { active, saved };
-}
 
 function fmtSpend(costUSD) {
   if (!costUSD || costUSD <= 0) return undefined;
   return fmtCost(costUSD);
 }
 
-export function ConversationScreen({ version }) {
+export function ConversationScreen() {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
-  // Global Settings sheet (spine ⚙) — device-wide, not per-session. Shared body
-  // with mobile so desktop is no longer a stub.
-  const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
 
   const session = focusedSession(state);
   const activeId = focusedSessionId(state);
-  const { active, saved } = spineSessions(state.sessions);
   const loaded = state.sessionsLoaded;
 
   // Activity clock: while the focused session shows live activity, tick once a
@@ -111,17 +62,13 @@ export function ConversationScreen({ version }) {
     return () => clearInterval(t);
   }, [activityActive]);
 
-  // onSelectSession routes a Spine click to the focused tile (desktop) via
-  // openSession, which leaves the tile showing that session.
-  const onSelectSession = (id) => { openSession(id); };
-
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
   // The dock is the permanent home for live ASYNC work (async subagents + bash)
   // above the composer ("async in the dock, sync inline"). Sync subagents stay
   // inline in the delegation block instead.
   const liveAgents = session ? liveTrayAgents(session) : [];
 
-  // --- Model selector popover (ChatHead's ModelPill) ---
+  // --- Model selector popover (StatusStrip's ModelPill) ---
   const [modelOpen, setModelOpen] = useState(false);
   const [models, setModels] = useState(null); // null = not fetched yet
   const modelAnchorRef = useRef(null);
@@ -145,54 +92,12 @@ export function ConversationScreen({ version }) {
     };
   }, [modelOpen]);
 
-  // --- Session settings popover (ChatHead's MoreHorizontal) ---
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsAnchorRef = useRef(null);
-  useEffect(() => {
-    if (!settingsOpen) return;
-    const unregister = registerOverlay("conv-settings-popover");
-    const onDocDown = (e) => {
-      if (settingsAnchorRef.current && !settingsAnchorRef.current.contains(e.target)) setSettingsOpen(false);
-    };
-    const onKeyDown = (e) => { if (e.key === "Escape") setSettingsOpen(false); };
-    document.addEventListener("mousedown", onDocDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      unregister();
-      document.removeEventListener("mousedown", onDocDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [settingsOpen]);
-  // Close both popovers when the focused session changes, so a stale popover
-  // from a different session doesn't linger visually.
+  // Close popovers when the focused session changes.
   useEffect(() => {
     setModelOpen(false);
-    setSettingsOpen(false);
-    setNotifOpen(false);
   }, [activeId]);
 
-  // --- Notifications popover (ChatHead's Bell) — device-wide push + sound.
-  // Not session-scoped, but anchored in the head next to the other popovers so
-  // it inherits the same click-outside + Escape wiring.
-  const [notifOpen, setNotifOpen] = useState(false);
-  const notifAnchorRef = useRef(null);
-  useEffect(() => {
-    if (!notifOpen) return;
-    const unregister = registerOverlay("conv-notif-popover");
-    const onDocDown = (e) => {
-      if (notifAnchorRef.current && !notifAnchorRef.current.contains(e.target)) setNotifOpen(false);
-    };
-    const onKeyDown = (e) => { if (e.key === "Escape") setNotifOpen(false); };
-    document.addEventListener("mousedown", onDocDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      unregister();
-      document.removeEventListener("mousedown", onDocDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [notifOpen]);
-
-  // --- Rewind timeline sheet (ChatHead/MobileHeader's Rewind button) ---
+  // --- Rewind timeline sheet ---
   const [rewindOpen, setRewindOpen] = useState(false);
   const [secretAliases, setSecretAliases] = useState(null);
   useEffect(() => { setRewindOpen(false); }, [activeId]);
@@ -240,24 +145,6 @@ export function ConversationScreen({ version }) {
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [mcpOpen]);
-
-  const spine = (
-    <Spine
-      version={version}
-      activeSessions={active}
-      savedSessions={saved}
-      activeId={activeId}
-      groupByProject={state.groupByProject}
-      onGroupByProject={setGroupByProject}
-      onSelectSession={onSelectSession}
-      onNewSession={() => openPalette("create")}
-      onSearch={() => openPalette("search")}
-      onSettings={() => setGlobalSettingsOpen(true)}
-      onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
-      onReopenSession={(id) => { resumeSession(id).catch(() => {}); }}
-      onDeleteSession={(id) => { deleteSession(id).catch(() => {}); }}
-    />
-  );
 
   let body;
   if (!loaded) {
@@ -329,54 +216,12 @@ export function ConversationScreen({ version }) {
       </div>
     );
 
-    const settingsPopover = settingsOpen && (
-      <div class="head-popover session-settings-popover">
-        {settingsBusy && (
-          <div class="session-settings-busy">Settings locked while agent is running</div>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="session-settings-close"
-          onClick={() => {
-            // closeSession toasts on refusal (409 while the session still
-            // works); swallow the rejection here so it isn't an unhandled one.
-            closeSession(session.id).catch(() => {}).finally(() => setSettingsOpen(false));
-          }}
-        >
-          Close session
-        </Button>
-      </div>
-    );
-
-    const notifPopover = notifOpen && (
-      <div class="head-popover">
-        <NotificationSettings soundEnabled={state.soundEnabled} />
-      </div>
-    );
-
     body = (
       <>
         <ChatHead
           title={sessionTitle(session)}
-          state={session.state || "idle"}
           path={shortPath(session.cwd) || session.cwd || ""}
-          model={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
-          modelAccent={modelAccent(session.model)}
-          thinkingLevel={thinking}
-          onTitleClick={() => { /* 5x: rename / session menu */ }}
           onGridToggle={() => navigate("grid")}
-          onRewind={() => setRewindOpen(true)}
-          rewindDisabled={settingsBusy}
-          onNotifications={() => setNotifOpen((v) => !v)}
-          onSessionSettings={() => setSettingsOpen((v) => !v)}
-          onModelClick={() => setModelOpen((v) => !v)}
-          modelPopover={modelPopover}
-          settingsPopover={settingsPopover}
-          notifPopover={notifPopover}
-          modelAnchorRef={modelAnchorRef}
-          settingsAnchorRef={settingsAnchorRef}
-          notifAnchorRef={notifAnchorRef}
         />
         {viewingSub ? (
           <SubagentView
@@ -444,6 +289,13 @@ export function ConversationScreen({ version }) {
                 onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
                 permBusy={settingsBusy}
                 showTokens={true}
+                modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
+                modelAccent={modelAccent(session.model)}
+                thinking={thinking}
+                onModel={() => setModelOpen((v) => !v)}
+                modelOpen={modelOpen}
+                modelPopover={modelPopover}
+                modelAnchorRef={modelAnchorRef}
               />
               {usageOpen && (
                 <div class="status-strip-usage-popover">
@@ -468,8 +320,7 @@ export function ConversationScreen({ version }) {
   }
 
   return (
-    <div class="conversation-screen">
-      {spine}
+    <>
       <main class="conversation-main">{body}</main>
       {session && (
         <RewindTimeline
@@ -478,14 +329,6 @@ export function ConversationScreen({ version }) {
           sessionId={session.id}
         />
       )}
-      <Sheet
-        open={globalSettingsOpen}
-        onClose={() => setGlobalSettingsOpen(false)}
-        title="Settings"
-        class="global-settings-sheet"
-      >
-        <GlobalSettings soundEnabled={state.soundEnabled} version={version} />
-      </Sheet>
       {session && (
         <Sheet open={secretAliases !== null} onClose={() => setSecretAliases(null)} title="Send secrets">
           <SecretBatch
@@ -496,6 +339,6 @@ export function ConversationScreen({ version }) {
           />
         </Sheet>
       )}
-    </div>
+    </>
   );
 }

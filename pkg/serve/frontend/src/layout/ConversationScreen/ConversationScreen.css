@@ -1,15 +1,4 @@
-.conversation-screen {
-  display: grid;
-  grid-template-columns: var(--spine-width) 1fr;
-  grid-template-rows: minmax(0, 1fr);
-  height: 100vh;
-  overflow: hidden;
-  background: var(--base);
-  color: var(--text);
-  font-family: var(--font);
-}
-
-.conversation-screen .conversation-main {
+.conversation-main {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -19,8 +8,8 @@
 
 /* LOADING / EMPTY states of the conversation container. Centered, quiet
    placeholders — no invented content. */
-.conversation-screen .conversation-placeholder,
-.conversation-screen .conversation-empty {
+.conversation-main .conversation-placeholder,
+.conversation-main .conversation-empty {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -32,11 +21,11 @@
   text-align: center;
 }
 
-.conversation-screen .conversation-empty {
+.conversation-main .conversation-empty {
   gap: var(--space-3);
 }
 
-.conversation-screen .conversation-empty-glyph {
+.conversation-main .conversation-empty-glyph {
   font-family: var(--font);
   font-weight: var(--weight-bold);
   font-size: var(--text-2xl);
@@ -45,20 +34,20 @@
   margin-bottom: var(--space-1);
 }
 
-.conversation-screen .conversation-empty-title {
+.conversation-main .conversation-empty-title {
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
   color: var(--subtext0);
   margin: 0;
 }
 
-.conversation-screen .conversation-empty-hint {
+.conversation-main .conversation-empty-hint {
   font-size: var(--text-sm);
   color: var(--overlay0);
   margin: 0;
 }
 
-.conversation-screen .conversation-empty-actions {
+.conversation-main .conversation-empty-actions {
   margin-top: var(--space-2);
   display: flex;
   align-items: center;
@@ -67,7 +56,7 @@
 
 /* conversation-blocking — fixed strip between the Stream and the AgentTray/
    Composer for untrusted MCP banners and pending permissions. */
-.conversation-screen .conversation-blocking {
+.conversation-main .conversation-blocking {
   flex: none;
   display: flex;
   flex-direction: column;
@@ -76,18 +65,17 @@
 }
 
 /* status-strip-anchor — positions the Usage panel popover relative to the
-   StatusStrip (level 2 telemetry, TELEMETRY-SETTINGS-REDESIGN §2). The strip
-   itself centers its content in a 844px column with auto margins; the anchor
-   is a zero-cost relative wrapper so the popover can drop right above the cost
-   segment (bottom-right of the line). */
-.conversation-screen .status-strip-anchor {
+   StatusStrip. The strip centers its content in a 844px column with auto
+   margins; the anchor is a relative wrapper so the popover opens above the cost. */
+.conversation-main .status-strip-anchor {
   position: relative;
   flex: none;
 }
 
-.conversation-screen .status-strip-usage-popover {
+.conversation-main .status-strip-usage-popover {
   position: absolute;
-  right: max(var(--space-4), calc(50% - 422px + var(--space-2)));
+  left: max(var(--space-4), calc(50% - 422px + var(--space-2)));
+  right: auto;
   bottom: calc(100% - var(--space-2));
   z-index: var(--z-overlay);
   background: var(--mantle);
@@ -95,4 +83,8 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   padding: var(--space-3);
+}
+.conversation-main .status-strip-mcp-popover {
+  left: auto;
+  right: max(var(--space-4), calc(50% - 422px + var(--space-2)));
 }

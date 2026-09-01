@@ -1,62 +1,15 @@
 import { useState, useEffect } from "preact/hooks";
-import { Spine } from "../Spine/Spine.jsx";
 import { GridToolbar } from "../GridToolbar/GridToolbar.jsx";
 import { PaneGrid } from "../PaneGrid/PaneGrid.jsx";
 import { store } from "../../data/store.js";
 import { allTileIds, allSessionIds, findTile, tileCount, treeShape, presetTree } from "../../data/tileTree.js";
 import { PRESETS } from "../../data/layoutPresets.js";
-import { applyPreset, addPane, focusTileByIndex, focusTile, openSession } from "../../data/tile-actions.js";
-import { openPalette } from "../../data/palette.js";
-import { setGroupByProject } from "../../data/drawer.js";
-import { sessionDisplayDotState, sessionTitle } from "../../data/util/format.js";
-import { Sheet, GlobalSettings } from "../../components/index.js";
+import { applyPreset, addPane, focusTileByIndex, focusTile } from "../../data/tile-actions.js";
 import "./PaneGridScreen.css";
 
-// PaneGridScreen — root organism AND container of the desktop pane grid.
-// Same container pattern as ConversationScreen: subscribes to the store,
-// derives sessions/tileTree/focusedTile, and passes real props down to the
-// presentational Spine / GridToolbar / PaneGrid. Owns the grid-only global
-// keyboard shortcuts (⌘/Alt+1–9 → focus pane N).
+// PaneGridScreen — the grid column. Spine lives in DesktopShell; this owns
+// the toolbar, the tiles, and the pane-focus shortcuts.
 
-// relAge / spineSessions — same coarse relative-age + ACTIVE/SAVED split as
-// ConversationScreen (kept local; a shared helper is a later cleanup).
-function relAge(updated) {
-  if (!updated) return "";
-  const diff = Date.now() - updated;
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return "now";
-  if (min < 60) return `${min}m`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.floor(h / 24);
-  return `${d}d`;
-}
-
-function spineSessions(sessions, paneOf) {
-  const all = Object.values(sessions);
-  const active = all
-    .filter((s) => s.state !== "saved")
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({
-      id: s.id,
-      cwd: s.cwd || "", updated: s.updated || 0,
-      title: sessionTitle(s),
-      state: sessionDisplayDotState(s),
-      unseen: !!s.unseen,
-      meta: relAge(s.updated),
-      pane: paneOf.get(s.id) || undefined,
-      origin: s.origin || undefined,
-    }));
-  const saved = all
-    .filter((s) => s.state === "saved")
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-    .map((s) => ({ id: s.id, title: sessionTitle(s), meta: relAge(s.updated), origin: s.origin || undefined, cwd: s.cwd || "", updated: s.updated || 0, saved: true }));
-  return { active, saved };
-}
-
-// matchPreset returns the preset id whose tree shape equals the current layout,
-// or null (freeform — no preset highlighted). Compares structure only (splits +
-// directions), ignoring ids/sessions/ratios.
 function matchPreset(tree) {
   const shape = treeShape(tree);
   for (const p of PRESETS) {
@@ -65,35 +18,18 @@ function matchPreset(tree) {
   return null;
 }
 
-export function PaneGridScreen({ version }) {
+export function PaneGridScreen() {
   const [state, setState] = useState(store.get());
   useEffect(() => store.subscribe(setState), []);
-  const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
 
-  // sessionId → pane index+1 (DFS order), for the Spine's Pn badges.
-  const paneOf = new Map();
-  for (const [i, tileId] of allTileIds(state.tileTree).entries()) {
-    const tile = findTile(state.tileTree, tileId);
-    if (tile && tile.sessionId) paneOf.set(tile.sessionId, `P${i + 1}`);
-  }
-
-  const { active, saved } = spineSessions(state.sessions, paneOf);
   const paneCount = tileCount(state.tileTree);
   const activePreset = matchPreset(state.tileTree);
-  const focusedSessionId = (() => {
-    const t = findTile(state.tileTree, state.focusedTile);
-    return t ? t.sessionId : null;
-  })();
 
-  // needsYouCount — sessions currently assigned to a visible pane that need
-  // attention (permission/error). Derived from the store (no /api/attention —
-  // kept simple).
   const assigned = new Set(allSessionIds(state.tileTree));
   const needsYou = Object.values(state.sessions).filter(
     (s) => assigned.has(s.id) && (s.state === "permission" || s.state === "error")
   );
 
-  // onAttentionClick — focus the pane holding the first session that needs you.
   const onAttentionClick = () => {
     if (needsYou.length === 0) return;
     const target = needsYou[0];
@@ -103,9 +39,6 @@ export function PaneGridScreen({ version }) {
     }
   };
 
-  // Grid hotkeys: ⌘/Ctrl/Alt + 1–9 focus pane N. We require a modifier chord
-  // so a bare number typed into a pane's composer goes to the textarea, never
-  // the layout (⌘2 is unambiguous — never a literal "2").
   useEffect(() => {
     const onKey = (e) => {
       if (e.key < "1" || e.key > "9") return;
@@ -117,42 +50,18 @@ export function PaneGridScreen({ version }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const onSelectSession = (id) => { openSession(id); };
-
   return (
-    <div class="pane-grid-screen">
-      <Spine
-        version={version}
-        activeSessions={active}
-        savedSessions={saved}
-        activeId={focusedSessionId}
-        groupByProject={state.groupByProject}
-        onGroupByProject={setGroupByProject}
-        onSelectSession={onSelectSession}
-        onNewSession={() => openPalette("create")}
-        onSearch={() => openPalette("search")}
-        onSettings={() => setGlobalSettingsOpen(true)}
+    <main class="pane-grid-main">
+      <GridToolbar
+        paneCount={paneCount}
+        activePreset={activePreset}
+        needsYouCount={needsYou.length}
+        onAttentionClick={onAttentionClick}
+        onPresetSelect={(id) => applyPreset(id)}
+        onSplitRight={() => addPane("horizontal")}
+        onSplitDown={() => addPane("vertical")}
       />
-      <main class="pane-grid-main">
-        <GridToolbar
-          paneCount={paneCount}
-          activePreset={activePreset}
-          needsYouCount={needsYou.length}
-          onAttentionClick={onAttentionClick}
-          onPresetSelect={(id) => applyPreset(id)}
-          onSplitRight={() => addPane("horizontal")}
-          onSplitDown={() => addPane("vertical")}
-        />
-        <PaneGrid state={state} />
-      </main>
-      <Sheet
-        open={globalSettingsOpen}
-        onClose={() => setGlobalSettingsOpen(false)}
-        title="Settings"
-        class="global-settings-sheet"
-      >
-        <GlobalSettings soundEnabled={state.soundEnabled} version={version} />
-      </Sheet>
-    </div>
+      <PaneGrid state={state} />
+    </main>
   );
 }

@@ -10,7 +10,7 @@ let apiResponse = [];
 
 const { store, setState } = await import('./store.js');
 const { syncConnections } = await import('./api.js');
-const { createSession, deleteSession, loadSessions, openPersistedSubagent, openBashJob, sendMessage } = await import('./session-actions.js');
+const { createSession, deleteSession, loadSessions, loadUsage, openPersistedSubagent, openBashJob, sendMessage, startPolling, stopPolling } = await import('./session-actions.js');
 const { getToasts, removeToast } = await import('./notifications.js');
 const { adoptAttentionNamespace, handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
 
@@ -1209,4 +1209,56 @@ test('loadSessions preserves the open bash job view across a poll', async () => 
   await loadSessions();
 
   expect(store.get().sessions.s1.viewingBashJob).toBe('bash-1');
+});
+
+test('setState does not notify when every patched field is already the current value', () => {
+  let n = 0;
+  const unsub = store.subscribe(() => { n++; });
+  setState({ activeSession: null, tileTree: null });
+  expect(n).toBe(0);
+  setState({ activeSession: 's1' });
+  expect(n).toBe(1);
+  unsub();
+});
+
+test('an unchanged roster poll does not replace session objects or notify', async () => {
+  apiResponse = [{ id: 's1', title: 'S1', state: 'idle', provider: 'openai', cwd: '/x' }];
+  await loadSessions();
+  const sessions = store.get().sessions;
+  const s1 = sessions.s1;
+  let n = 0;
+  const unsub = store.subscribe(() => { n++; });
+  await loadSessions();
+  unsub();
+  expect(n).toBe(0);
+  expect(store.get().sessions).toBe(sessions);
+  expect(store.get().sessions.s1).toBe(s1);
+});
+
+test('loadUsage does not notify when the snapshot is unchanged', async () => {
+  const snap = { plans: [{ used: 1, limit: 2 }] };
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify(snap), { status: 200 }));
+  await loadUsage();
+  let n = 0;
+  const unsub = store.subscribe(() => { n++; });
+  await loadUsage();
+  unsub();
+  expect(n).toBe(0);
+});
+
+test('desktop roster poll is 10s, mobile 15s', () => {
+  const intervals = [];
+  const orig = globalThis.setInterval;
+  globalThis.setInterval = (fn, ms) => { intervals.push(ms); return 1; };
+  try {
+    setState({ isMobile: false });
+    startPolling();
+    setState({ isMobile: true });
+    startPolling();
+    expect(intervals).toEqual([10000, 15000]);
+  } finally {
+    globalThis.setInterval = orig;
+    stopPolling();
+    setState({ isMobile: false });
+  }
 });

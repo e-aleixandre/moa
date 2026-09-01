@@ -1,6 +1,6 @@
 import { Search, Plus, Settings, MoreHorizontal, Check } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Kbd, IconButton } from "../../primitives/index.js";
+import { IconButton } from "../../primitives/index.js";
 import { SessionCardMenu, SessionRow } from "../../components/index.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { groupProjectSessions, hiddenProjectSavedCount, visibleProjectSessions } from "../../data/util/project-sessions.js";
@@ -32,10 +32,7 @@ function SpineVersion({ version }) {
   );
 }
 
-// Spine — left sidebar of sessions. Replaces the current frontend's
-// bottom TabBar: header with logo/wordmark/version, search
-// (trigger, no real input yet), ACTIVE/SAVED lists of SessionRow
-// (variant="card") and footer with Pulse status + settings.
+// Spine — left column of sessions: wordmark, jump, the list, settings.
 //
 // Connected: the ConversationScreen container builds `activeSessions`/
 // `savedSessions` from the store and passes them in, along with `activeId`
@@ -43,15 +40,15 @@ function SpineVersion({ version }) {
 // fallback for isolated rendering (e.g. galleries) — with real data the
 // container always supplies the props.
 const ACTIVE_SESSIONS = [
-  { id: "ws-race-fix", title: "ws race fix", state: "running", pane: "P1" },
-  { id: "deploy-pulse-api", title: "deploy pulse api", state: "permission", pane: "P2", unseen: true },
-  { id: "frontend-polish", title: "frontend polish", state: "idle", meta: "2h" },
-  { id: "migrate-sqlite", title: "migrate sqlite", state: "error", pane: "P3", unseen: true },
+  { id: "ws-race-fix", title: "ws race fix", state: "running", when: "now", brief: "Working…", path: "~/dev/moa/main" },
+  { id: "deploy-pulse-api", title: "deploy pulse api", state: "permission", when: "now", brief: "Needs you", path: "~/dev/moa/pulse-api", unseen: true },
+  { id: "frontend-polish", title: "frontend polish", state: "idle", when: "2h", path: "~/dev/moa/frontend-polish" },
+  { id: "migrate-sqlite", title: "migrate sqlite", state: "error", when: "18m", brief: "Error", path: "~/dev/moa/migrate", unseen: true },
 ];
 
 const SAVED_SESSIONS = [
-  { id: "verifier-design-notes", title: "verifier design notes", meta: "3d" },
-  { id: "changelog-0-10", title: "changelog 0.10", meta: "6d" },
+  { id: "verifier-design-notes", title: "verifier design notes", when: "3d", path: "~/dev/moa/main", saved: true },
+  { id: "changelog-0-10", title: "changelog 0.10", when: "6d", path: "~/dev/moa/main", saved: true },
 ];
 
 function SpineGroupMenu({ groupByProject, onChange }) {
@@ -96,7 +93,19 @@ export function Spine({
   const projectSections = groupProjectSessions([...activeSessions, ...savedSessions]);
   const row = (s) => (
     <div class="spine-session-card" key={s.id}>
-      <SessionRow variant="card" title={s.title} state={s.state || (s.saved ? "saved" : "idle")} active={s.active ?? s.id === activeId} unseen={s.unseen} meta={s.meta} pane={s.pane} origin={s.origin} onClick={() => onSelectSession?.(s.id)} />
+      <SessionRow
+        variant="card"
+        title={s.title}
+        state={s.state || (s.saved ? "saved" : "idle")}
+        active={s.active ?? s.id === activeId}
+        unseen={s.unseen}
+        when={s.when || s.meta}
+        brief={s.brief}
+        path={s.path}
+        pane={s.pane}
+        origin={s.origin}
+        onClick={() => onSelectSession?.(s.id)}
+      />
       <SessionCardMenu
         session={s}
         onClose={onCloseSession}
@@ -109,16 +118,16 @@ export function Spine({
   return (
     <aside class="spine">
       <div class="spine-head">
-        <span class="logo" aria-hidden="true">m</span>
         <span class="wordmark">moa</span>
-        <SpineVersion version={version} />
+        <button type="button" class="spine-jump" onClick={onSearch} aria-label={`Jump to session ${formatShortcut("K", { mod: true })}`} title={`Jump to session ${formatShortcut("K", { mod: true })}`}>
+          <Search size={14} aria-hidden="true" />
+        </button>
         <SpineGroupMenu groupByProject={groupByProject} onChange={onGroupByProject} />
       </div>
 
-      <button type="button" class="spine-search" onClick={onSearch}>
-        <Search size={14} aria-hidden="true" />
-        <span>Jump to session…</span>
-        <Kbd>{formatShortcut("K", { mod: true })}</Kbd>
+      <button type="button" class="spine-new" onClick={onNewSession}>
+        <Plus size={14} aria-hidden="true" />
+        New session
       </button>
 
       <div class="spine-sessions">
@@ -131,15 +140,17 @@ export function Spine({
             {section.path && <div class="spine-project-path">{section.path}</div>}
             <div class="spine-list">{shownSessions.map(row)}{hiddenSaved > 0 && <button type="button" class="spine-show-all" onClick={() => setExpandedProjects((keys) => new Set(keys).add(section.key))}>Show all {hiddenSaved} saved</button>}</div>
           </div>;
-        }) : <><div class="spine-label">Active</div><div class="spine-list">{activeSessions.map(row)}</div><div class="spine-label">Saved</div><div class="spine-list">{savedSessions.map(row)}</div></>}
+        }) : <>
+          <div class="spine-list">{activeSessions.map(row)}</div>
+          {savedSessions.length > 0 && <>
+            <div class="spine-label">Saved</div>
+            <div class="spine-list">{savedSessions.map(row)}</div>
+          </>}
+        </>}
       </div>
 
-      <button type="button" class="new-session" onClick={onNewSession}>
-        <Plus size={14} aria-hidden="true" />
-        New session
-      </button>
-
       <div class="spine-foot">
+        <SpineVersion version={version} />
         <IconButton label="Settings" onClick={onSettings}>
           <Settings size={15} />
         </IconButton>

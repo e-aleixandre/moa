@@ -8,6 +8,7 @@ export { Composer } from "./Composer/Composer.jsx";
 export { StatusStrip } from "./StatusStrip/StatusStrip.jsx";
 export { NowLine } from "./NowLine/NowLine.jsx";
 export { ConversationScreen } from "./ConversationScreen/ConversationScreen.jsx";
+export { DesktopShell } from "./DesktopShell/DesktopShell.jsx";
 export { GridToolbar } from "./GridToolbar/GridToolbar.jsx";
 export { Pane } from "./Pane/Pane.jsx";
 export { PaneGrid } from "./PaneGrid/PaneGrid.jsx";

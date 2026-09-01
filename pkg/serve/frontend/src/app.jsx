@@ -1,7 +1,7 @@
 import { render } from "preact";
 import { useState, useEffect } from "preact/hooks";
 import "./index.css";
-import { ConversationScreen, PaneGridScreen, MobileConversationScreen } from "./layout/index.js";
+import { ConversationScreen, PaneGridScreen, MobileConversationScreen, DesktopShell } from "./layout/index.js";
 import { CommandPalette, ToastContainer, PulsePairingPanel } from "./components/index.js";
 import { store, setState as setStoreState } from "./data/store.js";
 import { togglePalette, closePalette } from "./data/palette.js";
@@ -260,23 +260,6 @@ function App() {
     document.documentElement.classList.toggle("mobile-locked", state.isMobile && view !== "grid");
   }, [state.isMobile, view]);
 
-  if (view === "grid") {
-    // Real, store-connected pane grid — no ViewSwitch overlay.
-    return (
-      <>
-        <PaneGridScreen version={version} />
-        <GlobalPalette />
-        <GlobalPairingPanel />
-        <ToastContainer />
-      </>
-    );
-  }
-  // Default: real, store-connected conversation screen. On a mobile
-  // viewport (state.isMobile, driven by the matchMedia breakpoint in
-  // useBootstrap) mount the connected mobile screen instead of the desktop
-  // ConversationScreen. Both are single-session containers over the same store;
-  // the GlobalPalette mounts over either (its context derives to 'mobile'). No
-  // ViewSwitch.
   if (state.isMobile) {
     return (
       <>
@@ -289,7 +272,9 @@ function App() {
   }
   return (
     <>
-      <ConversationScreen version={version} />
+      <DesktopShell version={version}>
+        {view === "grid" ? <PaneGridScreen /> : <ConversationScreen />}
+      </DesktopShell>
       <GlobalPalette />
       <GlobalPairingPanel />
       <ToastContainer />

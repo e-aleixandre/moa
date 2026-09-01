@@ -368,16 +368,8 @@ export function SessionDrawer({
               <span class="sdrawer-count">
                 {q
                   ? `${hitCount} ${hitCount === 1 ? "match" : "matches"}`
-                  : `${activeCount} active · ${savedCount} saved`}
+                  : `${activeCount} open · ${savedCount} saved`}
               </span>
-              <button
-                type="button"
-                class="sdrawer-new"
-                aria-label="New session"
-                onClick={() => setView("new")}
-              >
-                <Plus size={15} aria-hidden="true" />
-              </button>
               <DrawerGroupMenu groupByProject={groupByProject} onChange={onGroupByProject} />
             </div>
 
@@ -394,6 +386,15 @@ export function SessionDrawer({
                 onInput={(e) => setQuery(e.target.value)}
               />
             </div>
+
+            <button
+              type="button"
+              class="sdrawer-new"
+              onClick={() => setView("new")}
+            >
+              <Plus size={15} aria-hidden="true" />
+              New session
+            </button>
 
             <div class="sdrawer-list">
               {shownNew.length > 0 && <>
@@ -418,7 +419,7 @@ export function SessionDrawer({
                     {hiddenSaved > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setExpandedProjects((keys) => new Set(keys).add(section.key))}>Show all {hiddenSaved} saved</button>}
                   </div>}
                 </section>;
-              }) : <>{shownActive.length > 0 && <span class="sdrawer-group">Active</span>}{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{savedPreview.visible.map((s) => card(s))}{savedPreview.hidden > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setShowAllSaved(true)}>Show all {shownSaved.length} saved</button>}</>}
+              }) : <>{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{savedPreview.visible.map((s) => card(s))}{savedPreview.hidden > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setShowAllSaved(true)}>Show all {shownSaved.length} saved</button>}</>}
               {q && hitCount === 0 && (
                 <span class="sdrawer-note">No session matches “{query}”</span>
               )}
