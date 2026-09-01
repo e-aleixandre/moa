@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,11 +26,25 @@ type streamWriter struct {
 }
 
 func (w *streamWriter) Write(p []byte) (int, error) {
+	p = stripANSI(p)
 	accepted := w.buf.Append(p)
 	if w.onUpdate != nil && accepted > 0 {
 		w.onUpdate(core.TextResult(string(p[:accepted])))
 	}
 	return len(p), nil
+}
+
+// ansiEscape matches CSI (colours, cursor moves) and OSC (titles, hyperlinks)
+// sequences. Test runners and package managers emit them whenever they think
+// they have a terminal; the output lands in a <pre> and in the model's
+// context, and both read "\x1b[33m" as garbage.
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)`)
+
+func stripANSI(p []byte) []byte {
+	if !bytes.Contains(p, []byte{0x1b}) {
+		return p
+	}
+	return ansiEscape.ReplaceAll(p, nil)
 }
 
 // NewBash creates the bash tool.
@@ -188,6 +204,13 @@ func executeBash(ctx context.Context, cfg ToolConfig, command, cwd string, persi
 	if persistedEnv != nil {
 		cmd.Env = persistedEnv
 	}
+	// Not a terminal: tell tools that honour the conventions to skip colour
+	// and progress animations before they reach the stream (the writer strips
+	// what slips through).
+	if cmd.Env == nil {
+		cmd.Env = os.Environ()
+	}
+	cmd.Env = append(cmd.Env, "NO_COLOR=1", "TERM=dumb")
 	setProcGroup(cmd)
 	// If the process doesn't exit within 5s of cancel signal, Go force-kills.
 	cmd.WaitDelay = 5 * time.Second
