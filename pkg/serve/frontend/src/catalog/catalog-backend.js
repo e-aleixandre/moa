@@ -22,7 +22,26 @@ export const CATALOG_CAPS = {
   homeDir: "/home/ealeixandre",
   workspaceRoot: "/home/ealeixandre/dev/moa",
   defaultModel: "anthropic/claude-opus-4-8",
+  goal_flags: [
+    { name: "--max", placeholder: "N", desc: "max iterations (0 = unlimited)" },
+    { name: "--stalled", placeholder: "N", desc: "stop after N iterations with no progress" },
+    { name: "--timeout", placeholder: "2h", desc: "wall-clock deadline" },
+    { name: "--budget", placeholder: "USD", desc: "cumulative USD ceiling" },
+    { name: "--verifier", placeholder: "SPEC", desc: "model spec for the verifier" },
+    { name: "--verify-timeout", placeholder: "5m", desc: "total verifier run timeout" },
+    { name: "--verify-oneshot", desc: "use the tool-less one-shot verifier" },
+    { name: "--compact", placeholder: "N", desc: "soft compaction threshold in tokens" },
+    { name: "--cwd", placeholder: "DIR", desc: "execution and evaluation directory" },
+  ],
 };
+
+const CATALOG_SKILLS = [
+  { name: "review", description: "Review the current diff" },
+  { name: "release-check", description: "Prepare a release decision" },
+  { name: "visual-qa", description: "Exercise the visible workflow" },
+  { name: "incident-review", description: "Learn from a material incident" },
+  { name: "feedback", description: "Send project feedback" },
+];
 
 export const CATALOG_USAGE = {
   available: true,
@@ -141,7 +160,7 @@ export function catalogResponse(method, path, body = null, sessions = CATALOG_SE
   if (sessionMatch) {
     const [, sessionId, rest = ""] = sessionMatch;
     if (m === "GET" && rest === "skills") {
-      return { skills: [{ name: "review", description: "Review the current diff" }] };
+      return { skills: CATALOG_SKILLS };
     }
     if (m === "GET" && rest === "mcp") return { servers: [] };
     if (m === "GET" && rest.startsWith("subagents/")) {
