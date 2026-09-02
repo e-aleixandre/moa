@@ -59,11 +59,24 @@ mock.module("../../data/session-actions.js", () => ({
   steerSubagent: async (...args) => { steered.push(args); return steerResult; },
 }));
 
-const { Composer } = await import("./Composer.jsx");
+const { Composer, keepCommandSuggestionVisible } = await import("./Composer.jsx");
 // The real store: the recall reads pendingSteers from it, so seeding it is
 // closer to the running app than faking the module.
 const { updateSession, setState, store } = await import("../../data/store.js");
 const { getToasts } = await import("../../data/notifications.js");
+
+test("keyboard command navigation keeps the selected row inside the menu", () => {
+  const list = {
+    scrollTop: 0,
+    clientHeight: 132,
+    children: Array.from({ length: 8 }, (_, i) => ({ offsetTop: i * 44, offsetHeight: 44 })),
+  };
+
+  keepCommandSuggestionVisible(list, 5);
+  expect(list.scrollTop).toBe(132);
+  keepCommandSuggestionVisible(list, 2);
+  expect(list.scrollTop).toBe(88);
+});
 
 function descendants(node, result = []) {
   if (!node || typeof node === "string") return result;

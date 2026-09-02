@@ -65,6 +65,18 @@ function getHistory(id) {
 }
 const MAX_HISTORY = 100;
 
+export function keepCommandSuggestionVisible(list, index) {
+  const item = list?.children?.[index];
+  if (!item) return;
+  const top = item.offsetTop;
+  const bottom = top + item.offsetHeight;
+  if (top < list.scrollTop) {
+    list.scrollTop = top;
+  } else if (bottom > list.scrollTop + list.clientHeight) {
+    list.scrollTop = bottom - list.clientHeight;
+  }
+}
+
 // Per-session unsent draft, persisted to localStorage so a reload (iOS evicts
 // backgrounded PWAs freely) doesn't lose what you were typing. The prefix is
 // deliberately DISTINCT from the old SPA's `moa-draft-` so the two frontends
@@ -130,8 +142,14 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   const [cmdCursor, setCmdCursor] = useState(0);
   const [fileSuggestions, setFileSuggestions] = useState(null); // [{path, is_dir}] or null
   const [fileCursor, setFileCursor] = useState(0);
+  const cmdSuggestionsRef = useRef(null);
   const fileAbortRef = useRef(null);
   const fileDebounceRef = useRef(null);
+
+  useEffect(() => {
+    if (!cmdSuggestions) return;
+    keepCommandSuggestionVisible(cmdSuggestionsRef.current, cmdCursor);
+  }, [cmdSuggestions, cmdCursor]);
 
   // --- Attachments ---
   const [attachments, setAttachments] = useState([]);
@@ -1046,7 +1064,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           />
         )}
         {cmdSuggestions && (
-          <div class="cmd-suggestions">
+          <div class="cmd-suggestions" ref={cmdSuggestionsRef}>
             {cmdSuggestions.map((cmd, i) => (
               <div
                 key={cmd.__flag ? cmd.name : '/' + cmd.name}

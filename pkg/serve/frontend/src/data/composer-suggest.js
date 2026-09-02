@@ -76,9 +76,9 @@ export function slashSuggestions(value, cursor, goalFlags, skills) {
   const afterSlash = value.slice(1);
   if (afterSlash.includes(' ')) {
     if (value.startsWith('/goal ')) {
-      const token = tokenAtCursor(value, cursor);
+      const token = normalizeDashes(tokenAtCursor(value, cursor));
       if (token.startsWith('-')) {
-        const matches = filterGoalFlags(goalFlags, token, value);
+        const matches = filterGoalFlags(goalFlags, token, normalizeDashes(value));
         if (matches.length > 0) return matches;
       }
     }

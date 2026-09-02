@@ -254,6 +254,12 @@ test('desktop session cards use the shared lifecycle menu and forward its action
   });
 });
 
+test('mobile session changes remount the transcript scroller', async () => {
+  const source = await Bun.file(new URL('./MobileConversationScreen.jsx', import.meta.url)).text();
+
+  expect(source).toMatch(/<MobileStream\s+key=\{session\.id\}/);
+});
+
 // Ideally this would render the screen and assert the handlers reached its
 // root, but the suite's shared preact/hooks mocks stub the gesture hook away,
 // so the wiring is asserted at the source level: it still catches the mistake

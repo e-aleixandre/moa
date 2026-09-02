@@ -71,6 +71,16 @@ test('slashSuggestions offers /goal flags once the token starts with -', () => {
   expect(s).toEqual([{ name: '--max', desc: 'Max', args: '<n>', __flag: true }]);
 });
 
+test('slashSuggestions treats mobile em/en-dashes as goal flag prefixes', () => {
+  const flags = [{ name: '--max', desc: 'Max', placeholder: '<n>' }];
+  expect(slashSuggestions('/goal do it —m', 14, flags)).toEqual([
+    { name: '--max', desc: 'Max', args: '<n>', __flag: true },
+  ]);
+  expect(slashSuggestions('/goal do it –m', 14, flags)).toEqual([
+    { name: '--max', desc: 'Max', args: '<n>', __flag: true },
+  ]);
+});
+
 test('slashSuggestions returns null for /goal args with no dash token', () => {
   expect(slashSuggestions('/goal do the thing', 18, [{ name: '--max', desc: 'Max' }])).toBeNull();
 });

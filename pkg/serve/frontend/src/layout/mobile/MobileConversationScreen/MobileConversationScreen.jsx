@@ -234,6 +234,7 @@ function MobileConversationBody({ forceMobile = false }) {
       body = (
         <>
           <MobileStream
+            key={session.id}
             session={session}
             blocks={blocks}
             // Rewind lives on the waypoints themselves now, not behind a door in
