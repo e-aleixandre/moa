@@ -3,6 +3,7 @@
 import { wsState } from './shared.js';
 import { store, updateSession } from '../store.js';
 import { extractToolNote } from './history.js';
+import { scheduleFlush } from './stream.js';
 
 export function handleWsToolCallStart(id, data) {
   const sess = store.get().sessions[id];
@@ -176,4 +177,3 @@ export function handleWsToolEnd(id, data) {
   });
   updateSession(id, { messages, runningTool: null });
 }
-

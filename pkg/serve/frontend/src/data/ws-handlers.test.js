@@ -2,7 +2,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved, handleWsCompactionEnd, handleWsConfigChange } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolUpdate, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved, handleWsCompactionEnd, handleWsConfigChange } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
 import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
@@ -22,6 +22,25 @@ test('an unrelated config change keeps fast mode enabled', () => {
   setState({ sessions: { fast: { id: 'fast', messages: [], subagents: {}, fast: true, fastSupported: true, fastNote: 'premium' } } });
   handleWsConfigChange('fast', { thinking: 'high' });
   expect(store.get().sessions.fast).toMatchObject({ thinking: 'high', fast: true, fastSupported: true, fastNote: 'premium' });
+});
+
+test('a tool update schedules and flushes its live result', () => {
+  const original = globalThis.requestAnimationFrame;
+  let flush;
+  globalThis.requestAnimationFrame = callback => {
+    flush = callback;
+    return 1;
+  };
+  try {
+    setState({ sessions: { s1: { id: 's1', messages: [{
+      _type: 'tool_start', tool_call_id: 't1', tool_name: 'bash', streamingResult: '',
+    }], subagents: {} } } });
+    expect(() => handleWsToolUpdate('s1', { tool_call_id: 't1', delta: 'live output' })).not.toThrow();
+    flush();
+    expect(store.get().sessions.s1.messages[0].streamingResult).toBe('live output');
+  } finally {
+    globalThis.requestAnimationFrame = original;
+  }
 });
 
 
