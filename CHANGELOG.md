@@ -5,6 +5,42 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.0] - 2026-09-02
+
+### Added
+
+- Goals can evaluate work in another worktree when their state declares a valid,
+  permitted `WORKDIR`; verification reports the directory it actually checked.
+
+### Changed
+
+- Goal verification uses Luna by default with a bounded multi-turn run and one
+  larger retry when the first verifier exhausts its turn or time allowance. An
+  exhausted verifier now pauses the goal instead of sending the maker a false
+  “not satisfied” verdict.
+- Goal progress recognizes commits made in any worktree of the repository, not
+  only the session's initial directory.
+- Fast-mode costs and goal budgets now apply the premium only when the provider
+  confirms that it served the request in its fast tier; standard-speed
+  fallbacks retain standard billing.
+- Memory guidance now reserves memory for small, non-secret facts that are hard
+  to reconstruct and have no discoverable canonical source. Rules, reusable
+  workflows, executable procedures, task state, secrets and versioned project
+  knowledge are directed to their appropriate artifacts instead.
+- Long slash-command menus fit the viewport and scroll by touch, wheel and
+  keyboard. `/goal` flag suggestions also recognize the en/em dashes produced
+  by mobile keyboards and insert ordinary `--` flags.
+- Bash output strips terminal control sequences and commands request plain
+  output, keeping logs readable in the interface and model context.
+
+### Fixed
+
+- Live tool output updates render again after the WebSocket handlers were split.
+- A failed automatic title generation can retry instead of leaving the session
+  permanently stuck with a provisional title.
+- Switching conversations on mobile remounts the transcript scroller instead
+  of inheriting the previous conversation's native scroll state.
+
 ## [0.35.0] - 2026-09-01
 
 ### Added
