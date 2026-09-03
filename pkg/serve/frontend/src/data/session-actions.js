@@ -10,6 +10,7 @@ import {
 } from './tile-actions.js';
 import { allSessionIds, clearSession } from './tileTree.js';
 import { attentionArrival, forgetAttentionArrival, retainAttentionArrivals } from './attention-arrivals.js';
+import { loadEvents } from './events.js'; // wake-on-event
 
 let pollTimer = null;
 let nextRosterRequest = 0;
@@ -289,7 +290,10 @@ export function startPolling() {
   // owns the visible ones). Mobile is slower: one visible session, push for
   // anything urgent, and a foreground handler on return.
   const interval = store.get().isMobile ? 15000 : 10000;
-  pollTimer = setInterval(loadSessions, interval);
+  // wake-on-event: the inbox rides this tick. It is drawn inside the session
+  // list, so refreshing it on a timer of its own would let the two disagree
+  // about what is waiting.
+  pollTimer = setInterval(() => { loadSessions(); loadEvents(); }, interval);
 }
 
 export function stopPolling() {

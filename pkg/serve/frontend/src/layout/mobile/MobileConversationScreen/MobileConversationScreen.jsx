@@ -8,6 +8,7 @@ import { setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
+import { dismissEvent, routeEvent, routeEventToNewSession } from "../../../data/events.js"; // wake-on-event
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
@@ -346,6 +347,10 @@ function MobileSessionChrome({ version, forceMobile = false }) {
         onClosed={onDrawerClosed}
         active={chrome.active}
         newResults={chrome.newResults}
+        inbox={chrome.inbox}
+        onRouteEvent={(id, sessionId) => { routeEvent(id, sessionId).catch(() => {}); }}
+        onNewSessionForEvent={(id) => { routeEventToNewSession(id).catch(() => {}); }}
+        onDismissEvent={(id) => { dismissEvent(id).catch(() => {}); }}
         saved={chrome.saved}
         activeCount={chrome.activeCount}
         savedCount={chrome.savedCount}

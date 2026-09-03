@@ -165,6 +165,12 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/push/vapid-public-key", handlePushVAPIDKey(manager))
 	mux.HandleFunc("POST /api/push/subscribe", handlePushSubscribe(manager))
 	mux.HandleFunc("POST /api/push/unsubscribe", handlePushUnsubscribe(manager))
+	// wake-on-event: the owner's inbox. Deciding where an event goes is the
+	// owner's call, so these sit on the normal browser auth, not the automation
+	// token — that token may write events and nothing else.
+	mux.HandleFunc("GET /api/events", handleListEvents(manager))
+	mux.HandleFunc("POST /api/events/{id}/route", handleRouteEvent(manager))
+	mux.HandleFunc("POST /api/events/{id}/dismiss", handleDismissEvent(manager))
 
 	mux.Handle("GET /", static.handler)
 	// The manifest needs its own content type; everything else the file server
@@ -214,6 +220,9 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/reply", handleAutomationReply(manager))
 	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/ask-response", handleAutomationAskResponse(manager))
 	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/permission", handleAutomationPermission(manager))
+	// wake-on-event ingress: an external emitter (mail watcher, CI, cron) posts
+	// an event for a project. It creates no session by itself.
+	automationRoutes.HandleFunc("POST /api/automation/events", handleAutomationEvent(manager))
 	handler = automationMiddleware(o.automationToken, bodyTimeoutMiddleware(automationRoutes), handler)
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.

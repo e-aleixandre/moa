@@ -2,6 +2,7 @@ import { focusedSessionId } from "../../../data/selectors.js";
 import { shortPath, sessionDisplayDotState, sessionTitle } from "../../../data/util/format.js";
 import { sessionRowBrief } from "../../Spine/sessions.js";
 import { aggregateAttention, newResultSessions } from "./attention-model.js";
+import { inboxCards, inboxSig } from "../../../data/events.js"; // wake-on-event
 
 function relAge(updated) {
   if (!updated) return "";
@@ -109,6 +110,7 @@ function mobileChromeEqual(a, b) {
     && a.savedCount === b.savedCount
     && a.drawerCollapsed === b.drawerCollapsed
     && attentionSig(a.attention) === attentionSig(b.attention)
+    && inboxSig(a.inbox) === inboxSig(b.inbox) // wake-on-event
     && listSig(a.newResults) === listSig(b.newResults)
     && listSig(a.active) === listSig(b.active)
     && listSig(a.saved) === listSig(b.saved)
@@ -134,6 +136,7 @@ export function selectMobileChrome(state, forceMobile = false) {
     groupByProject: !!state.groupByProject,
     drawerCollapsed: state.drawerCollapsed,
     soundEnabled: !!state.soundEnabled,
+    inbox: inboxCards(state.sessions, state.events), // wake-on-event
     projects: drawerProjects(state.sessions),
     recentSaved: recentSavedSessions(state.sessions),
     ...lists,
