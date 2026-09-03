@@ -265,9 +265,11 @@ func ThinkingAlwaysOn(model Model) bool {
 }
 
 // EffectiveThinkingLevel resolves a persisted level for a model. xAI requires
-// reasoning and only accepts low/medium/high. Models whose thinking cannot be
-// turned off promote "off" to the API default ("high"). Other providers keep
-// the value.
+// reasoning and only accepts low/medium/high. Meta also requires it; "off"
+// becomes "low" so a session never persists a level the selector can't show,
+// while internal callers may ask for "minimal" explicitly. Models whose
+// thinking cannot be turned off promote "off" to the API default ("high").
+// Other providers keep the value.
 func EffectiveThinkingLevel(model Model, level string) (string, error) {
 	if model.Provider == "xai" {
 		switch level {
@@ -279,6 +281,16 @@ func EffectiveThinkingLevel(model Model, level string) (string, error) {
 			return "high", nil
 		default:
 			return "", fmt.Errorf("invalid xAI thinking level %q (choose: low, medium, high)", level)
+		}
+	}
+	if model.Provider == "meta" {
+		switch level {
+		case "off", "low":
+			return "low", nil
+		case "minimal", "medium", "high", "xhigh":
+			return level, nil
+		default:
+			return "", fmt.Errorf("invalid Meta thinking level %q (choose: low, medium, high, xhigh)", level)
 		}
 	}
 	if !IsValidThinkingLevel(level) {

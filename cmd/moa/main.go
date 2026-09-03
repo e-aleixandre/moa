@@ -78,7 +78,7 @@ func main() {
 		extraAllowPaths = append(extraAllowPaths, val)
 		return nil
 	})
-	login := flag.String("login", "", "Login to a provider: anthropic, openai, or xai (OAuth)")
+	login := flag.String("login", "", "Login to a provider: anthropic, openai, xai, or meta (OAuth)")
 	logout := flag.String("logout", "", "Remove stored credentials for a provider")
 	cpuprofile := flag.String("cpuprofile", "", "Write CPU profile to file")
 	flag.Usage = printUsage

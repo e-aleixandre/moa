@@ -5,6 +5,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/provider/anthropic"
+	"github.com/e-aleixandre/moa/pkg/provider/meta"
 	"github.com/e-aleixandre/moa/pkg/provider/openai"
 	"github.com/e-aleixandre/moa/pkg/provider/xai"
 )
@@ -51,6 +52,15 @@ func New(model core.Model, cfg Config) (core.Provider, error) {
 			return xai.New(cfg.APIKey), nil
 		default:
 			return nil, fmt.Errorf("xai requires an explicit credential kind")
+		}
+	case "meta":
+		switch cfg.AuthKind {
+		case AuthKindOAuth:
+			return meta.NewOAuth(cfg.APIKey, cfg.RefreshOAuth), nil
+		case AuthKindAPIKey:
+			return meta.New(cfg.APIKey), nil
+		default:
+			return nil, fmt.Errorf("meta requires an explicit credential kind")
 		}
 	default:
 		return nil, fmt.Errorf("unsupported provider: %q (model: %s)", model.Provider, model.ID)

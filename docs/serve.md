@@ -292,6 +292,10 @@ is not a public consumer API promise and is not a billing authority. It may be
 unavailable or stale if that endpoint changes or cannot be reached; failure to
 read it never blocks a Grok request.
 
+Meta plan usage is not shown at all: the only known subscription snapshot rides
+the Muse key-mint response, so the panel states the credential kind instead of
+polling.
+
 `XAI_API_KEY` uses the separate, metered `api.x.ai` developer API, so its plan
 usage is intentionally not shown in this panel. Moa does not publish xAI
 pricing or calculate xAI run cost until that information is verified.

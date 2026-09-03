@@ -3,6 +3,7 @@ package core
 import (
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -32,6 +33,31 @@ func TestResolveModel_Grok(t *testing.T) {
 		if !ok || m.ID != "grok-4.5" || m.Provider != "xai" {
 			t.Errorf("ResolveModel(%q) = %+v, %v", spec, m, ok)
 		}
+	}
+}
+
+func TestResolveModel_Muse(t *testing.T) {
+	for _, spec := range []string{"muse", "muse-spark-1.3", "meta/muse-spark-1.3"} {
+		m, ok := ResolveModel(spec)
+		if !ok || m.ID != "muse-spark-1.3" || m.Provider != "meta" {
+			t.Errorf("ResolveModel(%q) = %+v, %v", spec, m, ok)
+		}
+	}
+	// The contributor SKU shares prompts with Meta, so it is only reachable by
+	// its explicit ID — never through the short alias.
+	m, ok := ResolveModel("muse-spark-1.3-contributor")
+	if !ok || m.Provider != "meta" || m.MaxInput != 1_000_000 {
+		t.Fatalf("contributor = %+v, %v", m, ok)
+	}
+	if m.Pricing == nil || m.Pricing.Input != 0.10 || m.Pricing.Output != 0.20 || m.Pricing.CacheRead != 0.002 {
+		t.Fatalf("contributor pricing = %+v", m.Pricing)
+	}
+	if !strings.Contains(strings.ToLower(m.Name), "contributor") {
+		t.Fatalf("contributor display name hides the trade-off: %q", m.Name)
+	}
+	base, _ := ResolveModel("muse")
+	if base.Pricing == nil || base.Pricing.Input != 1.25 || base.Pricing.Output != 4.25 || base.Pricing.CacheRead != 0.15 {
+		t.Fatalf("muse-spark-1.3 pricing = %+v", base.Pricing)
 	}
 }
 
@@ -148,6 +174,21 @@ func TestEffectiveThinkingLevel_Grok(t *testing.T) {
 	}
 	if _, err := EffectiveThinkingLevel(model, "unknown"); err == nil {
 		t.Fatal("unknown Grok level must fail")
+	}
+}
+
+// Muse Spark cannot disable reasoning ("reasoning.effort does not support
+// none with this model"), so "off" resolves to a real level.
+func TestEffectiveThinkingLevel_Muse(t *testing.T) {
+	model := Model{Provider: "meta", ID: "muse-spark-1.3"}
+	for input, want := range map[string]string{"off": "low", "minimal": "minimal", "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh"} {
+		got, err := EffectiveThinkingLevel(model, input)
+		if err != nil || got != want {
+			t.Errorf("EffectiveThinkingLevel(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	if _, err := EffectiveThinkingLevel(model, "unknown"); err == nil {
+		t.Fatal("unknown Meta level must fail")
 	}
 }
 

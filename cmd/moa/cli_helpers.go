@@ -63,9 +63,9 @@ func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult
 		APIKey:  apiKey,
 		IsOAuth: isOAuth,
 	}
-	if providerName == "xai" {
+	if providerName == "xai" || providerName == "meta" {
 		cfg.AuthKind = provider.AuthKindAPIKey
-		if authStore.CredentialKind("xai") == "oauth" {
+		if authStore.CredentialKind(providerName) == "oauth" {
 			cfg.AuthKind = provider.AuthKindOAuth
 		}
 	}
@@ -93,6 +93,15 @@ func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult
 				return authStore.RefreshOAuthIfCurrent("xai", rejected)
 			}
 			authNotice = "SuperGrok/X subscription OAuth"
+		}
+	case "meta":
+		if isOAuth {
+			// The rejected value here is the minted Model API key, not the
+			// access token; the store re-mints it from the OAuth session.
+			cfg.RefreshOAuth = func(rejected string) (string, error) {
+				return authStore.RefreshOAuthIfCurrent("meta", rejected)
+			}
+			authNotice = "Muse subscription OAuth"
 		}
 	}
 

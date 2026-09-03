@@ -19,11 +19,21 @@ import (
 // Credential represents a stored credential for a provider.
 type Credential struct {
 	Type      string `json:"type"`                 // "api_key" or "oauth"
-	Key       string `json:"key,omitempty"`        // API key (type=api_key)
+	Key       string `json:"key,omitempty"`        // API key (type=api_key), or a key minted from an OAuth session (Meta)
 	Access    string `json:"access,omitempty"`     // OAuth access token (type=oauth)
 	Refresh   string `json:"refresh,omitempty"`    // OAuth refresh token (type=oauth)
 	Expires   int64  `json:"expires,omitempty"`    // OAuth token expiry (unix ms) (type=oauth)
 	AccountID string `json:"account_id,omitempty"` // Provider-specific account ID (e.g., OpenAI chatgpt_account_id)
+}
+
+// derivedToken returns the credential value a provider API actually accepts.
+// Most OAuth providers accept the access token itself; Meta mints a separate
+// Model API key from the OAuth session and stores it in Key.
+func derivedToken(provider string, cred Credential) string {
+	if provider == "meta" && cred.Type == "oauth" && cred.Key != "" {
+		return cred.Key
+	}
+	return cred.Access
 }
 
 // IsOAuthToken returns true if the given key looks like an OAuth token
@@ -138,7 +148,7 @@ func (s *Store) adoptDisk() {
 	s.mu.Unlock()
 }
 
-func oauthCredential(previous Credential, refreshed *OAuthCredentials) (Credential, error) {
+func oauthCredential(provider string, previous Credential, refreshed *OAuthCredentials) (Credential, error) {
 	refresh := refreshed.Refresh
 	if refresh == "" {
 		refresh = previous.Refresh
@@ -150,7 +160,14 @@ func oauthCredential(previous Credential, refreshed *OAuthCredentials) (Credenti
 	if account == "" {
 		account = previous.AccountID
 	}
-	return Credential{Type: "oauth", Access: refreshed.Access, Refresh: refresh, Expires: refreshed.Expires, AccountID: account}, nil
+	key := ""
+	if provider == "meta" {
+		key = refreshed.APIKey
+		if key == "" {
+			key = previous.Key
+		}
+	}
+	return Credential{Type: "oauth", Access: refreshed.Access, Refresh: refresh, Expires: refreshed.Expires, AccountID: account, Key: key}, nil
 }
 
 func (s *Store) save() error {
@@ -244,9 +261,9 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 	// 1. Environment variable
 	envKey := envKeyForProvider(provider)
 	if v := os.Getenv(envKey); v != "" {
-		// XAI_API_KEY is always an API key. In particular, a JWT-shaped value
-		// must never accidentally select the consumer OAuth transport.
-		if provider == "xai" {
+		// XAI_API_KEY and META_API_KEY are always API keys. In particular, a
+		// JWT-shaped value must never accidentally select an OAuth transport.
+		if provider == "xai" || provider == "meta" {
 			return v, false, nil
 		}
 		return v, IsOAuthToken(v), nil
@@ -268,7 +285,7 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 	case "oauth":
 		// Fast path: token still valid, no refresh needed.
 		if time.Now().UnixMilli() < cred.Expires {
-			return cred.Access, true, nil
+			return derivedToken(provider, cred), true, nil
 		}
 		// Token expired — refresh, but serialize refreshes. The provider
 		// rotates the refresh token on every use, so two concurrent refreshes
@@ -286,7 +303,7 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 			return "", false, fmt.Errorf("no credentials for provider %q", provider)
 		}
 		if time.Now().UnixMilli() < cred.Expires {
-			return cred.Access, true, nil
+			return derivedToken(provider, cred), true, nil
 		}
 
 		var result Credential
@@ -311,7 +328,7 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 			if err != nil {
 				return err
 			}
-			result, err = oauthCredential(cred, refreshed)
+			result, err = oauthCredential(provider, cred, refreshed)
 			if err != nil {
 				return err
 			}
@@ -327,7 +344,7 @@ func (s *Store) GetAPIKey(provider string) (key string, isOAuth bool, err error)
 		if saveErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not persist refreshed %s token: %v (next start may require re-login)\n", provider, saveErr)
 		}
-		return result.Access, true, nil
+		return derivedToken(provider, result), true, nil
 
 	default:
 		return "", false, fmt.Errorf("unknown credential type %q for provider %q", cred.Type, provider)
@@ -359,8 +376,8 @@ func (s *Store) RefreshOAuthIfCurrent(provider, rejected string) (string, error)
 	if !ok || cred.Type != "oauth" {
 		return "", fmt.Errorf("no OAuth credentials for provider %q", provider)
 	}
-	if cred.Access != rejected {
-		return cred.Access, nil
+	if derivedToken(provider, cred) != rejected {
+		return derivedToken(provider, cred), nil
 	}
 	var result Credential
 	err := s.withFileLock(func() error {
@@ -371,7 +388,7 @@ func (s *Store) RefreshOAuthIfCurrent(provider, rejected string) (string, error)
 		if !ok || cred.Type != "oauth" {
 			return fmt.Errorf("no OAuth credentials for provider %q", provider)
 		}
-		if cred.Access != rejected {
+		if derivedToken(provider, cred) != rejected {
 			result = cred
 			return nil
 		}
@@ -389,7 +406,7 @@ func (s *Store) RefreshOAuthIfCurrent(provider, rejected string) (string, error)
 			s.mu.Unlock()
 			return err
 		}
-		result, err = oauthCredential(cred, refreshed)
+		result, err = oauthCredential(provider, cred, refreshed)
 		if err != nil {
 			return err
 		}
@@ -402,7 +419,7 @@ func (s *Store) RefreshOAuthIfCurrent(provider, rejected string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("token refresh failed: %w (run --login %s to re-authenticate)", err, provider)
 	}
-	return result.Access, nil
+	return derivedToken(provider, result), nil
 }
 
 // PeekOAuthToken returns the current OAuth access token for a provider WITHOUT
@@ -418,7 +435,7 @@ func (s *Store) RefreshOAuthIfCurrent(provider, rejected string) (string, error)
 func (s *Store) PeekOAuthToken(provider string) (token string, isOAuth, valid bool) {
 	// 1. Environment variable (never refreshed; treated as always valid).
 	if v := os.Getenv(envKeyForProvider(provider)); v != "" {
-		if provider == "xai" {
+		if provider == "xai" || provider == "meta" {
 			return "", false, false
 		}
 		if IsOAuthToken(v) {
@@ -459,6 +476,14 @@ func refreshOAuthToken(provider, refreshToken string) (*OAuthCredentials, error)
 		return RefreshAnthropicToken(refreshToken)
 	case "xai":
 		return RefreshXAIToken(refreshToken)
+	case "meta":
+		creds, err := RefreshMetaToken(refreshToken)
+		if err != nil {
+			return nil, err
+		}
+		refreshed := creds.OAuthCredentials
+		refreshed.APIKey = creds.APIKey
+		return &refreshed, nil
 	default:
 		return nil, fmt.Errorf("unsupported OAuth provider %q", provider)
 	}
