@@ -19,6 +19,15 @@
 | `-login` | | `anthropic`, `openai`, `xai` (SuperGrok/X OAuth device login), `openai-transcribe` |
 | `-logout` | | Remove stored credentials for provider |
 
+### JSON-lines output
+
+`-output json` emits one JSON object per line. In addition to lifecycle, message
+updates, tool execution, progress, and error lines, it emits `message_usage`
+for every completed assistant message (`role`, optional `subagent_id`,
+`provider`, `model`, token fields, and `cost_usd`) and `subagent_end` with the
+child's terminal `cost_usd`. Each `summary` includes total `cost_usd`, aggregate
+`usage`, and `by_model` entries split by provider, model, and main/subagent role.
+
 ## Version subcommand
 
 ```bash
