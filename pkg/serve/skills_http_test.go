@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/agent"
+	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/skill"
@@ -236,6 +237,64 @@ func TestRunSkillCommand_ForkDoesNotLoadIntoParent(t *testing.T) {
 	}
 	if !strings.Contains(task, "ARGUMENTS: extra") {
 		t.Fatalf("child task missing slash arguments: %q", task)
+	}
+}
+
+// A slash-launched fork must leave an anchor in the parent transcript carrying
+// the job ID. Without it the child is unreachable after a reload: ws init only
+// restores terminal cards for jobs it can find in the conversation
+// (launchedSubagentJobIDs), so the card the user saw live vanishes for good.
+func TestRunSkillCommand_ForkAnchorsJobInParentTranscript(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	writeTestSkill(t, dir, "learn", "---\ncontext: fork\nbackground: true\n---\n# Learn\n\nSecret body.\n")
+	mgr := newTestManagerWithConfig(t, ctx, newMockProvider(simpleResponseHandler("child done")), dir, core.MoaConfig{
+		DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off",
+	})
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := mgr.ExecCommand(sess.ID, "/learn", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("fork slash failed: %s", res.Message)
+	}
+	pollUntil(t, 2*time.Second, "child job", func() bool {
+		return len(sess.subagents.Snapshot()) > 0
+	})
+	jobID := sess.subagents.Snapshot()[0].JobID
+
+	msgs := sess.runtime.Context().Agent.Messages()
+	if !launchedSubagentJobIDs(msgs)[jobID] {
+		t.Fatalf("job %s has no anchor in the parent transcript; ws init would drop its card", jobID)
+	}
+	var anchor *core.AgentMessage
+	for i := range msgs {
+		if source, _ := msgs[i].Custom["source"].(string); source == "skill_fork" {
+			anchor = &msgs[i]
+			break
+		}
+	}
+	if anchor == nil {
+		t.Fatal("no skill_fork anchor message in the parent transcript")
+	}
+	if got, _ := anchor.Custom["skill"].(string); got != "learn" {
+		t.Fatalf("anchor skill = %q, want learn", got)
+	}
+	// The anchor rides as a user message (providers accept no other role
+	// mid-conversation), so the agent has an antecedent for the completion
+	// notification that follows.
+	if anchor.Role != "user" {
+		t.Fatalf("anchor role = %q, want user", anchor.Role)
+	}
+	if conversationContains(sess, "Secret body") {
+		t.Fatal("the anchor must not carry SKILL.md into the parent conversation")
 	}
 }
 
@@ -498,7 +557,10 @@ func TestSnapshotParentTranscriptIncludesUnsyncedAgentMessages(t *testing.T) {
 	}
 }
 
-func TestLoadSkill_ForkBackgroundDoesNotDeliverToParent(t *testing.T) {
+// A background fork does not stop the parent, but its result still reaches it:
+// the child spares the parent the work, not the conclusion. A postmortem whose
+// recommendations never arrive would leave the user to apply them by hand.
+func TestLoadSkill_ForkBackgroundDeliversResultToParent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := t.TempDir()
@@ -527,15 +589,13 @@ func TestLoadSkill_ForkBackgroundDoesNotDeliverToParent(t *testing.T) {
 		jobs := sess.subagents.Snapshot()
 		return len(jobs) > 0 && jobs[0].Status == "completed"
 	})
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if conversationContains(sess, "[subagent completed]") {
-			t.Fatal("background fork delivered a completion into the parent transcript")
-		}
-		if sessState(sess) != StateIdle {
-			t.Fatalf("background fork started a parent run, state=%s", sessState(sess))
-		}
-		time.Sleep(20 * time.Millisecond)
+	// The completion is delivered through the same async notification path any
+	// subagent uses, carrying the child's own output.
+	pollUntil(t, 5*time.Second, "completion delivered to parent", func() bool {
+		return conversationContains(sess, "[subagent completed]")
+	})
+	if !conversationContains(sess, "child done") {
+		t.Fatal("the parent received a completion without the child's result")
 	}
 }
 
@@ -560,4 +620,126 @@ func snapshotPathFromTask(t *testing.T, task string) string {
 	}
 	t.Fatalf("snapshot path not found in task:\n%s", task)
 	return ""
+}
+
+// End-to-end regression for the bug this fixes: a skill launched with /<name>
+// stayed visible while it ran, then vanished on reload. The card is only
+// restored for a job the init payload can find a launch row for, so without an
+// anchor in the transcript the finished child became unreachable — its report
+// lost unless the user went digging through the sessions directory.
+func TestSlashForkOutcomeSurvivesReload(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	writeTestSkill(t, dir, "learn", "---\ncontext: fork\nbackground: true\n---\n# Learn\n\nBody.\n")
+	mgr := newTestManagerWithConfig(t, ctx, newMockProvider(simpleResponseHandler("child done")), dir, core.MoaConfig{
+		DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off",
+	})
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := mgr.ExecCommand(sess.ID, "/learn", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "child completed", func() bool {
+		jobs := sess.subagents.Snapshot()
+		return len(jobs) > 0 && jobs[0].Status == "completed"
+	})
+	jobID := sess.subagents.Snapshot()[0].JobID
+	pollUntil(t, 5*time.Second, "outcome persisted", func() bool {
+		store := sess.persister.subagentStore(sess.ID)
+		if store == nil {
+			return false
+		}
+		transcripts, err := store.ListSummaries()
+		if err != nil {
+			return false
+		}
+		for _, transcript := range transcripts {
+			if transcript.JobID == jobID && transcript.Status == "completed" {
+				return true
+			}
+		}
+		return false
+	})
+
+	// What a reconnecting client receives.
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
+	found := false
+	for _, outcome := range data.SubagentOutcomes {
+		if outcome.JobID == jobID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("job %s has no terminal card on reload: %+v", jobID, data.SubagentOutcomes)
+	}
+	// And the launch row it attaches to, carrying the job ID so the client can
+	// open the child's transcript.
+	anchored := false
+	for _, msg := range data.Messages {
+		if id, _ := msg.Custom["subagent_job_id"].(string); id == jobID {
+			anchored = true
+		}
+	}
+	if !anchored {
+		t.Fatal("reload payload has no launch row carrying the job id")
+	}
+}
+
+// Deterministic reproduction of the race Terra found: the agent is already
+// running when the anchor is written, which is what happens when the child
+// finishes before the parent gets to append (its completion starts a run).
+func TestAnchorWhileAgentBusy(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	started := make(chan struct{})
+	release := make(chan struct{})
+	prov := newMockProvider(func(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		ch := make(chan core.AssistantEvent)
+		go func() {
+			defer close(ch)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return
+			}
+			ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "done"}
+		}()
+		return ch, nil
+	})
+	mgr := newTestManagerWithConfig(t, ctx, prov, dir, core.MoaConfig{
+		DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off",
+	})
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(sess.ID, "occupy the agent", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	pollUntil(t, 5*time.Second, "running", func() bool { return sessState(sess) == StateRunning })
+
+	anchorForkedSkillLaunch(sess, skill.Skill{Name: "probe"}, "sa-race")
+
+	close(release)
+	pollUntil(t, 5*time.Second, "idle", func() bool { return sessState(sess) == StateIdle })
+
+	for _, msg := range sess.runtime.Context().Agent.Messages() {
+		if id, _ := msg.Custom["subagent_job_id"].(string); id == "sa-race" {
+			return
+		}
+	}
+	t.Fatal("anchor was DROPPED because the agent was running: card is lost on reload")
 }

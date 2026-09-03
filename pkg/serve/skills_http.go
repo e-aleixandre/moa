@@ -165,9 +165,9 @@ func handleSessionSkills(mgr *Manager) http.HandlerFunc {
 // does not put SKILL.md into the parent conversation.
 //
 // Slash forks are always async: ExecCommand holds the session lifecycle lock,
-// so waiting on a foreground child here would block close/delete. A non-
-// background fork still notifies the idle parent through the usual subagent
-// completion path; a background fork stays silent.
+// so waiting on a foreground child here would block close/delete. The child
+// reports back through the usual subagent completion path, exactly like one
+// the agent had spawned itself.
 func runForkedSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (*CommandResult, error) {
 	sub, ok := sess.infra.toolReg.Get("subagent")
 	if !ok || sub.Execute == nil {
@@ -180,7 +180,7 @@ func runForkedSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (
 	res, err := skill.LaunchFork(ctx, s, args, skill.ToolConfig{
 		Fork:     bootstrap.NewSkillFork(sub),
 		Snapshot: func() (string, error) { return snapshotParentTranscript(sess) },
-	}, true, !s.Background, nil)
+	}, true, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -192,6 +192,9 @@ func runForkedSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (
 		return &CommandResult{OK: false, Message: text}, nil
 	}
 	jobID, _ := res.Custom["subagent_job_id"].(string)
+	if jobID != "" {
+		anchorForkedSkillLaunch(sess, s, jobID)
+	}
 	msg := "started skill: " + s.Name
 	if jobID != "" {
 		msg += "\nJob ID: " + jobID
@@ -199,6 +202,53 @@ func runForkedSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (
 		msg += "\n" + text
 	}
 	return &CommandResult{OK: true, Message: msg}, nil
+}
+
+// anchorForkedSkillLaunch records a slash-launched fork in the parent
+// conversation.
+//
+// A fork spawned by the model is anchored by the tool_result that carries
+// subagent_job_id; a slash-launched one has no such row, and without an anchor
+// the child is invisible after a reload: ws init only restores terminal cards
+// for jobs it can find in the transcript (launchedSubagentJobIDs). The agent
+// reads it too — the user invoked a skill on its behalf, and the completion
+// notification that follows would otherwise arrive with no antecedent.
+func anchorForkedSkillLaunch(sess *ManagedSession, s skill.Skill, jobID string) {
+	text := fmt.Sprintf("Launched the %q skill as an isolated subagent (job %s). It reports back when it finishes; carry on with the current work.", s.Name, jobID)
+	custom := map[string]any{"source": "skill_fork", "subagent_job_id": jobID, "skill": s.Name}
+
+	// A slash fork is only accepted on an idle session, but the child runs in
+	// its own goroutine and can finish before this line: its completion starts a
+	// notification run, and AppendToConversation is refused while the agent is
+	// running (agent.AppendMessage). Losing the append there would silently
+	// reproduce the very bug this anchor fixes, so a busy agent takes the same
+	// internal-steer lane the subagent completion itself uses, which carries
+	// Custom through to the eventual conversation message.
+	state := sess.runtime.State.Current()
+	if state == bus.StateRunning || state == bus.StatePermission {
+		_ = sess.runtime.Bus.Execute(bus.SteerAgent{
+			SessionID: sess.ID, ID: core.NewSteerID(), Text: text, Custom: custom, Internal: true,
+		})
+		return
+	}
+
+	msg := core.AgentMessage{
+		Message: core.Message{
+			Role:    "user",
+			Content: []core.Content{core.TextContent(text)},
+		},
+		Custom: custom,
+	}
+	if err := sess.runtime.Bus.Execute(bus.AppendToConversation{SessionID: sess.ID, Message: msg}); err != nil {
+		return
+	}
+	// Same re-sync the inline skill path needs: appending mutates agent state in
+	// memory, while persistence and the web's re-render hang off CommandExecuted.
+	sess.runtime.Bus.Publish(bus.CommandExecuted{
+		SessionID: sess.ID,
+		Command:   "skill",
+		Messages:  sess.runtime.Context().Agent.Messages(),
+	})
 }
 
 // snapshotParentTranscript freezes the active tree branch together with any

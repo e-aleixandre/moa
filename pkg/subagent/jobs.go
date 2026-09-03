@@ -73,10 +73,6 @@ type job struct {
 	// from the subagent's position in a Go map (non-deterministic order,
 	// and finished subagents are dropped from the reconnect snapshot).
 	accentIndex int
-	// notifyParent is true when an async completion should fire OnAsyncComplete
-	// (the public default). Forked background skills set it false so finishing
-	// does not SendPrompt/Steer the parent; UI/sidecar/OnChildEnd still run.
-	notifyParent bool
 }
 
 type jobSnapshot struct {
@@ -147,7 +143,6 @@ func (s *jobStore) createJob(task, model string, cancel context.CancelFunc, sync
 			promoted:         make(chan struct{}),
 			startedAt:        time.Now(),
 			sync:             sync,
-			notifyParent:     true,
 			// Unknown until the child closes its first message, which is also
 			// when there is a transcript worth measuring.
 			contextPct: -1,
@@ -384,7 +379,7 @@ func claimTerminalResultLocked(j *job) {
 	// When no waiter is registered, the async notification owns delivery and
 	// claims now; when a waiter is blocked, the notification is suppressed and
 	// the waiter claims on wake.
-	notify := j.waiters == 0 && j.notifyParent
+	notify := j.waiters == 0
 	j.notifyAsyncCompletion = notify
 	if notify {
 		j.resultClaimed = true

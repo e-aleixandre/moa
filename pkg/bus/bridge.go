@@ -1189,6 +1189,18 @@ func projectLiveCustom(custom map[string]any) map[string]any {
 		return nil
 	}
 	projected := map[string]any{"source": source}
+	// A slash-launched forked skill is anchored by this message; the job ID is
+	// what ties it to the child, exactly as it does on a tool result.
+	if jobID, ok := custom["subagent_job_id"].(string); ok && jobID != "" {
+		projected["subagent_job_id"] = jobID
+	}
+	// The skill name labels a slash-launched fork's row; without it the launch
+	// renders as an unnamed subagent.
+	if source == "skill_fork" {
+		if name, ok := custom["skill"].(string); ok && name != "" {
+			projected["skill"] = name
+		}
+	}
 	if source == "secret_batch" {
 		switch aliases := custom["secret_aliases"].(type) {
 		case []string:

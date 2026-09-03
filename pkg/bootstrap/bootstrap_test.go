@@ -8,6 +8,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/skill"
 )
 
 // nopProvider is a minimal provider that does nothing (for testing wiring only).
@@ -272,5 +273,33 @@ func TestFormatBashNotificationLongCommand(t *testing.T) {
 	}
 	if strings.Contains(header[1], "second line") {
 		t.Error("multi-line command must be reduced to first line")
+	}
+}
+
+// A forked skill is an ordinary subagent: it reports its result to the parent.
+// background means "do not stop the parent", not "hide the outcome from it" —
+// a postmortem the parent never reads leaves its recommendations for the user
+// to apply by hand. This asserts on the spawn params NewSkillFork builds,
+// which is where the suppression flag used to be injected.
+func TestNewSkillForkDoesNotSuppressParentNotification(t *testing.T) {
+	var got map[string]any
+	sub := core.Tool{
+		Name: "subagent",
+		Execute: func(_ context.Context, params map[string]any, _ func(core.Result)) (core.Result, error) {
+			got = params
+			return core.TextResult("Job ID: sa-1"), nil
+		},
+	}
+
+	fork := NewSkillFork(sub)
+	if _, err := fork(context.Background(), skill.ForkRequest{Task: "review", Async: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, suppressed := got["notify"]; suppressed {
+		t.Errorf("skill fork must not suppress the parent notification: %+v", got)
+	}
+	if got["async"] != true {
+		t.Errorf("async fork should spawn async: %+v", got)
 	}
 }

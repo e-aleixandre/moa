@@ -1,6 +1,27 @@
 // WebSocket history normalization and transcript projections.
 
 
+// skillForkLaunchRow renders a slash-launched forked skill as the SAME launch
+// row the reloaded transcript builds (ws/history.js), so live and reload agree.
+// It is a launch, not something the user typed: it rides as a user message only
+// because that is the role a mid-conversation injection can take. Keying it
+// `subagent-<jobId>` is what lets the terminal card fold into this row instead
+// of drawing a second one.
+export function skillForkLaunchRow(data) {
+  const jobId = data?.custom?.subagent_job_id;
+  if (data?.custom?.source !== 'skill_fork' || !jobId) return null;
+  return {
+    _type: 'tool_start',
+    _msg_id: data.msg_id || undefined,
+    tool_call_id: 'subagent-' + jobId,
+    subagentJobId: jobId,
+    tool_name: 'subagent',
+    args: { task: data.custom.skill ? 'skill: ' + data.custom.skill : '' },
+    status: 'running',
+    result: null,
+  };
+}
+
 // --- Message normalization ---
 
 export function normalizeHistory(raw, liveSubagents = []) {
@@ -126,6 +147,13 @@ export function normalizeHistory(raw, liveSubagents = []) {
             : undefined,
           result: msg.custom.subagent_status === 'completed' ? (msg.custom.subagent_result || '') : '',
           error: msg.custom.subagent_status === 'failed' ? (msg.custom.subagent_result || '') : '',
+          timestamp: msg.timestamp,
+        });
+      } else if (msg.custom?.source === 'skill_fork' && msg.custom.subagent_job_id) {
+        // Same row the live lanes build (skillForkLaunchRow), so the transcript
+        // does not change shape when the conversation is reloaded.
+        result.push({
+          ...skillForkLaunchRow({ msg_id: msg.msg_id, custom: msg.custom }),
           timestamp: msg.timestamp,
         });
       } else if (msg.custom?.source === 'bash_job') {

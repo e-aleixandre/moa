@@ -687,9 +687,9 @@ func inheritedCompactAt(sess *Session, globalCompactAt int) int {
 }
 
 // NewSkillFork returns the callback load_skill uses to spawn an isolated child
-// through the existing subagent tool. notify is not in the public schema; a
-// normal subagent call still notifies. Nested forks are refused in LaunchFork
-// because every child already carries an AgentID.
+// through the existing subagent tool. A forked skill is an ordinary subagent:
+// it reports its result back the same way. Nested forks are refused in
+// LaunchFork because every child already carries an AgentID.
 func NewSkillFork(sub core.Tool) skill.ForkFunc {
 	return func(ctx context.Context, req skill.ForkRequest, onUpdate func(core.Result)) (core.Result, error) {
 		if sub.Execute == nil {
@@ -698,9 +698,6 @@ func NewSkillFork(sub core.Tool) skill.ForkFunc {
 		params := map[string]any{"task": req.Task}
 		if req.Async {
 			params["async"] = true
-		}
-		if !req.Notify {
-			params["notify"] = false
 		}
 		ctx = subagent.WithReadOnlyFiles(ctx, req.ReadOnlyFiles)
 		return sub.Execute(ctx, params, onUpdate)
