@@ -16,7 +16,7 @@
 | `-allow` | | Permission pattern (repeatable), e.g. `"Bash(go:*)"` |
 | `-allow-path` | | Allow extra directory outside workspace (repeatable) |
 | `-output` | `text` | `text` or `json` (JSON-lines) |
-| `-login` | | `anthropic`, `openai`, `xai` (SuperGrok/X OAuth device login), `openai-transcribe` |
+| `-login` | | `anthropic`, `openai`, `xai` (SuperGrok/X OAuth device login), `meta` (Muse OAuth device login), `openai-transcribe` |
 | `-logout` | | Remove stored credentials for provider |
 
 ## Version subcommand
@@ -79,6 +79,7 @@ See [Web UI](./serve.md) for details.
 | `grok` | `grok-4.6` (xAI) |
 | `grok-4.6-build` | `grok-4.6` (the subscription backend's name for it) |
 | `grok-4.5-build` | `grok-4.5` (the subscription backend's name for it) |
+| `muse` | `muse-spark-1.3` (Meta) |
 | `sol` | `gpt-5.6-sol` |
 | `terra` | `gpt-5.6-terra` |
 | `luna` | `gpt-5.6-luna` |
@@ -87,7 +88,7 @@ See [Web UI](./serve.md) for details.
 | `gpt5.5` | `gpt-5.5` |
 | `gpt5-mini` | `gpt-5.4-mini` |
 
-You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-4-8`, `grok-4.5`. Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
+You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-4-8`, `grok-4.5`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
 
 ## Thinking levels
 

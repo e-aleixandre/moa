@@ -50,13 +50,39 @@ func handleLogin(ctx context.Context, providerName string, authStore *auth.Store
 	case "xai":
 		handleXAILogin(ctx, authStore)
 
+	case "meta":
+		handleMetaLogin(ctx, authStore)
+
 	case "openai-transcribe":
 		handleTranscribeKeySetup(authStore)
 
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown provider %q. Supported: anthropic, openai, xai, openai-transcribe\n", providerName)
+		fmt.Fprintf(os.Stderr, "Unknown provider %q. Supported: anthropic, openai, xai, meta, openai-transcribe\n", providerName)
 		os.Exit(1)
 	}
+}
+
+func handleMetaLogin(ctx context.Context, authStore *auth.Store) {
+	fmt.Println("Logging in to Meta (Muse subscription)...")
+	creds, err := auth.LoginMeta(ctx, func(url string) {
+		if url != "" {
+			fmt.Printf("\nOpening browser for Meta authentication...\n%s\n\n", url)
+			auth.OpenBrowser(url)
+		}
+	}, func(device *auth.MetaDeviceCode) {
+		fmt.Printf("Visit: %s\nCode: %s\n", device.VerificationURI, device.UserCode)
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+		os.Exit(1)
+	}
+	// Key holds the Model API key minted from the session: api.meta.ai does
+	// not accept the OAuth access token itself.
+	if err := authStore.Set("meta", auth.Credential{Type: "oauth", Access: creds.Access, Refresh: creds.Refresh, Expires: creds.Expires, Key: creds.APIKey}); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("✓ Meta OAuth login successful!")
 }
 
 func handleXAILogin(ctx context.Context, authStore *auth.Store) {

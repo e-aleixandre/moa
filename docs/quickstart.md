@@ -76,6 +76,9 @@ export OPENAI_API_KEY="..."
 export XAI_API_KEY="..."
 # Then select Grok
 moa -model grok
+# Meta Model API (Muse Spark)
+export META_API_KEY="..."
+moa -model muse
 ```
 
 ### OAuth / interactive login
@@ -85,6 +88,8 @@ moa --login anthropic
 moa --login openai
 # SuperGrok/X subscription (uses the Grok consumer proxy, not XAI_API_KEY billing)
 moa --login xai
+# Muse subscription (mints a Meta Model API key from the login)
+moa --login meta
 ```
 
 **Anthropic** (Claude Pro/Max) and **OpenAI** (ChatGPT Plus/Pro) use the same

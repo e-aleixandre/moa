@@ -33,6 +33,10 @@ type OAuthCredentials struct {
 	Refresh   string `json:"refresh"`
 	Expires   int64  `json:"expires"`              // Unix milliseconds
 	AccountID string `json:"account_id,omitempty"` // OpenAI chatgpt_account_id
+	// APIKey is a provider key derived from the OAuth session instead of the
+	// access token: Meta mints a Model API key, and api.meta.ai does not
+	// accept the access token itself.
+	APIKey string `json:"api_key,omitempty"`
 }
 
 // LoginAnthropic runs the Anthropic OAuth PKCE flow (device code style):

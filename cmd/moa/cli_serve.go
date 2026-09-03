@@ -250,5 +250,14 @@ func newAnthropicUsagePoller(authStore *auth.Store) *usage.MultiPoller {
 	if xaiAPIKey {
 		multi.StaticStatus = map[string]usage.ProviderStatus{"xai": {AuthKind: "api_key", Reason: "plan_unsupported"}}
 	}
+	// Meta has no usage endpoint Moa can poll: the only known subscription
+	// snapshot rides the key-mint response. Report the credential kind so the
+	// UI states it plainly instead of showing a pending widget forever.
+	if kind := authStore.CredentialKind("meta"); kind != "" {
+		if multi.StaticStatus == nil {
+			multi.StaticStatus = map[string]usage.ProviderStatus{}
+		}
+		multi.StaticStatus["meta"] = usage.ProviderStatus{AuthKind: kind, Reason: "plan_unsupported"}
+	}
 	return multi
 }

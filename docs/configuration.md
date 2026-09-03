@@ -119,6 +119,11 @@ provider-qualified custom model such as `xai/<model-id>` is accepted, but Moa
 has no context-window or pricing metadata for it unless it is in the built-in
 model registry.
 
+The Meta models are `muse-spark-1.3` (also available as `muse`) and
+`muse-spark-1.3-contributor`. The contributor variant is much cheaper because
+Meta uses its prompts to improve their products. Muse Spark always reasons, so
+`off` resolves to its lowest effort.
+
 ### MCP servers
 
 | Field | Type | Description |
@@ -262,7 +267,7 @@ when it is about the project itself and should reach everyone who clones it.
 
 | Variable | Purpose |
 |----------|---------|
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` | Provider credentials (see [Quickstart](./quickstart.md)). An environment key takes precedence over the stored credential for that provider; in particular, `XAI_API_KEY` selects the metered `api.x.ai` API-key route and eclipses a stored xAI OAuth login. |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` / `META_API_KEY` | Provider credentials (see [Quickstart](./quickstart.md)). An environment key takes precedence over the stored credential for that provider; in particular, `XAI_API_KEY` selects the metered `api.x.ai` API-key route and eclipses a stored xAI OAuth login, and `META_API_KEY` eclipses a stored Muse subscription login. |
 | `MOA_CONFIG_DIR` | Moves everything moa stores about itself (default `~/.config/moa`): `config.json`, credentials, sessions, skills, memory, attachments. See [Running two instances](#running-two-instances) |
 | `MOA_SERVE_TOKEN` | Shared secret for `moa serve` opt-in authentication; equivalent to `--token` (see [Web UI](./serve.md#security)) |
 | `MOA_AUTOMATION_TOKEN` | Shared secret enabling the inbound [Automation API](./automation.md); equivalent to `--automation-token`. Separate from `MOA_SERVE_TOKEN` |
