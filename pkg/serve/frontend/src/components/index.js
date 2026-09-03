@@ -35,3 +35,4 @@ export { HtmlResourceInfo } from "./HtmlResourceInfo/HtmlResourceInfo.jsx";
 export { UsagePanel } from "./UsagePanel/UsagePanel.jsx";
 export { TokenFlow } from "./TokenFlow/TokenFlow.jsx";
 export { SubagentDetails } from "./SubagentDetails/SubagentDetails.jsx";
+export { EventCard } from "./EventCard/EventCard.jsx"; // wake-on-event

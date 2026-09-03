@@ -6,6 +6,7 @@ import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
 import { setGroupByProject } from "../../data/drawer.js";
 import { closeSession, deleteSession, resumeSession } from "../../data/session-actions.js";
+import { dismissEvent, routeEvent, routeEventToNewSession } from "../../data/events.js"; // wake-on-event
 import { selectDesktopChrome } from "../Spine/sessions.js";
 import "./DesktopShell.css";
 
@@ -23,6 +24,10 @@ export function DesktopShell({ version, children }) {
       <Spine
         version={version}
         activeSessions={chrome.active}
+        inbox={chrome.inbox}
+        onRouteEvent={(id, sessionId) => { routeEvent(id, sessionId).catch(() => {}); }}
+        onNewSessionForEvent={(id) => { routeEventToNewSession(id).catch(() => {}); }}
+        onDismissEvent={(id) => { dismissEvent(id).catch(() => {}); }}
         savedSessions={chrome.saved}
         activeId={chrome.activeId}
         groupByProject={chrome.groupByProject}

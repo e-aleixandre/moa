@@ -1,7 +1,7 @@
 import { Search, Plus, Settings, MoreHorizontal, Check } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { IconButton, Kbd } from "../../primitives/index.js";
-import { SessionCardMenu, SessionRow } from "../../components/index.js";
+import { EventCard, SessionCardMenu, SessionRow } from "../../components/index.js"; // wake-on-event: EventCard
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { groupProjectSessions, hiddenProjectSavedCount, visibleProjectSessions } from "../../data/util/project-sessions.js";
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
@@ -88,6 +88,10 @@ export function Spine({
   onDeleteSession,
   groupByProject = false,
   onGroupByProject,
+  inbox = [], // wake-on-event
+  onRouteEvent,
+  onNewSessionForEvent,
+  onDismissEvent,
 }) {
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const projectSections = groupProjectSessions([...activeSessions, ...savedSessions]);
@@ -130,7 +134,20 @@ export function Spine({
       </div>
 
       <div class="spine-sessions">
-        {activeSessions.length === 0 && savedSessions.length === 0 && (
+        {/* wake-on-event: the same inbox as the mobile drawer, above everything
+            else — a pending event is the only item nobody has seen yet. */}
+        {inbox.length > 0 && <>
+          <div class="spine-label spine-label-inbox">Inbox<small>{inbox.length}</small></div>
+          <div class="spine-list">{inbox.map(({ event, suggestedTitle }) => <EventCard
+            key={event.id}
+            event={event}
+            suggestedTitle={suggestedTitle}
+            onRoute={onRouteEvent}
+            onNew={onNewSessionForEvent}
+            onDismiss={onDismissEvent}
+          />)}</div>
+        </>}
+        {inbox.length === 0 && activeSessions.length === 0 && savedSessions.length === 0 && (
           <button type="button" class="spine-empty-new" onClick={onNewSession}>
             + New session
           </button>

@@ -14,6 +14,7 @@ import {
   loadSessions, startPolling, stopPolling,
   startUsagePolling, stopUsagePolling,
 } from "./data/session-actions.js";
+import { loadEvents } from "./data/events.js"; // wake-on-event
 import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
@@ -122,6 +123,7 @@ function useBootstrap() {
       });
     startPolling();
     startUsagePolling();
+    loadEvents(); // wake-on-event: paint the inbox on first load, not one tick later
     // Reconcile the browser's actual push state on load (/next relies on the
     // root /sw.js, no SW registration here). Guarded internally for unsupported.
     refreshPushState();
@@ -141,6 +143,7 @@ function useBootstrap() {
         afterVisibilityChange();
         reconnectAll();
         loadSessions();
+        loadEvents(); // wake-on-event: an event may have arrived while away
         startPolling();
         // Also restarts the usage timer, and refreshes immediately so the
         // status line is not showing a number from before the app was hidden.

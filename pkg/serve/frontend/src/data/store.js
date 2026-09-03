@@ -89,6 +89,10 @@ let state = {
 
   activeSession: null,
 
+  // wake-on-event: pending events from GET /api/events, refreshed on the same
+  // poll as the roster. Only events waiting for a decision are ever here.
+  events: [],
+
   // Command palette (⌘K). Lives in the store so the global mount in
   // app.jsx and the per-screen Spine buttons (onSearch/onNewSession) read and
   // write the same state rather than standing up a second pub/sub system.

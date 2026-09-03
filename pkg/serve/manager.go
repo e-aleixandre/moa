@@ -23,6 +23,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/bus"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/events" // wake-on-event
 	"github.com/e-aleixandre/moa/pkg/files"
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/push"
@@ -599,6 +600,11 @@ type Manager struct {
 	usagePoller            *usage.MultiPoller // nil when plan usage tracking is unavailable
 	pushStore              *push.Store        // nil when Web Push is unavailable
 	pushDispatcher         *push.Dispatcher   // nil when Web Push is unavailable
+	// wake-on-event: the external event inbox and the file backing it. events is
+	// nil when that file could not be opened, which disables the feature instead
+	// of the server.
+	events     *events.Store
+	eventsPath string
 	defaultModel           core.Model
 	workspaceRoot          string
 	moaCfg                 core.MoaConfig
@@ -702,7 +708,10 @@ type ManagerConfig struct {
 	SessionBaseDir string // root for session stores; empty = default
 	// SchedulePath overrides the durable schedules file. Empty stores it beside
 	// the session base directory.
-	SchedulePath       string
+	SchedulePath string
+	// EventsPath overrides the wake-on-event inbox file. Empty stores it beside
+	// the session base directory.
+	EventsPath         string // wake-on-event
 	ReleaseInfo        release.Info
 	UpdateChecker      *release.Checker
 	UpdateCheckEnabled bool
@@ -744,6 +753,29 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			slog.Warn("schedule storage disabled", "path", schedulePath, "error", err)
 		}
 	}
+	// wake-on-event: the inbox file sits beside schedules.json, and a failure
+	// to open it disables the feature (handlers answer 503) rather than the
+	// server.
+	eventsPath := cfg.EventsPath
+	if eventsPath == "" {
+		baseDir := cfg.SessionBaseDir
+		if baseDir == "" {
+			baseDir = core.ConfigSubdir("sessions")
+		}
+		if baseDir != "" {
+			eventsPath = filepath.Join(filepath.Dir(baseDir), "events.json")
+		}
+	}
+	var eventStore *events.Store
+	if eventsPath == "" {
+		slog.Warn("event inbox disabled: cannot resolve config directory")
+	} else {
+		var err error
+		eventStore, err = events.NewStore(eventsPath)
+		if err != nil {
+			slog.Warn("event inbox disabled", "path", eventsPath, "error", err)
+		}
+	}
 	attachBaseDir := ""
 	var attachErr error
 	if cfg.SessionBaseDir != "" {
@@ -776,6 +808,8 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		usagePoller:            cfg.UsagePoller,
 		pushStore:              cfg.PushStore,
 		pushDispatcher:         cfg.PushDispatcher,
+		eventsPath:             eventsPath, // wake-on-event
+		events:                 eventStore, // wake-on-event
 		defaultModel:           cfg.DefaultModel,
 		workspaceRoot:          cfg.WorkspaceRoot,
 		moaCfg:                 cfg.MoaCfg,
