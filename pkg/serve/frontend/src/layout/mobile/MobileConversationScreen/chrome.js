@@ -110,6 +110,7 @@ function mobileChromeEqual(a, b) {
     && a.savedCount === b.savedCount
     && a.drawerCollapsed === b.drawerCollapsed
     && attentionSig(a.attention) === attentionSig(b.attention)
+    && a.inboxOpen === b.inboxOpen // wake-on-event
     && inboxSig(a.inbox) === inboxSig(b.inbox) // wake-on-event
     && listSig(a.newResults) === listSig(b.newResults)
     && listSig(a.active) === listSig(b.active)
@@ -137,6 +138,7 @@ export function selectMobileChrome(state, forceMobile = false) {
     drawerCollapsed: state.drawerCollapsed,
     soundEnabled: !!state.soundEnabled,
     inbox: inboxCards(state.sessions, state.events), // wake-on-event
+    inboxOpen: !!state.inboxOpen, // wake-on-event
     projects: drawerProjects(state.sessions),
     recentSaved: recentSavedSessions(state.sessions),
     ...lists,

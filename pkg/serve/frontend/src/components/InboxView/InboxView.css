@@ -1,0 +1,185 @@
+/* wake-on-event — InboxView styles.
+
+   The inbox is its own surface, so it does not borrow the session card's
+   filled chrome: rows are separated by hairlines and nothing else. What is
+   still waiting is in normal text; what has been settled recedes to the muted
+   role — the list stays as history without competing with the decisions that
+   are still open. */
+
+.inbox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-6);
+}
+
+.inbox .inbox-filter {
+  align-self: flex-start;
+  min-width: 180px;
+}
+
+.inbox .inbox-filter .segmented-item {
+  min-height: 32px;
+  font-size: var(--text-sm);
+}
+
+.inbox-group {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Project header: the same mono/uppercase voice the drawer and spine use for
+   a folder, so grouping reads the same wherever it happens. */
+.inbox-group-label {
+  padding: var(--space-3) 0 var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+
+.inbox-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-height: 56px;
+  padding: var(--space-3) 0;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.inbox-row:last-child { border-bottom: none; }
+
+.inbox-row:active { background: color-mix(in srgb, var(--surface0) 45%, transparent); }
+
+.inbox-row:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+.inbox-row-meta {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inbox-row-title {
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Where it went. Muted, and never a colour: delivery is a fact, not a state
+   that needs anyone. */
+.inbox-row-dest {
+  font-size: var(--text-sm);
+  color: var(--overlay1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inbox-row-settled .inbox-row-title { color: var(--subtext0); }
+
+.inbox-empty {
+  padding: var(--space-6) 0;
+  font-size: var(--text-base);
+  color: var(--overlay0);
+}
+
+/* ── the routing sheet ─────────────────────────────────────────────────── */
+
+.inbox-sheet-lead {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+
+.inbox-sheet-title {
+  font-family: var(--font);
+  font-size: var(--text-base);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text);
+}
+
+.inbox-sheet-note {
+  padding: var(--space-2) 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--overlay0);
+}
+
+.inbox-sheet-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.inbox-sheet-list + .inbox-sheet-list {
+  margin-top: var(--space-3);
+  border-top: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
+  padding-top: var(--space-2);
+}
+
+.inbox-sheet-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--subtext0);
+  font: inherit;
+  font-size: var(--text-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.inbox-sheet-item:hover,
+.inbox-sheet-item:focus-visible {
+  background: var(--surface0);
+  color: var(--text);
+  outline: none;
+}
+
+.inbox-sheet-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-sheet-item-age {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+}
+
+.inbox-sheet-item-quiet { color: var(--overlay1); }

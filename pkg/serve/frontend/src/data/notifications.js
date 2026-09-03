@@ -13,11 +13,15 @@ function notifyToastListeners() {
   toastListeners.forEach(fn => fn(toasts));
 }
 
+// addToast returns the id it assigned so a caller that has to REPLACE its own
+// toast (wake-on-event coalesces a burst of arrivals into a single count) can
+// remove the previous one instead of stacking a second.
 export function addToast(toast) {
   const id = Date.now() + Math.random();
   toasts = [...toasts, { ...toast, id }];
   notifyToastListeners();
   setTimeout(() => removeToast(id), 5000);
+  return id;
 }
 
 export function removeToast(id) {

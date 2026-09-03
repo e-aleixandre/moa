@@ -15,6 +15,7 @@ import { SubagentGallery } from "./catalog/subagent-gallery.jsx";
 import { DesktopLab, PhoneLab } from "./catalog/desktop-lab.jsx";
 import { seedCatalogStore } from "./catalog/specimen.js";
 import { installCatalogBackend } from "./catalog/catalog-backend.js";
+import { announceArrivals } from "./data/events.js"; // wake-on-event
 
 // catalog-app — design lab. Not shipped in the production binary. Served by
 // `npm run catalog`: the real screens in frames, plus the token/live galleries.
@@ -34,19 +35,34 @@ const LINKS = [
   { key: "pieces", label: "Mobile pieces", href: "?view=pieces" },
 ];
 
+// wake-on-event: the two inbox seed sets are a URL away from each other, so
+// the same real screen can be judged with one thing waiting and with a night's
+// worth of noise. The link keeps whichever view is open.
+function eventsToggleHref(view, noisy) {
+  const params = new URLSearchParams();
+  params.set("view", view);
+  if (!noisy) params.set("events", "noisy");
+  return `?${params.toString()}`;
+}
+
 function Nav({ current }) {
+  const noisy = typeof location !== "undefined" && new URLSearchParams(location.search).get("events") === "noisy";
   return (
     <nav class="catalog-nav" aria-label="Design lab">
       {LINKS.map((v) => (
         <a
           key={v.key}
-          href={v.href}
+          href={noisy ? `${v.href}&events=noisy` : v.href}
           aria-current={v.key === current ? "page" : undefined}
           style={{ color: v.key === current ? "var(--peach)" : "var(--lavender)" }}
         >
           {v.label}
         </a>
       ))}
+      {/* wake-on-event */}
+      <a href={eventsToggleHref(current, noisy)} style={{ color: noisy ? "var(--peach)" : "var(--lavender)" }}>
+        {noisy ? "Events: noisy" : "Events: 1 pending"}
+      </a>
     </nav>
   );
 }
@@ -59,6 +75,17 @@ function useCatalogBootstrap() {
     handler(mq);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
+  }, []);
+  // wake-on-event: show the arrival toast once on load, through the SHIPPED
+  // path (announceArrivals → notifications → ToastContainer), so what the owner
+  // sees in the lab is what a real hook produces. The event chosen is one that
+  // is NOT on screen — the rule is that the visible conversation never toasts.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const pending = store.get().events.find((e) => (e.state || "new") === "new");
+      if (pending) announceArrivals([pending], { visible: [] });
+    }, 700);
+    return () => clearTimeout(t);
   }, []);
 }
 

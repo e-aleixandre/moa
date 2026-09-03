@@ -8,8 +8,8 @@ import { setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
-import { dismissEvent, routeEvent, routeEventToNewSession } from "../../../data/events.js"; // wake-on-event
-import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
+import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, routeEvent, routeEventToNewSession, toggleInbox } from "../../../data/events.js"; // wake-on-event
+import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings, InboxButton } from "../../../components/index.js"; // wake-on-event: InboxButton
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
@@ -20,6 +20,7 @@ import { MobileStream } from "./MobileStream.jsx";
 import { MobileNowLine } from "./MobileNowLine.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import { MobileBashJobView } from "./MobileBashJobView.jsx";
+import { MobileInboxView } from "./MobileInboxView.jsx"; // wake-on-event
 import { LiveDock } from "../../LiveDock/LiveDock.jsx";
 import { selectMobileChrome } from "./chrome.js";
 import "./MobileConversationScreen.css";
@@ -332,12 +333,31 @@ function MobileSessionChrome({ version, forceMobile = false }) {
 
   return (
     <>
-      {chrome.showChip && (
+      {chrome.showChip && !chrome.inboxOpen && (
         <MobileTitleChip
           title={chrome.title}
           attention={chrome.attention}
           open={chrome.drawerOpen}
           onToggle={setDrawerOpen}
+        />
+      )}
+      {/* wake-on-event: the inbox's only door, beside the title chip. It
+          appears once anything has ever arrived — a permanent icon for someone
+          with no hooks configured would be chrome that never does anything. */}
+      {chrome.showChip && !chrome.inboxOpen && chrome.inbox.length > 0 && (
+        <div class="mconv-inbox-door">
+          <InboxButton count={inboxPendingCount(chrome.inbox)} onClick={toggleInbox} size={18} />
+        </div>
+      )}
+      {chrome.inboxOpen && (
+        <MobileInboxView
+          cards={chrome.inbox}
+          onBack={closeInbox}
+          onSend={(id, sessionId) => { routeEvent(id, sessionId).catch(() => {}); }}
+          onNewSession={(id, spec) => { routeEventToNewSession(id, spec).catch(() => {}); }}
+          onIgnore={(id) => { dismissEvent(id).catch(() => {}); }}
+          onIgnoreSource={(source) => { dismissSource(source).catch(() => {}); }}
+          onOpenSession={(id) => { closeInbox(); setActiveSession(id); }}
         />
       )}
       <SessionDrawer
@@ -347,10 +367,6 @@ function MobileSessionChrome({ version, forceMobile = false }) {
         onClosed={onDrawerClosed}
         active={chrome.active}
         newResults={chrome.newResults}
-        inbox={chrome.inbox}
-        onRouteEvent={(id, sessionId) => { routeEvent(id, sessionId).catch(() => {}); }}
-        onNewSessionForEvent={(id) => { routeEventToNewSession(id).catch(() => {}); }}
-        onDismissEvent={(id) => { dismissEvent(id).catch(() => {}); }}
         saved={chrome.saved}
         activeCount={chrome.activeCount}
         savedCount={chrome.savedCount}

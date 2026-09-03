@@ -239,7 +239,137 @@ const verifier = {
   subagents: {},
 };
 
+
+// wake-on-event: a session that received a hook. The event is a user-role
+// message with the server-set custom envelope, so the stream projects it as
+// its own block; it is followed by the turn it triggered.
+const hooked = {
+  id: "hooked",
+  title: "TypeError in OrderSummary",
+  state: "idle",
+  model: "GPT-5.6 Terra",
+  provider: "openai",
+  thinking: "low",
+  cwd: "/home/ealeixandre/dev/moa/main",
+  updated: now - 6 * 60000,
+  permissionMode: "yolo",
+  contextPercent: 9,
+  contextWindow: 400000,
+  costUSD: 0.18,
+  runTokensUp: 3100,
+  runTokensDown: 900,
+  messages: [
+    user("h-u1", "Keep an eye on the tienda errors today.", 40 * 60000),
+    assistant("Will do. I'll pick up whatever Sentry sends."),
+    {
+      msg_id: "h-ev1",
+      role: "user",
+      timestamp: now - 6 * 60000,
+      custom: { source: "event", id: "ev_9", source_name: "sentry-tienda", title: "TypeError in OrderSummary — 412 events" },
+      content: [{ type: "text", text: JSON.stringify({
+        id: "TIENDA-4F2", level: "error", culprit: "OrderSummary.render",
+        message: "Cannot read properties of undefined (reading 'total')",
+        url: "https://sentry.io/organizations/tienda/issues/4f2/",
+        first_seen: "2026-09-03T15:02:11Z", count: 412,
+      }, null, 2) }],
+    },
+    assistant("The crash is in `OrderSummary.render` when an order has no `totals` block yet. I'll reproduce it against a pending order and guard the read."),
+  ],
+  subagents: {},
+};
+
+// wake-on-event: inbox specimens.
+//
+// Two seed sets, because the inbox has to be judged in both of its lives. The
+// quiet one is the normal day: a single thing waiting, and one already filed.
+// The noisy one is the night a source misbehaves — three sources, two
+// projects, twenty-five events — which is what says whether the surface is
+// still readable when it is doing its actual job. Switch with ?events=noisy.
+const MAIN = "/home/ealeixandre/dev/moa/main";
+const PULSE = "/home/ealeixandre/dev/moa/pulse-api";
+
+export const CATALOG_EVENTS = [
+  { id: "ev_1", source: "sentry-tienda", project: MAIN, key: "TIENDA-4F2",
+    title: "TypeError in OrderSummary — 412 events", state: "new", created: now - 3 * 60000,
+    body: "Cannot read properties of undefined (reading 'total') — OrderSummary.render" },
+  { id: "ev_3", source: "ci-tienda", project: MAIN, key: "pipeline-8841",
+    title: "Pipeline #8841 failed on main", state: "routed", routed_to: "hooked", created: now - 2 * 3600000 },
+];
+
+const NOISY_TITLES = {
+  "sentry-tienda": [
+    "TypeError in OrderSummary — 412 events",
+    "Timeout in checkout.PlaceOrder — 38 events",
+    "NullReference in CartTotals — 9 events",
+    "Unhandled rejection in payments/webhook",
+    "RangeError in InvoicePdf.render",
+    "TypeError in AddressForm.validate",
+    "Timeout calling stripe.charges.create",
+    "Unhandled rejection in tienda/session",
+  ],
+  "ci-tienda": [
+    "Pipeline #8841 failed on main",
+    "Pipeline #8842 failed on main",
+    "Pipeline #8843 cancelled",
+    "Job build:web failed after 4m",
+    "Job test:e2e failed after 11m",
+    "Pipeline #8846 failed on release/0.36",
+    "Job lint failed after 22s",
+    "Pipeline #8848 failed on main",
+    "Job deploy:demo failed after 1m",
+  ],
+  agentmail: [
+    "Re: invoice layout — one more change",
+    "Re: pulse pairing — screenshots attached",
+    "New message from Jorge",
+    "Re: billing export — wrong VAT line",
+    "Re: onboarding copy",
+    "New message from Marta",
+    "Re: contract renewal",
+    "Re: pulse api quota",
+  ],
+};
+
+function noisyEvents() {
+  const out = [];
+  let n = 0;
+  for (const [source, titles] of Object.entries(NOISY_TITLES)) {
+    for (const title of titles) {
+      n += 1;
+      // A real night's inbox is not uniformly pending: some events were filed
+      // as they arrived. Every fourth one is delivered so the list has to hold
+      // both weights at once.
+      const delivered = n % 4 === 0;
+      out.push({
+        id: `noisy_${n}`,
+        source,
+        project: source === "agentmail" ? PULSE : MAIN,
+        title,
+        state: delivered ? "routed" : "new",
+        ...(delivered ? { routed_to: source === "agentmail" ? "deploy" : "hooked" } : {}),
+        created: now - n * 7 * 60000,
+        body: JSON.stringify({ source, title, seq: n }, null, 2),
+      });
+    }
+  }
+  return out;
+}
+
+export const CATALOG_EVENTS_NOISY = noisyEvents();
+
+// catalogEvents picks the seed set from the URL, so the owner switches between
+// the two cases by editing the address bar instead of rebuilding the lab.
+export function catalogEvents(search) {
+  try {
+    const query = search ?? (typeof location === "undefined" ? "" : location.search);
+    return new URLSearchParams(query).get("events") === "noisy" ? CATALOG_EVENTS_NOISY : CATALOG_EVENTS;
+  } catch (_) {
+    return CATALOG_EVENTS;
+  }
+}
+
 export const CATALOG_SESSIONS = {
+  hooked,
   [SPECIMEN_ID]: specimen,
   deploy,
   "ws-race": wsRace,
@@ -252,6 +382,7 @@ export function seedCatalogStore() {
   setState((s) => ({
     sessions: { ...CATALOG_SESSIONS },
     sessionsLoaded: true,
+    events: catalogEvents(), // wake-on-event
     activeSession: SPECIMEN_ID,
     usage: {
       available: true,

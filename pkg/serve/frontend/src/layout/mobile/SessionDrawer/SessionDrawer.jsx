@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight } from "lucide-preact";
-import { EventCard, SessionCardMenu, SessionRow } from "../../../components/index.js"; // wake-on-event: EventCard
+import { SessionCardMenu, SessionRow } from "../../../components/index.js";
 import { openOverlay } from "../../../data/overlay-history.js";
 import { filterProjectSections, groupProjectSessions, hiddenProjectSavedCount, previewSavedSessions, projectCollapsed, sessionSearchMatch, visibleProjectSessions } from "../../../data/util/project-sessions.js";
 import { useMenuKeyboard } from "../../../hooks/useMenuKeyboard.js";
@@ -139,10 +139,6 @@ export function SessionDrawer({
   onClose,
   onClosed,
   newResults = [],
-  inbox = [], // wake-on-event
-  onRouteEvent,
-  onNewSessionForEvent,
-  onDismissEvent,
   active = [],
   saved = [],
   activeCount = 0,
@@ -400,7 +396,7 @@ export function SessionDrawer({
             </div>
 
             <div class="sdrawer-list">
-              {!q && hitCount === 0 && inbox.length === 0 && (
+              {!q && hitCount === 0 && (
                 <button
                   type="button"
                   class="sdrawer-empty-new"
@@ -412,19 +408,6 @@ export function SessionDrawer({
               {q && hitCount === 0 && (
                 <span class="sdrawer-note">No session matches “{query}”</span>
               )}
-              {/* wake-on-event: pending events sit above New results — they are
-                  the only thing here that has not been seen by anyone yet. */}
-              {inbox.length > 0 && <>
-                <span class="sdrawer-group sdrawer-group-inbox">Inbox · {inbox.length}</span>
-                {inbox.map(({ event, suggestedTitle }) => <EventCard
-                  key={event.id}
-                  event={event}
-                  suggestedTitle={suggestedTitle}
-                  onRoute={onRouteEvent}
-                  onNew={onNewSessionForEvent}
-                  onDismiss={onDismissEvent}
-                />)}
-              </>}
               {shownNew.length > 0 && <>
                 <span class="sdrawer-group sdrawer-group-new">New results · {shownNew.length}</span>
                 {shownNew.slice(0, showAllNew ? undefined : 3).map((s) => card(s))}

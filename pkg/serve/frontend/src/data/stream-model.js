@@ -21,6 +21,14 @@
 //       never from the transcript index, so an expandable card retains state
 //       while earlier history is loaded.
 //
+//   { kind:'event', id, source, title, body, time, steer, autorun }
+//       wake-on-event: an external event delivered into this conversation. It
+//       arrives as a user-role message carrying `custom.source === 'event'`,
+//       and it gets its OWN block instead of a waypoint: a waypoint means the
+//       owner spoke, and nobody did. Its id follows the msg_id like the
+//       compaction card's, so the collapsed body survives loading older
+//       history.
+//
 //   { kind:'waypoint', time, text, msgId?, attachments? }
 //       A user turn. `text` is the joined text of the user message. `time` is
 //       the message ts when present (else undefined — we never invent one).
@@ -341,6 +349,27 @@ export function projectStream(session) {
       currentDoc = null;
       currentLedger = null;
       closeDelegation();
+      // wake-on-event: an event is a user-role message only because that is
+      // how the model must receive it; it is not the owner's turn, so it never
+      // becomes a waypoint. The custom envelope is set by the server on
+      // delivery and survives resumes and reloads (like subagent_parent).
+      if (msg.custom?.source === 'event') {
+        blocks.push({
+          kind: 'event',
+          id: blockID('event', msg, i),
+          source: msg.custom.source_name || 'event',
+          title: msg.custom.title || '',
+          body: joinText(msg.content),
+          time: msg.timestamp,
+          // A steered delivery is seen after the current tool, not at once —
+          // worth saying, because it explains a visible delay.
+          steer: !!(msg.custom.steer || msg._steer_id),
+          // Absent means autorun ran: only an explicit false says otherwise,
+          // so older transcripts do not all claim they were skipped.
+          autorun: msg.custom.autorun !== false,
+        });
+        continue;
+      }
       const attachments = attachmentsOf(msg.content);
       const msgId = msg.msg_id || msg._msg_id || '';
       const wp = {

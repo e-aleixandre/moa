@@ -1,0 +1,133 @@
+/* wake-on-event — EventBlock styles.
+
+   An event is a MARK in the transcript, not a card. It carries no fill, no
+   border, no left rule and no identity colour: peach belongs to the owner
+   (waypoints, primary actions) and yellow/red are reserved for states that
+   need someone. An event is neither, so it is monochrome, and its whole
+   presence is a mono provenance line over a plain title — the same weight the
+   stream gives a system line.
+
+   The expanded payload is the ledger's detail surface (crust panel, flush
+   CodeBlock), so raw text this conversation received looks the same wherever
+   it is read. */
+
+.evb {
+  margin: var(--space-4) 0 var(--space-5);
+}
+
+.evb-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-1) 0;
+  border: 0;
+  background: transparent;
+  color: var(--subtext0);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.evb-head:disabled { cursor: default; }
+.evb-head:focus-visible,
+.evb-more:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.evb-id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Provenance line: mono, uppercase, muted — the same voice as project paths
+   and tray timestamps. Every segment (source, age, delivery notes) is in the
+   one muted role, separated by middle dots: nothing here is more important
+   than the title below it. */
+.evb-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* The glyph is the mark itself — a wave, not a logo. Same muted role as the
+   rest of the line, so it reads as punctuation. */
+.evb-glyph {
+  flex: none;
+  font-family: var(--mono);
+  line-height: 1;
+}
+
+.evb-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The only line in normal text colour: what actually arrived. */
+.evb-title {
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.evb-chev {
+  flex: none;
+  display: inline-flex;
+  color: var(--overlay0);
+  transition: transform var(--duration) var(--ease);
+}
+
+.evb.open .evb-chev { transform: rotate(90deg); }
+
+/* The payload sits on the tool ledger's detail surface: recessed crust, one
+   border, the CodeBlock flush inside it providing its own padding. */
+.evb-body {
+  margin-top: var(--space-2);
+  background: var(--crust);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.evb-body .code.flush {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.evb-more {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
+  background: transparent;
+  color: var(--overlay1);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.evb-more:hover { color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) {
+  .evb-chev { transition: none; }
+}

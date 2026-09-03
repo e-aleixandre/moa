@@ -290,9 +290,10 @@ export function startPolling() {
   // owns the visible ones). Mobile is slower: one visible session, push for
   // anything urgent, and a foreground handler on return.
   const interval = store.get().isMobile ? 15000 : 10000;
-  // wake-on-event: the inbox rides this tick. It is drawn inside the session
-  // list, so refreshing it on a timer of its own would let the two disagree
-  // about what is waiting.
+  // wake-on-event: the inbox rides this tick. The inbox names the sessions an
+  // event can be sent to, so refreshing it on a timer of its own would let the
+  // two disagree about what is open; it is also where an arrival is noticed
+  // and toasted (loadEvents diffs the ids it already knew).
   pollTimer = setInterval(() => { loadSessions(); loadEvents(); }, interval);
 }
 

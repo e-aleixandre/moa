@@ -88,6 +88,7 @@ function desktopChromeEqual(a, b) {
   return a.activeId === b.activeId
     && a.groupByProject === b.groupByProject
     && a.soundEnabled === b.soundEnabled
+    && a.inboxOpen === b.inboxOpen // wake-on-event
     && inboxSig(a.inbox) === inboxSig(b.inbox) // wake-on-event
     && spineListSig(a.active) === spineListSig(b.active)
     && spineListSig(a.saved) === spineListSig(b.saved);
@@ -104,6 +105,7 @@ export function selectDesktopChrome(state) {
     active,
     saved,
     inbox: inboxCards(state.sessions, state.events), // wake-on-event
+    inboxOpen: !!state.inboxOpen, // wake-on-event
     activeId: inGrid ? focusedTileSessionId(state) : focusedSessionId(state),
     groupByProject: !!state.groupByProject,
     soundEnabled: !!state.soundEnabled,

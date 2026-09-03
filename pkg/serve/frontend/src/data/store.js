@@ -89,9 +89,12 @@ let state = {
 
   activeSession: null,
 
-  // wake-on-event: pending events from GET /api/events, refreshed on the same
-  // poll as the roster. Only events waiting for a decision are ever here.
+  // wake-on-event: events from GET /api/events — pending AND settled, since
+  // the inbox keeps its history. inboxOpen is the inbox surface's own state:
+  // the mobile push and the desktop spine swap read the same flag, so a toast
+  // can open the inbox without knowing which layout it is talking to.
   events: [],
+  inboxOpen: false,
 
   // Command palette (⌘K). Lives in the store so the global mount in
   // app.jsx and the per-screen Spine buttons (onSearch/onNewSession) read and

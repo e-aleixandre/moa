@@ -1302,3 +1302,53 @@ test('a card backed by a real job stays openable', () => {
     expect.objectContaining({ id: 'sa-2', openable: true }),
   ]);
 });
+
+// ── wake-on-event ────────────────────────────────────────────────────────────
+// An event is delivered as a user-role message because that is the only role
+// the model can receive it in. It must never render as the owner's waypoint:
+// nobody typed it.
+const event = (text, custom = {}, extra = {}) => user(text, {
+  _msg_id: 'ev-msg-1',
+  custom: { source: 'event', id: 'ev_1', source_name: 'sentry-tienda', title: 'Checkout 500s', ...custom },
+  ...extra,
+});
+
+test('a delivered event is projected as its own block, not a waypoint', () => {
+  const [block] = projectStream(session([event('{"level":"error"}')]));
+  expect(block).toEqual({
+    kind: 'event', id: 'event-ev-msg-1-0',
+    source: 'sentry-tienda', title: 'Checkout 500s', body: '{"level":"error"}',
+    time: undefined, steer: false, autorun: true,
+  });
+});
+
+test('an event closes the assistant turn before it, like every other user message', () => {
+  const blocks = projectStream(session([assistant('Done.'), event('{}'), assistant('Looking.')]));
+  expect(blocks.map((b) => b.kind)).toEqual(['document', 'event', 'document']);
+});
+
+test('a steered delivery and a skipped autorun are carried on the block', () => {
+  const [steered] = projectStream(session([event('{}', { steer: true })]));
+  expect(steered).toMatchObject({ steer: true, autorun: true });
+  const [quiet] = projectStream(session([event('{}', { autorun: false })]));
+  expect(quiet).toMatchObject({ autorun: false });
+});
+
+// Absence must not read as "autorun was off": most transcripts will carry no
+// flag at all, and claiming every one of them skipped its turn would be a lie
+// on the majority of the history.
+test('an event without an autorun flag is treated as having run', () => {
+  const [block] = projectStream(session([event('{}', { autorun: undefined })]));
+  expect(block.autorun).toBe(true);
+});
+
+test('an ordinary user message is still a waypoint', () => {
+  const [block] = projectStream(session([user('do the thing')]));
+  expect(block.kind).toBe('waypoint');
+});
+
+test('an event block keeps a stable id across a history prepend, so its body stays collapsed', () => {
+  const first = projectStream(session([event('{}')]));
+  const later = projectStream(session([user('earlier'), assistant('ok'), event('{}')]));
+  expect(later.find((b) => b.kind === 'event').id).toBe(first[0].id);
+});

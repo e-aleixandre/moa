@@ -505,6 +505,3 @@
     transition: none;
   }
 }
-
-/* wake-on-event: the inbox group label, in the accent its cards use. */
-.sdrawer-group-inbox { color: var(--peach); }

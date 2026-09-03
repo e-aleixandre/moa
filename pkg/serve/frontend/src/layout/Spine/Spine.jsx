@@ -1,9 +1,10 @@
 import { Search, Plus, Settings, MoreHorizontal, Check } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { IconButton, Kbd } from "../../primitives/index.js";
-import { EventCard, SessionCardMenu, SessionRow } from "../../components/index.js"; // wake-on-event: EventCard
+import { InboxButton, InboxView, SessionCardMenu, SessionRow } from "../../components/index.js"; // wake-on-event: InboxButton/InboxView
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { groupProjectSessions, hiddenProjectSavedCount, visibleProjectSessions } from "../../data/util/project-sessions.js";
+import { inboxPendingCount } from "../../data/events.js"; // wake-on-event
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
 import "./Spine.css";
 
@@ -88,12 +89,19 @@ export function Spine({
   onDeleteSession,
   groupByProject = false,
   onGroupByProject,
-  inbox = [], // wake-on-event
+  // wake-on-event: the inbox is the spine's OTHER list, not a group inside the
+  // session list. `inboxOpen` swaps which one this same column shows, so an
+  // event arriving never pushes the sessions down.
+  inbox = [],
+  inboxOpen = false,
+  onToggleInbox,
   onRouteEvent,
   onNewSessionForEvent,
   onDismissEvent,
+  onDismissEventSource,
 }) {
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
+  const pendingInbox = inboxPendingCount(inbox); // wake-on-event
   const projectSections = groupProjectSessions([...activeSessions, ...savedSessions]);
   const row = (s) => (
     <div class="spine-session-card" key={s.id}>
@@ -130,24 +138,29 @@ export function Spine({
         <button type="button" class="spine-new" aria-label="New session" onClick={onNewSession}>
           <Plus size={14} aria-hidden="true" />
         </button>
+        {/* wake-on-event: the inbox's door. It appears once anything has ever
+            arrived — a permanent icon for someone with no hooks configured
+            would be chrome that never does anything. */}
+        {inbox.length > 0 && (
+          <InboxButton count={pendingInbox} open={inboxOpen} onClick={onToggleInbox} size={15} />
+        )}
         <SpineGroupMenu groupByProject={groupByProject} onChange={onGroupByProject} />
       </div>
 
+      {inboxOpen ? (
+        <div class="spine-sessions spine-inbox">
+          <InboxView
+            cards={inbox}
+            onSend={onRouteEvent}
+            onNewSession={onNewSessionForEvent}
+            onIgnore={onDismissEvent}
+            onIgnoreSource={onDismissEventSource}
+            onOpenSession={onSelectSession}
+          />
+        </div>
+      ) : (
       <div class="spine-sessions">
-        {/* wake-on-event: the same inbox as the mobile drawer, above everything
-            else — a pending event is the only item nobody has seen yet. */}
-        {inbox.length > 0 && <>
-          <div class="spine-label spine-label-inbox">Inbox<small>{inbox.length}</small></div>
-          <div class="spine-list">{inbox.map(({ event, suggestedTitle }) => <EventCard
-            key={event.id}
-            event={event}
-            suggestedTitle={suggestedTitle}
-            onRoute={onRouteEvent}
-            onNew={onNewSessionForEvent}
-            onDismiss={onDismissEvent}
-          />)}</div>
-        </>}
-        {inbox.length === 0 && activeSessions.length === 0 && savedSessions.length === 0 && (
+        {activeSessions.length === 0 && savedSessions.length === 0 && (
           <button type="button" class="spine-empty-new" onClick={onNewSession}>
             + New session
           </button>
@@ -169,6 +182,7 @@ export function Spine({
           </>}
         </>}
       </div>
+      )}
 
       <div class="spine-foot">
         <SpineVersion version={version} />

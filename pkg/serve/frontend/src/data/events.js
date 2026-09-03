@@ -1,28 +1,116 @@
-// events.js — wake-on-event: the pending-event inbox on the client.
+// events.js — wake-on-event: the event inbox on the client.
 //
-// Events ride the existing session poll rather than a timer of their own: the
-// inbox is shown inside the session list, so refreshing them apart from it
-// would let the two disagree about what is waiting.
+// The inbox is its own surface (a pushed screen on mobile, a second list in
+// the Spine), not a group inside the session list: a session is something you
+// are working in, an event is something waiting to be filed, and mixing them
+// made the list mean two things at once.
+//
+// Events still ride the existing session poll rather than a timer of their
+// own: the inbox names the sessions an event can be sent to, so refreshing the
+// two apart would let them disagree about what is open.
 
 import { api } from './api.js';
-import { store, setState } from './store.js';
+import { store, setState, visibleSessionIds } from './store.js';
 import { loadSessions } from './session-actions.js';
 import { setActiveSession } from './tile-actions.js';
-import { sessionTitle } from './util/format.js';
+import { addToast, removeToast } from './notifications.js';
+import { projectKey, projectLabel, sessionTitle } from './util/format.js';
+
+// relAge is the session list's clock, kept identical to Spine/sessions.js and
+// the mobile chrome's: an event's age must not read like a different clock.
+function relAge(at) {
+  const ms = typeof at === 'number' ? at : Date.parse(at);
+  if (!Number.isFinite(ms)) return '';
+  const min = Math.floor((Date.now() - ms) / 60000);
+  if (min < 1) return 'now';
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
 
 function sameEvents(prev, next) {
   if (prev === next) return true;
   if (!prev || !next || prev.length !== next.length) return false;
-  return prev.every((event, i) => event.id === next[i].id && event.suggested === next[i].suggested);
+  return prev.every((event, i) => event.id === next[i].id
+    && event.state === next[i].state
+    && event.routed_to === next[i].routed_to);
+}
+
+// ── the inbox surface's open/closed state ───────────────────────────────────
+// One flag for both layouts: mobile pushes a screen, the desktop swaps the
+// spine's list, and a toast has to be able to open either without knowing
+// which one it is talking to.
+export function openInbox() { setState({ inboxOpen: true }); }
+export function closeInbox() { setState({ inboxOpen: false }); }
+export function toggleInbox() { setState({ inboxOpen: !store.get().inboxOpen }); }
+
+// ── arrival announcements ───────────────────────────────────────────────────
+// A poll that brings ids nobody has seen is the only moment an event is news.
+// The first poll of a session is NOT news: everything in it is history the
+// user is opening the app to read.
+let knownIds = null;
+let burst = null; // { toastId, count, at } — the 60 s coalescing window
+
+const BURST_WINDOW_MS = 60000;
+
+export function __resetEventAnnouncementsForTests() {
+  knownIds = null;
+  burst = null;
+}
+
+// announceArrivals toasts what just arrived. Delivered events point at their
+// session, pending ones at the inbox. More than one inside a minute collapses
+// into a single count: a burst of alerts must not become a wall of toasts.
+export function announceArrivals(arrivals, { visible = [], now = Date.now() } = {}) {
+  // Never toast for the conversation already on screen: the event's own block
+  // is right there, and a toast would announce something already visible.
+  const news = (arrivals || []).filter((event) => !(event.routed_to && visible.includes(event.routed_to)));
+  if (news.length === 0) return null;
+
+  const coalescing = burst && now - burst.at < BURST_WINDOW_MS;
+  const count = (coalescing ? burst.count : 0) + news.length;
+  if (coalescing) removeToast(burst.toastId);
+
+  if (count > 1) {
+    const toastId = addToast({
+      title: `${count} new events`,
+      detail: 'waiting in Inbox',
+      type: 'info',
+      onOpen: openInbox,
+    });
+    burst = { toastId, count, at: now };
+    return toastId;
+  }
+
+  const [event] = news;
+  const delivered = event.state === 'routed' && event.routed_to;
+  const target = delivered ? store.get().sessions?.[event.routed_to] : null;
+  const toastId = addToast({
+    title: `${event.source} · ${event.title || 'event'}`,
+    detail: delivered ? `→ ${target ? sessionTitle(target) : 'session'}` : 'waiting in Inbox',
+    type: 'info',
+    ...(delivered ? { sessionId: event.routed_to } : { onOpen: openInbox }),
+  });
+  burst = { toastId, count: 1, at: now };
+  return toastId;
 }
 
 // loadEvents refreshes the inbox. A failure keeps the previous list: an event
-// that is still waiting must not vanish from the drawer because one poll
-// failed.
+// that is still waiting must not vanish because one poll failed.
 export async function loadEvents() {
   try {
     const events = await api('GET', '/api/events');
     const list = Array.isArray(events) ? events : [];
+    const first = knownIds === null;
+    const previous = knownIds || new Set();
+    knownIds = new Set(list.map((event) => event.id));
+    if (!first) {
+      const arrivals = list.filter((event) => !previous.has(event.id));
+      if (arrivals.length > 0) {
+        announceArrivals(arrivals, { visible: visibleSessionIds(store.get()) });
+      }
+    }
     if (sameEvents(store.get().events, list)) return;
     setState({ events: list });
   } catch (e) {
@@ -30,51 +118,125 @@ export async function loadEvents() {
   }
 }
 
-// removeEvent drops a settled event from the local inbox immediately, so the
-// card cannot be tapped twice while the next poll is still on its way.
-function removeEvent(id) {
-  setState({ events: store.get().events.filter((event) => event.id !== id) });
+// settleEvent marks an event as decided locally the moment it is acted on, so
+// it cannot be acted on twice while the next poll is on its way. The row stays
+// in the list: the inbox keeps its history, it does not empty itself.
+function settleEvent(id, patch) {
+  setState({
+    events: store.get().events.map((event) => (event.id === id ? { ...event, ...patch } : event)),
+  });
 }
 
-// routeEvent sends an event to a session — the suggested one, or a session
-// created for it — and opens that session, which is where the event now lives.
+// routeEvent sends an event to a session and opens that session, which is
+// where the event now lives.
 export async function routeEvent(id, sessionId) {
+  settleEvent(id, { state: 'routed', routed_to: sessionId });
   const event = await api('POST', `/api/events/${encodeURIComponent(id)}/route`, { session_id: sessionId });
-  removeEvent(id);
   await loadSessions();
-  if (event?.routed_to) setActiveSession(event.routed_to);
+  const target = event?.routed_to || sessionId;
+  if (target) {
+    closeInbox();
+    setActiveSession(target);
+  }
   return event;
 }
 
-export async function routeEventToNewSession(id) {
-  const event = await api('POST', `/api/events/${encodeURIComponent(id)}/route`, { new: true });
-  removeEvent(id);
+// routeEventToNewSession creates the session for the event. `spec` carries the
+// model and thinking level picked in the sheet; without one the server falls
+// back to its defaults.
+export async function routeEventToNewSession(id, spec = null) {
+  settleEvent(id, { state: 'routed' });
+  const event = await api('POST', `/api/events/${encodeURIComponent(id)}/route`, {
+    new: true,
+    ...(spec?.model ? { model: spec.model } : {}),
+    ...(spec?.thinking ? { thinking: spec.thinking } : {}),
+  });
   await loadSessions();
-  if (event?.routed_to) setActiveSession(event.routed_to);
+  if (event?.routed_to) {
+    closeInbox();
+    setActiveSession(event.routed_to);
+  }
   return event;
 }
 
 export async function dismissEvent(id) {
+  settleEvent(id, { state: 'dismissed' });
   await api('POST', `/api/events/${encodeURIComponent(id)}/dismiss`);
-  removeEvent(id);
 }
 
-// inboxCards projects pending events for the session list: the event plus the
-// title of the session it would go to, which is what the primary action names.
-// A suggestion whose session has since disappeared from the roster is dropped,
-// so the card offers "New session" instead of naming something that is gone.
+// dismissSource is the bulk case: a source that fires all night is ignored in
+// one gesture instead of one row at a time. Only what is still WAITING is
+// touched — history is not rewritten.
+export async function dismissSource(source) {
+  const pending = store.get().events.filter((event) => event.source === source && (event.state || 'new') === 'new');
+  await Promise.all(pending.map((event) => dismissEvent(event.id).catch(() => {})));
+}
+
+// inboxCards projects the inbox: the event plus the open sessions of ITS
+// project, which is what the routing sheet offers. The list is what makes the
+// choice possible, so it is computed here — the surface only renders it, and
+// the two cannot disagree about which sessions are live.
+//
+// Saved sessions are not candidates: an event delivered to a session nobody is
+// running would sit unread with no turn behind it.
 export function inboxCards(sessions, events) {
+  const all = Object.values(sessions || {});
   return (events || []).map((event) => {
-    const target = event.suggested ? sessions?.[event.suggested] : null;
+    const project = projectKey(event.project);
+    const targets = all
+      .filter((s) => s.state !== 'saved' && projectKey(s.cwd) === project)
+      .sort((a, b) => (b.updated || 0) - (a.updated || 0))
+      .map((s) => ({ id: s.id, title: sessionTitle(s), when: relAge(s.updated) }));
+    // A settled event names where it went; if that session is gone from the
+    // roster the row falls back to a generic phrase rather than an empty name.
+    const routedTo = event.routed_to ? sessions?.[event.routed_to] : null;
     return {
-      event: target || !event.suggested ? event : { ...event, suggested: '' },
-      suggestedTitle: target ? sessionTitle(target) : '',
+      event,
+      age: relAge(event.created),
+      pending: (event.state || 'new') === 'new',
+      sessions: targets,
+      project,
+      projectLabel: projectLabel(event.project),
+      routedToTitle: routedTo ? sessionTitle(routedTo) : '',
     };
   });
 }
 
-// inboxSig is the change signal the chrome selectors compare on: identity plus
-// the suggestion, which is all a card renders from the roster.
+export function inboxPendingCount(cards) {
+  return (cards || []).filter((card) => card.pending).length;
+}
+
+// inboxGroups is what the surface paints: the chosen filter, newest first,
+// grouped by project ONLY when more than one project is involved — a single
+// project would be a header repeating what the whole screen already is.
+export function inboxGroups(cards, filter = 'pending') {
+  const shown = (cards || [])
+    .filter((card) => (filter === 'pending' ? card.pending : true))
+    .sort((a, b) => (b.event.created || 0) - (a.event.created || 0));
+  const projects = new Set(shown.map((card) => card.project));
+  if (projects.size <= 1) return [{ key: '', label: '', cards: shown }];
+  const groups = [];
+  for (const card of shown) {
+    let group = groups.find((g) => g.key === card.project);
+    if (!group) {
+      group = { key: card.project, label: card.projectLabel, cards: [] };
+      groups.push(group);
+    }
+    group.cards.push(card);
+  }
+  return groups;
+}
+
+// inboxSig is the change signal the chrome selectors compare on: identity, the
+// event's state, and the sessions its sheet would offer.
 export function inboxSig(cards) {
-  return (cards || []).map((c) => `${c.event.id}\0${c.event.suggested || ''}\0${c.suggestedTitle}`).join('\n');
+  return (cards || [])
+    .map((c) => [
+      c.event.id,
+      c.event.state || 'new',
+      c.age || '',
+      c.routedToTitle || '',
+      c.sessions.map((s) => `${s.id}:${s.when}`).join(','),
+    ].join('\0'))
+    .join('\n');
 }
