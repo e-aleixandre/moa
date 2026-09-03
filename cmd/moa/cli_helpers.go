@@ -132,6 +132,46 @@ func auxiliaryModelResolver(authStore *auth.Store) func(string) (core.Model, boo
 	}
 }
 
+// compactSummarizerResolver builds the summarizer for compaction: the model
+// configured in `compact_model`, with its own provider, or the session's own
+// model when none is configured.
+//
+// It never fails a compaction. A session that stops compacting grows until it
+// hits the window, which is worse than a summary billed to a pricier model, so
+// an unresolvable choice falls back to the session's model and returns the
+// reason for the transcript to show. A nil provider means "use the session's
+// own", which the agent already handles.
+func compactSummarizerResolver(
+	authStore *auth.Store,
+	providerFactory func(core.Model) (core.Provider, error),
+	spec func() string,
+) func(core.Model) (core.Provider, core.Model, string) {
+	return func(sessionModel core.Model) (core.Provider, core.Model, string) {
+		configured := ""
+		if spec != nil {
+			configured = spec()
+		}
+		model, fallback := core.ResolveCompactModel(configured, sessionModel, func(provider string) bool {
+			key, _, err := authStore.GetAPIKey(provider)
+			return err == nil && key != ""
+		})
+		if fallback != core.CompactModelFallbackNone {
+			return nil, core.Model{}, core.CompactModelFallbackNotice(fallback, configured, sessionModel)
+		}
+		if model.ID == sessionModel.ID {
+			return nil, core.Model{}, ""
+		}
+		prov, err := providerFactory(model)
+		if err != nil {
+			// The credential looked usable but the provider would not build.
+			// Same rule: compact anyway, and say why the choice was not kept.
+			return nil, core.Model{}, core.CompactModelFallbackNotice(
+				core.CompactModelFallbackNoCredential, configured, sessionModel)
+		}
+		return prov, model, ""
+	}
+}
+
 func printAuthNotice(w io.Writer, notice string) {
 	if notice == "" {
 		return

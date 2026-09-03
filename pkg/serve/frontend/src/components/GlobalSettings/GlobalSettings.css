@@ -447,3 +447,22 @@
   line-height: 1.5;
   color: var(--overlay1);
 }
+
+/* Model that writes compaction summaries. Only shown in "Custom" mode: the
+   session-model case has nothing to pick. */
+.compact-model-select {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-family: var(--mono);
+  /* --text-input (16px) — anything smaller makes iOS zoom on focus. */
+  font-size: var(--text-input);
+}
+
+.compact-model-select:focus {
+  outline: none;
+  border-color: var(--surface2);
+}

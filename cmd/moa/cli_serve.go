@@ -102,9 +102,22 @@ func runServe(args []string) {
 		WorkspaceRoot:          cwd,
 		MoaCfg:                 moaCfg,
 		AuxiliaryModelResolver: auxiliaryModelResolver(authStore),
-		ReleaseInfo:            release.Info{Version: version, Commit: commit, Date: date},
-		UpdateChecker:          release.NewChecker(release.Info{Version: version, Commit: commit, Date: date}),
-		UpdateCheckEnabled:     core.IsUpdateCheckEnabled(moaCfg),
+		// Read on every compaction, not captured once: changing compact_model in
+		// Settings must take effect without restarting live sessions.
+		CompactSummarizer: compactSummarizerResolver(authStore, func(m core.Model) (core.Provider, error) {
+			build, err := buildProvider(m, authStore)
+			if err != nil {
+				return nil, err
+			}
+			return build.Provider, nil
+		}, func() string { return core.GetCompactModel(core.LoadGlobalConfig()) }),
+		ProviderCredentialAvailable: func(provider string) bool {
+			key, _, err := authStore.GetAPIKey(provider)
+			return err == nil && key != ""
+		},
+		ReleaseInfo:        release.Info{Version: version, Commit: commit, Date: date},
+		UpdateChecker:      release.NewChecker(release.Info{Version: version, Commit: commit, Date: date}),
+		UpdateCheckEnabled: core.IsUpdateCheckEnabled(moaCfg),
 	})
 
 	// serve speaks plain HTTP (the security boundary is Tailscale), so the auth

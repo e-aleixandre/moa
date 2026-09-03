@@ -1,5 +1,6 @@
 import { NotificationSettings } from "../NotificationSettings/NotificationSettings.jsx";
 import { CompactAt } from "./CompactAt.jsx";
+import { CompactModel } from "./CompactModel.jsx";
 import { CompactStrategy } from "./CompactStrategy.jsx";
 import { SubagentModels } from "./SubagentModels.jsx";
 import "./GlobalSettings.css";
@@ -34,6 +35,11 @@ export function GlobalSettings({ soundEnabled, version = null }) {
       <section class="global-settings-section">
         <div class="global-settings-lbl">Before compacting</div>
         <CompactStrategy />
+      </section>
+
+      <section class="global-settings-section">
+        <div class="global-settings-lbl">Summarize with</div>
+        <CompactModel />
       </section>
 
       <section class="global-settings-section">

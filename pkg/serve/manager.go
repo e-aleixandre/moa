@@ -594,16 +594,20 @@ type Manager struct {
 
 	conversationKey []byte // process-local HMAC key for read cursors
 
-	providerFactory        func(model core.Model) (core.Provider, error)
-	transcriber            core.Transcriber   // nil when no speech-to-text is available
-	usagePoller            *usage.MultiPoller // nil when plan usage tracking is unavailable
-	pushStore              *push.Store        // nil when Web Push is unavailable
-	pushDispatcher         *push.Dispatcher   // nil when Web Push is unavailable
-	defaultModel           core.Model
-	workspaceRoot          string
-	moaCfg                 core.MoaConfig
-	configLoader           func(cwd string) core.MoaConfig
-	auxiliaryModelResolver func(spec string) (core.Model, bool, error)
+	providerFactory   func(model core.Model) (core.Provider, error)
+	compactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)
+	// providerCredentialAvailable reports whether a provider has a usable
+	// completion credential right now. nil = unknown.
+	providerCredentialAvailable func(provider string) bool
+	transcriber                 core.Transcriber   // nil when no speech-to-text is available
+	usagePoller                 *usage.MultiPoller // nil when plan usage tracking is unavailable
+	pushStore                   *push.Store        // nil when Web Push is unavailable
+	pushDispatcher              *push.Dispatcher   // nil when Web Push is unavailable
+	defaultModel                core.Model
+	workspaceRoot               string
+	moaCfg                      core.MoaConfig
+	configLoader                func(cwd string) core.MoaConfig
+	auxiliaryModelResolver      func(spec string) (core.Model, bool, error)
 	// mcpSourcesLoader resolves the provenance (global vs project) of MCP disable
 	// vetoes for a cwd. nil when a custom ConfigLoader is in use (tests), in which
 	// case bootstrap falls back to treating the merged list as global.
@@ -696,6 +700,14 @@ type ManagerConfig struct {
 	// normal completion credentials. A nil resolver leaves auto unavailable;
 	// explicit specs continue to work through the core resolver.
 	AuxiliaryModelResolver func(spec string) (core.Model, bool, error)
+	// CompactSummarizer routes compaction summaries to the globally configured
+	// `compact_model`, with its own provider. A nil resolver keeps compaction on
+	// the session's own model, which is the behaviour that predates the setting.
+	CompactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)
+	// ProviderCredentialAvailable reports whether a provider has a usable
+	// completion credential, so Settings only offers reachable models. A nil
+	// probe offers none rather than guessing.
+	ProviderCredentialAvailable func(provider string) bool
 	// ConfigLoader loads configuration for an individual session CWD. When
 	// nil, core.LoadMoaConfig preserves the normal global/project lookup.
 	ConfigLoader   func(cwd string) core.MoaConfig
@@ -767,30 +779,32 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		slog.Warn("conversation cursor key unavailable", "error", err)
 	}
 	m := &Manager{
-		sessions:               make(map[string]*ManagedSession),
-		resuming:               make(map[string]struct{}),
-		serverInstance:         newServerInstanceID(),
-		baseCtx:                ctx,
-		providerFactory:        cfg.ProviderFactory,
-		transcriber:            cfg.Transcriber,
-		usagePoller:            cfg.UsagePoller,
-		pushStore:              cfg.PushStore,
-		pushDispatcher:         cfg.PushDispatcher,
-		defaultModel:           cfg.DefaultModel,
-		workspaceRoot:          cfg.WorkspaceRoot,
-		moaCfg:                 cfg.MoaCfg,
-		configLoader:           configLoader,
-		auxiliaryModelResolver: cfg.AuxiliaryModelResolver,
-		mcpSourcesLoader:       mcpSourcesLoader,
-		sessionBaseDir:         cfg.SessionBaseDir,
-		attachStore:            attachStore,
-		secretBatches:          make(map[string][]string),
-		savedCacheTTL:          30 * time.Second,
-		fileScanner:            files.NewScanner(),
-		scheduler:              scheduler,
-		attention:              attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
-		conversationKey:        conversationKey,
-		version:                release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
+		sessions:                    make(map[string]*ManagedSession),
+		resuming:                    make(map[string]struct{}),
+		serverInstance:              newServerInstanceID(),
+		baseCtx:                     ctx,
+		providerFactory:             cfg.ProviderFactory,
+		transcriber:                 cfg.Transcriber,
+		usagePoller:                 cfg.UsagePoller,
+		pushStore:                   cfg.PushStore,
+		pushDispatcher:              cfg.PushDispatcher,
+		defaultModel:                cfg.DefaultModel,
+		workspaceRoot:               cfg.WorkspaceRoot,
+		moaCfg:                      cfg.MoaCfg,
+		configLoader:                configLoader,
+		auxiliaryModelResolver:      cfg.AuxiliaryModelResolver,
+		compactSummarizer:           cfg.CompactSummarizer,
+		providerCredentialAvailable: cfg.ProviderCredentialAvailable,
+		mcpSourcesLoader:            mcpSourcesLoader,
+		sessionBaseDir:              cfg.SessionBaseDir,
+		attachStore:                 attachStore,
+		secretBatches:               make(map[string][]string),
+		savedCacheTTL:               30 * time.Second,
+		fileScanner:                 files.NewScanner(),
+		scheduler:                   scheduler,
+		attention:                   attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
+		conversationKey:             conversationKey,
+		version:                     release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
 	}
 	// Read the persisted roster once for all startup consumers. The automation
 	// index requires the read error to preserve its fail-closed behavior; the

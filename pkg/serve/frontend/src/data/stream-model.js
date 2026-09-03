@@ -113,6 +113,7 @@ import {
   toolPath,
   toolPreview,
   shortModel,
+  modelCodename,
 } from './util/format.js';
 import { formatElapsed } from './util/activity.js';
 import { parseFileCardData } from './util/file-card.js';
@@ -335,6 +336,15 @@ export function projectStream(session) {
     if (msg && msg.role === 'assistant') {
       const text = joinText(msg.content);
       if (text) {
+        // A response served by a model other than the one requested is durable
+        // provenance, not an alert: it rides as the same quiet system line the
+        // rest of the transcript uses, above the turn it explains, instead of
+        // a coloured pill wedged into the assistant's prose.
+        const redirect = modelRedirectLine(msg);
+        if (redirect) {
+          currentDoc = null;
+          blocks.push({ kind: 'system', id: blockID('redirect', msg, i), text: redirect });
+        }
         const doc = ensureDoc(msg, i);
         closeLedger();
         closeDelegation();
@@ -489,6 +499,30 @@ function hasSubagentEntry(subagents, jobId) {
   if (!subagents) return false;
   if (Array.isArray(subagents)) return subagents.some((s) => s && String(s.jobId) === String(jobId));
   return Object.prototype.hasOwnProperty.call(subagents, jobId);
+}
+
+// modelRedirectLine describes a response the provider served with a model other
+// than the one asked for. It returns '' for the ordinary case, so callers can
+// call it unconditionally.
+//
+// It reads only durable message provenance (requested_model vs model), which is
+// why the line survives a reload. Names are rendered the way the rest of the UI
+// names models ('Fable → Opus'), not as raw ids.
+export function modelRedirectLine(msg) {
+  const requested = String(msg?.requested_model || '').trim();
+  const served = String(msg?.model || '').trim();
+  if (!requested || !served || requested === served) return '';
+  const from = modelName(requested);
+  const to = modelName(served);
+  // Two variants of one family share a codename ('grok-4.6' vs
+  // 'grok-4.6-build'), and "Grok → Grok" says nothing. Fall back to the raw
+  // ids, which is exactly the case where the detail is the whole point.
+  if (from === to) return `⤳ ${shortModel(requested)} → ${shortModel(served)}`;
+  return `⤳ ${from} → ${to}`;
+}
+
+function modelName(spec) {
+  return modelCodename(spec) || shortModel(spec);
 }
 
 // seenJobIdsOf collects every tool_call_id present in a message list, indexing
