@@ -200,12 +200,23 @@ function toRawMessages(messages) {
     // emits them, so the lab exercises the real normalizeHistory path instead
     // of a shortcut: the compaction notice rides as a user message carrying
     // custom.source, and the compaction marker as a session_event.
+    //
+    // The notice's copy is fixed by normalizeHistory, so only a row whose text
+    // matches it can travel that way; any other system line would come back
+    // rewritten. The rest ride as `goal`, the durable role that keeps its own
+    // text and renders as the same system line.
     if (msg._type === "system" && msg._msg_id) {
-      out.push({
+      const isNotice = (msg.text || "").includes("Context filling up");
+      out.push(isNotice ? {
         role: "user",
         msg_id: msg._msg_id,
         timestamp: msg.timestamp,
         custom: { source: "compaction_notice", internal: true },
+        content: [{ type: "text", text: msg.text || "" }],
+      } : {
+        role: "goal",
+        msg_id: msg._msg_id,
+        timestamp: msg.timestamp,
         content: [{ type: "text", text: msg.text || "" }],
       });
       continue;
@@ -231,6 +242,11 @@ function toRawMessages(messages) {
         role: msg.role,
         msg_id: msg.msg_id,
         timestamp: msg.timestamp,
+        // Model provenance is durable on the wire: it is what tells the
+        // transcript a response came back from a model other than the one
+        // asked for, so the lab must carry it like the server does.
+        requested_model: msg.requested_model,
+        model: msg.model,
         content: msg.content,
       });
       continue;

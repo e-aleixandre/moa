@@ -363,6 +363,122 @@ const compaction = {
   subagents: {},
 };
 
+// A response the provider served with a model other than the one requested.
+// The badge is durable message provenance (requested_model vs model), so it
+// survives a reload — this is the treatment to judge before reusing it for the
+// compaction summarizer.
+const redirected = {
+  id: "redirected",
+  title: "model redirect",
+  state: "idle",
+  model: "Claude Fable 5.1",
+  provider: "anthropic",
+  thinking: "high",
+  cwd: "/home/ealeixandre/dev/moa/main",
+  updated: now - 2 * 3600000,
+  contextPercent: 18,
+  contextWindow: 1000000,
+  costUSD: 1.24,
+  messages: [
+    user("r-u1", "Diseña la migración del bus de eventos.", 2 * 3600000),
+    // Real shape: a Fable request answered with Opus.
+    {
+      role: "assistant",
+      timestamp: now - 2 * 3600000 + 30000,
+      requested_model: "claude-fable-5-1",
+      model: "claude-opus-4-8",
+      content: [{ type: "text", text: "El bus actual acopla la publicación con la persistencia, así que la migración tiene que separar ambas antes de tocar los suscriptores." }],
+    },
+    tool("r-read", "read", { path: "pkg/bus/bridge.go" }, "done", "1240 lines"),
+    // Taken from a real session: grok-4.6 served as grok-4.6-build.
+    {
+      role: "assistant",
+      timestamp: now - 2 * 3600000 + 90000,
+      requested_model: "grok-4.6",
+      model: "grok-4.6-build",
+      content: [{ type: "text", text: "Confirmado: publish() y persist() comparten el mismo lock, y ese es el nudo de la migración." }],
+    },
+    // An ordinary answer, for contrast: no badge when nothing was redirected.
+    {
+      role: "assistant",
+      timestamp: now - 2 * 3600000 + 120000,
+      requested_model: "claude-fable-5-1",
+      model: "claude-fable-5-1",
+      content: [{ type: "text", text: "Sin redirección, esta respuesta no lleva distintivo." }],
+    },
+  ],
+  subagents: {},
+};
+
+// The compaction-model notice. The ordinary case says nothing: the compaction
+// card alone is the whole story, whether the summary was written by the
+// session's model or by the configured one. The line appears ONLY when the
+// configured summarizer could not be used, because that is the case the
+// transcript cannot otherwise explain.
+const compactNotice = {
+  id: "compact-notice",
+  title: "summarizer fallback",
+  state: "idle",
+  model: "Claude Fable 5.1",
+  provider: "anthropic",
+  thinking: "medium",
+  cwd: "/home/ealeixandre/dev/moa/main",
+  updated: now - 60000,
+  contextPercent: 21,
+  contextWindow: 1000000,
+  costUSD: 2.1,
+  messages: [
+    user("cn-u1", "Sigue con el refactor.", 600000),
+    {
+      role: "assistant",
+      timestamp: now - 590000,
+      content: [{ type: "text", text: "Sigo por donde lo dejamos." }],
+    },
+
+    // The ordinary compaction: card only, no line.
+    {
+      _type: "compaction_marker",
+      _msg_id: "cn-c1",
+      timestamp: Math.floor((now - 500000) / 1000),
+      summary: "Resumen de la conversación previa.",
+      tokensBefore: 262000,
+      readFiles: ["pkg/bus/bridge.go"],
+      modifiedFiles: [],
+    },
+    {
+      role: "assistant",
+      timestamp: now - 490000,
+      content: [{ type: "text", text: "Compactación normal: arriba solo está la tarjeta, sin aviso." }],
+    },
+
+    // The fallback: the configured summarizer could not be reached.
+    {
+      _type: "compaction_marker",
+      _msg_id: "cn-c2",
+      timestamp: Math.floor((now - 300000) / 1000),
+      summary: "Resumen de la conversación previa.",
+      tokensBefore: 271000,
+      readFiles: [],
+      modifiedFiles: [],
+    },
+    { _type: "system", _msg_id: "cn-fb", timestamp: now - 300000, text: "\u2702 Summarized with Fable — no usable credential for Terra" },
+    {
+      role: "assistant",
+      timestamp: now - 290000,
+      content: [{ type: "text", text: "Aquí sí: el modelo configurado no se pudo usar, y queda dicho." }],
+    },
+
+    // For tone comparison: the notice already in production.
+    {
+      _type: "system",
+      _msg_id: "cn-e",
+      timestamp: now - 100000,
+      text: "\u26a0 Context filling up — asked the agent to save unsaved work",
+    },
+  ],
+  subagents: {},
+};
+
 const verifier = {
   id: "verifier",
   title: "verifier design notes",
@@ -387,6 +503,8 @@ export const CATALOG_SESSIONS = {
   frontend,
   "skill-fork": skillFork,
   compaction,
+  redirected,
+  "compact-notice": compactNotice,
   verifier,
 };
 

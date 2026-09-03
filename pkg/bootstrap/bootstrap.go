@@ -42,6 +42,12 @@ type SessionConfig struct {
 	Provider        core.Provider                           // LLM provider for the primary model.
 	ProviderFactory func(core.Model) (core.Provider, error) // Creates providers for subagents, plan review, etc.
 
+	// CompactSummarizer optionally routes compaction summaries to a different
+	// model (the global `compact_model`). nil = summarize with the session's
+	// own model, which is how compaction behaved before this existed.
+	// Subagents inherit it: their compactions are summaries too.
+	CompactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)
+
 	// Config overrides. When nil, loaded from disk via core.LoadMoaConfig(CWD).
 	MoaCfg *core.MoaConfig
 
@@ -554,6 +560,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			return nil
 		},
 		ProviderFactory:     cfg.ProviderFactory,
+		CompactSummarizer:   cfg.CompactSummarizer,
 		AgentsMD:            agentsMD,
 		ParentTools:         toolReg,
 		AppCtx:              cfg.Ctx,
@@ -652,6 +659,10 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		// what lets a session's own choice win here without erasing the global
 		// value for the sessions that never made one.
 		Compaction: core.CompactionWithDefault(core.GetCompactAt(moaCfg)),
+		// Global too: which model writes the summaries. Read through the
+		// resolver on every compaction rather than captured here, so changing
+		// the setting takes effect without restarting live sessions.
+		CompactSummarizer: cfg.CompactSummarizer,
 	}
 	if gate != nil {
 		agentCfg.PermissionCheck = gate.Check
