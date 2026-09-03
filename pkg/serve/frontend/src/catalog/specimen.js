@@ -1,5 +1,6 @@
 import { setState } from "../data/store.js";
 import { setTileSession } from "../data/tileTree.js";
+import { skillForkLaunchRow } from "../data/ws/history.js";
 
 // Frozen conversations the real screens wear. The chrome is production; only
 // this data is fake. Each roster row is a full session so opening it shows
@@ -223,6 +224,145 @@ const frontend = {
   subagents: { docs: docsSub },
 };
 
+// A forked skill, launched both ways, so the two entry points can be compared
+// side by side. The model's own load_skill shows as an ordinary subagent row;
+// the user's /<name> shows as the anchored launch row. Both fold their terminal
+// card into the same `subagent-<jobId>` key, and both report back to the parent.
+const reviewSub = {
+  jobId: "sa-review",
+  title: "Delivery review",
+  task: "skill: delivery-review",
+  model: "terra",
+  async: true,
+  status: "completed",
+  accentIndex: 2,
+  usage: { inputTokens: 31400, outputTokens: 2600, costUSD: 0.14, elapsedMs: 68000 },
+  messages: [
+    tool("rv-read", "read", { path: "pkg/serve/skills_http.go" }, "done", "240 lines"),
+    { role: "assistant", content: [{ type: "text", text: "Reachable through the real entry point. One gap: the anchor is dropped when the agent is busy." }] },
+  ],
+};
+
+const learnSub = {
+  jobId: "sa-learn",
+  title: "Systemic learning",
+  task: "skill: systemic-learning",
+  model: "fable",
+  async: true,
+  status: "running",
+  accentIndex: 3,
+  startedAtMs: now - 46000,
+  contextPercent: 12,
+  thinking: "low",
+  usage: { inputTokens: 22800, outputTokens: 900, costUSD: 0.09, elapsedMs: 46000 },
+  messages: [
+    tool("ln-read", "read", { path: "/home/ealeixandre/.config/moa/sessions/…/transcript.md" }, "done", "3330 lines"),
+  ],
+};
+
+const skillFork = {
+  id: "skill-fork",
+  title: "forked skills",
+  state: "running",
+  model: "Claude Opus 4.8",
+  provider: "anthropic",
+  thinking: "medium",
+  cwd: "/home/ealeixandre/dev/moa/skill-fork-notify",
+  updated: now - 40000,
+  permissionMode: "yolo",
+  contextPercent: 33,
+  contextWindow: 200000,
+  costUSD: 0.88,
+  runTokensUp: 9100,
+  runTokensDown: 2400,
+  dockOpen: true,
+  messages: [
+    user("k-u1", "Check the fork lands before we ship it.", 300000),
+    // (1) THE MODEL launched it itself with load_skill: an ordinary subagent
+    // tool row, keyed by the job it spawned.
+    assistant("Running the delivery review as a child so I keep this thread."),
+    tool("subagent-sa-review", "subagent", { task: reviewSub.task }, "done", "verified · 1 gap found", {
+      subagentJobId: "sa-review",
+      accentIndex: 2,
+      finishedAtMs: now - 120000,
+    }),
+    {
+      role: "assistant",
+      timestamp: now - 110000,
+      content: [{ type: "text", text: "It came back with one gap: the anchor is dropped while the agent is busy. Fixed on the steer lane." }],
+    },
+    // (2) THE USER launched it with /systemic-learning. Built by the real
+    // production projection (skillForkLaunchRow), not hand-written, so the lab
+    // shows what the transcript actually renders — including if it regresses.
+    skillForkLaunchRow({
+      msg_id: "k-anchor",
+      custom: { source: "skill_fork", subagent_job_id: "sa-learn", skill: "systemic-learning" },
+    }),
+  ],
+  subagents: { "sa-review": reviewSub, "sa-learn": learnSub },
+};
+
+// The stretch a session reopened hours later could not explain: the notice, the
+// work the model did because of it, and the compaction that followed. The
+// notice is deliberately quiet — it is not an error or an alert, it is the
+// reason the model paused the task to write things down.
+const compaction = {
+  id: "compaction",
+  title: "long refactor",
+  state: "idle",
+  model: "Claude Opus 4.8",
+  provider: "anthropic",
+  thinking: "medium",
+  cwd: "/home/ealeixandre/dev/moa/main",
+  updated: now - 5 * 3600000,
+  contextPercent: 24,
+  contextWindow: 200000,
+  costUSD: 3.42,
+  messages: [
+    user("c-u1", "Sigue con el refactor de los handlers, que quedaba a medias.", 7 * 3600000),
+    {
+      role: "assistant",
+      timestamp: now - 7 * 3600000 + 20000,
+      content: [{ type: "text", text: "Sigo por donde lo dejamos: separo los handlers de sesión antes de tocar el bus." }],
+    },
+    tool("c-edit", "edit", { path: "pkg/serve/session_handlers.go" }, "done", "12 lines changed"),
+    // The notice: a quiet system line, not a user turn and not an alert.
+    {
+      _type: "system",
+      _msg_id: "c-notice",
+      timestamp: now - 6 * 3600000,
+      text: "⚠ Context filling up — asked the agent to save unsaved work",
+    },
+    {
+      role: "assistant",
+      timestamp: now - 6 * 3600000 + 15000,
+      content: [{ type: "text", text: "Antes de seguir dejo por escrito lo decidido, que si se resume la conversación se pierde." }],
+    },
+    tool("c-write", "write", { path: "tmp/ESTADO-refactor.md" }, "done", "Wrote 3120 bytes"),
+    {
+      _type: "compaction_marker",
+      _msg_id: "c-compact",
+      timestamp: Math.floor((now - 6 * 3600000 + 60000) / 1000),
+      summary:
+        "El usuario pidió terminar el refactor de handlers. Se separaron los handlers de sesión " +
+        "de los de configuración, quedando pendiente el bus. Decisión: no tocar el contrato HTTP " +
+        "existente; los clientes instalados dependen de él.",
+      tokensBefore: 154000,
+      readFiles: ["pkg/serve/session_handlers.go", "pkg/serve/manager.go", "pkg/bus/handlers.go"],
+      modifiedFiles: ["pkg/serve/session_handlers.go", "tmp/ESTADO-refactor.md"],
+    },
+    // Work carries on afterwards: the transcript reads continuously across the
+    // compaction instead of starting from nothing.
+    {
+      role: "assistant",
+      timestamp: now - 5 * 3600000,
+      content: [{ type: "text", text: "Retomo con el estado guardado: queda el bus, y el contrato HTTP no se toca." }],
+    },
+    tool("c-grep", "grep", { pattern: "RegisterHandlers", path: "pkg/bus" }, "done", "4 matches"),
+  ],
+  subagents: {},
+};
+
 const verifier = {
   id: "verifier",
   title: "verifier design notes",
@@ -245,6 +385,8 @@ export const CATALOG_SESSIONS = {
   "ws-race": wsRace,
   sqlite,
   frontend,
+  "skill-fork": skillFork,
+  compaction,
   verifier,
 };
 

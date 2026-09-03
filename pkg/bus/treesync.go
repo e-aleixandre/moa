@@ -239,12 +239,18 @@ func (ts *TreeSyncer) syncMessages() {
 // These ride as user-role messages because providers accept no other role
 // mid-conversation, but showing them in the transcript would attribute to the
 // user words they never wrote.
+//
+// The compaction notice is deliberately NOT one of them. It is addressed to the
+// model, but it is also the reason the model suddenly stops the task to write
+// things down: dropping it left those actions in the transcript with their
+// cause missing, and a session reopened hours later could not explain them.
+// The frontend renders it as a system line, not as words the user typed.
 func isHiddenInternalPrompt(msg core.AgentMessage) bool {
 	if msg.Role != "user" || msg.Custom == nil {
 		return false
 	}
 	switch msg.Custom["source"] {
-	case "prepare_compact", "compaction_notice":
+	case "prepare_compact":
 		return true
 	}
 	return false

@@ -96,7 +96,7 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
     case "secret_batch":
       return <SecretBatchCard aliases={block.aliases} />;
     case "compaction":
-      return <CompactionCard summary={block.summary} tokensBefore={block.tokensBefore} readFiles={block.readFiles} modifiedFiles={block.modifiedFiles} />;
+      return <CompactionCard summary={block.summary} tokensBefore={block.tokensBefore} timestamp={block.timestamp} readFiles={block.readFiles} modifiedFiles={block.modifiedFiles} />;
     case "waypoint":
       return (
         <UserWaypoint

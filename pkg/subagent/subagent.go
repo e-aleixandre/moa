@@ -379,7 +379,6 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				// its job ID so every child tool execution, including async bash,
 				// carries its owner. runJob drops the snapshot when it finishes.
 				jobCtx = core.WithAgentID(jobCtx, job.id)
-				applySpawnFlags(job, params)
 				if cfg.BashState != nil {
 					cfg.BashState.Seed(job.id, core.AgentIDFromContext(ctx))
 				}
@@ -392,9 +391,6 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				}
 				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil, true)
 				started := "Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."
-				if !jobNotifiesParent(job) {
-					started = "Subagent continues in the background.\nJob ID: " + job.id + "\nContinue the original task; do not wait for it. subagent_status and subagent_wait remain available if you need them."
-				}
 				return taggedWithJob(core.TextResult(started), job.id), nil
 			}
 
@@ -414,7 +410,6 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			// their owner. runJob drops the
 			// snapshot when it finishes.
 			jobCtx = core.WithAgentID(jobCtx, job.id)
-			applySpawnFlags(job, params)
 			if cfg.BashState != nil {
 				cfg.BashState.Seed(job.id, core.AgentIDFromContext(ctx))
 			}
@@ -1731,34 +1726,4 @@ func getBool(params map[string]any, key string) bool {
 	}
 	b, ok := v.(bool)
 	return ok && b
-}
-
-// getBoolDefault reads a boolean parameter, falling back to def when the key is
-// absent or not a bool. Used for internal flags (notify) whose public default
-// must stay true even though they are omitted from the schema.
-func getBoolDefault(params map[string]any, key string, def bool) bool {
-	v, ok := params[key]
-	if !ok {
-		return def
-	}
-	b, ok := v.(bool)
-	if !ok {
-		return def
-	}
-	return b
-}
-
-// applySpawnFlags copies internal, non-schema spawn options onto the job.
-// notify defaults true so a public subagent call is unchanged.
-func applySpawnFlags(job *job, params map[string]any) {
-	notify := getBoolDefault(params, "notify", true)
-	job.mu.Lock()
-	job.notifyParent = notify
-	job.mu.Unlock()
-}
-
-func jobNotifiesParent(job *job) bool {
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	return job.notifyParent
 }

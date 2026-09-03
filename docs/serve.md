@@ -207,7 +207,7 @@ it runs:
 disable-model-invocation: true   # only you, via /<name>
 user-invocable: false            # only the agent, via load_skill
 context: fork                    # isolated subagent, no inherited messages
-background: true                 # with fork: return a job id, do not notify the parent
+background: true                 # with fork: run async, do not block the parent
 parent-transcript: snapshot      # with fork: freeze the active branch and give the child its path
 ---
 ```
@@ -221,12 +221,17 @@ or `checkpoint`, and `load_skill` will refuse another forked skill.
 
 When the agent calls `load_skill` on a forked skill, a foreground fork blocks
 and returns the child's result; a background fork returns a job id immediately
-and stays silent when the child finishes (`subagent_status` / `subagent_wait` /
-`subagent_cancel` still work, and the dock still shows it). `/<name>` on a
-forked skill always launches asynchronously so the command does not hold the
-session: a non-background fork still notifies the idle parent through the usual
-subagent completion path; a background fork does not. Slash fork while the
-session is busy is refused in this MVP.
+and keeps working, and the child's result reaches the parent later through the
+usual subagent completion notification (`subagent_status` / `subagent_wait` /
+`subagent_cancel` still work, and the dock still shows it). `background` spares
+the parent the work, not the conclusion: a forked skill is an ordinary
+subagent, so what it found always comes back.
+
+`/<name>` on a forked skill always launches asynchronously so the command does
+not hold the session. It is recorded in the conversation as a launch row
+carrying the job id, which is what keeps the child openable after a reload and
+gives the agent an antecedent for the completion that follows. Slash fork while
+the session is busy is refused in this MVP.
 
 `parent-transcript: snapshot` writes a copy of the **active** conversation
 branch (not later messages, not abandoned branches) and adds that absolute path

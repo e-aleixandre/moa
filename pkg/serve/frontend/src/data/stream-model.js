@@ -233,6 +233,9 @@ export function projectStream(session) {
         id: `compaction-${msgId}-${ordinal}`,
         summary: typeof msg.summary === 'string' ? msg.summary : '',
         tokensBefore: Number.isFinite(msg.tokensBefore) ? msg.tokensBefore : 0,
+        // When it happened, so a session reopened hours later can place the
+        // compaction against the work around it.
+        timestamp: Number.isFinite(msg.timestamp) ? msg.timestamp : 0,
         readFiles: Array.isArray(msg.readFiles) ? msg.readFiles : [],
         modifiedFiles: Array.isArray(msg.modifiedFiles) ? msg.modifiedFiles : [],
       });
@@ -262,7 +265,11 @@ export function projectStream(session) {
         // the tool recorded on its result (subagentJobId). Without that a
         // restored card would point at a job the server has never heard of, and
         // opening it would do nothing.
-        const completionCard = /^subagent[-_]/.test(rawToolCallID);
+        // A completion card is terminal by construction. A slash-launched fork
+        // shares that key shape while it is still RUNNING (the anchor row), and
+        // treating it as a completion would paint a live child as finished with
+        // no result, so the status decides, not the key alone.
+        const completionCard = /^subagent[-_]/.test(rawToolCallID) && msg.status !== 'running';
         const origin = originToolCalls.byID.get(rawToolCallID) || null;
         const jobId = origin
           ? String(origin.jobId)
@@ -488,11 +495,17 @@ function hasSubagentEntry(subagents, jobId) {
 // the bare job_id for the terminated subagent/bash cards keyed as
 // `subagent-<id>` / `subagent_<id>` / `bash-complete-<id>` (see projectStream's
 // dedup). Exported so the AgentTray uses the exact same dedup set the stream does.
+//
+// A row that is still RUNNING is not a representation of the child's outcome —
+// the slash-launched fork's anchor shares the `subagent-<id>` key while its
+// child works. Counting it here would hide the live child from BOTH places at
+// once: the dock skips a job already "seen", and the inline block only shows
+// terminal ones.
 export function seenJobIdsOf(messages) {
   const seenJobIds = new Set();
   const list = Array.isArray(messages) ? messages : [];
   for (const msg of list) {
-    if (msg && msg._type === 'tool_start' && msg.tool_call_id) {
+    if (msg && msg._type === 'tool_start' && msg.tool_call_id && msg.status !== 'running') {
       const id = String(msg.tool_call_id);
       seenJobIds.add(id);
       if (id.startsWith('subagent-')) seenJobIds.add(id.slice('subagent-'.length));

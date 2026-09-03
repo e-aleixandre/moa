@@ -196,6 +196,36 @@ export function catalogResponse(method, path, body = null, sessions = CATALOG_SE
 function toRawMessages(messages) {
   const out = [];
   for (const msg of messages || []) {
+    // Durable non-conversational rows travel on the wire the way the Go server
+    // emits them, so the lab exercises the real normalizeHistory path instead
+    // of a shortcut: the compaction notice rides as a user message carrying
+    // custom.source, and the compaction marker as a session_event.
+    if (msg._type === "system" && msg._msg_id) {
+      out.push({
+        role: "user",
+        msg_id: msg._msg_id,
+        timestamp: msg.timestamp,
+        custom: { source: "compaction_notice", internal: true },
+        content: [{ type: "text", text: msg.text || "" }],
+      });
+      continue;
+    }
+    if (msg._type === "compaction_marker") {
+      out.push({
+        role: "session_event",
+        msg_id: msg._msg_id,
+        timestamp: msg.timestamp,
+        custom: {
+          type: "compaction_marker",
+          summary: msg.summary || "",
+          tokens_before: msg.tokensBefore || 0,
+          read_files: msg.readFiles || [],
+          modified_files: msg.modifiedFiles || [],
+        },
+        content: [{ type: "text", text: "compacted" }],
+      });
+      continue;
+    }
     if (msg.role === "user" || (msg.role === "assistant" && !msg._type)) {
       out.push({
         role: msg.role,
