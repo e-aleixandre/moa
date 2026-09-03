@@ -188,6 +188,7 @@ test('modelCodename: capitalizes a known codename anywhere in the string', () =>
   expect(modelCodename('gpt-5.6-terra')).toBe('Terra');
   expect(modelCodename('Grok 4.6')).toBe('Grok');
   expect(modelCodename('xai/grok-4.6')).toBe('Grok');
+  expect(modelCodename('Muse Spark 1.3')).toBe('Muse');
   expect(modelCodename('anthropic/claude-opus-4-8')).toBe('Opus');
 });
 

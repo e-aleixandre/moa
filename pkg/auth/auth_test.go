@@ -228,6 +228,37 @@ func TestStore_RefreshOAuthIfCurrent_SingleFlight(t *testing.T) {
 	}
 }
 
+func TestStore_OpenAIOAuthIgnoresAndDropsStaleMintedKey(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	store := NewStore(filepath.Join(t.TempDir(), "auth.json"))
+	if err := store.Set("openai", Credential{
+		Type: "oauth", Access: "access-1", Refresh: "refresh-1", Key: "stale-key",
+		Expires: time.Now().Add(time.Hour).UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	key, isOAuth, err := store.GetAPIKey("openai")
+	if err != nil || !isOAuth || key != "access-1" {
+		t.Fatalf("GetAPIKey = %q, %v, %v; want access-1, true, nil", key, isOAuth, err)
+	}
+	store.refresh = func(provider, refresh string) (*OAuthCredentials, error) {
+		if provider != "openai" || refresh != "refresh-1" {
+			t.Fatalf("refresh(%q, %q)", provider, refresh)
+		}
+		return &OAuthCredentials{Access: "access-2", Refresh: "refresh-2", APIKey: "also-stale", Expires: time.Now().Add(time.Hour).UnixMilli()}, nil
+	}
+
+	key, err = store.RefreshOAuthIfCurrent("openai", "access-1")
+	if err != nil || key != "access-2" {
+		t.Fatalf("RefreshOAuthIfCurrent = %q, %v; want access-2, nil", key, err)
+	}
+	stored, _ := store.Get("openai")
+	if stored.Key != "" || stored.Access != "access-2" {
+		t.Fatalf("stored = %#v; want refreshed access without key", stored)
+	}
+}
+
 // TestStore_GetAPIKey_AdoptsSiblingRefreshedToken pins M8: when our in-memory
 // OAuth token is expired but a sibling process (serve + CLI share auth.json)
 // already refreshed and wrote a fresh token to disk, GetAPIKey must adopt the
@@ -372,7 +403,7 @@ func TestStore_RefreshDoesNotClobberSiblingProvider(t *testing.T) {
 
 func TestOAuthCredentialKeepsPreviousRefreshWhenOmitted(t *testing.T) {
 	previous := Credential{Type: "oauth", Access: "old", Refresh: "keep-me", AccountID: "acct"}
-	got, err := oauthCredential(previous, &OAuthCredentials{
+	got, err := oauthCredential("anthropic", previous, &OAuthCredentials{
 		Access:  "new",
 		Refresh: "",
 		Expires: 123,
@@ -386,7 +417,7 @@ func TestOAuthCredentialKeepsPreviousRefreshWhenOmitted(t *testing.T) {
 }
 
 func TestOAuthCredentialRejectsMissingRefresh(t *testing.T) {
-	_, err := oauthCredential(Credential{Type: "oauth"}, &OAuthCredentials{Access: "new", Expires: 1})
+	_, err := oauthCredential("anthropic", Credential{Type: "oauth"}, &OAuthCredentials{Access: "new", Expires: 1})
 	if err == nil {
 		t.Fatal("expected error")
 	}
