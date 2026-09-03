@@ -114,6 +114,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("PATCH /api/subagent-models", handleSubagentModels(manager))
 	mux.HandleFunc("GET /api/compact-at", handleCompactAt(manager))
 	mux.HandleFunc("PATCH /api/compact-at", handleCompactAt(manager))
+	mux.HandleFunc("GET /api/compact-model", handleCompactModel(manager))
+	mux.HandleFunc("PATCH /api/compact-model", handleCompactModel(manager))
 	mux.HandleFunc("GET /api/compact-strategy", handleCompactStrategy(manager))
 	mux.HandleFunc("PATCH /api/compact-strategy", handleCompactStrategy(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/fast", handleSessionFast(manager))

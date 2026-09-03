@@ -91,13 +91,17 @@ func (cfg *loopConfig) appendState(msgs ...core.AgentMessage) {
 
 // loopConfig holds all dependencies for the agent loop.
 type loopConfig struct {
-	provider            core.Provider
-	tools               *core.Registry
-	hooks               Hooks
-	emitter             *Emitter
-	state               *AgentState
-	stateMu             *sync.Mutex // guards writes to *state (shared with Agent.mu)
-	model               core.Model
+	provider core.Provider
+	tools    *core.Registry
+	hooks    Hooks
+	emitter  *Emitter
+	state    *AgentState
+	stateMu  *sync.Mutex // guards writes to *state (shared with Agent.mu)
+	model    core.Model
+	// compactSummarizer optionally supplies the model that writes compaction
+	// summaries, instead of the session's own (see Config.CompactSummarizer).
+	// nil = summarize with the session's model.
+	compactSummarizer   func(core.Model) (core.Provider, core.Model, string)
 	systemPrompt        string
 	streamOpts          core.StreamOptions
 	streamRepairBackoff []time.Duration
@@ -309,8 +313,24 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				compactOpts := cfg.requestOptions()
 				compactOpts.CacheRetention = core.CacheOff
 
+				// A configured summarizer writes the summary instead of the
+				// session's model; the window stays the session's, since it is
+				// what decides when and how much to compact.
+				sumProvider, sumModel, fallbackNotice := cfg.provider, cfg.model, ""
+				if cfg.compactSummarizer != nil {
+					sumProvider, sumModel, fallbackNotice = cfg.compactSummarizer(cfg.model)
+					if sumProvider == nil || sumModel.ID == "" {
+						sumProvider, sumModel = cfg.provider, cfg.model
+					}
+					// Thinking level is not transferable across models, and
+					// compaction forces it off downstream regardless.
+					if sumModel.ID != cfg.model.ID {
+						compactOpts.ThinkingLevel = ""
+					}
+				}
+
 				result, compacted, err := compaction.Compact(
-					ctx, cfg.provider, cfg.model, compactOpts,
+					ctx, sumProvider, sumModel, compactOpts,
 					cfg.state.Messages, estimate.Tokens, window, *compactionSettings, "",
 				)
 				if err != nil {
@@ -355,7 +375,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 								}
 								return ""
 							}(),
-							Usage: result.Usage,
+							Usage:            result.Usage,
+							SummarizerNotice: fallbackNotice,
 						},
 					})
 				} else {

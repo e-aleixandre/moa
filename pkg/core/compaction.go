@@ -55,7 +55,18 @@ type CompactionPayload struct {
 	ModifiedFiles  []string `json:"modified_files,omitempty"`
 	SummaryMsgID   string   `json:"summary_msg_id,omitempty"`
 	FirstKeptMsgID string   `json:"first_kept_msg_id,omitempty"`
-	Usage          *Usage   `json:"usage,omitempty"`
+	// SummarizerNotice explains, for the reader, that the summary above was
+	// NOT written by the configured summarizer — an expired credential, a
+	// model no longer in the catalog. Empty in the ordinary case, including
+	// when a configured model was honoured: the compaction card is the whole
+	// story there, and a line on every compaction would be noise.
+	//
+	// It is part of the payload because it has to outlive the run that
+	// produced it: the reader usually comes back hours later, and a summary
+	// whose provenance is not what they configured is exactly what they need
+	// to know when judging it.
+	SummarizerNotice string `json:"summarizer_notice,omitempty"`
+	Usage            *Usage `json:"usage,omitempty"`
 }
 
 // compactionTailMargin is the extra headroom (≈2× the summary-message estimate)

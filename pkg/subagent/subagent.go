@@ -77,13 +77,16 @@ type Config struct {
 	CurrentThinkingLevel   func() string
 	CurrentPermissionCheck func() func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision
 	ProviderFactory        func(core.Model) (core.Provider, error)
-	AgentsMD               string
-	PromptBuilder          func(opts agentcontext.SystemPromptOptions) string
-	ParentTools            *core.Registry
-	AppCtx                 context.Context
-	WorkspaceRoot          string // CWD passed to system prompt builder
-	SkillsIndex            string // pre-formatted skills index for system prompt
-	MemoryIndex            string // pre-formatted memory index (one line per fact)
+	// CompactSummarizer optionally routes compaction summaries to the globally
+	// configured model instead of the child's own. nil = the child's model.
+	CompactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)
+	AgentsMD          string
+	PromptBuilder     func(opts agentcontext.SystemPromptOptions) string
+	ParentTools       *core.Registry
+	AppCtx            context.Context
+	WorkspaceRoot     string // CWD passed to system prompt builder
+	SkillsIndex       string // pre-formatted skills index for system prompt
+	MemoryIndex       string // pre-formatted memory index (one line per fact)
 	// Sources, when set, supersedes AgentsMD/SkillsIndex/MemoryIndex: children
 	// spawned after a /reload must inherit what the parent knows now, not the
 	// prompt inputs captured when the session was built.
@@ -1176,6 +1179,9 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 		// with the threshold inherited from it, read at spawn time so a child
 		// launched after the parent moved its limit uses the current value.
 		Compaction: core.CompactionWithDefault(resolveChildCompactAt(cfg)),
+		// Children summarize with the same model as the main session: the
+		// setting is global, and a child's compaction is a summary too.
+		CompactSummarizer: cfg.CompactSummarizer,
 	})
 }
 
