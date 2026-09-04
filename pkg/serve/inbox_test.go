@@ -909,3 +909,43 @@ func TestHookRetryReportsNotCreated(t *testing.T) {
 		t.Fatalf("stored %d events, want 1", got)
 	}
 }
+
+// Routing an event by hand from the inbox is an explicit instruction: it starts
+// a turn even when the source has autorun off, which only governs unattended
+// delivery.
+func TestManualRouteRunsEvenWhenSourceAutorunIsOff(t *testing.T) {
+	dir := t.TempDir()
+	off := false
+	srv, mgr := newHookTestServer(t, map[string]core.EventSourceConfig{
+		"ci": {
+			Secret:  "tok",
+			Target:  core.EventTarget{Kind: core.EventTargetInbox},
+			Autorun: &off,
+		},
+	})
+	_ = srv
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, _, err := mgr.events.Add(events.Event{Source: "ci", Title: "pipeline failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routed, err := mgr.RouteEvent(ev.ID, sess.ID, false, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if routed.State != events.StateRouted {
+		t.Fatalf("state = %q, want routed", routed.State)
+	}
+	found := false
+	for _, msg := range sess.History() {
+		if msg.Custom["source"] == "event" && msg.Custom["autorun"] == true {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("manual route did not deliver with autorun true: %+v", sess.History())
+	}
+}

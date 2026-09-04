@@ -300,7 +300,7 @@ func (m *Manager) autoRouteEvent(ev events.Event, src core.EventSourceConfig) (e
 		sessionID = sess.ID
 		createdID = sess.ID
 	}
-	routed, err := m.routeEventTo(ev, sessionID)
+	routed, err := m.routeEventTo(ev, sessionID, ev.Autorun)
 	if err != nil && createdID != "" {
 		if delErr := m.Delete(createdID); delErr != nil {
 			slog.Warn("wake-on-event: removing session orphaned by failed delivery", "session", createdID, "error", delErr)
@@ -431,7 +431,7 @@ func (m *Manager) RouteEvent(id, sessionID string, createNew bool, model, thinki
 			return events.Event{}, err
 		}
 		sessionID = sess.ID
-		routed, routeErr := m.deliverAndSettle(claimed, sessionID)
+		routed, routeErr := m.deliverAndSettle(claimed, sessionID, true)
 		if routeErr != nil {
 			if delErr := m.Delete(sessionID); delErr != nil {
 				slog.Warn("wake-on-event: removing session orphaned by route failure", "session", sessionID, "error", delErr)
@@ -439,7 +439,7 @@ func (m *Manager) RouteEvent(id, sessionID string, createNew bool, model, thinki
 		}
 		return routed, routeErr
 	}
-	return m.routeEventTo(ev, sessionID)
+	return m.routeEventTo(ev, sessionID, true)
 }
 
 func (m *Manager) createEventSession(ev events.Event, model, thinking string) (*ManagedSession, error) {
@@ -486,15 +486,18 @@ func eventSessionTitle(ev events.Event) string {
 // routeEventTo claims the event, injects it, then settles it. A refused send
 // returns the event to `new` for a later retry; a persist failure after a
 // successful send is logged and does not re-deliver.
-func (m *Manager) routeEventTo(ev events.Event, sessionID string) (events.Event, error) {
+func (m *Manager) routeEventTo(ev events.Event, sessionID string, run bool) (events.Event, error) {
 	claimed, err := m.events.MarkRouting(ev.ID)
 	if err != nil {
 		return claimed, err
 	}
-	return m.deliverAndSettle(claimed, sessionID)
+	return m.deliverAndSettle(claimed, sessionID, run)
 }
 
-func (m *Manager) deliverAndSettle(ev events.Event, sessionID string) (events.Event, error) {
+// run tells delivery whether to start a turn. It is the source's autorun for an
+// automatic delivery, and always true when the owner routes the event from the
+// inbox: choosing a destination by hand IS the instruction to act on it.
+func (m *Manager) deliverAndSettle(ev events.Event, sessionID string, run bool) (events.Event, error) {
 	if _, live := m.Get(sessionID); !live {
 		if _, err := m.resumeSession(sessionID, maxAutomationLoadedSessions); err != nil &&
 			!errors.Is(err, ErrBusy) {
@@ -505,7 +508,7 @@ func (m *Manager) deliverAndSettle(ev events.Event, sessionID string) (events.Ev
 			return events.Event{}, err
 		}
 	}
-	if err := m.deliverEvent(sessionID, ev, ev.Autorun); err != nil {
+	if err := m.deliverEvent(sessionID, ev, run); err != nil {
 		m.releaseRouting(ev.ID)
 		if errors.Is(err, errEventSessionBusy) {
 			return m.notePending(ev.ID, events.PendingSessionBusy), nil

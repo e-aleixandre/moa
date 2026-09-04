@@ -259,6 +259,16 @@
    you ("automation", "linear-webhook"…). Same badge shape as .pane but always
    neutral: it is information, not a call to action. Width-capped so a long
    caller label can never push the age off a narrow phone row. */
+/* An event-started session is marked with the transcript's own Import glyph
+   rather than a truncated label: it says "this came from outside" at a glance
+   and costs almost no width. The full source stays in the accessible name. */
+.session-row.variant-card .origin-event {
+  display: inline-flex;
+  align-items: center;
+  color: var(--overlay1);
+  flex: none;
+}
+
 .session-row.variant-card .origin {
   font-family: var(--mono);
   font-size: var(--text-nano);

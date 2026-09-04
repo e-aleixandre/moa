@@ -1,4 +1,4 @@
-import { X } from "lucide-preact";
+import { Import, X } from "lucide-preact";
 import { StateDot } from "../../primitives/index.js";
 import "./SessionRow.css";
 
@@ -29,6 +29,8 @@ const STATE_LABEL_SUFFIX = {
 //   path  — the session's working directory, the last and quietest line
 //   origin — who started the session when it wasn't you ("automation", or the
 //           label the caller passed). Omitted for ordinary user sessions.
+const isEventOrigin = (origin) => typeof origin === "string" && origin.startsWith("event:");
+
 export function SessionRow({
   title,
   state = "idle",
@@ -78,7 +80,12 @@ export function SessionRow({
             <span class="r1">
               <StateDot state={isUnseenResult ? "unseen" : state} size={8} />
               <span class="title" aria-hidden="true">{title}</span>
-              {origin && <span class="origin" aria-hidden="true">{origin}</span>}
+              {/* An event origin is shown as the same Import mark the event
+                  block uses in the transcript: the source name never fit in a
+                  7em badge, and "event:a…" told the owner nothing. */}
+              {origin && (isEventOrigin(origin)
+                ? <span class="origin-event" aria-hidden="true"><Import size={12} /></span>
+                : <span class="origin" aria-hidden="true">{origin}</span>)}
               {pane && <span class="pane" aria-hidden="true">{pane}</span>}
               {when && <span class="when" aria-hidden="true">{when}</span>}
             </span>
