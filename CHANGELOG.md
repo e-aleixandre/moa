@@ -5,6 +5,105 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Live Preview**: the web app the agent is building, inside the conversation.
+  The panel renders your development server at a chosen viewport width (390,
+  768, 1280 or fit to the panel), zooms and pans by pinch on touch or by
+  buttons with a mouse, and shows the run as activity that floats over the app
+  and dissolves, instead of a second chat permanently spending the app's pixels.
+  It opens from the session actions on mobile — full screen, because on a phone
+  the app is what you came to see — from the conversation head on desktop, and
+  per pane in a grid, each with its own address. In **Inspect** mode you tap an
+  element and write or dictate what should change about it: the agent receives
+  your sentence plus an unambiguous handle on that element (page, tag, id and
+  classes, containing elements, CSS path), so "this button" stops being
+  ambiguous. See [Live Preview](docs/serve.md#live-preview).
+- A **Live Preview proxy**, enabled with `moa serve --preview-port` and
+  `--preview-public-url`, serves your own development server with the inspector
+  script already injected, so Inspect works on a project you did not modify and
+  on a dev server your browser cannot reach directly. Moa manages no tunnels:
+  expose that local port however you already expose Moa. Because the previewed
+  app runs at the proxy's origin, it is for **your own dev servers**: only
+  loopback, private and tailnet addresses are accepted, Moa itself is not a
+  valid target, validated addresses are pinned at dial time, and every request
+  through the listener needs a capability that only the owner-authenticated API
+  issues.
+- **Wake-on-event v2**: an external system — an error tracker, a CI pipeline, a
+  mail watcher — gets its own hook URL, `POST /hooks/<source>/<secret>`, and
+  sends whatever body it already sends. Each source declares in config where its
+  events land (a project, a specific session, or the inbox), what to do when the
+  project has no open session or several, whether delivery starts a turn, and
+  how many events an hour it may act on. `moa hooks add|list|rm` manages sources
+  and prints the URL path once. The routing policy is snapshotted into each
+  event on arrival, so reconfiguring a source cannot change what an event
+  already waiting will do. See [Event hooks](docs/automation.md#event-hooks).
+- An event that could not be routed automatically waits in its own **Inbox**
+  surface, which now says why it is waiting (no open session, several, the
+  session is busy, the source is rate-limited, or the source targets the inbox)
+  and lets you read its payload before deciding. Choosing a destination is
+  itself the instruction to act: a hand-routed event starts a turn regardless of
+  the source's `autorun`, which governs unattended delivery only.
+- **A configurable summarizer model.** Compaction summaries were always written
+  by the session's own model, chosen for the work rather than for summarizing —
+  and the summary shares no cached prefix with the conversation, so a pricier
+  model buys nothing there. The global `compact_model` setting, editable from
+  the web Settings sheet, lets a cheaper model write them; subagents inherit it.
+  An unusable choice never breaks compaction: the session's model summarizes
+  instead and the transcript records why.
+- **Meta Model API (Muse Spark)** as a provider, through `META_API_KEY` or a
+  Muse subscription login (`moa --login meta`), with the `muse` alias.
+- Headless JSONL output (`-output json`) now carries usage and cost: a
+  `message_usage` line per completed assistant message, `subagent_end` with the
+  child's cost, and a `summary` whose `by_model` breaks the total down by
+  provider, model and main/subagent role — so a benchmark or a cost ledger no
+  longer has to reconstruct spending from session files.
+
+### Changed
+
+- A message sent from the Live Preview no longer prints its technical element
+  block as text. The transcript reads that block back and paints a compact
+  reference on the message's own spine — the element's visible text (or its
+  accessible name, for an image or icon button), the containing card, and the
+  page — with the full selector one tap away. What the agent receives is
+  unchanged, and messages already in your history paint the same way.
+- Attachments on your messages are grouped into a single block at the foot of
+  the message, with the file count and total weight in its header. Past four
+  files, three rows are shown and the rest fold behind "N more", so a message
+  keeps a predictable height however much was sent.
+- The mobile session actions are one button that opens a menu, rather than a
+  rail competing with the conversation title for room, and it carries a single
+  badge for everything waiting behind it.
+- The open sessions in the mobile drawer and the desktop spine are now named
+  **Active**, like the New results and Saved groups around them.
+- A session started by an event carries the same Import mark the event block
+  uses in the transcript, instead of a truncated `event:…` text badge that named
+  nothing and took the title's room.
+- The hook response says whether the delivery created a new event or matched one
+  already stored under the same key, so a provider that retries can tell a retry
+  from a new event.
+- Creating a session from a pending event no longer asks which model to use: it
+  takes the source's configured model and thinking, or Moa's defaults, with an
+  explicit override for the rare case.
+
+### Fixed
+
+- The pre-compaction notice stays in the transcript. It is addressed to the
+  model, but it is also the reason the model interrupts its task to write things
+  down; without it, a session reopened hours later kept those actions and lost
+  their cause. The compaction card also shows the time of day.
+- A skill launched with `/<name>` as an isolated fork is anchored in the
+  conversation, so its card survives a reload, and `background: true` now means
+  only "does not block the parent" — the child's result always reaches the agent
+  that has to act on it.
+- Touching a control on a phone no longer leaves it looking hovered afterwards.
+- A back swipe that was already settling is no longer picked up as a new
+  gesture.
+- The viewport width presets stay available in a narrow pane instead of being
+  dropped when the preview has little room.
+
 ## [0.36.0] - 2026-09-02
 
 ### Added
