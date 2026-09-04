@@ -6,6 +6,9 @@
 // custom, what to select when switching modes, what to send — can be tested
 // without a DOM.
 
+import { modelAccent } from "../../data/selectors.js";
+import { modelCodename } from "../../data/util/format.js";
+
 export const SESSION = "session";
 
 // isCustom reports whether a spec names a specific model rather than "whatever
@@ -33,6 +36,16 @@ export function normalizeChoices(choices) {
     });
   }
   return out;
+}
+
+export function selectorModels(choices) {
+  return normalizeChoices(choices).map((choice) => {
+    const codename = modelCodename(choice.name) || choice.name;
+    return { id: choice.spec, catalogId: choice.spec, name: choice.name,
+      provider: choice.provider || "Other", codename,
+      sub: codename === choice.name ? "" : choice.name.replace(codename, "").trim(),
+      accent: modelAccent(choice.name), alias: choice.spec };
+  });
 }
 
 // specForMode decides what to send when the user flips between "session model"

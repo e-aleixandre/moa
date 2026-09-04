@@ -1,11 +1,15 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { createPortal } from "preact/compat";
+import { ChevronDown } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
 import { Segmented } from "../Segmented/Segmented.jsx";
+import { ModelSelector } from "../ModelSelector/ModelSelector.jsx";
 import {
   SESSION,
   isCustom,
   normalizeChoices,
+  selectorModels,
   specForMode,
   summaryLabel,
 } from "./compact-model-model.js";
@@ -14,6 +18,31 @@ const MODE_OPTIONS = [
   { value: SESSION, label: "Session model" },
   { value: "custom", label: "Custom" },
 ];
+
+function CompactModelPicker({ choices, selected, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef(null);
+  const pickerRef = useRef(null);
+  const [position, setPosition] = useState(null);
+  const selectedChoice = choices.find((choice) => choice.spec === selected);
+  const close = () => { setOpen(false); requestAnimationFrame(() => triggerRef.current?.focus()); };
+  const show = () => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (rect) setPosition({ left: Math.max(16, Math.min(rect.left, window.innerWidth - 376)), top: Math.max(16, Math.min(rect.bottom + 8, window.innerHeight - 400)) });
+    setOpen(true);
+  };
+  useEffect(() => {
+    if (!open) return undefined;
+    const frame = requestAnimationFrame(() => pickerRef.current?.querySelector("input")?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+  return <>
+    <button ref={triggerRef} type="button" class="compact-model-picker-trigger" aria-label="Model that writes compaction summaries" aria-describedby="compact-model-hint" aria-haspopup="dialog" aria-expanded={open} onClick={show}>
+      <span class="compact-model-picker-choice"><span>{selectedChoice?.name || selected}</span>{selectedChoice?.provider && <small>{selectedChoice.provider}</small>}</span><ChevronDown size={16} aria-hidden="true" />
+    </button>
+    {open && typeof document !== "undefined" && document.body && createPortal(<div class="compact-model-picker-layer" onClick={close}><div class="compact-model-picker-popover" ref={pickerRef} role="dialog" aria-label="Choose compaction model" style={position || undefined} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); if (!event.defaultPrevented) close(); } }}><ModelSelector models={selectorModels(choices)} selected={selected} modelOnly onSelect={(spec) => { onSelect(spec); close(); }} /></div></div>, document.body)}
+  </>;
+}
 
 // CompactModel — which model writes compaction summaries.
 //
@@ -81,18 +110,7 @@ export function CompactModel() {
         aria-describedby="compact-model-hint"
       />
       {mode === "custom" && !noChoices && (
-        <select
-          class="compact-model-select"
-          value={spec}
-          aria-label="Model that writes compaction summaries"
-          onChange={(e) => save(e.currentTarget.value)}
-        >
-          {choices.map((c) => (
-            <option key={c.spec} value={c.spec}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+        <CompactModelPicker choices={choices} selected={spec} onSelect={save} />
       )}
     </div>
   );

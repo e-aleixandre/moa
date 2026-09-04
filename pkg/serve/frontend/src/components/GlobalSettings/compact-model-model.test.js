@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { SESSION, isCustom, normalizeChoices, specForMode, summaryLabel } from './compact-model-model.js';
+import { SESSION, isCustom, normalizeChoices, selectorModels, specForMode, summaryLabel } from './compact-model-model.js';
 
 describe('isCustom', () => {
   it('treats the keyword, empty and whitespace as "the session model"', () => {
@@ -12,6 +12,12 @@ describe('isCustom', () => {
 
   it('treats a model spec as custom', () => {
     expect(isCustom('terra')).toBe(true);
+  });
+});
+
+describe('selectorModels', () => {
+  it('adapts credential-filtered choices to the shared picker shape', () => {
+    expect(selectorModels([{ spec: 'terra', name: 'GPT-5.6 Terra', provider: 'openai' }])[0]).toMatchObject({ id: 'terra', codename: 'Terra', accent: 'teal' });
   });
 });
 
