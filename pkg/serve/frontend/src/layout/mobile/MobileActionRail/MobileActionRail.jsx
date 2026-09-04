@@ -36,7 +36,7 @@ export function MobileActionRail({ actions }) {
         aria-expanded={overflowOpen}
         onClick={() => setOverflowOpen((open) => !open)}
       >
-        <MoreVertical size={18} aria-hidden="true" />
+        <MoreVertical size={16} aria-hidden="true" />
         {pending > 0 && <span class="mconv-action-rail-badge" aria-hidden="true">{pending > 9 ? "9+" : pending}</span>}
       </button>
       {overflowOpen && (
