@@ -291,7 +291,7 @@ func TestPreviewRejectsLateDialFromPreviousGeneration(t *testing.T) {
 	}
 	old := p.targetSnapshot()
 	client, peer := net.Pipe()
-	defer peer.Close()
+	defer func() { _ = peer.Close() }()
 	p.dial = func(context.Context, string, string) (net.Conn, error) { return client, nil }
 	if err := p.SetTarget("http://127.0.0.1:5174", nil); err != nil {
 		t.Fatal(err)
