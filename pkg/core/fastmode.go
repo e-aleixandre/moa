@@ -3,14 +3,17 @@ package core
 import "strings"
 
 // FastCostMultiplier returns the premium-tier token-price multiplier for a
-// provider. Anthropic's fast-mode documentation table lists Opus 5 / 4.8 at
-// $10 input / $50 output versus $5 / $25 standard; OpenAI and xAI multipliers
-// come from their respective FastNote strings below.
-func FastCostMultiplier(provider string) float64 {
-	switch provider {
+// model. Anthropic's fast-mode documentation table lists Opus 5 / 4.8 at
+// $10 input / $50 output versus $5 / $25 standard. GPT-6 Astra's documented
+// fast rate differs from the older OpenAI GPT-5 generation.
+func FastCostMultiplier(model Model) float64 {
+	switch model.Provider {
 	case "anthropic", "xai":
 		return 2
 	case "openai":
+		if model.ID == "gpt-6-astra" {
+			return 2
+		}
 		return 2.5
 	default:
 		return 1
@@ -46,7 +49,8 @@ func supportsFastModel(m Model) bool {
 		// differently and are not offered a tier.
 		return strings.HasPrefix(m.ID, "gpt-5.4") ||
 			strings.HasPrefix(m.ID, "gpt-5.5") ||
-			strings.HasPrefix(m.ID, "gpt-5.6")
+			strings.HasPrefix(m.ID, "gpt-5.6") ||
+			strings.HasPrefix(m.ID, "gpt-6")
 	case "xai":
 		return true
 	}
@@ -71,6 +75,9 @@ func FastNote(modelID string) string {
 	case "anthropic":
 		return "2.5× faster · billed as separate usage credits"
 	case "openai":
+		if m.ID == "gpt-6-astra" {
+			return "Fast mode · 2× the token rate"
+		}
 		return "1.5× faster · burns credits 2.5×"
 	case "xai":
 		return "Priority queue · 2× the token rate"

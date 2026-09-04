@@ -126,6 +126,11 @@ The Meta models are `muse-spark-1.3` (also available as `muse`) and
 Meta uses its prompts to improve their products. Muse Spark always reasons, so
 `off` resolves to its lowest effort.
 
+The OpenAI model `gpt-6-astra` is also available as `astra` (or `gpt-6`). Its
+five thinking positions map to `low`, `medium`, `high`, `xhigh`, and `max`, so
+the `off` position selects Astra's lowest reasoning effort rather than disabling
+reasoning.
+
 ### MCP servers
 
 | Field | Type | Description |

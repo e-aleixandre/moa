@@ -130,6 +130,8 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | `codex` | `gpt-5.3-codex` |
 | `codex-spark` | `gpt-5.3-codex-spark` |
 | `codex-5.2` | `gpt-5.2-codex` |
+| `astra` | `gpt-6-astra` |
+| `gpt-6` | `gpt-6-astra` |
 | `grok` | `grok-4.6` (xAI) |
 | `grok-4.6-build` | `grok-4.6` (the subscription backend's name for it) |
 | `grok-4.5-build` | `grok-4.5` (the subscription backend's name for it) |
@@ -155,7 +157,9 @@ model does with them differs:
   and is promoted to `high`; the web selector hides the option.
 - **`xhigh`** only reaches a higher tier on Anthropic Opus models. Every other
   Anthropic model caps it at `high`. OpenAI models accept `xhigh` as its own
-  effort level.
+  effort level. On **GPT-6 Astra**, the five UI positions map to `low`,
+  `medium`, `high`, `xhigh`, and `max` respectively, so `off` is Astra's
+  lowest reasoning effort rather than disabled reasoning.
 
 ## Fast mode
 
@@ -166,6 +170,7 @@ CLI flag, and only some models can serve it:
 | Provider | Models that support it | What it costs |
 |---|---|---|
 | Anthropic | Opus models only | 2.5× faster, billed as separate usage credits |
+| OpenAI | GPT-6 Astra | Fast mode, 2× the token rate |
 | OpenAI | `gpt-5.4`, `gpt-5.5` and `gpt-5.6` generations (not the codex or mini variants) | 1.5× faster, burns credits 2.5× |
 | xAI | the whole catalogue | priority queue, 2× the token rate |
 
@@ -174,7 +179,8 @@ not stored, and the session stays at standard speed.
 
 The session cost (`cost_usd`, the budget guardrail) charges a fast request at
 the provider's premium: 2× on Anthropic ($10/$50 per MTok on Opus, cache
-multipliers on top), 2.5× on OpenAI and 2× on xAI. The multiplier applies only
+multipliers on top), 2× on GPT-6 Astra, 2.5× on earlier supported OpenAI GPT
+models, and 2× on xAI. The multiplier applies only
 to turns the provider actually served at the premium tier — Anthropic reports
 `usage.speed`, OpenAI and xAI echo `service_tier` — so a turn that fell back to
 standard speed is billed as standard.

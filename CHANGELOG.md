@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OpenAI **GPT-6 Astra** (`astra` / `gpt-6`), with long-context pricing,
+  Fast-mode billing, and its required reasoning settings.
 - **Live Preview**: the web app the agent is building, inside the conversation.
   The panel renders your development server at a chosen viewport width (390,
   768, 1280 or fit to the panel), zooms and pans by pinch on touch or by

@@ -267,7 +267,8 @@ func ThinkingAlwaysOn(model Model) bool {
 // EffectiveThinkingLevel resolves a persisted level for a model. xAI requires
 // reasoning and only accepts low/medium/high. Meta also requires it; "off"
 // becomes "low" so a session never persists a level the selector can't show,
-// while internal callers may ask for "minimal" explicitly. Models whose
+// while internal callers may ask for "minimal" explicitly. GPT-6 Astra maps
+// Moa's five selector positions onto its five supported efforts. Models whose
 // thinking cannot be turned off promote "off" to the API default ("high").
 // Other providers keep the value.
 func EffectiveThinkingLevel(model Model, level string) (string, error) {
@@ -292,6 +293,28 @@ func EffectiveThinkingLevel(model Model, level string) (string, error) {
 		default:
 			return "", fmt.Errorf("invalid Meta thinking level %q (choose: low, medium, high, xhigh)", level)
 		}
+	}
+	if strings.EqualFold(model.ID, "gpt-6-astra") {
+		switch level {
+		case "off":
+			return "low", nil
+		case "low":
+			return "medium", nil
+		case "medium":
+			return "high", nil
+		case "high":
+			return "xhigh", nil
+		case "xhigh", "max":
+			return "max", nil
+		default:
+			return "", fmt.Errorf("invalid GPT-6 Astra thinking level %q (choose: off, low, medium, high, xhigh)", level)
+		}
+	}
+	// "max" is persisted only while Astra is active. Translate it back to the
+	// nearest selector value before switching to any model that does not expose
+	// it, so a model switch cannot leave an unselectable setting behind.
+	if level == "max" {
+		level = "xhigh"
 	}
 	if !IsValidThinkingLevel(level) {
 		return "", fmt.Errorf("invalid thinking level %q", level)

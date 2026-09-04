@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+var gpt6AstraReasoningEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+
 // Known models with context window sizes and API details.
 var knownModels = map[string]Model{
 	// --- Anthropic ---
@@ -59,6 +61,18 @@ var knownModels = map[string]Model{
 		ID: "gpt-5.2-codex", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.2 Codex", MaxInput: 256_000, MaxOutput: 16384,
 		Pricing: &Pricing{Input: 1.25, Output: 10, CacheRead: 0.125},
+	},
+	"gpt-6-astra": {
+		ID: "gpt-6-astra", Provider: "openai", API: "openai-chat",
+		Name: "GPT-6 Astra", MaxInput: 1_050_000, MaxOutput: 128_000,
+		// Short-context (<=272K input) pricing shown here. Long-context
+		// (>272K input) prompts are billed at 2x input and 1.5x output.
+		Pricing: &Pricing{
+			Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5,
+			Tiers: []PricingTier{
+				{Threshold: 272_000, Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25},
+			},
+		},
 	},
 	"gpt-5.6-sol": {
 		ID: "gpt-5.6-sol", Provider: "openai", API: "openai-chat",
@@ -159,10 +173,20 @@ var knownModels = map[string]Model{
 	},
 }
 
+// ReasoningEffortsForModel returns the validated reasoning efforts a model
+// accepts. A nil result preserves the Responses API's existing behavior for
+// models without an explicit capability declaration.
+func ReasoningEffortsForModel(model Model) []string {
+	if strings.EqualFold(model.ID, "gpt-6-astra") {
+		return gpt6AstraReasoningEfforts
+	}
+	return nil
+}
+
 func init() {
 	for _, model := range knownModels {
 		if model.Pricing != nil && supportsFastModel(model) {
-			model.Pricing.FastMultiplier = FastCostMultiplier(model.Provider)
+			model.Pricing.FastMultiplier = FastCostMultiplier(model)
 		}
 	}
 }
@@ -178,6 +202,8 @@ var modelAliases = map[string]string{
 	"codex":       "gpt-5.3-codex",
 	"codex-spark": "gpt-5.3-codex-spark",
 	"codex-5.2":   "gpt-5.2-codex",
+	"astra":       "gpt-6-astra",
+	"gpt-6":       "gpt-6-astra",
 	"sol":         "gpt-5.6-sol",
 	"terra":       "gpt-5.6-terra",
 	"luna":        "gpt-5.6-luna",
@@ -346,6 +372,7 @@ var modelDisplayOrder = []string{
 	"muse-spark-1.3",
 	"muse-spark-1.3-contributor",
 	// OpenAI
+	"gpt-6-astra",
 	"gpt-5.6-sol",
 	"gpt-5.6-terra",
 	"gpt-5.6-luna",

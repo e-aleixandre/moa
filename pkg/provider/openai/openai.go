@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -99,6 +100,13 @@ func (o *OpenAI) supportsExplicitCacheBreakpoints(modelID string) bool {
 
 // Stream sends a request and returns a channel of normalized AssistantEvents.
 func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	// GPT-6 Astra rejects temperature. The normal agent path does not set it,
+	// but clearing it here also keeps direct provider callers on the documented
+	// contract without changing other OpenAI models.
+	if strings.EqualFold(req.Model.ID, "gpt-6-astra") {
+		req.Options.Temperature = nil
+	}
+
 	apiKey := o.apiKey
 	if req.Options.APIKey != "" {
 		apiKey = req.Options.APIKey
@@ -122,7 +130,8 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		SupportsExplicitCacheBreakpoints: o.supportsExplicitCacheBreakpoints(req.Model.ID),
 		// The Codex transport rejects service_tier outright; only the public
 		// API prices a priority tier.
-		SupportsServiceTier: o.endpoint == apiEndpoint,
+		SupportsServiceTier:     o.endpoint == apiEndpoint,
+		AllowedReasoningEfforts: core.ReasoningEffortsForModel(req.Model),
 	}
 	body, err := responses.BuildRequestBody(req, dialect)
 	if err != nil {

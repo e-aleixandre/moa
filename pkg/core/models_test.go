@@ -147,6 +147,26 @@ func TestGPT56TerraPricing(t *testing.T) {
 	}
 }
 
+func TestGPT6AstraPricing(t *testing.T) {
+	model, ok := ResolveModel("astra")
+	if !ok || model.ID != "gpt-6-astra" || model.Pricing == nil {
+		t.Fatalf("astra = %+v, %v", model, ok)
+	}
+	if model.MaxInput != 1_050_000 || model.MaxOutput != 128_000 {
+		t.Fatalf("Astra limits = %+v", model)
+	}
+	p := model.Pricing
+	if got, want := *p, (Pricing{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_000, Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25}}}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Astra pricing = %+v, want %+v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 271_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 2.794981; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("short Astra cost = %v, want %v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 272_000, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 5.565002; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("long Astra cost = %v, want %v", got, want)
+	}
+}
+
 func TestGPT56LunaPricing(t *testing.T) {
 	model, ok := ResolveModel("luna")
 	if !ok || model.Pricing == nil {
@@ -189,6 +209,34 @@ func TestEffectiveThinkingLevel_Muse(t *testing.T) {
 	}
 	if _, err := EffectiveThinkingLevel(model, "unknown"); err == nil {
 		t.Fatal("unknown Meta level must fail")
+	}
+}
+
+func TestEffectiveThinkingLevel_GPT6Astra(t *testing.T) {
+	model, ok := ResolveModel("astra")
+	if !ok {
+		t.Fatal("astra must resolve")
+	}
+	for input, want := range map[string]string{
+		"off": "low", "low": "medium", "medium": "high", "high": "xhigh", "xhigh": "max",
+	} {
+		got, err := EffectiveThinkingLevel(model, input)
+		if err != nil || got != want {
+			t.Errorf("EffectiveThinkingLevel(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	if _, err := EffectiveThinkingLevel(model, "minimal"); err == nil {
+		t.Fatal("minimal Astra level must fail")
+	}
+
+	// The internal Astra-only max value must return to an option the selector
+	// can represent when switching models.
+	other, ok := ResolveModel("terra")
+	if !ok {
+		t.Fatal("terra must resolve")
+	}
+	if got, err := EffectiveThinkingLevel(other, "max"); err != nil || got != "xhigh" {
+		t.Fatalf("switching Astra max to Terra = %q, %v; want xhigh", got, err)
 	}
 }
 
@@ -522,6 +570,7 @@ func TestResolveModel_CaseAndSpaceInsensitive(t *testing.T) {
 		"SOL":             "gpt-5.6-sol",
 		"Terra":           "gpt-5.6-terra",
 		"Luna":            "gpt-5.6-luna",
+		"Astra":           "gpt-6-astra",
 		"Opus":            "claude-opus-5",
 		"Fable":           "claude-fable-5-1",
 		" sol ":           "gpt-5.6-sol",

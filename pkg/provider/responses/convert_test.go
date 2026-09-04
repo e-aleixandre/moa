@@ -233,12 +233,51 @@ func TestMapReasoningEffort(t *testing.T) {
 		{"medium", "medium"},
 		{"high", "high"},
 		{"xhigh", "xhigh"},
+		{"max", "max"},
 	}
 	for _, tt := range tests {
 		got := mapReasoningEffort(tt.in)
 		if got != tt.want {
 			t.Errorf("mapReasoningEffort(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestBuildRequestBody_GPT6AstraReasoning(t *testing.T) {
+	model, ok := core.ResolveModel("astra")
+	if !ok {
+		t.Fatal("astra must resolve")
+	}
+	for uiLevel, want := range map[string]string{
+		"off": "low", "low": "medium", "medium": "high", "high": "xhigh", "xhigh": "max",
+	} {
+		t.Run(uiLevel, func(t *testing.T) {
+			effort, err := core.EffectiveThinkingLevel(model, uiLevel)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := BuildRequestBody(core.Request{
+				Model: model, Messages: []core.Message{core.NewUserMessage("hello")},
+				Options: core.StreamOptions{ThinkingLevel: effort},
+			}, Dialect{Provider: "openai", Model: model.ID, AllowedReasoningEfforts: core.ReasoningEffortsForModel(model)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(raw, &body); err != nil {
+				t.Fatal(err)
+			}
+			reasoning, ok := body["reasoning"].(map[string]any)
+			if !ok {
+				t.Fatalf("reasoning = %#v", body["reasoning"])
+			}
+			if got := reasoning["effort"]; got != want {
+				t.Errorf("reasoning.effort = %q, want %q", got, want)
+			}
+			if got := reasoning["effort"]; got == "none" {
+				t.Fatal("Astra must never receive reasoning.effort=none")
+			}
+		})
 	}
 }
 

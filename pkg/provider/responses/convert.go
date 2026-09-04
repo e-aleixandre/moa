@@ -136,8 +136,8 @@ func RequestsPriority(req core.Request, dialect Dialect) bool {
 	return req.Options.Fast && dialect.SupportsServiceTier && core.SupportsFast(req.Model.ID)
 }
 
-// mapReasoningEffort maps our thinking levels to OpenAI reasoning effort.
-// OpenAI supports: none, minimal, low, medium, high, xhigh.
+// MapReasoningEffort maps Moa's effective thinking level to an OpenAI
+// reasoning effort. Some models, including GPT-6 Astra, also support max.
 func MapReasoningEffort(level string, allowed []string) string {
 	var effort string
 	switch strings.ToLower(level) {
@@ -153,6 +153,8 @@ func MapReasoningEffort(level string, allowed []string) string {
 		effort = "high"
 	case "xhigh":
 		effort = "xhigh"
+	case "max":
+		effort = "max"
 	default:
 		effort = "medium"
 	}

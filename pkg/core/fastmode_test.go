@@ -17,6 +17,7 @@ func TestSupportsFast(t *testing.T) {
 		{"claude-sonnet-5", false, "Sonnet answers: does not support the `speed` parameter"},
 		{"claude-haiku-4-5-20251001", false, "Haiku answers: does not support the `speed` parameter"},
 		{"gpt-5.6", true, "OpenAI prices a priority tier on the 5.4 generation onwards"},
+		{"gpt-6", true, "GPT-6 Astra documents Fast mode"},
 		{"grok-4.5", true, "xAI accepts the priority tier across its catalogue"},
 		{"no-such-model", false, "an unknown model must not be offered a switch the API would reject"},
 	}
@@ -49,6 +50,7 @@ func TestPricingCostFastMultiplier(t *testing.T) {
 	}{
 		{"claude-opus-5", 2},
 		{"gpt-5.6-terra", 2.5},
+		{"gpt-6-astra", 2},
 		{"claude-sonnet-5", 1},
 	}
 	for _, tc := range cases {
