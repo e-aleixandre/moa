@@ -137,6 +137,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | `grok-4.5-build` | `grok-4.5` (the subscription backend's name for it) |
 | `muse` | `muse-spark-1.3` (Meta) |
 | `sol` | `gpt-5.6-sol` |
+| `daybreak` | `gpt-daybreak-blue-latest` (moving alias for the current flagship, with safeguards for defensive cybersecurity work; needs Daybreak provisioning) |
 | `terra` | `gpt-5.6-terra` |
 | `luna` | `gpt-5.6-luna` |
 | `gpt-5.6` | `gpt-5.6-sol` |
