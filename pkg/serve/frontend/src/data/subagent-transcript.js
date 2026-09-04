@@ -37,8 +37,12 @@ export function hasParentTask(messages) {
 // this client started listening — not "any message" — so an entry restored
 // from an init snapshot or from a persisted transcript is already complete.
 export function needsTranscriptHydration(entry) {
-  if (!entry) return false;
-  if (entry.transcriptHydrating || entry.transcriptHydrated) return false;
+  if (!entry || entry.transcriptHydrating) return false;
+  // A reconnect snapshot is authoritative about which jobs are live. When the
+  // viewed entry is absent, fetch its persisted summary even if its messages
+  // were already hydrated: the missed frame may be its terminal lifecycle.
+  if (entry.lifecycleUnverified) return true;
+  if (entry.transcriptHydrated) return false;
   return !hasParentTask(entry.messages);
 }
 
@@ -107,21 +111,29 @@ export function mergeSubagentTranscript(fetched, live, toolDetailBase = '') {
 
 // fetchTranscriptItems pages backwards (the endpoint answers newest first)
 // until the encargo shows up, the server reports no more history, or the page
-// cap is hit. Returns raw REST items in chronological order.
+// cap is hit. Returns raw REST items in chronological order together with the
+// lifecycle fields carried by the first page.
 async function fetchTranscriptItems(id, jobId) {
   const items = [];
+  let summary = null;
   let cursor = '';
   for (let page = 0; page < MAX_PAGES; page++) {
     const query = `limit=${PAGE_SIZE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     const response = await api('GET', `/api/sessions/${id}/subagents/${jobId}?${query}`);
     if (!response) break;
+    if (!summary) {
+      summary = {
+        status: response.status,
+        finishedAtMs: response.finished_at ? Date.parse(response.finished_at) : null,
+      };
+    }
     const batch = response.messages || [];
     items.unshift(...(response.order === 'newest_first' ? [...batch].reverse() : batch));
     if (!response.has_more || !response.next_cursor) break;
     if (items.some((item) => item?.source === 'subagent_parent')) break;
     cursor = response.next_cursor;
   }
-  return items;
+  return summary ? { items, ...summary } : null;
 }
 
 // hydrateSubagentTranscript backfills one subagent's earlier history.
@@ -137,9 +149,9 @@ export async function hydrateSubagentTranscript(id, jobId, isActive = () => true
     subagents: { ...session.subagents, [jobId]: { ...entry, transcriptHydrating: true } },
   });
 
-  let items = null;
+  let snapshot = null;
   try {
-    items = await fetchTranscriptItems(id, jobId);
+    snapshot = await fetchTranscriptItems(id, jobId);
   } catch { /* degrade to the live-only transcript below */ }
 
   // Read the store AFTER the round trip: WS deltas may have extended this
@@ -148,7 +160,10 @@ export async function hydrateSubagentTranscript(id, jobId, isActive = () => true
   const settled = store.get().sessions[id];
   const now = settled?.subagents?.[jobId];
   if (!now) return false;
-  const applied = !!items && isActive();
+  const applied = !!snapshot && isActive();
+  const terminal = applied && (
+    snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled'
+  );
   updateSession(id, {
     subagents: {
       ...settled.subagents,
@@ -158,10 +173,15 @@ export async function hydrateSubagentTranscript(id, jobId, isActive = () => true
         ...(applied
           ? {
             messages: mergeSubagentTranscript(
-              items,
+              snapshot.items,
               now.messages || [],
               `/api/sessions/${id}/subagents/${jobId}`,
             ),
+            status: snapshot.status || now.status,
+            finishedAtMs: Number.isFinite(snapshot.finishedAtMs) ? snapshot.finishedAtMs : now.finishedAtMs,
+            streamingText: terminal ? null : now.streamingText,
+            thinkingText: terminal ? null : now.thinkingText,
+            lifecycleUnverified: false,
             transcriptHydrated: true,
           }
           : {}),

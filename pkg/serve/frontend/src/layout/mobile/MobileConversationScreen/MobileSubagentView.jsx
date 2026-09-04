@@ -41,7 +41,7 @@ export function MobileSubagentView({ session, jobId, onBack }) {
   const view = subagentView(session, jobId);
 
   // Same backfill as the desktop view: see useSubagentTranscript.
-  useSubagentTranscript(session?.id, jobId);
+  useSubagentTranscript(session?.id, jobId, session?.subagents?.[jobId]?.lifecycleUnverified);
 
   // All hooks run on EVERY render regardless of `view` (rules of hooks); each
   // one guards internally for a null view rather than an early `if (!view)`.

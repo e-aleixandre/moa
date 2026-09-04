@@ -11,6 +11,8 @@ const {
   hydrateSubagentTranscript, mergeSubagentTranscript, needsTranscriptHydration,
 } = await import('./subagent-transcript.js');
 const { subagentView } = await import('./subagent-view-model.js');
+const { handleWsInit } = await import('./ws-handlers.js');
+const { liveTrayAgents } = await import('./stream-model.js');
 
 let requests = [];
 let responder = () => ({});
@@ -85,6 +87,37 @@ test('an entry that already holds the parent task is not refetched', async () =>
   expect(needsTranscriptHydration(store.get().sessions.s1.subagents.j1)).toBe(false);
   await hydrateSubagentTranscript('s1', 'j1');
   expect(requests).toEqual([]);
+});
+
+test('a viewed job missing from the live snapshot rechecks its persisted terminal status', async () => {
+  const parentTask = {
+    role: 'user', _msg_id: 'm-task', custom: { source: 'subagent_parent' },
+    content: [{ type: 'text', text: 'Investiga el bug' }],
+  };
+  seed({ messages: [parentTask], transcriptHydrated: true });
+  const current = store.get().sessions.s1;
+  setState({ sessions: { s1: { ...current, viewingSubagent: 'j1' } } });
+
+  // The launch has fallen outside the bounded history tail, so init cannot
+  // attach this completed job's outcome. It is also absent from subagents,
+  // which is authoritative for live jobs.
+  handleWsInit('s1', {
+    messages: Array.from({ length: 150 }, (_, i) => ({
+      role: 'assistant', msg_id: `filler-${i}`, content: [{ type: 'text', text: `filler ${i}` }],
+    })),
+    subagents: [],
+    subagent_outcomes: [],
+  });
+
+  expect(needsTranscriptHydration(store.get().sessions.s1.subagents.j1)).toBe(true);
+  responder = () => page([taskItem, assistantItem('m1', 'Terminado')], {
+    status: 'completed', finished_at: '2026-09-04T20:17:09Z',
+  });
+  await hydrateSubagentTranscript('s1', 'j1');
+
+  const session = store.get().sessions.s1;
+  expect(session.subagents.j1.status).toBe('completed');
+  expect(liveTrayAgents(session)).toHaveLength(0);
 });
 
 test('a pruned subagent (404) leaves the live transcript untouched', async () => {

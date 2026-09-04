@@ -51,6 +51,9 @@ export function handleWsInit(id, data) {
   // init snapshot lists live jobs only, so replacing the map outright would
   // delete the very transcript being read and bounce the reader back to the
   // parent — which is what happens on mobile every time the screen sleeps.
+  // An entry that was locally still running needs its persisted lifecycle
+  // rechecked, though: its terminal event may be exactly what the sleeping
+  // client missed, and a capped init cannot always carry the old outcome.
   const namespace = attentionNamespaceFromInit(data);
   const cursorTransition = namespace
     ? attentionNamespaceTransition(store.get().sessions[id], namespace)
@@ -60,7 +63,12 @@ export function handleWsInit(id, data) {
   const viewing = prev.viewingSubagent;
   const keptLocal = viewing && prev.subagents && prev.subagents[viewing]
     && !(data.subagents || []).some(sa => sa && sa.job_id === viewing)
-    ? { [viewing]: prev.subagents[viewing] }
+    ? { [viewing]: {
+      ...prev.subagents[viewing],
+      ...(['running', 'cancelling'].includes(prev.subagents[viewing].status)
+        ? { lifecycleUnverified: true }
+        : {}),
+    } }
     : null;
   // Same protection for a background bash being read in the BashJobView: once
   // the job ends the server may drop it from the bash_jobs snapshot, and

@@ -34,7 +34,7 @@ export function SubagentView({ session, jobId, onBack }) {
 
   // A subagent born while this conversation was open holds only the deltas
   // received since; fetch the history that predates opening this view.
-  useSubagentTranscript(session?.id, jobId);
+  useSubagentTranscript(session?.id, jobId, session?.subagents?.[jobId]?.lifecycleUnverified);
 
   // Rebound: the subagent was pruned (finished + cleaned). Fall back to parent.
   // All hooks below run on EVERY render regardless of `view` (rules of hooks);
