@@ -2,14 +2,20 @@ package serve
 
 import (
 	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,56 +26,146 @@ import (
 var previewInspector []byte
 
 const previewMaxBody = 8 << 20
+const previewAuthCookie = "moa_preview_auth"
+
+type previewTarget struct {
+	url          *url.URL
+	aliases      []string
+	ips          []net.IP
+	port         string
+	generation   uint64
+	parentOrigin string
+}
+
+type previewDialPlanKey struct{}
+type previewDialPlan struct {
+	ips  []net.IP
+	port string
+	gen  uint64
+}
 
 // PreviewProxy is the single, switchable upstream exposed by the preview port.
-// It deliberately has its own mux: no moa API is reachable on this origin.
+// It owns one bounded transport; targets are validated and pinned at dial time.
 type PreviewProxy struct {
 	publicURL  string
 	moaPort    int
 	listenPort int
-	mu         sync.RWMutex
-	target     *url.URL
-	aliases    []string
+	secret     string
+	secure     bool
+	transport  *http.Transport
+	resolve    func(string) ([]net.IP, error)
+
+	mu           sync.RWMutex
+	target       *previewTarget
+	generation   uint64
+	connections  map[uint64]map[net.Conn]struct{}
+	clearPending bool
 }
 
 func NewPreviewProxy(publicURL string, moaPort, listenPort int) *PreviewProxy {
-	return &PreviewProxy{publicURL: strings.TrimRight(publicURL, "/"), moaPort: moaPort, listenPort: listenPort}
+	secretBytes := make([]byte, 32)
+	if _, err := rand.Read(secretBytes); err != nil {
+		panic(fmt.Sprintf("preview capability: %v", err))
+	}
+	p := &PreviewProxy{
+		publicURL: strings.TrimRight(publicURL, "/"), moaPort: moaPort, listenPort: listenPort,
+		secret: base64.RawURLEncoding.EncodeToString(secretBytes), resolve: net.LookupIP,
+		connections: make(map[uint64]map[net.Conn]struct{}),
+	}
+	if u, err := url.Parse(p.publicURL); err == nil {
+		p.secure = u.Scheme == "https"
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = nil // Never let environment proxy settings bypass the validated dial.
+	tr.DisableCompression = true
+	tr.MaxIdleConns = 32
+	tr.MaxIdleConnsPerHost = 8
+	tr.MaxConnsPerHost = 16
+	tr.IdleConnTimeout = 30 * time.Second
+	tr.TLSHandshakeTimeout = 10 * time.Second
+	tr.ResponseHeaderTimeout = 20 * time.Second
+	tr.ExpectContinueTimeout = time.Second
+	tr.DialContext = p.dialContext
+	p.transport = tr
+	return p
 }
 
 func (p *PreviewProxy) PublicURL() string { return p.publicURL }
 
-func (p *PreviewProxy) targetSnapshot() (*url.URL, []string) {
+// PreviewURL is a one-hop capability URL. The listener exchanges it for an
+// HttpOnly cookie and redirects to a clean URL, so the app never receives it.
+func (p *PreviewProxy) PreviewURL() string {
+	u, err := url.Parse(p.publicURL)
+	if err != nil {
+		return p.publicURL
+	}
+	q := u.Query()
+	q.Set("preview_token", p.secret)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func (p *PreviewProxy) Close() { p.transport.CloseIdleConnections(); p.closeGenerations(^uint64(0)) }
+
+func (p *PreviewProxy) targetSnapshot() *previewTarget {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if p.target == nil {
-		return nil, nil
+		return nil
 	}
-	u := *p.target
-	return &u, append([]string(nil), p.aliases...)
+	out := *p.target
+	out.url = cloneURL(p.target.url)
+	out.aliases = append([]string(nil), p.target.aliases...)
+	out.ips = append([]net.IP(nil), p.target.ips...)
+	return &out
 }
+func cloneURL(u *url.URL) *url.URL { v := *u; return &v }
 
 func (p *PreviewProxy) SetTarget(raw string, aliases []string) error {
+	return p.setTarget(raw, aliases, p.publicURL)
+}
+func (p *PreviewProxy) setTarget(raw string, aliases []string, parentOrigin string) error {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+	if err != nil || u.Scheme == "" || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
 		return errors.New("target must be an absolute http(s) URL")
 	}
-	if err := p.allowed(u); err != nil {
+	parent, err := normalizedOrigin(parentOrigin)
+	if err != nil {
+		return errors.New("parent origin must be an absolute URL")
+	}
+	ips, port, err := p.validateTarget(u)
+	if err != nil {
 		return err
 	}
 	clean := make([]string, 0, len(aliases))
 	for _, a := range aliases {
-		if x, e := url.Parse(a); e == nil && x.Scheme != "" && x.Host != "" {
+		x, e := url.Parse(a)
+		if e == nil && (x.Scheme == "http" || x.Scheme == "https") && x.Host != "" && x.User == nil {
 			clean = append(clean, x.Scheme+"://"+x.Host)
 		}
 	}
 	p.mu.Lock()
-	p.target, p.aliases = u, clean
+	oldGeneration := p.generation
+	p.generation++
+	p.target = &previewTarget{url: u, aliases: clean, ips: ips, port: port, generation: p.generation, parentOrigin: parent}
+	p.clearPending = true
 	p.mu.Unlock()
+	if oldGeneration != 0 {
+		p.closeGenerations(oldGeneration)
+	}
+	p.transport.CloseIdleConnections()
 	return nil
 }
 
-func (p *PreviewProxy) allowed(u *url.URL) error {
-	host := u.Hostname()
+func normalizedOrigin(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
+		return "", errors.New("invalid origin")
+	}
+	return u.Scheme + "://" + u.Host, nil
+}
+
+func (p *PreviewProxy) validateTarget(u *url.URL) ([]net.IP, string, error) {
 	port := u.Port()
 	if port == "" {
 		if u.Scheme == "https" {
@@ -78,28 +174,42 @@ func (p *PreviewProxy) allowed(u *url.URL) error {
 			port = "80"
 		}
 	}
-	if (port == itoa(p.moaPort) || port == itoa(p.listenPort)) && (net.ParseIP(host) != nil || strings.EqualFold(host, "localhost")) {
-		return errors.New("target may not point at moa or the preview proxy")
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return nil, "", errors.New("target has an invalid port")
 	}
-	if strings.EqualFold(host, "localhost") {
-		return nil
+	port = strconv.Itoa(portNumber)
+	if ip := net.ParseIP(u.Hostname()); ip != nil && strings.Contains(u.Hostname(), ":") && ip.To4() != nil {
+		return nil, "", errors.New("IPv4-mapped IPv6 targets are not allowed")
 	}
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return err
+	ips, err := p.resolve(u.Hostname())
+	if err != nil || len(ips) == 0 {
+		if err != nil {
+			return nil, "", err
+		}
+		return nil, "", errors.New("target did not resolve")
 	}
 	for _, ip := range ips {
-		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			return errors.New("link-local and metadata targets are not allowed")
+		if !allowedPreviewIP(ip) {
+			return nil, "", errors.New("target must resolve to loopback, private, or tailnet address")
 		}
-		if ip.IsLoopback() || ip.IsPrivate() || (ip.To4() != nil && ip.To4()[0] == 100 && ip.To4()[1]&0xc0 == 0x40) {
-			continue
+		if (portNumber == p.moaPort || portNumber == p.listenPort) && isLocalIP(ip) {
+			return nil, "", errors.New("target may not point at moa or the preview proxy")
 		}
-		return errors.New("target must resolve to loopback, private, or tailnet address")
 	}
-	return nil
+	return ips, port, nil
 }
-func itoa(n int) string { return strconv.Itoa(n) }
+func allowedPreviewIP(ip net.IP) bool {
+	if ip == nil || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return false
+	}
+	// The Tailscale metadata service is inside CGNAT but must never be proxied.
+	if ip.Equal(net.ParseIP("100.100.100.200")) {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || (ip.To4() != nil && ip.To4()[0] == 100 && ip.To4()[1]&0xc0 == 0x40)
+}
+func isLocalIP(ip net.IP) bool { return ip.IsLoopback() || ip.IsUnspecified() }
 
 func (p *PreviewProxy) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -112,63 +222,162 @@ func (p *PreviewProxy) Handler() http.Handler {
 	return mux
 }
 
-// ProtectedHandler applies the same DNS-rebinding host policy as moa's main
-// listener while keeping this origin free of the main API.
+// ProtectedHandler authenticates every document, asset, request and upgrade.
+// In both token and network-owner modes the capability is issued only by the
+// owner-only main API, so publishing this port does not publish a network pivot.
 func (p *PreviewProxy) ProtectedHandler(allowedHosts []string) http.Handler {
-	return hostMiddleware(allowedHosts, p.Handler())
+	return hostMiddleware(allowedHosts, p.requireCapability(bodyTimeoutMiddleware(p.Handler())))
+}
+func (p *PreviewProxy) requireCapability(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c, err := r.Cookie(previewAuthCookie); err == nil && subtle.ConstantTimeCompare([]byte(c.Value), []byte(p.secret)) == 1 {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if token := r.URL.Query().Get("preview_token"); token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(p.secret)) == 1 {
+			http.SetCookie(w, &http.Cookie{Name: previewAuthCookie, Value: p.secret, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: p.secure})
+			u := *r.URL
+			q := u.Query()
+			q.Del("preview_token")
+			u.RawQuery = q.Encode()
+			http.Redirect(w, r, u.RequestURI(), http.StatusFound)
+			return
+		}
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	})
 }
 
 func (p *PreviewProxy) serve(w http.ResponseWriter, r *http.Request) {
-	target, aliases := p.targetSnapshot()
+	target := p.targetSnapshot()
 	if target == nil {
 		http.Error(w, "No preview target is configured. Change destination in moa.", http.StatusBadGateway)
 		return
 	}
-	proxy := &httputil.ReverseProxy{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, DisableCompression: true, DialContext: (&net.Dialer{Timeout: 10 * time.Second}).DialContext}}
+	p.mu.Lock()
+	clear := p.clearPending
+	p.clearPending = false
+	p.mu.Unlock()
+	proxy := &httputil.ReverseProxy{Transport: p.transport}
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
-		pr.SetURL(target)
+		pr.SetURL(target.url)
+		pr.Out = pr.Out.WithContext(context.WithValue(pr.Out.Context(), previewDialPlanKey{}, previewDialPlan{ips: target.ips, port: target.port, gen: target.generation}))
 		pr.Out.Host = "localhost"
-		if target.Port() != "" {
-			pr.Out.Host += ":" + target.Port()
+		if target.url.Port() != "" {
+			pr.Out.Host += ":" + target.url.Port()
 		}
 		pr.Out.Header.Del("Accept-Encoding")
-		filterRequestCookies(pr.Out)
-		pr.Out.Header.Set("X-Forwarded-Proto", "https")
+		pr.Out.Header.Del("Authorization")
+		filterRequestCookies(pr.Out, target.generation)
+		pr.Out.Header.Set("X-Forwarded-Proto", target.url.Scheme)
 		pr.Out.Header.Set("X-Forwarded-Host", r.Host)
 	}
-	proxy.ModifyResponse = func(resp *http.Response) error { return p.rewriteResponse(resp, target, aliases) }
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if clear {
+			resp.Header.Set("Clear-Site-Data", `"storage", "cache"`)
+		}
+		return p.rewriteResponse(resp, target)
+	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) {
 		http.Error(w, "The preview server is unavailable. Change destination in moa.", http.StatusBadGateway)
 	}
 	proxy.ServeHTTP(w, r)
 }
 
-func filterRequestCookies(r *http.Request) {
-	cookies := r.Cookies()
-	r.Header.Del("Cookie")
-	var keep []string
-	for _, c := range cookies {
-		if c.Name != authCookieName {
-			keep = append(keep, c.Name+"="+c.Value)
+func (p *PreviewProxy) dialContext(ctx context.Context, network, _ string) (net.Conn, error) {
+	plan, ok := ctx.Value(previewDialPlanKey{}).(previewDialPlan)
+	if !ok || len(plan.ips) == 0 {
+		return nil, errors.New("preview target was not validated")
+	}
+	var last error
+	for _, ip := range plan.ips {
+		conn, err := (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ip.String(), plan.port))
+		if err == nil {
+			return p.trackConnection(plan.gen, conn), nil
+		}
+		last = err
+	}
+	return nil, last
+}
+
+type trackedPreviewConn struct {
+	net.Conn
+	p    *PreviewProxy
+	gen  uint64
+	once sync.Once
+}
+
+func (c *trackedPreviewConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(func() { c.p.untrackConnection(c.gen, c) })
+	return err
+}
+func (p *PreviewProxy) trackConnection(gen uint64, conn net.Conn) net.Conn {
+	c := &trackedPreviewConn{Conn: conn, p: p, gen: gen}
+	p.mu.Lock()
+	if p.connections[gen] == nil {
+		p.connections[gen] = make(map[net.Conn]struct{})
+	}
+	p.connections[gen][c] = struct{}{}
+	p.mu.Unlock()
+	return c
+}
+func (p *PreviewProxy) untrackConnection(gen uint64, conn net.Conn) {
+	p.mu.Lock()
+	delete(p.connections[gen], conn)
+	p.mu.Unlock()
+}
+func (p *PreviewProxy) closeGenerations(through uint64) {
+	p.mu.Lock()
+	var closeList []net.Conn
+	for gen, conns := range p.connections {
+		if gen <= through {
+			for c := range conns {
+				closeList = append(closeList, c)
+			}
+			delete(p.connections, gen)
 		}
 	}
+	p.mu.Unlock()
+	for _, c := range closeList {
+		_ = c.Close()
+	}
+}
+
+func filterRequestCookies(r *http.Request, generation uint64) {
+	prefix := previewCookiePrefix(generation)
+	var keep []string
+	for _, c := range r.Cookies() {
+		if strings.HasPrefix(c.Name, prefix) {
+			keep = append(keep, strings.TrimPrefix(c.Name, prefix)+"="+c.Value)
+		}
+	}
+	r.Header.Del("Cookie")
 	if len(keep) > 0 {
 		r.Header.Set("Cookie", strings.Join(keep, "; "))
 	}
 }
+func previewCookiePrefix(generation uint64) string {
+	return "moa_preview_" + strconv.FormatUint(generation, 10) + "_"
+}
 
-func (p *PreviewProxy) rewriteResponse(resp *http.Response, target *url.URL, aliases []string) error {
+var metaCSP = regexp.MustCompile(`(?is)<meta\b[^>]*\bhttp-equiv\s*=\s*(?:"content-security-policy"|'content-security-policy'|content-security-policy)[^>]*>`)
+var headTag = regexp.MustCompile(`(?is)<head\b[^>]*>`)
+
+func (p *PreviewProxy) rewriteResponse(resp *http.Response, target *previewTarget) error {
 	resp.Header.Del("X-Frame-Options")
 	resp.Header.Del("Content-Security-Policy")
 	resp.Header.Del("Content-Security-Policy-Report-Only")
-	resp.Header.Set("Content-Security-Policy", "frame-ancestors "+p.frameAncestors())
-	for _, h := range []string{"Location", "Refresh", "Link"} {
-		if v := resp.Header.Get(h); v != "" {
-			resp.Header.Set(h, p.rewrite(v, target, aliases))
+	resp.Header.Set("Content-Security-Policy", "frame-ancestors "+target.parentOrigin)
+	if location := resp.Header.Get("Location"); location != "" {
+		if err := p.validateRedirect(location, target); err != nil {
+			return err
 		}
 	}
-	filterResponseCookies(resp.Header)
-	if resp.Header.Get("Content-Encoding") != "" || resp.Body == nil {
+	for _, h := range []string{"Location", "Refresh", "Link"} {
+		rewriteHeaderValues(resp.Header, h, func(v string) string { return p.rewrite(v, target) })
+	}
+	filterResponseCookies(resp.Header, target.generation, p.secure)
+	if resp.Body == nil || resp.Header.Get("Content-Encoding") != "" || resp.Request.Method == http.MethodHead || resp.StatusCode == http.StatusPartialContent || resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotModified {
 		return nil
 	}
 	ct := strings.ToLower(resp.Header.Get("Content-Type"))
@@ -176,83 +385,123 @@ func (p *PreviewProxy) rewriteResponse(resp *http.Response, target *url.URL, ali
 	if !textual {
 		return nil
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, previewMaxBody+1))
-	resp.Body.Close()
+	prefix, err := io.ReadAll(io.LimitReader(resp.Body, previewMaxBody+1))
 	if err != nil {
 		return err
 	}
-	if len(b) > previewMaxBody {
-		resp.Body = io.NopCloser(bytes.NewReader(b))
+	if len(prefix) > previewMaxBody {
+		resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(prefix), resp.Body))
 		return nil
 	}
-	b = []byte(p.rewrite(string(b), target, aliases))
+	_ = resp.Body.Close()
+	body := []byte(p.rewrite(string(prefix), target))
 	if strings.HasPrefix(ct, "text/html") {
-		parentOrigin := "*"
-		if ref, err := url.Parse(resp.Request.Referer()); err == nil && ref.Scheme != "" && ref.Host != "" {
-			parentOrigin = ref.Scheme + "://" + ref.Host
-		}
-		b = injectInspector(b, parentOrigin)
+		body = metaCSP.ReplaceAll(body, nil)
+		body = injectInspector(body, target.parentOrigin)
 	}
-	resp.Body = io.NopCloser(bytes.NewReader(b))
-	resp.ContentLength = int64(len(b))
-	resp.Header.Del("Content-Length")
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	for _, h := range []string{"Content-Length", "ETag", "Content-MD5", "Digest", "Content-Range", "Accept-Ranges"} {
+		resp.Header.Del(h)
+	}
 	return nil
 }
-
-func (p *PreviewProxy) frameAncestors() string {
-	u, err := url.Parse(p.publicURL)
-	if err != nil || u.Scheme == "" || u.Hostname() == "" {
-		return "'none'"
+func rewriteHeaderValues(h http.Header, name string, rewrite func(string) string) {
+	values := h.Values(name)
+	if len(values) == 0 {
+		return
 	}
-	return u.Scheme + "://" + u.Hostname() + ":*"
+	h.Del(name)
+	for _, v := range values {
+		h.Add(name, rewrite(v))
+	}
 }
-func (p *PreviewProxy) rewrite(s string, target *url.URL, aliases []string) string {
-	origins := []string{target.Scheme + "://" + target.Host}
-	if target.Port() != "" {
-		origins = append(origins, "http://localhost:"+target.Port(), "http://127.0.0.1:"+target.Port(), "http://[::1]:"+target.Port())
+func (p *PreviewProxy) validateRedirect(location string, target *previewTarget) error {
+	u, err := url.Parse(location)
+	if err != nil || !u.IsAbs() {
+		return nil
 	}
-	origins = append(origins, aliases...)
-	for _, o := range origins {
-		s = strings.ReplaceAll(s, o, p.publicURL)
+	origin := u.Scheme + "://" + u.Host
+	if origin == target.url.Scheme+"://"+target.url.Host {
+		return nil
+	}
+	for _, alias := range target.aliases {
+		if origin == alias {
+			return nil
+		}
+	}
+	return errors.New("preview redirect left the validated target")
+}
+func (p *PreviewProxy) rewrite(s string, target *previewTarget) string {
+	origins := []string{target.url.Scheme + "://" + target.url.Host}
+	if target.url.Port() != "" {
+		origins = append(origins, "http://localhost:"+target.url.Port(), "http://127.0.0.1:"+target.url.Port(), "http://[::1]:"+target.url.Port())
+	}
+	origins = append(origins, target.aliases...)
+	for _, origin := range origins {
+		s = replaceOrigin(s, origin, p.publicURL)
 	}
 	return s
 }
-func injectInspector(b []byte, parentOrigin string) []byte {
-	tag := []byte(`<script src="/__moa/inspector.js" data-moa-origin="` + parentOrigin + `"></script>`)
-	lower := bytes.ToLower(b)
-	if i := bytes.Index(lower, []byte("<head")); i >= 0 {
-		if j := bytes.IndexByte(lower[i:], '>'); j >= 0 {
-			return insertBytes(b, i+j+1, tag)
+func replaceOrigin(s, origin, replacement string) string {
+	var b strings.Builder
+	for from := 0; ; {
+		i := strings.Index(s[from:], origin)
+		if i < 0 {
+			b.WriteString(s[from:])
+			return b.String()
 		}
+		i += from
+		end := i + len(origin)
+		if end < len(s) && isOriginContinuation(s[end]) {
+			b.WriteString(s[from:end])
+			from = end
+			continue
+		}
+		b.WriteString(s[from:i])
+		b.WriteString(replacement)
+		from = end
 	}
-	if i := bytes.Index(lower, []byte("<body")); i >= 0 {
-		return insertBytes(b, i, tag)
+}
+func isOriginContinuation(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '-' || c == '_'
+}
+func injectInspector(b []byte, parentOrigin string) []byte {
+	if bytes.Contains(b, []byte("/__moa/inspector.js")) {
+		return b
+	}
+	tag := []byte(`<script src="/__moa/inspector.js" data-moa-origin="` + parentOrigin + `"></script>`)
+	if loc := headTag.FindIndex(b); loc != nil {
+		return insertBytes(b, loc[1], tag)
 	}
 	return insertBytes(b, 0, tag)
 }
-
 func insertBytes(body []byte, at int, addition []byte) []byte {
 	out := make([]byte, 0, len(body)+len(addition))
 	out = append(out, body[:at]...)
 	out = append(out, addition...)
 	return append(out, body[at:]...)
 }
-func filterResponseCookies(h http.Header) {
+func filterResponseCookies(h http.Header, generation uint64, secure bool) {
 	out := []string{}
 	for _, v := range h.Values("Set-Cookie") {
-		if strings.HasPrefix(strings.ToLower(v), strings.ToLower(authCookieName)+"=") {
+		parts := strings.Split(v, ";")
+		if len(parts) == 0 {
 			continue
 		}
-		parts := strings.Split(v, ";")
-		kept := []string{}
-		for _, part := range parts {
+		name, value, ok := strings.Cut(strings.TrimSpace(parts[0]), "=")
+		if !ok || strings.EqualFold(name, authCookieName) || strings.EqualFold(name, previewAuthCookie) {
+			continue
+		}
+		kept := []string{previewCookiePrefix(generation) + name + "=" + value}
+		for _, part := range parts[1:] {
 			t := strings.TrimSpace(part)
 			if strings.HasPrefix(strings.ToLower(t), "domain=") {
 				continue
 			}
 			kept = append(kept, t)
 		}
-		if !containsAttr(kept, "secure") {
+		if secure && !containsAttr(kept, "secure") {
 			kept = append(kept, "Secure")
 		}
 		out = append(out, strings.Join(kept, "; "))
@@ -278,26 +527,30 @@ func handlePreviewTarget(p *PreviewProxy) http.HandlerFunc {
 			return
 		}
 		if r.Method == http.MethodGet {
-			t, _ := p.targetSnapshot()
-			out := map[string]any{"enabled": true, "public_url": p.PublicURL()}
+			t := p.targetSnapshot()
+			out := map[string]any{"enabled": true, "public_url": p.PublicURL(), "preview_url": p.PreviewURL()}
 			if t != nil {
-				out["url"] = t.String()
+				out["url"] = t.url.String()
 			}
 			writeJSON(w, http.StatusOK, out)
 			return
 		}
 		var in struct {
-			URL     string   `json:"url"`
-			Aliases []string `json:"aliases"`
+			URL          string   `json:"url"`
+			Aliases      []string `json:"aliases"`
+			ParentOrigin string   `json:"parent_origin"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			http.Error(w, "invalid JSON", 400)
 			return
 		}
-		if err := p.SetTarget(in.URL, in.Aliases); err != nil {
+		if in.ParentOrigin == "" {
+			in.ParentOrigin = r.Header.Get("Origin")
+		}
+		if err := p.setTarget(in.URL, in.Aliases, in.ParentOrigin); err != nil {
 			http.Error(w, err.Error(), 400)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"url": in.URL, "public_url": p.PublicURL()})
+		writeJSON(w, http.StatusOK, map[string]any{"url": in.URL, "public_url": p.PublicURL(), "preview_url": p.PreviewURL()})
 	}
 }

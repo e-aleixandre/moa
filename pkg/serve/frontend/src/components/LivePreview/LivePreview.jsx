@@ -94,7 +94,8 @@ export function feedbackMessage(comment, el) {
 
 export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const session = useStore((s) => s.sessions[sessionId]);
-  const [committedURL, setCommittedURL] = useState("");
+  const [targetURL, setTargetURL] = useState("");
+  const [frameURL, setFrameURL] = useState("");
   const [draftURL, setDraftURL] = useState("");
   const [editingURL, setEditingURL] = useState(false);
   const [width, setWidth] = useState("fit");
@@ -130,19 +131,40 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     setTimeout(() => setNotes((prev) => prev.filter((n) => n.id !== id)), 8000);
   };
 
-  // Restore the last URL for this session when the panel opens.
+  // The saved value is always the upstream target; the iframe uses the proxy URL.
   useEffect(() => {
     if (!open) return;
-    const saved = loadPreviewURL(sessionId);
-    setCommittedURL(saved);
-    setDraftURL(saved);
-    setEditingURL(false);
+    let cancelled = false;
+    const restore = async () => {
+      const saved = loadPreviewURL(sessionId);
+      setDraftURL(saved);
+      setEditingURL(false);
+      try {
+        const response = await fetch("/api/preview/target");
+        const config = await response.json();
+        if (cancelled) return;
+        const target = saved || config.url || "";
+        setPreviewPublicURL(config.enabled ? config.public_url || "" : "");
+        if (!target) return;
+        setTargetURL(target);
+        if (!config.enabled || !config.public_url) {
+          setFrameURL(target);
+          return;
+        }
+        const put = await fetch("/api/preview/target", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "X-Moa-Request": "1" },
+          body: JSON.stringify({ url: target, parent_origin: location.origin }),
+        });
+        const result = await put.json();
+        if (!cancelled && put.ok) setFrameURL(result.preview_url || config.public_url);
+      } catch {
+        if (!cancelled && saved) { setTargetURL(saved); setFrameURL(saved); }
+      }
+    };
+    restore();
+    return () => { cancelled = true; };
   }, [open, sessionId]);
-
-  useEffect(() => {
-    if (!open) return;
-    fetch("/api/preview/target").then((r) => r.json()).then((v) => setPreviewPublicURL(v.enabled ? v.public_url || "" : "")).catch(() => setPreviewPublicURL(""));
-  }, [open]);
 
   // Measure the stage so the scaled iframe can be laid out in real pixels.
   useLayoutEffect(() => {
@@ -158,11 +180,12 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
       observer?.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [open, committedURL]);
+  }, [open, frameURL]);
 
   // The inspector lives in the previewed app; the only channel is postMessage.
   const post = (msg) => {
-    iframeRef.current?.contentWindow?.postMessage(msg, previewPublicURL || "*");
+    const origin = frameURL ? new URL(frameURL).origin : "";
+    if (origin) iframeRef.current?.contentWindow?.postMessage(msg, origin);
   };
   const postInspect = (enabled) => post({ type: "moa-inspect", enabled });
 
@@ -180,7 +203,9 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
       const data = event.data;
       if (!data || typeof data.type !== "string") return;
       const frame = iframeRef.current;
-      if (frame && event.source && event.source !== frame.contentWindow) return;
+      const expectedOrigin = frameURL ? new URL(frameURL).origin : "";
+      if (!expectedOrigin || event.origin !== expectedOrigin) return;
+      if (!frame || event.source !== frame.contentWindow) return;
 
       if (data.type === "moa-element") {
         setSelected(data);
@@ -200,14 +225,14 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [open, onClose]);
+  }, [open, onClose, frameURL]);
 
   useEffect(() => {
-    if (!committedURL) return undefined;
+    if (!frameURL) return undefined;
     setInspectorReady(false);
     const timer = setTimeout(() => setInspectorReady((ready) => ready), 3000);
     return () => clearTimeout(timer);
-  }, [committedURL, reloadNonce]);
+  }, [frameURL, reloadNonce]);
 
   // iOS Safari pinch guard. A pinch that has to
   // cross the iframe boundary is split between two touch-active documents and
@@ -249,15 +274,19 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     setDraftURL(next);
     setEditingURL(false);
     if (!next) return;
-    if (next === committedURL) return;
-    let frameURL = next;
+    if (next === targetURL && frameURL) return;
+    let nextFrameURL = next;
     if (previewPublicURL) {
       try {
-        const response = await fetch("/api/preview/target", { method: "PUT", headers: { "Content-Type": "application/json", "X-Moa-Request": "1" }, body: JSON.stringify({ url: next }) });
-        if (response.ok) frameURL = previewPublicURL;
+        const response = await fetch("/api/preview/target", { method: "PUT", headers: { "Content-Type": "application/json", "X-Moa-Request": "1" }, body: JSON.stringify({ url: next, parent_origin: location.origin }) });
+        if (response.ok) {
+          const result = await response.json();
+          nextFrameURL = result.preview_url || previewPublicURL;
+        }
       } catch { /* direct preview remains available */ }
     }
-    setCommittedURL(frameURL);
+    setTargetURL(next);
+    setFrameURL(nextFrameURL);
     setSelected(null);
     setView(IDENTITY);
     savePreviewURL(sessionId, next);
@@ -309,14 +338,14 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   // unscaled height. Zoomed, the pan is the position and the holder just fills.
   const holderStyle = zoomed ? { width: "100%", height: "100%" } : { width: `${frameW * scale}px`, height: `${frameH * scale}px` };
 
-  const showSetup = !committedURL || editingURL;
+  const showSetup = !targetURL || editingURL;
 
   const preview = (
     <>
       <div class="live-preview-bar">
         <PreviewMenu
           onChangeURL={() => {
-            setDraftURL(committedURL);
+            setDraftURL(targetURL);
             setEditingURL(true);
           }}
           onReload={reload}
@@ -366,13 +395,13 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           class={`live-preview-scroller${zoomed ? " is-zoomed" : ""}`}
           ref={stageRef}
         >
-          {committedURL && (
+          {frameURL && (
             <div class="live-preview-holder" style={holderStyle}>
               <iframe
-                key={`${committedURL}#${reloadNonce}`}
+                key={`${frameURL}#${reloadNonce}`}
                 ref={iframeRef}
                 class="live-preview-frame"
-                src={committedURL}
+                src={frameURL}
                 style={frameStyle}
                 onLoad={onFrameLoad}
                 sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
@@ -402,7 +431,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
                 onInput={(e) => setDraftURL(e.currentTarget.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") commitURL();
-                  if (e.key === "Escape" && committedURL) setEditingURL(false);
+                  if (e.key === "Escape" && targetURL) setEditingURL(false);
                 }}
                 aria-label="Preview URL"
               />
@@ -418,7 +447,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
 
         {/* Siblings of the scroller, not children: what floats over the app must
             not slide away when the app under it scrolls. */}
-        {committedURL && !showSetup && (
+        {frameURL && !showSetup && (
           <>
             {touchInput && <TouchZoomOverlay geometry={geometry} view={view} onView={setView} inspect={inspect} post={post} onMouse={disableTouchInput} />}
             <ZoomControls geometry={geometry} view={view} onView={setView} />

@@ -190,6 +190,7 @@ func runServe(args []string) {
 		_ = httpServer.Shutdown(shutdownCtx)
 		if previewServer != nil {
 			_ = previewServer.Shutdown(shutdownCtx)
+			preview.Close()
 		}
 	}()
 
