@@ -282,6 +282,122 @@
     inset 0 0 0 2px var(--yellow),
     inset 0 0 16px -6px var(--yellow);
 }
+
+/* The handle paints as a tiny bottom pill, but its button remains a full 44px
+   target. It sits above the touch relay only in its own small hit area, so the
+   rest of the preview continues to receive its tap, scroll, and pinch events. */
+.live-preview-composer-handle {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  z-index: 5;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transform: translateX(-50%);
+  touch-action: manipulation;
+}
+.live-preview-composer-handle span {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  left: 8px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--subtext0) 75%, transparent);
+  box-shadow: 0 1px 5px rgb(0 0 0 / 30%);
+}
+.live-preview-composer-handle:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -5px;
+}
+
+/* The real conversation Composer is deliberately embedded unchanged. The
+   preview only provides its placement and a compact reference attachment. */
+.live-preview-composer {
+  position: absolute;
+  right: var(--space-2);
+  bottom: max(var(--space-2), env(safe-area-inset-bottom));
+  left: var(--space-2);
+  z-index: 5;
+  padding: var(--space-2);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--base) 94%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-lg);
+}
+.live-preview-composer .composer-wrap {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+.live-preview-composer .attach-preview-strip {
+  max-height: 88px;
+  overflow: auto;
+}
+.live-preview-composer-close {
+  position: absolute;
+  top: -38px;
+  right: 0;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-full);
+  background: var(--mantle);
+  color: var(--subtext0);
+  cursor: pointer;
+}
+.live-preview-composer-close:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+@media (hover: hover) {
+  .live-preview-composer-handle:hover span,
+  .live-preview-composer-close:hover {
+    color: var(--mauve);
+    background: var(--surface0);
+  }
+  .live-preview-composer-handle:hover span {
+    background: var(--mauve);
+  }
+}
+.live-preview-reference {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: 0 var(--space-2) var(--space-2);
+  color: var(--subtext0);
+  font-size: var(--text-xs);
+}
+.live-preview-reference span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-preview-reference-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--radius-full);
+  background: var(--mauve);
+}
+
+/* Reserve independent lanes: activity cards never sit over either the closed
+   handle or the open composer. */
+.live-preview-stage.has-composer-handle .lp-stream {
+  bottom: calc(max(var(--space-3), env(safe-area-inset-bottom)) + 36px);
+}
+.live-preview-stage.has-composer .lp-stream {
+  bottom: 184px;
+}
 @keyframes lp-breathe {
   0%, 100% {
     box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--lp-kind, var(--sky)) 40%, transparent);

@@ -81,7 +81,7 @@ export function keepCommandSuggestionVisible(list, index) {
 // backgrounded PWAs freely) doesn't lose what you were typing. The prefix is
 // deliberately DISTINCT from the old SPA's `moa-draft-` so the two frontends
 // don't clobber each other's drafts while they coexist under /next.
-export function Composer({ sessionId, session, shortPlaceholder = false, compact = false, steer = null, onSecret }) {
+export function Composer({ sessionId, session, shortPlaceholder = false, compact = false, steer = null, onSecret, transformMessage, onSent }) {
   const { skills, refreshSkills } = useSessionSkills(sessionId);
   const textareaRef = useRef(null);
   const attachInputRef = useRef(null);
@@ -667,16 +667,17 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     }
 
     try {
-      await sendMessage(sessionId, text, atts);
+      await sendMessage(sessionId, transformMessage ? transformMessage(text) : text, atts);
       if (text) pushHistory(text);
       clearSentComposer();
+      onSent?.();
     } catch (e) {
       console.error('Send failed:', e);
       // sendMessage already rolled back the optimistic echo/chip; surface the
       // reason (e.g. a 400) so it's not silent.
       addToast({ sessionId, title: 'Message not sent', detail: `${String(e.message || e)} Your text and attachments are still here; you can retry.`, type: 'error' });
     }
-  }, [sessionId, sessionState, attachments, pushHistory, autoResize, steer, onSecret]);
+  }, [sessionId, sessionState, attachments, pushHistory, autoResize, steer, onSecret, transformMessage, onSent]);
 
   const handleSend = useCallback(() => handleSendInner(textareaRef.current), [handleSendInner]);
   const finishContentSend = useCallback(() => {

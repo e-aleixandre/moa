@@ -1,17 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { MousePointerClick, MessageSquare, X, Minus, Plus, MoreVertical, Mic, Loader2, Square, ChevronUp, ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from "lucide-preact";
+import { MousePointerClick, X, Minus, Plus, MoreVertical, ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from "lucide-preact";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { Segmented } from "../Segmented/Segmented.jsx";
 import { AssistantDocument } from "../AssistantDocument/AssistantDocument.jsx";
 import { Button } from "../../primitives/index.js";
 import { renderMarkdown } from "../../data/util/markdown.js";
 import { feedbackMessage, previewReferenceContext } from "../../data/util/preview-reference.js";
-import { sendMessage } from "../../data/session-actions.js";
+import { Composer } from "../../layout/Composer/Composer.jsx";
 import { useStore } from "../../hooks/useStore.js";
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
-import { useCanTranscribe } from "../../hooks/useCanTranscribe.js";
-import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
-import { addToast } from "../../data/notifications.js";
 import { PreviewStream } from "./PreviewStream.jsx";
 import { streamEvents, stageState } from "./stream.js";
 import { applyGesture, clampPan, pinchState, stageGesture, zoomAt, IDENTITY } from "./zoom.js";
@@ -81,8 +78,6 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const [inspect, setInspect] = useState(false);
   const [selected, setSelected] = useState(null);
   const [composerOpen, setComposerOpen] = useState(false);
-  const [comment, setComment] = useState("");
-  const [sending, setSending] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [previewPublicURL, setPreviewPublicURL] = useState("");
   const [previewError, setPreviewError] = useState("");
@@ -248,7 +243,6 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   useEffect(() => {
     if (open) return;
     setSelected(null);
-    setComment("");
     setInspect(false);
     setView(IDENTITY);
     setNotes([]);
@@ -312,21 +306,6 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     post({ type: "moa-hello" });
   };
 
-  const send = () => {
-    const message = feedbackMessage(comment, selected);
-    if (sending || !message) return;
-    setSending(true);
-    Promise.resolve(sendMessage(sessionId, message))
-      .catch(() => {})
-      .then(() => {
-        setSending(false);
-        setSelected(null);
-        setComposerOpen(false);
-        setComment("");
-        note("sent", "Sent");
-      });
-  };
-
   const zoomed = view.zoom !== 1;
   const scale = base * view.zoom;
   const frameStyle = {
@@ -373,16 +352,6 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           <MousePointerClick size={15} />
           <span class="live-preview-action-label">Inspect</span>
         </button>
-        <button
-          type="button"
-          class={`live-preview-action${composerOpen && !selected ? " is-on" : ""}`}
-          onClick={() => setComposerOpen((openComposer) => !openComposer)}
-          aria-pressed={composerOpen && !selected}
-          title="Message the agent"
-        >
-          <MessageSquare size={15} />
-          <span class="live-preview-action-label">Message</span>
-        </button>
         <button type="button" class="live-preview-action" onClick={onClose} title="Close preview">
           <X size={15} />
         </button>
@@ -397,11 +366,11 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           nothing but the 2px the panel's edge already spent. */}
       <div
         class={
-          `live-preview-stage is-${stage.mode}` +
+          `live-preview-stage is-${stage.mode}${composerOpen ? " has-composer" : " has-composer-handle"}` +
           `${stage.mode === "working" && stage.kind ? ` k-${stage.kind}` : ""}`
         }
         onPointerDownCapture={(event) => {
-          if (selected && !event.target.closest(".live-preview-inspect-popover")) setSelected(null);
+          if (selected && !event.target.closest(".live-preview-composer")) setSelected(null);
         }}
       >
         <div
@@ -476,22 +445,31 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
             1:1
           </button>
         )}
-        {(selected || composerOpen) && (
-          <InspectPopover
+        {composerOpen ? (
+          <PreviewComposer
+            sessionId={sessionId}
+            session={session}
             selected={selected}
-            comment={comment}
-            onComment={setComment}
             onClose={() => {
               setSelected(null);
               setComposerOpen(false);
             }}
-            onSend={send}
-            sending={sending}
-            stageRef={stageRef}
-            iframeRef={iframeRef}
-            geometry={geometry}
-            view={view}
+            onSent={() => {
+              setSelected(null);
+              setComposerOpen(false);
+              note("sent", "Sent");
+            }}
           />
+        ) : (
+          <button
+            type="button"
+            class="live-preview-composer-handle"
+            onClick={() => setComposerOpen(true)}
+            aria-label="Open message composer"
+            title="Message the agent"
+          >
+            <span aria-hidden="true" />
+          </button>
         )}
         {!showSetup && (
           <PreviewStream
@@ -604,139 +582,30 @@ function PreviewMenu({ onChangeURL, onReload }) {
   );
 }
 
-// The iframe is transformed by base × zoom plus the current pan. Reading its
-// rendered origin keeps the centred unzoomed viewport and the zoomed viewport
-// on the same coordinate system; rect pixels then use the exact scale from
-// zoom.js. The stream is a reserved bottom lane, so the feedback never covers
-// a live card.
-function InspectPopover({ selected, comment, onComment, onClose, onSend, sending, stageRef, iframeRef, geometry, view }) {
-  const popoverRef = useRef(null);
-  const textareaRef = useRef(null);
-  const [position, setPosition] = useState({ left: 0, top: 0, ready: false });
-  const canTranscribe = useCanTranscribe();
-
-  const appendTranscript = (text) => {
-    onComment((current) => `${current}${current && !/\s$/.test(current) ? " " : ""}${text}`);
-    textareaRef.current?.focus();
-  };
-  const onVoiceError = (detail) => addToast({ title: "Voice input", detail, type: "error" });
-  const {
-    handlers: voiceHandlers, recording, transcribing, locked, showSlideHint, supported,
-  } = useVoiceGesture({
-    onTranscript: appendTranscript,
-    onError: onVoiceError,
-    onSend,
-    sendOnPointerCancel: !!comment.trim(),
-  });
-  const canVoice = canTranscribe && supported;
-
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-
-  useLayoutEffect(() => {
-    const place = () => {
-      const stage = stageRef.current;
-      const frame = iframeRef.current;
-      const popover = popoverRef.current;
-      if (!stage || !popover) return;
-      if (!selected) {
-        const stream = stage.querySelector(".lp-stream");
-        const streamHeight = stream?.getBoundingClientRect().height || 0;
-        setPosition({ left: Math.max(8, (stage.clientWidth - popover.offsetWidth) / 2), top: Math.max(8, stage.clientHeight - popover.offsetHeight - streamHeight - 16), ready: true });
-        return;
-      }
-      if (!frame || !selected.rect) return;
-      const stageRect = stage.getBoundingClientRect();
-      const frameRect = frame.getBoundingClientRect();
-      const scale = (geometry.current.base || 1) * (view.zoom || 1);
-      const target = {
-        left: frameRect.left - stageRect.left + selected.rect.x * scale,
-        top: frameRect.top - stageRect.top + selected.rect.y * scale,
-        width: selected.rect.width * scale,
-        height: selected.rect.height * scale,
-      };
-      const margin = 8;
-      const stream = stage.parentElement?.querySelector(".lp-stream");
-      const streamTop = stream ? stream.getBoundingClientRect().top - stageRect.top - margin : stage.clientHeight;
-      const bottom = Math.max(margin, Math.min(stage.clientHeight - margin, streamTop));
-      const width = popover.offsetWidth;
-      const height = popover.offsetHeight;
-      const left = Math.min(Math.max(margin, target.left + target.width / 2 - width / 2), Math.max(margin, stage.clientWidth - width - margin));
-      const below = target.top + target.height + margin;
-      const above = target.top - margin - height;
-      let top;
-      if (below + height <= bottom) top = below;
-      else if (above >= margin) top = above;
-      else top = Math.max(margin, Math.min((bottom - height) / 2, bottom - height));
-      setPosition({ left, top, ready: true });
-    };
-    place();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
-    if (popoverRef.current) observer?.observe(popoverRef.current);
-    if (stageRef.current) observer?.observe(stageRef.current);
-    window.visualViewport?.addEventListener("resize", place);
-    return () => {
-      observer?.disconnect();
-      window.visualViewport?.removeEventListener("resize", place);
-    };
-  }, [selected, geometry, view]);
-
-  const selector = selected && `${selected.tag}${selected.id ? `#${selected.id}` : ""}${(selected.classes || []).slice(0, 2).map((name) => `.${name}`).join("")}`;
+function PreviewComposer({ sessionId, session, selected, onClose, onSent }) {
   const context = selected && previewReferenceContext(selected.ancestors);
-  const voiceTitle = transcribing ? "Transcribing…"
-    : recording ? (locked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
-    : canVoice ? "Hold to talk" : "Voice input unavailable";
-  const VoiceIcon = transcribing ? Loader2 : recording && locked ? Square : Mic;
+  const label = selected?.text || selected?.tag || "Element";
 
   return (
-    <div
-      ref={popoverRef}
-      class={`live-preview-inspect-popover${selected ? "" : " is-message"}`}
-      style={{ left: `${position.left}px`, top: `${position.top}px`, visibility: position.ready ? "visible" : "hidden" }}
-      role="dialog"
-      aria-label={selected ? "Feedback for selected element" : "Message the agent"}
-    >
-      <div class="live-preview-inspect-head">
-        {selected ? <><span class="live-preview-element-tag">{selected.tag}</span><code class="live-preview-selector">{selector}</code></> : <span class="live-preview-message-title">Message the agent</span>}
-        <button type="button" class="live-preview-inspect-close" onClick={onClose} aria-label="Close feedback"><X size={15} /></button>
-      </div>
-      {selected?.text && <p class="live-preview-inspect-text">“{selected.text}”{context && <small>in {context}</small>}</p>}
-      <div class="live-preview-inspect-compose">
-        <textarea
-          ref={textareaRef}
-          class="live-preview-comment"
-          rows={2}
-          placeholder="What should change here?"
-          value={comment}
-          onInput={(event) => onComment(event.currentTarget.value)}
-          aria-label="Comment for the agent"
-        />
-        <div class="live-preview-inspect-actions">
-          {showSlideHint && <span class="live-preview-voice-hint"><ChevronUp size={13} />Slide up to lock</span>}
-          <button
-            type="button"
-            class={`live-preview-voice${recording ? " is-recording" : ""}${transcribing ? " is-transcribing" : ""}`}
-            aria-label={recording ? "Stop recording" : "Record feedback"}
-            title={voiceTitle}
-            disabled={!canVoice || transcribing}
-            {...(canVoice || recording || transcribing ? voiceHandlers : {})}
-          >
-            <VoiceIcon size={16} class={transcribing ? "spin" : ""} />
-          </button>
-          <Button variant="solid" size="sm" onClick={onSend} disabled={sending || transcribing}>
-            {sending ? "Sending…" : "Send"}
-          </Button>
+    <section class="live-preview-composer" role="dialog" aria-label="Message the agent">
+      {selected && (
+        <div class="live-preview-reference">
+          <span class="live-preview-reference-dot" aria-hidden="true" />
+          <span>Element: {label}{context && ` · ${context}`}</span>
         </div>
-        <div class={`live-preview-attachment${selected ? "" : " is-empty"}`}>
-          {selected ? "Element attached" : "No element attached"}
-        </div>
-      </div>
-    </div>
+      )}
+      <Composer
+        sessionId={sessionId}
+        session={session}
+        compact
+        shortPlaceholder
+        transformMessage={(text) => feedbackMessage(text, selected)}
+        onSent={onSent}
+      />
+      <button type="button" class="live-preview-composer-close" onClick={onClose} aria-label="Close message composer">
+        <X size={15} />
+      </button>
+    </section>
   );
 }
 
