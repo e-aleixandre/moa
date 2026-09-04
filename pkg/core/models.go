@@ -86,6 +86,22 @@ var knownModels = map[string]Model{
 			},
 		},
 	},
+	// Daybreak Blue is an alias, not a fixed model: it points at the current
+	// flagship with safeguards calibrated for defensive cybersecurity work.
+	// It today resolves to gpt-5.6-sol (responses come back under that id), so
+	// it mirrors Sol's pricing and limits. When OpenAI repoints the alias, both
+	// must be revisited here — the API bills the new target, not this table.
+	// Requires separate provisioning on the account (openai.com/daybreak).
+	"gpt-daybreak-blue-latest": {
+		ID: "gpt-daybreak-blue-latest", Provider: "openai", API: "openai-chat",
+		Name: "Daybreak Blue", MaxInput: 1_050_000, MaxOutput: 128_000,
+		Pricing: &Pricing{
+			Input: 5, Output: 30, CacheRead: 0.5, CacheWrite: 6.25,
+			Tiers: []PricingTier{
+				{Threshold: 272_000, Input: 10, Output: 45, CacheRead: 1, CacheWrite: 12.5},
+			},
+		},
+	},
 	"gpt-5.6-terra": {
 		ID: "gpt-5.6-terra", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.6 Terra", MaxInput: 1_050_000, MaxOutput: 128_000,
@@ -205,6 +221,7 @@ var modelAliases = map[string]string{
 	"astra":       "gpt-6-astra",
 	"gpt-6":       "gpt-6-astra",
 	"sol":         "gpt-5.6-sol",
+	"daybreak":    "gpt-daybreak-blue-latest",
 	"terra":       "gpt-5.6-terra",
 	"luna":        "gpt-5.6-luna",
 	"gpt-5.6":     "gpt-5.6-sol",
@@ -374,6 +391,7 @@ var modelDisplayOrder = []string{
 	// OpenAI
 	"gpt-6-astra",
 	"gpt-5.6-sol",
+	"gpt-daybreak-blue-latest",
 	"gpt-5.6-terra",
 	"gpt-5.6-luna",
 	"gpt-5.5",
