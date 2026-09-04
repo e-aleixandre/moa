@@ -112,7 +112,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const geometry = useRef({ base: 1, w: 0, h: 0, stage: { w: 0, h: 0 } });
   const noteSeq = useRef(0);
   const inspectButtonRef = useRef(null);
-  const touchInput = useTouchPreviewInput();
+  const [touchInput, disableTouchInput] = useTouchPreviewInput();
 
   const events = streamEvents(session);
   const stage = stageState(session);
@@ -397,7 +397,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
             not slide away when the app under it scrolls. */}
         {committedURL && !showSetup && (
           <>
-            {touchInput && <TouchZoomOverlay geometry={geometry} view={view} onView={setView} inspect={inspect} post={post} />}
+            {touchInput && <TouchZoomOverlay geometry={geometry} view={view} onView={setView} inspect={inspect} post={post} onMouse={disableTouchInput} />}
             <ZoomControls geometry={geometry} view={view} onView={setView} />
           </>
         )}
@@ -464,7 +464,7 @@ function useTouchPreviewInput() {
     queries.forEach((query) => query.addEventListener?.("change", update));
     return () => queries.forEach((query) => query.removeEventListener?.("change", update));
   }, []);
-  return touch;
+  return [touch, () => setTouch(false)];
 }
 
 // PreviewMenu — the two rare actions on the URL, out of the way. Changing the
@@ -664,16 +664,18 @@ function InspectPopover({ selected, comment, onComment, onClose, onSend, sending
 // On touch-only devices this layer owns the first contact before WebKit chooses
 // a touch-active document. Fine pointers never get this layer: their iframe is
 // a normal browser surface for click, hover, wheel and keyboard input.
-function TouchZoomOverlay({ geometry, view, onView, inspect, post }) {
+function TouchZoomOverlay({ geometry, view, onView, inspect, post, onMouse }) {
   const layerRef = useRef(null);
   const viewRef = useRef(view);
   const inspectRef = useRef(inspect);
   const postRef = useRef(post);
   const onViewRef = useRef(onView);
+  const onMouseRef = useRef(onMouse);
   viewRef.current = view;
   inspectRef.current = inspect;
   postRef.current = post;
   onViewRef.current = onView;
+  onMouseRef.current = onMouse;
 
   useEffect(() => {
     const el = layerRef.current;
@@ -757,18 +759,27 @@ function TouchZoomOverlay({ geometry, view, onView, inspect, post }) {
       const rect = el.getBoundingClientRect();
       onViewRef.current(zoomAt(viewRef.current, Math.exp(-e.deltaY / 300), { x: e.clientX - rect.left, y: e.clientY - rect.top }, g, g.stage));
     };
+    const onPointerDown = (e) => {
+      if (e.pointerType !== "mouse") return;
+      e.preventDefault();
+      const p = point(e);
+      postRef.current({ type: inspectRef.current ? "moa-inspect-tap" : "moa-tap", x: p.x, y: p.y });
+      onMouseRef.current();
+    };
     const opts = { passive: false };
     el.addEventListener("touchstart", onTouchStart, opts);
     el.addEventListener("touchmove", onTouchMove, opts);
     el.addEventListener("touchend", onTouchEnd, opts);
     el.addEventListener("touchcancel", onTouchEnd, opts);
     el.addEventListener("wheel", onWheel, opts);
+    el.addEventListener("pointerdown", onPointerDown, opts);
     return () => {
       el.removeEventListener("touchstart", onTouchStart, opts);
       el.removeEventListener("touchmove", onTouchMove, opts);
       el.removeEventListener("touchend", onTouchEnd, opts);
       el.removeEventListener("touchcancel", onTouchEnd, opts);
       el.removeEventListener("wheel", onWheel, opts);
+      el.removeEventListener("pointerdown", onPointerDown, opts);
       if (relayRAF) cancelAnimationFrame(relayRAF);
     };
   }, [geometry]);
