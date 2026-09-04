@@ -258,6 +258,7 @@ export function ModelSelector({
   onThinkingChange,
   onFastChange,
   embedded = false,
+  modelOnly = false,
   sessionModel,
   sessionProvider,
   ...rest
@@ -292,6 +293,7 @@ export function ModelSelector({
   };
 
   useEffect(() => {
+    if (modelOnly) return undefined;
     let live = true;
     const revision = preferenceRevisionRef.current;
     api("GET", "/api/model-preferences")
@@ -304,7 +306,7 @@ export function ModelSelector({
         if (live && revision === preferenceRevisionRef.current) applyPinnedIDs([]);
       });
     return () => { live = false; };
-  }, []);
+  }, [modelOnly]);
 
   const updatePin = (model, shouldPin, { offerUndo = true } = {}) => {
     const before = pinnedIDsRef.current;
@@ -353,15 +355,15 @@ export function ModelSelector({
   };
 
   return (
-    <div class={`model-selector${embedded ? " model-selector--embedded" : ""}`} {...rest}>
-      {!embedded && <div class="sel-head">Model &amp; thinking</div>}
-      <ThinkingStepper
+    <div class={`model-selector${embedded ? " model-selector--embedded" : ""}${modelOnly ? " model-selector--model-only" : ""}`} {...rest}>
+      {!embedded && !modelOnly && <div class="sel-head">Model &amp; thinking</div>}
+      {!modelOnly && <ThinkingStepper
         value={clampThinkingLevel(thinking, thinkingLevelsFor(selectedSpec, sessionProvider))}
         onChange={onThinkingChange}
         levels={thinkingLevelsFor(selectedSpec, sessionProvider)}
-      />
-      <FastRow value={fast} supported={fastSupported} note={fastNote} onChange={onFastChange} />
-      {!!sessionModel && (
+      />}
+      {!modelOnly && <FastRow value={fast} supported={fastSupported} note={fastNote} onChange={onFastChange} />}
+      {!modelOnly && !!sessionModel && (
         <CurrentModelRow
           spec={selectedSpec}
           sessionModel={sessionModel}
@@ -421,8 +423,8 @@ export function ModelSelector({
         </div>
       ) : (
         <div class="model-selector-view">
-          <SectionHeading trailing={`★ ${pinned.length}`}>Pinned</SectionHeading>
-          {pinned.length > 0 ? (
+          {!modelOnly && <SectionHeading trailing={`★ ${pinned.length}`}>Pinned</SectionHeading>}
+          {!modelOnly && (pinned.length > 0 ? (
             <>
               <ModelGrid
                 models={visiblePins}
@@ -449,7 +451,7 @@ export function ModelSelector({
               <Star size={14} aria-hidden="true" />
               Pin your go-to models — tap <Star size={12} aria-hidden="true" /> on any model
             </div>
-          )}
+          ))}
           <SectionHeading>All models</SectionHeading>
           <ProviderList groups={groups} selected={selected} onOpen={openProvider} />
         </div>
