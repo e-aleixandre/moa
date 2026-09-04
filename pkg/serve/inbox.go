@@ -67,6 +67,10 @@ func hookMiddleware(routes http.Handler, next http.Handler) http.Handler {
 type hookResponse struct {
 	ID    string `json:"id"`
 	State string `json:"state"`
+	// Created is false when this delivery matched an event already stored
+	// under the same (source, key): providers retry, and a sender that reads
+	// the response should be able to tell a retry from a new event.
+	Created bool `json:"created"`
 }
 
 func handleHook(mgr *Manager) http.HandlerFunc {
@@ -84,12 +88,12 @@ func handleHook(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
 			return
 		}
-		ev, err := mgr.IngestHook(name, src, raw)
+		ev, created, err := mgr.IngestHook(name, src, raw)
 		if err != nil {
 			writeEventError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, hookResponse{ID: ev.ID, State: ev.State})
+		writeJSON(w, http.StatusOK, hookResponse{ID: ev.ID, State: ev.State, Created: created})
 	}
 }
 
@@ -206,9 +210,9 @@ func writeEventError(w http.ResponseWriter, err error) {
 }
 
 // IngestHook stores a webhook payload and routes it according to the source.
-func (m *Manager) IngestHook(name string, src core.EventSourceConfig, raw []byte) (events.Event, error) {
+func (m *Manager) IngestHook(name string, src core.EventSourceConfig, raw []byte) (events.Event, bool, error) {
 	if m.events == nil {
-		return events.Event{}, ErrEventsUnavailable
+		return events.Event{}, false, ErrEventsUnavailable
 	}
 	parsed := events.ParseHookBody(name, raw)
 	project := m.eventProject(src)
@@ -234,10 +238,10 @@ func (m *Manager) IngestHook(name string, src core.EventSourceConfig, raw []byte
 		CreateTitle:    src.Create.Title,
 	})
 	if err != nil {
-		return events.Event{}, err
+		return events.Event{}, false, err
 	}
 	if !created {
-		return ev, nil
+		return ev, created, nil
 	}
 	// Rate-limit only events that would have auto-delivered. An inbox-target
 	// (or when_none/when_many = inbox) wait is not an auto-route, so it must
@@ -248,7 +252,7 @@ func (m *Manager) IngestHook(name string, src core.EventSourceConfig, raw []byte
 		if m.noteEventRateLimited(name) {
 			m.notifyEventRateLimited(name)
 		}
-		return ev, nil
+		return ev, created, nil
 	}
 	routed, routeErr := m.autoRouteEvent(ev, src)
 	if routeErr != nil {
@@ -256,13 +260,13 @@ func (m *Manager) IngestHook(name string, src core.EventSourceConfig, raw []byte
 			"event", ev.ID, "error", routeErr)
 		ev, _ = m.events.Get(ev.ID)
 		m.notifyEvent(ev)
-		return ev, nil
+		return ev, created, nil
 	}
 	if routed.State == events.StateRouted {
 		m.recordEventAutoRoute(name)
 	}
 	m.notifyEvent(routed)
-	return routed, nil
+	return routed, created, nil
 }
 
 func (m *Manager) eventProject(src core.EventSourceConfig) string {

@@ -758,6 +758,9 @@ func TestHookRateLimitKeepsOverflowInInbox(t *testing.T) {
 	if a.State != events.StateRouted {
 		t.Fatalf("first state = %q, want routed", a.State)
 	}
+	if !a.Created {
+		t.Fatal("first delivery reported created=false")
+	}
 	second := postHook(t, srv, "ci", "tok", `{"title":"two","id":"2"}`)
 	defer second.Body.Close() //nolint:errcheck
 	var b hookResponse
@@ -866,4 +869,43 @@ func joinMessageText(msg core.AgentMessage) string {
 		b.WriteString(c.Text)
 	}
 	return b.String()
+}
+
+// A provider retrying the same payload must be told it is a retry: the event is
+// stored and delivered once, and the second response says created=false.
+func TestHookRetryReportsNotCreated(t *testing.T) {
+	dir := t.TempDir()
+	on := true
+	srv, mgr := newHookTestServer(t, map[string]core.EventSourceConfig{
+		"ci": {
+			Secret:  "tok",
+			Target:  core.EventTarget{Kind: core.EventTargetProject, Project: dir},
+			Autorun: &on,
+		},
+	})
+	if _, err := mgr.CreateSession(CreateOpts{CWD: dir}); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"title":"pipeline failed","id":"8841"}`
+	first := postHook(t, srv, "ci", "tok", body)
+	defer first.Body.Close() //nolint:errcheck
+	var a hookResponse
+	if err := json.NewDecoder(first.Body).Decode(&a); err != nil {
+		t.Fatal(err)
+	}
+	second := postHook(t, srv, "ci", "tok", body)
+	defer second.Body.Close() //nolint:errcheck
+	var b hookResponse
+	if err := json.NewDecoder(second.Body).Decode(&b); err != nil {
+		t.Fatal(err)
+	}
+	if !a.Created || b.Created {
+		t.Fatalf("created flags = %v, %v; want true, false", a.Created, b.Created)
+	}
+	if b.ID != a.ID {
+		t.Fatalf("retry got id %q, want the stored %q", b.ID, a.ID)
+	}
+	if got := len(mgr.events.List("")); got != 1 {
+		t.Fatalf("stored %d events, want 1", got)
+	}
 }
