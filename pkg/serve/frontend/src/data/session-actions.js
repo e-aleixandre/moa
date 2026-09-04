@@ -159,6 +159,10 @@ function normalizeSessionInfo(info, existing, visible) {
     // UI-only, no server field): preserved across polls exactly like
     // viewingSubagent, so switching sessions and back doesn't reset it.
     dockOpen: existing ? existing.dockOpen : false,
+    // previewOpen — the LivePreview panel's per-session open state (client
+    // UI-only, like dockOpen). Preserved across polls or the roster would
+    // close the preview under the user every refresh.
+    previewOpen: existing ? existing.previewOpen : false,
     autoVerifying: existing ? existing.autoVerifying : false,
     verifyDir: existing ? existing.verifyDir : null,
     verifyManual: existing ? existing.verifyManual : false,

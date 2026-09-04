@@ -307,3 +307,31 @@
     transition: none;
   }
 }
+
+/* Live preview door — a small floating pill on the same top inset as the title
+   chip, pinned right so it never fights the centred chip for room. */
+.mconv-preview-door {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  right: var(--space-3);
+  z-index: calc(var(--z-sheet) - 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  border: 1px solid color-mix(in srgb, var(--surface2) 70%, transparent);
+  background: color-mix(in srgb, var(--base) 72%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--subtext0);
+  cursor: pointer;
+}
+.mconv-preview-door:active {
+  transform: scale(0.94);
+}
+.mconv-preview-door:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}

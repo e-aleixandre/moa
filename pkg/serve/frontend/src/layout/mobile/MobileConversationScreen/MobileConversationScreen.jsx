@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "preact/hooks";
-import { Plus } from "lucide-preact";
+import { AppWindow, Plus } from "lucide-preact";
 import { updateSession, store } from "../../../data/store.js";
 import { useStore } from "../../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../../data/stream-model.js";
@@ -9,6 +9,7 @@ import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject }
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
+import { LivePreview } from "../../../components/LivePreview/LivePreview.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
@@ -299,6 +300,13 @@ function MobileConversationBody({ forceMobile = false }) {
           sessionId={session.id}
         />
       )}
+      {session && (
+        <LivePreview
+          sessionId={session.id}
+          open={!!session.previewOpen}
+          onClose={() => updateSession(session.id, { previewOpen: false })}
+        />
+      )}
     </>
   );
 }
@@ -338,6 +346,18 @@ function MobileSessionChrome({ version, forceMobile = false }) {
           open={chrome.drawerOpen}
           onToggle={setDrawerOpen}
         />
+      )}
+      {/* Live preview door. There is no mobile header, so it floats next to the
+          title chip, on the same top inset. Only opens: the panel owns closing. */}
+      {chrome.showChip && !chrome.drawerOpen && chrome.activeId && (
+        <button
+          type="button"
+          class="mconv-preview-door"
+          aria-label="Live preview"
+          onClick={() => updateSession(chrome.activeId, { previewOpen: true })}
+        >
+          <AppWindow size={16} aria-hidden="true" />
+        </button>
       )}
       <SessionDrawer
         open={chrome.drawerOpen}

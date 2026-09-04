@@ -85,6 +85,11 @@ button.crumb-title:hover {
   color: var(--peach);
 }
 
+.chat-head .grid-toggle.is-on {
+  border-color: var(--mauve);
+  color: var(--mauve);
+}
+
 .chat-head .grid-toggle:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);

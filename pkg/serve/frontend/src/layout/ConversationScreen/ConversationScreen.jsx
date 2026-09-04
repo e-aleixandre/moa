@@ -12,6 +12,7 @@ import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, UsagePanel, Sheet } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
+import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { updateSession } from "../../data/store.js";
 import { useStore } from "../../hooks/useStore.js";
@@ -259,6 +260,8 @@ export function ConversationScreen() {
           title={sessionTitle(session)}
           path={shortPath(session.cwd) || session.cwd || ""}
           onGridToggle={() => navigate("grid")}
+          previewOpen={!!session.previewOpen}
+          onPreviewToggle={() => updateSession(session.id, { previewOpen: !session.previewOpen })}
         />
         {viewingSub ? (
           <SubagentView
@@ -364,6 +367,13 @@ export function ConversationScreen() {
           open={rewindOpen}
           onClose={() => setRewindOpen(false)}
           sessionId={session.id}
+        />
+      )}
+      {session && (
+        <LivePreview
+          sessionId={session.id}
+          open={!!session.previewOpen}
+          onClose={() => updateSession(session.id, { previewOpen: false })}
         />
       )}
       {session && (
