@@ -75,6 +75,33 @@ finished, and what needs you.
   <em>Parallel sessions with live telemetry and delegated work visible in the Live Dock.</em>
 </p>
 
+## Look at the app, not only at the diff
+
+When the agent is building a web interface, the only honest way to judge its work is to
+look at the app. But the development server runs on the machine where the agent works —
+a port you cannot reach from a phone.
+
+**Live Preview** puts that development server inside the conversation: pick a viewport
+width (390, 768, 1280 or fit), pinch to zoom, and watch the agent's activity float over
+the app instead of hiding it. Turn on **Inspect** and tap any element: you write — or
+dictate — what should change, and the agent receives your sentence together with an exact
+handle on the element you meant, page and selector included.
+
+<p align="center">
+  <img
+    src="docs/assets/serve-live-preview-inspect.png"
+    alt="Live Preview on a phone: a button in the previewed app is highlighted and a popover asks what should change"
+    width="320"
+  />
+  <br/>
+  <em>Point at the button, say what is wrong with it. The agent gets the element, not a description of it.</em>
+</p>
+
+Optionally, `moa serve --preview-port … --preview-public-url …` proxies your dev server so
+the inspector is injected without touching your project. It is for **your own development
+servers**: the previewed app runs at the proxy's origin, and only loopback, private and
+tailnet addresses are accepted. See the [Live Preview guide](docs/serve.md#live-preview).
+
 ## Why self-host the agent?
 
 Moa runs on infrastructure you control rather than uploading your repository to a
