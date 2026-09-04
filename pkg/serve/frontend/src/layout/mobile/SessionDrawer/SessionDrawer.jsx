@@ -430,7 +430,7 @@ export function SessionDrawer({
                     {hiddenSaved > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setExpandedProjects((keys) => new Set(keys).add(section.key))}>Show all {hiddenSaved} saved</button>}
                   </div>}
                 </section>;
-              }) : <>{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{savedPreview.visible.map((s) => card(s))}{savedPreview.hidden > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setShowAllSaved(true)}>Show all {shownSaved.length} saved</button>}</>}
+              }) : <>{shownActive.length > 0 && <span class="sdrawer-group">Active</span>}{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{savedPreview.visible.map((s) => card(s))}{savedPreview.hidden > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setShowAllSaved(true)}>Show all {shownSaved.length} saved</button>}</>}
             </div>
 
             <div class="sdrawer-foot">

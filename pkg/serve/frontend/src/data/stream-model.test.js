@@ -17,7 +17,7 @@ const tool = (id, name, args, status = 'done', result = 'ok', extra = {}) => ({
 const system = (text) => ({ _type: 'system', text });
 const compaction = (id, extra = {}) => ({
   _type: 'compaction_marker', _msg_id: id, summary: 'Kept the important implementation context.',
-  tokensBefore: 24000, readFiles: ['pkg/a.go'], modifiedFiles: ['pkg/b.go'], ...extra,
+  tokensBefore: 24000, timestamp: 1788000000000, readFiles: ['pkg/a.go'], modifiedFiles: ['pkg/b.go'], ...extra,
 });
 const session = (messages, extra = {}) => ({ messages, ...extra });
 
@@ -26,6 +26,7 @@ test('projects the durable compaction contract as its own card block', () => {
   expect(block).toEqual({
     kind: 'compaction', id: 'compaction-entry-42-0',
     summary: 'Kept the important implementation context.', tokensBefore: 24000,
+    timestamp: 1788000000000,
     readFiles: ['pkg/a.go'], modifiedFiles: ['pkg/b.go'],
   });
 });

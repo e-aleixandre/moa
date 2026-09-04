@@ -175,6 +175,10 @@ export function Spine({
             <div class="spine-list">{shownSessions.map(row)}{hiddenSaved > 0 && <button type="button" class="spine-show-all" onClick={() => setExpandedProjects((keys) => new Set(keys).add(section.key))}>Show all {hiddenSaved} saved</button>}</div>
           </div>;
         }) : <>
+          {/* Open sessions carry a header like every other group: without one,
+              the first list reads as the continuation of whatever sits above
+              it (new results, the inbox) instead of a section of its own. */}
+          {activeSessions.length > 0 && <div class="spine-label">Active</div>}
           <div class="spine-list">{activeSessions.map(row)}</div>
           {savedSessions.length > 0 && <>
             <div class="spine-label">Saved</div>
