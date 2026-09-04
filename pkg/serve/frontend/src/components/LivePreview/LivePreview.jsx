@@ -81,7 +81,7 @@ export function feedbackMessage(comment, el) {
     .map(([k, v]) => `${k}=${JSON.stringify(String(v))}`)
     .join(" ");
   const lines = [
-    "[UI feedback · elemento seleccionado en el preview]",
+    "[UI feedback · selected element in preview]",
     `page: ${el.path || "/"} (${el.url || ""})`,
     `element: ${el.tag}${id}${classes}${text}`,
   ];
@@ -270,7 +270,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
         setSending(false);
         setSelected(null);
         setComment("");
-        note("sent", "Enviado");
+        note("sent", "Sent");
       });
   };
 
@@ -359,12 +359,12 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           )}
         </div>
 
-        {/* First run (and "Cambiar URL"): the ONLY moment the URL is worth a
+        {/* First run (and "Change URL"): the ONLY moment the URL is worth a
             screen. It takes the stage instead of a permanent row, so once the
             app is loaded those pixels go back to it for good. */}
         {showSetup && (
           <div class="live-preview-setup">
-            <p class="live-preview-setup-title">¿Qué app quieres ver?</p>
+            <p class="live-preview-setup-title">Enter your app URL</p>
             <div class="live-preview-setup-row">
               <input
                 class="live-preview-url"
@@ -384,11 +384,11 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
                 aria-label="Preview URL"
               />
               <Button variant="solid" size="sm" onClick={commitURL} disabled={!draftURL.trim()}>
-                Cargar
+                Load
               </Button>
             </div>
             <p class="live-preview-setup-hint">
-              Pon la URL de tu servidor de desarrollo.
+              Enter your development server URL.
             </p>
           </div>
         )}
@@ -436,11 +436,11 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
       </div>
 
       {reading && (
-        <Sheet open onClose={() => setReading(null)} title="Mensaje" class="lp-msg-sheet">
+        <Sheet open onClose={() => setReading(null)} title="Message" class="lp-msg-sheet">
           <AssistantDocument html={renderMarkdown(reading)} />
           <div class="lp-msg-actions">
             <Button variant="solid" size="sm" onClick={onClose}>
-              Ir al chat
+              Go to chat
             </Button>
           </div>
         </Sheet>
@@ -517,7 +517,7 @@ function PreviewMenu({ onChangeURL, onReload }) {
               onReload();
             }}
           >
-            Recargar
+            Reload
           </button>
           <button
             type="button"
@@ -528,7 +528,7 @@ function PreviewMenu({ onChangeURL, onReload }) {
               onChangeURL();
             }}
           >
-            Cambiar URL
+            Change URL
           </button>
         </div>
       )}
@@ -641,7 +641,7 @@ function InspectPopover({ selected, comment, onComment, onClose, onSend, sending
           aria-label="Comment for the agent"
         />
         <div class="live-preview-inspect-actions">
-          {showSlideHint && <span class="live-preview-voice-hint"><ChevronUp size={13} />Desliza para fijar</span>}
+          {showSlideHint && <span class="live-preview-voice-hint"><ChevronUp size={13} />Slide up to lock</span>}
           <button
             type="button"
             class={`live-preview-voice${recording ? " is-recording" : ""}${transcribing ? " is-transcribing" : ""}`}
@@ -787,7 +787,7 @@ function TouchZoomOverlay({ geometry, view, onView, inspect, post, onMouse }) {
   return (
     <>
       <div class="live-preview-zoomlayer" ref={layerRef} role="presentation" />
-      <span class="live-preview-zoomhint">Pinch · desplaza · doble toque = 1:1</span>
+      <span class="live-preview-zoomhint">Pinch · drag · double-tap = 1:1</span>
     </>
   );
 }

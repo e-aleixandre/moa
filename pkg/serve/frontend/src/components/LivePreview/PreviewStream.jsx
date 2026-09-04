@@ -142,7 +142,7 @@ function StreamCard({ card, onOpenText, onGoToChat }) {
       <button type="button" class={cls} onClick={onGoToChat}>
         <span class="lp-card-txt">{card.text}</span>
         <span class="lp-card-cta">
-          Ir al chat
+          Go to chat
           <ChevronRight size={12} aria-hidden="true" />
         </span>
       </button>

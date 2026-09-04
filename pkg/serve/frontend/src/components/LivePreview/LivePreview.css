@@ -64,12 +64,13 @@
 .live-preview-bar {
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
   touch-action: none;
 }
 .live-preview-widths {
-  flex: 1 1 auto;
+  flex: 1 1 150px;
   min-width: 0;
 }
 
@@ -104,21 +105,25 @@
   outline-offset: var(--focus-ring-offset);
 }
 
-.live-preview-widths .segmented-item {
+.live-preview-widths.segmented .segmented-item {
+  min-width: 0;
   padding: var(--space-1) var(--space-2);
+  white-space: nowrap;
 }
 
-/* A pane is its own density. At 430px the two middle presets cost more than
-   they communicate; Fit and phone remain, and at 330px Fit alone remains. */
+/* A pane is its own density. Viewport widths are the preview's essential
+   control, so keep all four and compact peripheral controls instead. */
 @container (max-width: 430px) {
-  .live-preview-widths .segmented-item:nth-child(2),
-  .live-preview-widths .segmented-item:nth-child(3) { display: none; }
   .live-preview-action-label { display: none; }
   .live-preview-action { min-width: 32px; padding: 0 var(--space-2); }
 }
 @container (max-width: 330px) {
-  .live-preview-widths .segmented-item:first-child { display: none; }
   .live-preview-bar { gap: var(--space-1); }
+  .live-preview-widths.segmented { padding: 2px; gap: 1px; }
+  .live-preview-widths.segmented .segmented-item {
+    padding: 3px;
+    letter-spacing: normal;
+  }
 }
 
 @media (max-width: 768px) {
