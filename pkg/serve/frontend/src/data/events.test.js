@@ -4,7 +4,7 @@
 // event, and an arrival can only be announced when it is really news, so both
 // are decided here — in the projection, not in a component — and pinned.
 import { afterEach, expect, test } from "bun:test";
-import { __resetEventAnnouncementsForTests, announceArrivals, dismissSource, inboxCards, inboxGroups, inboxPendingCount, inboxSig } from "./events.js";
+import { __resetEventAnnouncementsForTests, announceArrivals, dismissSource, eventCreateActionLabel, eventCreateSpec, inboxCards, inboxGroups, inboxPendingCount, inboxSig, isOpenEventCandidate, pendingReasonLabel, routeEvent } from "./events.js";
 import { getToasts, removeToast } from "./notifications.js";
 import { setState, store } from "./store.js";
 
@@ -13,6 +13,8 @@ const sessions = {
   b: { id: "b", title: "invoice pdf", cwd: "/home/u/tienda", state: "running", updated: 3000 },
   old: { id: "old", title: "last week", cwd: "/home/u/tienda", state: "saved", updated: 10 },
   other: { id: "other", title: "moa serve", cwd: "/home/u/moa", state: "idle", updated: 5000 },
+  broken: { id: "broken", title: "provider 429", cwd: "/home/u/tienda", state: "error", updated: 4000 },
+  ask: { id: "ask", title: "needs a secret", cwd: "/home/u/tienda", state: "permission", updated: 3500 },
 };
 
 const event = (extra = {}) => ({
@@ -31,12 +33,47 @@ test("the routing sheet offers the open sessions of the event's project, newest 
   expect(card.sessions[0]).toMatchObject({ id: "b", title: "invoice pdf" });
 });
 
+test("the routing sheet offers SessionRow card fields for its open sessions", () => {
+  const withCardFields = {
+    ...sessions,
+    b: {
+      ...sessions.b,
+      last: "Running checks",
+      origin: "sentry-tienda",
+      needsLabel: "Needs you",
+    },
+  };
+  const [card] = inboxCards(withCardFields, [event()]);
+  expect(card.sessions[0]).toMatchObject({
+    id: "b",
+    title: "invoice pdf",
+    state: "running",
+    brief: "Running checks",
+    path: "/home/u/tienda",
+    origin: "sentry-tienda",
+  });
+});
+
 // A saved session runs nothing; delivering there would file the event where no
-// turn can pick it up.
+// turn can pick it up. Error and permission match the backend: they are not
+// open candidates either.
 test("saved sessions and other projects are not offered", () => {
   const [card] = inboxCards(sessions, [event()]);
   expect(card.sessions.map((s) => s.id)).not.toContain("old");
   expect(card.sessions.map((s) => s.id)).not.toContain("other");
+});
+
+test("error and permission sessions are not offered, matching the backend", () => {
+  const [card] = inboxCards(sessions, [event()]);
+  expect(card.sessions.map((s) => s.id)).toEqual(["b", "a"]);
+  expect(isOpenEventCandidate(sessions.broken)).toBe(false);
+  expect(isOpenEventCandidate(sessions.ask)).toBe(false);
+});
+
+test("a project-less event offers every open session, newest first, still excluding error/permission/saved", () => {
+  const [card] = inboxCards(sessions, [event({ project: "" })]);
+  expect(card.sessions.map((s) => s.id)).toEqual(["other", "b", "a"]);
+  expect(card.sessions[0].path).toBe("/home/u/moa");
 });
 
 test("a project with nothing open yields no targets, so the sheet falls back to New session", () => {
@@ -184,4 +221,31 @@ test("bulk dismissal uses the server source endpoint and settles local pending r
   expect(requests[0].path).toBe("/api/events/dismiss");
   expect(JSON.parse(requests[0].options.body)).toEqual({ source: "sentry-tienda" });
   expect(store.get().events.map((item) => item.state)).toEqual(["dismissed", "dismissed", "new"]);
+});
+
+test("pending reason tokens map to a short muted phrase, unknowns stay hidden", () => {
+  expect(pendingReasonLabel("many_sessions")).toBe("several sessions are open");
+  expect(pendingReasonLabel("inbox")).toBe("this source always waits in the inbox");
+  expect(pendingReasonLabel("nope")).toBe("");
+});
+
+test("new session action names the snapshot model and omits thinking when unknown", () => {
+  expect(eventCreateActionLabel({ create_model: "terra", create_thinking: "low" })).toBe("New session · Terra low");
+  expect(eventCreateActionLabel({}, { defaultModel: "anthropic/claude-opus-4-8" })).toBe("New session · Opus");
+  expect(eventCreateSpec({ create_model: "terra", create_thinking: "low" })).toEqual({ model: "terra", thinking: "low" });
+  expect(eventCreateSpec({})).toEqual({});
+});
+
+test("a failed route keeps the row pending, the inbox open, and toasts the error", async () => {
+  setState({ events: [event()], inboxOpen: true });
+  globalThis.fetch = async () => new Response("session gone", { status: 404 });
+
+  await expect(routeEvent("ev_1", "a")).rejects.toThrow();
+
+  expect(store.get().events[0].state).toBe("new");
+  expect(store.get().events[0].routed_to).toBeUndefined();
+  expect(store.get().inboxOpen).toBe(true);
+  const [toast] = getToasts();
+  expect(toast.type).toBe("error");
+  expect(toast.title).toBe("Could not send event");
 });

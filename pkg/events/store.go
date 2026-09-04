@@ -128,6 +128,7 @@ func (s *Store) MarkRouted(id, sessionID string) (Event, error) {
 		ev.State = StateRouted
 		ev.RoutedTo = sessionID
 		ev.RoutedAt = time.Now()
+		ev.PendingReason = ""
 	})
 }
 
@@ -140,7 +141,33 @@ func (s *Store) ReleaseRouting(id string) (Event, error) {
 
 // MarkDismissed settles an event without sending it anywhere.
 func (s *Store) MarkDismissed(id string) (Event, error) {
-	return s.settleFrom(id, StateNew, func(ev *Event) { ev.State = StateDismissed })
+	return s.settleFrom(id, StateNew, func(ev *Event) {
+		ev.State = StateDismissed
+		ev.PendingReason = ""
+	})
+}
+
+// SetPendingReason records why a `new` event stayed in the inbox. Settled
+// events are left alone — the reason only applies while a decision is open.
+func (s *Store) SetPendingReason(id, reason string) (Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.items {
+		if s.items[i].ID != id || s.items[i].State != StateNew {
+			continue
+		}
+		if s.items[i].PendingReason == reason {
+			return s.items[i], nil
+		}
+		previous := s.items[i]
+		s.items[i].PendingReason = reason
+		if err := s.persistLocked(); err != nil {
+			s.items[i] = previous
+			return Event{}, err
+		}
+		return s.items[i], nil
+	}
+	return Event{}, ErrNotFound
 }
 
 // DismissSource settles every pending event from source. Already routed or
@@ -155,6 +182,7 @@ func (s *Store) DismissSource(source string) (int, error) {
 			continue
 		}
 		s.items[i].State = StateDismissed
+		s.items[i].PendingReason = ""
 		n++
 	}
 	if n == 0 {

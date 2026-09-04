@@ -14,7 +14,7 @@ import { store, setState, visibleSessionIds } from './store.js';
 import { loadSessions } from './session-actions.js';
 import { setActiveSession } from './tile-actions.js';
 import { addToast, removeToast } from './notifications.js';
-import { projectKey, projectLabel, sessionTitle } from './util/format.js';
+import { modelCodename, projectKey, projectLabel, sessionTitle } from './util/format.js';
 
 // relAge is the session list's clock, kept identical to Spine/sessions.js and
 // the mobile chrome's: an event's age must not read like a different clock.
@@ -42,7 +42,8 @@ function sameEvents(prev, next) {
   if (!prev || !next || prev.length !== next.length) return false;
   return prev.every((event, i) => event.id === next[i].id
     && event.state === next[i].state
-    && event.routed_to === next[i].routed_to);
+    && event.routed_to === next[i].routed_to
+    && event.pending_reason === next[i].pending_reason);
 }
 
 // ── the inbox surface's open/closed state ───────────────────────────────────
@@ -52,6 +53,52 @@ function sameEvents(prev, next) {
 export function openInbox() { setState({ inboxOpen: true }); }
 export function closeInbox() { setState({ inboxOpen: false }); }
 export function toggleInbox() { setState({ inboxOpen: !store.get().inboxOpen }); }
+
+// PENDING_REASON_COPY is why a row is still waiting. Tokens match
+// events.PendingReason on the server; unknown values are hidden, not shown raw.
+export const PENDING_REASON_COPY = {
+  inbox: 'this source always waits in the inbox',
+  no_session: 'no session open in this project',
+  many_sessions: 'several sessions are open',
+  session_unavailable: 'the target session is missing or unavailable',
+  session_busy: 'the session is busy and autorun is off',
+  rate_limited: 'this source is sending too many events',
+};
+
+export function pendingReasonLabel(reason) {
+  return PENDING_REASON_COPY[reason] || '';
+}
+
+// isOpenEventCandidate matches serve.isOpenEventCandidate: live, not error,
+// not waiting on a permission, not saved.
+export function isOpenEventCandidate(session) {
+  if (!session?.id) return false;
+  switch (session.state) {
+    case 'error':
+    case 'permission':
+    case 'saved':
+      return false;
+    default:
+      return true;
+  }
+}
+
+export function eventCreateSpec(event) {
+  const spec = {};
+  if (event?.create_model) spec.model = event.create_model;
+  if (event?.create_thinking) spec.thinking = event.create_thinking;
+  return spec;
+}
+
+export function eventCreateActionLabel(event, { specs = [], defaultModel = '' } = {}) {
+  const raw = event?.create_model || defaultModel;
+  const spec = (specs || []).find((item) => item.id === raw || item.catalogId === raw || item.alias === raw);
+  const name = spec?.codename || modelCodename(raw) || raw;
+  const thinking = event?.create_thinking || '';
+  if (name && thinking) return `New session · ${name} ${thinking}`;
+  if (name) return `New session · ${name}`;
+  return 'New session';
+}
 
 // ── arrival announcements ───────────────────────────────────────────────────
 // A poll that brings ids nobody has seen is the only moment an event is news.
@@ -135,36 +182,55 @@ function settleEvent(id, patch) {
   });
 }
 
-// routeEvent sends an event to a session and opens that session, which is
-// where the event now lives.
-export async function routeEvent(id, sessionId) {
-  settleEvent(id, { state: 'routed', routed_to: sessionId });
-  const event = await api('POST', `/api/events/${encodeURIComponent(id)}/route`, { session_id: sessionId });
-  await loadSessions();
-  const target = event?.routed_to || sessionId;
-  if (target) {
-    closeInbox();
-    setActiveSession(target);
-  }
-  return event;
+function routeFailureToast(e) {
+  addToast({
+    title: 'Could not send event',
+    detail: String(e.message || e),
+    type: 'error',
+  });
 }
 
-// routeEventToNewSession creates the session for the event. `spec` carries the
-// model and thinking level picked in the sheet; without one the server falls
-// back to its defaults.
-export async function routeEventToNewSession(id, spec = null) {
-  settleEvent(id, { state: 'routed' });
-  const event = await api('POST', `/api/events/${encodeURIComponent(id)}/route`, {
-    new: true,
-    ...(spec?.model ? { model: spec.model } : {}),
-    ...(spec?.thinking ? { thinking: spec.thinking } : {}),
-  });
-  await loadSessions();
-  if (event?.routed_to) {
-    closeInbox();
-    setActiveSession(event.routed_to);
+// routeEvent sends an event to a session and opens that session, which is
+// where the event now lives. The row stays pending until the server agrees —
+// an optimistic settle would close a decision that never happened.
+export async function routeEvent(id, sessionId) {
+  try {
+    const event = await api('POST', `/api/events/${encodeURIComponent(id)}/route`, { session_id: sessionId });
+    if (event) settleEvent(id, event);
+    await loadSessions();
+    const target = event?.routed_to || sessionId;
+    if (target) {
+      closeInbox();
+      setActiveSession(target);
+    }
+    return event;
+  } catch (e) {
+    routeFailureToast(e);
+    throw e;
   }
-  return event;
+}
+
+// routeEventToNewSession creates the session for the event. Model and thinking
+// are sent only when chosen (source snapshot or an explicit override); omitting
+// them lets the server apply its default rather than inventing "medium".
+export async function routeEventToNewSession(id, spec) {
+  try {
+    const event = await api('POST', `/api/events/${encodeURIComponent(id)}/route`, {
+      new: true,
+      ...(spec?.model ? { model: spec.model } : {}),
+      ...(spec?.thinking ? { thinking: spec.thinking } : {}),
+    });
+    if (event) settleEvent(id, event);
+    await loadSessions();
+    if (event?.routed_to) {
+      closeInbox();
+      setActiveSession(event.routed_to);
+    }
+    return event;
+  } catch (e) {
+    routeFailureToast(e);
+    throw e;
+  }
 }
 
 export async function dismissEvent(id) {
@@ -190,10 +256,11 @@ export async function dismissSource(source) {
   return result;
 }
 
-// inboxCards projects the inbox: the event plus the open sessions of ITS
-// project, which is what the routing sheet offers. The list is what makes the
-// choice possible, so it is computed here — the surface only renders it, and
-// the two cannot disagree about which sessions are live.
+// inboxCards projects the inbox: the event plus the open sessions of its
+// project. An event without a project can only be sent to an existing session,
+// so it offers every open one. The list is what makes the choice possible, so
+// it is computed here — the surface only renders it, and the two cannot
+// disagree about which sessions are live.
 //
 // Saved sessions are not candidates: an event delivered to a session nobody is
 // running would sit unread with no turn behind it.
@@ -202,9 +269,17 @@ export function inboxCards(sessions, events) {
   return (events || []).map((event) => {
     const project = projectKey(event.project);
     const targets = all
-      .filter((s) => s.state !== 'saved' && projectKey(s.cwd) === project)
+      .filter((s) => isOpenEventCandidate(s) && (!project || projectKey(s.cwd) === project))
       .sort((a, b) => (b.updated || 0) - (a.updated || 0))
-      .map((s) => ({ id: s.id, title: sessionTitle(s), when: relAge(s.updated) }));
+      .map((s) => ({
+        id: s.id,
+        title: sessionTitle(s),
+        state: s.state || 'idle',
+        when: relAge(s.updated),
+        brief: s.last || s.needsLabel,
+        path: s.cwd,
+        origin: s.origin,
+      }));
     // A settled event names where it went; if that session is gone from the
     // roster the row falls back to a generic phrase rather than an empty name.
     const routedTo = event.routed_to ? sessions?.[event.routed_to] : null;
@@ -252,9 +327,10 @@ export function inboxSig(cards) {
     .map((c) => [
       c.event.id,
       c.event.state || 'new',
+      c.event.pending_reason || '',
       c.age || '',
       c.routedToTitle || '',
-      c.sessions.map((s) => `${s.id}:${s.when}`).join(','),
+      c.sessions.map((s) => `${s.id}:${s.state}:${s.when}:${s.brief || ''}:${s.path || ''}:${s.origin || ''}`).join(','),
     ].join('\0'))
     .join('\n');
 }

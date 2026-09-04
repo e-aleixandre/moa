@@ -14,7 +14,7 @@ import {
   loadSessions, startPolling, stopPolling,
   startUsagePolling, stopUsagePolling,
 } from "./data/session-actions.js";
-import { loadEvents } from "./data/events.js"; // wake-on-event
+import { loadEvents, openInbox } from "./data/events.js"; // wake-on-event
 import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
@@ -102,19 +102,29 @@ function useBootstrap() {
     loadSessions()
       .then(() => {
         if (!mounted) return; // unmounted mid-flight: don't touch the store/view
-        const wanted = new URLSearchParams(location.search).get("session");
+        const params = new URLSearchParams(location.search);
+        const wanted = params.get("session");
+        const wantedInbox = params.get("inbox") === "1";
+        let stripped = false;
         if (wanted && openSession(wanted)) {
           // Strip only ?session= (a one-shot deep-link that must not re-pin on
           // refresh) while preserving ?view= so a `?view=grid&session=X` link
           // keeps the URL in sync with the store's seeded view.
-          const params = new URLSearchParams(location.search);
           params.delete("session");
-          const qs = params.toString();
-          history.replaceState({}, "", qs ? `${location.pathname}?${qs}` : location.pathname);
+          stripped = true;
         } else if (store.get().isMobile) {
           autoSelectMobile();
         } else {
           autoFillTiles();
+        }
+        if (wantedInbox) {
+          openInbox();
+          params.delete("inbox");
+          stripped = true;
+        }
+        if (stripped) {
+          const qs = params.toString();
+          history.replaceState({}, "", qs ? `${location.pathname}?${qs}` : location.pathname);
         }
       })
       .catch(() => {})

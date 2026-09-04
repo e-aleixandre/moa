@@ -86,6 +86,16 @@
   -webkit-box-orient: vertical;
 }
 
+.inbox-row-reason {
+  font-size: var(--text-sm);
+  color: var(--overlay1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inbox-row-reason { color: var(--overlay0); }
+
 /* Where it went. Muted, and never a colour: delivery is a fact, not a state
    that needs anyone. */
 .inbox-row-dest {
@@ -126,6 +136,16 @@
   color: var(--text);
 }
 
+.inbox-sheet-reason {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--overlay0);
+}
+
+.inbox-sheet .evb-payload {
+  margin-bottom: var(--space-3);
+}
+
 .inbox-sheet-note {
   padding: var(--space-2) 0 var(--space-3);
   font-size: var(--text-sm);
@@ -136,6 +156,9 @@
   display: flex;
   flex-direction: column;
 }
+
+.inbox-sheet-list .session-row { display: block; }
+.inbox-sheet-list .session-row-hit { width: 100%; min-height: 44px; }
 
 .inbox-sheet-list + .inbox-sheet-list {
   margin-top: var(--space-3);
@@ -183,3 +206,4 @@
 }
 
 .inbox-sheet-item-quiet { color: var(--overlay1); }
+

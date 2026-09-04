@@ -281,6 +281,40 @@ func TestWriteFailureRollsBackMemory(t *testing.T) {
 	}
 }
 
+func TestSetPendingReasonOnlyTouchesPendingEvents(t *testing.T) {
+	store := newTestStore(t)
+	ev, _, err := store.Add(Event{Source: "ci", Title: "build failed"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	got, err := store.SetPendingReason(ev.ID, PendingManySessions)
+	if err != nil {
+		t.Fatalf("SetPendingReason: %v", err)
+	}
+	if got.PendingReason != PendingManySessions {
+		t.Fatalf("pending_reason = %q, want %s", got.PendingReason, PendingManySessions)
+	}
+	reopened, err := NewStore(store.path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if stored, _ := reopened.Get(ev.ID); stored.PendingReason != PendingManySessions {
+		t.Fatalf("pending_reason after reopen = %q", stored.PendingReason)
+	}
+	if _, err := store.MarkRouting(ev.ID); err != nil {
+		t.Fatalf("MarkRouting: %v", err)
+	}
+	if _, err := store.MarkRouted(ev.ID, "sess-1"); err != nil {
+		t.Fatalf("MarkRouted: %v", err)
+	}
+	if _, err := store.SetPendingReason(ev.ID, PendingInbox); err != ErrNotFound {
+		t.Fatalf("SetPendingReason after route err = %v, want ErrNotFound", err)
+	}
+	if stored, _ := store.Get(ev.ID); stored.PendingReason != "" {
+		t.Fatalf("routed event kept pending_reason %q", stored.PendingReason)
+	}
+}
+
 func TestSetSuggestedOnlyTouchesPendingEvents(t *testing.T) {
 	store := newTestStore(t)
 	ev, _, _ := store.Add(Event{Source: "ci", Title: "build failed"})

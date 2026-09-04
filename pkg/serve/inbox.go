@@ -239,7 +239,12 @@ func (m *Manager) IngestHook(name string, src core.EventSourceConfig, raw []byte
 	if !created {
 		return ev, nil
 	}
-	if !m.allowEventAutoRoute(name, src.RateOrDefault()) {
+	// Rate-limit only events that would have auto-delivered. An inbox-target
+	// (or when_none/when_many = inbox) wait is not an auto-route, so it must
+	// not be labelled "rate limited".
+	decision := decideEventRoute(src, m.List())
+	if !decision.Inbox && !m.allowEventAutoRoute(name, src.RateOrDefault()) {
+		ev = m.notePending(ev.ID, events.PendingRateLimited)
 		if m.noteEventRateLimited(name) {
 			m.notifyEventRateLimited(name)
 		}
@@ -279,7 +284,7 @@ func (m *Manager) eventProject(src core.EventSourceConfig) string {
 func (m *Manager) autoRouteEvent(ev events.Event, src core.EventSourceConfig) (events.Event, error) {
 	decision := decideEventRoute(src, m.List())
 	if decision.Inbox {
-		return ev, nil
+		return m.notePending(ev.ID, decision.Reason), nil
 	}
 	sessionID := decision.SessionID
 	createdID := ""
@@ -305,6 +310,7 @@ type eventRouteDecision struct {
 	SessionID string
 	Create    bool
 	Inbox     bool
+	Reason    string
 }
 
 func decideEventRoute(src core.EventSourceConfig, sessions []SessionInfo) eventRouteDecision {
@@ -312,7 +318,7 @@ func decideEventRoute(src core.EventSourceConfig, sessions []SessionInfo) eventR
 	case core.EventTargetSession:
 		info, ok := sessionInfoByID(sessions, src.Target.Session)
 		if !ok || !isOpenEventCandidate(info) {
-			return eventRouteDecision{Inbox: true}
+			return eventRouteDecision{Inbox: true, Reason: events.PendingSessionUnavailable}
 		}
 		return eventRouteDecision{SessionID: info.ID}
 	case core.EventTargetProject:
@@ -328,15 +334,15 @@ func decideEventRoute(src core.EventSourceConfig, sessions []SessionInfo) eventR
 			if src.WhenNoneOrDefault() == core.EventWhenCreate {
 				return eventRouteDecision{Create: true}
 			}
-			return eventRouteDecision{Inbox: true}
+			return eventRouteDecision{Inbox: true, Reason: events.PendingNoSession}
 		default:
 			if src.WhenManyOrDefault() == core.EventWhenLatest {
 				return eventRouteDecision{SessionID: latestSessionID(open)}
 			}
-			return eventRouteDecision{Inbox: true}
+			return eventRouteDecision{Inbox: true, Reason: events.PendingManySessions}
 		}
 	default:
-		return eventRouteDecision{Inbox: true}
+		return eventRouteDecision{Inbox: true, Reason: events.PendingInbox}
 	}
 }
 
@@ -441,9 +447,12 @@ func (m *Manager) createEventSession(ev events.Event, model, thinking string) (*
 	}
 	cwd := ev.Project
 	opts := CreateOpts{
-		Title:    eventSessionTitle(ev),
-		CWD:      cwd,
-		Origin:   eventOrigin,
+		Title: eventSessionTitle(ev),
+		CWD:   cwd,
+		// The origin names the hook, not just "event": the session list shows
+		// this label beside the title, and "sentry-tienda" tells the owner
+		// where the session came from while a generic tag would not.
+		Origin:   eventOrigin + ":" + sanitizeEventHeader(ev.Source),
 		Model:    model,
 		Thinking: thinking,
 	}
@@ -458,7 +467,10 @@ func eventSessionTitle(ev events.Event) string {
 	if title != "" {
 		title = strings.ReplaceAll(title, "{title}", ev.Title)
 	} else {
-		title = "[event] " + ev.Title
+		// No prefix: the session list shows provenance next to the project,
+		// and the first block of the transcript is the event itself. A tag in
+		// the name would only crowd out the words that identify the session.
+		title = ev.Title
 	}
 	title = sanitizeEventHeader(title)
 	if len(title) > maxTitleLength {
@@ -492,8 +504,7 @@ func (m *Manager) deliverAndSettle(ev events.Event, sessionID string) (events.Ev
 	if err := m.deliverEvent(sessionID, ev, ev.Autorun); err != nil {
 		m.releaseRouting(ev.ID)
 		if errors.Is(err, errEventSessionBusy) {
-			got, _ := m.events.Get(ev.ID)
-			return got, nil
+			return m.notePending(ev.ID, events.PendingSessionBusy), nil
 		}
 		return events.Event{}, err
 	}
@@ -669,6 +680,7 @@ func (m *Manager) notifyEvent(ev events.Event) {
 		}
 	} else {
 		n.Title = "Event from " + source + " waiting"
+		n.Inbox = true
 	}
 	m.pushDispatcher.Notify(n)
 }
@@ -685,7 +697,25 @@ func (m *Manager) notifyEventRateLimited(source string) {
 		Tag:   "event-rate:" + source,
 		Title: "Event source rate-limited",
 		Body:  source + " is sending too many events; new ones wait in the inbox",
+		Inbox: true,
 	})
+}
+
+func (m *Manager) notePending(id, reason string) events.Event {
+	if m.events == nil {
+		return events.Event{}
+	}
+	if reason == "" {
+		ev, _ := m.events.Get(id)
+		return ev
+	}
+	ev, err := m.events.SetPendingReason(id, reason)
+	if err != nil {
+		slog.Warn("wake-on-event: could not record why the event stayed in the inbox",
+			"event", id, "reason", reason, "error", err)
+		ev, _ = m.events.Get(id)
+	}
+	return ev
 }
 
 func (m *Manager) allowEventAutoRoute(source string, limit int) bool {

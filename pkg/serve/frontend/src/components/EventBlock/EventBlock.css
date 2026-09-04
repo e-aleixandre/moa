@@ -1,18 +1,32 @@
 /* wake-on-event — EventBlock styles.
 
-   An event is a MARK in the transcript, not a card. It carries no fill, no
-   border, no left rule and no identity colour: peach belongs to the owner
+   An event is a MARGIN NOTE, not a card and not a message. It carries no fill,
+   no border, no rule and no identity colour: peach belongs to the owner
    (waypoints, primary actions) and yellow/red are reserved for states that
-   need someone. An event is neither, so it is monochrome, and its whole
-   presence is a mono provenance line over a plain title — the same weight the
-   stream gives a system line.
+   need someone. An event is neither.
+
+   What sets it apart is ALIGNMENT. The glyph sits in the gutter, outside the
+   text column, and everything else is indented past it — the shape of a note
+   written in the margin of a page. Scrolling, the eye catches the broken
+   left edge long before it would catch a colour, and nothing is shouted.
 
    The expanded payload is the ledger's detail surface (crust panel, flush
    CodeBlock), so raw text this conversation received looks the same wherever
    it is read. */
 
 .evb {
-  margin: var(--space-4) 0 var(--space-5);
+  position: relative;
+  margin: var(--space-5) 0;
+  padding-left: 22px;
+}
+
+/* The glyph hangs in the gutter, vertically on the provenance line. */
+.evb-glyph {
+  position: absolute;
+  left: 0;
+  top: 15px;
+  display: inline-flex;
+  color: var(--overlay1);
 }
 
 .evb-head {
@@ -63,15 +77,10 @@
   overflow: hidden;
 }
 
-/* The glyph is the mark itself — a wave, not a logo. Same muted role as the
-   rest of the line, so it reads as punctuation. */
-.evb-glyph {
-  flex: none;
-  font-family: var(--mono);
-  line-height: 1;
-}
-
+/* The source name carries the normal text colour while the rest of the line
+   stays muted: one anchor for the eye, at no cost in colour. */
 .evb-source {
+  color: var(--subtext0);
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -104,12 +113,51 @@
   background: var(--crust);
   border-radius: var(--radius-md);
   overflow: hidden;
+  max-width: 100%;
 }
 
 .evb-body .code.flush {
+  max-width: 100%;
   max-height: 420px;
   overflow: auto;
 }
+
+/* Compact: the inbox sheet on a phone cannot spend 420px on a payload. */
+.evb-body.compact .code.flush {
+  max-height: 120px;
+}
+
+.evb-payload-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--overlay1);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.evb-payload-toggle:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.evb-payload-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evb-payload.open .evb-chev { transform: rotate(90deg); }
 
 .evb-more {
   display: block;

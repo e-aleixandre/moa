@@ -60,7 +60,20 @@ type Event struct {
 	CreateThinking string `json:"create_thinking,omitempty"`
 	CreateYolo     bool   `json:"create_yolo,omitempty"`
 	CreateTitle    string `json:"create_title,omitempty"`
+	// PendingReason is why a `new` event is still in the inbox, set at the
+	// routing decision so the row can say so without the owner guessing.
+	PendingReason string `json:"pending_reason,omitempty"`
 }
+
+// PendingReason values. Stable API tokens; the client maps them to copy.
+const (
+	PendingInbox              = "inbox"
+	PendingNoSession          = "no_session"
+	PendingManySessions       = "many_sessions"
+	PendingSessionUnavailable = "session_unavailable"
+	PendingSessionBusy        = "session_busy"
+	PendingRateLimited        = "rate_limited"
+)
 
 // NewID mints an event identifier, using the same crypto/rand mechanism as
 // core.NewMsgID.

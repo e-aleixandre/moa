@@ -35,6 +35,7 @@ func TestDecideEventRoute(t *testing.T) {
 		wantID     string
 		wantCreate bool
 		wantInbox  bool
+		wantReason string
 	}{
 		{
 			name: "session:id live and idle → deliver",
@@ -58,7 +59,8 @@ func TestDecideEventRoute(t *testing.T) {
 			sessions: []SessionInfo{
 				{ID: "mine", State: StateIdle, CWD: project, Updated: now},
 			},
-			wantInbox: true,
+			wantInbox:  true,
+			wantReason: events.PendingSessionUnavailable,
 		},
 		{
 			name: "session:id in error → inbox",
@@ -66,7 +68,8 @@ func TestDecideEventRoute(t *testing.T) {
 			sessions: []SessionInfo{
 				{ID: "broken", State: StateError, CWD: project, Updated: now},
 			},
-			wantInbox: true,
+			wantInbox:  true,
+			wantReason: events.PendingSessionUnavailable,
 		},
 		{
 			name: "session:id waiting on permission → inbox",
@@ -74,7 +77,8 @@ func TestDecideEventRoute(t *testing.T) {
 			sessions: []SessionInfo{
 				{ID: "ask", State: StatePermission, CWD: project, Updated: now},
 			},
-			wantInbox: true,
+			wantInbox:  true,
+			wantReason: events.PendingSessionUnavailable,
 		},
 		{
 			name: "session:id saved is not open → inbox",
@@ -82,7 +86,8 @@ func TestDecideEventRoute(t *testing.T) {
 			sessions: []SessionInfo{
 				{ID: "disk", State: StateSaved, CWD: project, Updated: now},
 			},
-			wantInbox: true,
+			wantInbox:  true,
+			wantReason: events.PendingSessionUnavailable,
 		},
 		{
 			name:     "project with exactly one live session → deliver",
@@ -91,10 +96,11 @@ func TestDecideEventRoute(t *testing.T) {
 			wantID:   "only",
 		},
 		{
-			name:      "project with none, when_none inbox → inbox",
-			src:       projectSrc(core.EventWhenInbox, ""),
-			sessions:  []SessionInfo{{ID: "other", State: StateIdle, CWD: "/", Updated: now}},
-			wantInbox: true,
+			name:       "project with none, when_none inbox → inbox",
+			src:        projectSrc(core.EventWhenInbox, ""),
+			sessions:   []SessionInfo{{ID: "other", State: StateIdle, CWD: "/", Updated: now}},
+			wantInbox:  true,
+			wantReason: events.PendingNoSession,
 		},
 		{
 			name:       "project with none, when_none create → create",
@@ -116,7 +122,8 @@ func TestDecideEventRoute(t *testing.T) {
 				{ID: "old", State: StateIdle, CWD: project, Updated: ago(time.Hour)},
 				{ID: "fresh", State: StateIdle, CWD: project, Updated: ago(time.Minute)},
 			},
-			wantInbox: true,
+			wantInbox:  true,
+			wantReason: events.PendingManySessions,
 		},
 		{
 			name: "project with many, when_many latest → greatest Updated",
@@ -128,10 +135,11 @@ func TestDecideEventRoute(t *testing.T) {
 			wantID: "fresh",
 		},
 		{
-			name:      "inbox target always waits",
-			src:       core.EventSourceConfig{Target: core.EventTarget{Kind: core.EventTargetInbox}},
-			sessions:  []SessionInfo{{ID: "mine", State: StateIdle, CWD: project, Updated: now}},
-			wantInbox: true,
+			name:       "inbox target always waits",
+			src:        core.EventSourceConfig{Target: core.EventTarget{Kind: core.EventTargetInbox}},
+			sessions:   []SessionInfo{{ID: "mine", State: StateIdle, CWD: project, Updated: now}},
+			wantInbox:  true,
+			wantReason: events.PendingInbox,
 		},
 		{
 			name: "a permission-waiting session is not an open candidate",
@@ -146,8 +154,8 @@ func TestDecideEventRoute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := decideEventRoute(tt.src, tt.sessions)
-			if got.Inbox != tt.wantInbox || got.Create != tt.wantCreate || got.SessionID != tt.wantID {
-				t.Fatalf("got %+v, want id=%q create=%v inbox=%v", got, tt.wantID, tt.wantCreate, tt.wantInbox)
+			if got.Inbox != tt.wantInbox || got.Create != tt.wantCreate || got.SessionID != tt.wantID || got.Reason != tt.wantReason {
+				t.Fatalf("got %+v, want id=%q create=%v inbox=%v reason=%q", got, tt.wantID, tt.wantCreate, tt.wantInbox, tt.wantReason)
 			}
 		})
 	}
@@ -385,6 +393,10 @@ func TestHookProjectManyGoesToInbox(t *testing.T) {
 	if out.State != events.StateNew {
 		t.Fatalf("state = %q, want new", out.State)
 	}
+	got, ok := mgr.events.Get(out.ID)
+	if !ok || got.PendingReason != events.PendingManySessions {
+		t.Fatalf("pending_reason = %q, want %s", got.PendingReason, events.PendingManySessions)
+	}
 }
 
 func TestHookSessionInErrorGoesToInbox(t *testing.T) {
@@ -409,6 +421,10 @@ func TestHookSessionInErrorGoesToInbox(t *testing.T) {
 	}
 	if out.State != events.StateNew {
 		t.Fatalf("state = %q, want new (inbox)", out.State)
+	}
+	got, ok := mgr.events.Get(out.ID)
+	if !ok || got.PendingReason != events.PendingSessionUnavailable {
+		t.Fatalf("pending_reason = %q, want %s", got.PendingReason, events.PendingSessionUnavailable)
 	}
 }
 
@@ -517,6 +533,30 @@ func TestListEventsBoundsBodyAndOmitsPayload(t *testing.T) {
 	}
 	if len(list) != 1 || len(list[0].Body) != 2<<10 || len(list[0].Payload) != 0 {
 		t.Fatalf("listed event = %+v", list)
+	}
+}
+
+func TestListEventsIncludesPendingReason(t *testing.T) {
+	srv, _ := newHookTestServer(t, map[string]core.EventSourceConfig{
+		"ci": {Secret: "tok", Target: core.EventTarget{Kind: core.EventTargetInbox}},
+	})
+	resp := postHook(t, srv, "ci", "tok", `{"title":"alert"}`)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("hook status = %d", resp.StatusCode)
+	}
+
+	listed, err := http.Get(srv.URL + "/api/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listed.Body.Close() //nolint:errcheck
+	var list []events.Event
+	if err := json.NewDecoder(listed.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].PendingReason != events.PendingInbox {
+		t.Fatalf("listed = %+v, want pending_reason=%s", list, events.PendingInbox)
 	}
 }
 
@@ -686,6 +726,10 @@ func TestHookAutorunFalseBusyStaysInInbox(t *testing.T) {
 	if out.State != events.StateNew {
 		t.Fatalf("state = %q, want new", out.State)
 	}
+	got, ok := mgr.events.Get(out.ID)
+	if !ok || got.PendingReason != events.PendingSessionBusy {
+		t.Fatalf("pending_reason = %q, want %s", got.PendingReason, events.PendingSessionBusy)
+	}
 	if eventReached(sess) {
 		t.Fatal("autorun:false steered a busy session")
 	}
@@ -722,6 +766,10 @@ func TestHookRateLimitKeepsOverflowInInbox(t *testing.T) {
 	}
 	if b.State != events.StateNew {
 		t.Fatalf("second state = %q, want new (rate-limited)", b.State)
+	}
+	got, ok := mgr.events.Get(b.ID)
+	if !ok || got.PendingReason != events.PendingRateLimited {
+		t.Fatalf("pending_reason = %q, want %s", got.PendingReason, events.PendingRateLimited)
 	}
 	third := postHook(t, srv, "ci", "tok", `{"title":"three","id":"3"}`)
 	defer third.Body.Close() //nolint:errcheck
@@ -772,6 +820,31 @@ func TestRouteEventUsesSnapshotAutorun(t *testing.T) {
 	}
 	if sess.runtime.Context().Agent.IsRunning() {
 		t.Fatal("live autorun:true started a turn; snapshot should have stayed false")
+	}
+}
+
+func TestRouteEventNewOmitsModelWhenUnknown(t *testing.T) {
+	dir := t.TempDir()
+	srv, mgr := newHookTestServer(t, nil)
+	ev, _, err := mgr.events.Add(events.Event{Source: "ci", Project: dir, Title: "alert"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := automationReq(t, srv, "/api/events/"+ev.ID+"/route", "", `{"new":true}`, true)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("{new:true} without model should fall back to server defaults; status = %d, body = %s", resp.StatusCode, body)
+	}
+	var routed events.Event
+	if err := json.NewDecoder(resp.Body).Decode(&routed); err != nil {
+		t.Fatal(err)
+	}
+	if routed.State != events.StateRouted || routed.RoutedTo == "" {
+		t.Fatalf("routed = %+v", routed)
+	}
+	if _, ok := mgr.Get(routed.RoutedTo); !ok {
+		t.Fatal("created session is missing")
 	}
 }
 

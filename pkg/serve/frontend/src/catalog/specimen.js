@@ -291,7 +291,17 @@ const PULSE = "/home/ealeixandre/dev/moa/pulse-api";
 export const CATALOG_EVENTS = [
   { id: "ev_1", source: "sentry-tienda", project: MAIN, key: "TIENDA-4F2",
     title: "TypeError in OrderSummary — 412 events", state: "new", created: now - 3 * 60000,
-    body: "Cannot read properties of undefined (reading 'total') — OrderSummary.render" },
+    pending_reason: "many_sessions", create_model: "terra", create_thinking: "low",
+    body: JSON.stringify({
+      id: "TIENDA-4F2", level: "error", culprit: "OrderSummary.render",
+      message: "Cannot read properties of undefined (reading 'total')",
+      url: "https://sentry.io/organizations/tienda/issues/4f2/",
+      first_seen: "2026-09-03T15:02:11Z", count: 412,
+    }, null, 2) },
+  { id: "ev_inbox", source: "agentmail", project: "", key: "inbox-1",
+    title: "New message from Jorge", state: "new", created: now - 2 * 60000,
+    pending_reason: "inbox",
+    body: "Can you review the attached invoice layout?" },
   { id: "ev_3", source: "ci-tienda", project: MAIN, key: "pipeline-8841",
     title: "Pipeline #8841 failed on main", state: "routed", routed_to: "hooked", created: now - 2 * 3600000 },
 ];
@@ -346,9 +356,12 @@ function noisyEvents() {
         project: source === "agentmail" ? PULSE : MAIN,
         title,
         state: delivered ? "routed" : "new",
-        ...(delivered ? { routed_to: source === "agentmail" ? "deploy" : "hooked" } : {}),
+        ...(delivered
+          ? { routed_to: source === "agentmail" ? "deploy" : "hooked" }
+          : { pending_reason: source === "agentmail" ? "inbox" : "many_sessions" }),
         created: now - n * 7 * 60000,
         body: JSON.stringify({ source, title, seq: n }, null, 2),
+        ...(source === "sentry-tienda" && !delivered ? { create_model: "terra", create_thinking: "low" } : {}),
       });
     }
   }
@@ -379,10 +392,16 @@ export const CATALOG_SESSIONS = {
 };
 
 export function seedCatalogStore() {
+  let inboxOpen = false;
+  try {
+    const query = typeof location === "undefined" ? "" : location.search;
+    inboxOpen = new URLSearchParams(query).get("inbox") === "1";
+  } catch (_) { /* ignore */ }
   setState((s) => ({
     sessions: { ...CATALOG_SESSIONS },
     sessionsLoaded: true,
     events: catalogEvents(), // wake-on-event
+    inboxOpen, // wake-on-event: ?inbox=1 opens the inbox the same way a pending push does
     activeSession: SPECIMEN_ID,
     usage: {
       available: true,

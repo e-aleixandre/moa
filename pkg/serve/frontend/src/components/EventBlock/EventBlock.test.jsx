@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { EVENT_BODY_PREVIEW, eventAge, eventBodyLang, eventBodyPreview } from "./EventBlock.jsx";
+import { EVENT_BODY_PREVIEW, eventAge, eventBodyLang, eventBodyLine, eventBodyPreview } from "./EventBlock.jsx";
 
 test("a long event payload is previewed and keeps its full text for Show all", () => {
   const body = "{".repeat(EVENT_BODY_PREVIEW + 40);
@@ -49,4 +49,9 @@ test("a truncated payload is not claimed to be JSON", () => {
   const body = `{"a":"${"x".repeat(EVENT_BODY_PREVIEW)}"}`;
   expect(eventBodyLang(eventBodyPreview(body).text)).toBeUndefined();
   expect(eventBodyLang(body)).toBe("json");
+});
+
+test("a payload flattens to one line for the inbox row", () => {
+  expect(eventBodyLine('{\n  "ok": true\n}')).toBe('{ "ok": true }');
+  expect(eventBodyLine(undefined)).toBe("");
 });

@@ -13,7 +13,7 @@
 // uses for a tool's output (a recessed crust panel with a flush CodeBlock), so
 // "raw text this conversation received" looks the same everywhere.
 import { useState } from "preact/hooks";
-import { ChevronRight } from "lucide-preact";
+import { ChevronRight, Import } from "lucide-preact";
 import { CodeBlock } from "../CodeBlock/CodeBlock.jsx";
 import "./EventBlock.css";
 
@@ -56,6 +56,53 @@ export function eventBodyLang(body) {
   }
 }
 
+// EventPayloadBody is the ledger's code surface for an event payload: recessed
+// crust, flush CodeBlock. EventBlock and the inbox sheet share it so a hook
+// body does not grow a second presentation.
+export function EventPayloadBody({ body, compact = false }) {
+  const [full, setFull] = useState(false);
+  const preview = eventBodyPreview(body);
+  const shown = full ? body : preview.text;
+  return (
+    <div class={`evb-body${compact ? " compact" : ""}`}>
+      <CodeBlock className="flush" code={shown} lang={eventBodyLang(shown)} showHeader={false} />
+      {preview.truncated && (
+        <button type="button" class="evb-more" onClick={() => setFull((value) => !value)}>
+          {full ? "Show less" : "Show all"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// eventBodyLine flattens a payload for a one-line preview (inbox row / collapsed
+// sheet). Newlines would wrap; the expanded view is the code surface.
+export function eventBodyLine(body) {
+  return (typeof body === "string" ? body : "").replace(/\s+/g, " ").trim();
+}
+
+// EventPayload is the inbox's collapsed payload: a one-line preview that opens
+// onto EventPayloadBody. EventBlock keeps its own header as the toggle.
+export function EventPayload({ body, compact = false }) {
+  const [open, setOpen] = useState(false);
+  const line = eventBodyLine(body);
+  if (!line) return null;
+  return (
+    <div class={`evb-payload${open ? " open" : ""}`}>
+      <button
+        type="button"
+        class="evb-payload-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span class="evb-payload-line">{line}</span>
+        <span class="evb-chev" aria-hidden="true"><ChevronRight size={14} /></span>
+      </button>
+      {open && <EventPayloadBody body={body} compact={compact} />}
+    </div>
+  );
+}
+
 // EventBlock — one delivered event.
 //
 //   source   the hook that sent it ("sentry-tienda"), the block's own name
@@ -66,9 +113,6 @@ export function eventBodyLang(body) {
 //   autorun  false → it was recorded and no turn was started
 export function EventBlock({ source = "event", title = "", body = "", time, steer = false, autorun = true }) {
   const [open, setOpen] = useState(false);
-  const [full, setFull] = useState(false);
-  const preview = eventBodyPreview(body);
-  const shown = full ? body : preview.text;
   const age = eventAge(time);
   const hasBody = !!body;
 
@@ -83,7 +127,7 @@ export function EventBlock({ source = "event", title = "", body = "", time, stee
       >
         <span class="evb-id">
           <span class="evb-meta">
-            <span class="evb-glyph" aria-hidden="true">⌁</span>
+            <span class="evb-glyph" aria-hidden="true"><Import size={13} /></span>
             <span class="evb-source">{source}</span>
             {age && <span>· {age}</span>}
             {steer && <span>· seen after current tool</span>}
@@ -93,16 +137,7 @@ export function EventBlock({ source = "event", title = "", body = "", time, stee
         </span>
         {hasBody && <span class="evb-chev" aria-hidden="true"><ChevronRight size={14} /></span>}
       </button>
-      {open && hasBody && (
-        <div class="evb-body">
-          <CodeBlock className="flush" code={shown} lang={eventBodyLang(shown)} showHeader={false} />
-          {preview.truncated && (
-            <button type="button" class="evb-more" onClick={() => setFull((value) => !value)}>
-              {full ? "Show less" : "Show all"}
-            </button>
-          )}
-        </div>
-      )}
+      {open && hasBody && <EventPayloadBody body={body} />}
     </section>
   );
 }

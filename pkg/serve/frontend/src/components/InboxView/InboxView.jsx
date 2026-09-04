@@ -8,23 +8,29 @@
 // swapped in place on the desktop. Nothing else moves when an event arrives.
 //
 // One component serves both, because the content is identical and only the
-// frame differs. A row is three lines at most:
+// frame differs. A pending row is compact:
 //
 //     sentry-tienda · 6m        ← mono, muted: where it came from and when
 //     TypeError in OrderSummary ← what arrived
-//     → checkout bug            ← only when it was already delivered
+//     several sessions are open ← why it is still waiting
+//
+// The payload is NOT in the row: it is what you read once you are deciding,
+// and a JSON fragment under every title turns the list into noise. It opens
+// with the sheet.
 //
 // Tapping a pending row opens the routing sheet (the project's open sessions,
 // a new session, ignore). Tapping a delivered row opens the session it went to
 // — the event lives there now.
 import { useEffect, useState } from "preact/hooks";
-import { CornerDownRight } from "lucide-preact";
 import { Segmented } from "../Segmented/Segmented.jsx";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { ModelSelector } from "../ModelSelector/ModelSelector.jsx";
+import { SessionRow } from "../SessionRow/SessionRow.jsx";
+import { EventPayload } from "../EventBlock/EventBlock.jsx";
 import { api } from "../../data/api.js";
 import { deriveModelSpecs } from "../../data/selectors.js";
-import { inboxGroups } from "../../data/events.js";
+import { defaultModelSpec } from "../CommandPalette/command-palette-model.js";
+import { eventCreateActionLabel, eventCreateSpec, inboxGroups, pendingReasonLabel } from "../../data/events.js";
 import "./InboxView.css";
 
 const FILTERS = [
@@ -32,38 +38,60 @@ const FILTERS = [
   { value: "all", label: "All" },
 ];
 
-// NewSessionPicker — "New session…" opens the SHIPPED ModelSelector rather
-// than a second, smaller model list: the model is the only thing this decision
-// needs that the event does not already carry (the project comes from the
-// event, the first message is the event itself).
-function NewSessionPicker({ card, models, onCreate, onClose }) {
-  const [thinking, setThinking] = useState("medium");
-  const [fetched, setFetched] = useState(null);
-  // The catalog is only needed once someone actually opens the picker, so it
-  // is fetched here rather than kept warm in the list — the same lazy load the
-  // mobile status line's model sheet does. A caller that already has the specs
-  // (the lab, or a screen that fetched them) passes them in.
+// NewSessionAction is a direct create using the source snapshot (or moa's
+// default), labelled with that model. Change… opens the shipped selector for
+// the rare override — not a second "are you sure" sheet.
+function useEventCreateModels() {
+  const [models, setModels] = useState([]);
+  const [defaultModel, setDefaultModel] = useState("");
   useEffect(() => {
-    if (models.length > 0 || fetched) return undefined;
     let live = true;
-    api("GET", "/api/models")
-      .then((list) => { if (live) setFetched(deriveModelSpecs(list)); })
-      .catch(() => { if (live) setFetched([]); });
+    Promise.all([
+      api("GET", "/api/capabilities").catch(() => ({})),
+      api("GET", "/api/models").catch(() => []),
+    ]).then(([caps, list]) => {
+      if (!live) return;
+      const specs = deriveModelSpecs(list);
+      setModels(specs);
+      setDefaultModel(defaultModelSpec(caps, specs));
+    });
     return () => { live = false; };
-  }, [models.length, fetched]);
-  const specs = models.length > 0 ? models : (fetched || []);
+  }, []);
+  return { models, defaultModel };
+}
+
+function NewSessionAction({ event, onCreate, onChange }) {
+  const { models, defaultModel } = useEventCreateModels();
+  const label = eventCreateActionLabel(event, { specs: models, defaultModel });
   return (
-    <Sheet open onClose={onClose} title="New session" ariaLabel={`New session for ${card.event.title}`}>
-      <p class="inbox-sheet-lead">
-        Starts a session in {card.projectLabel} with the event as its first message.
-      </p>
+    <>
+      <button type="button" class="inbox-sheet-item" onClick={() => onCreate?.(event.id, eventCreateSpec(event))}>
+        <span class="inbox-sheet-item-name">{label}</span>
+      </button>
+      <button type="button" class="inbox-sheet-item inbox-sheet-item-quiet" onClick={onChange}>
+        <span class="inbox-sheet-item-name">Change…</span>
+      </button>
+    </>
+  );
+}
+
+function ChangeModel({ event, onCreate, onClose }) {
+  const { models, defaultModel } = useEventCreateModels();
+  const [thinking, setThinking] = useState(event.create_thinking || "");
+  return (
+    <Sheet open onClose={onClose} title="Model & thinking" ariaLabel="Choose model and thinking">
       <ModelSelector
-        models={specs}
-        selected={null}
-        thinking={thinking}
+        models={models}
+        selected={event.create_model || defaultModel}
+        thinking={thinking || "low"}
         embedded
         onThinkingChange={setThinking}
-        onSelect={(spec) => onCreate?.(card.event.id, { model: spec.id, thinking })}
+        onSelect={(nextModel) => {
+          const spec = { model: nextModel };
+          const level = thinking || "low";
+          if (level) spec.thinking = level;
+          onCreate?.(event.id, spec);
+        }}
       />
     </Sheet>
   );
@@ -74,50 +102,58 @@ function NewSessionPicker({ card, models, onCreate, onClose }) {
 // here too rather than behind a second menu idiom, and only when that source
 // actually has more than one waiting — a bulk action offered for a single row
 // is just a slower single action.
-function RouteSheet({ card, models, sameSourcePending, onSend, onNewSession, onIgnore, onIgnoreSource, onClose }) {
-  const [picking, setPicking] = useState(false);
+function RouteSheet({ card, sameSourcePending, onSend, onNewSession, onIgnore, onIgnoreSource, onClose }) {
+  const [changing, setChanging] = useState(false);
   const { event } = card;
-  if (picking) {
+  const hasProject = Boolean(event.project);
+  const reason = pendingReasonLabel(event.pending_reason);
+  if (changing) {
     return (
-      <NewSessionPicker
-        card={card}
-        models={models}
-        onCreate={(id, spec) => { setPicking(false); onNewSession?.(id, spec); }}
-        onClose={() => setPicking(false)}
+      <ChangeModel
+        event={event}
+        onCreate={(id, spec) => { setChanging(false); onNewSession?.(id, spec); }}
+        onClose={() => setChanging(false)}
       />
     );
   }
   return (
     <Sheet open onClose={onClose} title="Send event to" ariaLabel={`Send ${event.title} to a session`} class="inbox-sheet">
       <p class="inbox-sheet-lead">
-        <span class="inbox-sheet-from">{event.source} · {card.projectLabel}</span>
+        <span class="inbox-sheet-from">{event.source}{hasProject && ` · ${card.projectLabel}`}</span>
         <span class="inbox-sheet-title">{event.title}</span>
       </p>
+      {reason && <p class="inbox-sheet-reason">{reason}</p>}
+      <EventPayload body={event.body} compact />
       {card.sessions.length > 0 ? (
         <div class="inbox-sheet-list">
           {card.sessions.map((session) => (
-            <button
+            <SessionRow
               key={session.id}
-              type="button"
-              class="inbox-sheet-item"
+              variant="card"
+              title={session.title}
+              state={session.state}
+              when={session.when}
+              origin={session.origin}
+              brief={session.brief}
+              path={session.path}
               onClick={() => onSend?.(event.id, session.id)}
-            >
-              <CornerDownRight size={14} aria-hidden="true" />
-              <span class="inbox-sheet-item-name">{session.title}</span>
-              {session.when && <span class="inbox-sheet-item-age">{session.when}</span>}
-            </button>
+            />
           ))}
         </div>
       ) : (
         // Not an error and not a disabled item: with nothing open in the
         // project there is no session to pick, so the sheet says so and the
         // next item is the one that works.
-        <p class="inbox-sheet-note">No session open in {card.projectLabel}</p>
+        <p class="inbox-sheet-note">{hasProject ? `No session open in ${card.projectLabel}` : "No session open."}</p>
       )}
       <div class="inbox-sheet-list">
-        <button type="button" class="inbox-sheet-item" onClick={() => setPicking(true)}>
-          <span class="inbox-sheet-item-name">New session…</span>
-        </button>
+        {hasProject && (
+          <NewSessionAction
+            event={event}
+            onCreate={onNewSession}
+            onChange={() => setChanging(true)}
+          />
+        )}
         <button type="button" class="inbox-sheet-item inbox-sheet-item-quiet" onClick={() => onIgnore?.(event.id)}>
           <span class="inbox-sheet-item-name">Ignore</span>
         </button>
@@ -139,6 +175,7 @@ function RouteSheet({ card, models, sameSourcePending, onSend, onNewSession, onI
 function InboxRowButton({ card, onClick }) {
   const { event } = card;
   const delivered = !card.pending && event.state === "routed";
+  const reason = card.pending ? pendingReasonLabel(event.pending_reason) : "";
   const label = card.pending
     ? `${event.source}, ${card.age}, ${event.title} — choose where to send it`
     : delivered
@@ -156,6 +193,7 @@ function InboxRowButton({ card, onClick }) {
         {!card.pending && event.state === "dismissed" && " · ignored"}
       </span>
       <span class="inbox-row-title">{event.title}</span>
+      {reason && <span class="inbox-row-reason">{reason}</span>}
       {delivered && (
         <span class="inbox-row-dest">→ {card.routedToTitle || "a session"}</span>
       )}
@@ -167,7 +205,6 @@ function InboxRowButton({ card, onClick }) {
 // so this component decides nothing about routing, only how it is asked.
 export function InboxView({
   cards = [],
-  models = [],
   onSend,
   onNewSession,
   onIgnore,
@@ -185,7 +222,9 @@ export function InboxView({
     : 0;
 
   const close = () => setRouting(null);
-  const act = (fn) => (...args) => { close(); fn?.(...args); };
+  const act = (fn) => (...args) => {
+    Promise.resolve(fn?.(...args)).then(() => close()).catch(() => {});
+  };
 
   return (
     <div class={`inbox${className ? ` ${className}` : ""}`}>
@@ -219,7 +258,6 @@ export function InboxView({
       {card && (
         <RouteSheet
           card={card}
-          models={models}
           sameSourcePending={sameSourcePending}
           onSend={act(onSend)}
           onNewSession={act(onNewSession)}
