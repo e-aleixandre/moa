@@ -54,9 +54,12 @@
   color: var(--overlay1);
   transition: color var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .mhead-switch:hover .mhead-chev {
   color: var(--text);
+}
 }
 
 /* Empty state: [moa ▾] doesn't need to eat the whole row. */
@@ -151,9 +154,12 @@
   position: absolute;
   inset: -16px -14px -12px -14px;
 }
+@media (hover: hover) {
+
 
 .mhead-bell:hover {
   color: var(--text);
+}
 }
 
 .mhead-bell:focus-visible {
@@ -221,9 +227,14 @@
   cursor: default;
 }
 
-.mhead-rewind:active:not(:disabled),
+.mhead-rewind:active:not(:disabled){
+  color: var(--subtext0);
+}
+@media (hover: hover) {
+
 .mhead-rewind:hover:not(:disabled) {
   color: var(--subtext0);
+}
 }
 
 .mhead-rewind:focus-visible {

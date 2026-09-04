@@ -48,8 +48,11 @@
   font-size: var(--text-xs);
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .hydra-play:hover { background: var(--surface1); color: var(--text); }
+}
 .hydra-play:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);

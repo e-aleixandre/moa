@@ -16,9 +16,12 @@
   color: var(--overlay1);
   cursor: pointer;
 }
+@media (hover: hover) {
+
 .session-card-menu-button:hover {
   background: color-mix(in srgb, var(--surface2) 60%, transparent);
   color: var(--subtext0);
+}
 }
 .session-card-menu-button:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -59,9 +62,15 @@
   color: var(--text);
   cursor: pointer;
 }
-.session-card-action:hover,
 .session-card-action:focus-visible {
   background: var(--surface1);
   outline: none;
+}
+@media (hover: hover) {
+
+.session-card-action:hover{
+  background: var(--surface1);
+  outline: none;
+}
 }
 .session-card-action-danger { color: var(--red); }

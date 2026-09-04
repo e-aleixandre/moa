@@ -69,9 +69,12 @@
   opacity: 0.5;
   transition: opacity var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .pane .p-head-drag:hover .p-grip {
   opacity: 1;
+}
 }
 
 /* Tile number badge (⌘+N target) */
@@ -116,9 +119,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+@media (hover: hover) {
+
 
 .pane .p-title:hover {
   color: var(--rosewater);
+}
 }
 
 .pane .p-title:focus-visible {
@@ -156,16 +162,28 @@
   opacity: 0;
   transition: opacity var(--duration) var(--ease);
 }
-
-.pane:hover .p-tools,
 .pane.focused .p-tools,
 .pane:focus-within .p-tools {
   opacity: 1;
 }
+@media (hover: hover) {
+
+
+.pane:hover .p-tools{
+  opacity: 1;
+}
+}
+@media (hover: hover) {
+
 
 .pane .p-tools .icon-button.variant-ghost.p-close:hover {
   color: var(--red);
   background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+}
+.pane .p-tools .p-preview.is-on {
+  color: var(--mauve);
+  background: color-mix(in srgb, var(--mauve) 12%, transparent);
 }
 
 .pane .p-max-wrap {
@@ -191,9 +209,12 @@
   pointer-events: none;
   z-index: var(--z-sticky);
 }
+@media (hover: hover) {
+
 
 .pane.focused .p-max-wrap:hover .p-max-tip {
   opacity: 1;
+}
 }
 
 .pane .p-body {
@@ -418,9 +439,12 @@
   font: inherit;
   color: inherit;
 }
+@media (hover: hover) {
+
 
 .pane button.p-model-btn:hover {
   filter: brightness(1.08);
+}
 }
 
 .pane button.p-model-btn:focus-visible {

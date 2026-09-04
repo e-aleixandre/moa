@@ -18,8 +18,11 @@
   cursor: pointer;
   transition: color var(--duration) var(--ease), background var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .inbox-btn:hover { color: var(--text); }
+}
 
 .inbox-btn:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);

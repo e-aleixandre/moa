@@ -104,10 +104,16 @@
   position: absolute;
   inset: -8px;
 }
-.sdrawer-new:hover,
 .sdrawer-new:active {
   background: var(--surface0);
   color: var(--text);
+}
+@media (hover: hover) {
+
+.sdrawer-new:hover{
+  background: var(--surface0);
+  color: var(--text);
+}
 }
 .sdrawer-new:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -143,8 +149,11 @@
   content: "";
   position: absolute;
   inset: -8px;
+} .sdrawer-more:active { background: var(--surface0); color: var(--text); }
+@media (hover: hover) {
+
+.sdrawer-more:hover{ background: var(--surface0); color: var(--text); }
 }
-.sdrawer-more:hover, .sdrawer-more:active { background: var(--surface0); color: var(--text); }
 .sdrawer-more:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 .sdrawer-group-menu {
   position: absolute; top: calc(100% + 5px); right: 0; z-index: var(--z-overlay);
@@ -153,15 +162,21 @@
 }
 .sdrawer-group-menu--up { top: auto; bottom: calc(100% + 5px); }
 .sdrawer-group-menu-label { display: block; padding: 7px 10px 5px; font-family: var(--mono); font-size: var(--text-nano); color: var(--overlay0); text-transform: uppercase; letter-spacing: var(--tracking-wide); }
-.sdrawer-group-menu button { display: flex; align-items: center; min-height: 44px; width: 100%; padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--subtext0); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
-.sdrawer-group-menu button:hover, .sdrawer-group-menu button:focus-visible { background: var(--surface1); color: var(--text); outline: none; }
+.sdrawer-group-menu button { display: flex; align-items: center; min-height: 44px; width: 100%; padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--subtext0); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; } .sdrawer-group-menu button:focus-visible { background: var(--surface1); color: var(--text); outline: none; }
+@media (hover: hover) {
+
+.sdrawer-group-menu button:hover{ background: var(--surface1); color: var(--text); outline: none; }
+}
 .sdrawer-group-menu-tick { width: 14px; margin-right: 9px; color: var(--mauve); }
 
 /* Project accordion: cwd is spoken once in this 44px target, leaving card
    space for the live brief. Its compact type distinguishes hierarchy without
    giving a quiet navigator a competing, heavy background. */
-.sdrawer-project-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 44px; padding: var(--space-1) var(--space-1); border: 0; border-radius: var(--radius-md); background: none; color: inherit; text-align: left; cursor: pointer; }
-.sdrawer-project-head:hover, .sdrawer-project-head:active { background: color-mix(in srgb, var(--surface0) 55%, transparent); }
+.sdrawer-project-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 44px; padding: var(--space-1) var(--space-1); border: 0; border-radius: var(--radius-md); background: none; color: inherit; text-align: left; cursor: pointer; } .sdrawer-project-head:active { background: color-mix(in srgb, var(--surface0) 55%, transparent); }
+@media (hover: hover) {
+
+.sdrawer-project-head:hover{ background: color-mix(in srgb, var(--surface0) 55%, transparent); }
+}
 .sdrawer-project-head:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 .sdrawer-project-chevron { flex: none; display: inline-flex; color: var(--overlay1); transition: transform var(--duration) var(--ease); }
 .sdrawer-project.is-open .sdrawer-project-chevron { transform: rotate(90deg); }
@@ -172,8 +187,11 @@
 .sdrawer-project-attention { width: 7px; height: 7px; }
 .sdrawer-project-cards { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) 0 0 var(--space-1); }
 .sdrawer-project + .sdrawer-project .sdrawer-project-head { margin-top: var(--space-2); }
-.sdrawer-show-all { min-height: 36px; align-self: flex-start; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--mauve); font: inherit; font-size: var(--text-sm); cursor: pointer; }
-.sdrawer-show-all:hover, .sdrawer-show-all:active { background: var(--surface0); color: var(--text); }
+.sdrawer-show-all { min-height: 36px; align-self: flex-start; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--mauve); font: inherit; font-size: var(--text-sm); cursor: pointer; } .sdrawer-show-all:active { background: var(--surface0); color: var(--text); }
+@media (hover: hover) {
+
+.sdrawer-show-all:hover{ background: var(--surface0); color: var(--text); }
+}
 .sdrawer-show-all:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 
 /* Search — filters the list below in place. It is a real field, not a door to
@@ -256,20 +274,31 @@
   border-radius: 8px;
   min-width: 0;
 }
-.sdcard-slot .session-row.variant-card:hover,
 .sdcard-slot .session-row.variant-card.on {
   background: var(--surface0);
   border-color: transparent;
+}
+@media (hover: hover) {
+
+.sdcard-slot .session-row.variant-card:hover{
+  background: var(--surface0);
+  border-color: transparent;
+}
 }
 .sdcard-slot .session-row.variant-card.needs-yellow,
 .sdcard-slot .session-row.variant-card.needs-red {
   background: transparent;
 }
-.sdcard-slot .session-row.variant-card.needs-yellow:hover,
-.sdcard-slot .session-row.variant-card.needs-red:hover,
 .sdcard-slot .session-row.variant-card.needs-yellow.on,
 .sdcard-slot .session-row.variant-card.needs-red.on {
   background: var(--surface0);
+}
+@media (hover: hover) {
+
+.sdcard-slot .session-row.variant-card.needs-yellow:hover,
+.sdcard-slot .session-row.variant-card.needs-red:hover{
+  background: var(--surface0);
+}
 }
 .sdcard-slot .session-row.variant-card.needs-yellow .r1,
 .sdcard-slot .session-row.variant-card.needs-yellow .r2,
@@ -328,9 +357,14 @@
   color: var(--peach);
   font-weight: var(--weight-medium);
 }
-.sdrawer-ver-update:hover,
 .sdrawer-ver-update:active {
   background: var(--surface0);
+}
+@media (hover: hover) {
+
+.sdrawer-ver-update:hover{
+  background: var(--surface0);
+}
 }
 .sdrawer-ver-update:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -352,10 +386,16 @@
   font-weight: var(--weight-medium);
   font-size: var(--text-sm);
 }
-.sdrawer-settings:hover,
 .sdrawer-settings:active {
   background: var(--surface0);
   color: var(--text);
+}
+@media (hover: hover) {
+
+.sdrawer-settings:hover{
+  background: var(--surface0);
+  color: var(--text);
+}
 }
 .sdrawer-settings:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -386,10 +426,16 @@
   color: var(--subtext0);
   cursor: pointer;
 }
-.sdrawer-back:hover,
 .sdrawer-back:active {
   background: var(--surface0);
   color: var(--text);
+}
+@media (hover: hover) {
+
+.sdrawer-back:hover{
+  background: var(--surface0);
+  color: var(--text);
+}
 }
 .sdrawer-back:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -411,9 +457,14 @@
   font: inherit;
   cursor: pointer;
 }
-.sdnew-project:hover,
 .sdnew-project:active {
   border-color: var(--surface1);
+}
+@media (hover: hover) {
+
+.sdnew-project:hover{
+  border-color: var(--surface1);
+}
 }
 .sdnew-project:disabled {
   opacity: 0.5;
@@ -463,10 +514,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sdnew-dir:hover,
 .sdnew-dir:active {
   background: var(--surface0);
   color: var(--text);
+}
+@media (hover: hover) {
+
+.sdnew-dir:hover{
+  background: var(--surface0);
+  color: var(--text);
+}
 }
 .sdnew-dir:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -486,9 +543,14 @@
   color: var(--peach);
   cursor: pointer;
 }
-.sdnew-create:hover,
 .sdnew-create:active {
   background: var(--surface0);
+}
+@media (hover: hover) {
+
+.sdnew-create:hover{
+  background: var(--surface0);
+}
 }
 .sdnew-create:disabled {
   color: var(--overlay0);

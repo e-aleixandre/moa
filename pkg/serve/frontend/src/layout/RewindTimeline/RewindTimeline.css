@@ -89,9 +89,12 @@
   color: inherit;
   font: inherit;
 }
+@media (hover: hover) {
+
 
 .rw-item-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--surface0) 40%, transparent);
+}
 }
 
 .rw-item-btn:disabled {
@@ -180,10 +183,15 @@
   opacity: 0;
   transition: opacity var(--duration) var(--ease);
 }
-
-.rw-item-btn:hover .rw-jump,
 .rw-item-btn:focus-visible .rw-jump {
   opacity: 1;
+}
+@media (hover: hover) {
+
+
+.rw-item-btn:hover .rw-jump{
+  opacity: 1;
+}
 }
 
 .rw-foot {

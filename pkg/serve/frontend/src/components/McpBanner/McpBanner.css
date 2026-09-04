@@ -25,7 +25,10 @@
   background: var(--yellow);
   color: var(--crust);
 }
+@media (hover: hover) {
+
 
 .mcp-banner .mcp-banner-trust:hover:not(:disabled) {
   background: color-mix(in srgb, var(--yellow) 88%, var(--text));
+}
 }

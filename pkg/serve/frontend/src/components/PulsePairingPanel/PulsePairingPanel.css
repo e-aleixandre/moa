@@ -35,10 +35,13 @@
   font-weight: var(--weight-semibold);
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .pairing-create-button:hover,
 .pairing-copy-button:hover {
   filter: brightness(1.06);
+}
 }
 
 .pairing-create-button:focus-visible,
@@ -110,9 +113,12 @@
   text-decoration: underline;
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .pairing-manual-toggle:hover {
   color: var(--text);
+}
 }
 
 .pairing-manual {

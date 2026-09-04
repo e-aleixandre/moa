@@ -67,9 +67,12 @@
   border-radius: var(--radius-sm);
   transition: color var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .code .code-head .copy:hover {
   color: var(--text);
+}
 }
 
 .code .code-head .copy:focus-visible {

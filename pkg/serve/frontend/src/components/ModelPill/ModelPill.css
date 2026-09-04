@@ -16,9 +16,12 @@
   color: var(--text);
   transition: border-color var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .model-pill:hover {
   border-color: var(--mauve);
+}
 }
 
 .model-pill:focus-visible {

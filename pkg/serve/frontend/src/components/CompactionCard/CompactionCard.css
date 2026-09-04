@@ -8,7 +8,10 @@
   margin: var(--space-4) 0 var(--space-5);
 }
 .cc-header { width: 100%; min-height: 30px; display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); border: 0; background: transparent; color: var(--overlay1); font: inherit; text-align: left; cursor: pointer; }
+@media (hover: hover) {
+
 .cc-header:hover { background: color-mix(in srgb, var(--surface0) 30%, transparent); }
+}
 .cc-header:focus-visible, .cc-more:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: -2px; }
 .cc-icon { width: 18px; flex: none; display: inline-flex; justify-content: center; color: var(--overlay0); }
 .cc-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

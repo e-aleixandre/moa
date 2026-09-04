@@ -164,9 +164,14 @@
   cursor: pointer;
   transition: background var(--duration) var(--ease);
 }
-.mconv-empty-recent:hover,
 .mconv-empty-recent:active {
   background: var(--surface0);
+}
+@media (hover: hover) {
+
+.mconv-empty-recent:hover{
+  background: var(--surface0);
+}
 }
 .mconv-empty-recent:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -238,9 +243,14 @@
   border: 0;
   color: var(--text);
 }
-.mconv-empty-browse:hover,
 .mconv-empty-browse:active {
   background: var(--surface1);
+}
+@media (hover: hover) {
+
+.mconv-empty-browse:hover{
+  background: var(--surface1);
+}
 }
 
 /* New — secondary, borrowing the Spine's dashed "new session" idiom. */
@@ -249,10 +259,16 @@
   border: 1px dashed var(--surface1);
   color: var(--overlay1);
 }
-.mconv-empty-new:hover,
 .mconv-empty-new:active {
   border-color: var(--mauve);
   color: var(--mauve);
+}
+@media (hover: hover) {
+
+.mconv-empty-new:hover{
+  border-color: var(--mauve);
+  color: var(--mauve);
+}
 }
 
 /* First-run (§2.4): no list — center vertically and promote New to primary. */
@@ -272,9 +288,14 @@
   color: var(--crust);
   font-weight: var(--weight-semibold);
 }
-.mconv-empty-new-primary:hover,
 .mconv-empty-new-primary:active {
   box-shadow: 0 0 16px color-mix(in srgb, var(--peach) 40%, transparent);
+}
+@media (hover: hover) {
+
+.mconv-empty-new-primary:hover{
+  box-shadow: 0 0 16px color-mix(in srgb, var(--peach) 40%, transparent);
+}
 }
 
 /* Global Settings sheet body (drawer footer → sheet handoff) — a labelled
@@ -308,18 +329,9 @@
   }
 }
 
-/* wake-on-event: the inbox door, floating at the same height as the title chip
-   at the right edge of the screen. It is chrome over the transcript, like the
-   chip, so opening it moves nothing: the conversation keeps its full height
-   whether or not anything is waiting. The chip yields the 44px the door
-   occupies so a long session title cannot run under it. */
-.mconv-inbox-door {
-  position: absolute;
-  top: calc(6px + env(safe-area-inset-top));
-  right: var(--space-1);
-  z-index: calc(var(--z-sheet) - 1);
-}
-
-.mconv:has(.mconv-inbox-door) .mtchip {
-  max-width: calc(80% - 44px);
+/* The centred title reserves the action rail's 32px control and 12px gutter on
+   both sides. Mirror the right safe-area inset so it cannot reach beneath the
+   rail when a landscape cutout moves it inward. */
+.mconv:has(.mconv-action-rail) .mtchip {
+  max-width: calc(100% - 88px - env(safe-area-inset-right) - env(safe-area-inset-right));
 }

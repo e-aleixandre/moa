@@ -30,9 +30,12 @@
   cursor: pointer;
   padding: var(--space-1) var(--space-2);
 }
+@media (hover: hover) {
+
 
 .ask-user-prompt-nav button:hover:not(:disabled) {
   color: var(--text);
+}
 }
 
 .ask-user-prompt-nav button:disabled {
@@ -108,9 +111,12 @@
   color: var(--crust);
   font-weight: var(--weight-medium);
 }
+@media (hover: hover) {
+
 
 .ask-user-prompt-submit:hover:not(:disabled) {
   box-shadow: 0 0 16px color-mix(in srgb, var(--green) 40%, transparent);
+}
 }
 
 .ask-user-prompt-submit:disabled {
@@ -123,10 +129,13 @@
   background: transparent;
   color: var(--subtext1);
 }
+@media (hover: hover) {
+
 
 .ask-user-prompt-skip:hover {
   border-color: var(--red);
   color: var(--red);
+}
 }
 
 .ask-user-resolved {

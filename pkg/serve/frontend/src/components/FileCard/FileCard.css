@@ -24,7 +24,10 @@
   text-align: left;
 }
 .file-card-previewable { cursor: pointer; }
+@media (hover: hover) {
+
 .file-card-previewable:hover { background: var(--surface0); }
+}
 .file-card-previewable:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: calc(var(--focus-ring-offset) * -1);
@@ -71,8 +74,11 @@
   font: inherit;
   transition: background var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 .file-card-download:hover, .file-card-resource-info:hover {
   background: var(--surface1);
+}
 }
 .file-card-download:disabled {
   cursor: default;

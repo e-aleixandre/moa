@@ -54,10 +54,13 @@
 .ask .ask-opt:last-child {
   border-bottom: 0;
 }
+@media (hover: hover) {
+
 
 .ask .ask-opt:hover {
   background: color-mix(in srgb, var(--yellow) 6%, transparent);
   color: var(--text);
+}
 }
 
 .ask .ask-opt:focus-visible {
@@ -77,10 +80,13 @@
   place-items: center;
   flex: none;
 }
+@media (hover: hover) {
+
 
 .ask .ask-opt:hover .k {
   color: var(--yellow);
   border-color: color-mix(in srgb, var(--yellow) 50%, transparent);
+}
 }
 
 .ask .ask-opt .rec {
@@ -137,9 +143,12 @@
   cursor: pointer;
   transition: box-shadow var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .ask .ask-free-submit:hover {
   box-shadow: 0 0 16px color-mix(in srgb, var(--green) 40%, transparent);
+}
 }
 
 .ask .ask-free-submit:focus-visible {
@@ -172,10 +181,13 @@
   background: var(--surface0);
   color: var(--subtext0);
 }
+@media (hover: hover) {
+
 .ask .ask-free-submit.mic-mode:hover {
   background: var(--surface1);
   color: var(--text);
   box-shadow: none;
+}
 }
 
 .ask .ask-free-submit.recording {
@@ -183,8 +195,11 @@
   color: var(--crust);
   animation: ask-mic-pulse 1.5s ease-in-out infinite;
 }
+@media (hover: hover) {
+
 .ask .ask-free-submit.recording:hover {
   box-shadow: 0 4px 16px color-mix(in srgb, var(--red) 35%, transparent);
+}
 }
 /* Locked (hands-free): solid and still, showing a stop square. */
 .ask .ask-free-submit.recording.locked {

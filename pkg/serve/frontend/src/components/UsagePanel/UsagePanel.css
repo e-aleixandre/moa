@@ -67,8 +67,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+@media (hover: hover) {
+
 
 .usage-panel-idrow:hover { color: var(--text); }
+}
 
 .usage-panel-note {
   margin-left: auto;

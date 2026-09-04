@@ -42,10 +42,13 @@
   border-bottom-width: 1px;
   color: inherit;
 }
+@media (hover: hover) {
+
 
 .spine .spine-jump:hover {
   background: var(--surface0);
   color: var(--text);
+}
 }
 
 .spine .spine-jump:focus-visible {
@@ -66,11 +69,17 @@
   color: var(--overlay1);
   cursor: pointer;
 }
-
-.spine .spine-new:hover,
 .spine .spine-new:active {
   background: var(--surface0);
   color: var(--text);
+}
+@media (hover: hover) {
+
+
+.spine .spine-new:hover{
+  background: var(--surface0);
+  color: var(--text);
+}
 }
 
 .spine .spine-new:focus-visible {
@@ -98,12 +107,18 @@
 }
 .spine-group-wrap { position: relative; flex: none; }
 .spine-group-more { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-md); background: none; color: var(--overlay1); cursor: pointer; }
+@media (hover: hover) {
+
 .spine-group-more:hover { background: var(--surface0); color: var(--text); }
+}
 .spine-group-more:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 .spine-group-menu { position: absolute; top: calc(100% + 5px); right: 0; z-index: var(--z-overlay); min-width: 196px; padding: var(--space-1); background: var(--surface0); border: 1px solid var(--surface1); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); }
 .spine-group-menu > span { display: block; padding: 7px 10px 5px; font-family: var(--mono); font-size: var(--text-nano); color: var(--overlay0); text-transform: uppercase; letter-spacing: var(--tracking-wide); }
-.spine-group-menu button { display: flex; align-items: center; width: 100%; min-height: 36px; padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--subtext0); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
-.spine-group-menu button:hover, .spine-group-menu button:focus-visible { background: var(--surface1); color: var(--text); outline: none; }
+.spine-group-menu button { display: flex; align-items: center; width: 100%; min-height: 36px; padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--subtext0); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; } .spine-group-menu button:focus-visible { background: var(--surface1); color: var(--text); outline: none; }
+@media (hover: hover) {
+
+.spine-group-menu button:hover{ background: var(--surface1); color: var(--text); outline: none; }
+}
 .spine-group-menu i { display: inline-flex; width: 14px; margin-right: 9px; color: var(--mauve); }
 
 .spine a.ver-update {
@@ -112,8 +127,11 @@
   text-decoration: none;
   white-space: nowrap;
 }
+@media (hover: hover) {
+
 .spine a.ver-update:hover {
   background: color-mix(in srgb, var(--yellow) 22%, var(--surface0));
+}
 }
 .spine a.ver-update:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -147,7 +165,10 @@
 .spine .spine-project .spine-label small { margin-left: auto; font: inherit; font-size: var(--text-nano); font-weight: var(--weight-normal); letter-spacing: normal; text-transform: none; white-space: nowrap; }
 .spine-project-attention { width: 7px; height: 7px; }
 .spine-show-all { min-height: 30px; align-self: flex-start; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--mauve); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+@media (hover: hover) {
+
 .spine-show-all:hover { background: var(--surface0); color: var(--text); }
+}
 .spine-show-all:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 
 .spine .spine-session-card {
@@ -165,10 +186,16 @@
   pointer-events: none;
   transition: opacity var(--duration) var(--ease);
 }
-.spine .spine-session-card:hover .session-card-menu,
 .spine .spine-session-card:focus-within .session-card-menu {
   opacity: 1;
   pointer-events: auto;
+}
+@media (hover: hover) {
+
+.spine .spine-session-card:hover .session-card-menu{
+  opacity: 1;
+  pointer-events: auto;
+}
 }
 .spine .spine-session-card .session-row.variant-card .session-row-hit {
   padding: 8px 36px 8px 10px;
@@ -183,10 +210,13 @@
   border-radius: 8px;
   min-width: 0;
 }
+@media (hover: hover) {
+
 
 .spine .session-row.variant-card:hover {
   background: var(--surface0);
   border-color: transparent;
+}
 }
 
 .spine .session-row.variant-card.on {
@@ -226,12 +256,17 @@
 .spine .session-row.variant-card.needs-red {
   background: transparent;
 }
-
-.spine .session-row.variant-card.needs-yellow:hover,
-.spine .session-row.variant-card.needs-red:hover,
 .spine .session-row.variant-card.needs-yellow.on,
 .spine .session-row.variant-card.needs-red.on {
   background: var(--surface0);
+}
+@media (hover: hover) {
+
+
+.spine .session-row.variant-card.needs-yellow:hover,
+.spine .session-row.variant-card.needs-red:hover{
+  background: var(--surface0);
+}
 }
 
 .spine .session-row.variant-card.needs-yellow .r1,

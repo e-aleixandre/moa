@@ -221,9 +221,12 @@
 .model-selector .cur-row--button {
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .model-selector .cur-row--button:hover {
   border-color: var(--surface2);
+}
 }
 
 .model-selector .cur-row--button:focus-visible {
@@ -358,9 +361,12 @@
   border-radius: var(--radius-md);
   transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .model-selector .mchip-wrap:hover {
   border-color: var(--surface2);
+}
 }
 
 .model-selector .mchip-wrap.on {
@@ -437,9 +443,12 @@
   color: var(--overlay0);
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .model-selector .model-pin:hover {
   color: var(--subtext0);
+}
 }
 
 .model-selector .model-pin.on {
@@ -491,9 +500,12 @@
   text-align: left;
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .model-selector .provider-row:hover {
   border-color: var(--surface2);
+}
 }
 
 .model-selector .provider-mark {
@@ -583,9 +595,12 @@
   border: 1px solid transparent;
   border-radius: var(--radius-md);
 }
+@media (hover: hover) {
+
 
 .model-selector .model-result:hover {
   background: color-mix(in srgb, var(--surface0) 35%, transparent);
+}
 }
 
 .model-selector .model-result.on {

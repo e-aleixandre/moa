@@ -33,9 +33,12 @@
 button.crumb-title {
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 button.crumb-title:hover {
   color: var(--rosewater);
+}
 }
 
 .chat-head .crumb-title:focus-visible {
@@ -79,16 +82,44 @@ button.crumb-title:hover {
   color: var(--overlay1);
   transition: border-color var(--duration) var(--ease), color var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .chat-head .grid-toggle:hover {
   border-color: var(--peach);
   color: var(--peach);
+}
+}
+
+.chat-head .grid-toggle.is-on {
+  border-color: var(--mauve);
+  color: var(--mauve);
 }
 
 .chat-head .grid-toggle:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
+
+.chat-head .head-action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--overlay1);
+}
+@media (hover: hover) {
+
+.chat-head .head-action-icon:hover { color: var(--peach); border-color: var(--surface1); }
+}
+.chat-head .head-action-icon.is-on { color: var(--mauve); border-color: color-mix(in srgb, var(--mauve) 45%, var(--surface1)); }
+.chat-head .head-action-icon:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 
 .chat-head .grid-toggle .mini {
   display: grid;
@@ -140,8 +171,11 @@ button.crumb-title:hover {
   justify-content: flex-start;
   border: 1px solid var(--surface1);
 }
+@media (hover: hover) {
+
 
 .session-settings-archive:hover:not(:disabled) {
   border-color: var(--peach);
   color: var(--peach);
+}
 }

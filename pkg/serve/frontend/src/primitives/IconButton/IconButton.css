@@ -17,10 +17,13 @@
   cursor: pointer;
   transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .icon-button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--surface0) 60%, transparent);
   color: var(--text);
+}
 }
 
 .icon-button:disabled {

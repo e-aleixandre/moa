@@ -47,7 +47,10 @@
 .perm-chip.perm-yolo { color: var(--maroon); }
 .perm-chip.perm-ask { color: var(--yellow); }
 .perm-chip.perm-auto { color: var(--blue); }
+@media (hover: hover) {
+
 .perm-chip:not(:disabled):hover { filter: brightness(1.15); }
+}
 
 /* The menu — opens upward from the chip. Portalled to <body> with fixed
    positioning (see PermissionControl.jsx) so pane overflow:hidden cannot clip
@@ -96,9 +99,14 @@
   /* comfortable, ≥44px tall row */
   min-height: 44px;
 }
-.perm-menu-item:hover,
 .perm-menu-item:focus-visible {
   background: var(--surface0);
+}
+@media (hover: hover) {
+
+.perm-menu-item:hover{
+  background: var(--surface0);
+}
 }
 .perm-menu-item.on {
   background: color-mix(in srgb, var(--surface0) 60%, transparent);

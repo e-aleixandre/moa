@@ -265,10 +265,13 @@
   background: transparent;
   border-color: transparent;
 }
+@media (hover: hover) {
+
 
 .status-strip .status-strip-model .model-pill:hover {
   border-color: var(--surface1);
   background: var(--surface0);
+}
 }
 
 /* Permission mode */
