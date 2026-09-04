@@ -5,6 +5,7 @@ import { Segmented } from "../Segmented/Segmented.jsx";
 import { AssistantDocument } from "../AssistantDocument/AssistantDocument.jsx";
 import { Button } from "../../primitives/index.js";
 import { renderMarkdown } from "../../data/util/markdown.js";
+import { feedbackMessage } from "../../data/util/preview-reference.js";
 import { sendMessage } from "../../data/session-actions.js";
 import { useStore } from "../../hooks/useStore.js";
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
@@ -68,28 +69,6 @@ export function normalizeURL(raw) {
   if (!text) return "";
   if (/^https?:\/\//i.test(text)) return text;
   return `http://${text}`;
-}
-
-// feedbackMessage — the text sent to the agent for a selected element. The
-// block below the comment is machine-ish on purpose: the agent needs an
-// unambiguous handle on the element, the user only writes the intent.
-export function feedbackMessage(comment, el) {
-  const classes = (el.classes || []).map((c) => `.${c}`).join("");
-  const id = el.id ? `#${el.id}` : "";
-  const text = el.text ? `  — text: ${JSON.stringify(el.text)}` : "";
-  const attrs = Object.entries(el.attrs || {})
-    .map(([k, v]) => `${k}=${JSON.stringify(String(v))}`)
-    .join(" ");
-  const lines = [
-    "[UI feedback · selected element in preview]",
-    `page: ${el.path || "/"} (${el.url || ""})`,
-    `element: ${el.tag}${id}${classes}${text}`,
-  ];
-  if (el.ancestors?.length) lines.push(`ancestors: ${el.ancestors.join(" > ")}`);
-  if (el.selector) lines.push(`selector: ${el.selector}`);
-  if (attrs) lines.push(`attrs: ${attrs}`);
-  const body = lines.join("\n");
-  return comment.trim() ? `${comment.trim()}\n\n${body}` : body;
 }
 
 export function LivePreview({ sessionId, open, onClose, inline = false }) {

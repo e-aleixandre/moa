@@ -13,6 +13,7 @@ import {
 } from "../../components/index.js";
 import { SecretBatchCard } from "../../components/SecretBatchCard/SecretBatchCard.jsx";
 import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
+import { parsePreviewReference } from "../../data/util/preview-reference.js";
 import { renderMarkdown, renderMarkdownWithCaret } from "../../data/util/markdown.js";
 import { retryHistoryHydration } from "../../data/api.js";
 import { captureHydrationAnchor, restoreHydrationAnchor } from "../../data/stream-hydration-anchor.js";
@@ -102,7 +103,13 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
     // block — it is not the owner's turn, so it is never a waypoint.
     case "event":
       return <EventBlock source={block.source} title={block.title} body={block.body} time={block.time} steer={block.steer} autorun={block.autorun} />;
-    case "waypoint":
+    case "waypoint": {
+      // A message sent from the Live Preview carries the feedback block the
+      // agent needs verbatim; the transcript paints it as a reference tied to
+      // the message's spine and shows only the comment as text. Messages
+      // without the block (and every older transcript) are untouched.
+      const parsed = parsePreviewReference(block.text);
+      const text = parsed ? parsed.comment : block.text;
       return (
         <UserWaypoint
           time={block.time}
@@ -111,16 +118,18 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
           accent={block.fromParent ? waypointAccent : undefined}
           attachments={block.attachments}
           sessionId={sessionId}
+          reference={parsed?.reference}
           // The waypoint's own rewind mark, offered only when the block carries
           // the message id the branch API needs (see stream-model.js).
           onRewind={rewind && block.msgId ? () => rewind.to(block.msgId) : undefined}
           onOpenTimeline={rewind?.openTimeline}
           rewindDisabled={rewind?.disabled}
-          rewindPreview={block.text}
+          rewindPreview={text || block.text}
         >
-          <p>{block.text}</p>
+          {text && <p>{text}</p>}
         </UserWaypoint>
       );
+    }
     case "document":
     case "streaming":
       const proseHasCaret = block.blocks.some((b) => b.type === "prose" && b.caret);

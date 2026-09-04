@@ -3,6 +3,7 @@ import { Rewind as RewindIcon } from "lucide-preact";
 import { sanitizeHtml } from "../../util/sanitize.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { WaypointAttachments, attachmentImageSrc, attachmentLabel } from "./WaypointAttachments.jsx";
+import { PreviewReference } from "./PreviewReference.jsx";
 import "./UserWaypoint.css";
 
 // UserWaypoint — the user's prompt as a waypoint card inside
@@ -80,6 +81,10 @@ export function UserWaypoint({
   className = "",
   attachments,
   sessionId,
+  // The element pointed at in the Live Preview, parsed off this message's own
+  // feedback block (data/util/preview-reference.js). Painted as a tag tied to
+  // the message's spine instead of the raw block.
+  reference,
   onRewind,
   onOpenTimeline,
   rewindDisabled = false,
@@ -91,11 +96,14 @@ export function UserWaypoint({
 }) {
   const [openAttachment, setOpenAttachment] = useState(null);
   const [confirmRewind, setConfirmRewind] = useState(false);
+  // The attachments skirt is the card's own foot: it bleeds to the edges and
+  // closes the bottom corners, so the card gives up its bottom padding.
+  const hasSkirt = Array.isArray(attachments) && attachments.filter(Boolean).length > 0;
 
   return (
     <>
       <div
-        class={`waypoint waypoint-${tone} ${className}`.trim()}
+        class={`waypoint waypoint-${tone}${hasSkirt ? " has-skirt" : ""} ${className}`.trim()}
         style={accent ? { "--waypoint-accent": `var(--${accent})` } : undefined}
         {...rest}
       >
@@ -115,11 +123,10 @@ export function UserWaypoint({
             </button>
           )}
         </div>
-        {html != null ? (
-          <div class="body" dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
-        ) : (
-          <div class="body">{children}</div>
-        )}
+        <div class="body">
+          {reference && <PreviewReference reference={reference} />}
+          {html != null ? <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} /> : children}
+        </div>
         <WaypointAttachments attachments={attachments} sessionId={sessionId} onOpenImage={setOpenAttachment} />
       </div>
       {openAttachment && (
