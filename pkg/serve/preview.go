@@ -50,10 +50,13 @@ type PreviewProxy struct {
 	publicURL  string
 	moaPort    int
 	listenPort int
-	secret     string
+	capability string
+	authSecret string
 	secure     bool
 	transport  *http.Transport
 	resolve    func(string) ([]net.IP, error)
+	localIPs   func() ([]net.IP, error)
+	dial       func(context.Context, string, string) (net.Conn, error)
 
 	mu           sync.RWMutex
 	target       *previewTarget
@@ -63,13 +66,17 @@ type PreviewProxy struct {
 }
 
 func NewPreviewProxy(publicURL string, moaPort, listenPort int) *PreviewProxy {
-	secretBytes := make([]byte, 32)
-	if _, err := rand.Read(secretBytes); err != nil {
+	capability, err := newPreviewSecret()
+	if err != nil {
 		panic(fmt.Sprintf("preview capability: %v", err))
+	}
+	authSecret, err := newPreviewSecret()
+	if err != nil {
+		panic(fmt.Sprintf("preview authentication: %v", err))
 	}
 	p := &PreviewProxy{
 		publicURL: strings.TrimRight(publicURL, "/"), moaPort: moaPort, listenPort: listenPort,
-		secret: base64.RawURLEncoding.EncodeToString(secretBytes), resolve: net.LookupIP,
+		capability: capability, authSecret: authSecret, resolve: net.LookupIP, localIPs: localInterfaceIPs,
 		connections: make(map[uint64]map[net.Conn]struct{}),
 	}
 	if u, err := url.Parse(p.publicURL); err == nil {
@@ -85,9 +92,18 @@ func NewPreviewProxy(publicURL string, moaPort, listenPort int) *PreviewProxy {
 	tr.TLSHandshakeTimeout = 10 * time.Second
 	tr.ResponseHeaderTimeout = 20 * time.Second
 	tr.ExpectContinueTimeout = time.Second
+	p.dial = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	tr.DialContext = p.dialContext
 	p.transport = tr
 	return p
+}
+
+func newPreviewSecret() (string, error) {
+	secretBytes := make([]byte, 32)
+	if _, err := rand.Read(secretBytes); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(secretBytes), nil
 }
 
 func (p *PreviewProxy) PublicURL() string { return p.publicURL }
@@ -99,8 +115,14 @@ func (p *PreviewProxy) PreviewURL() string {
 	if err != nil {
 		return p.publicURL
 	}
+	p.mu.RLock()
+	capability := p.capability
+	p.mu.RUnlock()
+	if capability == "" {
+		return p.publicURL
+	}
 	q := u.Query()
-	q.Set("preview_token", p.secret)
+	q.Set("preview_token", capability)
 	u.RawQuery = q.Encode()
 	return u.String()
 }
@@ -137,6 +159,14 @@ func (p *PreviewProxy) setTarget(raw string, aliases []string, parentOrigin stri
 	if err != nil {
 		return err
 	}
+	capability, err := newPreviewSecret()
+	if err != nil {
+		return fmt.Errorf("preview capability: %w", err)
+	}
+	authSecret, err := newPreviewSecret()
+	if err != nil {
+		return fmt.Errorf("preview authentication: %w", err)
+	}
 	clean := make([]string, 0, len(aliases))
 	for _, a := range aliases {
 		x, e := url.Parse(a)
@@ -148,6 +178,8 @@ func (p *PreviewProxy) setTarget(raw string, aliases []string, parentOrigin stri
 	oldGeneration := p.generation
 	p.generation++
 	p.target = &previewTarget{url: u, aliases: clean, ips: ips, port: port, generation: p.generation, parentOrigin: parent}
+	p.capability = capability
+	p.authSecret = authSecret
 	p.clearPending = true
 	p.mu.Unlock()
 	if oldGeneration != 0 {
@@ -189,11 +221,18 @@ func (p *PreviewProxy) validateTarget(u *url.URL) ([]net.IP, string, error) {
 		}
 		return nil, "", errors.New("target did not resolve")
 	}
+	var ownIPs []net.IP
+	if portNumber == p.moaPort || portNumber == p.listenPort {
+		ownIPs, err = p.localIPs()
+		if err != nil {
+			return nil, "", fmt.Errorf("list local interfaces: %w", err)
+		}
+	}
 	for _, ip := range ips {
 		if !allowedPreviewIP(ip) {
 			return nil, "", errors.New("target must resolve to loopback, private, or tailnet address")
 		}
-		if (portNumber == p.moaPort || portNumber == p.listenPort) && isLocalIP(ip) {
+		if (portNumber == p.moaPort || portNumber == p.listenPort) && isLocalIP(ip, ownIPs) {
 			return nil, "", errors.New("target may not point at moa or the preview proxy")
 		}
 	}
@@ -209,7 +248,31 @@ func allowedPreviewIP(ip net.IP) bool {
 	}
 	return ip.IsLoopback() || ip.IsPrivate() || (ip.To4() != nil && ip.To4()[0] == 100 && ip.To4()[1]&0xc0 == 0x40)
 }
-func isLocalIP(ip net.IP) bool { return ip.IsLoopback() || ip.IsUnspecified() }
+func localInterfaceIPs() ([]net.IP, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, err
+	}
+	ips := make([]net.IP, 0, len(addrs))
+	for _, addr := range addrs {
+		if network, ok := addr.(*net.IPNet); ok && network.IP != nil {
+			ips = append(ips, network.IP)
+		}
+	}
+	return ips, nil
+}
+
+func isLocalIP(ip net.IP, localIPs []net.IP) bool {
+	if ip.IsLoopback() || ip.IsUnspecified() {
+		return true
+	}
+	for _, local := range localIPs {
+		if ip.Equal(local) {
+			return true
+		}
+	}
+	return false
+}
 
 func (p *PreviewProxy) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -226,25 +289,57 @@ func (p *PreviewProxy) Handler() http.Handler {
 // In both token and network-owner modes the capability is issued only by the
 // owner-only main API, so publishing this port does not publish a network pivot.
 func (p *PreviewProxy) ProtectedHandler(allowedHosts []string) http.Handler {
-	return hostMiddleware(allowedHosts, p.requireCapability(bodyTimeoutMiddleware(p.Handler())))
+	return previewReferrerPolicy(hostMiddleware(allowedHosts, p.requireCapability(bodyTimeoutMiddleware(p.Handler()))))
 }
+
+func previewReferrerPolicy(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (p *PreviewProxy) requireCapability(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if c, err := r.Cookie(previewAuthCookie); err == nil && subtle.ConstantTimeCompare([]byte(c.Value), []byte(p.secret)) == 1 {
+		if c, err := r.Cookie(previewAuthCookie); err == nil && p.validAuthCookie(c.Value) {
+			if r.URL.Query().Has("preview_token") {
+				redirectWithoutPreviewToken(w, r)
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
-		if token := r.URL.Query().Get("preview_token"); token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(p.secret)) == 1 {
-			http.SetCookie(w, &http.Cookie{Name: previewAuthCookie, Value: p.secret, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: p.secure})
-			u := *r.URL
-			q := u.Query()
-			q.Del("preview_token")
-			u.RawQuery = q.Encode()
-			http.Redirect(w, r, u.RequestURI(), http.StatusFound)
+		if authSecret, ok := p.exchangeCapability(r.URL.Query().Get("preview_token")); ok {
+			http.SetCookie(w, &http.Cookie{Name: previewAuthCookie, Value: authSecret, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: p.secure})
+			redirectWithoutPreviewToken(w, r)
 			return
 		}
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	})
+}
+
+func redirectWithoutPreviewToken(w http.ResponseWriter, r *http.Request) {
+	u := *r.URL
+	q := u.Query()
+	q.Del("preview_token")
+	u.RawQuery = q.Encode()
+	http.Redirect(w, r, u.RequestURI(), http.StatusFound)
+}
+
+func (p *PreviewProxy) validAuthCookie(value string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return subtle.ConstantTimeCompare([]byte(value), []byte(p.authSecret)) == 1
+}
+
+func (p *PreviewProxy) exchangeCapability(token string) (string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if token == "" || p.capability == "" || subtle.ConstantTimeCompare([]byte(token), []byte(p.capability)) != 1 {
+		return "", false
+	}
+	p.capability = ""
+	return p.authSecret, true
 }
 
 func (p *PreviewProxy) serve(w http.ResponseWriter, r *http.Request) {
@@ -290,9 +385,14 @@ func (p *PreviewProxy) dialContext(ctx context.Context, network, _ string) (net.
 	}
 	var last error
 	for _, ip := range plan.ips {
-		conn, err := (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ip.String(), plan.port))
+		conn, err := p.dial(ctx, network, net.JoinHostPort(ip.String(), plan.port))
 		if err == nil {
-			return p.trackConnection(plan.gen, conn), nil
+			tracked, current := p.trackConnection(plan.gen, conn)
+			if !current {
+				_ = conn.Close()
+				return nil, errors.New("preview target changed while connecting")
+			}
+			return tracked, nil
 		}
 		last = err
 	}
@@ -311,15 +411,19 @@ func (c *trackedPreviewConn) Close() error {
 	c.once.Do(func() { c.p.untrackConnection(c.gen, c) })
 	return err
 }
-func (p *PreviewProxy) trackConnection(gen uint64, conn net.Conn) net.Conn {
+func (p *PreviewProxy) trackConnection(gen uint64, conn net.Conn) (net.Conn, bool) {
 	c := &trackedPreviewConn{Conn: conn, p: p, gen: gen}
 	p.mu.Lock()
+	if gen != p.generation {
+		p.mu.Unlock()
+		return nil, false
+	}
 	if p.connections[gen] == nil {
 		p.connections[gen] = make(map[net.Conn]struct{})
 	}
 	p.connections[gen][c] = struct{}{}
 	p.mu.Unlock()
-	return c
+	return c, true
 }
 func (p *PreviewProxy) untrackConnection(gen uint64, conn net.Conn) {
 	p.mu.Lock()

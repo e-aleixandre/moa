@@ -3,6 +3,7 @@ package serve
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"io"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func newPreviewFor(t *testing.T, upstream string) *PreviewProxy {
@@ -170,6 +172,15 @@ func TestPreviewAllowlistPinsDNSAndBlocksBypasses(t *testing.T) {
 	p.Close()
 }
 
+func TestPreviewRejectsLocalInterfaceOnMoaPort(t *testing.T) {
+	p := NewPreviewProxy("https://preview.test", 7392, 7492)
+	p.resolve = func(string) ([]net.IP, error) { return []net.IP{net.ParseIP("10.10.10.4")}, nil }
+	p.localIPs = func() ([]net.IP, error) { return []net.IP{net.ParseIP("10.10.10.4")}, nil }
+	if err := p.SetTarget("http://10.10.10.4:7392", nil); err == nil {
+		t.Fatal("accepted an address assigned to this machine on moa's port")
+	}
+}
+
 func TestPreviewRejectsRedirectOutsideValidatedTarget(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "http://169.254.169.254/latest")
@@ -192,13 +203,21 @@ func TestPreviewProtectedHandlerRequiresCapability(t *testing.T) {
 	if denied.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous = %d", denied.Code)
 	}
+	capabilityURL := p.PreviewURL()
 	grant := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", p.PreviewURL(), nil)
+	req := httptest.NewRequest("GET", capabilityURL, nil)
 	req.Host = "preview.test"
 	protected.ServeHTTP(grant, req)
 	grantCookie := findCookie(grant.Result().Cookies(), previewAuthCookie)
-	if grant.Code != http.StatusFound || grantCookie == nil || strings.Contains(grant.Header().Get("Location"), "preview_token") {
+	if grant.Code != http.StatusFound || grantCookie == nil || strings.Contains(grant.Header().Get("Location"), "preview_token") || grant.Header().Get("Referrer-Policy") != "no-referrer" {
 		t.Fatalf("capability exchange failed: %d %q", grant.Code, grant.Header().Get("Location"))
+	}
+	replay := httptest.NewRecorder()
+	req = httptest.NewRequest("GET", capabilityURL, nil)
+	req.Host = "preview.test"
+	protected.ServeHTTP(replay, req)
+	if replay.Code != http.StatusUnauthorized {
+		t.Fatalf("replayed capability = %d", replay.Code)
 	}
 	allowed := httptest.NewRecorder()
 	req = httptest.NewRequest("GET", "https://preview.test/", nil)
@@ -207,6 +226,118 @@ func TestPreviewProtectedHandlerRequiresCapability(t *testing.T) {
 	protected.ServeHTTP(allowed, req)
 	if allowed.Code == http.StatusUnauthorized {
 		t.Fatal("capability cookie rejected")
+	}
+	clean := httptest.NewRecorder()
+	req = httptest.NewRequest("GET", capabilityURL, nil)
+	req.Host = "preview.test"
+	req.AddCookie(grantCookie)
+	protected.ServeHTTP(clean, req)
+	if clean.Code != http.StatusFound || strings.Contains(clean.Header().Get("Location"), "preview_token") {
+		t.Fatalf("authenticated bootstrap URL was not cleaned: %d %q", clean.Code, clean.Header().Get("Location"))
+	}
+}
+
+func TestPreviewRotatesCapabilityWhenTargetChanges(t *testing.T) {
+	p := NewPreviewProxy("https://preview.test", 7392, 7492)
+	t.Cleanup(p.Close)
+	if err := p.SetTarget("http://127.0.0.1:5173", nil); err != nil {
+		t.Fatal(err)
+	}
+	oldURL := p.PreviewURL()
+	protected := p.ProtectedHandler([]string{"preview.test"})
+	grant := httptest.NewRecorder()
+	request := httptest.NewRequest("GET", oldURL, nil)
+	request.Host = "preview.test"
+	protected.ServeHTTP(grant, request)
+	oldCookie := findCookie(grant.Result().Cookies(), previewAuthCookie)
+	if oldCookie == nil {
+		t.Fatal("did not issue the original preview cookie")
+	}
+	if err := p.SetTarget("http://127.0.0.1:5174", nil); err != nil {
+		t.Fatal(err)
+	}
+	newURL := p.PreviewURL()
+	if newURL == oldURL {
+		t.Fatal("target change did not create a new capability")
+	}
+	for _, request := range []*http.Request{
+		httptest.NewRequest("GET", oldURL, nil),
+		httptest.NewRequest("GET", "https://preview.test/", nil),
+	} {
+		request.Host = "preview.test"
+		if request.URL.String() == "https://preview.test/" {
+			request.AddCookie(oldCookie)
+		}
+		response := httptest.NewRecorder()
+		protected.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("old target credential accepted: %d", response.Code)
+		}
+	}
+	grant = httptest.NewRecorder()
+	request = httptest.NewRequest("GET", newURL, nil)
+	request.Host = "preview.test"
+	protected.ServeHTTP(grant, request)
+	if grant.Code != http.StatusFound {
+		t.Fatalf("new capability = %d", grant.Code)
+	}
+}
+
+func TestPreviewRejectsLateDialFromPreviousGeneration(t *testing.T) {
+	p := NewPreviewProxy("https://preview.test", 7392, 7492)
+	t.Cleanup(p.Close)
+	if err := p.SetTarget("http://127.0.0.1:5173", nil); err != nil {
+		t.Fatal(err)
+	}
+	old := p.targetSnapshot()
+	client, peer := net.Pipe()
+	defer peer.Close()
+	p.dial = func(context.Context, string, string) (net.Conn, error) { return client, nil }
+	if err := p.SetTarget("http://127.0.0.1:5174", nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(context.Background(), previewDialPlanKey{}, previewDialPlan{ips: old.ips, port: old.port, gen: old.generation})
+	if conn, err := p.dialContext(ctx, "tcp", "ignored"); err == nil || conn != nil {
+		t.Fatalf("late old-generation dial survived: conn=%v err=%v", conn, err)
+	}
+	_ = peer.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+	if _, err := peer.Write([]byte("x")); err == nil {
+		t.Fatal("late dial connection remained open")
+	}
+}
+
+type previewDeadlineWriter struct {
+	header   http.Header
+	deadline time.Time
+}
+
+func (w *previewDeadlineWriter) Header() http.Header         { return w.header }
+func (w *previewDeadlineWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (w *previewDeadlineWriter) WriteHeader(int)             {}
+func (w *previewDeadlineWriter) SetReadDeadline(t time.Time) error {
+	w.deadline = t
+	return nil
+}
+
+func TestBodyTimeoutRejectsFalseWebSocketUpgrade(t *testing.T) {
+	handler := bodyTimeoutMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	falseUpgrade := httptest.NewRequest(http.MethodPost, "http://preview.test/", nil)
+	falseUpgrade.Header.Set("Upgrade", "websocket")
+	falseWriter := &previewDeadlineWriter{header: make(http.Header)}
+	handler.ServeHTTP(falseWriter, falseUpgrade)
+	if falseWriter.deadline.IsZero() {
+		t.Fatal("false websocket upgrade bypassed the body deadline")
+	}
+
+	websocket := httptest.NewRequest(http.MethodGet, "http://preview.test/", nil)
+	websocket.Header.Set("Upgrade", "websocket")
+	websocket.Header.Set("Connection", "keep-alive, Upgrade")
+	websocket.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	websocket.Header.Set("Sec-WebSocket-Version", "13")
+	websocketWriter := &previewDeadlineWriter{header: make(http.Header)}
+	handler.ServeHTTP(websocketWriter, websocket)
+	if !websocketWriter.deadline.IsZero() {
+		t.Fatal("valid websocket upgrade received a body deadline")
 	}
 }
 

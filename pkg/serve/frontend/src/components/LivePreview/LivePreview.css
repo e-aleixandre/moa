@@ -219,6 +219,16 @@
   background: #fff;
   overflow: hidden;
 }
+.live-preview-proxy-error,
+.live-preview-inspector-warning {
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--red) 10%, var(--base));
+  color: var(--text);
+  font-size: var(--text-sm);
+}
 /* The scroller is what moves; the stage stays put so the live border and the
    floating cards stay pinned to the panel instead of scrolling with the app. */
 .live-preview-scroller {

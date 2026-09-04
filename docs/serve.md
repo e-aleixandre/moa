@@ -37,6 +37,23 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Pair a Pulse device by scanning a **QR code** (or manual code), created from the top bar (`POST /api/pulse/pairings`)
 - **Version indicator** in the top bar that links to the latest release when an update is available
 
+## Live Preview proxy
+
+Live Preview can proxy a local development server into the preview panel, adding
+the inspector bridge without changing the app. Enable its dedicated local
+listener with `--preview-port` and provide the URL through which that listener
+is exposed with `--preview-public-url`:
+
+```bash
+moa serve --preview-port 7492 --preview-public-url https://moa.example.test:7492
+```
+
+Moa is transport-agnostic: expose that port through your own HTTPS proxy,
+tailnet, LAN, or other setup. The proxy accepts only loopback, private, and
+tailnet development-server addresses. It is for **your own dev servers**. The
+previewed app runs at the proxy origin, so do not point it at a site you do not
+trust.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |

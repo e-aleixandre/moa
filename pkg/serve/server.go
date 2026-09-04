@@ -274,13 +274,27 @@ func handleVersion(mgr *Manager, buildID func() string) http.HandlerFunc {
 // only reads from the client, so streaming (SSE) responses are unaffected.
 func bodyTimeoutMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		if !isWebSocketUpgrade(r) {
 			// Best-effort: SetReadDeadline is unsupported on a few ResponseWriter
 			// wrappers; ignore the error and proceed without a deadline.
 			_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isWebSocketUpgrade(r *http.Request) bool {
+	if r.Method != http.MethodGet || !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || r.Header.Get("Sec-WebSocket-Key") == "" || r.Header.Get("Sec-WebSocket-Version") != "13" {
+		return false
+	}
+	for _, value := range r.Header.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // authCookieName holds the shared token once a client has authenticated via

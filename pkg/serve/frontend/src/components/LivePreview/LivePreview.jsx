@@ -105,6 +105,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const [sending, setSending] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [previewPublicURL, setPreviewPublicURL] = useState("");
+  const [previewError, setPreviewError] = useState("");
   const [inspectorReady, setInspectorReady] = useState(true);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [view, setView] = useState(IDENTITY);
@@ -141,10 +142,12 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
       setEditingURL(false);
       try {
         const response = await fetch("/api/preview/target");
+        if (!response.ok) throw new Error("preview configuration failed");
         const config = await response.json();
         if (cancelled) return;
         const target = saved || config.url || "";
         setPreviewPublicURL(config.enabled ? config.public_url || "" : "");
+        setPreviewError("");
         if (!target) return;
         setTargetURL(target);
         if (!config.enabled || !config.public_url) {
@@ -156,10 +159,14 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           headers: { "Content-Type": "application/json", "X-Moa-Request": "1" },
           body: JSON.stringify({ url: target, parent_origin: location.origin }),
         });
+        if (!put.ok) throw new Error("preview target failed");
         const result = await put.json();
-        if (!cancelled && put.ok) setFrameURL(result.preview_url || config.public_url);
+        if (!cancelled) setFrameURL(result.preview_url || config.public_url);
       } catch {
-        if (!cancelled && saved) { setTargetURL(saved); setFrameURL(saved); }
+        if (!cancelled) {
+          setFrameURL("");
+          setPreviewError("The preview proxy is unavailable. Try again.");
+        }
       }
     };
     restore();
@@ -275,18 +282,30 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     setEditingURL(false);
     if (!next) return;
     if (next === targetURL && frameURL) return;
-    let nextFrameURL = next;
     if (previewPublicURL) {
+      // A target switch gets a new capability and a new iframe document. Never
+      // leave the previous target running while the proxy is being configured.
+      setFrameURL("");
+      setPreviewError("");
       try {
         const response = await fetch("/api/preview/target", { method: "PUT", headers: { "Content-Type": "application/json", "X-Moa-Request": "1" }, body: JSON.stringify({ url: next, parent_origin: location.origin }) });
-        if (response.ok) {
-          const result = await response.json();
-          nextFrameURL = result.preview_url || previewPublicURL;
-        }
-      } catch { /* direct preview remains available */ }
+        if (!response.ok) throw new Error("preview target failed");
+        const result = await response.json();
+        setTargetURL(next);
+        setFrameURL(result.preview_url || previewPublicURL);
+        setSelected(null);
+        setView(IDENTITY);
+        savePreviewURL(sessionId, next);
+        setReloadNonce((n) => n + 1);
+      } catch {
+        setTargetURL(next);
+        setPreviewError("The preview proxy is unavailable. Try again.");
+        savePreviewURL(sessionId, next);
+      }
+      return;
     }
     setTargetURL(next);
-    setFrameURL(nextFrameURL);
+    setFrameURL(next);
     setSelected(null);
     setView(IDENTITY);
     savePreviewURL(sessionId, next);
@@ -376,6 +395,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
         </button>
       </div>
       {!inspectorReady && <div class="live-preview-inspector-warning">Inspector did not connect. Navigate the app directly, or add the inspector script to enable touch inspection and gestures.</div>}
+      {previewError && <div class="live-preview-proxy-error" role="alert">{previewError}</div>}
 
       {/* The live border: the stage's own frame carries the identity color of
           the tool in flight and breathes while it runs, amber and still while
