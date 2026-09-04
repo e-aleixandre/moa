@@ -1,7 +1,9 @@
 .mconv-action-rail {
   position: absolute;
+  /* Match the composer's horizontal content gutter, while clearing a
+     landscape device's right-side cutout. */
   top: calc(6px + env(safe-area-inset-top));
-  right: var(--space-1);
+  right: calc(var(--space-3) + env(safe-area-inset-right));
   z-index: calc(var(--z-sheet) - 1);
   display: flex;
   align-items: center;

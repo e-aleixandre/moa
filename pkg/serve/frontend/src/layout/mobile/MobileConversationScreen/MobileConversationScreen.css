@@ -308,7 +308,9 @@
   }
 }
 
-/* The centred title reserves the same space on both sides as the action rail,
-   so a long name never runs beneath one or two 44px controls. */
-.mconv:has(.mconv-action-rail--1) .mtchip { max-width: calc(100% - 112px); }
-.mconv:has(.mconv-action-rail--2) .mtchip { max-width: calc(100% - 200px); }
+/* The centred title reserves the action rail's 44px control and 12px gutter on
+   both sides. Mirror the right safe-area inset so it cannot reach beneath the
+   rail when a landscape cutout moves it inward. */
+.mconv:has(.mconv-action-rail) .mtchip {
+  max-width: calc(100% - 112px - env(safe-area-inset-right) - env(safe-area-inset-right));
+}
