@@ -21,12 +21,28 @@
 
 ### JSON-lines output
 
-`-output json` emits one JSON object per line. In addition to lifecycle, message
-updates, tool execution, progress, and error lines, it emits `message_usage`
-for every completed assistant message (`role`, optional `subagent_id`,
-`provider`, `model`, token fields, and `cost_usd`) and `subagent_end` with the
-child's terminal `cost_usd`. Each `summary` includes total `cost_usd`, aggregate
-`usage`, and `by_model` entries split by provider, model, and main/subagent role.
+`-output json` emits one JSON object per line: lifecycle, message updates, tool
+execution, progress and errors.
+
+It also reports what the run **cost**, so a benchmark or a cost ledger does not
+have to reconstruct spending from session files:
+
+- `message_usage` — one line per completed assistant message, with `role`
+  (`main` or `subagent`), `subagent_id` for a child, `provider`, `model`, the
+  token fields (`input`, `output`, `cache_read`, `cache_write`) and `cost_usd`.
+- `subagent_end` — the child's terminal `cost_usd`.
+- `summary` — the run total `cost_usd`, the aggregate `usage`, and `by_model`
+  entries split by provider, model and role, each with its `messages` count,
+  tokens and cost.
+
+```jsonl
+{"type":"message_usage","role":"main","provider":"anthropic","model":"claude-sonnet-5","input":1204,"output":318,"cache_read":8192,"cache_write":0,"cost_usd":0.008}
+{"type":"summary","turns":2,"tools_completed":3,"files_touched":["main.go"],"elapsed_seconds":41,"cost_usd":0.0143,"usage":{"input":1600,"output":420,"cache_read":8192,"cache_write":0},"by_model":[{"provider":"anthropic","model":"claude-sonnet-5","role":"main","messages":2,"input":1600,"output":420,"cache_read":8192,"cache_write":0,"cost_usd":0.0143}]}
+```
+
+The main run's cost comes from the run's own total and children's from their
+terminal cost, so no dollar is counted twice. Costs are rounded to the
+micro-dollar, well below any provider's billing granularity.
 
 ## Version subcommand
 

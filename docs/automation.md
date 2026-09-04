@@ -124,12 +124,15 @@ The provider POSTs any JSON (or text) body to that path. Unknown source or
 wrong secret → `404`. Once stored, the reply is always `200`:
 
 ```json
-{ "id": "ev_9f2…", "state": "routed" }
+{ "id": "ev_9f2…", "state": "routed", "created": true }
 ```
 
-`state` is `routed` when it reached a session, `new` when it is waiting in the
-inbox. A repeated provider `id` / `event_id` / `key` (or, if none, the SHA-256
-of the body) is answered without routing again.
+`state` is `routed` when it reached a session and `new` when it is waiting in
+the inbox. `created` is `false` when this delivery matched an event already
+stored under the same key: providers retry, and a sender that reads the response
+should be able to tell a retry from a new event. A repeated provider `id` /
+`event_id` / `key` (or, if none, the SHA-256 of the body) is answered without
+routing again.
 
 Title is the first non-empty string among `title`, `subject`, `summary`,
 `event`, `message` at the top level, else `"<source> event"`. The body is
@@ -185,10 +188,25 @@ path. `autorun: true` starts a turn on delivery to an idle session; the default
 creations are capped per source at `rate` events per rolling hour (default 10);
 overflow stays in the inbox and a single push says the source is rate-limited.
 
+**When it waits, it says why.** An event left in the inbox records a
+`pending_reason` — `inbox`, `no_session`, `many_sessions`, `session_unavailable`,
+`session_busy` or `rate_limited` — so the row explains itself instead of leaving
+you to guess whether the project had no session or too many. Those are stable
+API tokens; the web client turns them into readable copy.
+
 **Deciding by hand** is the owner's job: `GET /api/events`,
 `POST /api/events/{id}/route` (`{session_id}` or `{new:true, model, thinking}`),
 `POST /api/events/{id}/dismiss`, and `POST /api/events/dismiss` (`{source}`) sit
-on ordinary browser authentication.
+on ordinary browser authentication. `model` and `thinking` are optional
+overrides: a session created from an event otherwise uses the source's own
+`create.model` / `create.thinking`, falling back to Moa's defaults.
+
+Routing by hand **always starts a turn**, whatever the source's `autorun` says:
+choosing a destination for an event is itself the instruction to act on it, and
+`autorun` governs unattended delivery only. Only an event still in state `new`
+can be routed or dismissed; one already settled answers `409`. Delivery claims
+the event (`new` → `routing`) before sending, so two concurrent decisions cannot
+deliver it twice.
 
 **Exposing the path.** Serve itself stays on the tailnet. To let a provider
 reach only `/hooks`, put Tailscale Funnel on a second port that mounts that

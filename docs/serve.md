@@ -626,19 +626,34 @@ config.
 
 By default an event is sent straight to a live session in the target project,
 so the work continues without you opening moa. When routing cannot pick one
-session (none, several, a missing/errored target), the event waits in the
-**Inbox** — its own surface, not a group inside the session list — with:
+session (none, several, a missing/errored target, a busy session with autorun
+off, or a rate-limited source), the event waits in the **Inbox** — its own
+surface, not a group inside the session list. Each waiting row says **why** it
+is there, and opens its payload on the same code surface the transcript uses, so
+you can read what actually arrived before deciding:
 
-- **Send to ‹session›** — inject it into a live session of that project.
-- **New session** — open a session in that project and inject it there.
+- **Send to ‹session›** — inject it into a live session of that project. The
+  sessions offered are exactly the ones the server will accept.
+- **New session** — open a session in that project and inject it there, using
+  the source's configured model and thinking unless you override it.
 - **Dismiss** — drop it. Nothing is sent anywhere.
+
+Choosing a destination starts a turn on it: placing an event by hand *is* the
+instruction to act on it, whatever the source's unattended `autorun` setting
+says. A route the server refuses leaves the event pending with an error instead
+of silently closing the inbox.
 
 The inbox keeps history: pending, delivered, and dismissed. A dismissal
 survives a restart (`~/.config/moa/events.json`).
 
-A push notification announces each arriving event. Following the push contract
-it carries only what happened and, at most, the session title — never the
-event's own text, which is external content that would land on a lock screen.
+A push notification announces each arriving event, and opens the inbox rather
+than the home screen. Following the push contract it carries only what happened
+and, at most, the session title — never the event's own text, which is external
+content that would land on a lock screen.
+
+In a conversation, an event is a monochrome timestamped mark with its payload on
+the tool code surface: it neither impersonates you nor competes with the
+assistant. A session that an event created is marked as such in the session list.
 
 ## REST endpoints
 
@@ -652,6 +667,7 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/sessions/{id}/history?before={msg_id}&limit={n}` | Chronological, lossless display-history page before a message ID; the page size is an objective and can grow to keep tool calls with their results |
 | `GET /api/model-preferences` · `PATCH /api/model-preferences` | Read or pin/unpin models in the owner's global preferences |
 | `GET /api/compact-strategy` · `PATCH /api/compact-strategy` | Read or set what the agent gets before an automatic compaction (`plain`, `notify`, `prepare`) |
+| `GET /api/compact-model` · `PATCH /api/compact-model` | Read or set the model that writes compaction summaries (`session`, or a model spec). Only models whose provider has a usable credential are offered, and an unknown spec is rejected on the spot |
 | `GET /api/sessions/{id}/fast` · `PATCH /api/sessions/{id}/fast` | Read or set [fast mode](./cli.md#fast-mode) for one session; the reply also says whether the current model can serve it (`supported`) and what it costs there (`note`). Allowed while the agent is running |
 | `GET /api/models` · `GET /api/subagent-models` · `PATCH /api/subagent-models` | Known models, and the models subagents are allowed to run under |
 | `GET /api/compact-at` · `PATCH /api/compact-at` | Read or set the default auto-compaction threshold |
