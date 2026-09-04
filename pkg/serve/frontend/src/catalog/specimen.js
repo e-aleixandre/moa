@@ -1,5 +1,6 @@
 import { setState } from "../data/store.js";
 import { setTileSession } from "../data/tileTree.js";
+import { skillForkLaunchRow } from "../data/ws/history.js";
 
 // Frozen conversations the real screens wear. The chrome is production; only
 // this data is fake. Each roster row is a full session so opening it shows
@@ -223,6 +224,261 @@ const frontend = {
   subagents: { docs: docsSub },
 };
 
+// A forked skill, launched both ways, so the two entry points can be compared
+// side by side. The model's own load_skill shows as an ordinary subagent row;
+// the user's /<name> shows as the anchored launch row. Both fold their terminal
+// card into the same `subagent-<jobId>` key, and both report back to the parent.
+const reviewSub = {
+  jobId: "sa-review",
+  title: "Delivery review",
+  task: "skill: delivery-review",
+  model: "terra",
+  async: true,
+  status: "completed",
+  accentIndex: 2,
+  usage: { inputTokens: 31400, outputTokens: 2600, costUSD: 0.14, elapsedMs: 68000 },
+  messages: [
+    tool("rv-read", "read", { path: "pkg/serve/skills_http.go" }, "done", "240 lines"),
+    { role: "assistant", content: [{ type: "text", text: "Reachable through the real entry point. One gap: the anchor is dropped when the agent is busy." }] },
+  ],
+};
+
+const learnSub = {
+  jobId: "sa-learn",
+  title: "Systemic learning",
+  task: "skill: systemic-learning",
+  model: "fable",
+  async: true,
+  status: "running",
+  accentIndex: 3,
+  startedAtMs: now - 46000,
+  contextPercent: 12,
+  thinking: "low",
+  usage: { inputTokens: 22800, outputTokens: 900, costUSD: 0.09, elapsedMs: 46000 },
+  messages: [
+    tool("ln-read", "read", { path: "/home/ealeixandre/.config/moa/sessions/…/transcript.md" }, "done", "3330 lines"),
+  ],
+};
+
+const skillFork = {
+  id: "skill-fork",
+  title: "forked skills",
+  state: "running",
+  model: "Claude Opus 4.8",
+  provider: "anthropic",
+  thinking: "medium",
+  cwd: "/home/ealeixandre/dev/moa/skill-fork-notify",
+  updated: now - 40000,
+  permissionMode: "yolo",
+  contextPercent: 33,
+  contextWindow: 200000,
+  costUSD: 0.88,
+  runTokensUp: 9100,
+  runTokensDown: 2400,
+  dockOpen: true,
+  messages: [
+    user("k-u1", "Check the fork lands before we ship it.", 300000),
+    // (1) THE MODEL launched it itself with load_skill: an ordinary subagent
+    // tool row, keyed by the job it spawned.
+    assistant("Running the delivery review as a child so I keep this thread."),
+    tool("subagent-sa-review", "subagent", { task: reviewSub.task }, "done", "verified · 1 gap found", {
+      subagentJobId: "sa-review",
+      accentIndex: 2,
+      finishedAtMs: now - 120000,
+    }),
+    {
+      role: "assistant",
+      timestamp: now - 110000,
+      content: [{ type: "text", text: "It came back with one gap: the anchor is dropped while the agent is busy. Fixed on the steer lane." }],
+    },
+    // (2) THE USER launched it with /systemic-learning. Built by the real
+    // production projection (skillForkLaunchRow), not hand-written, so the lab
+    // shows what the transcript actually renders — including if it regresses.
+    skillForkLaunchRow({
+      msg_id: "k-anchor",
+      custom: { source: "skill_fork", subagent_job_id: "sa-learn", skill: "systemic-learning" },
+    }),
+  ],
+  subagents: { "sa-review": reviewSub, "sa-learn": learnSub },
+};
+
+// The stretch a session reopened hours later could not explain: the notice, the
+// work the model did because of it, and the compaction that followed. The
+// notice is deliberately quiet — it is not an error or an alert, it is the
+// reason the model paused the task to write things down.
+const compaction = {
+  id: "compaction",
+  title: "long refactor",
+  state: "idle",
+  model: "Claude Opus 4.8",
+  provider: "anthropic",
+  thinking: "medium",
+  cwd: "/home/ealeixandre/dev/moa/main",
+  updated: now - 5 * 3600000,
+  contextPercent: 24,
+  contextWindow: 200000,
+  costUSD: 3.42,
+  messages: [
+    user("c-u1", "Sigue con el refactor de los handlers, que quedaba a medias.", 7 * 3600000),
+    {
+      role: "assistant",
+      timestamp: now - 7 * 3600000 + 20000,
+      content: [{ type: "text", text: "Sigo por donde lo dejamos: separo los handlers de sesión antes de tocar el bus." }],
+    },
+    tool("c-edit", "edit", { path: "pkg/serve/session_handlers.go" }, "done", "12 lines changed"),
+    // The notice: a quiet system line, not a user turn and not an alert.
+    {
+      _type: "system",
+      _msg_id: "c-notice",
+      timestamp: now - 6 * 3600000,
+      text: "⚠ Context filling up — asked the agent to save unsaved work",
+    },
+    {
+      role: "assistant",
+      timestamp: now - 6 * 3600000 + 15000,
+      content: [{ type: "text", text: "Antes de seguir dejo por escrito lo decidido, que si se resume la conversación se pierde." }],
+    },
+    tool("c-write", "write", { path: "tmp/ESTADO-refactor.md" }, "done", "Wrote 3120 bytes"),
+    {
+      _type: "compaction_marker",
+      _msg_id: "c-compact",
+      timestamp: Math.floor((now - 6 * 3600000 + 60000) / 1000),
+      summary:
+        "El usuario pidió terminar el refactor de handlers. Se separaron los handlers de sesión " +
+        "de los de configuración, quedando pendiente el bus. Decisión: no tocar el contrato HTTP " +
+        "existente; los clientes instalados dependen de él.",
+      tokensBefore: 154000,
+      readFiles: ["pkg/serve/session_handlers.go", "pkg/serve/manager.go", "pkg/bus/handlers.go"],
+      modifiedFiles: ["pkg/serve/session_handlers.go", "tmp/ESTADO-refactor.md"],
+    },
+    // Work carries on afterwards: the transcript reads continuously across the
+    // compaction instead of starting from nothing.
+    {
+      role: "assistant",
+      timestamp: now - 5 * 3600000,
+      content: [{ type: "text", text: "Retomo con el estado guardado: queda el bus, y el contrato HTTP no se toca." }],
+    },
+    tool("c-grep", "grep", { pattern: "RegisterHandlers", path: "pkg/bus" }, "done", "4 matches"),
+  ],
+  subagents: {},
+};
+
+// A response the provider served with a model other than the one requested.
+// The badge is durable message provenance (requested_model vs model), so it
+// survives a reload — this is the treatment to judge before reusing it for the
+// compaction summarizer.
+const redirected = {
+  id: "redirected",
+  title: "model redirect",
+  state: "idle",
+  model: "Claude Fable 5.1",
+  provider: "anthropic",
+  thinking: "high",
+  cwd: "/home/ealeixandre/dev/moa/main",
+  updated: now - 2 * 3600000,
+  contextPercent: 18,
+  contextWindow: 1000000,
+  costUSD: 1.24,
+  messages: [
+    user("r-u1", "Diseña la migración del bus de eventos.", 2 * 3600000),
+    // Real shape: a Fable request answered with Opus.
+    {
+      role: "assistant",
+      timestamp: now - 2 * 3600000 + 30000,
+      requested_model: "claude-fable-5-1",
+      model: "claude-opus-4-8",
+      content: [{ type: "text", text: "El bus actual acopla la publicación con la persistencia, así que la migración tiene que separar ambas antes de tocar los suscriptores." }],
+    },
+    tool("r-read", "read", { path: "pkg/bus/bridge.go" }, "done", "1240 lines"),
+    // Taken from a real session: grok-4.6 served as grok-4.6-build.
+    {
+      role: "assistant",
+      timestamp: now - 2 * 3600000 + 90000,
+      requested_model: "grok-4.6",
+      model: "grok-4.6-build",
+      content: [{ type: "text", text: "Confirmado: publish() y persist() comparten el mismo lock, y ese es el nudo de la migración." }],
+    },
+    // An ordinary answer, for contrast: no badge when nothing was redirected.
+    {
+      role: "assistant",
+      timestamp: now - 2 * 3600000 + 120000,
+      requested_model: "claude-fable-5-1",
+      model: "claude-fable-5-1",
+      content: [{ type: "text", text: "Sin redirección, esta respuesta no lleva distintivo." }],
+    },
+  ],
+  subagents: {},
+};
+
+// The compaction-model notice. The ordinary case says nothing: the compaction
+// card alone is the whole story, whether the summary was written by the
+// session's model or by the configured one. The line appears ONLY when the
+// configured summarizer could not be used, because that is the case the
+// transcript cannot otherwise explain.
+const compactNotice = {
+  id: "compact-notice",
+  title: "summarizer fallback",
+  state: "idle",
+  model: "Claude Fable 5.1",
+  provider: "anthropic",
+  thinking: "medium",
+  cwd: "/home/ealeixandre/dev/moa/main",
+  updated: now - 60000,
+  contextPercent: 21,
+  contextWindow: 1000000,
+  costUSD: 2.1,
+  messages: [
+    user("cn-u1", "Sigue con el refactor.", 600000),
+    {
+      role: "assistant",
+      timestamp: now - 590000,
+      content: [{ type: "text", text: "Sigo por donde lo dejamos." }],
+    },
+
+    // The ordinary compaction: card only, no line.
+    {
+      _type: "compaction_marker",
+      _msg_id: "cn-c1",
+      timestamp: Math.floor((now - 500000) / 1000),
+      summary: "Resumen de la conversación previa.",
+      tokensBefore: 262000,
+      readFiles: ["pkg/bus/bridge.go"],
+      modifiedFiles: [],
+    },
+    {
+      role: "assistant",
+      timestamp: now - 490000,
+      content: [{ type: "text", text: "Compactación normal: arriba solo está la tarjeta, sin aviso." }],
+    },
+
+    // The fallback: the configured summarizer could not be reached.
+    {
+      _type: "compaction_marker",
+      _msg_id: "cn-c2",
+      timestamp: Math.floor((now - 300000) / 1000),
+      summary: "Resumen de la conversación previa.",
+      tokensBefore: 271000,
+      readFiles: [],
+      modifiedFiles: [],
+    },
+    { _type: "system", _msg_id: "cn-fb", timestamp: now - 300000, text: "\u2702 Summarized with Fable — no usable credential for Terra" },
+    {
+      role: "assistant",
+      timestamp: now - 290000,
+      content: [{ type: "text", text: "Aquí sí: el modelo configurado no se pudo usar, y queda dicho." }],
+    },
+
+    // For tone comparison: the notice already in production.
+    {
+      _type: "system",
+      _msg_id: "cn-e",
+      timestamp: now - 100000,
+      text: "\u26a0 Context filling up — asked the agent to save unsaved work",
+    },
+  ],
+  subagents: {},
+};
+
 const verifier = {
   id: "verifier",
   title: "verifier design notes",
@@ -239,19 +495,173 @@ const verifier = {
   subagents: {},
 };
 
+
+// wake-on-event: a session that received a hook. The event is a user-role
+// message with the server-set custom envelope, so the stream projects it as
+// its own block; it is followed by the turn it triggered.
+const hooked = {
+  id: "hooked",
+  title: "TypeError in OrderSummary",
+  state: "idle",
+  model: "GPT-5.6 Terra",
+  provider: "openai",
+  thinking: "low",
+  cwd: "/home/ealeixandre/dev/moa/main",
+  updated: now - 6 * 60000,
+  permissionMode: "yolo",
+  contextPercent: 9,
+  contextWindow: 400000,
+  costUSD: 0.18,
+  runTokensUp: 3100,
+  runTokensDown: 900,
+  messages: [
+    user("h-u1", "Keep an eye on the tienda errors today.", 40 * 60000),
+    assistant("Will do. I'll pick up whatever Sentry sends."),
+    {
+      msg_id: "h-ev1",
+      role: "user",
+      timestamp: now - 6 * 60000,
+      custom: { source: "event", id: "ev_9", source_name: "sentry-tienda", title: "TypeError in OrderSummary — 412 events" },
+      content: [{ type: "text", text: JSON.stringify({
+        id: "TIENDA-4F2", level: "error", culprit: "OrderSummary.render",
+        message: "Cannot read properties of undefined (reading 'total')",
+        url: "https://sentry.io/organizations/tienda/issues/4f2/",
+        first_seen: "2026-09-03T15:02:11Z", count: 412,
+      }, null, 2) }],
+    },
+    assistant("The crash is in `OrderSummary.render` when an order has no `totals` block yet. I'll reproduce it against a pending order and guard the read."),
+  ],
+  subagents: {},
+};
+
+// wake-on-event: inbox specimens.
+//
+// Two seed sets, because the inbox has to be judged in both of its lives. The
+// quiet one is the normal day: a single thing waiting, and one already filed.
+// The noisy one is the night a source misbehaves — three sources, two
+// projects, twenty-five events — which is what says whether the surface is
+// still readable when it is doing its actual job. Switch with ?events=noisy.
+const MAIN = "/home/ealeixandre/dev/moa/main";
+const PULSE = "/home/ealeixandre/dev/moa/pulse-api";
+
+export const CATALOG_EVENTS = [
+  { id: "ev_1", source: "sentry-tienda", project: MAIN, key: "TIENDA-4F2",
+    title: "TypeError in OrderSummary — 412 events", state: "new", created: now - 3 * 60000,
+    pending_reason: "many_sessions", create_model: "terra", create_thinking: "low",
+    body: JSON.stringify({
+      id: "TIENDA-4F2", level: "error", culprit: "OrderSummary.render",
+      message: "Cannot read properties of undefined (reading 'total')",
+      url: "https://sentry.io/organizations/tienda/issues/4f2/",
+      first_seen: "2026-09-03T15:02:11Z", count: 412,
+    }, null, 2) },
+  { id: "ev_inbox", source: "agentmail", project: "", key: "inbox-1",
+    title: "New message from Jorge", state: "new", created: now - 2 * 60000,
+    pending_reason: "inbox",
+    body: "Can you review the attached invoice layout?" },
+  { id: "ev_3", source: "ci-tienda", project: MAIN, key: "pipeline-8841",
+    title: "Pipeline #8841 failed on main", state: "routed", routed_to: "hooked", created: now - 2 * 3600000 },
+];
+
+const NOISY_TITLES = {
+  "sentry-tienda": [
+    "TypeError in OrderSummary — 412 events",
+    "Timeout in checkout.PlaceOrder — 38 events",
+    "NullReference in CartTotals — 9 events",
+    "Unhandled rejection in payments/webhook",
+    "RangeError in InvoicePdf.render",
+    "TypeError in AddressForm.validate",
+    "Timeout calling stripe.charges.create",
+    "Unhandled rejection in tienda/session",
+  ],
+  "ci-tienda": [
+    "Pipeline #8841 failed on main",
+    "Pipeline #8842 failed on main",
+    "Pipeline #8843 cancelled",
+    "Job build:web failed after 4m",
+    "Job test:e2e failed after 11m",
+    "Pipeline #8846 failed on release/0.36",
+    "Job lint failed after 22s",
+    "Pipeline #8848 failed on main",
+    "Job deploy:demo failed after 1m",
+  ],
+  agentmail: [
+    "Re: invoice layout — one more change",
+    "Re: pulse pairing — screenshots attached",
+    "New message from Jorge",
+    "Re: billing export — wrong VAT line",
+    "Re: onboarding copy",
+    "New message from Marta",
+    "Re: contract renewal",
+    "Re: pulse api quota",
+  ],
+};
+
+function noisyEvents() {
+  const out = [];
+  let n = 0;
+  for (const [source, titles] of Object.entries(NOISY_TITLES)) {
+    for (const title of titles) {
+      n += 1;
+      // A real night's inbox is not uniformly pending: some events were filed
+      // as they arrived. Every fourth one is delivered so the list has to hold
+      // both weights at once.
+      const delivered = n % 4 === 0;
+      out.push({
+        id: `noisy_${n}`,
+        source,
+        project: source === "agentmail" ? PULSE : MAIN,
+        title,
+        state: delivered ? "routed" : "new",
+        ...(delivered
+          ? { routed_to: source === "agentmail" ? "deploy" : "hooked" }
+          : { pending_reason: source === "agentmail" ? "inbox" : "many_sessions" }),
+        created: now - n * 7 * 60000,
+        body: JSON.stringify({ source, title, seq: n }, null, 2),
+        ...(source === "sentry-tienda" && !delivered ? { create_model: "terra", create_thinking: "low" } : {}),
+      });
+    }
+  }
+  return out;
+}
+
+export const CATALOG_EVENTS_NOISY = noisyEvents();
+
+// catalogEvents picks the seed set from the URL, so the owner switches between
+// the two cases by editing the address bar instead of rebuilding the lab.
+export function catalogEvents(search) {
+  try {
+    const query = search ?? (typeof location === "undefined" ? "" : location.search);
+    return new URLSearchParams(query).get("events") === "noisy" ? CATALOG_EVENTS_NOISY : CATALOG_EVENTS;
+  } catch (_) {
+    return CATALOG_EVENTS;
+  }
+}
+
 export const CATALOG_SESSIONS = {
+  hooked,
   [SPECIMEN_ID]: specimen,
   deploy,
   "ws-race": wsRace,
   sqlite,
   frontend,
+  "skill-fork": skillFork,
+  compaction,
+  redirected,
+  "compact-notice": compactNotice,
   verifier,
 };
 
 export function seedCatalogStore() {
+  let inboxOpen = false;
+  try {
+    const query = typeof location === "undefined" ? "" : location.search;
+    inboxOpen = new URLSearchParams(query).get("inbox") === "1";
+  } catch (_) { /* ignore */ }
   setState((s) => ({
     sessions: { ...CATALOG_SESSIONS },
     sessionsLoaded: true,
+    events: catalogEvents(), // wake-on-event
+    inboxOpen, // wake-on-event: ?inbox=1 opens the inbox the same way a pending push does
     activeSession: SPECIMEN_ID,
     usage: {
       available: true,

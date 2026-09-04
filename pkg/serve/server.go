@@ -114,6 +114,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("PATCH /api/subagent-models", handleSubagentModels(manager))
 	mux.HandleFunc("GET /api/compact-at", handleCompactAt(manager))
 	mux.HandleFunc("PATCH /api/compact-at", handleCompactAt(manager))
+	mux.HandleFunc("GET /api/compact-model", handleCompactModel(manager))
+	mux.HandleFunc("PATCH /api/compact-model", handleCompactModel(manager))
 	mux.HandleFunc("GET /api/compact-strategy", handleCompactStrategy(manager))
 	mux.HandleFunc("PATCH /api/compact-strategy", handleCompactStrategy(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/fast", handleSessionFast(manager))
@@ -165,6 +167,13 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/push/vapid-public-key", handlePushVAPIDKey(manager))
 	mux.HandleFunc("POST /api/push/subscribe", handlePushSubscribe(manager))
 	mux.HandleFunc("POST /api/push/unsubscribe", handlePushUnsubscribe(manager))
+	// wake-on-event: the owner's inbox. Deciding where an event goes is the
+	// owner's call, so these sit on the normal browser auth, not the automation
+	// token — that token may write events and nothing else.
+	mux.HandleFunc("GET /api/events", handleListEvents(manager))
+	mux.HandleFunc("POST /api/events/dismiss", handleDismissEventSource(manager))
+	mux.HandleFunc("POST /api/events/{id}/route", handleRouteEvent(manager))
+	mux.HandleFunc("POST /api/events/{id}/dismiss", handleDismissEvent(manager))
 
 	mux.Handle("GET /", static.handler)
 	// The manifest needs its own content type; everything else the file server
@@ -215,6 +224,12 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/ask-response", handleAutomationAskResponse(manager))
 	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/permission", handleAutomationPermission(manager))
 	handler = automationMiddleware(o.automationToken, bodyTimeoutMiddleware(automationRoutes), handler)
+	// wake-on-event ingress: POST /hooks/<source>/<secret>. The path secret is
+	// the credential, so this sits outside browser auth and CSRF — same shape
+	// as the Automation API, still under the Host check below.
+	hookRoutes := http.NewServeMux()
+	hookRoutes.HandleFunc("POST /hooks/{source}/{secret}", handleHook(manager))
+	handler = hookMiddleware(bodyTimeoutMiddleware(hookRoutes), handler)
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
 	return pulseNoStoreMiddleware(hostMiddleware(o.allowedHosts, handler))

@@ -2522,83 +2522,10 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 	}
 }
 
-func TestSubagentNotifyFalseSuppressesOnAsyncComplete(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	provider := newMockProvider(gateResponse(started, release, "silent child"))
-
-	var mu sync.Mutex
-	completeN := 0
-	ended := make(chan struct{}, 1)
-	cfg := Config{
-		DefaultModel:    core.Model{ID: "default", Provider: "mock"},
-		ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
-		AppCtx:          context.Background(),
-		OnAsyncComplete: func(jobID, task, status, resultTail string, truncated bool) {
-			mu.Lock()
-			completeN++
-			mu.Unlock()
-		},
-		OnChildStart: func(jobID, task, model, thinking, origin string, async bool, startedAt time.Time, accent int) {
-			if !async {
-				t.Error("background job should start as async")
-			}
-		},
-		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) {
-			ended <- struct{}{}
-		},
-	}
-	sub, _, _, jobs := newSubagentToolsWithStore(t, cfg)
-
-	res, err := sub.Execute(context.Background(), map[string]any{
-		"task": "quiet", "async": true, "notify": false,
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.IsError {
-		t.Fatal(textOf(res))
-	}
-	got := textOf(res)
-	if strings.Contains(got, "You'll also be notified") {
-		t.Fatalf("silent spawn still promised a notification:\n%s", got)
-	}
-	if strings.Contains(got, "Use subagent_wait to block") {
-		t.Fatalf("silent spawn invited the parent to wait:\n%s", got)
-	}
-	if !strings.Contains(got, "Continue the original task") {
-		t.Fatalf("silent spawn should tell the parent to continue the original task:\n%s", got)
-	}
-	jobID := jobIDFromResult(t, res)
-	<-started
-	close(release)
-
-	select {
-	case <-ended:
-	case <-time.After(2 * time.Second):
-		t.Fatal("OnChildEnd should still fire when notify is false")
-	}
-	time.Sleep(50 * time.Millisecond)
-	mu.Lock()
-	n := completeN
-	mu.Unlock()
-	if n != 0 {
-		t.Fatalf("OnAsyncComplete fired %d times with notify=false, want 0", n)
-	}
-
-	snap, delivered, err := jobs.wait(context.Background(), jobID, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snap.Status != statusCompleted || snap.Result != "silent child" {
-		t.Fatalf("wait = %+v", snap)
-	}
-	if !delivered {
-		t.Fatal("wait should own the result when the async notification was suppressed")
-	}
-}
-
-func TestSubagentNotifyDefaultStillNotifies(t *testing.T) {
+// Every async subagent notifies its parent on completion. There is no opt-out:
+// a child whose result never reaches the parent leaves its conclusions for a
+// human to carry across by hand.
+func TestAsyncSubagentAlwaysNotifiesParent(t *testing.T) {
 	provider := newMockProvider(textResponse("normal child"))
 	var mu sync.Mutex
 	completeN := 0

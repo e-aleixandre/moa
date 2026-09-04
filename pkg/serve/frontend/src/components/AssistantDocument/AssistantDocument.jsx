@@ -1,5 +1,4 @@
 import { sanitizeHtml } from "../../util/sanitize.js";
-import { ResponseModelBadge } from "../ResponseModelBadge/ResponseModelBadge.jsx";
 import "./AssistantDocument.css";
 
 // AssistantDocument — "document" flow of the agent's work: paragraphs,
@@ -8,20 +7,22 @@ import "./AssistantDocument.css";
 // DiffBlock…) as children, or passes already-rendered `html` (markdown).
 // `streaming` paints the blinking cursor at the end of the document, as a
 // sibling after the content — same in `html` mode and children mode.
+//
+// A response served by a model other than the one requested is NOT badged here:
+// the stream projection emits it as a system line above the turn
+// (modelRedirectLine), so provenance reads like the rest of the transcript
+// instead of interrupting the prose.
 export function AssistantDocument({
   children,
   html,
   streaming = false,
   className = "",
-
-  message,
   ...rest
 }) {
   const streamClass = streaming ? " is-streaming" : "";
   if (html != null) {
     return (
       <div class={`doc ${streamClass} ${className}`.trim()} {...rest}>
-        <ResponseModelBadge message={message} />
         <div
           class="doc-html"
           dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }}
@@ -32,7 +33,6 @@ export function AssistantDocument({
   }
   return (
     <div class={`doc ${streamClass} ${className}`.trim()} {...rest}>
-      <ResponseModelBadge message={message} />
       {children}
       {streaming && (
         <span class="doc-cursor" aria-hidden="true" />

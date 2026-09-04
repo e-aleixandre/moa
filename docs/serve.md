@@ -207,7 +207,7 @@ it runs:
 disable-model-invocation: true   # only you, via /<name>
 user-invocable: false            # only the agent, via load_skill
 context: fork                    # isolated subagent, no inherited messages
-background: true                 # with fork: return a job id, do not notify the parent
+background: true                 # with fork: run async, do not block the parent
 parent-transcript: snapshot      # with fork: freeze the active branch and give the child its path
 ---
 ```
@@ -221,12 +221,17 @@ or `checkpoint`, and `load_skill` will refuse another forked skill.
 
 When the agent calls `load_skill` on a forked skill, a foreground fork blocks
 and returns the child's result; a background fork returns a job id immediately
-and stays silent when the child finishes (`subagent_status` / `subagent_wait` /
-`subagent_cancel` still work, and the dock still shows it). `/<name>` on a
-forked skill always launches asynchronously so the command does not hold the
-session: a non-background fork still notifies the idle parent through the usual
-subagent completion path; a background fork does not. Slash fork while the
-session is busy is refused in this MVP.
+and keeps working, and the child's result reaches the parent later through the
+usual subagent completion notification (`subagent_status` / `subagent_wait` /
+`subagent_cancel` still work, and the dock still shows it). `background` spares
+the parent the work, not the conclusion: a forked skill is an ordinary
+subagent, so what it found always comes back.
+
+`/<name>` on a forked skill always launches asynchronously so the command does
+not hold the session. It is recorded in the conversation as a launch row
+carrying the job id, which is what keeps the child openable after a reload and
+gives the agent an antecedent for the completion that follows. Slash fork while
+the session is busy is refused in this MVP.
 
 `parent-transcript: snapshot` writes a copy of the **active** conversation
 branch (not later messages, not abandoned branches) and adds that absolute path
@@ -286,6 +291,10 @@ consumer plan through a private consumer endpoint on a best-effort basis. This
 is not a public consumer API promise and is not a billing authority. It may be
 unavailable or stale if that endpoint changes or cannot be reached; failure to
 read it never blocks a Grok request.
+
+Meta plan usage is not shown at all: the only known subscription snapshot rides
+the Muse key-mint response, so the panel states the credential kind instead of
+polling.
 
 `XAI_API_KEY` uses the separate, metered `api.x.ai` developer API, so its plan
 usage is intentionally not shown in this panel. Moa does not publish xAI
@@ -400,6 +409,29 @@ The `GET /api/sessions` roster includes `unseen`, `unseen_seq`, and
 `attention_namespace` scopes that occurrence and any read cursor to its runtime
 incarnation.
 
+## Event inbox
+
+External events — a mail reply, a failed pipeline, a cron job — reach moa
+through [`POST /hooks/<source>/<secret>`](./automation.md#event-hooks) and are
+addressed to a project, a session, or the inbox, according to that source's
+config.
+
+By default an event is sent straight to a live session in the target project,
+so the work continues without you opening moa. When routing cannot pick one
+session (none, several, a missing/errored target), the event waits in the
+**Inbox** — its own surface, not a group inside the session list — with:
+
+- **Send to ‹session›** — inject it into a live session of that project.
+- **New session** — open a session in that project and inject it there.
+- **Dismiss** — drop it. Nothing is sent anywhere.
+
+The inbox keeps history: pending, delivered, and dismissed. A dismissal
+survives a restart (`~/.config/moa/events.json`).
+
+A push notification announces each arriving event. Following the push contract
+it carries only what happened and, at most, the session title — never the
+event's own text, which is external content that would land on a lock screen.
+
 ## REST endpoints
 
 Beyond the per-session WebSocket, Serve exposes a few global read/write endpoints:
@@ -422,6 +454,7 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |
 | `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |
+| `GET /api/events` · `POST /api/events/{id}/route` · `.../dismiss` · `POST /api/events/dismiss` | The [event inbox](#event-inbox): history, sending or dropping one, or dismissing a source |
 
 The web transcript initially opens on the recent conversation and automatically
 loads older history as you scroll upwards. Each older page is prepended while

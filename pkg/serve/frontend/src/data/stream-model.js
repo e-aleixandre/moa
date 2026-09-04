@@ -21,6 +21,14 @@
 //       never from the transcript index, so an expandable card retains state
 //       while earlier history is loaded.
 //
+//   { kind:'event', id, source, title, body, time, steer, autorun }
+//       wake-on-event: an external event delivered into this conversation. It
+//       arrives as a user-role message carrying `custom.source === 'event'`,
+//       and it gets its OWN block instead of a waypoint: a waypoint means the
+//       owner spoke, and nobody did. Its id follows the msg_id like the
+//       compaction card's, so the collapsed body survives loading older
+//       history.
+//
 //   { kind:'waypoint', time, text, msgId?, attachments? }
 //       A user turn. `text` is the joined text of the user message. `time` is
 //       the message ts when present (else undefined — we never invent one).
@@ -113,6 +121,7 @@ import {
   toolPath,
   toolPreview,
   shortModel,
+  modelCodename,
 } from './util/format.js';
 import { formatElapsed } from './util/activity.js';
 import { parseFileCardData } from './util/file-card.js';
@@ -233,6 +242,9 @@ export function projectStream(session) {
         id: `compaction-${msgId}-${ordinal}`,
         summary: typeof msg.summary === 'string' ? msg.summary : '',
         tokensBefore: Number.isFinite(msg.tokensBefore) ? msg.tokensBefore : 0,
+        // When it happened, so a session reopened hours later can place the
+        // compaction against the work around it.
+        timestamp: Number.isFinite(msg.timestamp) ? msg.timestamp : 0,
         readFiles: Array.isArray(msg.readFiles) ? msg.readFiles : [],
         modifiedFiles: Array.isArray(msg.modifiedFiles) ? msg.modifiedFiles : [],
       });
@@ -262,7 +274,11 @@ export function projectStream(session) {
         // the tool recorded on its result (subagentJobId). Without that a
         // restored card would point at a job the server has never heard of, and
         // opening it would do nothing.
-        const completionCard = /^subagent[-_]/.test(rawToolCallID);
+        // A completion card is terminal by construction. A slash-launched fork
+        // shares that key shape while it is still RUNNING (the anchor row), and
+        // treating it as a completion would paint a live child as finished with
+        // no result, so the status decides, not the key alone.
+        const completionCard = /^subagent[-_]/.test(rawToolCallID) && msg.status !== 'running';
         const origin = originToolCalls.byID.get(rawToolCallID) || null;
         const jobId = origin
           ? String(origin.jobId)
@@ -328,6 +344,15 @@ export function projectStream(session) {
     if (msg && msg.role === 'assistant') {
       const text = joinText(msg.content);
       if (text) {
+        // A response served by a model other than the one requested is durable
+        // provenance, not an alert: it rides as the same quiet system line the
+        // rest of the transcript uses, above the turn it explains, instead of
+        // a coloured pill wedged into the assistant's prose.
+        const redirect = modelRedirectLine(msg);
+        if (redirect) {
+          currentDoc = null;
+          blocks.push({ kind: 'system', id: blockID('redirect', msg, i), text: redirect });
+        }
         const doc = ensureDoc(msg, i);
         closeLedger();
         closeDelegation();
@@ -341,6 +366,27 @@ export function projectStream(session) {
       currentDoc = null;
       currentLedger = null;
       closeDelegation();
+      // wake-on-event: an event is a user-role message only because that is
+      // how the model must receive it; it is not the owner's turn, so it never
+      // becomes a waypoint. The custom envelope is set by the server on
+      // delivery and survives resumes and reloads (like subagent_parent).
+      if (msg.custom?.source === 'event') {
+        blocks.push({
+          kind: 'event',
+          id: blockID('event', msg, i),
+          source: msg.custom.source_name || 'event',
+          title: msg.custom.title || '',
+          body: joinText(msg.content),
+          time: msg.timestamp,
+          // A steered delivery is seen after the current tool, not at once —
+          // worth saying, because it explains a visible delay.
+          steer: !!(msg.custom.steer || msg._steer_id),
+          // Absent means autorun ran: only an explicit false says otherwise,
+          // so older transcripts do not all claim they were skipped.
+          autorun: msg.custom.autorun !== false,
+        });
+        continue;
+      }
       const attachments = attachmentsOf(msg.content);
       const msgId = msg.msg_id || msg._msg_id || '';
       const wp = {
@@ -484,15 +530,45 @@ function hasSubagentEntry(subagents, jobId) {
   return Object.prototype.hasOwnProperty.call(subagents, jobId);
 }
 
+// modelRedirectLine describes a response the provider served with a model other
+// than the one asked for. It returns '' for the ordinary case, so callers can
+// call it unconditionally.
+//
+// It reads only durable message provenance (requested_model vs model), which is
+// why the line survives a reload. Names are rendered the way the rest of the UI
+// names models ('Fable → Opus'), not as raw ids.
+export function modelRedirectLine(msg) {
+  const requested = String(msg?.requested_model || '').trim();
+  const served = String(msg?.model || '').trim();
+  if (!requested || !served || requested === served) return '';
+  const from = modelName(requested);
+  const to = modelName(served);
+  // Two variants of one family share a codename ('grok-4.6' vs
+  // 'grok-4.6-build'), and "Grok → Grok" says nothing. Fall back to the raw
+  // ids, which is exactly the case where the detail is the whole point.
+  if (from === to) return `⤳ ${shortModel(requested)} → ${shortModel(served)}`;
+  return `⤳ ${from} → ${to}`;
+}
+
+function modelName(spec) {
+  return modelCodename(spec) || shortModel(spec);
+}
+
 // seenJobIdsOf collects every tool_call_id present in a message list, indexing
 // the bare job_id for the terminated subagent/bash cards keyed as
 // `subagent-<id>` / `subagent_<id>` / `bash-complete-<id>` (see projectStream's
 // dedup). Exported so the AgentTray uses the exact same dedup set the stream does.
+//
+// A row that is still RUNNING is not a representation of the child's outcome —
+// the slash-launched fork's anchor shares the `subagent-<id>` key while its
+// child works. Counting it here would hide the live child from BOTH places at
+// once: the dock skips a job already "seen", and the inline block only shows
+// terminal ones.
 export function seenJobIdsOf(messages) {
   const seenJobIds = new Set();
   const list = Array.isArray(messages) ? messages : [];
   for (const msg of list) {
-    if (msg && msg._type === 'tool_start' && msg.tool_call_id) {
+    if (msg && msg._type === 'tool_start' && msg.tool_call_id && msg.status !== 'running') {
       const id = String(msg.tool_call_id);
       seenJobIds.add(id);
       if (id.startsWith('subagent-')) seenJobIds.add(id.slice('subagent-'.length));

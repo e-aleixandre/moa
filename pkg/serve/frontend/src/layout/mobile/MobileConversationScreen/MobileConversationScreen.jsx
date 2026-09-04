@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "preact/hooks";
-import { AppWindow, Plus } from "lucide-preact";
+import { AppWindow, Inbox, Plus } from "lucide-preact";
 import { updateSession, store } from "../../../data/store.js";
 import { useStore } from "../../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../../data/stream-model.js";
@@ -8,6 +8,7 @@ import { setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
+import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, routeEvent, routeEventToNewSession, toggleInbox } from "../../../data/events.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
 import { LivePreview } from "../../../components/LivePreview/LivePreview.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
@@ -20,6 +21,8 @@ import { MobileStream } from "./MobileStream.jsx";
 import { MobileNowLine } from "./MobileNowLine.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import { MobileBashJobView } from "./MobileBashJobView.jsx";
+import { MobileInboxView } from "./MobileInboxView.jsx"; // wake-on-event
+import { MobileActionRail } from "../MobileActionRail/MobileActionRail.jsx";
 import { LiveDock } from "../../LiveDock/LiveDock.jsx";
 import { selectMobileChrome } from "./chrome.js";
 import "./MobileConversationScreen.css";
@@ -339,7 +342,7 @@ function MobileSessionChrome({ version, forceMobile = false }) {
 
   return (
     <>
-      {chrome.showChip && (
+      {chrome.showChip && !chrome.inboxOpen && (
         <MobileTitleChip
           title={chrome.title}
           attention={chrome.attention}
@@ -347,17 +350,36 @@ function MobileSessionChrome({ version, forceMobile = false }) {
           onToggle={setDrawerOpen}
         />
       )}
-      {/* Live preview door. There is no mobile header, so it floats next to the
-          title chip, on the same top inset. Only opens: the panel owns closing. */}
-      {chrome.showChip && !chrome.drawerOpen && chrome.activeId && (
-        <button
-          type="button"
-          class="mconv-preview-door"
-          aria-label="Live preview"
-          onClick={() => updateSession(chrome.activeId, { previewOpen: true })}
-        >
-          <AppWindow size={16} aria-hidden="true" />
-        </button>
+      {chrome.showChip && !chrome.drawerOpen && !chrome.inboxOpen && (
+        <MobileActionRail actions={[
+          {
+            id: "preview",
+            icon: AppWindow,
+            label: "Live preview",
+            onClick: () => updateSession(chrome.activeId, { previewOpen: true }),
+            active: chrome.previewOpen,
+            visible: !!chrome.activeId,
+          },
+          {
+            id: "inbox",
+            icon: Inbox,
+            label: "Inbox",
+            badge: inboxPendingCount(chrome.inbox),
+            onClick: toggleInbox,
+            visible: chrome.inbox.length > 0,
+          },
+        ]} />
+      )}
+      {chrome.inboxOpen && (
+        <MobileInboxView
+          cards={chrome.inbox}
+          onBack={closeInbox}
+          onSend={(id, sessionId) => { routeEvent(id, sessionId).catch(() => {}); }}
+          onNewSession={(id, spec) => { routeEventToNewSession(id, spec).catch(() => {}); }}
+          onIgnore={(id) => { dismissEvent(id).catch(() => {}); }}
+          onIgnoreSource={(source) => { dismissSource(source).catch(() => {}); }}
+          onOpenSession={(id) => { closeInbox(); setActiveSession(id); }}
+        />
       )}
       <SessionDrawer
         open={chrome.drawerOpen}

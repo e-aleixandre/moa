@@ -16,6 +16,23 @@ export function ChatHead({
   settingsAnchorRef,
 }) {
   const Title = onTitleClick ? "button" : "span";
+  const actions = [
+    onPreviewToggle && {
+      id: "preview",
+      icon: AppWindow,
+      label: "preview",
+      title: "Live preview — look at your dev server and point the agent at an element",
+      active: previewOpen,
+      onClick: onPreviewToggle,
+    },
+    onGridToggle && {
+      id: "grid",
+      label: "grid",
+      title: "Back to the grid — this session stays in pane 1",
+      onClick: onGridToggle,
+      shortcut: <Kbd>{formatShortcut("G", { mod: true })}</Kbd>,
+    },
+  ].filter(Boolean);
   return (
     <header class="chat-head">
       <div class="crumb" ref={settingsAnchorRef}>
@@ -27,27 +44,16 @@ export function ChatHead({
         {settingsPopover}
       </div>
 
-      {(onGridToggle || onPreviewToggle) && (
+      {actions.length > 0 && (
         <div class="head-actions">
-          {onPreviewToggle && (
-            <button
-              type="button"
-              class={`grid-toggle${previewOpen ? " is-on" : ""}`}
-              onClick={onPreviewToggle}
-              aria-pressed={previewOpen}
-              title="Live preview — look at your dev server and point the agent at an element"
-            >
-              <AppWindow size={14} aria-hidden="true" />
-              preview
-            </button>
-          )}
-          {onGridToggle && (
-          <button type="button" class="grid-toggle" onClick={onGridToggle} title="Back to the grid — this session stays in pane 1">
-            <span class="mini" aria-hidden="true"><i /><i /><i /></span>
-            grid
-            <Kbd>{formatShortcut("G", { mod: true })}</Kbd>
-          </button>
-          )}
+          {actions.map((action) => {
+            const Icon = action.icon;
+            return <button type="button" key={action.id} class={`grid-toggle${action.active ? " is-on" : ""}`} onClick={action.onClick} aria-pressed={action.active || undefined} title={action.title}>
+              {Icon ? <Icon size={14} aria-hidden="true" /> : <span class="mini" aria-hidden="true"><i /><i /><i /></span>}
+              {action.label}
+              {action.shortcut}
+            </button>;
+          })}
         </div>
       )}
     </header>

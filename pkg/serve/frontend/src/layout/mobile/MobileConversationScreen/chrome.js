@@ -2,6 +2,7 @@ import { focusedSessionId } from "../../../data/selectors.js";
 import { shortPath, sessionDisplayDotState, sessionTitle } from "../../../data/util/format.js";
 import { sessionRowBrief } from "../../Spine/sessions.js";
 import { aggregateAttention, newResultSessions } from "./attention-model.js";
+import { inboxCards, inboxSig } from "../../../data/events.js"; // wake-on-event
 
 function relAge(updated) {
   if (!updated) return "";
@@ -104,11 +105,14 @@ function mobileChromeEqual(a, b) {
     && a.groupByProject === b.groupByProject
     && a.soundEnabled === b.soundEnabled
     && a.showChip === b.showChip
+    && a.previewOpen === b.previewOpen
     && a.title === b.title
     && a.activeCount === b.activeCount
     && a.savedCount === b.savedCount
     && a.drawerCollapsed === b.drawerCollapsed
     && attentionSig(a.attention) === attentionSig(b.attention)
+    && a.inboxOpen === b.inboxOpen // wake-on-event
+    && inboxSig(a.inbox) === inboxSig(b.inbox) // wake-on-event
     && listSig(a.newResults) === listSig(b.newResults)
     && listSig(a.active) === listSig(b.active)
     && listSig(a.saved) === listSig(b.saved)
@@ -128,12 +132,15 @@ export function selectMobileChrome(state, forceMobile = false) {
     activeId,
     title: session ? sessionTitle(session) : "",
     showChip: !!(session && !session.viewingSubagent && !session.viewingBashJob),
+    previewOpen: !!session?.previewOpen,
     attention: aggregateAttention(state.sessions, activeId),
     drawerOpen: !!state.drawerOpen,
     drawerStep: state.drawerStep || "list",
     groupByProject: !!state.groupByProject,
     drawerCollapsed: state.drawerCollapsed,
     soundEnabled: !!state.soundEnabled,
+    inbox: inboxCards(state.sessions, state.events), // wake-on-event
+    inboxOpen: !!state.inboxOpen, // wake-on-event
     projects: drawerProjects(state.sessions),
     recentSaved: recentSavedSessions(state.sessions),
     ...lists,

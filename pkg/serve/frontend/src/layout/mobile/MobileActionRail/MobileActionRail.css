@@ -1,0 +1,79 @@
+.mconv-action-rail {
+  position: absolute;
+  top: calc(6px + env(safe-area-inset-top));
+  right: var(--space-1);
+  z-index: calc(var(--z-sheet) - 1);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mconv-action-rail-button {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--surface2) 70%, transparent);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--base) 72%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--subtext0);
+  cursor: pointer;
+}
+
+.mconv-action-rail-button:active { transform: scale(0.94); }
+.mconv-action-rail-button:hover,
+.mconv-action-rail-button.is-active { color: var(--text); background: var(--surface1); }
+.mconv-action-rail-button:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
+
+.mconv-action-rail-badge {
+  position: absolute;
+  top: 4px;
+  right: 3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: var(--radius-full);
+  background: var(--mauve);
+  color: var(--crust);
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  font-weight: var(--weight-semibold);
+  line-height: 15px;
+  text-align: center;
+}
+
+.mconv-action-rail-overflow {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: var(--space-1);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md);
+  background: var(--mantle);
+  box-shadow: var(--shadow-lg);
+}
+
+.mconv-action-rail-button.is-menu-item {
+  width: 100%;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: var(--font);
+  font-size: var(--text-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mconv-action-rail-button { transition: none; }
+}

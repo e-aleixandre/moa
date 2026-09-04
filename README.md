@@ -159,6 +159,7 @@ Authenticate with an existing subscription:
 moa --login anthropic   # Claude Pro/Max OAuth
 moa --login openai      # ChatGPT Plus/Pro OAuth, or choose an API key
 moa --login xai         # SuperGrok/X OAuth device flow
+moa --login meta        # Muse subscription OAuth device flow
 ```
 
 Or provide an API key directly:
@@ -169,6 +170,8 @@ export ANTHROPIC_API_KEY="..."
 export OPENAI_API_KEY="..."
 # or:
 export XAI_API_KEY="..."
+# or:
+export META_API_KEY="..."
 ```
 
 Start the web UI:

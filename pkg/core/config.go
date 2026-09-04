@@ -109,7 +109,9 @@ type MoaConfig struct {
 	SubagentMaxConcurrent  int                  `json:"subagent_max_concurrent_async,omitempty"` // Max concurrent async subagents. 0 = use package default.
 	SubagentAllowedModels  []string             `json:"subagent_allowed_models,omitempty"`       // Model IDs a subagent may run under. Empty/absent = no restriction (opt-in).
 	CompactAt              int                  `json:"compact_at,omitempty"`                    // Default soft compaction threshold in tokens for sessions with none of their own. 0 = compact at the model window.
+	CompactModel           string               `json:"compact_model,omitempty"`                 // Model that writes compaction summaries. Empty/"session" = the session's own model. See GetCompactModel.
 	CompactStrategy        string               `json:"compact_strategy,omitempty"`              // What happens before an automatic compaction: "plain", "notify" (default) or "prepare". See GetCompactStrategy.
+	Events                 *EventsConfig        `json:"events,omitempty"`                        // wake-on-event: inbound webhook sources (global-only; see EventsConfig).
 }
 
 // Compaction strategies: what the agent gets before its context is summarized.
@@ -190,6 +192,31 @@ func GetCompactAt(cfg MoaConfig) int {
 		return cfg.CompactAt
 	}
 	return 0
+}
+
+// CompactModelSession is the CompactModel value meaning "summarize with the
+// model the session is already using", which is how compaction behaved before
+// this setting existed.
+const CompactModelSession = "session"
+
+// GetCompactModel returns the model spec that should write compaction
+// summaries, or "" to use the session's own model.
+//
+// Compaction is extraction, not reasoning: the summarizer re-reads a flattened
+// transcript under its own system prompt, so the session's model is not
+// required to be the one doing it, and the strongest (most expensive) model is
+// rarely the right tool for it.
+//
+// An unset value and the explicit "session" both mean the session's model. The
+// spec is not validated here — a hand-edited config must not stop a session
+// from loading — so callers resolve it and fall back when it names a model they
+// cannot reach.
+func GetCompactModel(cfg MoaConfig) string {
+	spec := strings.TrimSpace(cfg.CompactModel)
+	if spec == "" || strings.EqualFold(spec, CompactModelSession) {
+		return ""
+	}
+	return spec
 }
 
 // GetCacheTTL returns the prompt-cache TTL for the interactive agent. The
@@ -487,6 +514,11 @@ func loadConfigFile(path string) MoaConfig {
 			cfg.SessionBriefModel = "off"
 		}
 	}
+	if dropped := cfg.Events.DropInvalid(); len(dropped) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: invalid events config %s: dropping sources %s\n",
+			path, strings.Join(dropped, ", "))
+	}
+	cfg.Events.WarnShortSecrets()
 	return cfg
 }
 
@@ -563,6 +595,9 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		// through. mergeConfigs builds the result field by field, so leaving this
 		// out would silently drop the global value at project level.
 		CompactAt: mergeScalar(base.CompactAt, override.CompactAt),
+		// Same reasoning for the summarizer: a project may pick its own, and
+		// with none set the global choice must survive the merge.
+		CompactModel: mergeScalar(base.CompactModel, override.CompactModel),
 	}
 	// MaxBudget: project can tighten but not disable a global budget.
 	if override.MaxBudget > 0 {
@@ -604,6 +639,9 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 	}
 	merged.SubagentMaxTurns = mergeScalar(base.SubagentMaxTurns, override.SubagentMaxTurns)
 	merged.SubagentMaxRunDuration = mergeScalar(base.SubagentMaxRunDuration, override.SubagentMaxRunDuration)
+	// Event sources carry webhook secrets and are global-only: a project
+	// config must not add a hook or override a secret.
+	merged.Events = base.Events
 	merged.SubagentMaxConcurrent = mergeScalar(base.SubagentMaxConcurrent, override.SubagentMaxConcurrent)
 	return merged
 }

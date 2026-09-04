@@ -445,6 +445,13 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 	if jobID != "" {
 		projected["subagent_job_id"] = jobID
 	}
+	// The skill name labels a slash-launched fork's row; without it the launch
+	// renders as an unnamed subagent.
+	if source == "skill_fork" {
+		if name, ok := custom["skill"].(string); ok && name != "" {
+			projected["skill"] = name
+		}
+	}
 	if source == "secret_batch" {
 		switch aliases := custom["secret_aliases"].(type) {
 		case []string:
@@ -457,6 +464,19 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 				}
 			}
 			projected["secret_aliases"] = values
+		}
+	}
+	if source == "event" {
+		for _, key := range []string{"id", "source_name", "title"} {
+			if value, ok := custom[key].(string); ok {
+				projected[key] = value
+			}
+		}
+		if autorun, ok := custom["autorun"].(bool); ok {
+			projected["autorun"] = autorun
+		}
+		if steer, ok := custom["steer"].(bool); ok {
+			projected["steer"] = steer
 		}
 	}
 	return projected

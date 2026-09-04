@@ -5,6 +5,7 @@
 // streaming, truncation) are pinned here with plain session fixtures.
 import { test, expect } from 'bun:test';
 import { LIVE_FULL_MAX_CHARS, LIVE_FULL_MAX_LINES, projectStream, liveTrayAgents } from './stream-model.js';
+import { normalizeHistory } from './ws/history.js';
 import { parseUnifiedDiff } from './util/unified-diff.js';
 
 // ── fixture helpers ──────────────────────────────────────────────────────────
@@ -16,7 +17,7 @@ const tool = (id, name, args, status = 'done', result = 'ok', extra = {}) => ({
 const system = (text) => ({ _type: 'system', text });
 const compaction = (id, extra = {}) => ({
   _type: 'compaction_marker', _msg_id: id, summary: 'Kept the important implementation context.',
-  tokensBefore: 24000, readFiles: ['pkg/a.go'], modifiedFiles: ['pkg/b.go'], ...extra,
+  tokensBefore: 24000, timestamp: 1788000000000, readFiles: ['pkg/a.go'], modifiedFiles: ['pkg/b.go'], ...extra,
 });
 const session = (messages, extra = {}) => ({ messages, ...extra });
 
@@ -25,6 +26,7 @@ test('projects the durable compaction contract as its own card block', () => {
   expect(block).toEqual({
     kind: 'compaction', id: 'compaction-entry-42-0',
     summary: 'Kept the important implementation context.', tokensBefore: 24000,
+    timestamp: 1788000000000,
     readFiles: ['pkg/a.go'], modifiedFiles: ['pkg/b.go'],
   });
 });
@@ -1301,4 +1303,75 @@ test('a card backed by a real job stays openable', () => {
     expect.objectContaining({ id: 'sa-1', openable: true }),
     expect.objectContaining({ id: 'sa-2', openable: true }),
   ]);
+});
+
+// ── wake-on-event ────────────────────────────────────────────────────────────
+// An event is delivered as a user-role message because that is the only role
+// the model can receive it in. It must never render as the owner's waypoint:
+// nobody typed it.
+const event = (text, custom = {}, extra = {}) => user(text, {
+  _msg_id: 'ev-msg-1',
+  custom: { source: 'event', id: 'ev_1', source_name: 'sentry-tienda', title: 'Checkout 500s', ...custom },
+  ...extra,
+});
+
+test('a delivered event is projected as its own block, not a waypoint', () => {
+  const [block] = projectStream(session([event('{"level":"error"}')]));
+  expect(block).toEqual({
+    kind: 'event', id: 'event-ev-msg-1-0',
+    source: 'sentry-tienda', title: 'Checkout 500s', body: '{"level":"error"}',
+    time: undefined, steer: false, autorun: true,
+  });
+});
+
+test('a WS init event envelope survives history normalization', () => {
+  const [message] = normalizeHistory([{
+    role: 'user', msg_id: 'event-msg', timestamp: 1725357600000,
+    content: [{ type: 'text', text: '<event>build failed</event>' }],
+    custom: {
+      source: 'event', id: 'ev_1', source_name: 'ci', title: 'Build failed',
+      autorun: false, steer: true,
+    },
+  }]);
+  expect(message.custom).toEqual({
+    source: 'event', id: 'ev_1', source_name: 'ci', title: 'Build failed',
+    autorun: false, steer: true,
+  });
+  const [block] = projectStream(session([message]));
+  expect(block).toMatchObject({
+    kind: 'event', source: 'ci', title: 'Build failed',
+    body: '<event>build failed</event>', time: 1725357600000,
+    autorun: false, steer: true,
+  });
+});
+
+test('an event closes the assistant turn before it, like every other user message', () => {
+  const blocks = projectStream(session([assistant('Done.'), event('{}'), assistant('Looking.')]));
+  expect(blocks.map((b) => b.kind)).toEqual(['document', 'event', 'document']);
+});
+
+test('a steered delivery and a skipped autorun are carried on the block', () => {
+  const [steered] = projectStream(session([event('{}', { steer: true })]));
+  expect(steered).toMatchObject({ steer: true, autorun: true });
+  const [quiet] = projectStream(session([event('{}', { autorun: false })]));
+  expect(quiet).toMatchObject({ autorun: false });
+});
+
+// Absence must not read as "autorun was off": most transcripts will carry no
+// flag at all, and claiming every one of them skipped its turn would be a lie
+// on the majority of the history.
+test('an event without an autorun flag is treated as having run', () => {
+  const [block] = projectStream(session([event('{}', { autorun: undefined })]));
+  expect(block.autorun).toBe(true);
+});
+
+test('an ordinary user message is still a waypoint', () => {
+  const [block] = projectStream(session([user('do the thing')]));
+  expect(block.kind).toBe('waypoint');
+});
+
+test('an event block keeps a stable id across a history prepend, so its body stays collapsed', () => {
+  const first = projectStream(session([event('{}')]));
+  const later = projectStream(session([user('earlier'), assistant('ok'), event('{}')]));
+  expect(later.find((b) => b.kind === 'event').id).toBe(first[0].id);
 });

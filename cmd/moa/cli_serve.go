@@ -102,9 +102,22 @@ func runServe(args []string) {
 		WorkspaceRoot:          cwd,
 		MoaCfg:                 moaCfg,
 		AuxiliaryModelResolver: auxiliaryModelResolver(authStore),
-		ReleaseInfo:            release.Info{Version: version, Commit: commit, Date: date},
-		UpdateChecker:          release.NewChecker(release.Info{Version: version, Commit: commit, Date: date}),
-		UpdateCheckEnabled:     core.IsUpdateCheckEnabled(moaCfg),
+		// Read on every compaction, not captured once: changing compact_model in
+		// Settings must take effect without restarting live sessions.
+		CompactSummarizer: compactSummarizerResolver(authStore, func(m core.Model) (core.Provider, error) {
+			build, err := buildProvider(m, authStore)
+			if err != nil {
+				return nil, err
+			}
+			return build.Provider, nil
+		}, func() string { return core.GetCompactModel(core.LoadGlobalConfig()) }),
+		ProviderCredentialAvailable: func(provider string) bool {
+			key, _, err := authStore.GetAPIKey(provider)
+			return err == nil && key != ""
+		},
+		ReleaseInfo:        release.Info{Version: version, Commit: commit, Date: date},
+		UpdateChecker:      release.NewChecker(release.Info{Version: version, Commit: commit, Date: date}),
+		UpdateCheckEnabled: core.IsUpdateCheckEnabled(moaCfg),
 	})
 
 	// serve speaks plain HTTP (the security boundary is Tailscale), so the auth
@@ -249,6 +262,15 @@ func newAnthropicUsagePoller(authStore *auth.Store) *usage.MultiPoller {
 	multi := &usage.MultiPoller{Pollers: map[string]*usage.Poller{"anthropic": anthropic, "xai": xaiPoller}}
 	if xaiAPIKey {
 		multi.StaticStatus = map[string]usage.ProviderStatus{"xai": {AuthKind: "api_key", Reason: "plan_unsupported"}}
+	}
+	// Meta has no usage endpoint Moa can poll: the only known subscription
+	// snapshot rides the key-mint response. Report the credential kind so the
+	// UI states it plainly instead of showing a pending widget forever.
+	if kind := authStore.CredentialKind("meta"); kind != "" {
+		if multi.StaticStatus == nil {
+			multi.StaticStatus = map[string]usage.ProviderStatus{}
+		}
+		multi.StaticStatus["meta"] = usage.ProviderStatus{AuthKind: kind, Reason: "plan_unsupported"}
 	}
 	return multi
 }

@@ -161,6 +161,9 @@ func parseDecision(response string) Decision {
 }
 
 func evaluatorThinking(model core.Model) string {
+	if model.Provider == "meta" {
+		return "minimal"
+	}
 	if model.Provider == "xai" {
 		return "low"
 	}

@@ -32,7 +32,7 @@ self.addEventListener('push', (event) => {
       body: data.body || '',
       tag: data.tag || undefined, // coalesce same-session notifications
       icon: '/icon-192.png',
-      data: { session_id: data.session_id || '' },
+      data: { session_id: data.session_id || '', inbox: !!data.inbox },
     })
   );
 });
@@ -41,7 +41,8 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const rawSessionId = event.notification.data && event.notification.data.session_id;
   const sessionId = typeof rawSessionId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(rawSessionId) ? rawSessionId : '';
-  const url = sessionId ? `/?session=${encodeURIComponent(sessionId)}` : '/';
+  const inbox = !sessionId && !!(event.notification.data && event.notification.data.inbox);
+  const url = sessionId ? `/?session=${encodeURIComponent(sessionId)}` : inbox ? '/?inbox=1' : '/';
 
   event.waitUntil((async () => {
     const clients = await self.clients.matchAll({ type: 'window' });
@@ -54,8 +55,13 @@ self.addEventListener('notificationclick', (event) => {
       if (!sameOrigin) continue;
       try {
         await client.focus();
-        if (!sessionId) return;
-        if (await requestOpenSession(client, sessionId)) return;
+        if (sessionId) {
+          if (await requestOpenSession(client, sessionId)) return;
+        } else if (inbox) {
+          if (await requestOpenInbox(client)) return;
+        } else {
+          return;
+        }
         // The focused client did not acknowledge promptly, usually because an
         // installed iOS PWA was suspended or is restarting. Navigate it to the
         // same deep link a cold start uses instead of losing the notification.
@@ -68,10 +74,30 @@ self.addEventListener('notificationclick', (event) => {
         }
       } catch (_) { /* another controlled client may still be focusable */ }
     }
-    // No window open → cold start with the session pinned in the URL.
+    // No window open → cold start with the session (or inbox) pinned in the URL.
     if (self.clients.openWindow) await self.clients.openWindow(url);
   })());
 });
+
+function requestOpenInbox(client) {
+  if (typeof MessageChannel === 'undefined') return Promise.resolve(false);
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const channel = new MessageChannel();
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => finish(false), 1200);
+    const finish = (acknowledged) => {
+      clearTimeout(timeout);
+      channel.port1.onmessage = null;
+      channel.port1.close();
+      resolve(acknowledged);
+    };
+    channel.port1.onmessage = (event) => {
+      const data = event.data;
+      finish(!!data && data.type === 'open-inbox-ack' && data.requestId === requestId);
+    };
+    client.postMessage({ type: 'open-inbox', requestId }, [channel.port2]);
+  });
+}
 
 function requestOpenSession(client, sessionId) {
   if (typeof MessageChannel === 'undefined') return Promise.resolve(false);

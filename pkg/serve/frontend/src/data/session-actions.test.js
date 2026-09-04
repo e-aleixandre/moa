@@ -1246,7 +1246,7 @@ test('loadUsage does not notify when the snapshot is unchanged', async () => {
   expect(n).toBe(0);
 });
 
-test('desktop roster poll is 10s, mobile 15s', () => {
+test('desktop and mobile roster polls run every 15s with the inbox refresh', () => {
   const intervals = [];
   const orig = globalThis.setInterval;
   globalThis.setInterval = (fn, ms) => { intervals.push(ms); return 1; };
@@ -1255,7 +1255,7 @@ test('desktop roster poll is 10s, mobile 15s', () => {
     startPolling();
     setState({ isMobile: true });
     startPolling();
-    expect(intervals).toEqual([10000, 15000]);
+    expect(intervals).toEqual([15000, 15000]);
   } finally {
     globalThis.setInterval = orig;
     stopPolling();

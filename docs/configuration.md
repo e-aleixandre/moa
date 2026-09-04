@@ -84,7 +84,9 @@ switched off for a project — is kept separately, in
 | `persistent_shell` | bool | `true` | Whether `bash` persists working directory and exported env between calls in a session |
 | `compact_at` | int | `0` | Default auto-compaction threshold in tokens for sessions that set none of their own. `0` = automatic: compaction waits for the model's window. A session's own limit always wins, and a subagent inherits its parent's, falling back to this. Values under the engine's floor (reserve + kept context + margin, ≈41k) are raised, since a lower threshold would compact on every turn. Editable from the web Settings sheet |
 | `compact_strategy` | string | `notify` | What the agent gets before an **automatic** compaction, which otherwise arrives mid-task with no warning: anything it had worked out but not written down is replaced by the summary. `plain` = no warning. `notify` = a reminder as the threshold nears, so it can persist unfinished work first; costs nothing, since the notice rides on the next request. `prepare` = a full turn to write things down before summarizing; more thorough, but costs an extra request. Subagents are never warned under any setting: they have no memory or checkpoint to write to, and their findings already travel back in their report. Editable from the web Settings sheet |
+| `compact_model` | string | `session` | Model that writes compaction summaries. `session` (or unset) = the session's own model, which is how compaction has always behaved. Any model spec (`terra`, `sonnet`…) makes that model summarize instead: summarizing is extraction rather than reasoning, so the session's — often pricier — model is rarely the right tool for it, and the summarizer's request shares no cached prefix with the conversation either way. The chosen model needs its provider's credentials; when they are missing the session's model summarizes instead and the transcript says so. Editable from the web Settings sheet |
 | `update_check` | bool | `true` | Check GitHub for a newer stable Moa release (six-hour ETag cache); set `false` to opt out |
+| `events` | object | absent | Wake-on-event sources (`events.sources.<name>`). Each source is a webhook with its own `secret`, a `target` (`{project:dir}`, `{session:id}`, or `"inbox"`), `when_none` (`inbox`/`create`), `when_many` (`inbox`/`latest`), `create` (`model`, `thinking`, `yolo`, `title`), `autorun` (default false; set true to start a turn), and `rate` (auto-deliveries and session creations per rolling hour, default 10). **Global-only** — secrets live in `~/.config/moa/config.json`. See [Event hooks](./automation.md#event-hooks) and `moa hooks` |
 
 Start `stt_vocabulary` empty and add words only once you catch the transcriber
 getting them wrong. It is a hint, not a substitution: listing a word biases
@@ -118,6 +120,11 @@ always reason: see [Thinking levels](./cli.md#thinking-levels). A
 provider-qualified custom model such as `xai/<model-id>` is accepted, but Moa
 has no context-window or pricing metadata for it unless it is in the built-in
 model registry.
+
+The Meta models are `muse-spark-1.3` (also available as `muse`) and
+`muse-spark-1.3-contributor`. The contributor variant is much cheaper because
+Meta uses its prompts to improve their products. Muse Spark always reasons, so
+`off` resolves to its lowest effort.
 
 ### MCP servers
 
@@ -262,7 +269,7 @@ when it is about the project itself and should reach everyone who clones it.
 
 | Variable | Purpose |
 |----------|---------|
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` | Provider credentials (see [Quickstart](./quickstart.md)). An environment key takes precedence over the stored credential for that provider; in particular, `XAI_API_KEY` selects the metered `api.x.ai` API-key route and eclipses a stored xAI OAuth login. |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` / `META_API_KEY` | Provider credentials (see [Quickstart](./quickstart.md)). An environment key takes precedence over the stored credential for that provider; in particular, `XAI_API_KEY` selects the metered `api.x.ai` API-key route and eclipses a stored xAI OAuth login, and `META_API_KEY` eclipses a stored Muse subscription login. |
 | `MOA_CONFIG_DIR` | Moves everything moa stores about itself (default `~/.config/moa`): `config.json`, credentials, sessions, skills, memory, attachments. See [Running two instances](#running-two-instances) |
 | `MOA_SERVE_TOKEN` | Shared secret for `moa serve` opt-in authentication; equivalent to `--token` (see [Web UI](./serve.md#security)) |
 | `MOA_AUTOMATION_TOKEN` | Shared secret enabling the inbound [Automation API](./automation.md); equivalent to `--automation-token`. Separate from `MOA_SERVE_TOKEN` |

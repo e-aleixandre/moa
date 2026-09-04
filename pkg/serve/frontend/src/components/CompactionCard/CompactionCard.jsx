@@ -9,6 +9,15 @@ export function compactionSummaryPreview(summary, limit = COMPACTION_SUMMARY_PRE
   return text.length > limit ? { text: text.slice(0, limit) + "…", truncated: true } : { text, truncated: false };
 }
 
+// compactionClock renders the time of day a compaction happened. Reopening a
+// session hours later, when it happened is what places it against the work
+// around it. The transcript carries epoch SECONDS (tree.Entry.Timestamp.Unix),
+// so it is scaled here like every other timestamp in the UI.
+export function compactionClock(timestampSeconds) {
+  if (!Number.isFinite(timestampSeconds) || timestampSeconds <= 0) return "";
+  return new Date(timestampSeconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 function FileList({ title, files, Icon }) {
   if (!files?.length) return null;
   return (
@@ -23,18 +32,19 @@ function FileList({ title, files, Icon }) {
 
 // CompactionCard follows ActivityLedger's compact, keyboard-native <button>
 // header and recessed detail surface while keeping long summaries/files bounded.
-export function CompactionCard({ summary = "", tokensBefore = 0, readFiles = [], modifiedFiles = [] }) {
+export function CompactionCard({ summary = "", tokensBefore = 0, timestamp = 0, readFiles = [], modifiedFiles = [] }) {
   const [open, setOpen] = useState(false);
   const [fullSummary, setFullSummary] = useState(false);
   const preview = compactionSummaryPreview(summary);
   const tokenLabel = tokensBefore > 0 ? `${Math.round(tokensBefore / 1000)}K tokens summarized` : "Context compacted";
   const shownSummary = fullSummary ? summary : preview.text;
+  const clockLabel = compactionClock(timestamp);
 
   return (
     <section class={`cc${open ? " open" : ""}`}>
       <button type="button" class="cc-header" aria-expanded={open} onClick={() => setOpen(value => !value)}>
         <span class="cc-icon" aria-hidden="true"><Scissors size={14} /></span>
-        <span class="cc-title"><b>Context compacted</b><span> · {tokenLabel}</span></span>
+        <span class="cc-title"><b>Context compacted</b>{clockLabel && <span> · {clockLabel}</span>}<span> · {tokenLabel}</span></span>
         <span class="cc-chev" aria-hidden="true"><ChevronRight size={13} /></span>
       </button>
       {open && (

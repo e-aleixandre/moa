@@ -1,0 +1,65 @@
+/* wake-on-event — MobileInboxView: a full-screen push over the conversation,
+   wearing MobileSubagentView's chrome verbatim (same surface, same push-in,
+   same edge-swipe shadow, same header geometry). Two screens pushed the same
+   way must not look pushed differently. */
+.minbox {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  background: var(--base);
+  animation: minbox-push-in 250ms ease-out;
+}
+
+@keyframes minbox-push-in {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .minbox { animation: none; }
+}
+
+.minbox.is-swiping {
+  animation: none;
+  will-change: transform;
+  box-shadow: -8px 0 24px rgb(0 0 0 / 0.35);
+}
+
+.minbox-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: calc(env(safe-area-inset-top, 0px) + 12px) var(--space-2) 4px;
+  min-height: 44px;
+}
+
+.minbox-back {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--subtext0);
+  cursor: pointer;
+  flex: none;
+  margin-left: -10px;
+}
+
+.minbox-name {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+}
+
+.minbox-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

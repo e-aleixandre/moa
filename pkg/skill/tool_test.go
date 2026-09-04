@@ -141,9 +141,6 @@ func TestTool_ForkBackgroundReturnsJobNotBody(t *testing.T) {
 	if !got.Async {
 		t.Error("background fork should launch async")
 	}
-	if got.Notify {
-		t.Error("background fork should suppress parent notification")
-	}
 	if !strings.Contains(got.Task, "Secret body") {
 		t.Errorf("child task missing skill body: %q", got.Task)
 	}
@@ -171,9 +168,6 @@ func TestTool_ForkForegroundReturnsChildResult(t *testing.T) {
 	}
 	if got.Async {
 		t.Error("foreground fork should block for the child")
-	}
-	if !got.Notify {
-		t.Error("foreground fork should keep the public notify default")
 	}
 }
 
@@ -232,7 +226,7 @@ func TestLaunchForkRemovesUnclaimedSnapshot(t *testing.T) {
 			_, err := LaunchFork(context.Background(), s, nil, ToolConfig{
 				Snapshot: func() (string, error) { return path, nil },
 				Fork:     func(context.Context, ForkRequest, func(core.Result)) (core.Result, error) { return tc.fork() },
-			}, false, true, nil)
+			}, false, nil)
 			if tc.name == "go error" && err == nil {
 				t.Fatal("expected Go error")
 			}
@@ -257,7 +251,7 @@ func TestLaunchForkKeepsClaimedSnapshot(t *testing.T) {
 		Fork: func(context.Context, ForkRequest, func(core.Result)) (core.Result, error) {
 			return core.Result{Custom: map[string]any{"subagent_job_id": "sa-1"}}, nil
 		},
-	}, false, true, nil)
+	}, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

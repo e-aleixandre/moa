@@ -139,6 +139,24 @@ var knownModels = map[string]Model{
 			},
 		},
 	},
+
+	// --- Meta ---
+	// MaxOutput is not published. api.meta.ai accepts large
+	// max_output_tokens values but reserves that capacity against the account's
+	// output rate limit (a 5M request is refused with rate_limit_exceeded), so
+	// this stays at the same cap as the other 1M-context models.
+	"muse-spark-1.3": {
+		ID: "muse-spark-1.3", Provider: "meta", API: "meta-responses",
+		Name: "Muse Spark 1.3", MaxInput: 1_000_000, MaxOutput: 131072,
+		Pricing: &Pricing{Input: 1.25, Output: 4.25, CacheRead: 0.15},
+	},
+	// The contributor SKU is cheap because Meta trains on its prompts. The
+	// display name has to say so: it is the whole trade-off of picking it.
+	"muse-spark-1.3-contributor": {
+		ID: "muse-spark-1.3-contributor", Provider: "meta", API: "meta-responses",
+		Name: "Muse Spark 1.3 (contributor, data shared)", MaxInput: 1_000_000, MaxOutput: 131072,
+		Pricing: &Pricing{Input: 0.10, Output: 0.20, CacheRead: 0.002},
+	},
 }
 
 func init() {
@@ -174,6 +192,8 @@ var modelAliases = map[string]string{
 	// one entry and cost/identity work whichever backend answered.
 	"grok-4.6-build": "grok-4.6",
 	"grok-4.5-build": "grok-4.5",
+	// Meta
+	"muse": "muse-spark-1.3",
 }
 
 // ResolveModel resolves a model specifier to a fully-populated Model.
@@ -322,6 +342,9 @@ var modelDisplayOrder = []string{
 	"claude-sonnet-5",
 	"claude-opus-4-8",
 	"claude-haiku-4-5-20251001",
+	// Meta
+	"muse-spark-1.3",
+	"muse-spark-1.3-contributor",
 	// OpenAI
 	"gpt-5.6-sol",
 	"gpt-5.6-terra",

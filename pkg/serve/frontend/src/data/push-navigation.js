@@ -1,6 +1,7 @@
 import { store } from './store.js';
 import { openSession } from './tile-actions.js';
 import { loadSessions } from './session-actions.js';
+import { openInbox } from './events.js';
 
 export function isPushSessionID(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -56,6 +57,13 @@ export function installOpenSessionNavigation({
   };
   const onMessage = (event) => {
     const data = event?.data;
+    if (data?.type === 'open-inbox') {
+      openInbox();
+      if (event.ports?.[0] && typeof event.ports[0].postMessage === 'function') {
+        event.ports[0].postMessage({ type: 'open-inbox-ack', requestId: data.requestId });
+      }
+      return;
+    }
     if (!data || data.type !== 'open-session' || !isPushSessionID(data.sessionId)) return;
     pending = {
       sessionId: data.sessionId,

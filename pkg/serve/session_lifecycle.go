@@ -234,6 +234,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		Model:             model,
 		Provider:          prov,
 		ProviderFactory:   m.providerFactory,
+		CompactSummarizer: m.compactSummarizer,
 		MoaCfg:            &moaCfg,
 		SessionID:         id,
 		MCPDisableSources: mcpSources,

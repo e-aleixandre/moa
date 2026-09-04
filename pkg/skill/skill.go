@@ -61,8 +61,9 @@ type Skill struct {
 	// inline, which is how every skill behaved before this field existed.
 	Context string
 	// Background, when true with Context=="fork", launches the child without
-	// blocking and without notifying the parent when it finishes. Ignored for
-	// inline skills. Defaults to false.
+	// blocking: the parent keeps working and receives the child's result later,
+	// through the usual subagent completion notification. Ignored for inline
+	// skills. Defaults to false.
 	Background bool
 	// ParentTranscript is "snapshot" to freeze the parent's active transcript
 	// branch and hand the child a path to that file. Defaults to none.

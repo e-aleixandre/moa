@@ -88,6 +88,9 @@ test('thinkingLevelsFor: Fable 5.1 cannot turn thinking off; Fable 5 and Opus st
   expect(thinkingLevelsFor({ catalogId: 'claude-fable-5', provider: 'anthropic' })).toBeUndefined();
   expect(thinkingLevelsFor({ catalogId: 'claude-opus-5', provider: 'anthropic' })).toBeUndefined();
   expect(thinkingLevelsFor({ catalogId: 'grok-4.6', provider: 'xai' })).toEqual(['low', 'medium', 'high']);
+  expect(thinkingLevelsFor({ catalogId: 'muse-spark-1.3', provider: 'meta' })).toEqual([
+    'low', 'medium', 'high', 'xhigh',
+  ]);
 });
 
 test('clampThinkingLevel: off on an always-on model becomes high', () => {
