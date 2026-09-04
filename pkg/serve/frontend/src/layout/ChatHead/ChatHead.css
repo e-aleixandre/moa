@@ -95,6 +95,23 @@ button.crumb-title:hover {
   outline-offset: var(--focus-ring-offset);
 }
 
+.chat-head .head-action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--overlay1);
+}
+.chat-head .head-action-icon:hover { color: var(--peach); border-color: var(--surface1); }
+.chat-head .head-action-icon.is-on { color: var(--mauve); border-color: color-mix(in srgb, var(--mauve) 45%, var(--surface1)); }
+.chat-head .head-action-icon:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
+
 .chat-head .grid-toggle .mini {
   display: grid;
   grid-template-columns: 1fr 1fr;

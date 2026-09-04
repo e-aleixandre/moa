@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { MousePointerClick, X, Minus, Plus, MoreVertical, Mic, Loader2, Square, ChevronUp } from "lucide-preact";
+import { MousePointerClick, X, Minus, Plus, MoreVertical, Mic, Loader2, Square, ChevronUp, ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from "lucide-preact";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { Segmented } from "../Segmented/Segmented.jsx";
 import { AssistantDocument } from "../AssistantDocument/AssistantDocument.jsx";
@@ -92,7 +92,7 @@ export function feedbackMessage(comment, el) {
   return comment.trim() ? `${comment.trim()}\n\n${body}` : body;
 }
 
-export function LivePreview({ sessionId, open, onClose }) {
+export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const session = useStore((s) => s.sessions[sessionId]);
   const [committedURL, setCommittedURL] = useState("");
   const [draftURL, setDraftURL] = useState("");
@@ -111,6 +111,8 @@ export function LivePreview({ sessionId, open, onClose }) {
   const stageRef = useRef(null);
   const geometry = useRef({ base: 1, w: 0, h: 0, stage: { w: 0, h: 0 } });
   const noteSeq = useRef(0);
+  const inspectButtonRef = useRef(null);
+  const touchInput = useTouchPreviewInput();
 
   const events = streamEvents(session);
   const stage = stageState(session);
@@ -175,7 +177,14 @@ export function LivePreview({ sessionId, open, onClose }) {
 
       if (data.type === "moa-element") {
         setSelected(data);
+        // A mouse click inside a cross-origin frame gives that frame focus.
+        // Return it to moa's chrome once the selection is delivered.
+        requestAnimationFrame(() => inspectButtonRef.current?.focus());
         return;
+      }
+      if (data.type === "moa-escape") {
+        onClose();
+        requestAnimationFrame(() => document.querySelector("[data-preview-trigger='true']")?.focus());
       }
       if (data.type === "moa-ready") {
         return;
@@ -183,7 +192,7 @@ export function LivePreview({ sessionId, open, onClose }) {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [open]);
+  }, [open, onClose]);
 
   // iOS Safari pinch guard. A pinch that has to
   // cross the iframe boundary is split between two touch-active documents and
@@ -280,8 +289,8 @@ export function LivePreview({ sessionId, open, onClose }) {
 
   const showSetup = !committedURL || editingURL;
 
-  return (
-    <Sheet open onClose={onClose} ariaLabel="Live preview" class="live-preview-sheet">
+  const preview = (
+    <>
       <div class="live-preview-bar">
         <PreviewMenu
           onChangeURL={() => {
@@ -303,6 +312,7 @@ export function LivePreview({ sessionId, open, onClose }) {
         <button
           type="button"
           class={`live-preview-action${inspect ? " is-on" : ""}`}
+          ref={inspectButtonRef}
           onClick={toggleInspect}
           aria-pressed={inspect}
           title="Inspect — tap an element in the app"
@@ -386,7 +396,10 @@ export function LivePreview({ sessionId, open, onClose }) {
         {/* Siblings of the scroller, not children: what floats over the app must
             not slide away when the app under it scrolls. */}
         {committedURL && !showSetup && (
-          <ZoomOverlay geometry={geometry} view={view} onView={setView} inspect={inspect} post={post} />
+          <>
+            {touchInput && <TouchZoomOverlay geometry={geometry} view={view} onView={setView} inspect={inspect} post={post} />}
+            <ZoomControls geometry={geometry} view={view} onView={setView} />
+          </>
         )}
         {zoomed && (
           <button
@@ -432,8 +445,26 @@ export function LivePreview({ sessionId, open, onClose }) {
           </div>
         </Sheet>
       )}
-    </Sheet>
+    </>
   );
+  return inline
+    ? <section class="live-preview-inline" aria-label="Live preview">{preview}</section>
+    : <Sheet open onClose={onClose} ariaLabel="Live preview" class="live-preview-sheet">{preview}</Sheet>;
+}
+
+function useTouchPreviewInput() {
+  const get = () => typeof window !== "undefined"
+    && window.matchMedia("(pointer: coarse)").matches
+    && !window.matchMedia("(any-pointer: fine)").matches;
+  const [touch, setTouch] = useState(get);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const queries = [window.matchMedia("(pointer: coarse)"), window.matchMedia("(any-pointer: fine)")];
+    const update = () => setTouch(get());
+    queries.forEach((query) => query.addEventListener?.("change", update));
+    return () => queries.forEach((query) => query.removeEventListener?.("change", update));
+  }, []);
+  return touch;
 }
 
 // PreviewMenu — the two rare actions on the URL, out of the way. Changing the
@@ -630,9 +661,10 @@ function InspectPopover({ selected, comment, onComment, onClose, onSend, sending
   );
 }
 
-// This layer is permanent: it owns the first contact before WebKit chooses a
-// touch-active document. One finger is relayed to the frame; two stay local.
-function ZoomOverlay({ geometry, view, onView, inspect, post }) {
+// On touch-only devices this layer owns the first contact before WebKit chooses
+// a touch-active document. Fine pointers never get this layer: their iframe is
+// a normal browser surface for click, hover, wheel and keyboard input.
+function TouchZoomOverlay({ geometry, view, onView, inspect, post }) {
   const layerRef = useRef(null);
   const viewRef = useRef(view);
   const inspectRef = useRef(inspect);
@@ -642,11 +674,6 @@ function ZoomOverlay({ geometry, view, onView, inspect, post }) {
   inspectRef.current = inspect;
   postRef.current = post;
   onViewRef.current = onView;
-
-  const step = (factor) => {
-    const g = geometry.current;
-    onView(zoomAt(viewRef.current, factor, null, g, g.stage));
-  };
 
   useEffect(() => {
     const el = layerRef.current;
@@ -746,28 +773,35 @@ function ZoomOverlay({ geometry, view, onView, inspect, post }) {
     };
   }, [geometry]);
 
-  const mouse = useRef(null);
-  const onPointerDown = (e) => {
-    if (e.pointerType === "touch") return;
-    mouse.current = { x: e.clientX, y: e.clientY, view: viewRef.current };
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-  };
-  const onPointerMove = (e) => {
-    if (!mouse.current) return;
-    const g = geometry.current;
-    const s = g.base * mouse.current.view.zoom;
-    const pan = clampPan(mouse.current.view.x + e.clientX - mouse.current.x, mouse.current.view.y + e.clientY - mouse.current.y, g.w * s, g.h * s, g.stage.w, g.stage.h);
-    onView({ zoom: mouse.current.view.zoom, ...pan });
-  };
   return (
     <>
-      <div class="live-preview-zoomlayer" ref={layerRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={() => { mouse.current = null; }} onPointerCancel={() => { mouse.current = null; }} onDblClick={() => onView(IDENTITY)} role="presentation" />
-      <div class="live-preview-zoomctl">
-        <button type="button" onClick={() => step(1 / 1.4)} aria-label="Zoom out" title="Zoom out"><Minus size={15} /></button>
-        <button type="button" onClick={() => step(1.4)} aria-label="Zoom in" title="Zoom in"><Plus size={15} /></button>
-        <button type="button" onClick={() => onView(IDENTITY)} aria-label="Reset zoom" title="Reset zoom">1:1</button>
-      </div>
+      <div class="live-preview-zoomlayer" ref={layerRef} role="presentation" />
       <span class="live-preview-zoomhint">Pinch · desplaza · doble toque = 1:1</span>
     </>
+  );
+}
+
+function ZoomControls({ geometry, view, onView }) {
+  const step = (factor) => {
+    const g = geometry.current;
+    onView(zoomAt(view, factor, null, g, g.stage));
+  };
+  const pan = (x, y) => {
+    const g = geometry.current;
+    const scale = g.base * view.zoom;
+    onView({ zoom: view.zoom, ...clampPan(view.x + x, view.y + y, g.w * scale, g.h * scale, g.stage.w, g.stage.h) });
+  };
+  return (
+    <div class="live-preview-zoomctl">
+      <button type="button" onClick={() => step(1 / 1.4)} aria-label="Zoom out" title="Zoom out"><Minus size={15} /></button>
+      <button type="button" onClick={() => step(1.4)} aria-label="Zoom in" title="Zoom in"><Plus size={15} /></button>
+      <button type="button" onClick={() => onView(IDENTITY)} aria-label="Reset zoom" title="Reset zoom">1:1</button>
+      <span class="live-preview-pan-controls" aria-label="Pan preview">
+        <button type="button" onClick={() => pan(48, 0)} aria-label="Pan left" title="Pan left"><ArrowLeft size={13} /></button>
+        <button type="button" onClick={() => pan(-48, 0)} aria-label="Pan right" title="Pan right"><ArrowRight size={13} /></button>
+        <button type="button" onClick={() => pan(0, 48)} aria-label="Pan up" title="Pan up"><ArrowUp size={13} /></button>
+        <button type="button" onClick={() => pan(0, -48)} aria-label="Pan down" title="Pan down"><ArrowDown size={13} /></button>
+      </span>
+    </div>
   );
 }

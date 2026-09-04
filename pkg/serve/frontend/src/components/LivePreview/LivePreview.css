@@ -7,7 +7,8 @@
    dissolves (.lp-stream), the stage's own 2px edge carries the tool in flight,
    and the URL only exists on the first-run screen. Idle, the app is alone. */
 
-.live-preview-sheet {
+.live-preview-sheet,
+.live-preview-inline {
   width: min(1240px, 96vw);
   max-width: none;
   height: 92vh;
@@ -15,6 +16,7 @@
   display: flex;
   flex-direction: column;
   touch-action: none;
+  container-type: inline-size;
 }
 .sheet-overlay:has(.live-preview-sheet) {
   padding: var(--space-3);
@@ -26,6 +28,17 @@
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-3);
+}
+.live-preview-inline {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-overlay);
+  width: auto;
+  height: auto;
+  padding: var(--space-3);
+  gap: var(--space-2);
+  box-sizing: border-box;
+  background: var(--base);
 }
 
 /* Phones: the preview IS the screen — full bleed, insets only for safe areas.
@@ -93,6 +106,19 @@
 
 .live-preview-widths .segmented-item {
   padding: var(--space-1) var(--space-2);
+}
+
+/* A pane is its own density. At 430px the two middle presets cost more than
+   they communicate; Fit and phone remain, and at 330px Fit alone remains. */
+@container (max-width: 430px) {
+  .live-preview-widths .segmented-item:nth-child(2),
+  .live-preview-widths .segmented-item:nth-child(3) { display: none; }
+  .live-preview-action-label { display: none; }
+  .live-preview-action { min-width: 32px; padding: 0 var(--space-2); }
+}
+@container (max-width: 330px) {
+  .live-preview-widths .segmented-item:first-child { display: none; }
+  .live-preview-bar { gap: var(--space-1); }
 }
 
 @media (max-width: 768px) {
@@ -562,6 +588,22 @@
   font-family: var(--mono);
   font-size: var(--text-xs);
   cursor: pointer;
+}
+.live-preview-pan-controls {
+  display: inline-flex;
+  align-items: center;
+  border-left: 1px solid var(--surface2);
+  margin-left: var(--space-1);
+  padding-left: var(--space-1);
+}
+.live-preview-pan-controls button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+@container (max-width: 430px) {
+  .live-preview-pan-controls { display: none; }
+  .live-preview-zoomctl button { min-width: 34px; min-height: 34px; }
 }
 .live-preview-zoomctl button:hover {
   color: var(--peach);

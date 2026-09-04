@@ -361,19 +361,22 @@ export function ConversationScreen() {
 
   return (
     <>
-      <main class="conversation-main">{body}</main>
+      <main class="conversation-main">
+        {body}
+        {session && (
+          <LivePreview
+            sessionId={session.id}
+            open={!!session.previewOpen}
+            inline
+            onClose={() => updateSession(session.id, { previewOpen: false })}
+          />
+        )}
+      </main>
       {session && (
         <RewindTimeline
           open={rewindOpen}
           onClose={() => setRewindOpen(false)}
           sessionId={session.id}
-        />
-      )}
-      {session && (
-        <LivePreview
-          sessionId={session.id}
-          open={!!session.previewOpen}
-          onClose={() => updateSession(session.id, { previewOpen: false })}
         />
       )}
       {session && (

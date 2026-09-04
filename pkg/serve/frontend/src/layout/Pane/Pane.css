@@ -167,6 +167,10 @@
   color: var(--red);
   background: color-mix(in srgb, var(--red) 12%, transparent);
 }
+.pane .p-tools .p-preview.is-on {
+  color: var(--mauve);
+  background: color-mix(in srgb, var(--mauve) 12%, transparent);
+}
 
 .pane .p-max-wrap {
   position: relative;

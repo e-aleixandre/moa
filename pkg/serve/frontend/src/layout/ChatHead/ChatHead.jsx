@@ -48,10 +48,10 @@ export function ChatHead({
         <div class="head-actions">
           {actions.map((action) => {
             const Icon = action.icon;
-            return <button type="button" key={action.id} class={`grid-toggle${action.active ? " is-on" : ""}`} onClick={action.onClick} aria-pressed={action.active || undefined} title={action.title}>
+            return <button type="button" key={action.id} data-preview-trigger={action.id === "preview" ? "true" : undefined} class={`${action.id === "preview" ? "head-action-icon" : "grid-toggle"}${action.active ? " is-on" : ""}`} onClick={action.onClick} aria-label={action.id === "preview" ? "Live preview" : undefined} aria-pressed={action.active || undefined} title={action.title}>
               {Icon ? <Icon size={14} aria-hidden="true" /> : <span class="mini" aria-hidden="true"><i /><i /><i /></span>}
-              {action.label}
-              {action.shortcut}
+              {action.id !== "preview" && action.label}
+              {action.id !== "preview" && action.shortcut}
             </button>;
           })}
         </div>

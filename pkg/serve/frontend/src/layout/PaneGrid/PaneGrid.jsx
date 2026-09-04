@@ -11,6 +11,7 @@ import {
   McpBanner, PermissionPrompt, AskUserPrompt, UsagePanel, ModelSelector,
 } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
+import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { snapToRatio } from "../../data/snap.js";
@@ -390,6 +391,8 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
       state={dotState}
       path={shortPath(session.cwd) || session.cwd || ""}
       attention={attention}
+      previewOpen={!!session.previewOpen}
+      onPreviewToggle={(e) => { e.stopPropagation(); updateSession(session.id, { previewOpen: !session.previewOpen }); }}
       onMaximize={handleMaximize}
       blocking={blocking}
       bodyLive
@@ -464,6 +467,14 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
             </div>
           )}
         </div>
+      )}
+      overlay={(
+        <LivePreview
+          sessionId={session.id}
+          open={!!session.previewOpen}
+          inline
+          onClose={() => updateSession(session.id, { previewOpen: false })}
+        />
       )}
     >
       <Stream

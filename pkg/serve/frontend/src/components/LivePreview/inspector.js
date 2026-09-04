@@ -178,7 +178,14 @@
     event.stopPropagation();
     pinned = el;
     paint(el);
-    window.parent.postMessage(payload(el), '*');
+    send(payload(el));
+  }
+
+  function onKeyDown(event) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    send({ type: 'moa-escape' });
   }
 
   function onScrollOrResize() {
@@ -274,6 +281,8 @@
       send(payload(inspected));
     }
   });
+
+  document.addEventListener('keydown', onKeyDown, true);
 
   send({ type: 'moa-ready' });
 })();

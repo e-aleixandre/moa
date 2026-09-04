@@ -1,18 +1,25 @@
-import { useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { MoreVertical } from "lucide-preact";
 import "./MobileActionRail.css";
 
 // Session actions share the small amount of room beside the mobile title.
 // An action is { id, icon, label, onClick, badge?, active?, visible? }.
-export function MobileActionRail({ actions, maxVisible = 2 }) {
+export function MobileActionRail({ actions }) {
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const railRef = useRef(null);
   const visibleActions = actions.filter((action) => action.visible !== false);
-  const hasOverflow = visibleActions.length > maxVisible;
-  const directActions = visibleActions.slice(0, hasOverflow ? maxVisible - 1 : maxVisible);
-  const overflowActions = hasOverflow ? visibleActions.slice(maxVisible - 1) : [];
-  const displayedCount = directActions.length + (hasOverflow ? 1 : 0);
+  if (!visibleActions.length) return null;
 
-  if (!displayedCount) return null;
+  const pending = visibleActions.reduce((total, action) => total + (Number(action.badge) || 0), 0);
+
+  useEffect(() => {
+    if (!overflowOpen) return undefined;
+    const close = (event) => {
+      if (!railRef.current?.contains(event.target)) setOverflowOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [overflowOpen]);
 
   const run = (action) => {
     setOverflowOpen(false);
@@ -20,25 +27,22 @@ export function MobileActionRail({ actions, maxVisible = 2 }) {
   };
 
   return (
-    <div class={`mconv-action-rail mconv-action-rail--${displayedCount}`}>
-      {directActions.map((action) => <ActionButton key={action.id} action={action} onClick={() => run(action)} />)}
-      {hasOverflow && (
-        <>
-          <button
-            type="button"
-            class={`mconv-action-rail-button${overflowOpen ? " is-active" : ""}`}
-            aria-label="More session actions"
-            aria-expanded={overflowOpen}
-            onClick={() => setOverflowOpen((open) => !open)}
-          >
-            <MoreVertical size={18} aria-hidden="true" />
-          </button>
-          {overflowOpen && (
-            <div class="mconv-action-rail-overflow" role="menu" aria-label="More session actions">
-              {overflowActions.map((action) => <ActionButton key={action.id} action={action} menuItem onClick={() => run(action)} />)}
-            </div>
-          )}
-        </>
+    <div class="mconv-action-rail" ref={railRef}>
+      <button
+        type="button"
+        class={`mconv-action-rail-button${overflowOpen ? " is-active" : ""}`}
+        aria-label={pending ? `Session actions, ${pending} waiting` : "Session actions"}
+        aria-haspopup="menu"
+        aria-expanded={overflowOpen}
+        onClick={() => setOverflowOpen((open) => !open)}
+      >
+        <MoreVertical size={18} aria-hidden="true" />
+        {pending > 0 && <span class="mconv-action-rail-badge" aria-hidden="true">{pending > 9 ? "9+" : pending}</span>}
+      </button>
+      {overflowOpen && (
+        <div class="mconv-action-rail-overflow" role="menu" aria-label="Session actions">
+          {visibleActions.map((action) => <ActionButton key={action.id} action={action} menuItem onClick={() => run(action)} />)}
+        </div>
       )}
     </div>
   );
