@@ -403,22 +403,20 @@ incarnation.
 ## Event inbox
 
 External events — a mail reply, a failed pipeline, a cron job — reach moa
-through [`POST /api/automation/events`](./automation.md#post-apiautomationevents)
-and are addressed to a project, not to a conversation.
+through [`POST /hooks/<source>/<secret>`](./automation.md#event-hooks) and are
+addressed to a project, a session, or the inbox, according to that source's
+config.
 
-By default an event is sent straight to that project's active session, so the
-work continues without you opening moa. When the project has no session (or you
-turned autorun off for it), the event waits in the **Inbox** group at the top of
-the session list — the drawer on mobile, the sidebar on desktop — with three
-actions:
+By default an event is sent straight to a live session in the target project,
+so the work continues without you opening moa. When routing cannot pick one
+session (none, several, a missing/errored target), the event waits in the
+**Inbox** — its own surface, not a group inside the session list — with:
 
-- **Send to ‹session›** — inject it into the session moa picked.
+- **Send to ‹session›** — inject it into a live session of that project.
 - **New session** — open a session in that project and inject it there.
 - **Dismiss** — drop it. Nothing is sent anywhere.
 
-An event has exactly one place: while it waits it is only in the inbox, and once
-sent it is only the message in that session, with the normal unread behaviour.
-There is no "read" state — you either send it or dismiss it. A dismissal
+The inbox keeps history: pending, delivered, and dismissed. A dismissal
 survives a restart (`~/.config/moa/events.json`).
 
 A push notification announces each arriving event. Following the push contract
@@ -447,7 +445,7 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |
 | `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |
-| `GET /api/events` · `POST /api/events/{id}/route` · `.../dismiss` | The [event inbox](#event-inbox): pending events, and sending or dropping one |
+| `GET /api/events` · `POST /api/events/{id}/route` · `.../dismiss` · `POST /api/events/dismiss` | The [event inbox](#event-inbox): history, sending or dropping one, or dismissing a source |
 
 The web transcript initially opens on the recent conversation and automatically
 loads older history as you scroll upwards. Each older page is prepended while

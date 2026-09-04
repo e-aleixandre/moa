@@ -286,10 +286,9 @@ export async function loadSessions() {
 
 export function startPolling() {
   stopPolling();
-  // Desktop still polls hidden panes; 10s is enough for the roster (WS already
-  // owns the visible ones). Mobile is slower: one visible session, push for
-  // anything urgent, and a foreground handler on return.
-  const interval = store.get().isMobile ? 15000 : 10000;
+  // The inbox is discovered through this poll, so keep both layouts on the
+  // same 15 s cadence. WebSockets still own visible-session updates.
+  const interval = 15000;
   // wake-on-event: the inbox rides this tick. The inbox names the sessions an
   // event can be sent to, so refreshing it on a timer of its own would let the
   // two disagree about what is open; it is also where an arrival is noticed

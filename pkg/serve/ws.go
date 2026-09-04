@@ -459,6 +459,19 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 			projected["secret_aliases"] = values
 		}
 	}
+	if source == "event" {
+		for _, key := range []string{"id", "source_name", "title"} {
+			if value, ok := custom[key].(string); ok {
+				projected[key] = value
+			}
+		}
+		if autorun, ok := custom["autorun"].(bool); ok {
+			projected["autorun"] = autorun
+		}
+		if steer, ok := custom["steer"].(bool); ok {
+			projected["steer"] = steer
+		}
+	}
 	return projected
 }
 

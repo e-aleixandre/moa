@@ -5,6 +5,7 @@
 // streaming, truncation) are pinned here with plain session fixtures.
 import { test, expect } from 'bun:test';
 import { LIVE_FULL_MAX_CHARS, LIVE_FULL_MAX_LINES, projectStream, liveTrayAgents } from './stream-model.js';
+import { normalizeHistory } from './ws/history.js';
 import { parseUnifiedDiff } from './util/unified-diff.js';
 
 // ── fixture helpers ──────────────────────────────────────────────────────────
@@ -1319,6 +1320,27 @@ test('a delivered event is projected as its own block, not a waypoint', () => {
     kind: 'event', id: 'event-ev-msg-1-0',
     source: 'sentry-tienda', title: 'Checkout 500s', body: '{"level":"error"}',
     time: undefined, steer: false, autorun: true,
+  });
+});
+
+test('a WS init event envelope survives history normalization', () => {
+  const [message] = normalizeHistory([{
+    role: 'user', msg_id: 'event-msg', timestamp: 1725357600000,
+    content: [{ type: 'text', text: '<event>build failed</event>' }],
+    custom: {
+      source: 'event', id: 'ev_1', source_name: 'ci', title: 'Build failed',
+      autorun: false, steer: true,
+    },
+  }]);
+  expect(message.custom).toEqual({
+    source: 'event', id: 'ev_1', source_name: 'ci', title: 'Build failed',
+    autorun: false, steer: true,
+  });
+  const [block] = projectStream(session([message]));
+  expect(block).toMatchObject({
+    kind: 'event', source: 'ci', title: 'Build failed',
+    body: '<event>build failed</event>', time: 1725357600000,
+    autorun: false, steer: true,
   });
 });
 

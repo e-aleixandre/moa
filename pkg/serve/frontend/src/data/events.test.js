@@ -4,8 +4,9 @@
 // event, and an arrival can only be announced when it is really news, so both
 // are decided here — in the projection, not in a component — and pinned.
 import { afterEach, expect, test } from "bun:test";
-import { __resetEventAnnouncementsForTests, announceArrivals, inboxCards, inboxGroups, inboxPendingCount, inboxSig } from "./events.js";
+import { __resetEventAnnouncementsForTests, announceArrivals, dismissSource, inboxCards, inboxGroups, inboxPendingCount, inboxSig } from "./events.js";
 import { getToasts, removeToast } from "./notifications.js";
+import { setState, store } from "./store.js";
 
 const sessions = {
   a: { id: "a", title: "checkout bug", cwd: "/home/u/tienda", state: "idle", updated: 1000 },
@@ -88,6 +89,14 @@ test("rows are newest first", () => {
   expect(inboxGroups(cards, "all")[0].cards.map((c) => c.event.id)).toEqual(["new", "old"]);
 });
 
+test("server ISO creation times sort newest first", () => {
+  const cards = inboxCards(sessions, [
+    event({ id: "old", created: "2026-09-03T09:00:00Z" }),
+    event({ id: "new", created: "2026-09-03T10:00:00Z" }),
+  ]);
+  expect(inboxGroups(cards, "all")[0].cards.map((c) => c.event.id)).toEqual(["new", "old"]);
+});
+
 // ── the change signal ───────────────────────────────────────────────────────
 test("the signature changes when an event settles, so the chrome repaints", () => {
   const pending = inboxSig(inboxCards(sessions, [event()]));
@@ -159,4 +168,20 @@ test("an arrival past the window starts its own toast", () => {
 test("nothing new says nothing", () => {
   expect(announceArrivals([])).toBeNull();
   expect(getToasts()).toHaveLength(0);
+});
+
+test("bulk dismissal uses the server source endpoint and settles local pending rows", async () => {
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return new Response(JSON.stringify({ dismissed: 2 }), { status: 200 });
+  };
+  setState({ events: [event(), event({ id: "ev_2" }), event({ id: "ev_3", source: "mail" })] });
+
+  await dismissSource("sentry-tienda");
+
+  expect(requests).toHaveLength(1);
+  expect(requests[0].path).toBe("/api/events/dismiss");
+  expect(JSON.parse(requests[0].options.body)).toEqual({ source: "sentry-tienda" });
+  expect(store.get().events.map((item) => item.state)).toEqual(["dismissed", "dismissed", "new"]);
 });

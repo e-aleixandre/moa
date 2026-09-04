@@ -595,16 +595,19 @@ type Manager struct {
 
 	conversationKey []byte // process-local HMAC key for read cursors
 
-	providerFactory        func(model core.Model) (core.Provider, error)
-	transcriber            core.Transcriber   // nil when no speech-to-text is available
-	usagePoller            *usage.MultiPoller // nil when plan usage tracking is unavailable
-	pushStore              *push.Store        // nil when Web Push is unavailable
-	pushDispatcher         *push.Dispatcher   // nil when Web Push is unavailable
+	providerFactory func(model core.Model) (core.Provider, error)
+	transcriber     core.Transcriber   // nil when no speech-to-text is available
+	usagePoller     *usage.MultiPoller // nil when plan usage tracking is unavailable
+	pushStore       *push.Store        // nil when Web Push is unavailable
+	pushDispatcher  *push.Dispatcher   // nil when Web Push is unavailable
 	// wake-on-event: the external event inbox and the file backing it. events is
 	// nil when that file could not be opened, which disables the feature instead
 	// of the server.
-	events     *events.Store
-	eventsPath string
+	events                 *events.Store
+	eventsPath             string
+	eventRateMu            sync.Mutex
+	eventRateHits          map[string][]time.Time
+	eventRateNotified      map[string]bool
 	defaultModel           core.Model
 	workspaceRoot          string
 	moaCfg                 core.MoaConfig

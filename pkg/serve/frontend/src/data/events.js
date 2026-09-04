@@ -19,14 +19,22 @@ import { projectKey, projectLabel, sessionTitle } from './util/format.js';
 // relAge is the session list's clock, kept identical to Spine/sessions.js and
 // the mobile chrome's: an event's age must not read like a different clock.
 function relAge(at) {
-  const ms = typeof at === 'number' ? at : Date.parse(at);
-  if (!Number.isFinite(ms)) return '';
+  const ms = eventCreatedAt(at);
+  if (!ms) return '';
   const min = Math.floor((Date.now() - ms) / 60000);
   if (min < 1) return 'now';
   if (min < 60) return `${min}m`;
   const h = Math.floor(min / 60);
   if (h < 24) return `${h}h`;
   return `${Math.floor(h / 24)}d`;
+}
+
+// Event.Created is time.Time on the server, so /api/events encodes it as an
+// ISO timestamp. Catalog fixtures use epoch milliseconds; accept both at the
+// transport boundary instead of making their sort order depend on coercion.
+function eventCreatedAt(at) {
+  const ms = typeof at === 'number' ? at : Date.parse(at);
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 function sameEvents(prev, next) {
@@ -168,8 +176,18 @@ export async function dismissEvent(id) {
 // one gesture instead of one row at a time. Only what is still WAITING is
 // touched — history is not rewritten.
 export async function dismissSource(source) {
-  const pending = store.get().events.filter((event) => event.source === source && (event.state || 'new') === 'new');
-  await Promise.all(pending.map((event) => dismissEvent(event.id).catch(() => {})));
+  const result = await api('POST', '/api/events/dismiss', { source });
+  // The server dismisses this source atomically. Mirror every pending row now
+  // rather than issuing one single-dismiss request per row, which can race a
+  // fresh poll and does not use the bulk endpoint.
+  setState({
+    events: store.get().events.map((event) => (
+      event.source === source && (event.state || 'new') === 'new'
+        ? { ...event, state: 'dismissed' }
+        : event
+    )),
+  });
+  return result;
 }
 
 // inboxCards projects the inbox: the event plus the open sessions of ITS
@@ -212,7 +230,7 @@ export function inboxPendingCount(cards) {
 export function inboxGroups(cards, filter = 'pending') {
   const shown = (cards || [])
     .filter((card) => (filter === 'pending' ? card.pending : true))
-    .sort((a, b) => (b.event.created || 0) - (a.event.created || 0));
+    .sort((a, b) => eventCreatedAt(b.event.created) - eventCreatedAt(a.event.created));
   const projects = new Set(shown.map((card) => card.project));
   if (projects.size <= 1) return [{ key: '', label: '', cards: shown }];
   const groups = [];

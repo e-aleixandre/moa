@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -103,6 +105,9 @@ func TestMarkRoutedSettlesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
+	if _, err := store.MarkRouting(ev.ID); err != nil {
+		t.Fatalf("MarkRouting: %v", err)
+	}
 	routed, err := store.MarkRouted(ev.ID, "sess-1")
 	if err != nil {
 		t.Fatalf("MarkRouted: %v", err)
@@ -149,8 +154,45 @@ func TestMarkDismissedSurvivesReopen(t *testing.T) {
 
 func TestSettleUnknownEvent(t *testing.T) {
 	store := newTestStore(t)
-	if _, err := store.MarkRouted("ev_missing", "sess-1"); err != ErrNotFound {
-		t.Fatalf("MarkRouted err = %v, want ErrNotFound", err)
+	if _, err := store.MarkRouting("ev_missing"); err != ErrNotFound {
+		t.Fatalf("MarkRouting err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestMarkRoutingClaimsOnce(t *testing.T) {
+	store := newTestStore(t)
+	ev, _, err := store.Add(Event{Source: "ci", Title: "build failed"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	var nOK atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := store.MarkRouting(ev.ID); err == nil {
+				nOK.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if nOK.Load() != 1 {
+		t.Fatalf("MarkRouting succeeded %d times, want 1", nOK.Load())
+	}
+	got, _ := store.Get(ev.ID)
+	if got.State != StateRouting {
+		t.Fatalf("state = %q, want %q", got.State, StateRouting)
+	}
+	if _, err := store.MarkRouting(ev.ID); err != ErrSettled {
+		t.Fatalf("second MarkRouting err = %v, want ErrSettled", err)
+	}
+	if _, err := store.ReleaseRouting(ev.ID); err != nil {
+		t.Fatalf("ReleaseRouting: %v", err)
+	}
+	got, _ = store.Get(ev.ID)
+	if got.State != StateNew {
+		t.Fatalf("released state = %q, want %q", got.State, StateNew)
 	}
 }
 
@@ -231,8 +273,8 @@ func TestWriteFailureRollsBackMemory(t *testing.T) {
 	if got := len(store.List("")); got != 1 {
 		t.Fatalf("Add failure left %d events in memory, want 1", got)
 	}
-	if _, err := store.MarkRouted(ev.ID, "sess-1"); err == nil {
-		t.Fatal("MarkRouted unexpectedly persisted to a directory")
+	if _, err := store.MarkRouting(ev.ID); err == nil {
+		t.Fatal("MarkRouting unexpectedly persisted to a directory")
 	}
 	if got, _ := store.Get(ev.ID); got.State != StateNew {
 		t.Fatalf("failed settle left state %q, want %q", got.State, StateNew)
@@ -247,6 +289,9 @@ func TestSetSuggestedOnlyTouchesPendingEvents(t *testing.T) {
 	}
 	if got, _ := store.Get(ev.ID); got.Suggested != "sess-1" {
 		t.Fatalf("suggested = %q, want sess-1", got.Suggested)
+	}
+	if _, err := store.MarkRouting(ev.ID); err != nil {
+		t.Fatalf("MarkRouting: %v", err)
 	}
 	if _, err := store.MarkRouted(ev.ID, "sess-1"); err != nil {
 		t.Fatalf("MarkRouted: %v", err)
@@ -277,5 +322,36 @@ func TestPayloadRoundTrips(t *testing.T) {
 	}
 	if decoded["job"] != 42 {
 		t.Fatalf("payload = %s", got.Payload)
+	}
+}
+
+func TestDismissSourceOnlyTouchesPending(t *testing.T) {
+	store := newTestStore(t)
+	if _, _, err := store.Add(Event{Source: "ci", Title: "one"}); err != nil {
+		t.Fatal(err)
+	}
+	kept, _, err := store.Add(Event{Source: "mail", Title: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routed, _, err := store.Add(Event{Source: "ci", Title: "already"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkRouting(routed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkRouted(routed.ID, "s1"); err != nil {
+		t.Fatal(err)
+	}
+	n, err := store.DismissSource("ci")
+	if err != nil || n != 1 {
+		t.Fatalf("DismissSource: n=%d err=%v", n, err)
+	}
+	if got, _ := store.Get(kept.ID); got.State != StateNew {
+		t.Fatalf("unrelated source changed: %+v", got)
+	}
+	if got, _ := store.Get(routed.ID); got.State != StateRouted {
+		t.Fatalf("history was rewritten: %+v", got)
 	}
 }

@@ -110,18 +110,7 @@ type MoaConfig struct {
 	SubagentAllowedModels  []string             `json:"subagent_allowed_models,omitempty"`       // Model IDs a subagent may run under. Empty/absent = no restriction (opt-in).
 	CompactAt              int                  `json:"compact_at,omitempty"`                    // Default soft compaction threshold in tokens for sessions with none of their own. 0 = compact at the model window.
 	CompactStrategy        string               `json:"compact_strategy,omitempty"`              // What happens before an automatic compaction: "plain", "notify" (default) or "prepare". See GetCompactStrategy.
-	Events                 *EventsConfig        `json:"events,omitempty"`                        // wake-on-event: what an arriving external event may do here. Absent = start a run.
-}
-
-// EventsConfig is the per-project wake-on-event setting. It has no UI: you
-// hand-edit it in your own project state (docs/configuration.md §Your project
-// state) when you want a project's events to wait for you rather than start a
-// run on their own.
-type EventsConfig struct {
-	// Autorun: absent or true sends an arriving event to the project's active
-	// session, which starts a run. false leaves the event in the inbox with
-	// the session it would have gone to named on its card.
-	Autorun *bool `json:"autorun,omitempty"`
+	Events                 *EventsConfig        `json:"events,omitempty"`                        // wake-on-event: inbound webhook sources (global-only; see EventsConfig).
 }
 
 // Compaction strategies: what the agent gets before its context is summarized.
@@ -499,6 +488,11 @@ func loadConfigFile(path string) MoaConfig {
 			cfg.SessionBriefModel = "off"
 		}
 	}
+	if dropped := cfg.Events.DropInvalid(); len(dropped) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: invalid events config %s: dropping sources %s\n",
+			path, strings.Join(dropped, ", "))
+	}
+	cfg.Events.WarnShortSecrets()
 	return cfg
 }
 
@@ -616,13 +610,9 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 	}
 	merged.SubagentMaxTurns = mergeScalar(base.SubagentMaxTurns, override.SubagentMaxTurns)
 	merged.SubagentMaxRunDuration = mergeScalar(base.SubagentMaxRunDuration, override.SubagentMaxRunDuration)
-	// wake-on-event: an explicit project setting wins, so a project can stop
-	// its events from starting runs on their own.
-	if override.Events != nil {
-		merged.Events = override.Events
-	} else {
-		merged.Events = base.Events
-	}
+	// Event sources carry webhook secrets and are global-only: a project
+	// config must not add a hook or override a secret.
+	merged.Events = base.Events
 	merged.SubagentMaxConcurrent = mergeScalar(base.SubagentMaxConcurrent, override.SubagentMaxConcurrent)
 	return merged
 }

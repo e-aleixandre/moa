@@ -112,20 +112,59 @@ func (s *Store) List(state string) []Event {
 	return out
 }
 
-// MarkRouted settles an event onto a session. Only a `new` event can be
-// routed: a second attempt (a retried tap, or a race between the phone and an
-// auto-route) reports ErrSettled rather than injecting the message twice.
+// MarkRouting CAS-claims a `new` event for delivery. A second claim (two
+// concurrent route requests) reports ErrSettled so the message is injected
+// at most once. Persist this transition before sending.
+func (s *Store) MarkRouting(id string) (Event, error) {
+	return s.settleFrom(id, StateNew, func(ev *Event) {
+		ev.State = StateRouting
+	})
+}
+
+// MarkRouted settles a claimed event onto a session. Only `routing` can
+// become `routed`; a `new` event must be claimed first.
 func (s *Store) MarkRouted(id, sessionID string) (Event, error) {
-	return s.settle(id, func(ev *Event) {
+	return s.settleFrom(id, StateRouting, func(ev *Event) {
 		ev.State = StateRouted
 		ev.RoutedTo = sessionID
 		ev.RoutedAt = time.Now()
 	})
 }
 
+// ReleaseRouting returns a claimed event to `new` after a failed delivery.
+func (s *Store) ReleaseRouting(id string) (Event, error) {
+	return s.settleFrom(id, StateRouting, func(ev *Event) {
+		ev.State = StateNew
+	})
+}
+
 // MarkDismissed settles an event without sending it anywhere.
 func (s *Store) MarkDismissed(id string) (Event, error) {
-	return s.settle(id, func(ev *Event) { ev.State = StateDismissed })
+	return s.settleFrom(id, StateNew, func(ev *Event) { ev.State = StateDismissed })
+}
+
+// DismissSource settles every pending event from source. Already routed or
+// dismissed rows are left alone — history is not rewritten.
+func (s *Store) DismissSource(source string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous := append([]Event(nil), s.items...)
+	n := 0
+	for i := range s.items {
+		if s.items[i].Source != source || s.items[i].State != StateNew {
+			continue
+		}
+		s.items[i].State = StateDismissed
+		n++
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	if err := s.persistLocked(); err != nil {
+		s.items = previous
+		return 0, err
+	}
+	return n, nil
 }
 
 // SetSuggested updates the session an inbox card offers to send to. Used when
@@ -151,14 +190,14 @@ func (s *Store) SetSuggested(id, sessionID string) error {
 	return nil
 }
 
-func (s *Store) settle(id string, apply func(*Event)) (Event, error) {
+func (s *Store) settleFrom(id, from string, apply func(*Event)) (Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.items {
 		if s.items[i].ID != id {
 			continue
 		}
-		if s.items[i].State != StateNew {
+		if s.items[i].State != from {
 			return s.items[i], ErrSettled
 		}
 		previous := s.items[i]
@@ -181,7 +220,7 @@ func (s *Store) pruneLocked() []Event {
 	cutoff := time.Now().Add(-retentionAge)
 	kept := s.items[:0]
 	for _, ev := range s.items {
-		if ev.State != StateNew && ev.Created.Before(cutoff) {
+		if ev.State != StateNew && ev.State != StateRouting && ev.Created.Before(cutoff) {
 			dropped = append(dropped, ev)
 			continue
 		}

@@ -17,6 +17,7 @@ import (
 // end of the line. There is no "read".
 const (
 	StateNew       = "new"
+	StateRouting   = "routing"
 	StateRouted    = "routed"
 	StateDismissed = "dismissed"
 )
@@ -35,9 +36,9 @@ const (
 // Event is one external notification addressed to a project (a canonical cwd).
 type Event struct {
 	ID      string `json:"id"`
-	Key     string `json:"key,omitempty"`     // idempotency key, e.g. "agentmail:<message_id>"
-	Source  string `json:"source"`            // "agentmail" | "ci" | free-form label
-	Project string `json:"project"`           // canonical cwd
+	Key     string `json:"key,omitempty"` // idempotency key, e.g. "agentmail:<message_id>"
+	Source  string `json:"source"`        // "agentmail" | "ci" | free-form label
+	Project string `json:"project"`       // canonical cwd
 	Title   string `json:"title"`
 	Body    string `json:"body,omitempty"`
 	// Payload is opaque caller data. It is stored and returned but never
@@ -51,6 +52,14 @@ type Event struct {
 	// Suggested is the session the inbox would send this event to, computed at
 	// ingress so the card can name it. Empty when the project had no candidate.
 	Suggested string `json:"suggested,omitempty"`
+	// Autorun / Create* snapshot the source policy at ingest so a later config
+	// change (or a deleted source) cannot start a turn the owner had not opted
+	// into. Missing source → these stay at their zero values (autorun false).
+	Autorun        bool   `json:"autorun,omitempty"`
+	CreateModel    string `json:"create_model,omitempty"`
+	CreateThinking string `json:"create_thinking,omitempty"`
+	CreateYolo     bool   `json:"create_yolo,omitempty"`
+	CreateTitle    string `json:"create_title,omitempty"`
 }
 
 // NewID mints an event identifier, using the same crypto/rand mechanism as

@@ -169,6 +169,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	// owner's call, so these sit on the normal browser auth, not the automation
 	// token — that token may write events and nothing else.
 	mux.HandleFunc("GET /api/events", handleListEvents(manager))
+	mux.HandleFunc("POST /api/events/dismiss", handleDismissEventSource(manager))
 	mux.HandleFunc("POST /api/events/{id}/route", handleRouteEvent(manager))
 	mux.HandleFunc("POST /api/events/{id}/dismiss", handleDismissEvent(manager))
 
@@ -220,10 +221,13 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/reply", handleAutomationReply(manager))
 	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/ask-response", handleAutomationAskResponse(manager))
 	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/permission", handleAutomationPermission(manager))
-	// wake-on-event ingress: an external emitter (mail watcher, CI, cron) posts
-	// an event for a project. It creates no session by itself.
-	automationRoutes.HandleFunc("POST /api/automation/events", handleAutomationEvent(manager))
 	handler = automationMiddleware(o.automationToken, bodyTimeoutMiddleware(automationRoutes), handler)
+	// wake-on-event ingress: POST /hooks/<source>/<secret>. The path secret is
+	// the credential, so this sits outside browser auth and CSRF — same shape
+	// as the Automation API, still under the Host check below.
+	hookRoutes := http.NewServeMux()
+	hookRoutes.HandleFunc("POST /hooks/{source}/{secret}", handleHook(manager))
+	handler = hookMiddleware(bodyTimeoutMiddleware(hookRoutes), handler)
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
 	return pulseNoStoreMiddleware(hostMiddleware(o.allowedHosts, handler))
