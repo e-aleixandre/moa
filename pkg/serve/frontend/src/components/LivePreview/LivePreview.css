@@ -91,9 +91,12 @@
   font-size: var(--text-sm);
   transition: border-color var(--duration) var(--ease), color var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 .live-preview-action:hover {
   border-color: var(--peach);
   color: var(--peach);
+}
 }
 .live-preview-action.is-on {
   border-color: var(--mauve);
@@ -181,10 +184,16 @@
   text-align: left;
   cursor: pointer;
 }
-.live-preview-menu-item:hover,
 .live-preview-menu-item:focus-visible {
   background: color-mix(in srgb, var(--surface2) 60%, transparent);
   outline: none;
+}
+@media (hover: hover) {
+
+.live-preview-menu-item:hover{
+  background: color-mix(in srgb, var(--surface2) 60%, transparent);
+  outline: none;
+}
 }
 
 /* ── Kind identity ──────────────────────────────────────────────────────────
@@ -472,8 +481,11 @@
   gap: 2px;
   color: var(--overlay1);
 }
+@media (hover: hover) {
+
 .lp-card.is-waiting:hover .lp-card-cta {
   color: var(--yellow);
+}
 }
 
 /* Feedback acknowledgement raised by the shell. */
@@ -610,8 +622,11 @@
   .live-preview-pan-controls { display: none; }
   .live-preview-zoomctl button { min-width: 34px; min-height: 34px; }
 }
+@media (hover: hover) {
+
 .live-preview-zoomctl button:hover {
   color: var(--peach);
+}
 }
 .live-preview-zoomctl button:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -664,10 +679,13 @@
   color: var(--subtext0);
   cursor: pointer;
 }
+@media (hover: hover) {
+
 .live-preview-inspect-close:hover,
 .live-preview-voice:hover:not(:disabled) {
   color: var(--mauve);
   border-color: var(--mauve);
+}
 }
 .live-preview-inspect-close:focus-visible,
 .live-preview-voice:focus-visible {

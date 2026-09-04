@@ -43,10 +43,16 @@
 }
 
 .mconv-action-rail-button:active { transform: scale(0.94); }
-.mconv-action-rail-button:hover,
 .mconv-action-rail-button.is-active { color: var(--text); }
-.mconv-action-rail-button:hover::after,
+@media (hover: hover) {
+
+.mconv-action-rail-button:hover{ color: var(--text); }
+}
 .mconv-action-rail-button.is-active::after { background: var(--surface1); }
+@media (hover: hover) {
+
+.mconv-action-rail-button:hover::after{ background: var(--surface1); }
+}
 .mconv-action-rail-button:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 
 .mconv-action-rail-badge {

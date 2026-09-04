@@ -173,8 +173,11 @@
   text-align: left;
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .evb-more:hover { color: var(--text); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .evb-chev { transition: none; }

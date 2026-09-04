@@ -165,10 +165,13 @@
   font-size: var(--text-xs);
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .talab-replay:hover {
   background: var(--surface1);
   color: var(--text);
+}
 }
 
 /* ---- Variant 1 · rail --------------------------------------------------

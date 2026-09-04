@@ -81,7 +81,10 @@
   cursor: pointer;
   box-shadow: var(--shadow-md);
 }
+@media (hover: hover) {
+
 
 .stream .stream-new-btn:hover {
   border-color: var(--peach);
+}
 }

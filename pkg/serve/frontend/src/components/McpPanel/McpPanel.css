@@ -55,9 +55,12 @@
   border-radius: var(--radius-sm);
   font-family: var(--font);
 }
+@media (hover: hover) {
+
 
 .mcp-head-btn:hover {
   background: color-mix(in srgb, var(--surface0) 45%, transparent);
+}
 }
 
 .mcp-head-btn:focus-visible {
@@ -254,9 +257,12 @@
     border-color var(--duration) var(--ease),
     background var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .mcp-schip:hover:not(:disabled) {
   border-color: var(--surface2);
+}
 }
 
 .mcp-schip-on {
@@ -322,10 +328,13 @@
   background: var(--base);
   color: var(--subtext1);
 }
+@media (hover: hover) {
+
 
 .mcp-restart:hover:not(:disabled) {
   color: var(--text);
   border-color: var(--overlay0);
+}
 }
 
 .mcp-restart:disabled {
@@ -396,10 +405,13 @@
   background: transparent;
   color: var(--subtext1);
 }
+@media (hover: hover) {
+
 
 .mcp-cbtn-ghost:hover {
   background: color-mix(in srgb, var(--surface0) 60%, transparent);
   color: var(--text);
+}
 }
 
 .mcp-cbtn-go {
@@ -407,9 +419,12 @@
   color: var(--text);
   border-color: var(--surface1);
 }
+@media (hover: hover) {
+
 
 .mcp-cbtn-go:hover {
   background: var(--surface1);
+}
 }
 
 /* Touch targets grow on the mobile sheet. */

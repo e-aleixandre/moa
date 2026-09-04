@@ -58,11 +58,17 @@
   -webkit-tap-highlight-color: transparent;
   transition: opacity var(--duration) var(--ease), background var(--duration) var(--ease);
 }
-
-.waypoint .wp-rewind:hover:not(:disabled),
 .waypoint .wp-rewind:active:not(:disabled) {
   opacity: 1;
   background: color-mix(in srgb, var(--peach) 14%, transparent);
+}
+@media (hover: hover) {
+
+
+.waypoint .wp-rewind:hover:not(:disabled){
+  opacity: 1;
+  background: color-mix(in srgb, var(--peach) 14%, transparent);
+}
 }
 
 .waypoint .wp-rewind:disabled {
@@ -232,21 +238,32 @@
   color: var(--crust);
   font-weight: var(--weight-semibold);
 }
-
-.wp-rewind-go:hover,
 .wp-rewind-go:active {
   background: color-mix(in srgb, var(--peach) 85%, var(--text));
+}
+@media (hover: hover) {
+
+
+.wp-rewind-go:hover{
+  background: color-mix(in srgb, var(--peach) 85%, var(--text));
+}
 }
 
 .wp-rewind-cancel {
   background: var(--surface0);
   color: var(--subtext0);
 }
-
-.wp-rewind-cancel:hover,
 .wp-rewind-cancel:active {
   background: var(--surface1);
   color: var(--text);
+}
+@media (hover: hover) {
+
+
+.wp-rewind-cancel:hover{
+  background: var(--surface1);
+  color: var(--text);
+}
 }
 
 .wp-rewind-all {
@@ -260,10 +277,15 @@
   cursor: pointer;
   padding: var(--space-2);
 }
-
-.wp-rewind-all:hover,
 .wp-rewind-all:active {
   color: var(--subtext0);
+}
+@media (hover: hover) {
+
+
+.wp-rewind-all:hover{
+  color: var(--subtext0);
+}
 }
 
 .wp-rewind-go:focus-visible,

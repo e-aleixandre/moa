@@ -20,10 +20,13 @@ button.chip {
   cursor: pointer;
   transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 button.chip:hover {
   background: var(--surface0);
   border-color: var(--surface1);
+}
 }
 
 button.chip:focus-visible {

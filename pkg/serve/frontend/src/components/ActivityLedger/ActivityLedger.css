@@ -50,11 +50,14 @@
 .tg div.tg-row {
   cursor: default;
 }
+@media (hover: hover) {
+
 
 /* Only interactive rows (buttons: detail toggles, fold header) react to hover;
    an inert <div> done row must not imply it's clickable. */
 .tg button.tg-row:hover {
   background: color-mix(in srgb, var(--surface0) 30%, transparent);
+}
 }
 
 .tg .tg-row:focus-visible {
@@ -227,9 +230,12 @@
   box-shadow: inset 2px 0 0 var(--blue);
   cursor: default;
 }
+@media (hover: hover) {
+
 
 .tg .tg-row.live:hover {
   background: color-mix(in srgb, var(--blue) 7%, transparent);
+}
 }
 
 /* A live row that can open its full command IS interactive, so it takes the
@@ -238,9 +244,12 @@
 .tg button.tg-row.live {
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .tg button.tg-row.live:hover {
   background: color-mix(in srgb, var(--blue) 12%, transparent);
+}
 }
 
 .tg .tg-row.live .txt {
@@ -392,9 +401,12 @@
   text-align: left;
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .tg button.tg-log:hover {
   background: color-mix(in srgb, var(--surface0) 24%, var(--crust));
+}
 }
 
 .tg button.tg-log:focus-visible {

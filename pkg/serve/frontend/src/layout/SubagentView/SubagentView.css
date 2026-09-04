@@ -53,10 +53,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+@media (hover: hover) {
+
 
 .subagent-view .sa-crumb-parent:hover {
   color: var(--text);
   text-decoration: underline;
+}
 }
 
 .subagent-view .sa-crumb-sep {
@@ -246,8 +249,11 @@
   cursor: pointer;
   font-size: var(--text-sm);
 }
+@media (hover: hover) {
+
 
 .subagent-view .sa-outcome-btn:hover { background: var(--surface0); color: var(--text); }
+}
 
 .subagent-view .sa-outcome-btn.primary {
   border-color: transparent;

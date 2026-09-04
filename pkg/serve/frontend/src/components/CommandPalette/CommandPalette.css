@@ -102,7 +102,10 @@
   position: relative;
   transition: background 0.08s;
 }
+@media (hover: hover) {
+
 .row:hover { background: var(--surface0); }
+}
 .row.sel { background: var(--surface0); }
 .row .name {
   flex: 3 1 auto;
@@ -340,10 +343,13 @@
   background: transparent;
   transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
+@media (hover: hover) {
+
 .model-row .model-change:hover {
   border-color: var(--surface2);
   background: color-mix(in srgb, var(--surface0) 55%, transparent);
   color: var(--text);
+}
 }
 .model-row .model-change:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);

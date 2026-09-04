@@ -56,10 +56,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+@media (hover: hover) {
+
 
 .bashjob-view .bj-crumb-parent:hover {
   color: var(--text);
   text-decoration: underline;
+}
 }
 
 .bashjob-view .bj-crumb-sep {
@@ -117,9 +120,12 @@
   color: var(--red);
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .bashjob-view .bj-stop:hover {
   background: color-mix(in srgb, var(--red) 10%, transparent);
+}
 }
 
 /* Armed state: filled, so "sure?" is unmistakably a second, louder question
@@ -187,8 +193,11 @@
   color: var(--overlay1);
   font-size: var(--text-xs);
 }
+@media (hover: hover) {
+
 
 .bashjob-view .bj-cmd-copy:hover { color: var(--text); }
+}
 
 .bashjob-view .bj-cmd-copy:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -275,8 +284,11 @@
   font-weight: var(--weight-semibold);
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .bashjob-view .bj-outcome-back:hover { background: var(--surface1); }
+}
 
 .bashjob-view .bj-outcome-back:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);

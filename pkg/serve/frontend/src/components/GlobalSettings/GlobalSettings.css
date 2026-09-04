@@ -269,9 +269,12 @@
   border-radius: var(--radius-md);
   transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .subagent-model-row:hover {
   background: color-mix(in srgb, var(--surface0) 35%, transparent);
+}
 }
 
 /* The check alone carries the state. Tinting the row as well repeated the same
@@ -345,9 +348,12 @@
   transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease),
     color var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .subagent-allow:hover .subagent-allow-box {
   border-color: var(--overlay0);
+}
 }
 
 .subagent-allow.on .subagent-allow-box {
