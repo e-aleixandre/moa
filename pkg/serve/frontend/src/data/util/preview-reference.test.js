@@ -6,7 +6,7 @@ import { parsePreviewReference, feedbackMessage } from './preview-reference.js';
 const block = [
   '[UI feedback · selected element in preview]',
   'page: /pricing (http://host:5173/pricing)',
-  'element: button#buy.btn.btn-primary — text: "Comprar"',
+  'element: button#buy.btn.btn-primary  — text: "Comprar"',
   'ancestors: section#pricing > div.card.card--pro > div.card__footer',
   'selector: #pricing .card--pro button#buy',
   'attrs: data-plan="pro" aria-label="Comprar el plan Pro"',
@@ -83,6 +83,11 @@ test('a comment-less feedback message keeps an empty comment', () => {
   expect(parsePreviewReference(block).comment).toBe('');
 });
 
+test('a composer without a selected element sends only the user text', () => {
+  expect(feedbackMessage('  Make the heading smaller  ', null)).toBe('Make the heading smaller');
+  expect(feedbackMessage('   ', null)).toBe('');
+});
+
 test('a long visible text is trimmed for the spine', () => {
   const long = 'x'.repeat(200);
   const parsed = parsePreviewReference([
@@ -122,6 +127,20 @@ test('what LivePreview sends parses back into a reference', () => {
   expect(parsed.reference.context).toBe('card--pro');
   expect(parsed.reference.path).toBe('/pricing');
   expect(parsed.reference.target).toBe('button#buy.btn.btn-primary');
+});
+
+test('a selected element keeps the feedback payload byte-for-byte stable', () => {
+  expect(feedbackMessage('Este botón es demasiado grande', {
+    tag: 'button',
+    id: 'buy',
+    classes: ['btn', 'btn-primary'],
+    text: 'Comprar',
+    path: '/pricing',
+    url: 'http://host:5173/pricing',
+    ancestors: ['section#pricing', 'div.card.card--pro', 'div.card__footer'],
+    selector: '#pricing .card--pro button#buy',
+    attrs: { 'data-plan': 'pro', 'aria-label': 'Comprar el plan Pro' },
+  })).toBe(`Este botón es demasiado grande\n\n${block}`);
 });
 
 test('a bare element with no comment still parses what LivePreview sends', () => {

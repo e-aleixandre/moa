@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { MousePointerClick, X, Minus, Plus, MoreVertical, Mic, Loader2, Square, ChevronUp, ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from "lucide-preact";
+import { MousePointerClick, MessageSquare, X, Minus, Plus, MoreVertical, Mic, Loader2, Square, ChevronUp, ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from "lucide-preact";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { Segmented } from "../Segmented/Segmented.jsx";
 import { AssistantDocument } from "../AssistantDocument/AssistantDocument.jsx";
 import { Button } from "../../primitives/index.js";
 import { renderMarkdown } from "../../data/util/markdown.js";
-import { feedbackMessage } from "../../data/util/preview-reference.js";
+import { feedbackMessage, previewReferenceContext } from "../../data/util/preview-reference.js";
 import { sendMessage } from "../../data/session-actions.js";
 import { useStore } from "../../hooks/useStore.js";
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
@@ -80,6 +80,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const [width, setWidth] = useState("fit");
   const [inspect, setInspect] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [composerOpen, setComposerOpen] = useState(false);
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -195,6 +196,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
 
       if (data.type === "moa-element") {
         setSelected(data);
+        setComposerOpen(true);
         // A mouse click inside a cross-origin frame gives that frame focus.
         // Return it to moa's chrome once the selection is delivered.
         requestAnimationFrame(() => inspectButtonRef.current?.focus());
@@ -311,13 +313,15 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   };
 
   const send = () => {
-    if (!selected || sending) return;
+    const message = feedbackMessage(comment, selected);
+    if (sending || !message) return;
     setSending(true);
-    Promise.resolve(sendMessage(sessionId, feedbackMessage(comment, selected)))
+    Promise.resolve(sendMessage(sessionId, message))
       .catch(() => {})
       .then(() => {
         setSending(false);
         setSelected(null);
+        setComposerOpen(false);
         setComment("");
         note("sent", "Sent");
       });
@@ -368,6 +372,16 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
         >
           <MousePointerClick size={15} />
           <span class="live-preview-action-label">Inspect</span>
+        </button>
+        <button
+          type="button"
+          class={`live-preview-action${composerOpen && !selected ? " is-on" : ""}`}
+          onClick={() => setComposerOpen((openComposer) => !openComposer)}
+          aria-pressed={composerOpen && !selected}
+          title="Message the agent"
+        >
+          <MessageSquare size={15} />
+          <span class="live-preview-action-label">Message</span>
         </button>
         <button type="button" class="live-preview-action" onClick={onClose} title="Close preview">
           <X size={15} />
@@ -462,12 +476,15 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
             1:1
           </button>
         )}
-        {selected && (
+        {(selected || composerOpen) && (
           <InspectPopover
             selected={selected}
             comment={comment}
             onComment={setComment}
-            onClose={() => setSelected(null)}
+            onClose={() => {
+              setSelected(null);
+              setComposerOpen(false);
+            }}
             onSend={send}
             sending={sending}
             stageRef={stageRef}
@@ -626,7 +643,14 @@ function InspectPopover({ selected, comment, onComment, onClose, onSend, sending
       const stage = stageRef.current;
       const frame = iframeRef.current;
       const popover = popoverRef.current;
-      if (!stage || !frame || !popover || !selected.rect) return;
+      if (!stage || !popover) return;
+      if (!selected) {
+        const stream = stage.querySelector(".lp-stream");
+        const streamHeight = stream?.getBoundingClientRect().height || 0;
+        setPosition({ left: Math.max(8, (stage.clientWidth - popover.offsetWidth) / 2), top: Math.max(8, stage.clientHeight - popover.offsetHeight - streamHeight - 16), ready: true });
+        return;
+      }
+      if (!frame || !selected.rect) return;
       const stageRect = stage.getBoundingClientRect();
       const frameRect = frame.getBoundingClientRect();
       const scale = (geometry.current.base || 1) * (view.zoom || 1);
@@ -662,7 +686,8 @@ function InspectPopover({ selected, comment, onComment, onClose, onSend, sending
     };
   }, [selected, geometry, view]);
 
-  const selector = `${selected.tag}${selected.id ? `#${selected.id}` : ""}${(selected.classes || []).slice(0, 2).map((name) => `.${name}`).join("")}`;
+  const selector = selected && `${selected.tag}${selected.id ? `#${selected.id}` : ""}${(selected.classes || []).slice(0, 2).map((name) => `.${name}`).join("")}`;
+  const context = selected && previewReferenceContext(selected.ancestors);
   const voiceTitle = transcribing ? "Transcribing…"
     : recording ? (locked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
     : canVoice ? "Hold to talk" : "Voice input unavailable";
@@ -671,16 +696,16 @@ function InspectPopover({ selected, comment, onComment, onClose, onSend, sending
   return (
     <div
       ref={popoverRef}
-      class="live-preview-inspect-popover"
+      class={`live-preview-inspect-popover${selected ? "" : " is-message"}`}
       style={{ left: `${position.left}px`, top: `${position.top}px`, visibility: position.ready ? "visible" : "hidden" }}
       role="dialog"
-      aria-label="Feedback for selected element"
+      aria-label={selected ? "Feedback for selected element" : "Message the agent"}
     >
       <div class="live-preview-inspect-head">
-        <code class="live-preview-selector">{selector}</code>
+        {selected ? <><span class="live-preview-element-tag">{selected.tag}</span><code class="live-preview-selector">{selector}</code></> : <span class="live-preview-message-title">Message the agent</span>}
         <button type="button" class="live-preview-inspect-close" onClick={onClose} aria-label="Close feedback"><X size={15} /></button>
       </div>
-      {selected.text && <p class="live-preview-inspect-text">“{selected.text}”</p>}
+      {selected?.text && <p class="live-preview-inspect-text">“{selected.text}”{context && <small>in {context}</small>}</p>}
       <div class="live-preview-inspect-compose">
         <textarea
           ref={textareaRef}
@@ -706,6 +731,9 @@ function InspectPopover({ selected, comment, onComment, onClose, onSend, sending
           <Button variant="solid" size="sm" onClick={onSend} disabled={sending || transcribing}>
             {sending ? "Sending…" : "Send"}
           </Button>
+        </div>
+        <div class={`live-preview-attachment${selected ? "" : " is-empty"}`}>
+          {selected ? "Element attached" : "No element attached"}
         </div>
       </div>
     </div>

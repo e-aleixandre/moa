@@ -13,6 +13,10 @@ export const PREVIEW_REFERENCE_MARKER = '[UI feedback · selected element in pre
 // block below the comment is machine-ish on purpose: the agent needs an
 // unambiguous handle on the element, the user only writes the intent.
 export function feedbackMessage(comment, el) {
+  // A composer opened without inspecting an element is an ordinary message.
+  // Keeping that path here prevents callers from accidentally appending a
+  // partial reference block.
+  if (!el) return comment.trim();
   const classes = (el.classes || []).map((c) => `.${c}`).join('');
   const id = el.id ? `#${el.id}` : '';
   const text = el.text ? `  — text: ${JSON.stringify(el.text)}` : '';
@@ -75,6 +79,11 @@ function contextOf(ancestors) {
     if (label) return label;
   }
   return '';
+}
+
+// The composer and the transcript use the same human-readable ancestor label.
+export function previewReferenceContext(ancestors) {
+  return contextOf(ancestors || []);
 }
 
 function truncate(text, max = 64) {
@@ -146,7 +155,7 @@ export function parsePreviewReference(text) {
     reference: {
       quote,
       tagMark,
-      context: contextOf(ancestors),
+      context: previewReferenceContext(ancestors),
       path,
       url,
       target,
