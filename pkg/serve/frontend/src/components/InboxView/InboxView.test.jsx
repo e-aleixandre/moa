@@ -171,3 +171,48 @@ test("candidates of a project event drop the path the sheet already states", () 
   const spanning = descendants(expand(InboxView({ cards: [projectless] })));
   expect(byClass(spanning, "path")).toHaveLength(1);
 });
+
+const SETTLED_CARD = {
+  ...CARD,
+  pending: false,
+  sessions: [],
+  routedToAvailable: false,
+};
+
+function settledCard(state) {
+  return {
+    ...SETTLED_CARD,
+    event: { ...EVENT, state, routed_to: state === "routed" ? "missing-session" : "" },
+  };
+}
+
+test("a routed event whose destination is gone opens a read-only detail", () => {
+  const card = settledCard("routed");
+  const closed = render({ 0: "all" }, { cards: [card] });
+  const [row] = byClass(closed, "inbox-row");
+  row.props.onClick();
+  expect(setters[1]).toHaveBeenCalledWith(EVENT.id);
+
+  const open = render({ 0: "all", 1: EVENT.id }, { cards: [card] });
+  expect(text(open)).toContain("Destination unavailable");
+  expect(text(open)).toContain("Arrived 6m ago");
+  expect(text(open)).toContain(EVENT.body);
+});
+
+test("an ignored event opens an ignored read-only detail", () => {
+  const card = settledCard("dismissed");
+  const open = render({ 0: "all", 1: EVENT.id }, { cards: [card] });
+  expect(text(open)).toContain("Ignored");
+  expect(text(open)).toContain("This event was ignored");
+});
+
+test("a delivering event says delivering in its row and detail", () => {
+  const card = settledCard("routing");
+  const closed = render({ 0: "all" }, { cards: [card] });
+  expect(text(closed)).toContain("delivering");
+  expect(text(closed)).not.toContain("ignored");
+
+  const open = render({ 0: "all", 1: EVENT.id }, { cards: [card] });
+  expect(text(open)).toContain("Delivering event");
+  expect(text(open)).toContain("Delivery is in progress");
+});

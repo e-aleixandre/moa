@@ -233,16 +233,46 @@ function RouteSheet({ card, sameSourcePending, onSend, onNewSession, onIgnore, o
   );
 }
 
+function EventDetailSheet({ card, onClose }) {
+  const { event } = card;
+  const state = event.state || "new";
+  const detail = state === "routing"
+    ? { title: "Delivering event", message: "Delivery is in progress. This will update when it finishes." }
+    : state === "dismissed"
+      ? { title: "Ignored", message: "This event was ignored. Choose another event to take action." }
+      : { title: "Destination unavailable", message: "The destination session is no longer available. Choose another event to take action." };
+  const hasProject = Boolean(event.project);
+
+  return (
+    <Sheet open onClose={onClose} title={detail.title} ariaLabel={`${event.title} event details`} class="inbox-sheet">
+      <div class="inbox-detail">
+        <p class="inbox-detail-status">{detail.message}</p>
+        <div class="inbox-sheet-event">
+          <span class="inbox-sheet-from">{event.source}{hasProject && ` · ${card.projectLabel}`}</span>
+          <span class="inbox-sheet-title">{event.title}</span>
+          {card.age && <span class="inbox-sheet-reason">Arrived {card.age} ago</span>}
+          <EventPayload body={event.body} compact />
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
 
 function InboxRowButton({ card, onClick }) {
   const { event } = card;
   const delivered = !card.pending && event.state === "routed";
+  const unavailable = delivered && !card.routedToAvailable;
   const reason = card.pending ? pendingReasonLabel(event.pending_reason) : "";
   const label = card.pending
     ? `${event.source}, ${card.age}, ${event.title} — choose where to send it`
     : delivered
-      ? `${event.source}, ${card.age}, ${event.title} — delivered to ${card.routedToTitle || "a session"}`
-      : `${event.source}, ${card.age}, ${event.title} — ignored`;
+      ? unavailable
+        ? `${event.source}, ${card.age}, ${event.title} — destination unavailable, view details`
+        : `${event.source}, ${card.age}, ${event.title} — delivered to ${card.routedToTitle}`
+      : event.state === "routing"
+        ? `${event.source}, ${card.age}, ${event.title} — delivery in progress, view details`
+        : `${event.source}, ${card.age}, ${event.title} — ignored, view details`;
   return (
     <button
       type="button"
@@ -253,11 +283,12 @@ function InboxRowButton({ card, onClick }) {
       <span class="inbox-row-meta">
         {event.source} · {card.age}
         {!card.pending && event.state === "dismissed" && " · ignored"}
+        {!card.pending && event.state === "routing" && " · delivering"}
       </span>
       <span class="inbox-row-title">{event.title}</span>
       {reason && <span class="inbox-row-reason">{reason}</span>}
       {delivered && (
-        <span class="inbox-row-dest">→ {card.routedToTitle || "a session"}</span>
+        <span class="inbox-row-dest">{unavailable ? "→ destination unavailable" : `→ ${card.routedToTitle}`}</span>
       )}
     </button>
   );
@@ -275,15 +306,15 @@ export function InboxView({
   className = "",
 }) {
   const [filter, setFilter] = useState("pending");
-  const [routing, setRouting] = useState(null);
+  const [selected, setSelected] = useState(null);
   const groups = inboxGroups(cards, filter);
   const shown = groups.reduce((n, group) => n + group.cards.length, 0);
-  const card = routing ? cards.find((c) => c.event.id === routing) : null;
+  const card = selected ? cards.find((c) => c.event.id === selected) : null;
   const sameSourcePending = card
     ? cards.filter((c) => c.pending && c.event.source === card.event.source).length
     : 0;
 
-  const close = () => setRouting(null);
+  const close = () => setSelected(null);
   const act = (fn) => (...args) => {
     Promise.resolve(fn?.(...args)).then(() => close()).catch(() => {});
   };
@@ -310,14 +341,15 @@ export function InboxView({
               key={c.event.id}
               card={c}
               onClick={() => {
-                if (c.pending) setRouting(c.event.id);
-                else if (c.event.routed_to) onOpenSession?.(c.event.routed_to);
+                if (c.pending) setSelected(c.event.id);
+                else if (c.event.state === "routed" && c.routedToAvailable) onOpenSession?.(c.event.routed_to);
+                else setSelected(c.event.id);
               }}
             />
           ))}
         </div>
       ))}
-      {card && (
+      {card?.pending && (
         <RouteSheet
           card={card}
           sameSourcePending={sameSourcePending}
@@ -328,6 +360,7 @@ export function InboxView({
           onClose={close}
         />
       )}
+      {card && !card.pending && <EventDetailSheet card={card} onClose={close} />}
     </div>
   );
 }

@@ -65,6 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Inbox events that are ignored, delivering, or routed to an unavailable
+  session now open a read-only detail instead of appearing tappable without a
+  response; delivering rows now show their actual state.
 - A message sent from the Live Preview no longer prints its technical element
   block as text. The transcript reads that block back and paints a compact
   reference on the message's own spine — the element's visible text (or its

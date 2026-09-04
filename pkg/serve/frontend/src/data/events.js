@@ -291,6 +291,7 @@ export function inboxCards(sessions, events) {
       project,
       projectLabel: projectLabel(event.project),
       routedToTitle: routedTo ? sessionTitle(routedTo) : '',
+      routedToAvailable: Boolean(routedTo),
     };
   });
 }
@@ -330,6 +331,7 @@ export function inboxSig(cards) {
       c.event.pending_reason || '',
       c.age || '',
       c.routedToTitle || '',
+      c.routedToAvailable ? 'available' : 'unavailable',
       c.sessions.map((s) => `${s.id}:${s.state}:${s.when}:${s.brief || ''}:${s.path || ''}:${s.origin || ''}`).join(','),
     ].join('\0'))
     .join('\n');

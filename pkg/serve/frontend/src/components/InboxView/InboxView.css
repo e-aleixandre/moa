@@ -58,6 +58,10 @@
 
 .inbox-row:active { background: color-mix(in srgb, var(--surface0) 45%, transparent); }
 
+@media (hover: hover) {
+  .inbox-row:hover { background: color-mix(in srgb, var(--surface0) 45%, transparent); }
+}
+
 .inbox-row:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: -2px;
@@ -150,6 +154,19 @@
   padding: var(--space-3);
   border-radius: var(--radius-md);
   background: var(--base);
+}
+
+.inbox-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.inbox-detail-status {
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--subtext0);
 }
 
 .inbox-sheet-from {

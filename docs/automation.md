@@ -208,6 +208,11 @@ can be routed or dismissed; one already settled answers `409`. Delivery claims
 the event (`new` → `routing`) before sending, so two concurrent decisions cannot
 deliver it twice.
 
+The Inbox keeps settled events as read-only details: an ignored event says
+**Ignored**, a delivery in progress says **Delivering**, and a routed event
+whose destination session is no longer available says so alongside its source,
+arrival time and payload. Only events still in state `new` can be routed again.
+
 **Exposing the path.** Serve itself stays on the tailnet. To let a provider
 reach only `/hooks`, put Tailscale Funnel on a second port that mounts that
 prefix:
