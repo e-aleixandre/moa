@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Mobile session actions, rearranged.** The overflow menu (`⋮`) is gone from
+  the top of the conversation: **Live preview** now hangs off the composer's
+  **+**, next to **Attach files**, and the **Inbox** sits in the session
+  drawer's header. The count of waiting events rides on the title chip, so it
+  stays visible without opening the drawer. The desktop is unchanged — **+**
+  still opens the file picker directly.
 - OpenAI **GPT-6 Astra** (`astra` / `gpt-6`), with long-context pricing,
   Fast-mode billing, and its required reasoning settings.
 - **Live Preview**: the web app the agent is building, inside the conversation.
@@ -16,8 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   768, 1280 or fit to the panel), zooms and pans by pinch on touch or by
   buttons with a mouse, and shows the run as activity that floats over the app
   and dissolves, instead of a second chat permanently spending the app's pixels.
-  It opens from the session actions on mobile — full screen, because on a phone
-  the app is what you came to see — from the conversation head on desktop, and
+  It opens from the composer's **+** menu on mobile — full screen, because on a
+  phone the app is what you came to see — from the conversation head on desktop, and
   per pane in a grid, each with its own address. In **Inspect** mode you tap an
   element and write or dictate what should change about it: the agent receives
   your sentence plus an unambiguous handle on that element (page, tag, id and

@@ -516,6 +516,14 @@
   color: var(--overlay1);
 }
 
+/* When `+` is a menu, its wrapper becomes the grid item and the button inside
+   keeps the 44px face. The list hangs upwards from that wrapper, so it clears
+   the status line and the home indicator without measuring either. */
+.composer-wrap.is-compact .action-menu {
+  grid-row: 1;
+  grid-column: 1;
+}
+
 .composer-wrap.is-compact .composer-btn-slash {
   display: none;
 }

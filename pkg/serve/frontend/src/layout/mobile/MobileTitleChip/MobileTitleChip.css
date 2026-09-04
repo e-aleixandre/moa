@@ -50,6 +50,26 @@
   text-overflow: ellipsis;
 }
 
+/* Inbox count — events waiting behind the drawer's Inbox door. Mauve (the
+   product's "unseen work" colour, shared with InboxButton's badge), inline in
+   the pill so it never collides with the attention dot at the top-right. */
+.mtchip-inbox {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  padding: 1px 6px 1px 5px;
+  border-radius: var(--radius-full);
+  background: var(--mauve);
+  color: var(--crust);
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  font-weight: var(--weight-semibold);
+  line-height: 14px;
+}
+
 .mtchip-chev {
   position: relative;
   z-index: 1;

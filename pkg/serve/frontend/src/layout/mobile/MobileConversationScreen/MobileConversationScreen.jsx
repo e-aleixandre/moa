@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "preact/hooks";
-import { AppWindow, Inbox, Plus } from "lucide-preact";
+import { Plus } from "lucide-preact";
 import { updateSession, store } from "../../../data/store.js";
 import { useStore } from "../../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../../data/stream-model.js";
@@ -8,7 +8,7 @@ import { openSession, setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
-import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, routeEvent, routeEventToNewSession, toggleInbox } from "../../../data/events.js";
+import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, openInbox, routeEvent, routeEventToNewSession } from "../../../data/events.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
 import { LivePreview } from "../../../components/LivePreview/LivePreview.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
@@ -22,7 +22,6 @@ import { MobileNowLine } from "./MobileNowLine.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import { MobileBashJobView } from "./MobileBashJobView.jsx";
 import { MobileInboxView } from "./MobileInboxView.jsx"; // wake-on-event
-import { MobileActionRail } from "../MobileActionRail/MobileActionRail.jsx";
 import { LiveDock } from "../../LiveDock/LiveDock.jsx";
 import { selectMobileChrome } from "./chrome.js";
 import "./MobileConversationScreen.css";
@@ -318,6 +317,11 @@ function MobileSessionChrome({ version, forceMobile = false }) {
   const chrome = useStore((s) => selectMobileChrome(s, forceMobile));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsPendingRef = useRef(false);
+  // The drawer hands off to another overlay by CLOSING FIRST (see the HANDOFF
+  // note in SessionDrawer): the pending flag is consumed in onClosed, once the
+  // leave animation has settled, so two overlays are never on screen at once.
+  // Settings and the Inbox both take that route.
+  const inboxPendingRef = useRef(false);
   const setDrawerOpen = (next) => (next ? openDrawer("list") : closeDrawer());
   const onSelectFromDrawer = (id) => selectMobileDrawerSession(store.get().sessions[id], {
     resume: resumeSession,
@@ -334,11 +338,22 @@ function MobileSessionChrome({ version, forceMobile = false }) {
     settingsPendingRef.current = true;
     closeDrawer();
   };
+  const onInboxFromDrawer = () => {
+    inboxPendingRef.current = true;
+    closeDrawer();
+  };
   const onDrawerClosed = () => {
+    if (inboxPendingRef.current) {
+      inboxPendingRef.current = false;
+      openInbox();
+      return;
+    }
     if (!settingsPendingRef.current) return;
     settingsPendingRef.current = false;
     setSettingsOpen(true);
   };
+
+  const inboxCount = inboxPendingCount(chrome.inbox);
 
   return (
     <>
@@ -348,27 +363,8 @@ function MobileSessionChrome({ version, forceMobile = false }) {
           attention={chrome.attention}
           open={chrome.drawerOpen}
           onToggle={setDrawerOpen}
+          inboxCount={inboxCount}
         />
-      )}
-      {chrome.showChip && !chrome.drawerOpen && !chrome.inboxOpen && (
-        <MobileActionRail actions={[
-          {
-            id: "preview",
-            icon: AppWindow,
-            label: "Live preview",
-            onClick: () => updateSession(chrome.activeId, { previewOpen: true }),
-            active: chrome.previewOpen,
-            visible: !!chrome.activeId,
-          },
-          {
-            id: "inbox",
-            icon: Inbox,
-            label: "Inbox",
-            badge: inboxPendingCount(chrome.inbox),
-            onClick: toggleInbox,
-            visible: chrome.inbox.length > 0,
-          },
-        ]} />
       )}
       {chrome.inboxOpen && (
         <MobileInboxView
@@ -395,6 +391,9 @@ function MobileSessionChrome({ version, forceMobile = false }) {
         onSelect={onSelectFromDrawer}
         onCreate={onCreate}
         onSettings={onSettingsFromDrawer}
+        onInbox={onInboxFromDrawer}
+        inboxCount={inboxCount}
+        inboxVisible={chrome.inbox.length > 0}
         version={version}
         onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
         onReopenSession={(id) => { resumeSession(id).catch(() => {}); }}

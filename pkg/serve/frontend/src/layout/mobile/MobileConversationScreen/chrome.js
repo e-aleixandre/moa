@@ -105,7 +105,6 @@ function mobileChromeEqual(a, b) {
     && a.groupByProject === b.groupByProject
     && a.soundEnabled === b.soundEnabled
     && a.showChip === b.showChip
-    && a.previewOpen === b.previewOpen
     && a.title === b.title
     && a.activeCount === b.activeCount
     && a.savedCount === b.savedCount
@@ -132,7 +131,6 @@ export function selectMobileChrome(state, forceMobile = false) {
     activeId,
     title: session ? sessionTitle(session) : "",
     showChip: !!(session && !session.viewingSubagent && !session.viewingBashJob),
-    previewOpen: !!session?.previewOpen,
     attention: aggregateAttention(state.sessions, activeId),
     drawerOpen: !!state.drawerOpen,
     drawerStep: state.drawerStep || "list",

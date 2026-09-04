@@ -1,0 +1,78 @@
+/* ActionMenu — icon trigger + popup list. The wrapper is the positioning
+   anchor, so a menu placed "up" hangs off the trigger's top edge and never
+   depends on the height of the surface hosting it. */
+
+.action-menu {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
+
+.action-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--overlay1);
+  cursor: pointer;
+}
+
+.action-menu-trigger:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.action-menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  min-width: 196px;
+  padding: var(--space-1);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md);
+  background: var(--surface0);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Opening upwards: the composer's trigger sits at the bottom of the screen, so
+   the list grows towards the transcript instead of under the home indicator. */
+.action-menu-list--up {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.action-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--subtext0);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.action-menu-item.is-active {
+  color: var(--text);
+}
+
+.action-menu-item:focus-visible {
+  background: var(--surface1);
+  color: var(--text);
+  outline: none;
+}
+
+@media (hover: hover) {
+  .action-menu-trigger:hover { color: var(--text); }
+  .action-menu-item:hover { background: var(--surface1); color: var(--text); }
+}

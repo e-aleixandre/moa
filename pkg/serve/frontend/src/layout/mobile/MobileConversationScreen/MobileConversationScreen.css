@@ -328,10 +328,3 @@
     transition: none;
   }
 }
-
-/* The centred title reserves the action rail's 32px control and 12px gutter on
-   both sides. Mirror the right safe-area inset so it cannot reach beneath the
-   rail when a landscape cutout moves it inward. */
-.mconv:has(.mconv-action-rail) .mtchip {
-  max-width: calc(100% - 88px - env(safe-area-inset-right) - env(safe-area-inset-right));
-}

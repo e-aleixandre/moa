@@ -422,3 +422,40 @@ test("a dead request still reports commands whose outcome is not deferred", asyn
   commandError = null;
   expect(shown).toHaveLength(1);
 });
+
+test("the desktop + opens the file picker directly, with no menu", () => {
+  refs.length = 0;
+  const tree = Composer({ sessionId: "s1", session: { state: "idle" } });
+  const nodes = descendants(tree);
+  expect(nodes.some((node) => node.type?.name === "ActionMenu")).toBe(false);
+  const plus = nodes.find((node) => node.props?.class === "composer-btn composer-btn-attach");
+  expect(plus.props["aria-label"]).toBe("Attach");
+
+  // Composer's second ref is the hidden file input; clicking + must reach it.
+  let clicked = 0;
+  refs[1].current = { click() { clicked += 1; } };
+  plus.props.onClick();
+  expect(clicked).toBe(1);
+});
+
+test("plusActions turn + into a menu whose first entry is still Attach files", () => {
+  refs.length = 0;
+  let previewed = 0;
+  const tree = Composer({
+    sessionId: "s1",
+    session: { state: "idle" },
+    compact: true,
+    plusActions: [{ id: "preview", icon: () => null, label: "Live preview", onClick: () => { previewed += 1; } }],
+  });
+  const menu = descendants(tree).find((node) => node.type?.name === "ActionMenu");
+  expect(menu).toBeTruthy();
+  expect(menu.props.placement).toBe("up");
+  expect(menu.props.actions.map((a) => a.label)).toEqual(["Attach files", "Live preview"]);
+
+  let clicked = 0;
+  refs[1].current = { click() { clicked += 1; } };
+  menu.props.actions[0].onClick();
+  expect(clicked).toBe(1);
+  menu.props.actions[1].onClick();
+  expect(previewed).toBe(1);
+});

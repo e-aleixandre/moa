@@ -293,3 +293,96 @@ test('MobileBashJobView spreads edge-swipe handlers onto its screen root', async
 
   expect(source).toContain('ref={screenRef} {...swipeBind}');
 });
+
+test('the mobile composer turns + into a menu carrying Live preview', () => {
+  const previous = store.get();
+  setState({
+    sessions: { s1: { id: 's1', title: 'Build', state: 'idle', messages: [], subagents: {} } },
+    activeSession: 's1',
+    isMobile: true,
+    sessionsLoaded: true,
+  });
+
+  try {
+    const composer = componentNode(MobileConversationScreen({}), 'MobileComposer');
+    expect(composer).toBeTruthy();
+    const inner = componentNode(composer.type(composer.props), 'Composer');
+    const actions = inner.props.plusActions;
+    expect(actions.map((a) => a.id)).toEqual(['preview']);
+    expect(actions[0].label).toBe('Live preview');
+    // No visibility condition: there is no composer without a session.
+    expect(actions[0].visible).toBeUndefined();
+
+    actions[0].onClick();
+    expect(store.get().sessions.s1.previewOpen).toBe(true);
+  } finally {
+    setState(previous);
+  }
+});
+
+test('the mobile inbox door lives in the drawer and opens after the drawer leaves', () => {
+  const previous = store.get();
+  setState({
+    sessions: { s1: { id: 's1', title: 'Build', state: 'idle', messages: [], subagents: {} } },
+    activeSession: 's1',
+    isMobile: true,
+    sessionsLoaded: true,
+    drawerOpen: true,
+    inboxOpen: false,
+    events: [{ id: 'ev-1', source: 'hook', title: 'Deploy finished', state: 'new', pending_reason: 'inbox' }],
+  });
+
+  try {
+    const screen = MobileConversationScreen({});
+    const drawer = componentNode(screen, 'SessionDrawer');
+    expect(drawer.props.inboxVisible).toBe(true);
+    expect(drawer.props.inboxCount).toBe(1);
+
+    // The drawer hands off like Settings: the tap closes it, and only once the
+    // leave animation has settled does the inbox open. Never both at once.
+    drawer.props.onInbox();
+    expect(store.get().drawerOpen).toBe(false);
+    expect(store.get().inboxOpen).toBe(false);
+    drawer.props.onClosed();
+    expect(store.get().inboxOpen).toBe(true);
+
+    const head = componentNode(
+      drawer.type({ ...drawer.props, open: true }),
+      'InboxButton',
+    );
+    expect(head.props.count).toBe(1);
+  } finally {
+    setState(previous);
+  }
+});
+
+test('the title chip carries the waiting inbox count without opening the drawer', () => {
+  const previous = store.get();
+  setState({
+    sessions: { s1: { id: 's1', title: 'Build', state: 'idle', messages: [], subagents: {} } },
+    activeSession: 's1',
+    isMobile: true,
+    sessionsLoaded: true,
+    drawerOpen: false,
+    inboxOpen: false,
+    events: [
+      { id: 'ev-1', source: 'hook', title: 'One', state: 'new', pending_reason: 'inbox' },
+      { id: 'ev-2', source: 'hook', title: 'Two', state: 'new', pending_reason: 'inbox' },
+    ],
+  });
+
+  try {
+    const chip = componentNode(MobileConversationScreen({}), 'MobileTitleChip');
+    expect(chip.props.inboxCount).toBe(2);
+    const rendered = JSON.stringify(chip.type(chip.props));
+    expect(rendered).toContain('mtchip-inbox');
+  } finally {
+    setState(previous);
+  }
+});
+
+test('the mobile header no longer carries an overflow action rail', async () => {
+  const source = await Bun.file(new URL('./MobileConversationScreen.jsx', import.meta.url)).text();
+
+  expect(source).not.toContain('MobileActionRail');
+});

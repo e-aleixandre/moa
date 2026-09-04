@@ -55,9 +55,8 @@ from memory which button you meant.
 Live Preview belongs to one conversation, and each conversation remembers its
 own URL (stored in the browser, per session).
 
-- **Mobile** — the session actions button (`⋮`, beside the title) opens the
-  menu; pick **Live preview**. It takes the whole screen: on a phone the app is
-  the thing you came to look at.
+- **Mobile** — tap **+** in the composer and pick **Live preview**. It takes the
+  whole screen: on a phone the app is the thing you came to look at.
 - **Desktop** — the preview button in the conversation head. It takes over the
   conversation area, so the rest of the interface stays put.
 - **In a pane grid** — each pane has its own preview button and its own preview,
@@ -628,9 +627,12 @@ By default an event is sent straight to a live session in the target project,
 so the work continues without you opening moa. When routing cannot pick one
 session (none, several, a missing/errored target, a busy session with autorun
 off, or a rate-limited source), the event waits in the **Inbox** — its own
-surface, not a group inside the session list. Each waiting row says **why** it
-is there, and opens its payload on the same code surface the transcript uses, so
-you can read what actually arrived before deciding:
+surface, not a group inside the session list. Its door is the inbox button in
+the session list (the spine's header on desktop, the session drawer on mobile);
+on a phone the count also rides on the title chip, so waiting events are visible
+without opening the drawer. Each waiting row says **why** it is there, and opens
+its payload on the same code surface the transcript uses, so you can read what
+actually arrived before deciding:
 
 - **Send to ‹session›** — inject it into a live session of that project. The
   sessions offered are exactly the ones the server will accept.

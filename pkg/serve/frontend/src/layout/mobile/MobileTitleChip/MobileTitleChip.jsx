@@ -1,4 +1,4 @@
-import { ChevronDown } from "lucide-preact";
+import { ChevronDown, Inbox } from "lucide-preact";
 import { useRef } from "preact/hooks";
 import { mobileTitleChipLabel, mobileTitleChipPresentation, nextMobileTitleRipple } from "../MobileConversationScreen/attention-model.js";
 import "./MobileTitleChip.css";
@@ -15,14 +15,18 @@ import "./MobileTitleChip.css";
 // It replaces the status line's explicit "Sessions" door, and inherits its
 // cross-session attention duty. Errors, human-input requests, and new results
 // keep their winning red, yellow, or mauve color. The active session is inline.
-export function MobileTitleChip({ title, attention = {}, open = false, onToggle }) {
+//
+// The inbox count rides on the chip too. The Inbox door itself now lives inside
+// the drawer, but "events are waiting" has to stay visible WITHOUT opening it,
+// and the chip is the only permanent chrome left at the top of the phone.
+export function MobileTitleChip({ title, attention = {}, open = false, onToggle, inboxCount = 0 }) {
   const presentation = mobileTitleChipPresentation(attention);
   const arrivalRef = useRef(0);
   const rippleRef = useRef(0);
   const nextRipple = nextMobileTitleRipple(arrivalRef.current, rippleRef.current, attention);
   arrivalRef.current = nextRipple.arrival;
   rippleRef.current = nextRipple.ripple;
-  const label = mobileTitleChipLabel(title, attention);
+  const label = mobileTitleChipLabel(title, attention, inboxCount);
   return (
     <button
       type="button"
@@ -33,6 +37,12 @@ export function MobileTitleChip({ title, attention = {}, open = false, onToggle 
       aria-label={label}
     >
       <span class="mtchip-title">{title}</span>
+      {inboxCount > 0 && (
+        <span class="mtchip-inbox" aria-hidden="true">
+          <Inbox size={11} />
+          {inboxCount > 9 ? "9+" : inboxCount}
+        </span>
+      )}
       <span class="mtchip-chev" aria-hidden="true">
         <ChevronDown size={12} />
       </span>

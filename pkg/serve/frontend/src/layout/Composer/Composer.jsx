@@ -1,7 +1,8 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Plus, Slash, ArrowUp, Square, X, Mic, Loader2, ChevronUp, Image as ImageIcon } from "lucide-preact";
+import { Plus, Paperclip, Slash, ArrowUp, Square, X, Mic, Loader2, ChevronUp, Image as ImageIcon } from "lucide-preact";
 import { Chip } from "../../primitives/index.js";
 import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
+import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import {
   sendMessage, cancelRun, cancelSteers, execCommand, execShell, newSteerId,
@@ -81,7 +82,12 @@ export function keepCommandSuggestionVisible(list, index) {
 // backgrounded PWAs freely) doesn't lose what you were typing. The prefix is
 // deliberately DISTINCT from the old SPA's `moa-draft-` so the two frontends
 // don't clobber each other's drafts while they coexist under /next.
-export function Composer({ sessionId, session, shortPlaceholder = false, compact = false, steer = null, onSecret, transformMessage, onSent }) {
+// `plusActions` turns the `+` into a menu instead of a direct file picker: the
+// surface that hosts the composer contributes the extra entries that belong
+// next to Attach files there. Only the phone passes any (Live preview, which
+// has no room of its own since the mobile header is gone); on the desktop the
+// prop stays empty and `+` opens the picker with a single tap, as before.
+export function Composer({ sessionId, session, shortPlaceholder = false, compact = false, steer = null, onSecret, transformMessage, onSent, plusActions = [] }) {
   const { skills, refreshSkills } = useSessionSkills(sessionId);
   const textareaRef = useRef(null);
   const attachInputRef = useRef(null);
@@ -390,6 +396,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
   }, []);
 
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  // Never leave the menu hanging over another screen: a session switch remounts
+  // this composer, and a send closes it below.
+  useEffect(() => { setPlusMenuOpen(false); }, [sessionId]);
+
   const handleAttachClick = useCallback(() => {
     attachInputRef.current?.click();
   }, []);
@@ -679,7 +690,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     }
   }, [sessionId, sessionState, attachments, pushHistory, autoResize, steer, onSecret, transformMessage, onSent]);
 
-  const handleSend = useCallback(() => handleSendInner(textareaRef.current), [handleSendInner]);
+  const handleSend = useCallback(() => {
+    setPlusMenuOpen(false);
+    return handleSendInner(textareaRef.current);
+  }, [handleSendInner]);
   const finishContentSend = useCallback(() => {
     const { state } = reduceContentSendActivation(
       contentSendActivationRef.current,
@@ -1094,9 +1108,25 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           readOnly={contentSendPending}
         />
         <div class="composer-bar">
-          <button type="button" class="composer-btn composer-btn-attach" title="Attach files" aria-label="Attach" onClick={handleAttachClick} disabled={contentSendPending}>
-            <Plus size={15} />
-          </button>
+          {plusActions.length > 0 ? (
+            <ActionMenu
+              open={plusMenuOpen}
+              onOpenChange={setPlusMenuOpen}
+              icon={Plus}
+              label="More"
+              triggerClass="composer-btn composer-btn-attach"
+              placement="up"
+              disabled={contentSendPending}
+              actions={[
+                { id: "attach", icon: Paperclip, label: "Attach files", onClick: handleAttachClick },
+                ...plusActions,
+              ]}
+            />
+          ) : (
+            <button type="button" class="composer-btn composer-btn-attach" title="Attach files" aria-label="Attach" onClick={handleAttachClick} disabled={contentSendPending}>
+              <Plus size={15} />
+            </button>
+          )}
           <button type="button" class="composer-btn composer-btn-slash" title="Slash commands" aria-label="Slash commands" onClick={handleSlashButton} disabled={contentSendPending}>
             <Slash size={14} />
           </button>

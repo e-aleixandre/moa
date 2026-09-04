@@ -138,6 +138,21 @@
   inset: -6px -8px;
 }
 
+/* Inbox — the door to waiting events, beside New session in the head row. The
+   shared InboxButton is a 44px control; inside this row it takes the head's
+   optical 28px so the three tools line up, and keeps its reach via ::after. */
+.sdrawer-head .inbox-btn {
+  width: 28px;
+  height: 28px;
+}
+.sdrawer-head .inbox-btn::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+.sdrawer-head .inbox-btn:active { background: var(--surface0); color: var(--text); }
+.sdrawer-head .inbox-btn-badge { top: -2px; right: -2px; }
+
 .sdrawer-more-wrap { position: relative; flex: none; }
 .sdrawer-more {
   position: relative;
