@@ -4,7 +4,7 @@ import { updateSession, store } from "../../../data/store.js";
 import { useStore } from "../../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../../data/stream-model.js";
 import { focusedSessionId } from "../../../data/selectors.js";
-import { setActiveSession } from "../../../data/tile-actions.js";
+import { openSession, setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
@@ -378,7 +378,7 @@ function MobileSessionChrome({ version, forceMobile = false }) {
           onNewSession={(id, spec) => { routeEventToNewSession(id, spec).catch(() => {}); }}
           onIgnore={(id) => { dismissEvent(id).catch(() => {}); }}
           onIgnoreSource={(source) => { dismissSource(source).catch(() => {}); }}
-          onOpenSession={(id) => { closeInbox(); setActiveSession(id); }}
+          onOpenSession={(id) => { if (openSession(id)) closeInbox(); }}
         />
       )}
       <SessionDrawer

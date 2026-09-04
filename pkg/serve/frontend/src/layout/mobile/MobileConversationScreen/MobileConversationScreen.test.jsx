@@ -22,7 +22,7 @@ mock.module('preact/hooks', () => ({
 mock.module('../../../util/sanitize.js', () => ({ sanitizeHtml(html) { return html; } }));
 
 const { MobileConversationScreen, mobileFocusedSession, selectMobileDrawerSession } = await import('./MobileConversationScreen.jsx');
-const { setState } = await import('../../../data/store.js');
+const { setState, store } = await import('../../../data/store.js');
 const { ConversationScreen } = await import('../../ConversationScreen/ConversationScreen.jsx');
 const { Spine } = await import('../../Spine/Spine.jsx');
 
@@ -258,6 +258,30 @@ test('mobile session changes remount the transcript scroller', async () => {
   const source = await Bun.file(new URL('./MobileConversationScreen.jsx', import.meta.url)).text();
 
   expect(source).toMatch(/<MobileStream\s+key=\{session\.id\}/);
+});
+
+test('a delivered inbox event with a deleted destination cannot replace the active mobile session', () => {
+  const previous = store.get();
+  setState({
+    sessions: { open: { id: 'open', title: 'Still open', state: 'idle', messages: [], subagents: {} } },
+    activeSession: 'open',
+    isMobile: true,
+    sessionsLoaded: true,
+    inboxOpen: true,
+    events: [{ id: 'ev-stale', source: 'hook', title: 'Old delivery', state: 'routed', routed_to: 'deleted' }],
+  });
+
+  try {
+    const inbox = componentNode(MobileConversationScreen({}), 'MobileInboxView');
+    expect(inbox).toBeTruthy();
+
+    inbox.props.onOpenSession('deleted');
+
+    expect(store.get().activeSession).toBe('open');
+    expect(store.get().inboxOpen).toBe(true);
+  } finally {
+    setState(previous);
+  }
 });
 
 // Ideally this would render the screen and assert the handlers reached its

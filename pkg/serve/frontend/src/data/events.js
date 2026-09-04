@@ -12,7 +12,7 @@
 import { api } from './api.js';
 import { store, setState, visibleSessionIds } from './store.js';
 import { loadSessions } from './session-actions.js';
-import { setActiveSession } from './tile-actions.js';
+import { openSession } from './tile-actions.js';
 import { addToast, removeToast } from './notifications.js';
 import { modelCodename, projectKey, projectLabel, sessionTitle } from './util/format.js';
 
@@ -201,7 +201,7 @@ export async function routeEvent(id, sessionId) {
     const target = event?.routed_to || sessionId;
     if (target) {
       closeInbox();
-      setActiveSession(target);
+      openSession(target);
     }
     return event;
   } catch (e) {
@@ -224,7 +224,7 @@ export async function routeEventToNewSession(id, spec) {
     await loadSessions();
     if (event?.routed_to) {
       closeInbox();
-      setActiveSession(event.routed_to);
+      openSession(event.routed_to);
     }
     return event;
   } catch (e) {

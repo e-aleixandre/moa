@@ -7,6 +7,7 @@ import { afterEach, expect, test } from "bun:test";
 import { __resetEventAnnouncementsForTests, announceArrivals, dismissSource, eventCreateActionLabel, eventCreateSpec, inboxCards, inboxGroups, inboxPendingCount, inboxSig, isOpenEventCandidate, pendingReasonLabel, routeEvent } from "./events.js";
 import { getToasts, removeToast } from "./notifications.js";
 import { setState, store } from "./store.js";
+import { allSessionIds, createTile, initIds } from "./tileTree.js";
 
 const sessions = {
   a: { id: "a", title: "checkout bug", cwd: "/home/u/tienda", state: "idle", updated: 1000 },
@@ -234,6 +235,32 @@ test("new session action names the snapshot model and omits thinking when unknow
   expect(eventCreateActionLabel({}, { defaultModel: "anthropic/claude-opus-4-8" })).toBe("New session · Opus");
   expect(eventCreateSpec({ create_model: "terra", create_thinking: "low" })).toEqual({ model: "terra", thinking: "low" });
   expect(eventCreateSpec({})).toEqual({});
+});
+
+test("routing an event opens its destination in the focused desktop tile", async () => {
+  const tile = createTile();
+  initIds(tile);
+  const roster = [
+    { id: "a", title: "Current", cwd: "/home/u/tienda", state: "idle" },
+    { id: "b", title: "Destination", cwd: "/home/u/tienda", state: "idle" },
+  ];
+  setState({
+    sessions: Object.fromEntries(roster.map((session) => [session.id, { ...session, messages: [], subagents: {} }])),
+    tileTree: { ...tile, sessionId: "a" },
+    focusedTile: tile.id,
+    isMobile: false,
+    inboxOpen: true,
+    events: [event()],
+  });
+  globalThis.fetch = async (path) => {
+    if (path === "/api/sessions") return new Response(JSON.stringify(roster), { status: 200 });
+    return new Response(JSON.stringify(event({ state: "routed", routed_to: "b" })), { status: 200 });
+  };
+
+  await routeEvent("ev_1", "b");
+
+  expect(allSessionIds(store.get().tileTree)).toEqual(["b"]);
+  expect(store.get().inboxOpen).toBe(false);
 });
 
 test("a failed route keeps the row pending, the inbox open, and toasts the error", async () => {
