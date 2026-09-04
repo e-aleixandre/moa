@@ -164,14 +164,9 @@
   cursor: pointer;
   transition: background var(--duration) var(--ease);
 }
+.mconv-empty-recent:hover,
 .mconv-empty-recent:active {
   background: var(--surface0);
-}
-@media (hover: hover) {
-
-.mconv-empty-recent:hover{
-  background: var(--surface0);
-}
 }
 .mconv-empty-recent:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -243,14 +238,9 @@
   border: 0;
   color: var(--text);
 }
+.mconv-empty-browse:hover,
 .mconv-empty-browse:active {
   background: var(--surface1);
-}
-@media (hover: hover) {
-
-.mconv-empty-browse:hover{
-  background: var(--surface1);
-}
 }
 
 /* New — secondary, borrowing the Spine's dashed "new session" idiom. */
@@ -259,16 +249,10 @@
   border: 1px dashed var(--surface1);
   color: var(--overlay1);
 }
+.mconv-empty-new:hover,
 .mconv-empty-new:active {
   border-color: var(--mauve);
   color: var(--mauve);
-}
-@media (hover: hover) {
-
-.mconv-empty-new:hover{
-  border-color: var(--mauve);
-  color: var(--mauve);
-}
 }
 
 /* First-run (§2.4): no list — center vertically and promote New to primary. */
@@ -288,14 +272,9 @@
   color: var(--crust);
   font-weight: var(--weight-semibold);
 }
+.mconv-empty-new-primary:hover,
 .mconv-empty-new-primary:active {
   box-shadow: 0 0 16px color-mix(in srgb, var(--peach) 40%, transparent);
-}
-@media (hover: hover) {
-
-.mconv-empty-new-primary:hover{
-  box-shadow: 0 0 16px color-mix(in srgb, var(--peach) 40%, transparent);
-}
 }
 
 /* Global Settings sheet body (drawer footer → sheet handoff) — a labelled
