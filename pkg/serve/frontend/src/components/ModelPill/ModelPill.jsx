@@ -11,6 +11,7 @@ import "./ModelPill.css";
 export function ModelPill({
   model,
   level = "off",
+  thinkingPosition,
   variant = "bars",
   accent = "lavender",
   hot = false,
@@ -18,10 +19,14 @@ export function ModelPill({
   onClick,
   ...rest
 }) {
+  // Consumers that know the selected model pass its stable selector position.
+  // Keep the highest backend label usable for older/read-only consumers that
+  // only carry the effective effort.
+  const meterPosition = thinkingPosition || (level === "max" ? "xhigh" : level);
   // The highest effort always renders "hot" (peach) on the persistent pill meter, even when
   // the caller doesn't pass `hot` — the spec requires the pill to reflect xhigh
   // as hot everywhere (desktop and mobile). Astra calls that effort "max".
-  const isHot = hot || level === "xhigh" || level === "max";
+  const isHot = hot || meterPosition === "xhigh";
   // Read-only: the same pill as a plain span. Used inside a subagent, where the
   // model is the CHILD's and can't be changed from there — a disabled button
   // would promise an action that doesn't exist anywhere, rather than stating a
@@ -32,7 +37,7 @@ export function ModelPill({
         <span class="m-name" style={{ color: `var(--${accent})` }}>
           {model}
         </span>
-        <ThinkingMeter variant={variant} level={level} hot={isHot} label={`Thinking: ${level}`} />
+        <ThinkingMeter variant={variant} level={meterPosition} hot={isHot} label={`Thinking: ${level}`} />
       </span>
     );
   }
@@ -46,7 +51,7 @@ export function ModelPill({
       <span class="m-name" style={{ color: `var(--${accent})` }}>
         {model}
       </span>
-      <ThinkingMeter variant={variant} level={level} hot={isHot} label={`Thinking: ${level}`} />
+      <ThinkingMeter variant={variant} level={meterPosition} hot={isHot} label={`Thinking: ${level}`} />
     </button>
   );
 }

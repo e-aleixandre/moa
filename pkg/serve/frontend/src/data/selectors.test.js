@@ -110,6 +110,7 @@ test('thinkingOptionsFor: Astra labels the five persisted positions with backend
   for (const [position, effort] of [['off', 'low'], ['low', 'medium'], ['medium', 'high'], ['high', 'xhigh'], ['xhigh', 'max']]) {
     expect(thinkingPositionFor(effort, astra)).toBe(position);
   }
+  expect(thinkingOptionsFor(astra).find((option) => option.label === 'max')).toMatchObject({ value: 'xhigh', bars: 4 });
 });
 
 test('thinkingOptionsFor: models without backend efforts retain the standard labels', () => {
@@ -118,4 +119,5 @@ test('thinkingOptionsFor: models without backend efforts retain the standard lab
     ['off', 'off'], ['low', 'low'], ['medium', 'medium'], ['high', 'high'], ['xhigh', 'xhigh'],
   ]);
   expect(thinkingPositionFor('xhigh', terra)).toBe('xhigh');
+  expect(thinkingOptionsFor(terra).find((option) => option.label === 'xhigh')).toMatchObject({ value: 'xhigh', bars: 4 });
 });

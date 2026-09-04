@@ -17,7 +17,7 @@ import { Button, Kbd } from "../../primitives/index.js";
 import { updateSession } from "../../data/store.js";
 import { useStore } from "../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
-import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
+import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchSelectedModel, thinkingPositionFor } from "../../data/selectors.js";
 import { navigate } from "../../data/router.js";
 import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
@@ -332,6 +332,7 @@ export function ConversationScreen() {
                 modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
                 modelAccent={modelAccent(session.model)}
                 thinking={thinking}
+                thinkingPosition={thinkingPositionFor(thinking, specs.find((spec) => spec.id === selectedModel), session.provider)}
                 onModel={() => setModelOpen((v) => !v)}
                 modelOpen={modelOpen}
                 modelPopover={modelPopover}

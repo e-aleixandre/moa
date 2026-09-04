@@ -38,6 +38,7 @@ export function StatusStrip({
   modelName,
   modelAccent = "lavender",
   thinking = "off",
+  thinkingPosition = thinking,
   onModel,
   modelOpen,
   modelPopover,
@@ -121,6 +122,7 @@ export function StatusStrip({
             accent={modelAccent}
             variant="bars"
             level={thinking}
+            thinkingPosition={thinkingPosition}
             readOnly={!onModel}
             onClick={onModel}
             aria-haspopup={onModel ? "dialog" : undefined}

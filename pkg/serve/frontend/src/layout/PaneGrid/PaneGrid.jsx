@@ -25,7 +25,7 @@ import { getTileCount, updateSession } from "../../data/store.js";
 import { useStore } from "../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { openPersistedSubagent, openBashJob, configureSession, setSessionFast } from "../../data/session-actions.js";
-import { modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
+import { modelAccent, deriveModelSpecs, matchSelectedModel, thinkingPositionFor } from "../../data/selectors.js";
 import { shortModel, shortPath, sessionDisplayDotState, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
@@ -442,6 +442,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
             modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
             modelAccent={modelAccent(session.model)}
             thinking={thinking}
+            thinkingPosition={thinkingPositionFor(thinking, specs.find((spec) => spec.id === selectedModel), session.provider)}
             onModel={() => {
               setUsageOpen(false);
               setMcpOpen(false);
