@@ -114,13 +114,78 @@
   color: var(--overlay0);
 }
 
-/* ── the routing sheet ─────────────────────────────────────────────────── */
+/* ── the routing sheet ─────────────────────────────────────────────────────
 
-.inbox-sheet-lead {
+   One decision, one idiom. The sheet reads top to bottom as: what arrived (the
+   event's identity and payload, on the base surface so it is evidence rather
+   than another choice), then the destinations, each a 44px row of the SAME
+   shape under a mono section label — the drawer's grouping voice, which the
+   inbox list and the spine already speak.
+
+   The candidates keep the shipped SessionRow so a session still looks like a
+   session, but the card variant's own surface is dropped here: inside a panel
+   that already has a surface, a second filled card with its own border reads
+   as a foreign object pasted in. What is kept is what identifies a session —
+   state dot, title, age, live line. No colour identity is introduced: peach is
+   the owner and yellow/red are states that need someone, and the dot already
+   carries the state. */
+
+.inbox-sheet .sheet-body {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-4) var(--space-5) var(--space-5);
+}
+
+/* Narrower than the generic 600px sheet: this panel is a column of one-line
+   destinations, and stretched to the full modal width the rows turn into long
+   empty runs between a name and its age. */
+.inbox-sheet { max-width: 460px; }
+
+/* What arrived. Recessed on the base surface, so the top of the sheet is
+   evidence and everything under it is a choice. */
+.inbox-sheet-event {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--base);
+}
+
+.inbox-sheet-from {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-sheet-title {
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text);
+}
+
+.inbox-sheet-reason {
+  font-size: var(--text-sm);
+  color: var(--overlay0);
+}
+
+/* The payload's toggle is a row of this block, not a control floating between
+   sections: it sits on the block's own hairline, flush with its text column. */
+.inbox-sheet .evb-payload {
+  margin-top: var(--space-1);
+  border-top: 1px solid color-mix(in srgb, var(--surface0) 70%, transparent);
+}
+
+.inbox-sheet .evb-payload-toggle { min-height: 44px; }
+
+/* Section label — the drawer/spine's mono voice for "a group of things". */
+.inbox-sheet-sec {
+  padding: var(--space-4) var(--space-1) var(--space-2);
   font-family: var(--mono);
   font-size: var(--text-micro);
   letter-spacing: var(--tracking-wide);
@@ -128,26 +193,12 @@
   color: var(--overlay0);
 }
 
-.inbox-sheet-title {
-  font-family: var(--font);
-  font-size: var(--text-base);
-  letter-spacing: normal;
-  text-transform: none;
-  color: var(--text);
-}
-
-.inbox-sheet-reason {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--overlay0);
-}
-
-.inbox-sheet .evb-payload {
-  margin-bottom: var(--space-3);
-}
-
 .inbox-sheet-note {
-  padding: var(--space-2) 0 var(--space-3);
+  margin: 0;
+  padding: 0 var(--space-2) 0 calc(var(--space-2) + 8px + var(--space-2));
+  min-height: 44px;
+  display: flex;
+  align-items: center;
   font-size: var(--text-sm);
   color: var(--overlay0);
 }
@@ -157,14 +208,114 @@
   flex-direction: column;
 }
 
-.inbox-sheet-list .session-row { display: block; }
-.inbox-sheet-list .session-row-hit { width: 100%; min-height: 44px; }
-
-.inbox-sheet-list + .inbox-sheet-list {
-  margin-top: var(--space-3);
-  border-top: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
+/* The quiet footer: ignoring is separated by a hairline rather than by a third
+   section label, so the sheet ends instead of offering one more heading. */
+.inbox-sheet-foot {
+  margin-top: var(--space-4);
   padding-top: var(--space-2);
+  border-top: 1px solid color-mix(in srgb, var(--surface0) 70%, transparent);
 }
+
+/* SessionRow, stripped of the drawer card's surface: same content, this
+   panel's chrome. */
+.inbox-sheet-list .session-row.variant-card {
+  display: block;
+  min-width: 0;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.inbox-sheet-list .session-row.variant-card .session-row-hit {
+  width: 100%;
+  min-height: 44px;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--space-2);
+}
+
+.inbox-sheet-list .session-row.variant-card:hover,
+.inbox-sheet-list .session-row.variant-card:focus-within {
+  background: var(--surface0);
+}
+
+.inbox-sheet-list .session-row.variant-card .r1 {
+  font-weight: var(--weight-normal);
+  color: var(--subtext0);
+}
+
+.inbox-sheet-list .session-row.variant-card:hover .r1 { color: var(--text); }
+
+.inbox-sheet-list .session-row.variant-card .brief,
+.inbox-sheet-list .session-row.variant-card .path {
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+}
+
+/* The create action and its override are one decision on one row: the model is
+   named by the action itself, so "Change…" is the trailing verb of that row and
+   not a second, equal-weight item under it. */
+.inbox-sheet-pair {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* The create row's label starts on the session titles' text column (row
+   padding + dot + gap), so the destinations read as one column of names
+   instead of two indents. */
+.inbox-sheet-pair .inbox-sheet-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.inbox-sheet-item-mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  color: var(--overlay1);
+}
+
+.inbox-sheet-change {
+  flex: none;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--overlay1);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.inbox-sheet-change:hover,
+.inbox-sheet-change:focus-visible {
+  background: var(--surface0);
+  color: var(--text);
+  outline: none;
+}
+
+/* The model step's way back, in the same shape the ModelSelector's own
+   provider step uses to return to "All models". */
+.inbox-sheet-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+  min-height: 44px;
+  margin-bottom: var(--space-2);
+  padding: 0 var(--space-2) 0 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--overlay1);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.inbox-sheet-back:hover { color: var(--text); }
 
 .inbox-sheet-item {
   display: flex;
