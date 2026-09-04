@@ -204,7 +204,8 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 		}
 		if err := startRun(sctx, cmd.Text, func(ctx context.Context) ([]core.AgentMessage, error) {
 			if cmd.Custom != nil {
-				if cmd.Custom["source"] == "secret_batch" {
+				switch cmd.Custom["source"] {
+				case "secret_batch", "event":
 					return sctx.Agent.SendWithCustomAnnounced(ctx, cmd.Text, cmd.Custom)
 				}
 				return sctx.Agent.SendWithCustom(ctx, cmd.Text, cmd.Custom)

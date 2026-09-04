@@ -248,6 +248,9 @@ function toRawMessages(messages) {
         requested_model: msg.requested_model,
         model: msg.model,
         content: msg.content,
+        // The real server persists custom envelopes (event, subagent_parent…);
+        // dropping them here would render a specimen differently from prod.
+        ...(msg.custom ? { custom: msg.custom } : {}),
       });
       continue;
     }

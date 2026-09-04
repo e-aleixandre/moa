@@ -7,6 +7,7 @@ import {
   DelegationBlock,
   FileCard,
   CompactionCard,
+  EventBlock,
   HistoryHydrationTail,
   historyHydrationTailVisible,
 } from "../../components/index.js";
@@ -97,6 +98,10 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
       return <SecretBatchCard aliases={block.aliases} />;
     case "compaction":
       return <CompactionCard summary={block.summary} tokensBefore={block.tokensBefore} timestamp={block.timestamp} readFiles={block.readFiles} modifiedFiles={block.modifiedFiles} />;
+    // wake-on-event: an event delivered into this conversation gets its own
+    // block — it is not the owner's turn, so it is never a waypoint.
+    case "event":
+      return <EventBlock source={block.source} title={block.title} body={block.body} time={block.time} steer={block.steer} autorun={block.autorun} />;
     case "waypoint":
       return (
         <UserWaypoint

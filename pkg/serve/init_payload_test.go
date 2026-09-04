@@ -592,6 +592,26 @@ func TestInitProjectionStillDropsUnrelatedInternalCustomKeys(t *testing.T) {
 	}
 }
 
+func TestInitProjectionKeepsEventEnvelope(t *testing.T) {
+	original := core.AgentMessage{Message: core.Message{
+		Role: "user", MsgID: "ev-msg",
+		Content: []core.Content{core.TextContent(`{"ok":true}`)},
+	}, Custom: map[string]any{
+		"source": "event", "id": "ev_1", "source_name": "sentry-tienda",
+		"title": "Checkout 500s", "autorun": false, "steer": true,
+		"internal_secret": "nope",
+	}}
+	projected, _ := sanitizeHistoryMessage(original)
+	if projected.Custom["source"] != "event" || projected.Custom["id"] != "ev_1" ||
+		projected.Custom["source_name"] != "sentry-tienda" || projected.Custom["title"] != "Checkout 500s" ||
+		projected.Custom["autorun"] != false || projected.Custom["steer"] != true {
+		t.Fatalf("event custom = %#v", projected.Custom)
+	}
+	if _, leaked := projected.Custom["internal_secret"]; leaked {
+		t.Fatalf("internal key leaked: %#v", projected.Custom)
+	}
+}
+
 // TestBuildInitData_OmitsOutcomesWhoseLaunchIsNotSent covers the report behind
 // this filter: a long-running session showed ~50 subagent cards in one block at
 // the end of the transcript, hours apart from each other. The cap is applied to

@@ -307,3 +307,19 @@
     transition: none;
   }
 }
+
+/* wake-on-event: the inbox door, floating at the same height as the title chip
+   at the right edge of the screen. It is chrome over the transcript, like the
+   chip, so opening it moves nothing: the conversation keeps its full height
+   whether or not anything is waiting. The chip yields the 44px the door
+   occupies so a long session title cannot run under it. */
+.mconv-inbox-door {
+  position: absolute;
+  top: calc(6px + env(safe-area-inset-top));
+  right: var(--space-1);
+  z-index: calc(var(--z-sheet) - 1);
+}
+
+.mconv:has(.mconv-inbox-door) .mtchip {
+  max-width: calc(80% - 44px);
+}

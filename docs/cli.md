@@ -74,6 +74,33 @@ moa serve [--host 127.0.0.1] [--port 8080] [--model sonnet] [--token <secret>] [
 
 See [Web UI](./serve.md) for details.
 
+## Hooks subcommand
+
+```bash
+moa hooks add <source> --project DIR [--when-none inbox|create] [--when-many inbox|latest] [--model M --thinking T --yolo] [--autorun]
+moa hooks add <source> --session ID
+moa hooks add <source> --inbox
+moa hooks list [--show-secrets]
+moa hooks rm <source>
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--project` | | Target a project directory (`{project: DIR}`). Mutually exclusive with `--session` and `--inbox` |
+| `--session` | | Target a live session id. Mutually exclusive with `--project` and `--inbox` |
+| `--inbox` | false | Leave events in the inbox. Mutually exclusive with `--project` and `--session` |
+| `--when-none` | `inbox` | When the project has no live session: `inbox` or `create` |
+| `--when-many` | `inbox` | When the project has several live sessions: `inbox` or `latest` |
+| `--model` | | Model for `when-none=create` |
+| `--thinking` | | Thinking level for `when-none=create` |
+| `--yolo` | false | Create sessions in yolo permission mode |
+| `--autorun` | false | Start a turn on delivery to an idle session. Off by default: the event is recorded without running |
+| `--show-secrets` | false | `list` only: print the full `/hooks/<source>/<secret>` path |
+
+`add` generates a 32-byte url-safe secret, writes it to the global config, and
+prints the hook path on its own line, preceded by `Hook URL path (contains the
+secret; store it in the provider now):`. See [Event hooks](./automation.md#event-hooks).
+
 ## Model aliases
 
 | Alias | Resolves to |

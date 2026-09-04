@@ -262,3 +262,9 @@
 .spine .spine-foot > .icon-button {
   margin-left: auto;
 }
+
+/* wake-on-event: the inbox occupies the same column the sessions do, so the
+   swap changes what the list is about without moving the header or the foot. */
+.spine .spine-inbox .inbox {
+  padding: var(--space-2) var(--space-4) var(--space-6);
+}

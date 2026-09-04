@@ -33,6 +33,7 @@ func printUsage() {
 	out := flag.CommandLine.Output()
 	_, _ = fmt.Fprint(out, "Usage: moa [flags]\n       moa <command> [flags]\n\nCommands:\n"+
 		"  serve      Run the web UI server\n"+
+		"  hooks      Manage inbound event webhooks (add, list, rm)\n"+
 		"  update     Update moa to the latest release (--check to only report)\n"+
 		"  version    Print version, commit, and build date\n\nFlags:\n")
 	flag.PrintDefaults()
@@ -44,6 +45,9 @@ func main() {
 		switch os.Args[1] {
 		case "serve":
 			runServe(os.Args[2:])
+			return
+		case "hooks":
+			runHooks(os.Args[2:])
 			return
 		case "update":
 			runUpdate(os.Args[2:])
