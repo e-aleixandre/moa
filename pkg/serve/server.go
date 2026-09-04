@@ -367,21 +367,23 @@ func csrfMiddleware(next http.Handler) http.Handler {
 
 func handleListModels() http.HandlerFunc {
 	type modelInfo struct {
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		Provider string `json:"provider"`
-		Alias    string `json:"alias,omitempty"`
-		MaxInput int    `json:"max_input,omitempty"`
+		ID               string   `json:"id"`
+		Name             string   `json:"name"`
+		Provider         string   `json:"provider"`
+		Alias            string   `json:"alias,omitempty"`
+		MaxInput         int      `json:"max_input,omitempty"`
+		ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 	}
 	entries := core.ListModels()
 	models := make([]modelInfo, len(entries))
 	for i, e := range entries {
 		models[i] = modelInfo{
-			ID:       e.Model.ID,
-			Name:     e.Model.Name,
-			Provider: e.Model.Provider,
-			Alias:    e.Alias,
-			MaxInput: e.Model.MaxInput,
+			ID:               e.Model.ID,
+			Name:             e.Model.Name,
+			Provider:         e.Model.Provider,
+			Alias:            e.Alias,
+			MaxInput:         e.Model.MaxInput,
+			ReasoningEfforts: core.ReasoningEffortsForModel(e.Model),
 		}
 	}
 	return func(w http.ResponseWriter, _ *http.Request) {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Check, ChevronLeft, ChevronRight, Search, Star, X } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
-import { clampThinkingLevel, thinkingLevelsFor } from "../../data/selectors.js";
+import { thinkingOptionsFor, thinkingPositionFor } from "../../data/selectors.js";
 import { Segmented } from "../Segmented/Segmented.jsx";
 import {
   groupByProvider,
@@ -22,13 +22,13 @@ const THINKING_OPTIONS = [
 
 const PINNED_COLLAPSE_THRESHOLD = 4;
 
-function ThinkingStepper({ value, onChange, levels = THINKING_OPTIONS.map((option) => option.value) }) {
-  const options = THINKING_OPTIONS.filter((option) => levels.includes(option.value));
-  const hot = value === "xhigh";
+function ThinkingStepper({ value, onChange, options = THINKING_OPTIONS }) {
+  const selected = options.find((option) => option.value === value) || options[0];
+  const hot = selected?.value === "xhigh";
   return (
     <div class="think-block">
       <div class="think-lbl" id="model-selector-thinking-label">
-        Thinking <b class={hot ? "hot" : ""}>{value.toUpperCase()}</b>
+        Thinking <b class={hot ? "hot" : ""}>{selected?.label.toUpperCase()}</b>
       </div>
       <Segmented
         options={options}
@@ -359,9 +359,9 @@ export function ModelSelector({
     <div class={`model-selector${embedded ? " model-selector--embedded" : ""}${modelOnly ? " model-selector--model-only" : ""}`} {...rest}>
       {!embedded && !modelOnly && <div class="sel-head">Model &amp; thinking</div>}
       {!modelOnly && <ThinkingStepper
-        value={clampThinkingLevel(thinking, thinkingLevelsFor(selectedSpec, sessionProvider))}
+        value={thinkingPositionFor(thinking, selectedSpec, sessionProvider)}
         onChange={onThinkingChange}
-        levels={thinkingLevelsFor(selectedSpec, sessionProvider)}
+        options={thinkingOptionsFor(selectedSpec, sessionProvider)}
       />}
       {!modelOnly && <FastRow value={fast} supported={fastSupported} note={fastNote} onChange={onFastChange} />}
       {!modelOnly && !!sessionModel && (

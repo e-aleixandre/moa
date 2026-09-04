@@ -18,10 +18,10 @@ export function ModelPill({
   onClick,
   ...rest
 }) {
-  // xhigh always renders "hot" (peach) on the persistent pill meter, even when
+  // The highest effort always renders "hot" (peach) on the persistent pill meter, even when
   // the caller doesn't pass `hot` — the spec requires the pill to reflect xhigh
-  // as hot everywhere (desktop and mobile).
-  const isHot = hot || level === "xhigh";
+  // as hot everywhere (desktop and mobile). Astra calls that effort "max".
+  const isHot = hot || level === "xhigh" || level === "max";
   // Read-only: the same pill as a plain span. Used inside a subagent, where the
   // model is the CHILD's and can't be changed from there — a disabled button
   // would promise an action that doesn't exist anywhere, rather than stating a

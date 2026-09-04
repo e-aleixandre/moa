@@ -2,11 +2,11 @@ import "./ThinkingMeter.css";
 
 // ThinkingMeter — a single component with 3 switchable variants (bars |
 // dial | glyph) so we can compare which one we like before settling on one.
-const LEVELS = ["off", "low", "medium", "high", "xhigh"];
+const LEVELS = ["off", "low", "medium", "high", "xhigh", "max"];
 
 function levelToFilled(level) {
   const idx = LEVELS.indexOf(level);
-  return idx < 0 ? 0 : idx;
+  return idx < 0 ? 0 : Math.min(idx, 4);
 }
 
 function Bars({ filled, hot, a11y }) {

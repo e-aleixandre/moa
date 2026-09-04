@@ -32,6 +32,30 @@ func newTestServer(t *testing.T) (*httptest.Server, *Manager, context.CancelFunc
 	return newTestServerWithRoot(t, "/tmp")
 }
 
+func TestListModelsIncludesDeclaredReasoningEfforts(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/models", nil)
+	res := httptest.NewRecorder()
+	handleListModels().ServeHTTP(res, req)
+
+	var models []struct {
+		ID               string   `json:"id"`
+		ReasoningEfforts []string `json:"reasoning_efforts"`
+	}
+	if err := json.NewDecoder(res.Result().Body).Decode(&models); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range models {
+		if model.ID == "gpt-6-astra" {
+			want := []string{"low", "medium", "high", "xhigh", "max"}
+			if strings.Join(model.ReasoningEfforts, ",") != strings.Join(want, ",") {
+				t.Fatalf("Astra reasoning_efforts = %v, want %v", model.ReasoningEfforts, want)
+			}
+			return
+		}
+	}
+	t.Fatal("GPT-6 Astra absent from /api/models")
+}
+
 func TestReadSessionCursorRejectsStaleNamespaceAndEmitsRosterFields(t *testing.T) {
 	ts, mgr, cancel := newTestServer(t)
 	defer cancel()
