@@ -17,6 +17,7 @@
   if (typeof window === 'undefined' || window.parent === window) return;
 
   var enabled = false;
+  var shellOrigin = (document.currentScript && document.currentScript.getAttribute('data-moa-origin')) || '*';
   var overlay = null;
   var pinned = null;
   var hovered = null;
@@ -219,7 +220,7 @@
 
   function send(msg) {
     try {
-      window.parent.postMessage(msg, '*');
+      window.parent.postMessage(msg, shellOrigin);
     } catch (e) { /* the shell went away */ }
   }
 
@@ -249,6 +250,7 @@
   }
 
   window.addEventListener('message', function (event) {
+    if (shellOrigin !== '*' && event.origin !== shellOrigin) return;
     var data = event.data;
     if (!data || !data.type) return;
     if (data.type === 'moa-inspect') {

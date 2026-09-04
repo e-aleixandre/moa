@@ -28,6 +28,8 @@ func runServe(args []string) {
 	host := fs.String("host", "127.0.0.1", "Bind address (use 0.0.0.0 for remote access)")
 	modelFlag := fs.String("model", "sonnet", "Default model for new sessions")
 	allowedHosts := fs.String("allowed-hosts", "", "Comma-separated extra Host names accepted by the anti DNS-rebinding check (localhost and IP literals are always allowed; e.g. a Tailscale MagicDNS name)")
+	previewPort := fs.Int("preview-port", 0, "Dedicated local port for the Live Preview proxy (0 disables it)")
+	previewPublicURL := fs.String("preview-public-url", "", "Public HTTPS URL of the Live Preview proxy")
 	tokenFlag := fs.String("token", "", "Shared secret for opt-in auth. When set, requests must present a valid session cookie or ?token=<secret> in the URL (which sets the cookie). Overrides MOA_SERVE_TOKEN.")
 	automationTokenFlag := fs.String("automation-token", "", "Shared secret enabling the Automation API (POST /api/automation/runs), presented as 'Authorization: Bearer <secret>'. Separate from --token; without it the automation routes do not exist. Overrides MOA_AUTOMATION_TOKEN.")
 	_ = fs.Parse(args)
@@ -122,11 +124,20 @@ func runServe(args []string) {
 
 	// serve speaks plain HTTP (the security boundary is Tailscale), so the auth
 	// cookie must not be Secure or the browser would drop it over http://.
+	var preview *serve.PreviewProxy
+	if *previewPort != 0 {
+		if *previewPublicURL == "" {
+			fmt.Fprintln(os.Stderr, "error: --preview-public-url is required with --preview-port")
+			os.Exit(2)
+		}
+		preview = serve.NewPreviewProxy(*previewPublicURL, *port, *previewPort)
+	}
 	srv := serve.NewServer(mgr,
 		serve.WithAllowedHosts(splitCSV(*allowedHosts)),
 		serve.WithAuthToken(token, false),
 		serve.WithAutomationToken(automationToken),
 		serve.WithDeviceAuthentication(),
+		serve.WithPreviewProxy(preview),
 		serve.WithRealtimeClientSecretBroker(func() (string, bool) {
 			// Priority:
 			//  1) dedicated OpenAI API key ("openai-transcribe" slot, shared
@@ -162,11 +173,24 @@ func runServe(args []string) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
+	var previewServer *http.Server
+	if preview != nil {
+		previewServer = &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", *previewPort), Handler: preview.ProtectedHandler(splitCSV(*allowedHosts)), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
+		go func() {
+			if err := previewServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				fmt.Fprintf(os.Stderr, "preview proxy: %v\n", err)
+			}
+		}()
+		fmt.Printf("Live Preview proxy listening on http://127.0.0.1:%d\n", *previewPort)
+	}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
 		defer c()
 		_ = httpServer.Shutdown(shutdownCtx)
+		if previewServer != nil {
+			_ = previewServer.Shutdown(shutdownCtx)
+		}
 	}()
 
 	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {

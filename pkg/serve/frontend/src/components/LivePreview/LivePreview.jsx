@@ -103,6 +103,8 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [previewPublicURL, setPreviewPublicURL] = useState("");
+  const [inspectorReady, setInspectorReady] = useState(true);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [view, setView] = useState(IDENTITY);
   const [notes, setNotes] = useState([]);
@@ -137,6 +139,11 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     setEditingURL(false);
   }, [open, sessionId]);
 
+  useEffect(() => {
+    if (!open) return;
+    fetch("/api/preview/target").then((r) => r.json()).then((v) => setPreviewPublicURL(v.enabled ? v.public_url || "" : "")).catch(() => setPreviewPublicURL(""));
+  }, [open]);
+
   // Measure the stage so the scaled iframe can be laid out in real pixels.
   useLayoutEffect(() => {
     if (!open) return undefined;
@@ -155,7 +162,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
 
   // The inspector lives in the previewed app; the only channel is postMessage.
   const post = (msg) => {
-    iframeRef.current?.contentWindow?.postMessage(msg, "*");
+    iframeRef.current?.contentWindow?.postMessage(msg, previewPublicURL || "*");
   };
   const postInspect = (enabled) => post({ type: "moa-inspect", enabled });
 
@@ -187,12 +194,20 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
         requestAnimationFrame(() => document.querySelector("[data-preview-trigger='true']")?.focus());
       }
       if (data.type === "moa-ready") {
+        setInspectorReady(true);
         return;
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!committedURL) return undefined;
+    setInspectorReady(false);
+    const timer = setTimeout(() => setInspectorReady((ready) => ready), 3000);
+    return () => clearTimeout(timer);
+  }, [committedURL, reloadNonce]);
 
   // iOS Safari pinch guard. A pinch that has to
   // cross the iframe boundary is split between two touch-active documents and
@@ -229,13 +244,20 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
 
   if (!open) return null;
 
-  const commitURL = () => {
+  const commitURL = async () => {
     const next = normalizeURL(draftURL);
     setDraftURL(next);
     setEditingURL(false);
     if (!next) return;
     if (next === committedURL) return;
-    setCommittedURL(next);
+    let frameURL = next;
+    if (previewPublicURL) {
+      try {
+        const response = await fetch("/api/preview/target", { method: "PUT", headers: { "Content-Type": "application/json", "X-Moa-Request": "1" }, body: JSON.stringify({ url: next }) });
+        if (response.ok) frameURL = previewPublicURL;
+      } catch { /* direct preview remains available */ }
+    }
+    setCommittedURL(frameURL);
     setSelected(null);
     setView(IDENTITY);
     savePreviewURL(sessionId, next);
@@ -324,6 +346,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           <X size={15} />
         </button>
       </div>
+      {!inspectorReady && <div class="live-preview-inspector-warning">Inspector did not connect. Navigate the app directly, or add the inspector script to enable touch inspection and gestures.</div>}
 
       {/* The live border: the stage's own frame carries the identity color of
           the tool in flight and breathes while it runs, amber and still while

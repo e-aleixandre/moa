@@ -44,6 +44,7 @@ type serverOptions struct {
 	deviceAuth      bool
 	realtimeKey     RealtimeAPIKeyFunc
 	realtimeHTTP    *http.Client
+	preview         *PreviewProxy
 }
 
 // RealtimeAPIKeyFunc returns only a normal OpenAI API key. ok must be false
@@ -94,6 +95,10 @@ func WithDeviceStorePath(path string) ServerOption {
 // tests and other embedders opt in explicitly.
 func WithDeviceAuthentication() ServerOption {
 	return func(o *serverOptions) { o.deviceAuth = true }
+}
+
+func WithPreviewProxy(proxy *PreviewProxy) ServerOption {
+	return func(o *serverOptions) { o.preview = proxy }
 }
 
 // NewServer returns an http.Handler wired to the given manager.
@@ -162,6 +167,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
+	mux.HandleFunc("GET /api/preview/target", handlePreviewTarget(o.preview))
+	mux.HandleFunc("PUT /api/preview/target", handlePreviewTarget(o.preview))
 	mux.HandleFunc("GET /api/usage", handleUsage(manager))
 	mux.HandleFunc("POST /api/transcribe", handleTranscribe(manager))
 	mux.HandleFunc("GET /api/push/vapid-public-key", handlePushVAPIDKey(manager))
