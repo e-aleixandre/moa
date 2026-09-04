@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { createPortal } from "preact/compat";
 import { ChevronDown } from "lucide-preact";
 import { api } from "../../data/api.js";
@@ -23,14 +23,27 @@ function CompactModelPicker({ choices, selected, onSelect }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef(null);
   const pickerRef = useRef(null);
+  const triggerBoundsRef = useRef(null);
   const [position, setPosition] = useState(null);
   const selectedChoice = choices.find((choice) => choice.spec === selected);
   const close = () => { setOpen(false); requestAnimationFrame(() => triggerRef.current?.focus()); };
   const show = () => {
     const rect = triggerRef.current?.getBoundingClientRect();
-    if (rect) setPosition({ left: Math.max(16, Math.min(rect.left, window.innerWidth - 376)), top: Math.max(16, Math.min(rect.bottom + 8, window.innerHeight - 400)) });
+    triggerBoundsRef.current = rect || null;
+    if (rect) setPosition({ left: Math.max(16, Math.min(rect.left, window.innerWidth - 376)), top: rect.bottom + 8 });
     setOpen(true);
   };
+  useLayoutEffect(() => {
+    if (!open || !triggerBoundsRef.current || window.innerWidth <= 600) return undefined;
+    const rect = triggerBoundsRef.current;
+    const height = pickerRef.current?.offsetHeight || 0;
+    const below = rect.bottom + 8;
+    setPosition({
+      left: Math.max(16, Math.min(rect.left, window.innerWidth - 376)),
+      top: below + height <= window.innerHeight - 16 ? below : Math.max(16, rect.top - 8 - height),
+    });
+    return undefined;
+  }, [open]);
   useEffect(() => {
     if (!open) return undefined;
     const frame = requestAnimationFrame(() => pickerRef.current?.querySelector("input")?.focus());

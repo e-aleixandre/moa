@@ -104,7 +104,7 @@ function PinButton({ model, pinned, onToggle }) {
   );
 }
 
-function ModelChip({ model, selected, pinned, onSelect, onTogglePin }) {
+function ModelChip({ model, selected, pinned, onSelect, onTogglePin, pinnable = true }) {
   const on = model.id === selected;
   return (
     <div class={`mchip-wrap${on ? " on" : ""}`}>
@@ -120,12 +120,12 @@ function ModelChip({ model, selected, pinned, onSelect, onTogglePin }) {
         </span>
         {model.sub && <span class="cv">{model.sub}</span>}
       </button>
-      <PinButton model={model} pinned={pinned} onToggle={onTogglePin} />
+      {pinnable && <PinButton model={model} pinned={pinned} onToggle={onTogglePin} />}
     </div>
   );
 }
 
-function ModelGrid({ models, selected, pinnedIDs, onSelect, onTogglePin }) {
+function ModelGrid({ models, selected, pinnedIDs, onSelect, onTogglePin, pinnable = true }) {
   return (
     <div class="chip-grid">
       {models.map((model) => (
@@ -136,13 +136,14 @@ function ModelGrid({ models, selected, pinnedIDs, onSelect, onTogglePin }) {
           pinned={pinnedIDs.includes(model.catalogId)}
           onSelect={onSelect}
           onTogglePin={onTogglePin}
+          pinnable={pinnable}
         />
       ))}
     </div>
   );
 }
 
-function SearchResults({ models, selected, pinnedIDs, onSelect, onTogglePin }) {
+function SearchResults({ models, selected, pinnedIDs, onSelect, onTogglePin, pinnable = true }) {
   return (
     <div class="model-results">
       {models.map((model) => {
@@ -164,7 +165,7 @@ function SearchResults({ models, selected, pinnedIDs, onSelect, onTogglePin }) {
               <span class="model-provider-badge">{model.provider}</span>
               {on && <Check size={12} aria-hidden="true" />}
             </button>
-            <PinButton model={model} pinned={pinned} onToggle={onTogglePin} />
+            {pinnable && <PinButton model={model} pinned={pinned} onToggle={onTogglePin} />}
           </div>
         );
       })}
@@ -400,6 +401,7 @@ export function ModelSelector({
               pinnedIDs={pinnedIDs}
               onSelect={onSelect}
               onTogglePin={updatePin}
+              pinnable={!modelOnly}
             />
           ) : (
             <div class="model-empty">No models match “{query.trim()}”</div>
@@ -419,6 +421,7 @@ export function ModelSelector({
             pinnedIDs={pinnedIDs}
             onSelect={onSelect}
             onTogglePin={updatePin}
+            pinnable={!modelOnly}
           />
         </div>
       ) : (
@@ -432,6 +435,7 @@ export function ModelSelector({
                 pinnedIDs={pinnedIDs}
                 onSelect={onSelect}
                 onTogglePin={updatePin}
+                pinnable={!modelOnly}
               />
               {pinned.length > PINNED_COLLAPSE_THRESHOLD && (
                 <button
