@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { MousePointerClick, X, Minus, Plus, MoreVertical, ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from "lucide-preact";
+import { MousePointerClick, X, Minus, Plus, MoreVertical, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Smartphone, Tablet, Monitor, Scan, PencilLine } from "lucide-preact";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { Segmented } from "../Segmented/Segmented.jsx";
 import { AssistantDocument } from "../AssistantDocument/AssistantDocument.jsx";
@@ -35,12 +35,27 @@ import "./LivePreview.css";
 // then its row is gone for good — changing it is a rare action, so it lives in
 // the overflow menu with the reload.
 
+// Each width is an icon first (the device it stands for) and a number second:
+// the number is shown only where the bar has room for it and always lives in
+// the accessible name, so "768" is still what a screen reader or a tooltip says.
+// Glyph sizes follow the device: phone < tablet < desktop, so the three
+// rectangles read apart at a glance even without their numbers.
 const WIDTHS = [
-  { value: "390", label: "390" },
-  { value: "768", label: "768" },
-  { value: "1280", label: "1280" },
-  { value: "fit", label: "Fit" },
+  { value: "390", label: "390", icon: Smartphone, size: 14, ariaLabel: "Phone · 390px", title: "Phone · 390px" },
+  { value: "768", label: "768", icon: Tablet, size: 17, ariaLabel: "Tablet · 768px", title: "Tablet · 768px" },
+  { value: "1280", label: "1280", icon: Monitor, size: 18, ariaLabel: "Desktop · 1280px", title: "Desktop · 1280px" },
+  { value: "fit", label: "Fit", icon: Scan, size: 16, ariaLabel: "Fit to pane", title: "Fit to pane" },
 ];
+
+function renderWidth(opt) {
+  const Icon = opt.icon;
+  return (
+    <>
+      <Icon size={opt.size} aria-hidden="true" />
+      <span class="live-preview-width-label" aria-hidden="true">{opt.label}</span>
+    </>
+  );
+}
 
 const urlKey = (sessionId) => `moa-preview-url:${sessionId}`;
 
@@ -339,22 +354,26 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
             setWidth(next);
             setView(IDENTITY);
           }}
+          renderOption={renderWidth}
           aria-label="Viewport width"
         />
-        <button
-          type="button"
-          class={`live-preview-action${inspect ? " is-on" : ""}`}
-          ref={inspectButtonRef}
-          onClick={toggleInspect}
-          aria-pressed={inspect}
-          title="Inspect — tap an element in the app"
-        >
-          <MousePointerClick size={15} />
-          <span class="live-preview-action-label">Inspect</span>
-        </button>
-        <button type="button" class="live-preview-action" onClick={onClose} title="Close preview">
-          <X size={15} />
-        </button>
+        <div class="live-preview-bar-end">
+          <button
+            type="button"
+            class={`live-preview-action${inspect ? " is-on" : ""}`}
+            ref={inspectButtonRef}
+            onClick={toggleInspect}
+            aria-pressed={inspect}
+            aria-label="Inspect"
+            title="Inspect — tap an element in the app"
+          >
+            <MousePointerClick size={16} />
+            <span class="live-preview-action-label">Inspect</span>
+          </button>
+          <button type="button" class="live-preview-action" onClick={onClose} aria-label="Close preview" title="Close preview">
+            <X size={16} />
+          </button>
+        </div>
       </div>
       {!inspectorReady && <div class="live-preview-inspector-warning">Inspector did not connect. Navigate the app directly, or add the inspector script to enable touch inspection and gestures.</div>}
       {previewError && <div class="live-preview-proxy-error" role="alert">{previewError}</div>}
@@ -465,10 +484,12 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
             type="button"
             class="live-preview-composer-handle"
             onClick={() => setComposerOpen(true)}
-            aria-label="Open message composer"
-            title="Message the agent"
+            title="Open the message composer"
           >
-            <span aria-hidden="true" />
+            <span class="live-preview-composer-handle-pill">
+              <PencilLine size={14} aria-hidden="true" />
+              Write to Moa
+            </span>
           </button>
         )}
         {!showSetup && (

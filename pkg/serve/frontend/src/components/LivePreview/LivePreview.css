@@ -60,18 +60,67 @@
 }
 
 /* ONE row, and it is only controls: the URL row is gone for good, so the stage
-   starts ~40px higher than it used to. */
+   starts ~40px higher than it used to.
+
+   Three groups, left to right: the rare actions (⋮), the widths, and the
+   modes (Inspect, close). Widths are icons — the device each one stands for —
+   with the number next to the icon only where the bar is wide enough for it;
+   the number always stays in the accessible name and in the tooltip. Widths
+   sit in a sunken segment; Inspect and close are outlined buttons, so a mode
+   toggle never reads as a fifth width. */
 .live-preview-bar {
   flex: none;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   touch-action: none;
 }
+.live-preview-bar-end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
 .live-preview-widths {
-  flex: 1 1 150px;
+  flex: 0 1 auto;
   min-width: 0;
+}
+.live-preview-widths.segmented {
+  padding: 3px;
+  gap: 2px;
+  background: var(--mantle);
+}
+.live-preview-widths.segmented .segmented-item {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 36px;
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+  letter-spacing: normal;
+  color: var(--overlay1);
+}
+.live-preview-widths.segmented .segmented-item svg {
+  flex: none;
+}
+.live-preview-width-label {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+.live-preview-widths.segmented .segmented-item.on {
+  color: var(--mauve);
+  background: color-mix(in srgb, var(--mauve) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mauve) 40%, transparent);
+}
+@media (hover: hover) {
+  .live-preview-widths.segmented .segmented-item:hover {
+    color: var(--text);
+  }
 }
 
 .live-preview-action {
@@ -97,54 +146,55 @@
   border-color: var(--peach);
   color: var(--peach);
 }
+.live-preview-action.is-on:hover {
+  border-color: var(--mauve);
+  color: var(--crust);
 }
+}
+/* A mode is louder than a selection: solid, so Inspect never reads as a
+   fifth width. */
 .live-preview-action.is-on {
   border-color: var(--mauve);
-  color: var(--mauve);
-  background: color-mix(in srgb, var(--mauve) 14%, transparent);
+  color: var(--crust);
+  background: var(--mauve);
 }
 .live-preview-action:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
 
-.live-preview-widths.segmented .segmented-item {
-  min-width: 0;
-  padding: var(--space-1) var(--space-2);
-  white-space: nowrap;
-}
-
 /* A pane is its own density. Viewport widths are the preview's essential
-   control, so keep all four and compact peripheral controls instead. */
+   control, so all four ALWAYS stay: first the numbers go (the icons and their
+   tooltips carry the meaning), then the Inspect word, then the padding. */
+@container (max-width: 560px) {
+  .live-preview-width-label { display: none; }
+  .live-preview-widths.segmented .segmented-item { min-width: 40px; }
+}
 @container (max-width: 430px) {
   .live-preview-action-label { display: none; }
-  .live-preview-action { min-width: 32px; padding: 0 var(--space-2); }
+  .live-preview-action { min-width: 34px; padding: 0 var(--space-2); }
 }
 @container (max-width: 330px) {
   .live-preview-bar { gap: var(--space-1); }
+  .live-preview-bar-end { gap: var(--space-1); }
   .live-preview-widths.segmented { padding: 2px; gap: 1px; }
   .live-preview-widths.segmented .segmented-item {
-    padding: 3px;
-    letter-spacing: normal;
+    min-width: 32px;
+    padding: 0 var(--space-1);
   }
 }
 
 @media (max-width: 768px) {
   .live-preview-action-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+    display: none;
   }
   .live-preview-action {
     min-width: 44px;
     min-height: 44px;
     padding: 0 var(--space-2);
   }
-  .live-preview-widths .segmented-item {
-    min-height: 34px;
+  .live-preview-widths.segmented .segmented-item {
+    min-height: 38px;
   }
   .live-preview-inspect-close,
   .live-preview-voice {
@@ -283,36 +333,58 @@
     inset 0 0 16px -6px var(--yellow);
 }
 
-/* The handle paints as a tiny bottom pill, but its button remains a full 44px
-   target. It sits above the touch relay only in its own small hit area, so the
-   rest of the preview continues to receive its tap, scroll, and pinch events. */
+/* The handle is the way to talk to Moa while looking at the app. It paints as
+   a small labelled pill at the bottom edge — an invitation, not a scrollbar —
+   and its button stays a full 44px target around it. It sits above the touch
+   relay only in its own hit area, so the rest of the preview continues to
+   receive its tap, scroll, and pinch events. */
 .live-preview-composer-handle {
   position: absolute;
   left: 50%;
   bottom: 0;
   z-index: 5;
-  width: 44px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 44px;
   height: 44px;
-  padding: 0;
+  padding: 0 0 max(6px, env(safe-area-inset-bottom));
   border: 0;
   background: transparent;
+  color: var(--text);
   cursor: pointer;
   transform: translateX(-50%);
   touch-action: manipulation;
+  font-family: var(--font);
 }
-.live-preview-composer-handle span {
-  position: absolute;
-  right: 8px;
-  bottom: 6px;
-  left: 8px;
-  height: 4px;
+.live-preview-composer-handle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 var(--space-3) 0 10px;
+  border: 1px solid color-mix(in srgb, var(--mauve) 45%, var(--surface2));
   border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--subtext0) 75%, transparent);
-  box-shadow: 0 1px 5px rgb(0 0 0 / 30%);
+  background: color-mix(in srgb, var(--mantle) 92%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px -8px rgb(0 0 0 / 55%), 0 1px 4px -2px rgb(0 0 0 / 40%);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  transition: border-color var(--duration) var(--ease), color var(--duration) var(--ease), background var(--duration) var(--ease);
+}
+.live-preview-composer-handle-pill svg {
+  flex: none;
+  color: var(--mauve);
 }
 .live-preview-composer-handle:focus-visible {
+  outline: none;
+}
+.live-preview-composer-handle:focus-visible .live-preview-composer-handle-pill {
   outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: -5px;
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* The real conversation Composer is deliberately embedded unchanged. The
@@ -359,13 +431,13 @@
   outline-offset: var(--focus-ring-offset);
 }
 @media (hover: hover) {
-  .live-preview-composer-handle:hover span,
   .live-preview-composer-close:hover {
     color: var(--mauve);
     background: var(--surface0);
   }
-  .live-preview-composer-handle:hover span {
-    background: var(--mauve);
+  .live-preview-composer-handle:hover .live-preview-composer-handle-pill {
+    border-color: var(--mauve);
+    background: color-mix(in srgb, var(--mauve) 14%, var(--mantle));
   }
 }
 .live-preview-reference {
@@ -393,7 +465,7 @@
 /* Reserve independent lanes: activity cards never sit over either the closed
    handle or the open composer. */
 .live-preview-stage.has-composer-handle .lp-stream {
-  bottom: calc(max(var(--space-3), env(safe-area-inset-bottom)) + 36px);
+  bottom: calc(max(var(--space-3), env(safe-area-inset-bottom)) + 44px);
 }
 .live-preview-stage.has-composer .lp-stream {
   bottom: 184px;

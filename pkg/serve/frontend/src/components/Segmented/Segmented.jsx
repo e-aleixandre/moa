@@ -21,7 +21,8 @@ function normalizeOptions(options) {
 // `className`/`itemClassName`/`renderOption` are optional escape hatches so a
 // caller can restyle the chrome/cells (e.g. ModelSelector's thinking stepper,
 // which needs a glyph-over-label cell instead of a plain text label) without
-// forking the radiogroup/roving-tabindex/arrow-key logic above.
+// forking the radiogroup/roving-tabindex/arrow-key logic above. An option may
+// also carry `ariaLabel`/`title` for cells whose visible content is an icon.
 export function Segmented({
   options,
   value,
@@ -81,6 +82,8 @@ export function Segmented({
             class={`segmented-item${on ? " on" : ""}${itemClassName ? ` ${itemClassName(opt, on)}` : ""}`}
             role="radio"
             aria-checked={on}
+            aria-label={opt.ariaLabel}
+            title={opt.title}
             tabIndex={disabled ? -1 : (isTabbable ? 0 : -1)}
             disabled={disabled}
             onClick={() => !disabled && onChange?.(opt.id)}
