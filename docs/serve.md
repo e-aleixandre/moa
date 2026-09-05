@@ -31,6 +31,7 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
   badges instead reflect pending session state and disappear when the request
   is resolved.
 - [Live Preview](#live-preview): the web app the agent is building, inside the conversation, with tap-to-inspect feedback
+- [Artifacts](#files-sent-by-the-agent): reopen files delivered by the agent without searching the conversation
 - Multi-pane tiled layouts
 - Keyboard-first navigation
 - Voice input
@@ -319,20 +320,43 @@ In the conversation history, images render as thumbnails you can open full-size,
 
 ### Files sent by the agent
 
-The reverse direction is also supported: the agent can **send you a file** with the
-`send_file` tool. It renders in the chat as a **download card** (name, size, type icon)
-that fetches the file as a blob and hands it off via the OS share sheet on mobile or a
-same-origin download on desktop. Files are served from a per-session, in-memory allowlist
-(`GET /api/sessions/{id}/files/{fileID}`); the path never comes from the request, and the
-descriptor is re-checked right before serving. Like disk attachments, these registrations
-are in-memory only — they 404 after the session is deleted or the server restarts.
+Ask the agent to send a file, then open its card or choose **Artifacts** from the
+conversation's actions to find it again. Every file delivered through `send_file`
+appears in that conversation's collection; creating or editing a file alone does
+not add it. Search the collection by title or filename.
 
-Text, Markdown and image files can be **previewed inline** in an embedded viewer. HTML files
-get a live **preview rendered in a sandboxed `iframe`** (`sandbox="allow-scripts"`, no
-`allow-same-origin`, plus a strict `Content-Security-Policy`), with an inspector button to
-review any external resources the page references before it loads.
+On desktop, the reader opens on the right and can expand to full screen. Each grid
+pane has its own Artifacts entry, but all panes use the same drawer: opening another
+pane's collection switches its contents; merely changing pane focus does not. On
+mobile, tap **+** in the composer and pick **Artifacts**; the reader fills the
+screen. Use Back to return and Share to download the file or open the OS share
+sheet where supported.
 
-### Files saved to disk are ephemeral
+Markdown, text and images can be read in the viewer. HTML supports interactive
+reports inside a sandboxed iframe, without access to Moa's DOM, cookies or storage.
+External HTTPS resources may load automatically; the resource inspector lets you
+check their domains. Keep local HTML assets inline or use externally hosted assets:
+publishing an HTML file does not publish the rest of its directory. Other formats,
+and files too large to preview, remain downloadable.
+
+Keep files you want to revisit in a stable location. Artifacts retain a reference
+to the original file, **not a copy or a version**:
+
+- References survive server restarts and closing or reopening a conversation.
+- Opening or sharing reads the file's **current content**, including edits made by
+  another conversation. Sending the same canonical path again updates its entry
+  instead of adding a duplicate.
+- Deleting a conversation removes its artifact references, not the original files
+  in your project.
+- If the source is moved, deleted or cleaned from temporary storage, restore it at
+  the same location and retry, or ask the agent to send its new location.
+- Older download links whose in-memory registrations have already been lost are
+  not recovered automatically.
+
+The `send_file` tool accepts optional `title` and `description` fields for the card
+and collection. Existing `path` and `name` arguments continue to work.
+
+### Uploaded files saved to disk are ephemeral
 
 - They live under `/tmp/moa-<uid>/<session-id>/` and are **deleted when you delete the session**.
 - They may **disappear if the server restarts** (`/tmp` is not durable). Resuming an old session does not restore them.
@@ -698,7 +722,9 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/attention` | Cross-session snapshot of unresolved attention items |
 | `POST /api/transcribe` | Speech-to-text for voice input |
 | `POST /api/sessions/{id}/secrets` | Stage a short-lived secret batch; returns its directory and aliases, never values |
-| `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
+| `GET /api/sessions/{id}/artifacts` | List the conversation's published artifacts, including saved conversations |
+| `GET /api/sessions/{id}/files/{fileID}` | Read or download a published artifact's current file contents |
+| `GET /api/sessions/{id}/files` | Find files in the session's working directory for autocomplete |
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |
 | `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |
 | `GET /api/preview/target` · `PUT /api/preview/target` | Whether the [Live Preview proxy](#the-live-preview-proxy) is listening right now, at what address, and which dev server it points at. `PUT` with a `url` starts the listener and points it; `PUT {"enabled": false}` shuts it down |

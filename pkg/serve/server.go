@@ -165,6 +165,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/branches", handleListBranches(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/files", handleListFiles(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/files/{fileID}", handleDownloadFile(manager))
+	mux.HandleFunc("HEAD /api/sessions/{id}/files/{fileID}", handleDownloadFile(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/artifacts", handleListArtifacts(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/attachments/{attID}", handleGetAttachment(manager))
 	mux.HandleFunc("HEAD /api/sessions/{id}/attachments/{attID}", handleGetAttachment(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))

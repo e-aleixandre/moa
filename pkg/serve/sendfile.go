@@ -1,79 +1,43 @@
 package serve
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
+	"sort"
+	"strings"
+	"time"
+	"unicode/utf8"
 
-	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
-// sharedFile is a file the agent has explicitly shared via send_file.
-type sharedFile struct {
-	Path string // canonical absolute path on disk
-	Name string // download filename (basename or override)
-	Mime string
-	Size int64
-	// AttachmentID identifies the durable session-owned copy when the
-	// attachment store was available at send time. The allowlist remains
-	// in-memory, so file IDs still do not survive a server restart.
-	AttachmentID string
-	// identity pins the exact file that was authorized. The path may be
-	// replaced between send_file and download, so it must be checked again on
-	// the already-open descriptor before serving.
-	identity os.FileInfo
-}
-
-// sharedFiles is the per-session allowlist: only entries registered here can
-// be served by handleDownloadFile. In-memory only — cleared when the session
-// is deleted or the server restarts, at which point old download links 404.
-type sharedFiles struct {
-	mu sync.Mutex
-	m  map[string]sharedFile // fileID -> sharedFile
-}
-
-func newSharedFiles() *sharedFiles {
-	return &sharedFiles{m: make(map[string]sharedFile)}
-}
-
-// add registers f under a new random fileID and returns it.
-func (s *sharedFiles) add(f sharedFile) string {
-	id := newID()
-	s.mu.Lock()
-	s.m[id] = f
-	s.mu.Unlock()
-	return id
-}
-
-// get looks up a registered file by fileID.
-func (s *sharedFiles) get(id string) (sharedFile, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	f, ok := s.m[id]
-	return f, ok
-}
-
-// newSendFileTool creates the send_file tool for a session. cfg resolves
-// paths against the same workspace/PathPolicy as the built-in file tools;
-// sessionID and reg build the download URL and allowlist entry. store may be
-// nil when durable attachment storage is unavailable.
-func newSendFileTool(cfg tool.ToolConfig, sessionID string, reg *sharedFiles, store *attachment.Store) core.Tool {
+// newSendFileTool creates the send_file tool for a session. cfg resolves paths
+// against the same workspace/PathPolicy as the built-in file tools; sessionID
+// builds the download URL and store is the session's durable artifact catalog.
+//
+// A successful call has already persisted its reference: there is no in-memory
+// allowlist and no snapshot of the bytes, so the artifact keeps pointing at the
+// live file across restarts and shows whatever that path holds when it is read.
+func newSendFileTool(cfg tool.ToolConfig, sessionID string, store *session.ArtifactStore) core.Tool {
 	return core.Tool{
 		Name:  "send_file",
 		Label: "Send file",
-		Description: "Send a file to the user: it appears in the web chat as a download card " +
-			"(on mobile it opens the native share sheet). Use when the user asks you to " +
-			"send/share/give them a file. One file per call — call it once per file; to send " +
-			"many files, zip them first with bash. Read-only: does not modify the file.",
+		Description: "Deliver a file to the user: it appears in the web chat as a download card " +
+			"(on mobile it opens the native share sheet) and is added to the conversation's " +
+			"Artifacts, where the user can reopen it later. Use it to hand over any result you " +
+			"produced or were asked for — writing a file is not delivering it. The reference " +
+			"points at the file itself, so keep the source where it is (do not delete or move it) " +
+			"and later edits are what the user sees. One file per call — call it once per file; " +
+			"to send many files, zip them first with bash. Read-only: does not modify the file.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -84,6 +48,14 @@ func newSendFileTool(cfg tool.ToolConfig, sessionID string, reg *sharedFiles, st
 				"name": {
 					"type": "string",
 					"description": "Download filename shown to the user (default: the file's basename)."
+				},
+				"title": {
+					"type": "string",
+					"description": "Optional short title for the artifact card (default: the filename)."
+				},
+				"description": {
+					"type": "string",
+					"description": "Optional one-line description of what the file contains."
 				}
 			},
 			"required": ["path"]
@@ -94,99 +66,144 @@ func newSendFileTool(cfg tool.ToolConfig, sessionID string, reg *sharedFiles, st
 			if path == "" {
 				return core.ErrorResult("path is required"), nil
 			}
+			if store == nil {
+				return core.ErrorResult("artifact storage is unavailable for this session"), nil
+			}
 			resolved, err := tool.SafePath(cfg, path)
 			if err != nil {
 				return core.ErrorResult(err.Error()), nil
 			}
-			info, err := os.Stat(resolved)
+			// Resolve any allowed symlink to the destination that will actually
+			// be published, then re-check THAT path against the policy: a
+			// symlink flipped between the two steps must not turn an allowed
+			// input into a publication outside the boundary.
+			canonical, err := canonicalArtifactPath(cfg, resolved)
 			if err != nil {
 				return core.ErrorResult(fmt.Sprintf("cannot access %s: %v", path, err)), nil
 			}
-			if !info.Mode().IsRegular() {
-				return core.ErrorResult(fmt.Sprintf("%s is not a regular file", path)), nil
-			}
 
-			name, _ := params["name"].(string)
+			file, info, err := openArtifactPath(canonical)
+			if err != nil {
+				return core.ErrorResult(fmt.Sprintf("cannot send %s: %v", path, err)), nil
+			}
+			defer file.Close() //nolint:errcheck
+
+			name, err := artifactText(params, "name")
+			if err != nil {
+				return core.ErrorResult("name: " + err.Error()), nil
+			}
 			if name == "" {
-				name = filepath.Base(resolved)
-			} else {
-				name = filepath.Base(name) // don't let a custom name inject path separators
+				name = filepath.Base(canonical)
+			}
+			name = safeBase(name) // don't let a custom name inject path separators
+			if name == "" {
+				name = "file"
+			}
+			title, err := artifactText(params, "title")
+			if err != nil {
+				return core.ErrorResult("title: " + err.Error()), nil
+			}
+			description, err := artifactText(params, "description")
+			if err != nil {
+				return core.ErrorResult("description: " + err.Error()), nil
 			}
 
-			mimeType := detectMime(resolved, name)
+			mimeType := detectMimeFromFile(file, name)
 			size := info.Size()
-			attachmentID := ""
 
-			// A durable copy lets the user download a file after the agent has
-			// cleaned up its source path. Storage failures deliberately retain the
-			// legacy path-backed behavior rather than failing send_file.
-			if store != nil {
-				file, openErr := os.Open(resolved)
-				if openErr == nil {
-					fileInfo, statErr := file.Stat()
-					data, readErr := func() ([]byte, error) {
-						defer file.Close() //nolint:errcheck
-						if statErr != nil || !fileInfo.Mode().IsRegular() || !os.SameFile(info, fileInfo) {
-							return nil, os.ErrNotExist
-						}
-						return io.ReadAll(file)
-					}()
-					if readErr == nil {
-						mediaType, _, parseErr := mime.ParseMediaType(mimeType)
-						if parseErr != nil {
-							mediaType = "application/octet-stream"
-							mimeType = mediaType
-						}
-						kind := "file"
-						width, height := 0, 0
-						if bytesLookLikeImage(data, mediaType) {
-							kind = "image"
-							width, height = imageDimensions(data)
-						}
-						if descriptor, putErr := store.PutRef(sessionID, data, attachment.PutMeta{
-							Name: name, Mime: mimeType, Kind: kind, Width: width, Height: height,
-						}); putErr == nil {
-							attachmentID = descriptor.ID
-							size = descriptor.Size
-							mimeType = descriptor.Mime
-						}
-					}
-				}
+			// Persist BEFORE reporting success: a card the user can click must
+			// correspond to a reference that survived the process.
+			artifact, err := store.Upsert(canonical, session.ArtifactMeta{
+				Name: name, Title: title, Description: description, Mime: mimeType, Size: size,
+			})
+			if err != nil {
+				return core.ErrorResult(fmt.Sprintf("cannot publish %s: %v", path, err)), nil
 			}
 
-			id := reg.add(sharedFile{Path: resolved, Name: name, Mime: mimeType, Size: size, AttachmentID: attachmentID, identity: info})
-			url := fmt.Sprintf("/api/sessions/%s/files/%s", sessionID, id)
-
-			// Result = one human-readable line for the model, then a JSON line the
-			// frontend parses to render the download card (see FileCard.jsx).
-			card, _ := json.Marshal(map[string]any{
-				"file_id": id,
-				"name":    name,
-				"size":    size,
-				"mime":    mimeType,
+			url := fmt.Sprintf("/api/sessions/%s/files/%s", sessionID, artifact.ID)
+			// Result = one human-readable line for the model, then a JSON line
+			// the frontend parses to render the download card (see
+			// FileCard.jsx). The legacy fields keep their shape for installed
+			// clients; title/description are additive.
+			card := map[string]any{
+				"file_id": artifact.ID,
+				"name":    artifact.Name,
+				"size":    artifact.Size,
+				"mime":    artifact.Mime,
 				"url":     url,
-			})
-			text := fmt.Sprintf("Sent %q (%s) to the user.\n%s", name, humanSize(size), card)
+			}
+			if artifact.Title != "" {
+				card["title"] = artifact.Title
+			}
+			if artifact.Description != "" {
+				card["description"] = artifact.Description
+			}
+			encoded, _ := json.Marshal(card)
+			text := fmt.Sprintf("Sent %q (%s) to the user.\n%s", artifact.Name, humanSize(artifact.Size), encoded)
 			return core.TextResult(text), nil
 		},
 	}
 }
 
-// detectMime determines a file's MIME type from its extension, falling back to
-// content sniffing and finally application/octet-stream.
-func detectMime(path, name string) string {
+// canonicalArtifactPath turns an allowed input path into the existing
+// destination that will be stored, re-validating it against the path policy.
+func canonicalArtifactPath(cfg tool.ToolConfig, resolved string) (string, error) {
+	abs, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", err
+	}
+	canonical, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	checked, err := tool.SafePath(cfg, canonical)
+	if err != nil {
+		return "", err
+	}
+	return checked, nil
+}
+
+// artifactText reads an optional string parameter, trimming outer whitespace
+// and rejecting NUL bytes or invalid UTF-8 (which would corrupt the catalog
+// and the headers built from it).
+func artifactText(params map[string]any, key string) (string, error) {
+	raw, ok := params[key]
+	if !ok || raw == nil {
+		return "", nil
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return "", errors.New("must be a string")
+	}
+	s = strings.TrimSpace(s)
+	if strings.ContainsRune(s, 0) || !utf8.ValidString(s) {
+		return "", errors.New("must be valid UTF-8 text")
+	}
+	return s, nil
+}
+
+// detectMimeFromFile determines a file's MIME type from its name extension,
+// falling back to sniffing at most the first 512 bytes of the ALREADY VALIDATED
+// descriptor. The path is never reopened: what is sniffed is what is served.
+func detectMimeFromFile(f *os.File, name string) string {
 	if t := mime.TypeByExtension(filepath.Ext(name)); t != "" {
 		return t
 	}
-	if f, err := os.Open(path); err == nil {
-		defer f.Close() //nolint:errcheck
-		buf := make([]byte, 512)
-		n, _ := f.Read(buf)
-		if n > 0 {
-			return http.DetectContentType(buf[:n])
-		}
+	if head := artifactHead(f); len(head) > 0 {
+		return http.DetectContentType(head)
 	}
 	return "application/octet-stream"
+}
+
+// artifactHead reads at most the first 512 bytes of the validated descriptor
+// without disturbing its offset (ServeContent seeks it itself afterwards).
+func artifactHead(f *os.File) []byte {
+	buf := make([]byte, 512)
+	n, err := f.ReadAt(buf, 0)
+	if n > 0 && (err == nil || err == io.EOF) {
+		return buf[:n]
+	}
+	return nil
 }
 
 // humanSize formats a byte count as a human-readable string (e.g. "2.4 MB").
@@ -203,82 +220,150 @@ func humanSize(n int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
-// handleDownloadFile serves a file previously registered via send_file. Only
-// fileIDs present in the session's allowlist are served — the path never comes
-// from the request, so there is no path-traversal surface. A re-stat with
-// IsRegular right before serving closes the TOCTOU window between registration
-// and download (e.g. the path was replaced by a symlink or directory).
+// artifactDTO is the wire shape of one artifact. path never leaves the server.
+type artifactDTO struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Title       string    `json:"title,omitempty"`
+	Description string    `json:"description,omitempty"`
+	Mime        string    `json:"mime"`
+	Size        int64     `json:"size"`
+	URL         string    `json:"url"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Available   bool      `json:"available"`
+}
+
+// artifactStoreFor resolves the artifact catalog of a session, live or not.
+//
+// Both paths require the session's own "<id>.json" to exist with a matching
+// header: an orphaned sidecar left by a crash is never served, and a delete
+// that already removed the main JSON stops answering. The second return value
+// is the HTTP status to use when err != nil.
+func artifactStoreFor(mgr *Manager, id string) (*session.ArtifactStore, int, error) {
+	if sess, ok := mgr.Get(id); ok {
+		store := sess.artifactStore
+		if store == nil {
+			return nil, http.StatusInternalServerError, errors.New("session has no artifact store")
+		}
+		if _, err := session.FindSessionStoreReadOnly(mgr.sessionBaseDir, id); err != nil {
+			if errors.Is(err, session.ErrNotFound) {
+				return nil, http.StatusNotFound, err
+			}
+			return nil, http.StatusInternalServerError, err
+		}
+		return store, http.StatusOK, nil
+	}
+	store, err := session.FindSessionStoreReadOnly(mgr.sessionBaseDir, id)
+	if err != nil {
+		if errors.Is(err, session.ErrNotFound) {
+			return nil, http.StatusNotFound, err
+		}
+		return nil, http.StatusInternalServerError, err
+	}
+	// Read-only view of the same sidecar: the atomic rename means a reader
+	// always sees a whole catalog, so no extra writer is created.
+	return session.NewArtifactStore(store.Dir(), id), http.StatusOK, nil
+}
+
+// handleListArtifacts serves a session's artifact collection, newest update
+// first. Each entry is opened through the same safe helper the download path
+// uses, so size/MIME reflect the file right now; an entry that cannot be opened
+// as a regular file keeps its last known metadata and reports available:false
+// instead of failing the whole list.
+func handleListArtifacts(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		store, status, err := artifactStoreFor(mgr, id)
+		if err != nil {
+			http.Error(w, http.StatusText(status), status)
+			return
+		}
+		artifacts, err := store.List()
+		if err != nil {
+			http.Error(w, "artifact catalog is unreadable", http.StatusInternalServerError)
+			return
+		}
+
+		out := make([]artifactDTO, 0, len(artifacts))
+		for _, a := range artifacts {
+			dto := artifactDTO{
+				ID: a.ID, Name: a.Name, Title: a.Title, Description: a.Description,
+				Mime: a.Mime, Size: a.Size,
+				URL:       fmt.Sprintf("/api/sessions/%s/files/%s", id, a.ID),
+				CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
+			}
+			if f, info, openErr := openArtifactPath(a.Path); openErr == nil {
+				dto.Available = true
+				dto.Size = info.Size()
+				dto.Mime = detectMimeFromFile(f, a.Name)
+				_ = f.Close()
+			}
+			out = append(out, dto)
+		}
+		sort.SliceStable(out, func(i, j int) bool {
+			if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+				return out[i].ID < out[j].ID
+			}
+			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		})
+		writeJSON(w, http.StatusOK, map[string]any{"artifacts": out})
+	}
+}
+
+// handleDownloadFile serves the current content of an artifact. The path never
+// comes from the request — it is read from the session's own catalog — and the
+// descriptor is opened without following symlinks in any component, so a path
+// or parent swapped for a link to somewhere else is refused rather than served.
+// A legitimate atomic replacement at the same location simply returns the new
+// bytes.
 func handleDownloadFile(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := mgr.Get(r.PathValue("id"))
-		if !ok {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		f, ok := sess.sharedFiles.get(r.PathValue("fileID"))
-		if !ok {
-			http.Error(w, "file not shared (or the session was restarted) — ask the agent to send it again", http.StatusNotFound)
-			return
-		}
-		if f.AttachmentID != "" {
-			if mgr.attachStore == nil {
-				http.Error(w, "file unavailable", http.StatusNotFound)
-				return
-			}
-			reader, descriptor, err := mgr.attachStore.Open(sess.ID, f.AttachmentID)
-			if err != nil {
-				http.Error(w, "file unavailable", http.StatusNotFound)
-				return
-			}
-			defer reader.Close() //nolint:errcheck
-
-			name := safeBase(descriptor.Name)
-			if name == "" {
-				name = "attachment"
-			}
-			disposition := "attachment"
-			if descriptor.Kind == "image" && inlineAttachmentMIMEs[descriptor.Mime] {
-				disposition = "inline"
-			}
-			w.Header().Set("Content-Type", descriptor.Mime)
-			w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": name}))
-			w.Header().Set("X-Content-Type-Options", "nosniff")
-			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
-			w.Header().Set("Content-Security-Policy", "sandbox")
-			w.Header().Set("ETag", `"sha256-`+descriptor.SHA256+`"`)
-			w.Header().Set("Cache-Control", "private, max-age=0, must-revalidate")
-			if seeker, ok := reader.(io.ReadSeeker); ok {
-				http.ServeContent(w, r, name, descriptor.CreatedAt, seeker)
-				return
-			}
-			data, err := io.ReadAll(reader)
-			if err != nil {
-				http.Error(w, "file unavailable", http.StatusInternalServerError)
-				return
-			}
-			http.ServeContent(w, r, name, descriptor.CreatedAt, bytes.NewReader(data))
-			return
-		}
-
-		file, err := os.Open(f.Path)
+		id := r.PathValue("id")
+		store, status, err := artifactStoreFor(mgr, id)
 		if err != nil {
-			http.Error(w, "file no longer exists on disk", http.StatusNotFound)
+			http.Error(w, http.StatusText(status), status)
+			return
+		}
+		artifact, ok, err := store.Get(r.PathValue("fileID"))
+		if err != nil {
+			http.Error(w, "artifact catalog is unreadable", http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			http.Error(w, "artifact not found", http.StatusNotFound)
+			return
+		}
+
+		file, info, err := openArtifactPath(artifact.Path)
+		if err != nil {
+			// Known reference, unreachable source: distinct from 404 so the UI
+			// can offer recovery instead of claiming the artifact never existed.
+			// The path is not revealed.
+			http.Error(w, "artifact source is unavailable", http.StatusGone)
 			return
 		}
 		defer file.Close() //nolint:errcheck
 
-		info, err := file.Stat()
-		if err != nil || !info.Mode().IsRegular() || f.identity == nil || !os.SameFile(f.identity, info) {
-			http.Error(w, "file no longer exists on disk", http.StatusNotFound)
-			return
+		name := safeBase(artifact.Name)
+		if name == "" {
+			name = "file"
 		}
-
-		w.Header().Set("Content-Type", f.Mime)
-		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": f.Name}))
+		mimeType := detectMimeFromFile(file, name)
+		disposition := "attachment"
+		// Inline only for an image type whose BYTES agree: a text/HTML payload
+		// named .png must not be rendered in the browsing context.
+		if inlineAttachmentMIMEs[mimeType] && bytesLookLikeImage(artifactHead(file), mimeType) {
+			disposition = "inline"
+		}
+		w.Header().Set("Content-Type", mimeType)
+		w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": name}))
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 		w.Header().Set("Content-Security-Policy", "sandbox")
 		w.Header().Set("Cache-Control", "private, no-store")
-		http.ServeContent(w, r, f.Name, info.ModTime(), file)
+		// ServeContent streams from the descriptor (HEAD and ranges included):
+		// the file is never copied into memory, so size is not capped here.
+		http.ServeContent(w, r, name, info.ModTime(), file)
 	}
 }

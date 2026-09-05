@@ -44,9 +44,13 @@ type subagentListResponse struct {
 // includes messages and bounded tool-call arguments, while tool result output
 // remains outside the default response budget.
 type subagentConversationResponse struct {
-	SessionID  string                `json:"session_id"`
-	JobID      string                `json:"job_id"`
-	Task       string                `json:"task"`
+	SessionID string `json:"session_id"`
+	JobID     string `json:"job_id"`
+	Task      string `json:"task"`
+	// Title is the child's generated identity label (same field the live
+	// snapshot and subagent_title event carry), so reopening a finished child
+	// from disk shows the label its live row showed instead of a model id.
+	Title      string                `json:"title,omitempty"`
 	Model      string                `json:"model,omitempty"`
 	Thinking   string                `json:"thinking,omitempty"`
 	Status     string                `json:"status"`
@@ -123,6 +127,7 @@ func handleSubagentConversation(m *Manager) http.HandlerFunc {
 		response := subagentConversationResponse{
 			SessionID: r.PathValue("id"), JobID: snapshot.summary.JobID,
 			Task:  snapshot.summary.Task,
+			Title: snapshot.summary.Title,
 			Model: snapshot.summary.Model, Thinking: snapshot.summary.Thinking, Status: snapshot.summary.Status, Async: snapshot.summary.Async,
 			StartedAt: snapshot.summary.StartedAt, FinishedAt: snapshot.summary.FinishedAt,
 			Source: snapshot.summary.Source, Order: "newest_first", Messages: page, HasMore: hasMore,
@@ -240,7 +245,7 @@ func (m *Manager) subagentSummaries(sessionID string) ([]SubagentSummary, error)
 }
 
 func subagentSummaryFromLive(info subagent.JobInfo) SubagentSummary {
-	s := SubagentSummary{JobID: info.JobID, Task: info.Task, Model: info.Model, Thinking: info.Thinking, Status: info.Status, Async: info.Async, StartedAt: info.StartedAt, FinishedAt: info.FinishedAt, Source: "active", CostUSD: info.CostUSD, ContextPercent: info.ContextPercent}
+	s := SubagentSummary{JobID: info.JobID, Task: info.Task, Title: info.Title, Model: info.Model, Thinking: info.Thinking, Status: info.Status, Async: info.Async, StartedAt: info.StartedAt, FinishedAt: info.FinishedAt, Source: "active", CostUSD: info.CostUSD, ContextPercent: info.ContextPercent}
 	if info.Usage != nil {
 		s.InputTokens, s.OutputTokens = info.Usage.Input, info.Usage.Output
 	}

@@ -137,9 +137,10 @@ type ManagedSession struct {
 	// Serve-specific infrastructure (MCP, toolReg — not agent).
 	infra serveInfra
 
-	// sharedFiles holds files the agent explicitly shared via send_file.
-	// Allowlist for GET /api/sessions/{id}/files/{fileID}. In-memory only.
-	sharedFiles *sharedFiles
+	// artifactStore is the session's durable catalog of files delivered with
+	// send_file. Writer instance: it is the one the tool publishes through, and
+	// the one Delete tombstones.
+	artifactStore *session.ArtifactStore
 
 	// Web Push: live count of WebSocket clients watching this session (gates
 	// non-blocking notifications), a "deleted" guard against late pushes, and

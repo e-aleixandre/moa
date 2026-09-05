@@ -258,3 +258,21 @@ test('owned async bash is projected in the launching subagent activity', () => {
   const rows = view.blocks.flatMap(block => (block.blocks || []).flatMap(inner => inner.rows || []));
   expect(rows).toContainEqual(expect.objectContaining({ id: 'bash-1', tool: 'bash' }));
 });
+
+// ── identity label: the same rule the dock and the delegation use ───────────
+test('the breadcrumb prefers the generated title over the task and the model', () => {
+  const session = { id: 's1', messages: [], subagents: { j1: sub({
+    task: '\n# Delivery review\n\nVerify the promised work.',
+    title: 'Review Promised Delivery Work',
+    model: 'openai/gpt-6-astra',
+  }) } };
+  expect(subagentView(session, 'j1').name).toBe('Review Promised Delivery Work');
+});
+
+test('a task starting with a blank line labels the breadcrumb with its heading, not the model', () => {
+  const session = { id: 's1', messages: [], subagents: { j1: sub({
+    task: '\n# Delivery review\n\nVerify the promised work.',
+    model: 'openai/gpt-6-astra',
+  }) } };
+  expect(subagentView(session, 'j1').name).toBe('Delivery review');
+});

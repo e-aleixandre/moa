@@ -5,7 +5,7 @@ import {
   ActivityLedger,
   DiffBlock,
   DelegationBlock,
-  FileCard,
+  ArtifactCard,
   CompactionCard,
   EventBlock,
   HistoryHydrationTail,
@@ -41,7 +41,7 @@ import {
 // the markdown pipeline through DOMPurify, so the output is safe to inject; the
 // component's own sanitizeHtml pass is a second, allowlist-based guard. No raw
 // user/assistant text ever reaches innerHTML unsanitized.
-function docChildren(blocks, onOpenSubagent, visibleDone) {
+function docChildren(blocks, onOpenSubagent, visibleDone, sessionId) {
   const out = [];
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
@@ -71,7 +71,7 @@ function docChildren(blocks, onOpenSubagent, visibleDone) {
         out.push(<DiffBlock key={b.id} diffText={b.diffText} filename={b.filename} />);
         break;
       case "file":
-        out.push(<FileCard key={b.id} file={b.file} />);
+        out.push(<ArtifactCard key={b.id} file={b.file} sessionId={sessionId} />);
         break;
       case "delegation":
         out.push(
@@ -135,7 +135,7 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
       const proseHasCaret = block.blocks.some((b) => b.type === "prose" && b.caret);
       return (
         <AssistantDocument streaming={block.kind === "streaming" && block.textLive === true && !proseHasCaret}>
-          {docChildren(block.blocks, onOpenSubagent, visibleDone)}
+          {docChildren(block.blocks, onOpenSubagent, visibleDone, sessionId)}
         </AssistantDocument>
       );
     default:

@@ -1,5 +1,6 @@
 import { AppWindow } from "lucide-preact";
 import { Composer } from "../../Composer/Composer.jsx";
+import { artifactsMobileAction } from "../../../components/Artifacts/ArtifactsEntry.jsx";
 import { updateSession } from "../../../data/store.js";
 import { MobileStatusLine } from "../MobileStatusLine/MobileStatusLine.jsx";
 import "./MobileComposer.css";
@@ -24,16 +25,19 @@ import "./MobileComposer.css";
 //
 // The composer's `+` is a MENU here, not a direct file picker: the phone has no
 // header any more, so per-session actions with nowhere else to live hang off it
-// (Live preview). It needs no visibility condition — there is no composer
-// without a session.
+// (Live preview, Artifacts). They need no visibility condition — there is no
+// composer without a session.
 export function MobileComposer({ session, usage, onSecret }) {
-  const plusActions = [{
-    id: "preview",
-    icon: AppWindow,
-    label: "Live preview",
-    onClick: () => updateSession(session.id, { previewOpen: true }),
-    active: !!session.previewOpen,
-  }];
+  const plusActions = [
+    {
+      id: "preview",
+      icon: AppWindow,
+      label: "Live preview",
+      onClick: () => updateSession(session.id, { previewOpen: true }),
+      active: !!session.previewOpen,
+    },
+    artifactsMobileAction(session.id),
+  ];
   return (
     <div class="mcomposer">
       <Composer sessionId={session.id} session={session} compact onSecret={onSecret} plusActions={plusActions} />

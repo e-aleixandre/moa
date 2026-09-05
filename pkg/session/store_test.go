@@ -810,11 +810,115 @@ func TestDeleteByID(t *testing.T) {
 	}
 }
 
+func TestDeleteByID_SkipsStoresWithoutSession(t *testing.T) {
+	base := t.TempDir()
+	if _, err := NewFileStore(base, "/project/alpha"); err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewFileStore(base, "/project/beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := store.Create()
+	if err := store.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+	artifacts := NewArtifactStore(store.Dir(), sess.ID)
+	if _, err := artifacts.Upsert("/data/report.txt", ArtifactMeta{Name: "report.txt"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := DeleteByID(base, sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(store.Dir(), sess.ID+".json")); !os.IsNotExist(err) {
+		t.Fatalf("session JSON survived DeleteByID: %v", err)
+	}
+	if _, err := os.Stat(artifacts.Path()); !os.IsNotExist(err) {
+		t.Fatalf("artifact sidecar survived DeleteByID: %v", err)
+	}
+}
+
+func TestDeleteByID_CorruptHeaderRemovesArtifacts(t *testing.T) {
+	base := t.TempDir()
+	store, err := NewFileStore(base, "/project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := store.Create()
+	if err := store.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "report.txt")
+	if err := os.WriteFile(source, []byte("keep me"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	artifacts := NewArtifactStore(store.Dir(), sess.ID)
+	if _, err := artifacts.Upsert(source, ArtifactMeta{Name: "report.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	jsonPath := filepath.Join(store.Dir(), sess.ID+".json")
+	if err := os.WriteFile(jsonPath, []byte("{corrupt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := DeleteByID(base, sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(jsonPath); !os.IsNotExist(err) {
+		t.Fatalf("corrupt session JSON survived DeleteByID: %v", err)
+	}
+	if _, err := os.Stat(artifacts.Path()); !os.IsNotExist(err) {
+		t.Fatalf("artifact sidecar survived DeleteByID: %v", err)
+	}
+	if data, err := os.ReadFile(source); err != nil || string(data) != "keep me" {
+		t.Fatalf("DeleteByID touched source: %q, %v", data, err)
+	}
+}
+
+func TestDeleteByID_ReturnsArtifactRemovalFailure(t *testing.T) {
+	base := t.TempDir()
+	store, err := NewFileStore(base, "/project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := store.Create()
+	if err := store.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+	sidecar := filepath.Join(store.Dir(), sess.ID+".artifacts")
+	if err := os.Mkdir(sidecar, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sidecar, "remaining"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := DeleteByID(base, sess.ID); err == nil {
+		t.Fatal("DeleteByID succeeded after the artifact sidecar could not be removed")
+	}
+}
+
 func TestDeleteByID_NotFound(t *testing.T) {
 	base := t.TempDir()
 	err := DeleteByID(base, "nonexistent")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestDeleteByID_ValidMissingIDInExistingStore(t *testing.T) {
+	base := t.TempDir()
+	store, err := NewFileStore(base, "/project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := store.Create().ID
+	if err := store.Delete(id); err != nil {
+		t.Fatalf("FileStore.Delete must remain idempotent: %v", err)
+	}
+	if err := DeleteByID(base, id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a missing candidate, got %v", err)
 	}
 }
 

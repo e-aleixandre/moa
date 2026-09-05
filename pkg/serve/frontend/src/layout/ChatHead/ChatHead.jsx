@@ -12,6 +12,9 @@ export function ChatHead({
   onGridToggle,
   onPreviewToggle,
   previewOpen = false,
+  // headExtra — extra head actions (the Artifacts entry), rendered as a
+  // neighbour of the existing ones rather than as a second bar.
+  headExtra,
   settingsPopover,
   settingsAnchorRef,
 }) {
@@ -44,8 +47,9 @@ export function ChatHead({
         {settingsPopover}
       </div>
 
-      {actions.length > 0 && (
+      {(actions.length > 0 || headExtra) && (
         <div class="head-actions">
+          {headExtra}
           {actions.map((action) => {
             const Icon = action.icon;
             return <button type="button" key={action.id} data-preview-trigger={action.id === "preview" ? "true" : undefined} class={`${action.id === "preview" ? "head-action-icon" : "grid-toggle"}${action.active ? " is-on" : ""}`} onClick={action.onClick} aria-label={action.id === "preview" ? "Live preview" : undefined} aria-pressed={action.active || undefined} title={action.title}>

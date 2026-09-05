@@ -4,6 +4,8 @@ import { wsState } from './shared.js';
 import { store, updateSession } from '../store.js';
 import { extractToolNote } from './history.js';
 import { scheduleFlush } from './stream.js';
+import { parseFileCardData } from '../util/file-card.js';
+import { refreshArtifactsAfterDelivery } from '../artifacts.js';
 
 export function handleWsToolCallStart(id, data) {
   const sess = store.get().sessions[id];
@@ -176,4 +178,16 @@ export function handleWsToolEnd(id, data) {
     return m;
   });
   updateSession(id, { messages, runningTool: null });
+  noteArtifactDelivery(id, data);
+}
+
+// noteArtifactDelivery — a successful send_file already reports the published
+// artifact in its result; the backend upserted it before answering, so this
+// event is the refresh signal for an open drawer. No new bus event.
+export function noteArtifactDelivery(id, data) {
+  if (data?.is_error || data?.rejected === true) return;
+  if ((data?.tool_name || '').toLowerCase() !== 'send_file') return;
+  const descriptor = parseFileCardData(data.result);
+  if (!descriptor) return;
+  refreshArtifactsAfterDelivery(id, descriptor);
 }

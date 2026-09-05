@@ -2,7 +2,7 @@ import { render } from "preact";
 import { useState, useEffect } from "preact/hooks";
 import "./index.css";
 import { ConversationScreen, PaneGridScreen, MobileConversationScreen, DesktopShell } from "./layout/index.js";
-import { CommandPalette, ToastContainer, PulsePairingPanel } from "./components/index.js";
+import { CommandPalette, ToastContainer, PulsePairingPanel, ArtifactsDrawer } from "./components/index.js";
 import { store, setState as setStoreState } from "./data/store.js";
 import { useStore } from "./hooks/useStore.js";
 import { togglePalette, closePalette } from "./data/palette.js";
@@ -292,6 +292,7 @@ function App() {
         <MobileConversationScreen version={version} />
         <GlobalPalette />
         <GlobalPairingPanel />
+        <ArtifactsDrawer />
         <ToastContainer />
       </>
     );
@@ -303,6 +304,9 @@ function App() {
       </DesktopShell>
       <GlobalPalette />
       <GlobalPairingPanel />
+      {/* Artifacts — ONE shared drawer for conversation and grid, mounted
+          globally so switching screens never duplicates or loses a reader. */}
+      <ArtifactsDrawer />
       <ToastContainer />
     </>
   );

@@ -422,6 +422,25 @@ func TestListModels_HasAliases(t *testing.T) {
 	}
 }
 
+func TestListModels_PrefersLexicalAliasOnEqualLength(t *testing.T) {
+	for range 100 {
+		for _, entry := range ListModels() {
+			if entry.Model.ID == "gpt-6-astra" && entry.Alias != "astra" {
+				t.Fatalf("GPT-6 Astra alias = %q, want astra", entry.Alias)
+			}
+		}
+	}
+}
+
+func TestResolveModel_GPT6Aliases(t *testing.T) {
+	for _, alias := range []string{"astra", "gpt-6"} {
+		model, ok := ResolveModel(alias)
+		if !ok || model.ID != "gpt-6-astra" {
+			t.Errorf("ResolveModel(%q) = %+v, %v; want gpt-6-astra", alias, model, ok)
+		}
+	}
+}
+
 func TestListModels_SortedByProvider(t *testing.T) {
 	models := ListModels()
 	for i := 1; i < len(models); i++ {

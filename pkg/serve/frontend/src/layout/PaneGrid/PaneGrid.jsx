@@ -8,7 +8,7 @@ import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { NowLine } from "../NowLine/NowLine.jsx";
 import { LiveDock } from "../LiveDock/LiveDock.jsx";
 import {
-  McpBanner, PermissionPrompt, AskUserPrompt, UsagePanel, ModelSelector,
+  McpBanner, PermissionPrompt, AskUserPrompt, UsagePanel, ModelSelector, ArtifactsPaneButton,
 } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
@@ -393,6 +393,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
       attention={attention}
       previewOpen={!!session.previewOpen}
       onPreviewToggle={(e) => { e.stopPropagation(); updateSession(session.id, { previewOpen: !session.previewOpen }); }}
+      headExtra={<ArtifactsPaneButton sessionId={session.id} />}
       onMaximize={handleMaximize}
       blocking={blocking}
       bodyLive

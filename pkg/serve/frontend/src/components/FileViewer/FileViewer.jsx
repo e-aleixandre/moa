@@ -3,14 +3,11 @@ import { Download, Loader2, Maximize2, Minimize2 } from 'lucide-preact';
 import { Sheet } from '../Sheet/Sheet.jsx';
 import { renderMarkdown } from '../../data/util/markdown.js';
 import { downloadFile } from '../../data/util/file-download.js';
-import { readCapped } from '../../data/util/file-preview.js';
+import { readCapped, MAX_PREVIEW_SIZE, MAX_HIGHLIGHT_SIZE } from '../../data/util/file-preview.js';
 import { buildHTMLSrcdoc, HTML_PREVIEW_SANDBOX, HTML_PREVIEW_VIEWPORT } from '../../data/util/html-preview.js';
 import { previewKind, looksBinary } from '../../data/util/file-card.js';
 import { usePinchZoom } from '../../hooks/usePinchZoom.js';
 import './FileViewer.css';
-
-const MAX_PREVIEW_SIZE = 2 * 1024 * 1024;
-const MAX_HIGHLIGHT_SIZE = 150 * 1024;
 
 // FileViewer — in-app preview of a send_file result (image/HTML/markdown/
 // plain text), rendered inside the shared Sheet container. Fetches the file

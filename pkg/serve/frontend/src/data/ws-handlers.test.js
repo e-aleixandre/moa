@@ -2,7 +2,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolUpdate, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved, handleWsCompactionEnd, handleWsConfigChange } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentTitle, handleWsSubagentEvent, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolUpdate, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved, handleWsCompactionEnd, handleWsConfigChange } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
 import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
@@ -1807,4 +1807,50 @@ test('a compacted child projects its summary as a compaction card', () => {
   expect(card).toBeTruthy();
   expect(card.summary).toBe('previously: mapped the parser');
   expect(out.some(m => m.role === 'compaction_summary')).toBe(false);
+});
+
+// ── subagent title survives reconnect and a late start echo ────────────────
+test('an init snapshot restores the generated title so the label survives a reconnect', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    subagents: [{
+      job_id: 'j1', task: '\n# Delivery review\n\nVerify.', title: 'Review Promised Delivery Work',
+      model: 'openai/gpt-6-astra', status: 'running', async: true, messages: [],
+    }],
+  });
+  expect(store.get().sessions.s1.subagents.j1.title).toBe('Review Promised Delivery Work');
+  expect(liveTrayAgents(store.get().sessions.s1)[0].name).toBe('Review Promised Delivery Work');
+});
+
+test('a later subagent_start without a title does not erase the one already received', () => {
+  seedSession('s1');
+  handleWsSubagentStart('s1', { job_id: 'j1', task: '\n# Delivery review\n\nVerify.', model: 'openai/gpt-6-astra', async: false });
+  handleWsSubagentTitle('s1', { job_id: 'j1', title: 'Review Promised Delivery Work' });
+  handleWsSubagentStart('s1', { job_id: 'j1', async: true });
+  expect(store.get().sessions.s1.subagents.j1.title).toBe('Review Promised Delivery Work');
+});
+
+// After the parent reloads, a finished SYNC child has no live entry left: the
+// init outcome is the only carrier of its title, so the restored card must keep
+// the label its live row had instead of falling back to the task heading.
+test('an init with only outcomes keeps the title on the restored terminal card', () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    subagents: [],
+    subagent_outcomes: [{
+      job_id: 'sa-617bc98ea8ba',
+      task: '\n# Delivery review QA\n\nVerify the promised work.',
+      title: 'Review delivered files',
+      status: 'completed',
+      result: 'looks good',
+      finished_at_ms: 1788000000000,
+    }],
+  });
+  const agents = projectStream(store.get().sessions.s1)
+    .flatMap(b => (b.blocks || []).flatMap(i => i.agents || []));
+  expect(agents).toEqual([expect.objectContaining({
+    id: 'sa-617bc98ea8ba', state: 'done', name: 'Review delivered files',
+  })]);
 });

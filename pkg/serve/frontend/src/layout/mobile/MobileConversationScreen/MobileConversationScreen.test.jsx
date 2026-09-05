@@ -23,6 +23,8 @@ mock.module('../../../util/sanitize.js', () => ({ sanitizeHtml(html) { return ht
 
 const { MobileConversationScreen, mobileFocusedSession, selectMobileDrawerSession } = await import('./MobileConversationScreen.jsx');
 const { setState, store } = await import('../../../data/store.js');
+const { artifactsSlice } = await import('../../../data/artifacts.js');
+const { ARTIFACTS_CLOSED } = await import('../../../data/artifacts-model.js');
 const { ConversationScreen } = await import('../../ConversationScreen/ConversationScreen.jsx');
 const { Spine } = await import('../../Spine/Spine.jsx');
 
@@ -294,8 +296,14 @@ test('MobileBashJobView spreads edge-swipe handlers onto its screen root', async
   expect(source).toContain('ref={screenRef} {...swipeBind}');
 });
 
-test('the mobile composer turns + into a menu carrying Live preview', () => {
+test('the mobile composer turns + into a menu carrying Live preview and Artifacts', () => {
   const previous = store.get();
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = (path) => {
+    calls.push(path);
+    return Promise.resolve(new Response(JSON.stringify({ artifacts: [] }), { status: 200 }));
+  };
   setState({
     sessions: { s1: { id: 's1', title: 'Build', state: 'idle', messages: [], subagents: {} } },
     activeSession: 's1',
@@ -308,15 +316,24 @@ test('the mobile composer turns + into a menu carrying Live preview', () => {
     expect(composer).toBeTruthy();
     const inner = componentNode(composer.type(composer.props), 'Composer');
     const actions = inner.props.plusActions;
-    expect(actions.map((a) => a.id)).toEqual(['preview']);
+    expect(actions.map((a) => a.id)).toEqual(['preview', 'artifacts']);
     expect(actions[0].label).toBe('Live preview');
     // No visibility condition: there is no composer without a session.
     expect(actions[0].visible).toBeUndefined();
 
     actions[0].onClick();
     expect(store.get().sessions.s1.previewOpen).toBe(true);
+
+    // Artifacts opens the shared drawer on THIS conversation's collection.
+    expect(actions[1].label).toBe('Artifacts');
+    actions[1].onClick();
+    const slice = artifactsSlice(store.get());
+    expect(slice.view).toBe('list');
+    expect(slice.ownerSessionId).toBe('s1');
+    expect(calls).toEqual(['/api/sessions/s1/artifacts']);
   } finally {
-    setState(previous);
+    globalThis.fetch = originalFetch;
+    setState({ ...previous, artifacts: ARTIFACTS_CLOSED });
   }
 });
 

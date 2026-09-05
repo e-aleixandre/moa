@@ -1375,3 +1375,93 @@ test('an event block keeps a stable id across a history prepend, so its body sta
   const later = projectStream(session([user('earlier'), assistant('ok'), event('{}')]));
   expect(later.find((b) => b.kind === 'event').id).toBe(first[0].id);
 });
+
+// ── Subagent identity label (one rule across every surface) ─────────────────
+// A skill's task begins with a blank line before its `# Heading`, so the old
+// "first literal line" rule produced '' and every surface fell back to the raw
+// model id. The generated title wins; the heading is the fallback, not the model.
+const SKILL_TASK = '\n# Delivery review\n\nVerify the promised work.';
+
+test('a generated title labels the live inline row, the dock chip and the done card', () => {
+  const live = session([], {
+    subagents: {
+      j1: {
+        jobId: 'j1', task: SKILL_TASK, title: 'Review Promised Delivery Work',
+        model: 'openai/gpt-6-astra', status: 'running', async: false, messages: [],
+      },
+    },
+  });
+  const inline = projectStream(live).flatMap(b => (b.blocks || []).flatMap(i => i.agents || []));
+  expect(inline).toEqual([expect.objectContaining({ id: 'j1', name: 'Review Promised Delivery Work' })]);
+
+  const async = session([], {
+    subagents: { j1: { ...live.subagents.j1, async: true } },
+  });
+  expect(liveTrayAgents(async)).toEqual([
+    expect.objectContaining({ id: 'j1', name: 'Review Promised Delivery Work' }),
+  ]);
+
+  const done = session([
+    tool('subagent-j1', 'subagent', { task: SKILL_TASK }, 'done', 'Looks good'),
+  ], {
+    subagents: { j1: { ...live.subagents.j1, status: 'completed' } },
+  });
+  const doneAgents = projectStream(done).flatMap(b => (b.blocks || []).flatMap(i => i.agents || []));
+  expect(doneAgents).toEqual([expect.objectContaining({ id: 'j1', name: 'Review Promised Delivery Work' })]);
+});
+
+test('a task starting with a blank line falls back to its heading, never to the model id', () => {
+  const s = session([], {
+    subagents: {
+      j1: { jobId: 'j1', task: SKILL_TASK, model: 'openai/gpt-6-astra', status: 'running', async: true, messages: [] },
+    },
+  });
+  expect(liveTrayAgents(s)[0].name).toBe('Delivery review');
+});
+
+test('a subagent with neither title nor task still degrades to the model, then the job id', () => {
+  const withModel = session([], {
+    subagents: { j1: { jobId: 'j1', task: '', model: 'openai/gpt-6-astra', status: 'running', async: true, messages: [] } },
+  });
+  expect(liveTrayAgents(withModel)[0].name).toBe('gpt-6-astra');
+  const bare = session([], {
+    subagents: { j1: { jobId: 'j1', task: '', model: '', status: 'running', async: true, messages: [] } },
+  });
+  expect(liveTrayAgents(bare)[0].name).toBe('j1');
+});
+
+test('titling a subagent does not move it between the dock and the inline delegation', () => {
+  const s = session([], {
+    subagents: {
+      sync1: { jobId: 'sync1', task: SKILL_TASK, title: 'Review Promised Delivery Work', status: 'running', async: false, messages: [] },
+      async1: { jobId: 'async1', task: 'Map the code', title: 'Map The Code', status: 'running', async: true, messages: [] },
+    },
+  });
+  const inline = projectStream(s).flatMap(b => (b.blocks || []).flatMap(i => i.agents || []));
+  expect(inline.map(a => a.id)).toEqual(['sync1']);
+  expect(liveTrayAgents(s).map(a => a.id)).toEqual(['async1']);
+});
+
+test('a terminated card with an empty args falls back to the entry model before the job id', () => {
+  const s = session([
+    tool('subagent-j1', 'subagent', {}, 'done', 'Looks good'),
+  ], {
+    subagents: {
+      j1: { jobId: 'j1', task: '', model: 'openai/gpt-6-astra', status: 'completed', async: false, messages: [] },
+    },
+  });
+  const agents = projectStream(s).flatMap(b => (b.blocks || []).flatMap(i => i.agents || []));
+  expect(agents).toEqual([expect.objectContaining({ id: 'j1', name: 'gpt-6-astra' })]);
+});
+
+test('a terminated card with an empty args still uses the task the entry remembers', () => {
+  const s = session([
+    tool('subagent-j1', 'subagent', {}, 'done', 'Looks good'),
+  ], {
+    subagents: {
+      j1: { jobId: 'j1', task: SKILL_TASK, model: 'openai/gpt-6-astra', status: 'completed', async: false, messages: [] },
+    },
+  });
+  const agents = projectStream(s).flatMap(b => (b.blocks || []).flatMap(i => i.agents || []));
+  expect(agents).toEqual([expect.objectContaining({ id: 'j1', name: 'Delivery review' })]);
+});

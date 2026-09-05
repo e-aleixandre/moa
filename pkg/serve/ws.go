@@ -701,7 +701,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 					result = legacyResult
 				}
 				outcome := SubagentEndData{
-					JobID: transcript.JobID, Task: truncateSubagentTask(transcript.Task), Async: transcript.Async,
+					JobID: transcript.JobID, Task: truncateSubagentTask(transcript.Task), Title: truncateSubagentTask(transcript.Title), Async: transcript.Async,
 					Status: transcript.Status, Result: truncateSubagentOutcome(result), Error: truncateSubagentOutcome(resultErr),
 					CostUSD: transcript.CostUSD,
 				}
