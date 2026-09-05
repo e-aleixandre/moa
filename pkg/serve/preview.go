@@ -57,12 +57,17 @@ type PreviewProxy struct {
 	resolve    func(string) ([]net.IP, error)
 	localIPs   func() ([]net.IP, error)
 	dial       func(context.Context, string, string) (net.Conn, error)
+	// closed is cancelled by Close. Dials in flight watch it, so shutting the
+	// proxy down cannot leave a connection being opened to the old target.
+	closeCtx    context.Context
+	closeCancel context.CancelFunc
 
 	mu           sync.RWMutex
 	target       *previewTarget
 	generation   uint64
 	connections  map[uint64]map[net.Conn]struct{}
 	clearPending bool
+	closed       bool
 }
 
 func NewPreviewProxy(publicURL string, moaPort, listenPort int) *PreviewProxy {
@@ -74,10 +79,13 @@ func NewPreviewProxy(publicURL string, moaPort, listenPort int) *PreviewProxy {
 	if err != nil {
 		panic(fmt.Sprintf("preview authentication: %v", err))
 	}
+	closeCtx, closeCancel := context.WithCancel(context.Background())
 	p := &PreviewProxy{
 		publicURL: strings.TrimRight(publicURL, "/"), moaPort: moaPort, listenPort: listenPort,
 		capability: capability, authSecret: authSecret, resolve: net.LookupIP, localIPs: localInterfaceIPs,
 		connections: make(map[uint64]map[net.Conn]struct{}),
+		closeCtx:    closeCtx,
+		closeCancel: closeCancel,
 	}
 	if u, err := url.Parse(p.publicURL); err == nil {
 		p.secure = u.Scheme == "https"
@@ -127,7 +135,19 @@ func (p *PreviewProxy) PreviewURL() string {
 	return u.String()
 }
 
-func (p *PreviewProxy) Close() { p.transport.CloseIdleConnections(); p.closeGenerations(^uint64(0)) }
+// Close makes the proxy permanently unusable: dials in flight are cancelled,
+// every tracked upstream connection is dropped, and a dial that completes after
+// this point is closed instead of handed back. Deactivating the preview must
+// not leave a single connection to the previewed app alive.
+func (p *PreviewProxy) Close() {
+	p.mu.Lock()
+	p.closed = true
+	p.capability, p.authSecret = "", ""
+	p.mu.Unlock()
+	p.closeCancel()
+	p.transport.CloseIdleConnections()
+	p.closeGenerations(^uint64(0))
+}
 
 func (p *PreviewProxy) targetSnapshot() *previewTarget {
 	p.mu.RLock()
@@ -175,6 +195,10 @@ func (p *PreviewProxy) setTarget(raw string, aliases []string, parentOrigin stri
 		}
 	}
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return errors.New("the preview proxy is no longer running")
+	}
 	oldGeneration := p.generation
 	p.generation++
 	p.target = &previewTarget{url: u, aliases: clean, ips: ips, port: port, generation: p.generation, parentOrigin: parent}
@@ -329,6 +353,11 @@ func redirectWithoutPreviewToken(w http.ResponseWriter, r *http.Request) {
 func (p *PreviewProxy) validAuthCookie(value string) bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	// An empty secret means the proxy was closed (or never issued one): an empty
+	// cookie must never compare equal to it.
+	if p.authSecret == "" {
+		return false
+	}
 	return subtle.ConstantTimeCompare([]byte(value), []byte(p.authSecret)) == 1
 }
 
@@ -383,14 +412,19 @@ func (p *PreviewProxy) dialContext(ctx context.Context, network, _ string) (net.
 	if !ok || len(plan.ips) == 0 {
 		return nil, errors.New("preview target was not validated")
 	}
+	// A dial started just before Deactivate must not complete afterwards: tie
+	// its lifetime to the proxy's, not only to the request's.
+	dialCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(p.closeCtx, cancel)()
 	var last error
 	for _, ip := range plan.ips {
-		conn, err := p.dial(ctx, network, net.JoinHostPort(ip.String(), plan.port))
+		conn, err := p.dial(dialCtx, network, net.JoinHostPort(ip.String(), plan.port))
 		if err == nil {
 			tracked, current := p.trackConnection(plan.gen, conn)
 			if !current {
 				_ = conn.Close()
-				return nil, errors.New("preview target changed while connecting")
+				return nil, errors.New("the preview target changed or was turned off while connecting")
 			}
 			return tracked, nil
 		}
@@ -414,7 +448,7 @@ func (c *trackedPreviewConn) Close() error {
 func (p *PreviewProxy) trackConnection(gen uint64, conn net.Conn) (net.Conn, bool) {
 	c := &trackedPreviewConn{Conn: conn, p: p, gen: gen}
 	p.mu.Lock()
-	if gen != p.generation {
+	if gen != p.generation || p.closed {
 		p.mu.Unlock()
 		return nil, false
 	}
@@ -624,17 +658,35 @@ func containsAttr(parts []string, want string) bool {
 	return false
 }
 
-func handlePreviewTarget(p *PreviewProxy) http.HandlerFunc {
+// handlePreviewTarget is the whole hot-activation surface.
+//
+// GET reports what is configured and what is actually listening. PUT with a
+// URL brings the listener up (creating it if needed) and points it at the dev
+// server; PUT with "enabled": false takes it down. Nothing about running state
+// is persisted: the listener exists only while a preview is in use.
+func handlePreviewTarget(c *PreviewController) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if p == nil {
-			writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
+		if c == nil {
+			writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "supported": false})
 			return
 		}
 		if r.Method == http.MethodGet {
-			t := p.targetSnapshot()
-			out := map[string]any{"enabled": true, "public_url": p.PublicURL(), "preview_url": p.PreviewURL()}
-			if t != nil {
-				out["url"] = t.url.String()
+			status := c.Status()
+			out := map[string]any{
+				"enabled":        status.Enabled,
+				"supported":      true,
+				"public_url":     status.PublicURL,
+				"port":           status.Port,
+				"suggested_port": status.SuggestedPort,
+			}
+			if status.Error != "" {
+				out["error"] = status.Error
+			}
+			if proxy := c.Proxy(); proxy != nil {
+				out["preview_url"] = proxy.PreviewURL()
+				if t := proxy.targetSnapshot(); t != nil {
+					out["url"] = t.url.String()
+				}
 			}
 			writeJSON(w, http.StatusOK, out)
 			return
@@ -643,18 +695,44 @@ func handlePreviewTarget(p *PreviewProxy) http.HandlerFunc {
 			URL          string   `json:"url"`
 			Aliases      []string `json:"aliases"`
 			ParentOrigin string   `json:"parent_origin"`
+			PublicURL    string   `json:"public_url"`
+			Port         int      `json:"port"`
+			Enabled      *bool    `json:"enabled"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-			http.Error(w, "invalid JSON", 400)
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if in.Enabled != nil && !*in.Enabled {
+			c.Deactivate()
+			writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "supported": true})
 			return
 		}
 		if in.ParentOrigin == "" {
 			in.ParentOrigin = r.Header.Get("Origin")
 		}
-		if err := p.setTarget(in.URL, in.Aliases, in.ParentOrigin); err != nil {
-			http.Error(w, err.Error(), 400)
+		proxy, started, err := c.Activate(in.PublicURL, in.Port)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"url": in.URL, "public_url": p.PublicURL(), "preview_url": p.PreviewURL()})
+		if err := proxy.setTarget(in.URL, in.Aliases, in.ParentOrigin); err != nil {
+			// This call opened the port and then found the target unusable:
+			// close it again rather than leave a listener nobody asked for.
+			if started {
+				c.Deactivate()
+			}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		status := c.Status()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"enabled":     true,
+			"supported":   true,
+			"url":         in.URL,
+			"public_url":  proxy.PublicURL(),
+			"port":        status.Port,
+			"preview_url": proxy.PreviewURL(),
+		})
 	}
 }

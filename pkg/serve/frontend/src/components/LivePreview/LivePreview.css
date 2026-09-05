@@ -284,6 +284,29 @@
   color: var(--text);
   font-size: var(--text-sm);
 }
+/* The error is not only a statement: an unreachable address is corrected from
+   the same place it is reported, so the fix is one tap away from the problem. */
+.live-preview-proxy-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: space-between;
+}
+.live-preview-proxy-error-action {
+  flex: none;
+  padding: 6px var(--space-2);
+  min-height: 32px;
+  border: 1px solid var(--red);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.live-preview-proxy-error-action:hover {
+  background: color-mix(in srgb, var(--red) 18%, transparent);
+}
 /* The scroller is what moves; the stage stays put so the live border and the
    floating cards stay pinned to the panel instead of scrolling with the app. */
 .live-preview-scroller {
@@ -513,6 +536,25 @@
   margin: 0;
   color: var(--overlay1);
   font-size: var(--text-sm);
+  max-width: min(440px, 100%);
+  text-align: center;
+}
+.live-preview-setup-error {
+  margin: 0;
+  max-width: min(440px, 100%);
+  color: var(--red);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+.live-preview-setup-back {
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--overlay1);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 .live-preview-url {
   flex: 1 1 auto;

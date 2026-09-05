@@ -29,16 +29,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   your sentence plus an unambiguous handle on that element (page, tag, id and
   classes, containing elements, CSS path), so "this button" stops being
   ambiguous. See [Live Preview](docs/serve.md#live-preview).
-- A **Live Preview proxy**, enabled with `moa serve --preview-port` and
-  `--preview-public-url`, serves your own development server with the inspector
+- A **Live Preview proxy** serves your own development server with the inspector
   script already injected, so Inspect works on a project you did not modify and
-  on a dev server your browser cannot reach directly. Moa manages no tunnels:
-  expose that local port however you already expose Moa. Because the previewed
-  app runs at the proxy's origin, it is for **your own dev servers**: only
-  loopback, private and tailnet addresses are accepted, Moa itself is not a
+  on a dev server your browser cannot reach directly. It is turned on **while
+  Moa is running**: the listener binds the first time you load a URL in the
+  preview panel and closes when you leave it, so no restart is needed to use it
+  and no extra port is open when it is not — which matters, since restarting
+  `moa serve` would cut every session running under it. The one thing Moa cannot
+  derive is the address your browser reaches that listener at, so the first time
+  it proposes one built from the address you are already on (Moa's port plus
+  one), editable and confirmed, and then remembers it in the global config;
+  whether the proxy is running is never persisted. `--preview-port` /
+  `--preview-public-url` still work as initial configuration. Moa manages no
+  tunnels: expose that local port however you already expose Moa. Because the
+  previewed app runs at the proxy's origin, it is for **your own dev servers**:
+  only loopback, private and tailnet addresses are accepted, Moa itself is not a
   valid target, validated addresses are pinned at dial time, and every request
   through the listener needs a capability that only the owner-authenticated API
-  issues.
+  issues — one that stops working as soon as the preview is turned off.
 - **Wake-on-event v2**: an external system — an error tracker, a CI pipeline, a
   mail watcher — gets its own hook URL, `POST /hooks/<source>/<secret>`, and
   sends whatever body it already sends. Each source declares in config where its

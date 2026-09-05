@@ -11,6 +11,8 @@ import { useStore } from "../../hooks/useStore.js";
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
 import { PreviewStream } from "./PreviewStream.jsx";
 import { streamEvents, stageState } from "./stream.js";
+import { PreviewAddressSetup, PreviewErrorBanner, PreviewURLSetup } from "./PreviewSetup.jsx";
+import { INSPECTOR_NOTICE, activatePreview, deactivatePreview, fetchPreviewStatus, portOf, suggestPublicURL, validPublicURL } from "./preview-proxy.js";
 import { applyGesture, clampPan, pinchState, stageGesture, zoomAt, IDENTITY } from "./zoom.js";
 import "./LivePreview.css";
 
@@ -96,6 +98,12 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const [reloadNonce, setReloadNonce] = useState(0);
   const [previewPublicURL, setPreviewPublicURL] = useState("");
   const [previewError, setPreviewError] = useState("");
+  // setupMode is which question the panel is asking: the app URL, the address
+  // the browser reaches the proxy through, or nothing (it is showing the app).
+  const [setupMode, setSetupMode] = useState(null);
+  const [addressDraft, setAddressDraft] = useState("");
+  const [addressError, setAddressError] = useState("");
+  const [proxySupported, setProxySupported] = useState(true);
   const [inspectorReady, setInspectorReady] = useState(true);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [view, setView] = useState(IDENTITY);
@@ -123,45 +131,93 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   };
 
   // The saved value is always the upstream target; the iframe uses the proxy URL.
+  //
+  // Opening the panel is what turns the proxy on: there is no flag and no
+  // restart. What Moa cannot know by itself is the address the browser reaches
+  // that listener through, so the first time it asks, proposing the host the
+  // user is already on. Afterwards the address is remembered server-side.
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
     let cancelled = false;
     const restore = async () => {
       const saved = loadPreviewURL(sessionId);
       setDraftURL(saved);
       setEditingURL(false);
       try {
-        const response = await fetch("/api/preview/target");
-        if (!response.ok) throw new Error("preview configuration failed");
-        const config = await response.json();
+        const status = await fetchPreviewStatus();
         if (cancelled) return;
-        const target = saved || config.url || "";
-        setPreviewPublicURL(config.enabled ? config.public_url || "" : "");
-        setPreviewError("");
-        if (!target) return;
-        setTargetURL(target);
-        if (!config.enabled || !config.public_url) {
-          setFrameURL(target);
+        const supported = status.supported !== false;
+        setProxySupported(supported);
+        setPreviewPublicURL(supported ? status.public_url || "" : "");
+        setPreviewError(status.error || "");
+        if (!saved) {
+          setSetupMode("url");
           return;
         }
-        const put = await fetch("/api/preview/target", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json", "X-Moa-Request": "1" },
-          body: JSON.stringify({ url: target, parent_origin: location.origin }),
-        });
-        if (!put.ok) throw new Error("preview target failed");
-        const result = await put.json();
-        if (!cancelled) setFrameURL(result.preview_url || config.public_url);
+        setTargetURL(saved);
+        if (!supported) {
+          setFrameURL(saved);
+          setSetupMode(null);
+          return;
+        }
+        if (!status.public_url) {
+          setAddressDraft(suggestPublicURL(window.location, status.suggested_port));
+          setSetupMode("address");
+          return;
+        }
+        await startPreview(saved, status.public_url, () => cancelled);
       } catch {
         if (!cancelled) {
           setFrameURL("");
-          setPreviewError("The preview proxy is unavailable. Try again.");
+          setPreviewError("Moa could not reach its own preview settings. Reload the page and try again.");
         }
       }
     };
     restore();
     return () => { cancelled = true; };
   }, [open, sessionId]);
+
+  // Closing the panel takes the listener down. Without this the port would stay
+  // open (and the app stay reachable through it) for as long as moa serve runs,
+  // which is exactly what hot activation exists to avoid.
+  useEffect(() => {
+    if (!open) return undefined;
+    return () => { deactivatePreview().catch(() => {}); };
+  }, [open]);
+
+  // Every activation carries a token. A PUT that comes back after the user has
+  // changed target, corrected the address or closed the panel is dropped
+  // instead of silently mounting a preview nobody asked for any more — the
+  // failure mode of a slow response and a second tab.
+  const activation = useRef(0);
+
+  const startPreview = async (target, publicURL, cancelled = () => false) => {
+    const token = ++activation.current;
+    const stale = () => cancelled() || activation.current !== token;
+    setFrameURL("");
+    try {
+      const result = await activatePreview(fetch, {
+        url: target,
+        publicURL,
+        port: publicURL ? portOf(publicURL) : 0,
+        parentOrigin: location.origin,
+      });
+      if (stale()) return false;
+      setPreviewPublicURL(result.public_url || publicURL || "");
+      setFrameURL(result.preview_url || result.public_url || "");
+      setPreviewError("");
+      setSetupMode(null);
+      setSelected(null);
+      setView(IDENTITY);
+      setReloadNonce((n) => n + 1);
+      return true;
+    } catch (error) {
+      if (stale()) return false;
+      setFrameURL("");
+      setPreviewError(String(error?.message || error) || "The preview proxy could not be started.");
+      return false;
+    }
+  };
 
   // Measure the stage so the scaled iframe can be laid out in real pixels.
   useLayoutEffect(() => {
@@ -271,35 +327,46 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     setDraftURL(next);
     setEditingURL(false);
     if (!next) return;
-    if (next === targetURL && frameURL) return;
-    if (previewPublicURL) {
-      // A target switch gets a new capability and a new iframe document. Never
-      // leave the previous target running while the proxy is being configured.
-      setFrameURL("");
-      setPreviewError("");
-      try {
-        const response = await fetch("/api/preview/target", { method: "PUT", headers: { "Content-Type": "application/json", "X-Moa-Request": "1" }, body: JSON.stringify({ url: next, parent_origin: location.origin }) });
-        if (!response.ok) throw new Error("preview target failed");
-        const result = await response.json();
-        setTargetURL(next);
-        setFrameURL(result.preview_url || previewPublicURL);
-        setSelected(null);
-        setView(IDENTITY);
-        savePreviewURL(sessionId, next);
-        setReloadNonce((n) => n + 1);
-      } catch {
-        setTargetURL(next);
-        setPreviewError("The preview proxy is unavailable. Try again.");
-        savePreviewURL(sessionId, next);
-      }
+    setTargetURL(next);
+    savePreviewURL(sessionId, next);
+    if (!proxySupported) {
+      setFrameURL(next);
+      setSetupMode(null);
+      setSelected(null);
+      setView(IDENTITY);
+      setReloadNonce((n) => n + 1);
       return;
     }
-    setTargetURL(next);
-    setFrameURL(next);
-    setSelected(null);
-    setView(IDENTITY);
-    savePreviewURL(sessionId, next);
-    setReloadNonce((n) => n + 1);
+    if (!previewPublicURL) {
+      // First run: the app URL is known, the address of the proxy is not. Ask
+      // for it now, with a proposal, rather than opening a listener the browser
+      // may have no way to reach.
+      try {
+        const status = await fetchPreviewStatus();
+        setAddressDraft(addressDraft || suggestPublicURL(window.location, status.suggested_port));
+      } catch {
+        setAddressDraft(addressDraft || suggestPublicURL(window.location, 0));
+      }
+      setSetupMode("address");
+      return;
+    }
+    // A target switch gets a new capability and a new iframe document. Never
+    // leave the previous target running while the proxy is being repointed.
+    await startPreview(next, previewPublicURL);
+  };
+
+  // commitAddress is the one-time confirmation of the address the browser uses
+  // to reach the proxy. Moa binds the port it names, so a busy port or an
+  // unusable address comes back here as an error the user can correct.
+  const commitAddress = async () => {
+    const address = addressDraft.trim().replace(/\/+$/, "");
+    if (!validPublicURL(address)) {
+      setAddressError("Enter a full address, including http:// or https:// and the port.");
+      return;
+    }
+    setAddressError("");
+    const started = await startPreview(targetURL, address);
+    if (!started) setSetupMode("address");
   };
 
   const reload = () => {
@@ -334,7 +401,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   // unscaled height. Zoomed, the pan is the position and the holder just fills.
   const holderStyle = zoomed ? { width: "100%", height: "100%" } : { width: `${frameW * scale}px`, height: `${frameH * scale}px` };
 
-  const showSetup = !targetURL || editingURL;
+  const showSetup = setupMode === "address" ? "address" : (!targetURL || editingURL || setupMode === "url") ? "url" : null;
 
   const preview = (
     <>
@@ -375,8 +442,16 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           </button>
         </div>
       </div>
-      {!inspectorReady && <div class="live-preview-inspector-warning">Inspector did not connect. Navigate the app directly, or add the inspector script to enable touch inspection and gestures.</div>}
-      {previewError && <div class="live-preview-proxy-error" role="alert">{previewError}</div>}
+      {!inspectorReady && <div class="live-preview-inspector-warning">{INSPECTOR_NOTICE}</div>}
+      {previewError && showSetup !== "address" && (
+        <PreviewErrorBanner
+          message={previewError}
+          onChangeAddress={() => {
+            setAddressDraft(previewPublicURL || addressDraft);
+            setSetupMode("address");
+          }}
+        />
+      )}
 
       {/* The live border: the stage's own frame carries the identity color of
           the tool in flight and breathes while it runs, amber and still while
@@ -412,38 +487,24 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           )}
         </div>
 
-        {/* First run (and "Change URL"): the ONLY moment the URL is worth a
-            screen. It takes the stage instead of a permanent row, so once the
-            app is loaded those pixels go back to it for good. */}
-        {showSetup && (
-          <div class="live-preview-setup">
-            <p class="live-preview-setup-title">Enter your app URL</p>
-            <div class="live-preview-setup-row">
-              <input
-                class="live-preview-url"
-                type="url"
-                inputMode="url"
-                autocapitalize="off"
-                autocorrect="off"
-                spellcheck={false}
-                placeholder="http://localhost:5173"
-                value={draftURL}
-                autofocus
-                onInput={(e) => setDraftURL(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") commitURL();
-                  if (e.key === "Escape" && targetURL) setEditingURL(false);
-                }}
-                aria-label="Preview URL"
-              />
-              <Button variant="solid" size="sm" onClick={commitURL} disabled={!draftURL.trim()}>
-                Load
-              </Button>
-            </div>
-            <p class="live-preview-setup-hint">
-              Enter your development server URL.
-            </p>
-          </div>
+        {showSetup === "url" && (
+          <PreviewURLSetup
+            value={draftURL}
+            onInput={setDraftURL}
+            onCommit={commitURL}
+            onCancel={() => setEditingURL(false)}
+            canCancel={!!targetURL}
+          />
+        )}
+
+        {showSetup === "address" && (
+          <PreviewAddressSetup
+            value={addressDraft}
+            onInput={setAddressDraft}
+            onCommit={commitAddress}
+            onBack={() => { setSetupMode("url"); setDraftURL(targetURL); }}
+            error={addressError || previewError}
+          />
         )}
 
         {/* Siblings of the scroller, not children: what floats over the app must

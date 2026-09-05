@@ -132,40 +132,57 @@ transcript the message paints as a short reference instead; see
 Inspect works through a small script that runs **inside your app** and talks to
 Moa by `postMessage` only. There are two ways to get it there:
 
-- **Let the proxy inject it** (recommended) — run `moa serve` with
-  `--preview-port` / `--preview-public-url`, described below, and Moa serves
-  your dev server through its own listener with the script already in the page.
-  You change nothing in your project.
-- **Add it yourself** — without the proxy, the panel loads your dev server URL
-  directly in the iframe, so the script has to be part of your app. Copy
-  `pkg/serve/frontend/src/components/LivePreview/inspector.js` into it and load
-  it with `<script src="/inspector.js" data-moa-origin="<your moa origin>">`.
+- **Let the proxy inject it** (recommended) — Moa serves your dev server through
+  its own listener with the script already in the page, so you change nothing in
+  your project. Nothing to enable up front: the listener is started the first
+  time you load a URL in the panel (see below).
+- **Add it yourself** — if you do not use the proxy, the panel loads your dev
+  server URL directly in the iframe, so the script has to be part of your app.
+  Copy `pkg/serve/frontend/src/components/LivePreview/inspector.js` into it and
+  load it with `<script src="/inspector.js" data-moa-origin="<your moa origin>">`.
 
 Without the script the preview still shows and reloads your app, but a notice
-says the inspector did not connect: tap-to-inspect and touch gestures are
-unavailable until it is there.
+appears: tap-to-inspect and touch gestures are unavailable until it is there.
 
 ### The Live Preview proxy
 
 The proxy exists so Inspect works on an app you did not modify, and so the
-preview can reach a dev server that your browser cannot see directly. It is a
-**convenience, not a requirement**: without it the panel simply loads the URL
-you typed.
+preview can reach a dev server that your browser cannot see directly.
 
-Enable a dedicated local listener with `--preview-port`, and tell Moa the URL
-through which that listener is reachable from the browser with
-`--preview-public-url`:
+**It starts and stops while Moa runs.** There is nothing to enable at startup
+and no restart to pay: the listener is opened the moment you load a URL in the
+preview panel, and closed again when you leave it. With no preview open Moa
+holds no extra port at all. This matters because `moa serve` is long-lived —
+restarting it to turn a preview on would cut every session running under it.
+
+The one thing Moa cannot work out on its own is **the address your browser uses
+to reach that listener**, because it depends on how you expose the port (a
+tailnet, a reverse proxy, a LAN address). So the first time it is needed the
+panel proposes one, built from the address you are already on — reaching Moa at
+`https://dev.example.ts.net:7401` proposes `https://dev.example.ts.net:7402` —
+and you confirm it or correct the port. The default is Moa's own port plus one,
+so two Moa instances never propose the same listener. The address is then
+remembered in your global config (`preview` in
+[Configuration](./configuration.md#config-fields)) and never asked again;
+whether the proxy is *running* is not remembered, since that is decided per use.
+
+If the port is busy, activation fails and says so — Moa never reports a live
+preview it did not bind. If the address is wrong, the frame will not load: the
+error offers to change the address on the spot.
+
+The listener binds `127.0.0.1`. Moa is **transport-agnostic** and never manages
+tunnels: expose that port however you already expose Moa itself. The address you
+confirm must be the one browsers actually use, because the proxy rewrites your
+dev server's own origin to it, which is what keeps `localhost:5173` links, HMR
+websockets and redirects inside the app working.
+
+`moa serve --preview-port` / `--preview-public-url` still work: they are initial
+configuration, so the panel never has to ask. They do not open the port either —
+that still happens on first use.
 
 ```bash
 moa serve --preview-port 7492 --preview-public-url https://moa.example.test:7492
 ```
-
-The listener binds `127.0.0.1`. Moa is **transport-agnostic** and never manages
-tunnels: expose that port however you already expose Moa itself — a tailnet, a
-reverse proxy terminating HTTPS, a LAN address. The public URL must be the one
-browsers actually use, because the proxy rewrites your dev server's own origin
-to it, which is what keeps `localhost:5173` links, HMR websockets and redirects
-inside the app working.
 
 What the proxy does to the traffic:
 
@@ -182,6 +199,10 @@ What the proxy does to the traffic:
 
 Only one target is active at a time. Changing the URL in the panel repoints the
 proxy, closes the previous target's connections and issues fresh credentials.
+Closing the preview goes further: the listener itself is torn down along with
+every connection through it, including requests still in flight and HMR
+websockets, and the credentials issued for that session stop working — turning
+the preview on again mints new ones.
 
 **Trust model — read this before pointing it anywhere.** The previewed app is
 served from the proxy's origin, so it runs with whatever that origin is allowed
@@ -680,7 +701,7 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |
 | `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |
-| `GET /api/preview/target` · `PUT /api/preview/target` | Whether the [Live Preview proxy](#the-live-preview-proxy) is enabled, and which dev server it currently points at |
+| `GET /api/preview/target` · `PUT /api/preview/target` | Whether the [Live Preview proxy](#the-live-preview-proxy) is listening right now, at what address, and which dev server it points at. `PUT` with a `url` starts the listener and points it; `PUT {"enabled": false}` shuts it down |
 | `GET /api/events` · `POST /api/events/{id}/route` · `.../dismiss` · `POST /api/events/dismiss` | The [event inbox](#event-inbox): history, sending or dropping one, or dismissing a source |
 
 The web transcript initially opens on the recent conversation and automatically

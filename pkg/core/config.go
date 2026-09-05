@@ -112,6 +112,15 @@ type MoaConfig struct {
 	CompactModel           string               `json:"compact_model,omitempty"`                 // Model that writes compaction summaries. Empty/"session" = the session's own model. See GetCompactModel.
 	CompactStrategy        string               `json:"compact_strategy,omitempty"`              // What happens before an automatic compaction: "plain", "notify" (default) or "prepare". See GetCompactStrategy.
 	Events                 *EventsConfig        `json:"events,omitempty"`                        // wake-on-event: inbound webhook sources (global-only; see EventsConfig).
+	Preview                *PreviewConfig       `json:"preview,omitempty"`                       // Live Preview proxy address, remembered so the web UI does not ask again (global-only).
+}
+
+// PreviewConfig remembers how the browser reaches the Live Preview proxy. Only
+// the address is stored: whether the proxy is running is decided per use, in
+// memory, so Moa never reopens a port on startup because of a saved flag.
+type PreviewConfig struct {
+	PublicURL string `json:"public_url,omitempty"` // URL through which the browser reaches the proxy listener
+	Port      int    `json:"port,omitempty"`       // Local port the listener binds on 127.0.0.1
 }
 
 // Compaction strategies: what the agent gets before its context is summarized.
@@ -573,6 +582,9 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		DisabledMCPServers:  unionStrings(base.DisabledMCPServers, override.DisabledMCPServers),
 		TrustedMCPPaths:     base.TrustedMCPPaths,     // global-only; persisted via SaveGlobalConfig
 		TrustedProjectPaths: base.TrustedProjectPaths, // global-only; persisted via SaveGlobalConfig
+		// The preview address is the owner's, not a project's: a repository must
+		// never be able to tell Moa where to publish a proxy.
+		Preview: base.Preview,
 		Permissions: PermissionsConfig{
 			Mode:  mergeScalar(base.Permissions.Mode, override.Permissions.Mode),
 			Model: mergeScalar(base.Permissions.Model, override.Permissions.Model),

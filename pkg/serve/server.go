@@ -44,7 +44,7 @@ type serverOptions struct {
 	deviceAuth      bool
 	realtimeKey     RealtimeAPIKeyFunc
 	realtimeHTTP    *http.Client
-	preview         *PreviewProxy
+	preview         *PreviewController
 }
 
 // RealtimeAPIKeyFunc returns only a normal OpenAI API key. ok must be false
@@ -97,8 +97,11 @@ func WithDeviceAuthentication() ServerOption {
 	return func(o *serverOptions) { o.deviceAuth = true }
 }
 
-func WithPreviewProxy(proxy *PreviewProxy) ServerOption {
-	return func(o *serverOptions) { o.preview = proxy }
+// WithPreviewController wires the Live Preview proxy's lifecycle. The listener
+// is not opened here: the controller binds a port only when someone actually
+// opens a preview, and closes it again when they turn it off.
+func WithPreviewController(controller *PreviewController) ServerOption {
+	return func(o *serverOptions) { o.preview = controller }
 }
 
 // NewServer returns an http.Handler wired to the given manager.

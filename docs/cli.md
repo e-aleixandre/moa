@@ -87,8 +87,8 @@ moa serve [--host 127.0.0.1] [--port 8080] [--model sonnet] [--token <secret>] [
 | `--token` | | Shared secret for opt-in auth (or `MOA_SERVE_TOKEN`). When set, requests need a valid session cookie or `?token=<secret>` |
 | `--automation-token` | | Shared secret enabling the [Automation API](./automation.md) (or `MOA_AUTOMATION_TOKEN`), presented as `Authorization: Bearer <secret>`. Separate from `--token`; without it those routes do not exist |
 | `--allowed-hosts` | | Comma-separated extra Host names accepted by the anti DNS-rebinding check (localhost/IP literals always allowed; e.g. a Tailscale MagicDNS name) |
-| `--preview-port` | `0` | Dedicated local port for the [Live Preview proxy](./serve.md#the-live-preview-proxy), which serves your own dev server with the inspector already injected. Binds `127.0.0.1`; `0` disables it |
-| `--preview-public-url` | | URL through which that listener is reachable from the browser — Moa rewrites the dev server's origin to it. Required with `--preview-port` |
+| `--preview-port` | `0` | Initial local port for the [Live Preview proxy](./serve.md#the-live-preview-proxy). Optional: with `0` the port is chosen (and confirmed) the first time you open a preview. The listener is never opened at startup either way — it binds `127.0.0.1` on first use and closes when the preview does |
+| `--preview-public-url` | | Address through which that listener is reachable from the browser — Moa rewrites the dev server's origin to it. Required with `--preview-port`; without either flag the web UI proposes an address and remembers your answer |
 
 See [Web UI](./serve.md) for details.
 
