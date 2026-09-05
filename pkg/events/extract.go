@@ -21,10 +21,6 @@ type ParsedHook struct {
 // JSON objects look at title|subject|summary|event|message for a title and at
 // id|event_id|key for a provider id; anything else is pretty-printed (or kept
 // as text) and keyed by the SHA-256 of the raw bytes.
-//
-// Real providers wrap the interesting fields one level down (AgentMail sends
-// {event_type, event_id, message:{subject, ...}}), so a nested object under a
-// known envelope key is consulted before falling back to "<source> event".
 func ParseHookBody(source string, raw []byte) ParsedHook {
 	raw = []byte(strings.TrimSpace(string(raw)))
 	title := strings.TrimSpace(source) + " event"
@@ -34,16 +30,11 @@ func ParseHookBody(source string, raw []byte) ParsedHook {
 	if obj, ok := asJSONObject(raw); ok {
 		if extracted := firstJSONString(obj, "title", "subject", "summary", "event", "message"); extracted != "" {
 			title = extracted
-		} else if nested := nestedTitle(obj); nested != "" {
-			title = nested
 		}
 		if pretty, err := json.MarshalIndent(obj, "", "  "); err == nil {
 			body = string(pretty)
 		}
 		key = firstJSONKey(obj, "id", "event_id", "key")
-		if key == "" {
-			key = nestedKey(obj)
-		}
 	} else if trimmed := strings.TrimSpace(string(raw)); len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
 		var v any
 		if err := json.Unmarshal(raw, &v); err == nil {
@@ -76,36 +67,6 @@ func asJSONObject(raw []byte) (map[string]any, bool) {
 		return nil, false
 	}
 	return obj, true
-}
-
-// envelopeKeys are the containers providers put the real payload in. Only one
-// level is inspected: deeper walking would start guessing.
-var envelopeKeys = []string{"message", "data", "payload", "event", "issue", "object"}
-
-func nestedTitle(obj map[string]any) string {
-	for _, k := range envelopeKeys {
-		inner, ok := obj[k].(map[string]any)
-		if !ok {
-			continue
-		}
-		if s := firstJSONString(inner, "title", "subject", "summary", "name", "preview"); s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
-func nestedKey(obj map[string]any) string {
-	for _, k := range envelopeKeys {
-		inner, ok := obj[k].(map[string]any)
-		if !ok {
-			continue
-		}
-		if s := firstJSONKey(inner, "id", "message_id", "event_id", "key"); s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 func firstJSONString(obj map[string]any, keys ...string) string {
