@@ -8,6 +8,7 @@ import { canAppendHistoryDelta, finishHistoryHydration } from '../history-hydrat
 import { acknowledgeVisibleAttentionThrough } from '../api.js';
 import { store, updateSession, visibleSessionIds } from '../store.js';
 import { seedOlderHistory } from '../history-paging.js';
+import { refreshArtifactsAfterReconnect } from '../artifacts.js';
 
 export function mergeSteers(snapshot, local) {
   // Snapshot steers are authoritative and already accepted by the server, so
@@ -160,6 +161,9 @@ export function handleWsInit(id, data) {
     updateSession(id, { readCandidateSeq: data.last_seq || 0 });
   }
   acknowledgeInitAttention(id, data, namespace);
+  // A socket that was away may have missed a delivery entirely; the drawer's
+  // authoritative source is the API, so an open collection reloads here.
+  refreshArtifactsAfterReconnect(id);
 }
 
 // An authoritative init is the read boundary: the selected session showed the
@@ -236,6 +240,10 @@ export function initSubagents(raw) {
       jobId: sa.job_id,
       originToolCallId: sa.origin_tool_call_id || '',
       task: sa.task || '',
+      // The backend-generated title is the child's identity label everywhere
+      // (see stream-model's subagentLabel); dropping it here made a reconnect
+      // silently downgrade every titled child to its raw model id.
+      title: sa.title || '',
       model: sa.model || '',
       thinking: sa.thinking || 'off',
       status: sa.status || 'running',

@@ -236,6 +236,38 @@ func TestLiveSubagentInitData_SharesOneAggregateBudget(t *testing.T) {
 	}
 }
 
+// A terminal SYNC child is gone from the live registry by the time the parent
+// reloads, so the init snapshot lists no live subagent for it and the outcome
+// is the only carrier of its identity. Without the title there, the restored
+// card degrades to the task heading (or the model) even though the sidecar and
+// the REST endpoints have the real title.
+func TestBuildInitData_OutcomeCarriesPersistedTitle(t *testing.T) {
+	mgr := newTestManager(t, t.Context(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveOutcome(t, sess, session.SubagentTranscript{
+		JobID:      "sa-titled",
+		Task:       "\n# Delivery review QA\n\nVerify the promised work.",
+		Title:      "Review delivered files",
+		Status:     "completed",
+		Result:     "looks good",
+		FinishedAt: time.Now(),
+	})
+
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
+	if len(data.Subagents) != 0 {
+		t.Fatalf("terminal sync child must not appear as live: %+v", data.Subagents)
+	}
+	if len(data.SubagentOutcomes) != 1 {
+		t.Fatalf("outcomes = %+v", data.SubagentOutcomes)
+	}
+	if got := data.SubagentOutcomes[0].Title; got != "Review delivered files" {
+		t.Fatalf("outcome title = %q, want the persisted title", got)
+	}
+}
+
 func TestBuildInitData_OutcomeResultsAreExcerpted(t *testing.T) {
 	mgr := newTestManager(t, t.Context(), newMockProvider())
 	sess, err := mgr.CreateSession(CreateOpts{})

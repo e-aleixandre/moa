@@ -81,10 +81,10 @@
 //         { type:'file', file:{name,size,mime,url} }
 //             A full-width download card for a FINISHED send_file call whose
 //             result ends in a valid JSON file descriptor (see
-//             data/util/file-card.js#parseFileCardData). Emitted as a SIBLING
-//             right after the ledger that contains the send_file row (same
-//             pattern as `diff`), closing that ledger. A send_file call that
-//             errored keeps its raw ledger text instead (no file block).
+//             data/util/file-card.js#parseFileCardData). Its generic tool row
+//             is omitted; it closes a preceding ledger and is emitted in its
+//             chronological place. A send_file call that errored keeps its raw
+//             ledger text instead (no file block).
 //
 //         { type:'fanout', task?, agents:[...] }
 //             2+ LIVE subagents running in parallel right now. Matches the
@@ -301,17 +301,29 @@ export function projectStream(session) {
           currentDelegation = { type: 'delegation', id: blockID('delegation', msg, i), agents: [], settled: true };
           doc.blocks.push(currentDelegation);
         }
-        currentDelegation.agents.push(delegationDoneAgent(msg, subagentAccent(session.subagents, jobId, msg.accentIndex), jobId, openable));
+        currentDelegation.agents.push(delegationDoneAgent(
+          msg,
+          subagentAccent(session.subagents, jobId, msg.accentIndex),
+          jobId,
+          openable,
+          subagentIdentityOf(session.subagents, jobId),
+        ));
         closeLedger();
         continue;
       }
 
       closeDelegation();
-      if (!currentLedger) {
-        currentLedger = { type: 'ledger', id: blockID('ledger', msg, i), rows: [] };
-        doc.blocks.push(currentLedger);
+      // A valid completed delivery has its own card. Do not also retain its
+      // generic ledger row; failed/rejected/invalid deliveries have no file
+      // block and therefore keep their feedback row.
+      const file = toFileBlock(msg);
+      if (!file) {
+        if (!currentLedger) {
+          currentLedger = { type: 'ledger', id: blockID('ledger', msg, i), rows: [] };
+          doc.blocks.push(currentLedger);
+        }
+        currentLedger.rows.push(toLedgerRow(msg));
       }
-      currentLedger.rows.push(toLedgerRow(msg));
 
       // An edit carrying a real unified diff emits a sibling for fusion into
       // that row. It must not close the ledger: consecutive edits belong in
@@ -322,9 +334,8 @@ export function projectStream(session) {
         doc.blocks.push(diff);
       }
 
-      // A finished send_file result renders as a download card, sibling to
-      // the ledger row (like the diff above) instead of raw text.
-      const file = toFileBlock(msg);
+      // A finished send_file result renders as a download card instead of a
+      // generic ledger row.
       if (file) {
         file.id = blockID('file', msg, i);
         doc.blocks.push(file);
@@ -530,6 +541,18 @@ function hasSubagentEntry(subagents, jobId) {
   return Object.prototype.hasOwnProperty.call(subagents, jobId);
 }
 
+// subagentIdentityOf returns the session entry that holds a job's identity, so
+// a TERMINATED card keeps the identity its live row had: the title, task and
+// model live on that entry, not on the card message. One lookup returning one
+// object, rather than more positional arguments on the card projector.
+function subagentIdentityOf(subagents, jobId) {
+  if (!subagents || !jobId) return null;
+  const sub = Array.isArray(subagents)
+    ? subagents.find((s) => s && String(s.jobId) === String(jobId))
+    : subagents[jobId];
+  return sub || null;
+}
+
 // modelRedirectLine describes a response the provider served with a model other
 // than the one asked for. It returns '' for the ordinary case, so callers can
 // call it unconditionally.
@@ -665,6 +688,35 @@ function firstLine(str) {
 function shortLabel(str, max = 40) {
   if (!str) return '';
   return str.length > max ? str.slice(0, max - 1) + '…' : str;
+}
+
+// firstMeaningfulLine returns the first NON-EMPTY line of a task, with the
+// Markdown heading marker stripped for display. A skill's task commonly starts
+// with a blank line before its `# Heading` (stripFrontmatter keeps it), and
+// taking the literal first line then yields '' — which used to collapse the
+// whole identity to the raw model id.
+function firstMeaningfulLine(str) {
+  if (!str) return '';
+  for (const line of String(str).split('\n')) {
+    const trimmed = line.trim().replace(/^#{1,6}\s+/, '').trim();
+    if (trimmed) return trimmed;
+  }
+  return '';
+}
+
+// subagentLabel is the ONE identity rule for a subagent across every surface
+// (LiveDock chip, inline delegation row, terminated card, SubagentView
+// breadcrumb): the backend-generated title first, then the first meaningful
+// line of the task, then the model, then the job id. Surfaces used to
+// reimplement it and diverged — a titled child showed its title only in
+// SubagentView while the dock and the delegation showed `gpt-6-astra`.
+export function subagentLabel(sub, max = 40) {
+  if (!sub) return 'subagent';
+  const title = typeof sub.title === 'string' ? sub.title.trim() : '';
+  if (title) return shortLabel(title, max);
+  const task = shortLabel(firstMeaningfulLine(sub.task), max);
+  if (task) return task;
+  return shortModel(sub.model) || sub.jobId || 'subagent';
 }
 
 // mapStatus normalizes a tool_start status to the ledger row status class.
@@ -851,7 +903,16 @@ function toFileBlock(msg) {
   if (!data) return null;
   return {
     type: 'file',
-    file: { name: data.name, size: data.size, mime: data.mime, url: data.url },
+    file: {
+      name: data.name,
+      size: data.size,
+      mime: data.mime,
+      url: data.url,
+      // Optional visual metadata from send_file. Absent in older transcripts
+      // and in clients that never sent them; the file name is the fallback.
+      ...(typeof data.title === 'string' ? { title: data.title } : {}),
+      ...(typeof data.description === 'string' ? { description: data.description } : {}),
+    },
   };
 }
 
@@ -897,7 +958,7 @@ function agentAction(sub) {
 export function liveAgent(sub, i) {
   const agent = {
     id: sub.jobId,
-    name: shortLabel(firstLine(sub.task)) || shortModel(sub.model) || sub.jobId || 'subagent',
+    name: subagentLabel(sub),
     accent: FANOUT_ACCENTS[i % FANOUT_ACCENTS.length],
     state: 'running',
   };
@@ -921,7 +982,7 @@ export function liveAgent(sub, i) {
 function delegationRunningAgent(sub, accentIdx) {
   const agent = {
     id: sub.jobId,
-    name: shortLabel(firstLine(sub.task)) || shortModel(sub.model) || sub.jobId || 'subagent',
+    name: subagentLabel(sub),
     accent: FANOUT_ACCENTS[accentIdx % FANOUT_ACCENTS.length],
     state: 'running',
     bashJobs: [],
@@ -942,13 +1003,21 @@ function delegationRunningAgent(sub, accentIdx) {
 // delegationDoneAgent builds a terminated agent row from a subagent card
 // (tool_name 'subagent', keyed `subagent-<jobId>` or legacy `subagent_<index>`)
 // comes from session.subagents (the completed entry keeps its accentIndex).
-function delegationDoneAgent(msg, accent, jobIDOverride, openable = true) {
+function delegationDoneAgent(msg, accent, jobIDOverride, openable = true, entry = null) {
   const jobId = jobIDOverride || String(msg.tool_call_id || '').replace(/^subagent[-_]/, '');
   const failed = msg.status === 'error' || msg.status === 'failed' || msg.status === 'cancelled';
-  const task = msg.args && msg.args.task ? firstLine(msg.args.task) : '';
   const agent = {
     id: jobId,
-    name: shortLabel(task) || jobId || 'subagent',
+    // Same precedence a live row uses: the card carries the task the model
+    // sent and, after a reload, the title the init outcome restored; the
+    // session entry carries them while the child is still known; the job id is
+    // only the last resort.
+    name: subagentLabel({
+      title: (entry && entry.title) || msg.subagentTitle,
+      task: (msg.args && msg.args.task) || (entry && entry.task),
+      model: (entry && entry.model) || (msg.args && msg.args.model),
+      jobId,
+    }),
     accent: accent || FANOUT_ACCENTS[0],
     state: failed ? (msg.status === 'cancelled' ? 'cancelled' : 'failed') : 'done',
     bashJobs: [],

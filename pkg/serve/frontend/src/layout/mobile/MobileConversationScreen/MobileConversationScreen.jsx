@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "preact/hooks";
-import { AppWindow, Inbox, Plus } from "lucide-preact";
+import { AppWindow, Inbox, Layers, Plus } from "lucide-preact";
 import { updateSession, store } from "../../../data/store.js";
 import { useStore } from "../../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../../data/stream-model.js";
@@ -10,6 +10,7 @@ import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resume
 import { addToast } from "../../../data/notifications.js";
 import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, routeEvent, routeEventToNewSession, toggleInbox } from "../../../data/events.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
+import { openArtifactsList } from "../../../data/artifacts.js";
 import { LivePreview } from "../../../components/LivePreview/LivePreview.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
@@ -358,6 +359,13 @@ function MobileSessionChrome({ version, forceMobile = false }) {
             label: "Live preview",
             onClick: () => updateSession(chrome.activeId, { previewOpen: true }),
             active: chrome.previewOpen,
+            visible: !!chrome.activeId,
+          },
+          {
+            id: "artifacts",
+            icon: Layers,
+            label: "Artifacts",
+            onClick: () => openArtifactsList(chrome.activeId),
             visible: !!chrome.activeId,
           },
           {

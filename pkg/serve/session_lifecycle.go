@@ -2,8 +2,6 @@ package serve
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -105,7 +103,10 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	var bopts *buildOpts
 	if titleSource != "" || opts.Thinking != "" || opts.PermissionMode != "" || len(opts.extraMCPServers) > 0 {
 		bopts = &buildOpts{titleSource: titleSource, initialThinking: opts.Thinking, initialPermissionMode: opts.PermissionMode, extraMCPServers: opts.extraMCPServers}
+	} else {
+		bopts = &buildOpts{}
 	}
+	bopts.artifactStore = session.NewArtifactStore(store.Dir(), id)
 	sess, err := m.buildManagedSession(id, opts.Title, opts.Model, cwd, bopts)
 	if err != nil {
 		return nil, err
@@ -161,6 +162,12 @@ type buildOpts struct {
 	initialEntries  []session.Entry
 	initialLeafID   string
 	initialMetadata map[string]any
+
+	// artifactStore is the durable artifact catalog of this session, built by
+	// the caller from the FileStore that owns it. Passed in rather than derived
+	// from CWD so create and resume always publish into the same directory as
+	// the session's own JSON.
+	artifactStore *session.ArtifactStore
 
 	// extraMCPServers are session-scoped MCP servers merged on top of the
 	// configured ones (see CreateOpts.extraMCPServers). On resume they are
@@ -421,8 +428,11 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		}
 	}
 
-	shared := newSharedFiles()
-	core.RegisterOrLog(bs.ToolReg, newSendFileTool(tool.ToolConfig{WorkspaceRoot: bs.CWD, PathPolicy: bs.PathPolicy}, id, shared, m.attachStore))
+	var artifactStore *session.ArtifactStore
+	if opts != nil {
+		artifactStore = opts.artifactStore
+	}
+	core.RegisterOrLog(bs.ToolReg, newSendFileTool(tool.ToolConfig{WorkspaceRoot: bs.CWD, PathPolicy: bs.PathPolicy}, id, artifactStore))
 
 	// Build RuntimeConfig from bootstrap session + serve-specific fields.
 	rcfg := bs.RuntimeConfig()
@@ -533,7 +543,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			promptSources:   bs.Sources,
 			UntrustedMCP:    bs.UntrustedMCP,
 		},
-		sharedFiles:     shared,
+		artifactStore:   artifactStore,
 		attachmentScope: attachScope,
 	}
 	// Wire the MCP controller's prompt refresh now that the runtime exists: when
@@ -680,7 +690,7 @@ func (m *Manager) deleteSession(id string) error {
 	sess, ok := m.sessions[id]
 	if !ok {
 		m.mu.Unlock()
-		// Not active — try disk.
+		// Not active — delete its on-disk state.
 		if err := session.DeleteByID(m.sessionBaseDir, id); err != nil {
 			if errors.Is(err, session.ErrNotFound) {
 				return ErrNotFound
@@ -715,6 +725,16 @@ func (m *Manager) deleteSession(id string) error {
 	// Mark deleted to prevent persistence from resurrecting.
 	if sess.persister != nil {
 		sess.persister.markDeleted()
+	}
+	// Tombstone the artifact catalog before tearing the runtime down. Neither
+	// the lifecycle barrier nor Abort guarantees an in-flight send_file has
+	// returned, so this takes the store's own mutex: an upsert already inside
+	// its critical section finishes and is then removed, and one that had not
+	// entered fails instead of recreating the sidecar. Only references go —
+	// never the files they point at.
+	var artifactErr error
+	if sess.artifactStore != nil {
+		artifactErr = sess.artifactStore.DeleteReferences()
 	}
 
 	// Stop Web Push subscribers BEFORE closing the runtime, so events drained
@@ -755,6 +775,9 @@ func (m *Manager) deleteSession(id string) error {
 	// Report every failed removal so callers never claim a conversation was
 	// deleted while its private data remains on disk.
 	var deleteErrs []error
+	if artifactErr != nil {
+		deleteErrs = append(deleteErrs, artifactErr)
+	}
 	if sess.persister != nil {
 		sess.persister.mu.Lock()
 		store := sess.persister.store
@@ -1047,6 +1070,7 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 		initialLeafID:          saved.LeafID,
 		initialMetadata:        saved.Metadata,
 		titleSource:            saved.TitleSource,
+		artifactStore:          session.NewArtifactStore(store.Dir(), saved.ID),
 		// Per-run MCP servers are session-scoped: they only exist in this
 		// session's metadata, so a resume has to bring them back or the agent
 		// silently loses the tools the automation caller attached. A name the
@@ -1499,12 +1523,6 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 		return ErrBusy
 	}
 	return nil
-}
-
-func newID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
 }
 
 func modelDisplayName(m core.Model) string {

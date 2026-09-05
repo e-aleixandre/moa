@@ -4,6 +4,7 @@ import {
   initIds, allTileIds, allSessionIds, tileCount,
 } from './tileTree.js';
 import { pruneDrawerCollapsed } from './util/project-sessions.js';
+import { ARTIFACTS_CLOSED } from './artifacts-model.js';
 
 const STORAGE_KEY = 'moa-next-ui-state';
 
@@ -109,6 +110,12 @@ let state = {
   // it (see data/drawer.js). drawerStep is 'list' | 'new'.
   drawerOpen: false,
   drawerStep: 'list',
+
+  // Artifacts drawer — ONE ephemeral, global slice (see data/artifacts.js).
+  // It holds the conversation that owns the drawer, what it shows and the
+  // state of its list request. The collection is server state and is refetched
+  // on every open, so it deliberately does not live in session metadata.
+  artifacts: ARTIFACTS_CLOSED,
 };
 
 let listeners = new Set();

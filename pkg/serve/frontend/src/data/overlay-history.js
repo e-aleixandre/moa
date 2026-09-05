@@ -120,6 +120,16 @@ export function closeOverlay(id, fromPop = false, knownEntry = null) {
   }
 }
 
+// isTopOverlay — is `id` the overlay currently on top of the shared stack?
+// Needed because a capture-phase key handler (the artifacts drawer's) runs for
+// EVERY overlay above it too: without this, Escape inside an HtmlResourceInfo
+// Sheet opened from the drawer would close the drawer underneath instead of
+// the Sheet. The stack already knows the order, so this is a read of existing
+// state rather than a second layering mechanism.
+export function isTopOverlay(id) {
+  return stack.length > 0 && stack[stack.length - 1].id === id;
+}
+
 // Test-only escape hatch: bun test doesn't reload modules between files, so a
 // stray listener/stack entry from one test could leak into the next.
 export function __resetOverlayHistoryForTests() {

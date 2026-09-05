@@ -6,6 +6,7 @@ import { truncateText } from '../util/format.js';
 import { addToast } from '../notifications.js';
 import { store, updateSession } from '../store.js';
 import { isSessionAway, markUnseen } from './attention.js';
+import { noteArtifactDelivery } from './tools.js';
 
 export function handleWsSubagentTitle(id, data) {
   const sess = store.get().sessions[id];
@@ -113,6 +114,10 @@ export function handleWsSubagentStart(id, data) {
     jobId,
     originToolCallId: data.origin_tool_call_id || (existing && existing.originToolCallId) || '',
     task: data.task || (existing && existing.task) || '',
+    // The title is generated asynchronously AFTER the first start event, so a
+    // later start (promotion echo) never carries it: the existing one wins
+    // rather than being erased back to the model id.
+    title: data.title || (existing && existing.title) || '',
     model: data.model || (existing && existing.model) || '',
     thinking: data.thinking || (existing && existing.thinking) || 'off',
     status: isTerminal ? existing.status : 'running',
@@ -175,6 +180,9 @@ export function handleWsSubagentEvent(id, data) {
   if (!jobId || !evt) return;
   if (!wsState.pendingSubagentEvents[id]) wsState.pendingSubagentEvents[id] = [];
   wsState.pendingSubagentEvents[id].push({ jobId, evt });
+  // A delegated send_file publishes into the PARENT conversation, so a nested
+  // tool_end refreshes the same open drawer a foreground delivery would.
+  if (evt.type === 'tool_end') noteArtifactDelivery(id, evt.data);
   scheduleSubagentFlush();
 }
 
@@ -244,6 +252,10 @@ export function upsertTerminalSubagentOutcome(messages, subagent, data) {
     subagentJobId: jobId,
     tool_name: 'subagent',
     args: { task: data.task || subagent?.task || '' },
+    // The generated title is the card's identity label. After a reload with no
+    // live entry left, the init outcome is the ONLY carrier of it, so it is
+    // stored on the card; an event without one never erases what is known.
+    subagentTitle: data.title || subagent?.title || existing?.subagentTitle || '',
     status: status === 'completed' ? 'done' : status === 'cancelled' ? 'cancelled' : 'error',
     accentIndex: Number.isInteger(subagent?.accentIndex) ? subagent.accentIndex : undefined,
     // A successful but empty child response has no Result action. Failed

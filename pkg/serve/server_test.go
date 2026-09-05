@@ -1780,6 +1780,54 @@ func TestSubagentTranscriptEndpoints(t *testing.T) {
 	resp.Body.Close() //nolint:errcheck
 }
 
+func TestSubagentTranscriptEndpointsExposePersistedTitle(t *testing.T) {
+	// The child's generated title is its identity label in every client
+	// surface. The sidecar already stored it; the transcript endpoint used to
+	// drop it, so reopening a finished child degraded its label to a model id.
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := mgr.subagentStoreFor(sess.ID)
+	if store == nil {
+		t.Fatal("expected a subagent store for active session")
+	}
+	if err := store.Save(session.SubagentTranscript{
+		JobID:  "sa-titled",
+		Task:   "\n# Delivery review\n\nVerify the promised work.",
+		Title:  "Review Promised Delivery Work",
+		Model:  "gpt-6-astra",
+		Status: "completed",
+		Messages: []core.AgentMessage{
+			{Message: core.Message{MsgID: "child-user", Role: "user", Content: []core.Content{core.TextContent("review")}}},
+		},
+	}); err != nil {
+		t.Fatalf("save transcript: %v", err)
+	}
+
+	resp := apiReq(t, srv, "GET", "/api/sessions/"+sess.ID+"/subagents", "")
+	var list subagentListResponse
+	_ = json.NewDecoder(resp.Body).Decode(&list)
+	resp.Body.Close() //nolint:errcheck
+	if len(list.Subagents) != 1 || list.Subagents[0].Title != "Review Promised Delivery Work" {
+		t.Fatalf("list lost the title: %+v", list.Subagents)
+	}
+
+	resp = apiReq(t, srv, "GET", "/api/sessions/"+sess.ID+"/subagents/sa-titled", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get status = %d", resp.StatusCode)
+	}
+	var got subagentConversationResponse
+	_ = json.NewDecoder(resp.Body).Decode(&got)
+	resp.Body.Close() //nolint:errcheck
+	if got.Title != "Review Promised Delivery Work" {
+		t.Fatalf("conversation response lost the title: %+v", got)
+	}
+}
+
 func TestSafeSubagentConversationMessagesBoundsVisibleText(t *testing.T) {
 	projection := safeSubagentConversationMessages([]core.AgentMessage{
 		{Message: core.Message{MsgID: "large", Role: "assistant", Content: []core.Content{core.TextContent(strings.Repeat("é", maxConversationTextBytes))}}},

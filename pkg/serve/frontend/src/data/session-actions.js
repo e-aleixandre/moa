@@ -11,6 +11,7 @@ import {
 import { allSessionIds, clearSession } from './tileTree.js';
 import { attentionArrival, forgetAttentionArrival, retainAttentionArrivals } from './attention-arrivals.js';
 import { loadEvents } from './events.js'; // wake-on-event
+import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artifacts.js';
 
 let pollTimer = null;
 let nextRosterRequest = 0;
@@ -272,6 +273,11 @@ export async function loadSessions() {
     // Clean deleted sessions from tile tree
     const validIds = new Set(Object.keys(sessions));
     retainAttentionArrivals(validIds);
+    // The roster is authoritative and still lists saved/closed conversations,
+    // so an owner missing from it was deleted — possibly by another client.
+    // Its references are gone, and the shared drawer must not keep showing
+    // them under a conversation this client no longer has.
+    closeArtifactsForMissingOwner(validIds);
     const currentState = store.get();
     let tree = currentState.tileTree;
     let treeChanged = false;
@@ -377,6 +383,10 @@ export async function deleteSession(id) {
   const tileTree = clearSession(state.tileTree, id);
   const activeSession = state.activeSession === id ? null : state.activeSession;
   forgetAttentionArrival(id);
+  // A deleted conversation's references are gone, so the shared drawer must not
+  // keep showing its collection. Closing (unloading) does not need this: the
+  // artifacts API answers for a saved session.
+  closeArtifactsForSession(id);
   setState({ sessions, tileTree, activeSession });
   afterVisibilityChange();
 }
@@ -791,6 +801,10 @@ export async function openPersistedSubagent(id, jobId, opts = {}) {
   subs[jobId] = {
     jobId,
     task: t.task || '',
+    // Restored from the sidecar so a reopened terminal child keeps the same
+    // identity label its live row had (see stream-model's subagentLabel).
+    // Older servers omit it; the existing entry's title then still wins.
+    title: t.title || (existing && existing.title) || '',
     model: t.model || '',
     thinking: t.thinking || 'off',
     status: t.status || 'completed',

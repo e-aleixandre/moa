@@ -66,6 +66,9 @@ export function Pane({
   overlay,
   onPreviewToggle,
   previewOpen = false,
+  // headExtra — extra pane-header actions (the Artifacts entry), in the same
+  // icon family as the existing tools.
+  headExtra,
 }) {
   const classes = [
     "pane",
@@ -124,6 +127,7 @@ export function Pane({
         {path && <span class="p-path">{path}</span>}
 
         <div class="p-tools">
+          {headExtra}
           {onPreviewToggle && (
             <IconButton label="Live preview" onClick={onPreviewToggle} className={previewOpen ? "p-preview is-on" : "p-preview"}>
               <AppWindow size={15} />

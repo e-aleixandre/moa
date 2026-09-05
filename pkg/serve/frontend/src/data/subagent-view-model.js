@@ -18,6 +18,7 @@ import {
   seenJobIdsOf,
   projectStream,
   subagentAccentIndex,
+  subagentLabel,
 } from './stream-model.js';
 import { shortModel, modelCodename } from './util/format.js';
 import { activityText, formatElapsed } from './util/activity.js';
@@ -31,14 +32,12 @@ function firstLine(str) {
   return nl < 0 ? str : str.slice(0, nl);
 }
 
-// codenameOf derives a short, breadcrumb-friendly label from the (long) task.
-// There is no server-side codename today (SUBAGENT-VIEW-SPEC §9.3 [BACKEND]),
-// so we trim the first line; the full task lives in the task card below.
+// codenameOf derives a short, breadcrumb-friendly label. It defers to the ONE
+// shared identity rule (stream-model's subagentLabel) so the breadcrumb never
+// diverges from the dock chip or the delegation row; only the breadcrumb's
+// tighter width is local.
 function codenameOf(sub) {
-	if (sub.title) return String(sub.title);
-  const short = firstLine(sub.task || '').trim();
-  if (short) return short.length > 32 ? short.slice(0, 31) + '…' : short;
-  return shortModel(sub.model) || sub.jobId || 'subagent';
+  return subagentLabel(sub, 32);
 }
 
 // accentForIndex is the identity color for a fanout slot (never a state color).

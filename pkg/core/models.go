@@ -410,10 +410,11 @@ func ListModels() []ModelEntry {
 		byID[m.ID] = m
 	}
 
-	// Build reverse alias map: canonical ID → shortest alias.
+	// Build reverse alias map: canonical ID → shortest alias. Equal-length
+	// aliases use lexical order so map iteration cannot change what is shown.
 	aliases := make(map[string]string)
 	for alias, canonicalID := range modelAliases {
-		if existing, ok := aliases[canonicalID]; !ok || len(alias) < len(existing) {
+		if existing, ok := aliases[canonicalID]; !ok || len(alias) < len(existing) || len(alias) == len(existing) && alias < existing {
 			aliases[canonicalID] = alias
 		}
 	}
