@@ -211,6 +211,7 @@ export function AskUserPrompt({ session }) {
       <AskUserCard
         question={q.question}
         options={options}
+        currentAnswer={currentAnswer}
         onPick={pick}
         onSubmitFree={submitFree}
         freeValue={freeValue}

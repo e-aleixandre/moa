@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { PreviewAddressSetup, PreviewErrorBanner, PreviewURLSetup } from "./PreviewSetup.jsx";
+import { PreviewAddressSetup, PreviewErrorBanner, PreviewRecoveryNotice, PreviewURLSetup } from "./PreviewSetup.jsx";
 
 const find = (node, predicate) => {
   if (!node || typeof node !== "object") return null;
@@ -86,4 +86,14 @@ test("a preview error offers the way to change the address", () => {
   expect(textOf(action)).toBe("Change the preview address");
   action.props.onClick();
   expect(opened).toBe(1);
+});
+
+test("a disconnected bridge offers an explicit return to the configured app", () => {
+  let returned = 0;
+  const tree = PreviewRecoveryNotice({ message: "This page is no longer connected to Moa.", onReturn: () => { returned += 1; } });
+  expect(textOf(tree)).toContain("This page is no longer connected to Moa.");
+  const action = byClass(tree, "live-preview-recovery-action");
+  expect(textOf(action)).toBe("Return to app");
+  action.props.onClick();
+  expect(returned).toBe(1);
 });

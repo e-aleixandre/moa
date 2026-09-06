@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { MousePointerClick, X, Minus, Plus, MoreVertical, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Smartphone, Tablet, Monitor, Scan, PencilLine } from "lucide-preact";
+import { ArrowLeft, MousePointerClick, X, MoreVertical, Smartphone, Tablet, Monitor, Scan, PencilLine } from "lucide-preact";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { Segmented } from "../Segmented/Segmented.jsx";
 import { AssistantDocument } from "../AssistantDocument/AssistantDocument.jsx";
@@ -11,9 +11,11 @@ import { useStore } from "../../hooks/useStore.js";
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
 import { PreviewStream } from "./PreviewStream.jsx";
 import { streamEvents, stageState } from "./stream.js";
-import { PreviewAddressSetup, PreviewErrorBanner, PreviewURLSetup } from "./PreviewSetup.jsx";
-import { INSPECTOR_NOTICE, activatePreview, deactivatePreview, fetchPreviewStatus, portOf, suggestPublicURL, validPublicURL } from "./preview-proxy.js";
-import { applyGesture, clampPan, pinchState, stageGesture, zoomAt, IDENTITY } from "./zoom.js";
+import { PreviewAddressSetup, PreviewErrorBanner, PreviewRecoveryNotice, PreviewURLSetup } from "./PreviewSetup.jsx";
+import { activatePreview, deactivatePreview, fetchPreviewStatus, portOf, suggestPublicURL, validPublicURL } from "./preview-proxy.js";
+import { applyGesture, appToStage, chainPan, panBy, pinchState, stageGesture, wheelFactor, zoomAt, IDENTITY } from "./zoom.js";
+import { createScrollChain, setViewIfChanged } from "./scroll-chain.js";
+import { applyReport, backTitle, canGoBack, newEpoch, press, resetBack, shouldAutoReturn, INITIAL_BACK } from "./preview-back.js";
 import "./LivePreview.css";
 
 // LivePreview — PROTOTYPE. A dev server rendered inside moa, next to the
@@ -105,16 +107,57 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const [addressError, setAddressError] = useState("");
   const [proxySupported, setProxySupported] = useState(true);
   const [inspectorReady, setInspectorReady] = useState(true);
+  const [bridgeLost, setBridgeLost] = useState(false);
   const [box, setBox] = useState({ w: 0, h: 0 });
-  const [view, setView] = useState(IDENTITY);
+  const boxRef = useRef(box);
+  const [view, setViewState] = useState(IDENTITY);
   const [notes, setNotes] = useState([]);
   const [reading, setReading] = useState(null);
   const iframeRef = useRef(null);
+  const inspectorReadyRef = useRef(true);
+  const bridgeFallbackRef = useRef(null);
   const stageRef = useRef(null);
   const geometry = useRef({ base: 1, w: 0, h: 0, stage: { w: 0, h: 0 } });
   const noteSeq = useRef(0);
   const inspectButtonRef = useRef(null);
+  // The view is read by handlers that fire between renders (a scroll answer
+  // arriving while the finger is still moving), so it is kept in a ref that is
+  // written BEFORE the state: two answers in the same frame must not both clamp
+  // from the same stale pan and lose the second one.
+  const viewRef = useRef(view);
+  const setView = (next) => {
+    viewRef.current = next;
+    setViewState(next);
+  };
+  const chain = useRef(null);
+  if (!chain.current) chain.current = createScrollChain();
+  // Only an inspector that says so answers scroll packets. An older copy is
+  // still a working preview: it keeps the fire-and-forget relay and the shell
+  // never waits for anything, so nothing can pile up or stall.
+  const chainable = useRef(false);
+  // The desktop bridge's frame of reference. A mouse or trackpad over the app is
+  // inside the iframe's document, so the inspector relays it; the epoch is what
+  // tells an answer minted for one document, viewport width or stage size apart
+  // from an answer minted for the next. It deliberately does NOT change with the
+  // zoom: a trackpad pinch is a burst of wheel events already in flight with the
+  // epoch the app last heard, and bumping per step would throw the pinch away.
+  const viewEpoch = useRef(0);
+  const [spacePan, setSpacePan] = useState(false);
+  // Back is the app's own history, not moa's: the shell never traverses
+  // anything itself, it only mirrors what the current document says about its
+  // own Navigation API and asks that document to go back. See preview-back.js.
+  const [back, setBack] = useState(INITIAL_BACK);
+  const backRef = useRef(back);
+  const setBackState = (next) => {
+    backRef.current = next;
+    setBack(next);
+  };
   const [touchInput, disableTouchInput] = useTouchPreviewInput();
+
+  const clearBridgeFallback = () => {
+    if (bridgeFallbackRef.current) clearTimeout(bridgeFallbackRef.current);
+    bridgeFallbackRef.current = null;
+  };
 
   const events = streamEvents(session);
   const stage = stageState(session);
@@ -194,6 +237,11 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const startPreview = async (target, publicURL, cancelled = () => false) => {
     const token = ++activation.current;
     const stale = () => cancelled() || activation.current !== token;
+    clearBridgeFallback();
+    inspectorReadyRef.current = false;
+    setInspectorReady(false);
+    setBridgeLost(false);
+    setBackState(resetBack(backRef.current));
     setFrameURL("");
     try {
       const result = await activatePreview(fetch, {
@@ -224,7 +272,13 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     if (!open) return undefined;
     const stageEl = stageRef.current;
     if (!stageEl) return undefined;
-    const measure = () => setBox({ w: stageEl.clientWidth, h: stageEl.clientHeight });
+    const measure = () => {
+      const next = { w: stageEl.clientWidth, h: stageEl.clientHeight };
+      const previous = boxRef.current;
+      if (previous.w !== next.w || previous.h !== next.h) chain.current.invalidate();
+      boxRef.current = next;
+      setBox(next);
+    };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(stageEl);
@@ -273,7 +327,59 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
         requestAnimationFrame(() => document.querySelector("[data-preview-trigger='true']")?.focus());
       }
       if (data.type === "moa-ready") {
+        inspectorReadyRef.current = true;
         setInspectorReady(true);
+        setBridgeLost(false);
+        clearBridgeFallback();
+        chainable.current = data.chain === true;
+        // A ready message is emitted once per inspector document. Treat it as
+        // a document boundary even when the iframe URL did not change (an
+        // in-frame navigation): old packets and a held Space belong to it.
+        viewEpoch.current += 1;
+        chain.current.invalidate();
+        setSpacePan(false);
+        post({ type: "moa-view", epoch: viewEpoch.current, zoom: viewRef.current.zoom, zoomed: viewRef.current.zoom !== 1 });
+        return;
+      }
+      if (data.type === "moa-preview-navigation") {
+        const current = backRef.current;
+        const next = applyReport(current, data);
+        setBackState(next);
+        if (shouldAutoReturn(current, data)) returnToApp();
+        return;
+      }
+      if (data.type === "moa-scrolled") {
+        const request = chain.current.resolve(data.id, data);
+        if (!request) return;
+        const g = geometry.current;
+        const current = viewRef.current;
+        setViewIfChanged(setView, current, chainPan(current, request, data, g, g.stage));
+        return;
+      }
+      // ── Desktop, relayed from inside the frame ──────────────────────────
+      if (data.epoch !== viewEpoch.current) return;
+      if (data.type === "moa-wheel-zoom") {
+        if (!Number.isFinite(data.x) || !Number.isFinite(data.y)) return;
+        const g = geometry.current;
+        const current = viewRef.current;
+        const anchor = appToStage(current, g, data.x, data.y);
+        const factor = Number.isFinite(data.factor) && data.factor > 0 ? data.factor : wheelFactor(data.deltaY);
+        setViewIfChanged(setView, current, zoomAt(current, factor, anchor, g, g.stage));
+        return;
+      }
+      if (data.type === "moa-wheel-pan") {
+        if (!Number.isFinite(data.rdx) || !Number.isFinite(data.rdy)) return;
+        if (!Number.isFinite(data.dx) || !Number.isFinite(data.dy)) return;
+        const g = geometry.current;
+        const current = viewRef.current;
+        // The same residual math the touch chain uses, at the scale the app
+        // measured the wheel at — not the scale the view may have become.
+        const request = { dx: data.rdx, dy: data.rdy, scale: (g.base || 1) * (data.zoom || current.zoom || 1) };
+        setViewIfChanged(setView, current, chainPan(current, request, data, g, g.stage));
+        return;
+      }
+      if (data.type === "moa-space") {
+        setSpacePan(data.down === true && viewRef.current.zoom !== 1);
         return;
       }
     };
@@ -281,38 +387,84 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     return () => window.removeEventListener("message", onMessage);
   }, [open, onClose, frameURL]);
 
+  // A new view, a new document or a closed panel: whatever the app was still
+  // going to answer about belongs to a gesture that no longer exists.
+  useEffect(() => {
+    chain.current.invalidate();
+    return () => chain.current.invalidate();
+  }, [frameURL, reloadNonce, width, open]);
+
+  // The desktop epoch: bumped when the coordinates the app reports stop meaning
+  // what they meant — a new document, another viewport width, a resized stage.
+  // Not when the zoom changes; that is what keeps a pinch burst continuous.
+  useEffect(() => {
+    viewEpoch.current += 1;
+    setSpacePan(false);
+  }, [frameURL, reloadNonce, width, box.w, box.h, open]);
+
+  // What the app has to know to relay anything at all: the epoch to stamp and
+  // whether there is a zoom to scroll against. Sent on every zoom change, which
+  // is a message per pinch step and nothing else.
+  useEffect(() => {
+    if (!open || !frameURL) return;
+    post({ type: "moa-view", epoch: viewEpoch.current, zoom: view.zoom, zoomed: view.zoom !== 1 });
+  }, [open, frameURL, reloadNonce, width, box.w, box.h, view.zoom]);
+
+  // Space is only relayed by the app while the pointer is inside it. With the
+  // focus on moa's own chrome the key never reaches the frame, so the shell
+  // watches for it too — under exactly the same rule: never where text is typed.
+  useEffect(() => {
+    if (!open || !frameURL) return undefined;
+    const editing = () => {
+      const el = document.activeElement;
+      if (!el || el.nodeType !== 1) return false;
+      const tag = (el.tagName || "").toLowerCase();
+      return tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable === true;
+    };
+    const onKeyDown = (e) => {
+      if (e.key !== " " || e.repeat || viewRef.current.zoom === 1 || editing()) return;
+      e.preventDefault();
+      setSpacePan(true);
+    };
+    const onKeyUp = (e) => {
+      if (e.key === " ") setSpacePan(false);
+    };
+    // A Space held while the window loses focus never gets its keyup.
+    const release = () => setSpacePan(false);
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", release);
+    document.addEventListener("visibilitychange", release);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", release);
+      document.removeEventListener("visibilitychange", release);
+    };
+  }, [open, frameURL]);
+
+  // Reset before iframe load can finish its handshake; a passive effect could
+  // otherwise invalidate the freshly acknowledged epoch without another hello.
+  useLayoutEffect(() => {
+    setBackState(resetBack(backRef.current));
+  }, [frameURL, reloadNonce, open]);
+
   useEffect(() => {
     if (!frameURL) return undefined;
+    inspectorReadyRef.current = false;
     setInspectorReady(false);
-    const timer = setTimeout(() => setInspectorReady((ready) => ready), 3000);
-    return () => clearTimeout(timer);
+    // A new document brings its own copy of the inspector, which may be older
+    // than this one: it has to say again that it answers scroll packets.
+    chainable.current = false;
+    return () => clearBridgeFallback();
   }, [frameURL, reloadNonce]);
-
-  // iOS Safari pinch guard. A pinch that has to
-  // cross the iframe boundary is split between two touch-active documents and
-  // never becomes one two-finger sequence — measured on a real iPhone, both the
-  // in-frame bridge and same-origin listeners flicker. Zoom mode puts a layer of
-  // THIS document over the whole stage before the first contact, so there is
-  // only one document involved; these guards are the last mile, stopping
-  // WebKit's legacy gesture* events from page-zooming moa's shell. Outside Zoom
-  // mode nothing global is installed: the rest of moa must keep its own gestures.
-  useEffect(() => {
-    if (!open) return undefined;
-    const stop = (e) => e.preventDefault();
-    const opts = { passive: false };
-    document.addEventListener("gesturestart", stop, opts);
-    document.addEventListener("gesturechange", stop, opts);
-    document.addEventListener("gestureend", stop, opts);
-    return () => {
-      document.removeEventListener("gesturestart", stop, opts);
-      document.removeEventListener("gesturechange", stop, opts);
-      document.removeEventListener("gestureend", stop, opts);
-    };
-  }, [open]);
 
   // Closing the panel drops the selection but keeps the URL (persisted).
   useEffect(() => {
     if (open) return;
+    clearBridgeFallback();
+    inspectorReadyRef.current = false;
+    setBridgeLost(false);
     setSelected(null);
     setInspect(false);
     setView(IDENTITY);
@@ -330,6 +482,11 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     setTargetURL(next);
     savePreviewURL(sessionId, next);
     if (!proxySupported) {
+      clearBridgeFallback();
+      inspectorReadyRef.current = false;
+      setInspectorReady(false);
+      setBridgeLost(false);
+      setBackState(resetBack(backRef.current));
       setFrameURL(next);
       setSetupMode(null);
       setSelected(null);
@@ -369,10 +526,28 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     if (!started) setSetupMode("address");
   };
 
+  // Moving the view by any other means ends the chain: a scroll answer minted
+  // for the old pan must not be applied on top of the new one.
+  const resetChainAnd = (apply) => (next) => {
+    chain.current.invalidate();
+    apply(next);
+  };
+
   const reload = () => {
+    clearBridgeFallback();
+    inspectorReadyRef.current = false;
+    setInspectorReady(false);
+    setBridgeLost(false);
+    setPreviewError("");
+    setBackState(resetBack(backRef.current));
     setSelected(null);
     setReloadNonce((n) => n + 1);
   };
+
+  // The iframe's src is the proxy URL configured by startPreview, not whatever
+  // external page the frame last reached. Re-keying it is therefore a parent-
+  // owned return to the configured app, never a history simulation.
+  const returnToApp = () => reload();
 
   const toggleInspect = () => {
     const next = !inspect;
@@ -384,8 +559,36 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const onFrameLoad = () => {
     // A navigation inside the app (or a reload) drops the inspector state:
     // re-arm it so the toggle keeps meaning what it says.
+    chain.current.invalidate();
+    chainable.current = false;
+    inspectorReadyRef.current = false;
+    setInspectorReady(false);
+    setBridgeLost(false);
+    clearBridgeFallback();
+    // A normal injected document answers moa-ready immediately after this
+    // load. Wait before treating it as external/blank so short loads never
+    // flash a terminal recovery action.
+    bridgeFallbackRef.current = setTimeout(() => {
+      if (!inspectorReadyRef.current) setBridgeLost(true);
+    }, 3000);
     if (inspect) postInspect(true);
-    post({ type: "moa-hello" });
+    // A new document: Back goes back to disabled AND the epoch moves, so a
+    // report still in flight from the document being replaced cannot re-enable
+    // it. Only this document's answer to this hello can.
+    const next = newEpoch(backRef.current);
+    setBackState(next);
+    post({ type: "moa-hello", navigationEpoch: next.epoch });
+  };
+
+  const goBack = () => {
+    const { state, command } = press(backRef.current);
+    if (!command) return;
+    setBackState(state);
+    if (command.type === "moa-preview-return") {
+      returnToApp();
+      return;
+    }
+    post(command);
   };
 
   const zoomed = view.zoom !== 1;
@@ -402,6 +605,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const holderStyle = zoomed ? { width: "100%", height: "100%" } : { width: `${frameW * scale}px`, height: `${frameH * scale}px` };
 
   const showSetup = setupMode === "address" ? "address" : (!targetURL || editingURL || setupMode === "url") ? "url" : null;
+  const showRecovery = bridgeLost;
 
   const preview = (
     <>
@@ -413,11 +617,22 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           }}
           onReload={reload}
         />
+        <button
+          type="button"
+          class="live-preview-action"
+          onClick={goBack}
+          disabled={!canGoBack(back)}
+          aria-label="Back in preview"
+          title={backTitle(back)}
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+        </button>
         <Segmented
           className="live-preview-widths"
           options={WIDTHS}
           value={width}
           onChange={(next) => {
+            chain.current.invalidate();
             setWidth(next);
             setView(IDENTITY);
           }}
@@ -442,7 +657,12 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           </button>
         </div>
       </div>
-      {!inspectorReady && <div class="live-preview-inspector-warning">{INSPECTOR_NOTICE}</div>}
+      {showRecovery && !showSetup && (
+        <PreviewRecoveryNotice
+          message="This page is no longer connected to Moa."
+          onReturn={returnToApp}
+        />
+      )}
       {previewError && showSetup !== "address" && (
         <PreviewErrorBanner
           message={previewError}
@@ -511,19 +731,25 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
             not slide away when the app under it scrolls. */}
         {frameURL && !showSetup && (
           <>
-            {touchInput && <TouchZoomOverlay geometry={geometry} view={view} onView={setView} inspect={inspect} post={post} onMouse={disableTouchInput} />}
-            <ZoomControls geometry={geometry} view={view} onView={setView} />
+            {touchInput && (
+              <TouchZoomOverlay
+                geometry={geometry}
+                viewRef={viewRef}
+                onView={setView}
+                inspect={inspect}
+                post={post}
+                onMouse={disableTouchInput}
+                chain={chain.current}
+                chainable={chainable}
+              />
+            )}
+            {/* Space is held: for as long as that lasts, and no longer, the
+                drag belongs to the frame. Released, there is nothing over the
+                app again and clicking and selecting text are its own. */}
+            {!touchInput && spacePan && zoomed && (
+              <DesktopPanLayer geometry={geometry} viewRef={viewRef} onView={resetChainAnd(setView)} />
+            )}
           </>
-        )}
-        {zoomed && (
-          <button
-            type="button"
-            class="live-preview-chip is-zoom"
-            onClick={() => setView(IDENTITY)}
-            title="Reset zoom"
-          >
-            1:1
-          </button>
         )}
         {composerOpen ? (
           <PreviewComposer
@@ -694,14 +920,12 @@ function PreviewComposer({ sessionId, session, selected, onClose, onSent }) {
 // On touch-only devices this layer owns the first contact before WebKit chooses
 // a touch-active document. Fine pointers never get this layer: their iframe is
 // a normal browser surface for click, hover, wheel and keyboard input.
-function TouchZoomOverlay({ geometry, view, onView, inspect, post, onMouse }) {
+function TouchZoomOverlay({ geometry, viewRef, onView, inspect, post, onMouse, chain, chainable }) {
   const layerRef = useRef(null);
-  const viewRef = useRef(view);
   const inspectRef = useRef(inspect);
   const postRef = useRef(post);
   const onViewRef = useRef(onView);
   const onMouseRef = useRef(onMouse);
-  viewRef.current = view;
   inspectRef.current = inspect;
   postRef.current = post;
   onViewRef.current = onView;
@@ -715,6 +939,10 @@ function TouchZoomOverlay({ geometry, view, onView, inspect, post, onMouse }) {
     let relay = null;
     let relayMove = null;
     let relayRAF = 0;
+    // Whether the app has already been told which scroller this gesture owns.
+    // Chained packets pick a target once and keep it, root included, so content
+    // moving under the finger cannot hand the rest of the drag to something else.
+    let relayTargeted = false;
     let lastTap = null;
     const point = (touch) => {
       const g = geometry.current;
@@ -722,20 +950,46 @@ function TouchZoomOverlay({ geometry, view, onView, inspect, post, onMouse }) {
       const scale = g.base * viewRef.current.zoom;
       return { x: (touch.clientX - rect.left - viewRef.current.x) / scale, y: (touch.clientY - rect.top - viewRef.current.y) / scale };
     };
+    const pinchPoints = (a, b) => {
+      const rect = el.getBoundingClientRect();
+      return pinchState(a, b, rect);
+    };
     const flushRelay = () => {
       relayRAF = 0;
       if (!relayMove) return;
-      postRef.current({ type: "moa-scroll", ...relayMove });
+      // Zoomed, the app gets first refusal: the packet carries an identity and
+      // what the app could not scroll comes back and moves the pan instead.
+      // At zoom 1 there is no pan to give it to, so the relay stays as it was.
+      const packet = { type: "moa-scroll", ...relayMove };
+      if (relayMove.scale !== undefined && chainable.current) {
+        packet.id = chain.request({ dx: relayMove.dx, dy: relayMove.dy, scale: relayMove.scale });
+        packet.reset = !relayTargeted;
+        relayTargeted = true;
+      }
+      delete packet.scale;
+      postRef.current(packet);
       relayMove = null;
+    };
+    // A second finger ends the one-finger chain outright: the packet still
+    // queued for this frame belongs to a drag the pinch has just replaced, and
+    // its answer must not arrive on top of the pinch's own math.
+    const dropRelay = () => {
+      relay = null;
+      relayMove = null;
+      if (relayRAF) cancelAnimationFrame(relayRAF);
+      relayRAF = 0;
+      chain.invalidate();
     };
     const onTouchStart = (e) => {
       e.preventDefault();
       if (e.touches.length >= 2) {
-        relay = null;
+        dropRelay();
         start = viewRef.current;
-        pinch = pinchState(e.touches[0], e.touches[1]);
+        pinch = pinchPoints(e.touches[0], e.touches[1]);
       } else if (e.touches.length === 1) {
+        chain.invalidate();
         const t = e.touches[0];
+        relayTargeted = false;
         relay = { x: t.clientX, y: t.clientY, startX: t.clientX, startY: t.clientY, started: performance.now(), moved: false, point: point(t) };
       }
     };
@@ -743,9 +997,9 @@ function TouchZoomOverlay({ geometry, view, onView, inspect, post, onMouse }) {
       e.preventDefault();
       const g = geometry.current;
       if (e.touches.length >= 2) {
-        relay = null;
-        if (!pinch) { start = viewRef.current; pinch = pinchState(e.touches[0], e.touches[1]); }
-        onViewRef.current(applyGesture(start, stageGesture(start, g, pinch, pinchState(e.touches[0], e.touches[1])), g, g.stage));
+        dropRelay();
+        if (!pinch) { start = viewRef.current; pinch = pinchPoints(e.touches[0], e.touches[1]); }
+        onViewRef.current(applyGesture(start, stageGesture(start, g, pinch, pinchPoints(e.touches[0], e.touches[1])), g, g.stage));
         return;
       }
       if (e.touches.length === 1 && relay) {
@@ -760,18 +1014,27 @@ function TouchZoomOverlay({ geometry, view, onView, inspect, post, onMouse }) {
           if (!relayMove) relayMove = { x: relay.point.x, y: relay.point.y, dx: 0, dy: 0, reset: true };
           relayMove.dx -= dx / scale;
           relayMove.dy -= dy / scale;
+          // The scale a packet is measured at is the scale its residual has to
+          // be read back at, whatever the view has become by then.
+          relayMove.scale = viewRef.current.zoom === 1 ? undefined : scale;
           if (!relayRAF) relayRAF = requestAnimationFrame(flushRelay);
         }
       }
     };
     const onTouchEnd = (e) => {
       e.preventDefault();
+      if (e.type === "touchcancel") {
+        dropRelay();
+        pinch = null;
+        return;
+      }
       if (e.touches.length < 2) pinch = null;
       if (e.touches.length === 0 && relay) {
         const duration = performance.now() - relay.started;
         if (e.type === "touchend" && !relay.moved && duration < 300 && e.changedTouches.length) {
           const p = point(e.changedTouches[0]);
           if (lastTap && performance.now() - lastTap.at < 300 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 10) {
+            chain.invalidate();
             onViewRef.current(IDENTITY);
             lastTap = null;
           } else {
@@ -781,13 +1044,21 @@ function TouchZoomOverlay({ geometry, view, onView, inspect, post, onMouse }) {
         }
         relay = null;
       }
+      // A packet the finger produced on its way up is still that movement: it
+      // is flushed, and its answer is allowed to finish the gesture it belongs
+      // to. Only a pinch, a reset or a new frame invalidates it.
+      if (e.touches.length === 0 && relayRAF) {
+        cancelAnimationFrame(relayRAF);
+        flushRelay();
+      }
     };
     const onWheel = (e) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
+      chain.invalidate();
       const g = geometry.current;
       const rect = el.getBoundingClientRect();
-      onViewRef.current(zoomAt(viewRef.current, Math.exp(-e.deltaY / 300), { x: e.clientX - rect.left, y: e.clientY - rect.top }, g, g.stage));
+      onViewRef.current(zoomAt(viewRef.current, wheelFactor(e.deltaY), { x: e.clientX - rect.left, y: e.clientY - rect.top }, g, g.stage));
     };
     const onPointerDown = (e) => {
       if (e.pointerType !== "mouse") return;
@@ -811,38 +1082,60 @@ function TouchZoomOverlay({ geometry, view, onView, inspect, post, onMouse }) {
       el.removeEventListener("wheel", onWheel, opts);
       el.removeEventListener("pointerdown", onPointerDown, opts);
       if (relayRAF) cancelAnimationFrame(relayRAF);
+      chain.invalidate();
     };
-  }, [geometry]);
+  }, [geometry, chain, chainable, viewRef]);
 
-  return (
-    <>
-      <div class="live-preview-zoomlayer" ref={layerRef} role="presentation" />
-      <span class="live-preview-zoomhint">Pinch · drag · double-tap = 1:1</span>
-    </>
-  );
+  return <div class="live-preview-zoomlayer" ref={layerRef} role="presentation" />;
 }
 
-function ZoomControls({ geometry, view, onView }) {
-  const step = (factor) => {
-    const g = geometry.current;
-    onView(zoomAt(view, factor, null, g, g.stage));
-  };
-  const pan = (x, y) => {
-    const g = geometry.current;
-    const scale = g.base * view.zoom;
-    onView({ zoom: view.zoom, ...clampPan(view.x + x, view.y + y, g.w * scale, g.h * scale, g.stage.w, g.stage.h) });
-  };
-  return (
-    <div class="live-preview-zoomctl">
-      <button type="button" onClick={() => step(1 / 1.4)} aria-label="Zoom out" title="Zoom out"><Minus size={15} /></button>
-      <button type="button" onClick={() => step(1.4)} aria-label="Zoom in" title="Zoom in"><Plus size={15} /></button>
-      <button type="button" onClick={() => onView(IDENTITY)} aria-label="Reset zoom" title="Reset zoom">1:1</button>
-      <span class="live-preview-pan-controls" aria-label="Pan preview">
-        <button type="button" onClick={() => pan(48, 0)} aria-label="Pan left" title="Pan left"><ArrowLeft size={13} /></button>
-        <button type="button" onClick={() => pan(-48, 0)} aria-label="Pan right" title="Pan right"><ArrowRight size={13} /></button>
-        <button type="button" onClick={() => pan(0, 48)} aria-label="Pan up" title="Pan up"><ArrowUp size={13} /></button>
-        <button type="button" onClick={() => pan(0, -48)} aria-label="Pan down" title="Pan down"><ArrowDown size={13} /></button>
-      </span>
-    </div>
-  );
+// DesktopPanLayer — the ONLY thing the shell ever puts over the app on a fine
+// pointer, and only while Space is held over a zoomed preview. It is the one
+// gesture that cannot be relayed: a drag has to be tracked across the whole
+// stage, and half of it happens outside the frame. Mouse and trackpad reach it
+// the same way, through pointer events. Unmounted the instant Space comes up,
+// so a click, a hover or a text selection never meets it.
+function DesktopPanLayer({ geometry, viewRef, onView }) {
+  const layerRef = useRef(null);
+  const onViewRef = useRef(onView);
+  onViewRef.current = onView;
+
+  useEffect(() => {
+    const el = layerRef.current;
+    if (!el) return undefined;
+    let dragging = null;
+    const onDown = (e) => {
+      dragging = { x: e.clientX, y: e.clientY, id: e.pointerId };
+      el.setPointerCapture?.(e.pointerId);
+    };
+    const onMove = (e) => {
+      if (!dragging || e.pointerId !== dragging.id) return;
+      const dx = e.clientX - dragging.x;
+      const dy = e.clientY - dragging.y;
+      dragging.x = e.clientX;
+      dragging.y = e.clientY;
+      if (!dx && !dy) return;
+      const g = geometry.current;
+      onViewRef.current(panBy(viewRef.current, dx, dy, g, g.stage));
+    };
+    // Capture lost, button released, gesture cancelled: all the same end.
+    const onUp = (e) => {
+      if (dragging && e.pointerId === dragging.id) el.releasePointerCapture?.(e.pointerId);
+      dragging = null;
+    };
+    el.addEventListener("pointerdown", onDown);
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onUp);
+    el.addEventListener("lostpointercapture", onUp);
+    return () => {
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onUp);
+      el.removeEventListener("lostpointercapture", onUp);
+    };
+  }, [geometry, viewRef]);
+
+  return <div class="live-preview-panlayer" ref={layerRef} role="presentation" />;
 }

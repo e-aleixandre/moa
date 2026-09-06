@@ -54,10 +54,35 @@
 .ask .ask-opt:last-child {
   border-bottom: 0;
 }
+
+.ask .ask-opt.chosen {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--text);
+}
+
+.ask .ask-opt.chosen .k {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 50%, transparent);
+}
+
+.ask .ask-opt-check {
+  display: inline-flex;
+  width: 15px;
+  height: 15px;
+  margin-left: auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--green);
+  flex: none;
+}
+
+.ask .ask-opt .rec + .ask-opt-check {
+  margin-left: var(--space-2);
+}
 @media (hover: hover) {
 
 
-.ask .ask-opt:hover {
+.ask .ask-opt:not(.chosen):hover {
   background: color-mix(in srgb, var(--yellow) 6%, transparent);
   color: var(--text);
 }
@@ -83,7 +108,7 @@
 @media (hover: hover) {
 
 
-.ask .ask-opt:hover .k {
+.ask .ask-opt:not(.chosen):hover .k {
   color: var(--yellow);
   border-color: color-mix(in srgb, var(--yellow) 50%, transparent);
 }
