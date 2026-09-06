@@ -92,3 +92,14 @@ export function PreviewErrorBanner({ message, onChangeAddress }) {
     </div>
   );
 }
+
+export function PreviewRecoveryNotice({ message, onReturn }) {
+  return (
+    <div class="live-preview-recovery" role="alert">
+      <span>{message}</span>
+      <button type="button" class="live-preview-recovery-action" onClick={onReturn}>
+        Return to app
+      </button>
+    </div>
+  );
+}

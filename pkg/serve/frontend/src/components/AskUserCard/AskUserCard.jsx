@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "preact/hooks";
-import { Users, ArrowUp, Mic, Square, Loader2, ChevronUp } from "lucide-preact";
+import { Users, ArrowUp, Check, Mic, Square, Loader2, ChevronUp } from "lucide-preact";
 import "./AskUserCard.css";
 
 const isTextEntryTarget = (el) => {
@@ -22,6 +22,7 @@ const isTextEntryTarget = (el) => {
 export function AskUserCard({
   question,
   options = [],
+  currentAnswer = "",
   onPick,
   onSubmitFree,
   freeValue,
@@ -65,18 +66,25 @@ export function AskUserCard({
         <p>{question}</p>
       </div>
       <div class="ask-opts">
-        {options.map((opt, i) => (
-          <button
-            key={opt.label ?? i}
-            type="button"
-            class="ask-opt"
-            onClick={() => onPick?.(opt, i)}
-          >
-            <span class="k" aria-hidden="true">{i + 1}</span>
-            {opt.label}
-            {opt.recommended && <span class="rec">RECOMMENDED</span>}
-          </button>
-        ))}
+        {options.map((opt, i) => {
+          const chosen = opt.label === currentAnswer;
+          return (
+            <button
+              key={opt.label ?? i}
+              type="button"
+              class={`ask-opt${chosen ? " chosen" : ""}`}
+              aria-pressed={chosen}
+              onClick={() => onPick?.(opt, i)}
+            >
+              <span class="k" aria-hidden="true">{i + 1}</span>
+              {opt.label}
+              {opt.recommended && <span class="rec">RECOMMENDED</span>}
+              <span class="ask-opt-check" aria-hidden="true">
+                {chosen && <Check size={15} />}
+              </span>
+            </button>
+          );
+        })}
       </div>
       <form class="ask-free" onSubmit={submitFree}>
         <input

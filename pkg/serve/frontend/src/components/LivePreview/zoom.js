@@ -36,6 +36,34 @@ export function clampPan(x, y, contentW, contentH, stageW, stageH) {
   return { x: limit(x, contentW, stageW), y: limit(y, contentH, stageH) };
 }
 
+// chainResidual — on ONE axis, the part of a requested app scroll the child did
+// not take. Scroll snap (and any scroller that lands somewhere other than where
+// it was asked to) can move further than requested, or the other way: the frame
+// must never invent movement the finger did not ask for, so an overshoot is
+// worth nothing more than the request and an opposite sign is worth nothing.
+export function chainResidual(requested, consumed) {
+  if (!Number.isFinite(requested)) return 0;
+  const taken = Number.isFinite(consumed) ? consumed : 0;
+  const rest = requested - taken;
+  if (!rest) return 0;
+  if (Math.sign(rest) !== Math.sign(requested)) return 0;
+  return Math.abs(rest) > Math.abs(requested) ? requested : rest;
+}
+
+// chainPan — the view after a zoomed one-finger packet the app could not fully
+// consume. The residual is app px again, so it becomes finger travel by the
+// scale the packet was SENT at, and it moves the frame the opposite way (the
+// app scrolls down when the finger goes up). It passes through the same bounds
+// as every other pan: what neither the app scroller nor the frame can take is
+// dropped, because both owned layers are at that edge.
+export function chainPan(view, request, consumed, frame, stage) {
+  const scale = request.scale || 1;
+  const x = view.x - chainResidual(request.dx, consumed.dx) * scale;
+  const y = view.y - chainResidual(request.dy, consumed.dy) * scale;
+  const s = (frame.base || 1) * (view.zoom || 1);
+  return { zoom: view.zoom, ...clampPan(x, y, frame.w * s, frame.h * s, stage.w, stage.h) };
+}
+
 // applyGesture — the new view after a pinch/pan update.
 //   start : the {zoom,x,y} captured when the gesture began.
 //   g     : { scale, dx, dy, cx, cy } as reported by the inspector.
@@ -59,12 +87,15 @@ export function applyGesture(start, g, frame, stage) {
 }
 
 // pinchState — what the overlay measures from two touches, in STAGE px: the
-// distance between the fingers and their midpoint.
-export function pinchState(a, b) {
+// distance between the fingers and their midpoint. TouchEvent coordinates are
+// client-relative, so callers can supply the overlay rect to normalize them.
+export function pinchState(a, b, offset = null) {
+  const left = offset?.left ?? offset?.x ?? 0;
+  const top = offset?.top ?? offset?.y ?? 0;
   return {
     d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1,
-    cx: (a.clientX + b.clientX) / 2,
-    cy: (a.clientY + b.clientY) / 2,
+    cx: (a.clientX + b.clientX) / 2 - left,
+    cy: (a.clientY + b.clientY) / 2 - top,
   };
 }
 
@@ -83,8 +114,8 @@ export function stageGesture(start, frame, initial, current) {
   };
 }
 
-// zoomAt — a scale step anchored on a stage point. What the −/+ buttons and a
-// ctrl-wheel do: same math as a pinch, with the anchor given instead of
+// zoomAt — a scale step anchored on a stage point. What a ctrl-wheel or a
+// trackpad pinch does: same math as a pinch, with the anchor given instead of
 // measured. Without a point the centre of the stage is the honest default.
 export function zoomAt(view, factor, point, frame, stage) {
   const s = (frame.base || 1) * (view.zoom || 1);
@@ -96,4 +127,29 @@ export function zoomAt(view, factor, point, frame, stage) {
     frame,
     stage,
   );
+}
+
+// wheelFactor — the scale step a wheel notch is worth. A mouse's ctrl-wheel and
+// a trackpad pinch arrive as the same event with the same units, so they get the
+// same curve; the clamp is what stops one very large delta (a coarse mouse, or a
+// deltaMode the app converted generously) from jumping the whole zoom range.
+export function wheelFactor(deltaY) {
+  if (!Number.isFinite(deltaY)) return 1;
+  const bounded = Math.max(-200, Math.min(200, deltaY));
+  return Math.exp(-bounded / 300);
+}
+
+// panBy — move the frame by stage pixels, through the same bounds as every
+// other pan. What a Space+drag does.
+export function panBy(view, dx, dy, frame, stage) {
+  const s = (frame.base || 1) * (view.zoom || 1);
+  return { zoom: view.zoom, ...clampPan(view.x + dx, view.y + dy, frame.w * s, frame.h * s, stage.w, stage.h) };
+}
+
+// appToStage — a point the app reported in ITS OWN pixels, in stage pixels.
+// The only conversion the desktop bridge needs: the app cannot know the shell's
+// pan or scale, so it always speaks its own coordinates.
+export function appToStage(view, frame, x, y) {
+  const s = (frame.base || 1) * (view.zoom || 1);
+  return { x: view.x + x * s, y: view.y + y * s };
 }

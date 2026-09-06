@@ -162,6 +162,20 @@
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
+/* Disabled is still readable: the control keeps its place and its size in the
+   row (Back does not appear and disappear as the app navigates), it just stops
+   inviting the press. */
+.live-preview-action:disabled {
+  color: var(--overlay0);
+  border-color: var(--surface0);
+  cursor: not-allowed;
+}
+@media (hover: hover) {
+  .live-preview-action:disabled:hover {
+    color: var(--overlay0);
+    border-color: var(--surface0);
+  }
+}
 
 /* A pane is its own density. Viewport widths are the preview's essential
    control, so all four ALWAYS stay: first the numbers go (the icons and their
@@ -306,6 +320,37 @@
 }
 .live-preview-proxy-error-action:hover {
   background: color-mix(in srgb, var(--red) 18%, transparent);
+}
+.live-preview-recovery {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--yellow);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--yellow) 10%, var(--base));
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+.live-preview-recovery-action {
+  flex: none;
+  min-height: 32px;
+  padding: 6px var(--space-2);
+  border: 1px solid var(--yellow);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.live-preview-recovery-action:hover {
+  background: color-mix(in srgb, var(--yellow) 18%, transparent);
+}
+@media (max-width: 768px) {
+  .live-preview-recovery-action { min-height: 44px; }
 }
 /* The scroller is what moves; the stage stays put so the live border and the
    floating cards stay pinned to the panel instead of scrolling with the app. */
@@ -757,38 +802,6 @@
   pointer-events: none;
 }
 
-/* ── Chips ──────────────────────────────────────────────────────────────────
-   Only one is left, and it is the user's own doing: "1:1" exists solely while
-   they have zoomed. Top-left, so it never sits in the stream's lane. */
-.live-preview-chip {
-  position: absolute;
-  top: var(--space-2);
-  left: var(--space-2);
-  z-index: 3;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-height: 26px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--surface2);
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--crust) 88%, transparent);
-  backdrop-filter: blur(6px);
-  color: var(--subtext0);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  animation: lp-chip-in 0.18s var(--ease);
-}
-.live-preview-chip:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-@keyframes lp-chip-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
 /* ── Touch relay ──────────────────────────────────────────────────────────── */
 .live-preview-zoomlayer {
   position: absolute;
@@ -801,81 +814,15 @@
 .live-preview-stage {
   touch-action: none;
 }
-.live-preview-zoomhint {
+/* The desktop pan layer: nothing is over the app on a fine pointer until Space
+   is held over a zoomed preview, and it is gone again on keyup. Grabbing is the
+   only state it has, so it is the only cursor it needs. */
+.live-preview-panlayer {
   position: absolute;
-  left: var(--space-2);
-  bottom: calc(max(var(--space-2), env(safe-area-inset-bottom)) + 52px);
-  z-index: 3;
-  display: inline-flex;
-  align-items: center;
-  min-height: 26px;
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--crust) 85%, transparent);
-  backdrop-filter: blur(6px);
-  color: var(--subtext0);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  white-space: nowrap;
-  pointer-events: none;
-}
-/* The safety net: if iOS ever takes a gesture, these still change the scale.
-   Bottom-right, clear of the stream's lane and of the 1:1 chip top-left. */
-.live-preview-zoomctl {
-  position: absolute;
-  right: var(--space-2);
-  bottom: max(var(--space-2), env(safe-area-inset-bottom));
+  inset: 0;
   z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  padding: var(--space-1);
-  border: 1px solid var(--surface2);
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--crust) 92%, transparent);
-  backdrop-filter: blur(6px);
-  touch-action: none;
-}
-.live-preview-zoomctl button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 40px;
-  min-height: 40px;
-  padding: 0 var(--space-2);
-  border: 0;
-  border-radius: var(--radius-full);
-  background: none;
-  color: var(--subtext0);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.live-preview-pan-controls {
-  display: inline-flex;
-  align-items: center;
-  border-left: 1px solid var(--surface2);
-  margin-left: var(--space-1);
-  padding-left: var(--space-1);
-}
-.live-preview-pan-controls button {
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0;
-}
-@container (max-width: 430px) {
-  .live-preview-pan-controls { display: none; }
-  .live-preview-zoomctl button { min-width: 34px; min-height: 34px; }
-}
-@media (hover: hover) {
-
-.live-preview-zoomctl button:hover {
-  color: var(--peach);
-}
-}
-.live-preview-zoomctl button:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
+  cursor: grabbing;
+  background: transparent;
 }
 
 .live-preview-inspect-popover {
@@ -1043,9 +990,6 @@
     -webkit-background-clip: border-box;
     background-clip: border-box;
     color: var(--subtext0);
-  }
-  .live-preview-chip {
-    animation: none;
   }
 }
 

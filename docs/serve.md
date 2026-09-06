@@ -77,11 +77,17 @@ to whatever room the panel has, which is how you check a phone layout from a
 desktop pane, or a desktop layout from a phone. **Fit** simply gives the app the
 panel's own size.
 
-On a touch device you can **pinch to zoom** (up to 4×) and drag to pan; the
-`1:1` chip resets it. With a mouse, the zoom controls in the corner do the same
-with buttons, plus arrows to pan. The pinch is measured by an overlay of Moa's
-own document rather than inside the app, because a gesture that crosses an
-iframe boundary is split between two documents and never becomes one gesture.
+- **Touch:** pinch to zoom (up to 4×), drag with two fingers to pan, and use one
+  finger to scroll. Pinch to zoom back out to the original scale.
+- **Mouse:** use **Ctrl+wheel** to zoom, the wheel to scroll, and **Shift+wheel**
+  to scroll horizontally.
+- **Trackpad:** pinch to zoom and slide with two fingers to scroll.
+- **Desktop panning:** hold **Space** and drag with a mouse or trackpad. Space
+  still types normally in text fields and editors; browser keyboard zoom
+  shortcuts are unchanged.
+
+Scrolling moves the app's page or list first. While zoomed, movement left over
+at a scroll boundary pans the enlarged preview instead.
 
 While the preview is open it covers the transcript, so the run is shown as a
 **stream**: each thing the agent does — a tool call in the ledger's own grammar
@@ -90,6 +96,15 @@ the app and dissolves. Idle, nothing at all is drawn over the app. One card does
 not expire: a run parked on a question or a permission stays until you answer
 it. Tapping a prose card opens the full message; **Go to chat** closes the
 preview and returns to the transcript.
+
+Use **←** beside the preview menu to go back after following a link. If the
+browser blocks native history traversal for security reasons, the same click
+reloads the URL you originally configured instead. This reload can discard
+temporary app state. On browsers without the Navigation API, use **⋮ → Reload**.
+
+If an external page cannot load or no longer connects to Moa, choose **Return
+to app** to reload the configured URL. Live Preview does not bypass external
+websites' framing restrictions.
 
 ### Inspect: pointing at an element
 
