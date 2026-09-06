@@ -1201,6 +1201,91 @@ func TestReconfigureSession_InvalidModel_Returns400(t *testing.T) {
 	}
 }
 
+func TestReconfigureSession_AstraThinkingNormalizesOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := newTestManager(t, ctx, newMockProvider())
+	srv := httptest.NewServer(NewServer(mgr))
+	defer srv.Close()
+
+	astra, err := mgr.CreateSession(CreateOpts{Model: "gpt-6-astra"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	normal, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	patchThinking := func(sessionID, level string) (int, string) {
+		t.Helper()
+		resp := apiReq(t, srv, http.MethodPatch, "/api/sessions/"+sessionID+"/config", `{"thinking":"`+level+`"}`)
+		defer resp.Body.Close() //nolint:errcheck
+		var result map[string]string
+		if resp.StatusCode == http.StatusOK {
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return resp.StatusCode, result["thinking"]
+	}
+	assertRuntimeAndRoster := func(sess *ManagedSession, want string) {
+		t.Helper()
+		runtime, _ := bus.QueryTyped[bus.GetThinkingLevel, string](sess.runtime.Bus, bus.GetThinkingLevel{})
+		if runtime != want {
+			t.Fatalf("runtime thinking = %q, want %q", runtime, want)
+		}
+		resp := apiReq(t, srv, http.MethodGet, "/api/sessions", "")
+		defer resp.Body.Close() //nolint:errcheck
+		var roster []SessionInfo
+		if err := json.NewDecoder(resp.Body).Decode(&roster); err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range roster {
+			if entry.ID == sess.ID {
+				if entry.Thinking != want {
+					t.Fatalf("roster thinking = %q, want %q", entry.Thinking, want)
+				}
+				return
+			}
+		}
+		t.Fatalf("session %q missing from roster", sess.ID)
+	}
+
+	for _, tc := range []struct{ input, want string }{
+		{"off", "low"}, {"low", "medium"}, {"medium", "high"}, {"high", "xhigh"}, {"xhigh", "max"},
+	} {
+		status, got := patchThinking(astra.ID, tc.input)
+		if status != http.StatusOK || got != tc.want {
+			t.Fatalf("Astra PATCH thinking=%q = (%d, %q), want (%d, %q)", tc.input, status, got, http.StatusOK, tc.want)
+		}
+		assertRuntimeAndRoster(astra, tc.want)
+	}
+
+	// Reapplying the minimum selector position must not turn Astra's low effort
+	// into medium through a second normalization.
+	for range 2 {
+		status, got := patchThinking(astra.ID, "off")
+		if status != http.StatusOK || got != "low" {
+			t.Fatalf("repeated Astra PATCH off = (%d, %q), want (%d, %q)", status, got, http.StatusOK, "low")
+		}
+		assertRuntimeAndRoster(astra, "low")
+	}
+
+	for _, level := range []string{"off", "low", "medium", "high", "xhigh"} {
+		status, got := patchThinking(normal.ID, level)
+		if status != http.StatusOK || got != level {
+			t.Fatalf("normal PATCH thinking=%q = (%d, %q), want (%d, %q)", level, status, got, http.StatusOK, level)
+		}
+		assertRuntimeAndRoster(normal, level)
+	}
+	if status, _ := patchThinking(astra.ID, "minimal"); status != http.StatusBadRequest {
+		t.Fatalf("Astra PATCH invalid thinking status = %d, want %d", status, http.StatusBadRequest)
+	}
+	assertRuntimeAndRoster(astra, "low")
+}
+
 func TestCreateSession_WithCWD_API(t *testing.T) {
 	dir := t.TempDir()
 	srv, _, cancel := newTestServerWithRoot(t, dir)

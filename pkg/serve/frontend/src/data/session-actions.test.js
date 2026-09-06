@@ -8,7 +8,7 @@ import { test, expect, beforeEach } from 'bun:test';
 
 let apiResponse = [];
 
-const { store, setState } = await import('./store.js');
+const { store, setState, updateSession } = await import('./store.js');
 const { syncConnections } = await import('./api.js');
 const { createSession, deleteSession, loadSessions, loadUsage, openPersistedSubagent, openBashJob, sendMessage, startPolling, stopPolling } = await import('./session-actions.js');
 const { getToasts, removeToast } = await import('./notifications.js');
@@ -63,6 +63,33 @@ test('an in-flight roster from before create cannot erase the created session', 
   expect(store.get().sessions.created).toMatchObject({ id: 'created', title: 'New session' });
   expect(store.get().activeSession).toBe('created');
   setState({ isMobile: false });
+});
+
+test('a successful delete fences an older roster without losing concurrent updates', async () => {
+  let resolveOldRoster;
+  globalThis.fetch = (path, opts) => {
+    if (opts.method === 'GET') return new Promise(resolve => { resolveOldRoster = resolve; });
+    return Promise.resolve(new Response(null, { status: 204 }));
+  };
+  setState({ sessions: {
+    deleted: { id: 'deleted', state: 'idle', provider: 'openai', cwd: '/work', subagents: {} },
+    kept: { id: 'kept', state: 'idle', provider: 'openai', cwd: '/work', subagents: {} },
+  } });
+
+  const oldRoster = loadSessions();
+  await Promise.resolve();
+  await deleteSession('deleted');
+  // This models a WS update that lands after DELETE succeeds but before the
+  // old GET resolves; delete cleanup must not replace this newer local state.
+  updateSession('kept', { title: 'updated while deleting' });
+  resolveOldRoster(new Response(JSON.stringify([
+    { id: 'deleted', title: 'stale', state: 'idle', provider: 'openai', cwd: '/work' },
+    { id: 'kept', title: 'old', state: 'idle', provider: 'openai', cwd: '/work' },
+  ]), { status: 200 }));
+  await oldRoster;
+
+  expect(store.get().sessions.deleted).toBeUndefined();
+  expect(store.get().sessions.kept.title).toBe('updated while deleting');
 });
 
 test('a failed create does not add a roster entry', async () => {

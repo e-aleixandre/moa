@@ -180,6 +180,28 @@ export function reduceMessageEnd(target, buffers, fullText, msgID) {
   }
   target.streamingText = null;
   target.thinkingText = null;
+  // A hydration that overlapped this turn already spliced the server's copy of
+  // it into the transcript. That copy is the same message (msg_id is what says
+  // so), but it is not necessarily the same TEXT: the REST projection caps
+  // text at a byte budget and flags it truncated, while fullText here is
+  // authoritative. So this is an update by identity, not a discard: the single
+  // existing row keeps its position and receives the complete live text.
+  const existingIdx = msgID
+    ? target.messages.findIndex(m => m._msg_id === msgID)
+    : -1;
+  if (existingIdx >= 0) {
+    // With text already materialized by a tool call, assistantText is only the
+    // remaining tail of this turn, so the whole row is fullText when we have
+    // it; otherwise keep what is already rendered rather than shortening it.
+    const complete = materialized ? (fullText || '') : assistantText;
+    if (complete) {
+      target.messages = target.messages.map((m, i) => (
+        i === existingIdx ? { ...m, content: [{ type: 'text', text: complete }] } : m
+      ));
+    }
+    buffers.materializedText = '';
+    return target;
+  }
   if (assistantText) {
     target.messages = [...target.messages, {
       role: 'assistant',
@@ -230,6 +252,32 @@ export function reduceSteer(target, data) {
   return target;
 }
 
+// reduceUserMessage appends a user-role message that the agent has just taken
+// into its history (user_message). For a subagent this is how the delegated
+// task becomes visible from the very first frame: the backend announces it
+// from the point it reaches the child's transcript, so a client watching
+// before the child's first message_end no longer has to wait for a reconnect
+// snapshot to learn what was delegated.
+//
+// Deduplicated by msg_id, like reduceSteer: the same message also arrives in
+// the REST backfill and in an init snapshot, and the id — not the text — is
+// what makes them the same message.
+export function reduceUserMessage(target, data) {
+  target = ensureTarget(target);
+  const msgID = data.msg_id || undefined;
+  if (msgID && target.messages.some(m => m._msg_id === msgID)) return target;
+  const content = Array.isArray(data.content) && data.content.length > 0
+    ? data.content
+    : [{ type: 'text', text: data.text }];
+  target.messages = [...target.messages, {
+    role: 'user',
+    _msg_id: msgID,
+    content,
+    custom: data.custom,
+  }];
+  return target;
+}
+
 // applyNestedEvent routes one nested WS event ({type, data}) to the right
 // reducer for a target. Used by the subagent handlers, where events arrive
 // wrapped inside subagent_event. Returns the updated target.
@@ -247,6 +295,7 @@ export function applyNestedEvent(target, buffers, evt, extractNote) {
     case 'tool_end':      return reduceToolEnd(target, buffers, data, extractNote);
     case 'run_end':       return reduceRunEnd(target, buffers);
     case 'steer':         return reduceSteer(target, data);
+    case 'user_message':  return reduceUserMessage(target, data);
     default:              return ensureTarget(target);
   }
 }

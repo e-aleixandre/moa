@@ -67,6 +67,11 @@ let state = {
 
   usage: null, // global plan usage snapshot from /api/usage (null until first poll)
 
+  // modelCatalog — the shared /api/models resource (see data/model-catalog.js).
+  // Ephemeral like `usage`: server state, never persisted, so a stale catalog
+  // can never mislabel a thinking meter.
+  modelCatalog: { status: 'idle', entries: null },
+
   tileTree: initialTree,
   focusedTile: initialFocused,
   soundEnabled: persisted.soundEnabled || false,

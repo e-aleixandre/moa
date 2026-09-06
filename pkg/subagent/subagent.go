@@ -852,6 +852,15 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		} else {
 			forwardAsyncEvent(jobs, j.id, e)
 		}
+		// The delegated task is announced from the point it reaches the
+		// child's history (SendWithCustomAnnounced). Record it on the job
+		// BEFORE the event leaves for the clients, so a transcript fetched
+		// the instant that event arrives already contains it: the live event
+		// and the REST snapshot may overlap — clients dedup by msg_id — but
+		// they can never both miss the message.
+		if e.Type == core.AgentEventUserMessage {
+			jobs.setMessages(j.id, child.Messages())
+		}
 		forwardChildEvent(cfg, j.id, e)
 		if e.Type == core.AgentEventMessageEnd {
 			msgs := child.Messages()
@@ -1592,13 +1601,17 @@ func runChild(ctx context.Context, child *agent.Agent, task string, seedMsgs []c
 	// its source is distinct from a user steering the child through the UI.
 	// Persist the provenance so every resumed task can be rendered accurately.
 	custom := map[string]any{"source": "subagent_parent"}
-	if len(seedMsgs) == 0 {
-		return child.RunWithCustom(ctx, task, custom)
+	if len(seedMsgs) > 0 {
+		if err := child.LoadMessages(seedMsgs); err != nil {
+			return nil, err
+		}
 	}
-	if err := child.LoadMessages(seedMsgs); err != nil {
-		return nil, err
-	}
-	return child.SendWithCustom(ctx, task, custom)
+	// Announce it. The task is the child's opening turn and its live UI
+	// representation, so a client watching from before the first message_end
+	// must learn about it from the run itself — not from a future reconnect
+	// snapshot. A fresh child has empty state, so Send auto-initializes it
+	// exactly as Run would; one path covers create and resume alike.
+	return child.SendWithCustomAnnounced(ctx, task, custom)
 }
 
 func buildSystemPrompt(promptBuilder func(agentcontext.SystemPromptOptions) string, agentsMD string, specs []core.ToolSpec, cwd, skillsIndex, memoryIndex string) string {

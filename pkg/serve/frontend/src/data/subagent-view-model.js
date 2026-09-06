@@ -151,6 +151,10 @@ export function subagentView(session, jobId) {
     // ModelPill (modelCodename), never the raw id ("gpt-5.6-terra"). Falls back
     // to the provider-stripped id when the model carries no known codename.
     model: modelCodename(sub.model) || shortModel(sub.model) || sub.model || '',
+    // The RAW model the child was spawned with, kept alongside the codename:
+    // the model catalog is keyed by identity ("gpt-6-astra"), and a codename
+    // ("Astra") matches no catalog entry, so the thinking meter needs this.
+    modelSpec: sub.model || '',
     thinking: sub.thinking || 'off',
     task: sub.task || '',
     async: !!sub.async,

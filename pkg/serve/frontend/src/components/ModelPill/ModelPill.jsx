@@ -20,8 +20,12 @@ export function ModelPill({
   ...rest
 }) {
   // Consumers that know the selected model pass its stable selector position.
-  // Keep the highest backend label usable for older/read-only consumers that
-  // only carry the effective effort.
+  // An explicit null means "not known yet" (the model catalog has not answered):
+  // the meter is omitted rather than drawing the effort as if it were a
+  // position, which is how Astra's "low" used to read as one bar instead of
+  // zero. undefined keeps the legacy fallback for consumers that only carry the
+  // effective effort.
+  const unknownPosition = thinkingPosition === null;
   const meterPosition = thinkingPosition || (level === "max" ? "xhigh" : level);
   // The highest effort always renders "hot" (peach) on the persistent pill meter, even when
   // the caller doesn't pass `hot` — the spec requires the pill to reflect xhigh
@@ -37,7 +41,9 @@ export function ModelPill({
         <span class="m-name" style={{ color: `var(--${accent})` }}>
           {model}
         </span>
-        <ThinkingMeter variant={variant} level={meterPosition} hot={isHot} label={`Thinking: ${level}`} />
+        {!unknownPosition && (
+          <ThinkingMeter variant={variant} level={meterPosition} hot={isHot} label={`Thinking: ${level}`} />
+        )}
       </span>
     );
   }
@@ -51,7 +57,9 @@ export function ModelPill({
       <span class="m-name" style={{ color: `var(--${accent})` }}>
         {model}
       </span>
-      <ThinkingMeter variant={variant} level={meterPosition} hot={isHot} label={`Thinking: ${level}`} />
+      {!unknownPosition && (
+        <ThinkingMeter variant={variant} level={meterPosition} hot={isHot} label={`Thinking: ${level}`} />
+      )}
     </button>
   );
 }

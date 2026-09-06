@@ -79,34 +79,86 @@ export function rowSignature(row) {
   return `msg|${row?.role || ''}|${rowText(row).slice(0, SIGNATURE_CHARS)}`;
 }
 
-// mergeSubagentTranscript splices a fetched history under the rows the socket
-// already delivered.
+// mergeSubagentTranscript reconciles the fetched history with the rows the
+// socket delivered.
 //
-// The live rows are a suffix of the same transcript, so the fetched rows that
-// duplicate them are its LAST occurrences: walking the fetched list backwards
-// and consuming one live signature per match drops exactly those. Live rows
-// are never rewritten nor dropped, so deltas that landed while the request was
-// in flight survive untouched, and every message ends up rendered once —
-// always from the live copy, which is the fresher of the two.
+// The fetched snapshot is the authoritative CHRONOLOGY: the server writes the
+// child's history in order, so its sequence is the one to render. Live rows
+// are not necessarily a suffix of it — a hydration started before the task was
+// announced can have its REST response run ahead of the queued live events, so
+// the socket may so far hold only a row the snapshot already contains in the
+// middle. Prepending everything unmatched then moved the encargo BELOW the
+// answer it caused.
+//
+// So: walk the fetched rows in order, emitting the live copy wherever the two
+// sources describe the same row (live is the fresher of the two, and never
+// truncated), then append the live rows the snapshot did not contain — the
+// genuine tail that landed while the request was in flight. Every message is
+// rendered exactly once, in the server's order.
+//
+// Matching is occurrence-aware, and pairs from the END: a repeated tool
+// signature has no id to tell its occurrences apart, and the live rows are the
+// most recent ones, so the last N live occurrences correspond to the last N
+// fetched occurrences.
 export function mergeSubagentTranscript(fetched, live, toolDetailBase = '') {
   const current = Array.isArray(live) ? live : [];
-  const unmatched = new Map();
-  for (const row of current) {
-    const signature = rowSignature(row);
-    unmatched.set(signature, (unmatched.get(signature) || 0) + 1);
-  }
   const rows = normalizeConversationProjection(fetched || [], toolDetailBase);
-  const prefix = [];
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const signature = rowSignature(rows[i]);
-    const pending = unmatched.get(signature) || 0;
-    if (pending > 0) {
-      unmatched.set(signature, pending - 1);
-      continue;
+
+  // Legacy signatures are only comparable between the same shared message
+  // anchors. Matching across a parent task would move a new execution into
+  // an older turn just because both invoked the same command.
+  const liveIDs = new Set(current.map(row => row?._msg_id).filter(Boolean));
+  const sharedIDs = new Set(rows.map(row => row?._msg_id).filter(id => id && liveIDs.has(id)));
+  const signatures = (source) => {
+    const nextAnchors = [];
+    let next = null;
+    for (let i = source.length - 1; i >= 0; i--) {
+      nextAnchors[i] = next;
+      if (sharedIDs.has(source[i]?._msg_id)) next = source[i]._msg_id;
     }
-    prefix.unshift(rows[i]);
+    let previous = null;
+    return source.map((row, i) => {
+      if (sharedIDs.has(row?._msg_id)) previous = row._msg_id;
+      const signature = rowSignature(row);
+      return row?._msg_id ? signature : JSON.stringify([signature, previous, nextAnchors[i]]);
+    });
+  };
+  const fetchedSignatures = signatures(rows);
+  const liveSignatures = signatures(current);
+
+  // signature → positions, in order, on each side.
+  const fetchedBySignature = new Map();
+  rows.forEach((row, index) => {
+    const signature = fetchedSignatures[index];
+    if (!fetchedBySignature.has(signature)) fetchedBySignature.set(signature, []);
+    fetchedBySignature.get(signature).push(index);
+  });
+  const liveBySignature = new Map();
+  current.forEach((row, index) => {
+    const signature = liveSignatures[index];
+    if (!liveBySignature.has(signature)) liveBySignature.set(signature, []);
+    liveBySignature.get(signature).push(index);
+  });
+
+  const liveForFetched = new Map(); // fetched index → live index
+  const pairedLive = new Set();
+  for (const [signature, liveIndexes] of liveBySignature) {
+    const fetchedIndexes = fetchedBySignature.get(signature) || [];
+    const pairs = Math.min(liveIndexes.length, fetchedIndexes.length);
+    for (let n = 1; n <= pairs; n++) {
+      const liveIndex = liveIndexes[liveIndexes.length - n];
+      liveForFetched.set(fetchedIndexes[fetchedIndexes.length - n], liveIndex);
+      pairedLive.add(liveIndex);
+    }
   }
-  return [...prefix, ...current];
+
+  const merged = rows.map((row, index) => (
+    liveForFetched.has(index) ? current[liveForFetched.get(index)] : row
+  ));
+  for (let index = 0; index < current.length; index++) {
+    if (!pairedLive.has(index)) merged.push(current[index]);
+  }
+  return merged;
 }
 
 // fetchTranscriptItems pages backwards (the endpoint answers newest first)
@@ -164,6 +216,17 @@ export async function hydrateSubagentTranscript(id, jobId, isActive = () => true
   const terminal = applied && (
     snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled'
   );
+  const merged = applied
+    ? mergeSubagentTranscript(
+      snapshot.items,
+      now.messages || [],
+      `/api/sessions/${id}/subagents/${jobId}`,
+    )
+    : null;
+  // A live snapshot without the parent task may precede its announcement.
+  // Only terminal snapshots are complete without it, including legacy history
+  // written before provenance tags were introduced.
+  const hydrated = applied && (terminal || hasParentTask(merged));
   updateSession(id, {
     subagents: {
       ...settled.subagents,
@@ -172,17 +235,13 @@ export async function hydrateSubagentTranscript(id, jobId, isActive = () => true
         transcriptHydrating: false,
         ...(applied
           ? {
-            messages: mergeSubagentTranscript(
-              snapshot.items,
-              now.messages || [],
-              `/api/sessions/${id}/subagents/${jobId}`,
-            ),
+            messages: merged,
             status: snapshot.status || now.status,
             finishedAtMs: Number.isFinite(snapshot.finishedAtMs) ? snapshot.finishedAtMs : now.finishedAtMs,
             streamingText: terminal ? null : now.streamingText,
             thinkingText: terminal ? null : now.thinkingText,
             lifecycleUnverified: false,
-            transcriptHydrated: true,
+            transcriptHydrated: hydrated,
           }
           : {}),
       },

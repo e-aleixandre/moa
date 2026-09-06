@@ -8,6 +8,8 @@ import { subagentView, canPromote } from "../../../data/subagent-view-model.js";
 import { fmtTokens, copyToClipboard, sessionTitle } from "../../../data/util/format.js";
 import { fmtCost } from "../../../data/util/usage-pills.js";
 import { modelAccent } from "../../../data/selectors.js";
+import { catalogThinkingPosition, modelCatalog } from "../../../data/model-catalog.js";
+import { useStore } from "../../../hooks/useStore.js";
 import { cancelSubagent, promoteSubagent } from "../../../data/session-actions.js";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SubagentDetails } from "../../../components/index.js";
@@ -39,6 +41,7 @@ import "./MobileSubagentView.css";
 
 export function MobileSubagentView({ session, jobId, onBack }) {
   const view = subagentView(session, jobId);
+  const catalog = useStore(modelCatalog);
 
   // Same backfill as the desktop view: see useSubagentTranscript.
   useSubagentTranscript(session?.id, jobId, session?.subagents?.[jobId]?.lifecycleUnverified);
@@ -132,7 +135,7 @@ export function MobileSubagentView({ session, jobId, onBack }) {
             />
           </>
         )}
-        <BranchStatusLine session={session} view={view} />
+        <BranchStatusLine session={session} view={view} catalog={catalog} />
       </div>
       <MobileSheet open={detailsOpen} onClose={() => setDetailsOpen(false)} title="Subagent details" scope="subagent">
         <SubagentDetails session={session} view={view} accent={accent} />
@@ -147,7 +150,7 @@ export function MobileSubagentView({ session, jobId, onBack }) {
 // and stays because it is the policy the child's tools run under. Nothing is a
 // door: a child's settings aren't changed from inside it, so each segment is
 // the same face without the tap.
-function BranchStatusLine({ session, view }) {
+function BranchStatusLine({ session, view, catalog }) {
   const usage = view.usage;
   return (
     <StatusStrip
@@ -164,6 +167,10 @@ function BranchStatusLine({ session, view }) {
       modelName={view.model}
       modelAccent={modelAccent(view.model)}
       thinking={view.thinking || "off"}
+      thinkingPosition={catalogThinkingPosition(catalog, {
+        model: view.modelSpec,
+        thinking: view.thinking || "off",
+      })}
     />
   );
 }

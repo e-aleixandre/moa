@@ -375,6 +375,10 @@ export async function deleteSession(id) {
     });
     throw e;
   }
+  // A GET that began before this successful delete still contains the session.
+  // Fence it before publishing local cleanup, as createSession does for a
+  // pre-create roster snapshot.
+  lastAppliedRosterRequest = ++nextRosterRequest;
   // Read the store after the await so concurrent WS updates to other
   // sessions aren't clobbered by a stale pre-request snapshot.
   const state = store.get();

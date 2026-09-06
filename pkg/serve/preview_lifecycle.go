@@ -62,14 +62,14 @@ type PreviewController struct {
 	allowedHosts []string
 	store        PreviewStore
 
-	mu          sync.Mutex
-	settings    PreviewSettings
-	storeErr    string
-	proxy       *PreviewProxy
-	server      *http.Server
-	listener    net.Listener
-	activePort  int
-	activeURL   string
+	mu         sync.Mutex
+	settings   PreviewSettings
+	storeErr   string
+	proxy      *PreviewProxy
+	server     *http.Server
+	listener   net.Listener
+	activePort int
+	activeURL  string
 }
 
 // NewPreviewController loads the remembered public URL and port. A store that

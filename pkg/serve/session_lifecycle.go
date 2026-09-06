@@ -134,11 +134,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		return nil, fmt.Errorf("create session persistence: %w", err)
 	}
 
-	sp := newServePersister(persisted, store, func() string {
-		sess.mu.Lock()
-		defer sess.mu.Unlock()
-		return sess.Title
-	})
+	sp := newServePersister(persisted, store, sess.titleState)
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 
@@ -558,15 +554,17 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	sess.runtime.Context().ReloadPrompt = sess.reloadSession
 	if opts != nil {
 		sess.TitleSource = opts.titleSource
-		// A resumed session with prior history has already lived past its first
-		// run, so don't re-generate its title.
-		if len(opts.initialMessages) > 0 || len(opts.initialEntries) > 0 {
+		// A resumed session that already has history, or that already carries an
+		// automatic title, has had its one shot. An untouched empty session
+		// remains eligible for its first prompt.
+		if len(opts.initialMessages) > 0 || len(opts.initialEntries) > 0 ||
+			opts.titleSource == session.TitleSourceAuto {
 			sess.autoTitled.Store(true)
 		}
 	}
 
-	// Wire Web Push and auto-titling before the session can run (no-ops if the
-	// respective feature is unavailable).
+	// Wire background session services before the session can run (no-ops if
+	// the respective feature is unavailable).
 	m.subscribeAttachmentReleases(sess)
 	m.subscribePush(sess)
 	m.subscribeAutoTitle(sess)
@@ -1114,11 +1112,7 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 	}
 
 	// 5. Attach persistence.
-	sp := newServePersister(saved, store, func() string {
-		sess.mu.Lock()
-		defer sess.mu.Unlock()
-		return sess.Title
-	})
+	sp := newServePersister(saved, store, sess.titleState)
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 

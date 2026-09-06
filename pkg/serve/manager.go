@@ -213,6 +213,16 @@ func (s *ManagedSession) title() string {
 	return s.Title
 }
 
+// titleState reports the authoritative title, its source, and whether this
+// runtime is being torn down. It is the persister's single source of truth for
+// out-of-band title writes, so a writer can never persist a value it read
+// before another one changed it.
+func (s *ManagedSession) titleState() (string, string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Title, s.TitleSource, s.closing.Load()
+}
+
 func (s *ManagedSession) setProviderName(provider string) {
 	s.mu.Lock()
 	s.modelProvider = provider
@@ -662,6 +672,9 @@ type Manager struct {
 	beforeReadThroughAdvance          func()
 	attentionRuntimeDeactivateBlocked func()
 	beforeCloseSessionLifecycleLock   func()
+	// afterAutoTitleGeneration reports that a title goroutine finished, so a
+	// test can join it instead of polling for a write that may never come.
+	afterAutoTitleGeneration func(*ManagedSession)
 }
 
 func (m *Manager) initializeAttentionRuntimeLocked(sess *ManagedSession) {

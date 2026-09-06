@@ -119,5 +119,8 @@ test('thinkingOptionsFor: models without backend efforts retain the standard lab
     ['off', 'off'], ['low', 'low'], ['medium', 'medium'], ['high', 'high'], ['xhigh', 'xhigh'],
   ]);
   expect(thinkingPositionFor('xhigh', terra)).toBe('xhigh');
+  expect(thinkingPositionFor('low', terra)).toBe('low');
+  expect(thinkingPositionFor('medium', terra)).toBe('medium');
+  expect(thinkingPositionFor('high', terra)).toBe('high');
   expect(thinkingOptionsFor(terra).find((option) => option.label === 'xhigh')).toMatchObject({ value: 'xhigh', bars: 4 });
 });

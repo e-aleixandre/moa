@@ -46,6 +46,21 @@ test('the resolved thinking level is projected for the model pill', () => {
   expect(subagentView(session, 'j1').thinking).toBe('high');
 });
 
+// The codename is a label, not an identity: the model catalog that maps an
+// effort onto a meter position is keyed by the raw model, so the projection
+// keeps it alongside.
+test('the raw model the child was spawned with survives next to the codename', () => {
+  const session = { id: 's1', messages: [], subagents: { j1: sub({ model: 'openai/gpt-6-astra' }) } };
+  const view = subagentView(session, 'j1');
+  expect(view.model).toBe('Astra');
+  expect(view.modelSpec).toBe('openai/gpt-6-astra');
+});
+
+test('a child with no model reports an empty raw model rather than a guess', () => {
+  const session = { id: 's1', messages: [], subagents: { j1: sub({ model: '' }) } };
+  expect(subagentView(session, 'j1').modelSpec).toBe('');
+});
+
 // ── sibling rail only for 2+ live ─────────────────────────────────────────
 test('two live subagents produce a sibling rail with the active one flagged', () => {
   const session = {

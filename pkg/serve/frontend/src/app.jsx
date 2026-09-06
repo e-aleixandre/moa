@@ -15,6 +15,7 @@ import {
   startUsagePolling, stopUsagePolling,
 } from "./data/session-actions.js";
 import { loadEvents, openInbox } from "./data/events.js"; // wake-on-event
+import { loadModelCatalog, ensureModelCatalog } from "./data/model-catalog.js";
 import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
@@ -133,6 +134,11 @@ function useBootstrap() {
       });
     startPolling();
     startUsagePolling();
+    // The model catalog is what turns a backend effort into the position the
+    // thinking meters draw, so it is loaded with the first roster instead of
+    // waiting for someone to open a model selector. No polling: it only
+    // changes when the server does.
+    loadModelCatalog();
     loadEvents(); // wake-on-event: paint the inbox on first load, not one tick later
     // Reconcile the browser's actual push state on load (/next relies on the
     // root /sw.js, no SW registration here). Guarded internally for unsupported.
@@ -158,6 +164,8 @@ function useBootstrap() {
         // Also restarts the usage timer, and refreshes immediately so the
         // status line is not showing a number from before the app was hidden.
         startUsagePolling();
+        // Retry a catalog that never arrived; a ready one costs nothing.
+        ensureModelCatalog();
         // Returning to a backgrounded PWA is when a user expects to see the
         // interface that was deployed meanwhile, and on iOS it is the only
         // moment an installed app re-reads anything at all.
@@ -173,6 +181,7 @@ function useBootstrap() {
       if (document.visibilityState !== "visible") return;
       reconnectAll();
       loadSessions();
+      ensureModelCatalog();
     };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("online", onOnline);

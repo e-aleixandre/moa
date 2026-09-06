@@ -59,15 +59,10 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 
 	if thinking != "" {
 		normalized := normalizeThinkingLevel(thinking)
-		model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
-		effective, err := core.EffectiveThinkingLevel(model, normalized)
-		if err != nil {
+		if err := sess.runtime.Bus.Execute(bus.SetThinking{Level: normalized}); err != nil {
 			return nil, err
 		}
-		if err := sess.runtime.Bus.Execute(bus.SetThinking{Level: effective}); err != nil {
-			return nil, err
-		}
-		result["thinking"] = effective
+		result["thinking"], _ = bus.QueryTyped[bus.GetThinkingLevel, string](sess.runtime.Bus, bus.GetThinkingLevel{})
 	}
 
 	// Fill in current values for non-changed fields.
@@ -100,6 +95,20 @@ func (m *Manager) SetTitle(sessionID, title string) (string, error) {
 	if !ok {
 		return "", ErrNotFound
 	}
+	// Rename under the same lifecycle guard a send uses. saveTitle refuses to
+	// write for a closing runtime (its final flush owns the file, and a resumed
+	// runtime may already have replaced it), so without this a rename admitted
+	// during a close could report success and never reach disk.
+	sess.lifecycle.RLock()
+	defer sess.lifecycle.RUnlock()
+	return m.setTitle(sess, title)
+}
+
+// setTitle is SetTitle's body. Callers must hold sess.lifecycle for read.
+func (m *Manager) setTitle(sess *ManagedSession, title string) (string, error) {
+	if sess.closing.Load() {
+		return "", ErrNotFound
+	}
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return "", fmt.Errorf("title cannot be empty")
@@ -116,7 +125,7 @@ func (m *Manager) SetTitle(sessionID, title string) (string, error) {
 	// manual rename; claim the guard.
 	sess.autoTitled.Store(true)
 	if sess.persister != nil {
-		sess.persister.saveTitle(title, session.TitleSourceManual)
+		sess.persister.saveTitle()
 	}
 	m.invalidateSavedCache()
 	return title, nil

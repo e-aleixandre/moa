@@ -17,7 +17,8 @@ import { Button, Kbd } from "../../primitives/index.js";
 import { updateSession } from "../../data/store.js";
 import { useStore } from "../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
-import { focusedSession, focusedSessionId, modelAccent, deriveModelSpecs, matchSelectedModel, thinkingPositionFor } from "../../data/selectors.js";
+import { focusedSession, focusedSessionId, modelAccent, matchSelectedModel } from "../../data/selectors.js";
+import { catalogThinkingPosition, ensureModelCatalog, modelCatalog } from "../../data/model-catalog.js";
 import { navigate } from "../../data/router.js";
 import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
@@ -25,7 +26,6 @@ import { shortModel, shortPath, modelCodename, sessionTitle } from "../../data/u
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
-import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
 import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast } from "../../data/session-actions.js";
 import { positionModelPopover } from "../PaneGrid/model-popover-position.js";
@@ -57,14 +57,13 @@ export function ConversationScreen() {
 
   // --- Model selector popover (StatusStrip's ModelPill) ---
   const [modelOpen, setModelOpen] = useState(false);
-  const [models, setModels] = useState(null); // null = not fetched yet
+  const catalog = useStore(modelCatalog);
   const modelAnchorRef = useRef(null);
   const modelPopoverRef = useRef(null);
   const [modelPopoverPosition, setModelPopoverPosition] = useState(null);
   useEffect(() => {
-    if (!modelOpen || models) return;
-    api("GET", "/api/models").then(setModels).catch(() => setModels([]));
-  }, [modelOpen, models]);
+    if (modelOpen) ensureModelCatalog();
+  }, [modelOpen]);
   useEffect(() => {
     if (!modelOpen) return;
     const unregister = registerOverlay("conv-model-popover");
@@ -190,7 +189,7 @@ export function ConversationScreen() {
     );
   } else {
     const blocks = projectStream(session);
-    const specs = deriveModelSpecs(models);
+    const specs = catalog.entries || [];
     const selectedModel = matchSelectedModel(specs, session.model);
     const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
     const settingsBusy = session.state === "running" || session.state === "permission";
@@ -333,7 +332,11 @@ export function ConversationScreen() {
                 modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
                 modelAccent={modelAccent(session.model)}
                 thinking={thinking}
-                thinkingPosition={thinkingPositionFor(thinking, specs.find((spec) => spec.id === selectedModel), session.provider)}
+                thinkingPosition={catalogThinkingPosition(catalog, {
+                  model: session.model,
+                  provider: session.provider,
+                  thinking,
+                })}
                 onModel={() => setModelOpen((v) => !v)}
                 modelOpen={modelOpen}
                 modelPopover={modelPopover}
