@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -163,8 +164,12 @@ func TestDecideEventRoute(t *testing.T) {
 
 func newHookTestServer(t *testing.T, sources map[string]core.EventSourceConfig) (*httptest.Server, *Manager) {
 	t.Helper()
+	return newHookTestServerWithProvider(t, sources, newMockProvider(simpleResponseHandler("test reply")))
+}
+
+func newHookTestServerWithProvider(t *testing.T, sources map[string]core.EventSourceConfig, prov core.Provider) (*httptest.Server, *Manager) {
+	t.Helper()
 	ctx := t.Context()
-	prov := newMockProvider(simpleResponseHandler("test reply"))
 	cfg := core.MoaConfig{
 		DisableSandbox:    true,
 		AutoTitleModel:    "haiku",
@@ -781,48 +786,66 @@ func TestHookRateLimitKeepsOverflowInInbox(t *testing.T) {
 	}
 }
 
-func TestRouteEventUsesSnapshotAutorun(t *testing.T) {
+func TestAutoRouteEventUsesSnapshotAutorun(t *testing.T) {
 	dir := t.TempDir()
-	off := false
-	srv, mgr := newHookTestServer(t, map[string]core.EventSourceConfig{
-		"ci": {
-			Secret:  "tok",
-			Target:  core.EventTarget{Kind: core.EventTargetInbox},
-			Autorun: &off,
-		},
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	prov := newMockProvider(func(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+			return simpleResponse("test reply"), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	})
+	_, mgr := newHookTestServerWithProvider(t, nil, prov)
 	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp := postHook(t, srv, "ci", "tok", `{"title":"ping"}`)
-	defer resp.Body.Close() //nolint:errcheck
-	var out hookResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	ev, _, err := mgr.events.Add(events.Event{Source: "ci", Title: "ping", Autorun: false})
+	if err != nil {
 		t.Fatal(err)
 	}
 	on := true
-	mgr.configLoader = func(string) core.MoaConfig {
-		return core.MoaConfig{Events: &core.EventsConfig{Sources: map[string]core.EventSourceConfig{
-			"ci": {Secret: "tok", Target: core.EventTarget{Kind: core.EventTargetInbox}, Autorun: &on},
-		}}}
+	src := core.EventSourceConfig{
+		Target:  core.EventTarget{Kind: core.EventTargetSession, Session: sess.ID},
+		Autorun: &on,
 	}
-	routed, err := mgr.RouteEvent(out.ID, sess.ID, false, "", "")
+	routed, err := mgr.autoRouteEvent(ev, src)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if routed.State != events.StateRouted {
 		t.Fatalf("state = %q, want routed", routed.State)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for !eventReached(sess) {
-		if time.Now().After(deadline) {
-			t.Fatal("event never reached the transcript")
-		}
-		time.Sleep(20 * time.Millisecond)
+	if !eventReached(sess) {
+		t.Fatal("event never reached the transcript")
 	}
-	if sess.runtime.Context().Agent.IsRunning() {
-		t.Fatal("live autorun:true started a turn; snapshot should have stayed false")
+	found := false
+	for _, msg := range sess.History() {
+		if msg.Custom["source"] != "event" {
+			continue
+		}
+		found = true
+		if msg.Custom["autorun"] != false {
+			t.Fatalf("event autorun metadata = %v, want false", msg.Custom["autorun"])
+		}
+	}
+	if !found {
+		t.Fatal("event metadata was not recorded")
+	}
+	if got := prov.calls.Load(); got != 0 {
+		t.Fatalf("provider calls = %d, want 0", got)
+	}
+	select {
+	case <-started:
+		t.Fatal("stored autorun:false started a provider turn")
+	default:
 	}
 }
 
@@ -916,14 +939,29 @@ func TestHookRetryReportsNotCreated(t *testing.T) {
 func TestManualRouteRunsEvenWhenSourceAutorunIsOff(t *testing.T) {
 	dir := t.TempDir()
 	off := false
-	srv, mgr := newHookTestServer(t, map[string]core.EventSourceConfig{
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	prov := newMockProvider(func(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+			return simpleResponse("test reply"), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+	srv, mgr := newHookTestServerWithProvider(t, map[string]core.EventSourceConfig{
 		"ci": {
 			Secret:  "tok",
 			Target:  core.EventTarget{Kind: core.EventTargetInbox},
 			Autorun: &off,
 		},
-	})
+	}, prov)
 	_ = srv
+	t.Cleanup(func() { close(release) })
 	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -938,6 +976,11 @@ func TestManualRouteRunsEvenWhenSourceAutorunIsOff(t *testing.T) {
 	}
 	if routed.State != events.StateRouted {
 		t.Fatalf("state = %q, want routed", routed.State)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("manual route did not start a provider turn")
 	}
 	found := false
 	for _, msg := range sess.History() {
