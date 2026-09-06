@@ -8,7 +8,7 @@ import { test, expect, beforeEach } from 'bun:test';
 
 let apiResponse = [];
 
-const { store, setState } = await import('./store.js');
+const { store, setState, updateSession } = await import('./store.js');
 const { syncConnections } = await import('./api.js');
 const { createSession, deleteSession, loadSessions, loadUsage, openPersistedSubagent, openBashJob, sendMessage, startPolling, stopPolling } = await import('./session-actions.js');
 const { getToasts, removeToast } = await import('./notifications.js');
@@ -63,6 +63,33 @@ test('an in-flight roster from before create cannot erase the created session', 
   expect(store.get().sessions.created).toMatchObject({ id: 'created', title: 'New session' });
   expect(store.get().activeSession).toBe('created');
   setState({ isMobile: false });
+});
+
+test('a successful delete fences an older roster without losing concurrent updates', async () => {
+  let resolveOldRoster;
+  globalThis.fetch = (path, opts) => {
+    if (opts.method === 'GET') return new Promise(resolve => { resolveOldRoster = resolve; });
+    return Promise.resolve(new Response(null, { status: 204 }));
+  };
+  setState({ sessions: {
+    deleted: { id: 'deleted', state: 'idle', provider: 'openai', cwd: '/work', subagents: {} },
+    kept: { id: 'kept', state: 'idle', provider: 'openai', cwd: '/work', subagents: {} },
+  } });
+
+  const oldRoster = loadSessions();
+  await Promise.resolve();
+  await deleteSession('deleted');
+  // This models a WS update that lands after DELETE succeeds but before the
+  // old GET resolves; delete cleanup must not replace this newer local state.
+  updateSession('kept', { title: 'updated while deleting' });
+  resolveOldRoster(new Response(JSON.stringify([
+    { id: 'deleted', title: 'stale', state: 'idle', provider: 'openai', cwd: '/work' },
+    { id: 'kept', title: 'old', state: 'idle', provider: 'openai', cwd: '/work' },
+  ]), { status: 200 }));
+  await oldRoster;
+
+  expect(store.get().sessions.deleted).toBeUndefined();
+  expect(store.get().sessions.kept.title).toBe('updated while deleting');
 });
 
 test('a failed create does not add a roster entry', async () => {
@@ -1246,7 +1273,7 @@ test('loadUsage does not notify when the snapshot is unchanged', async () => {
   expect(n).toBe(0);
 });
 
-test('desktop roster poll is 10s, mobile 15s', () => {
+test('desktop and mobile roster polls run every 15s with the inbox refresh', () => {
   const intervals = [];
   const orig = globalThis.setInterval;
   globalThis.setInterval = (fn, ms) => { intervals.push(ms); return 1; };
@@ -1255,10 +1282,66 @@ test('desktop roster poll is 10s, mobile 15s', () => {
     startPolling();
     setState({ isMobile: true });
     startPolling();
-    expect(intervals).toEqual([10000, 15000]);
+    expect(intervals).toEqual([15000, 15000]);
   } finally {
     globalThis.setInterval = orig;
     stopPolling();
     setState({ isMobile: false });
   }
+});
+
+test('a roster poll that lost the artifacts owner closes its drawer, and another owner is not switched', async () => {
+  const { openArtifactsList, artifactsSlice } = await import('./artifacts.js');
+  const { ARTIFACTS_CLOSED } = await import('./artifacts-model.js');
+  setState({ artifacts: ARTIFACTS_CLOSED, sessions: {}, tileTree: null, activeSession: null });
+
+  // Two conversations exist; the drawer is opened on the one that will be
+  // deleted from another client.
+  apiResponse = [
+    { id: 'gone', title: 'deleted elsewhere', state: 'idle' },
+    { id: 'kept', title: 'still here', state: 'saved' },
+  ];
+  await loadSessions();
+  openArtifactsList('gone');
+  await Promise.resolve();
+  expect(artifactsSlice(store.get()).ownerSessionId).toBe('gone');
+
+  // The authoritative roster no longer lists it. 'kept' is still there and is
+  // NOT adopted as the new owner: the drawer closes instead of switching.
+  apiResponse = [{ id: 'kept', title: 'still here', state: 'saved' }];
+  await loadSessions();
+  expect(artifactsSlice(store.get()).view).toBeNull();
+  expect(artifactsSlice(store.get()).ownerSessionId).toBeNull();
+
+  // A saved conversation that stays in the roster keeps its drawer open: it is
+  // unloaded, not deleted, and the artifacts API still answers for it.
+  openArtifactsList('kept');
+  await Promise.resolve();
+  await loadSessions();
+  expect(artifactsSlice(store.get()).ownerSessionId).toBe('kept');
+});
+
+test('openPersistedSubagent restores the title the sidecar saved for the child', async () => {
+  setState({ sessions: { s1: { id: 's1', subagents: {} } } });
+  apiResponse = {
+    task: '\n# Delivery review\n\nVerify the promised work.',
+    title: 'Review Promised Delivery Work',
+    status: 'completed',
+    messages: [{ id: 'm1', role: 'assistant', text: 'done' }],
+  };
+
+  await openPersistedSubagent('s1', 'job-1');
+
+  expect(store.get().sessions.s1.subagents['job-1'].title).toBe('Review Promised Delivery Work');
+});
+
+test('openPersistedSubagent keeps a known title when an older server omits it', async () => {
+  setState({ sessions: { s1: { id: 's1', subagents: {
+    'job-1': { jobId: 'job-1', status: 'completed', title: 'Review Promised Delivery Work', messages: [] },
+  } } } });
+  apiResponse = { task: 'inspect', status: 'completed', messages: [] };
+
+  await openPersistedSubagent('s1', 'job-1');
+
+  expect(store.get().sessions.s1.subagents['job-1'].title).toBe('Review Promised Delivery Work');
 });

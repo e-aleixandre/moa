@@ -56,6 +56,8 @@ func serveRouteAccess(r *http.Request) routeAccess {
 		return routeOwnerAdmin
 	case isPulseDeviceRevokeRoute(r.URL.Path) && r.Method == http.MethodPost:
 		return routeOwnerAdmin
+	case r.URL.Path == "/api/preview/target":
+		return routeOwnerAdmin
 	default:
 		return routeOwnerSurface
 	}

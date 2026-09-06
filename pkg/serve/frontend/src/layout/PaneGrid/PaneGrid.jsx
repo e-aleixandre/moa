@@ -8,9 +8,10 @@ import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { NowLine } from "../NowLine/NowLine.jsx";
 import { LiveDock } from "../LiveDock/LiveDock.jsx";
 import {
-  McpBanner, PermissionPrompt, AskUserPrompt, UsagePanel, ModelSelector,
+  McpBanner, PermissionPrompt, AskUserPrompt, UsagePanel, ModelSelector, ArtifactsPaneButton,
 } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
+import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { snapToRatio } from "../../data/snap.js";
@@ -24,11 +25,11 @@ import { getTileCount, updateSession } from "../../data/store.js";
 import { useStore } from "../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { openPersistedSubagent, openBashJob, configureSession, setSessionFast } from "../../data/session-actions.js";
-import { modelAccent, deriveModelSpecs, matchSelectedModel } from "../../data/selectors.js";
+import { modelAccent, matchSelectedModel } from "../../data/selectors.js";
+import { catalogThinkingPosition, ensureModelCatalog, modelCatalog } from "../../data/model-catalog.js";
 import { shortModel, shortPath, sessionDisplayDotState, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
-import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { positionModelPopover } from "./model-popover-position.js";
@@ -211,7 +212,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   const [usageOpen, setUsageOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
-  const [models, setModels] = useState(null);
+  const catalog = useStore(modelCatalog);
   const stripAnchorRef = useRef(null);
   const modelAnchorRef = useRef(null);
   const modelPopoverRef = useRef(null);
@@ -224,9 +225,8 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   }, [node.sessionId]);
 
   useEffect(() => {
-    if (!modelOpen || models) return;
-    api("GET", "/api/models").then(setModels).catch(() => setModels([]));
-  }, [modelOpen, models]);
+    if (modelOpen) ensureModelCatalog();
+  }, [modelOpen]);
 
   useEffect(() => {
     if (!modelOpen) return undefined;
@@ -340,7 +340,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
     </>
   ) : null;
 
-  const specs = deriveModelSpecs(models);
+  const specs = catalog.entries || [];
   const selectedModel = matchSelectedModel(specs, session.model);
   const modelPopover = modelOpen && typeof document !== "undefined" && document.body && createPortal(
     <div
@@ -390,6 +390,9 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
       state={dotState}
       path={shortPath(session.cwd) || session.cwd || ""}
       attention={attention}
+      previewOpen={!!session.previewOpen}
+      onPreviewToggle={(e) => { e.stopPropagation(); updateSession(session.id, { previewOpen: !session.previewOpen }); }}
+      headExtra={<ArtifactsPaneButton sessionId={session.id} />}
       onMaximize={handleMaximize}
       blocking={blocking}
       bodyLive
@@ -439,6 +442,11 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
             modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
             modelAccent={modelAccent(session.model)}
             thinking={thinking}
+            thinkingPosition={catalogThinkingPosition(catalog, {
+              model: session.model,
+              provider: session.provider,
+              thinking,
+            })}
             onModel={() => {
               setUsageOpen(false);
               setMcpOpen(false);
@@ -464,6 +472,14 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
             </div>
           )}
         </div>
+      )}
+      overlay={(
+        <LivePreview
+          sessionId={session.id}
+          open={!!session.previewOpen}
+          inline
+          onClose={() => updateSession(session.id, { previewOpen: false })}
+        />
       )}
     >
       <Stream

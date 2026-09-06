@@ -426,6 +426,19 @@ type AgentConfig struct {
 	// Set Enabled:false to disable.
 	Compaction *core.CompactionSettings
 
+	// CompactSummarizer optionally supplies a different model — and its
+	// provider — to write compaction summaries, instead of the session's own.
+	// Summarizing is extraction over a flattened transcript under its own
+	// system prompt: it shares no cached prefix with the conversation either
+	// way, so the session's (often pricier) model is rarely the right tool.
+	//
+	// nil, or a nil model, means "summarize with the session's model", which is
+	// how compaction behaved before this existed. It never fails the
+	// compaction: a summarizer that cannot be reached falls back to the
+	// session's model and reports why, because a session that stops compacting
+	// grows until it hits the window, which is worse than a costlier summary.
+	CompactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)
+
 	// SessionCheckpoint is the ephemeral handoff slot. When set, automatic
 	// compaction appends its contents to the summary and clears it, matching
 	// the manual CompactWithCheckpoint path.
@@ -1267,6 +1280,7 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	provider := a.config.Provider
 	settings := a.config.Compaction
 	epoch := a.state.CompactionEpoch
+	summarizer := a.config.CompactSummarizer
 
 	// Claim the running slot for the whole operation. The compaction LLM call
 	// below takes seconds and runs with the mutex released; without holding the
@@ -1305,8 +1319,25 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	// with no possible reader. The cache key still travels: the request belongs
 	// to this conversation and must route with it.
 	streamOpts := core.StreamOptions{ThinkingLevel: a.config.ThinkingLevel, PromptCacheKey: a.config.PromptCacheKey, CacheRetention: core.CacheOff}
+
+	// A configured summarizer writes the summary instead of the session's
+	// model. The window stays the session's: it decides when and how much to
+	// compact, and swapping it would change what the summary is asked to cover.
+	sumProvider, sumModel, fallbackNotice := provider, model, ""
+	if summarizer != nil {
+		sumProvider, sumModel, fallbackNotice = summarizer(model)
+		if sumProvider == nil || sumModel.ID == "" {
+			sumProvider, sumModel = provider, model
+		}
+		// The summarizer's thinking level is not the session's to lend: a model
+		// may not support it at all. Compaction forces it off downstream anyway.
+		if sumModel.ID != model.ID {
+			streamOpts.ThinkingLevel = ""
+		}
+	}
+
 	result, compacted, err := compaction.Compact(
-		ctx, provider, model, streamOpts,
+		ctx, sumProvider, sumModel, streamOpts,
 		msgs, estimate.Tokens, settings.EffectiveWindow(model.MaxInput), *settings, focus,
 	)
 	if err != nil {
@@ -1338,7 +1369,8 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 			}
 			return ""
 		}(),
-		Usage: result.Usage,
+		Usage:            result.Usage,
+		SummarizerNotice: fallbackNotice,
 	}, nil
 }
 
@@ -1623,6 +1655,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		state:               &a.state,
 		stateMu:             &a.mu,
 		model:               a.config.Model,
+		compactSummarizer:   a.config.CompactSummarizer,
 		systemPrompt:        a.config.SystemPrompt + extraPrompt,
 		streamOpts:          streamOpts,
 		streamRepairBackoff: a.config.StreamRepairBackoff,

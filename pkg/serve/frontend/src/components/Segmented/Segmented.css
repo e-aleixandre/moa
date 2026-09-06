@@ -21,9 +21,12 @@
   transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
   letter-spacing: var(--tracking-wide);
 }
+@media (hover: hover) {
+
 
 .segmented .segmented-item:hover {
   color: var(--text);
+}
 }
 
 .segmented .segmented-item:focus-visible {

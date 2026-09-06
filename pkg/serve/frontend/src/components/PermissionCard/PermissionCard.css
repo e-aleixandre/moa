@@ -107,31 +107,40 @@
   border-color: var(--surface1);
   color: var(--subtext1);
 }
+@media (hover: hover) {
+
 
 .perm-card .perm-actions .btn-always:hover:not(:disabled) {
   border-color: var(--green);
   color: var(--green);
   background: transparent;
 }
+}
 
 .perm-card .perm-actions .btn-always b {
   font-family: var(--mono);
   font-weight: var(--weight-medium);
 }
+@media (hover: hover) {
+
 
 .perm-card .perm-actions .btn-deny:hover:not(:disabled) {
   color: var(--red);
+}
 }
 
 .perm-card.danger .perm-actions .btn-deny {
   border: 1px solid var(--surface1);
   color: var(--subtext1);
 }
+@media (hover: hover) {
+
 
 .perm-card.danger .perm-actions .btn-deny:hover:not(:disabled) {
   color: var(--red);
   border-color: color-mix(in srgb, var(--red) 45%, transparent);
   background: transparent;
+}
 }
 
 .perm-card .perm-actions .hint {
@@ -199,10 +208,13 @@
   cursor: pointer;
   transition: border-color var(--duration) var(--ease), color var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .perm-card .perm-inline-editor .perm-inline-save:hover:not(:disabled) {
   border-color: var(--green);
   color: var(--green);
+}
 }
 
 .perm-card .perm-inline-editor .perm-inline-save:disabled {

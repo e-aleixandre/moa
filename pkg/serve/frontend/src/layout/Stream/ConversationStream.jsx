@@ -5,13 +5,15 @@ import {
   ActivityLedger,
   DiffBlock,
   DelegationBlock,
-  FileCard,
+  ArtifactCard,
   CompactionCard,
+  EventBlock,
   HistoryHydrationTail,
   historyHydrationTailVisible,
 } from "../../components/index.js";
 import { SecretBatchCard } from "../../components/SecretBatchCard/SecretBatchCard.jsx";
 import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
+import { parsePreviewReference } from "../../data/util/preview-reference.js";
 import { renderMarkdown, renderMarkdownWithCaret } from "../../data/util/markdown.js";
 import { retryHistoryHydration } from "../../data/api.js";
 import { captureHydrationAnchor, restoreHydrationAnchor } from "../../data/stream-hydration-anchor.js";
@@ -39,7 +41,7 @@ import {
 // the markdown pipeline through DOMPurify, so the output is safe to inject; the
 // component's own sanitizeHtml pass is a second, allowlist-based guard. No raw
 // user/assistant text ever reaches innerHTML unsanitized.
-function docChildren(blocks, onOpenSubagent, visibleDone) {
+function docChildren(blocks, onOpenSubagent, visibleDone, sessionId) {
   const out = [];
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
@@ -69,7 +71,7 @@ function docChildren(blocks, onOpenSubagent, visibleDone) {
         out.push(<DiffBlock key={b.id} diffText={b.diffText} filename={b.filename} />);
         break;
       case "file":
-        out.push(<FileCard key={b.id} file={b.file} />);
+        out.push(<ArtifactCard key={b.id} file={b.file} sessionId={sessionId} />);
         break;
       case "delegation":
         out.push(
@@ -96,8 +98,18 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
     case "secret_batch":
       return <SecretBatchCard aliases={block.aliases} />;
     case "compaction":
-      return <CompactionCard summary={block.summary} tokensBefore={block.tokensBefore} readFiles={block.readFiles} modifiedFiles={block.modifiedFiles} />;
-    case "waypoint":
+      return <CompactionCard summary={block.summary} tokensBefore={block.tokensBefore} timestamp={block.timestamp} readFiles={block.readFiles} modifiedFiles={block.modifiedFiles} />;
+    // wake-on-event: an event delivered into this conversation gets its own
+    // block — it is not the owner's turn, so it is never a waypoint.
+    case "event":
+      return <EventBlock source={block.source} title={block.title} body={block.body} time={block.time} steer={block.steer} autorun={block.autorun} />;
+    case "waypoint": {
+      // A message sent from the Live Preview carries the feedback block the
+      // agent needs verbatim; the transcript paints it as a reference tied to
+      // the message's spine and shows only the comment as text. Messages
+      // without the block (and every older transcript) are untouched.
+      const parsed = parsePreviewReference(block.text);
+      const text = parsed ? parsed.comment : block.text;
       return (
         <UserWaypoint
           time={block.time}
@@ -106,22 +118,24 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
           accent={block.fromParent ? waypointAccent : undefined}
           attachments={block.attachments}
           sessionId={sessionId}
+          reference={parsed?.reference}
           // The waypoint's own rewind mark, offered only when the block carries
           // the message id the branch API needs (see stream-model.js).
           onRewind={rewind && block.msgId ? () => rewind.to(block.msgId) : undefined}
           onOpenTimeline={rewind?.openTimeline}
           rewindDisabled={rewind?.disabled}
-          rewindPreview={block.text}
+          rewindPreview={text || block.text}
         >
-          <p>{block.text}</p>
+          {text && <p>{text}</p>}
         </UserWaypoint>
       );
+    }
     case "document":
     case "streaming":
       const proseHasCaret = block.blocks.some((b) => b.type === "prose" && b.caret);
       return (
-        <AssistantDocument message={block.message} streaming={block.kind === "streaming" && block.textLive === true && !proseHasCaret}>
-          {docChildren(block.blocks, onOpenSubagent, visibleDone)}
+        <AssistantDocument streaming={block.kind === "streaming" && block.textLive === true && !proseHasCaret}>
+          {docChildren(block.blocks, onOpenSubagent, visibleDone, sessionId)}
         </AssistantDocument>
       );
     default:

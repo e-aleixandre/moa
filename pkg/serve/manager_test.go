@@ -39,11 +39,21 @@ func newMockProvider(handlers ...mockHandler) *mockProvider {
 }
 
 func (m *mockProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	// Auxiliary titles now start alongside the main run. Keep legacy tests that
+	// script only the main provider responses deterministic.
+	if isTestAutoTitleRequest(req) {
+		return simpleResponse("title"), nil
+	}
 	idx := int(m.calls.Add(1) - 1)
 	if idx >= len(m.handlers) {
 		return simpleResponse("done"), nil
 	}
 	return m.handlers[idx](ctx, req)
+}
+
+func isTestAutoTitleRequest(req core.Request) bool {
+	return len(req.Messages) == 1 && len(req.Messages[0].Content) > 0 &&
+		strings.HasPrefix(req.Messages[0].Content[0].Text, "Here is the start of the conversation, between the markers:\n\n<conversation>\n")
 }
 
 func simpleResponse(text string) <-chan core.AssistantEvent {
@@ -115,7 +125,7 @@ func newTestManagerWithRoot(t *testing.T, ctx context.Context, provider core.Pro
 	// hermetic tests unless a test deliberately opts in.
 	return newTestManagerWithConfig(t, ctx, provider, root, core.MoaConfig{
 		DisableSandbox:    true,
-		AutoTitleModel:    "haiku",
+		AutoTitleModel:    "off",
 		SessionBriefModel: "haiku",
 	})
 }
@@ -728,12 +738,8 @@ func TestSend_AutoTitle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// First call answers the run; the second answers the auto-title request.
-	prov := newMockProvider(
-		simpleResponseHandler("reply"),
-		simpleResponseHandler("Auth module refactor"),
-	)
-	mgr := newTestManager(t, ctx, prov)
+	prov := newEarlyAutoTitleProvider("Auth module refactor")
+	mgr := newTestManagerWithConfig(t, ctx, prov, t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "haiku", SessionBriefModel: "off"})
 
 	sess, _ := mgr.CreateSession(CreateOpts{})
 
@@ -742,13 +748,452 @@ func TestSend_AutoTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// After the first run, auto-titling replaces the crude first-message title
-	// with the LLM-generated one.
-	pollUntil(t, 5*time.Second, "auto-title generated", func() bool {
+	// Wait for the durable write, not for the in-memory title: generateAutoTitle
+	// updates memory before it persists, so polling memory and reading disk
+	// immediately is itself a race.
+	pollUntil(t, 5*time.Second, "auto-title persisted", func() bool {
+		saved, _, err := session.FindSession(mgr.sessionBaseDir, sess.ID)
+		return err == nil && saved.Title == "Auth module refactor" && saved.TitleSource == session.TitleSourceAuto
+	})
+	select {
+	case <-prov.mainFinished:
+		t.Fatal("auto-title waited for the main provider to finish")
+	default:
+	}
+	if got := prov.titlePrompt(); got != "User: Refactoriza el módulo de auth" {
+		t.Fatalf("auto-title prompt = %q", got)
+	}
+	close(prov.mainRelease)
+}
+
+// autoTitleDone joins the background title goroutines of a manager, so a test
+// can assert on disk state instead of polling for a write that may never come.
+func autoTitleDone(t *testing.T, mgr *Manager) <-chan struct{} {
+	t.Helper()
+	done := make(chan struct{}, 8)
+	mgr.afterAutoTitleGeneration = func(*ManagedSession) { done <- struct{}{} }
+	return done
+}
+
+func waitAutoTitleDone(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the title goroutine to finish")
+	}
+}
+
+// TestSend_AutoTitleTitlesFirstAcceptedPromptUnderConcurrency is the review's
+// first reproduction: concurrent senders share the lifecycle read lock, so the
+// order in which Send returns is NOT acceptance order. The generated title must
+// come from the prompt that actually became the conversation's first message.
+func TestSend_AutoTitleTitlesFirstAcceptedPromptUnderConcurrency(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prov := newEarlyAutoTitleProvider()
+	mgr := newTestManagerWithConfig(t, ctx, prov, t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "haiku", SessionBriefModel: "off"})
+
+	for iteration := range 30 {
+		sess, err := mgr.CreateSession(CreateOpts{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := prov.titleCount()
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := range 12 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, _, _, _ = mgr.Send(sess.ID, fmt.Sprintf("prompt-%02d-%02d", iteration, i), nil, "", "")
+			}()
+		}
+		close(start)
+		wg.Wait()
+		pollUntil(t, 5*time.Second, "title request", func() bool { return prov.titleCount() == before+1 })
+		var first string
+		pollUntil(t, 5*time.Second, "first history prompt", func() bool {
+			history := sess.History()
+			if len(history) == 0 {
+				return false
+			}
+			for _, c := range history[0].Content {
+				if c.Type == "text" && c.Text != "" {
+					first = c.Text
+					return true
+				}
+			}
+			return false
+		})
+		if got := prov.titlePromptAt(before); got != "User: "+first {
+			t.Fatalf("iteration %d: first history prompt %q but title request was %q", iteration, first, got)
+		}
+		if err := mgr.Delete(sess.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestSend_AutoTitleManualRenameWinsOnDisk is the review's second
+// reproduction: a generator descheduled between committing memory and
+// persisting must not write its stale title over a rename that landed meanwhile.
+func TestSend_AutoTitleManualRenameWinsOnDisk(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prov := newEarlyAutoTitleProvider("Generated title")
+	prov.titleRelease = make(chan struct{})
+	mgr := newTestManagerWithConfig(t, ctx, prov, t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "haiku", SessionBriefModel: "off"})
+	done := autoTitleDone(t, mgr)
+	sess, _ := mgr.CreateSession(CreateOpts{})
+
+	if _, _, _, err := mgr.Send(sess.ID, "rename me", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "in-flight title request", func() bool { return prov.titleCount() == 1 })
+	if _, err := mgr.SetTitle(sess.ID, "Manual title"); err != nil {
+		t.Fatal(err)
+	}
+	close(prov.titleRelease)
+	waitAutoTitleDone(t, done)
+
+	saved, _, err := session.FindSession(mgr.sessionBaseDir, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Title != "Manual title" || saved.TitleSource != session.TitleSourceManual {
+		t.Fatalf("stale auto write clobbered the rename on disk: title=%q source=%q", saved.Title, saved.TitleSource)
+	}
+	close(prov.mainRelease)
+}
+
+// TestSend_AutoTitleClosedRuntimeCannotOverwriteResumedSession is the review's
+// third reproduction: after close and resume, a title write left over from the
+// old runtime must not overwrite the file the new runtime owns.
+func TestSend_AutoTitleClosedRuntimeCannotOverwriteResumedSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManagerWithConfig(t, ctx, newMockProvider(), t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off"})
+	old, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.CloseSession(old.ID); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := mgr.ResumeSession(old.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.SetTitle(resumed.ID, "Manual after resume"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A title goroutine of the closed runtime resumes after cancellation.
+	old.mu.Lock()
+	old.Title = "Stale title from old runtime"
+	old.TitleSource = session.TitleSourceAuto
+	old.mu.Unlock()
+	old.persister.saveTitle()
+
+	saved, _, err := session.FindSession(mgr.sessionBaseDir, old.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Title != "Manual after resume" || saved.TitleSource != session.TitleSourceManual {
+		t.Fatalf("closed runtime overwrote the resumed session: title=%q source=%q", saved.Title, saved.TitleSource)
+	}
+}
+
+// TestSetTitleRefusesClosingSession keeps the rename contract honest: a rename
+// admitted while the runtime is being torn down would report success and never
+// reach disk, since saveTitle refuses to write for a closing runtime.
+func TestSetTitleRefusesClosingSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManagerWithConfig(t, ctx, newMockProvider(), t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off"})
+	sess, err := mgr.CreateSession(CreateOpts{Title: "before close"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.CloseSession(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.setTitle(sess, "after close"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rename on a closing runtime = %v, want ErrNotFound", err)
+	}
+	saved, _, err := session.FindSession(mgr.sessionBaseDir, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Title != "before close" {
+		t.Fatalf("closing rename reached disk: title=%q", saved.Title)
+	}
+}
+
+// earlyAutoTitleProvider separates auxiliary requests from normal agent
+// requests so tests don't depend on the scheduling order of their goroutines.
+type earlyAutoTitleProvider struct {
+	mu           sync.Mutex
+	titles       []core.Request
+	titleOutput  []string
+	titleCalls   int
+	mainRelease  chan struct{}
+	mainStarted  chan struct{}
+	mainFinished chan struct{}
+	titleRelease chan struct{}
+}
+
+func newEarlyAutoTitleProvider(titleOutput ...string) *earlyAutoTitleProvider {
+	return &earlyAutoTitleProvider{
+		titleOutput: titleOutput, mainRelease: make(chan struct{}),
+		mainStarted: make(chan struct{}, 8), mainFinished: make(chan struct{}, 8),
+	}
+}
+
+func (p *earlyAutoTitleProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	if isTestAutoTitleRequest(req) {
+		p.mu.Lock()
+		p.titles = append(p.titles, req)
+		idx := p.titleCalls
+		p.titleCalls++
+		output := "title"
+		if idx < len(p.titleOutput) {
+			output = p.titleOutput[idx]
+		}
+		p.mu.Unlock()
+		if p.titleRelease != nil {
+			select {
+			case <-p.titleRelease:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return simpleResponse(output), nil
+	}
+	select {
+	case p.mainStarted <- struct{}{}:
+	default:
+	}
+	select {
+	case <-p.mainRelease:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case p.mainFinished <- struct{}{}:
+	default:
+	}
+	return simpleResponse("reply"), nil
+}
+
+func (p *earlyAutoTitleProvider) titlePrompt() string {
+	return p.titlePromptAt(0)
+}
+
+func (p *earlyAutoTitleProvider) titlePromptAt(i int) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if i >= len(p.titles) || len(p.titles[i].Messages[0].Content) == 0 {
+		return ""
+	}
+	text := p.titles[i].Messages[0].Content[0].Text
+	start := strings.Index(text, "<conversation>\n")
+	end := strings.Index(text, "\n</conversation>")
+	if start < 0 || end < 0 {
+		return text
+	}
+	return text[start+len("<conversation>\n") : end]
+}
+
+func (p *earlyAutoTitleProvider) titleCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.titles)
+}
+
+func TestSend_AutoTitleUsesFirstAcceptedPromptOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prov := newEarlyAutoTitleProvider("First task")
+	mgr := newTestManagerWithConfig(t, ctx, prov, t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "haiku", SessionBriefModel: "off"})
+	sess, _ := mgr.CreateSession(CreateOpts{})
+
+	if _, _, _, err := mgr.Send(sess.ID, "first task", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "main provider started", func() bool { return len(prov.mainStarted) > 0 })
+	if _, _, _, err := mgr.Send(sess.ID, "later steer", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "title request", func() bool { return prov.titleCount() == 1 })
+	if got := prov.titlePrompt(); got != "User: first task" {
+		t.Fatalf("title used later conversation content: %q", got)
+	}
+	close(prov.mainRelease)
+}
+
+func TestSend_AutoTitleFailureRetriesAndManualTitleWins(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prov := newEarlyAutoTitleProvider("NONE", "Recovered title")
+	mgr := newTestManagerWithConfig(t, ctx, prov, t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "haiku", SessionBriefModel: "off"})
+	sess, _ := mgr.CreateSession(CreateOpts{})
+
+	if _, _, _, err := mgr.Send(sess.ID, "greeting", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "failed title request", func() bool { return prov.titleCount() == 1 && !sess.autoTitled.Load() })
+	close(prov.mainRelease)
+	pollUntil(t, time.Second, "first run settled", func() bool { return sessState(sess) == StateIdle })
+	// Hold the retry in flight so the manual rename races its final title
+	// application rather than merely replacing an already-saved title.
+	prov.titleRelease = make(chan struct{})
+	if _, _, _, err := mgr.Send(sess.ID, "real task", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "retry title", func() bool { return prov.titleCount() == 2 })
+	if _, err := mgr.SetTitle(sess.ID, "Manual title"); err != nil {
+		t.Fatal(err)
+	}
+	close(prov.titleRelease)
+	pollUntil(t, time.Second, "manual title preserved", func() bool {
 		sess.mu.Lock()
 		defer sess.mu.Unlock()
-		return sess.Title == "Auth module refactor"
+		return sess.Title == "Manual title" && sess.TitleSource == session.TitleSourceManual
 	})
+	if got := prov.titleCount(); got != 2 {
+		t.Fatalf("title requests after manual rename = %d, want 2", got)
+	}
+}
+
+func TestSend_AutoTitleRejectedAndConcurrentPrompts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prov := newEarlyAutoTitleProvider("One title")
+	mgr := newTestManagerWithConfig(t, ctx, prov, t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "haiku", SessionBriefModel: "off"})
+	sess, _ := mgr.CreateSession(CreateOpts{})
+
+	if _, _, _, err := mgr.Send(sess.ID, "", []Attachment{{Name: "bad.txt", Data: "%%%"}}, "", ""); err == nil {
+		t.Fatal("rejected attachment send succeeded")
+	}
+	if got := prov.titleCount(); got != 0 {
+		t.Fatalf("rejected send made %d title requests", got)
+	}
+	if _, _, _, err := mgr.Send(sess.ID, "first", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "main provider started", func() bool { return len(prov.mainStarted) > 0 })
+	var wg sync.WaitGroup
+	for range 6 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, _, _ = mgr.Send(sess.ID, "concurrent steer", nil, "", "")
+		}()
+	}
+	wg.Wait()
+	pollUntil(t, time.Second, "one title request", func() bool { return prov.titleCount() == 1 })
+	close(prov.mainRelease)
+}
+
+func TestSend_AutoTitleDeleteDoesNotResurrectSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prov := newEarlyAutoTitleProvider("Too late")
+	prov.titleRelease = make(chan struct{})
+	mgr := newTestManagerWithConfig(t, ctx, prov, t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "haiku", SessionBriefModel: "off"})
+	sess, _ := mgr.CreateSession(CreateOpts{})
+	if _, _, _, err := mgr.Send(sess.ID, "delete me", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "in-flight title request", func() bool { return prov.titleCount() == 1 })
+	if err := mgr.Delete(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := session.FindSession(mgr.sessionBaseDir, sess.ID); !errors.Is(err, session.ErrNotFound) {
+		t.Fatalf("deleted session was recreated: %v", err)
+	}
+}
+
+func TestSend_AutoTitleResumeEligibility(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prov := newEarlyAutoTitleProvider("Initial title", "Empty restored title")
+	mgr := newTestManagerWithConfig(t, ctx, prov, t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "haiku", SessionBriefModel: "off"})
+
+	withHistory, _ := mgr.CreateSession(CreateOpts{})
+	if _, _, _, err := mgr.Send(withHistory.ID, "saved prompt", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "initial title", func() bool { return prov.titleCount() == 1 })
+	close(prov.mainRelease)
+	pollUntil(t, time.Second, "saved run settled", func() bool { return sessState(withHistory) == StateIdle })
+	if err := mgr.CloseSession(withHistory.ID); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := mgr.ResumeSession(withHistory.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(resumed.ID, "new prompt", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := prov.titleCount(); got != 1 {
+		t.Fatalf("resumed history made %d title requests, want 1", got)
+	}
+
+	empty, _ := mgr.CreateSession(CreateOpts{})
+	if err := mgr.CloseSession(empty.ID); err != nil {
+		t.Fatal(err)
+	}
+	empty, err = mgr.ResumeSession(empty.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(empty.ID, "restored first prompt", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "empty restored title", func() bool { return prov.titleCount() == 2 })
+}
+
+// TestSend_AutoTitleResumeEmptyAlreadyAutoTitled is the review's fourth
+// reproduction: an empty session that already carries an automatic title (the
+// early write beat the first durable transcript snapshot) has had its one shot.
+func TestSend_AutoTitleResumeEmptyAlreadyAutoTitled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prov := newEarlyAutoTitleProvider("Second title")
+	mgr := newTestManagerWithConfig(t, ctx, prov, t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "haiku", SessionBriefModel: "off"})
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.mu.Lock()
+	sess.Title = "Already generated"
+	sess.TitleSource = session.TitleSourceAuto
+	sess.mu.Unlock()
+	sess.persister.saveTitle()
+	if err := mgr.CloseSession(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := mgr.ResumeSession(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resumed.autoTitled.Load() {
+		t.Fatal("an already auto-titled session is still eligible for a second title")
+	}
+	if _, _, _, err := mgr.Send(resumed.ID, "later prompt", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "main provider started", func() bool { return len(prov.mainStarted) > 0 })
+	if got := prov.titleCount(); got != 0 {
+		t.Fatalf("already auto-titled session generated %d more title(s)", got)
+	}
+	close(prov.mainRelease)
 }
 
 func TestCreateSession_WithCWD(t *testing.T) {

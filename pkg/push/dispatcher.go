@@ -21,6 +21,9 @@ type Notification struct {
 	Body      string `json:"body,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
 	Tag       string `json:"tag,omitempty"` // coalesces same-session notifications on the device
+	// Inbox asks the client to open the event inbox (pending events have no
+	// session to deep-link). The service worker turns this into /?inbox=1.
+	Inbox bool `json:"inbox,omitempty"`
 }
 
 const (

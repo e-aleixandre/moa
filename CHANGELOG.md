@@ -5,6 +5,137 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.0] - 2026-09-06
+
+### Added
+
+- **Mobile session actions, rearranged.** The overflow menu (`⋮`) is gone from
+  the top of the conversation: **Live preview** now hangs off the composer's
+  **+**, next to **Attach files**, and the **Inbox** sits in the session
+  drawer's header. The count of waiting events rides on the title chip, so it
+  stays visible without opening the drawer. The desktop is unchanged — **+**
+  still opens the file picker directly.
+- **Artifacts** keep files the agent delivers with `send_file` available from
+  the conversation after a reconnect or restart. They refer to the original
+  file, so opening one reads its current contents; see
+  [Artifacts](docs/serve.md#files-sent-by-the-agent).
+- OpenAI **GPT-6 Astra** (`astra` / `gpt-6`), with long-context pricing,
+  Fast-mode billing, and its required reasoning settings.
+- OpenAI **Daybreak Blue** through Moa's `daybreak` alias
+  (`gpt-daybreak-blue-latest`); see [Model aliases](docs/cli.md#model-aliases).
+- **Live Preview**: the web app the agent is building, inside the conversation.
+  The panel renders your development server at a chosen viewport width (390,
+  768, 1280 or fit to the panel), zooms and pans by pinch on touch or by
+  buttons with a mouse, and shows the run as activity that floats over the app
+  and dissolves, instead of a second chat permanently spending the app's pixels.
+  It opens from the composer's **+** menu on mobile — full screen, because on a
+  phone the app is what you came to see — from the conversation head on desktop, and
+  per pane in a grid, each with its own address. In **Inspect** mode you tap an
+  element and write or dictate what should change about it: the agent receives
+  your sentence plus an unambiguous handle on that element (page, tag, id and
+  classes, containing elements, CSS path), so "this button" stops being
+  ambiguous. See [Live Preview](docs/serve.md#live-preview).
+- A **Live Preview proxy** serves your own development server with the inspector
+  script already injected, so Inspect works on a project you did not modify and
+  on a dev server your browser cannot reach directly. It is turned on **while
+  Moa is running**: the listener binds the first time you load a URL in the
+  preview panel and closes when you leave it, so no restart is needed to use it
+  and no extra port is open when it is not — which matters, since restarting
+  `moa serve` would cut every session running under it. The one thing Moa cannot
+  derive is the address your browser reaches that listener at, so the first time
+  it proposes one built from the address you are already on (Moa's port plus
+  one), editable and confirmed, and then remembers it in the global config;
+  whether the proxy is running is never persisted. `--preview-port` /
+  `--preview-public-url` still work as initial configuration. Moa manages no
+  tunnels: expose that local port however you already expose Moa. Because the
+  previewed app runs at the proxy's origin, it is for **your own dev servers**:
+  only loopback, private and tailnet addresses are accepted, Moa itself is not a
+  valid target, validated addresses are pinned at dial time, and every request
+  through the listener needs a capability that only the owner-authenticated API
+  issues — one that stops working as soon as the preview is turned off.
+- **Wake-on-event v2**: an external system — an error tracker, a CI pipeline, a
+  mail watcher — gets its own hook URL, `POST /hooks/<source>/<secret>`, and
+  sends whatever body it already sends. Each source declares in config where its
+  events land (a project, a specific session, or the inbox), what to do when the
+  project has no open session or several, whether delivery starts a turn, and
+  how many events an hour it may act on. `moa hooks add|list|rm` manages sources
+  and prints the URL path once. The routing policy is snapshotted into each
+  event on arrival, so reconfiguring a source cannot change what an event
+  already waiting will do. See [Event hooks](docs/automation.md#event-hooks).
+- An event that could not be routed automatically waits in its own **Inbox**
+  surface, which now says why it is waiting (no open session, several, the
+  session is busy, the source is rate-limited, or the source targets the inbox)
+  and lets you read its payload before deciding. Choosing a destination is
+  itself the instruction to act: a hand-routed event starts a turn regardless of
+  the source's `autorun`, which governs unattended delivery only.
+- **A configurable summarizer model.** The global `compact_model` setting,
+  editable from the web Settings sheet, chooses the model that writes
+  compaction summaries; the summarizer request shares no cached conversation
+  prefix. Subagents inherit the setting. An unusable choice never breaks
+  compaction: the session's model summarizes instead and the transcript records
+  why.
+- **Meta Model API (Muse Spark)** as a provider, through `META_API_KEY` or a
+  Muse subscription login (`moa --login meta`), with the `muse` alias.
+- Headless JSONL output (`-output json`) now carries usage and cost: a
+  `message_usage` line per completed assistant message, `subagent_end` with the
+  child's cost, and a `summary` whose `by_model` breaks the total down by
+  provider, model and main/subagent role — so a benchmark or a cost ledger no
+  longer has to reconstruct spending from session files.
+
+### Changed
+
+- Inbox events that are ignored, delivering, or routed to an unavailable
+  session now open a read-only detail instead of appearing tappable without a
+  response; delivering rows now show their actual state.
+- A message sent from the Live Preview no longer prints its technical element
+  block as text. The transcript reads that block back and paints a compact
+  reference on the message's own spine — the element's visible text (or its
+  accessible name, for an image or icon button), the containing card, and the
+  page — with the full selector one tap away. What the agent receives is
+  unchanged, and messages already in your history paint the same way.
+- Attachments on your messages are grouped into a single block at the foot of
+  the message, with the file count and total weight in its header. Past four
+  files, three rows are shown and the rest fold behind "N more", so a message
+  keeps a predictable height however much was sent.
+- The open sessions in the mobile drawer and the desktop spine are now named
+  **Active**, like the New results and Saved groups around them.
+- A session started by an event carries the same Import mark the event block
+  uses in the transcript, instead of a truncated `event:…` text badge that named
+  nothing and took the title's room.
+- The hook response says whether the delivery created a new event or matched one
+  already stored under the same key, so a provider that retries can tell a retry
+  from a new event.
+- Creating a session from a pending event no longer asks which model to use: it
+  takes the source's configured model and thinking, or Moa's defaults, with an
+  explicit override for the rare case.
+
+### Fixed
+
+- The pre-compaction notice stays in the transcript. It is addressed to the
+  model, but it is also the reason the model interrupts its task to write things
+  down; without it, a session reopened hours later kept those actions and lost
+  their cause. The compaction card also shows the time of day.
+- A skill launched with `/<name>` as an isolated fork is anchored in the
+  conversation, so its card survives a reload, and `background: true` now means
+  only "does not block the parent" — the child's result always reaches the agent
+  that has to act on it.
+- Touching a control on a phone no longer leaves it looking hovered afterwards.
+- A back swipe that was already settling is no longer picked up as a new
+  gesture.
+- The viewport width presets stay available in a narrow pane instead of being
+  dropped when the preview has little room.
+- A new conversation gets its automatic title from the first prompt Moa
+  accepts, without waiting for the run to finish. A manual title remains
+  authoritative, including when a conversation is closed and reopened.
+- Deleting a conversation is no longer undone by an older session-roster
+  refresh that finishes afterwards.
+- A live subagent conversation shows its opening task immediately and restores
+  it in the right order after reconnecting; a missed completion is reconciled
+  from the saved child transcript, which retains the child's generated title.
+- Astra's thinking setting is applied once when saved, and its selector and
+  badges agree on the effective level, including `low` as the minimum.
+  Model listings consistently advertise `astra`; `gpt-6` remains a valid alias.
+
 ## [0.36.0] - 2026-09-02
 
 ### Added

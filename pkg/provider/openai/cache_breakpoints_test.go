@@ -20,6 +20,7 @@ func TestModelSupportsExplicitCacheBreakpoints(t *testing.T) {
 		{"gpt-5.6-terra", true},
 		{"gpt-5.6-sol", true},
 		{"gpt-5.6-luna", true},
+		{"gpt-6-astra", true},
 		{"openai/gpt-5.6-sol", true},
 		{"GPT-5.6-TERRA", true},
 		{"gpt-5.7-preview", true},
@@ -83,6 +84,44 @@ func TestStream_GPT56SendsCacheBreakpoints(t *testing.T) {
 	dev, _ := input[0].(map[string]any)
 	if dev["role"] != "developer" {
 		t.Fatalf("first input role = %v, want developer", dev["role"])
+	}
+}
+
+func TestStream_GPT6AstraOmitsTemperature(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Errorf("decode body: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`)))
+	}))
+	defer server.Close()
+
+	temperature := 0.2
+	model, ok := core.ResolveModel("astra")
+	if !ok {
+		t.Fatal("astra must resolve")
+	}
+	prov := NewWithBaseURL("test-key", server.URL)
+	ch, err := prov.Stream(context.Background(), core.Request{
+		Model: model, Messages: []core.Message{core.NewUserMessage("hello")},
+		Options: core.StreamOptions{Temperature: &temperature},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ch {
+	}
+	if _, present := body["temperature"]; present {
+		t.Fatalf("GPT-6 Astra body sent unsupported temperature: %#v", body["temperature"])
 	}
 }
 

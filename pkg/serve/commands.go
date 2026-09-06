@@ -274,7 +274,8 @@ func cmdRename(m *Manager, sess *ManagedSession, args []string) (*CommandResult,
 	if len(args) == 0 {
 		return &CommandResult{OK: false, Message: "usage: /rename <new title>"}, nil
 	}
-	title, err := m.SetTitle(sess.ID, strings.Join(args, " "))
+	// ExecCommand already holds sess.lifecycle for read.
+	title, err := m.setTitle(sess, strings.Join(args, " "))
 	if err != nil {
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}

@@ -58,11 +58,17 @@
   -webkit-tap-highlight-color: transparent;
   transition: opacity var(--duration) var(--ease), background var(--duration) var(--ease);
 }
-
-.waypoint .wp-rewind:hover:not(:disabled),
 .waypoint .wp-rewind:active:not(:disabled) {
   opacity: 1;
   background: color-mix(in srgb, var(--peach) 14%, transparent);
+}
+@media (hover: hover) {
+
+
+.waypoint .wp-rewind:hover:not(:disabled){
+  opacity: 1;
+  background: color-mix(in srgb, var(--peach) 14%, transparent);
+}
 }
 
 .waypoint .wp-rewind:disabled {
@@ -109,61 +115,310 @@
   padding: 1px 5px;
 }
 
-.wp-attachments {
+/* the preview reference — "anclado al lomo": a short peach dash comes out of
+   the message's own spine and ties the reference to it. Same color as the
+   spine, so it reads as one thing: what you pointed at, one disambiguator and
+   the page. The full selector is one tap away, never competing with the text. */
+.ref-spine {
+  position: relative;
   display: flex;
+  align-items: baseline;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
+  gap: 0 var(--space-2);
+  /* pulls left into the card's padding so the dash starts at the spine */
+  width: calc(100% + var(--space-4));
+  margin: 2px 0 var(--space-2) calc(var(--space-4) * -1);
+  padding: 2px 0 2px var(--space-4);
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-md);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--duration) var(--ease);
 }
 
-.wp-attachment-thumbnail {
-  width: 64px;
-  height: 64px;
-  flex: 0 0 64px;
+.ref-spine::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 9px;
+  height: 2px;
+  background: var(--peach);
+  border-radius: 0 2px 2px 0;
+}
+
+.ref-spine-q {
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.ref-spine-ctx,
+.ref-spine-page {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--overlay1);
+  overflow-wrap: anywhere;
+}
+
+.ref-spine-page::before {
+  content: "";
+}
+
+/* the middle dot separates the container from the page — with no container to
+   separate from, it would dangle in front of the path. */
+.ref-spine-ctx + .ref-spine-page::before {
+  content: "· ";
+}
+
+.ref-spine.is-on .ref-spine-q {
+  color: var(--peach);
+}
+
+.ref-spine:active {
+  background: color-mix(in srgb, var(--peach) 8%, transparent);
+}
+@media (hover: hover) {
+  .ref-spine:hover {
+    background: color-mix(in srgb, var(--peach) 6%, transparent);
+  }
+}
+
+.ref-spine:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* the tag mark for an element with no words of its own (img, icon button):
+   it says WHAT it is before saying which one. */
+.ref-tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.72em;
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--peach);
+  margin-right: 4px;
+  vertical-align: 2px;
+}
+
+.ref-detail {
+  display: grid;
+  gap: 2px;
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--crust) 55%, transparent);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--subtext0);
+  overflow-wrap: anywhere;
+}
+
+.ref-detail code {
+  color: var(--flamingo);
+  background: none;
   padding: 0;
+  font-size: inherit;
+}
+
+/* the attachments skirt — "faldón": one box that IS the foot of the message.
+   It bleeds to the card's edges and closes its bottom corners instead of
+   nesting a second card inside the bubble. */
+.waypoint.has-skirt {
+  padding-bottom: 0;
+}
+
+.wp-attachments {
+  margin: var(--space-3) calc(var(--space-4) * -1) 0;
+  border-top: 1px solid var(--surface0);
+  background: color-mix(in srgb, var(--mantle) 70%, transparent);
+  /* mirrors the card's own radii: round on the right, near-square by the spine */
+  border-radius: 0 0 var(--radius-lg) 2px;
+  overflow: hidden;
+}
+
+.skirt-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px var(--space-4) 6px;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay1);
+}
+
+.skirt-head .lucide {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--peach);
+}
+
+.skirt-head-size {
+  margin-left: auto;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--overlay0);
+}
+
+.skirt-row {
+  display: grid;
+  grid-template-columns: 32px 1fr auto 16px;
+  align-items: center;
+  column-gap: var(--space-3);
+  width: 100%;
+  min-height: 44px;
+  padding: 6px var(--space-4);
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--duration) var(--ease);
+}
+
+.skirt-head + .skirt-row,
+.skirt-row + .skirt-row,
+.skirt-rest .skirt-row {
+  border-top: 1px solid color-mix(in srgb, var(--surface1) 45%, transparent);
+}
+
+.skirt-row:active {
+  background: color-mix(in srgb, var(--surface1) 40%, transparent);
+}
+@media (hover: hover) {
+  .skirt-row:hover {
+    background: color-mix(in srgb, var(--surface1) 30%, transparent);
+  }
+}
+
+.skirt-row:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: calc(var(--focus-ring-offset) * -1);
+}
+
+/* an attachment this device cannot reach: same row, no affordance */
+.skirt-row.wp-attachment-chip {
+  cursor: default;
+  color: var(--subtext1);
+}
+.skirt-row.wp-attachment-chip:active {
+  background: none;
+}
+@media (hover: hover) {
+  .skirt-row.wp-attachment-chip:hover {
+    background: none;
+  }
+}
+
+.skirt-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   border: 1px solid var(--surface1);
-  border-radius: var(--radius-md);
   background: var(--surface0);
-  cursor: pointer;
 }
 
-.wp-attachment-thumbnail img {
+.skirt-thumb img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.wp-attachment-thumbnail:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
+.skirt-ico {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  color: var(--peach);
 }
 
-.wp-attachment-chip {
-  display: inline-flex;
-  min-height: 28px;
-  max-width: 100%;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 0 var(--space-2);
-  overflow: hidden;
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-full);
-  background: var(--surface0);
-  color: var(--subtext1);
+.skirt-ico .lucide {
+  width: 18px;
+  height: 18px;
+}
+
+.skirt-name {
   font-family: var(--mono);
   font-size: var(--text-sm);
-  line-height: var(--leading-tight);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.skirt-meta {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay1);
   white-space: nowrap;
 }
 
-.wp-attachment-chip .lucide {
-  width: 14px;
-  height: 14px;
-  flex: none;
-  color: var(--peach);
+/* the icon already says the type: on a phone the name wins and the "PNG ·"
+   prefix only appears once the column has room for it. */
+.skirt-type {
+  font-style: normal;
+  display: none;
+}
+@media (min-width: 1100px) {
+  .skirt-type {
+    display: inline;
+  }
+}
+
+.skirt-chev {
+  width: 16px;
+  height: 16px;
+  color: var(--overlay0);
+}
+
+/* "N more": the names run into the meta column so the fold still says what is
+   hidden, on a single line. */
+.skirt-more {
+  grid-template-columns: 32px auto 1fr;
+}
+
+.skirt-ico-more {
+  color: var(--overlay1);
+}
+
+.skirt-ico-more .lucide {
+  transition: transform var(--duration) var(--ease);
+}
+
+.skirt-more.is-on .skirt-ico-more .lucide {
+  transform: rotate(180deg);
+}
+
+.skirt-more-label {
+  color: var(--subtext1);
+  font-family: var(--font);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+}
+
+.skirt-more-names {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  color: var(--overlay0);
+}
+
+.skirt-more.is-on .skirt-more-names {
+  visibility: hidden;
 }
 
 /* the rewind confirmation — a short sheet: what you go back to, what it costs
@@ -232,21 +487,32 @@
   color: var(--crust);
   font-weight: var(--weight-semibold);
 }
-
-.wp-rewind-go:hover,
 .wp-rewind-go:active {
   background: color-mix(in srgb, var(--peach) 85%, var(--text));
+}
+@media (hover: hover) {
+
+
+.wp-rewind-go:hover{
+  background: color-mix(in srgb, var(--peach) 85%, var(--text));
+}
 }
 
 .wp-rewind-cancel {
   background: var(--surface0);
   color: var(--subtext0);
 }
-
-.wp-rewind-cancel:hover,
 .wp-rewind-cancel:active {
   background: var(--surface1);
   color: var(--text);
+}
+@media (hover: hover) {
+
+
+.wp-rewind-cancel:hover{
+  background: var(--surface1);
+  color: var(--text);
+}
 }
 
 .wp-rewind-all {
@@ -260,10 +526,15 @@
   cursor: pointer;
   padding: var(--space-2);
 }
-
-.wp-rewind-all:hover,
 .wp-rewind-all:active {
   color: var(--subtext0);
+}
+@media (hover: hover) {
+
+
+.wp-rewind-all:hover{
+  color: var(--subtext0);
+}
 }
 
 .wp-rewind-go:focus-visible,

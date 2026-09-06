@@ -30,12 +30,241 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
   sessions continue to follow their newest output. Permission and question
   badges instead reflect pending session state and disappear when the request
   is resolved.
+- [Live Preview](#live-preview): the web app the agent is building, inside the conversation, with tap-to-inspect feedback
+- [Artifacts](#files-sent-by-the-agent): reopen files delivered by the agent without searching the conversation
 - Multi-pane tiled layouts
 - Keyboard-first navigation
 - Voice input
 - Stage short-lived secrets for the agent without putting their values in chat
 - Pair a Pulse device by scanning a **QR code** (or manual code), created from the top bar (`POST /api/pulse/pairings`)
 - **Version indicator** in the top bar that links to the latest release when an update is available
+
+## Live Preview
+
+When the agent is building a web interface, the thing you actually need to judge
+its work is the app itself — and it usually runs on the same machine as the
+agent, on a port you cannot see from a phone. Live Preview puts that development
+server **inside the conversation**: the app on one side, the run on the other,
+and a way to point at a concrete element and say what is wrong with it.
+
+It is aimed at the loop this whole product exists for: the agent changes a
+screen, you look at the screen, you answer *"this button"* instead of describing
+from memory which button you meant.
+
+### Opening it
+
+Live Preview belongs to one conversation, and each conversation remembers its
+own URL (stored in the browser, per session).
+
+- **Mobile** — tap **+** in the composer and pick **Live preview**. It takes the
+  whole screen: on a phone the app is the thing you came to look at.
+- **Desktop** — the preview button in the conversation head. It takes over the
+  conversation area, so the rest of the interface stays put.
+- **In a pane grid** — each pane has its own preview button and its own preview,
+  so two sessions can watch two different apps side by side.
+
+The first time, the panel asks for the URL of your development server
+(`http://localhost:5173`, or just `localhost:5173` — a bare `host:port` typed on
+a phone keyboard is accepted and prefixed with `http://`). After that the URL
+row is gone: changing it is a rare action and lives in the `⋮` menu of the
+panel, next to **Reload**.
+
+### Looking at the app
+
+The bar above the app carries four viewport widths — **390**, **768**, **1280**
+and **Fit**. The first three render the app at that CSS width and scale it down
+to whatever room the panel has, which is how you check a phone layout from a
+desktop pane, or a desktop layout from a phone. **Fit** simply gives the app the
+panel's own size.
+
+On a touch device you can **pinch to zoom** (up to 4×) and drag to pan; the
+`1:1` chip resets it. With a mouse, the zoom controls in the corner do the same
+with buttons, plus arrows to pan. The pinch is measured by an overlay of Moa's
+own document rather than inside the app, because a gesture that crosses an
+iframe boundary is split between two documents and never becomes one gesture.
+
+While the preview is open it covers the transcript, so the run is shown as a
+**stream**: each thing the agent does — a tool call in the ledger's own grammar
+("Editing style.css"), or a run of its prose — floats up from the bottom over
+the app and dissolves. Idle, nothing at all is drawn over the app. One card does
+not expire: a run parked on a question or a permission stays until you answer
+it. Tapping a prose card opens the full message; **Go to chat** closes the
+preview and returns to the transcript.
+
+### Inspect: pointing at an element
+
+<p align="center">
+  <img
+    src="./assets/serve-live-preview-inspect.png"
+    alt="Live Preview on a phone with Inspect on: a button in the previewed app is highlighted and a popover asks what should change"
+    width="320"
+  />
+  <br/>
+  <em>Inspect mode: tap an element in your app and write (or dictate) what should change.</em>
+</p>
+
+**Inspect** is the reason the panel exists. Turn it on in the bar and tap any
+element of your app: it is outlined, and a popover opens next to it with the
+element's short selector, its visible text, and a box for your comment. You can
+type it, or hold the microphone and dictate it — the same voice input the
+composer uses (hold to talk, slide up to lock).
+
+**Send** posts an ordinary user message into the conversation. The agent
+receives your comment plus an unambiguous handle on the element:
+
+```text
+Give this action a bit more presence.
+
+[UI feedback · selected element in preview]
+page: /pricing (http://localhost:5173/pricing)
+element: button#buy.btn.btn-primary  — text: "Buy"
+ancestors: main.pricing > section.pricing-grid > article.card.card--pro
+selector: .card--pro .btn-primary
+attrs: type="button" data-plan="pro"
+```
+
+That block is what the model needs — the page, the tag, id and classes, the
+containing elements and a CSS path — not what you should have to read. In the
+transcript the message paints as a short reference instead; see
+[Element references and attachment skirts](#element-references-and-attachment-skirts).
+
+### How the app gets the inspector
+
+Inspect works through a small script that runs **inside your app** and talks to
+Moa by `postMessage` only. There are two ways to get it there:
+
+- **Let the proxy inject it** (recommended) — Moa serves your dev server through
+  its own listener with the script already in the page, so you change nothing in
+  your project. Nothing to enable up front: the listener is started the first
+  time you load a URL in the panel (see below).
+- **Add it yourself** — if you do not use the proxy, the panel loads your dev
+  server URL directly in the iframe, so the script has to be part of your app.
+  Copy `pkg/serve/frontend/src/components/LivePreview/inspector.js` into it and
+  load it with `<script src="/inspector.js" data-moa-origin="<your moa origin>">`.
+
+Without the script the preview still shows and reloads your app, but a notice
+appears: tap-to-inspect and touch gestures are unavailable until it is there.
+
+### The Live Preview proxy
+
+The proxy exists so Inspect works on an app you did not modify, and so the
+preview can reach a dev server that your browser cannot see directly.
+
+**It starts and stops while Moa runs.** There is nothing to enable at startup
+and no restart to pay: the listener is opened the moment you load a URL in the
+preview panel, and closed again when you leave it. With no preview open Moa
+holds no extra port at all. This matters because `moa serve` is long-lived —
+restarting it to turn a preview on would cut every session running under it.
+
+The one thing Moa cannot work out on its own is **the address your browser uses
+to reach that listener**, because it depends on how you expose the port (a
+tailnet, a reverse proxy, a LAN address). So the first time it is needed the
+panel proposes one, built from the address you are already on — reaching Moa at
+`https://dev.example.ts.net:7401` proposes `https://dev.example.ts.net:7402` —
+and you confirm it or correct the port. The default is Moa's own port plus one,
+so two Moa instances never propose the same listener. The address is then
+remembered in your global config (`preview` in
+[Configuration](./configuration.md#config-fields)) and never asked again;
+whether the proxy is *running* is not remembered, since that is decided per use.
+
+If the port is busy, activation fails and says so — Moa never reports a live
+preview it did not bind. If the address is wrong, the frame will not load: the
+error offers to change the address on the spot.
+
+The listener binds `127.0.0.1`. Moa is **transport-agnostic** and never manages
+tunnels: expose that port however you already expose Moa itself. The address you
+confirm must be the one browsers actually use, because the proxy rewrites your
+dev server's own origin to it, which is what keeps `localhost:5173` links, HMR
+websockets and redirects inside the app working.
+
+`moa serve --preview-port` / `--preview-public-url` still work: they are initial
+configuration, so the panel never has to ask. They do not open the port either —
+that still happens on first use.
+
+```bash
+moa serve --preview-port 7492 --preview-public-url https://moa.example.test:7492
+```
+
+What the proxy does to the traffic:
+
+- Injects `<script src="/__moa/inspector.js">` into HTML responses, right after
+  `<head>`, unless the page already carries it.
+- Strips `X-Frame-Options` and the app's own `Content-Security-Policy` (header
+  and `<meta>`) so the page can be framed, and replaces it with one allowing
+  only Moa's origin as a frame ancestor.
+- Rewrites the dev server's origin to the public URL in HTML, CSS, JavaScript
+  and JSON bodies up to 8 MB, and in `Location`, `Refresh` and `Link` headers.
+- Namespaces the previewed app's cookies per target and clears them when you
+  switch target, so two apps previewed in turn never see each other's state.
+- Refuses a redirect that leaves the validated target.
+
+Only one target is active at a time. Changing the URL in the panel repoints the
+proxy, closes the previous target's connections and issues fresh credentials.
+Closing the preview goes further: the listener itself is torn down along with
+every connection through it, including requests still in flight and HMR
+websockets, and the credentials issued for that session stop working — turning
+the preview on again mints new ones.
+
+**Trust model — read this before pointing it anywhere.** The previewed app is
+served from the proxy's origin, so it runs with whatever that origin is allowed
+to do in your browser. Live Preview is for **your own development servers**, on
+machines you control. Do not point it at a third-party site or an app you do not
+trust.
+
+Moa enforces the boundary it can:
+
+- A target must resolve to a **loopback, private or tailnet (CGNAT)** address.
+  Public addresses, link-local, unspecified and IPv4-mapped IPv6 targets are
+  refused, as is the Tailscale metadata service.
+- A target may not point back at Moa itself or at the preview listener.
+- Validated addresses are pinned at dial time, so a hostname cannot be
+  re-resolved to a different address between the check and the connection.
+- Every request through the listener — documents, assets, websocket upgrades —
+  needs a capability issued only by Moa's owner-authenticated API, exchanged
+  once for an `HttpOnly` cookie. Publishing the preview port therefore does not
+  publish an unauthenticated way into your private network.
+
+The flags themselves are listed under
+[`moa serve`](./cli.md#serve-subcommand).
+
+### Element references and attachment skirts
+
+<p align="center">
+  <img
+    src="./assets/serve-preview-reference.png"
+    alt="Two messages in a transcript, each with a one-line reference to the element selected in the preview hanging off the message spine"
+    width="320"
+  />
+  <br/>
+  <em>What you pointed at, read back: the element's own words, the containing card, and the page.</em>
+</p>
+
+A message sent from the preview carries a technical block the agent needs and
+you do not. In the transcript that block is not printed as text: it is read back
+and painted as a **reference hanging off the message's own spine** — the
+element's visible text (or its accessible name behind a tag mark, for an image
+or an icon button), one disambiguator such as the containing card, and the page.
+Tapping the reference opens the full selector, ancestors and attributes. What
+the agent receives is unchanged, and messages already in your history paint the
+same way.
+
+Attachments on your own messages are grouped into a **skirt**: one box at the
+foot of the message, with a header carrying the file count and the total weight
+and one row per file. A single attachment needs no header. Past four, three rows
+are shown and the rest fold behind **N more**, so a message keeps a predictable
+height however much was sent. Image rows still open the lightbox, other rows
+still download, and a file this device cannot reach stays as a non-interactive
+row.
+
+<p align="center">
+  <img
+    src="./assets/serve-attachment-skirt.png"
+    alt="Two messages with attachment skirts: one listing three files, one folding five of eight behind a 'more' row"
+    width="320"
+  />
+  <br/>
+  <em>Attachments as the foot of the message: count, total weight, and a fold past four files.</em>
+</p>
 
 ## Keyboard shortcuts
 
@@ -91,20 +320,43 @@ In the conversation history, images render as thumbnails you can open full-size,
 
 ### Files sent by the agent
 
-The reverse direction is also supported: the agent can **send you a file** with the
-`send_file` tool. It renders in the chat as a **download card** (name, size, type icon)
-that fetches the file as a blob and hands it off via the OS share sheet on mobile or a
-same-origin download on desktop. Files are served from a per-session, in-memory allowlist
-(`GET /api/sessions/{id}/files/{fileID}`); the path never comes from the request, and the
-descriptor is re-checked right before serving. Like disk attachments, these registrations
-are in-memory only — they 404 after the session is deleted or the server restarts.
+Ask the agent to send a file, then open its card or choose **Artifacts** from the
+conversation's actions to find it again. Every file delivered through `send_file`
+appears in that conversation's collection; creating or editing a file alone does
+not add it. Search the collection by title or filename.
 
-Text, Markdown and image files can be **previewed inline** in an embedded viewer. HTML files
-get a live **preview rendered in a sandboxed `iframe`** (`sandbox="allow-scripts"`, no
-`allow-same-origin`, plus a strict `Content-Security-Policy`), with an inspector button to
-review any external resources the page references before it loads.
+On desktop, the reader opens on the right and can expand to full screen. Each grid
+pane has its own Artifacts entry, but all panes use the same drawer: opening another
+pane's collection switches its contents; merely changing pane focus does not. On
+mobile, tap **+** in the composer and pick **Artifacts**; the reader fills the
+screen. Use Back to return and Share to download the file or open the OS share
+sheet where supported.
 
-### Files saved to disk are ephemeral
+Markdown, text and images can be read in the viewer. HTML supports interactive
+reports inside a sandboxed iframe, without access to Moa's DOM, cookies or storage.
+External HTTPS resources may load automatically; the resource inspector lets you
+check their domains. Keep local HTML assets inline or use externally hosted assets:
+publishing an HTML file does not publish the rest of its directory. Other formats,
+and files too large to preview, remain downloadable.
+
+Keep files you want to revisit in a stable location. Artifacts retain a reference
+to the original file, **not a copy or a version**:
+
+- References survive server restarts and closing or reopening a conversation.
+- Opening or sharing reads the file's **current content**, including edits made by
+  another conversation. Sending the same canonical path again updates its entry
+  instead of adding a duplicate.
+- Deleting a conversation removes its artifact references, not the original files
+  in your project.
+- If the source is moved, deleted or cleaned from temporary storage, restore it at
+  the same location and retry, or ask the agent to send its new location.
+- Older download links whose in-memory registrations have already been lost are
+  not recovered automatically.
+
+The `send_file` tool accepts optional `title` and `description` fields for the card
+and collection. Existing `path` and `name` arguments continue to work.
+
+### Uploaded files saved to disk are ephemeral
 
 - They live under `/tmp/moa-<uid>/<session-id>/` and are **deleted when you delete the session**.
 - They may **disappear if the server restarts** (`/tmp` is not durable). Resuming an old session does not restore them.
@@ -207,7 +459,7 @@ it runs:
 disable-model-invocation: true   # only you, via /<name>
 user-invocable: false            # only the agent, via load_skill
 context: fork                    # isolated subagent, no inherited messages
-background: true                 # with fork: return a job id, do not notify the parent
+background: true                 # with fork: run async, do not block the parent
 parent-transcript: snapshot      # with fork: freeze the active branch and give the child its path
 ---
 ```
@@ -221,12 +473,17 @@ or `checkpoint`, and `load_skill` will refuse another forked skill.
 
 When the agent calls `load_skill` on a forked skill, a foreground fork blocks
 and returns the child's result; a background fork returns a job id immediately
-and stays silent when the child finishes (`subagent_status` / `subagent_wait` /
-`subagent_cancel` still work, and the dock still shows it). `/<name>` on a
-forked skill always launches asynchronously so the command does not hold the
-session: a non-background fork still notifies the idle parent through the usual
-subagent completion path; a background fork does not. Slash fork while the
-session is busy is refused in this MVP.
+and keeps working, and the child's result reaches the parent later through the
+usual subagent completion notification (`subagent_status` / `subagent_wait` /
+`subagent_cancel` still work, and the dock still shows it). `background` spares
+the parent the work, not the conclusion: a forked skill is an ordinary
+subagent, so what it found always comes back.
+
+`/<name>` on a forked skill always launches asynchronously so the command does
+not hold the session. It is recorded in the conversation as a launch row
+carrying the job id, which is what keeps the child openable after a reload and
+gives the agent an antecedent for the completion that follows. Slash fork while
+the session is busy is refused in this MVP.
 
 `parent-transcript: snapshot` writes a copy of the **active** conversation
 branch (not later messages, not abandoned branches) and adds that absolute path
@@ -286,6 +543,10 @@ consumer plan through a private consumer endpoint on a best-effort basis. This
 is not a public consumer API promise and is not a billing authority. It may be
 unavailable or stale if that endpoint changes or cannot be reached; failure to
 read it never blocks a Grok request.
+
+Meta plan usage is not shown at all: the only known subscription snapshot rides
+the Muse key-mint response, so the panel states the credential kind instead of
+polling.
 
 `XAI_API_KEY` uses the separate, metered `api.x.ai` developer API, so its plan
 usage is intentionally not shown in this panel. Moa does not publish xAI
@@ -400,6 +661,47 @@ The `GET /api/sessions` roster includes `unseen`, `unseen_seq`, and
 `attention_namespace` scopes that occurrence and any read cursor to its runtime
 incarnation.
 
+## Event inbox
+
+External events — a mail reply, a failed pipeline, a cron job — reach moa
+through [`POST /hooks/<source>/<secret>`](./automation.md#event-hooks) and are
+addressed to a project, a session, or the inbox, according to that source's
+config.
+
+By default an event is sent straight to a live session in the target project,
+so the work continues without you opening moa. When routing cannot pick one
+session (none, several, a missing/errored target, a busy session with autorun
+off, or a rate-limited source), the event waits in the **Inbox** — its own
+surface, not a group inside the session list. Its door is the inbox button in
+the session list (the spine's header on desktop, the session drawer on mobile);
+on a phone the count also rides on the title chip, so waiting events are visible
+without opening the drawer. Each waiting row says **why** it is there, and opens
+its payload on the same code surface the transcript uses, so you can read what
+actually arrived before deciding:
+
+- **Send to ‹session›** — inject it into a live session of that project. The
+  sessions offered are exactly the ones the server will accept.
+- **New session** — open a session in that project and inject it there, using
+  the source's configured model and thinking unless you override it.
+- **Dismiss** — drop it. Nothing is sent anywhere.
+
+Choosing a destination starts a turn on it: placing an event by hand *is* the
+instruction to act on it, whatever the source's unattended `autorun` setting
+says. A route the server refuses leaves the event pending with an error instead
+of silently closing the inbox.
+
+The inbox keeps history: pending, delivered, and dismissed. A dismissal
+survives a restart (`~/.config/moa/events.json`).
+
+A push notification announces each arriving event, and opens the inbox rather
+than the home screen. Following the push contract it carries only what happened
+and, at most, the session title — never the event's own text, which is external
+content that would land on a lock screen.
+
+In a conversation, an event is a monochrome timestamped mark with its payload on
+the tool code surface: it neither impersonates you nor competes with the
+assistant. A session that an event created is marked as such in the session list.
+
 ## REST endpoints
 
 Beyond the per-session WebSocket, Serve exposes a few global read/write endpoints:
@@ -412,6 +714,7 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/sessions/{id}/history?before={msg_id}&limit={n}` | Chronological, lossless display-history page before a message ID; the page size is an objective and can grow to keep tool calls with their results |
 | `GET /api/model-preferences` · `PATCH /api/model-preferences` | Read or pin/unpin models in the owner's global preferences |
 | `GET /api/compact-strategy` · `PATCH /api/compact-strategy` | Read or set what the agent gets before an automatic compaction (`plain`, `notify`, `prepare`) |
+| `GET /api/compact-model` · `PATCH /api/compact-model` | Read or set the model that writes compaction summaries (`session`, or a model spec). Only models whose provider has a usable credential are offered, and an unknown spec is rejected on the spot |
 | `GET /api/sessions/{id}/fast` · `PATCH /api/sessions/{id}/fast` | Read or set [fast mode](./cli.md#fast-mode) for one session; the reply also says whether the current model can serve it (`supported`) and what it costs there (`note`). Allowed while the agent is running |
 | `GET /api/models` · `GET /api/subagent-models` · `PATCH /api/subagent-models` | Known models, and the models subagents are allowed to run under |
 | `GET /api/compact-at` · `PATCH /api/compact-at` | Read or set the default auto-compaction threshold |
@@ -419,9 +722,13 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/attention` | Cross-session snapshot of unresolved attention items |
 | `POST /api/transcribe` | Speech-to-text for voice input |
 | `POST /api/sessions/{id}/secrets` | Stage a short-lived secret batch; returns its directory and aliases, never values |
-| `GET /api/sessions/{id}/files` · `GET /api/sessions/{id}/files/{fileID}` | List and download files the agent shared via `send_file` |
+| `GET /api/sessions/{id}/artifacts` | List the conversation's published artifacts, including saved conversations |
+| `GET /api/sessions/{id}/files/{fileID}` | Read or download a published artifact's current file contents |
+| `GET /api/sessions/{id}/files` | Find files in the session's working directory for autocomplete |
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |
 | `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |
+| `GET /api/preview/target` · `PUT /api/preview/target` | Whether the [Live Preview proxy](#the-live-preview-proxy) is listening right now, at what address, and which dev server it points at. `PUT` with a `url` starts the listener and points it; `PUT {"enabled": false}` shuts it down |
+| `GET /api/events` · `POST /api/events/{id}/route` · `.../dismiss` · `POST /api/events/dismiss` | The [event inbox](#event-inbox): history, sending or dropping one, or dismissing a source |
 
 The web transcript initially opens on the recent conversation and automatically
 loads older history as you scroll upwards. Each older page is prepended while

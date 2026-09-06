@@ -12,13 +12,12 @@ import (
 )
 
 // ForkRequest is the isolated-child launch that load_skill and slash commands
-// share. Async and Notify are independent: a slash-invoked fork is always async
-// (so the command does not hold the session lock), but only background forks
-// suppress the parent's completion notification.
+// share. A background fork runs async so the parent keeps working, but its
+// result still reaches the parent through the usual subagent completion path:
+// the point of forking is to spare the parent the work, not the conclusion.
 type ForkRequest struct {
 	Task          string
 	Async         bool
-	Notify        bool
 	ReadOnlyFiles []string
 }
 
@@ -107,7 +106,7 @@ func NewTool(cwd string, cfg ...ToolConfig) core.Tool {
 			}
 
 			if s.IsFork() {
-				return LaunchFork(ctx, s, nil, opts, s.Background, !s.Background, onUpdate)
+				return LaunchFork(ctx, s, nil, opts, s.Background, onUpdate)
 			}
 
 			content, err := Load(s)
@@ -128,10 +127,10 @@ const snapshotTaskWarning = "A frozen snapshot of the parent conversation's acti
 const errNestedFork = "forked skills cannot be loaded from a subagent; children cannot spawn subagents"
 const errSnapshotUnavailable = "parent-transcript: snapshot is not available in this session (no frozen conversation tree). Omit parent-transcript to fork without a snapshot."
 
-// LaunchFork runs a forked skill as an isolated subagent. async/notify are
-// supplied by the caller so slash commands can stay async without holding the
-// session lock, while load_skill foreground still blocks for the child result.
-func LaunchFork(ctx context.Context, s Skill, args []string, cfg ToolConfig, async, notify bool, onUpdate func(core.Result)) (core.Result, error) {
+// LaunchFork runs a forked skill as an isolated subagent. async is supplied by
+// the caller so slash commands can stay async without holding the session lock,
+// while load_skill foreground still blocks for the child result.
+func LaunchFork(ctx context.Context, s Skill, args []string, cfg ToolConfig, async bool, onUpdate func(core.Result)) (core.Result, error) {
 	if core.AgentIDFromContext(ctx) != "" {
 		return core.ErrorResult(errNestedFork), nil
 	}
@@ -171,7 +170,6 @@ func LaunchFork(ctx context.Context, s Skill, args []string, cfg ToolConfig, asy
 	result, err := cfg.Fork(ctx, ForkRequest{
 		Task:          task,
 		Async:         async,
-		Notify:        notify,
 		ReadOnlyFiles: nonEmptyPath(snapshotPath),
 	}, onUpdate)
 	if err == nil {

@@ -23,6 +23,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/bus"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/events" // wake-on-event
 	"github.com/e-aleixandre/moa/pkg/files"
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/push"
@@ -136,9 +137,10 @@ type ManagedSession struct {
 	// Serve-specific infrastructure (MCP, toolReg — not agent).
 	infra serveInfra
 
-	// sharedFiles holds files the agent explicitly shared via send_file.
-	// Allowlist for GET /api/sessions/{id}/files/{fileID}. In-memory only.
-	sharedFiles *sharedFiles
+	// artifactStore is the session's durable catalog of files delivered with
+	// send_file. Writer instance: it is the one the tool publishes through, and
+	// the one Delete tombstones.
+	artifactStore *session.ArtifactStore
 
 	// Web Push: live count of WebSocket clients watching this session (gates
 	// non-blocking notifications), a "deleted" guard against late pushes, and
@@ -209,6 +211,16 @@ func (s *ManagedSession) title() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.Title
+}
+
+// titleState reports the authoritative title, its source, and whether this
+// runtime is being torn down. It is the persister's single source of truth for
+// out-of-band title writes, so a writer can never persist a value it read
+// before another one changed it.
+func (s *ManagedSession) titleState() (string, string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Title, s.TitleSource, s.closing.Load()
 }
 
 func (s *ManagedSession) setProviderName(provider string) {
@@ -594,11 +606,23 @@ type Manager struct {
 
 	conversationKey []byte // process-local HMAC key for read cursors
 
-	providerFactory        func(model core.Model) (core.Provider, error)
-	transcriber            core.Transcriber   // nil when no speech-to-text is available
-	usagePoller            *usage.MultiPoller // nil when plan usage tracking is unavailable
-	pushStore              *push.Store        // nil when Web Push is unavailable
-	pushDispatcher         *push.Dispatcher   // nil when Web Push is unavailable
+	providerFactory   func(model core.Model) (core.Provider, error)
+	compactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)
+	// providerCredentialAvailable reports whether a provider has a usable
+	// completion credential right now. nil = unknown.
+	providerCredentialAvailable func(provider string) bool
+	transcriber                 core.Transcriber   // nil when no speech-to-text is available
+	usagePoller                 *usage.MultiPoller // nil when plan usage tracking is unavailable
+	pushStore                   *push.Store        // nil when Web Push is unavailable
+	pushDispatcher              *push.Dispatcher   // nil when Web Push is unavailable
+	// wake-on-event: the external event inbox and the file backing it. events is
+	// nil when that file could not be opened, which disables the feature instead
+	// of the server.
+	events                 *events.Store
+	eventsPath             string
+	eventRateMu            sync.Mutex
+	eventRateHits          map[string][]time.Time
+	eventRateNotified      map[string]bool
 	defaultModel           core.Model
 	workspaceRoot          string
 	moaCfg                 core.MoaConfig
@@ -648,6 +672,9 @@ type Manager struct {
 	beforeReadThroughAdvance          func()
 	attentionRuntimeDeactivateBlocked func()
 	beforeCloseSessionLifecycleLock   func()
+	// afterAutoTitleGeneration reports that a title goroutine finished, so a
+	// test can join it instead of polling for a write that may never come.
+	afterAutoTitleGeneration func(*ManagedSession)
 }
 
 func (m *Manager) initializeAttentionRuntimeLocked(sess *ManagedSession) {
@@ -696,13 +723,24 @@ type ManagerConfig struct {
 	// normal completion credentials. A nil resolver leaves auto unavailable;
 	// explicit specs continue to work through the core resolver.
 	AuxiliaryModelResolver func(spec string) (core.Model, bool, error)
+	// CompactSummarizer routes compaction summaries to the globally configured
+	// `compact_model`, with its own provider. A nil resolver keeps compaction on
+	// the session's own model, which is the behaviour that predates the setting.
+	CompactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)
+	// ProviderCredentialAvailable reports whether a provider has a usable
+	// completion credential, so Settings only offers reachable models. A nil
+	// probe offers none rather than guessing.
+	ProviderCredentialAvailable func(provider string) bool
 	// ConfigLoader loads configuration for an individual session CWD. When
 	// nil, core.LoadMoaConfig preserves the normal global/project lookup.
 	ConfigLoader   func(cwd string) core.MoaConfig
 	SessionBaseDir string // root for session stores; empty = default
 	// SchedulePath overrides the durable schedules file. Empty stores it beside
 	// the session base directory.
-	SchedulePath       string
+	SchedulePath string
+	// EventsPath overrides the wake-on-event inbox file. Empty stores it beside
+	// the session base directory.
+	EventsPath         string // wake-on-event
 	ReleaseInfo        release.Info
 	UpdateChecker      *release.Checker
 	UpdateCheckEnabled bool
@@ -744,6 +782,29 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			slog.Warn("schedule storage disabled", "path", schedulePath, "error", err)
 		}
 	}
+	// wake-on-event: the inbox file sits beside schedules.json, and a failure
+	// to open it disables the feature (handlers answer 503) rather than the
+	// server.
+	eventsPath := cfg.EventsPath
+	if eventsPath == "" {
+		baseDir := cfg.SessionBaseDir
+		if baseDir == "" {
+			baseDir = core.ConfigSubdir("sessions")
+		}
+		if baseDir != "" {
+			eventsPath = filepath.Join(filepath.Dir(baseDir), "events.json")
+		}
+	}
+	var eventStore *events.Store
+	if eventsPath == "" {
+		slog.Warn("event inbox disabled: cannot resolve config directory")
+	} else {
+		var err error
+		eventStore, err = events.NewStore(eventsPath)
+		if err != nil {
+			slog.Warn("event inbox disabled", "path", eventsPath, "error", err)
+		}
+	}
 	attachBaseDir := ""
 	var attachErr error
 	if cfg.SessionBaseDir != "" {
@@ -767,30 +828,34 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		slog.Warn("conversation cursor key unavailable", "error", err)
 	}
 	m := &Manager{
-		sessions:               make(map[string]*ManagedSession),
-		resuming:               make(map[string]struct{}),
-		serverInstance:         newServerInstanceID(),
-		baseCtx:                ctx,
-		providerFactory:        cfg.ProviderFactory,
-		transcriber:            cfg.Transcriber,
-		usagePoller:            cfg.UsagePoller,
-		pushStore:              cfg.PushStore,
-		pushDispatcher:         cfg.PushDispatcher,
-		defaultModel:           cfg.DefaultModel,
-		workspaceRoot:          cfg.WorkspaceRoot,
-		moaCfg:                 cfg.MoaCfg,
-		configLoader:           configLoader,
-		auxiliaryModelResolver: cfg.AuxiliaryModelResolver,
-		mcpSourcesLoader:       mcpSourcesLoader,
-		sessionBaseDir:         cfg.SessionBaseDir,
-		attachStore:            attachStore,
-		secretBatches:          make(map[string][]string),
-		savedCacheTTL:          30 * time.Second,
-		fileScanner:            files.NewScanner(),
-		scheduler:              scheduler,
-		attention:              attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
-		conversationKey:        conversationKey,
-		version:                release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
+		sessions:                    make(map[string]*ManagedSession),
+		resuming:                    make(map[string]struct{}),
+		serverInstance:              newServerInstanceID(),
+		baseCtx:                     ctx,
+		providerFactory:             cfg.ProviderFactory,
+		transcriber:                 cfg.Transcriber,
+		usagePoller:                 cfg.UsagePoller,
+		pushStore:                   cfg.PushStore,
+		pushDispatcher:              cfg.PushDispatcher,
+		eventsPath:                  eventsPath, // wake-on-event
+		events:                      eventStore, // wake-on-event
+		defaultModel:                cfg.DefaultModel,
+		workspaceRoot:               cfg.WorkspaceRoot,
+		moaCfg:                      cfg.MoaCfg,
+		configLoader:                configLoader,
+		auxiliaryModelResolver:      cfg.AuxiliaryModelResolver,
+		compactSummarizer:           cfg.CompactSummarizer,
+		providerCredentialAvailable: cfg.ProviderCredentialAvailable,
+		mcpSourcesLoader:            mcpSourcesLoader,
+		sessionBaseDir:              cfg.SessionBaseDir,
+		attachStore:                 attachStore,
+		secretBatches:               make(map[string][]string),
+		savedCacheTTL:               30 * time.Second,
+		fileScanner:                 files.NewScanner(),
+		scheduler:                   scheduler,
+		attention:                   attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
+		conversationKey:             conversationKey,
+		version:                     release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
 	}
 	// Read the persisted roster once for all startup consumers. The automation
 	// index requires the read error to preserve its fail-closed behavior; the

@@ -438,8 +438,13 @@ type SubagentUsageData struct {
 
 // SubagentEndData is sent when a subagent finishes, carrying its usage/cost.
 type SubagentEndData struct {
-	JobID  string `json:"job_id"`
-	Task   string `json:"task,omitempty"`
+	JobID string `json:"job_id"`
+	Task  string `json:"task,omitempty"`
+	// Title is the child's generated identity label, carried so a terminal
+	// card restored from an init snapshot (where no live subagent entry
+	// exists any more) keeps the label its live row had. Omitted when the
+	// child never got one.
+	Title  string `json:"title,omitempty"`
 	Async  bool   `json:"async"`
 	Status string `json:"status"`
 	// Result is present for completed children. Error is present for failures;

@@ -30,8 +30,14 @@ export { GlobalSettings } from "./GlobalSettings/GlobalSettings.jsx";
 export { PulsePairingPanel } from "./PulsePairingPanel/PulsePairingPanel.jsx";
 export { ToastContainer } from "./Toast/ToastContainer.jsx";
 export { FileCard } from "./FileCard/FileCard.jsx";
+export { ArtifactCard } from "./Artifacts/ArtifactCard.jsx";
+export { ArtifactsDrawer } from "./Artifacts/ArtifactsDrawer.jsx";
+export { ArtifactsEntry, ArtifactsPaneButton } from "./Artifacts/ArtifactsEntry.jsx";
 export { FileViewer } from "./FileViewer/FileViewer.jsx";
 export { HtmlResourceInfo } from "./HtmlResourceInfo/HtmlResourceInfo.jsx";
 export { UsagePanel } from "./UsagePanel/UsagePanel.jsx";
 export { TokenFlow } from "./TokenFlow/TokenFlow.jsx";
 export { SubagentDetails } from "./SubagentDetails/SubagentDetails.jsx";
+export { EventBlock } from "./EventBlock/EventBlock.jsx"; // wake-on-event
+export { InboxView } from "./InboxView/InboxView.jsx"; // wake-on-event
+export { InboxButton } from "./InboxButton/InboxButton.jsx"; // wake-on-event

@@ -60,10 +60,15 @@
 
 .pane-grid .resize-h::before { top: 20%; bottom: 20%; left: 2px; right: 2px; }
 .pane-grid .resize-v::before { left: 20%; right: 20%; top: 2px; bottom: 2px; }
-
-.pane-grid .resize-handle:hover::before,
 .pane-grid .resize-handle.active::before {
   background: color-mix(in srgb, var(--mauve) 55%, transparent);
+}
+@media (hover: hover) {
+
+
+.pane-grid .resize-handle:hover::before{
+  background: color-mix(in srgb, var(--mauve) 55%, transparent);
+}
 }
 
 /* A single tile fills the whole grid (no split). */

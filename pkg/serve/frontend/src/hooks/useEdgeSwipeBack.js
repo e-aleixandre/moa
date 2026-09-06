@@ -41,6 +41,18 @@ export function useEdgeSwipeBack({ onBack }) {
   const samplesRef = useRef([]); // recent { t, x } for release velocity
   const offsetRef = useRef(0); // last px of rightward travel
   const settleTimerRef = useRef(null);
+  const settlingRef = useRef(false);
+
+  const clearGesture = useCallback((el = screenRef.current) => {
+    startRef.current = null;
+    activeRef.current = false;
+    samplesRef.current = [];
+    offsetRef.current = 0;
+    if (el) {
+      el.style.transition = "";
+      el.style.transform = "";
+    }
+  }, []);
 
   const paint = useCallback((dx) => {
     const el = screenRef.current;
@@ -54,6 +66,7 @@ export function useEdgeSwipeBack({ onBack }) {
   const settle = useCallback(
     (toBack) => {
       const el = screenRef.current;
+      settlingRef.current = true;
       const reduce = prefersReducedMotion();
       const width = el ? el.offsetWidth : window.innerWidth;
       if (el) {
@@ -62,20 +75,22 @@ export function useEdgeSwipeBack({ onBack }) {
       }
       const finish = () => {
         settleTimerRef.current = null;
+        clearGesture(el);
         setDragging(false);
+        settlingRef.current = false;
         if (toBack) onBack?.();
-        else if (el) {
-          el.style.transition = "";
-          el.style.transform = "";
-        }
       };
       if (reduce) finish();
       else settleTimerRef.current = setTimeout(finish, SETTLE_MS);
     },
-    [onBack]
+    [clearGesture, onBack]
   );
 
   const onTouchStart = useCallback((e) => {
+    // A second touch can arrive while the outgoing screen is still settling.
+    // It belongs to the screen underneath once navigation completes, never to
+    // this departing surface.
+    if (settlingRef.current) return;
     if (e.touches.length !== 1) return;
     const t = e.touches[0];
     // Measure the edge against the screen itself, not the viewport: the screen
@@ -122,6 +137,7 @@ export function useEdgeSwipeBack({ onBack }) {
   );
 
   const endGesture = useCallback(() => {
+    if (settlingRef.current) return;
     if (!activeRef.current) {
       startRef.current = null;
       return;
@@ -148,6 +164,7 @@ export function useEdgeSwipeBack({ onBack }) {
   // spring back, never navigate, so it deliberately skips the threshold and
   // velocity verdict that endGesture applies.
   const cancelGesture = useCallback(() => {
+    if (settlingRef.current) return;
     if (!activeRef.current) {
       startRef.current = null;
       return;
@@ -157,7 +174,10 @@ export function useEdgeSwipeBack({ onBack }) {
     settle(false);
   }, [settle]);
 
-  useEffect(() => () => clearTimeout(settleTimerRef.current), []);
+  useEffect(() => () => {
+    clearTimeout(settleTimerRef.current);
+    clearGesture();
+  }, [clearGesture]);
 
   return {
     screenRef,

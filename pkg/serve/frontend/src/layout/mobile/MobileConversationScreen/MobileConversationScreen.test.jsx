@@ -22,7 +22,9 @@ mock.module('preact/hooks', () => ({
 mock.module('../../../util/sanitize.js', () => ({ sanitizeHtml(html) { return html; } }));
 
 const { MobileConversationScreen, mobileFocusedSession, selectMobileDrawerSession } = await import('./MobileConversationScreen.jsx');
-const { setState } = await import('../../../data/store.js');
+const { setState, store } = await import('../../../data/store.js');
+const { artifactsSlice } = await import('../../../data/artifacts.js');
+const { ARTIFACTS_CLOSED } = await import('../../../data/artifacts-model.js');
 const { ConversationScreen } = await import('../../ConversationScreen/ConversationScreen.jsx');
 const { Spine } = await import('../../Spine/Spine.jsx');
 
@@ -260,6 +262,30 @@ test('mobile session changes remount the transcript scroller', async () => {
   expect(source).toMatch(/<MobileStream\s+key=\{session\.id\}/);
 });
 
+test('a delivered inbox event with a deleted destination cannot replace the active mobile session', () => {
+  const previous = store.get();
+  setState({
+    sessions: { open: { id: 'open', title: 'Still open', state: 'idle', messages: [], subagents: {} } },
+    activeSession: 'open',
+    isMobile: true,
+    sessionsLoaded: true,
+    inboxOpen: true,
+    events: [{ id: 'ev-stale', source: 'hook', title: 'Old delivery', state: 'routed', routed_to: 'deleted' }],
+  });
+
+  try {
+    const inbox = componentNode(MobileConversationScreen({}), 'MobileInboxView');
+    expect(inbox).toBeTruthy();
+
+    inbox.props.onOpenSession('deleted');
+
+    expect(store.get().activeSession).toBe('open');
+    expect(store.get().inboxOpen).toBe(true);
+  } finally {
+    setState(previous);
+  }
+});
+
 // Ideally this would render the screen and assert the handlers reached its
 // root, but the suite's shared preact/hooks mocks stub the gesture hook away,
 // so the wiring is asserted at the source level: it still catches the mistake
@@ -268,4 +294,112 @@ test('MobileBashJobView spreads edge-swipe handlers onto its screen root', async
   const source = await Bun.file(new URL('./MobileBashJobView.jsx', import.meta.url)).text();
 
   expect(source).toContain('ref={screenRef} {...swipeBind}');
+});
+
+test('the mobile composer turns + into a menu carrying Live preview and Artifacts', () => {
+  const previous = store.get();
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = (path) => {
+    calls.push(path);
+    return Promise.resolve(new Response(JSON.stringify({ artifacts: [] }), { status: 200 }));
+  };
+  setState({
+    sessions: { s1: { id: 's1', title: 'Build', state: 'idle', messages: [], subagents: {} } },
+    activeSession: 's1',
+    isMobile: true,
+    sessionsLoaded: true,
+  });
+
+  try {
+    const composer = componentNode(MobileConversationScreen({}), 'MobileComposer');
+    expect(composer).toBeTruthy();
+    const inner = componentNode(composer.type(composer.props), 'Composer');
+    const actions = inner.props.plusActions;
+    expect(actions.map((a) => a.id)).toEqual(['preview', 'artifacts']);
+    expect(actions[0].label).toBe('Live preview');
+    // No visibility condition: there is no composer without a session.
+    expect(actions[0].visible).toBeUndefined();
+
+    actions[0].onClick();
+    expect(store.get().sessions.s1.previewOpen).toBe(true);
+
+    // Artifacts opens the shared drawer on THIS conversation's collection.
+    expect(actions[1].label).toBe('Artifacts');
+    actions[1].onClick();
+    const slice = artifactsSlice(store.get());
+    expect(slice.view).toBe('list');
+    expect(slice.ownerSessionId).toBe('s1');
+    expect(calls).toEqual(['/api/sessions/s1/artifacts']);
+  } finally {
+    globalThis.fetch = originalFetch;
+    setState({ ...previous, artifacts: ARTIFACTS_CLOSED });
+  }
+});
+
+test('the mobile inbox door lives in the drawer and opens after the drawer leaves', () => {
+  const previous = store.get();
+  setState({
+    sessions: { s1: { id: 's1', title: 'Build', state: 'idle', messages: [], subagents: {} } },
+    activeSession: 's1',
+    isMobile: true,
+    sessionsLoaded: true,
+    drawerOpen: true,
+    inboxOpen: false,
+    events: [{ id: 'ev-1', source: 'hook', title: 'Deploy finished', state: 'new', pending_reason: 'inbox' }],
+  });
+
+  try {
+    const screen = MobileConversationScreen({});
+    const drawer = componentNode(screen, 'SessionDrawer');
+    expect(drawer.props.inboxVisible).toBe(true);
+    expect(drawer.props.inboxCount).toBe(1);
+
+    // The drawer hands off like Settings: the tap closes it, and only once the
+    // leave animation has settled does the inbox open. Never both at once.
+    drawer.props.onInbox();
+    expect(store.get().drawerOpen).toBe(false);
+    expect(store.get().inboxOpen).toBe(false);
+    drawer.props.onClosed();
+    expect(store.get().inboxOpen).toBe(true);
+
+    const head = componentNode(
+      drawer.type({ ...drawer.props, open: true }),
+      'InboxButton',
+    );
+    expect(head.props.count).toBe(1);
+  } finally {
+    setState(previous);
+  }
+});
+
+test('the title chip carries the waiting inbox count without opening the drawer', () => {
+  const previous = store.get();
+  setState({
+    sessions: { s1: { id: 's1', title: 'Build', state: 'idle', messages: [], subagents: {} } },
+    activeSession: 's1',
+    isMobile: true,
+    sessionsLoaded: true,
+    drawerOpen: false,
+    inboxOpen: false,
+    events: [
+      { id: 'ev-1', source: 'hook', title: 'One', state: 'new', pending_reason: 'inbox' },
+      { id: 'ev-2', source: 'hook', title: 'Two', state: 'new', pending_reason: 'inbox' },
+    ],
+  });
+
+  try {
+    const chip = componentNode(MobileConversationScreen({}), 'MobileTitleChip');
+    expect(chip.props.inboxCount).toBe(2);
+    const rendered = JSON.stringify(chip.type(chip.props));
+    expect(rendered).toContain('mtchip-inbox');
+  } finally {
+    setState(previous);
+  }
+});
+
+test('the mobile header no longer carries an overflow action rail', async () => {
+  const source = await Bun.file(new URL('./MobileConversationScreen.jsx', import.meta.url)).text();
+
+  expect(source).not.toContain('MobileActionRail');
 });

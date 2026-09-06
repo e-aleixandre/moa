@@ -42,6 +42,12 @@ type SessionConfig struct {
 	Provider        core.Provider                           // LLM provider for the primary model.
 	ProviderFactory func(core.Model) (core.Provider, error) // Creates providers for subagents, plan review, etc.
 
+	// CompactSummarizer optionally routes compaction summaries to a different
+	// model (the global `compact_model`). nil = summarize with the session's
+	// own model, which is how compaction behaved before this existed.
+	// Subagents inherit it: their compactions are summaries too.
+	CompactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)
+
 	// Config overrides. When nil, loaded from disk via core.LoadMoaConfig(CWD).
 	MoaCfg *core.MoaConfig
 
@@ -554,6 +560,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			return nil
 		},
 		ProviderFactory:     cfg.ProviderFactory,
+		CompactSummarizer:   cfg.CompactSummarizer,
 		AgentsMD:            agentsMD,
 		ParentTools:         toolReg,
 		AppCtx:              cfg.Ctx,
@@ -652,6 +659,10 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		// what lets a session's own choice win here without erasing the global
 		// value for the sessions that never made one.
 		Compaction: core.CompactionWithDefault(core.GetCompactAt(moaCfg)),
+		// Global too: which model writes the summaries. Read through the
+		// resolver on every compaction rather than captured here, so changing
+		// the setting takes effect without restarting live sessions.
+		CompactSummarizer: cfg.CompactSummarizer,
 	}
 	if gate != nil {
 		agentCfg.PermissionCheck = gate.Check
@@ -687,9 +698,9 @@ func inheritedCompactAt(sess *Session, globalCompactAt int) int {
 }
 
 // NewSkillFork returns the callback load_skill uses to spawn an isolated child
-// through the existing subagent tool. notify is not in the public schema; a
-// normal subagent call still notifies. Nested forks are refused in LaunchFork
-// because every child already carries an AgentID.
+// through the existing subagent tool. A forked skill is an ordinary subagent:
+// it reports its result back the same way. Nested forks are refused in
+// LaunchFork because every child already carries an AgentID.
 func NewSkillFork(sub core.Tool) skill.ForkFunc {
 	return func(ctx context.Context, req skill.ForkRequest, onUpdate func(core.Result)) (core.Result, error) {
 		if sub.Execute == nil {
@@ -698,9 +709,6 @@ func NewSkillFork(sub core.Tool) skill.ForkFunc {
 		params := map[string]any{"task": req.Task}
 		if req.Async {
 			params["async"] = true
-		}
-		if !req.Notify {
-			params["notify"] = false
 		}
 		ctx = subagent.WithReadOnlyFiles(ctx, req.ReadOnlyFiles)
 		return sub.Execute(ctx, params, onUpdate)

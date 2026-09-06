@@ -1,6 +1,6 @@
 // selectors.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { clampThinkingLevel, deriveModelSpecs, matchSelectedModel, modelAccent, nextThinkingLevel, thinkingLevelsFor } from './selectors.js';
+import { clampThinkingLevel, deriveModelSpecs, matchSelectedModel, modelAccent, nextThinkingLevel, thinkingLevelsFor, thinkingOptionsFor, thinkingPositionFor } from './selectors.js';
 
 test('deriveModelSpecs: known codename splits into codename + version/context subline', () => {
   const specs = deriveModelSpecs([
@@ -88,10 +88,39 @@ test('thinkingLevelsFor: Fable 5.1 cannot turn thinking off; Fable 5 and Opus st
   expect(thinkingLevelsFor({ catalogId: 'claude-fable-5', provider: 'anthropic' })).toBeUndefined();
   expect(thinkingLevelsFor({ catalogId: 'claude-opus-5', provider: 'anthropic' })).toBeUndefined();
   expect(thinkingLevelsFor({ catalogId: 'grok-4.6', provider: 'xai' })).toEqual(['low', 'medium', 'high']);
+  expect(thinkingLevelsFor({ catalogId: 'muse-spark-1.3', provider: 'meta' })).toEqual([
+    'low', 'medium', 'high', 'xhigh',
+  ]);
 });
 
 test('clampThinkingLevel: off on an always-on model becomes high', () => {
   expect(clampThinkingLevel('off', ['low', 'medium', 'high', 'xhigh'])).toBe('high');
   expect(clampThinkingLevel('medium', ['low', 'medium', 'high', 'xhigh'])).toBe('medium');
   expect(clampThinkingLevel('off', undefined)).toBe('off');
+});
+
+test('thinkingOptionsFor: Astra labels the five persisted positions with backend efforts', () => {
+  const astra = {
+    catalogId: 'gpt-6-astra', provider: 'openai',
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+  };
+  expect(thinkingOptionsFor(astra).map(({ value, label }) => [value, label])).toEqual([
+    ['off', 'low'], ['low', 'medium'], ['medium', 'high'], ['high', 'xhigh'], ['xhigh', 'max'],
+  ]);
+  for (const [position, effort] of [['off', 'low'], ['low', 'medium'], ['medium', 'high'], ['high', 'xhigh'], ['xhigh', 'max']]) {
+    expect(thinkingPositionFor(effort, astra)).toBe(position);
+  }
+  expect(thinkingOptionsFor(astra).find((option) => option.label === 'max')).toMatchObject({ value: 'xhigh', bars: 4 });
+});
+
+test('thinkingOptionsFor: models without backend efforts retain the standard labels', () => {
+  const terra = { catalogId: 'gpt-5.6-terra', provider: 'openai' };
+  expect(thinkingOptionsFor(terra).map(({ value, label }) => [value, label])).toEqual([
+    ['off', 'off'], ['low', 'low'], ['medium', 'medium'], ['high', 'high'], ['xhigh', 'xhigh'],
+  ]);
+  expect(thinkingPositionFor('xhigh', terra)).toBe('xhigh');
+  expect(thinkingPositionFor('low', terra)).toBe('low');
+  expect(thinkingPositionFor('medium', terra)).toBe('medium');
+  expect(thinkingPositionFor('high', terra)).toBe('high');
+  expect(thinkingOptionsFor(terra).find((option) => option.label === 'xhigh')).toMatchObject({ value: 'xhigh', bars: 4 });
 });

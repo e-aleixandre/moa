@@ -735,6 +735,57 @@ func FindSessionReadOnly(baseDir, id string) (*Session, *FileStore, error) {
 	return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
 }
 
+// FindSessionStoreReadOnly locates the project store owning a session without
+// loading its transcript. It opens only the exact "<id>.json" candidate and
+// decodes the header prefix, so a handler that just needs the session's
+// directory (artifact catalog, sidecars) does not pay for the whole
+// conversation history on every request — unlike FindSessionReadOnly, which
+// calls LoadReadOnly.
+//
+// A missing session returns ErrNotFound; a candidate that exists but cannot be
+// read or whose header does not identify it is a real error, so callers can
+// answer 404 and 500 differently.
+func FindSessionStoreReadOnly(baseDir, id string) (*FileStore, error) {
+	if err := ValidateID(id); err != nil {
+		return nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+	}
+	if baseDir == "" {
+		var err error
+		baseDir, err = defaultBaseDir()
+		if err != nil {
+			return nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+		}
+	}
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(baseDir, e.Name())
+		store := &FileStore{dir: dir}
+		f, err := os.Open(store.path(id))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("session %s: open: %w", id, err)
+		}
+		sum, ok := decodeSummaryPrefix(f)
+		_ = f.Close()
+		if !ok {
+			return nil, fmt.Errorf("session %s: unreadable header", id)
+		}
+		if sum.ID != id {
+			return nil, fmt.Errorf("session %s: header identifies %q", id, sum.ID)
+		}
+		return store, nil
+	}
+	return nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+}
+
 // DeleteByID searches all project stores under baseDir and deletes the session.
 func DeleteByID(baseDir, id string) error {
 	if err := ValidateID(id); err != nil {
@@ -755,13 +806,21 @@ func DeleteByID(baseDir, id string) error {
 		if !e.IsDir() {
 			continue
 		}
-		store := &FileStore{dir: filepath.Join(baseDir, e.Name())}
-		if err := store.Delete(id); err == nil {
-			// Also remove the subagent transcript side directory, if any.
-			_ = os.RemoveAll(filepath.Join(baseDir, e.Name(), id+".subagents"))
-			_ = RemoveTranscriptSnapshots(filepath.Join(baseDir, e.Name()), id)
-			return nil
+		dir := filepath.Join(baseDir, e.Name())
+		store := &FileStore{dir: dir}
+		// Delete is idempotent, so an absent file does not identify its owner.
+		if _, err := os.Lstat(store.path(id)); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("session %s: stat: %w", id, err)
 		}
+		if err := store.Delete(id); err != nil {
+			return err
+		}
+		_ = os.RemoveAll(filepath.Join(dir, id+".subagents"))
+		_ = RemoveTranscriptSnapshots(dir, id)
+		return RemoveArtifacts(dir, id)
 	}
 	return fmt.Errorf("session %s: %w", id, ErrNotFound)
 }

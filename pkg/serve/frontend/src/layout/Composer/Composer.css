@@ -58,10 +58,13 @@
   cursor: pointer;
   transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .composer-wrap .composer-btn:hover {
   background: var(--surface0);
   color: var(--text);
+}
 }
 
 .composer-wrap .composer-btn:focus-visible {
@@ -82,10 +85,13 @@
   cursor: pointer;
   transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .composer-wrap .composer-send:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 16px color-mix(in srgb, var(--peach) 35%, transparent);
+}
 }
 
 .composer-wrap .composer-send:focus-visible {
@@ -109,9 +115,12 @@
   border-radius: var(--radius-sm);
   transition: background var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .composer-wrap button.queue-note:hover {
   background: var(--surface0);
+}
 }
 
 .composer-wrap button.queue-note:focus-visible {
@@ -133,9 +142,12 @@
   margin-left: auto; /* the pair [stop][send] is pushed flush-right together */
   transition: background var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .composer-wrap .composer-stop-ghost:hover {
   background: color-mix(in srgb, var(--red) 12%, transparent);
+}
 }
 
 /* Armed — the first tap of a two-tap stop (subagent steer mode). Filled rather
@@ -236,10 +248,15 @@
   transition: background var(--duration) var(--ease);
   font-size: var(--text-base);
 }
-
-.composer-wrap .cmd-suggestion-item:hover,
 .composer-wrap .cmd-suggestion-item.selected {
   background: var(--surface0);
+}
+@media (hover: hover) {
+
+
+.composer-wrap .cmd-suggestion-item:hover{
+  background: var(--surface0);
+}
 }
 
 .composer-wrap .cmd-suggestion-name {
@@ -314,10 +331,13 @@
   border: none;
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .attach-chip-remove:hover {
   color: var(--red);
   background: var(--surface1);
+}
 }
 
 /* --- Cache-expiry warning, shown above the composer when idle past the
@@ -376,9 +396,12 @@
   color: var(--subtext1);
   box-shadow: none;
 }
+@media (hover: hover) {
+
 .composer-wrap .composer-send.mic-mode:hover {
   background: var(--surface1);
   color: var(--text);
+}
 }
 
 /* Actively recording: red, gently pulsing, white icon for contrast. */
@@ -387,8 +410,11 @@
   color: var(--crust);
   animation: composer-mic-pulse 1.5s ease-in-out infinite;
 }
+@media (hover: hover) {
+
 .composer-wrap .composer-send.recording:hover {
   box-shadow: 0 4px 16px color-mix(in srgb, var(--red) 35%, transparent);
+}
 }
 /* Locked (hands-free) recording: solid, not pulsing — shows a stop square. */
 .composer-wrap .composer-send.recording.locked {
@@ -488,6 +514,14 @@
   height: 44px;
   border-radius: var(--radius-md);
   color: var(--overlay1);
+}
+
+/* When `+` is a menu, its wrapper becomes the grid item and the button inside
+   keeps the 44px face. The list hangs upwards from that wrapper, so it clears
+   the status line and the home indicator without measuring either. */
+.composer-wrap.is-compact .action-menu {
+  grid-row: 1;
+  grid-column: 1;
 }
 
 .composer-wrap.is-compact .composer-btn-slash {

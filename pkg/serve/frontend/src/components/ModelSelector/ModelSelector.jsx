@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Check, ChevronLeft, ChevronRight, Search, Star, X } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
-import { clampThinkingLevel, thinkingLevelsFor } from "../../data/selectors.js";
+import { thinkingOptionsFor, thinkingPositionFor } from "../../data/selectors.js";
 import { Segmented } from "../Segmented/Segmented.jsx";
 import {
   groupByProvider,
@@ -22,13 +22,13 @@ const THINKING_OPTIONS = [
 
 const PINNED_COLLAPSE_THRESHOLD = 4;
 
-function ThinkingStepper({ value, onChange, levels = THINKING_OPTIONS.map((option) => option.value) }) {
-  const options = THINKING_OPTIONS.filter((option) => levels.includes(option.value));
-  const hot = value === "xhigh";
+function ThinkingStepper({ value, onChange, options = THINKING_OPTIONS }) {
+  const selected = options.find((option) => option.value === value) || options[0];
+  const hot = selected?.value === "xhigh";
   return (
     <div class="think-block">
       <div class="think-lbl" id="model-selector-thinking-label">
-        Thinking <b class={hot ? "hot" : ""}>{value.toUpperCase()}</b>
+        Thinking <b class={hot ? "hot" : ""}>{selected?.label.toUpperCase()}</b>
       </div>
       <Segmented
         options={options}
@@ -104,7 +104,7 @@ function PinButton({ model, pinned, onToggle }) {
   );
 }
 
-function ModelChip({ model, selected, pinned, onSelect, onTogglePin }) {
+function ModelChip({ model, selected, pinned, onSelect, onTogglePin, pinnable = true }) {
   const on = model.id === selected;
   return (
     <div class={`mchip-wrap${on ? " on" : ""}`}>
@@ -120,12 +120,12 @@ function ModelChip({ model, selected, pinned, onSelect, onTogglePin }) {
         </span>
         {model.sub && <span class="cv">{model.sub}</span>}
       </button>
-      <PinButton model={model} pinned={pinned} onToggle={onTogglePin} />
+      {pinnable && <PinButton model={model} pinned={pinned} onToggle={onTogglePin} />}
     </div>
   );
 }
 
-function ModelGrid({ models, selected, pinnedIDs, onSelect, onTogglePin }) {
+function ModelGrid({ models, selected, pinnedIDs, onSelect, onTogglePin, pinnable = true }) {
   return (
     <div class="chip-grid">
       {models.map((model) => (
@@ -136,13 +136,14 @@ function ModelGrid({ models, selected, pinnedIDs, onSelect, onTogglePin }) {
           pinned={pinnedIDs.includes(model.catalogId)}
           onSelect={onSelect}
           onTogglePin={onTogglePin}
+          pinnable={pinnable}
         />
       ))}
     </div>
   );
 }
 
-function SearchResults({ models, selected, pinnedIDs, onSelect, onTogglePin }) {
+function SearchResults({ models, selected, pinnedIDs, onSelect, onTogglePin, pinnable = true }) {
   return (
     <div class="model-results">
       {models.map((model) => {
@@ -164,7 +165,7 @@ function SearchResults({ models, selected, pinnedIDs, onSelect, onTogglePin }) {
               <span class="model-provider-badge">{model.provider}</span>
               {on && <Check size={12} aria-hidden="true" />}
             </button>
-            <PinButton model={model} pinned={pinned} onToggle={onTogglePin} />
+            {pinnable && <PinButton model={model} pinned={pinned} onToggle={onTogglePin} />}
           </div>
         );
       })}
@@ -258,6 +259,7 @@ export function ModelSelector({
   onThinkingChange,
   onFastChange,
   embedded = false,
+  modelOnly = false,
   sessionModel,
   sessionProvider,
   ...rest
@@ -292,6 +294,7 @@ export function ModelSelector({
   };
 
   useEffect(() => {
+    if (modelOnly) return undefined;
     let live = true;
     const revision = preferenceRevisionRef.current;
     api("GET", "/api/model-preferences")
@@ -304,7 +307,7 @@ export function ModelSelector({
         if (live && revision === preferenceRevisionRef.current) applyPinnedIDs([]);
       });
     return () => { live = false; };
-  }, []);
+  }, [modelOnly]);
 
   const updatePin = (model, shouldPin, { offerUndo = true } = {}) => {
     const before = pinnedIDsRef.current;
@@ -353,15 +356,15 @@ export function ModelSelector({
   };
 
   return (
-    <div class={`model-selector${embedded ? " model-selector--embedded" : ""}`} {...rest}>
-      {!embedded && <div class="sel-head">Model &amp; thinking</div>}
-      <ThinkingStepper
-        value={clampThinkingLevel(thinking, thinkingLevelsFor(selectedSpec, sessionProvider))}
+    <div class={`model-selector${embedded ? " model-selector--embedded" : ""}${modelOnly ? " model-selector--model-only" : ""}`} {...rest}>
+      {!embedded && !modelOnly && <div class="sel-head">Model &amp; thinking</div>}
+      {!modelOnly && <ThinkingStepper
+        value={thinkingPositionFor(thinking, selectedSpec, sessionProvider)}
         onChange={onThinkingChange}
-        levels={thinkingLevelsFor(selectedSpec, sessionProvider)}
-      />
-      <FastRow value={fast} supported={fastSupported} note={fastNote} onChange={onFastChange} />
-      {!!sessionModel && (
+        options={thinkingOptionsFor(selectedSpec, sessionProvider)}
+      />}
+      {!modelOnly && <FastRow value={fast} supported={fastSupported} note={fastNote} onChange={onFastChange} />}
+      {!modelOnly && !!sessionModel && (
         <CurrentModelRow
           spec={selectedSpec}
           sessionModel={sessionModel}
@@ -398,6 +401,7 @@ export function ModelSelector({
               pinnedIDs={pinnedIDs}
               onSelect={onSelect}
               onTogglePin={updatePin}
+              pinnable={!modelOnly}
             />
           ) : (
             <div class="model-empty">No models match “{query.trim()}”</div>
@@ -417,12 +421,13 @@ export function ModelSelector({
             pinnedIDs={pinnedIDs}
             onSelect={onSelect}
             onTogglePin={updatePin}
+            pinnable={!modelOnly}
           />
         </div>
       ) : (
         <div class="model-selector-view">
-          <SectionHeading trailing={`★ ${pinned.length}`}>Pinned</SectionHeading>
-          {pinned.length > 0 ? (
+          {!modelOnly && <SectionHeading trailing={`★ ${pinned.length}`}>Pinned</SectionHeading>}
+          {!modelOnly && (pinned.length > 0 ? (
             <>
               <ModelGrid
                 models={visiblePins}
@@ -430,6 +435,7 @@ export function ModelSelector({
                 pinnedIDs={pinnedIDs}
                 onSelect={onSelect}
                 onTogglePin={updatePin}
+                pinnable={!modelOnly}
               />
               {pinned.length > PINNED_COLLAPSE_THRESHOLD && (
                 <button
@@ -449,7 +455,7 @@ export function ModelSelector({
               <Star size={14} aria-hidden="true" />
               Pin your go-to models — tap <Star size={12} aria-hidden="true" /> on any model
             </div>
-          )}
+          ))}
           <SectionHeading>All models</SectionHeading>
           <ProviderList groups={groups} selected={selected} onOpen={openProvider} />
         </div>

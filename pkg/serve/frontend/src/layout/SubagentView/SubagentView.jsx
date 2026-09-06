@@ -10,6 +10,8 @@ import { subagentView, canPromote } from "../../data/subagent-view-model.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { fmtTokens, copyToClipboard, sessionTitle } from "../../data/util/format.js";
 import { modelAccent } from "../../data/selectors.js";
+import { catalogThinkingPosition, modelCatalog } from "../../data/model-catalog.js";
+import { useStore } from "../../hooks/useStore.js";
 import { cancelSubagent, promoteSubagent } from "../../data/session-actions.js";
 import { updateSession } from "../../data/store.js";
 import { useSubagentTranscript } from "../../hooks/useSubagentTranscript.js";
@@ -31,10 +33,11 @@ import "./SubagentView.css";
 
 export function SubagentView({ session, jobId, onBack }) {
   const view = subagentView(session, jobId);
+  const catalog = useStore(modelCatalog);
 
   // A subagent born while this conversation was open holds only the deltas
   // received since; fetch the history that predates opening this view.
-  useSubagentTranscript(session?.id, jobId);
+  useSubagentTranscript(session?.id, jobId, session?.subagents?.[jobId]?.lifecycleUnverified);
 
   // Rebound: the subagent was pruned (finished + cleaned). Fall back to parent.
   // All hooks below run on EVERY render regardless of `view` (rules of hooks);
@@ -179,7 +182,7 @@ export function SubagentView({ session, jobId, onBack }) {
           />
         </>
       )}
-      <BranchStrip session={session} view={view} />
+      <BranchStrip session={session} view={view} catalog={catalog} />
       <Sheet open={detailsOpen} onClose={() => setDetailsOpen(false)} title="Subagent details">
         <SubagentDetails session={session} view={view} accent={modelAccent(view.model)} />
       </Sheet>
@@ -192,7 +195,7 @@ export function SubagentView({ session, jobId, onBack }) {
 // session's, because that is the policy the child's tools run under. Nothing
 // is a door: a child's settings are not changed from inside it. Goal/tasks
 // stay off this line — they belong to the parent run.
-function BranchStrip({ session, view }) {
+function BranchStrip({ session, view, catalog }) {
   const usage = view.usage;
   return (
     <div class="sa-strip">
@@ -209,6 +212,10 @@ function BranchStrip({ session, view }) {
         modelName={view.model}
         modelAccent={modelAccent(view.model)}
         thinking={view.thinking || "off"}
+        thinkingPosition={catalogThinkingPosition(catalog, {
+          model: view.modelSpec,
+          thinking: view.thinking || "off",
+        })}
       />
     </div>
   );

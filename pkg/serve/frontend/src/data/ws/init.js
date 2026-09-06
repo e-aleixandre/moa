@@ -8,6 +8,7 @@ import { canAppendHistoryDelta, finishHistoryHydration } from '../history-hydrat
 import { acknowledgeVisibleAttentionThrough } from '../api.js';
 import { store, updateSession, visibleSessionIds } from '../store.js';
 import { seedOlderHistory } from '../history-paging.js';
+import { refreshArtifactsAfterReconnect } from '../artifacts.js';
 
 export function mergeSteers(snapshot, local) {
   // Snapshot steers are authoritative and already accepted by the server, so
@@ -51,6 +52,9 @@ export function handleWsInit(id, data) {
   // init snapshot lists live jobs only, so replacing the map outright would
   // delete the very transcript being read and bounce the reader back to the
   // parent — which is what happens on mobile every time the screen sleeps.
+  // An entry that was locally still running needs its persisted lifecycle
+  // rechecked, though: its terminal event may be exactly what the sleeping
+  // client missed, and a capped init cannot always carry the old outcome.
   const namespace = attentionNamespaceFromInit(data);
   const cursorTransition = namespace
     ? attentionNamespaceTransition(store.get().sessions[id], namespace)
@@ -60,7 +64,12 @@ export function handleWsInit(id, data) {
   const viewing = prev.viewingSubagent;
   const keptLocal = viewing && prev.subagents && prev.subagents[viewing]
     && !(data.subagents || []).some(sa => sa && sa.job_id === viewing)
-    ? { [viewing]: prev.subagents[viewing] }
+    ? { [viewing]: {
+      ...prev.subagents[viewing],
+      ...(['running', 'cancelling'].includes(prev.subagents[viewing].status)
+        ? { lifecycleUnverified: true }
+        : {}),
+    } }
     : null;
   // Same protection for a background bash being read in the BashJobView: once
   // the job ends the server may drop it from the bash_jobs snapshot, and
@@ -152,6 +161,9 @@ export function handleWsInit(id, data) {
     updateSession(id, { readCandidateSeq: data.last_seq || 0 });
   }
   acknowledgeInitAttention(id, data, namespace);
+  // A socket that was away may have missed a delivery entirely; the drawer's
+  // authoritative source is the API, so an open collection reloads here.
+  refreshArtifactsAfterReconnect(id);
 }
 
 // An authoritative init is the read boundary: the selected session showed the
@@ -228,6 +240,10 @@ export function initSubagents(raw) {
       jobId: sa.job_id,
       originToolCallId: sa.origin_tool_call_id || '',
       task: sa.task || '',
+      // The backend-generated title is the child's identity label everywhere
+      // (see stream-model's subagentLabel); dropping it here made a reconnect
+      // silently downgrade every titled child to its raw model id.
+      title: sa.title || '',
       model: sa.model || '',
       thinking: sa.thinking || 'off',
       status: sa.status || 'running',

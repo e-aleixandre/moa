@@ -18,13 +18,15 @@ const TONE = {
 // queue (notifications.js) and renders each entry via the Toast primitive.
 // Mounted ONCE in app.jsx so it's global to desktop and mobile. Clicking a
 // toast that carries a sessionId brings that session into view (openSession
-// handles both layouts) and dismisses it.
+// handles both layouts) and dismisses it; `onOpen` is that same gesture for a
+// destination that is not a session (wake-on-event's inbox).
 export function ToastContainer() {
   const [toasts, setToasts] = useState(getToasts());
   useEffect(() => subscribeToasts(setToasts), []);
 
   const handleClick = useCallback((toast) => {
     if (toast.sessionId) openSession(toast.sessionId);
+    else toast.onOpen?.();
     removeToast(toast.id);
   }, []);
 
@@ -44,8 +46,8 @@ export function ToastContainer() {
             },
           } : undefined}
           onDismiss={() => removeToast(t.id)}
-          onClick={t.sessionId ? () => handleClick(t) : undefined}
-          style={t.sessionId ? "cursor:pointer" : undefined}
+          onClick={t.sessionId || t.onOpen ? () => handleClick(t) : undefined}
+          style={t.sessionId || t.onOpen ? "cursor:pointer" : undefined}
         >
           <ToastTitle>{t.title}</ToastTitle>
           {t.detail && <ToastMessage>{t.detail}</ToastMessage>}

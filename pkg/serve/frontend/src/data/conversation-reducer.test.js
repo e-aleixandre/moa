@@ -152,9 +152,121 @@ test('a nested steer is deduplicated by msg_id, not by text', () => {
   expect(t.messages).toHaveLength(2);
 });
 
+// The delegated task is announced (user_message) from the point it reaches the
+// child's history. Before this reducer accepted it the event fell through to
+// the default branch, so a subagent opened before its first message_end showed
+// activity with no encargo until a reconnect snapshot arrived.
+test('a nested user_message shows the delegated task ahead of the child activity', () => {
+  const t = freshTarget();
+  const b = newBuffers();
+  applyNestedEvent(t, b, {
+    type: 'user_message',
+    data: { msg_id: 'p1', text: 'Investiga el bug', custom: { source: 'subagent_parent' } },
+  });
+  applyNestedEvent(t, b, { type: 'message_end', data: { msg_id: 'a1', text: 'Empiezo' } });
+
+  expect(t.messages).toHaveLength(2);
+  expect(t.messages[0]).toMatchObject({
+    role: 'user', _msg_id: 'p1', custom: { source: 'subagent_parent' },
+  });
+  expect(t.messages[0].content[0].text).toBe('Investiga el bug');
+  expect(t.messages[1].role).toBe('assistant');
+});
+
+test('a nested user_message is deduplicated by msg_id, not by text', () => {
+  const t = freshTarget();
+  const b = newBuffers();
+  const evt = { type: 'user_message', data: { msg_id: 'p1', text: 'Otra vez' } };
+  applyNestedEvent(t, b, evt);
+  applyNestedEvent(t, b, evt);
+  expect(t.messages).toHaveLength(1);
+  // The same words delegated again are a different message and must both show.
+  applyNestedEvent(t, b, { type: 'user_message', data: { msg_id: 'p2', text: 'Otra vez' } });
+  expect(t.messages).toHaveLength(2);
+});
+
+test('a nested user_message carries structured content when it has one', () => {
+  const t = freshTarget();
+  const b = newBuffers();
+  applyNestedEvent(t, b, {
+    type: 'user_message',
+    data: { msg_id: 'p1', content: [{ type: 'text', text: 'mira' }, { type: 'image_ref', id: 'img1' }] },
+  });
+  expect(t.messages[0].content).toHaveLength(2);
+});
+
 test('ensureTarget tolerates null/partial input', () => {
   const t = ensureTarget(null);
   expect(t.messages).toEqual([]);
   const t2 = ensureTarget({ streamingText: 'x' });
   expect(Array.isArray(t2.messages)).toBe(true);
+});
+
+// A hydration that overlaps a turn splices the server's copy of it into the
+// transcript; the message_end closing that same turn then arrives afterwards.
+// Without id-based dedup the turn was rendered twice.
+test('messageEnd does not re-append a turn the transcript already holds', () => {
+  const t = freshTarget();
+  const b = newBuffers();
+  t.messages = [{ role: 'assistant', _msg_id: 'm1', content: [{ type: 'text', text: 'Empiezo' }] }];
+  applyNestedEvent(t, b, { type: 'message_end', data: { msg_id: 'm1', text: 'Empiezo' } });
+  expect(t.messages).toHaveLength(1);
+  // A different turn with the same words is still its own message.
+  applyNestedEvent(t, b, { type: 'message_end', data: { msg_id: 'm2', text: 'Empiezo' } });
+  expect(t.messages).toHaveLength(2);
+});
+
+// The REST projection caps text at a byte budget (see safeDisplayText), so a
+// hydrated row can be a PREFIX of the real answer. fullText is authoritative,
+// so closing that turn must complete the row in place — deduplicating by
+// dropping the event lost the rest of the response for good.
+test('messageEnd completes a truncated snapshot row instead of discarding its text', () => {
+  const t = freshTarget();
+  const b = newBuffers();
+  t.messages = [
+    { role: 'user', _msg_id: 'm-task', content: [{ type: 'text', text: 'Investiga' }] },
+    { role: 'assistant', _msg_id: 'm1', content: [{ type: 'text', text: 'short snapshot' }] },
+  ];
+  applyNestedEvent(t, b, {
+    type: 'message_end',
+    data: { msg_id: 'm1', text: 'short snapshot followed by the full live response' },
+  });
+
+  expect(t.messages).toHaveLength(2);
+  const answer = t.messages[1];
+  // Same row, same identity, same position — with the complete text.
+  expect(answer._msg_id).toBe('m1');
+  expect(answer.content[0].text).toBe('short snapshot followed by the full live response');
+  expect(t.messages[0]._msg_id).toBe('m-task');
+});
+
+test('messageEnd completing an existing row respects text already materialized by a tool', () => {
+  const t = freshTarget();
+  const b = newBuffers();
+  // A tool call materialized the head of this turn; the row was then hydrated
+  // from REST holding the whole (truncated) turn under the same id.
+  t.messages = [{ role: 'assistant', _msg_id: 'm1', content: [{ type: 'text', text: 'Analizando' }] }];
+  b.materializedText = 'Analizando ';
+  applyNestedEvent(t, b, { type: 'message_end', data: { msg_id: 'm1', text: 'Analizando el fichero entero' } });
+
+  expect(t.messages).toHaveLength(1);
+  // The row is the whole turn, not just the tail after the materialized head.
+  expect(t.messages[0].content[0].text).toBe('Analizando el fichero entero');
+  expect(b.materializedText).toBe('');
+});
+
+test('messageEnd with no text does not blank an existing row', () => {
+  const t = freshTarget();
+  const b = newBuffers();
+  t.messages = [{ role: 'assistant', _msg_id: 'm1', content: [{ type: 'text', text: 'ya renderizado' }] }];
+  applyNestedEvent(t, b, { type: 'message_end', data: { msg_id: 'm1', text: '' } });
+  expect(t.messages[0].content[0].text).toBe('ya renderizado');
+});
+
+test('messageEnd without a msg_id keeps appending as before', () => {
+  const t = freshTarget();
+  const b = newBuffers();
+  applyNestedEvent(t, b, { type: 'message_end', data: { text: 'uno' } });
+  applyNestedEvent(t, b, { type: 'message_end', data: { text: 'uno' } });
+  expect(t.messages).toHaveLength(2);
 });

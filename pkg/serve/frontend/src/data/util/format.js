@@ -330,8 +330,8 @@ export function shortModel(model) {
 // rendered capitalized, so "Claude Opus 4.8" → "Opus", "Claude Fable 5" →
 // "Fable", "GPT-5.6 Sol" → "Sol", "Grok 4.6" → "Grok". None is a substring of
 // another, so order doesn't matter. Anthropic: opus/sonnet/haiku/fable;
-// OpenAI: sol/terra/luna; xAI: grok.
-const MODEL_CODENAMES = ['opus', 'sonnet', 'haiku', 'fable', 'sol', 'terra', 'luna', 'grok'];
+// OpenAI: astra/sol/terra/luna; xAI: grok; Meta: muse.
+const MODEL_CODENAMES = ['opus', 'sonnet', 'haiku', 'fable', 'astra', 'sol', 'terra', 'luna', 'grok', 'muse'];
 
 /** modelCodename → the friendly one-word model name (capitalized) when the model
  *  string carries a known codename; "" when it doesn't (caller falls back). */

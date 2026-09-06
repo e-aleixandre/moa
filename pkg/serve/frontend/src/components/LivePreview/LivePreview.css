@@ -1,0 +1,1075 @@
+/* LivePreview — the dev server rendered inside a Sheet.
+   One thin row of controls (⋮, widths, inspect, close), the iframe stage, and
+   the selected element panel that turns a tap into a message for the agent.
+
+   The prototype's rule: the app owns every pixel, PERMANENTLY. Nothing that
+   describes the run has a fixed home over the app — the run floats up and
+   dissolves (.lp-stream), the stage's own 2px edge carries the tool in flight,
+   and the URL only exists on the first-run screen. Idle, the app is alone. */
+
+.live-preview-sheet,
+.live-preview-inline {
+  width: min(1240px, 96vw);
+  max-width: none;
+  height: 92vh;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  touch-action: none;
+  container-type: inline-size;
+}
+.sheet-overlay:has(.live-preview-sheet) {
+  padding: var(--space-3);
+}
+.live-preview-sheet .sheet-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+.live-preview-inline {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-overlay);
+  width: auto;
+  height: auto;
+  padding: var(--space-3);
+  gap: var(--space-2);
+  box-sizing: border-box;
+  background: var(--base);
+}
+
+/* Phones: the preview IS the screen — full bleed, insets only for safe areas.
+   dvh so the iOS URL bar collapsing doesn't leave the stage cropped. */
+@media (max-width: 768px) {
+  .sheet-overlay:has(.live-preview-sheet) {
+    padding: 0;
+  }
+  .live-preview-sheet {
+    width: 100%;
+    height: 100dvh;
+    border-radius: 0;
+    border: 0;
+  }
+  .live-preview-sheet .sheet-body {
+    padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-2)
+      max(var(--space-2), env(safe-area-inset-bottom));
+  }
+}
+
+/* ONE row, and it is only controls: the URL row is gone for good, so the stage
+   starts ~40px higher than it used to.
+
+   Three groups, left to right: the rare actions (⋮), the widths, and the
+   modes (Inspect, close). Widths are icons — the device each one stands for —
+   with the number next to the icon only where the bar is wide enough for it;
+   the number always stays in the accessible name and in the tooltip. Widths
+   sit in a sunken segment; Inspect and close are outlined buttons, so a mode
+   toggle never reads as a fifth width. */
+.live-preview-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  touch-action: none;
+}
+.live-preview-bar-end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+.live-preview-widths {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.live-preview-widths.segmented {
+  padding: 3px;
+  gap: 2px;
+  background: var(--mantle);
+}
+.live-preview-widths.segmented .segmented-item {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 36px;
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+  letter-spacing: normal;
+  color: var(--overlay1);
+}
+.live-preview-widths.segmented .segmented-item svg {
+  flex: none;
+}
+.live-preview-width-label {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+.live-preview-widths.segmented .segmented-item.on {
+  color: var(--mauve);
+  background: color-mix(in srgb, var(--mauve) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mauve) 40%, transparent);
+}
+@media (hover: hover) {
+  .live-preview-widths.segmented .segmented-item:hover {
+    color: var(--text);
+  }
+}
+
+.live-preview-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--subtext0);
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  transition: border-color var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+@media (hover: hover) {
+
+.live-preview-action:hover {
+  border-color: var(--peach);
+  color: var(--peach);
+}
+.live-preview-action.is-on:hover {
+  border-color: var(--mauve);
+  color: var(--crust);
+}
+}
+/* A mode is louder than a selection: solid, so Inspect never reads as a
+   fifth width. */
+.live-preview-action.is-on {
+  border-color: var(--mauve);
+  color: var(--crust);
+  background: var(--mauve);
+}
+.live-preview-action:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* A pane is its own density. Viewport widths are the preview's essential
+   control, so all four ALWAYS stay: first the numbers go (the icons and their
+   tooltips carry the meaning), then the Inspect word, then the padding. */
+@container (max-width: 560px) {
+  .live-preview-width-label { display: none; }
+  .live-preview-widths.segmented .segmented-item { min-width: 40px; }
+}
+@container (max-width: 430px) {
+  .live-preview-action-label { display: none; }
+  .live-preview-action { min-width: 34px; padding: 0 var(--space-2); }
+}
+@container (max-width: 330px) {
+  .live-preview-bar { gap: var(--space-1); }
+  .live-preview-bar-end { gap: var(--space-1); }
+  .live-preview-widths.segmented { padding: 2px; gap: 1px; }
+  .live-preview-widths.segmented .segmented-item {
+    min-width: 32px;
+    padding: 0 var(--space-1);
+  }
+}
+
+@media (max-width: 768px) {
+  .live-preview-action-label {
+    display: none;
+  }
+  .live-preview-action {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 var(--space-2);
+  }
+  .live-preview-widths.segmented .segmented-item {
+    min-height: 38px;
+  }
+  .live-preview-inspect-close,
+  .live-preview-voice {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* ── Overflow menu ──────────────────────────────────────────────────────────
+   The two rare URL actions. Same atom as SessionCardMenu's popup, so a menu in
+   this prototype looks like every other menu in moa. */
+.live-preview-menu {
+  position: relative;
+  flex: none;
+}
+.live-preview-menu-items {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: var(--z-overlay);
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-1);
+  background: var(--surface0);
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.live-preview-menu-item {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.live-preview-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--surface2) 60%, transparent);
+  outline: none;
+}
+@media (hover: hover) {
+
+.live-preview-menu-item:hover{
+  background: color-mix(in srgb, var(--surface2) 60%, transparent);
+  outline: none;
+}
+}
+
+/* ── Kind identity ──────────────────────────────────────────────────────────
+   ONE mapping, kind → color, consumed by both the floating cards and the
+   stage's live border. Same palette the ledger and the fanout accents use: the
+   user should recognise "an edit is happening" by color alone. */
+.k-edit    { --lp-kind: var(--peach); }
+.k-write   { --lp-kind: var(--peach); }
+.k-read    { --lp-kind: var(--sky); }
+.k-bash    { --lp-kind: var(--teal); }
+.k-search  { --lp-kind: var(--sky); }
+.k-subagent { --lp-kind: var(--mauve); }
+.k-fetch_content { --lp-kind: var(--blue); }
+.k-web_search    { --lp-kind: var(--blue); }
+.k-verify  { --lp-kind: var(--green); }
+.k-tool    { --lp-kind: var(--lavender); }
+
+.live-preview-stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  border-radius: var(--radius-md);
+  background: #fff;
+  overflow: hidden;
+}
+.live-preview-proxy-error,
+.live-preview-inspector-warning {
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--red) 10%, var(--base));
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+/* The error is not only a statement: an unreachable address is corrected from
+   the same place it is reported, so the fix is one tap away from the problem. */
+.live-preview-proxy-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: space-between;
+}
+.live-preview-proxy-error-action {
+  flex: none;
+  padding: 6px var(--space-2);
+  min-height: 32px;
+  border: 1px solid var(--red);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.live-preview-proxy-error-action:hover {
+  background: color-mix(in srgb, var(--red) 18%, transparent);
+}
+/* The scroller is what moves; the stage stays put so the live border and the
+   floating cards stay pinned to the panel instead of scrolling with the app. */
+.live-preview-scroller {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  touch-action: none;
+}
+/* Zoomed, the transform IS the position: the holder fills the stage and the
+   scroller must not also scroll over it. Outside Zoom mode the app itself keeps
+   its own scrolling, which is why touch-action is not taken away here. */
+.live-preview-scroller.is-zoomed {
+  overflow: hidden;
+}
+.live-preview-holder {
+  position: relative;
+  margin: 0 auto;
+}
+.live-preview-frame {
+  display: block;
+  border: 0;
+  background: #fff;
+}
+/* The live border is drawn by a pseudo-element ON TOP of the frame, not as the
+   stage's own box-shadow: an inset shadow paints under the element's content,
+   and an iframe would simply cover it. `pointer-events:none` keeps every pixel
+   of the app clickable through it. Resting state is the panel's hairline, so the
+   stage never resizes when the agent starts or stops working. */
+.live-preview-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--surface0);
+  transition: box-shadow var(--duration) var(--ease);
+}
+.live-preview-stage.is-working::after {
+  box-shadow: inset 0 0 0 2px var(--lp-kind, var(--sky));
+  animation: lp-breathe 2s ease-in-out infinite;
+}
+.live-preview-stage.is-waiting::after {
+  box-shadow:
+    inset 0 0 0 2px var(--yellow),
+    inset 0 0 16px -6px var(--yellow);
+}
+
+/* The handle is the way to talk to Moa while looking at the app. It paints as
+   a small labelled pill at the bottom edge — an invitation, not a scrollbar —
+   and its button stays a full 44px target around it. It sits above the touch
+   relay only in its own hit area, so the rest of the preview continues to
+   receive its tap, scroll, and pinch events. */
+.live-preview-composer-handle {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 0 max(6px, env(safe-area-inset-bottom));
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transform: translateX(-50%);
+  touch-action: manipulation;
+  font-family: var(--font);
+}
+.live-preview-composer-handle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 var(--space-3) 0 10px;
+  border: 1px solid color-mix(in srgb, var(--mauve) 45%, var(--surface2));
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--mantle) 92%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px -8px rgb(0 0 0 / 55%), 0 1px 4px -2px rgb(0 0 0 / 40%);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  transition: border-color var(--duration) var(--ease), color var(--duration) var(--ease), background var(--duration) var(--ease);
+}
+.live-preview-composer-handle-pill svg {
+  flex: none;
+  color: var(--mauve);
+}
+.live-preview-composer-handle:focus-visible {
+  outline: none;
+}
+.live-preview-composer-handle:focus-visible .live-preview-composer-handle-pill {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* The real conversation Composer is deliberately embedded unchanged. The
+   preview only provides its placement and a compact reference attachment. */
+.live-preview-composer {
+  position: absolute;
+  right: var(--space-2);
+  bottom: max(var(--space-2), env(safe-area-inset-bottom));
+  left: var(--space-2);
+  z-index: 5;
+  padding: var(--space-2);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--base) 94%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-lg);
+}
+.live-preview-composer .composer-wrap {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+.live-preview-composer .attach-preview-strip {
+  max-height: 88px;
+  overflow: auto;
+}
+.live-preview-composer-close {
+  position: absolute;
+  top: -38px;
+  right: 0;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-full);
+  background: var(--mantle);
+  color: var(--subtext0);
+  cursor: pointer;
+}
+.live-preview-composer-close:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+@media (hover: hover) {
+  .live-preview-composer-close:hover {
+    color: var(--mauve);
+    background: var(--surface0);
+  }
+  .live-preview-composer-handle:hover .live-preview-composer-handle-pill {
+    border-color: var(--mauve);
+    background: color-mix(in srgb, var(--mauve) 14%, var(--mantle));
+  }
+}
+.live-preview-reference {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: 0 var(--space-2) var(--space-2);
+  color: var(--subtext0);
+  font-size: var(--text-xs);
+}
+.live-preview-reference span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-preview-reference-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--radius-full);
+  background: var(--mauve);
+}
+
+/* Reserve independent lanes: activity cards never sit over either the closed
+   handle or the open composer. */
+.live-preview-stage.has-composer-handle .lp-stream {
+  bottom: calc(max(var(--space-3), env(safe-area-inset-bottom)) + 44px);
+}
+.live-preview-stage.has-composer .lp-stream {
+  bottom: 184px;
+}
+@keyframes lp-breathe {
+  0%, 100% {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--lp-kind, var(--sky)) 40%, transparent);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 2px var(--lp-kind, var(--sky)),
+      inset 0 0 18px -6px var(--lp-kind, var(--sky));
+  }
+}
+
+/* ── First run ──────────────────────────────────────────────────────────────
+   The ONLY moment the URL gets pixels. It takes the whole stage (there is no app
+   to cover yet) and then never comes back: changing it later is a menu item. */
+.live-preview-setup {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  background: var(--base);
+  border-radius: inherit;
+}
+.live-preview-setup-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+.live-preview-setup-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: min(440px, 100%);
+}
+.live-preview-setup-hint {
+  margin: 0;
+  color: var(--overlay1);
+  font-size: var(--text-sm);
+  max-width: min(440px, 100%);
+  text-align: center;
+}
+.live-preview-setup-error {
+  margin: 0;
+  max-width: min(440px, 100%);
+  color: var(--red);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+.live-preview-setup-back {
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--overlay1);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.live-preview-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px var(--space-3);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md);
+  background: var(--mantle);
+  color: var(--text);
+  font-family: var(--mono);
+  /* ≥16px or iOS zooms the page when this input takes focus. */
+  font-size: var(--text-input);
+}
+.live-preview-url:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ── The stream ─────────────────────────────────────────────────────────────
+   What the agent is doing, over the app, for as long as it is worth saying.
+   Anchored to the BOTTOM of the stage, column-reverse so the newest card is at
+   the bottom and the older ones are pushed up by it: a new arrival visibly
+   lifts the stack, which is the whole gesture the user asked for.
+
+   The lane is transparent and click-through — only the cards themselves take
+   pointer events, so the app underneath stays fully usable while they float. */
+.lp-stream {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-3);
+  transform: translateX(-50%);
+  z-index: 3;
+  width: min(520px, calc(100% - var(--space-4) * 2));
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+
+/* A card is legible over ANY app: never bare text on someone's page. moa's own
+   surface, blurred, with a soft shadow that separates it from whatever color
+   happens to be under it. */
+.lp-card {
+  pointer-events: auto;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--surface2) 70%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--mantle) 88%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 6px 24px -10px rgb(0 0 0 / 55%), 0 2px 6px -4px rgb(0 0 0 / 40%);
+  color: var(--subtext0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  text-align: left;
+  animation: lp-rise-in 0.28s var(--ease) both;
+}
+.lp-card:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.lp-card-ic {
+  flex: none;
+  display: inline-flex;
+  color: var(--lp-kind, var(--overlay1));
+}
+.lp-card-txt {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* running — the chat's own work-shimmer, tinted by the kind, so the card and the
+   border say the same thing in two languages. */
+.lp-card-txt.is-live {
+  background: linear-gradient(
+    90deg,
+    var(--subtext0) 0%,
+    var(--subtext0) 35%,
+    var(--lp-kind, var(--sky)) 50%,
+    var(--subtext0) 65%,
+    var(--subtext0) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  background-size: 200% 100%;
+  animation: work-shimmer 2.5s ease-in-out infinite;
+}
+
+/* Tool cards are the blink: small, one line, gone in 2.5s. */
+.lp-card.is-tool {
+  width: auto;
+}
+
+/* Prose is meant to be READ, so it is wider and uses the chat's typography.
+   Streaming text stays in this fixed glimpse and follows its newest lines; the
+   whole message remains one tap away. */
+.lp-card.is-text {
+  width: 100%;
+  align-items: flex-start;
+  padding: var(--space-3);
+  cursor: pointer;
+}
+.lp-card-doc {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-height: 6.2em;
+  overflow: hidden;
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--subtext1);
+  margin: 0;
+  padding: 0;
+  touch-action: none;
+  overscroll-behavior: none;
+  scrollbar-width: none;
+}
+.lp-card-doc.has-hidden-above {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 100%);
+}
+.lp-card-doc :is(p, ul, ol, li) {
+  font-size: inherit;
+  line-height: inherit;
+  margin: 0 0 var(--space-2);
+  max-width: none;
+}
+.lp-card-doc > :last-child {
+  margin-bottom: 0;
+}
+.lp-card-doc :is(h1, h2, h3, h4) {
+  font-size: inherit;
+  margin: 0 0 var(--space-1);
+}
+.lp-card-doc .code-block,
+.lp-card-doc pre {
+  margin: 0;
+  max-height: 4em;
+  overflow: hidden;
+}
+.lp-card-doc .code-block-header {
+  display: none;
+}
+
+/* Waiting — the exception. The run is parked on a human, so this one does not
+   expire: it is amber, it is still (motion would claim a progress that is not
+   happening), and it is a door to the chat where the answer lives. */
+.lp-card.is-waiting {
+  width: 100%;
+  border-color: color-mix(in srgb, var(--yellow) 50%, transparent);
+  background: color-mix(in srgb, var(--mantle) 92%, transparent);
+  color: var(--yellow);
+  cursor: pointer;
+  animation: lp-rise-in 0.28s var(--ease) both;
+}
+.lp-card-cta {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--overlay1);
+}
+@media (hover: hover) {
+
+.lp-card.is-waiting:hover .lp-card-cta {
+  color: var(--yellow);
+}
+}
+
+/* Feedback acknowledgement raised by the shell. */
+.lp-card.n-sent {
+  color: var(--green);
+}
+.lp-card.n-sent .lp-card-ic {
+  color: var(--green);
+}
+
+/* Enter from below, leave upwards: the card's whole life in two keyframes. The
+   exit duration MUST match EXIT_MS in stream.js or a card is removed from the
+   DOM mid-animation (or lingers as a ghost). */
+@keyframes lp-rise-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes lp-rise-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-12px); }
+}
+.lp-card.is-leaving {
+  animation: lp-rise-out 0.42s var(--ease) both;
+  pointer-events: none;
+}
+
+/* ── Chips ──────────────────────────────────────────────────────────────────
+   Only one is left, and it is the user's own doing: "1:1" exists solely while
+   they have zoomed. Top-left, so it never sits in the stream's lane. */
+.live-preview-chip {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--crust) 88%, transparent);
+  backdrop-filter: blur(6px);
+  color: var(--subtext0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  animation: lp-chip-in 0.18s var(--ease);
+}
+.live-preview-chip:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+@keyframes lp-chip-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Touch relay ──────────────────────────────────────────────────────────── */
+.live-preview-zoomlayer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  touch-action: none;
+  cursor: grab;
+  background: transparent;
+}
+.live-preview-stage {
+  touch-action: none;
+}
+.live-preview-zoomhint {
+  position: absolute;
+  left: var(--space-2);
+  bottom: calc(max(var(--space-2), env(safe-area-inset-bottom)) + 52px);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--crust) 85%, transparent);
+  backdrop-filter: blur(6px);
+  color: var(--subtext0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* The safety net: if iOS ever takes a gesture, these still change the scale.
+   Bottom-right, clear of the stream's lane and of the 1:1 chip top-left. */
+.live-preview-zoomctl {
+  position: absolute;
+  right: var(--space-2);
+  bottom: max(var(--space-2), env(safe-area-inset-bottom));
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: var(--space-1);
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--crust) 92%, transparent);
+  backdrop-filter: blur(6px);
+  touch-action: none;
+}
+.live-preview-zoomctl button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--subtext0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.live-preview-pan-controls {
+  display: inline-flex;
+  align-items: center;
+  border-left: 1px solid var(--surface2);
+  margin-left: var(--space-1);
+  padding-left: var(--space-1);
+}
+.live-preview-pan-controls button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+@container (max-width: 430px) {
+  .live-preview-pan-controls { display: none; }
+  .live-preview-zoomctl button { min-width: 34px; min-height: 34px; }
+}
+@media (hover: hover) {
+
+.live-preview-zoomctl button:hover {
+  color: var(--peach);
+}
+}
+.live-preview-zoomctl button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.live-preview-inspect-popover {
+  position: absolute;
+  z-index: 4;
+  width: min(320px, calc(100% - var(--space-4)));
+  max-height: calc(100% - var(--space-4));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--mauve) 60%, var(--surface2));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--mantle) 94%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-lg);
+  overflow: auto;
+}
+.live-preview-inspect-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.live-preview-element-tag {
+  flex: none;
+  padding: 3px 5px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--mauve) 16%, var(--surface0));
+  color: var(--mauve);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.live-preview-message-title {
+  flex: 1;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+.live-preview-selector {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--mauve);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-preview-inspect-close,
+.live-preview-voice {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md);
+  background: var(--base);
+  color: var(--subtext0);
+  cursor: pointer;
+}
+@media (hover: hover) {
+
+.live-preview-inspect-close:hover,
+.live-preview-voice:hover:not(:disabled) {
+  color: var(--mauve);
+  border-color: var(--mauve);
+}
+}
+.live-preview-inspect-close:focus-visible,
+.live-preview-voice:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.live-preview-voice:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+.live-preview-voice.is-recording {
+  border-color: var(--red);
+  color: var(--red);
+}
+.live-preview-voice.is-transcribing { color: var(--mauve); }
+.live-preview-inspect-text {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-preview-inspect-text small {
+  margin-left: var(--space-2);
+  color: var(--subtext0);
+  font-size: var(--text-xs);
+}
+.live-preview-inspect-compose { display: flex; flex-direction: column; gap: var(--space-2); }
+.live-preview-inspect-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); }
+.live-preview-voice-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: auto;
+  color: var(--subtext0);
+  font-size: var(--text-xs);
+}
+.live-preview-comment {
+  width: 100%;
+  resize: vertical;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md);
+  background: var(--base);
+  color: var(--text);
+  font-family: var(--font);
+  /* ≥16px — iOS zoom guard, same as the URL input. */
+  font-size: var(--text-input);
+}
+.live-preview-comment:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.live-preview-attachment {
+  color: var(--subtext0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+.live-preview-attachment::before {
+  content: "●";
+  margin-right: 5px;
+  color: var(--mauve);
+}
+.live-preview-attachment.is-empty::before { color: var(--surface2); }
+/* the whole message, read properly: the same AssistantDocument the transcript
+   renders, plus the way back to the conversation it came from. */
+.lp-msg-sheet .doc {
+  max-height: 60vh;
+  overflow: auto;
+}
+.lp-msg-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-preview-stage.is-working::after {
+    animation: none;
+  }
+  .lp-card,
+  .lp-card.is-leaving {
+    animation: none;
+  }
+  .lp-card.is-leaving {
+    opacity: 0;
+  }
+  .lp-card-txt.is-live {
+    animation: none;
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+    color: var(--subtext0);
+  }
+  .live-preview-chip {
+    animation: none;
+  }
+}
+
+/* Phone density for the full message in its sheet. The mobile rhythm the chat
+   applies to assistant prose is scoped to `.mconv` (MobileStream.css), and the
+   sheet is portalled to <body>, outside it — without this the same message would
+   read at a different line height here than in the transcript it came from. */
+@media (max-width: 768px) {
+  .lp-msg-sheet .doc p {
+    font-size: var(--text-base);
+    line-height: 1.55;
+    max-width: none;
+    margin: 0 0 10px;
+  }
+  .lp-msg-sheet .doc p:last-child {
+    margin-bottom: 0;
+  }
+  .lp-msg-sheet .doc ul {
+    margin-bottom: 10px;
+  }
+  /* Same behaviour, phone widths: the lane hugs the screen and clears the home
+     indicator. */
+  .lp-stream {
+    width: calc(100% - var(--space-3) * 2);
+    bottom: max(var(--space-3), env(safe-area-inset-bottom));
+  }
+}

@@ -4,11 +4,13 @@ import { updateSession, store } from "../../../data/store.js";
 import { useStore } from "../../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../../data/stream-model.js";
 import { focusedSessionId } from "../../../data/selectors.js";
-import { setActiveSession } from "../../../data/tile-actions.js";
+import { openSession, setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
+import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, openInbox, routeEvent, routeEventToNewSession } from "../../../data/events.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
+import { LivePreview } from "../../../components/LivePreview/LivePreview.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
@@ -19,6 +21,7 @@ import { MobileStream } from "./MobileStream.jsx";
 import { MobileNowLine } from "./MobileNowLine.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import { MobileBashJobView } from "./MobileBashJobView.jsx";
+import { MobileInboxView } from "./MobileInboxView.jsx"; // wake-on-event
 import { LiveDock } from "../../LiveDock/LiveDock.jsx";
 import { selectMobileChrome } from "./chrome.js";
 import "./MobileConversationScreen.css";
@@ -299,6 +302,13 @@ function MobileConversationBody({ forceMobile = false }) {
           sessionId={session.id}
         />
       )}
+      {session && (
+        <LivePreview
+          sessionId={session.id}
+          open={!!session.previewOpen}
+          onClose={() => updateSession(session.id, { previewOpen: false })}
+        />
+      )}
     </>
   );
 }
@@ -307,6 +317,11 @@ function MobileSessionChrome({ version, forceMobile = false }) {
   const chrome = useStore((s) => selectMobileChrome(s, forceMobile));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsPendingRef = useRef(false);
+  // The drawer hands off to another overlay by CLOSING FIRST (see the HANDOFF
+  // note in SessionDrawer): the pending flag is consumed in onClosed, once the
+  // leave animation has settled, so two overlays are never on screen at once.
+  // Settings and the Inbox both take that route.
+  const inboxPendingRef = useRef(false);
   const setDrawerOpen = (next) => (next ? openDrawer("list") : closeDrawer());
   const onSelectFromDrawer = (id) => selectMobileDrawerSession(store.get().sessions[id], {
     resume: resumeSession,
@@ -323,20 +338,43 @@ function MobileSessionChrome({ version, forceMobile = false }) {
     settingsPendingRef.current = true;
     closeDrawer();
   };
+  const onInboxFromDrawer = () => {
+    inboxPendingRef.current = true;
+    closeDrawer();
+  };
   const onDrawerClosed = () => {
+    if (inboxPendingRef.current) {
+      inboxPendingRef.current = false;
+      openInbox();
+      return;
+    }
     if (!settingsPendingRef.current) return;
     settingsPendingRef.current = false;
     setSettingsOpen(true);
   };
 
+  const inboxCount = inboxPendingCount(chrome.inbox);
+
   return (
     <>
-      {chrome.showChip && (
+      {chrome.showChip && !chrome.inboxOpen && (
         <MobileTitleChip
           title={chrome.title}
           attention={chrome.attention}
           open={chrome.drawerOpen}
           onToggle={setDrawerOpen}
+          inboxCount={inboxCount}
+        />
+      )}
+      {chrome.inboxOpen && (
+        <MobileInboxView
+          cards={chrome.inbox}
+          onBack={closeInbox}
+          onSend={(id, sessionId) => { routeEvent(id, sessionId).catch(() => {}); }}
+          onNewSession={(id, spec) => { routeEventToNewSession(id, spec).catch(() => {}); }}
+          onIgnore={(id) => { dismissEvent(id).catch(() => {}); }}
+          onIgnoreSource={(source) => { dismissSource(source).catch(() => {}); }}
+          onOpenSession={(id) => { if (openSession(id)) closeInbox(); }}
         />
       )}
       <SessionDrawer
@@ -353,6 +391,9 @@ function MobileSessionChrome({ version, forceMobile = false }) {
         onSelect={onSelectFromDrawer}
         onCreate={onCreate}
         onSettings={onSettingsFromDrawer}
+        onInbox={onInboxFromDrawer}
+        inboxCount={inboxCount}
+        inboxVisible={chrome.inbox.length > 0}
         version={version}
         onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
         onReopenSession={(id) => { resumeSession(id).catch(() => {}); }}

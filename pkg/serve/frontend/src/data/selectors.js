@@ -40,8 +40,8 @@ export function modelAccent(model) {
 }
 
 // deriveModelSpecs maps /api/models entries ({id, name, provider, alias?,
-// max_input?}) into the shape the model selector expects: {id, catalogId,
-// name, provider, codename, sub, accent, alias}. `id` here is the full "provider/id" spec
+// max_input?, reasoning_efforts?}) into the shape the model selector expects: {id, catalogId,
+// name, provider, codename, sub, accent, alias, reasoningEfforts}. `id` here is the full "provider/id" spec
 // configureSession sends over the wire (matches the old SettingsDropdown's
 // `m.provider + '/' + m.id`). `codename` is the one-word vocabulary the rest
 // of the UI already uses (modelCodename — Opus/Sonnet/Sol/Terra…); models
@@ -69,6 +69,7 @@ export function deriveModelSpecs(models) {
       sub,
       accent: modelAccent(m.name),
       alias: m.alias || '',
+      reasoningEfforts: m.reasoning_efforts || [],
     };
   });
 }
@@ -96,6 +97,28 @@ function escapeRegExp(s) {
 // Same vocabulary as ThinkingMeter/Segmented elsewhere.
 const THINKING_CYCLE = ['off', 'low', 'medium', 'high', 'xhigh'];
 
+// thinkingOptionsFor pairs the stable persisted selector positions with the
+// effective effort labels supplied by the backend. Most models have no custom
+// efforts, so their labels remain the positions themselves.
+export function thinkingOptionsFor(spec, sessionProvider) {
+  const levels = thinkingLevelsFor(spec, sessionProvider) || THINKING_CYCLE;
+  const efforts = spec?.reasoningEfforts;
+  return levels.map((value, index) => ({
+    value,
+    label: efforts?.[index] || value,
+    bars: THINKING_CYCLE.indexOf(value),
+  }));
+}
+
+// thinkingPositionFor converts an effective backend effort back to the stable
+// selector position. This keeps the selection meaningful when a model labels
+// its five positions differently (such as Astra's low through max).
+export function thinkingPositionFor(level, spec, sessionProvider) {
+  const options = thinkingOptionsFor(spec, sessionProvider);
+  return options.find((option) => option.label === level)?.value
+    || clampThinkingLevel(level, options.map((option) => option.value));
+}
+
 // nextThinkingLevel returns the next level in THINKING_CYCLE after `level`,
 // wrapping back to "off" after "xhigh". Unknown/missing levels start the
 // cycle at "low" (one step past "off"), so a stray click always moves it.
@@ -108,10 +131,12 @@ export function nextThinkingLevel(level, levels = THINKING_CYCLE) {
 
 // thinkingLevelsFor is the selector's option list for the current model.
 // Undefined means the full THINKING_CYCLE. xAI cannot persist off/xhigh;
+// Meta cannot disable reasoning at all, so off is not offered either;
 // Fable 5.1 thinks on every turn so off is not a real setting.
 export function thinkingLevelsFor(spec, sessionProvider) {
   const provider = spec?.provider || sessionProvider;
   if (provider === "xai") return ["low", "medium", "high"];
+  if (provider === "meta") return ["low", "medium", "high", "xhigh"];
   const id = String(spec?.catalogId || spec?.id || "").toLowerCase();
   if (id.includes("fable-5-1") || id.includes("fable-5.1")) {
     return ["low", "medium", "high", "xhigh"];

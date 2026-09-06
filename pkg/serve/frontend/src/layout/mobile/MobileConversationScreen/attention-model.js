@@ -54,10 +54,14 @@ export function mobileTitleChipPresentation(attention = {}) {
   };
 }
 
-export function mobileTitleChipLabel(title, attention = {}) {
+export function mobileTitleChipLabel(title, attention = {}, inboxCount = 0) {
   const { count, hasAttention } = mobileTitleChipPresentation(attention);
-  if (!hasAttention) return `${title} — sessions`;
-  return `${title} — sessions; ${count} other session${count === 1 ? '' : 's'} need attention`;
+  const parts = [`${title} — sessions`];
+  if (hasAttention) parts.push(`${count} other session${count === 1 ? '' : 's'} need attention`);
+  // The chip is the only place the inbox count is legible without opening the
+  // drawer, so the accessible label has to name it too.
+  if (inboxCount > 0) parts.push(`${inboxCount} event${inboxCount === 1 ? '' : 's'} waiting in the inbox`);
+  return parts.join('; ');
 }
 
 export function nextMobileTitleRipple(previousArrival, previousRipple, attention) {

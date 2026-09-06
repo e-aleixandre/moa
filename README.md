@@ -75,6 +75,33 @@ finished, and what needs you.
   <em>Parallel sessions with live telemetry and delegated work visible in the Live Dock.</em>
 </p>
 
+## Look at the app, not only at the diff
+
+When the agent is building a web interface, the only honest way to judge its work is to
+look at the app. But the development server runs on the machine where the agent works —
+a port you cannot reach from a phone.
+
+**Live Preview** puts that development server inside the conversation: pick a viewport
+width (390, 768, 1280 or fit), pinch to zoom, and watch the agent's activity float over
+the app instead of hiding it. Turn on **Inspect** and tap any element: you write — or
+dictate — what should change, and the agent receives your sentence together with an exact
+handle on the element you meant, page and selector included.
+
+<p align="center">
+  <img
+    src="docs/assets/serve-live-preview-inspect.png"
+    alt="Live Preview on a phone: a button in the previewed app is highlighted and a popover asks what should change"
+    width="320"
+  />
+  <br/>
+  <em>Point at the button, say what is wrong with it. The agent gets the element, not a description of it.</em>
+</p>
+
+Optionally, `moa serve --preview-port … --preview-public-url …` proxies your dev server so
+the inspector is injected without touching your project. It is for **your own development
+servers**: the previewed app runs at the proxy's origin, and only loopback, private and
+tailnet addresses are accepted. See the [Live Preview guide](docs/serve.md#live-preview).
+
 ## Why self-host the agent?
 
 Moa runs on infrastructure you control rather than uploading your repository to a
@@ -86,8 +113,8 @@ Moa-operated service.
   network such as Tailscale, or place it behind your own authenticated reverse proxy.
 - **Keep operational state on your machine.** Session history, configuration, credentials,
   and project memory are stored by your Moa installation.
-- **Use the provider you choose.** Moa talks to Anthropic, OpenAI or xAI from your machine and
-  does not add a separate hosted agent service in between.
+- **Use the provider you choose.** Moa talks to Anthropic, OpenAI, xAI or Meta from your
+  machine and does not add a separate hosted agent service in between.
 
 Self-hosted does **not** mean offline: prompts, selected code or file content, and tool results
 needed by the model are sent to the provider you configure. Review that provider's data
@@ -102,7 +129,8 @@ policies and use Moa's permission and path controls for the level of access you 
 - **Delegate and parallelize.** Run multiple sessions or let an agent spawn synchronous or
   asynchronous subagents whose activity can be inspected live.
 - **Exchange real artifacts.** Attach images, PDFs, source files, and other inputs; the agent
-  can return downloadable files, rich Markdown, images, and sandboxed HTML previews.
+  can return downloadable files as [Artifacts](docs/serve.md#files-sent-by-the-agent), rich
+  Markdown, images, and sandboxed HTML previews.
 - **Bring your own workflow.** Add MCP servers, custom script tools, verification commands,
   reusable skills, and project instructions through `AGENTS.md`.
 
@@ -122,12 +150,12 @@ For the complete capability reference, see the
 
 ## Use the provider you already have
 
-Moa supports Anthropic, OpenAI and xAI.
+Moa supports Anthropic, OpenAI, xAI and Meta.
 
-You can authenticate with a **Claude Pro or Max**, **ChatGPT Plus/Pro** or **SuperGrok/X**
-subscription through OAuth, without configuring a separate API key for the main agent.
-Anthropic, OpenAI and xAI API keys are supported as well. Model availability and usage limits
-remain those of the provider account you use.
+You can authenticate with a **Claude Pro or Max**, **ChatGPT Plus/Pro**, **SuperGrok/X**
+or **Muse** subscription through OAuth, without configuring a separate API key for the
+main agent. Anthropic, OpenAI, xAI and Meta API keys are supported as well. Model
+availability and usage limits remain those of the provider account you use.
 
 ## Quick start
 
@@ -159,6 +187,7 @@ Authenticate with an existing subscription:
 moa --login anthropic   # Claude Pro/Max OAuth
 moa --login openai      # ChatGPT Plus/Pro OAuth, or choose an API key
 moa --login xai         # SuperGrok/X OAuth device flow
+moa --login meta        # Muse subscription OAuth device flow
 ```
 
 Or provide an API key directly:
@@ -169,6 +198,8 @@ export ANTHROPIC_API_KEY="..."
 export OPENAI_API_KEY="..."
 # or:
 export XAI_API_KEY="..."
+# or:
+export META_API_KEY="..."
 ```
 
 Start the web UI:

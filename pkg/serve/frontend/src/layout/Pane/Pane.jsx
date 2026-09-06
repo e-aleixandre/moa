@@ -1,4 +1,4 @@
-import { Maximize2, X, GripHorizontal, Columns2, Rows2 } from "lucide-preact";
+import { Maximize2, X, GripHorizontal, Columns2, Rows2, AppWindow } from "lucide-preact";
 import { StateDot, IconButton } from "../../primitives/index.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import "./Pane.css";
@@ -63,6 +63,12 @@ export function Pane({
   paneRef,
   dataTileId,
   bodyLive = false,
+  overlay,
+  onPreviewToggle,
+  previewOpen = false,
+  // headExtra — extra pane-header actions (the Artifacts entry), in the same
+  // icon family as the existing tools.
+  headExtra,
 }) {
   const classes = [
     "pane",
@@ -121,6 +127,12 @@ export function Pane({
         {path && <span class="p-path">{path}</span>}
 
         <div class="p-tools">
+          {headExtra}
+          {onPreviewToggle && (
+            <IconButton label="Live preview" onClick={onPreviewToggle} className={previewOpen ? "p-preview is-on" : "p-preview"}>
+              <AppWindow size={15} />
+            </IconButton>
+          )}
           {onSplitRight && (
             <IconButton label="Split right" onClick={onSplitRight}>
               <Columns2 size={15} />
@@ -165,6 +177,7 @@ export function Pane({
         )}
 
       {status && <div class="p-status">{status}</div>}
+      {overlay}
     </section>
   );
 }

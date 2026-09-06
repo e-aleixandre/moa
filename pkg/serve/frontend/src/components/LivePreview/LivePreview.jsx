@@ -1,0 +1,848 @@
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { MousePointerClick, X, Minus, Plus, MoreVertical, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Smartphone, Tablet, Monitor, Scan, PencilLine } from "lucide-preact";
+import { Sheet } from "../Sheet/Sheet.jsx";
+import { Segmented } from "../Segmented/Segmented.jsx";
+import { AssistantDocument } from "../AssistantDocument/AssistantDocument.jsx";
+import { Button } from "../../primitives/index.js";
+import { renderMarkdown } from "../../data/util/markdown.js";
+import { feedbackMessage, previewReferenceContext } from "../../data/util/preview-reference.js";
+import { Composer } from "../../layout/Composer/Composer.jsx";
+import { useStore } from "../../hooks/useStore.js";
+import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
+import { PreviewStream } from "./PreviewStream.jsx";
+import { streamEvents, stageState } from "./stream.js";
+import { PreviewAddressSetup, PreviewErrorBanner, PreviewURLSetup } from "./PreviewSetup.jsx";
+import { INSPECTOR_NOTICE, activatePreview, deactivatePreview, fetchPreviewStatus, portOf, suggestPublicURL, validPublicURL } from "./preview-proxy.js";
+import { applyGesture, clampPan, pinchState, stageGesture, zoomAt, IDENTITY } from "./zoom.js";
+import "./LivePreview.css";
+
+// LivePreview — PROTOTYPE. A dev server rendered inside moa, next to the
+// conversation, so the user can look at their app at a chosen viewport width
+// and hand the agent a pointer to a concrete element ("this button", not "the
+// button on the pricing page").
+//
+// The iframe loads a cross-origin URL the user types, so it is NOT sandboxed
+// the way srcdoc previews are (see data/util/html-preview.js): Vite's HMR needs
+// websockets and same-origin access inside the frame. The bridge with the
+// previewed app is postMessage only (inspector.js, copied into that app).
+//
+// DESIGN RULE, everywhere below: the app owns every pixel, permanently. The
+// preview covers the transcript, so the run still has to be visible — but not as
+// a place. It is a STREAM: each thing the agent does floats up over the app and
+// dissolves (PreviewStream), the tool in flight tints the stage's own frame, and
+// what changed is shown INSIDE the app by the inspector. Idle, there is nothing
+// over the app at all.
+//
+// The URL follows the same rule: it is typed once, on a first-run screen, and
+// then its row is gone for good — changing it is a rare action, so it lives in
+// the overflow menu with the reload.
+
+// Each width is an icon first (the device it stands for) and a number second:
+// the number is shown only where the bar has room for it and always lives in
+// the accessible name, so "768" is still what a screen reader or a tooltip says.
+// Glyph sizes follow the device: phone < tablet < desktop, so the three
+// rectangles read apart at a glance even without their numbers.
+const WIDTHS = [
+  { value: "390", label: "390", icon: Smartphone, size: 14, ariaLabel: "Phone · 390px", title: "Phone · 390px" },
+  { value: "768", label: "768", icon: Tablet, size: 17, ariaLabel: "Tablet · 768px", title: "Tablet · 768px" },
+  { value: "1280", label: "1280", icon: Monitor, size: 18, ariaLabel: "Desktop · 1280px", title: "Desktop · 1280px" },
+  { value: "fit", label: "Fit", icon: Scan, size: 16, ariaLabel: "Fit to pane", title: "Fit to pane" },
+];
+
+function renderWidth(opt) {
+  const Icon = opt.icon;
+  return (
+    <>
+      <Icon size={opt.size} aria-hidden="true" />
+      <span class="live-preview-width-label" aria-hidden="true">{opt.label}</span>
+    </>
+  );
+}
+
+const urlKey = (sessionId) => `moa-preview-url:${sessionId}`;
+
+export function loadPreviewURL(sessionId) {
+  try {
+    return localStorage.getItem(urlKey(sessionId)) || "";
+  } catch {
+    return "";
+  }
+}
+
+function savePreviewURL(sessionId, url) {
+  try {
+    localStorage.setItem(urlKey(sessionId), url);
+  } catch {
+    /* private mode / quota — the URL just won't survive a reload */
+  }
+}
+
+// normalizeURL — a bare "host:5173" typed on a phone keyboard should load.
+export function normalizeURL(raw) {
+  const text = (raw || "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text)) return text;
+  return `http://${text}`;
+}
+
+export function LivePreview({ sessionId, open, onClose, inline = false }) {
+  const session = useStore((s) => s.sessions[sessionId]);
+  const [targetURL, setTargetURL] = useState("");
+  const [frameURL, setFrameURL] = useState("");
+  const [draftURL, setDraftURL] = useState("");
+  const [editingURL, setEditingURL] = useState(false);
+  const [width, setWidth] = useState("fit");
+  const [inspect, setInspect] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const [previewPublicURL, setPreviewPublicURL] = useState("");
+  const [previewError, setPreviewError] = useState("");
+  // setupMode is which question the panel is asking: the app URL, the address
+  // the browser reaches the proxy through, or nothing (it is showing the app).
+  const [setupMode, setSetupMode] = useState(null);
+  const [addressDraft, setAddressDraft] = useState("");
+  const [addressError, setAddressError] = useState("");
+  const [proxySupported, setProxySupported] = useState(true);
+  const [inspectorReady, setInspectorReady] = useState(true);
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  const [view, setView] = useState(IDENTITY);
+  const [notes, setNotes] = useState([]);
+  const [reading, setReading] = useState(null);
+  const iframeRef = useRef(null);
+  const stageRef = useRef(null);
+  const geometry = useRef({ base: 1, w: 0, h: 0, stage: { w: 0, h: 0 } });
+  const noteSeq = useRef(0);
+  const inspectButtonRef = useRef(null);
+  const [touchInput, disableTouchInput] = useTouchPreviewInput();
+
+  const events = streamEvents(session);
+  const stage = stageState(session);
+
+  // note — a card the SHELL raises next to the ones the run raises: the
+  // acknowledgement of a feedback message.
+  // Same lifetime, same lane, so they never fight the run for a corner.
+  const note = (kind, text) => {
+    const id = `note:${noteSeq.current++}`;
+    setNotes((prev) => [...prev.slice(-2), { id, kind: "note", note: kind, text }]);
+    // The card owns its own exit (reconcile); this only stops the list from
+    // growing forever behind it.
+    setTimeout(() => setNotes((prev) => prev.filter((n) => n.id !== id)), 8000);
+  };
+
+  // The saved value is always the upstream target; the iframe uses the proxy URL.
+  //
+  // Opening the panel is what turns the proxy on: there is no flag and no
+  // restart. What Moa cannot know by itself is the address the browser reaches
+  // that listener through, so the first time it asks, proposing the host the
+  // user is already on. Afterwards the address is remembered server-side.
+  useEffect(() => {
+    if (!open) return undefined;
+    let cancelled = false;
+    const restore = async () => {
+      const saved = loadPreviewURL(sessionId);
+      setDraftURL(saved);
+      setEditingURL(false);
+      try {
+        const status = await fetchPreviewStatus();
+        if (cancelled) return;
+        const supported = status.supported !== false;
+        setProxySupported(supported);
+        setPreviewPublicURL(supported ? status.public_url || "" : "");
+        setPreviewError(status.error || "");
+        if (!saved) {
+          setSetupMode("url");
+          return;
+        }
+        setTargetURL(saved);
+        if (!supported) {
+          setFrameURL(saved);
+          setSetupMode(null);
+          return;
+        }
+        if (!status.public_url) {
+          setAddressDraft(suggestPublicURL(window.location, status.suggested_port));
+          setSetupMode("address");
+          return;
+        }
+        await startPreview(saved, status.public_url, () => cancelled);
+      } catch {
+        if (!cancelled) {
+          setFrameURL("");
+          setPreviewError("Moa could not reach its own preview settings. Reload the page and try again.");
+        }
+      }
+    };
+    restore();
+    return () => { cancelled = true; };
+  }, [open, sessionId]);
+
+  // Closing the panel takes the listener down. Without this the port would stay
+  // open (and the app stay reachable through it) for as long as moa serve runs,
+  // which is exactly what hot activation exists to avoid.
+  useEffect(() => {
+    if (!open) return undefined;
+    return () => { deactivatePreview().catch(() => {}); };
+  }, [open]);
+
+  // Every activation carries a token. A PUT that comes back after the user has
+  // changed target, corrected the address or closed the panel is dropped
+  // instead of silently mounting a preview nobody asked for any more — the
+  // failure mode of a slow response and a second tab.
+  const activation = useRef(0);
+
+  const startPreview = async (target, publicURL, cancelled = () => false) => {
+    const token = ++activation.current;
+    const stale = () => cancelled() || activation.current !== token;
+    setFrameURL("");
+    try {
+      const result = await activatePreview(fetch, {
+        url: target,
+        publicURL,
+        port: publicURL ? portOf(publicURL) : 0,
+        parentOrigin: location.origin,
+      });
+      if (stale()) return false;
+      setPreviewPublicURL(result.public_url || publicURL || "");
+      setFrameURL(result.preview_url || result.public_url || "");
+      setPreviewError("");
+      setSetupMode(null);
+      setSelected(null);
+      setView(IDENTITY);
+      setReloadNonce((n) => n + 1);
+      return true;
+    } catch (error) {
+      if (stale()) return false;
+      setFrameURL("");
+      setPreviewError(String(error?.message || error) || "The preview proxy could not be started.");
+      return false;
+    }
+  };
+
+  // Measure the stage so the scaled iframe can be laid out in real pixels.
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const stageEl = stageRef.current;
+    if (!stageEl) return undefined;
+    const measure = () => setBox({ w: stageEl.clientWidth, h: stageEl.clientHeight });
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(stageEl);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [open, frameURL]);
+
+  // The inspector lives in the previewed app; the only channel is postMessage.
+  const post = (msg) => {
+    const origin = frameURL ? new URL(frameURL).origin : "";
+    if (origin) iframeRef.current?.contentWindow?.postMessage(msg, origin);
+  };
+  const postInspect = (enabled) => post({ type: "moa-inspect", enabled });
+
+  // Frame geometry: the unscaled size of the iframe and the scale the chosen
+  // width is already drawn at. Everything the pinch math needs, in one place.
+  const fixed = width === "fit" ? null : Number(width);
+  const frameW = fixed || Math.max(box.w, 1);
+  const base = fixed && box.w ? Math.min(1, box.w / fixed) : 1;
+  const frameH = Math.max(box.h, 1) / base;
+  geometry.current = { base, w: frameW, h: frameH, stage: { w: box.w, h: box.h } };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onMessage = (event) => {
+      const data = event.data;
+      if (!data || typeof data.type !== "string") return;
+      const frame = iframeRef.current;
+      const expectedOrigin = frameURL ? new URL(frameURL).origin : "";
+      if (!expectedOrigin || event.origin !== expectedOrigin) return;
+      if (!frame || event.source !== frame.contentWindow) return;
+
+      if (data.type === "moa-element") {
+        setSelected(data);
+        setComposerOpen(true);
+        // A mouse click inside a cross-origin frame gives that frame focus.
+        // Return it to moa's chrome once the selection is delivered.
+        requestAnimationFrame(() => inspectButtonRef.current?.focus());
+        return;
+      }
+      if (data.type === "moa-escape") {
+        onClose();
+        requestAnimationFrame(() => document.querySelector("[data-preview-trigger='true']")?.focus());
+      }
+      if (data.type === "moa-ready") {
+        setInspectorReady(true);
+        return;
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [open, onClose, frameURL]);
+
+  useEffect(() => {
+    if (!frameURL) return undefined;
+    setInspectorReady(false);
+    const timer = setTimeout(() => setInspectorReady((ready) => ready), 3000);
+    return () => clearTimeout(timer);
+  }, [frameURL, reloadNonce]);
+
+  // iOS Safari pinch guard. A pinch that has to
+  // cross the iframe boundary is split between two touch-active documents and
+  // never becomes one two-finger sequence — measured on a real iPhone, both the
+  // in-frame bridge and same-origin listeners flicker. Zoom mode puts a layer of
+  // THIS document over the whole stage before the first contact, so there is
+  // only one document involved; these guards are the last mile, stopping
+  // WebKit's legacy gesture* events from page-zooming moa's shell. Outside Zoom
+  // mode nothing global is installed: the rest of moa must keep its own gestures.
+  useEffect(() => {
+    if (!open) return undefined;
+    const stop = (e) => e.preventDefault();
+    const opts = { passive: false };
+    document.addEventListener("gesturestart", stop, opts);
+    document.addEventListener("gesturechange", stop, opts);
+    document.addEventListener("gestureend", stop, opts);
+    return () => {
+      document.removeEventListener("gesturestart", stop, opts);
+      document.removeEventListener("gesturechange", stop, opts);
+      document.removeEventListener("gestureend", stop, opts);
+    };
+  }, [open]);
+
+  // Closing the panel drops the selection but keeps the URL (persisted).
+  useEffect(() => {
+    if (open) return;
+    setSelected(null);
+    setInspect(false);
+    setView(IDENTITY);
+    setNotes([]);
+    setReading(null);
+  }, [open]);
+
+  if (!open) return null;
+
+  const commitURL = async () => {
+    const next = normalizeURL(draftURL);
+    setDraftURL(next);
+    setEditingURL(false);
+    if (!next) return;
+    setTargetURL(next);
+    savePreviewURL(sessionId, next);
+    if (!proxySupported) {
+      setFrameURL(next);
+      setSetupMode(null);
+      setSelected(null);
+      setView(IDENTITY);
+      setReloadNonce((n) => n + 1);
+      return;
+    }
+    if (!previewPublicURL) {
+      // First run: the app URL is known, the address of the proxy is not. Ask
+      // for it now, with a proposal, rather than opening a listener the browser
+      // may have no way to reach.
+      try {
+        const status = await fetchPreviewStatus();
+        setAddressDraft(addressDraft || suggestPublicURL(window.location, status.suggested_port));
+      } catch {
+        setAddressDraft(addressDraft || suggestPublicURL(window.location, 0));
+      }
+      setSetupMode("address");
+      return;
+    }
+    // A target switch gets a new capability and a new iframe document. Never
+    // leave the previous target running while the proxy is being repointed.
+    await startPreview(next, previewPublicURL);
+  };
+
+  // commitAddress is the one-time confirmation of the address the browser uses
+  // to reach the proxy. Moa binds the port it names, so a busy port or an
+  // unusable address comes back here as an error the user can correct.
+  const commitAddress = async () => {
+    const address = addressDraft.trim().replace(/\/+$/, "");
+    if (!validPublicURL(address)) {
+      setAddressError("Enter a full address, including http:// or https:// and the port.");
+      return;
+    }
+    setAddressError("");
+    const started = await startPreview(targetURL, address);
+    if (!started) setSetupMode("address");
+  };
+
+  const reload = () => {
+    setSelected(null);
+    setReloadNonce((n) => n + 1);
+  };
+
+  const toggleInspect = () => {
+    const next = !inspect;
+    setInspect(next);
+    postInspect(next);
+    if (!next) setSelected(null);
+  };
+
+  const onFrameLoad = () => {
+    // A navigation inside the app (or a reload) drops the inspector state:
+    // re-arm it so the toggle keeps meaning what it says.
+    if (inspect) postInspect(true);
+    post({ type: "moa-hello" });
+  };
+
+  const zoomed = view.zoom !== 1;
+  const scale = base * view.zoom;
+  const frameStyle = {
+    width: `${frameW}px`,
+    height: `${frameH}px`,
+    transform: `translate(${view.x}px, ${view.y}px) scale(${scale})`,
+    transformOrigin: "0 0",
+  };
+  // The holder carries the SCALED size: a transform does not change layout, so
+  // without it the stage would either not scroll at all or scroll over the
+  // unscaled height. Zoomed, the pan is the position and the holder just fills.
+  const holderStyle = zoomed ? { width: "100%", height: "100%" } : { width: `${frameW * scale}px`, height: `${frameH * scale}px` };
+
+  const showSetup = setupMode === "address" ? "address" : (!targetURL || editingURL || setupMode === "url") ? "url" : null;
+
+  const preview = (
+    <>
+      <div class="live-preview-bar">
+        <PreviewMenu
+          onChangeURL={() => {
+            setDraftURL(targetURL);
+            setEditingURL(true);
+          }}
+          onReload={reload}
+        />
+        <Segmented
+          className="live-preview-widths"
+          options={WIDTHS}
+          value={width}
+          onChange={(next) => {
+            setWidth(next);
+            setView(IDENTITY);
+          }}
+          renderOption={renderWidth}
+          aria-label="Viewport width"
+        />
+        <div class="live-preview-bar-end">
+          <button
+            type="button"
+            class={`live-preview-action${inspect ? " is-on" : ""}`}
+            ref={inspectButtonRef}
+            onClick={toggleInspect}
+            aria-pressed={inspect}
+            aria-label="Inspect"
+            title="Inspect — tap an element in the app"
+          >
+            <MousePointerClick size={16} />
+            <span class="live-preview-action-label">Inspect</span>
+          </button>
+          <button type="button" class="live-preview-action" onClick={onClose} aria-label="Close preview" title="Close preview">
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+      {!inspectorReady && <div class="live-preview-inspector-warning">{INSPECTOR_NOTICE}</div>}
+      {previewError && showSetup !== "address" && (
+        <PreviewErrorBanner
+          message={previewError}
+          onChangeAddress={() => {
+            setAddressDraft(previewPublicURL || addressDraft);
+            setSetupMode("address");
+          }}
+        />
+      )}
+
+      {/* The live border: the stage's own frame carries the identity color of
+          the tool in flight and breathes while it runs, amber and still while
+          the run is parked on the user, invisible when idle. Peripheral vision
+          is the whole point — it is read without looking, and it costs the app
+          nothing but the 2px the panel's edge already spent. */}
+      <div
+        class={
+          `live-preview-stage is-${stage.mode}${composerOpen ? " has-composer" : " has-composer-handle"}` +
+          `${stage.mode === "working" && stage.kind ? ` k-${stage.kind}` : ""}`
+        }
+        onPointerDownCapture={(event) => {
+          if (selected && !event.target.closest(".live-preview-composer")) setSelected(null);
+        }}
+      >
+        <div
+          class={`live-preview-scroller${zoomed ? " is-zoomed" : ""}`}
+          ref={stageRef}
+        >
+          {frameURL && (
+            <div class="live-preview-holder" style={holderStyle}>
+              <iframe
+                key={`${frameURL}#${reloadNonce}`}
+                ref={iframeRef}
+                class="live-preview-frame"
+                src={frameURL}
+                style={frameStyle}
+                onLoad={onFrameLoad}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                title="Live preview"
+              />
+            </div>
+          )}
+        </div>
+
+        {showSetup === "url" && (
+          <PreviewURLSetup
+            value={draftURL}
+            onInput={setDraftURL}
+            onCommit={commitURL}
+            onCancel={() => setEditingURL(false)}
+            canCancel={!!targetURL}
+          />
+        )}
+
+        {showSetup === "address" && (
+          <PreviewAddressSetup
+            value={addressDraft}
+            onInput={setAddressDraft}
+            onCommit={commitAddress}
+            onBack={() => { setSetupMode("url"); setDraftURL(targetURL); }}
+            error={addressError || previewError}
+          />
+        )}
+
+        {/* Siblings of the scroller, not children: what floats over the app must
+            not slide away when the app under it scrolls. */}
+        {frameURL && !showSetup && (
+          <>
+            {touchInput && <TouchZoomOverlay geometry={geometry} view={view} onView={setView} inspect={inspect} post={post} onMouse={disableTouchInput} />}
+            <ZoomControls geometry={geometry} view={view} onView={setView} />
+          </>
+        )}
+        {zoomed && (
+          <button
+            type="button"
+            class="live-preview-chip is-zoom"
+            onClick={() => setView(IDENTITY)}
+            title="Reset zoom"
+          >
+            1:1
+          </button>
+        )}
+        {composerOpen ? (
+          <PreviewComposer
+            sessionId={sessionId}
+            session={session}
+            selected={selected}
+            onClose={() => {
+              setSelected(null);
+              setComposerOpen(false);
+            }}
+            onSent={() => {
+              setSelected(null);
+              setComposerOpen(false);
+              note("sent", "Sent");
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            class="live-preview-composer-handle"
+            onClick={() => setComposerOpen(true)}
+            title="Open the message composer"
+          >
+            <span class="live-preview-composer-handle-pill">
+              <PencilLine size={14} aria-hidden="true" />
+              Write to Moa
+            </span>
+          </button>
+        )}
+        {!showSetup && (
+          <PreviewStream
+            events={events}
+            notes={notes}
+            onOpenText={setReading}
+            onGoToChat={onClose}
+          />
+        )}
+      </div>
+
+      {reading && (
+        <Sheet open onClose={() => setReading(null)} title="Message" class="lp-msg-sheet">
+          <AssistantDocument html={renderMarkdown(reading)} />
+          <div class="lp-msg-actions">
+            <Button variant="solid" size="sm" onClick={onClose}>
+              Go to chat
+            </Button>
+          </div>
+        </Sheet>
+      )}
+    </>
+  );
+  return inline
+    ? <section class="live-preview-inline" aria-label="Live preview">{preview}</section>
+    : <Sheet open onClose={onClose} ariaLabel="Live preview" class="live-preview-sheet">{preview}</Sheet>;
+}
+
+function useTouchPreviewInput() {
+  const get = () => typeof window !== "undefined"
+    && window.matchMedia("(pointer: coarse)").matches
+    && !window.matchMedia("(any-pointer: fine)").matches;
+  const [touch, setTouch] = useState(get);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const queries = [window.matchMedia("(pointer: coarse)"), window.matchMedia("(any-pointer: fine)")];
+    const update = () => setTouch(get());
+    queries.forEach((query) => query.addEventListener?.("change", update));
+    return () => queries.forEach((query) => query.removeEventListener?.("change", update));
+  }, []);
+  return [touch, () => setTouch(false)];
+}
+
+// PreviewMenu — the two rare actions on the URL, out of the way. Changing the
+// dev server address happens once a session at most, so it does not get to keep
+// a row of the app forever; reload joins it because it is one tap deeper and
+// still instant.
+function PreviewMenu({ onChangeURL, onReload }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const triggerRef = useRef(null);
+  const actionsRef = useRef(null);
+  const { onMenuKeyDown, closeMenu } = useMenuKeyboard(open, setOpen, triggerRef, actionsRef);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocDown = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocDown);
+    return () => document.removeEventListener("mousedown", onDocDown);
+  }, [open]);
+
+  return (
+    <div class="live-preview-menu" ref={ref}>
+      <button
+        type="button"
+        class="live-preview-action"
+        ref={triggerRef}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Preview options"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <MoreVertical size={15} />
+      </button>
+      {open && (
+        <div
+          class="live-preview-menu-items"
+          role="menu"
+          aria-label="Preview options"
+          ref={actionsRef}
+          onKeyDown={onMenuKeyDown}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            class="live-preview-menu-item"
+            onClick={() => {
+              closeMenu();
+              onReload();
+            }}
+          >
+            Reload
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="live-preview-menu-item"
+            onClick={() => {
+              closeMenu();
+              onChangeURL();
+            }}
+          >
+            Change URL
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PreviewComposer({ sessionId, session, selected, onClose, onSent }) {
+  const context = selected && previewReferenceContext(selected.ancestors);
+  const label = selected?.text || selected?.tag || "Element";
+
+  return (
+    <section class="live-preview-composer" role="dialog" aria-label="Message the agent">
+      {selected && (
+        <div class="live-preview-reference">
+          <span class="live-preview-reference-dot" aria-hidden="true" />
+          <span>Element: {label}{context && ` · ${context}`}</span>
+        </div>
+      )}
+      <Composer
+        sessionId={sessionId}
+        session={session}
+        compact
+        shortPlaceholder
+        transformMessage={(text) => feedbackMessage(text, selected)}
+        onSent={onSent}
+      />
+      <button type="button" class="live-preview-composer-close" onClick={onClose} aria-label="Close message composer">
+        <X size={15} />
+      </button>
+    </section>
+  );
+}
+
+// On touch-only devices this layer owns the first contact before WebKit chooses
+// a touch-active document. Fine pointers never get this layer: their iframe is
+// a normal browser surface for click, hover, wheel and keyboard input.
+function TouchZoomOverlay({ geometry, view, onView, inspect, post, onMouse }) {
+  const layerRef = useRef(null);
+  const viewRef = useRef(view);
+  const inspectRef = useRef(inspect);
+  const postRef = useRef(post);
+  const onViewRef = useRef(onView);
+  const onMouseRef = useRef(onMouse);
+  viewRef.current = view;
+  inspectRef.current = inspect;
+  postRef.current = post;
+  onViewRef.current = onView;
+  onMouseRef.current = onMouse;
+
+  useEffect(() => {
+    const el = layerRef.current;
+    if (!el) return undefined;
+    let start = IDENTITY;
+    let pinch = null;
+    let relay = null;
+    let relayMove = null;
+    let relayRAF = 0;
+    let lastTap = null;
+    const point = (touch) => {
+      const g = geometry.current;
+      const rect = el.getBoundingClientRect();
+      const scale = g.base * viewRef.current.zoom;
+      return { x: (touch.clientX - rect.left - viewRef.current.x) / scale, y: (touch.clientY - rect.top - viewRef.current.y) / scale };
+    };
+    const flushRelay = () => {
+      relayRAF = 0;
+      if (!relayMove) return;
+      postRef.current({ type: "moa-scroll", ...relayMove });
+      relayMove = null;
+    };
+    const onTouchStart = (e) => {
+      e.preventDefault();
+      if (e.touches.length >= 2) {
+        relay = null;
+        start = viewRef.current;
+        pinch = pinchState(e.touches[0], e.touches[1]);
+      } else if (e.touches.length === 1) {
+        const t = e.touches[0];
+        relay = { x: t.clientX, y: t.clientY, startX: t.clientX, startY: t.clientY, started: performance.now(), moved: false, point: point(t) };
+      }
+    };
+    const onTouchMove = (e) => {
+      e.preventDefault();
+      const g = geometry.current;
+      if (e.touches.length >= 2) {
+        relay = null;
+        if (!pinch) { start = viewRef.current; pinch = pinchState(e.touches[0], e.touches[1]); }
+        onViewRef.current(applyGesture(start, stageGesture(start, g, pinch, pinchState(e.touches[0], e.touches[1])), g, g.stage));
+        return;
+      }
+      if (e.touches.length === 1 && relay) {
+        const t = e.touches[0];
+        const dx = t.clientX - relay.x;
+        const dy = t.clientY - relay.y;
+        relay.moved ||= Math.hypot(t.clientX - relay.startX, t.clientY - relay.startY) >= 10;
+        relay.x = t.clientX;
+        relay.y = t.clientY;
+        if (relay.moved) {
+          const scale = g.base * viewRef.current.zoom;
+          if (!relayMove) relayMove = { x: relay.point.x, y: relay.point.y, dx: 0, dy: 0, reset: true };
+          relayMove.dx -= dx / scale;
+          relayMove.dy -= dy / scale;
+          if (!relayRAF) relayRAF = requestAnimationFrame(flushRelay);
+        }
+      }
+    };
+    const onTouchEnd = (e) => {
+      e.preventDefault();
+      if (e.touches.length < 2) pinch = null;
+      if (e.touches.length === 0 && relay) {
+        const duration = performance.now() - relay.started;
+        if (e.type === "touchend" && !relay.moved && duration < 300 && e.changedTouches.length) {
+          const p = point(e.changedTouches[0]);
+          if (lastTap && performance.now() - lastTap.at < 300 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 10) {
+            onViewRef.current(IDENTITY);
+            lastTap = null;
+          } else {
+            postRef.current({ type: inspectRef.current ? "moa-inspect-tap" : "moa-tap", x: p.x, y: p.y });
+            lastTap = { ...p, at: performance.now() };
+          }
+        }
+        relay = null;
+      }
+    };
+    const onWheel = (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const g = geometry.current;
+      const rect = el.getBoundingClientRect();
+      onViewRef.current(zoomAt(viewRef.current, Math.exp(-e.deltaY / 300), { x: e.clientX - rect.left, y: e.clientY - rect.top }, g, g.stage));
+    };
+    const onPointerDown = (e) => {
+      if (e.pointerType !== "mouse") return;
+      e.preventDefault();
+      const p = point(e);
+      postRef.current({ type: inspectRef.current ? "moa-inspect-tap" : "moa-tap", x: p.x, y: p.y });
+      onMouseRef.current();
+    };
+    const opts = { passive: false };
+    el.addEventListener("touchstart", onTouchStart, opts);
+    el.addEventListener("touchmove", onTouchMove, opts);
+    el.addEventListener("touchend", onTouchEnd, opts);
+    el.addEventListener("touchcancel", onTouchEnd, opts);
+    el.addEventListener("wheel", onWheel, opts);
+    el.addEventListener("pointerdown", onPointerDown, opts);
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart, opts);
+      el.removeEventListener("touchmove", onTouchMove, opts);
+      el.removeEventListener("touchend", onTouchEnd, opts);
+      el.removeEventListener("touchcancel", onTouchEnd, opts);
+      el.removeEventListener("wheel", onWheel, opts);
+      el.removeEventListener("pointerdown", onPointerDown, opts);
+      if (relayRAF) cancelAnimationFrame(relayRAF);
+    };
+  }, [geometry]);
+
+  return (
+    <>
+      <div class="live-preview-zoomlayer" ref={layerRef} role="presentation" />
+      <span class="live-preview-zoomhint">Pinch · drag · double-tap = 1:1</span>
+    </>
+  );
+}
+
+function ZoomControls({ geometry, view, onView }) {
+  const step = (factor) => {
+    const g = geometry.current;
+    onView(zoomAt(view, factor, null, g, g.stage));
+  };
+  const pan = (x, y) => {
+    const g = geometry.current;
+    const scale = g.base * view.zoom;
+    onView({ zoom: view.zoom, ...clampPan(view.x + x, view.y + y, g.w * scale, g.h * scale, g.stage.w, g.stage.h) });
+  };
+  return (
+    <div class="live-preview-zoomctl">
+      <button type="button" onClick={() => step(1 / 1.4)} aria-label="Zoom out" title="Zoom out"><Minus size={15} /></button>
+      <button type="button" onClick={() => step(1.4)} aria-label="Zoom in" title="Zoom in"><Plus size={15} /></button>
+      <button type="button" onClick={() => onView(IDENTITY)} aria-label="Reset zoom" title="Reset zoom">1:1</button>
+      <span class="live-preview-pan-controls" aria-label="Pan preview">
+        <button type="button" onClick={() => pan(48, 0)} aria-label="Pan left" title="Pan left"><ArrowLeft size={13} /></button>
+        <button type="button" onClick={() => pan(-48, 0)} aria-label="Pan right" title="Pan right"><ArrowRight size={13} /></button>
+        <button type="button" onClick={() => pan(0, 48)} aria-label="Pan up" title="Pan up"><ArrowUp size={13} /></button>
+        <button type="button" onClick={() => pan(0, -48)} aria-label="Pan down" title="Pan down"><ArrowDown size={13} /></button>
+      </span>
+    </div>
+  );
+}

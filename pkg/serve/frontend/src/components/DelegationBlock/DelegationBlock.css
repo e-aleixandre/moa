@@ -93,9 +93,12 @@
   cursor: pointer;
   transition: background var(--duration) var(--ease);
 }
+@media (hover: hover) {
+
 
 .dlg-agent.clickable:hover {
   background: color-mix(in srgb, var(--surface0) 30%, transparent);
+}
 }
 
 .dlg-agent .a-id {
@@ -188,9 +191,12 @@
   font-size: var(--text-xs);
   cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .dlg-open:hover {
   text-decoration: underline;
+}
 }
 
 .a-expand {
@@ -236,8 +242,11 @@
 	font: inherit;
 	cursor: pointer;
 }
+@media (hover: hover) {
+
 
 .dlg-copy:hover { color: var(--text); background: var(--surface1); }
+}
 
 /* indeterminate progress bar under a running agent's action line, in its
    accent color — same pattern as the old .fanout .ibar */
@@ -470,7 +479,10 @@
 .dlg-outcome-card { border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent); }
 .dlg-outcome-summary { width: 100%; display: grid; gap: 3px; padding: var(--space-3) var(--space-4); border: 0; background: transparent; color: inherit; text-align: left; font: inherit; }
 .dlg-outcome-summary.clickable { cursor: pointer; }
+@media (hover: hover) {
+
 .dlg-outcome-summary.clickable:hover { background: color-mix(in srgb, var(--surface0) 30%, transparent); }
+}
 .outcome-title { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); min-height: 20px; }
 .outcome-mark { color: var(--green); display: inline-flex; justify-content:center; align-items:center; }
 .dlg-outcome-card.failed .outcome-mark { color: var(--red); }
@@ -484,6 +496,9 @@
 .dlg-outcome-actions.single { grid-template-columns: minmax(0, 1fr); }
 .dlg-outcome-actions button { min-height: 44px; display: inline-flex; justify-content: center; align-items: center; gap: 3px; border: 0; background: transparent; color: var(--a); font: inherit; font-size: var(--text-xs); cursor: pointer; }
 .dlg-outcome-actions button + button { border-left: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent); }
+@media (hover: hover) {
+
 .dlg-outcome-actions button:hover { background: color-mix(in srgb, var(--surface0) 30%, transparent); }
+}
 .dlg-outcome-summary:focus-visible, .dlg-outcome-actions button:focus-visible, .dlg-copy:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--focus-ring-width)); }
 .dlg-outcome-actions .open { transform: rotate(180deg); }

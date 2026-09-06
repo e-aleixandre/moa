@@ -49,9 +49,12 @@
   display: inline-flex;
   align-items: center;
 }
+@media (hover: hover) {
+
 
 .toast .x:hover {
   color: var(--text);
+}
 }
 
 .toast .x:focus-visible {
@@ -70,9 +73,12 @@
   border: none;
   padding: 0;
 }
+@media (hover: hover) {
+
 
 .toast .act:hover {
   text-decoration: underline;
+}
 }
 
 .toast .act:focus-visible {

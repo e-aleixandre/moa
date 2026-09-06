@@ -1,0 +1,56 @@
+/* wake-on-event — InboxButton styles. Sized to the 44px tap target on the
+   phone; the badge overlaps the glyph's corner rather than widening the
+   control, so nothing beside it moves when a count appears. */
+
+.inbox-btn {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--overlay1);
+  cursor: pointer;
+  transition: color var(--duration) var(--ease), background var(--duration) var(--ease);
+}
+@media (hover: hover) {
+
+
+.inbox-btn:hover { color: var(--text); }
+}
+
+.inbox-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.inbox-btn.is-open {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.inbox-btn-badge {
+  position: absolute;
+  top: 6px;
+  right: 5px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: var(--radius-full);
+  background: var(--mauve);
+  color: var(--crust);
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  font-weight: var(--weight-semibold);
+  line-height: 15px;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inbox-btn { transition: none; }
+}

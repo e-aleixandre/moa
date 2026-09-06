@@ -3,7 +3,7 @@
 import { wsState } from './shared.js';
 import { store, setState, updateSession } from '../store.js';
 import { markUnseen, acknowledgeVisibleLiveAttention } from './attention.js';
-import { parseSubagentNotification } from './history.js';
+import { parseSubagentNotification, skillForkLaunchRow } from './history.js';
 import { nextRunEpoch } from './init.js';
 
 export function scheduleFlush() {
@@ -241,6 +241,12 @@ export function handleWsUserMessage(id, data) {
     }] });
     return;
   }
+  // A skill the user launched with /<name>: same launch row live and on reload.
+  const forkRow = skillForkLaunchRow(data);
+  if (forkRow) {
+    updateSession(id, { messages: [...messages, forkRow] });
+    return;
+  }
 	const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, content, custom: data.custom };
 	updateSession(id, { messages: [...messages, userMsg] });
 }
@@ -276,6 +282,14 @@ export function handleWsSteer(id, data) {
     const content = Array.isArray(data.content) && data.content.length > 0
       ? data.content
       : [{ type: 'text', text: data.text }];
+    // A forked skill launched while the agent was busy arrives on this lane
+    // (an internal steer), not as a user_message. Same row either way.
+    const forkRow = skillForkLaunchRow(data);
+    if (forkRow) {
+      patch.messages = [...messages, forkRow];
+      updateSession(id, patch);
+      return;
+    }
     if (!isStructuredSubagentNotification(sess, data.text || '')) {
 		const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content, custom: data.custom };
 		patch.messages = [...messages, userMsg];

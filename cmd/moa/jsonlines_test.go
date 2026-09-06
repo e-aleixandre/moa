@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // captureJSONLines runs fn with stdout redirected and returns parsed JSON objects.
@@ -57,21 +58,21 @@ func TestJSONLineWriter_AgentStartEnd(t *testing.T) {
 		defer b.Close()
 		jw := newJSONLineWriter()
 		jw.subscribeAll(b, nil)
-		publishAndDrain(b, bus.AgentStarted{}, bus.AgentEnded{})
+		publishAndDrain(b, bus.AgentStarted{}, bus.AgentEnded{}, bus.RunEnded{})
 	})
 
-	// agent_start, summary, agent_end
+	// agent_start, agent_end, summary
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 lines, got %d", len(lines))
 	}
 	if lines[0]["type"] != "agent_start" {
 		t.Errorf("expected agent_start, got %v", lines[0]["type"])
 	}
-	if lines[1]["type"] != "summary" {
-		t.Errorf("expected summary, got %v", lines[1]["type"])
+	if lines[1]["type"] != "agent_end" {
+		t.Errorf("expected agent_end, got %v", lines[1]["type"])
 	}
-	if lines[2]["type"] != "agent_end" {
-		t.Errorf("expected agent_end, got %v", lines[2]["type"])
+	if lines[2]["type"] != "summary" {
+		t.Errorf("expected summary, got %v", lines[2]["type"])
 	}
 }
 
@@ -287,10 +288,11 @@ func TestJSONLineWriter_Progress(t *testing.T) {
 				IsError:  false,
 			},
 			bus.AgentEnded{},
+			bus.RunEnded{},
 		)
 	})
 
-	// tool_execution_start, tool_execution_end, progress, summary, agent_end
+	// tool_execution_start, tool_execution_end, progress, agent_end, summary
 	if len(lines) != 5 {
 		t.Fatalf("expected 5 lines, got %d", len(lines))
 	}
@@ -315,8 +317,8 @@ func TestJSONLineWriter_Progress(t *testing.T) {
 		t.Errorf("expected elapsed_seconds >= 0, got %v", progress["elapsed_seconds"])
 	}
 
-	// Summary before agent_end
-	summary := lines[3]
+	// Summary follows RunEnded.
+	summary := lines[4]
 	if summary["type"] != "summary" {
 		t.Errorf("expected summary, got %v", summary["type"])
 	}
@@ -324,8 +326,97 @@ func TestJSONLineWriter_Progress(t *testing.T) {
 		t.Errorf("expected turns=1, got %v", summary["turns"])
 	}
 
-	if lines[4]["type"] != "agent_end" {
-		t.Errorf("expected agent_end, got %v", lines[4]["type"])
+	if lines[3]["type"] != "agent_end" {
+		t.Errorf("expected agent_end, got %v", lines[3]["type"])
+	}
+}
+
+func TestJSONLineWriter_MainUsageAndCost(t *testing.T) {
+	usage := core.Usage{Input: 1_000_000, Output: 1_000_000, CacheRead: 10, CacheWrite: 20}
+	message := core.AgentMessage{Message: core.Message{
+		Role: "assistant", Provider: "openai", Model: "gpt-5.6-luna", Usage: &usage,
+	}}
+	const runCost = 2.2 + 0.0000004 + 0.00001 // luna long-context input + output + cache rates
+
+	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
+		jw := newJSONLineWriter()
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b,
+			bus.MessageEnded{Message: message},
+			bus.AgentEnded{},
+			bus.RunEnded{Cost: runCost},
+		)
+	})
+
+	if len(lines) != 3 {
+		t.Fatalf("expected message_usage, agent_end, summary; got %d lines", len(lines))
+	}
+	messageLine := lines[0]
+	if messageLine["type"] != "message_usage" || messageLine["role"] != "main" {
+		t.Fatalf("unexpected message usage line: %#v", messageLine)
+	}
+	if messageLine["cost_usd"] != roundUSD(runCost) {
+		t.Errorf("message cost = %v, want %v", messageLine["cost_usd"], runCost)
+	}
+	summary := lines[2]
+	if summary["cost_usd"] != roundUSD(runCost) {
+		t.Errorf("summary cost = %v, want %v", summary["cost_usd"], runCost)
+	}
+	usageSummary := summary["usage"].(map[string]any)
+	if usageSummary["input"] != float64(1_000_000) || usageSummary["output"] != float64(1_000_000) {
+		t.Errorf("unexpected summary usage: %#v", usageSummary)
+	}
+	byModel := summary["by_model"].([]any)
+	if len(byModel) != 1 || byModel[0].(map[string]any)["messages"] != float64(1) {
+		t.Errorf("unexpected by_model: %#v", byModel)
+	}
+}
+
+func TestJSONLineWriter_SubagentUsageAndNoDoubleCounting(t *testing.T) {
+	mainUsage := core.Usage{Input: 1_000_000}
+	childUsage := core.Usage{Input: 1_000_000, Output: 1_000_000}
+	mainMessage := core.AgentMessage{Message: core.Message{
+		Role: "assistant", Provider: "openai", Model: "gpt-5.6-luna", Usage: &mainUsage,
+	}}
+	childMessage := core.AgentMessage{Message: core.Message{
+		Role: "assistant", Provider: "openai", Model: "gpt-5.6-terra", Usage: &childUsage,
+	}}
+	const mainRunCost = 0.4
+	const childCost = 22.0
+
+	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
+		jw := newJSONLineWriter()
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b,
+			bus.MessageEnded{Message: mainMessage},
+			bus.SubagentEvent{JobID: "child-1", Inner: bus.MessageEnded{Message: childMessage}},
+			bus.SubagentUsage{JobID: "child-1", Usage: &childUsage, CostUSD: childCost},
+			bus.SubagentEnded{JobID: "child-1", Status: "completed", CostUSD: childCost},
+			bus.AgentEnded{},
+			bus.RunEnded{Cost: mainRunCost},
+		)
+	})
+
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 lines, got %d: %#v", len(lines), lines)
+	}
+	if lines[1]["role"] != "subagent" || lines[1]["subagent_id"] != "child-1" {
+		t.Errorf("unexpected subagent message usage: %#v", lines[1])
+	}
+	if lines[2]["type"] != "subagent_end" || lines[2]["cost_usd"] != childCost {
+		t.Errorf("unexpected subagent end: %#v", lines[2])
+	}
+	summary := lines[4]
+	if got, want := summary["cost_usd"], mainRunCost+childCost; got != want {
+		t.Errorf("summary cost = %v, want %v; main usage must not be added to RunEnded.Cost again", got, want)
+	}
+	byModel := summary["by_model"].([]any)
+	if len(byModel) != 2 {
+		t.Fatalf("expected main and child model aggregates, got %#v", byModel)
 	}
 }
 
@@ -346,6 +437,7 @@ func TestJSONLineWriter_ProgressSkipsErrorTools(t *testing.T) {
 				IsError:  false,
 			},
 			bus.AgentEnded{},
+			bus.RunEnded{},
 		)
 	})
 

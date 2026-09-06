@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+var gpt6AstraReasoningEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+
 // Known models with context window sizes and API details.
 var knownModels = map[string]Model{
 	// --- Anthropic ---
@@ -60,11 +62,39 @@ var knownModels = map[string]Model{
 		Name: "GPT-5.2 Codex", MaxInput: 256_000, MaxOutput: 16384,
 		Pricing: &Pricing{Input: 1.25, Output: 10, CacheRead: 0.125},
 	},
+	"gpt-6-astra": {
+		ID: "gpt-6-astra", Provider: "openai", API: "openai-chat",
+		Name: "GPT-6 Astra", MaxInput: 1_050_000, MaxOutput: 128_000,
+		// Short-context (<=272K input) pricing shown here. Long-context
+		// (>272K input) prompts are billed at 2x input and 1.5x output.
+		Pricing: &Pricing{
+			Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5,
+			Tiers: []PricingTier{
+				{Threshold: 272_000, Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25},
+			},
+		},
+	},
 	"gpt-5.6-sol": {
 		ID: "gpt-5.6-sol", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.6 Sol", MaxInput: 1_050_000, MaxOutput: 128_000,
 		// Short-context (<=272K input) pricing shown here. Long-context
 		// (>272K input) prompts are billed at 2x input and 1.5x output.
+		Pricing: &Pricing{
+			Input: 5, Output: 30, CacheRead: 0.5, CacheWrite: 6.25,
+			Tiers: []PricingTier{
+				{Threshold: 272_000, Input: 10, Output: 45, CacheRead: 1, CacheWrite: 12.5},
+			},
+		},
+	},
+	// Daybreak Blue is an alias, not a fixed model: it points at the current
+	// flagship with safeguards calibrated for defensive cybersecurity work.
+	// It today resolves to gpt-5.6-sol (responses come back under that id), so
+	// it mirrors Sol's pricing and limits. When OpenAI repoints the alias, both
+	// must be revisited here — the API bills the new target, not this table.
+	// Requires separate provisioning on the account (openai.com/daybreak).
+	"gpt-daybreak-blue-latest": {
+		ID: "gpt-daybreak-blue-latest", Provider: "openai", API: "openai-chat",
+		Name: "Daybreak Blue", MaxInput: 1_050_000, MaxOutput: 128_000,
 		Pricing: &Pricing{
 			Input: 5, Output: 30, CacheRead: 0.5, CacheWrite: 6.25,
 			Tiers: []PricingTier{
@@ -139,12 +169,40 @@ var knownModels = map[string]Model{
 			},
 		},
 	},
+
+	// --- Meta ---
+	// MaxOutput is not published. api.meta.ai accepts large
+	// max_output_tokens values but reserves that capacity against the account's
+	// output rate limit (a 5M request is refused with rate_limit_exceeded), so
+	// this stays at the same cap as the other 1M-context models.
+	"muse-spark-1.3": {
+		ID: "muse-spark-1.3", Provider: "meta", API: "meta-responses",
+		Name: "Muse Spark 1.3", MaxInput: 1_000_000, MaxOutput: 131072,
+		Pricing: &Pricing{Input: 1.25, Output: 4.25, CacheRead: 0.15},
+	},
+	// The contributor SKU is cheap because Meta trains on its prompts. The
+	// display name has to say so: it is the whole trade-off of picking it.
+	"muse-spark-1.3-contributor": {
+		ID: "muse-spark-1.3-contributor", Provider: "meta", API: "meta-responses",
+		Name: "Muse Spark 1.3 (contributor, data shared)", MaxInput: 1_000_000, MaxOutput: 131072,
+		Pricing: &Pricing{Input: 0.10, Output: 0.20, CacheRead: 0.002},
+	},
+}
+
+// ReasoningEffortsForModel returns the validated reasoning efforts a model
+// accepts. A nil result preserves the Responses API's existing behavior for
+// models without an explicit capability declaration.
+func ReasoningEffortsForModel(model Model) []string {
+	if strings.EqualFold(model.ID, "gpt-6-astra") {
+		return gpt6AstraReasoningEfforts
+	}
+	return nil
 }
 
 func init() {
 	for _, model := range knownModels {
 		if model.Pricing != nil && supportsFastModel(model) {
-			model.Pricing.FastMultiplier = FastCostMultiplier(model.Provider)
+			model.Pricing.FastMultiplier = FastCostMultiplier(model)
 		}
 	}
 }
@@ -160,7 +218,10 @@ var modelAliases = map[string]string{
 	"codex":       "gpt-5.3-codex",
 	"codex-spark": "gpt-5.3-codex-spark",
 	"codex-5.2":   "gpt-5.2-codex",
+	"astra":       "gpt-6-astra",
+	"gpt-6":       "gpt-6-astra",
 	"sol":         "gpt-5.6-sol",
+	"daybreak":    "gpt-daybreak-blue-latest",
 	"terra":       "gpt-5.6-terra",
 	"luna":        "gpt-5.6-luna",
 	"gpt-5.6":     "gpt-5.6-sol",
@@ -174,6 +235,8 @@ var modelAliases = map[string]string{
 	// one entry and cost/identity work whichever backend answered.
 	"grok-4.6-build": "grok-4.6",
 	"grok-4.5-build": "grok-4.5",
+	// Meta
+	"muse": "muse-spark-1.3",
 }
 
 // ResolveModel resolves a model specifier to a fully-populated Model.
@@ -322,8 +385,13 @@ var modelDisplayOrder = []string{
 	"claude-sonnet-5",
 	"claude-opus-4-8",
 	"claude-haiku-4-5-20251001",
+	// Meta
+	"muse-spark-1.3",
+	"muse-spark-1.3-contributor",
 	// OpenAI
+	"gpt-6-astra",
 	"gpt-5.6-sol",
+	"gpt-daybreak-blue-latest",
 	"gpt-5.6-terra",
 	"gpt-5.6-luna",
 	"gpt-5.5",
@@ -342,10 +410,11 @@ func ListModels() []ModelEntry {
 		byID[m.ID] = m
 	}
 
-	// Build reverse alias map: canonical ID → shortest alias.
+	// Build reverse alias map: canonical ID → shortest alias. Equal-length
+	// aliases use lexical order so map iteration cannot change what is shown.
 	aliases := make(map[string]string)
 	for alias, canonicalID := range modelAliases {
-		if existing, ok := aliases[canonicalID]; !ok || len(alias) < len(existing) {
+		if existing, ok := aliases[canonicalID]; !ok || len(alias) < len(existing) || len(alias) == len(existing) && alias < existing {
 			aliases[canonicalID] = alias
 		}
 	}

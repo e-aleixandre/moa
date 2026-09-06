@@ -49,6 +49,19 @@ func TestNew_XAI_APIKey(t *testing.T) {
 	}
 }
 
+func TestNew_Meta_RequiresExplicitCredentialKind(t *testing.T) {
+	p, err := New(core.Model{Provider: "meta", ID: "muse-spark-1.3"}, Config{APIKey: "meta-key", AuthKind: AuthKindAPIKey})
+	if err != nil || p == nil {
+		t.Fatalf("New meta = %v, %v", p, err)
+	}
+	if p, err := New(core.Model{Provider: "meta", ID: "muse-spark-1.3"}, Config{APIKey: "minted-key", AuthKind: AuthKindOAuth}); err != nil || p == nil {
+		t.Fatalf("New meta OAuth = %v, %v", p, err)
+	}
+	if _, err := New(core.Model{Provider: "meta", ID: "muse-spark-1.3"}, Config{APIKey: "meta-key"}); err == nil {
+		t.Fatal("meta without a credential kind must fail")
+	}
+}
+
 func TestNew_EmptyProvider_Errors(t *testing.T) {
 	model := core.Model{Provider: "", ID: "some-model"}
 	_, err := New(model, Config{APIKey: "key"})

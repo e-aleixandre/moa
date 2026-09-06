@@ -333,3 +333,75 @@ func TestMsgIDInUse_WithoutTreeSyncer(t *testing.T) {
 // syncer released its lock raced the pointer swap performed by ClearSession /
 // resume (runtime.go) and could also date an anchor from a different tree than
 // the suffix. Run under -race; a regression reports a read/write on sctx.Tree.
+
+// The compaction notice is addressed to the model, but the user needs it too:
+// it is the reason the model interrupts the task to write things down. Without
+// it the transcript keeps those actions and loses their cause, which is what a
+// session reopened hours later cannot explain.
+//
+// The two audiences are independent, and this pins both: the notice is durable
+// in the transcript, the model sees it while it is relevant, and a compaction
+// drops it from the context so a stale "save your work" is never replayed.
+func TestTreeSyncer_CompactionNoticeIsDurableButLeavesModelContext(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.Tree = session.NewTree()
+	RegisterHandlers(sctx)
+	RegisterTreeSyncer(b, sctx)
+
+	task := msg("user", "long task")
+	task.MsgID = "u-task"
+	notice := msg("user", "<system-reminder>context is close…</system-reminder>")
+	notice.MsgID = "n-1"
+	notice.Custom = map[string]any{"source": "compaction_notice", "internal": true}
+	saved := msg("assistant", "wrote the state down")
+	saved.MsgID = "a-saved"
+
+	fa.mu.Lock()
+	fa.messages = []core.AgentMessage{task, notice, saved}
+	fa.mu.Unlock()
+	b.Publish(RunEnded{SessionID: "test-session"})
+	b.Drain(time.Second)
+
+	if !containsMsgID(sctx.Tree.AllMessages(), "n-1") {
+		t.Error("notice is not in the durable transcript; the actions it caused lose their cause")
+	}
+	if before, _ := sctx.Tree.BuildContext(); !containsMsgID(before, "n-1") {
+		t.Error("model context lacks the notice before compaction; the warning would do nothing")
+	}
+
+	summary := msg("assistant", "summary")
+	summary.MsgID = "sum-1"
+	fa.mu.Lock()
+	fa.messages = []core.AgentMessage{summary, saved}
+	fa.mu.Unlock()
+	b.Publish(CompactionEnded{SessionID: "test-session", Payload: &core.CompactionPayload{
+		Summary:        "summary",
+		SummaryMsgID:   "sum-1",
+		FirstKeptMsgID: "a-saved",
+	}})
+	b.Drain(time.Second)
+
+	if after, _ := sctx.Tree.BuildContext(); containsMsgID(after, "n-1") {
+		t.Error("a spent notice is still sent to the model after compaction")
+	}
+	all := sctx.Tree.AllMessages()
+	if !containsMsgID(all, "n-1") {
+		t.Error("notice lost from the durable transcript after compaction")
+	}
+	if !containsMsgID(all, "a-saved") {
+		t.Error("work done in response to the notice is missing from the transcript")
+	}
+}
+
+func containsMsgID(msgs []core.AgentMessage, id string) bool {
+	for _, m := range msgs {
+		if m.MsgID == id {
+			return true
+		}
+	}
+	return false
+}

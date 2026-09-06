@@ -236,6 +236,38 @@ func TestLiveSubagentInitData_SharesOneAggregateBudget(t *testing.T) {
 	}
 }
 
+// A terminal SYNC child is gone from the live registry by the time the parent
+// reloads, so the init snapshot lists no live subagent for it and the outcome
+// is the only carrier of its identity. Without the title there, the restored
+// card degrades to the task heading (or the model) even though the sidecar and
+// the REST endpoints have the real title.
+func TestBuildInitData_OutcomeCarriesPersistedTitle(t *testing.T) {
+	mgr := newTestManager(t, t.Context(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveOutcome(t, sess, session.SubagentTranscript{
+		JobID:      "sa-titled",
+		Task:       "\n# Delivery review QA\n\nVerify the promised work.",
+		Title:      "Review delivered files",
+		Status:     "completed",
+		Result:     "looks good",
+		FinishedAt: time.Now(),
+	})
+
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
+	if len(data.Subagents) != 0 {
+		t.Fatalf("terminal sync child must not appear as live: %+v", data.Subagents)
+	}
+	if len(data.SubagentOutcomes) != 1 {
+		t.Fatalf("outcomes = %+v", data.SubagentOutcomes)
+	}
+	if got := data.SubagentOutcomes[0].Title; got != "Review delivered files" {
+		t.Fatalf("outcome title = %q, want the persisted title", got)
+	}
+}
+
 func TestBuildInitData_OutcomeResultsAreExcerpted(t *testing.T) {
 	mgr := newTestManager(t, t.Context(), newMockProvider())
 	sess, err := mgr.CreateSession(CreateOpts{})
@@ -589,6 +621,26 @@ func TestInitProjectionStillDropsUnrelatedInternalCustomKeys(t *testing.T) {
 	projected, _ := sanitizeHistoryMessage(original)
 	if _, leaked := projected.Custom["internal_secret"]; leaked {
 		t.Fatalf("unrelated internal key reached the client: %#v", projected.Custom)
+	}
+}
+
+func TestInitProjectionKeepsEventEnvelope(t *testing.T) {
+	original := core.AgentMessage{Message: core.Message{
+		Role: "user", MsgID: "ev-msg",
+		Content: []core.Content{core.TextContent(`{"ok":true}`)},
+	}, Custom: map[string]any{
+		"source": "event", "id": "ev_1", "source_name": "sentry-tienda",
+		"title": "Checkout 500s", "autorun": false, "steer": true,
+		"internal_secret": "nope",
+	}}
+	projected, _ := sanitizeHistoryMessage(original)
+	if projected.Custom["source"] != "event" || projected.Custom["id"] != "ev_1" ||
+		projected.Custom["source_name"] != "sentry-tienda" || projected.Custom["title"] != "Checkout 500s" ||
+		projected.Custom["autorun"] != false || projected.Custom["steer"] != true {
+		t.Fatalf("event custom = %#v", projected.Custom)
+	}
+	if _, leaked := projected.Custom["internal_secret"]; leaked {
+		t.Fatalf("internal key leaked: %#v", projected.Custom)
 	}
 }
 

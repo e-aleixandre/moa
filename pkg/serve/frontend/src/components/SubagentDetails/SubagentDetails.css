@@ -84,6 +84,9 @@
   place-items: center;
   color: var(--overlay1);
 }
-
-.sa-idrow:hover .sa-idrow-act,
 .sa-idrow:focus-visible .sa-idrow-act { color: var(--text); }
+@media (hover: hover) {
+
+
+.sa-idrow:hover .sa-idrow-act{ color: var(--text); }
+}

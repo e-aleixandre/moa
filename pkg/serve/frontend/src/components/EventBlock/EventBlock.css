@@ -1,0 +1,184 @@
+/* wake-on-event — EventBlock styles.
+
+   An event is a MARGIN NOTE, not a card and not a message. It carries no fill,
+   no border, no rule and no identity colour: peach belongs to the owner
+   (waypoints, primary actions) and yellow/red are reserved for states that
+   need someone. An event is neither.
+
+   What sets it apart is ALIGNMENT. The glyph sits in the gutter, outside the
+   text column, and everything else is indented past it — the shape of a note
+   written in the margin of a page. Scrolling, the eye catches the broken
+   left edge long before it would catch a colour, and nothing is shouted.
+
+   The expanded payload is the ledger's detail surface (crust panel, flush
+   CodeBlock), so raw text this conversation received looks the same wherever
+   it is read. */
+
+.evb {
+  position: relative;
+  margin: var(--space-5) 0;
+  padding-left: 22px;
+}
+
+/* The glyph hangs in the gutter, vertically on the provenance line. */
+.evb-glyph {
+  position: absolute;
+  left: 0;
+  top: 15px;
+  display: inline-flex;
+  color: var(--overlay1);
+}
+
+.evb-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-1) 0;
+  border: 0;
+  background: transparent;
+  color: var(--subtext0);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.evb-head:disabled { cursor: default; }
+.evb-head:focus-visible,
+.evb-more:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.evb-id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Provenance line: mono, uppercase, muted — the same voice as project paths
+   and tray timestamps. Every segment (source, age, delivery notes) is in the
+   one muted role, separated by middle dots: nothing here is more important
+   than the title below it. */
+.evb-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* The source name carries the normal text colour while the rest of the line
+   stays muted: one anchor for the eye, at no cost in colour. */
+.evb-source {
+  color: var(--subtext0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The only line in normal text colour: what actually arrived. */
+.evb-title {
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.evb-chev {
+  flex: none;
+  display: inline-flex;
+  color: var(--overlay0);
+  transition: transform var(--duration) var(--ease);
+}
+
+.evb.open .evb-chev { transform: rotate(90deg); }
+
+/* The payload sits on the tool ledger's detail surface: recessed crust, one
+   border, the CodeBlock flush inside it providing its own padding. */
+.evb-body {
+  margin-top: var(--space-2);
+  background: var(--crust);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.evb-body .code.flush {
+  max-width: 100%;
+  max-height: 420px;
+  overflow: auto;
+}
+
+/* Compact: the inbox sheet on a phone cannot spend 420px on a payload. */
+.evb-body.compact .code.flush {
+  max-height: 120px;
+}
+
+.evb-payload-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--overlay1);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.evb-payload-toggle:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.evb-payload-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evb-payload.open .evb-chev { transform: rotate(90deg); }
+
+.evb-more {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
+  background: transparent;
+  color: var(--overlay1);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+@media (hover: hover) {
+
+
+.evb-more:hover { color: var(--text); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .evb-chev { transition: none; }
+}

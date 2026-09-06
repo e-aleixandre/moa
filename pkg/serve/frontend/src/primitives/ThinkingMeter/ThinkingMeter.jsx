@@ -2,10 +2,11 @@ import "./ThinkingMeter.css";
 
 // ThinkingMeter — a single component with 3 switchable variants (bars |
 // dial | glyph) so we can compare which one we like before settling on one.
-const LEVELS = ["off", "low", "medium", "high", "xhigh"];
+// These are stable selector positions, not provider-specific effort labels.
+const POSITIONS = ["off", "low", "medium", "high", "xhigh"];
 
-function levelToFilled(level) {
-  const idx = LEVELS.indexOf(level);
+export function thinkingMeterFilled(position) {
+  const idx = POSITIONS.indexOf(position);
   return idx < 0 ? 0 : idx;
 }
 
@@ -48,7 +49,7 @@ export function ThinkingMeter({
   decorative = false,
   ...rest
 }) {
-  const filled = levelToFilled(level);
+  const filled = thinkingMeterFilled(level);
   // Accessible name: hidden when the consumer already exposes the level in text
   // (decorative), otherwise a sensible default like "Thinking: high".
   const a11y = decorative

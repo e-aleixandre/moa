@@ -44,6 +44,7 @@ type serverOptions struct {
 	deviceAuth      bool
 	realtimeKey     RealtimeAPIKeyFunc
 	realtimeHTTP    *http.Client
+	preview         *PreviewController
 }
 
 // RealtimeAPIKeyFunc returns only a normal OpenAI API key. ok must be false
@@ -96,6 +97,13 @@ func WithDeviceAuthentication() ServerOption {
 	return func(o *serverOptions) { o.deviceAuth = true }
 }
 
+// WithPreviewController wires the Live Preview proxy's lifecycle. The listener
+// is not opened here: the controller binds a port only when someone actually
+// opens a preview, and closes it again when they turn it off.
+func WithPreviewController(controller *PreviewController) ServerOption {
+	return func(o *serverOptions) { o.preview = controller }
+}
+
 // NewServer returns an http.Handler wired to the given manager.
 func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	var o serverOptions
@@ -114,6 +122,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("PATCH /api/subagent-models", handleSubagentModels(manager))
 	mux.HandleFunc("GET /api/compact-at", handleCompactAt(manager))
 	mux.HandleFunc("PATCH /api/compact-at", handleCompactAt(manager))
+	mux.HandleFunc("GET /api/compact-model", handleCompactModel(manager))
+	mux.HandleFunc("PATCH /api/compact-model", handleCompactModel(manager))
 	mux.HandleFunc("GET /api/compact-strategy", handleCompactStrategy(manager))
 	mux.HandleFunc("PATCH /api/compact-strategy", handleCompactStrategy(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/fast", handleSessionFast(manager))
@@ -155,16 +165,27 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/branches", handleListBranches(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/files", handleListFiles(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/files/{fileID}", handleDownloadFile(manager))
+	mux.HandleFunc("HEAD /api/sessions/{id}/files/{fileID}", handleDownloadFile(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/artifacts", handleListArtifacts(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/attachments/{attID}", handleGetAttachment(manager))
 	mux.HandleFunc("HEAD /api/sessions/{id}/attachments/{attID}", handleGetAttachment(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
+	mux.HandleFunc("GET /api/preview/target", handlePreviewTarget(o.preview))
+	mux.HandleFunc("PUT /api/preview/target", handlePreviewTarget(o.preview))
 	mux.HandleFunc("GET /api/usage", handleUsage(manager))
 	mux.HandleFunc("POST /api/transcribe", handleTranscribe(manager))
 	mux.HandleFunc("GET /api/push/vapid-public-key", handlePushVAPIDKey(manager))
 	mux.HandleFunc("POST /api/push/subscribe", handlePushSubscribe(manager))
 	mux.HandleFunc("POST /api/push/unsubscribe", handlePushUnsubscribe(manager))
+	// wake-on-event: the owner's inbox. Deciding where an event goes is the
+	// owner's call, so these sit on the normal browser auth, not the automation
+	// token — that token may write events and nothing else.
+	mux.HandleFunc("GET /api/events", handleListEvents(manager))
+	mux.HandleFunc("POST /api/events/dismiss", handleDismissEventSource(manager))
+	mux.HandleFunc("POST /api/events/{id}/route", handleRouteEvent(manager))
+	mux.HandleFunc("POST /api/events/{id}/dismiss", handleDismissEvent(manager))
 
 	mux.Handle("GET /", static.handler)
 	// The manifest needs its own content type; everything else the file server
@@ -215,6 +236,12 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/ask-response", handleAutomationAskResponse(manager))
 	automationRoutes.HandleFunc("POST /api/automation/sessions/{id}/permission", handleAutomationPermission(manager))
 	handler = automationMiddleware(o.automationToken, bodyTimeoutMiddleware(automationRoutes), handler)
+	// wake-on-event ingress: POST /hooks/<source>/<secret>. The path secret is
+	// the credential, so this sits outside browser auth and CSRF — same shape
+	// as the Automation API, still under the Host check below.
+	hookRoutes := http.NewServeMux()
+	hookRoutes.HandleFunc("POST /hooks/{source}/{secret}", handleHook(manager))
+	handler = hookMiddleware(bodyTimeoutMiddleware(hookRoutes), handler)
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
 	return pulseNoStoreMiddleware(hostMiddleware(o.allowedHosts, handler))
@@ -252,13 +279,27 @@ func handleVersion(mgr *Manager, buildID func() string) http.HandlerFunc {
 // only reads from the client, so streaming (SSE) responses are unaffected.
 func bodyTimeoutMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		if !isWebSocketUpgrade(r) {
 			// Best-effort: SetReadDeadline is unsupported on a few ResponseWriter
 			// wrappers; ignore the error and proceed without a deadline.
 			_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isWebSocketUpgrade(r *http.Request) bool {
+	if r.Method != http.MethodGet || !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || r.Header.Get("Sec-WebSocket-Key") == "" || r.Header.Get("Sec-WebSocket-Version") != "13" {
+		return false
+	}
+	for _, value := range r.Header.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // authCookieName holds the shared token once a client has authenticated via
@@ -331,21 +372,23 @@ func csrfMiddleware(next http.Handler) http.Handler {
 
 func handleListModels() http.HandlerFunc {
 	type modelInfo struct {
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		Provider string `json:"provider"`
-		Alias    string `json:"alias,omitempty"`
-		MaxInput int    `json:"max_input,omitempty"`
+		ID               string   `json:"id"`
+		Name             string   `json:"name"`
+		Provider         string   `json:"provider"`
+		Alias            string   `json:"alias,omitempty"`
+		MaxInput         int      `json:"max_input,omitempty"`
+		ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 	}
 	entries := core.ListModels()
 	models := make([]modelInfo, len(entries))
 	for i, e := range entries {
 		models[i] = modelInfo{
-			ID:       e.Model.ID,
-			Name:     e.Model.Name,
-			Provider: e.Model.Provider,
-			Alias:    e.Alias,
-			MaxInput: e.Model.MaxInput,
+			ID:               e.Model.ID,
+			Name:             e.Model.Name,
+			Provider:         e.Model.Provider,
+			Alias:            e.Alias,
+			MaxInput:         e.Model.MaxInput,
+			ReasoningEfforts: core.ReasoningEffortsForModel(e.Model),
 		}
 	}
 	return func(w http.ResponseWriter, _ *http.Request) {

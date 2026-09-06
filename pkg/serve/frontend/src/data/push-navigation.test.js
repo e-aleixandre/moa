@@ -102,3 +102,17 @@ test('unknown session after refresh withholds acknowledgement for SW fallback', 
 
   stop();
 });
+
+test('a pending-event tap opens the inbox and is acknowledged', () => {
+  restore = { sessions: store.get().sessions, sessionsLoaded: store.get().sessionsLoaded, inboxOpen: store.get().inboxOpen };
+  setState({ inboxOpen: false, sessionsLoaded: true });
+  const worker = new FakeServiceWorker();
+  const acknowledgements = [];
+  const stop = installOpenSessionNavigation({ serviceWorker: worker });
+
+  worker.send({ type: 'open-inbox', requestId: 'tap-inbox' }, [{ postMessage: message => acknowledgements.push(message) }]);
+  expect(store.get().inboxOpen).toBe(true);
+  expect(acknowledgements).toEqual([{ type: 'open-inbox-ack', requestId: 'tap-inbox' }]);
+
+  stop();
+});

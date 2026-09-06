@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight } from "lucide-preact";
-import { SessionCardMenu, SessionRow } from "../../../components/index.js";
+import { InboxButton, SessionCardMenu, SessionRow } from "../../../components/index.js"; // wake-on-event: InboxButton
 import { openOverlay } from "../../../data/overlay-history.js";
 import { filterProjectSections, groupProjectSessions, hiddenProjectSavedCount, previewSavedSessions, projectCollapsed, sessionSearchMatch, visibleProjectSessions } from "../../../data/util/project-sessions.js";
 import { useMenuKeyboard } from "../../../hooks/useMenuKeyboard.js";
@@ -133,6 +133,9 @@ function DrawerGroupMenu({ groupByProject, onChange }) {
 // `onClosed` callback fires once the leave animation has settled (mirroring
 // MobileSheet.onClosed) so the parent can sequence that handoff without
 // stacking overlays or racing the shared overlay-history back()/popstate.
+//
+// The Inbox door in the head row takes the SAME handoff: it only signals
+// `onInbox`, and the parent opens the inbox view once the drawer has left.
 export function SessionDrawer({
   open,
   step = "list",
@@ -147,6 +150,9 @@ export function SessionDrawer({
   onSelect,
   onCreate,
   onSettings,
+  onInbox,
+  inboxCount = 0,
+  inboxVisible = false,
   version = null,
   onCloseSession,
   onReopenSession,
@@ -378,6 +384,9 @@ export function SessionDrawer({
               >
                 <Plus size={16} aria-hidden="true" />
               </button>
+              {inboxVisible && (
+                <InboxButton count={inboxCount} onClick={() => onInbox?.()} size={16} />
+              )}
               <DrawerGroupMenu groupByProject={groupByProject} onChange={onGroupByProject} />
             </div>
 
@@ -430,7 +439,7 @@ export function SessionDrawer({
                     {hiddenSaved > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setExpandedProjects((keys) => new Set(keys).add(section.key))}>Show all {hiddenSaved} saved</button>}
                   </div>}
                 </section>;
-              }) : <>{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{savedPreview.visible.map((s) => card(s))}{savedPreview.hidden > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setShowAllSaved(true)}>Show all {shownSaved.length} saved</button>}</>}
+              }) : <>{shownActive.length > 0 && <span class="sdrawer-group">Active</span>}{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{savedPreview.visible.map((s) => card(s))}{savedPreview.hidden > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setShowAllSaved(true)}>Show all {shownSaved.length} saved</button>}</>}
             </div>
 
             <div class="sdrawer-foot">

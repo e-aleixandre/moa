@@ -4,6 +4,7 @@ import {
   initIds, allTileIds, allSessionIds, tileCount,
 } from './tileTree.js';
 import { pruneDrawerCollapsed } from './util/project-sessions.js';
+import { ARTIFACTS_CLOSED } from './artifacts-model.js';
 
 const STORAGE_KEY = 'moa-next-ui-state';
 
@@ -66,6 +67,11 @@ let state = {
 
   usage: null, // global plan usage snapshot from /api/usage (null until first poll)
 
+  // modelCatalog — the shared /api/models resource (see data/model-catalog.js).
+  // Ephemeral like `usage`: server state, never persisted, so a stale catalog
+  // can never mislabel a thinking meter.
+  modelCatalog: { status: 'idle', entries: null },
+
   tileTree: initialTree,
   focusedTile: initialFocused,
   soundEnabled: persisted.soundEnabled || false,
@@ -89,6 +95,13 @@ let state = {
 
   activeSession: null,
 
+  // wake-on-event: events from GET /api/events — pending AND settled, since
+  // the inbox keeps its history. inboxOpen is the inbox surface's own state:
+  // the mobile push and the desktop spine swap read the same flag, so a toast
+  // can open the inbox without knowing which layout it is talking to.
+  events: [],
+  inboxOpen: false,
+
   // Command palette (⌘K). Lives in the store so the global mount in
   // app.jsx and the per-screen Spine buttons (onSearch/onNewSession) read and
   // write the same state rather than standing up a second pub/sub system.
@@ -102,6 +115,12 @@ let state = {
   // it (see data/drawer.js). drawerStep is 'list' | 'new'.
   drawerOpen: false,
   drawerStep: 'list',
+
+  // Artifacts drawer — ONE ephemeral, global slice (see data/artifacts.js).
+  // It holds the conversation that owns the drawer, what it shows and the
+  // state of its list request. The collection is server state and is refetched
+  // on every open, so it deliberately does not live in session metadata.
+  artifacts: ARTIFACTS_CLOSED,
 };
 
 let listeners = new Set();

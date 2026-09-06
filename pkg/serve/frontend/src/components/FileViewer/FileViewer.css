@@ -79,7 +79,10 @@
   font: inherit;
   font-size: var(--text-sm);
 }
+@media (hover: hover) {
+
 .file-viewer-action:hover { background: var(--surface1); }
+}
 .file-viewer-action:disabled { opacity: 0.6; cursor: default; }
 .file-viewer-action .lucide { width: 16px; height: 16px; }
 
@@ -175,7 +178,10 @@
   cursor: pointer;
   font: inherit;
 }
+@media (hover: hover) {
+
 .file-viewer-download-button:hover { background: var(--surface1); }
+}
 .spin { animation: file-viewer-spin 1s linear infinite; }
 @keyframes file-viewer-spin {
   from { transform: rotate(0deg); }

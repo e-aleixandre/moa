@@ -13,11 +13,13 @@ Moa is a coding agent runtime in Go. One core, two interfaces: web UI and headle
 - **Skills**: loadable knowledge packs discovered from `.moa/skills/` or `~/.config/moa/skills/`. The agent pulls one in with `load_skill`; you can invoke one yourself with `/<name>`. `context: fork` runs the skill as an isolated subagent instead of loading it into the current conversation
 - **Budget & limits**: per-run USD caps, turn limits, duration limits
 - **Checkpoint / undo**: revert file changes per agent turn
-- **Context compaction**: automatic summarization when context grows large
+- **Context compaction**: automatic summarization when context grows large, written by the session's model or by a [summarizer you choose](./configuration.md#features)
 - **MCP**: connect external tool servers
 - **Voice input**: in the web UI
+- **[Live Preview](./serve.md#live-preview)**: watch the web app the agent is building inside the conversation, at a chosen viewport width, and tap an element to tell the agent what should change about it
+- **[Wake on event](./automation.md#event-hooks)**: give an external system (CI, error tracker, mail watcher) its own webhook URL and let what it sends reach a session, or wait in an inbox for you to place it
 - **AGENTS.md**: project instructions discovered automatically from working directory; `/reload` re-reads them in an open session
-- **Multi-provider**: Anthropic, OpenAI, and xAI Grok, with model aliases for quick switching, per-model [thinking levels](./cli.md#thinking-levels) and an optional [fast mode](./cli.md#fast-mode)
+- **Multi-provider**: Anthropic, OpenAI, xAI Grok and Meta (Muse Spark), with model aliases for quick switching, per-model [thinking levels](./cli.md#thinking-levels) and an optional [fast mode](./cli.md#fast-mode)
 
 ## How it works
 

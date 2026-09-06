@@ -40,6 +40,7 @@
 | `pkg/provider/openai/` | OpenAI API transport and transcription |
 | `pkg/provider/responses/` | Shared stateless Responses request/replay codec for OpenAI-compatible Responses transports (`store: false`) |
 | `pkg/provider/xai/` | xAI Responses transport: `api.x.ai` API keys or the separate Grok consumer OAuth proxy |
+| `pkg/provider/meta/` | Meta Model API Responses transport (Muse Spark): `META_API_KEY` or a key minted from a Muse subscription login |
 | `pkg/provider/retry/` | Retry wrapper with backoff |
 | `pkg/provider/sseutil/` | SSE timeout reader |
 

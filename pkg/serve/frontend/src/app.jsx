@@ -2,7 +2,7 @@ import { render } from "preact";
 import { useState, useEffect } from "preact/hooks";
 import "./index.css";
 import { ConversationScreen, PaneGridScreen, MobileConversationScreen, DesktopShell } from "./layout/index.js";
-import { CommandPalette, ToastContainer, PulsePairingPanel } from "./components/index.js";
+import { CommandPalette, ToastContainer, PulsePairingPanel, ArtifactsDrawer } from "./components/index.js";
 import { store, setState as setStoreState } from "./data/store.js";
 import { useStore } from "./hooks/useStore.js";
 import { togglePalette, closePalette } from "./data/palette.js";
@@ -14,6 +14,8 @@ import {
   loadSessions, startPolling, stopPolling,
   startUsagePolling, stopUsagePolling,
 } from "./data/session-actions.js";
+import { loadEvents, openInbox } from "./data/events.js"; // wake-on-event
+import { loadModelCatalog, ensureModelCatalog } from "./data/model-catalog.js";
 import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
@@ -101,19 +103,29 @@ function useBootstrap() {
     loadSessions()
       .then(() => {
         if (!mounted) return; // unmounted mid-flight: don't touch the store/view
-        const wanted = new URLSearchParams(location.search).get("session");
+        const params = new URLSearchParams(location.search);
+        const wanted = params.get("session");
+        const wantedInbox = params.get("inbox") === "1";
+        let stripped = false;
         if (wanted && openSession(wanted)) {
           // Strip only ?session= (a one-shot deep-link that must not re-pin on
           // refresh) while preserving ?view= so a `?view=grid&session=X` link
           // keeps the URL in sync with the store's seeded view.
-          const params = new URLSearchParams(location.search);
           params.delete("session");
-          const qs = params.toString();
-          history.replaceState({}, "", qs ? `${location.pathname}?${qs}` : location.pathname);
+          stripped = true;
         } else if (store.get().isMobile) {
           autoSelectMobile();
         } else {
           autoFillTiles();
+        }
+        if (wantedInbox) {
+          openInbox();
+          params.delete("inbox");
+          stripped = true;
+        }
+        if (stripped) {
+          const qs = params.toString();
+          history.replaceState({}, "", qs ? `${location.pathname}?${qs}` : location.pathname);
         }
       })
       .catch(() => {})
@@ -122,6 +134,12 @@ function useBootstrap() {
       });
     startPolling();
     startUsagePolling();
+    // The model catalog is what turns a backend effort into the position the
+    // thinking meters draw, so it is loaded with the first roster instead of
+    // waiting for someone to open a model selector. No polling: it only
+    // changes when the server does.
+    loadModelCatalog();
+    loadEvents(); // wake-on-event: paint the inbox on first load, not one tick later
     // Reconcile the browser's actual push state on load (/next relies on the
     // root /sw.js, no SW registration here). Guarded internally for unsupported.
     refreshPushState();
@@ -141,10 +159,13 @@ function useBootstrap() {
         afterVisibilityChange();
         reconnectAll();
         loadSessions();
+        loadEvents(); // wake-on-event: an event may have arrived while away
         startPolling();
         // Also restarts the usage timer, and refreshes immediately so the
         // status line is not showing a number from before the app was hidden.
         startUsagePolling();
+        // Retry a catalog that never arrived; a ready one costs nothing.
+        ensureModelCatalog();
         // Returning to a backgrounded PWA is when a user expects to see the
         // interface that was deployed meanwhile, and on iOS it is the only
         // moment an installed app re-reads anything at all.
@@ -160,6 +181,7 @@ function useBootstrap() {
       if (document.visibilityState !== "visible") return;
       reconnectAll();
       loadSessions();
+      ensureModelCatalog();
     };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("online", onOnline);
@@ -279,6 +301,7 @@ function App() {
         <MobileConversationScreen version={version} />
         <GlobalPalette />
         <GlobalPairingPanel />
+        <ArtifactsDrawer />
         <ToastContainer />
       </>
     );
@@ -290,6 +313,9 @@ function App() {
       </DesktopShell>
       <GlobalPalette />
       <GlobalPairingPanel />
+      {/* Artifacts — ONE shared drawer for conversation and grid, mounted
+          globally so switching screens never duplicates or loses a reader. */}
+      <ArtifactsDrawer />
       <ToastContainer />
     </>
   );

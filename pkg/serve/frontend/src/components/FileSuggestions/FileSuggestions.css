@@ -27,10 +27,15 @@
   transition: background var(--duration) var(--ease);
   font-size: var(--text-base);
 }
-
-.filesug-item:hover,
 .filesug-item.selected {
   background: var(--surface0);
+}
+@media (hover: hover) {
+
+
+.filesug-item:hover{
+  background: var(--surface0);
+}
 }
 
 .filesug-icon {

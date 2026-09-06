@@ -10,6 +10,8 @@ import {
 } from './tile-actions.js';
 import { allSessionIds, clearSession } from './tileTree.js';
 import { attentionArrival, forgetAttentionArrival, retainAttentionArrivals } from './attention-arrivals.js';
+import { loadEvents } from './events.js'; // wake-on-event
+import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artifacts.js';
 
 let pollTimer = null;
 let nextRosterRequest = 0;
@@ -159,6 +161,10 @@ function normalizeSessionInfo(info, existing, visible) {
     // UI-only, no server field): preserved across polls exactly like
     // viewingSubagent, so switching sessions and back doesn't reset it.
     dockOpen: existing ? existing.dockOpen : false,
+    // previewOpen — the LivePreview panel's per-session open state (client
+    // UI-only, like dockOpen). Preserved across polls or the roster would
+    // close the preview under the user every refresh.
+    previewOpen: existing ? existing.previewOpen : false,
     autoVerifying: existing ? existing.autoVerifying : false,
     verifyDir: existing ? existing.verifyDir : null,
     verifyManual: existing ? existing.verifyManual : false,
@@ -267,6 +273,11 @@ export async function loadSessions() {
     // Clean deleted sessions from tile tree
     const validIds = new Set(Object.keys(sessions));
     retainAttentionArrivals(validIds);
+    // The roster is authoritative and still lists saved/closed conversations,
+    // so an owner missing from it was deleted — possibly by another client.
+    // Its references are gone, and the shared drawer must not keep showing
+    // them under a conversation this client no longer has.
+    closeArtifactsForMissingOwner(validIds);
     const currentState = store.get();
     let tree = currentState.tileTree;
     let treeChanged = false;
@@ -285,11 +296,14 @@ export async function loadSessions() {
 
 export function startPolling() {
   stopPolling();
-  // Desktop still polls hidden panes; 10s is enough for the roster (WS already
-  // owns the visible ones). Mobile is slower: one visible session, push for
-  // anything urgent, and a foreground handler on return.
-  const interval = store.get().isMobile ? 15000 : 10000;
-  pollTimer = setInterval(loadSessions, interval);
+  // The inbox is discovered through this poll, so keep both layouts on the
+  // same 15 s cadence. WebSockets still own visible-session updates.
+  const interval = 15000;
+  // wake-on-event: the inbox rides this tick. The inbox names the sessions an
+  // event can be sent to, so refreshing it on a timer of its own would let the
+  // two disagree about what is open; it is also where an arrival is noticed
+  // and toasted (loadEvents diffs the ids it already knew).
+  pollTimer = setInterval(() => { loadSessions(); loadEvents(); }, interval);
 }
 
 export function stopPolling() {
@@ -361,6 +375,10 @@ export async function deleteSession(id) {
     });
     throw e;
   }
+  // A GET that began before this successful delete still contains the session.
+  // Fence it before publishing local cleanup, as createSession does for a
+  // pre-create roster snapshot.
+  lastAppliedRosterRequest = ++nextRosterRequest;
   // Read the store after the await so concurrent WS updates to other
   // sessions aren't clobbered by a stale pre-request snapshot.
   const state = store.get();
@@ -369,6 +387,10 @@ export async function deleteSession(id) {
   const tileTree = clearSession(state.tileTree, id);
   const activeSession = state.activeSession === id ? null : state.activeSession;
   forgetAttentionArrival(id);
+  // A deleted conversation's references are gone, so the shared drawer must not
+  // keep showing its collection. Closing (unloading) does not need this: the
+  // artifacts API answers for a saved session.
+  closeArtifactsForSession(id);
   setState({ sessions, tileTree, activeSession });
   afterVisibilityChange();
 }
@@ -783,6 +805,10 @@ export async function openPersistedSubagent(id, jobId, opts = {}) {
   subs[jobId] = {
     jobId,
     task: t.task || '',
+    // Restored from the sidecar so a reopened terminal child keeps the same
+    // identity label its live row had (see stream-model's subagentLabel).
+    // Older servers omit it; the existing entry's title then still wins.
+    title: t.title || (existing && existing.title) || '',
     model: t.model || '',
     thinking: t.thinking || 'off',
     status: t.status || 'completed',

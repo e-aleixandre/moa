@@ -1,7 +1,6 @@
 import { useState, useEffect } from "preact/hooks";
 import { Check, Copy } from "lucide-preact";
 import { ModelSelector } from "../../../components/index.js";
-import { api } from "../../../data/api.js";
 import { statusStripModel } from "../../../data/util/status-strip-model.js";
 import {
   usageForSession,
@@ -10,7 +9,9 @@ import {
   fmtCost,
   money,
 } from "../../../data/util/usage-pills.js";
-import { deriveModelSpecs, matchSelectedModel, modelAccent } from "../../../data/selectors.js";
+import { matchSelectedModel, modelAccent } from "../../../data/selectors.js";
+import { catalogThinkingPosition, ensureModelCatalog, modelCatalog } from "../../../data/model-catalog.js";
+import { useStore } from "../../../hooks/useStore.js";
 import { configureSession, setSessionFast } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { modelCodename, shortModel, fmtTokens } from "../../../data/util/format.js";
@@ -270,7 +271,7 @@ export function MobileStatusLine({ session, usage }) {
   const [sessionOpen, setSessionOpen] = useState(false);
   const [permsOpen, setPermsOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
-  const [models, setModels] = useState(null); // null = not fetched yet
+  const catalog = useStore(modelCatalog);
 
   const sessionId = session ? session.id : null;
   useEffect(() => {
@@ -280,10 +281,11 @@ export function MobileStatusLine({ session, usage }) {
     setMcpOpen(false);
   }, [sessionId]);
 
+  // Opening the sheet is a natural moment to retry a catalog that never
+  // arrived; the bootstrap already asked once.
   useEffect(() => {
-    if (!sessionOpen || models) return;
-    api("GET", "/api/models").then(setModels).catch(() => setModels([]));
-  }, [sessionOpen, models]);
+    if (sessionOpen) ensureModelCatalog();
+  }, [sessionOpen]);
 
   const hasSession = !!session;
   const ctx = hasSession ? session.contextPercent : undefined;
@@ -297,7 +299,7 @@ export function MobileStatusLine({ session, usage }) {
   const tokensDown = hasSession ? session.runTokensDown : undefined;
   const hasTokens = (tokensUp || 0) > 0 || (tokensDown || 0) > 0;
 
-  const specs = deriveModelSpecs(models);
+  const specs = catalog.entries || [];
   const thinking = hasSession
     ? session.thinking === "none"
       ? "off"
@@ -330,6 +332,11 @@ export function MobileStatusLine({ session, usage }) {
       modelName={modelName}
       modelAccent={hasSession ? modelAccent(session.model) : "lavender"}
       thinking={thinking}
+      thinkingPosition={catalogThinkingPosition(catalog, {
+        model: session?.model,
+        provider: session?.provider,
+        thinking,
+      })}
       onModel={hasSession ? () => setSessionOpen(true) : undefined}
       modelOpen={sessionOpen}
     >

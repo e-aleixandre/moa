@@ -16,8 +16,33 @@
 | `-allow` | | Permission pattern (repeatable), e.g. `"Bash(go:*)"` |
 | `-allow-path` | | Allow extra directory outside workspace (repeatable) |
 | `-output` | `text` | `text` or `json` (JSON-lines) |
-| `-login` | | `anthropic`, `openai`, `xai` (SuperGrok/X OAuth device login), `openai-transcribe` |
+| `-login` | | `anthropic`, `openai`, `xai` (SuperGrok/X OAuth device login), `meta` (Muse OAuth device login), `openai-transcribe` |
 | `-logout` | | Remove stored credentials for provider |
+
+### JSON-lines output
+
+`-output json` emits one JSON object per line: lifecycle, message updates, tool
+execution, progress and errors.
+
+It also reports what the run **cost**, so a benchmark or a cost ledger does not
+have to reconstruct spending from session files:
+
+- `message_usage` — one line per completed assistant message, with `role`
+  (`main` or `subagent`), `subagent_id` for a child, `provider`, `model`, the
+  token fields (`input`, `output`, `cache_read`, `cache_write`) and `cost_usd`.
+- `subagent_end` — the child's terminal `cost_usd`.
+- `summary` — the run total `cost_usd`, the aggregate `usage`, and `by_model`
+  entries split by provider, model and role, each with its `messages` count,
+  tokens and cost.
+
+```jsonl
+{"type":"message_usage","role":"main","provider":"anthropic","model":"claude-sonnet-5","input":1204,"output":318,"cache_read":8192,"cache_write":0,"cost_usd":0.008}
+{"type":"summary","turns":2,"tools_completed":3,"files_touched":["main.go"],"elapsed_seconds":41,"cost_usd":0.0143,"usage":{"input":1600,"output":420,"cache_read":8192,"cache_write":0},"by_model":[{"provider":"anthropic","model":"claude-sonnet-5","role":"main","messages":2,"input":1600,"output":420,"cache_read":8192,"cache_write":0,"cost_usd":0.0143}]}
+```
+
+The main run's cost comes from the run's own total and children's from their
+terminal cost, so no dollar is counted twice. Costs are rounded to the
+micro-dollar, well below any provider's billing granularity.
 
 ## Version subcommand
 
@@ -62,8 +87,37 @@ moa serve [--host 127.0.0.1] [--port 8080] [--model sonnet] [--token <secret>] [
 | `--token` | | Shared secret for opt-in auth (or `MOA_SERVE_TOKEN`). When set, requests need a valid session cookie or `?token=<secret>` |
 | `--automation-token` | | Shared secret enabling the [Automation API](./automation.md) (or `MOA_AUTOMATION_TOKEN`), presented as `Authorization: Bearer <secret>`. Separate from `--token`; without it those routes do not exist |
 | `--allowed-hosts` | | Comma-separated extra Host names accepted by the anti DNS-rebinding check (localhost/IP literals always allowed; e.g. a Tailscale MagicDNS name) |
+| `--preview-port` | `0` | Initial local port for the [Live Preview proxy](./serve.md#the-live-preview-proxy). Optional: with `0` the port is chosen (and confirmed) the first time you open a preview. The listener is never opened at startup either way — it binds `127.0.0.1` on first use and closes when the preview does |
+| `--preview-public-url` | | Address through which that listener is reachable from the browser — Moa rewrites the dev server's origin to it. Required with `--preview-port`; without either flag the web UI proposes an address and remembers your answer |
 
 See [Web UI](./serve.md) for details.
+
+## Hooks subcommand
+
+```bash
+moa hooks add <source> --project DIR [--when-none inbox|create] [--when-many inbox|latest] [--model M --thinking T --yolo] [--autorun]
+moa hooks add <source> --session ID
+moa hooks add <source> --inbox
+moa hooks list [--show-secrets]
+moa hooks rm <source>
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--project` | | Target a project directory (`{project: DIR}`). Mutually exclusive with `--session` and `--inbox` |
+| `--session` | | Target a live session id. Mutually exclusive with `--project` and `--inbox` |
+| `--inbox` | false | Leave events in the inbox. Mutually exclusive with `--project` and `--session` |
+| `--when-none` | `inbox` | When the project has no live session: `inbox` or `create` |
+| `--when-many` | `inbox` | When the project has several live sessions: `inbox` or `latest` |
+| `--model` | | Model for `when-none=create` |
+| `--thinking` | | Thinking level for `when-none=create` |
+| `--yolo` | false | Create sessions in yolo permission mode |
+| `--autorun` | false | Start a turn on delivery to an idle session. Off by default: the event is recorded without running |
+| `--show-secrets` | false | `list` only: print the full `/hooks/<source>/<secret>` path |
+
+`add` generates a 32-byte url-safe secret, writes it to the global config, and
+prints the hook path on its own line, preceded by `Hook URL path (contains the
+secret; store it in the provider now):`. See [Event hooks](./automation.md#event-hooks).
 
 ## Model aliases
 
@@ -76,10 +130,14 @@ See [Web UI](./serve.md) for details.
 | `codex` | `gpt-5.3-codex` |
 | `codex-spark` | `gpt-5.3-codex-spark` |
 | `codex-5.2` | `gpt-5.2-codex` |
+| `astra` | `gpt-6-astra` |
+| `gpt-6` | `gpt-6-astra` |
 | `grok` | `grok-4.6` (xAI) |
 | `grok-4.6-build` | `grok-4.6` (the subscription backend's name for it) |
 | `grok-4.5-build` | `grok-4.5` (the subscription backend's name for it) |
+| `muse` | `muse-spark-1.3` (Meta) |
 | `sol` | `gpt-5.6-sol` |
+| `daybreak` | `gpt-daybreak-blue-latest` (moving alias for the current flagship, with safeguards for defensive cybersecurity work; needs Daybreak provisioning) |
 | `terra` | `gpt-5.6-terra` |
 | `luna` | `gpt-5.6-luna` |
 | `gpt-5.6` | `gpt-5.6-sol` |
@@ -87,7 +145,7 @@ See [Web UI](./serve.md) for details.
 | `gpt5.5` | `gpt-5.5` |
 | `gpt5-mini` | `gpt-5.4-mini` |
 
-You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-4-8`, `grok-4.5`. Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
+You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-4-8`, `grok-4.5`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
 
 ## Thinking levels
 
@@ -100,7 +158,9 @@ model does with them differs:
   and is promoted to `high`; the web selector hides the option.
 - **`xhigh`** only reaches a higher tier on Anthropic Opus models. Every other
   Anthropic model caps it at `high`. OpenAI models accept `xhigh` as its own
-  effort level.
+  effort level. On **GPT-6 Astra**, the five UI positions map to `low`,
+  `medium`, `high`, `xhigh`, and `max` respectively, so `off` is Astra's
+  lowest reasoning effort rather than disabled reasoning.
 
 ## Fast mode
 
@@ -111,6 +171,7 @@ CLI flag, and only some models can serve it:
 | Provider | Models that support it | What it costs |
 |---|---|---|
 | Anthropic | Opus models only | 2.5× faster, billed as separate usage credits |
+| OpenAI | GPT-6 Astra | Fast mode, 2× the token rate |
 | OpenAI | `gpt-5.4`, `gpt-5.5` and `gpt-5.6` generations (not the codex or mini variants) | 1.5× faster, burns credits 2.5× |
 | xAI | the whole catalogue | priority queue, 2× the token rate |
 
@@ -119,7 +180,8 @@ not stored, and the session stays at standard speed.
 
 The session cost (`cost_usd`, the budget guardrail) charges a fast request at
 the provider's premium: 2× on Anthropic ($10/$50 per MTok on Opus, cache
-multipliers on top), 2.5× on OpenAI and 2× on xAI. The multiplier applies only
+multipliers on top), 2× on GPT-6 Astra, 2.5× on earlier supported OpenAI GPT
+models, and 2× on xAI. The multiplier applies only
 to turns the provider actually served at the premium tier — Anthropic reports
 `usage.speed`, OpenAI and xAI echo `service_tier` — so a turn that fell back to
 standard speed is billed as standard.

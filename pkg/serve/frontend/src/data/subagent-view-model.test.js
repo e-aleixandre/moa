@@ -46,6 +46,21 @@ test('the resolved thinking level is projected for the model pill', () => {
   expect(subagentView(session, 'j1').thinking).toBe('high');
 });
 
+// The codename is a label, not an identity: the model catalog that maps an
+// effort onto a meter position is keyed by the raw model, so the projection
+// keeps it alongside.
+test('the raw model the child was spawned with survives next to the codename', () => {
+  const session = { id: 's1', messages: [], subagents: { j1: sub({ model: 'openai/gpt-6-astra' }) } };
+  const view = subagentView(session, 'j1');
+  expect(view.model).toBe('Astra');
+  expect(view.modelSpec).toBe('openai/gpt-6-astra');
+});
+
+test('a child with no model reports an empty raw model rather than a guess', () => {
+  const session = { id: 's1', messages: [], subagents: { j1: sub({ model: '' }) } };
+  expect(subagentView(session, 'j1').modelSpec).toBe('');
+});
+
 // ── sibling rail only for 2+ live ─────────────────────────────────────────
 test('two live subagents produce a sibling rail with the active one flagged', () => {
   const session = {
@@ -257,4 +272,22 @@ test('owned async bash is projected in the launching subagent activity', () => {
   const view = subagentView(session, 'child');
   const rows = view.blocks.flatMap(block => (block.blocks || []).flatMap(inner => inner.rows || []));
   expect(rows).toContainEqual(expect.objectContaining({ id: 'bash-1', tool: 'bash' }));
+});
+
+// ── identity label: the same rule the dock and the delegation use ───────────
+test('the breadcrumb prefers the generated title over the task and the model', () => {
+  const session = { id: 's1', messages: [], subagents: { j1: sub({
+    task: '\n# Delivery review\n\nVerify the promised work.',
+    title: 'Review Promised Delivery Work',
+    model: 'openai/gpt-6-astra',
+  }) } };
+  expect(subagentView(session, 'j1').name).toBe('Review Promised Delivery Work');
+});
+
+test('a task starting with a blank line labels the breadcrumb with its heading, not the model', () => {
+  const session = { id: 's1', messages: [], subagents: { j1: sub({
+    task: '\n# Delivery review\n\nVerify the promised work.',
+    model: 'openai/gpt-6-astra',
+  }) } };
+  expect(subagentView(session, 'j1').name).toBe('Delivery review');
 });
