@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.37.0] - 2026-09-06
 
 ### Added
 
@@ -15,8 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drawer's header. The count of waiting events rides on the title chip, so it
   stays visible without opening the drawer. The desktop is unchanged — **+**
   still opens the file picker directly.
+- **Artifacts** keep files the agent delivers with `send_file` available from
+  the conversation after a reconnect or restart. They refer to the original
+  file, so opening one reads its current contents; see
+  [Artifacts](docs/serve.md#files-sent-by-the-agent).
 - OpenAI **GPT-6 Astra** (`astra` / `gpt-6`), with long-context pricing,
   Fast-mode billing, and its required reasoning settings.
+- OpenAI **Daybreak Blue** through Moa's `daybreak` alias
+  (`gpt-daybreak-blue-latest`); see [Model aliases](docs/cli.md#model-aliases).
 - **Live Preview**: the web app the agent is building, inside the conversation.
   The panel renders your development server at a chosen viewport width (390,
   768, 1280 or fit to the panel), zooms and pans by pinch on touch or by
@@ -62,13 +68,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and lets you read its payload before deciding. Choosing a destination is
   itself the instruction to act: a hand-routed event starts a turn regardless of
   the source's `autorun`, which governs unattended delivery only.
-- **A configurable summarizer model.** Compaction summaries were always written
-  by the session's own model, chosen for the work rather than for summarizing —
-  and the summary shares no cached prefix with the conversation, so a pricier
-  model buys nothing there. The global `compact_model` setting, editable from
-  the web Settings sheet, lets a cheaper model write them; subagents inherit it.
-  An unusable choice never breaks compaction: the session's model summarizes
-  instead and the transcript records why.
+- **A configurable summarizer model.** The global `compact_model` setting,
+  editable from the web Settings sheet, chooses the model that writes
+  compaction summaries; the summarizer request shares no cached conversation
+  prefix. Subagents inherit the setting. An unusable choice never breaks
+  compaction: the session's model summarizes instead and the transcript records
+  why.
 - **Meta Model API (Muse Spark)** as a provider, through `META_API_KEY` or a
   Muse subscription login (`moa --login meta`), with the `muse` alias.
 - Headless JSONL output (`-output json`) now carries usage and cost: a
@@ -92,9 +97,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the message, with the file count and total weight in its header. Past four
   files, three rows are shown and the rest fold behind "N more", so a message
   keeps a predictable height however much was sent.
-- The mobile session actions are one button that opens a menu, rather than a
-  rail competing with the conversation title for room, and it carries a single
-  badge for everything waiting behind it.
 - The open sessions in the mobile drawer and the desktop spine are now named
   **Active**, like the New results and Saved groups around them.
 - A session started by an event carries the same Import mark the event block
@@ -122,6 +124,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gesture.
 - The viewport width presets stay available in a narrow pane instead of being
   dropped when the preview has little room.
+- A new conversation gets its automatic title from the first prompt Moa
+  accepts, without waiting for the run to finish. A manual title remains
+  authoritative, including when a conversation is closed and reopened.
+- Deleting a conversation is no longer undone by an older session-roster
+  refresh that finishes afterwards.
+- A live subagent conversation shows its opening task immediately and restores
+  it in the right order after reconnecting; a missed completion is reconciled
+  from the saved child transcript, which retains the child's generated title.
+- Astra's thinking setting is applied once when saved, and its selector and
+  badges agree on the effective level, including `low` as the minimum.
+  Model listings consistently advertise `astra`; `gpt-6` remains a valid alias.
 
 ## [0.36.0] - 2026-09-02
 

@@ -37,9 +37,9 @@ Conditionally registered:
 | `web_search` | `brave_api_key` is configured |
 | `ask_user` | The web UI is active (not headless) |
 
-In a `moa serve` session the agent also gets `send_file`, which hands you a file
-as a download card in the chat — see
-[Files sent by the agent](./serve.md#files-sent-by-the-agent). Custom
+In a `moa serve` session the agent also gets `send_file`, which publishes a file
+to the conversation's [Artifacts](./serve.md#files-sent-by-the-agent) as well
+as showing its download card in the chat. Custom
 [script tools](#custom-script-tools) and [MCP](./configuration.md#mcp-servers)
 tools are registered on top of all of this.
 

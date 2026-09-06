@@ -129,7 +129,8 @@ policies and use Moa's permission and path controls for the level of access you 
 - **Delegate and parallelize.** Run multiple sessions or let an agent spawn synchronous or
   asynchronous subagents whose activity can be inspected live.
 - **Exchange real artifacts.** Attach images, PDFs, source files, and other inputs; the agent
-  can return downloadable files, rich Markdown, images, and sandboxed HTML previews.
+  can return downloadable files as [Artifacts](docs/serve.md#files-sent-by-the-agent), rich
+  Markdown, images, and sandboxed HTML previews.
 - **Bring your own workflow.** Add MCP servers, custom script tools, verification commands,
   reusable skills, and project instructions through `AGENTS.md`.
 
