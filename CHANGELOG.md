@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.2] - 2026-09-07
+
+### Fixed
+
+- A background `bash` job finishing or timing out while `ask_user` waits for an
+  answer no longer starts a second agent run. Its completion stays with the
+  existing run, avoiding the spurious `agent is already running` error and the
+  session-state mismatch that could hide an active run and strand follow-up
+  messages after answering or reconnecting.
+
 ## [0.37.1] - 2026-09-06
 
 ### Fixed
