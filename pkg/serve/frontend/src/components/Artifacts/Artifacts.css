@@ -106,14 +106,8 @@
 
 /* ── List ────────────────────────────────────────────────────────────────── */
 .af-list-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-2) var(--space-4) var(--space-6); }
-.af-search {
-  display: flex; align-items: center; gap: var(--space-2); min-height: 44px; margin: var(--space-1) 0 var(--space-3);
-  border: 1px solid var(--surface1); border-radius: var(--radius-md); background: var(--mantle); padding: 0 var(--space-3); color: var(--overlay1);
-}
-.af-search:focus-within { border-color: var(--focus-ring); }
-/* 16px minimum: anything smaller makes iOS zoom on focus. */
-.af-search input { font: var(--text-input) var(--font); color: var(--text); min-width: 0; width: 100%; background: none; border: 0; outline: 0; padding: 8px 0; }
-.af-search input::placeholder { color: var(--overlay0); }
+/* Field (box/lg) draws the control; the drawer only places it. */
+.af-search { margin: var(--space-1) 0 var(--space-3); }
 .af-search .af-icon-button { min-width: 32px; min-height: 32px; padding: 0; }
 .af-list { padding: 0; margin: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
 .af-list li { border: 1px solid var(--surface0); border-radius: var(--radius-md); background: color-mix(in srgb, var(--mantle) 65%, transparent); transition: border-color var(--duration) var(--ease); }

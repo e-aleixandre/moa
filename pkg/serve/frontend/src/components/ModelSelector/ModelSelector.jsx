@@ -4,6 +4,7 @@ import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
 import { thinkingOptionsFor, thinkingPositionFor } from "../../data/selectors.js";
 import { Segmented } from "../Segmented/Segmented.jsx";
+import { Field } from "../../primitives/index.js";
 import {
   groupByProvider,
   pinnedModelSpecs,
@@ -371,25 +372,26 @@ export function ModelSelector({
           onOpenProvider={selectedSpec ? () => openProvider(selectedSpec.provider) : undefined}
         />
       )}
-      <div class="model-filter">
-        <Search size={15} aria-hidden="true" />
-        <input
-          type="search"
-          value={query}
-          onInput={(event) => setQuery(event.currentTarget.value)}
-          placeholder="Filter models…"
-          aria-label="Filter models"
-          autocomplete="off"
-          autocorrect="off"
-          autocapitalize="off"
-          spellcheck={false}
-        />
-        {query && (
+      <Field
+        variant="box"
+        size="lg"
+        class="model-filter"
+        leading={<Search size={15} />}
+        trailing={query ? (
           <button type="button" class="model-filter-clear" aria-label="Clear filter" onClick={showRoot}>
             <X size={14} aria-hidden="true" />
           </button>
-        )}
-      </div>
+        ) : null}
+        type="search"
+        value={query}
+        onInput={(event) => setQuery(event.currentTarget.value)}
+        placeholder="Filter models…"
+        aria-label="Filter models"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck={false}
+      />
 
       {q ? (
         <div class="model-selector-view">

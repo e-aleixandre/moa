@@ -37,6 +37,16 @@
   color: var(--overlay0);
 }
 
+/* type="search" draws its own clear button in Chrome and Safari. A field that
+   wants one puts it in the trailing slot, where it matches the rest of the app
+   and can be reached by keyboard; the native one would sit beside it as a
+   second, differently-styled X. */
+.field-input::-webkit-search-cancel-button,
+.field-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 .field-mono .field-input {
   font-family: var(--mono);
 }

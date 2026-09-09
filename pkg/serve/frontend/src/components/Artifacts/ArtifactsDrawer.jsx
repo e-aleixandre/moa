@@ -9,6 +9,7 @@ import {
   restoreArtifactsFocus, retryArtifacts, setArtifactExpanded,
 } from '../../data/artifacts.js';
 import { currentArtifact, filterArtifacts, originLabel } from '../../data/artifacts-model.js';
+import { Field } from '../../primitives/index.js';
 import { ArtifactRow, KindIcon, ShareButton } from './ArtifactRow.jsx';
 import { ArtifactContent, ARTIFACT_ESCAPE } from './ArtifactContent.jsx';
 import './Artifacts.css';
@@ -265,21 +266,22 @@ export function ArtifactsDrawer() {
       {list ? (
         <div class="af-list-content">
           {searching && (
-            <div class="af-search">
-              <Search size={16} aria-hidden="true" />
-              <input
-                autoFocus
-                aria-label="Search artifacts"
-                placeholder="Search by title or file name…"
-                value={query}
-                onInput={(event) => setQuery(event.currentTarget.value)}
-              />
-              {query && (
+            <Field
+              variant="box"
+              size="lg"
+              class="af-search"
+              leading={<Search size={16} />}
+              trailing={query ? (
                 <button type="button" class="af-icon-button" aria-label="Clear search" onClick={() => setQuery('')}>
                   <X size={14} />
                 </button>
-              )}
-            </div>
+              ) : null}
+              autoFocus
+              aria-label="Search artifacts"
+              placeholder="Search by title or file name…"
+              value={query}
+              onInput={(event) => setQuery(event.currentTarget.value)}
+            />
           )}
           <ArtifactListBody slice={slice} items={items} filtered={filtered} onClearSearch={() => { setQuery(''); setSearching(false); }} />
         </div>

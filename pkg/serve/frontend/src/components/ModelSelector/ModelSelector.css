@@ -261,36 +261,9 @@
   color: var(--overlay1);
 }
 
+/* Field (box/lg) draws the control; the selector only places it. */
 .model-selector .model-filter {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
   margin-bottom: var(--space-3);
-  background: var(--base);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-md);
-  color: var(--overlay0);
-}
-
-.model-selector .model-filter:focus-within {
-  border-color: var(--surface2);
-}
-
-.model-selector .model-filter input {
-  flex: 1;
-  min-width: 0;
-  background: none;
-  border: 0;
-  outline: none;
-  color: var(--text);
-  font-family: var(--font);
-  font-size: var(--text-input);
-  line-height: var(--leading-tight);
-}
-
-.model-selector .model-filter input::placeholder {
-  color: var(--overlay0);
 }
 
 .model-selector .model-filter-clear {
