@@ -91,6 +91,30 @@
   [data-ambient="on"] body::before { animation: none; }
 }
 
+/* The dose was chosen on a 1400px desktop, where the blobs have room to be
+   seen at their centres. A 430px phone shows mostly their faded edges, and
+   0.45 x 0.52 leaves an effective alpha of 0.23 -- against #12121f that is
+   rgb(56,58,83) at the very strongest point, and the drawer covers even that.
+   The phone gets a stronger dose and tighter blobs so the colour reaches the
+   pixel, without touching the desktop where the current dose was approved. */
+@media (max-width: 768px) {
+  [data-ambient="on"] {
+    --amb-aurora: 0.85;
+  }
+  /* Blobs pulled INWARD and made taller. Pushed to the corners, as they are on
+     a wide desktop, none of them reaches the middle of a 430px screen -- which
+     is exactly where the text is, and therefore the only place the colour is
+     ever seen behind reading. Measured: at 50%/45% of the viewport every blob
+     was more than its own radius away. */
+  [data-ambient="on"] body::before {
+    background:
+      radial-gradient(96% 44% at 22% 14%, rgba(180, 190, 254, 0.72), transparent 72%),
+      radial-gradient(104% 42% at 84% 30%, rgba(203, 166, 247, 0.80), transparent 72%),
+      radial-gradient(112% 46% at 30% 62%, rgba(137, 180, 250, 0.74), transparent 74%),
+      radial-gradient(100% 42% at 82% 90%, rgba(148, 226, 213, 0.62), transparent 74%);
+  }
+}
+
 /* ── Session rows (shared by the desktop Spine and the mobile drawer) ────── */
 [data-ambient="on"] .session-row.variant-card {
   border: 0;
@@ -162,8 +186,49 @@
   backdrop-filter: var(--amb-blur);
   -webkit-backdrop-filter: var(--amb-blur);
   border: 0;
+  /* 24px against the app's 18px: the radius family is one of the few things
+     that reads as a different design at a glance on a phone. */
   border-radius: var(--amb-r-panel);
   box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 30px 70px rgba(0, 0, 0, 0.55);
+}
+
+/* Rows: no dividers, no card borders. Ambient tells surfaces apart by
+   luminosity, so a selected row is a lighter plane rather than an outlined
+   box, and the separators go entirely -- the gap does that work. */
+[data-ambient="on"] .sdrawer .session-row.variant-card {
+  border: 0;
+  box-shadow: none;
+}
+[data-ambient="on"] .sdrawer .session-row.variant-card.is-active,
+[data-ambient="on"] .sdrawer .session-row.variant-card[aria-current="true"] {
+  background: var(--amb-on);
+}
+[data-ambient="on"] .sdrawer-foot {
+  border-color: transparent;
+}
+
+/* Section labels (ACTIVE / SAVED) and project names: the app sets them in
+   mono, which is the loudest "terminal" signal left on the screen. Ambient is
+   not a terminal, so the labels become sans -- paths stay mono, because paths
+   are code. */
+[data-ambient="on"] .sdrawer-group,
+[data-ambient="on"] .sdrawer-project-name,
+[data-ambient="on"] .spine .spine-label {
+  font-family: var(--font);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  color: var(--amb-text-4);
+}
+
+/* The head reads as a title rather than a toolbar label. */
+[data-ambient="on"] .sdrawer-head h2 {
+  font-size: 20px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+[data-ambient="on"] .sdrawer-head .sdrawer-count {
+  font-family: var(--font);
+  color: var(--amb-text-4);
 }
 
 /* The search field is a well, not a bordered box: recessed into the drawer
@@ -172,6 +237,42 @@
 [data-ambient="on"] .sdrawer-search.field-inset {
   background: var(--amb-well);
   border-color: transparent;
+}
+
+/* ── The composer ─────────────────────────────────────────────────────────
+   The bar you touch most, and the last opaque box floating on the canvas: a
+   1px-outlined rectangle in --mantle over an aurora reads as a control pasted
+   on top of the design rather than part of it. It becomes a pill of glass, the
+   same material as the drawer. Its container goes transparent too -- it was
+   painting --base across the bottom of the screen and cutting the aurora off. */
+[data-ambient="on"] .mcomposer {
+  background: transparent;
+}
+[data-ambient="on"] .composer-wrap.is-compact .composer {
+  background: rgba(255, 255, 255, 0.07);
+  backdrop-filter: var(--amb-blur);
+  -webkit-backdrop-filter: var(--amb-blur);
+  border: 0;
+  border-radius: 22px;
+  box-shadow: inset 0 1px 0 var(--amb-on-edge);
+}
+[data-ambient="on"] .composer-wrap.is-compact .composer:focus-within {
+  background: rgba(255, 255, 255, 0.11);
+  border: 0;
+}
+
+/* ── The floating chip ─────────────────────────────────────────────────────
+   It hovers over a scrolling transcript, so it has to separate itself from
+   whatever passes underneath. At the app's 72% the words behind it stayed
+   legible through the pill; over an aurora that is worse, because what is
+   behind is no longer a flat colour. Solid surface, real blur, and a shadow so
+   it reads as floating ABOVE the text rather than sitting in it. */
+[data-ambient="on"] .mtchip {
+  background: rgba(26, 26, 42, 0.94);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border: 0;
+  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 /* ── The user message keeps its bar ─────────────────────────────────────────
@@ -184,10 +285,27 @@
 }
 
 /* The app renders into #root; it has to stand above the aurora, which is
-   painted on body. One stacking context, set once. */
-[data-ambient="on"] #root {
+   painted on body. One stacking context, set once.
+
+   And it must be TRANSPARENT. It inherits --base from the reset, so raising it
+   above the aurora with z-index also raised an opaque sheet over it: the
+   canvas colour was correct, the blobs were correct, and none of it was ever
+   visible. body paints the canvas; #root only holds the app. */
+[data-ambient="on"] #root,
+html.mobile-locked[data-ambient="on"] body,
+html.mobile-locked[data-ambient="on"] #root {
   position: relative;
   z-index: 1;
+  background: transparent;
+}
+/* body keeps the canvas: it is the element the aurora is painted on. The rule
+   above only strips the sheet from #root, which the mobile scroll lock paints
+   with a specificity ([data-ambient] alone could not beat html.mobile-locked
+   #root) that has to be matched, not assumed. */
+[data-ambient="on"] body,
+html.mobile-locked[data-ambient="on"] body {
+  background: var(--amb-canvas);
+  z-index: auto;
 }
 
 /* The screen shells paint --base to fill the viewport. With the aurora behind
