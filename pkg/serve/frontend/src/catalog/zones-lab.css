@@ -822,3 +822,27 @@ button.zl-st:hover { background: var(--zl-hi); }
   font-variant-numeric: tabular-nums;
 }
 .zl-input.is-static.zl-data { font-size: var(--zl-fs-body); }
+
+/* ── A breath of aurora, inside the product ───────────────────────────────
+   The owner asked to try a touch of it. It goes in the transcript's own
+   canvas, not behind the sheet, because that is the only place it can be seen
+   without washing out the surfaces the tonal ladder depends on.
+   Deliberately weak, and deliberately not peach: peach means "you wrote this".
+   Two soft pools, one cool and one mauve, anchored to opposite corners so the
+   long reading area is never uniformly tinted. */
+.zl-phone::before,
+.zl-desk-main::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    radial-gradient(78% 46% at 12% 0%, rgba(137, 180, 250, 0.11), transparent 72%),
+    radial-gradient(64% 42% at 96% 8%, rgba(203, 166, 247, 0.09), transparent 74%);
+}
+/* The wash sits at the very bottom of its own stacking context; the children
+   keep whatever positioning they already had, which is what the layout
+   depends on -- forcing them all to position:relative moved the anchored ones. */
+.zl-phone::before,
+.zl-desk-main::before { z-index: 0; }
