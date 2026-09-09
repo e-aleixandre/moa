@@ -136,58 +136,310 @@ function Sidebar({ onPick, desktop }) {
   );
 }
 
-/* The right drawer: this session. Deliberately excludes model, permissions
-   and fast -- those live in the status line, and putting them here too would
-   break "one datum, one place". */
-function SessionPanel({ onClose }) {
+/* ── The right drawer: this session's dossier ──────────────────────────────
+   The rule (PANEL-CRITERIO-FABLE.md): the LINE holds the controls for the
+   next turn (model, thinking, fast, permissions); the PANEL is the dossier
+   of the session -- what it is and what it has done; the CENTRE shows the
+   result. So the panel never shows model or permissions, not even as a
+   reading: one datum, one place.
+
+   Hierarchy, top to bottom, in the order you need it:
+     1  identity     name (editable), folder            -- what this is
+     2  run facts    started, turns, branch; tokens,    -- what it has done,
+                     context, spend, fast, goal, tasks     the line's overflow
+     3  dossiers     usage, MCP, artifacts              -- three rows, each
+                                                          pushes a second page
+     4  lifecycle    save for later, close              -- anchored at the foot
+
+   The three dossiers are rows, not inline content: each is a screen's worth
+   of detail, and a 320px sheet that scrolls through three of them is a
+   settings page nobody finishes. A row says its one-line verdict (the thing
+   you came to check); the page behind it is the full detail, pushed INSIDE
+   the panel with a back button. No modal ever opens over the drawer. */
+const PANEL_PAGES = { usage: "Usage", mcp: "MCP", artifacts: "Artifacts" };
+
+const PANEL_ICONS = {
+  usage: <><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 8V4.5M8 8l2.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></>,
+  mcp: <path d="M5 2v3M11 2v3M3.5 5h9v3a4.5 4.5 0 0 1-9 0zM8 12.5V15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />,
+  artifacts: <path d="M3.5 2.5h6l3 3v8h-9z M9.5 2.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
+};
+
+function BackIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
+function GoIcon() {
+  return (
+    <svg class="zl-go" viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
+
+/* A dossier row: icon, title, one-line verdict, chevron. The verdict is data
+   (mono) and may carry state colour when it IS a state (MCP down). */
+function PanelRow({ id, title, verdict, warn, onOpen }) {
+  return (
+    <button type="button" class="zl-prow" onClick={() => onOpen(id)} aria-label={`${title}: ${verdict}`}>
+      <svg class="zl-prow-ico" viewBox="0 0 16 16" aria-hidden="true">{PANEL_ICONS[id]}</svg>
+      <span class="zl-prow-t">{title}</span>
+      <span class={`zl-prow-v zl-data${warn ? " is-warn" : ""}`}>{verdict}</span>
+      <GoIcon />
+    </button>
+  );
+}
+
+/* Meter: the ring's rule laid flat. Accent while there is room, state colour
+   as it fills (≥70 yellow, ≥90 red). */
+function Meter({ pct }) {
+  const tone = pct >= 90 ? "is-hot" : pct >= 70 ? "is-warm" : "";
+  return (
+    <span class={`zl-meter ${tone}`} aria-hidden="true">
+      <span class="zl-meter-fill" style={`width:${pct}%`} />
+    </span>
+  );
+}
+
+/* Switch: the one toggle shape in the product. Accent when on -- a setting
+   you chose, not a state. Used by Fast and by the MCP scopes. */
+function Switch({ on, onChange, label, disabled }) {
+  return (
+    <button
+      type="button"
+      class={`zl-switch${on ? " is-on" : ""}`}
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onChange ? () => onChange(!on) : undefined}
+    >
+      <span class="zl-switch-track" aria-hidden="true"><span class="zl-switch-knob" /></span>
+    </button>
+  );
+}
+
+/* Usage page: the answer to "can this session keep going?". Two groups: what
+   this session has spent, and the quota of the provider it is using -- the
+   provider is named so the quota never reads as global. Session ID is here
+   because it is what you paste into a bug report about THIS session. */
+function UsagePage() {
+  return (
+    <div class="zl-page">
+      <div class="zl-group"><span>This session</span></div>
+      <div class="zl-kv">
+        <div class="zl-kv-row"><span class="zl-kv-k">Spend</span><span class="zl-kv-v zl-data">$1.84</span></div>
+        <div class="zl-kv-row is-meter">
+          <span class="zl-kv-k">Context</span>
+          <span class="zl-kv-v zl-data">63%</span>
+          <Meter pct={63} />
+          <span class="zl-kv-note zl-data">126k of 200k</span>
+        </div>
+        <div class="zl-kv-row"><span class="zl-kv-k">Tokens</span><span class="zl-kv-v zl-data">↑12.4k ↓1.8k</span></div>
+        <button type="button" class="zl-kv-row is-btn" aria-label="Copy session ID">
+          <span class="zl-kv-k">Session ID</span>
+          <span class="zl-kv-v zl-data is-id">a3f91c…7c2e</span>
+          <span class="zl-kv-hint">copy</span>
+        </button>
+      </div>
+      <div class="zl-group"><span>Plan · Anthropic</span></div>
+      <div class="zl-kv">
+        <div class="zl-kv-row is-meter">
+          <span class="zl-kv-k">5 hours</span>
+          <span class="zl-kv-v zl-data">62%</span>
+          <Meter pct={62} />
+          <span class="zl-kv-note zl-data">resets in 2h 10m</span>
+        </div>
+        <div class="zl-kv-row is-meter">
+          <span class="zl-kv-k">Week</span>
+          <span class="zl-kv-v zl-data">31%</span>
+          <Meter pct={31} />
+          <span class="zl-kv-note zl-data">resets Mon 09:00</span>
+        </div>
+        <div class="zl-kv-row">
+          <span class="zl-kv-k">Extra</span>
+          <span class="zl-kv-v zl-data">$4.20 <span class="zl-kv-dim">of $20</span></span>
+          <span class="zl-kv-hint">pay-as-you-go</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* MCP page: production's dossier layout, in the panel's tone. One calm row
+   per server; the one you open shows its verdict, its three scopes -- each
+   switch says its reach on the same line -- and its error. A control here
+   can reach beyond the session because its row says so; that is the rule. */
+const MCP_SERVERS = [
+  { name: "github", tools: 12, state: "ready" },
+  { name: "playwright", tools: 24, state: "ready" },
+  { name: "linear", tools: 0, state: "failed", error: "spawn npx ENOENT — is Node on PATH for the service?" },
+];
+const MCP_SCOPES = [
+  { id: "session", label: "This session", why: "Only this conversation, until it ends" },
+  { id: "project", label: "This project", why: "Whenever you work in ~/dev/moa" },
+  { id: "global", label: "Global", why: "Every project and future session" },
+];
+const MCP_STATE = { ready: ["running", "is-ok"], failed: ["failed", "is-bad"], disabled: ["off", "is-off"] };
+
+function McpPage() {
+  const [open, setOpen] = useState("linear");
+  const [scopes, setScopes] = useState({ session: true, project: true, global: true });
+  const up = MCP_SERVERS.filter((s) => s.state === "ready").length;
+  return (
+    <div class="zl-page">
+      <p class="zl-page-sum"><span class="zl-data">{up}</span> of <span class="zl-data">{MCP_SERVERS.length}</span> running. A server runs only when every scope has it on.</p>
+      <div class="zl-kv">
+        {MCP_SERVERS.map((s) => {
+          const [label, tone] = MCP_STATE[s.state];
+          const isOpen = open === s.name;
+          return (
+            <div class={`zl-mcp${isOpen ? " is-open" : ""}`} key={s.name}>
+              <button type="button" class="zl-kv-row is-btn zl-mcp-head" onClick={() => setOpen(isOpen ? null : s.name)} aria-expanded={isOpen}>
+                <span class={`zl-mcp-dot ${tone}`} aria-hidden="true" />
+                <span class="zl-kv-k is-strong">{s.name}</span>
+                <span class="zl-kv-hint zl-data">{s.tools} tools</span>
+                <span class={`zl-mcp-state ${tone}`}>{label}</span>
+                <svg class={`zl-go${isOpen ? " is-open" : ""}`} viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              </button>
+              {isOpen && (
+                <div class="zl-mcp-body">
+                  <p class="zl-mcp-verdict">
+                    {s.state === "failed" ? "On everywhere, but it isn’t running — see the error below." : "On everywhere and running."}
+                  </p>
+                  {MCP_SCOPES.map((sc) => (
+                    <div class="zl-scope" key={sc.id}>
+                      <span class="zl-scope-txt">
+                        <span class="zl-scope-k">{sc.label}</span>
+                        <span class="zl-scope-why">{sc.why}</span>
+                      </span>
+                      <Switch on={scopes[sc.id]} onChange={(v) => setScopes({ ...scopes, [sc.id]: v })} label={`${s.name} in ${sc.label}`} />
+                    </div>
+                  ))}
+                  {s.error && <div class="zl-mcp-err zl-data">{s.error}</div>}
+                  <div class="zl-mcp-foot">
+                    <button type="button" class="zl-btn">Restart</button>
+                    <span class="zl-kv-hint zl-data">stdio · 2 restarts</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* Artifacts page: the list. Choosing one opens it in the CENTRE (inline on
+   desktop, full screen on the phone) -- the reader never lives in 320px. The
+   row is the transcript's artifact card, reduced to a list row: same glyph,
+   same name, same meta, plus the turn it came from. */
+const ARTIFACTS = [
+  { name: "attach-race-report.md", kind: "md", size: "4.2 kB", when: "09:28" },
+  { name: "race-test.log", kind: "log", size: "1.1 kB", when: "09:33" },
+  { name: "coverage.html", kind: "html", size: "38 kB", when: "09:34" },
+];
+function ArtifactsPage() {
+  return (
+    <div class="zl-page">
+      <p class="zl-page-sum"><span class="zl-data">{ARTIFACTS.length}</span> files this session. Open one to view it in the conversation.</p>
+      <div class="zl-kv">
+        {ARTIFACTS.map((a) => (
+          <button type="button" class="zl-kv-row is-btn zl-artrow" key={a.name} aria-label={`Open ${a.name}`}>
+            <span class="zl-artrow-ico" aria-hidden="true">
+              <svg viewBox="0 0 20 24">
+                <path d="M2.75 1h8.5L17.25 7v15.25a.75.75 0 0 1-.75.75h-13a.75.75 0 0 1-.75-.75V1.75A.75.75 0 0 1 2.75 1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+                <path d="M11.25 1v5.25a.75.75 0 0 0 .75.75h5.25" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+              </svg>
+            </span>
+            <span class="zl-artrow-main">
+              <span class="zl-artrow-name">{a.name}</span>
+              <span class="zl-artrow-meta zl-data">{a.kind} · {a.size} · {a.when}</span>
+            </span>
+            <GoIcon />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SessionPanel({ onClose, page = "root", onPage }) {
+  const sub = page !== "root";
   return (
     <>
-      <div class="zl-side-head">
-        <span class="zl-side-title is-eyebrow">This session</span>
+      <div class={`zl-side-head${sub ? " is-sub" : ""}`}>
+        {sub ? (
+          <>
+            <button type="button" class="zl-back" onClick={() => onPage("root")} aria-label="Back to this session">
+              <BackIcon />
+            </button>
+            <span class="zl-side-title is-page" key={page}>{PANEL_PAGES[page]}</span>
+          </>
+        ) : (
+          <span class="zl-side-title is-eyebrow">This session</span>
+        )}
         <button type="button" class="zl-x" onClick={onClose} aria-label="Close">
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
           </svg>
         </button>
       </div>
-      <div class="zl-panel-body">
-        <label class="zl-field">
-          <span class="zl-label">Name</span>
-          <input class="zl-input" defaultValue="Buscar un bug bounty" />
-        </label>
-        <div class="zl-field">
-          <span class="zl-label">Folder</span>
-          <div class="zl-input is-static zl-data">
-            <span class="zl-path-dir">~/dev/moa/</span>main
-          </div>
+      {sub ? (
+        <div class="zl-panel-body is-sub" key={page}>
+          {page === "usage" && <UsagePage />}
+          {page === "mcp" && <McpPage />}
+          {page === "artifacts" && <ArtifactsPage />}
         </div>
-        <dl class="zl-facts">
-          <div><dt>Started</dt><dd class="zl-data">09:12</dd></div>
-          <div><dt>Turns</dt><dd class="zl-data">14</dd></div>
-          <div><dt>Branch</dt><dd class="zl-data">design-visual</dd></div>
-        </dl>
-        {/* The other end of the status line's priority rule: everything the
-            line sheds when the dock narrows is here, in full, always. A narrow
-            screen shows fewer things on the line -- never fewer things known. */}
-        <dl class="zl-facts is-run">
-          <div><dt>Tokens</dt><dd class="zl-data">↑12.4k ↓1.8k</dd></div>
-          <div><dt>Spend</dt><dd class="zl-data">$1.84</dd></div>
-          <div><dt>Fast</dt><dd class="zl-data">on</dd></div>
-          <div><dt>Goal</dt><dd class="zl-data">iteration 3</dd></div>
-          <div><dt>Tasks</dt><dd class="zl-data">2/5</dd></div>
-          <div><dt>MCP</dt><dd class="zl-data is-warn">1 of 3 down</dd></div>
-        </dl>
-      </div>
-      <div class="zl-panel-acts">
-        <button type="button" class="zl-act">
-          <span class="zl-act-t">Save for later</span>
-          <span class="zl-act-d">Stops the agent, keeps the session in Saved.</span>
-        </button>
-        <button type="button" class="zl-act is-danger">
-          <span class="zl-act-t">Close session</span>
-          <span class="zl-act-d">Removes it from the list. The transcript stays on disk.</span>
-        </button>
-      </div>
+      ) : (
+        <>
+          <div class="zl-panel-body">
+            <label class="zl-field">
+              <span class="zl-label">Name</span>
+              <input class="zl-input" defaultValue="Buscar un bug bounty" />
+            </label>
+            <div class="zl-field">
+              <span class="zl-label">Folder</span>
+              <div class="zl-input is-static zl-data">
+                <span class="zl-path-dir">~/dev/moa/</span>main
+              </div>
+              <div class="zl-field-meta zl-data">design-visual · started 09:12</div>
+            </div>
+            {/* The other end of the status line's priority rule: everything the
+                line sheds when the dock narrows is here, in full, always. A
+                narrow screen shows fewer things on the line -- never fewer
+                things known. Context is not here: it never leaves the line,
+                and it is on the Usage page. Fast is here as a FACT of the run;
+                the control for it is in the model picker. */}
+            <dl class="zl-facts is-run">
+              <div><dt>Tokens</dt><dd class="zl-data">↑12.4k ↓1.8k</dd></div>
+              <div><dt>Spend</dt><dd class="zl-data">$1.84</dd></div>
+              <div><dt>Turns</dt><dd class="zl-data">14</dd></div>
+              <div><dt>Fast</dt><dd class="zl-data">on</dd></div>
+              <div><dt>Goal</dt><dd class="zl-data">iteration 3</dd></div>
+              <div><dt>Tasks</dt><dd class="zl-data">2/5</dd></div>
+            </dl>
+            <div class="zl-prows">
+              <PanelRow id="usage" title="Usage" verdict="Anthropic · 5h 62%" onOpen={onPage} />
+              <PanelRow id="mcp" title="MCP" verdict="1 of 3 down" warn onOpen={onPage} />
+              <PanelRow id="artifacts" title="Artifacts" verdict="3 files" onOpen={onPage} />
+            </div>
+          </div>
+          <div class="zl-panel-acts">
+            <button type="button" class="zl-act">
+              <span class="zl-act-t">Save for later</span>
+              <span class="zl-act-d">Stops the agent, keeps the session in Saved.</span>
+            </button>
+            <button type="button" class="zl-act is-danger">
+              <span class="zl-act-t">Close session</span>
+              <span class="zl-act-d">Removes it from the list. The transcript stays on disk.</span>
+            </button>
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -777,18 +1029,305 @@ const FULL_STATUS = {
   mcp: { total: 3, unhealthy: 1 }, onExtra: true,
 };
 
-function StatusLine({ s = FULL_STATUS, compact }) {
+/* ── What opens when you tap a setting ─────────────────────────────────────
+   The line's rule: it holds the controls for the NEXT turn. Two of its
+   buttons are controls (model+thinking+fast, permissions) and open a picker;
+   the third (the ring) is a reading and opens the session panel on its
+   Usage page -- the panel is where "how is this going" lives, and a second
+   home for the same numbers would be a second thing to keep in sync.
+
+   The picker is one component per control and one surface per density:
+   on desktop and in a pane it is a popover anchored to its button, opening
+   UPWARD (the line is at the bottom; the button stays under your pointer);
+   on the phone it is a bottom sheet, the same content, with the transcript
+   still visible above it -- that is what keeps model/permissions at two
+   taps on the phone, where the panel would cost a third and hide the
+   conversation. Popover and sheet are the same sheet-tone surface the
+   drawers use, with the same head (eyebrow, or back + title one level in),
+   so the three read as one family: drawer, popover, sheet.
+
+   The model picker is production's ModelSelector reduced to its parts:
+   current model (tap: the provider view), the pinned grid, the door to all
+   providers, the thinking stepper, the fast switch. Provider and per-provider
+   views are pushed INSIDE the popover with a back button, like the panel's
+   pages: one navigation idiom for every second level in the product. */
+const MODELS = [
+  { name: "Daybreak Blue", sub: "1M ctx", provider: "Anthropic", pinned: true },
+  { name: "Opus", sub: "4.8 · 1M ctx", provider: "Anthropic", pinned: true },
+  { name: "Sonnet", sub: "4.6 · 1M ctx", provider: "Anthropic", pinned: true },
+  { name: "Haiku", sub: "4.5 · 200k ctx", provider: "Anthropic" },
+  { name: "Sol", sub: "5.5 · 400k ctx", provider: "OpenAI", pinned: true },
+  { name: "Terra", sub: "5.3 codex · 400k ctx", provider: "OpenAI", pinned: true },
+  { name: "Luna", sub: "5.1 mini · 400k ctx", provider: "OpenAI", pinned: true },
+  { name: "GPT-5.5", sub: "400k ctx", provider: "OpenAI" },
+  { name: "Fable", sub: "3.1 pro · 1M ctx", provider: "Google" },
+  { name: "Flash", sub: "3.1 · 1M ctx", provider: "Google" },
+  { name: "Grok", sub: "4.2 · 256k ctx", provider: "xAI" },
+  { name: "Grok Fast", sub: "4.2 · 128k ctx", provider: "xAI" },
+];
+const PROVIDERS = [...new Set(MODELS.map((m) => m.provider))];
+const THINK_STEPS = [
+  { id: "off", label: "off", bars: 0 },
+  { id: "low", label: "low", bars: 1 },
+  { id: "medium", label: "med", bars: 2 },
+  { id: "high", label: "high", bars: 3 },
+  { id: "xhigh", label: "xhigh", bars: 4 },
+];
+
+/* A model's identity mark: the same hue function as the project monogram and
+   the subagent dot, so the same name is the same colour everywhere. */
+function ModelMark({ name }) {
+  return <span class="zl-live-id is-agent" style={`--h:${projectHue(name)}`} aria-hidden="true" />;
+}
+
+function ModelChip({ m, on, onPick }) {
+  return (
+    <button type="button" class={`zl-mchip${on ? " is-on" : ""}`} onClick={() => onPick(m.name)} aria-pressed={on}>
+      <ModelMark name={m.name} />
+      <span class="zl-mchip-txt">
+        <span class="zl-mchip-name">{m.name}</span>
+        <span class="zl-mchip-sub zl-data">{m.sub}</span>
+      </span>
+      {on && (
+        <svg class="zl-mchip-check" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M2.5 6.5l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+/* The head every second-level surface shares: back + title, in place of the
+   eyebrow -- exactly what the panel does for its pages. The X, where the
+   host has one, stays. */
+function SubHead({ title, count, onBack }) {
+  return (
+    <>
+      <button type="button" class="zl-back" onClick={onBack} aria-label="Back">
+        <BackIcon />
+      </button>
+      <span class="zl-side-title is-page" key={title}>{title}{count != null && <span class="zl-group-n zl-data"> {count}</span>}</span>
+    </>
+  );
+}
+
+function ModelPicker({ s, onChange, onDone, view, setView }) {
+  const current = MODELS.find((m) => m.name === s.model);
+  const pick = (name) => { onChange({ model: name }); onDone(); };
+
+  if (view === "providers") {
+    return (
+      <div class="zl-pick" key="providers">
+        <div class="zl-kv is-flush">
+          {PROVIDERS.map((p) => {
+            const items = MODELS.filter((m) => m.provider === p);
+            const has = items.some((m) => m.name === s.model);
+            return (
+              <button type="button" class="zl-kv-row is-btn zl-prov" key={p} onClick={() => setView(p)}>
+                <span class="zl-mono is-sm" style={`--h:${projectHue(p)}`} aria-hidden="true">{p.slice(0, 1)}</span>
+                <span class="zl-prov-txt">
+                  <span class="zl-kv-k is-strong">{p}{has && <span class="zl-prov-cur" aria-label="contains the current model" />}</span>
+                  <span class="zl-prov-sub">{items.map((m) => m.name).join(", ")}</span>
+                </span>
+                <span class="zl-kv-hint zl-data">{items.length}</span>
+                <GoIcon />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+  if (view !== "root") {
+    const items = MODELS.filter((m) => m.provider === view);
+    return (
+      <div class="zl-pick" key={view}>
+        <div class="zl-chips">
+          {items.map((m) => <ModelChip m={m} on={m.name === s.model} onPick={pick} key={m.name} />)}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div class="zl-pick" key="root">
+      <button type="button" class="zl-pick-cur" onClick={() => setView(current?.provider || "providers")} aria-label={`Current model ${s.model}, ${current?.provider}. Show provider`}>
+        <ModelMark name={s.model} />
+        <span class="zl-pick-cur-txt">
+          <span class="zl-pick-cur-name">{s.model}</span>
+          <span class="zl-pick-cur-sub zl-data">{current ? `${current.provider} · ${current.sub}` : "custom · not in catalog"}</span>
+        </span>
+        <GoIcon />
+      </button>
+      <div class="zl-group"><span>Pinned</span><span class="zl-group-n zl-data">{MODELS.filter((m) => m.pinned).length}</span></div>
+      <div class="zl-chips">
+        {MODELS.filter((m) => m.pinned).map((m) => <ModelChip m={m} on={m.name === s.model} onPick={pick} key={m.name} />)}
+      </div>
+      <button type="button" class="zl-pick-all" onClick={() => setView("providers")}>
+        <span class="zl-pick-all-t">All models</span>
+        <span class="zl-kv-hint zl-data">{MODELS.length} · {PROVIDERS.length} providers</span>
+        <GoIcon />
+      </button>
+      <div class="zl-group"><span>Thinking</span><span class="zl-group-n zl-data">{s.thinking}</span></div>
+      <div class="zl-seg" role="radiogroup" aria-label="Thinking level">
+        {THINK_STEPS.map((t) => (
+          <button
+            type="button"
+            role="radio"
+            aria-checked={s.thinking === t.id}
+            class={`zl-seg-opt${s.thinking === t.id ? " is-on" : ""}`}
+            onClick={() => onChange({ thinking: t.id })}
+            key={t.id}
+          >
+            <span class="zl-seg-bars" aria-hidden="true">
+              {t.bars === 0 ? <i class="is-none" /> : [1, 2, 3, 4].map((k) => <i class={k <= t.bars ? "" : "is-off"} key={k} />)}
+            </span>
+            <span class="zl-seg-l">{t.label}</span>
+          </button>
+        ))}
+      </div>
+      <div class="zl-fast">
+        <span class="zl-fast-txt">
+          <span class="zl-fast-k">Fast</span>
+          <span class="zl-fast-d">Same model, less waiting · billed at a premium rate</span>
+        </span>
+        <Switch on={s.fast} onChange={(v) => onChange({ fast: v })} label="Fast mode" />
+      </div>
+    </div>
+  );
+}
+
+/* Permissions: three rows, label in the mode's colour (the same colour the
+   line prints), one line of what it does, a check on the current one. Order
+   is by autonomy, ask → auto → yolo, so the list reads as a dial. */
+const PERMS = [
+  { id: "ask", label: "ask", desc: "Ask before every command" },
+  { id: "auto", label: "auto", desc: "Ask only for risky commands" },
+  { id: "yolo", label: "yolo", desc: "Run everything — never ask" },
+];
+function PermPicker({ s, onChange, onDone }) {
+  return (
+    <div class="zl-pick" role="radiogroup" aria-label="Permission mode">
+      {PERMS.map((p) => {
+        const on = s.perm === p.id;
+        return (
+          <button
+            type="button"
+            role="radio"
+            aria-checked={on}
+            class={`zl-perm is-${p.id}${on ? " is-on" : ""}`}
+            onClick={() => { onChange({ perm: p.id }); onDone(); }}
+            key={p.id}
+          >
+            <span class="zl-perm-dot" aria-hidden="true" />
+            <span class="zl-perm-txt">
+              <span class="zl-perm-l">{p.label}</span>
+              <span class="zl-perm-d">{p.desc}</span>
+            </span>
+            {on && (
+              <svg class="zl-mchip-check" viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M2.5 6.5l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const PICK_TITLES = { model: "Model", perm: "Permissions" };
+
+/* The model picker's second level lives in the host, so the host's head can
+   swap eyebrow for back + title (the panel's idiom). */
+function usePickView(kind) {
+  const [view, setView] = useState("root"); // root | providers | <provider>
+  useEffect(() => { setView("root"); }, [kind]);
+  const head = view === "root"
+    ? <span class="zl-side-title is-eyebrow">{PICK_TITLES[kind]}</span>
+    : view === "providers"
+      ? <SubHead title="All models" count={MODELS.length} onBack={() => setView("root")} />
+      : <SubHead title={view} count={MODELS.filter((m) => m.provider === view).length} onBack={() => setView("providers")} />;
+  return { view, setView, head, sub: view !== "root" };
+}
+
+function Picker({ kind, s, onChange, onDone, view, setView }) {
+  return kind === "model"
+    ? <ModelPicker s={s} onChange={onChange} onDone={onDone} view={view} setView={setView} />
+    : <PermPicker s={s} onChange={onChange} onDone={onDone} />;
+}
+
+/* Desktop: the popover, anchored to its button. Closes on Escape or a click
+   anywhere else (the veil is the host's, so the popover can rise above the
+   dock's siblings). */
+function Popover({ kind, s, onChange, onClose }) {
+  const v = usePickView(kind);
+  useEffect(() => {
+    const k = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+  return (
+    <div class="zl-pop" role="dialog" aria-label={PICK_TITLES[kind]}>
+      <div class={`zl-side-head is-pop${v.sub ? " is-sub" : ""}`}>{v.head}</div>
+      <Picker kind={kind} s={s} onChange={onChange} onDone={onClose} view={v.view} setView={v.setView} />
+    </div>
+  );
+}
+
+/* Phone: the bottom sheet. Same content, same head as the drawer (eyebrow
+   and X), a grabber because it is the one surface you can also drag away. */
+function Sheet({ kind, s, onChange, onClose }) {
+  const v = usePickView(kind);
+  return (
+    <div class="zl-sheet" role="dialog" aria-label={PICK_TITLES[kind]}>
+      <span class="zl-grab" aria-hidden="true" />
+      <div class={`zl-side-head is-sheet${v.sub ? " is-sub" : ""}`}>
+        {v.head}
+        <button type="button" class="zl-x" onClick={onClose} aria-label="Close">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+      <div class="zl-sheet-body">
+        <Picker kind={kind} s={s} onChange={onChange} onDone={onClose} view={v.view} setView={v.setView} />
+      </div>
+    </div>
+  );
+}
+
+/* Each host owns its settings and which picker is open. `inline` hosts
+   (desktop, pane) render the popover anchored inside the line; the phone
+   renders a sheet itself. */
+function useSettings(initial, forced) {
+  const [s, setS] = useState(initial);
+  const [pick, setPick] = useState(null);
+  useEffect(() => { setS(initial); }, [initial]);
+  useEffect(() => { setPick(forced === "model" || forced === "perm" ? forced : null); }, [forced]);
+  const onChange = (patch) => setS((v) => ({ ...v, ...patch }));
+  return { s, onChange, pick, setPick, close: () => setPick(null) };
+}
+
+function StatusLine({ s = FULL_STATUS, compact, pick, onPick, onUsage, onChange, inline }) {
+  const open = (k) => onPick && onPick(pick === k ? null : k);
+  const pop = (k) => inline && pick === k && <Popover kind={k} s={s} onChange={onChange} onClose={() => onPick(null)} />;
   return (
     <div class={`zl-status${compact ? " is-compact" : ""}`}>
       {/* tier 1 — settings */}
       <div class="zl-st-group is-settings">
-        <button type="button" class="zl-st zl-st-model zl-p1" aria-label={`Model & thinking: ${s.model}, ${s.thinking}`}>
-          <span class="zl-st-word zl-st-model-name">{s.model}</span>
-          <ThinkMeter level={s.thinking} />
-        </button>
-        <button type="button" class={`zl-st zl-st-perm zl-p1 is-${s.perm}`} aria-label={`Permission mode: ${s.perm}`}>
-          <span class="zl-st-word">{s.perm}</span>
-        </button>
+        <span class="zl-st-anchor">
+          <button type="button" class={`zl-st zl-st-model zl-p1${pick === "model" ? " is-open" : ""}`} onClick={() => open("model")} aria-expanded={pick === "model"} aria-haspopup="dialog" aria-label={`Model & thinking: ${s.model}, ${s.thinking}`}>
+            <span class="zl-st-word zl-st-model-name">{s.model}</span>
+            <ThinkMeter level={s.thinking} />
+          </button>
+          {pop("model")}
+        </span>
+        <span class="zl-st-anchor">
+          <button type="button" class={`zl-st zl-st-perm zl-p1 is-${s.perm}${pick === "perm" ? " is-open" : ""}`} onClick={() => open("perm")} aria-expanded={pick === "perm"} aria-haspopup="dialog" aria-label={`Permission mode: ${s.perm}`}>
+            <span class="zl-st-word">{s.perm}</span>
+          </button>
+          {pop("perm")}
+        </span>
         {s.fast && (
           <span class="zl-st zl-st-fast zl-p4" title="Fast mode: billed at a premium rate">
             <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5L3.5 9h4l-.5 5.5L12.5 7h-4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
@@ -828,7 +1367,7 @@ function StatusLine({ s = FULL_STATUS, compact }) {
 
       {/* tier 2 — gauges */}
       <div class="zl-st-group is-gauges">
-        <button type="button" class="zl-st zl-st-ctx zl-p1" aria-label={`Context ${s.ctx}% used, ${s.spend} spent — show usage`}>
+        <button type="button" class="zl-st zl-st-ctx zl-p1" onClick={onUsage} aria-label={`Context ${s.ctx}% used, ${s.spend} spent — show usage`}>
           <CtxRing pct={s.ctx} />
           <span class="zl-data zl-num">{s.ctx}<span class="zl-unit">%</span></span>
           <span class="zl-st-sep" aria-hidden="true" />
@@ -951,14 +1490,37 @@ function useEdgeDrawers(hostRef) {
   };
 }
 
+/* The session panel's page, owned by the host: the ring on the line opens
+   the panel straight on Usage; closing resets to the root. `forced` is the
+   lab's preset (a page name, or "panel" for the root). */
+function usePanel(forced, setOpen) {
+  const [page, setPage] = useState("root");
+  useEffect(() => {
+    const p = forced === "panel" ? "root" : forced;
+    if (p === "root" || p in PANEL_PAGES) { setPage(p); setOpen(true); } else { setOpen(false); setPage("root"); }
+  }, [forced]);
+  return {
+    page, setPage,
+    show: (p = "root") => { setPage(p); setOpen(true); },
+    close: () => { setOpen(false); setPage("root"); },
+  };
+}
+
 /* ── Phone ─────────────────────────────────────────────────────────────── */
-function Phone({ label, live: preset }) {
+function Phone({ label, live: preset, surface }) {
   const host = useRef(null);
   const d = useEdgeDrawers(host);
+  const panel = usePanel(surface, d.setRight);
+  const set = useSettings(FULL_STATUS, surface);
   const anyOpen = d.left || d.right || d.veil != null;
   // Typing wins: with the keyboard up the panel is forced shut.
   const [typing, setTyping] = useState(false);
   const live = useLive(preset, typing);
+  const closeRight = panel.close;
+  // The edge gesture closes the drawer without going through panel.close:
+  // reset its page on the open→closed edge so the next open starts at root.
+  const wasRight = useRef(false);
+  useEffect(() => { if (wasRight.current && !d.right) panel.setPage("root"); wasRight.current = d.right; }, [d.right]);
 
   return (
     <div class="zl-phone-wrap">
@@ -984,14 +1546,21 @@ function Phone({ label, live: preset }) {
         <div class="zl-dock">
           <LiveZone {...live} />
           <Composer onFocusChange={setTyping} />
-          <StatusLine compact />
+          <StatusLine compact s={set.s} pick={set.pick} onPick={set.setPick} onChange={set.onChange} onUsage={() => panel.show("usage")} />
         </div>
+
+        {set.pick && (
+          <>
+            <div class="zl-scrim is-sheet" onClick={set.close} />
+            <Sheet kind={set.pick} s={set.s} onChange={set.onChange} onClose={set.close} />
+          </>
+        )}
 
         {anyOpen && (
           <div
             class="zl-scrim"
             style={d.veil != null ? `opacity:${d.veil};transition:none` : ""}
-            onClick={() => { d.setLeft(false); d.setRight(false); }}
+            onClick={() => { d.setLeft(false); closeRight(); }}
           />
         )}
         <div
@@ -1007,7 +1576,7 @@ function Phone({ label, live: preset }) {
           aria-hidden={!d.right}
           style={d.rightX != null ? `transform:translateX(${d.rightX}px);transition:none` : ""}
         >
-          <SessionPanel onClose={() => d.setRight(false)} />
+          <SessionPanel onClose={closeRight} page={panel.page} onPage={panel.setPage} />
         </div>
       </div>
       <p class="zl-hint">
@@ -1038,8 +1607,10 @@ function HeadActions() {
   );
 }
 
-function Desktop({ label, live: preset }) {
-  const [panel, setPanel] = useState(false);
+function Desktop({ label, live: preset, surface }) {
+  const [open, setOpen] = useState(false);
+  const panel = usePanel(surface, setOpen);
+  const set = useSettings(FULL_STATUS, surface);
   const live = useLive(preset, false);
   return (
     <div class="zl-desk-wrap">
@@ -1050,7 +1621,7 @@ function Desktop({ label, live: preset }) {
         </div>
         <div class="zl-desk-main">
           <div class="zl-desk-head">
-            <button type="button" class="zl-crumb" onClick={() => setPanel(true)} aria-expanded={panel}>
+            <button type="button" class="zl-crumb" onClick={() => panel.show()} aria-expanded={open}>
               <span class="zl-crumb-title">Buscar un bug bounty</span>
               <span class="zl-crumb-path zl-data">~/dev/moa</span>
             </button>
@@ -1058,19 +1629,20 @@ function Desktop({ label, live: preset }) {
             <HeadActions />
           </div>
           <Transcript streaming={!!preset.fg && preset.fg.phase === "working"} tail={preset.fg?.phase === "waiting" ? ASK_CARD : null} />
+          {set.pick && <div class="zl-veil" onClick={set.close} />}
           <div class="zl-dock">
             <LiveZone {...live} />
             <Composer />
-            <StatusLine />
+            <StatusLine inline s={set.s} pick={set.pick} onPick={set.setPick} onChange={set.onChange} onUsage={() => panel.show("usage")} />
           </div>
-          {panel && <div class="zl-scrim" onClick={() => setPanel(false)} />}
+          {open && <div class="zl-scrim" onClick={panel.close} />}
           <div
-            class={`zl-side zl-side-right${panel ? " is-open" : ""}`}
+            class={`zl-side zl-side-right${open ? " is-open" : ""}`}
             role="dialog"
             aria-label="This session"
-            aria-hidden={!panel}
+            aria-hidden={!open}
           >
-            <SessionPanel onClose={() => setPanel(false)} />
+            <SessionPanel onClose={panel.close} page={panel.page} onPage={panel.setPage} />
           </div>
         </div>
       </div>
@@ -1103,8 +1675,9 @@ const PANES = [
     ) },
 ];
 
-function Pane({ p, streaming, live: preset }) {
+function Pane({ p, streaming, live: preset, surface }) {
   const live = useLive(preset || LIVE_STATES[0], false);
+  const set = useSettings(p.status, surface);
   return (
     <section class={`zl-pane${p.focus ? " is-focus" : ""}`} aria-label={`Pane ${p.n}: ${p.title}`}>
       <div class="zl-pane-head">
@@ -1120,16 +1693,17 @@ function Pane({ p, streaming, live: preset }) {
       <div class="zl-pane-body">
         <Transcript dense streaming={streaming} short={p.n !== 1} tail={p.tail} />
       </div>
+      {set.pick && <div class="zl-veil" onClick={set.close} />}
       <div class="zl-dock is-pane">
         <LiveZone {...live} dense />
         <Composer />
-        <StatusLine s={p.status} compact />
+        <StatusLine inline s={set.s} compact pick={set.pick} onPick={set.setPick} onChange={set.onChange} />
       </div>
     </section>
   );
 }
 
-function Grid({ label, live }) {
+function Grid({ label, live, surface }) {
   return (
     <div class="zl-grid-wrap">
       <div class="zl-density-label">{label}</div>
@@ -1140,7 +1714,7 @@ function Grid({ label, live }) {
           <span class="zl-grid-needs"><span class="zl-data">1</span> needs you</span>
         </div>
         <div class="zl-grid-panes">
-          <Pane p={PANES[0]} streaming={!!live.fg && live.fg.phase === "working"} live={live} />
+          <Pane p={PANES[0]} streaming={!!live.fg && live.fg.phase === "working"} live={live} surface={surface} />
           <div class="zl-grid-col">
             <Pane p={PANES[1]} streaming={false} />
             <Pane p={PANES[2]} streaming={false} />
@@ -1223,6 +1797,39 @@ function StudyLive({ preset, dense }) {
 }
 
 /* Lab control: one segmented switch, not product. */
+function LabSeg({ label, options, value, onChange }) {
+  const cur = options.find((s) => s.id === value);
+  return (
+    <div class="zl-lab-ctl">
+      <div class="zl-lab-seg" role="radiogroup" aria-label={label}>
+        {options.map((s) => (
+          <button
+            type="button"
+            role="radio"
+            aria-checked={s.id === value}
+            class={`zl-lab-opt${s.id === value ? " is-on" : ""}`}
+            onClick={() => onChange(s.id)}
+            key={s.id}
+          >{s.label}</button>
+        ))}
+      </div>
+      {cur?.note && <p class="zl-lab-note">{cur.note}</p>}
+    </div>
+  );
+}
+
+/* The surfaces the owner asked to see without touching anything: the panel
+   and its three pages, and the two pickers. Each preset opens the same thing
+   in every host on the page, so the densities can be compared side by side. */
+const SURFACES = [
+  { id: "none", label: "Closed", note: "Everything shut. Tap the crumb / the name for the panel; tap a setting on the line for its picker; tap the ring for Usage." },
+  { id: "panel", label: "Panel", note: "The session dossier: identity, run facts, three rows (Usage, MCP, Artifacts) that push a page inside the panel, lifecycle at the foot. No model, no permissions: those are the line's." },
+  { id: "usage", label: "Panel · Usage", note: "What the ring opens. This session's spend, context and tokens; then the quota of the provider this session uses, named so it never reads as global." },
+  { id: "mcp", label: "Panel · MCP", note: "Production's dossier, in the panel: one row per server; the open one shows its verdict, its three scopes with the reach on the same line as the switch, and its error." },
+  { id: "artifacts", label: "Panel · Artifacts", note: "The list. Opening one goes to the centre (inline on desktop, full screen on the phone). The reader never lives in 320px." },
+  { id: "model", label: "Model picker", note: "What the model tap opens: a popover above its button on desktop and in a pane, a bottom sheet on the phone. Current model, pinned, the door to all providers (pushed inside with back), thinking, fast." },
+  { id: "perm", label: "Permissions", note: "What the permission tap opens: three rows in the line's own colours, one line each of what it does. Pick one and it closes." },
+];
 function LiveSwitch({ value, onChange }) {
   const cur = LIVE_STATES.find((s) => s.id === value);
   return (
@@ -1251,6 +1858,7 @@ export function ZonesLab() {
   }, []);
   const [liveId, setLiveId] = useState(() => new URLSearchParams(location.search).get("live") || "working");
   const live = LIVE_STATES.find((s) => s.id === liveId) || LIVE_STATES[1];
+  const [surface, setSurface] = useState(() => new URLSearchParams(location.search).get("surface") || "none");
   return (
     <div class="zl">
       <div class="zl-aurora" aria-hidden="true" />
@@ -1263,12 +1871,13 @@ export function ZonesLab() {
         </p>
       </header>
       <LiveSwitch value={live.id} onChange={setLiveId} />
+      <LabSeg label="Open surface" options={SURFACES} value={surface} onChange={setSurface} />
       <div class="zl-stage">
-        <Phone label="Phone" live={live} />
-        <Desktop label="Desktop" live={live} />
+        <Phone label="Phone" live={live} surface={surface} />
+        <Desktop label="Desktop" live={live} surface={surface} />
       </div>
       <div class="zl-stage">
-        <Grid label="Desktop · grid" live={live} />
+        <Grid label="Desktop · grid" live={live} surface={surface} />
       </div>
       <LiveZoneStudy />
       <StatusLineStudy />
