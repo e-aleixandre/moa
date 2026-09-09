@@ -14,13 +14,17 @@
   background: #12121f;
   color: #f1f1f6;
   font-family: var(--font);
-  --zl-canvas: #12121f;
-  --zl-sheet: #181826;
-  --zl-well: rgba(0, 0, 0, 0.28);
-  --zl-hi: rgba(255, 255, 255, 0.05);
-  --zl-on: rgba(255, 255, 255, 0.09);
-  --zl-on-2: rgba(255, 255, 255, 0.14);
-  --zl-t1: #f1f1f6;
+  /* An explicit tonal ladder: canvas, sheet, raised, control. Small, regular
+     steps -- the separation between planes is tonal, not a shadow. */
+  --zl-canvas: #101018;
+  --zl-sheet: #16161f;
+  --zl-well: rgba(0, 0, 0, 0.22);
+  --zl-hi: rgba(255, 255, 255, 0.04);
+  --zl-on: rgba(255, 255, 255, 0.07);
+  --zl-on-2: rgba(255, 255, 255, 0.11);
+  /* Not pure white: Linear ships #F7F8F8, Raycast #F4F4F6. Pure white on a
+     dark canvas is the tell of a system nobody tuned. */
+  --zl-t1: #f4f4f7;
   --zl-t2: #c0c1cf;
   --zl-t3: #9192a6;
   --zl-t4: #6b6c80;
@@ -37,14 +41,21 @@
      on its top edge and throws a shadow below; a sunken one is shaded at the
      top and its far rim catches the light. The hairline rim is what lets a
      surface read as an object against the aurora at any opacity. */
-  --zl-lit: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  --zl-rim: 0 0 0 1px rgba(255, 255, 255, 0.055);
-  --zl-rim-strong: 0 0 0 1px rgba(255, 255, 255, 0.11);
-  --zl-drop-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.28);
-  --zl-drop-md: 0 2px 4px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.4);
-  --zl-sunk: inset 0 1px 2px rgba(0, 0, 0, 0.45), inset 0 -1px 0 rgba(255, 255, 255, 0.045);
-  --zl-raised: linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.06));
-  --zl-raised-hover: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.09));
+  /* Depth the way shipped products actually do it. Linear, Raycast, Warp, Zed,
+     Vercel and Superhuman all compute box-shadow:none on their structural
+     elements; Notion's are #00000004-0A, effectively invisible. So layers are
+     separated by TONE and a low-energy hairline, and shadow is spent only on
+     things that genuinely float above the page: drawers and popovers. */
+  --zl-line: rgba(255, 255, 255, 0.07);
+  --zl-line-2: rgba(255, 255, 255, 0.11);
+  --zl-rim: 0 0 0 1px var(--zl-line);
+  --zl-rim-strong: 0 0 0 1px var(--zl-line-2);
+  --zl-drop-md: 0 16px 48px rgba(0, 0, 0, 0.5);
+  /* Three radii, repeated everywhere, even where a fourth would fit better.
+     The discipline is the identity: nine radii is what "generic" looks like. */
+  --zl-r-sm: 6px;
+  --zl-r-md: 10px;
+  --zl-r-lg: 16px;
 }
 
 .zl-aurora {
@@ -96,7 +107,7 @@
   width: 390px;
   height: 780px;
   overflow: hidden;
-  border-radius: 34px;
+  border-radius: var(--zl-r-lg);
   /* The frame is a sheet lit from above: lighter at the top, settling into
      the canvas at the bottom, with a bright top edge and a real shadow. */
   background: linear-gradient(180deg, rgba(26, 26, 42, 0.78), rgba(12, 12, 22, 0.7) 40%, rgba(9, 9, 18, 0.72));
@@ -130,10 +141,10 @@
   min-width: 44px;
   padding: 0 14px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--zl-r-lg);
   background: linear-gradient(180deg, rgba(40, 40, 60, 0.86), rgba(26, 26, 42, 0.86));
   backdrop-filter: blur(12px);
-  box-shadow: var(--zl-lit), var(--zl-rim), var(--zl-drop-sm);
+  box-shadow: var(--zl-rim);
   color: var(--zl-t1);
   font-family: inherit;
   font-size: 14px;
@@ -173,7 +184,7 @@
 .zl-bar {
   height: 11px;
   margin: 0 0 11px;
-  border-radius: 6px;
+  border-radius: var(--zl-r-sm);
   background: rgba(255, 255, 255, 0.13);
 }
 .zl-user {
@@ -204,7 +215,7 @@
   align-items: flex-end;
   gap: 6px;
   padding: 6px 6px 6px 6px;
-  border-radius: 22px;
+  border-radius: var(--zl-r-lg);
   background: linear-gradient(180deg, rgba(34, 34, 52, 0.92), rgba(22, 22, 36, 0.92));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.09),
@@ -247,7 +258,7 @@
   width: 44px;
   height: 44px;
   border: 0;
-  border-radius: 16px;
+  border-radius: var(--zl-r-lg);
   font-family: inherit;
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease, transform 140ms var(--zl-ease);
@@ -262,7 +273,7 @@
    stays where it belongs. */
 .zl-send {
   background: rgba(0, 0, 0, 0.22);
-  box-shadow: var(--zl-sunk);
+  box-shadow: var(--zl-rim);
   color: var(--zl-t4);
   cursor: default;
 }
@@ -294,7 +305,7 @@
   height: 28px;
   padding: 0 9px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--zl-r-md);
   background: transparent;
   color: inherit;
   font-family: inherit;
@@ -314,7 +325,7 @@ button.zl-st:hover { background: var(--zl-hi); }
 .zl-think i {
   display: block;
   width: 3px;
-  border-radius: 1.5px;
+  border-radius: var(--zl-r-sm);
   background: var(--zl-lavender);
 }
 .zl-think i:nth-child(1) { height: 5px; }
@@ -455,9 +466,9 @@ button.zl-st:hover { background: var(--zl-hi); }
   height: 36px;
   padding: 0 14px 0 10px;
   border: 0;
-  border-radius: 12px;
-  background: var(--zl-raised);
-  box-shadow: var(--zl-lit), var(--zl-rim), var(--zl-drop-sm);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-on);
+  box-shadow: var(--zl-rim);
   color: var(--zl-t1);
   font-family: inherit;
   font-size: 13px;
@@ -465,7 +476,7 @@ button.zl-st:hover { background: var(--zl-hi); }
   cursor: pointer;
   transition: background 120ms ease, transform 120ms var(--zl-ease);
 }
-.zl-side-new:hover { background: var(--zl-raised-hover); }
+.zl-side-new:hover { background: var(--zl-on-2); }
 .zl-side-new:active { transform: translateY(1px); }
 .zl-side-new-plus { font-size: 17px; line-height: 1; color: var(--zl-t2); }
 
@@ -476,14 +487,14 @@ button.zl-st:hover { background: var(--zl-hi); }
   width: 36px;
   height: 36px;
   border: 0;
-  border-radius: 12px;
-  background: var(--zl-raised);
-  box-shadow: var(--zl-lit), var(--zl-rim);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-on);
+  box-shadow: var(--zl-rim);
   color: var(--zl-t2);
   cursor: pointer;
 }
 .zl-x svg { width: 16px; height: 16px; }
-.zl-x:hover { background: var(--zl-raised-hover); color: var(--zl-t1); }
+.zl-x:hover { background: var(--zl-on-2); color: var(--zl-t1); }
 
 /* Search is an object, not a hole: a recess machined into the sheet, shaded
    at the top where the rim blocks the light, with a hairline of light on the
@@ -498,19 +509,17 @@ button.zl-st:hover { background: var(--zl-hi); }
   gap: 7px;
   height: 36px;
   padding: 0 10px;
-  border-radius: 10px;
+  border-radius: var(--zl-r-md);
   background: rgba(0, 0, 0, 0.26);
-  box-shadow: var(--zl-sunk), var(--zl-rim);
+  box-shadow: var(--zl-rim);
   color: var(--zl-t4);
   transition: box-shadow 140ms ease, color 140ms ease;
 }
-.zl-search:hover { color: var(--zl-t3); box-shadow: var(--zl-sunk), 0 0 0 1px rgba(255, 255, 255, 0.09); }
+.zl-search:hover { color: var(--zl-t3); box-shadow: var(--zl-rim-strong); }
 .zl-search:focus-within {
-  color: var(--zl-t3);
-  box-shadow:
-    var(--zl-sunk),
-    var(--zl-rim-strong),
-    0 0 0 4px rgba(255, 255, 255, 0.035);
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: var(--zl-rim-strong);
+  color: var(--zl-t2);
 }
 .zl-search-ico { width: 15px; height: 15px; flex: none; }
 .zl-search-in {
@@ -527,9 +536,9 @@ button.zl-st:hover { background: var(--zl-hi); }
 /* The keycap is a small raised object inside the recess: a keycap. */
 .zl-kbd {
   padding: 2px 6px;
-  border-radius: 6px;
-  background: var(--zl-raised);
-  box-shadow: var(--zl-lit), var(--zl-rim), 0 1px 1px rgba(0, 0, 0, 0.4);
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-on);
+  box-shadow: var(--zl-rim);
   font-family: inherit;
   font-size: 11px;
   color: var(--zl-t3);
@@ -557,7 +566,7 @@ button.zl-st:hover { background: var(--zl-hi); }
   min-height: 52px;
   padding: 8px 12px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--zl-r-lg);
   background: transparent;
   color: inherit;
   font-family: inherit;
@@ -626,7 +635,7 @@ button.zl-st:hover { background: var(--zl-hi); }
   height: 40px;
   padding: 0 12px;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--zl-r-md);
   background: transparent;
   color: var(--zl-t2);
   font-family: inherit;
@@ -640,7 +649,7 @@ button.zl-st:hover { background: var(--zl-hi); }
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 9px;
+  border-radius: var(--zl-r-md);
   background: var(--zl-yellow);
   color: #1a1a28;
   font-size: 11px;
@@ -669,15 +678,15 @@ button.zl-st:hover { background: var(--zl-hi); }
   padding: 0 14px;
   border: 0;
   outline: 0;
-  border-radius: 14px;
+  border-radius: var(--zl-r-lg);
   background: rgba(0, 0, 0, 0.26);
-  box-shadow: var(--zl-sunk), var(--zl-rim);
+  box-shadow: var(--zl-rim);
   color: var(--zl-t1);
   font-family: inherit;
   font-size: 16px; /* iOS focus zoom floor */
   transition: box-shadow 140ms ease;
 }
-.zl-input:focus { box-shadow: var(--zl-sunk), var(--zl-rim-strong), 0 0 0 4px rgba(255, 255, 255, 0.035); }
+.zl-input:focus { box-shadow: var(--zl-rim-strong); }
 /* A read-only value is not a recess you can type into: it sits flush. */
 .zl-input.is-static { background: rgba(255, 255, 255, 0.04); box-shadow: var(--zl-rim); color: var(--zl-t2); }
 .zl-path-dir { color: var(--zl-t4); }
@@ -690,9 +699,9 @@ button.zl-st:hover { background: var(--zl-hi); }
 }
 .zl-facts div {
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: var(--zl-r-md);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.03));
-  box-shadow: var(--zl-lit), var(--zl-rim);
+  box-shadow: var(--zl-rim);
 }
 .zl-facts dt { font-size: 11px; color: var(--zl-t4); margin-bottom: 3px; }
 .zl-facts dd {
@@ -716,16 +725,16 @@ button.zl-st:hover { background: var(--zl-hi); }
   min-height: 56px;
   padding: 10px 14px;
   border: 0;
-  border-radius: 14px;
-  background: var(--zl-raised);
-  box-shadow: var(--zl-lit), var(--zl-rim), var(--zl-drop-sm);
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-on);
+  box-shadow: var(--zl-rim);
   color: var(--zl-t1);
   font-family: inherit;
   text-align: left;
   cursor: pointer;
   transition: background 120ms ease, transform 120ms var(--zl-ease);
 }
-.zl-act:hover { background: var(--zl-raised-hover); }
+.zl-act:hover { background: var(--zl-on-2); }
 .zl-act:active { transform: translateY(1px); }
 .zl-act-t { font-size: 14px; font-weight: 500; }
 .zl-act-d { font-size: 12px; line-height: 1.4; color: var(--zl-t4); }
@@ -739,7 +748,7 @@ button.zl-st:hover { background: var(--zl-hi); }
   width: 860px;
   height: 780px;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: var(--zl-r-lg);
   background: linear-gradient(180deg, rgba(26, 26, 42, 0.78), rgba(12, 12, 22, 0.7) 40%, rgba(9, 9, 18, 0.72));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
@@ -776,7 +785,7 @@ button.zl-st:hover { background: var(--zl-hi); }
   height: 36px;
   padding: 0 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--zl-r-md);
   background: transparent;
   color: inherit;
   font-family: inherit;
@@ -788,9 +797,9 @@ button.zl-st:hover { background: var(--zl-hi); }
 .zl-desk-act {
   width: 32px;
   height: 32px;
-  border-radius: 9px;
-  background: var(--zl-raised);
-  box-shadow: var(--zl-lit), var(--zl-rim);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-on);
+  box-shadow: var(--zl-rim);
 }
 .zl-desk .zl-transcript { padding: 10px 22px 12px; }
 .zl-desk .zl-dock { padding: 18px 22px 12px; }
@@ -798,16 +807,16 @@ button.zl-st:hover { background: var(--zl-hi); }
 
 /* Phone-only sizing: every control that gets a thumb is at least 44px. The
    desktop keeps the tighter metrics because a pointer does not need them. */
-.zl-phone .zl-x { width: 44px; height: 44px; border-radius: 14px; }
-.zl-phone .zl-side-new { height: 44px; border-radius: 14px; }
+.zl-phone .zl-x { width: 44px; height: 44px; border-radius: var(--zl-r-lg); }
+.zl-phone .zl-side-new { height: 44px; border-radius: var(--zl-r-lg); }
 .zl-phone .zl-status { height: 44px; }
 /* On the phone every real control is a 44px target. The status pills and the
    inbox button were 40, and the search input's own box was 26 inside a 44px
    wrapper -- the wrapper is not what the thumb hits, the input is. */
-.zl-phone button.zl-st { height: 44px; border-radius: 13px; }
+.zl-phone button.zl-st { height: 44px; border-radius: var(--zl-r-md); }
 .zl-phone .zl-inbox { height: 44px; }
 .zl-phone .zl-search-in { height: 44px; }
-.zl-phone .zl-search { height: 44px; padding-top: 0; padding-bottom: 0; border-radius: 13px; }
+.zl-phone .zl-search { height: 44px; padding-top: 0; padding-bottom: 0; border-radius: var(--zl-r-md); }
 
 @media (max-width: 1400px) {
   .zl-desk { width: 720px; }
@@ -847,12 +856,12 @@ button.zl-st:hover { background: var(--zl-hi); }
   width: 32px;
   height: 32px;
   margin-top: 1px;
-  border-radius: 10px;
+  border-radius: var(--zl-r-md);
   background: linear-gradient(180deg, hsl(var(--h) 55% 62% / 0.22), hsl(var(--h) 55% 55% / 0.13));
   box-shadow: inset 0 1px 0 hsl(var(--h) 60% 80% / 0.16), 0 1px 2px rgba(0, 0, 0, 0.3);
   color: hsl(var(--h) 70% 76%);
-  font-size: 11.5px;
-  font-weight: 650;
+  font-size: 11px;
+  font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: lowercase;
   transition: background 140ms ease, box-shadow 140ms ease;
@@ -862,7 +871,7 @@ button.zl-st:hover { background: var(--zl-hi); }
 .zl-mono.is-running {
   background: hsl(150 60% 45% / 0.2);
   color: #a6e3a1;
-  box-shadow: 0 0 0 1px hsl(150 60% 55% / 0.3), 0 0 14px hsl(150 60% 45% / 0.25);
+  box-shadow: 0 0 0 1px hsl(150 60% 55% / 0.35);
 }
 .zl-mono.is-needs {
   background: hsl(45 85% 55% / 0.2);
@@ -880,17 +889,13 @@ button.zl-st:hover { background: var(--zl-hi); }
    beneath. Hover is a flat wash; this has thickness. No accent bar -- the
    only edge bar in the product means "you said this". */
 .zl-row.is-current {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.115), rgba(255, 255, 255, 0.07));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.13),
-    0 0 0 1px rgba(255, 255, 255, 0.06),
-    0 1px 2px rgba(0, 0, 0, 0.45),
-    0 6px 16px rgba(0, 0, 0, 0.35);
+  background: var(--zl-on);
+  box-shadow: none;
 }
 .zl-row.is-current:hover {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.09));
 }
-.zl-row.is-current .zl-row-title { color: #fff; font-weight: 600; }
+.zl-row.is-current .zl-row-title { color: var(--zl-t1); font-weight: 600; }
 .zl-row.is-current .zl-row-when { color: var(--zl-t3); }
 
 .zl-row { align-items: center; }
