@@ -122,8 +122,14 @@
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
+  /* No peach in here, deliberately. Peach is this product's word for "you said
+     this": the left bar of every user message, and nothing else. The first blob
+     used to be peach AND sat at 12% 18% — top left, exactly where the user
+     waypoint lives — so the identity colour was being used as wallpaper right
+     behind the one element it belongs to. Lavender takes that corner: it is
+     still warm-adjacent against the mauve, and it means nothing on its own. */
   background:
-    radial-gradient(60% 55% at 12% 18%, rgba(250, 179, 135, 0.62), transparent 68%),
+    radial-gradient(60% 55% at 12% 18%, rgba(180, 190, 254, 0.52), transparent 68%),
     radial-gradient(55% 60% at 88% 12%, rgba(203, 166, 247, 0.60), transparent 68%),
     radial-gradient(70% 55% at 62% 92%, rgba(137, 180, 250, 0.58), transparent 70%),
     radial-gradient(45% 45% at 10% 88%, rgba(148, 226, 213, 0.42), transparent 70%),
@@ -160,15 +166,6 @@
   --amb-glass: #1a1a28;
   --amb-sheet: #16161f;
   --amb-blur: none;
-}
-/* The veil is the OTHER piece of glass, and the one that leaked: at 0.3 alpha
-   with blur it turned the composer's white send button into a bright smear
-   under the drawer — the glow both reviewers flagged. With no aurora there is
-   nothing worth showing through, so the veil just dims. */
-.sk-ambient.amb-none .sdrawer-veil {
-  background: rgba(6, 6, 12, 0.72);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 /* lift the static children above the aurora; the chip and the veil are
    already absolute with their own z-index and must not be touched */
@@ -382,9 +379,11 @@
 
 /* ── phone: canvas + drawer glass + composer pill ───────────────────────── */
 .sk-ambient.sk-phone { background: var(--amb-canvas); }
+/* Same rule as the desktop aurora: no peach. On the phone it mattered more —
+   the peach blob sat at 20% 6%, directly behind the first user message. */
 .sk-ambient.sk-phone .sk-aurora {
   background:
-    radial-gradient(70% 34% at 20% 6%, rgba(250, 179, 135, 0.66), transparent 70%),
+    radial-gradient(70% 34% at 20% 6%, rgba(180, 190, 254, 0.56), transparent 70%),
     radial-gradient(70% 30% at 90% 30%, rgba(203, 166, 247, 0.62), transparent 70%),
     radial-gradient(80% 34% at 30% 70%, rgba(137, 180, 250, 0.60), transparent 70%),
     radial-gradient(70% 30% at 85% 98%, rgba(148, 226, 213, 0.46), transparent 70%);
@@ -423,11 +422,17 @@
 .sk-ambient .mtchip-attn { border-color: var(--amb-canvas); }
 /* the inbox count is a state (unseen work): it keeps mauve */
 
-/* veil + drawer */
+/* veil + drawer
+   The veil does NOT blur, at any dose. Blurring a 0.30 veil turned the
+   composer's send button into a bright smear under the drawer (both reviewers
+   flagged it, and it is visible in amb-soft, the chosen dose). Two reasons to
+   dim instead of blur: what is behind the drawer is a LIVE transcript, so
+   whatever leaks through also moves while you read; and the veil was a second
+   stacked backdrop-filter over the whole viewport, the most expensive kind. */
 .sk-ambient .sdrawer-veil {
-  background: rgba(6, 6, 12, 0.30);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(6, 6, 12, 0.72);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .sk-ambient .sdrawer {
   background: var(--amb-glass);
