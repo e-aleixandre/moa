@@ -365,6 +365,60 @@
   color: var(--amb-text-4);
 }
 
+/* ── Permission cards ──────────────────────────────────────────────────────
+   The card that interrupts you. It keeps its yellow -- that is the state, and
+   state colour is the one thing this direction must not touch -- but the
+   yellow moves from a 1px outline to a filled left bar and a tinted surface,
+   which is how Ambient separates things everywhere else. */
+[data-ambient="on"] .perm-card {
+  border: 0;
+  border-left: 3px solid var(--yellow);
+  border-radius: 4px var(--amb-r-row) var(--amb-r-row) 4px;
+  background: color-mix(in srgb, var(--yellow) 7%, rgba(0, 0, 0, 0.22));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+[data-ambient="on"] .perm-card .perm-head .p-timer {
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .perm-card .scope {
+  border: 0;
+  background: var(--amb-hi);
+  border-radius: var(--amb-r-ctl);
+}
+
+/* ── Code blocks ──────────────────────────────────────────────────────────
+   The code stays mono, obviously. What changes is the chrome around it: the
+   outline becomes a recessed surface and the filename header stops being a
+   bordered strip, so a code block reads as a well cut into the page rather
+   than a box dropped on it. */
+[data-ambient="on"] .code {
+  border: 0;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+[data-ambient="on"] .code .code-head {
+  background: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: var(--amb-text-4);
+}
+
+/* ── Ask cards ────────────────────────────────────────────────────────────
+   Same treatment as the permission card: this is also a session waiting on
+   you, so it wears the same yellow gesture rather than an outline. */
+[data-ambient="on"] .ask {
+  border: 0;
+  border-left: 3px solid var(--yellow);
+  border-radius: 4px var(--amb-r-row) var(--amb-r-row) 4px;
+  background: color-mix(in srgb, var(--yellow) 7%, rgba(0, 0, 0, 0.22));
+}
+[data-ambient="on"] .ask .ask-free {
+  border-top-color: rgba(255, 255, 255, 0.06);
+}
+
 /* ── The status strip ──────────────────────────────────────────────────────
    The densest run of mono in the app, sitting right under the composer. It
    stays tabular (these are numbers you compare at a glance) but stops being
