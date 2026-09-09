@@ -1,9 +1,10 @@
-import { Rewind, Settings, History, Trash2, Copy, X } from "lucide-preact";
+import { Rewind, Settings, History, Trash2, Copy, X, Search } from "lucide-preact";
 import {
   StateDot,
   Chip,
   Button,
   IconButton,
+  Field,
   Kbd,
   ThinkingMeter,
 } from "../primitives/index.js";
@@ -46,19 +47,53 @@ function ButtonRow() {
   return (
     <>
       <div class="gallery-row tight">
+        <Button variant="accent" size="md">Accent md</Button>
         <Button variant="solid" size="md">Solid md</Button>
         <Button variant="ghost" size="md">Ghost md</Button>
         <Button variant="danger" size="md">Danger md</Button>
       </div>
       <div class="gallery-row tight">
+        <Button variant="accent" size="sm">Accent sm</Button>
         <Button variant="solid" size="sm">Solid sm</Button>
         <Button variant="ghost" size="sm">Ghost sm</Button>
         <Button variant="danger" size="sm">Danger sm</Button>
       </div>
       <div class="gallery-row tight">
+        <Button variant="accent" size="lg">Accent lg</Button>
+        <Button variant="solid" size="lg">Solid lg</Button>
+        <Button variant="ghost" size="lg">Ghost lg</Button>
+      </div>
+      <div class="gallery-row tight">
+        <Button variant="accent" disabled>Accent disabled</Button>
         <Button variant="solid" disabled>Solid disabled</Button>
         <Button variant="ghost" disabled>Ghost disabled</Button>
         <Button variant="danger" disabled>Danger disabled</Button>
+      </div>
+    </>
+  );
+}
+
+// FieldRow — the whole point of the primitive is that a field and a button of
+// the same size are the SAME height, so they are shown paired.
+function FieldRow() {
+  return (
+    <>
+      <div class="gallery-row tight">
+        <Field variant="box" size="lg" placeholder="http://localhost:5173" mono aria-label="URL" />
+        <Button variant="accent" size="lg">Load</Button>
+      </div>
+      <div class="gallery-row tight">
+        <Field
+          variant="inset"
+          size="md"
+          placeholder="Search sessions…"
+          leading={<Search size={15} />}
+          aria-label="Search"
+        />
+      </div>
+      <div class="gallery-row tight">
+        <Field variant="box" size="sm" placeholder="Small box" aria-label="Small" />
+        <Field variant="inset" size="sm" placeholder="Small inset" aria-label="Small inset" />
       </div>
     </>
   );
@@ -160,6 +195,9 @@ export function PrimitivesGallery() {
 
       <h3>IconButton</h3>
       <IconButtonRow />
+
+      <h3>Field</h3>
+      <FieldRow />
 
       <h3>Kbd</h3>
       <KbdRow />

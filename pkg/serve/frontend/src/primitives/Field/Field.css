@@ -1,0 +1,86 @@
+/* Field — the text input primitive.
+
+   Heights come from --control-*: a field and a button of the same size have to
+   be the same height, which is the thing that was missing (a 42px input beside
+   a 26px "Load" button is what the Live Preview setup looks like today). */
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--overlay1);
+  transition: border-color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+
+.field-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text);
+  font-family: var(--font);
+  /* Hard floor: below 16px iOS Safari zooms the page on focus. Not negotiable
+     and deliberately not a prop. */
+  font-size: var(--text-input);
+}
+
+.field-input:focus {
+  outline: none;
+}
+
+.field-input::placeholder {
+  color: var(--overlay0);
+}
+
+.field-mono .field-input {
+  font-family: var(--mono);
+}
+
+.field:focus-within {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.field-affix {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--overlay0);
+}
+
+/* Sizes — the control scale, so fields and buttons line up */
+
+.field-sm {
+  min-height: var(--control-sm);
+  padding: 0 var(--space-2);
+}
+
+.field-md {
+  min-height: var(--control-md);
+  padding: 0 var(--space-3);
+}
+
+.field-lg {
+  min-height: var(--control-touch);
+  padding: 0 var(--space-3);
+}
+
+/* Variants */
+
+/* box — a field standing on its own */
+.field-box {
+  background: var(--mantle);
+  border-color: var(--surface1);
+}
+
+/* inset — a well recessed into its surface, the shape every search field in
+   the app already uses */
+.field-inset {
+  background: var(--surface0);
+  border-color: var(--surface1);
+}

@@ -87,6 +87,20 @@
      blocks. */
   --text-code:   12.5px;
 
+  /* Control heights — the touch/click scale for buttons, rows and fields.
+     Derived from what the codebase already does rather than invented: a sweep
+     of every literal height/min-height found 44px used 63 times, 32px 26 times,
+     36px 23 times, 28px 19 times and 48px 10 times, plus ~18 other one-off
+     values. These five are the real scale; anything else was drift.
+     --control-touch (44px) is the mobile target size and the floor for
+     anything a finger has to hit. */
+  --control-xs:    28px;
+  --control-sm:    32px;
+  --control-md:    36px;
+  --control-lg:    40px;
+  --control-touch: 44px;
+  --control-xl:    48px;
+
   /* Editable fields: never below 16px. iOS Safari auto-zooms when focusing an
      input/textarea/select with font-size < 16px, which is very annoying in the
      PWA. This token is the floor for every input field. */

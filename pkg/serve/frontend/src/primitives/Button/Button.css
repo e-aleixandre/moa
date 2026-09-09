@@ -35,7 +35,34 @@
   font-size: var(--text-sm);
 }
 
+/* size-lg — the size that pairs with a --text-input (16px) field. Without it,
+   a "Load" button next to a text input is 26px tall against a 42px field,
+   which is exactly what the Live Preview setup screen looks like today. */
+.button.size-lg {
+  min-height: var(--control-touch);
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--text-md);
+}
+
 /* Variants */
+
+/* variant-accent — the ONE dominant action of a screen. The gradient is the
+   product's own: the same peach→mauve the composer's send button already uses,
+   lifted here so it stops being copied by hand wherever an accent is needed.
+   Reserve it: if the most eye-catching thing on screen is not what the screen
+   is for, the weight is inverted (see CRITERIO-VISUAL §2). */
+.button.variant-accent {
+  background: linear-gradient(135deg, var(--peach), color-mix(in srgb, var(--peach) 60%, var(--mauve)));
+  color: var(--crust);
+  font-weight: var(--weight-semibold);
+}
+@media (hover: hover) {
+
+
+.button.variant-accent:hover:not(:disabled) {
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--peach) 35%, transparent);
+}
+}
 
 .button.variant-solid {
   background: var(--surface0);
