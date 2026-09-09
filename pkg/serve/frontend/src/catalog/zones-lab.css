@@ -47,7 +47,9 @@
   --zl-t4: #66677c;
 
   /* Accent: mauve. Already the product's focus ring and, per the visual
-     criterion, an identity colour alongside peach. Kept off state entirely. */
+     criterion, an identity colour alongside peach. It has one state job as
+     well -- unseen -- because that is what this product has always used for
+     work you have not read. Everywhere else it stays off state. */
   --zl-accent: #cba6f7;
   --zl-accent-ink: #1a1424;
   --zl-accent-dim: rgba(203, 166, 247, 0.12);
@@ -944,7 +946,10 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 /* State and age ride together at the end of the title line: both are
    metadata about the row. */
 .zl-row-meta { display: inline-flex; align-items: center; gap: 6px; flex: none; }
-.zl-row-when { color: var(--zl-t4); }
+/* The timestamp is set to the width of its longest form and aligned left, so
+   the dot beside it lands on the same x in every row. Ragged dots read as a
+   wobble down the list: the eye follows the column, not the number. */
+.zl-row-when { color: var(--zl-t4); min-width: 3ch; text-align: left; font-variant-numeric: tabular-nums; }
 .zl-row-path,
 .zl-row-brief {
   font-size: var(--zl-fs-meta);
@@ -962,11 +967,12 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-dot.is-running { background: var(--zl-green); box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18); }
 .zl-dot.is-needs { background: var(--zl-yellow); box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22); }
 .zl-dot.is-error { background: var(--zl-red); box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.2); }
-/* Unseen is sky, not mauve: mauve is the product's accent and may not say
-   state. It is the quietest of the three because nothing is blocked -- the
-   work is done and only unread. */
-.zl-dot.is-unseen { background: var(--zl-sky, #89dceb); box-shadow: 0 0 0 3px rgba(137, 220, 235, 0.18); }
-.zl-row-brief.is-unseen { color: var(--zl-sky, #89dceb); }
+/* Unseen keeps production's mauve: it is the colour this product has always
+   used for work you have not read, and it separates cleanly from idle grey.
+   The cost is that mauve now says two things -- accent and unseen -- so the
+   accent has to stay off anything that could be mistaken for a state. */
+.zl-dot.is-unseen { background: var(--zl-accent); box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.2); }
+.zl-row-brief.is-unseen { color: var(--zl-accent); }
 .zl-dot.is-idle { display: none; }
 
 /* New session: the contained accent button. The list is the point of the
