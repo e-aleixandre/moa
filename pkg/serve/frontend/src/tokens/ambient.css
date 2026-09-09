@@ -98,14 +98,12 @@
    The phone gets a stronger dose and tighter blobs so the colour reaches the
    pixel, without touching the desktop where the current dose was approved. */
 @media (max-width: 768px) {
-  /* 0.55, not 0.85. At 0.85 the blobs stopped being an environment and became
-     the subject: the transcript was reading over saturated colour rather than
-     on a tinted canvas, which is the same failure that ruled out the full
-     aurora on desktop. The phone still needs MORE than the desktop's 0.45,
-     because a narrow screen only ever shows the faded part of a blob. */
-  [data-ambient="on"] {
-    --amb-aurora: 0.68;
-  }
+  /* No dose override any more. Raising it to 0.85 was compensating for a bug,
+     not for the screen: the aurora was invisible because #root painted an
+     opaque sheet over it, and the fix for that landed in the same session.
+     Once the canvas was actually visible the extra dose was just loud, so the
+     phone runs the same 0.45 as the desktop. What a narrow screen genuinely
+     needs is different GEOMETRY, not more colour -- see the blobs below. */
   /* Blobs pulled INWARD and made taller. Pushed to the corners, as they are on
      a wide desktop, none of them reaches the middle of a 430px screen -- which
      is exactly where the text is, and therefore the only place the colour is
@@ -113,10 +111,10 @@
      was more than its own radius away. */
   [data-ambient="on"] body::before {
     background:
-      radial-gradient(96% 44% at 22% 14%, rgba(180, 190, 254, 0.60), transparent 72%),
-      radial-gradient(104% 42% at 84% 30%, rgba(203, 166, 247, 0.64), transparent 72%),
-      radial-gradient(112% 46% at 30% 62%, rgba(137, 180, 250, 0.58), transparent 74%),
-      radial-gradient(100% 42% at 82% 90%, rgba(148, 226, 213, 0.48), transparent 74%);
+      radial-gradient(96% 44% at 22% 14%, rgba(180, 190, 254, 0.52), transparent 72%),
+      radial-gradient(104% 42% at 84% 30%, rgba(203, 166, 247, 0.56), transparent 72%),
+      radial-gradient(112% 46% at 30% 62%, rgba(137, 180, 250, 0.50), transparent 74%),
+      radial-gradient(100% 42% at 82% 90%, rgba(148, 226, 213, 0.42), transparent 74%);
   }
 
   /* The reading band is calmed further. The colour belongs at the edges of the
