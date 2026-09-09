@@ -17,9 +17,9 @@ import "./RewindTimeline.css";
 // 'branch' command) takes care of refreshing the message list, so this
 // component only needs to close itself after a successful jump.
 //
-// Shared between desktop (ChatHead's Rewind button) and mobile (MobileHeader's
-// rewind control) — same component, only the Sheet's own responsive layout
-// changes density.
+// Shared between desktop (ChatHead's Rewind button) and mobile
+// (MobileConversationScreen) — same component, only the Sheet's own responsive
+// layout changes density.
 export function RewindTimeline({ open, onClose, sessionId, disabled }) {
   const [status, setStatus] = useState("idle"); // idle | loading | ready | error
   const [points, setPoints] = useState([]);

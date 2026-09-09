@@ -19,11 +19,10 @@ import "./mobile-gallery.css";
 // To keep the design surface reviewable WITHOUT a backend, the mock
 // (hardcoded sessions / ledgers / conversation) lives HERE as
 // MobileConversationSpecimen, decoupled from the connected container. It never
-// touches the store — it renders the presentational chrome (MobileHeader /
-// SessionStrip) around a hand-built AssistantDocument with mock tool-group
-// cards (<ActivityLedger>), plus a static MobileComposerSpecimen (the connected
-// MobileComposer wraps the store-bound Composer, so the gallery uses a dumb
-// stand-in for it).
+// touches the store — it renders a hand-built AssistantDocument with mock
+// tool-group cards (<ActivityLedger>), plus a static MobileComposerSpecimen (the
+// connected MobileComposer wraps the store-bound Composer, so the gallery uses a
+// dumb stand-in for it).
 
 const SESSIONS = [
   { id: "ws", name: "ws race", state: "running" },

@@ -18,7 +18,7 @@ const PUSH_SUB = {
 // NotificationSettings — device-wide notifications dropdown (push + sound). It
 // renders ONLY the dropdown body; the parent owns the anchor/trigger and the
 // open state (see ChatHead's onNotifications + the popover pattern in
-// ConversationScreen / MobileHeader), so it composes with the other head
+// ConversationScreen), so it composes with the other head
 // popovers (model / session settings) and gets click-outside + Escape from the
 // same registerOverlay wiring.
 //
