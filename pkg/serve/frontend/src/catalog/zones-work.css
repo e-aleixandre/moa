@@ -1,0 +1,779 @@
+/* Work: tool calls, subagent screen, background-command screen.
+
+   This sheet adds NO tokens. Everything comes from .zl in zones-lab.css --
+   the tonal ladder (canvas < sheet < raised < control), the three radii
+   (6/10/16), the four sizes (12/14/16/20), the three weights (400/500/600),
+   mauve for accent, green/yellow/red for state. Peach appears exactly once,
+   on the left edge of a message you wrote, and nowhere else.
+
+   Two rules of this sheet in particular:
+   · A ::before is decoration only. Nothing you must be able to press is
+     drawn with one, and no ::before is used to enlarge a hit area: hit areas
+     are min-height/min-width on the element itself, so elementFromPoint at
+     the centre AND at the edges returns the button.
+   · Nothing floats. The only shadows in the whole design are on the two
+     drawers, and neither lives here. */
+
+.zw { padding-bottom: 96px; }
+
+/* ── Lab chrome ──────────────────────────────────────────────────────── */
+.zw-sec { position: relative; max-width: 1360px; margin: 0 auto 64px; }
+.zw-sec-hd { display: flex; align-items: baseline; gap: 10px; justify-content: center; }
+.zw-sec-n {
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+  padding: 2px 7px;
+  border-radius: 999px;
+  box-shadow: var(--zl-rim);
+}
+.zw-sec h2 { margin: 0; font-size: var(--zl-fs-display); font-weight: 600; letter-spacing: -0.01em; }
+.zw-sec-b {
+  max-width: 74ch;
+  margin: 10px auto 20px;
+  text-align: center;
+  font-size: var(--zl-fs-body);
+  line-height: 1.6;
+  color: var(--zl-t3);
+}
+.zw-stage { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; justify-content: center; }
+.zw-frame { display: flex; flex-direction: column; }
+
+/* The two hosts. The phone is zones-lab's phone (390×780); the desktop frame
+   is the CONVERSATION COLUMN only -- the session list and the session panel
+   are unchanged by this work, so they are not redrawn here. */
+.zw-screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--zl-canvas);
+  border-radius: var(--zl-r-lg);
+  box-shadow: var(--zl-rim);
+  isolation: isolate;
+}
+.zw-screen.is-phone { width: 390px; height: 780px; }
+.zw-screen.is-desk { width: 840px; height: 780px; }
+.zw-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--zl-line-2) transparent; }
+
+.zw-doc { padding: 20px 22px 40px; }
+.zw-doc.is-dense { padding: 14px 14px 32px; }
+.zw-cap {
+  margin: 26px 0 8px;
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--zl-t4);
+}
+.zw-doc > .zw-cap:first-child { margin-top: 0; }
+/* The spacer was fighting the crumb: both were flex:1, so the two split the
+   row and the session name truncated with 300px of empty space next to it
+   (measured). The crumb is the only thing that should grow. */
+.zw-sp { flex: none; margin-left: auto; }
+.zw-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ═══ 1 · LEDGER ═══════════════════════════════════════════════════════
+   A recessed slab on the page: the assistant's prose is the page itself, so
+   the machine work has to be an object ON it, and "recessed" is the honest
+   direction -- it is subordinate to the prose, not floating above it. */
+.zw-ledger {
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+  overflow: hidden;
+}
+.zw-ledger + .zw-ledger { margin-top: 14px; }
+
+/* position:relative is not decoration here: .zw-sr below is absolutely
+   positioned, and an absolute child with no positioned ancestor anchors to
+   whatever is furthest up the tree -- measured, the screen-reader label was
+   resolving against .zw-screen and its box landed 1 900px away from its own
+   row. It is 1×1 and clipped so nothing was visible, but that is the same
+   mistake that puts a ::before over half a screen. */
+.zw-head,
+.zw-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--zl-t3);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  letter-spacing: inherit;
+  text-align: left;
+}
+button.zw-head, button.zw-row { cursor: pointer; transition: background 120ms ease; }
+button.zw-head:hover, button.zw-row:hover { background: var(--zl-hi); color: var(--zl-t2); }
+.zw-row + .zw-row,
+.zw-head + .zw-row,
+.zw-detail + .zw-row,
+.zw-tail + .zw-row { box-shadow: inset 0 1px 0 var(--zl-line); }
+
+.zw-head { color: var(--zl-t3); font-weight: 500; }
+.zw-head-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zw-head-n { flex: none; font-size: var(--zl-fs-meta); font-weight: 500; }
+.zw-head-n.is-err { color: var(--zl-red); }
+.zw-head-n.is-cancel { color: var(--zl-t4); }
+
+.zw-ico { width: 14px; height: 14px; flex: none; color: var(--zl-t4); }
+.zw-row-txt { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 7px; overflow: hidden; }
+.zw-tool { flex: none; font-weight: 500; color: var(--zl-t2); }
+.zw-arg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--zl-t3); }
+.zw-dim { flex: none; color: var(--zl-t4); }
+.zw-out { flex: none; color: var(--zl-t4); white-space: nowrap; }
+.zw-out.is-err { color: var(--zl-red); }
+.zw-out.is-warn { color: var(--zl-yellow); }
+
+/* The four marks. Green did it, red broke, yellow you refused, grey you
+   stopped. Grey is not a fourth state colour: it is the absence of one, and
+   that is the point -- a cancelled call has no news. */
+.zw-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+.zw-mark svg { width: 12px; height: 12px; }
+.zw-mark.is-ok { color: var(--zl-green); }
+.zw-mark.is-err { color: var(--zl-red); }
+.zw-mark.is-warn { color: var(--zl-yellow); }
+.zw-mark.is-cancel { color: var(--zl-t4); }
+.zw-mark-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--zl-green); animation: zw-breathe 1.8s ease-in-out infinite; }
+@keyframes zw-breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.82); } }
+
+/* A cancelled row keeps its text but drops a step of contrast: it happened,
+   it just has nothing to say. No strikethrough -- struck text reads as
+   "deleted", and the call did run. */
+.zw-row.is-cancel .zw-tool,
+.zw-row.is-cancel .zw-arg { color: var(--zl-t4); }
+.zw-row.is-warn .zw-tool { color: var(--zl-t2); }
+.zw-row.is-live { color: var(--zl-t2); }
+.zw-row.is-live .zw-tool { color: var(--zl-t1); }
+.zw-row.is-live .zw-out { color: var(--zl-t3); }
+
+.zw-chev { flex: none; width: 12px; height: 12px; color: var(--zl-t4); transition: transform 160ms var(--zl-ease), color 120ms ease; }
+.zw-chev svg { width: 100%; height: 100%; display: block; }
+button.zw-row:hover .zw-chev { color: var(--zl-t2); }
+.zw-row.is-open { color: var(--zl-t2); background: var(--zl-hi); }
+.zw-row.is-open .zw-chev { transform: rotate(90deg); color: var(--zl-t2); }
+.zw-chev.is-head.is-open { transform: rotate(90deg); }
+
+.zw-detail,
+.zw-tail { padding: 2px 10px 10px 32px; background: var(--zl-sheet); }
+.zw-tail { padding-bottom: 8px; }
+
+/* Captured text, one shape everywhere: recessed one step below the ledger,
+   mono, anchored to its end. */
+.zw-log {
+  margin: 0;
+  max-height: 132px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-size: var(--zl-fs-meta);
+  line-height: 1.55;
+  white-space: pre;
+  scrollbar-width: thin;
+  scrollbar-color: var(--zl-line-2) transparent;
+}
+.zw-log.is-tall { max-height: 212px; }
+
+.zw-cmd {
+  margin: 0 0 6px;
+  padding: 7px 10px;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-size: var(--zl-fs-meta);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.zw-cmd-sig { display: inline-block; width: 1.4em; color: var(--zl-t4); user-select: none; }
+
+.zw-diff {
+  margin: 0;
+  padding: 6px 0;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
+  font-size: var(--zl-fs-meta);
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.zw-dl { display: flex; min-height: 18px; }
+.zw-dl-no { flex: none; width: 34px; padding-right: 10px; text-align: right; color: var(--zl-t4); user-select: none; }
+.zw-dl-sign { flex: none; width: 14px; text-align: center; user-select: none; color: var(--zl-t4); }
+.zw-dl-txt { flex: 1; padding-right: 10px; white-space: pre; color: var(--zl-t3); }
+.zw-dl.is-add { background: rgba(166, 227, 161, 0.1); }
+.zw-dl.is-add .zw-dl-sign { color: var(--zl-green); }
+.zw-dl.is-add .zw-dl-txt { color: var(--zl-t1); }
+.zw-dl.is-del { background: rgba(243, 139, 168, 0.1); }
+.zw-dl.is-del .zw-dl-sign { color: var(--zl-red); }
+.zw-dl.is-del .zw-dl-txt { color: var(--zl-t2); }
+
+/* A lot of output: what is missing is stated above, what is kept is stated
+   below, and the door to the whole thing is next to it. */
+.zw-big-head {
+  padding: 4px 2px 6px;
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+}
+.zw-big-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.zw-big-n { flex: 1; min-width: 0; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
+.zw-linkbtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.zw-linkbtn svg { width: 12px; height: 12px; }
+.zw-linkbtn:hover { background: var(--zl-control); color: var(--zl-t1); }
+
+/* ask_user, finished: a record, not a log. */
+.zw-askrec { display: flex; flex-direction: column; gap: 6px; }
+.zw-askrec-l { display: flex; gap: 10px; align-items: baseline; }
+.zw-askrec-k {
+  flex: none;
+  width: 40px;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+}
+.zw-askrec-v { flex: 1; min-width: 0; font-size: var(--zl-fs-body); line-height: 1.5; color: var(--zl-t3); }
+.zw-askrec-v.is-you { color: var(--zl-t1); box-shadow: inset 3px 0 0 var(--peach, #fab387); padding-left: 10px; }
+
+/* The deliverable. Raised: it is the one thing you take away from a turn.
+   The failed one keeps the shape and loses the action -- same event, other
+   outcome (see the note in the JSX). */
+.zw-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  letter-spacing: inherit;
+  text-align: left;
+}
+button.zw-file { cursor: pointer; transition: background 120ms ease; }
+button.zw-file:hover { background: var(--zl-control); }
+button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
+.zw-file.is-err { background: transparent; box-shadow: 0 0 0 1px rgba(243, 139, 168, 0.28); }
+.zw-file-ico { flex: none; width: 24px; height: 29px; color: var(--zl-t3); }
+.zw-file-ico svg { width: 24px; height: 29px; display: block; }
+.zw-file.is-err .zw-file-ico { color: var(--zl-t4); }
+.zw-file-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.zw-file-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zw-file.is-err .zw-file-name { color: var(--zl-t2); }
+.zw-file-meta { font-size: var(--zl-fs-meta); color: var(--zl-t4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zw-file-meta.is-err { color: var(--zl-red); }
+.zw-file-act { flex: none; width: 16px; height: 16px; color: var(--zl-t3); }
+.zw-file-act svg { width: 16px; height: 16px; display: block; }
+
+/* ═══ 2 & 3 · THE TWO SCREENS ══════════════════════════════════════════
+   One head, one facts strip, one body, for both. What differs is what the
+   body holds and what the strip prints. */
+.zw-hd {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 8px 12px;
+  box-shadow: inset 0 -1px 0 var(--zl-line);
+}
+.zw-hd.is-phone { min-height: 60px; padding: 8px 10px; }
+
+.zw-back {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-t2);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.zw-back.is-phone { width: 44px; height: 44px; }
+.zw-back svg { width: 17px; height: 17px; display: block; }
+.zw-back:hover { background: var(--zl-hi); color: var(--zl-t1); }
+
+/* The negative margin that pulled the parent's name flush with the back
+   button also pushed its hit box 6px outside the crumb (measured). The crumb
+   is a clipping box, so the button was being clipped: the padding is dropped
+   instead of compensated. */
+.zw-crumb { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 7px; overflow: hidden; }
+/* The parent's name is the thing you came from and the one you are most
+   likely to click, so it gets room to be read; the child's name is already
+   the title and can afford to be the one that shortens. */
+.zw-crumb-p {
+  flex: 0 1 auto;
+  min-width: 6ch;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t4);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  letter-spacing: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.zw-crumb-p:hover { background: var(--zl-hi); color: var(--zl-t2); }
+.zw-crumb-sep { flex: none; color: var(--zl-t4); }
+.zw-crumb-c {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--zl-fs-title);
+  font-weight: 600;
+  color: var(--zl-t1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.zw-crumb-task { font-size: var(--zl-fs-body); font-weight: 400; color: var(--zl-t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.zw-hd-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.zw-hd-t { display: flex; align-items: center; gap: 7px; font-size: var(--zl-fs-title); font-weight: 600; color: var(--zl-t1); }
+.zw-hd-s { font-size: var(--zl-fs-meta); color: var(--zl-t4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zw-hd-sig { color: var(--zl-t3); font-weight: 500; }
+
+/* The identity mark: the same hue function as the project monogram and the
+   live bar's dots, so a name is always the same colour.
+
+   It is a RING, not a filled dot, and that is a fix from looking at the
+   waiting state: terra's identity hue is a teal-green, and a filled green
+   circle next to the word "waiting" reads as "running" -- identity was
+   impersonating state. Filled = state, hollow = identity. Now the two can
+   never be confused whatever hue a name lands on. */
+.zw-dotid {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 2px hsl(var(--h) 65% 62%);
+}
+
+.zw-chip {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  box-shadow: var(--zl-rim);
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  color: var(--zl-t3);
+}
+.zw-chip.is-wait { color: var(--zl-yellow); box-shadow: 0 0 0 1px rgba(249, 226, 175, 0.3); }
+.zw-kbd {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: var(--zl-r-sm);
+  box-shadow: var(--zl-rim);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+}
+
+/* Stop: two steps, in place, no dialog. The armed state says "sure?" and
+   disarms itself after three seconds, so a stray tap cannot leave a live
+   trap on screen. Red only once armed: the resting button is not a danger,
+   it is an option. */
+.zw-stop {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+.zw-stop.is-phone { height: 44px; padding: 0 14px; font-size: var(--zl-fs-body); }
+.zw-stop:hover { background: var(--zl-control); color: var(--zl-t1); }
+.zw-stop-sq { width: 8px; height: 8px; border-radius: 2px; background: currentColor; }
+.zw-stop.is-armed { color: var(--zl-red); background: rgba(243, 139, 168, 0.1); box-shadow: 0 0 0 1px rgba(243, 139, 168, 0.35); }
+
+/* The facts strip. Printed, not boxed: boxes are for what you press. It is
+   the same idea as the session panel's run facts, and each screen prints its
+   own currency -- money and tokens for an agent, wall time and an exit code
+   for a command. */
+.zw-facts {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 22px;
+  margin: 0;
+  padding: 9px 16px;
+  box-shadow: inset 0 -1px 0 var(--zl-line);
+}
+.zw-facts > div { display: flex; align-items: baseline; gap: 7px; min-height: 22px; }
+.zw-facts dt { margin: 0; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
+.zw-facts dd { margin: 0; font-size: var(--zl-fs-meta); color: var(--zl-t2); }
+.zw-facts dd.is-ok { color: var(--zl-green); }
+.zw-facts dd.is-err { color: var(--zl-red); }
+.zw-facts dd.is-cancel { color: var(--zl-t3); }
+.zw-facts dd.is-wait { color: var(--zl-yellow); }
+
+/* The siblings rail: only worth its height when there is more than one live
+   child. Chips are identity, and the current one is raised -- not accented,
+   because being where you are is not an action. */
+.zw-rail {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  box-shadow: inset 0 -1px 0 var(--zl-line);
+}
+.zw-rail-k { flex: none; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
+.zw-rail-c {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t3);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.zw-rail-c:hover { background: var(--zl-hi); color: var(--zl-t1); }
+.zw-rail-c.is-on { background: var(--zl-raised); box-shadow: var(--zl-rim-2); color: var(--zl-t1); }
+.zw-rail-h { margin-left: auto; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
+
+.zw-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px 20px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--zl-line-2) transparent;
+}
+.zw-body.is-log { padding: 12px 14px 16px; }
+.zw-screen.is-phone .zw-body { padding: 14px 14px 18px; }
+
+/* The child's own transcript, in the parent's language: the peach edge is
+   still and only "you wrote this". */
+.zw-user {
+  margin: 0 0 14px;
+  padding-left: 14px;
+  box-shadow: inset 3px 0 0 var(--peach, #fab387);
+  font-size: var(--zl-fs-body);
+  line-height: 1.6;
+  color: var(--zl-t1);
+}
+.zw-user-b { overflow-wrap: anywhere; }
+.zw-user-w { display: block; margin-top: 4px; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
+.zw-prose { margin: 0 0 14px; font-size: var(--zl-fs-body); line-height: 1.65; color: var(--zl-t2); }
+.zw-prose p { margin: 0 0 0.8em; }
+.zw-prose > :last-child { margin-bottom: 0; }
+.zw-prose code, .zw-banner-b code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--zl-raised);
+  font-size: 0.9em;
+  color: var(--zl-t1);
+}
+.zw-body .zw-ledger { margin-bottom: 14px; }
+
+/* ── waiting for you ─────────────────────────────────────────────────────
+   Amber, and completely still. The card is at the tail of the child's own
+   transcript because that is where the question was asked; the head's chip
+   and the facts strip carry the same state, so scrolling away does not lose
+   it. No shimmer, no elapsed-as-work: the run is parked on you. */
+.zw-ask {
+  margin: 4px 0 6px;
+  padding: 14px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: 0 0 0 1px rgba(249, 226, 175, 0.3);
+}
+.zw-ask-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.zw-ask-h { flex: 1; min-width: 0; font-size: var(--zl-fs-body); font-weight: 500; color: var(--zl-yellow); }
+.zw-ask-since { flex: none; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
+.zw-ask-q { margin: 0 0 12px; font-size: var(--zl-fs-body); line-height: 1.6; color: var(--zl-t1); }
+.zw-ask-q code { padding: 1px 5px; border-radius: 4px; background: var(--zl-raised); font-size: 0.9em; }
+.zw-ask-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.zw-ask-b {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.zw-ask-b.is-phone { min-height: 44px; padding: 0 16px; }
+.zw-ask-b:hover { background: var(--zl-raised); }
+/* The one primary action gets the accent -- an action, not a state, which is
+   the only thing mauve is allowed to do besides focus and unseen. */
+.zw-ask-b.is-primary { background: var(--zl-accent); color: var(--zl-accent-ink); font-weight: 600; box-shadow: none; }
+.zw-ask-b.is-primary:hover { background: #d7bafa; }
+/* 16px, always: below it iOS zooms on focus and the PWA jumps. */
+.zw-ask-in {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 10px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-title);
+  letter-spacing: inherit;
+}
+.zw-ask-in::placeholder { color: var(--zl-t4); }
+.zw-ask-in:focus { outline: none; box-shadow: 0 0 0 1px var(--zl-accent-line); }
+
+/* ── the outcome banner ──────────────────────────────────────────────────
+   A lid on the transcript, not a replacement for it: what it did is still
+   there above. The rim carries the outcome; cancelled has no rim colour at
+   all, because it is not news. */
+.zw-banner {
+  margin-top: 12px;
+  padding: 14px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+}
+.zw-banner.is-flat { background: transparent; box-shadow: none; padding: 12px 0 0; }
+.zw-banner.is-ok { box-shadow: 0 0 0 1px rgba(166, 227, 161, 0.26); }
+.zw-banner.is-err { box-shadow: 0 0 0 1px rgba(243, 139, 168, 0.3); }
+.zw-banner.is-cancel { box-shadow: var(--zl-rim); }
+.zw-banner.is-flat.is-ok, .zw-banner.is-flat.is-err, .zw-banner.is-flat.is-cancel { box-shadow: inset 0 1px 0 var(--zl-line); }
+.zw-banner-l1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.zw-banner-t { font-size: var(--zl-fs-title); font-weight: 600; color: var(--zl-t1); }
+.zw-banner-m { flex: 1; min-width: 0; font-size: var(--zl-fs-meta); color: var(--zl-t4); text-align: right; }
+.zw-banner-b { margin: 10px 0 0; font-size: var(--zl-fs-body); line-height: 1.6; color: var(--zl-t2); }
+.zw-banner .zw-log { margin-top: 10px; }
+.zw-banner-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.zw-banner-acts.is-flush { margin-top: 10px; }
+
+.zw-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.zw-btn.is-phone { min-height: 44px; padding: 0 16px; }
+.zw-btn svg { width: 14px; height: 14px; }
+.zw-btn:hover { background: var(--zl-raised); }
+.zw-btn.is-primary { background: var(--zl-accent); color: var(--zl-accent-ink); font-weight: 600; box-shadow: none; }
+.zw-btn.is-primary:hover { background: #d7bafa; }
+
+.zw-icobtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t3);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.zw-icobtn.is-phone { width: 44px; height: 44px; }
+.zw-icobtn svg { width: 16px; height: 16px; display: block; }
+.zw-icobtn:hover { background: var(--zl-hi); color: var(--zl-t1); }
+
+/* ── the child's dock ───────────────────────────────────────────────────
+   The same two pieces as the parent's, in the same order: the sentence about
+   now, then the field. A subagent you can steer is the whole reason its
+   screen has a composer at all. */
+.zw-dock { flex: none; padding: 10px 14px 12px; box-shadow: inset 0 1px 0 var(--zl-line); }
+.zw-now { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 0 2px 6px; font-size: var(--zl-fs-body); color: var(--zl-t3); }
+.zw-now-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zw-now-el { flex: none; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
+.zw-now-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+.zw-now-dot.is-working { background: var(--zl-green); animation: zw-breathe 1.8s ease-in-out infinite; }
+.zw-now-dot.is-waiting { background: var(--zl-yellow); }
+.zw-now.is-waiting { color: var(--zl-yellow); }
+@media (prefers-reduced-motion: reduce) {
+  .zw-now-dot.is-working, .zw-mark-dot { animation: none; }
+}
+
+.zw-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 5px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+}
+.zw-composer:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line); }
+.zw-ta {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  max-height: 120px;
+  padding: 10px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-title);
+  line-height: 1.45;
+  letter-spacing: inherit;
+  resize: none;
+}
+.zw-ta:focus { outline: none; }
+.zw-ta::placeholder { color: var(--zl-t4); }
+.zw-send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-control);
+  color: var(--zl-t4);
+  cursor: not-allowed;
+  transition: background 120ms ease, color 120ms ease;
+}
+.zw-send svg { width: 18px; height: 18px; display: block; }
+.zw-composer.is-armed .zw-send { background: var(--zl-accent); color: var(--zl-accent-ink); cursor: pointer; }
+.zw-screen.is-phone .zw-send { width: 44px; height: 44px; }
+.zw-screen.is-phone .zw-ta { min-height: 44px; }
+
+/* ── the command screen ─────────────────────────────────────────────── */
+.zw-cmdbox { flex: none; display: flex; align-items: flex-start; gap: 6px; padding: 10px 12px 8px; }
+.zw-cmd.is-full { flex: 1; min-width: 0; margin: 0; max-height: 76px; overflow: auto; }
+
+.zw-logstate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 0 2px;
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+}
+.zw-logstate-t { flex: 1; min-width: 0; line-height: 1.5; }
+.zw-logstate.is-wait { color: var(--zl-yellow); }
+.zw-logstate .zl-data { color: inherit; }
+.zw-body.is-log .zw-log { max-height: none; flex: 1; }
+.zw-body.is-log { display: flex; flex-direction: column; overflow: hidden; }
+.zw-body.is-log > .zw-log { min-height: 0; }
+
+/* ── Phone density ───────────────────────────────────────────────────────
+   Everything that acts is 44 or more, measured at the element, never with a
+   pseudo-element. The ledger row is the interesting case: an inert row can
+   stay at 36 because there is nothing to hit; the moment it has something to
+   open it becomes a button and grows. */
+.zw-screen.is-phone .zw-row,
+.zw-screen.is-phone .zw-head { min-height: 38px; }
+.zw-screen.is-phone button.zw-row,
+.zw-screen.is-phone button.zw-head { min-height: 44px; }
+.zw-screen.is-phone .zw-file { min-height: 60px; }
+.zw-screen.is-phone .zw-linkbtn { min-height: 44px; padding: 0 14px; font-size: var(--zl-fs-body); }
+/* Measured and fixed: the sibling chips were 40 tall and the ledger rows 36,
+   both under the bar. A chip is small in both axes, so it needs the width
+   too; a full-width row only needs the height. */
+.zw-screen.is-phone .zw-rail-c { min-height: 44px; min-width: 72px; padding: 0 14px; justify-content: center; }
+
+/* Dense (a grid pane, and the ledger inside a child's transcript). Rows lose
+   4px and the meta line, never the mark and never the chevron: what a row
+   MEANS survives every density; only its comfort changes. */
+.zw-ledger.is-dense .zw-row,
+.zw-ledger.is-dense .zw-head { min-height: 30px; gap: 6px; padding: 0 8px; font-size: var(--zl-fs-meta); }
+.zw-ledger.is-dense .zw-detail,
+.zw-ledger.is-dense .zw-tail { padding-left: 26px; }
+/* On the phone a dense ledger is still touched by a thumb, so a row that
+   opens something stays at 44 even there. Written at the same specificity as
+   the dense rule it has to beat: an interactive size is not something to
+   leave to source order. */
+.zw-screen.is-phone .zw-ledger.is-dense .zw-row,
+.zw-screen.is-phone .zw-ledger.is-dense .zw-head { min-height: 38px; }
+.zw-screen.is-phone .zw-ledger.is-dense button.zw-row,
+.zw-screen.is-phone .zw-ledger.is-dense button.zw-head { min-height: 44px; }
