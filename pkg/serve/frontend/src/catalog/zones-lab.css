@@ -962,6 +962,11 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-dot.is-running { background: var(--zl-green); box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18); }
 .zl-dot.is-needs { background: var(--zl-yellow); box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22); }
 .zl-dot.is-error { background: var(--zl-red); box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.2); }
+/* Unseen is sky, not mauve: mauve is the product's accent and may not say
+   state. It is the quietest of the three because nothing is blocked -- the
+   work is done and only unread. */
+.zl-dot.is-unseen { background: var(--zl-sky, #89dceb); box-shadow: 0 0 0 3px rgba(137, 220, 235, 0.18); }
+.zl-row-brief.is-unseen { color: var(--zl-sky, #89dceb); }
 .zl-dot.is-idle { display: none; }
 
 /* New session: the contained accent button. The list is the point of the
@@ -2194,3 +2199,15 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-facts.is-run > div { min-height: 28px; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .zl-facts.is-run dt { margin: 0; }
 .zl-prows { margin-top: 14px; }
+
+/* The attention heading earns one mark and no more: the rows underneath
+   already carry their own colour, and a coloured band on top of coloured rows
+   is how a list stops being scannable. */
+.zl-group.is-attn { color: var(--zl-text); }
+.zl-group.is-attn .zl-group-n {
+  color: var(--zl-canvas);
+  background: var(--zl-yellow);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-weight: 600;
+}

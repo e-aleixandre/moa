@@ -18,6 +18,7 @@ const SESSIONS = [
   { title: "Buscar un bug bounty", when: "now", path: "~/dev/moa", project: "moa", state: "running", brief: "Running · 4m" },
   { title: "Check access to two repos", when: "28m", path: "~/dev/gugo", project: "gugo", state: "needs", brief: "Needs your answer" },
   { title: "Deploy fails on ARM runner", when: "1h", path: "~/dev/tienda", project: "tienda", state: "error", brief: "Stopped with an error" },
+  { title: "Resumen de la factura de octubre", when: "12m", path: "~/dev/moa", project: "moa", state: "unseen", brief: "Answered · not read yet" },
   { title: "Limpiar Docker y worktrees", when: "35m", path: "~/dev", project: "dev", state: "idle" },
   { title: "Búscame un dominio para el side project", when: "36m", path: "~/dev", project: "dev", state: "idle" },
   { title: "Browse Gugo GitLab", when: "39d", path: "~/dev/gugo", project: "gugo", state: "idle" },
@@ -45,7 +46,21 @@ function Monogram({ project }) {
   );
 }
 
-const ACTIVE = SESSIONS.filter((s) => s.state !== "idle");
+/* Three groups, not two. "Needs attention" is not a nicer name for "active":
+   it is the list of sessions that stop unless you do something -- a permission
+   or question waiting, a run that died, an answer nobody has read. Running and
+   idle stay in Active precisely because they need nothing from you.
+
+   The predicate is production's own (data/util/project-sessions.js:7 counts
+   permission and error) plus unseen, which sessionDisplayDotState already
+   treats as its own display state (data/util/format.js:472). */
+const NEEDS = ["needs", "error", "unseen"];
+const wantsYou = (s) => NEEDS.includes(s.state);
+/* Blocked before broken before merely unread: the order is how much of your
+   work is stopped, not when it happened. */
+const RANK = { needs: 0, error: 1, unseen: 2 };
+const ATTENTION = SESSIONS.filter(wantsYou).sort((a, b) => RANK[a.state] - RANK[b.state]);
+const ACTIVE = SESSIONS.filter((s) => s.state !== "idle" && !wantsYou(s));
 const SAVED = SESSIONS.filter((s) => s.state === "idle");
 
 function Dot({ state }) {
@@ -90,6 +105,15 @@ function Row({ s, current, onPick }) {
 function SessionList({ onPick }) {
   return (
     <div class="zl-list">
+      {ATTENTION.length > 0 && (
+        <>
+          <div class="zl-group is-attn">
+            <span>Needs attention</span>
+            <span class="zl-group-n zl-data">{ATTENTION.length}</span>
+          </div>
+          {ATTENTION.map((s) => <Row s={s} current={false} onPick={onPick} key={s.title} />)}
+        </>
+      )}
       <div class="zl-group"><span>Active</span><span class="zl-group-n zl-data">{ACTIVE.length}</span></div>
       {ACTIVE.map((s, i) => <Row s={s} current={i === 0} onPick={onPick} key={s.title} />)}
       <div class="zl-group"><span>Saved</span><span class="zl-group-n zl-data">{SAVED.length}</span></div>
