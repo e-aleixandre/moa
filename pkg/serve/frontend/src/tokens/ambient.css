@@ -261,6 +261,55 @@
   border-color: transparent;
 }
 
+/* ── The desktop head ─────────────────────────────────────────────────────
+   The head sits on the sheet, so it does not need its own surface; its icon
+   buttons stop being outlined boxes and become the same soft wells the rest of
+   the controls use. */
+[data-ambient="on"] .chat-head { background: transparent; }
+[data-ambient="on"] .chat-head .crumb-title { color: var(--amb-text); }
+[data-ambient="on"] .chat-head .crumb-path { color: var(--amb-text-4); }
+[data-ambient="on"] .chat-head .grid-toggle,
+[data-ambient="on"] .chat-head .head-action-icon,
+[data-ambient="on"] .chat-head .icon-button {
+  border: 0;
+  background: var(--amb-hi);
+  border-radius: var(--amb-r-ctl);
+  color: var(--amb-text-2);
+}
+/* Keycaps: a bordered box in mono is the most terminal-looking thing in the
+   head. Same well, sans, no outline. */
+[data-ambient="on"] .kbd {
+  font-family: var(--font);
+  font-weight: var(--weight-medium);
+  background: var(--amb-hi);
+  border: 0;
+  border-radius: 6px;
+  color: var(--amb-text-3);
+}
+
+/* The chip's own parts */
+[data-ambient="on"] .mtchip-chev { background: var(--amb-on); }
+[data-ambient="on"] .mtchip.is-open .mtchip-chev { background: rgba(255, 255, 255, 0.16); }
+/* the attention dot rings against the canvas, not against the old --base */
+[data-ambient="on"] .mtchip-attn { border-color: var(--amb-canvas); }
+
+/* Drawer chrome: the remaining outlined controls. */
+[data-ambient="on"] .sdrawer-new,
+[data-ambient="on"] .sdrawer-more,
+[data-ambient="on"] .sdrawer-settings,
+[data-ambient="on"] .sdrawer-show-all,
+[data-ambient="on"] .session-card-menu .icon-button {
+  border: 0;
+  background: var(--amb-hi);
+  border-radius: var(--amb-r-ctl);
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .sdrawer-ver,
+[data-ambient="on"] .spine .ver {
+  font-family: var(--font);
+  color: var(--amb-text-4);
+}
+
 /* ── The composer ─────────────────────────────────────────────────────────
    The bar you touch most, and the last opaque box floating on the canvas: a
    1px-outlined rectangle in --mantle over an aurora reads as a control pasted
@@ -282,6 +331,63 @@
   background: rgba(255, 255, 255, 0.11);
   border: 0;
 }
+
+/* ── The transcript ────────────────────────────────────────────────────────
+   This is the half that was missing: the canvas changed but the blocks on it
+   were still Terminal, so the screen read as two designs at once. Tool groups
+   lose their 1px outline and become a recessed well; the mono labels that are
+   not code become sans; text moves onto the warm neutral scale. */
+[data-ambient="on"] .tg {
+  border: 0;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .tg .tg-row {
+  border-bottom-color: rgba(255, 255, 255, 0.045);
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .tg .tg-row .tool { color: var(--amb-text-2); }
+[data-ambient="on"] .doc p { color: var(--amb-text-2); }
+[data-ambient="on"] .doc p strong { color: var(--amb-text); }
+[data-ambient="on"] .waypoint .who { color: var(--amb-text-2); }
+[data-ambient="on"] .waypoint .who time {
+  font-family: var(--font);
+  color: var(--amb-text-3);
+}
+
+/* The now-line: sans, because it is prose about what is happening, not code. */
+[data-ambient="on"] .nowline { font-family: var(--font); }
+[data-ambient="on"] .nowline-act { color: var(--amb-text-3); }
+[data-ambient="on"] .nowline-elapsed {
+  font-variant-numeric: tabular-nums;
+  color: var(--amb-text-4);
+}
+
+/* ── The status strip ──────────────────────────────────────────────────────
+   The densest run of mono in the app, sitting right under the composer. It
+   stays tabular (these are numbers you compare at a glance) but stops being
+   monospaced, which is what made it read as a terminal readout. */
+[data-ambient="on"] .status-strip {
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .status-strip .status-strip-usage-btn { color: inherit; }
+[data-ambient="on"] .status-strip .status-strip-spend b { color: var(--amb-text-2); }
+[data-ambient="on"] .status-strip .model-pill {
+  background: var(--amb-hi);
+  border: 0;
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .status-strip .model-pill .m-name { color: var(--amb-text); }
+[data-ambient="on"] .status-strip .perm-chip,
+[data-ambient="on"] .status-strip .status-strip-pill {
+  font-family: var(--font);
+  border-radius: 6px;
+}
+[data-ambient="on"] .status-strip .token-flow { color: var(--amb-text-4); }
 
 /* ── The floating chip ─────────────────────────────────────────────────────
    It hovers over a scrolling transcript, so it has to separate itself from
