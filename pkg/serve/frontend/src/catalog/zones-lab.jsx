@@ -223,6 +223,11 @@ function LedgerRow({ tool, arg, dim, out, status, detail, open, onToggle, live, 
           {status === "ok" && !live && <svg viewBox="0 0 12 12"><path d="M2.5 6.5l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>}
           {status === "err" && <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>}
         </span>
+        {detail && (
+          <span class="zl-lg-chev" aria-hidden="true">
+            <svg viewBox="0 0 12 12"><path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          </span>
+        )}
         {!live && <span class="sr-only">{status === "err" ? "failed" : "completed"}</span>}
         {live && <span class="sr-only">running</span>}
       </Tag>
@@ -305,7 +310,10 @@ FAIL    moa/pkg/attach  0.014s`}</pre>
   { tool: "edit", arg: "pkg/attach/store.go", dim: "+5 −1", out: "ok", status: "ok", detail: <Diff /> },
 ];
 const LEDGER_B = [
-  { tool: "bash", arg: "go test ./pkg/attach/", out: "ok", status: "ok" },
+  { tool: "bash", arg: "go test ./pkg/attach/", out: "ok", status: "ok", detail: (
+    <pre class="zl-log zl-data">{`ok    moa/pkg/attach  0.312s
+ok    moa/pkg/attach/store  0.088s`}</pre>
+  ) },
   { tool: "bash", arg: "go vet ./...", live: true, status: "ok", elapsed: "4s" },
 ];
 // The same ledger once the turn has finished: the live row has returned.
@@ -317,16 +325,18 @@ const LEDGER_B_DONE = LEDGER_B.map((r) => (r.live ? { ...r, live: false, out: "o
 function Artifact({ name, kind, size, dense }) {
   return (
     <button type="button" class={`zl-art${dense ? " is-dense" : ""}`} aria-label={`Open artifact ${name}`}>
+      {/* One clean sheet-with-folded-corner. The extension was stamped across
+          the glyph, which read as a sticker rather than a file; it belongs in
+          the metadata line with the size, where the other facts already are. */}
       <span class="zl-art-ico" aria-hidden="true">
         <svg viewBox="0 0 20 24">
-          <path d="M2 1h10l6 6v16H2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-          <path d="M12 1v6h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+          <path d="M2.75 1h8.5L17.25 7v15.25a.75.75 0 0 1-.75.75h-13a.75.75 0 0 1-.75-.75V1.75A.75.75 0 0 1 2.75 1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+          <path d="M11.25 1v5.25a.75.75 0 0 0 .75.75h5.25" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
         </svg>
-        <span class="zl-art-ext zl-data">{kind}</span>
       </span>
       <span class="zl-art-main">
         <span class="zl-art-name">{name}</span>
-        <span class="zl-art-meta zl-data">{size}</span>
+        <span class="zl-art-meta zl-data">{kind} · {size}</span>
       </span>
       <span class="zl-art-act" aria-hidden="true">
         <svg viewBox="0 0 16 16">

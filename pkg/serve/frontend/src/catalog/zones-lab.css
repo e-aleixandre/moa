@@ -866,6 +866,7 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
   cursor: pointer;
   transition: background 120ms ease;
 }
+.zl-row + .zl-row { margin-top: 2px; }
 .zl-row:hover { background: var(--zl-hi); }
 
 /* The current row is a raised plane on the sheet, with the title in full
@@ -1365,3 +1366,37 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
    depends on -- forcing them all to position:relative moved the anchored ones. */
 .zl-phone::before,
 .zl-desk-main::before { z-index: 0; }
+
+/* The ledger's expand affordance. Half the rows have a detail and half do not,
+   and until now nothing on screen said which -- you had to click to find out.
+   The chevron is the tell, and it turns when the row opens. */
+.zl-lg-chev {
+  flex: none;
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  margin-left: 2px;
+  color: var(--zl-t4);
+  transition: transform 140ms var(--zl-ease), color 140ms ease;
+}
+.zl-lg-chev svg { width: 100%; height: 100%; }
+.zl-lg-row:hover .zl-lg-chev { color: var(--zl-t2); }
+.zl-lg-row.is-open .zl-lg-chev { transform: rotate(90deg); color: var(--zl-t2); }
+
+/* The status line's two glyph-only events. A lightning bolt and a flame mean
+   nothing on their own -- the owner asked what they were, which is the answer.
+   They keep their word down to the narrowest dock; only the datum-bearing
+   events (mcp, tasks) may fall back to a glyph, because their number stays. */
+@container (max-width: 800px) {
+  .zl-st-fast .zl-st-word,
+  .zl-st-ev.is-alarm-yellow .zl-st-word { display: inline; }
+}
+@container (max-width: 420px) {
+  .zl-st-fast .zl-st-word { display: inline; }
+}
+
+/* Only the model name is long enough to earn an ellipsis. The event words are
+   four or five characters: truncating "extra" to "ex..." costs more clarity
+   than the 4px it saves, which is the whole reason these words came back. */
+.zl-st-fast .zl-st-word,
+.zl-st-ev .zl-st-word { overflow: visible; text-overflow: clip; flex: none; }
