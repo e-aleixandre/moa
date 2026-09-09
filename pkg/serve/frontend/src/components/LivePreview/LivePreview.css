@@ -601,21 +601,11 @@
   text-decoration: underline;
   cursor: pointer;
 }
+/* The field itself is the Field primitive (box/lg/mono): border, background,
+   height and the 16px floor come from there. All this screen adds is that it
+   takes the free width next to the button. */
 .live-preview-url {
   flex: 1 1 auto;
-  min-width: 0;
-  padding: 10px var(--space-3);
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-md);
-  background: var(--mantle);
-  color: var(--text);
-  font-family: var(--mono);
-  /* ≥16px or iOS zooms the page when this input takes focus. */
-  font-size: var(--text-input);
-}
-.live-preview-url:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
 }
 
 /* ── The stream ─────────────────────────────────────────────────────────────

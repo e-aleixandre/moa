@@ -1,4 +1,4 @@
-import { Button } from "../../primitives/index.js";
+import { Button, Field } from "../../primitives/index.js";
 
 // The two questions Live Preview ever asks, as plain components: no hooks, no
 // state of their own. They exist apart from the panel because they are the
@@ -12,7 +12,10 @@ export function PreviewURLSetup({ value, onInput, onCommit, onCancel, canCancel 
     <div class="live-preview-setup">
       <p class="live-preview-setup-title">Enter your app URL</p>
       <div class="live-preview-setup-row">
-        <input
+        <Field
+          variant="box"
+          size="lg"
+          mono
           class="live-preview-url"
           type="url"
           inputMode="url"
@@ -29,7 +32,7 @@ export function PreviewURLSetup({ value, onInput, onCommit, onCancel, canCancel 
           }}
           aria-label="Preview URL"
         />
-        <Button variant="solid" size="sm" onClick={onCommit} disabled={!String(value || "").trim()}>
+        <Button variant="accent" size="lg" onClick={onCommit} disabled={!String(value || "").trim()}>
           Load
         </Button>
       </div>
@@ -47,7 +50,10 @@ export function PreviewAddressSetup({ value, onInput, onCommit, onBack, error })
     <div class="live-preview-setup">
       <p class="live-preview-setup-title">Confirm the preview address</p>
       <div class="live-preview-setup-row">
-        <input
+        <Field
+          variant="box"
+          size="lg"
+          mono
           class="live-preview-url"
           type="url"
           inputMode="url"
@@ -63,7 +69,7 @@ export function PreviewAddressSetup({ value, onInput, onCommit, onBack, error })
           }}
           aria-label="Preview proxy address"
         />
-        <Button variant="solid" size="sm" onClick={onCommit} disabled={!String(value || "").trim()}>
+        <Button variant="accent" size="lg" onClick={onCommit} disabled={!String(value || "").trim()}>
           Start
         </Button>
       </div>
