@@ -1,2 +1,5 @@
 @import "./tokens/reset.css";
 @import "./tokens/tokens.css";
+/* Ambient: inert unless data-ambient="on" is set (see data/ambient.js).
+   Imported last so it can override component sheets. Temporary. */
+@import "./tokens/ambient.css";

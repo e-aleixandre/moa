@@ -21,6 +21,7 @@ import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
 import { refreshPushState } from "./data/push-client.js";
 import { installOpenSessionNavigation } from "./data/push-navigation.js";
+import { initAmbient } from "./data/ambient.js";
 import {
   setMobile, autoFillTiles, autoSelectMobile, openSession, afterVisibilityChange,
 } from "./data/tile-actions.js";
@@ -320,5 +321,9 @@ function App() {
     </>
   );
 }
+
+// Before first paint: sets data-ambient on <html> when the switch is on, so the
+// app never renders one look and then flips to the other.
+initAmbient();
 
 render(<App />, document.getElementById("root"));

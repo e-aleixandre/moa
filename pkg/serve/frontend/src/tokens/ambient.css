@@ -1,0 +1,203 @@
+/* ambient.css — the Ambient visual direction, behind the temporary
+   data-ambient switch (see data/ambient.js, which is meant to be deleted).
+
+   WHY A SHEET AND NOT A THEME
+   This is not a palette swap. Ambient changes how surfaces are told apart:
+   depth and luminosity instead of 1px borders, one radius family, colour in
+   the background rather than on the controls. That is why it reaches into
+   component selectors rather than only re-pointing tokens.
+
+   Everything here hangs off [data-ambient="on"], so with the switch off not a
+   single declaration applies. Scoped to :root rather than to a wrapper element
+   so nothing has to be restructured to opt in.
+
+   TWO RULES THIS SHEET KEEPS
+   1. Peach is never used decoratively. It is the product's word for "you said
+      this" (the user message bar) and appears nowhere else, including in the
+      aurora.
+   2. State colour survives. Controls go achromatic precisely so the state dots
+      and the "needs you" briefs are the only saturated marks on screen. */
+
+[data-ambient="on"] {
+  /* canvas + glass. The canvas is dark but NOT black: the aurora needs
+     something to lift, and the glass needs something to show through. */
+  --amb-canvas: #12121f;
+  --amb-sheet: rgba(14, 14, 24, 0.68);
+  /* The drawer is READ ON, over a live transcript, so it is the one panel that
+     cannot be thin. In the lab it sat over a frozen mock and 0.62 looked fine;
+     over real text the words behind it stayed legible through the glass. It
+     keeps the blur (it still reads as glass against the aurora) but stops
+     pretending the conversation underneath is decoration. */
+  --amb-glass: rgba(20, 20, 34, 0.93);
+  --amb-well: rgba(0, 0, 0, 0.30);
+  --amb-hi: rgba(255, 255, 255, 0.06);
+  --amb-on: rgba(255, 255, 255, 0.11);
+  --amb-on-edge: rgba(255, 255, 255, 0.12);
+  --amb-blur: blur(28px) saturate(1.4);
+
+  /* one radius family */
+  --amb-r-panel: 24px;
+  --amb-r-row: 12px;
+  --amb-r-ctl: 10px;
+
+  /* the canvas carries the colour, so text can be neutral-warm */
+  --amb-text: #f1f1f6;
+  --amb-text-2: #c0c1cf;
+  --amb-text-3: #9192a6;
+  --amb-text-4: #6b6c80;
+
+  /* Aurora intensity. 0.45 is "suave", the dose chosen after comparing it
+     against full, hinted and none: full was legible but loud enough to argue
+     with the transcript. */
+  --amb-aurora: 0.45;
+
+  /* Re-point the surface tokens rather than repainting body: --base is what
+     the reset, the PWA safe area and the panels all read, so moving the token
+     moves every surface at once and nothing is left on the old colour. */
+  --base: var(--amb-canvas);
+  --mantle: #0f0f1a;
+  --crust: #0c0c15;
+  color: var(--amb-text);
+}
+
+/* ── The aurora ─────────────────────────────────────────────────────────────
+   Soft blobs on the page background, behind everything. No peach: the first
+   blob sits top-left, which is exactly where the user waypoint lives, so peach
+   there would be using the identity colour as wallpaper behind the one element
+   it belongs to. Lavender holds that corner instead.
+
+   Painted on a fixed pseudo-element rather than on a real node so it costs no
+   DOM and cannot end up in a scroll container. */
+[data-ambient="on"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  /* z-index 0 with the app's own stacking above it: at -1 it would fall behind
+     body's background and never be seen. */
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--amb-aurora);
+  background:
+    radial-gradient(60% 55% at 12% 18%, rgba(180, 190, 254, 0.52), transparent 68%),
+    radial-gradient(55% 60% at 88% 12%, rgba(203, 166, 247, 0.60), transparent 68%),
+    radial-gradient(70% 55% at 62% 92%, rgba(137, 180, 250, 0.58), transparent 70%),
+    radial-gradient(45% 45% at 10% 88%, rgba(148, 226, 213, 0.42), transparent 70%);
+  filter: blur(22px) saturate(1.2);
+}
+
+/* Motion is opt-out: a slowly drifting background is pleasant until you are
+   reading a stack trace on it. */
+@media (prefers-reduced-motion: reduce) {
+  [data-ambient="on"] body::before { animation: none; }
+}
+
+/* ── Session rows (shared by the desktop Spine and the mobile drawer) ────── */
+[data-ambient="on"] .session-row.variant-card {
+  border: 0;
+  border-radius: var(--amb-r-row);
+}
+[data-ambient="on"] .session-row.variant-card .r1 { color: var(--amb-text); }
+[data-ambient="on"] .session-row.variant-card .when {
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .session-row.variant-card .brief { color: var(--amb-text-3); }
+/* paths stay mono: they are code. Everything else that was mono becomes sans. */
+[data-ambient="on"] .session-row.variant-card .path {
+  font-family: var(--mono);
+  color: var(--amb-text-4);
+}
+
+/* The state dot is the only saturated mark left, so it gets a little more
+   presence rather than less. These halos are the reason the controls can
+   afford to be grey. */
+[data-ambient="on"] .session-row.variant-card .r1 .state-dot { width: 9px; height: 9px; }
+[data-ambient="on"] .state-dot.idle { box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
+[data-ambient="on"] .state-dot.running { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent); }
+[data-ambient="on"] .state-dot.permission { box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 26%, transparent); }
+[data-ambient="on"] .state-dot.error { box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 24%, transparent); }
+[data-ambient="on"] .state-dot.unseen { box-shadow: 0 0 0 3px color-mix(in srgb, var(--mauve) 24%, transparent); }
+[data-ambient="on"] .state-dot.saved { box-shadow: none; opacity: 0.7; }
+
+/* ── Desktop: the Spine ─────────────────────────────────────────────────── */
+[data-ambient="on"] .spine {
+  background: rgba(12, 12, 22, 0.34);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  border-right: 0;
+}
+[data-ambient="on"] .spine .wordmark {
+  letter-spacing: -0.01em;
+  color: var(--amb-text);
+}
+[data-ambient="on"] .spine .spine-label,
+[data-ambient="on"] .spine .session-row.variant-card .when,
+[data-ambient="on"] .spine .session-row.variant-card .path { color: var(--amb-text-3); }
+[data-ambient="on"] .spine .spine-jump,
+[data-ambient="on"] .spine .spine-new,
+[data-ambient="on"] .spine .inbox-btn {
+  border-radius: var(--amb-r-ctl);
+  color: var(--amb-text-3);
+}
+
+/* ── Mobile: drawer and veil ────────────────────────────────────────────────
+   The veil does NOT blur, at any dose. Blurring it turned the composer's send
+   button into a bright smear under the open drawer, and what sits behind the
+   drawer is a live transcript: anything legible through the veil also moves
+   while you read the list. Dimming is both calmer and one less full-viewport
+   backdrop-filter, which is the expensive kind. */
+[data-ambient="on"] .sdrawer-veil {
+  /* 0.90, not the 0.72 the lab used. The drawer does not fill the screen --
+     there are ~50px above it and ~155px below where only the veil covers the
+     transcript -- and at 0.72 the text underneath stayed readable in those
+     bands. The lab hid this: it sat over a short frozen mock, so the uncovered
+     strips happened to be empty. */
+  background: rgba(6, 6, 12, 0.90);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+[data-ambient="on"] .sdrawer {
+  background: var(--amb-glass);
+  backdrop-filter: var(--amb-blur);
+  -webkit-backdrop-filter: var(--amb-blur);
+  border: 0;
+  border-radius: var(--amb-r-panel);
+  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 30px 70px rgba(0, 0, 0, 0.55);
+}
+
+/* The search field is a well, not a bordered box: recessed into the drawer
+   rather than drawn on top of it. Field's own sizing is untouched -- this only
+   changes the surface. */
+[data-ambient="on"] .sdrawer-search.field-inset {
+  background: var(--amb-well);
+  border-color: transparent;
+}
+
+/* ── The user message keeps its bar ─────────────────────────────────────────
+   Rounded to match the radius family, but the peach 3px bar stays exactly as
+   it is. It is the one piece of colour language this direction must not
+   touch. */
+[data-ambient="on"] .waypoint {
+  border-radius: 4px var(--amb-r-row) var(--amb-r-row) 4px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* The app renders into #root; it has to stand above the aurora, which is
+   painted on body. One stacking context, set once. */
+[data-ambient="on"] #root {
+  position: relative;
+  z-index: 1;
+}
+
+/* The screen shells paint --base to fill the viewport. With the aurora behind
+   them that is exactly the wrong job: an opaque sheet over the canvas hides
+   it completely. They go transparent and let the canvas through -- this is
+   what "colour lives in the background" means structurally, not just
+   chromatically. Panels that need to be read on (drawer, cards, composer)
+   keep their own surface below. */
+[data-ambient="on"] .mconv,
+[data-ambient="on"] .desktop-shell,
+[data-ambient="on"] .conversation-main {
+  background: transparent;
+}
