@@ -1,0 +1,529 @@
+/* skins-lab — the chosen style direction (ambient) on the current screen
+   architecture.
+
+   .sk-ambient is a pure override on the production markup, scoped to the frame.
+   Nothing here ships: it is the proposal, kept next to the real screens so the
+   two can be compared (?view=desktop / ?view=mobile are the current style).
+
+   The aurora is a DIAL, not a constant: .amb-soft / .amb-trace / .amb-none dose
+   it down, and the panels get more opaque as the colour recedes. */
+
+/* ── lab chrome ─────────────────────────────────────────────────────────── */
+.sk { max-width: 1440px; margin: 0 auto; padding: var(--space-8) var(--space-6) var(--space-12); }
+.sk-head h1 { font-size: var(--text-2xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.sk-head h1 em { font-style: normal; color: var(--peach); }
+.sk-head p { color: var(--overlay1); margin-top: var(--space-2); max-width: 88ch; font-size: var(--text-md); }
+.sk-tabs { display: flex; gap: var(--space-2); margin-top: var(--space-5); }
+.sk-tabs button {
+  min-height: 36px; padding: 0 var(--space-4); border: 1px solid var(--surface1); border-radius: var(--radius-full);
+  background: none; color: var(--subtext0); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); cursor: pointer;
+}
+.sk-tabs button[aria-pressed="true"] { background: var(--surface0); border-color: var(--surface2); color: var(--text); }
+.sk-tabs button:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
+
+.sk-row { margin-top: var(--space-12); }
+.sk-row-head h2 { font-size: var(--text-xl); font-weight: var(--weight-semibold); }
+.sk-row-head p { color: var(--overlay1); font-size: var(--text-sm); margin-top: var(--space-1); max-width: 96ch; }
+.sk-pair { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-6); margin-top: var(--space-5); }
+.sk-figure { margin: 0; flex: none; }
+.sk-caption { margin-bottom: var(--space-2); font-family: var(--mono); font-size: var(--text-xs); letter-spacing: var(--tracking-wide); text-transform: uppercase; color: var(--overlay0); }
+
+/* ── frames ─────────────────────────────────────────────────────────────── */
+.sk-phone {
+  position: relative;
+  width: 390px;
+  height: 760px;
+  /* .mconv sets 100dvh; the frame owns its height */
+  height: 760px !important;
+  overflow: hidden;
+  border: 1px solid var(--surface1);
+  border-radius: 28px;
+  box-shadow: var(--shadow-lg);
+  isolation: isolate;
+  font-family: var(--font);
+  color: var(--text);
+}
+.sk-phone .mconv-stream { padding-top: 50px; }
+.sk-phone .mcomposer { flex: none; background: var(--base); padding: var(--space-2) var(--space-3) 6px; }
+.sk-phone .mcomposer .composer-wrap { margin: 0; padding: 0; max-width: none; }
+.sk-phone .mcomposer .status-strip { font-size: var(--text-micro); overflow: hidden; }
+.sk-phone .mtchip { top: 12px; }
+
+.sk-desk {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--spine-width) 1fr;
+  width: 940px;
+  height: 640px;
+  overflow: hidden;
+  background: var(--base);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  isolation: isolate;
+  font-family: var(--font);
+  color: var(--text);
+}
+.sk-desk .spine { min-height: 0; }
+.sk-desk .sk-main { min-height: 0; height: 100%; }
+.sk-desk .stream-scroll { overflow: hidden; }
+.sk-desk .stream-col { padding-top: var(--space-4); }
+.sk-desk .stream-col .waypoint { margin-top: 0; }
+
+/* the aurora layer exists in every frame but only paints under ambient */
+.sk-aurora { display: none; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AMBIENT — colour lives in the environment, so the controls don't need it.
+   Aurora canvas; glass panels with real backdrop blur; surfaces told apart by
+   depth and luminosity rather than 1px lines; one radius family; less mono;
+   achromatic controls. The status dots are the only saturated thing left.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.sk-ambient {
+  /* canvas + glass. The canvas is dark but NOT black: the aurora has to have
+     something to lift, and the glass has to have something to show through. */
+  --amb-canvas: #12121f;
+  --amb-glass: rgba(20, 20, 34, 0.42);         /* the drawer: sees the transcript and the aurora through it */
+  --amb-sheet: rgba(14, 14, 24, 0.52);         /* the page: opaque enough to read on for hours, translucent enough to be tinted */
+  --amb-well: rgba(0, 0, 0, 0.30);             /* recessed: search field */
+  --amb-hi: rgba(255, 255, 255, 0.06);         /* hover */
+  --amb-on: rgba(255, 255, 255, 0.11);         /* selected / open */
+  --amb-on-edge: rgba(255, 255, 255, 0.12);    /* 1px inner highlight on a raised panel */
+  --amb-ink: rgba(255, 255, 255, 0.94);        /* the one filled control (send) */
+  --amb-blur: blur(28px) saturate(1.4);
+  /* radii: one family */
+  --amb-r-panel: 24px;
+  --amb-r-row: 12px;
+  --amb-r-ctl: 10px;
+  /* type: fewer mono, wider range */
+  --amb-caps: 10.5px;
+  --amb-meta: 11.5px;
+  --amb-body: 13.5px;
+  --amb-title: 14px;
+  --amb-head: 18px;
+  /* the canvas carries colour, so text can afford to be neutral-warm rather
+     than blue-white */
+  --amb-text: #f1f1f6;
+  --amb-text-2: #c0c1cf;
+  --amb-text-3: #9192a6;
+  --amb-text-4: #6b6c80;
+  background: var(--amb-canvas);
+  color: var(--amb-text);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+/* The aurora: five soft blobs INSIDE the frame, big enough to overlap, on a
+   slow drift. Radial gradients are already soft; the blur only smooths the
+   overlaps. Identity colours (peach, mauve) plus sky and teal: identity lives
+   here and nowhere else. */
+.sk-ambient .sk-aurora {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(60% 55% at 12% 18%, rgba(250, 179, 135, 0.62), transparent 68%),
+    radial-gradient(55% 60% at 88% 12%, rgba(203, 166, 247, 0.60), transparent 68%),
+    radial-gradient(70% 55% at 62% 92%, rgba(137, 180, 250, 0.58), transparent 70%),
+    radial-gradient(45% 45% at 10% 88%, rgba(148, 226, 213, 0.42), transparent 70%),
+    radial-gradient(50% 40% at 50% 45%, rgba(203, 166, 247, 0.22), transparent 70%);
+  filter: blur(22px) saturate(1.2);
+  /* Intensity is a dial, not a constant: the owner found the full aurora
+     "exaggerated, hard to read". `opacity` dims the whole layer uniformly, so
+     the colour relationships stay put while the canvas takes over. */
+  opacity: var(--amb-aurora, 1);
+}
+
+/* ── Aurora intensity levels ────────────────────────────────────────────────
+   Same skin, three doses. The sheet also gets more opaque as the aurora gets
+   quieter: less colour to show through means the glass can stop fighting the
+   text behind it. */
+.sk-ambient.amb-soft {
+  --amb-aurora: 0.45;
+  --amb-glass: rgba(20, 20, 34, 0.62);
+  --amb-sheet: rgba(14, 14, 24, 0.68);
+}
+.sk-ambient.amb-trace {
+  --amb-aurora: 0.18;
+  --amb-glass: rgba(20, 20, 34, 0.78);
+  --amb-sheet: rgba(14, 14, 24, 0.82);
+}
+/* No aurora at all: the SYSTEM without the effect. Acromatic controls, no 1px
+   borders, unified radii, sans telemetry — everything Ambient changes that does
+   NOT depend on the background, and therefore costs nothing to render. The
+   panels stop being glass and become plain surfaces: with no colour behind
+   them there is nothing to let through, and translucency would only leak the
+   moving transcript underneath (the drawer glow both reviewers flagged). */
+.sk-ambient.amb-none {
+  --amb-aurora: 0;
+  --amb-glass: #1a1a28;
+  --amb-sheet: #16161f;
+  --amb-blur: none;
+}
+/* The veil is the OTHER piece of glass, and the one that leaked: at 0.3 alpha
+   with blur it turned the composer's white send button into a bright smear
+   under the drawer — the glow both reviewers flagged. With no aurora there is
+   nothing worth showing through, so the veil just dims. */
+.sk-ambient.amb-none .sdrawer-veil {
+  background: rgba(6, 6, 12, 0.72);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* lift the static children above the aurora; the chip and the veil are
+   already absolute with their own z-index and must not be touched */
+.sk-ambient > .mstream,
+.sk-ambient > .mcomposer,
+.sk-ambient > .spine,
+.sk-ambient > .sk-main { position: relative; z-index: 1; }
+
+/* ── shared: the session row (Spine + drawer render the same SessionRow) ── */
+.sk-ambient .session-row.variant-card {
+  border: 0;
+  border-radius: var(--amb-r-row);
+  transition: background var(--duration) var(--ease);
+}
+.sk-ambient .session-row.variant-card .r1 { font-size: var(--amb-title); color: var(--amb-text); }
+.sk-ambient .session-row.variant-card .when {
+  font-family: var(--font);
+  font-size: var(--amb-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--amb-text-4);
+}
+.sk-ambient .session-row.variant-card .brief { font-size: 12.5px; color: var(--amb-text-3); }
+.sk-ambient .session-row.variant-card .path { font-size: var(--amb-meta); color: var(--amb-text-4); }
+/* the state dot is the only saturated mark: give it a hair more presence */
+.sk-ambient .session-row.variant-card .r1 .state-dot { width: 9px; height: 9px; }
+.sk-ambient .state-dot.idle { box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
+.sk-ambient .state-dot.running { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent); }
+.sk-ambient .state-dot.permission { box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 26%, transparent); }
+.sk-ambient .state-dot.error { box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 24%, transparent); }
+.sk-ambient .state-dot.unseen { box-shadow: 0 0 0 3px color-mix(in srgb, var(--mauve) 24%, transparent); }
+.sk-ambient .state-dot.saved { box-shadow: none; opacity: 0.7; }
+/* paths stay mono (they are code); everything else that was mono is sans */
+.sk-ambient .session-row.variant-card .path { font-family: var(--mono); }
+/* "needs you" rows keep their semantic colour ON THE BRIEF, never on the row */
+.sk-ambient .session-row.variant-card.needs-yellow .brief,
+.sk-ambient .sdcard-needs-label { color: var(--yellow); }
+.sk-ambient .session-row.variant-card.needs-red .brief { color: var(--red); }
+.sk-ambient .session-card-menu button,
+.sk-ambient .session-card-menu .icon-button { color: var(--amb-text-3); }
+
+/* ── Spine (desktop column) ─────────────────────────────────────────────── */
+/* the column is a lighter glass than the sheet: it sits ON the aurora, so it
+   needs enough body for a 251-row list to stay legible over a peach blob */
+.sk-ambient .spine {
+  background: rgba(12, 12, 22, 0.34);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  border-right: 0;
+}
+.sk-ambient .spine .spine-label,
+.sk-ambient .spine .session-row.variant-card .when,
+.sk-ambient .spine .session-row.variant-card .path { color: var(--amb-text-3); }
+.sk-ambient .spine .spine-head { padding: 18px 16px 8px; }
+.sk-ambient .spine .wordmark { font-size: var(--amb-head); font-weight: var(--weight-semibold); letter-spacing: -0.01em; color: var(--amb-text); }
+.sk-ambient .spine .spine-jump,
+.sk-ambient .spine .spine-new,
+.sk-ambient .spine-group-more,
+.sk-ambient .spine .inbox-btn {
+  width: 30px; height: 30px;
+  border-radius: var(--amb-r-ctl);
+  color: var(--amb-text-3);
+}
+.sk-ambient .spine .spine-jump { width: auto; padding: 0 7px 0 6px; }
+.sk-ambient .spine .spine-jump .kbd {
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  background: var(--amb-hi);
+  border: 0;
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+@media (hover: hover) {
+  .sk-ambient .spine .spine-jump:hover,
+  .sk-ambient .spine .spine-new:hover,
+  .sk-ambient .spine-group-more:hover,
+  .sk-ambient .spine .inbox-btn:hover { background: var(--amb-on); color: var(--amb-text); }
+}
+.sk-ambient .spine .spine-sessions { padding: 0 10px 10px; }
+.sk-ambient .spine .spine-label {
+  font-size: var(--amb-caps);
+  letter-spacing: 0.06em;
+  color: var(--amb-text-4);
+  padding: 12px 8px 6px;
+}
+.sk-ambient .spine .spine-list { gap: 1px; }
+.sk-ambient .spine .spine-session-card .session-row.variant-card .session-row-hit { padding: 9px 36px 9px 11px; gap: 3px; }
+.sk-ambient .spine .session-row.variant-card .r1 { font-size: 13px; }
+.sk-ambient .spine .session-row.variant-card .brief,
+.sk-ambient .spine .session-row.variant-card .path { padding-left: 19px; }
+@media (hover: hover) {
+  .sk-ambient .spine .session-row.variant-card:hover { background: var(--amb-hi); }
+}
+.sk-ambient .spine .session-row.variant-card.on,
+.sk-ambient .spine .session-row.variant-card.needs-yellow.on,
+.sk-ambient .spine .session-row.variant-card.needs-red.on {
+  background: rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+.sk-ambient .spine .spine-foot {
+  border-top: 0;
+  padding: 10px 16px 12px;
+}
+.sk-ambient .spine .ver { font-family: var(--font); font-size: var(--amb-meta); color: var(--amb-text-4); }
+.sk-ambient .spine .spine-foot .icon-button { color: var(--amb-text-3); border-radius: var(--amb-r-ctl); }
+
+/* ── the page: a raised sheet beside the column ─────────────────────────── */
+.sk-ambient .sk-main {
+  margin: 10px 10px 10px 0;
+  height: calc(100% - 20px);
+  border-radius: 20px;
+  background: var(--amb-sheet);
+  backdrop-filter: var(--amb-blur);
+  -webkit-backdrop-filter: var(--amb-blur);
+  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 24px 60px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.sk-ambient .chat-head { background: transparent; padding: 16px 28px 6px; }
+.sk-ambient .chat-head .crumb-title { font-size: var(--amb-head); color: var(--amb-text); }
+.sk-ambient .chat-head .crumb-path { font-size: var(--amb-meta); color: var(--amb-text-4); }
+.sk-ambient .chat-head .grid-toggle,
+.sk-ambient .chat-head .head-action-icon,
+.sk-ambient .chat-head .icon-button {
+  border: 0;
+  background: var(--amb-hi);
+  border-radius: var(--amb-r-ctl);
+  color: var(--amb-text-2);
+}
+.sk-ambient .chat-head .grid-toggle .kbd { font-family: var(--font); font-size: 10px; background: var(--amb-hi); border: 0; color: var(--amb-text-3); }
+.sk-ambient .stream-col { padding-left: 28px; padding-right: 28px; }
+
+/* transcript blocks: the user's left bar stays — that gesture is reserved */
+.sk-ambient .waypoint {
+  background: var(--amb-hi);
+  border: 0;
+  border-left: 3px solid var(--peach);
+  border-radius: 4px 16px 16px 4px;
+}
+.sk-ambient .waypoint .who { color: var(--amb-text-2); font-size: var(--amb-caps); }
+.sk-ambient .waypoint .who time { font-family: var(--font); color: var(--amb-text-3); }
+.sk-ambient .waypoint .body,
+.sk-ambient .doc p { color: var(--amb-text-2); font-size: var(--amb-body); }
+.sk-ambient .doc p strong { color: var(--amb-text); }
+.sk-ambient .tg {
+  border: 0;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  color: var(--amb-text-3);
+}
+.sk-ambient .tg .tg-row { border-bottom-color: rgba(255, 255, 255, 0.045); color: var(--amb-text-3); }
+.sk-ambient .tg .tg-row .tool { color: var(--amb-text-2); }
+
+/* now-line + composer + strip */
+.sk-ambient .nowline { font-family: var(--font); font-size: 12.5px; padding-left: 28px; padding-right: 28px; }
+.sk-ambient .nowline-act { color: var(--amb-text-3); }
+.sk-ambient .nowline-elapsed { font-variant-numeric: tabular-nums; color: var(--amb-text-4); }
+.sk-ambient .composer-wrap { padding-left: 28px; padding-right: 28px; }
+.sk-ambient .composer-wrap .composer {
+  background: rgba(255, 255, 255, 0.06);
+  border: 0;
+  border-radius: 18px;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 14px 36px rgba(0, 0, 0, 0.32);
+}
+.sk-ambient .composer-wrap .composer:focus-within {
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 0 1px rgba(255, 255, 255, 0.10), 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.sk-ambient .composer-wrap .composer-textarea { color: var(--amb-text); }
+.sk-ambient .composer-wrap .composer-textarea::placeholder { color: var(--amb-text-4); }
+.sk-ambient .composer-wrap .composer-btn { border-radius: var(--amb-r-ctl); color: var(--amb-text-3); }
+@media (hover: hover) {
+  .sk-ambient .composer-wrap .composer-btn:hover { background: var(--amb-on); color: var(--amb-text); }
+}
+/* the one filled control is ink, not identity colour */
+.sk-ambient .composer-wrap .composer-send {
+  background: var(--amb-ink);
+  color: #14141f;
+  border-radius: var(--amb-r-ctl);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.30);
+}
+@media (hover: hover) {
+  .sk-ambient .composer-wrap .composer-send:hover { transform: none; background: #fff; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
+}
+/* Stop stays red — it is the destructive state, not decoration */
+.sk-ambient .composer-wrap .composer-stop-ghost {
+  border: 0;
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  border-radius: var(--amb-r-ctl);
+}
+.sk-ambient .composer-wrap .steer-hint { font-family: var(--font); color: var(--amb-text-4); }
+.sk-ambient .status-strip {
+  font-family: var(--font);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--amb-text-4);
+  padding-left: 28px;
+  padding-right: 28px;
+}
+.sk-ambient .status-strip .status-strip-usage-btn { color: inherit; }
+.sk-ambient .status-strip .status-strip-spend b { color: var(--amb-text-2); }
+.sk-ambient .status-strip .model-pill { background: var(--amb-hi); border: 0; color: var(--amb-text-2); }
+.sk-ambient .status-strip .model-pill .m-name { color: var(--amb-text); }
+.sk-ambient .status-strip .perm-chip,
+.sk-ambient .status-strip .status-strip-pill { font-family: var(--font); border-radius: 6px; }
+.sk-ambient .status-strip .token-flow { color: var(--amb-text-4); }
+
+/* ── phone: canvas + drawer glass + composer pill ───────────────────────── */
+.sk-ambient.sk-phone { background: var(--amb-canvas); }
+.sk-ambient.sk-phone .sk-aurora {
+  background:
+    radial-gradient(70% 34% at 20% 6%, rgba(250, 179, 135, 0.66), transparent 70%),
+    radial-gradient(70% 30% at 90% 30%, rgba(203, 166, 247, 0.62), transparent 70%),
+    radial-gradient(80% 34% at 30% 70%, rgba(137, 180, 250, 0.60), transparent 70%),
+    radial-gradient(70% 30% at 85% 98%, rgba(148, 226, 213, 0.46), transparent 70%);
+}
+.sk-ambient.mconv { background: transparent; }
+.sk-ambient .mconv-stream { padding-left: 14px; padding-right: 14px; }
+.sk-ambient.mconv .waypoint { border-radius: 4px 14px 14px 4px; background: rgba(255, 255, 255, 0.08); }
+.sk-ambient .mcomposer { background: transparent; }
+.sk-ambient .composer-wrap.is-compact .composer {
+  background: rgba(255, 255, 255, 0.08);
+  border: 0;
+  border-radius: 22px;
+  backdrop-filter: var(--amb-blur);
+  -webkit-backdrop-filter: var(--amb-blur);
+  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.sk-ambient .composer-wrap.is-compact .composer:focus-within { background: rgba(255, 255, 255, 0.09); }
+.sk-ambient .composer-wrap.is-compact .composer-send { border-radius: 16px; }
+.sk-ambient .composer-wrap.is-compact .composer-stop-ghost { border-radius: 14px; }
+.sk-ambient .composer-wrap.is-compact .composer-btn-attach { border-radius: 16px; }
+
+/* the chip: glass pill over the transcript */
+.sk-ambient .mtchip {
+  background: rgba(24, 24, 38, 0.55);
+  backdrop-filter: var(--amb-blur);
+  -webkit-backdrop-filter: var(--amb-blur);
+  border: 0;
+  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 6px 20px rgba(0, 0, 0, 0.30);
+  padding: 7px 8px 7px 15px;
+}
+.sk-ambient .mtchip.is-open { background: rgba(48, 48, 66, 0.92); border: 0; }
+.sk-ambient .mtchip-title { font-size: 12.5px; }
+.sk-ambient .mtchip-chev { background: var(--amb-on); }
+.sk-ambient .mtchip.is-open .mtchip-chev { background: rgba(255, 255, 255, 0.16); }
+/* the attention dot keeps the border ring colour of the canvas, not --base */
+.sk-ambient .mtchip-attn { border-color: var(--amb-canvas); }
+/* the inbox count is a state (unseen work): it keeps mauve */
+
+/* veil + drawer */
+.sk-ambient .sdrawer-veil {
+  background: rgba(6, 6, 12, 0.30);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.sk-ambient .sdrawer {
+  background: var(--amb-glass);
+  backdrop-filter: var(--amb-blur);
+  -webkit-backdrop-filter: var(--amb-blur);
+  border: 0;
+  border-radius: var(--amb-r-panel);
+  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 30px 70px rgba(0, 0, 0, 0.55);
+}
+.sk-ambient .sdrawer-head { padding: 16px 16px 8px; }
+.sk-ambient .sdrawer-head h2 { font-size: var(--amb-head); color: var(--amb-text); }
+.sk-ambient .sdrawer-head .sdrawer-count { font-family: var(--font); font-size: var(--amb-meta); font-variant-numeric: tabular-nums; color: var(--amb-text-4); }
+.sk-ambient .sdrawer-new,
+.sk-ambient .sdrawer-more,
+.sk-ambient .sdrawer-head .inbox-btn { width: 32px; height: 32px; border-radius: var(--amb-r-ctl); color: var(--amb-text-3); }
+.sk-ambient .sdrawer-new:active,
+.sk-ambient .sdrawer-more:active,
+.sk-ambient .sdrawer-head .inbox-btn:active { background: var(--amb-on); }
+.sk-ambient .sdrawer-search {
+  margin: 0 12px 8px;
+  padding: 11px 14px;
+  background: var(--amb-well);
+  border: 0;
+  border-radius: 14px;
+  color: var(--amb-text-4);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+.sk-ambient .sdrawer-search:focus-within { box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.sk-ambient .sdrawer-search input { color: var(--amb-text); }
+.sk-ambient .sdrawer-search input::placeholder { color: var(--amb-text-4); }
+.sk-ambient .sdrawer-list { padding: 0 10px 10px; gap: 2px; }
+.sk-ambient .sdrawer-group {
+  font-family: var(--font);
+  font-size: var(--amb-caps);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  color: var(--amb-text-4);
+  padding: 12px 8px 4px;
+}
+.sk-ambient .sdrawer-group-new { color: var(--mauve); }
+.sk-ambient .sdcard-slot .session-row.variant-card .session-row-hit { padding: 11px 40px 11px 13px; gap: 3px; }
+.sk-ambient .sdcard-slot .session-row.variant-card .r1 { font-size: 15px; }
+.sk-ambient .sdcard-slot .session-row.variant-card .brief { font-size: 13px; }
+.sk-ambient .sdcard-slot .session-row.variant-card.on,
+.sk-ambient .sdcard-slot .session-row.variant-card.needs-yellow.on,
+.sk-ambient .sdcard-slot .session-row.variant-card.needs-red.on {
+  background: rgba(255, 255, 255, 0.11);
+  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+.sk-ambient .sdrawer-show-all { color: var(--amb-text-2); font-weight: var(--weight-medium); border-radius: var(--amb-r-ctl); }
+.sk-ambient .sdrawer-foot {
+  background: transparent;
+  border-top: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.sk-ambient .sdrawer-settings { color: var(--amb-text-2); font-size: 13px; }
+.sk-ambient .sdrawer-settings:active { background: var(--amb-hi); }
+.sk-ambient .sdrawer-ver { font-family: var(--font); font-size: var(--amb-meta); color: var(--amb-text-4); }
+
+/* the strip under the phone composer: sans, tabular */
+.sk-ambient .mcomposer .status-strip { font-family: var(--font); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sk-ambient .status-strip.is-compact .status-strip-div { background: rgba(255, 255, 255, 0.10); }
+
+
+/* ── Aurora dose switch ─────────────────────────────────────────────────────
+   Only ambient shows it. Real buttons, not a decorative segmented control. */
+.sk-dose {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.sk-dose-label {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+.sk-dose-btn {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--subtext0);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.sk-dose-btn.is-on {
+  border-color: color-mix(in srgb, var(--peach) 55%, var(--surface1));
+  background: var(--peach-dim);
+  color: var(--text);
+}
+.sk-dose-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}

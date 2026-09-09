@@ -13,6 +13,7 @@ import { LiveStatesGallery } from "./catalog/live-states-gallery.jsx";
 import { MobileGallery } from "./catalog/mobile-gallery.jsx";
 import { SubagentGallery } from "./catalog/subagent-gallery.jsx";
 import { DesktopLab, PhoneLab } from "./catalog/desktop-lab.jsx";
+import { SkinsLab } from "./catalog/skins-lab.jsx";
 import { seedCatalogStore } from "./catalog/specimen.js";
 import { installCatalogBackend } from "./catalog/catalog-backend.js";
 import { announceArrivals } from "./data/events.js"; // wake-on-event
@@ -33,6 +34,7 @@ const LINKS = [
   { key: "live", label: "Live", href: "?view=live" },
   { key: "subagent", label: "Subagent", href: "?view=subagent" },
   { key: "pieces", label: "Mobile pieces", href: "?view=pieces" },
+  { key: "skins", label: "Ambient", href: "?view=skins" },
 ];
 
 // wake-on-event: the two inbox seed sets are a URL away from each other, so
@@ -116,6 +118,7 @@ function CatalogApp() {
   else if (view === "live") body = <LiveStatesGallery />;
   else if (view === "subagent") body = <SubagentGallery />;
   else if (view === "pieces") body = <MobileGallery />;
+  else if (view === "skins") body = <SkinsLab />;
   else if (view === "mobile") {
     body = (
       <PhoneLab>

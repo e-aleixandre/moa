@@ -8,8 +8,6 @@ import {
   PermissionControl,
   TokenFlow,
 } from "../components/index.js";
-import { MobileHeader } from "../layout/mobile/MobileHeader/MobileHeader.jsx";
-import { SessionStrip } from "../layout/mobile/SessionStrip/SessionStrip.jsx";
 import { SessionDrawer } from "../layout/mobile/SessionDrawer/SessionDrawer.jsx";
 import { MobileSubagentView } from "../layout/mobile/MobileConversationScreen/MobileSubagentView.jsx";
 import "../layout/mobile/MobileConversationScreen/MobileConversationScreen.css";
@@ -270,25 +268,14 @@ function MobileSubagentSpecimen({ spec }) {
 
 // MobileConversationSpecimen — the static mock of the mobile conversation
 // screen for the gallery (decoupled from the connected container).
+//
+// The chrome it used to mount (MobileHeader + SessionStrip) is gone: the real
+// screen replaced both with the floating MobileTitleChip and the SessionDrawer
+// hanging from it, so this specimen was the only thing keeping two unused
+// components alive.
 export function MobileConversationSpecimen() {
   return (
     <div class="mconv">
-      <MobileHeader
-        state="running"
-        title="ws race fix"
-        model="sol"
-        level="high"
-        path="~/dev/moa/main"
-        ctx={62}
-        onOpenSessions={noop}
-      />
-      <SessionStrip
-        sessions={SESSIONS}
-        activeId="ws"
-        onSelect={noop}
-        onNew={noop}
-      />
-
       <div class="mconv-stream">
         <UserWaypoint time="10:41">
           <p>
