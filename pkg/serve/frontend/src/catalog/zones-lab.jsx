@@ -93,8 +93,9 @@ function Sidebar({ onPick, desktop }) {
     <>
       <div class="zl-side-head">
         <span class="zl-side-title">moa</span>
-        {/* Search is the quietest thing here, not the heaviest: a line with an
-            icon, no filled box competing with the sessions it searches. */}
+        {/* Search is a recess cut into the sheet: present at rest, so it reads
+            as an object you can reach for, but sunken so it never competes
+            with the raised things (the active row, New session). */}
         <label class="zl-search">
           <svg class="zl-search-ico" viewBox="0 0 16 16" aria-hidden="true">
             <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6" />
@@ -232,10 +233,11 @@ function StatusLine() {
   );
 }
 
-/* Composer. A sunken well, not a pill: the field is the thing you look at
-   most, so it gets the most careful surface. The send button arms when there
-   is something to send and stays achromatic -- peach is "you said this",
-   which is what the message becomes AFTER sending, not the button. */
+/* Composer. A raised slab floating over the transcript, not a hole in it:
+   the field is the thing you look at most, so it gets the most careful
+   surface. The send button arms when there is something to send and stays
+   achromatic -- peach is "you said this", which is what the message becomes
+   AFTER sending, not the button. */
 function Composer() {
   const [draft, setDraft] = useState("");
   const ref = useRef(null);
