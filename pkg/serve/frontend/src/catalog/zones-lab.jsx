@@ -8,15 +8,42 @@ import "./zones-lab.css";
    this session, the bottom is state. Both drawers use the same motion and the
    same gesture, mirrored, so learning one teaches the other. */
 
+/* Every session carries the project it lives in, as a coloured monogram. The
+   references all put an icon on every row; a chat client has no icon per
+   conversation, but it does have a folder -- and that is the thing you
+   actually navigate by, so it earns the slot. Colour is derived from the
+   project name, so the same repo always looks the same. */
 const SESSIONS = [
-  { title: "Buscar un bug bounty", when: "now", path: "~/dev/moa", state: "running", brief: "Running · 4m" },
-  { title: "Check access to two repos", when: "28m", path: "~/dev/gugo", state: "needs", brief: "Needs your answer" },
-  { title: "Deploy fails on ARM runner", when: "1h", path: "~/dev/tienda", state: "error", brief: "Stopped with an error" },
-  { title: "Limpiar Docker y worktrees", when: "35m", path: "~/dev", state: "idle" },
-  { title: "Búscame un dominio para el side project", when: "36m", path: "~/dev", state: "idle" },
-  { title: "Browse Gugo GitLab", when: "39d", path: "~/dev/gugo", state: "idle" },
-  { title: "MenuApp", when: "41d", path: "~/dev/menuapp", state: "idle" },
+  { title: "Buscar un bug bounty", when: "now", path: "~/dev/moa", project: "moa", state: "running", brief: "Running · 4m" },
+  { title: "Check access to two repos", when: "28m", path: "~/dev/gugo", project: "gugo", state: "needs", brief: "Needs your answer" },
+  { title: "Deploy fails on ARM runner", when: "1h", path: "~/dev/tienda", project: "tienda", state: "error", brief: "Stopped with an error" },
+  { title: "Limpiar Docker y worktrees", when: "35m", path: "~/dev", project: "dev", state: "idle" },
+  { title: "Búscame un dominio para el side project", when: "36m", path: "~/dev", project: "dev", state: "idle" },
+  { title: "Browse Gugo GitLab", when: "39d", path: "~/dev/gugo", project: "gugo", state: "idle" },
+  { title: "MenuApp", when: "41d", path: "~/dev/menuapp", project: "menuapp", state: "idle" },
 ];
+
+/* Identity hues, deliberately none of them peach: that one means "you wrote
+   this" and may not be spent on decoration. */
+const HUES = [210, 265, 170, 320, 40, 190];
+function projectHue(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return HUES[h % HUES.length];
+}
+
+function Monogram({ project, state }) {
+  const hue = projectHue(project);
+  return (
+    <span
+      class={`zl-mono is-${state}`}
+      style={`--h:${hue}`}
+      aria-hidden="true"
+    >
+      {project.slice(0, 2)}
+    </span>
+  );
+}
 
 const ACTIVE = SESSIONS.filter((s) => s.state !== "idle");
 const SAVED = SESSIONS.filter((s) => s.state === "idle");
@@ -33,13 +60,11 @@ function Row({ s, current, onPick }) {
       aria-current={current ? "true" : undefined}
       onClick={onPick}
     >
+      <Monogram project={s.project} state={s.state} />
       <span class="zl-row-main">
         <span class="zl-row-l1">
           <span class="zl-row-title">{s.title}</span>
-          <span class="zl-row-meta">
-            <Dot state={s.state} />
-            <span class="zl-row-when">{s.when}</span>
-          </span>
+          <span class="zl-row-when">{s.when}</span>
         </span>
         {/* Active sessions say what they are doing; saved ones say where they
             live. Two lines is the budget, so the more useful datum wins. */}
