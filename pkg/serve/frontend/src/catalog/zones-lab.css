@@ -1452,6 +1452,16 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-live-tally:hover { background: var(--zl-raised); color: var(--zl-t1); box-shadow: var(--zl-rim-2); }
 .zl-live-dots { display: inline-flex; align-items: center; gap: 1px; }
 .zl-live-dots .zl-live-id { width: 10px; }
+/* In the cluster a command is a neutral dot, not a `$`: two of them side by
+   side read as a price. The glyph stays where the item stands alone. */
+.zl-live-dots .zl-live-id.is-bash { font-size: 0; }
+.zl-live-dots .zl-live-id.is-bash::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--zl-t3);
+}
 .zl-live-n { color: inherit; }
 .zl-live-chev {
   width: 12px;
@@ -1462,9 +1472,9 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 }
 .zl-live-chev.is-up { transform: rotate(180deg); }
 
-/* The panel: a recess above the row, the ledger's tone. Capped at four
-   rows plus a group head before it scrolls, so it can never eat the
-   conversation: ~200px on the phone, less in a pane. */
+/* The panel: a recess above the row, the ledger's tone. Capped so it can
+   never eat the conversation: measured on the phone, bar + open panel =
+   242px of a 780px screen, and the transcript keeps 398px. */
 .zl-live-panel {
   max-height: 208px;
   margin: 0 0 4px;
@@ -1524,15 +1534,31 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 /* Phone: the row and every panel row are 44 for the thumb; the tally is
    a full 44 hit too, with its visible chip inside. */
 .zl-phone .zl-live-bar { min-height: 44px; }
-.zl-phone .zl-live-tally { height: 36px; }
+/* The button itself is 44 tall; the chip look comes from its own inner
+   surface, not from shrinking the control. The invisible-halo trick was
+   measured and did not work -- a transparent pseudo-element does not answer
+   elementFromPoint, so the target existed on paper only. Making the real
+   button the real size needs no trick. */
+.zl-phone .zl-live-tally {
+  /* position:relative is what makes the inset chip below anchor to THIS
+     button. Without it the pseudo-element resolved against the dock and
+     covered the whole open panel -- which is why the panel came out black. */
+  position: relative;
+  height: 44px;
+  background: transparent;
+  box-shadow: none;
+  padding: 0 3px;
+}
+.zl-phone .zl-live-tally > * { position: relative; }
 .zl-phone .zl-live-tally::before {
-  /* The chip is 36 tall, the target is 44: an invisible halo makes up the
-     difference without enlarging the visible control. */
   content: "";
   position: absolute;
-  inset: -4px 0;
+  inset: 4px 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-hi);
+  box-shadow: var(--zl-rim);
 }
-.zl-phone .zl-live-tally { position: relative; }
+.zl-phone .zl-live-tally:hover::before { background: var(--zl-raised); }
 .zl-phone .zl-live-row { min-height: 44px; }
 .zl-phone .zl-live-panel { max-height: 232px; }
 
@@ -1635,6 +1661,10 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
    depends on -- forcing them all to position:relative moved the anchored ones. */
 .zl-phone::before,
 .zl-desk-main::before { z-index: 0; }
+/* The wash is a background layer, so the hosts own a stacking context and it
+   can never paint over a child's surface: at z-index:-1 without one, the live
+   panel came out as an empty black slab. */
+.zl-phone, .zl-desk-main { isolation: isolate; }
 
 /* The ledger's expand affordance. Half the rows have a detail and half do not,
    and until now nothing on screen said which -- you had to click to find out.
