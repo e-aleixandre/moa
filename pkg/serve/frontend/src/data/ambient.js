@@ -15,6 +15,10 @@
 // switch cannot break a component.
 
 const KEY = "moa-ambient";
+// Kept in sync by hand with --base (tokens.css) and --amb-canvas
+// (tokens/ambient.css): a meta tag cannot read a custom property.
+const DEFAULT_CANVAS = "#1e1e2e";
+const AMBIENT_CANVAS = "#12121f";
 
 export function initAmbient() {
   let on = false;
@@ -36,5 +40,13 @@ export function initAmbient() {
   }
   if (on) document.documentElement.dataset.ambient = "on";
   else delete document.documentElement.dataset.ambient;
+
+  // theme-color paints the iOS status bar and the Home Screen splash in an
+  // installed PWA -- it is the one surface CSS cannot reach. Left at the app's
+  // --base it showed as a lighter band above an ambient canvas, which is the
+  // same seam this meta exists to avoid (see the note in index.html).
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", on ? AMBIENT_CANVAS : DEFAULT_CANVAS);
+
   return on;
 }

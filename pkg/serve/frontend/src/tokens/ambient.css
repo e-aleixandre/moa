@@ -98,8 +98,13 @@
    The phone gets a stronger dose and tighter blobs so the colour reaches the
    pixel, without touching the desktop where the current dose was approved. */
 @media (max-width: 768px) {
+  /* 0.55, not 0.85. At 0.85 the blobs stopped being an environment and became
+     the subject: the transcript was reading over saturated colour rather than
+     on a tinted canvas, which is the same failure that ruled out the full
+     aurora on desktop. The phone still needs MORE than the desktop's 0.45,
+     because a narrow screen only ever shows the faded part of a blob. */
   [data-ambient="on"] {
-    --amb-aurora: 0.85;
+    --amb-aurora: 0.68;
   }
   /* Blobs pulled INWARD and made taller. Pushed to the corners, as they are on
      a wide desktop, none of them reaches the middle of a 430px screen -- which
@@ -108,10 +113,29 @@
      was more than its own radius away. */
   [data-ambient="on"] body::before {
     background:
-      radial-gradient(96% 44% at 22% 14%, rgba(180, 190, 254, 0.72), transparent 72%),
-      radial-gradient(104% 42% at 84% 30%, rgba(203, 166, 247, 0.80), transparent 72%),
-      radial-gradient(112% 46% at 30% 62%, rgba(137, 180, 250, 0.74), transparent 74%),
-      radial-gradient(100% 42% at 82% 90%, rgba(148, 226, 213, 0.62), transparent 74%);
+      radial-gradient(96% 44% at 22% 14%, rgba(180, 190, 254, 0.60), transparent 72%),
+      radial-gradient(104% 42% at 84% 30%, rgba(203, 166, 247, 0.64), transparent 72%),
+      radial-gradient(112% 46% at 30% 62%, rgba(137, 180, 250, 0.58), transparent 74%),
+      radial-gradient(100% 42% at 82% 90%, rgba(148, 226, 213, 0.48), transparent 74%);
+  }
+
+  /* The reading band is calmed further. The colour belongs at the edges of the
+     screen, where nothing is being read: a vertical veil of the canvas colour
+     keeps the middle quiet without flattening the corners, so the aurora still
+     frames the text instead of competing with it. */
+  [data-ambient="on"] body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      transparent 0,
+      color-mix(in srgb, var(--amb-canvas) 30%, transparent) 30%,
+      color-mix(in srgb, var(--amb-canvas) 30%, transparent) 70%,
+      transparent 100%
+    );
   }
 }
 
