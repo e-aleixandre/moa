@@ -376,8 +376,8 @@ button.zl-st:hover { background: var(--zl-hi); }
 .zl-side-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 20px 16px 8px 20px;
+  gap: 10px;
+  padding: 18px 14px 10px 20px;
 }
 .zl-side-title {
   flex: 1;
@@ -439,18 +439,20 @@ button.zl-st:hover { background: var(--zl-hi); }
 .zl-x:hover { background: var(--zl-on); color: var(--zl-t1); }
 
 .zl-search {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 44px;
-  margin: 6px 12px 6px;
-  padding: 0 10px 0 12px;
-  border-radius: 14px;
-  background: var(--zl-well);
+  gap: 7px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: transparent;
   color: var(--zl-t4);
-  transition: box-shadow 140ms ease;
+  transition: background 140ms ease;
 }
-.zl-search:focus-within { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.zl-search:hover { background: rgba(255, 255, 255, 0.03); }
+.zl-search:focus-within { background: var(--zl-well); }
 .zl-search-ico { width: 15px; height: 15px; flex: none; }
 .zl-search-in {
   flex: 1;
@@ -492,7 +494,7 @@ button.zl-st:hover { background: var(--zl-hi); }
   gap: 10px;
   width: 100%;
   min-height: 52px;
-  padding: 9px 10px 9px 12px;
+  padding: 8px 12px;
   border: 0;
   border-radius: 14px;
   background: transparent;
@@ -736,3 +738,25 @@ button.zl-st:hover { background: var(--zl-hi); }
 @media (max-width: 1400px) {
   .zl-desk { width: 720px; }
 }
+
+/* The dot rides with the timestamp instead of holding a 30px column hostage
+   for 8px of information: it is metadata about the row, so it sits with the
+   other metadata and the titles get a single left edge to scan down. */
+.zl-row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.zl-side-new {
+  width: auto;
+  margin: 4px 12px 8px;
+  justify-content: center;
+  height: 40px;
+}
+.zl-phone .zl-side-new { height: 48px; margin: 4px 12px 10px; }
+/* Rhythm: air between groups, none inside them. A list of things that are all
+   equally spaced reads as one undifferentiated block. */
+.zl-group { margin-top: 14px; }
+.zl-list > .zl-group:first-child { margin-top: 4px; }
+.zl-list { padding-bottom: 8px; }

@@ -33,11 +33,13 @@ function Row({ s, current, onPick }) {
       aria-current={current ? "true" : undefined}
       onClick={onPick}
     >
-      <Dot state={s.state} />
       <span class="zl-row-main">
         <span class="zl-row-l1">
           <span class="zl-row-title">{s.title}</span>
-          <span class="zl-row-when">{s.when}</span>
+          <span class="zl-row-meta">
+            <Dot state={s.state} />
+            <span class="zl-row-when">{s.when}</span>
+          </span>
         </span>
         {/* Active sessions say what they are doing; saved ones say where they
             live. Two lines is the budget, so the more useful datum wins. */}
@@ -65,20 +67,24 @@ function Sidebar({ onPick, desktop }) {
   return (
     <>
       <div class="zl-side-head">
-        <span class="zl-side-title">moa<span class="zl-side-count">{SESSIONS.length}</span></span>
-        <button type="button" class="zl-side-new">
-          <span class="zl-side-new-plus" aria-hidden="true">+</span>New
-        </button>
+        <span class="zl-side-title">moa</span>
+        {/* Search is the quietest thing here, not the heaviest: a line with an
+            icon, no filled box competing with the sessions it searches. */}
+        <label class="zl-search">
+          <svg class="zl-search-ico" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6" />
+            <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+          <input class="zl-search-in" placeholder="Search" aria-label="Search sessions" />
+          {desktop && <kbd class="zl-kbd">⌘K</kbd>}
+        </label>
       </div>
-      <label class="zl-search">
-        <svg class="zl-search-ico" viewBox="0 0 16 16" aria-hidden="true">
-          <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6" />
-          <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-        </svg>
-        <input class="zl-search-in" placeholder="Search sessions" aria-label="Search sessions" />
-        {desktop && <kbd class="zl-kbd">⌘K</kbd>}
-      </label>
       <SessionList onPick={onPick} />
+      {/* New anchors the bottom, where the thumb is and where the empty half of
+          the column was. It is the one action, so it gets the width. */}
+      <button type="button" class="zl-side-new">
+        <span class="zl-side-new-plus" aria-hidden="true">+</span>New session
+      </button>
       <div class="zl-side-foot">
         <button type="button" class="zl-inbox">
           <svg viewBox="0 0 16 16" aria-hidden="true">
