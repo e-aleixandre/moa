@@ -166,6 +166,17 @@ function SessionPanel({ onClose }) {
           <div><dt>Turns</dt><dd class="zl-data">14</dd></div>
           <div><dt>Branch</dt><dd class="zl-data">design-visual</dd></div>
         </dl>
+        {/* The other end of the status line's priority rule: everything the
+            line sheds when the dock narrows is here, in full, always. A narrow
+            screen shows fewer things on the line -- never fewer things known. */}
+        <dl class="zl-facts is-run">
+          <div><dt>Tokens</dt><dd class="zl-data">↑12.4k ↓1.8k</dd></div>
+          <div><dt>Spend</dt><dd class="zl-data">$1.84</dd></div>
+          <div><dt>Fast</dt><dd class="zl-data">on</dd></div>
+          <div><dt>Goal</dt><dd class="zl-data">iteration 3</dd></div>
+          <div><dt>Tasks</dt><dd class="zl-data">2/5</dd></div>
+          <div><dt>MCP</dt><dd class="zl-data is-warn">1 of 3 down</dd></div>
+        </dl>
       </div>
       <div class="zl-panel-acts">
         <button type="button" class="zl-act">
@@ -771,15 +782,15 @@ function StatusLine({ s = FULL_STATUS, compact }) {
     <div class={`zl-status${compact ? " is-compact" : ""}`}>
       {/* tier 1 — settings */}
       <div class="zl-st-group is-settings">
-        <button type="button" class="zl-st zl-st-model" aria-label={`Model & thinking: ${s.model}, ${s.thinking}`}>
+        <button type="button" class="zl-st zl-st-model zl-p1" aria-label={`Model & thinking: ${s.model}, ${s.thinking}`}>
           <span class="zl-st-word zl-st-model-name">{s.model}</span>
           <ThinkMeter level={s.thinking} />
         </button>
-        <button type="button" class={`zl-st zl-st-perm is-${s.perm}`} aria-label={`Permission mode: ${s.perm}`}>
+        <button type="button" class={`zl-st zl-st-perm zl-p1 is-${s.perm}`} aria-label={`Permission mode: ${s.perm}`}>
           <span class="zl-st-word">{s.perm}</span>
         </button>
         {s.fast && (
-          <span class="zl-st zl-st-fast" title="Fast mode: billed at a premium rate">
+          <span class="zl-st zl-st-fast zl-p4" title="Fast mode: billed at a premium rate">
             <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5L3.5 9h4l-.5 5.5L12.5 7h-4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
             <span class="zl-st-word">fast</span>
           </span>
@@ -789,26 +800,26 @@ function StatusLine({ s = FULL_STATUS, compact }) {
       {/* tier 3 — events, only while they exist */}
       <div class="zl-st-group is-events">
         {!compact && s.goal && (
-          <span class="zl-st zl-st-ev" title="Goal active, iteration 3">
+          <span class="zl-st zl-st-ev zl-p4" title="Goal active, iteration 3">
             <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5" /><circle cx="8" cy="8" r="1.8" fill="currentColor" /></svg>
             <span class="zl-st-word">goal</span><span class="zl-data">{s.goal.iteration}</span>
           </span>
         )}
         {!compact && s.tasks && (
-          <span class="zl-st zl-st-ev" title="Tasks: 2 of 5 done">
+          <span class="zl-st zl-st-ev zl-p4" title="Tasks: 2 of 5 done">
             <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5l1.5 1.5 3-3M3 10.5l1.5 1.5 3-3M9 5h4M9 11h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
             <span class="zl-st-word">tasks</span><span class="zl-data">{s.tasks.done}/{s.tasks.total}</span>
           </span>
         )}
         {s.mcp && s.mcp.total > 0 && (
-          <button type="button" class={`zl-st zl-st-ev${s.mcp.unhealthy ? " is-alarm-red" : ""}`} aria-label={s.mcp.unhealthy ? `MCP: ${s.mcp.unhealthy} of ${s.mcp.total} need attention` : `MCP: ${s.mcp.total} servers`}>
+          <button type="button" class={`zl-st zl-st-ev ${s.mcp.unhealthy ? "zl-p2 is-alarm-red" : "zl-p4"}`} aria-label={s.mcp.unhealthy ? `MCP: ${s.mcp.unhealthy} of ${s.mcp.total} need attention` : `MCP: ${s.mcp.total} servers`}>
             <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2v3M11 2v3M3.5 5h9v3a4.5 4.5 0 0 1-9 0zM8 12.5V15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
             <span class="zl-st-word">mcp</span>
             <span class="zl-data">{s.mcp.unhealthy ? `${s.mcp.unhealthy}/${s.mcp.total}` : s.mcp.total}</span>
           </button>
         )}
         {s.onExtra && (
-          <span class="zl-st zl-st-ev is-alarm-yellow" title="Served from extra usage (pay-as-you-go)">
+          <span class="zl-st zl-st-ev zl-p2 is-alarm-yellow" title="Served from extra usage (pay-as-you-go)">
             <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5c.5 3-3 4-3 8a3 3 0 0 0 6 0c0-1.5-.6-2.5-1.2-3.2-.3 1.2-1 1.7-1.3 1.7C9 6 9.5 3.5 8 1.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
             <span class="zl-st-word">extra</span>
           </span>
@@ -817,13 +828,13 @@ function StatusLine({ s = FULL_STATUS, compact }) {
 
       {/* tier 2 — gauges */}
       <div class="zl-st-group is-gauges">
-        <button type="button" class="zl-st zl-st-ctx" aria-label={`Context ${s.ctx}% used, ${s.spend} spent — show usage`}>
+        <button type="button" class="zl-st zl-st-ctx zl-p1" aria-label={`Context ${s.ctx}% used, ${s.spend} spent — show usage`}>
           <CtxRing pct={s.ctx} />
           <span class="zl-data zl-num">{s.ctx}<span class="zl-unit">%</span></span>
           <span class="zl-st-sep" aria-hidden="true" />
           <span class="zl-data zl-num zl-st-spend">{s.spend}</span>
         </button>
-        <span class="zl-st zl-st-tok zl-data" title="Tokens this run">
+        <span class="zl-st zl-st-tok zl-data zl-p3" title="Tokens this run">
           <span class="zl-arrow" aria-hidden="true">↑</span><span class="zl-num">{s.up}</span>
           <span class="zl-arrow" aria-hidden="true">↓</span><span class="zl-num">{s.down}</span>
         </span>

@@ -706,24 +706,46 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
    < 340: non-alarm events shrink to their icon; alarms keep their datum;
           the model name truncates. Below ~300 the line is out of design:
           a pane that narrow has already lost its composer. */
-@container (max-width: 800px) {
-  .zl-st-ev .zl-st-word { display: none; }
-  .zl-st-ev { gap: 4px; padding: 0 5px; }
+/* ── Priority, declared once ──────────────────────────────────────────────
+   Every item carries a priority class and the line sheds them in order, low
+   first, as the dock narrows. That is the whole rule -- no per-element
+   exceptions, so adding a datum later means choosing its priority, not
+   inventing another breakpoint.
+
+   The order is the owner's: "mejor poder ver modelo, contexto, permisos que
+   ver si está en fast o no, o ver los MCPs".
+
+     p1  model, permissions, context  — never drops. What you glance at while
+                                        typing, and what changes the answer.
+     p2  real alarms (mcp down, on extra) — only exist while something is
+                                        wrong, so they outrank normal numbers.
+     p3  tokens, spend                — read after the fact, not during.
+     p4  fast, goal, tasks, healthy mcp — settings and progress, not warnings.
+
+   Everything that drops is reachable in the session panel, so narrow means
+   fewer things ON THE LINE, never fewer things known. */
+@container (max-width: 640px) {
+  .zl-p4 { display: none; }
 }
-@container (max-width: 620px) {
-  .zl-st-tok { display: none; }
-}
-@container (max-width: 420px) {
+@container (max-width: 470px) {
+  .zl-p3 { display: none; }
   .zl-st-ctx .zl-st-sep, .zl-st-ctx .zl-st-spend { display: none; }
-  .zl-st-model .zl-st-word { max-width: 110px; }
-  .zl-st { padding: 0 5px; }
-  .zl-st-fast .zl-st-word { display: none; }
 }
-@container (max-width: 340px) {
-  .zl-st-model .zl-st-word { max-width: 64px; }
-  .zl-st-ev:not(.is-alarm-red):not(.is-alarm-yellow) .zl-data { display: none; }
+@container (max-width: 360px) {
+  /* p2 only sheds its words, never itself: an alarm you cannot see is worse
+     than a cramped line, and its number survives. */
+  .zl-p2 .zl-st-word { display: none; }
+  .zl-st { padding: 0 5px; }
+}
+@container (max-width: 300px) {
+  .zl-st-model .zl-st-word { max-width: 84px; }
   .zl-st { padding: 0 4px; gap: 4px; }
 }
+/* The events group never squeezes its children: if room runs out the line
+   gives, not the legibility of a warning. */
+.zl-st-group.is-events { flex: none; overflow: visible; gap: 6px; }
+.zl-st-fast .zl-st-word,
+.zl-st-ev .zl-st-word { overflow: visible; text-overflow: clip; flex: none; }
 
 /* Compact (grid pane, phone): the existing production prop. Goal and tasks
    are already dropped in the JSX; the line itself only tightens. */
@@ -1700,36 +1722,17 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-st-fast .zl-st-word,
 .zl-st-ev .zl-st-word { overflow: visible; text-overflow: clip; flex: none; }
 
-/* ── The dock at phone width ──────────────────────────────────────────────
-   Measured on a 390px phone: the line wanted 447px of content in 366px. The
-   events group was set to overflow:hidden, so instead of failing loudly it
-   crushed its children into each other -- which is what the owner photographed.
 
-   The fix is not more squeezing, it is fewer things. At this width the line
-   keeps only what you glance at continuously (model, permissions, context) and
-   what is genuinely wrong (an alarm). Everything else has another home:
-     - fast          -> it is a property of the model, and it is set in the
-                        model picker, which is one tap away on the model pill.
-     - tokens/spend  -> they live in the context popover, with the usage
-                        breakdown they belong to.
-     - non-alarm events (goal, tasks) -> already dropped by the compact rule.
-   Nothing is lost: each of these is reachable, and none of them is a number
-   you watch while you type. */
-@container (max-width: 470px) {
-  .zl-st-fast { display: none; }
-  .zl-st-tok { display: none; }
-  .zl-st-ctx .zl-st-sep,
-  .zl-st-ctx .zl-st-spend { display: none; }
-  /* The events group stops being a squeeze box: it sizes to its content and
-     the alarms keep their words. If there is no room, the LINE is what has to
-     give, not the legibility of a warning. */
-  .zl-st-group.is-events { flex: none; overflow: visible; gap: 6px; }
-  .zl-st-group.is-settings { min-width: 0; }
-  /* With fast and the counters gone there is room for the name in full:
-     "Daybre..." saves nothing here and the model is the most-read word on the
-     line. It only truncates below a phone, where a pane is already tiny. */
-  .zl-st-model .zl-st-word { max-width: none; }
+
+/* The run facts: the overflow home for whatever the status line drops. Two
+   columns, because these are pairs you scan, not prose. */
+.zl-facts.is-run {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--zl-line);
 }
-@container (max-width: 340px) {
-  .zl-st-model .zl-st-word { max-width: 84px; }
-}
+.zl-facts.is-run > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.zl-facts.is-run dd.is-warn { color: var(--zl-red); }
