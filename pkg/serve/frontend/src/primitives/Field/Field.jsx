@@ -22,6 +22,10 @@ export function Field({
   leading,
   trailing,
   mono = false,
+  // Both spellings land on the wrapper. Preact callers write `class`, and if it
+  // fell through to ...rest it would silently style the inner input instead --
+  // the wrapper would lose its layout and the input would grow a second box.
+  class: klass = "",
   className = "",
   inputRef,
   as = "input",
@@ -33,6 +37,7 @@ export function Field({
     `field-${variant}`,
     `field-${size}`,
     mono ? "field-mono" : "",
+    klass,
     className,
   ]
     .filter(Boolean)

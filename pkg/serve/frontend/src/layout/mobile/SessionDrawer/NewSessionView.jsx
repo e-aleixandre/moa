@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { ArrowLeft, Folder } from "lucide-preact";
 import { projectLabel, shortPath, tildify, expandHome, basename } from "../../../data/util/format.js";
+import { Field } from "../../../primitives/index.js";
 
 // NewSessionView — the drawer's second screen: choose where the session runs,
 // then create it. It replaces the drawer's list in place rather than opening
@@ -128,20 +129,21 @@ export function NewSessionView({ projects = [], onBack, onCreate }) {
         <h2>New session</h2>
       </div>
 
-      <div class="sdrawer-search">
-        <input
-          ref={inputRef}
-          type="text"
-          aria-label="Project or path"
-          placeholder="Filter, or type a path…"
-          autocomplete="off"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck={false}
-          value={text}
-          onInput={(e) => onInput(e.target.value)}
-        />
-      </div>
+      <Field
+        variant="inset"
+        size="lg"
+        class="sdrawer-search"
+        inputRef={inputRef}
+        type="text"
+        aria-label="Project or path"
+        placeholder="Filter, or type a path…"
+        autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck={false}
+        value={text}
+        onInput={(e) => onInput(e.target.value)}
+      />
 
       <div class="sdrawer-list">
         {!isPath && (

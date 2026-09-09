@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight } from "lucide-preact";
 import { InboxButton, SessionCardMenu, SessionRow } from "../../../components/index.js"; // wake-on-event: InboxButton
+import { Field } from "../../../primitives/index.js";
 import { openOverlay } from "../../../data/overlay-history.js";
 import { filterProjectSections, groupProjectSessions, hiddenProjectSavedCount, previewSavedSessions, projectCollapsed, sessionSearchMatch, visibleProjectSessions } from "../../../data/util/project-sessions.js";
 import { useMenuKeyboard } from "../../../hooks/useMenuKeyboard.js";
@@ -390,19 +391,20 @@ export function SessionDrawer({
               <DrawerGroupMenu groupByProject={groupByProject} onChange={onGroupByProject} />
             </div>
 
-            <div class="sdrawer-search">
-              <Search size={15} aria-hidden="true" />
-              <input
-                type="text"
-                aria-label="Search sessions"
-                placeholder="Search sessions…"
-                autocomplete="off"
-                autocapitalize="off"
-                spellcheck={false}
-                value={query}
-                onInput={(e) => setQuery(e.target.value)}
-              />
-            </div>
+            <Field
+              variant="inset"
+              size="lg"
+              class="sdrawer-search"
+              leading={<Search size={15} />}
+              type="text"
+              aria-label="Search sessions"
+              placeholder="Search sessions…"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck={false}
+              value={query}
+              onInput={(e) => setQuery(e.target.value)}
+            />
 
             <div class="sdrawer-list">
               {!q && hitCount === 0 && (

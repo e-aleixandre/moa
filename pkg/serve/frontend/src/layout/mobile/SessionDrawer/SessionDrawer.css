@@ -212,37 +212,12 @@
 /* Search — filters the list below in place. It is a real field, not a door to
    somewhere else: sending the user to the command palette meant leaving the
    drawer for a second session list with its own look and its own way back. */
+/* The control is the Field primitive (inset/lg): surface, border, height, the
+   16px iOS floor and the focus ring all come from there. What belongs to the
+   drawer is only where it sits. */
 .sdrawer-search {
   flex: none;
   margin: 0 12px 10px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 9px 12px;
-  background: var(--surface0);
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-md);
-  color: var(--overlay1);
-}
-.sdrawer-search input {
-  flex: 1 1 auto;
-  min-width: 0;
-  background: none;
-  border: 0;
-  padding: 0;
-  font-family: var(--font);
-  /* --text-input (≥16px) or iOS zooms the whole screen on focus. */
-  font-size: var(--text-input);
-  color: var(--text);
-}
-.sdrawer-search input::placeholder {
-  color: var(--overlay0);
-}
-.sdrawer-search input:focus {
-  outline: none;
-}
-.sdrawer-search:focus-within {
-  border-color: var(--surface2);
 }
 
 /* Empty result / empty project list — a quiet line where a card would be. */
