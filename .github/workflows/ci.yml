@@ -97,6 +97,13 @@ jobs:
           npm ci
           npm run build
 
+      # Two mechanical rules a reviewer cannot reliably check by eye: no
+      # editable control below 16px (iOS Safari zooms the PWA when one takes
+      # focus), and no new raw <input> now that there is a Field primitive.
+      # scripts/check-fields.mjs carries the documented exceptions.
+      - name: Check field rules
+        working-directory: pkg/serve/frontend
+        run: npm run check:fields
 
       - uses: golangci/golangci-lint-action@v9
         with:

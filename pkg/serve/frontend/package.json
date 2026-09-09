@@ -4,7 +4,8 @@
   "scripts": {
     "build": "node esbuild.mjs --prune",
     "watch": "node esbuild.mjs --watch",
-    "catalog": "node catalog-serve.mjs"
+    "catalog": "node catalog-serve.mjs",
+    "check:fields": "node scripts/check-fields.mjs"
   },
   "dependencies": {
     "dompurify": "^3.4.12",
