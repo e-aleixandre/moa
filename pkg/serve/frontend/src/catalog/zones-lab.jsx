@@ -12,7 +12,8 @@ import "./zones-lab.css";
    references all put an icon on every row; a chat client has no icon per
    conversation, but it does have a folder -- and that is the thing you
    actually navigate by, so it earns the slot. Colour is derived from the
-   project name, so the same repo always looks the same. */
+   project name, so the same repo always looks the same. State is a separate
+   datum and lives in the dot next to the age. */
 const SESSIONS = [
   { title: "Buscar un bug bounty", when: "now", path: "~/dev/moa", project: "moa", state: "running", brief: "Running · 4m" },
   { title: "Check access to two repos", when: "28m", path: "~/dev/gugo", project: "gugo", state: "needs", brief: "Needs your answer" },
@@ -32,14 +33,13 @@ function projectHue(name) {
   return HUES[h % HUES.length];
 }
 
-function Monogram({ project, state }) {
+/* Identity and state are two data: the monogram says WHICH project, the dot
+   says WHAT it is doing. Folding state into the monogram made the same repo
+   change colour from row to row, which defeats the point of a monogram. */
+function Monogram({ project }) {
   const hue = projectHue(project);
   return (
-    <span
-      class={`zl-mono is-${state}`}
-      style={`--h:${hue}`}
-      aria-hidden="true"
-    >
+    <span class="zl-mono" style={`--h:${hue}`} aria-hidden="true">
       {project.slice(0, 2)}
     </span>
   );
@@ -52,6 +52,14 @@ function Dot({ state }) {
   return <span class={`zl-dot is-${state}`} aria-hidden="true" />;
 }
 
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    </svg>
+  );
+}
+
 function Row({ s, current, onPick }) {
   return (
     <button
@@ -60,17 +68,20 @@ function Row({ s, current, onPick }) {
       aria-current={current ? "true" : undefined}
       onClick={onPick}
     >
-      <Monogram project={s.project} state={s.state} />
+      <Monogram project={s.project} />
       <span class="zl-row-main">
         <span class="zl-row-l1">
           <span class="zl-row-title">{s.title}</span>
-          <span class="zl-row-when">{s.when}</span>
+          <span class="zl-row-meta">
+            <Dot state={s.state} />
+            <span class="zl-row-when zl-data">{s.when}</span>
+          </span>
         </span>
         {/* Active sessions say what they are doing; saved ones say where they
             live. Two lines is the budget, so the more useful datum wins. */}
         {s.brief
           ? <span class={`zl-row-brief is-${s.state}`}>{s.brief}</span>
-          : <span class="zl-row-path">{s.path}</span>}
+          : <span class="zl-row-path zl-data">{s.path}</span>}
       </span>
     </button>
   );
@@ -79,9 +90,9 @@ function Row({ s, current, onPick }) {
 function SessionList({ onPick }) {
   return (
     <div class="zl-list">
-      <div class="zl-group"><span>Active</span><span class="zl-group-n">{ACTIVE.length}</span></div>
+      <div class="zl-group"><span>Active</span><span class="zl-group-n zl-data">{ACTIVE.length}</span></div>
       {ACTIVE.map((s, i) => <Row s={s} current={i === 0} onPick={onPick} key={s.title} />)}
-      <div class="zl-group"><span>Saved</span><span class="zl-group-n">{SAVED.length}</span></div>
+      <div class="zl-group"><span>Saved</span><span class="zl-group-n zl-data">{SAVED.length}</span></div>
       {SAVED.map((s) => <Row s={s} current={false} onPick={onPick} key={s.title} />)}
     </div>
   );
@@ -102,14 +113,14 @@ function Sidebar({ onPick, desktop }) {
             <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
           </svg>
           <input class="zl-search-in" placeholder="Search" aria-label="Search sessions" />
-          {desktop && <kbd class="zl-kbd">⌘K</kbd>}
+          {desktop && <kbd class="zl-kbd zl-data">⌘K</kbd>}
         </label>
       </div>
       <SessionList onPick={onPick} />
       {/* New anchors the bottom, where the thumb is and where the empty half of
           the column was. It is the one action, so it gets the width. */}
       <button type="button" class="zl-side-new">
-        <span class="zl-side-new-plus" aria-hidden="true">+</span>New session
+        <PlusIcon />New session
       </button>
       <div class="zl-side-foot">
         <button type="button" class="zl-inbox">
@@ -117,9 +128,9 @@ function Sidebar({ onPick, desktop }) {
             <path d="M2 9.5V12a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.5M2 9.5h3.2l.8 1.5h4l.8-1.5H14M2 9.5l1.6-5.2A1 1 0 0 1 4.6 3.5h6.8a1 1 0 0 1 1 .8L14 9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
           </svg>
           Inbox
-          <span class="zl-inbox-n">1</span>
+          <span class="zl-inbox-n zl-data">1</span>
         </button>
-        <span class="zl-ver">v0.37.2</span>
+        <span class="zl-ver zl-data">v0.37.2</span>
       </div>
     </>
   );
@@ -146,14 +157,14 @@ function SessionPanel({ onClose }) {
         </label>
         <div class="zl-field">
           <span class="zl-label">Folder</span>
-          <div class="zl-input is-static">
+          <div class="zl-input is-static zl-data">
             <span class="zl-path-dir">~/dev/moa/</span>main
           </div>
         </div>
         <dl class="zl-facts">
-          <div><dt>Started</dt><dd>Today, 09:12</dd></div>
-          <div><dt>Turns</dt><dd>14</dd></div>
-          <div><dt>Branch</dt><dd>design-visual</dd></div>
+          <div><dt>Started</dt><dd class="zl-data">09:12</dd></div>
+          <div><dt>Turns</dt><dd class="zl-data">14</dd></div>
+          <div><dt>Branch</dt><dd class="zl-data">design-visual</dd></div>
         </dl>
       </div>
       <div class="zl-panel-acts">
@@ -221,11 +232,11 @@ function StatusLine() {
         yolo
       </button>
       <span class="zl-spacer" />
-      <span class="zl-st zl-st-ctx" title="Context used">
+      <span class="zl-st zl-st-ctx zl-data" title="Context used">
         <CtxRing pct={10} />
         <span class="zl-num">10<span class="zl-unit">%</span></span>
       </span>
-      <span class="zl-st zl-st-tok" title="Tokens this run">
+      <span class="zl-st zl-st-tok zl-data" title="Tokens this run">
         <span class="zl-arrow" aria-hidden="true">↑</span><span class="zl-num">12.4k</span>
         <span class="zl-arrow" aria-hidden="true">↓</span><span class="zl-num">1.8k</span>
       </span>
@@ -235,8 +246,8 @@ function StatusLine() {
 
 /* Composer. A raised slab floating over the transcript, not a hole in it:
    the field is the thing you look at most, so it gets the most careful
-   surface. The send button arms when there is something to send and stays
-   achromatic -- peach is "you said this", which is what the message becomes
+   surface. The send button arms when there is something to send and takes
+   the accent -- peach is "you said this", which is what the message becomes
    AFTER sending, not the button. */
 function Composer() {
   const [draft, setDraft] = useState("");
@@ -251,9 +262,7 @@ function Composer() {
   return (
     <div class={`zl-composer${armed ? " is-armed" : ""}`}>
       <button type="button" class="zl-attach" aria-label="Attach">
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-        </svg>
+        <PlusIcon />
       </button>
       <textarea
         ref={ref}
@@ -361,9 +370,11 @@ function Phone({ label }) {
           </button>
           <button type="button" class="zl-cap zl-chip" onClick={() => d.setRight(true)}>
             <span class="zl-chip-name">Buscar un bug bounty</span>
-            <span class="zl-chev" aria-hidden="true">▾</span>
+            <svg class="zl-chev" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M4.5 6.5L8 10l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
           </button>
-          <button type="button" class="zl-cap zl-cap-right" aria-label="New session">+</button>
+          <button type="button" class="zl-cap zl-cap-right" aria-label="New session"><PlusIcon /></button>
         </div>
 
         <div class="zl-dock">
@@ -416,11 +427,21 @@ function Desktop({ label }) {
           <div class="zl-desk-head">
             <button type="button" class="zl-crumb" onClick={() => setPanel(true)} aria-expanded={panel}>
               <span class="zl-crumb-title">Buscar un bug bounty</span>
-              <span class="zl-crumb-path">~/dev/moa</span>
+              <span class="zl-crumb-path zl-data">~/dev/moa</span>
             </button>
             <span class="zl-spacer" />
-            <span class="zl-desk-act" />
-            <span class="zl-desk-act" />
+            <button type="button" class="zl-desk-act" aria-label="Live preview">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
+                <path d="M2 6.5h12" stroke="currentColor" stroke-width="1.5" />
+              </svg>
+            </button>
+            <button type="button" class="zl-desk-act" aria-label="Split">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
+                <path d="M8 3v10" stroke="currentColor" stroke-width="1.5" />
+              </svg>
+            </button>
           </div>
           <Transcript />
           <div class="zl-dock">

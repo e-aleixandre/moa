@@ -1,61 +1,81 @@
 /* Three-zone architecture prototype, Ambient direction.
 
-   Surfaces are told apart by depth: wells are darker than the canvas, raised
-   things are lighter. Depth is made of LIGHT, not of colour: every surface
-   has a lit top edge, raised things cast a shadow, sunken things hold one.
-   One radius family. Colour lives in the aurora and in STATE (green / amber /
-   red / maroon) -- never on chrome. Peach appears exactly once, on the user's
-   own message. */
+   What makes a product recognisable, per the shipped references
+   (tmp/redesign/REFERENCIAS-REALES.md), is not a shadow: it is a small set of
+   decisions repeated everywhere. This sheet makes them explicit so they can be
+   counted.
+
+   TYPE      Outfit for words, IBM Plex Mono for data. Four sizes, three
+             weights. Every number, path, age, shortcut and monogram is mono:
+             that is the pairing (Warp, Raycast) and it is what lets small
+             data be small without being unreadable.
+   TONE      One ladder: canvas < sheet < raised < control. Flat fills, no
+             gradients. Planes are told apart by tone plus a 1px hairline.
+   SHADOW    Only on things that genuinely float over the page: the two
+             drawers. Nothing structural casts one.
+   RADIUS    6 / 10 / 16. Nothing else.
+   COLOUR    Peach = "you said this" (once, the user message). Green / yellow
+             / red = state. Mauve = the product's own accent: focus, the one
+             primary action, and the readings that belong to it. Mauve never
+             marks state, and state colours never decorate. */
 
 .zl {
   position: relative;
   min-height: 100vh;
   padding: 32px 24px 64px;
-  background: #12121f;
-  color: #f1f1f6;
+  background: var(--zl-canvas);
+  color: var(--zl-t1);
   font-family: var(--font);
-  /* An explicit tonal ladder: canvas, sheet, raised, control. Small, regular
-     steps -- the separation between planes is tonal, not a shadow. */
+  font-size: var(--zl-fs-body);
+  letter-spacing: -0.005em;
+
+  /* Tonal ladder. Regular steps, blue-violet leaning like the icon's ground. */
   --zl-canvas: #101018;
-  --zl-sheet: #16161f;
-  --zl-well: rgba(0, 0, 0, 0.22);
+  --zl-sheet: #171720;
+  --zl-raised: #1e1e29;
+  --zl-control: #262633;
   --zl-hi: rgba(255, 255, 255, 0.04);
-  --zl-on: rgba(255, 255, 255, 0.07);
-  --zl-on-2: rgba(255, 255, 255, 0.11);
-  /* Not pure white: Linear ships #F7F8F8, Raycast #F4F4F6. Pure white on a
-     dark canvas is the tell of a system nobody tuned. */
+  --zl-line: rgba(255, 255, 255, 0.07);
+  --zl-line-2: rgba(255, 255, 255, 0.12);
+  --zl-rim: 0 0 0 1px var(--zl-line);
+  --zl-rim-2: 0 0 0 1px var(--zl-line-2);
+
+  /* Text. Not pure white: Linear ships #F7F8F8, Raycast #F4F4F6. */
   --zl-t1: #f4f4f7;
-  --zl-t2: #c0c1cf;
-  --zl-t3: #9192a6;
-  --zl-t4: #6b6c80;
+  --zl-t2: #c3c4d1;
+  --zl-t3: #9091a6;
+  --zl-t4: #66677c;
+
+  /* Accent: mauve. Already the product's focus ring and, per the visual
+     criterion, an identity colour alongside peach. Kept off state entirely. */
+  --zl-accent: #cba6f7;
+  --zl-accent-ink: #1a1424;
+  --zl-accent-dim: rgba(203, 166, 247, 0.12);
+  --zl-accent-med: rgba(203, 166, 247, 0.22);
+  --zl-accent-line: rgba(203, 166, 247, 0.45);
+
+  /* State. Semantic, never decorative. */
   --zl-green: #a6e3a1;
   --zl-yellow: #f9e2af;
   --zl-red: #f38ba8;
   --zl-maroon: #eba0ac;
-  --zl-blue: #89b4fa;
-  --zl-lavender: #b4befe;
-  --zl-teal: #94e2d5;
-  --zl-ease: cubic-bezier(0.32, 0.72, 0, 1);
 
-  /* Material vocabulary. Light comes from above: a raised surface catches it
-     on its top edge and throws a shadow below; a sunken one is shaded at the
-     top and its far rim catches the light. The hairline rim is what lets a
-     surface read as an object against the aurora at any opacity. */
-  /* Depth the way shipped products actually do it. Linear, Raycast, Warp, Zed,
-     Vercel and Superhuman all compute box-shadow:none on their structural
-     elements; Notion's are #00000004-0A, effectively invisible. So layers are
-     separated by TONE and a low-energy hairline, and shadow is spent only on
-     things that genuinely float above the page: drawers and popovers. */
-  --zl-line: rgba(255, 255, 255, 0.07);
-  --zl-line-2: rgba(255, 255, 255, 0.11);
-  --zl-rim: 0 0 0 1px var(--zl-line);
-  --zl-rim-strong: 0 0 0 1px var(--zl-line-2);
-  --zl-drop-md: 0 16px 48px rgba(0, 0, 0, 0.5);
-  /* Three radii, repeated everywhere, even where a fourth would fit better.
-     The discipline is the identity: nine radii is what "generic" looks like. */
+  /* Type roles. */
+  --zl-fs-meta: 12px;
+  --zl-fs-body: 14px;
+  --zl-fs-title: 16px;
+  --zl-fs-display: 20px;
+
   --zl-r-sm: 6px;
   --zl-r-md: 10px;
   --zl-r-lg: 16px;
+  --zl-ease: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Keyboard focus is the accent's first job. */
+.zl :is(button, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
 }
 
 .zl-aurora {
@@ -69,9 +89,10 @@
     radial-gradient(55% 45% at 60% 88%, rgba(125, 207, 255, 0.32), transparent 70%);
 }
 
+/* ── Lab chrome (not product) ────────────────────────────────────────── */
 .zl-head { position: relative; max-width: 720px; margin: 0 auto 28px; text-align: center; }
-.zl-head h1 { margin: 0 0 8px; font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
-.zl-head p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--zl-t3); }
+.zl-head h1 { margin: 0 0 8px; font-size: var(--zl-fs-display); font-weight: 600; letter-spacing: -0.01em; }
+.zl-head p { margin: 0; line-height: 1.6; color: var(--zl-t3); }
 
 .zl-stage {
   position: relative;
@@ -84,7 +105,7 @@
 
 .zl-density-label {
   margin-bottom: 10px;
-  font-size: 11px;
+  font-size: var(--zl-fs-meta);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -94,34 +115,37 @@
 .zl-hint {
   margin: 12px 0 0;
   max-width: 390px;
-  font-size: 12px;
+  font-size: var(--zl-fs-meta);
   line-height: 1.55;
   color: var(--zl-t4);
 }
 
 .zl-spacer { flex: 1; }
 
-/* ── The phone ─────────────────────────────────────────────────────────── */
-.zl-phone {
+/* ── Device frames ───────────────────────────────────────────────────────
+   The frame is the canvas: translucent so the aurora reads through it. */
+.zl-phone,
+.zl-desk {
   position: relative;
-  width: 390px;
-  height: 780px;
   overflow: hidden;
   border-radius: var(--zl-r-lg);
-  /* The frame is a sheet lit from above: lighter at the top, settling into
-     the canvas at the bottom, with a bright top edge and a real shadow. */
-  background: linear-gradient(180deg, rgba(26, 26, 42, 0.78), rgba(12, 12, 22, 0.7) 40%, rgba(9, 9, 18, 0.72));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
-    0 2px 4px rgba(0, 0, 0, 0.4),
-    0 30px 70px rgba(0, 0, 0, 0.55);
+  background: rgba(16, 16, 24, 0.78);
+  box-shadow: var(--zl-rim-2), 0 30px 70px rgba(0, 0, 0, 0.5);
+}
+.zl-phone {
+  width: 390px;
+  height: 780px;
   display: flex;
   flex-direction: column;
   touch-action: pan-y;
 }
+.zl-desk {
+  display: flex;
+  width: 860px;
+  height: 780px;
+}
 
-/* the three capsules */
+/* ── Phone capsules ──────────────────────────────────────────────────── */
 .zl-chrome {
   position: absolute;
   top: 14px;
@@ -142,18 +166,21 @@
   padding: 0 14px;
   border: 0;
   border-radius: var(--zl-r-lg);
-  background: linear-gradient(180deg, rgba(40, 40, 60, 0.86), rgba(26, 26, 42, 0.86));
+  background: rgba(30, 30, 41, 0.82);
   backdrop-filter: blur(12px);
   box-shadow: var(--zl-rim);
   color: var(--zl-t1);
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--zl-fs-title);
+  font-weight: 500;
+  letter-spacing: inherit;
   cursor: pointer;
 }
+.zl-cap svg { width: 18px; height: 18px; }
 
 .zl-cap-left { position: relative; }
 .zl-burger {
-  width: 15px;
+  width: 16px;
   height: 10px;
   border-top: 2px solid currentColor;
   border-bottom: 2px solid currentColor;
@@ -169,17 +196,11 @@
   border: 2px solid var(--zl-canvas);
 }
 
-.zl-chip {
-  flex: 1;
-  min-width: 0;
-  gap: 8px;
-  font-weight: 500;
-}
+.zl-chip { flex: 1; min-width: 0; gap: 6px; }
 .zl-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.zl-chev { font-size: 10px; opacity: 0.6; }
-.zl-cap-right { font-size: 20px; }
+.zl-chip .zl-chev { width: 14px; height: 14px; flex: none; color: var(--zl-t3); }
 
-/* transcript stub */
+/* ── Transcript stub ─────────────────────────────────────────────────── */
 .zl-transcript { flex: 1; padding: 74px 18px 12px; overflow: hidden; }
 .zl-bar {
   height: 11px;
@@ -194,41 +215,29 @@
 }
 .zl-bar.is-on-user { background: rgba(250, 179, 135, 0.3); }
 
-/* ── The dock: composer + status line ──────────────────────────────────────
-   One region, not two stacked strips. The composer is the well you type into;
-   the status line is the readout printed under it, in the same margins, so
-   the eye reads them as a single instrument. A soft fade above lets the
-   transcript slide beneath without a hard edge. */
+/* ── Dock: composer + status line ────────────────────────────────────────
+   One instrument: the field you type into and the readout printed under it,
+   in the same margins. The fade lets the transcript slide beneath. */
 .zl-dock {
   position: relative;
   flex: none;
-  padding: 18px 12px 10px;
-  background: linear-gradient(to bottom, transparent, rgba(10, 10, 20, 0.7) 32%);
+  padding: 18px 12px 8px;
+  background: linear-gradient(to bottom, transparent, rgba(16, 16, 24, 0.8) 32%);
 }
 
-/* The composer is the one raised object on the canvas: a slab that sits on
-   top of the transcript, lit along its top edge, casting a shadow onto the
-   text sliding under it. Focus brightens the rim -- the object does not
-   change shape, the light on it does. */
+/* The composer is the one raised plane on the canvas. Focus is the accent
+   on its rim: the object does not change shape, it is chosen. */
 .zl-composer {
   display: flex;
   align-items: flex-end;
   gap: 6px;
-  padding: 6px 6px 6px 6px;
+  padding: 6px;
   border-radius: var(--zl-r-lg);
-  background: linear-gradient(180deg, rgba(34, 34, 52, 0.92), rgba(22, 22, 36, 0.92));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.09),
-    var(--zl-rim),
-    var(--zl-drop-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim-2);
   transition: box-shadow 160ms ease;
 }
-.zl-composer:focus-within {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    var(--zl-rim-strong),
-    var(--zl-drop-md);
-}
+.zl-composer:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line); }
 
 .zl-ta {
   flex: 1;
@@ -243,7 +252,8 @@
   background: transparent;
   color: var(--zl-t1);
   font-family: inherit;
-  font-size: 16px; /* iOS focus-zoom floor */
+  font-size: var(--zl-fs-title); /* 16: iOS focus-zoom floor */
+  letter-spacing: inherit;
   line-height: 22px;
   overflow-y: auto;
 }
@@ -258,7 +268,7 @@
   width: 44px;
   height: 44px;
   border: 0;
-  border-radius: var(--zl-r-lg);
+  border-radius: var(--zl-r-md);
   font-family: inherit;
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease, transform 140ms var(--zl-ease);
@@ -268,102 +278,94 @@
 .zl-attach { background: transparent; color: var(--zl-t3); }
 .zl-attach:hover { background: var(--zl-hi); color: var(--zl-t1); }
 
-/* Send: a dark disc while there is nothing to send, a light one the moment
-   there is. The state change IS the affordance -- no colour needed, and peach
-   stays where it belongs. */
+/* Send: a quiet control until there is something to send, then the accent.
+   This is the single most visible use of mauve in the product and it marks
+   the primary action -- peach stays with the message, which is what the
+   text becomes AFTER this button. */
 .zl-send {
-  background: rgba(0, 0, 0, 0.22);
-  box-shadow: var(--zl-rim);
+  background: var(--zl-control);
   color: var(--zl-t4);
   cursor: default;
 }
 .zl-composer.is-armed .zl-send {
-  background: linear-gradient(180deg, #ffffff, #dedee8);
-  color: #14141f;
+  background: var(--zl-accent);
+  color: var(--zl-accent-ink);
   cursor: pointer;
-  box-shadow: inset 0 1px 0 #fff, 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 16px rgba(0, 0, 0, 0.4);
 }
 .zl-composer.is-armed .zl-send:hover { transform: translateY(-1px); }
 .zl-composer.is-armed .zl-send:active { transform: translateY(0) scale(0.96); }
 
 /* Status line. Controls on the left (things you can change), readings on the
-   right (things you watch). Both sit in the composer's margins. */
+   right (things you watch). Names are words; values are data. */
 .zl-status {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   height: 36px;
-  padding: 0 4px;
+  padding: 0 2px;
   margin-top: 4px;
-  font-size: 12px;
   color: var(--zl-t3);
 }
 .zl-st {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 9px;
+  height: 32px;
+  padding: 0 8px;
   border: 0;
   border-radius: var(--zl-r-md);
   background: transparent;
   color: inherit;
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--zl-fs-body);
   font-weight: 500;
-  letter-spacing: 0.01em;
+  letter-spacing: inherit;
   white-space: nowrap;
 }
 button.zl-st { cursor: pointer; transition: background 120ms ease; }
 button.zl-st:hover { background: var(--zl-hi); }
 
-.zl-st-model { color: var(--zl-t2); padding-left: 8px; }
-.zl-st-model-name { font-weight: 600; letter-spacing: 0; }
-/* thinking level: three bars, lit from the left. A picture of "how much"
-   that fits in 12px and needs no label. */
+.zl-st-model { color: var(--zl-t2); }
+/* Thinking level: three bars, lit from the left, in the accent. It is a
+   setting of the product, not a state of the session. */
 .zl-think { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; }
 .zl-think i {
   display: block;
   width: 3px;
   border-radius: var(--zl-r-sm);
-  background: var(--zl-lavender);
+  background: var(--zl-accent);
 }
 .zl-think i:nth-child(1) { height: 5px; }
 .zl-think i:nth-child(2) { height: 8px; }
 .zl-think i:nth-child(3) { height: 11px; }
-.zl-think i.is-off { background: var(--zl-on-2); }
+.zl-think i.is-off { background: var(--zl-line-2); }
 
-/* Permission mode is the one control on the line that carries state colour,
-   because it is the datum whose value you must not misread. */
-.zl-st-perm { font-weight: 600; letter-spacing: 0.02em; }
+/* Permission mode carries state colour because it is the one value you must
+   not misread. */
+.zl-st-perm { font-weight: 600; }
 .zl-st-perm.is-yolo { color: var(--zl-maroon); }
 .zl-st-perm.is-ask { color: var(--zl-yellow); }
-.zl-st-perm.is-auto { color: var(--zl-blue); }
 .zl-st-perm::before {
   content: "";
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: currentColor;
-  opacity: 0.9;
 }
 
-.zl-st-ctx, .zl-st-tok { padding: 0 6px; color: var(--zl-t3); }
-.zl-num {
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  color: var(--zl-t2);
-}
-.zl-unit { font-size: 10px; color: var(--zl-t4); margin-left: 1px; }
-.zl-arrow { font-size: 10px; color: var(--zl-t4); margin-right: -3px; }
-.zl-st-tok .zl-arrow + .zl-num { margin-right: 4px; }
-.zl-st-tok .zl-num:last-child { margin-right: 0; }
+.zl-st-ctx, .zl-st-tok { gap: 4px; padding: 0 6px; }
+.zl-st-tok { gap: 3px; }
+.zl-num { color: var(--zl-t2); }
+.zl-unit, .zl-arrow { color: var(--zl-t4); }
+.zl-arrow { margin-right: 1px; }
+.zl-st-tok .zl-num + .zl-arrow { margin-left: 6px; }
 
+/* Context ring: accent while there is room, then state colour as it fills. */
 .zl-ring { width: 14px; height: 14px; }
-.zl-ring-track { fill: none; stroke: var(--zl-on); stroke-width: 2.4; }
+.zl-ring-track { fill: none; stroke: var(--zl-line-2); stroke-width: 2.4; }
 .zl-ring-arc {
   fill: none;
-  stroke: var(--zl-teal);
+  stroke: var(--zl-accent);
   stroke-width: 2.4;
   stroke-linecap: round;
   transition: stroke-dasharray 400ms var(--zl-ease);
@@ -371,23 +373,20 @@ button.zl-st:hover { background: var(--zl-hi); }
 .zl-ring.is-warm .zl-ring-arc { stroke: var(--zl-yellow); }
 .zl-ring.is-hot .zl-ring-arc { stroke: var(--zl-red); }
 
-/* ── Drawers, mirrored ─────────────────────────────────────────────────────
-   Left = the other sessions. Right = this session. Same surface, same motion,
-   same head; only the edge differs. */
+/* ── Drawers, mirrored ─────────────────────────────────────────────────
+   Left = the other sessions. Right = this session. The same sheet, the same
+   motion; only the edge differs. They are the one thing that floats, so
+   they are the one thing with a shadow. */
 .zl-scrim {
   position: absolute;
   inset: 0;
   z-index: 5;
-  background: rgba(6, 6, 14, 0.55);
+  background: rgba(8, 8, 16, 0.55);
   border: 0;
   animation: zl-fade 200ms ease;
 }
 @keyframes zl-fade { from { opacity: 0; } }
 
-/* A drawer is a sheet of its own, lit from its top like the frame, with a
-   soft light pooling near the head (the references all give the sidebar a
-   light source of its own). Its exposed edge is a hairline of light; the
-   shadow it throws over the transcript is what makes it float. */
 .zl-side {
   position: absolute;
   top: 0;
@@ -395,9 +394,7 @@ button.zl-st:hover { background: var(--zl-hi); }
   z-index: 6;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(120% 40% at 50% -6%, rgba(255, 255, 255, 0.07), transparent 70%),
-    linear-gradient(180deg, #1c1c2c, #171724 30%, #15151f);
+  background: var(--zl-sheet);
   transition: transform 260ms var(--zl-ease);
   will-change: transform;
 }
@@ -405,23 +402,15 @@ button.zl-st:hover { background: var(--zl-hi); }
   left: 0;
   width: 300px;
   transform: translateX(-100%);
-  border-radius: 0 28px 28px 0;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.09),
-    inset -1px 0 0 rgba(255, 255, 255, 0.07),
-    4px 0 8px rgba(0, 0, 0, 0.3),
-    24px 0 60px rgba(0, 0, 0, 0.55);
+  border-radius: 0 var(--zl-r-lg) var(--zl-r-lg) 0;
+  box-shadow: inset -1px 0 0 var(--zl-line-2), 16px 0 48px rgba(0, 0, 0, 0.45);
 }
 .zl-side-right {
   right: 0;
   width: 320px;
   transform: translateX(100%);
-  border-radius: 28px 0 0 28px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.09),
-    inset 1px 0 0 rgba(255, 255, 255, 0.07),
-    -4px 0 8px rgba(0, 0, 0, 0.3),
-    -24px 0 60px rgba(0, 0, 0, 0.55);
+  border-radius: var(--zl-r-lg) 0 0 var(--zl-r-lg);
+  box-shadow: inset 1px 0 0 var(--zl-line-2), -16px 0 48px rgba(0, 0, 0, 0.45);
 }
 .zl-side.is-open { transform: translateX(0); }
 
@@ -429,176 +418,149 @@ button.zl-st:hover { background: var(--zl-hi); }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 18px 14px 10px 20px;
+  padding: 16px 12px 8px 20px;
 }
-/* The wordmark takes what it needs; the search recess takes the rest. On the
-   session drawer there is no search, so the eyebrow stretches instead. */
 .zl-side-title {
   flex: none;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 18px;
+  font-size: var(--zl-fs-display);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 .zl-side-title.is-eyebrow {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--zl-fs-meta);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--zl-t4);
 }
-.zl-side-count {
-  font-size: 12px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  color: var(--zl-t4);
-}
 
-/* Contained accent: the list is the point of the sidebar, so "New" stays a
-   quiet raised button, not a beacon. */
-.zl-side-new {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 36px;
-  padding: 0 14px 0 10px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-on);
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t1);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 120ms ease, transform 120ms var(--zl-ease);
-}
-.zl-side-new:hover { background: var(--zl-on-2); }
-.zl-side-new:active { transform: translateY(1px); }
-.zl-side-new-plus { font-size: 17px; line-height: 1; color: var(--zl-t2); }
-
-.zl-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-on);
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t2);
-  cursor: pointer;
-}
-.zl-x svg { width: 16px; height: 16px; }
-.zl-x:hover { background: var(--zl-on-2); color: var(--zl-t1); }
-
-/* Search is an object, not a hole: a recess machined into the sheet, shaded
-   at the top where the rim blocks the light, with a hairline of light on the
-   rim itself. Filled at rest, so it is there before you reach for it. Focus
-   brightens the rim and lifts a faint halo -- the light changes, not the
-   shape. */
+/* Search is a recess in the sheet: canvas tone, hairline rim. */
 .zl-search {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   height: 36px;
-  padding: 0 10px;
+  padding: 0 8px 0 10px;
   border-radius: var(--zl-r-md);
-  background: rgba(0, 0, 0, 0.26);
+  background: var(--zl-canvas);
   box-shadow: var(--zl-rim);
   color: var(--zl-t4);
   transition: box-shadow 140ms ease, color 140ms ease;
 }
-.zl-search:hover { color: var(--zl-t3); box-shadow: var(--zl-rim-strong); }
-.zl-search:focus-within {
-  background: rgba(0, 0, 0, 0.3);
-  box-shadow: var(--zl-rim-strong);
-  color: var(--zl-t2);
-}
+.zl-search:hover { color: var(--zl-t3); box-shadow: var(--zl-rim-2); }
+.zl-search:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line); color: var(--zl-t2); }
 .zl-search-ico { width: 15px; height: 15px; flex: none; }
 .zl-search-in {
   flex: 1;
   min-width: 0;
+  height: 36px;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--zl-t1);
   font-family: inherit;
-  font-size: 16px; /* iOS focus-zoom floor */
+  font-size: var(--zl-fs-title); /* 16: iOS focus-zoom floor */
+  letter-spacing: inherit;
 }
 .zl-search-in::placeholder { color: var(--zl-t4); }
-/* The keycap is a small raised object inside the recess: a keycap. */
 .zl-kbd {
-  padding: 2px 6px;
+  padding: 2px 5px;
   border-radius: var(--zl-r-sm);
-  background: var(--zl-on);
+  background: var(--zl-raised);
   box-shadow: var(--zl-rim);
-  font-family: inherit;
-  font-size: 11px;
   color: var(--zl-t3);
 }
 
+/* ── Session list ────────────────────────────────────────────────────── */
 .zl-list { flex: 1; overflow-y: auto; padding: 4px 8px 8px; }
+/* Rhythm: air between groups, none inside them. */
 .zl-group {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  padding: 14px 12px 6px;
-  font-size: 11px;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 12px 4px;
+  font-size: var(--zl-fs-meta);
   font-weight: 600;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--zl-t4);
 }
-.zl-group-n { font-weight: 500; letter-spacing: 0; font-variant-numeric: tabular-nums; opacity: 0.8; }
+.zl-list > .zl-group:first-child { margin-top: 0; }
+.zl-group-n { letter-spacing: 0; color: var(--zl-t4); }
 
 .zl-row {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
   width: 100%;
   min-height: 52px;
-  padding: 8px 12px;
+  padding: 7px 12px;
   border: 0;
-  border-radius: var(--zl-r-lg);
+  border-radius: var(--zl-r-md);
   background: transparent;
   color: inherit;
   font-family: inherit;
+  letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
   transition: background 120ms ease;
 }
 .zl-row:hover { background: var(--zl-hi); }
 
-.zl-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+/* The current row is a raised plane on the sheet, with the title in full
+   white. No bar, no accent: the only edge bar in the product means "you said
+   this", and the accent is for actions, not for where you are. */
+.zl-row.is-current { background: var(--zl-raised); box-shadow: var(--zl-rim); }
+.zl-row.is-current:hover { background: var(--zl-control); }
+.zl-row.is-current .zl-row-title { color: var(--zl-t1); font-weight: 600; }
+.zl-row.is-current .zl-row-when { color: var(--zl-t3); }
+
+/* The monogram is the project's identity: hue derived from its name, always
+   the same for the same repo, never overridden by state. */
+.zl-mono {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--zl-r-md);
+  background: hsl(var(--h) 50% 60% / 0.16);
+  box-shadow: 0 0 0 1px hsl(var(--h) 50% 65% / 0.18);
+  color: hsl(var(--h) 65% 78%);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.zl-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .zl-row-l1 { display: flex; align-items: baseline; gap: 8px; }
+/* Row titles sit at body size: at 16 they truncated one word earlier in a
+   272px column, and the list is scanned, not read. The one session you are
+   in gets title size, in the crumb and the chip. */
 .zl-row-title {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
   font-weight: 500;
-  line-height: 18px;
+  line-height: 20px;
   color: var(--zl-t2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.zl-row-when {
-  flex: none;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--zl-t4);
-}
+/* State and age ride together at the end of the title line: both are
+   metadata about the row. */
+.zl-row-meta { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.zl-row-when { color: var(--zl-t4); }
 .zl-row-path,
 .zl-row-brief {
-  font-size: 12px;
-  line-height: 15px;
+  font-size: var(--zl-fs-meta);
+  line-height: 16px;
   color: var(--zl-t4);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -608,25 +570,43 @@ button.zl-st:hover { background: var(--zl-hi); }
 .zl-row-brief.is-needs { color: var(--zl-yellow); }
 .zl-row-brief.is-error { color: var(--zl-red); }
 
-/* The dot sits on the title's baseline row and carries a halo of its own
-   colour: the halo is what you see from the corner of your eye. */
-.zl-dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  margin-top: 5px;
-  border-radius: 50%;
-}
+.zl-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
 .zl-dot.is-running { background: var(--zl-green); box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18); }
 .zl-dot.is-needs { background: var(--zl-yellow); box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22); }
 .zl-dot.is-error { background: var(--zl-red); box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.2); }
-.zl-dot.is-idle { background: var(--zl-on-2); }
+.zl-dot.is-idle { display: none; }
+
+/* New session: the contained accent button. The list is the point of the
+   sidebar, so this reads as available, not as a beacon. */
+.zl-side-new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  margin: 4px 12px 8px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-accent-dim);
+  box-shadow: 0 0 0 1px var(--zl-accent-med);
+  color: var(--zl-accent);
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  font-weight: 600;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms var(--zl-ease);
+}
+.zl-side-new:hover { background: var(--zl-accent-med); }
+.zl-side-new:active { transform: translateY(1px); }
+.zl-side-new svg { width: 16px; height: 16px; }
 
 .zl-side-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px 12px 8px;
+  padding: 0 20px 12px 8px;
 }
 .zl-inbox {
   display: inline-flex;
@@ -639,12 +619,14 @@ button.zl-st:hover { background: var(--zl-hi); }
   background: transparent;
   color: var(--zl-t2);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--zl-fs-body);
   font-weight: 500;
+  letter-spacing: inherit;
   cursor: pointer;
 }
 .zl-inbox:hover { background: var(--zl-hi); }
 .zl-inbox svg { width: 16px; height: 16px; color: var(--zl-t3); }
+/* The count is yellow because the inbox IS "needs you": state, not accent. */
 .zl-inbox-n {
   min-width: 18px;
   height: 18px;
@@ -652,21 +634,34 @@ button.zl-st:hover { background: var(--zl-hi); }
   border-radius: var(--zl-r-md);
   background: var(--zl-yellow);
   color: #1a1a28;
-  font-size: 11px;
   font-weight: 600;
   line-height: 18px;
   text-align: center;
-  font-variant-numeric: tabular-nums;
 }
-.zl-ver { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--zl-t4); }
+.zl-ver { color: var(--zl-t4); }
 
-/* ── The session drawer body ──────────────────────────────────────────── */
+/* ── Session drawer body ─────────────────────────────────────────────── */
+.zl-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  cursor: pointer;
+}
+.zl-x svg { width: 16px; height: 16px; }
+.zl-x:hover { background: var(--zl-control); color: var(--zl-t1); }
+
 .zl-panel-body { flex: 1; padding: 8px 20px 0; overflow-y: auto; }
 .zl-field { display: block; margin-bottom: 16px; }
 .zl-label {
   display: block;
   margin: 0 0 6px 2px;
-  font-size: 12px;
   font-weight: 500;
   color: var(--zl-t3);
 }
@@ -674,48 +669,46 @@ button.zl-st:hover { background: var(--zl-hi); }
   display: flex;
   align-items: center;
   width: 100%;
-  height: 46px;
-  padding: 0 14px;
+  height: 44px;
+  padding: 0 12px;
   border: 0;
   outline: 0;
-  border-radius: var(--zl-r-lg);
-  background: rgba(0, 0, 0, 0.26);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-canvas);
   box-shadow: var(--zl-rim);
   color: var(--zl-t1);
   font-family: inherit;
-  font-size: 16px; /* iOS focus zoom floor */
+  font-size: var(--zl-fs-title); /* 16: iOS focus-zoom floor */
+  letter-spacing: inherit;
   transition: box-shadow 140ms ease;
 }
-.zl-input:focus { box-shadow: var(--zl-rim-strong); }
-/* A read-only value is not a recess you can type into: it sits flush. */
-.zl-input.is-static { background: rgba(255, 255, 255, 0.04); box-shadow: var(--zl-rim); color: var(--zl-t2); }
+.zl-input:focus { box-shadow: 0 0 0 1px var(--zl-accent-line); }
+/* A read-only value is not a recess: it sits flush, in data type. */
+.zl-input.is-static { background: var(--zl-raised); color: var(--zl-t2); }
 .zl-path-dir { color: var(--zl-t4); }
 
 .zl-facts {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 6px;
-  margin: 22px 0 0;
+  margin: 20px 0 0;
 }
 .zl-facts div {
   padding: 10px 12px;
   border-radius: var(--zl-r-md);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.03));
+  background: var(--zl-raised);
   box-shadow: var(--zl-rim);
 }
-.zl-facts dt { font-size: 11px; color: var(--zl-t4); margin-bottom: 3px; }
+.zl-facts dt { margin-bottom: 4px; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
 .zl-facts dd {
   margin: 0;
-  font-size: 13px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
   color: var(--zl-t2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.zl-panel-acts { display: flex; flex-direction: column; gap: 6px; padding: 16px 12px 14px; }
+.zl-panel-acts { display: flex; flex-direction: column; gap: 6px; padding: 16px 12px 12px; }
 .zl-act {
   display: flex;
   flex-direction: column;
@@ -725,49 +718,32 @@ button.zl-st:hover { background: var(--zl-hi); }
   min-height: 56px;
   padding: 10px 14px;
   border: 0;
-  border-radius: var(--zl-r-lg);
-  background: var(--zl-on);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
   box-shadow: var(--zl-rim);
   color: var(--zl-t1);
   font-family: inherit;
+  letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
   transition: background 120ms ease, transform 120ms var(--zl-ease);
 }
-.zl-act:hover { background: var(--zl-on-2); }
+.zl-act:hover { background: var(--zl-control); }
 .zl-act:active { transform: translateY(1px); }
-.zl-act-t { font-size: 14px; font-weight: 500; }
-.zl-act-d { font-size: 12px; line-height: 1.4; color: var(--zl-t4); }
+.zl-act-t { font-size: var(--zl-fs-title); font-weight: 500; }
+.zl-act-d { line-height: 1.4; color: var(--zl-t4); }
 .zl-act.is-danger .zl-act-t { color: var(--zl-red); }
 .zl-act.is-danger:hover { background: rgba(243, 139, 168, 0.1); }
 
-/* ── The desktop ───────────────────────────────────────────────────────── */
-.zl-desk {
-  position: relative;
-  display: flex;
-  width: 860px;
-  height: 780px;
-  overflow: hidden;
-  border-radius: var(--zl-r-lg);
-  background: linear-gradient(180deg, rgba(26, 26, 42, 0.78), rgba(12, 12, 22, 0.7) 40%, rgba(9, 9, 18, 0.72));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
-    0 2px 4px rgba(0, 0, 0, 0.4),
-    0 30px 70px rgba(0, 0, 0, 0.55);
-}
-/* The permanent column is a well cut into the frame: darker than the
-   transcript, with its own pool of light at the head, and a lit seam where it
-   meets the main plane. */
+/* ── Desktop ─────────────────────────────────────────────────────────────
+   The same sheet the phone slides in, docked: same tone, same hairline seam. */
 .zl-desk-side {
   width: 272px;
   flex: none;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(120% 34% at 50% -4%, rgba(255, 255, 255, 0.06), transparent 70%),
-    linear-gradient(180deg, rgba(0, 0, 0, 0.26), rgba(0, 0, 0, 0.38));
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.06), inset -8px 0 16px -8px rgba(0, 0, 0, 0.35);
+  background: var(--zl-sheet);
+  box-shadow: inset -1px 0 0 var(--zl-line);
 }
 .zl-desk-main {
   position: relative;
@@ -777,11 +753,12 @@ button.zl-st:hover { background: var(--zl-hi); }
   min-width: 0;
   overflow: hidden;
 }
-.zl-desk-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 6px; }
+.zl-desk-head { display: flex; align-items: center; gap: 6px; padding: 12px 16px 4px; }
 .zl-crumb {
   display: flex;
   align-items: baseline;
-  gap: 9px;
+  gap: 10px;
+  min-width: 0;
   height: 36px;
   padding: 0 10px;
   border: 0;
@@ -789,114 +766,59 @@ button.zl-st:hover { background: var(--zl-hi); }
   background: transparent;
   color: inherit;
   font-family: inherit;
+  letter-spacing: inherit;
   cursor: pointer;
 }
 .zl-crumb:hover { background: var(--zl-hi); }
-.zl-crumb-title { font-size: 16px; font-weight: 600; }
-.zl-crumb-path { font-size: 12px; color: var(--zl-t4); }
-.zl-desk-act {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-on);
-  box-shadow: var(--zl-rim);
+.zl-crumb-title {
+  font-size: var(--zl-fs-title);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.zl-crumb-path { color: var(--zl-t4); }
+.zl-desk-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-t3);
+  cursor: pointer;
+}
+.zl-desk-act svg { width: 16px; height: 16px; }
+.zl-desk-act:hover { background: var(--zl-hi); color: var(--zl-t1); }
 .zl-desk .zl-transcript { padding: 10px 22px 12px; }
-.zl-desk .zl-dock { padding: 18px 22px 12px; }
+.zl-desk .zl-dock { padding: 18px 22px 10px; }
 .zl-desk .zl-side-right { width: 340px; }
-
-/* Phone-only sizing: every control that gets a thumb is at least 44px. The
-   desktop keeps the tighter metrics because a pointer does not need them. */
-.zl-phone .zl-x { width: 44px; height: 44px; border-radius: var(--zl-r-lg); }
-.zl-phone .zl-side-new { height: 44px; border-radius: var(--zl-r-lg); }
-.zl-phone .zl-status { height: 44px; }
-/* On the phone every real control is a 44px target. The status pills and the
-   inbox button were 40, and the search input's own box was 26 inside a 44px
-   wrapper -- the wrapper is not what the thumb hits, the input is. */
-.zl-phone button.zl-st { height: 44px; border-radius: var(--zl-r-md); }
-.zl-phone .zl-inbox { height: 44px; }
-.zl-phone .zl-search-in { height: 44px; }
-.zl-phone .zl-search { height: 44px; padding-top: 0; padding-bottom: 0; border-radius: var(--zl-r-md); }
 
 @media (max-width: 1400px) {
   .zl-desk { width: 720px; }
 }
 
-/* The dot rides with the timestamp instead of holding a 30px column hostage
-   for 8px of information: it is metadata about the row, so it sits with the
-   other metadata and the titles get a single left edge to scan down. */
-.zl-row-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-}
-.zl-side-new {
-  width: auto;
-  margin: 4px 12px 8px;
-  justify-content: center;
-  height: 40px;
-}
+/* ── Phone sizing: every control that gets a thumb is at least 44px. ──── */
+.zl-phone .zl-x { width: 44px; height: 44px; }
 .zl-phone .zl-side-new { height: 48px; margin: 4px 12px 10px; }
-/* Rhythm: air between groups, none inside them. A list of things that are all
-   equally spaced reads as one undifferentiated block. */
-.zl-group { margin-top: 14px; }
-.zl-list > .zl-group:first-child { margin-top: 4px; }
-.zl-list { padding-bottom: 8px; }
+.zl-phone .zl-status { height: 44px; }
+.zl-phone button.zl-st { height: 44px; }
+.zl-phone .zl-inbox { height: 44px; }
+.zl-phone .zl-search,
+.zl-phone .zl-search-in { height: 44px; }
+.zl-phone .zl-input { height: 48px; }
 
-/* ── Identity, contrast and a real active state ─────────────────────────────
-   The references are not "prettier": they have a visual vocabulary per row and
-   an active state you can see across the room. Ours had neither. */
-
-.zl-mono {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-top: 1px;
-  border-radius: var(--zl-r-md);
-  background: linear-gradient(180deg, hsl(var(--h) 55% 62% / 0.22), hsl(var(--h) 55% 55% / 0.13));
-  box-shadow: inset 0 1px 0 hsl(var(--h) 60% 80% / 0.16), 0 1px 2px rgba(0, 0, 0, 0.3);
-  color: hsl(var(--h) 70% 76%);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: lowercase;
-  transition: background 140ms ease, box-shadow 140ms ease;
+/* ── Data is mono ────────────────────────────────────────────────────────
+   One class, applied wherever the content is a number, a path, a shortcut or
+   a code. Plex Mono is loaded by index.html already. Last in the sheet so it
+   beats the `font-family: inherit` that every control resets with. */
+.zl-data {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
-/* State rides the monogram instead of a separate dot: same datum, one place,
-   and it no longer costs a column of its own. */
-.zl-mono.is-running {
-  background: hsl(150 60% 45% / 0.2);
-  color: #a6e3a1;
-  box-shadow: 0 0 0 1px hsl(150 60% 55% / 0.35);
-}
-.zl-mono.is-needs {
-  background: hsl(45 85% 55% / 0.2);
-  color: #f9e2af;
-  box-shadow: 0 0 0 1px hsl(45 85% 60% / 0.35);
-}
-.zl-mono.is-error {
-  background: hsl(348 70% 60% / 0.2);
-  color: #f38ba8;
-  box-shadow: 0 0 0 1px hsl(348 70% 62% / 0.3);
-}
-
-/* The active row is the one row that is a physical object: a raised slab
-   sitting on the list, lit along its top edge, casting a shadow onto the rows
-   beneath. Hover is a flat wash; this has thickness. No accent bar -- the
-   only edge bar in the product means "you said this". */
-.zl-row.is-current {
-  background: var(--zl-on);
-  box-shadow: none;
-}
-.zl-row.is-current:hover {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.09));
-}
-.zl-row.is-current .zl-row-title { color: var(--zl-t1); font-weight: 600; }
-.zl-row.is-current .zl-row-when { color: var(--zl-t3); }
-
-.zl-row { align-items: center; }
-.zl-row-when { font-variant-numeric: tabular-nums; }
+.zl-input.is-static.zl-data { font-size: var(--zl-fs-body); }
