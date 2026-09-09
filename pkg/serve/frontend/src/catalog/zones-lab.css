@@ -1325,6 +1325,275 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-phone button.zl-lg-row, .zl-phone button.zl-lg-head { min-height: 44px; }
 .zl-phone .zl-art { min-height: 60px; max-width: none; }
 
+/* ── Live zone ─────────────────────────────────────────────────────────────
+   One row, in the dock's margins, between the transcript and the composer.
+   It is a flex sibling (flex: none): present, it pushes the transcript up;
+   absent, the transcript has the space. It never overlays and never blocks.
+
+   Tone: the row is the DOCK, not an object on it. No fill, no rim: a
+   sentence printed in the margin above the composer, in t3, with a state
+   dot. The one framed thing is the tally, and only because it is a button
+   (control tone, hairline). The panel that opens is the sheet tone with a
+   hairline -- the same recess as the ledger, because it is the same class
+   of thing: a list of work. No shadow: it does not float, it unfolds.
+
+   Sizes: 32px row on desktop (a pointer), 44px on the phone (a thumb),
+   32px in a dense pane. The row is always the one size in its host; the
+   panel adds rows of the same height. */
+.zl-live {
+  flex: none;
+  container-type: inline-size;
+  margin: 0 0 6px;
+}
+.zl-live-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 4px 0 8px;
+}
+
+/* The sentence: dot, words, counter. Words in Outfit 14/500 t3 (the same
+   voice as the status line), the counter in mono t4. */
+.zl-live-now {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--zl-t3);
+  font-weight: 500;
+}
+.zl-live-txt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zl-live-el { flex: none; color: var(--zl-t4); }
+
+/* State is the dot, and only the dot. Green breathes: alive. Amber is
+   still: parked on you. The words go one step brighter while waiting, so
+   the line is readable at a glance from across the room, but they do not
+   go amber -- the dot is enough, and amber text next to the yellow ask
+   card above would double the alarm. */
+.zl-live-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.zl-live-dot.is-working,
+.zl-live-dot.is-thinking {
+  background: var(--zl-green);
+  box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18);
+  animation: zl-breathe 1.6s ease-in-out infinite;
+}
+.zl-live-dot.is-waiting {
+  background: var(--zl-yellow);
+  box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22);
+}
+.zl-live-now.is-waiting { color: var(--zl-t2); }
+@media (prefers-reduced-motion: reduce) { .zl-live-dot { animation: none; } }
+
+/* Background spotlight: the sentence belongs to a background item, so it
+   is prefixed with that item's identity mark and the item's name is the
+   subject. It crossfades when the spotlight moves: opacity only. */
+.zl-live-spot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: zl-arrive 260ms ease-out both;
+}
+.zl-live-who { color: var(--zl-t2); }
+.zl-live-now.is-bg .zl-live-txt.zl-data { font-size: var(--zl-fs-body); color: var(--zl-t3); }
+
+/* Identity marks. A subagent is a 7px dot in its own hue, exactly the
+   project monogram's palette, never green/yellow/red. A command is a mono
+   `$` in t3: neutral, and it says "shell" without an icon. In the tally
+   the marks cluster; in the sentence and the panel each stands alone. */
+.zl-live-id {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+}
+.zl-live-id.is-agent::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: hsl(var(--h) 65% 72%);
+}
+.zl-live-id.is-bash { color: var(--zl-t3); font-weight: 500; line-height: 1; }
+
+/* The tally: the door to the panel. A control-tone chip with the identity
+   marks, the count and a chevron pointing where the panel will open (up). */
+.zl-live-tally {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px 0 8px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.zl-live-tally:hover { background: var(--zl-raised); color: var(--zl-t1); box-shadow: var(--zl-rim-2); }
+.zl-live-dots { display: inline-flex; align-items: center; gap: 1px; }
+.zl-live-dots .zl-live-id { width: 10px; }
+.zl-live-n { color: inherit; }
+.zl-live-chev {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--zl-t3);
+  transition: transform 160ms var(--zl-ease);
+}
+.zl-live-chev.is-up { transform: rotate(180deg); }
+
+/* The panel: a recess above the row, the ledger's tone. Capped at four
+   rows plus a group head before it scrolls, so it can never eat the
+   conversation: ~200px on the phone, less in a pane. */
+.zl-live-panel {
+  max-height: 208px;
+  margin: 0 0 4px;
+  padding: 2px 4px 4px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--zl-line-2) transparent;
+  animation: zl-unfold 180ms var(--zl-ease);
+  transform-origin: bottom;
+}
+@keyframes zl-unfold { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { .zl-live-panel { animation: none; } }
+.zl-live-panel .zl-group { margin-top: 4px; padding: 6px 8px 2px; }
+.zl-live-grp:first-child .zl-group { margin-top: 0; }
+
+.zl-live-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t2);
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.zl-live-row:hover { background: var(--zl-hi); color: var(--zl-t1); }
+.zl-live-row:hover .zl-live-go { color: var(--zl-t2); }
+.zl-live-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.zl-live-row-t {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.zl-live-row-t.zl-data { font-size: var(--zl-fs-body); font-weight: 400; }
+.zl-live-row-task { font-weight: 400; color: var(--zl-t3); }
+.zl-live-row-d {
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.zl-live-go { width: 12px; height: 12px; flex: none; color: var(--zl-t4); }
+
+/* Phone: the row and every panel row are 44 for the thumb; the tally is
+   a full 44 hit too, with its visible chip inside. */
+.zl-phone .zl-live-bar { min-height: 44px; }
+.zl-phone .zl-live-tally { height: 36px; }
+.zl-phone .zl-live-tally::before {
+  /* The chip is 36 tall, the target is 44: an invisible halo makes up the
+     difference without enlarging the visible control. */
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}
+.zl-phone .zl-live-tally { position: relative; }
+.zl-phone .zl-live-row { min-height: 44px; }
+.zl-phone .zl-live-panel { max-height: 232px; }
+
+/* Dense (pane): 32px row, the panel's rows too, three of them before it
+   scrolls. */
+.zl-live.is-dense .zl-live-bar { min-height: 32px; padding-left: 6px; gap: 6px; }
+.zl-live.is-dense .zl-live-now { font-size: var(--zl-fs-body); }
+.zl-live.is-dense .zl-live-tally { height: 26px; }
+.zl-live.is-dense .zl-live-row { min-height: 32px; }
+.zl-live.is-dense .zl-live-row-d { display: none; }
+.zl-live.is-dense .zl-live-panel { max-height: 160px; }
+
+/* Degradation by the zone's own width: the tally loses its dots first
+   (the count says the same thing), then the counter goes. The verb is the
+   last thing, and it only truncates. */
+@container (max-width: 420px) {
+  .zl-live-dots { display: none; }
+  .zl-live-tally { padding-left: 7px; }
+}
+@container (max-width: 340px) {
+  .zl-live-now > .zl-live-el, .zl-live-spot > .zl-live-el { display: none; }
+}
+
+/* ── Lab control (not product) ───────────────────────────────────────── */
+.zl-lab-ctl {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 0 auto 28px;
+  max-width: 820px;
+}
+.zl-lab-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+}
+.zl-lab-opt {
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t3);
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.zl-lab-opt:hover { color: var(--zl-t1); }
+.zl-lab-opt.is-on { background: var(--zl-control); color: var(--zl-t1); box-shadow: var(--zl-rim); }
+.zl-lab-note { margin: 0; max-width: 640px; text-align: center; font-size: var(--zl-fs-meta); line-height: 1.55; color: var(--zl-t4); }
+
 /* ── Data is mono ────────────────────────────────────────────────────────
    One class, applied wherever the content is a number, a path, a shortcut or
    a code. Plex Mono is loaded by index.html already. Last in the sheet so it
@@ -1400,3 +1669,37 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
    than the 4px it saves, which is the whole reason these words came back. */
 .zl-st-fast .zl-st-word,
 .zl-st-ev .zl-st-word { overflow: visible; text-overflow: clip; flex: none; }
+
+/* ── The dock at phone width ──────────────────────────────────────────────
+   Measured on a 390px phone: the line wanted 447px of content in 366px. The
+   events group was set to overflow:hidden, so instead of failing loudly it
+   crushed its children into each other -- which is what the owner photographed.
+
+   The fix is not more squeezing, it is fewer things. At this width the line
+   keeps only what you glance at continuously (model, permissions, context) and
+   what is genuinely wrong (an alarm). Everything else has another home:
+     - fast          -> it is a property of the model, and it is set in the
+                        model picker, which is one tap away on the model pill.
+     - tokens/spend  -> they live in the context popover, with the usage
+                        breakdown they belong to.
+     - non-alarm events (goal, tasks) -> already dropped by the compact rule.
+   Nothing is lost: each of these is reachable, and none of them is a number
+   you watch while you type. */
+@container (max-width: 470px) {
+  .zl-st-fast { display: none; }
+  .zl-st-tok { display: none; }
+  .zl-st-ctx .zl-st-sep,
+  .zl-st-ctx .zl-st-spend { display: none; }
+  /* The events group stops being a squeeze box: it sizes to its content and
+     the alarms keep their words. If there is no room, the LINE is what has to
+     give, not the legibility of a warning. */
+  .zl-st-group.is-events { flex: none; overflow: visible; gap: 6px; }
+  .zl-st-group.is-settings { min-width: 0; }
+  /* With fast and the counters gone there is room for the name in full:
+     "Daybre..." saves nothing here and the model is the most-read word on the
+     line. It only truncates below a phone, where a pane is already tiny. */
+  .zl-st-model .zl-st-word { max-width: none; }
+}
+@container (max-width: 340px) {
+  .zl-st-model .zl-st-word { max-width: 84px; }
+}

@@ -466,6 +466,192 @@ function StreamingProse({ playing }) {
   );
 }
 
+/* ── Live zone ─────────────────────────────────────────────────────────────
+   The strip between the transcript and the composer. In production two
+   components compete for it: NowLine (the foreground run: alive? since
+   when? parked on me?) and LiveDock (the async work: subagents and
+   background commands that never block the conversation). Here they are ONE
+   row with two fixed slots, and the row is what stays constant:
+
+     [ the sentence ........................ ]  [ tally ▸ ]
+
+   The sentence is the one thing being said about "now". The foreground run
+   owns it whenever it exists (it is the thing you are actually waiting on);
+   with nothing in the foreground, the background takes the slot and
+   rotates a spotlight through its items, each one prefixed with its OWN
+   identity mark (a coloured dot for a subagent, a mono `$` for a command)
+   so it never reads as the foreground. The tally is the door to the panel
+   and is only there while something async is alive. Two sentences never
+   share the line: when the foreground is busy, the background is reduced to
+   its dots and its count. That is the answer to "agent working + two bash
+   + a subagent": one verb, one counter, and a small cluster you can open.
+
+   State is the dot, and only the dot: green breathing = running, amber and
+   still = waiting on you. Waiting also drops the counter, because an
+   elapsed-as-work number would lie while the run is parked. Nothing else
+   moves: the counter ticks and the dot breathes, and that is the whole
+   "alive" signal -- no shimmer, no sweep, so the strip is quieter than the
+   live ledger row it sits under.
+
+   The panel opens UPWARD from the row (the row is what your thumb found;
+   it does not move), one row per live thing grouped by kind, capped at four
+   rows before it scrolls. Height budget: the zone is one row unless you
+   open it, and open it never takes more than ~200px, a quarter of the
+   phone's transcript. On the phone, typing wins: focusing the composer
+   collapses the panel. */
+const LIVE_BG = [
+  { kind: "agent", name: "terra", task: "review the diff", doing: "Reading pkg/attach/store.go", ago: 134 },
+  { kind: "bash", cmd: "go test ./... -race", ago: 41 },
+  { kind: "bash", cmd: "npm run build", ago: 12 },
+];
+const FG_WORKING = { phase: "working", text: "Running go vet", ago: 4 };
+const FG_WAITING = { phase: "waiting", text: "Waiting for you" };
+
+/* The lab presets. `open` is the initial panel state; each host then owns
+   it, so the owner can open and close the panel in any preset. */
+const LIVE_STATES = [
+  { id: "idle", label: "Idle", fg: null, bg: [], note: "Nothing alive. The zone does not exist; the transcript has the space." },
+  { id: "working", label: "Working", fg: FG_WORKING, bg: [], note: "The foreground run: one verb, a breathing green dot, a counter that ticks. Nothing async." },
+  { id: "waiting", label: "Waiting for you", fg: FG_WAITING, bg: [], note: "Parked on you: amber, still, no counter. The loud prompt stays inline above; this is its quiet echo, pinned." },
+  { id: "background", label: "Background only", fg: null, bg: LIVE_BG, note: "Nothing in the foreground, three things in the background: the sentence slot rotates a spotlight, each item with its own identity mark. The tally is the door." },
+  { id: "all", label: "Everything", fg: FG_WORKING, bg: LIVE_BG, note: "Foreground busy AND three async. The foreground keeps the sentence; the background is only dots and a count. One line, no second verb." },
+  { id: "open", label: "Everything, open", fg: FG_WORKING, bg: LIVE_BG, open: true, note: "The panel: one row per live thing, grouped by kind, opening upward so the row stays where it was. Tap a row to go to it." },
+];
+
+function useNow(active) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  return now;
+}
+
+function fmtElapsed(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  if (m < 60) return r === 0 ? `${m}m` : `${m}m${String(r).padStart(2, "0")}s`;
+  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`;
+}
+
+/* Identity mark for a background item: colour for a subagent (same hue
+   function as the project monogram, so the same name is always the same
+   colour), a mono glyph for a command. Neither is a state colour. */
+function LiveId({ item }) {
+  if (item.kind === "agent") return <span class="zl-live-id is-agent" style={`--h:${projectHue(item.name)}`} aria-hidden="true" />;
+  return <span class="zl-live-id is-bash zl-data" aria-hidden="true">$</span>;
+}
+
+function ChevIcon({ up }) {
+  return (
+    <svg class={`zl-live-chev${up ? " is-up" : ""}`} viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M2.5 4.5L6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
+
+function LiveZone({ fg, bg, open, onToggle, dense, t0 }) {
+  const alive = !!fg || bg.length > 0;
+  const now = useNow(alive);
+  // Spotlight: only when the background owns the sentence.
+  const [spot, setSpot] = useState(0);
+  useEffect(() => {
+    if (fg || bg.length < 2) return;
+    const t = setInterval(() => setSpot((i) => (i + 1) % bg.length), 3500);
+    return () => clearInterval(t);
+  }, [fg, bg.length]);
+  if (!alive) return null;
+
+  const el = (ago) => fmtElapsed(now - (t0 - ago * 1000));
+  const item = bg.length ? bg[spot % bg.length] : null;
+  const waiting = fg?.phase === "waiting";
+
+  return (
+    <div class={`zl-live${dense ? " is-dense" : ""}${open ? " is-open" : ""}`}>
+      {open && bg.length > 0 && (
+        <div class="zl-live-panel" role="region" aria-label="Live in the background">
+          {[["Subagents", bg.filter((b) => b.kind === "agent")], ["Commands", bg.filter((b) => b.kind === "bash")]].map(([title, items]) => items.length > 0 && (
+            <div class="zl-live-grp" key={title}>
+              <div class="zl-group"><span>{title}</span><span class="zl-group-n zl-data">{items.length}</span></div>
+              {items.map((b, i) => (
+                <button type="button" class="zl-live-row" key={i} aria-label={b.kind === "agent" ? `Open subagent ${b.name}` : `Show output of ${b.cmd}`}>
+                  <LiveId item={b} />
+                  <span class="zl-live-row-main">
+                    {b.kind === "agent"
+                      ? <><span class="zl-live-row-t">{b.name} <span class="zl-live-row-task">· {b.task}</span></span><span class="zl-live-row-d">{b.doing}</span></>
+                      : <span class="zl-live-row-t zl-data">{b.cmd}</span>}
+                  </span>
+                  <span class="zl-live-el zl-data">{el(b.ago)}</span>
+                  <svg class="zl-live-go" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      <div class="zl-live-bar">
+        {fg ? (
+          <div class={`zl-live-now${waiting ? " is-waiting" : ""}`} role="status" aria-live="polite">
+            <span class={`zl-live-dot is-${fg.phase}`} aria-hidden="true" />
+            <span class="zl-live-txt">{fg.text}</span>
+            {!waiting && <span class="zl-live-el zl-data">{el(fg.ago)}</span>}
+          </div>
+        ) : (
+          <div class="zl-live-now is-bg" role="status" aria-live="polite">
+            <span class="zl-live-spot" key={spot}>
+              <LiveId item={item} />
+              {item.kind === "agent"
+                ? <span class="zl-live-txt"><span class="zl-live-who">{item.name}</span> · {item.doing}</span>
+                : <span class="zl-live-txt zl-data">{item.cmd}</span>}
+              <span class="zl-live-el zl-data">{el(item.ago)}</span>
+            </span>
+          </div>
+        )}
+        {bg.length > 0 && (
+          <button
+            type="button"
+            class="zl-live-tally"
+            onClick={onToggle}
+            aria-expanded={open}
+            aria-label={`${bg.length} in the background${open ? ", collapse" : ", expand"}`}
+          >
+            <span class="zl-live-dots" aria-hidden="true">
+              {bg.map((b, i) => <LiveId item={b} key={i} />)}
+            </span>
+            <span class="zl-live-n zl-data">{bg.length}</span>
+            <ChevIcon up={!open} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Each host owns the panel: the preset seeds it, the owner can toggle it. */
+function useLive(preset, forceCompact) {
+  const [open, setOpen] = useState(!!preset.open);
+  const [t0, setT0] = useState(() => Date.now());
+  useEffect(() => { setOpen(!!preset.open); setT0(Date.now()); }, [preset]);
+  return { fg: preset.fg, bg: preset.bg, open: open && !forceCompact, onToggle: () => setOpen((v) => !v), t0 };
+}
+
+/* The blocking card, out of scope here (it has its own component in
+   production); this stub only shows WHERE it sits -- after the transcript,
+   before the composer -- and that "needs you" is yellow. */
+const ASK_CARD = (
+  <div class="zl-ask" role="group" aria-label="Permission requested">
+    <div class="zl-ask-t">Run <code class="zl-data">git push origin fix/attach-race</code>?</div>
+    <div class="zl-ask-acts">
+      <button type="button" class="zl-ask-btn is-primary">Allow</button>
+      <button type="button" class="zl-ask-btn">Deny</button>
+    </div>
+  </div>
+);
+
 function Transcript({ dense, streaming = true, short, tail }) {
   // Follow the tail like production does: the transcript is pinned to its
   // bottom while a turn is streaming. (Production also un-pins when the user
@@ -651,7 +837,7 @@ function StatusLine({ s = FULL_STATUS, compact }) {
    surface. The send button arms when there is something to send and takes
    the accent -- peach is "you said this", which is what the message becomes
    AFTER sending, not the button. */
-function Composer() {
+function Composer({ onFocusChange }) {
   const [draft, setDraft] = useState("");
   const ref = useRef(null);
   const onInput = (e) => {
@@ -673,6 +859,8 @@ function Composer() {
         placeholder="Message moa"
         value={draft}
         onInput={onInput}
+        onFocus={onFocusChange ? () => onFocusChange(true) : undefined}
+        onBlur={onFocusChange ? () => onFocusChange(false) : undefined}
         aria-label="Message"
       />
       <button type="button" class="zl-send" aria-label="Send" disabled={!armed}>
@@ -753,16 +941,19 @@ function useEdgeDrawers(hostRef) {
 }
 
 /* ── Phone ─────────────────────────────────────────────────────────────── */
-function Phone({ label }) {
+function Phone({ label, live: preset }) {
   const host = useRef(null);
   const d = useEdgeDrawers(host);
   const anyOpen = d.left || d.right || d.veil != null;
+  // Typing wins: with the keyboard up the panel is forced shut.
+  const [typing, setTyping] = useState(false);
+  const live = useLive(preset, typing);
 
   return (
     <div class="zl-phone-wrap">
       <div class="zl-density-label">{label}</div>
       <div class="zl-phone" ref={host} {...d.handlers}>
-        <Transcript />
+        <Transcript streaming={!!preset.fg && preset.fg.phase === "working"} tail={preset.fg?.phase === "waiting" ? ASK_CARD : null} />
 
         {/* three floating capsules: sidebar / this session / new */}
         <div class="zl-chrome">
@@ -780,7 +971,8 @@ function Phone({ label }) {
         </div>
 
         <div class="zl-dock">
-          <Composer />
+          <LiveZone {...live} />
+          <Composer onFocusChange={setTyping} />
           <StatusLine compact />
         </div>
 
@@ -835,8 +1027,9 @@ function HeadActions() {
   );
 }
 
-function Desktop({ label }) {
+function Desktop({ label, live: preset }) {
   const [panel, setPanel] = useState(false);
+  const live = useLive(preset, false);
   return (
     <div class="zl-desk-wrap">
       <div class="zl-density-label">{label}</div>
@@ -853,8 +1046,9 @@ function Desktop({ label }) {
             <span class="zl-spacer" />
             <HeadActions />
           </div>
-          <Transcript />
+          <Transcript streaming={!!preset.fg && preset.fg.phase === "working"} tail={preset.fg?.phase === "waiting" ? ASK_CARD : null} />
           <div class="zl-dock">
+            <LiveZone {...live} />
             <Composer />
             <StatusLine />
           </div>
@@ -890,18 +1084,7 @@ const PANES = [
     status: { ...FULL_STATUS, goal: null, tasks: null, mcp: null, onExtra: false, fast: false, ctx: 63, spend: "$1.84" } },
   { title: "Check access to two repos", path: "~/dev/gugo", state: "needs", n: 2,
     status: { ...FULL_STATUS, model: "Terra", thinking: "high", perm: "ask", goal: null, tasks: null, mcp: null, onExtra: false, fast: false, ctx: 21, spend: "$0.42", up: "3.1k", down: "640" },
-    tail: (
-      /* The blocking card is out of scope here (it has its own component in
-         production); this stub only shows WHERE it sits -- after the
-         transcript, before the composer -- and that "needs you" is yellow. */
-      <div class="zl-ask" role="group" aria-label="Permission requested">
-        <div class="zl-ask-t">Run <code class="zl-data">git push origin fix/attach-race</code>?</div>
-        <div class="zl-ask-acts">
-          <button type="button" class="zl-ask-btn is-primary">Allow</button>
-          <button type="button" class="zl-ask-btn">Deny</button>
-        </div>
-      </div>
-    ) },
+    tail: ASK_CARD },
   { title: "Deploy fails on ARM runner", path: "~/dev/tienda", state: "error", n: 3,
     status: { ...FULL_STATUS, model: "Sol", thinking: "high", perm: "auto", goal: null, tasks: null, onExtra: true, fast: false, ctx: 88, spend: "$6.10", up: "41k", down: "9.2k" },
     tail: (
@@ -909,7 +1092,8 @@ const PANES = [
     ) },
 ];
 
-function Pane({ p, streaming }) {
+function Pane({ p, streaming, live: preset }) {
+  const live = useLive(preset || LIVE_STATES[0], false);
   return (
     <section class={`zl-pane${p.focus ? " is-focus" : ""}`} aria-label={`Pane ${p.n}: ${p.title}`}>
       <div class="zl-pane-head">
@@ -926,6 +1110,7 @@ function Pane({ p, streaming }) {
         <Transcript dense streaming={streaming} short={p.n !== 1} tail={p.tail} />
       </div>
       <div class="zl-dock is-pane">
+        <LiveZone {...live} dense />
         <Composer />
         <StatusLine s={p.status} compact />
       </div>
@@ -933,7 +1118,7 @@ function Pane({ p, streaming }) {
   );
 }
 
-function Grid({ label }) {
+function Grid({ label, live }) {
   return (
     <div class="zl-grid-wrap">
       <div class="zl-density-label">{label}</div>
@@ -944,7 +1129,7 @@ function Grid({ label }) {
           <span class="zl-grid-needs"><span class="zl-data">1</span> needs you</span>
         </div>
         <div class="zl-grid-panes">
-          <Pane p={PANES[0]} streaming />
+          <Pane p={PANES[0]} streaming={!!live.fg && live.fg.phase === "working"} live={live} />
           <div class="zl-grid-col">
             <Pane p={PANES[1]} streaming={false} />
             <Pane p={PANES[2]} streaming={false} />
@@ -954,7 +1139,8 @@ function Grid({ label }) {
       <p class="zl-hint">
         The 2+1 preset. Each pane is the single conversation with the compact
         status line and a dense transcript; the pane head replaces the crumb
-        and carries the session's state dot.
+        and carries the session's state dot. The live zone follows the
+        preset in the focused pane.
       </p>
     </div>
   );
@@ -990,11 +1176,70 @@ function StatusLineStudy() {
   );
 }
 
+/* ── Live zone study ──────────────────────────────────────────────────────
+   The "everything" row at the widths it meets, with the panel open at the
+   narrowest so the cap is visible. Degradation is by container width:
+   < 420 the tally loses its dots (count + chevron), < 340 the sentence
+   loses its counter. The verb is the last thing to go, and it only
+   truncates. */
+const LIVE_STUDY_WIDTHS = [
+  { w: 816, note: "desktop column: verb, counter, dots, count" },
+  { w: 520, note: "grid pane: the same, dense (32px row)" },
+  { w: 366, note: "phone dock: the same at 44px; dots go below 420" },
+  { w: 300, note: "narrow pane: the counter goes, the verb truncates, the count stays. Panel open: rows keep their identity mark and elapsed.", open: true },
+];
+
+function LiveZoneStudy() {
+  const preset = LIVE_STATES.find((s) => s.id === "all");
+  return (
+    <div class="zl-study">
+      <div class="zl-density-label">Live zone · everything at once · four widths</div>
+      {LIVE_STUDY_WIDTHS.map(({ w, note, open }) => (
+        <div class="zl-study-row" key={w}>
+          <div class="zl-study-w zl-data">{w}px</div>
+          <div class="zl-study-line" style={`width:${w + 24}px`}>
+            <StudyLive preset={open ? { ...preset, open: true } : preset} dense={w < 700} />
+          </div>
+          <div class="zl-study-note">{note}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+function StudyLive({ preset, dense }) {
+  const live = useLive(preset, false);
+  return <LiveZone {...live} dense={dense} />;
+}
+
+/* Lab control: one segmented switch, not product. */
+function LiveSwitch({ value, onChange }) {
+  const cur = LIVE_STATES.find((s) => s.id === value);
+  return (
+    <div class="zl-lab-ctl">
+      <div class="zl-lab-seg" role="radiogroup" aria-label="Live zone state">
+        {LIVE_STATES.map((s) => (
+          <button
+            type="button"
+            role="radio"
+            aria-checked={s.id === value}
+            class={`zl-lab-opt${s.id === value ? " is-on" : ""}`}
+            onClick={() => onChange(s.id)}
+            key={s.id}
+          >{s.label}</button>
+        ))}
+      </div>
+      <p class="zl-lab-note">{cur.note}</p>
+    </div>
+  );
+}
+
 export function ZonesLab() {
   useEffect(() => {
     document.documentElement.setAttribute("data-ambient", "on");
     return () => document.documentElement.removeAttribute("data-ambient");
   }, []);
+  const [liveId, setLiveId] = useState(() => new URLSearchParams(location.search).get("live") || "working");
+  const live = LIVE_STATES.find((s) => s.id === liveId) || LIVE_STATES[1];
   return (
     <div class="zl">
       <div class="zl-aurora" aria-hidden="true" />
@@ -1006,13 +1251,15 @@ export function ZonesLab() {
           — and share the list, the dock and the session drawer.
         </p>
       </header>
+      <LiveSwitch value={live.id} onChange={setLiveId} />
       <div class="zl-stage">
-        <Phone label="Phone" />
-        <Desktop label="Desktop" />
+        <Phone label="Phone" live={live} />
+        <Desktop label="Desktop" live={live} />
       </div>
       <div class="zl-stage">
-        <Grid label="Desktop · grid" />
+        <Grid label="Desktop · grid" live={live} />
       </div>
+      <LiveZoneStudy />
       <StatusLineStudy />
     </div>
   );
