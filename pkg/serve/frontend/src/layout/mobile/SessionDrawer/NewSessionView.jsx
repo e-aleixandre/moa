@@ -28,6 +28,7 @@ export function NewSessionView({ projects = [], onBack, onCreate }) {
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [creating, setCreating] = useState(false);
+  const inFlightRef = useRef(false);
   const inputRef = useRef(null);
 
   const homeDir = caps.homeDir || "";
@@ -114,8 +115,13 @@ export function NewSessionView({ projects = [], onBack, onCreate }) {
   // to the server's own workspace before anything has been typed.
   const target = exploreDir || serverCwd;
 
+  // Synchronous in-flight guard, not just the reactive `creating` flag: two
+  // taps inside one render cycle both read the same closed-over `creating ===
+  // false` and fire two sessions. The palette hit this exact bug and fixed it
+  // with a ref (CommandPalette.jsx:211-218); this screen never got the fix.
   const create = (cwd) => {
-    if (creating || !cwd) return;
+    if (inFlightRef.current || creating || !cwd) return;
+    inFlightRef.current = true;
     setCreating(true);
     onCreate?.(cwd);
   };
