@@ -3,6 +3,7 @@ import { Check, ChevronRight, Search, X } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
 import { deriveModelSpecs } from "../../data/selectors.js";
+import { Field } from "../../primitives/index.js";
 import { Segmented } from "../Segmented/Segmented.jsx";
 import { groupByProvider, specMatches } from "../ModelSelector/model-selector-model.js";
 import {
@@ -199,20 +200,12 @@ export function SubagentModels() {
       />
       {limited && (
         <div class="subagent-models-picker">
-          <div class="subagent-filter">
-            <Search size={15} aria-hidden="true" />
-            <input
-              type="search"
-              value={query}
-              onInput={(event) => setQuery(event.currentTarget.value)}
-              placeholder="Filter models…"
-              aria-label="Filter subagent models"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              spellcheck={false}
-            />
-            {query && (
+          <Field
+            variant="box"
+            size="lg"
+            class="subagent-filter"
+            leading={<Search size={15} />}
+            trailing={query ? (
               <button
                 type="button"
                 class="subagent-filter-clear"
@@ -221,8 +214,17 @@ export function SubagentModels() {
               >
                 <X size={14} aria-hidden="true" />
               </button>
-            )}
-          </div>
+            ) : null}
+            type="search"
+            value={query}
+            onInput={(event) => setQuery(event.currentTarget.value)}
+            placeholder="Filter models…"
+            aria-label="Filter subagent models"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck={false}
+          />
           <div class="subagent-models-tally">
             <span>
               {allowed.length} of {models.length} allowed

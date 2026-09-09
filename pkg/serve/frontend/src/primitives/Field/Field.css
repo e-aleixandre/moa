@@ -56,6 +56,13 @@
   outline-offset: var(--focus-ring-offset);
 }
 
+/* A field that reports itself invalid says so on the border, which now lives on
+   the wrapper. Driven off aria-invalid rather than a prop: the attribute has to
+   be there anyway for assistive tech, so this cannot drift out of sync with it. */
+.field:has(.field-input[aria-invalid="true"]) {
+  border-color: var(--red);
+}
+
 .field-affix {
   flex: none;
   display: inline-flex;

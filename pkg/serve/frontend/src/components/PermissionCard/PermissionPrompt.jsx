@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import { PermissionCard } from "./PermissionCard.jsx";
 import { resolvePermission, addPermissionRule } from "../../data/session-actions.js";
 import { formatArgs } from "../../data/util/format.js";
+import { Field } from "../../primitives/index.js";
 
 // PermissionPrompt — stateful container around the presentational PermissionCard
 // mock. Ports the semantics of the old SPA's permission-prompt-bar
@@ -105,7 +106,10 @@ export function PermissionPrompt({ session }) {
     >
       {ruleOpen && permissionMode === "auto" && (
         <div class="perm-inline-editor">
-          <input
+          <Field
+            variant="box"
+            size="md"
+            class="perm-inline-field"
             type="text"
             value={rule}
             onInput={(e) => setRule(e.currentTarget.value)}
@@ -124,7 +128,10 @@ export function PermissionPrompt({ session }) {
       )}
       {feedbackOpen && (
         <div class="perm-inline-editor">
-          <input
+          <Field
+            variant="box"
+            size="md"
+            class="perm-inline-field"
             type="text"
             value={feedback}
             onInput={(e) => setFeedback(e.currentTarget.value)}

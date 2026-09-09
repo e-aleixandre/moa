@@ -173,24 +173,15 @@
   margin-top: var(--space-3);
 }
 
-.perm-card .perm-inline-editor input {
+/* Field (box/md) draws the control. The card sets the surface (it sits on a
+   card, not on the page) and keeps the yellow focus border: a permission
+   prompt is a session waiting on you, and yellow is that state. */
+.perm-card .perm-inline-editor .perm-inline-field {
   flex: 1;
   background: var(--crust);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-family: var(--font);
-  font-size: var(--text-input);
-  padding: var(--space-2) var(--space-3);
-  outline: none;
 }
 
-.perm-card .perm-inline-editor input:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.perm-card .perm-inline-editor input:focus {
+.perm-card .perm-inline-editor .perm-inline-field:focus-within {
   border-color: var(--yellow);
 }
 

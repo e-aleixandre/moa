@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Plus, X } from "lucide-preact";
-import { Button } from "../../primitives/index.js";
+import { Button, Field } from "../../primitives/index.js";
 import { MAX_SECRET_ROWS, buildSecretBatch, secretRowsForAliases, storeSecretBatch } from "../../data/secrets.js";
 import "./SecretBatch.css";
 
@@ -60,13 +60,13 @@ export function SecretBatch({ open, sessionId, aliases, onClose, onStored }) {
               ) : (
                 <label class="secret-batch-field">
                   <span>Alias</span>
-                  <input type="text" value={row.name} onInput={(e) => changeRow(index, "name", e.currentTarget.value)} placeholder="e.g. db-produccion" aria-invalid={!!rowErrors.name} />
+                  <Field variant="box" size="lg" type="text" value={row.name} onInput={(e) => changeRow(index, "name", e.currentTarget.value)} placeholder="e.g. db-produccion" aria-invalid={!!rowErrors.name} />
                   {rowErrors.name && <small>{rowErrors.name}</small>}
                 </label>
               )}
               <label class="secret-batch-field secret-batch-value">
                 <span class="secret-batch-sr-only">Secret value for {row.name || "new secret"}</span>
-                <input ref={index === 0 ? firstValueRef : undefined} type="password" value={row.value} onInput={(e) => changeRow(index, "value", e.currentTarget.value)} placeholder="Secret value" aria-label={`Secret value for ${row.name || "new secret"}`} aria-invalid={!!rowErrors.value} autoComplete="off" />
+                <Field variant="box" size="lg" inputRef={index === 0 ? firstValueRef : undefined} type="password" value={row.value} onInput={(e) => changeRow(index, "value", e.currentTarget.value)} placeholder="Secret value" aria-label={`Secret value for ${row.name || "new secret"}`} aria-invalid={!!rowErrors.value} autoComplete="off" />
                 {rowErrors.value && <small>{rowErrors.value}</small>}
               </label>
               <button type="button" class="secret-batch-remove" onClick={() => removeRow(index)} aria-label={`Remove ${row.name || "new secret"}`}><X size={15} /></button>

@@ -129,31 +129,16 @@
   border-top: 1px solid var(--surface0);
 }
 
-.ask .ask-free input {
+/* Field (box/md) draws the control. Two things stay: it takes the free width,
+   and it borrows the card's yellow while focused — this card is a question
+   waiting on you, and yellow is what that state looks like everywhere else. */
+.ask .ask-free-field {
   flex: 1;
   background: var(--base);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-family: var(--font);
-  /* 16px minimum: anything smaller makes iOS zoom the page in when the field
-     takes focus. Same token the composer uses. */
-  font-size: var(--text-input);
-  padding: var(--space-2) var(--space-3);
-  outline: none;
 }
 
-.ask .ask-free input:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.ask .ask-free input:focus {
+.ask .ask-free-field:focus-within {
   border-color: var(--yellow);
-}
-
-.ask .ask-free input::placeholder {
-  color: var(--overlay0);
 }
 
 .ask .ask-free-submit {

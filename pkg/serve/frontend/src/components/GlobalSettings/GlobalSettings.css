@@ -92,41 +92,6 @@
   gap: var(--space-2);
 }
 
-.subagent-filter {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: var(--base);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-md);
-  color: var(--overlay0);
-}
-
-.subagent-filter:focus-within {
-  border-color: var(--surface2);
-}
-
-.subagent-filter input {
-  flex: 1;
-  min-width: 0;
-  background: none;
-  border: 0;
-  outline: none;
-  color: var(--text);
-  font-family: var(--font);
-  /* --text-input (16px) — anything smaller makes iOS zoom on focus. */
-  font-size: var(--text-input);
-  line-height: var(--leading-tight);
-}
-
-.subagent-filter input::placeholder {
-  color: var(--overlay0);
-}
-
-.subagent-filter input::-webkit-search-cancel-button {
-  display: none;
-}
 
 .subagent-filter-clear {
   display: grid;

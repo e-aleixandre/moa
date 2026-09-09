@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "preact/hooks";
 import { Users, ArrowUp, Check, Mic, Square, Loader2, ChevronUp } from "lucide-preact";
+import { Field } from "../../primitives/index.js";
 import "./AskUserCard.css";
 
 const isTextEntryTarget = (el) => {
@@ -87,7 +88,10 @@ export function AskUserCard({
         })}
       </div>
       <form class="ask-free" onSubmit={submitFree}>
-        <input
+        <Field
+          variant="box"
+          size="md"
+          class="ask-free-field"
           type="text"
           placeholder={voice?.supported ? "Answer in your own words, or hold to talk…" : placeholder}
           aria-label="Answer in your own words"
