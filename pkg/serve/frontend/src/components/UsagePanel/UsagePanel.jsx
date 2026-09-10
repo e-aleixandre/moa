@@ -86,7 +86,7 @@ export function UsagePanel({ session, usage, ctxPercent, costUSD }) {
         </div>
       )}
 
-      {(u.fiveHour || u.week || extra || (u.moneyBuckets || []).length) && (
+      {!!(u.fiveHour || u.week || extra || (u.moneyBuckets || []).length) && (
         <div class="usage-panel-group">
           {u.fiveHour && (
             <div class="usage-panel-row usage-panel-meter-row">

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "preact/hooks";
-import { Check, Copy } from "lucide-preact";
+import { Copy } from "lucide-preact";
 import { ModelSelector } from "../../../components/index.js";
+import { PermissionOptions } from "../../../components/PermissionControl/PermissionControl.jsx";
 import { statusStripModel } from "../../../data/util/status-strip-model.js";
 import {
   usageForSession,
@@ -39,7 +40,8 @@ import "./MobileStatusLine.css";
 //      WHERE" is answered by the tap instead of by a second screen.
 //   3. permission chip — the glanceable safety color AND the door. ONE tap
 //      reveals the complete YOLO/AUTO/ASK choice directly in the sheet (no
-//      intermediate chip, no second tap).
+//      intermediate chip, no second tap). The rows come from PermissionControl,
+//      so the two densities cannot drift apart.
 //   4. TokenFlow (RIGHT) — the per-run ↑/↓ heartbeat. NOT a door: it is the
 //      same shared component the desktop StatusStrip carries in the same
 //      corner, so "is it still chewing?" is answered identically on both.
@@ -54,13 +56,6 @@ import "./MobileStatusLine.css";
 // Every destination lays out real shared data (usageForSession / ModelSelector /
 // the canonical MODES / configureSession) in the mock's visual structure. Global
 // settings (notifications) live behind the SessionDrawer footer, not here.
-
-// Canonical permission modes — same copy/order as the shared PermissionControl.
-const PERM_MODES = [
-  { value: "yolo", label: "YOLO", desc: "Run everything — never ask" },
-  { value: "auto", label: "AUTO", desc: "Ask only for risky commands" },
-  { value: "ask", label: "ASK", desc: "Ask before every command" },
-];
 
 // Granularity of the context-limit slider, in percentage points. 5 rather than
 // 10 because the honest answer to "where should this compact?" is a number, not
@@ -193,7 +188,7 @@ function UsageSheetBody({ session, usage, busy }) {
         </div>
       )}
 
-      {(u.fiveHour || u.week || extra || (u.moneyBuckets || []).length) && (
+      {!!(u.fiveHour || u.week || extra || (u.moneyBuckets || []).length) && (
         <div class="msl-ugroup">
           {u.fiveHour && (
             <div class="msl-urow">
@@ -402,26 +397,11 @@ export function MobileStatusLine({ session, usage }) {
           scope="this session"
         >
           <div class="perm-sheet-list" role="menu" aria-label="Permission mode">
-            {PERM_MODES.map((m) => {
-              const on = m.value === permMode;
-              return (
-                <button
-                  key={m.value}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={on}
-                  class={`perm-menu-item${on ? " on" : ""}`}
-                  disabled={busy && !on}
-                  onClick={() => changePerm(m.value)}
-                >
-                  <span class="perm-menu-check" aria-hidden="true">{on && <Check />}</span>
-                  <span class="perm-menu-text">
-                    <span class={`perm-menu-label perm-${m.value}`}>{m.label}</span>
-                    <span class="perm-menu-desc">{m.desc}</span>
-                  </span>
-                </button>
-              );
-            })}
+            <PermissionOptions
+              mode={permMode}
+              onPick={changePerm}
+              isDisabled={(_value, on) => busy && !on}
+            />
           </div>
         </MobileSheet>
       )}
