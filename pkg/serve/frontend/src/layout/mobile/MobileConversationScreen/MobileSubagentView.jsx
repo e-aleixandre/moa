@@ -15,10 +15,10 @@ import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SubagentDetails } from "../../../components/index.js";
 import { useEdgeSwipeBack } from "../../../hooks/useEdgeSwipeBack.js";
 import { useSubagentTranscript } from "../../../hooks/useSubagentTranscript.js";
-// The now-line above the composer reuses MobileNowLine's rules verbatim (same
+// The live line above the composer reuses LiveBar's rules verbatim (same
 // grammar, different subject), so its stylesheet has to be in the graph even
 // though this screen doesn't render that component.
-import "./MobileNowLine.css";
+import "../../LiveBar/LiveBar.css";
 import "./MobileSubagentView.css";
 
 // MobileSubagentView — full-screen push counterpart of the desktop SubagentView
@@ -114,11 +114,14 @@ export function MobileSubagentView({ session, jobId, onBack }) {
       <div class="mcomposer msa-foot">
         {!view.terminal && (
           <>
-            <div class="mnowline" role="status" aria-live="polite">
-              <span class="mnowline-act">
-                <span class="txt is-live">{view.action || "working"}</span>
-              </span>
-              {view.elapsed && <span class="mnowline-elapsed">{view.elapsed}</span>}
+            <div class="livebar">
+              <div class="lb-bar">
+                <div class="lb-now" role="status" aria-live="polite">
+                  <span class="lb-dot is-working" aria-hidden="true" />
+                  <span class="lb-txt">{view.action || "working"}</span>
+                  {view.elapsed && <span class="lb-el">{view.elapsed}</span>}
+                </div>
+              </div>
             </div>
             <Composer
               key={`steer-${jobId}`}

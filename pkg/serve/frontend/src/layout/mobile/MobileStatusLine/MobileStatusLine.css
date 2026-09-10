@@ -4,7 +4,7 @@
    permission chip · Sessions), each its own hit area. Catppuccin tokens only; the
    ring is the canonical teal StatusStrip arc, the attention badge the GridToolbar
    `attn-lamp` grammar. Live activity is NOT here — it lives in the ephemeral
-   now-line above the composer (MobileNowLine). Each door opens the approved
+   live bar above the composer (LiveBar). Each door opens the approved
    bottom sheet (MobileSheet); the sheet-body styles below mirror fx.css. */
 .mstatusline {
   flex: none;

@@ -569,7 +569,7 @@ test('two sequential terminated subagents form one delegation block, two agents'
 // ── 6. LIVE async bash job → dock (liveTrayAgents), NOT an inline block ──────
 // Async bash used to render an inline `background` block; that block is retired
 // ("async in the dock, sync inline"). A live bash now only surfaces through
-// liveTrayAgents() for the LiveDock, and never appears in the stream projection.
+// liveTrayAgents() for the LiveBar, and never appears in the stream projection.
 test('a live async bash job goes to the dock, not an inline background block', () => {
   const s = session([assistant('Running build.')], {
     subagents: {

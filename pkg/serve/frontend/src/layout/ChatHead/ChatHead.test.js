@@ -46,7 +46,7 @@ test("the sidebar lives once; close is wired there, not per view", () => {
 test("grid panes share the status strip and put activity above the composer", () => {
   const paneGrid = readFileSync(new URL("../PaneGrid/PaneGrid.jsx", import.meta.url), "utf8");
   expect(paneGrid).toContain("<StatusStrip");
-  expect(paneGrid).toContain("<NowLine");
+  expect(paneGrid).toContain("<LiveBar");
   expect(paneGrid).not.toMatch(/<StatusStrip[\s\S]*\btask=/);
   expect(paneGrid).toContain("compact");
 });

@@ -15,7 +15,7 @@ import "./MobileComposer.css";
 // right. Sessions is NOT among them: that door is the floating title chip at the
 // top of the screen (MobileTitleChip). Live activity is not in the line either:
 // it lives in the ephemeral now-line rendered above this composer
-// (MobileNowLine). Each door opens the approved bottom sheet (MobileSheet),
+// (LiveBar). Each door opens the approved bottom sheet (MobileSheet),
 // which — per device feedback — covers the full mobile container (scrim + sheet
 // flush to the bottom), so the composer is never left exposed under it.
 //

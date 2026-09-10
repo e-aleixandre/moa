@@ -161,7 +161,7 @@ function normalizeSessionInfo(info, existing, visible) {
     // detailReturnView — where Back from bash/subagent detail should land
     // ("grid" when opened from the pane grid). Client UI-only; survives polls.
     detailReturnView: existing ? existing.detailReturnView : null,
-    // dockOpen is the LiveDock's per-session open/closed preference (client
+    // dockOpen is the LiveBar panel's per-session open/closed preference (client
     // UI-only, no server field): preserved across polls exactly like
     // viewingSubagent, so switching sessions and back doesn't reset it.
     dockOpen: existing ? existing.dockOpen : false,
@@ -474,7 +474,7 @@ export async function cancelBashJob(sessionId, jobId) {
 // live output, stop). Unlike openPersistedSubagent there is no disk fallback:
 // a bash job has no persisted transcript endpoint, and once it ends its output
 // lands inline in the conversation as a card — so this only opens jobs still
-// present in the store (i.e. the ones the LiveDock lists).
+// present in the store (i.e. the ones the LiveBar lists).
 export function openBashJob(id, jobId, opts = {}) {
   const sess = store.get().sessions[id];
   if (!sess || !sess.subagents || !sess.subagents[jobId]) return;

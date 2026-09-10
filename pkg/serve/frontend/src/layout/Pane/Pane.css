@@ -235,9 +235,8 @@
   flex: none;
 }
 
-.pane .p-dock .live-dock {
+.pane .p-dock .livebar {
   max-width: none;
-  padding: 0 var(--space-3) var(--space-2);
 }
 
 .pane .p-status .status-strip {
@@ -371,13 +370,6 @@
 .pane .p-body-live .stream .stream-col {
   max-width: none;
   padding: var(--space-4) var(--space-4) var(--space-5);
-}
-
-/* The pane's composer sits flush at the bottom; trim the conversation-screen
-   spacing so it fits a small panel. */
-.pane .nowline {
-  max-width: none;
-  padding: 0 var(--space-3) var(--space-2);
 }
 
 .pane .composer-wrap {

@@ -1,0 +1,353 @@
+/* LiveBar — the single row of live work between the transcript and the
+   composer, in every density. It replaces the two things that used to stack
+   here (the now-line and the live dock).
+
+   flex:none is the whole layout contract: the stream is the flexible sibling,
+   so the bar's mere presence REDUCES the stream's height — it pushes the
+   transcript up instead of overlaying it, and it never covers or tap-blocks the
+   composer below. Absent in repose (the component returns null → removed from
+   flow), so the layout shift is one row at most, never a jump over the input.
+
+   Deliberately not a header or a rail: no fill, no box, no full-width border on
+   the bar itself. It reads as the last, living line of the conversation. The
+   panel is the only surface, because it is a list you read. */
+.livebar {
+  flex: none;
+  min-width: 0;
+  width: 100%;
+  max-width: 844px;
+  margin: 0 auto;
+  padding: 0 var(--space-8) var(--space-2);
+  box-sizing: border-box;
+  container-type: inline-size;
+}
+
+.lb-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px; /* px: pointer-sized row; 44 on the phone */
+  min-width: 0;
+}
+
+/* The sentence: one verb, whoever owns it. Words carry the voice of the status
+   line; the counter is data. */
+.lb-now {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--subtext0);
+  overflow: hidden;
+  animation: lb-in 0.2s var(--ease);
+}
+
+@keyframes lb-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.lb-txt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* State is the dot, and only the dot. Sky breathes: alive. Amber is still: the
+   run is parked on you, and animating something that is not moving would lie. */
+.lb-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--sky);
+}
+
+.lb-dot.is-working {
+  animation: lb-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes lb-breathe {
+  50% { opacity: 0.4; }
+}
+
+.lb-now.is-waiting { color: var(--yellow); }
+.lb-now.is-waiting .lb-dot { background: var(--yellow); animation: none; }
+
+/* The background spotlight: the sentence belongs to a background item, so it is
+   prefixed with that item's identity mark and the item's name is the subject.
+   It crossfades when the spotlight moves — opacity only. */
+.lb-spot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  animation: lb-arrive 260ms var(--ease);
+}
+
+@keyframes lb-arrive {
+  from { opacity: 0; }
+}
+
+.lb-who {
+  font-weight: var(--weight-semibold);
+}
+
+.lb-txt.is-data {
+  font-family: var(--mono);
+  color: var(--overlay1);
+}
+
+/* The elapsed counter — the honest progress signal (formatElapsed: "12s",
+   "1m03s"). Never truncates, always tabular. */
+.lb-el {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* Identity marks. A subagent is a dot in its own fanout hue — identity, never a
+   state colour. A command is a mono `$`: neutral, and it says "shell" without
+   an icon. */
+.lb-id {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  line-height: 1;
+  color: var(--overlay1);
+}
+
+.lb-id.is-agent::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--lb-accent, var(--blue));
+}
+
+/* The tally: the door to the panel. It only exists while something async is
+   alive. A control-tone chip with the identity marks, the count and a chevron
+   pointing where the panel will open. */
+.lb-tally {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 26px;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  background: var(--mantle);
+  color: var(--subtext0);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.lb-tally:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+@media (hover: hover) {
+  .lb-tally:hover { background: var(--surface0); color: var(--text); }
+}
+
+.lb-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.lb-dots .lb-id { width: 10px; }
+
+/* In the cluster a command is a neutral dot, not a `$`: two of them side by
+   side read as a price. The glyph stays where the item stands alone. */
+.lb-dots .lb-id.is-bash { font-size: 0; }
+.lb-dots .lb-id.is-bash::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: var(--overlay0);
+}
+
+.lb-chev {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  color: var(--overlay1);
+}
+
+/* The panel: a recess ABOVE the bar, so opening it leaves the tally where it
+   was rather than shoving it under the thumb. Capped and scrolling inside
+   itself, so N live jobs can never eat the conversation. */
+.lb-panel {
+  max-height: 198px; /* px: the cap measured in the lab — see the header note */
+  margin: 0 0 var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  background: var(--mantle);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  animation: lb-unfold 180ms var(--ease);
+  transform-origin: bottom;
+}
+
+@keyframes lb-unfold {
+  from { opacity: 0; transform: translateY(6px); }
+}
+
+.lb-grp-h {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+
+.lb-grp:first-child .lb-grp-h { margin-top: 0; }
+.lb-grp-n { letter-spacing: 0; }
+
+.lb-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 32px; /* px: pointer row; 44 on the phone */
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--subtext0);
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+div.lb-row { cursor: default; }
+
+.lb-row:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-ring-width));
+}
+
+@media (hover: hover) {
+  button.lb-row:hover { background: var(--surface0); color: var(--text); }
+  button.lb-row:hover .lb-go { color: var(--subtext0); }
+}
+
+.lb-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.lb-row-t {
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lb-row-t.is-data {
+  font-family: var(--mono);
+  font-weight: var(--weight-normal);
+  color: var(--overlay1);
+}
+
+.lb-row-d {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  color: var(--overlay0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lb-go {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  color: var(--overlay0);
+}
+
+/* Dense (a pane): everything one notch tighter, and the row's second line goes
+   — in a pane the name is what identifies the job. */
+.livebar.is-dense { padding: 0 var(--space-3) var(--space-1); }
+.livebar.is-dense .lb-row-d { display: none; }
+.livebar.is-dense .lb-panel { max-height: 160px; }
+
+/* Phone: the bar, the tally and every panel row are a full 44 for the thumb.
+   The tally's chip look comes from its own inner surface, not from shrinking
+   the control — a transparent halo does not answer elementFromPoint, so a
+   target made that way exists on paper only. position:relative is what anchors
+   that inner surface to THIS button instead of the bar. */
+@media (max-width: 767px) {
+  .livebar { padding: 0 var(--space-4) var(--space-2); }
+  .lb-bar { min-height: 44px; }
+  .lb-row { min-height: 44px; }
+  .lb-panel { max-height: 232px; }
+  .lb-tally {
+    position: relative;
+    /* 44 in BOTH axes. Measured: with only a count and a chevron the chip came
+       out 36px wide, which is a target on paper and a miss under a thumb. */
+    min-width: 44px;
+    height: 44px;
+    justify-content: center;
+    padding: 0 var(--space-1);
+    border: 0;
+    background: transparent;
+  }
+  .lb-tally > * { position: relative; }
+  .lb-tally::before {
+    content: "";
+    position: absolute;
+    inset: 8px 0;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--surface0);
+    background: var(--mantle);
+  }
+}
+
+/* Degradation by the bar's own width: the tally loses its dots first (the count
+   says the same thing), then the counter goes. The verb is the last thing, and
+   it only truncates. */
+@container (max-width: 420px) {
+  .lb-dots { display: none; }
+  .lb-tally { padding-left: var(--space-2); }
+}
+
+@container (max-width: 340px) {
+  .lb-now > .lb-el, .lb-spot > .lb-el { display: none; }
+}
+
+/* Reduced motion — no shimmerless deception to preserve here, just stillness:
+   the bar still appears and disappears, only without the reveal. */
+@media (prefers-reduced-motion: reduce) {
+  .lb-now, .lb-spot, .lb-panel { animation: none; }
+  .lb-dot { animation: none; }
+}

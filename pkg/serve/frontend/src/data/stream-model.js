@@ -107,7 +107,7 @@
 //     blocks the conversation, so it joins this turn's delegation block like a
 //     terminated one; an ASYNC subagent, and ALL bash (kind:'bash' is always
 //     async background work), never appear inline — they only surface through
-//     liveTrayAgents() for the LiveDock. There is NO `background` block: async
+//     liveTrayAgents() for the LiveBar. There is NO `background` block: async
 //     bash lives in the dock permanently, never as a loose inline strip. Anything
 //     whose job_id already appears in messages is skipped (dedup — completed
 //     entries also linger in the map).
@@ -453,7 +453,7 @@ export function projectStream(session) {
     // rows — the conversation is paused on them, so they belong inline
     // ("async in the dock, sync inline"). ASYNC live subagents, and ALL live
     // bash (kind:'bash' is always async background work), are NOT pushed
-    // inline: they only surface through liveTrayAgents() for the LiveDock.
+    // inline: they only surface through liveTrayAgents() for the LiveBar.
     // The block is `settled:false` while at least one agent is still running
     // so the renderer keeps it live (hairline sweep, breathing dots) instead
     // of auto-collapsing (SUBAGENTS-REDESIGN-SPEC §1.3).
@@ -632,7 +632,7 @@ function isTerminalSubagent(subagent) {
   return subagent.status === 'completed' || subagent.status === 'failed' || subagent.status === 'cancelled';
 }
 
-// liveTrayAgents projects a session into the LiveDock's chip descriptors: the
+// liveTrayAgents projects a session into the LiveBar's chip descriptors: the
 // LIVE ASYNC subagents (each carrying its fanout identity accent) followed by
 // ALL live bash jobs (no identity accent: spinner overlay1 + mono
 // `bash`; kind:'bash' is always async background work). SYNC subagents are
@@ -705,7 +705,7 @@ function firstMeaningfulLine(str) {
 }
 
 // subagentLabel is the ONE identity rule for a subagent across every surface
-// (LiveDock chip, inline delegation row, terminated card, SubagentView
+// (LiveBar chip, inline delegation row, terminated card, SubagentView
 // breadcrumb): the backend-generated title first, then the first meaningful
 // line of the task, then the model, then the job id. Surfaces used to
 // reimplement it and diverged — a titled child showed its title only in
@@ -974,7 +974,7 @@ export function liveAgent(sub, i) {
 // { kind:'delegation' } block: live subs mutate in place and terminated ones
 // fold to a ✓/✗ row with a short result chip — instead of the old pile of raw
 // subagent ledger rows + system line + toast + fanout. Only SYNC live subs are
-// projected inline; async live subs (and all bash) live in the LiveDock, not
+// projected inline; async live subs (and all bash) live in the LiveBar, not
 // here ("async in the dock, sync inline"). Terminated cards of BOTH kinds fold
 // inline as history so nothing an agent did is ever lost.
 

@@ -1,6 +1,6 @@
 /* BashJobView — read-only detail of a background bash job. Deliberately the
    same frame as SubagentView (header → subject card → body → outcome), so the
-   two things the LiveDock can open feel like one family; the difference is
+   two things the LiveBar can open feel like one family; the difference is
    that there is nothing to write here, so the composer slot simply does not
    exist. */
 .bashjob-view {

@@ -5,7 +5,7 @@ import {
   StreamingSkeleton,
   PermissionCard,
 } from "../components/index.js";
-import { Composer, StatusStrip, Pane, GridToolbar, LiveDock } from "../layout/index.js";
+import { Composer, StatusStrip, Pane, GridToolbar, LiveBar } from "../layout/index.js";
 import { StateDot } from "../primitives/index.js";
 import "./live-states-gallery.css";
 
@@ -154,20 +154,20 @@ function LiveDockSection() {
   return (
     <section class="lsg-section">
       <h2>
-        Live Dock <span class="alt">async never lost · compact bar ⇄ expanded panel · shown only when the block is off-screen</span>
+        Live Bar <span class="alt">one sentence · one tally · the panel behind it</span>
       </h2>
 
       <div class="lsg-dock-frame">
-        <span class="lsg-dock-tag">compact (spotlight rotates every 4s)</span>
-        <LiveDock agents={LIVE_DOCK_AGENTS} onOpen={() => {}} />
+        <span class="lsg-dock-tag">background only (the spotlight rotates every 4s)</span>
+        <LiveBar session={{ state: "idle" }} agents={LIVE_DOCK_AGENTS} onOpen={() => {}} />
       </div>
 
       <p class="lsg-caption">
-        <b>Live Dock</b> is the delegation block peeking above the composer once you've scrolled its
-        inline surface out of view. Identity dots + count on the left, a rotating spotlight of what one
-        live thing is doing in the middle; tap to expand into one row per live agent/bash (same visual
-        language as the block), each with a <code>↑</code> jump back to its point in the stream. It only
-        exists while something is alive AND off-screen — scroll back to the block and it retracts.
+        <b>Live Bar</b> is the single row of live work above the composer. The sentence belongs to the
+        foreground run whenever there is one; only when the foreground is idle does the background take
+        it, with a spotlight rotating across the live async work — never two verbs at once. The tally on
+        the right exists only while something async is alive, and is the door to the panel: one row per
+        live thing, grouped by kind, each opening its own screen.
       </p>
     </section>
   );

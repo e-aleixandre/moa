@@ -15,7 +15,7 @@ import { tokenFlowVariant } from "./status-strip-view-model.js";
 // side as the mobile line), the model (same pill as mobile, here instead of
 // in the header), per-run tokens, the permission chip, fast mode when it's on,
 // and the modes that are currently ACTIVE (goal/tasks) plus the on-extra alert.
-// The foreground run's ACTIVITY is not here: it lives in the NowLine above the
+// The foreground run's ACTIVITY is not here: it lives in the LiveBar above the
 // composer. Compact density (phone, grid pane) is the same line with less
 // padding and without goal/tasks pills.
 export function StatusStrip({

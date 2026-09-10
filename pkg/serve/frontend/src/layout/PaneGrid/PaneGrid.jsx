@@ -5,8 +5,7 @@ import { Pane } from "../Pane/Pane.jsx";
 import { Stream } from "../Stream/Stream.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
-import { NowLine } from "../NowLine/NowLine.jsx";
-import { LiveDock } from "../LiveDock/LiveDock.jsx";
+import { LiveBar } from "../LiveBar/LiveBar.jsx";
 import {
   McpBanner, PermissionPrompt, AskUserPrompt, UsagePanel, ModelSelector, ArtifactsPaneButton,
 } from "../../components/index.js";
@@ -397,14 +396,13 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
       blocking={blocking}
       bodyLive
       composer={(
-        <>
-          <NowLine session={session} />
-          <Composer key={session.id} sessionId={session.id} session={session} compact onSecret={(aliases) => onSecret(session.id, aliases)} />
-        </>
+        <Composer key={session.id} sessionId={session.id} session={session} compact onSecret={(aliases) => onSecret(session.id, aliases)} />
       )}
-      dock={liveAgents.length > 0 && (
-        <LiveDock
+      dock={(
+        <LiveBar
+          session={session}
           agents={liveAgents}
+          dense
           open={!!session.dockOpen}
           onToggle={(next) => updateSession(session.id, { dockOpen: next })}
           onOpen={async (jobId, kind) => {

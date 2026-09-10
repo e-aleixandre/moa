@@ -5,7 +5,7 @@ import { RunModeChip, SubagentDetails } from "../../components/index.js";
 import { Stream } from "../Stream/Stream.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { Composer } from "../Composer/Composer.jsx";
-import "../NowLine/NowLine.css";
+import "../LiveBar/LiveBar.css";
 import { subagentView, canPromote } from "../../data/subagent-view-model.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { fmtTokens, copyToClipboard, sessionTitle } from "../../data/util/format.js";
@@ -161,11 +161,14 @@ export function SubagentView({ session, jobId, onBack }) {
       ) : (
         <>
           {(view.action || view.elapsed) && (
-            <div class="nowline" role="status" aria-live="polite">
-              <span class="nowline-act">
-                <span class="txt is-live">{view.action || "working"}</span>
-              </span>
-              {view.elapsed && <span class="nowline-elapsed">{view.elapsed}</span>}
+            <div class="livebar">
+              <div class="lb-bar">
+                <div class="lb-now" role="status" aria-live="polite">
+                  <span class="lb-dot is-working" aria-hidden="true" />
+                  <span class="lb-txt">{view.action || "working"}</span>
+                  {view.elapsed && <span class="lb-el">{view.elapsed}</span>}
+                </div>
+              </div>
             </div>
           )}
           <Composer

@@ -4,7 +4,7 @@ import { Spine } from "../layout/Spine/Spine.jsx";
 import { ChatHead } from "../layout/ChatHead/ChatHead.jsx";
 import { Composer } from "../layout/Composer/Composer.jsx";
 import { StatusStrip } from "../layout/StatusStrip/StatusStrip.jsx";
-import { NowLine } from "../layout/NowLine/NowLine.jsx";
+import { LiveBar } from "../layout/LiveBar/LiveBar.jsx";
 import { MobileTitleChip } from "../layout/mobile/MobileTitleChip/MobileTitleChip.jsx";
 import { SessionDrawer } from "../layout/mobile/SessionDrawer/SessionDrawer.jsx";
 import { UserWaypoint, AssistantDocument, ActivityLedger } from "../components/index.js";
@@ -19,7 +19,7 @@ import "./skins-lab.css";
 // skins-lab — the STYLE axis only, with the screen architecture frozen.
 //
 // Every frame here is built from the production components (Spine, ChatHead,
-// Composer, StatusStrip, NowLine, SessionDrawer, MobileTitleChip, the stream
+// Composer, StatusStrip, LiveBar, SessionDrawer, MobileTitleChip, the stream
 // blocks) fed by the redesign fixtures through the real selectors. A skin is a
 // class on the frame (.sk-<key>) and a block of CSS overrides in
 // skins-lab.css: nothing moves, nothing is regrouped, no control is added or
@@ -199,7 +199,7 @@ export function SkinDesktop({ skin, variant = "" }) {
             </div>
           </div>
         </div>
-        <NowLine session={RUN_SESSION} />
+        <LiveBar session={RUN_SESSION} />
         <Composer sessionId={`sk-${skin}-desk`} session={RUN_SESSION} />
         <div class="status-strip-anchor">
           <Strip />
@@ -265,7 +265,7 @@ export function SkinsLab() {
         <h1>moa studio · <em>ambient</em></h1>
         <p>
           La dirección de estilo elegida, sobre la arquitectura actual: son los componentes de
-          producción (Spine, SessionDrawer, ChatHead, Composer, StatusStrip, NowLine, los bloques
+          producción (Spine, SessionDrawer, ChatHead, Composer, StatusStrip, LiveBar, los bloques
           del stream) con los mismos datos ({DRAWER.activeCount} abiertas · {DRAWER.savedCount}{" "}
           guardadas, seis estados) y una hoja de overrides con ámbito. Nada cambia de sitio.
           El estilo actual se ve en <a href="?view=desktop">Desktop</a> y{" "}

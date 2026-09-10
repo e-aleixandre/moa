@@ -2,12 +2,11 @@ import { useState, useEffect, useRef, useCallback, useLayoutEffect } from "preac
 import { createPortal } from "preact/compat";
 import { ChatHead } from "../ChatHead/ChatHead.jsx";
 import { Stream } from "../Stream/Stream.jsx";
-import { LiveDock } from "../LiveDock/LiveDock.jsx";
+import { LiveBar } from "../LiveBar/LiveBar.jsx";
 import { SubagentView } from "../SubagentView/SubagentView.jsx";
 import { BashJobView } from "../BashJobView/BashJobView.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
-import { NowLine } from "../NowLine/NowLine.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, UsagePanel, Sheet, ArtifactsEntry, SessionPanel } from "../../components/index.js";
@@ -305,25 +304,23 @@ export function ConversationScreen() {
                 {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
               </div>
             )}
-            {/* Live Dock — the permanent home for live async work ("async in
-                the dock, sync inline"). Shown whenever there's async work; its
-                open/closed state persists per session (session.dockOpen). */}
-            {liveAgents.length > 0 && (
-              <LiveDock
-                agents={liveAgents}
-                open={!!session.dockOpen}
-                onToggle={(next) => updateSession(session.id, { dockOpen: next })}
-                onOpen={(id, kind) => (kind === "bash"
-                  ? openBashJob(session.id, id)
-                  : openPersistedSubagent(session.id, id))}
-              />
-            )}
-            {/* The activity now-line sits ABOVE the input, as on mobile: what
-                is happening NOW belongs next to where you'd interrupt it, while
-                the strip below keeps the standing telemetry (context, cost,
-                permissions, MCP, tokens). flex:none, so it pushes the stream up
-                instead of overlaying the composer. */}
-            <NowLine session={session} />
+            {/* One bar of live work, right above the input: what is happening
+                NOW belongs next to where you'd interrupt it, while the strip
+                below keeps the standing telemetry (context, cost, permissions,
+                MCP, tokens). The foreground owns the sentence; the background
+                takes it only when the foreground is silent, and its tally is
+                the door to the panel. The panel's open state persists per
+                session (session.dockOpen). flex:none, so it pushes the stream
+                up instead of overlaying the composer. */}
+            <LiveBar
+              session={session}
+              agents={liveAgents}
+              open={!!session.dockOpen}
+              onToggle={(next) => updateSession(session.id, { dockOpen: next })}
+              onOpen={(id, kind) => (kind === "bash"
+                ? openBashJob(session.id, id)
+                : openPersistedSubagent(session.id, id))}
+            />
             <Composer key={session.id} sessionId={session.id} session={session} onSecret={setSecretAliases} />
             <div class="status-strip-anchor" ref={usageAnchorRef}>
               <StatusStrip

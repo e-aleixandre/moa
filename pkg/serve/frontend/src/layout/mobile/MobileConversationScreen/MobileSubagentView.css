@@ -1,6 +1,6 @@
 /* MobileSubagentView — full-screen push over the mobile
    conversation, wearing the parent's chrome: the composer sits in the
-   `.mcomposer` pill, with `.mnowline` above it and `.mstatusline` below, all
+   `.mcomposer` pill, with `.livebar` above it and `.mstatusline` below, all
    three from the parent's own stylesheets. Bespoke here: the one-row header,
    the sibling strip, the task-card label and the terminal outcome banner. */
 .msa {
@@ -133,8 +133,8 @@
   margin-bottom: var(--space-1);
 }
 
-/* Foot: now-line, composer, status line — the parent's stack, wearing the
-   parent's rules (.mnowline from MobileNowLine.css, .mstatusline from
+/* Foot: live bar, composer, status line — the parent's stack, wearing the
+   parent's rules (.livebar from LiveBar.css, .mstatusline from
    MobileStatusLine.css). Nothing is restyled here; if it looked different, the
    two screens would have drifted. */
 .msa-foot { flex: none; }

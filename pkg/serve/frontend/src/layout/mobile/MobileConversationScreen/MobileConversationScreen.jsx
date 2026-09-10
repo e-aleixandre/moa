@@ -18,11 +18,10 @@ import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
-import { MobileNowLine } from "./MobileNowLine.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import { MobileBashJobView } from "./MobileBashJobView.jsx";
 import { MobileInboxView } from "./MobileInboxView.jsx"; // wake-on-event
-import { LiveDock } from "../../LiveDock/LiveDock.jsx";
+import { LiveBar } from "../../LiveBar/LiveBar.jsx";
 import { selectMobileChrome } from "./chrome.js";
 import "./MobileConversationScreen.css";
 
@@ -34,7 +33,7 @@ import "./MobileConversationScreen.css";
 //
 // There is no header and no session tab bar. The screen is a column: the
 // transcript takes the space, then the ephemeral activity now-line
-// (MobileNowLine) while the agent works, then the composer with the status line
+// (LiveBar) while the agent works, then the composer with the status line
 // under it. Two things float over that column: the title chip at the top
 // (MobileTitleChip — the session's name, and the door to the session list) and
 // whatever overlay is open.
@@ -259,18 +258,21 @@ function MobileConversationBody({ forceMobile = false }) {
               {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
             </div>
           )}
-          {liveAgents.length > 0 && (
-            <LiveDock
-              agents={liveAgents}
-              open={!!session.dockOpen}
-              onToggle={(next) => updateSession(session.id, { dockOpen: next })}
-              onOpen={(id, kind) => (kind === "bash"
-                ? openBashJob(session.id, id)
-                : openPersistedSubagent(session.id, id))}
-              forceCompact={kbdOpen}
-            />
-          )}
-          <MobileNowLine session={session} />
+          {/* One bar of live work between the transcript and the composer: the
+              foreground run owns the sentence, the background takes it only
+              when the foreground is silent, and the tally is the door to the
+              panel. While the keyboard is up the panel stays shut (writing
+              wins) without losing the stored preference. */}
+          <LiveBar
+            session={session}
+            agents={liveAgents}
+            open={!!session.dockOpen}
+            onToggle={(next) => updateSession(session.id, { dockOpen: next })}
+            onOpen={(id, kind) => (kind === "bash"
+              ? openBashJob(session.id, id)
+              : openPersistedSubagent(session.id, id))}
+            forceCompact={kbdOpen}
+          />
           <MobileComposer key={session.id} session={session} usage={usage} onSecret={setSecretAliases} />
         </>
       );
