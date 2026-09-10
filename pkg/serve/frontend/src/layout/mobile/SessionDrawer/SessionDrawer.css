@@ -25,11 +25,11 @@
   opacity: 1;
 }
 
-/* The panel hangs from just under the chip (which sits at top:12px and is ~30px
-   tall), inset from both edges so it reads as a dropdown rather than a page. */
+/* The panel hangs from just under the header capsules (top:12px, 44px tall),
+   inset from both edges so it reads as a dropdown rather than a page. */
 .sdrawer {
   position: absolute;
-  top: 50px;
+  top: 64px;
   left: 12px;
   right: 12px;
   max-height: 78%;

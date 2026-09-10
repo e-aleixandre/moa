@@ -12,7 +12,7 @@ import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, openInbox, 
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
 import { LivePreview } from "../../../components/LivePreview/LivePreview.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
-import { MobileTitleChip } from "../MobileTitleChip/MobileTitleChip.jsx";
+import { MobileChrome } from "../MobileChrome/MobileChrome.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
@@ -31,11 +31,11 @@ import "./MobileConversationScreen.css";
 // content components (via MobileStream) + the REAL Composer + the persistent
 // mobile chrome (MobileStatusLine, hosted inside MobileComposer).
 //
-// There is no header and no session tab bar. The screen is a column: the
+// There is no header bar and no session tab bar. The screen is a column: the
 // transcript takes the space, then the ephemeral activity now-line
 // (LiveBar) while the agent works, then the composer with the status line
-// under it. Two things float over that column: the title chip at the top
-// (MobileTitleChip — the session's name, and the door to the session list) and
+// under it. Two things float over that column: the header's three capsules at
+// the top (MobileChrome — sessions, this session's name, new session) and
 // whatever overlay is open.
 //
 // The screen owns only the OVERLAYS it opens (the SessionDrawer and the
@@ -360,11 +360,12 @@ function MobileSessionChrome({ version, forceMobile = false }) {
   return (
     <>
       {chrome.showChip && !chrome.inboxOpen && (
-        <MobileTitleChip
+        <MobileChrome
           title={chrome.title}
           attention={chrome.attention}
           open={chrome.drawerOpen}
           onToggle={setDrawerOpen}
+          onNew={() => openDrawer("new")}
           inboxCount={inboxCount}
         />
       )}

@@ -1,15 +1,20 @@
 import { useState } from "preact/hooks";
-import { MobileTitleChip } from "../layout/mobile/MobileTitleChip/MobileTitleChip.jsx";
+import { MobileChrome } from "../layout/mobile/MobileChrome/MobileChrome.jsx";
 import { SessionDrawer } from "../layout/mobile/SessionDrawer/SessionDrawer.jsx";
 import "./responsive-lab.css";
 import "./title-attention-lab.css";
 
 // TitleAttentionLab — catalog-only exploration of four treatments for the
-// mobile unread-results indicator on the REAL MobileTitleChip. Every specimen
-// mounts the shipped component (and, for the drawer fixture, the shipped
-// SessionDrawer); the experimental styling lives in title-attention-lab.css
-// behind `.title-attn-lab--*` wrapper classes that target the production
-// markup, so nothing here touches production CSS or components.
+// mobile unread-results indicator on the REAL mobile header (MobileChrome).
+// Every specimen mounts the shipped component (and, for the drawer fixture, the
+// shipped SessionDrawer); the experimental styling lives in
+// title-attention-lab.css behind `.title-attn-lab--*` wrapper classes that
+// target the production markup, so nothing here touches production CSS or
+// components.
+//
+// The indicator's home is the header's SESSIONS capsule (`.mcap-left`), not the
+// title: it says "another session wants you", so it rides the button that goes
+// to those sessions. The specimens follow it there.
 //
 // Ground rules mirrored from production: opening the drawer does NOT clear
 // unread, there are never count badges (several unread must look identical to
@@ -113,20 +118,21 @@ function ChipSpecimen({ variant, fixture, width, replay }) {
       </header>
       <div class={`talab-frame talab-frame--${fixture.id} title-attn-lab--${variant.id}`}>
         <TranscriptFiller />
-        <MobileTitleChip
+        <MobileChrome
           key={variant.id.startsWith("arrival") ? replay : undefined}
           title="ws race fix"
           attention={fixture.attn}
           onToggle={noop}
+          onNew={noop}
         />
       </div>
     </article>
   );
 }
 
-// DrawerSpecimen — the chip in its open state with the REAL SessionDrawer
+// DrawerSpecimen — the header in its open state with the REAL SessionDrawer
 // unfurled beneath it, two "New results" entries showing. The unread signal
-// stays on the chip: opening the drawer does not clear it.
+// stays on the sessions capsule: opening the drawer does not clear it.
 function DrawerSpecimen({ variant, width, replay }) {
   return (
     <article class="responsive-specimen talab-specimen" style={{ width: `${width.width}px` }}>
@@ -135,12 +141,13 @@ function DrawerSpecimen({ variant, width, replay }) {
       </header>
       <div class={`talab-frame talab-frame--drawer title-attn-lab--${variant.id}`}>
         <TranscriptFiller />
-        <MobileTitleChip
+        <MobileChrome
           key={variant.id.startsWith("arrival") ? replay : undefined}
           title="ws race fix"
           attention={DRAWER_ATTN}
           open
           onToggle={noop}
+          onNew={noop}
         />
         <SessionDrawer
           open
@@ -174,11 +181,12 @@ function KeyboardSpecimen({ variant, replay }) {
       </header>
       <div class={`talab-frame talab-frame--keyboard title-attn-lab--${variant.id}`}>
         <TranscriptFiller />
-        <MobileTitleChip
+        <MobileChrome
           key={variant.id.startsWith("arrival") ? replay : undefined}
           title="ws race fix"
           attention={{ unseen: 1, urgent: 0 }}
           onToggle={noop}
+          onNew={noop}
         />
         <div class="talab-composer">
           <textarea
@@ -216,7 +224,7 @@ export function TitleAttentionLab() {
       <h2>Mobile title attention</h2>
       <p>
         Four alternative treatments for the cross-session unread indicator on the
-        real MobileTitleChip. Styling is scoped to catalog-only wrapper classes
+        real mobile header. Styling is scoped to catalog-only wrapper classes
         over the production markup — several unread looks identical to one (no
         counts), urgent keeps the untouched production peach, and opening the
         drawer never clears unread.

@@ -1,0 +1,121 @@
+/* MobileChrome — the three capsules across the top of the phone.
+
+   Catalogue: .zl-chrome, a 44px row inset 12px from both edges with 8px between
+   its three children. Every value here is that row's measured value, not an
+   approximation of it: 44px tall (the touch floor the rest of the phone already
+   respects), 16px radius (the one radius family — a full capsule was the old
+   pill's own idea), and the title at 16px, which makes the name of the session
+   the largest thing on the screen instead of the smallest.
+
+   Structure lives here, unconditionally: with the Ambient switch off the three
+   capsules are still three capsules, they just wear the old --base surface. The
+   skin (the exact rgba(30,30,41,0.82) glass) is in tokens/ambient.css, like
+   every other Ambient material. */
+
+.mchrome {
+  position: absolute;
+  /* the row clears the iOS status bar in an installed PWA, exactly as the lone
+     chip did before it — it is still the topmost thing on the screen */
+  top: calc(12px + env(safe-area-inset-top));
+  left: var(--space-3);
+  right: var(--space-3);
+  z-index: calc(var(--z-sheet) - 1);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+
+/* Only the capsules take the taps. The row spans the full width so the three
+   sit at their edges, and the gaps between them are transcript, not chrome. */
+.mchrome > * {
+  pointer-events: auto;
+}
+
+/* The shared capsule: the side buttons and the title chip are the same object
+   at two widths, which is what makes the header read as one row. */
+.mcap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--control-touch);
+  height: var(--control-touch);
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--surface2) 70%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--base) 82%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-sm);
+  color: var(--subtext1);
+  font-family: var(--font);
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+
+.mcap:active {
+  transform: scale(0.96);
+}
+
+.mcap:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Attention — another session needs you. Same dot, same colours and the same
+   finite ripple the chip carried; it moves onto the door that leads to those
+   sessions. Positioned against the capsule, which is why the capsule is
+   relative: an absolute badge on a static button anchors to whatever ancestor
+   happens to be positioned, which on this screen is the whole conversation. */
+.mcap-left {
+  position: relative;
+}
+
+.mcap-badge {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--mcap-attn-color);
+  border: 2px solid var(--base);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--mcap-attn-color) 70%, transparent);
+}
+.mcap-attention-unseen { --mcap-attn-color: var(--mauve); }
+.mcap-attention-permission { --mcap-attn-color: var(--yellow); }
+.mcap-attention-error { --mcap-attn-color: var(--red); }
+
+.mcap-badge::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border: 2px solid var(--mcap-attn-color);
+  border-radius: var(--radius-full);
+  opacity: 0;
+  animation: mcap-arrival-ripple 700ms var(--ease) 2;
+}
+
+@keyframes mcap-arrival-ripple {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mcap {
+    transition: none;
+  }
+
+  .mcap-badge::before {
+    animation: none;
+    opacity: 0.6;
+    transform: scale(1.6);
+  }
+}

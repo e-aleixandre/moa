@@ -5,7 +5,7 @@ import { ChatHead } from "../layout/ChatHead/ChatHead.jsx";
 import { Composer } from "../layout/Composer/Composer.jsx";
 import { StatusStrip } from "../layout/StatusStrip/StatusStrip.jsx";
 import { LiveBar } from "../layout/LiveBar/LiveBar.jsx";
-import { MobileTitleChip } from "../layout/mobile/MobileTitleChip/MobileTitleChip.jsx";
+import { MobileChrome } from "../layout/mobile/MobileChrome/MobileChrome.jsx";
 import { SessionDrawer } from "../layout/mobile/SessionDrawer/SessionDrawer.jsx";
 import { UserWaypoint, AssistantDocument, ActivityLedger } from "../components/index.js";
 import { drawerSessions, drawerProjects } from "../layout/mobile/MobileConversationScreen/chrome.js";
@@ -19,7 +19,7 @@ import "./skins-lab.css";
 // skins-lab — the STYLE axis only, with the screen architecture frozen.
 //
 // Every frame here is built from the production components (Spine, ChatHead,
-// Composer, StatusStrip, LiveBar, SessionDrawer, MobileTitleChip, the stream
+// Composer, StatusStrip, LiveBar, SessionDrawer, MobileChrome, the stream
 // blocks) fed by the redesign fixtures through the real selectors. A skin is a
 // class on the frame (.sk-<key>) and a block of CSS overrides in
 // skins-lab.css: nothing moves, nothing is regrouped, no control is added or
@@ -139,11 +139,12 @@ export function SkinPhone({ skin, drawer = false, variant = "" }) {
         />
         <Strip compact />
       </div>
-      <MobileTitleChip
+      <MobileChrome
         title={ACTIVE_TITLE}
         attention={{ permission: 1, error: 1, urgent: 1 }}
         open={drawerOpen}
         onToggle={setDrawerOpen}
+        onNew={noop}
         inboxCount={INBOX_COUNT}
       />
       <SessionDrawer

@@ -46,6 +46,10 @@
 
   /* one radius family */
   --amb-r-panel: 24px;
+  /* The largest control radius: the phone's header capsules and the composer.
+     The catalogue's --zl-r-lg, and the reason it is not --radius-lg (14px):
+     these are the two surfaces measured side by side against it. */
+  --amb-r-lg: 16px;
   --amb-r-row: 12px;
   --amb-r-ctl: 10px;
   /* the smallest step, for wells nested inside a control-sized surface (a log
@@ -324,11 +328,35 @@
   color: var(--amb-text-3);
 }
 
-/* The chip's own parts */
-[data-ambient="on"] .mtchip-chev { background: var(--amb-on); }
-[data-ambient="on"] .mtchip.is-open .mtchip-chev { background: rgba(255, 255, 255, 0.16); }
+/* ── The header's three capsules ───────────────────────────────────────────
+   They hover over a scrolling transcript, so they have to separate themselves
+   from whatever passes underneath. At the app's 72% the words behind them
+   stayed legible through the glass; over an aurora that is worse, because what
+   is behind is no longer a flat colour. Solid surface, real blur, and a shadow
+   so the row reads as floating ABOVE the text rather than sitting in it.
+
+   The catalogue's own value, measured: rgba(30,30,41,0.82) — the raised step of
+   the tonal ladder, at the opacity that still lets the aurora tint it. */
+[data-ambient="on"] .mcap,
+[data-ambient="on"] .mtchip {
+  background: rgba(30, 30, 41, 0.82);
+  backdrop-filter: blur(12px) saturate(1.3);
+  -webkit-backdrop-filter: blur(12px) saturate(1.3);
+  border: 0;
+  border-radius: var(--amb-r-lg);
+  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .mtchip-title { color: var(--amb-text); }
+[data-ambient="on"] .mtchip-chev { color: var(--amb-text-3); }
+[data-ambient="on"] .mtchip.is-open {
+  background: var(--amb-control);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+[data-ambient="on"] .mtchip.is-open .mtchip-chev { color: var(--amb-text-2); }
 /* the attention dot rings against the canvas, not against the old --base */
-[data-ambient="on"] .mtchip-attn { border-color: var(--amb-canvas); }
+[data-ambient="on"] .mcap-badge { border-color: var(--amb-canvas); }
 
 /* Drawer chrome: the remaining outlined controls. */
 [data-ambient="on"] .sdrawer-new,

@@ -54,14 +54,22 @@ export function mobileTitleChipPresentation(attention = {}) {
   };
 }
 
-export function mobileTitleChipLabel(title, attention = {}, inboxCount = 0) {
+// The label of the header's LEFT capsule: the door to the other sessions, and
+// the badge's home. Attention moved off the title with the badge — the sentence
+// "N other sessions need attention" describes where this button goes, not the
+// session whose name sits beside it.
+export function mobileSessionsDoorLabel(attention = {}) {
   const { count, hasAttention } = mobileTitleChipPresentation(attention);
+  if (!hasAttention) return "Sessions";
+  return `Sessions; ${count} other session${count === 1 ? "" : "s"} need attention`;
+}
+
+export function mobileTitleChipLabel(title, inboxCount = 0) {
   const parts = [`${title} — sessions`];
-  if (hasAttention) parts.push(`${count} other session${count === 1 ? '' : 's'} need attention`);
   // The chip is the only place the inbox count is legible without opening the
   // drawer, so the accessible label has to name it too.
-  if (inboxCount > 0) parts.push(`${inboxCount} event${inboxCount === 1 ? '' : 's'} waiting in the inbox`);
-  return parts.join('; ');
+  if (inboxCount > 0) parts.push(`${inboxCount} event${inboxCount === 1 ? "" : "s"} waiting in the inbox`);
+  return parts.join("; ");
 }
 
 export function nextMobileTitleRipple(previousArrival, previousRipple, attention) {

@@ -6,7 +6,7 @@ import {
   StreamingSkeleton,
 } from "../components/index.js";
 import { Spinner } from "../primitives/index.js";
-import { MobileTitleChip } from "../layout/mobile/MobileTitleChip/MobileTitleChip.jsx";
+import { MobileChrome } from "../layout/mobile/MobileChrome/MobileChrome.jsx";
 import "../layout/mobile/MobileConversationScreen/MobileConversationScreen.css";
 import "../layout/mobile/MobileConversationScreen/MobileStream.css";
 import "./responsive-lab.css";
@@ -26,7 +26,7 @@ import "./hydration-lab.css";
 //
 // Every specimen mounts the REAL stream components (UserWaypoint,
 // AssistantDocument, ActivityLedger, StreamingSkeleton) and the REAL
-// MobileTitleChip inside the production `.mconv` / `.mconv-stream` chrome, so
+// MobileChrome inside the production `.mconv` / `.mconv-stream` chrome, so
 // mobile density and tokens are the shipped ones. Only the fixtures, the
 // 390px frame and the `.hydra-*` treatments are catalog-only; nothing here is
 // imported by production app.js.
@@ -235,10 +235,11 @@ function Screen({ variant, resolved }) {
 
       <ComposerBar />
 
-      <MobileTitleChip
+      <MobileChrome
         title="deploy pulse api"
         attention={waiting ? PENDING_ATTENTION : RESOLVED_ATTENTION}
         onToggle={noop}
+        onNew={noop}
       />
     </div>
   );
