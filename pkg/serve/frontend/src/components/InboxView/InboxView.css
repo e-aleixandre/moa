@@ -90,15 +90,15 @@
   -webkit-box-orient: vertical;
 }
 
+/* The reason it is still waiting. Muted, never a colour: the row's job is to
+   be scanned, and a coloured line per row would make the list shout. */
 .inbox-row-reason {
   font-size: var(--text-sm);
-  color: var(--overlay1);
+  color: var(--overlay0);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.inbox-row-reason { color: var(--overlay0); }
 
 /* Where it went. Muted, and never a colour: delivery is a fact, not a state
    that needs anyone. */
@@ -116,6 +116,178 @@
   padding: var(--space-6) 0;
   font-size: var(--text-base);
   color: var(--overlay0);
+}
+
+/* ── the three things that are not a list ───────────────────────────────────
+
+   Loading, failed-to-load and stale. They exist because "the list is empty"
+   and "I could not read the list" used to be the same picture, which made the
+   app assert something it did not know. */
+
+/* Never loaded and the request failed. A block of its own: an error is not a
+   row of a list that does not exist. Red because it is a failure — yellow
+   stays the colour of what needs an answer. */
+.inbox-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-4) var(--space-3);
+  border-radius: var(--radius-md);
+  line-height: var(--leading-normal);
+  color: var(--overlay1);
+}
+
+.inbox-state.is-error { background: var(--surface0); }
+
+.inbox-state-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  color: var(--red);
+}
+
+/* The request that failed, verbatim and in mono: the report has to be
+   checkable, not a mood. */
+.inbox-state-detail {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--overlay1);
+  overflow-wrap: anywhere;
+}
+
+.inbox-state-body { font-size: var(--text-sm); color: var(--overlay1); }
+
+.inbox-state-retry {
+  min-height: 44px;
+  margin-top: var(--space-1);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface1);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.inbox-state-retry:disabled { cursor: default; color: var(--overlay1); }
+.inbox-state-retry:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Loaded once, the poll now failing: a strip over a list that is still worth
+   reading. It says since WHEN it stopped being true, which is the one thing
+   the rows themselves cannot say. Two lines rather than three columns: the
+   spine is 240px wide, and a name + a datum + a verb on one line wraps into
+   ragged fragments there. */
+.inbox-stale {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface0);
+}
+
+.inbox-stale-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+}
+
+.inbox-stale-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+.inbox-stale-since {
+  padding-left: calc(8px + var(--space-2));
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--overlay1);
+}
+
+.inbox-stale-retry {
+  flex: none;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--overlay1);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.inbox-stale-retry:disabled { cursor: default; }
+/* On a phone the strip is not squeezed into a 240px column and the button has
+   to be a real touch target. Checked in the browser with elementFromPoint at
+   the centre and the edges, not by trusting the min-height. */
+@media (pointer: coarse) {
+  .inbox-stale-line { min-height: 44px; }
+  .inbox-stale-retry { min-height: 44px; padding: 0 var(--space-3); }
+}
+@media (hover: hover) {
+  .inbox-stale-retry:hover { color: var(--text); }
+}
+.inbox-stale-retry:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* First load: the row's own geometry, breathing, so nothing jumps when the
+   real list lands. */
+.inbox-ghosts { display: flex; flex-direction: column; }
+
+/* The one thing a screen reader gets from three ghosts: that they are ghosts.
+   There is no global .sr-only in this codebase, so it is scoped here. */
+.inbox-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.inbox-ghost {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 56px;
+  padding: var(--space-3) 0;
+  animation: inbox-breathe 1.6s ease-in-out infinite;
+}
+/* nth-child counts the sr-only announcement as the first child. */
+.inbox-ghost:nth-child(3) { animation-delay: 0.2s; }
+.inbox-ghost:nth-child(4) { animation-delay: 0.4s; }
+
+.inbox-ghost-bar {
+  display: block;
+  height: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface0);
+}
+.inbox-ghost-bar.is-title { height: 14px; }
+
+@keyframes inbox-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inbox-ghost { animation: none; opacity: 0.7; }
 }
 
 /* ── the routing sheet ─────────────────────────────────────────────────────
