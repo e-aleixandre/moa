@@ -1252,12 +1252,31 @@ html.mobile-locked[data-ambient="on"] body {
    them that is exactly the wrong job: an opaque sheet over the canvas hides
    it completely. They go transparent and let the canvas through -- this is
    what "colour lives in the background" means structurally, not just
-   chromatically. Panels that need to be read on (drawer, cards, composer)
-   keep their own surface below. */
+   chromatically. */
 [data-ambient="on"] .mconv,
 [data-ambient="on"] .desktop-shell,
 [data-ambient="on"] .conversation-main {
   background: transparent;
+}
+
+/* ...but fully transparent was one layer too far, and it is why the phone
+   "reads badly". The catalogue never lets the aurora sit directly under
+   running text: its device frames carry a surface of their own
+   (.zl-phone / .zl-desk = rgba(16,16,24,0.78)) and the aurora is seen AROUND
+   them, not THROUGH them. Production had no such frame, so every ancestor of
+   a message was transparent down to the root and the aurora came up at full
+   strength behind the words.
+   Measured on the composited pixels behind a user message: catalogue
+   rgb(20,21,32) vs production rgb(41,38,56) -- twice as light and visibly
+   violet. Secondary text (.who, timestamps, tool result lines) fell to
+   2.86:1 against it, under the 4.5:1 floor and under the catalogue's own
+   3.53:1.
+   So the scroller gets the frame's surface. Not the message: the message was
+   already right, transparent with its peach rule, in both. What was missing
+   was the sheet underneath it. */
+[data-ambient="on"] .mstream,
+[data-ambient="on"] .stream-col {
+  background: rgba(16, 16, 24, 0.78);
 }
 
 /* ── The status line sheds by declared priority ────────────────────────────
