@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { IconButton, Kbd } from "../../primitives/index.js";
 import { InboxButton, InboxView, SessionCardMenu, SessionRow } from "../../components/index.js"; // wake-on-event: InboxButton/InboxView
 import { formatShortcut } from "../../data/util/shortcut.js";
-import { groupProjectSessions, hiddenProjectSavedCount, visibleProjectSessions } from "../../data/util/project-sessions.js";
+import { groupProjectSessions, hiddenProjectSavedCount, partitionByAttention, visibleProjectSessions } from "../../data/util/project-sessions.js";
 import { inboxPendingCount } from "../../data/events.js"; // wake-on-event
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
 import "./Spine.css";
@@ -103,6 +103,9 @@ export function Spine({
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const pendingInbox = inboxPendingCount(inbox); // wake-on-event
   const projectSections = groupProjectSessions([...activeSessions, ...savedSessions]);
+  /* Saved sessions are deliberately not offered to the split: a saved session
+     is parked on purpose, so it belongs under Saved even if it ended badly. */
+  const { needs: needsAttention, rest: restActive } = partitionByAttention(activeSessions);
   const row = (s) => (
     <div class="spine-session-card" key={s.id}>
       <SessionRow
@@ -175,11 +178,20 @@ export function Spine({
             <div class="spine-list">{shownSessions.map(row)}{hiddenSaved > 0 && <button type="button" class="spine-show-all" onClick={() => setExpandedProjects((keys) => new Set(keys).add(section.key))}>Show all {hiddenSaved} saved</button>}</div>
           </div>;
         }) : <>
+          {/* Needs attention comes first: a session blocked on a question sat
+              below one that needs nothing from anyone. It belongs to this view
+              only -- grouped by folder, a session listed here AND inside its
+              project would be the same row printed twice, so there the alarm
+              rides on the project heading instead. */}
+          {needsAttention.length > 0 && <>
+            <div class="spine-label is-attention">Needs attention<span class="spine-attention-n">{needsAttention.length}</span></div>
+            <div class="spine-list">{needsAttention.map(row)}</div>
+          </>}
           {/* Open sessions carry a header like every other group: without one,
               the first list reads as the continuation of whatever sits above
               it (new results, the inbox) instead of a section of its own. */}
-          {activeSessions.length > 0 && <div class="spine-label">Active</div>}
-          <div class="spine-list">{activeSessions.map(row)}</div>
+          {restActive.length > 0 && <div class="spine-label">Active</div>}
+          <div class="spine-list">{restActive.map(row)}</div>
           {savedSessions.length > 0 && <>
             <div class="spine-label">Saved</div>
             <div class="spine-list">{savedSessions.map(row)}</div>

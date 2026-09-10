@@ -303,3 +303,28 @@
 .spine .spine-inbox .inbox {
   padding: var(--space-2) var(--space-4) var(--space-6);
 }
+
+/* Needs attention earns one mark and no more: the rows underneath already
+   carry their own state colour, and a coloured band above coloured rows is how
+   a list stops being scannable. The count is the mark. */
+.spine .spine-label.is-attention {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text);
+}
+.spine .spine-attention-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--yellow);
+  color: var(--crust);
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  font-weight: var(--weight-semibold);
+  letter-spacing: normal;
+}

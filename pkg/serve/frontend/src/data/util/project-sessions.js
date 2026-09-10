@@ -134,3 +134,36 @@ export function filterProjectSections(sections, query) {
     return sessions.length ? [{ ...section, sessions }] : [];
   });
 }
+
+/* ── Needs attention ───────────────────────────────────────────────────────
+   The sidebar's first group. Three states qualify, and the order is how much
+   of your work is stopped rather than when it happened: a session blocked on a
+   question, then one that died, then an answer nobody has read.
+
+   `unseen` joins the two states this file already counted because
+   sessionDisplayDotState treats it as a display state of its own, and because
+   a finished answer you have not read is the third way a session waits for
+   you. It is deliberately limited to non-saved sessions: a saved session is
+   parked on purpose and asks for nothing. */
+const ATTENTION_RANK = { permission: 0, error: 1, unseen: 2 };
+
+export function attentionKind(session) {
+  if (!session) return null;
+  if (session.state === 'permission' || session.pendingPerm || session.pendingAsk) return 'permission';
+  if (session.state === 'error') return 'error';
+  if (session.unseen && !isSaved(session)) return 'unseen';
+  return null;
+}
+
+/** Split a session list into the ones that stop without you and the rest.
+ *  Both halves keep the caller's order; only the attention half is re-sorted,
+ *  by urgency and then by the list's own recency. */
+export function partitionByAttention(sessions = []) {
+  const needs = [], rest = [];
+  for (const s of sessions) (attentionKind(s) ? needs : rest).push(s);
+  needs.sort((a, b) => {
+    const d = ATTENTION_RANK[attentionKind(a)] - ATTENTION_RANK[attentionKind(b)];
+    return d !== 0 ? d : updated(b) - updated(a);
+  });
+  return { needs, rest };
+}

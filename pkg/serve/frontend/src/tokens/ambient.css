@@ -21,7 +21,16 @@
 [data-ambient="on"] {
   /* canvas + glass. The canvas is dark but NOT black: the aurora needs
      something to lift, and the glass needs something to show through. */
-  --amb-canvas: #12121f;
+  /* The tonal ladder decided in the lab, and the reason the earlier values
+     are gone: hierarchy here is carried by four flat steps and hairlines, not
+     by translucency. Real products in this space (Linear, Raycast, Zed) do the
+     same -- the depth came from discipline, not from shadows. */
+  --amb-canvas: #101018;
+  --amb-sheet-solid: #171720;
+  --amb-raised: #1e1e29;
+  --amb-control: #262633;
+  --amb-line: rgba(255, 255, 255, 0.07);
+  --amb-line-strong: rgba(255, 255, 255, 0.11);
   --amb-sheet: rgba(14, 14, 24, 0.68);
   /* The drawer is READ ON, over a live transcript, so it is the one panel that
      cannot be thin. In the lab it sat over a frozen mock and 0.62 looked fine;
@@ -41,7 +50,7 @@
   --amb-r-ctl: 10px;
 
   /* the canvas carries the colour, so text can be neutral-warm */
-  --amb-text: #f1f1f6;
+  --amb-text: #f4f4f7;
   --amb-text-2: #c0c1cf;
   --amb-text-3: #9192a6;
   --amb-text-4: #6b6c80;
