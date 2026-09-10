@@ -442,35 +442,45 @@ function ToolSpecimen({ dense, onOpenOutput }) {
 }
 
 /* ── 2 · SUBAGENT ────────────────────────────────────────────────────────
-   The screen you land on when you open a delegated conversation.
+   A subagent is a DELEGATED ERRAND. While it lives, the screen follows the
+   errand; when it ends, the screen IS its report. The internal conversation
+   is the record of how it got there, not the identity of the screen.
 
-   Order, top to bottom, and why:
-     head     back (says where to), whose child this is, run mode, stop.
-     facts    the printed dossier: model, thinking, elapsed, turns, tokens,
-              spend. Same idea as the session panel's run facts -- printed,
-              not boxed -- because the boxes are for what you press.
-     rail     the siblings, only when there are at least two live.
-     body     its transcript. This is the point of the screen.
-     tail     while running: the now-line and a steer composer. When it has
-              ended: the outcome banner and the way back.
+   That fixes the hierarchy, and the hierarchy fixes the layout:
+     1  the errand        what you asked for. It is the title.
+     2  state or result   what it is doing, needs, or concluded.
+     3  work log          the messages and tools that prove it.
+     4  run details       model, tokens, cost, ids.
 
-   Desktop DECISION: it replaces the conversation column, exactly as
-   production does, and does NOT open as a modal or a new pane. A subagent
-   has a transcript, a composer and a status of its own -- it is a
-   conversation, and conversations own the centre. The breadcrumb keeps the
-   parent one click away and `esc` does the same thing as the arrow. A pane
-   would have been the other candidate; it loses, because you would then have
-   two composers on screen and no way to say which one Enter belongs to. */
+   What the previous draft did wrong, measured: on the phone a head plus a
+   permanent facts strip ate 124 of 780px before one word of the work. Model,
+   started, turns, tokens and spend answer none of the four questions you
+   arrive with; they are audit, so they moved to Run details at the bottom.
+   Duration is the one that survives near the state, because "how long has
+   this been going" IS a question you arrive with.
+
+   Running and terminal are the same object on the same route, so they share
+   the head. They do NOT share the composition: a live errand opens at its
+   live end and offers a composer; a finished one opens at the top with the
+   result and folds the log away. Same screen, two shapes, one transition.
+
+   Desktop DECISION unchanged: it replaces the conversation column and does
+   not open as a modal or a second pane. Two composers on screen and no way
+   to say which one Enter belongs to is the failure mode a pane would buy. */
 const SA_STATES = [
-  { id: "running", label: "Running", note: "Green, breathing, counting. The now-line says the current action and the composer steers it. Everything about the child is on the child's screen; the parent keeps only a row in the live bar." },
-  { id: "waiting", label: "Waiting for you", note: "The state nobody had designed. Amber and still: no shimmer and no work counter, because the run is parked on you and movement would claim progress. The question is a card at the tail of ITS transcript, answered from here." },
-  { id: "completed", label: "Completed", note: "The banner states the outcome, the duration and what it cost, and the result is copyable. The transcript stays: the outcome is a lid, not a replacement." },
-  { id: "failed", label: "Failed", note: "Red rim, the error's first lines verbatim, copy. Nothing is summarised away: a failure you cannot paste is a failure you cannot report." },
-  { id: "cancelled", label: "Cancelled", note: "Neutral, not red. You stopped it; there is nothing to fix. It states how far it got, so the work is not lost." },
+  { id: "running", label: "Running", note: "Direct. The title is the errand, green says it works, the duration rides with the state. Now-line and the steer composer at the foot; the body opens at the live end. Model and money are not here: they are in Run details." },
+  { id: "waiting", label: "Waiting for you", note: "Amber and FIXED: no breathing, no counter. A counter next to a parked run claims progress that is not happening. The question and its answers come first; the record stays below. One place to answer — the card — and no duplicate composer." },
+  { id: "completed", label: "Completed", note: "A report. Neutral mark, never green: green means running here. Duration, then the whole result. The work log is a closed disclosure below it, and Run details closes the page. Nothing is pinned to the bottom: the report wins that space." },
+  { id: "failed", label: "Failed", note: "Same shape as the report, but the literal error IS the result: verbatim, red, copyable. A failure you cannot paste is a failure you cannot report." },
+  { id: "cancelled", label: "Cancelled", note: "Neutral, not red. It states the last real progress and stops there: the system cannot prove that nothing was written, so it does not say so." },
 ];
 
+const SA_ERRAND = "Revisa el diff de pkg/attach y dime si el fix del borrado tapa la carrera o solo el síntoma.";
+const SA_TITLE = "review the diff";
+const SA_PARENT = "Buscar un bug bounty";
+
 const SA_TRANSCRIPT = [
-  { who: "you", text: "Revisa el diff de pkg/attach y dime si el fix del borrado tapa la carrera o solo el síntoma.", when: "09:41" },
+  { who: "you", text: SA_ERRAND, when: "09:41" },
   { who: "agent", text: "Voy a leer el store y el test antes de opinar: el síntoma (blob huérfano) puede venir del orden de las escrituras o del contador de referencias, y son arreglos distintos." },
   { who: "agent", text: "El store guarda el índice y el contador por separado, así que el fix tiene que ser correcto en los dos. Miro dónde se decrementa refs." },
 ];
@@ -501,23 +511,78 @@ function StopButton({ phone, onStop }) {
   );
 }
 
-/* The facts strip. Printed, hairline above and below, values in mono.
-   THIS is where finding 3 is answered: the strip exists on both screens and
-   each prints ITS OWN currency. A subagent spends tokens and money, so it
-   prints them. A command spends wall time and returns a code, so it prints
-   those -- and printing `$0.00` for a command would invent a meter that does
-   not exist and teach you to distrust the one that does. What was actually
-   missing from bash was not cost: it was facts at all. */
-function Facts({ items }) {
+/* ONE door out, and it says where it leads. Desktop prints the parent's own
+   name; the phone prints `Parent`, because 390px cannot spend 22 characters
+   on the way back without shortening the errand, and the errand is the title.
+   Both carry the same full accessible name, so a screen reader hears the
+   destination in either density. Esc still works on desktop; the `esc`
+   capsule does not, because a shortcut does not deserve permanent pixels.
+   No second "Back to the conversation" at the foot of the report: one door. */
+function BackHome({ phone, parent, onBack }) {
   return (
-    <dl class="zw-facts">
-      {items.map(([k, v, tone]) => (
-        <div key={k}>
-          <dt>{k}</dt>
-          <dd class={`zl-data${tone ? ` is-${tone}` : ""}`}>{v}</dd>
-        </div>
-      ))}
-    </dl>
+    <button
+      type="button"
+      class={`zw-home${phone ? " is-phone" : ""}`}
+      onClick={onBack}
+      aria-label={`Back to ${parent}`}
+    >
+      <BackChevron />
+      <span class="zw-home-t">{phone ? "Parent" : parent}</span>
+    </button>
+  );
+}
+
+/* The state word, and the ONE number allowed to travel with it. Terminal
+   states carry no dot: a finished run has no pulse, and a green tick on
+   "Completed" would spend the running colour on something that has stopped.
+   Green breathes, amber does not move at all.
+
+   Completed and cancelled get a MARK and no word: the report's own headline
+   ("Completed in 4m12s") is 30px below and says it better, and repeating the
+   word in both places is the duplication the head was supposed to end.
+   Running, Waiting and Failed keep the word, because in those three the head
+   is the only place that carries the state while you scroll. */
+function StateWord({ tone, word, time, markOnly }) {
+  const dot = tone === "running" || tone === "waiting";
+  return (
+    <span class={`zw-state is-${tone}`}>
+      {dot && <span class={`zw-now-dot is-${tone === "running" ? "working" : "waiting"}`} aria-hidden="true" />}
+      {markOnly
+        ? <><Mark status={markOnly} /><span class="zw-sr">{word}</span></>
+        : <span class="zw-state-w">{word}</span>}
+      {time && <span class="zw-state-t zl-data">{time}</span>}
+    </span>
+  );
+}
+
+/* The head of both screens. One region, one hairline, and the title is the
+   WORK -- the errand for a subagent, the command for a process. The agent
+   and its model are the line that truncates first; the errand never does.
+
+   `copy` makes the title itself the copy target, which is what a command
+   needs: it is the one thing on that screen you take away verbatim, and a
+   16px icon beside 76 characters of shell is a worse target than the 76
+   characters. An errand is prose and is not copied, so it stays an h3. */
+function WorkHead({ phone, parent, onBack, title, titleMono, copy, sub, state, right }) {
+  const cls = `zw-hd-title${titleMono ? " zl-data" : ""}`;
+  return (
+    <div class={`zw-hd${phone ? " is-phone" : ""}`}>
+      <div class="zw-hd-top">
+        <BackHome phone={phone} parent={parent} onBack={onBack} />
+        {state}
+        <span class="zw-sp" />
+        {right}
+      </div>
+      {copy
+        ? (
+          <button type="button" class={`${cls} is-copy${phone ? " is-phone" : ""}`} aria-label={copy}>
+            <span class="zw-hd-title-t">{title}</span>
+            <CopyIcon />
+          </button>
+        )
+        : <h3 class={cls}>{title}</h3>}
+      {sub && <p class="zw-hd-sub">{sub}</p>}
+    </div>
   );
 }
 
@@ -543,13 +608,14 @@ function Steer({ placeholder }) {
   );
 }
 
-/* Waiting for you, designed. Two halves, and both are needed:
-   · the QUESTION, as a card at the tail of the child's own transcript --
-     because that is where it was asked and where the context is;
-   · the fact that it is waiting, in the head and in the facts strip, so the
-     state survives scrolling away from the card.
-   The card carries the answers as real buttons (44 on the phone) and a free
-   field at 16px. Amber, and completely still: the run is stopped on you. */
+/* Waiting for you, as an interruption and not as a slower kind of running.
+   The card goes FIRST, above the record, because a question buried under a
+   long transcript is a question you answer late. Amber, and completely
+   still: no shimmer, no elapsed-as-work. `since 09:47` is a timestamp, not a
+   counter -- it states when it stopped, it does not animate towards
+   anything. The card is the only place to answer: the steer composer is gone
+   in this state, because two routes to one action means guessing which one
+   the run is listening to. */
 function AskCard({ phone }) {
   return (
     <div class="zw-ask" role="group" aria-label="The subagent is asking you something">
@@ -568,49 +634,108 @@ function AskCard({ phone }) {
   );
 }
 
-function Banner({ outcome, phone, onBack }) {
-  const MAP = {
-    completed: { t: "Completed", tone: "ok" },
-    failed: { t: "Failed", tone: "err" },
-    cancelled: { t: "Cancelled", tone: "cancel" },
-  };
-  const m = MAP[outcome];
+/* A disclosure. Closed by default on a finished run: the record is evidence,
+   and evidence is what you open when the report is not enough. It never
+   loses anything -- the transcript and the full ledger are inside. */
+function Disclosure({ label, count, children, openInit = false }) {
+  const [open, setOpen] = useState(openInit);
   return (
-    <div class={`zw-banner is-${m.tone}`}>
-      <div class="zw-banner-l1">
-        <Mark status={m.tone === "ok" ? "ok" : m.tone === "err" ? "err" : "cancel"} />
-        <span class="zw-banner-t">{m.t}</span>
-        <span class="zw-banner-m zl-data">
-          {outcome === "completed" && "4m12s · $0.42 · ↑18.2k ↓3.1k"}
-          {outcome === "failed" && "1m38s · $0.11 · ↑6.4k ↓410"}
-          {outcome === "cancelled" && "1m03s · $0.08 · you stopped it"}
+    <div class={`zw-disc${open ? " is-open" : ""}`}>
+      <button type="button" class="zw-disc-b" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span class={`zw-chev${open ? " is-open" : ""}`} aria-hidden="true">
+          <svg viewBox="0 0 12 12"><path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </span>
+        <span class="zw-disc-t">{label}</span>
+        {count && <span class="zw-disc-n zl-data">{count}</span>}
+      </button>
+      {open && <div class="zw-disc-body">{children}</div>}
+    </div>
+  );
+}
+
+/* Run details: the audit, at the end, where audit belongs. Printed rows, not
+   boxes -- boxes are for what you press -- except the ids, which you press to
+   copy, and therefore look pressable. */
+function RunDetails({ phone, rows, ids }) {
+  return (
+    <Disclosure label="Run details">
+      <dl class="zw-rd">
+        {rows.map(([k, v, tone]) => (
+          <div key={k}>
+            <dt>{k}</dt>
+            <dd class={`zl-data${tone ? ` is-${tone}` : ""}`}>{v}</dd>
+          </div>
+        ))}
+      </dl>
+      {ids && (
+        <div class="zw-ids">
+          {ids.map(([k, v]) => (
+            <button type="button" class={`zw-id${phone ? " is-phone" : ""}`} key={k} aria-label={`Copy ${k}: ${v}`}>
+              <span class="zw-id-k">{k}</span>
+              <span class="zw-id-v zl-data">{v}</span>
+              <CopyIcon />
+            </button>
+          ))}
+        </div>
+      )}
+    </Disclosure>
+  );
+}
+
+/* The report. Terminal runs are not a banner stapled to the bottom of a
+   transcript: the outcome sentence and the result ARE the page, and they get
+   the top of it.
+
+   The state lives in the head, not here: a neutral mark for completed and
+   cancelled, the red word for failed. Completed is never green -- in this
+   system green means RUNNING, and a green tick on something that stopped
+   teaches the eye that green is decoration.
+
+   `Copy result` is secondary and alone: there is no mauve button to go back,
+   because the door is already in the head and a report has no primary action
+   other than being read. */
+function Report({ outcome, phone }) {
+  const word = outcome === "completed" ? "Completed in 4m12s" : outcome === "failed" ? "Failed after 1m38s" : "Cancelled after 1m03s";
+  return (
+    <div class={`zw-report is-${outcome}`}>
+      <div class="zw-report-h">
+        {/* No mark here. The head above carries the persistent state -- a
+            neutral mark for completed/cancelled, the red word for failed --
+            and this is a headline sentence, which does not need a glyph to
+            repeat it 100px lower. One state, one persistent place, one
+            contextual expression. */}
+        <span class="zw-report-t">{word}</span>
       </div>
       {outcome === "completed" && (
         <>
-          <p class="zw-banner-b">Es la carrera, no el índice: <code class="zl-data">Delete</code> quita la entrada antes de comprobarla. El fix es correcto; queda deuda en los contadores ya guardados.</p>
-          <div class="zw-banner-acts">
+          <div class="zw-result">
+            <p>Es la carrera, no el índice: <code class="zl-data">Delete</code> quita la entrada del índice antes de comprobar que existe, así que dos borrados concurrentes del mismo id dejan el blob sin dueño.</p>
+            <p>El fix del diff es correcto: mueve la comprobación dentro del lock y el test de concurrencia lo demuestra. Queda deuda: los contadores <code class="zl-data">refs</code> ya guardados en disco pueden estar en −1 y nadie los migra.</p>
+          </div>
+          <div class="zw-report-acts">
             <button type="button" class={`zw-btn${phone ? " is-phone" : ""}`}><CopyIcon />Copy result</button>
-            <button type="button" class={`zw-btn is-primary${phone ? " is-phone" : ""}`} onClick={onBack}>Back to the conversation</button>
           </div>
         </>
       )}
       {outcome === "failed" && (
         <>
-          <Log text={"panic: send on closed channel\n\ngoroutine 41 [running]:\nmoa/pkg/agent.(*Runner).emit(0xc0001a2000, …)\n\t/home/e/dev/moa/pkg/agent/runner.go:212 +0x1a4"} />
-          <div class="zw-banner-acts">
+          {/* The error verbatim, and it is the result -- not a summary of it,
+              not the first two lines with the rest folded away. */}
+          <Log text={"panic: send on closed channel\n\ngoroutine 41 [running]:\nmoa/pkg/agent.(*Runner).emit(0xc0001a2000, 0x1, 0xc0004a1e00)\n\t/home/e/dev/moa/pkg/agent/runner.go:212 +0x1a4\nmoa/pkg/agent.(*Runner).Step(0xc0001a2000)\n\t/home/e/dev/moa/pkg/agent/runner.go:158 +0x2c8\ncreated by moa/pkg/agent.Spawn\n\t/home/e/dev/moa/pkg/agent/spawn.go:74 +0x11c"} tall />
+          <div class="zw-report-acts">
             <button type="button" class={`zw-btn${phone ? " is-phone" : ""}`}><CopyIcon />Copy error</button>
-            <button type="button" class={`zw-btn is-primary${phone ? " is-phone" : ""}`} onClick={onBack}>Back to the conversation</button>
           </div>
         </>
       )}
       {outcome === "cancelled" && (
-        <>
-          <p class="zw-banner-b">It had read 2 files and was searching for <code class="zl-data">refs--</code>. Nothing was written.</p>
-          <div class="zw-banner-acts">
-            <button type="button" class={`zw-btn is-primary${phone ? " is-phone" : ""}`} onClick={onBack}>Back to the conversation</button>
-          </div>
-        </>
+        /* What it had actually done, and nothing more. The earlier draft said
+           "Nothing was written", which the system cannot prove: the run had
+           executed three tools and any of them could have touched disk. A
+           screen that guarantees what it does not know is worse than a screen
+           that stops at the last fact. */
+        <div class="zw-result">
+          <p>Last progress: it had read <code class="zl-data">store.go</code> and <code class="zl-data">store_test.go</code>, run <code class="zl-data">git diff</code>, and was searching for <code class="zl-data">refs--</code>. It reached no conclusion.</p>
+        </div>
       )}
     </div>
   );
@@ -628,90 +753,95 @@ function Bubble({ m }) {
   return <div class="zw-prose"><p>{m.text}</p></div>;
 }
 
+/* The record. In a terminal run this is what the disclosure holds; while the
+   run is parked it stays open, because you may need it to answer. The last
+   agent message is NOT repeated as a result: if the final message and the
+   result payload are the same thing, it is painted once. Duplication is not
+   traceability. */
+function WorkLog({ live, t0 }) {
+  return (
+    <>
+      {SA_TRANSCRIPT.map((m, i) => <Bubble m={m} key={i} />)}
+      <Ledger rows={SA_ROWS(live)} dense t0={t0} />
+    </>
+  );
+}
+
 function SubagentScreen({ phone, state, onBack }) {
   const [t0] = useState(() => Date.now());
   const live = state === "running";
   const waiting = state === "waiting";
-  const now = useNow(live || waiting);
+  const now = useNow(live);
   const terminal = state === "completed" || state === "failed" || state === "cancelled";
   const bodyRef = useRef(null);
-  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight; }, [state]);
-  const facts = [
+  /* A live run opens at its live end; a report opens at the top. Same route,
+     opposite anchors, and this is the moment the screen changes shape. */
+  useEffect(() => {
+    if (!bodyRef.current) return;
+    bodyRef.current.scrollTop = terminal || waiting ? 0 : bodyRef.current.scrollHeight;
+  }, [state, terminal, waiting]);
+
+  const dur = state === "completed" ? "4m12s" : state === "failed" ? "1m38s" : state === "cancelled" ? "1m03s" : null;
+  const details = [
     ["model", "Terra · high"],
+    ["mode", "background"],
     ["started", "09:41"],
-    [waiting ? "waiting" : "elapsed", waiting ? "6m02s" : terminal ? (state === "completed" ? "4m12s" : state === "failed" ? "1m38s" : "1m03s") : fmtElapsed(now - t0 + 134000), waiting ? "wait" : null],
-    ["turns", "3"],
-    ["tokens", "↑18.2k ↓3.1k"],
-    ["spend", "$0.42"],
+    ["duration", waiting ? "6m02s (parked 4m18s)" : dur || fmtElapsed(now - t0 + 134000)],
+    ["turns", terminal ? "3" : "2"],
+    ["tokens", terminal ? "↑18.2k ↓3.1k" : "↑11.4k ↓1.9k"],
+    ["cost", terminal ? "$0.42" : "$0.26"],
   ];
+  const ids = [["Job ID", "sa-9559b3b23433"], ["Parent", "ses-3f1a0c77"]];
+
   return (
     <>
-      <div class={`zw-hd${phone ? " is-phone" : ""}`}>
-        <button type="button" class={`zw-back${phone ? " is-phone" : ""}`} onClick={onBack} aria-label="Back to the conversation">
-          <BackChevron />
-        </button>
-        {phone ? (
-          /* The phone head carries the child's identity and its ONE job.
-             The parent's name is not repeated here: the back chevron already
-             says where you came from, and two names in 300px means neither is
-             readable (measured: both were truncating). */
-          <span class="zw-hd-id">
-            <span class="zw-hd-t">
-              <span class="zw-dotid" style={`--h:${hueOf("terra")}`} aria-hidden="true" />
-              terra
-            </span>
-            <span class="zw-hd-s">review the diff</span>
-          </span>
-        ) : (
-          <span class="zw-crumb">
-            <button type="button" class="zw-crumb-p" onClick={onBack}>Buscar un bug bounty</button>
-            <span class="zw-crumb-sep" aria-hidden="true">›</span>
-            <span class="zw-crumb-c">
-              <span class="zw-dotid" style={`--h:${hueOf("terra")}`} aria-hidden="true" />
-              terra
-              <span class="zw-crumb-task">· review the diff</span>
-            </span>
-          </span>
-        )}
-        <span class="zw-sp" />
-        <span class={`zw-chip${waiting ? " is-wait" : ""}`}>{waiting ? "waiting" : "background"}</span>
-        {!phone && !terminal && <kbd class="zw-kbd zl-data">esc</kbd>}
-        {(live || waiting) && <StopButton phone={phone} />}
-      </div>
-
-      <Facts items={facts} />
-
-      <div class="zw-rail" role="group" aria-label="Live siblings">
-        <span class="zw-rail-k">also live</span>
-        <button type="button" class="zw-rail-c is-on"><span class="zw-dotid" style={`--h:${hueOf("terra")}`} aria-hidden="true" />terra</button>
-        <button type="button" class="zw-rail-c"><span class="zw-dotid" style={`--h:${hueOf("luna")}`} aria-hidden="true" />luna</button>
-        {!phone && <span class="zw-rail-h zl-data">[ ]</span>}
-      </div>
+      <WorkHead
+        phone={phone}
+        parent={SA_PARENT}
+        onBack={onBack}
+        title={SA_TITLE}
+        sub={<><span class="zw-dotid" style={`--h:${hueOf("terra")}`} aria-hidden="true" />terra · high</>}
+        state={
+          live ? <StateWord tone="running" word="Running" time={fmtElapsed(now - t0 + 134000)} />
+            : waiting ? <StateWord tone="waiting" word="Waiting for you" />
+              : state === "failed"
+                ? <StateWord tone="failed" word="Failed" />
+                : <StateWord tone="neutral" word={state === "completed" ? "Completed" : "Cancelled"} markOnly={state === "completed" ? "ok" : "cancel"} />
+        }
+        right={(live || waiting) && <StopButton phone={phone} />}
+      />
 
       <div class="zw-body" ref={bodyRef}>
-        {SA_TRANSCRIPT.map((m, i) => <Bubble m={m} key={i} />)}
-        <Ledger rows={SA_ROWS(live)} dense t0={t0} />
-        {(terminal || waiting) && (
-          <div class="zw-prose">
-            <p>
-              {waiting
-                ? "El fix es correcto para las sesiones nuevas. Antes de seguir necesito una decisión tuya sobre lo que ya está en disco."
-                : "Confirmado: la comprobación tiene que entrar dentro del lock; el test de concurrencia lo demuestra."}
-            </p>
-          </div>
-        )}
         {waiting && <AskCard phone={phone} />}
-        {terminal && <Banner outcome={state} phone={phone} onBack={onBack} />}
+        {terminal && <Report outcome={state} phone={phone} />}
+
+        {terminal
+          ? (
+            <Disclosure label="Work log" count={`${SA_ROWS(false).length} actions`}>
+              <WorkLog live={false} t0={t0} />
+            </Disclosure>
+          )
+          : (
+            <>
+              {waiting && <p class="zw-logsep">Work log</p>}
+              <WorkLog live={live} t0={t0} />
+              {waiting && (
+                <div class="zw-prose">
+                  <p>El fix es correcto para las sesiones nuevas. Antes de seguir necesito una decisión tuya sobre lo que ya está en disco.</p>
+                </div>
+              )}
+            </>
+          )}
+
+        {terminal && <RunDetails phone={phone} rows={details} ids={ids} />}
       </div>
 
-      {(live || waiting) && (
+      {/* Nothing is pinned in a terminal state: the report gets that space.
+          Waiting pins nothing either -- the card is the answer field. */}
+      {live && (
         <div class="zw-dock">
-          <NowLine
-            phase={waiting ? "waiting" : "working"}
-            text={waiting ? "Waiting for your answer" : "Searching pkg/attach for refs--"}
-            elapsed={fmtElapsed(now - t0 + 3000)}
-          />
-          <Steer placeholder={waiting ? "Answer terra" : "Steer terra"} />
+          <NowLine phase="working" text="Searching pkg/attach for refs--" elapsed={fmtElapsed(now - t0 + 3000)} />
+          <Steer placeholder="Steer terra" />
         </div>
       )}
     </>
@@ -719,35 +849,36 @@ function SubagentScreen({ phone, state, onBack }) {
 }
 
 /* ── 3 · ASYNC BASH ──────────────────────────────────────────────────────
-   The same screen, with the same head and the same facts strip, for the
-   other kind of async work. Everything that differs, differs because a
-   command is not a conversation:
+   A background command is NOT a subagent with different facts. It is the
+   CONSOLE OF A PROCESS. It shares the frame of open work -- the same door
+   home, a state word, Stop, details -- and nothing else, because a process
+   has no errand, no conversation, no model and no bill.
 
-     · no transcript, no steer: you cannot talk to it. The whole body is the
-       output, so the output gets the height the transcript had.
-     · the command itself is printed in full at the top, copyable. It is the
-       one thing you need to read carefully and the one thing the dock's row
-       had to truncate.
-     · the facts are its own currency (finding 3): cwd, started, elapsed,
-       lines, and -- once it ends -- the exit code, in the mark's colours.
-     · following: it sticks to the tail while you have not scrolled. Scroll
-       up and it stops and offers to jump back, which is the honest version
-       of "it moved while I was reading".
+   Its order is its own:
+     1  the command, in full, copyable. It is the title, in mono, because it
+        is data and every other title here is words.
+     2  cwd and state/elapsed/exit, one line, right under it.
+     3  the output, monospaced, taking the whole centre and following the
+        tail until you scroll away from it.
+     4  Stop while it lives; Copy output when it ends.
 
-   WAITING, for a command (finding 4, second half): a command cannot ask you
-   anything -- moa gives it no stdin. What it CAN do is block on a prompt you
-   will never see. So the designed state is not a question, it is a warning:
-   after a while with no output the log's status goes amber and says so, and
-   offers the only two things that help -- stop it, or open a shell there.
-   Marked as a hypothesis: I did not verify that the backend reports stdin
-   blocking, and this is inferred from `waiting for output`
-   (BashJobLog.jsx:42) plus the absence of any waiting state in the model. */
+   Terminal is NOT promoted above the log the way a subagent's report is, and
+   that is the point of the distinction: in bash the exit code IS the result.
+   There is no semantic conclusion to lift to the top -- the last lines of
+   output are the conclusion, and they are already at the bottom because the
+   log is anchored to its end.
+
+   NO OUTPUT is a neutral fact, not a warning and not "waiting". Absence of
+   stdout does not demonstrate that a process is blocked on stdin, and moa
+   gives a background command no stdin to block on. So it is printed in the
+   log's own status line, in the same ink as the rest of the line, and it
+   offers nothing: there is no action that a fact this uncertain justifies. */
 const BASH_STATES = [
-  { id: "running", label: "Running", note: "Live output, following the tail. Green and counting. Stop is two-step." },
-  { id: "stalled", label: "No output", note: "Not designed today. After a while with nothing on stdout, amber: the command may be blocked on input you cannot give it. It offers the only two useful moves." },
-  { id: "completed", label: "exit 0", note: "The log stays; the banner states the code and the duration. Exit code is a fact of the strip too, in the mark's colours." },
-  { id: "failed", label: "exit 1", note: "Red. The last lines are the ones you need, and they are already at the bottom because the log is anchored to its end." },
-  { id: "cancelled", label: "Cancelled", note: "Neutral. It says how much it had emitted before you stopped it." },
+  { id: "running", label: "Running", note: "The console. The command is the title, the output owns the centre, and it follows the tail. Green and counting, Stop is two-step. No tokens, no cost, no transcript: a process has none of those." },
+  { id: "stalled", label: "No output", note: "A neutral fact, deliberately not amber and deliberately not called waiting: silence on stdout does not prove the process is blocked, and moa gives it no stdin anyway. The command is still running and still says so." },
+  { id: "completed", label: "exit 0", note: "The exit code is the result, so it stays on the status line where it has been all along — it is not lifted into a report, because there is no conclusion to lift. Copy output replaces Stop." },
+  { id: "failed", label: "exit 1", note: "Red on the code, and the lines you need are already at the bottom because the log is anchored to its end. Nothing gets summarised." },
+  { id: "cancelled", label: "Cancelled", note: "Neutral. It states how much it had emitted before you stopped it, and stops there." },
 ];
 
 const BASH_CMD = "go test ./... -race -count=1 -timeout 20m 2>&1 | tee /tmp/race-$(date +%s).log";
@@ -793,82 +924,56 @@ function BashScreen({ phone, state, onBack }) {
         : state === "cancelled" ? BASH_LINES.slice(0, 5)
           : BASH_LINES.concat(["", "ok      all 14 packages"]);
 
-  const exit = state === "completed" ? ["exit", "0", "ok"] : state === "failed" ? ["exit", "1", "err"] : state === "cancelled" ? ["exit", "stopped", "cancel"] : null;
-  const facts = [
-    ["cwd", "~/dev/moa/main"],
-    ["started", "09:44"],
-    [stalled ? "no output for" : "elapsed", stalled ? "3m12s" : terminal ? (state === "completed" ? "6m41s" : state === "failed" ? "2m08s" : "1m22s") : fmtElapsed(now - t0 + 41000), stalled ? "wait" : null],
-    ["lines", `${(1051 + lines.length).toLocaleString("en-US")}`],
-    ...(exit ? [exit] : []),
-  ];
+  const dur = state === "completed" ? "6m41s" : state === "failed" ? "2m08s" : state === "cancelled" ? "1m22s" : fmtElapsed(now - t0 + 41000);
+  /* The exit code is the result of this screen, so it is the state word --
+     not a banner, not a fact hidden in a strip. Cancelled has no code. */
+  const stateWord = state === "completed" ? { tone: "exit-ok", word: "exit 0" }
+    : state === "failed" ? { tone: "exit-err", word: "exit 1" }
+      : state === "cancelled" ? { tone: "neutral", word: "Cancelled" }
+        : { tone: "running", word: "Running" };
 
   return (
     <>
-      <div class={`zw-hd${phone ? " is-phone" : ""}`}>
-        <button type="button" class={`zw-back${phone ? " is-phone" : ""}`} onClick={onBack} aria-label="Back to the conversation">
-          <BackChevron />
-        </button>
-        {phone ? (
-          <span class="zw-hd-id">
-            <span class="zw-hd-t"><span class="zw-hd-sig zl-data" aria-hidden="true">$</span>bash</span>
-            <span class="zw-hd-s zl-data">go test ./... -race</span>
-          </span>
-        ) : (
-          <span class="zw-crumb">
-            <button type="button" class="zw-crumb-p" onClick={onBack}>Buscar un bug bounty</button>
-            <span class="zw-crumb-sep" aria-hidden="true">›</span>
-            <span class="zw-crumb-c"><span class="zw-hd-sig zl-data" aria-hidden="true">$</span>bash</span>
-          </span>
-        )}
-        <span class="zw-sp" />
-        <span class={`zw-chip${stalled ? " is-wait" : ""}`}>{stalled ? "no output" : "background"}</span>
-        {!phone && !terminal && <kbd class="zw-kbd zl-data">esc</kbd>}
-        {(live || stalled) && <StopButton phone={phone} />}
-      </div>
-
-      <div class="zw-cmdbox">
-        <pre class="zw-cmd is-full zl-data"><span class="zw-cmd-sig">$</span>{BASH_CMD}</pre>
-        <button type="button" class={`zw-icobtn${phone ? " is-phone" : ""}`} aria-label="Copy the command"><CopyIcon /></button>
-      </div>
-
-      <Facts items={facts} />
+      <WorkHead
+        phone={phone}
+        parent={SA_PARENT}
+        onBack={onBack}
+        title={<><span class="zw-cmd-sig" aria-hidden="true">$</span>{BASH_CMD}</>}
+        titleMono
+        copy="Copy the command"
+        sub={<>
+          <span class="zl-data">~/dev/moa/main</span>
+          <span class="zw-hd-sep" aria-hidden="true">·</span>
+          <span class="zl-data">{(1051 + lines.length).toLocaleString("en-US")} lines</span>
+        </>}
+        state={<StateWord tone={stateWord.tone} word={stateWord.word} time={dur} />}
+        right={
+          (live || stalled)
+            ? <StopButton phone={phone} />
+            : <button type="button" class={`zw-btn is-small${phone ? " is-phone" : ""}`}><CopyIcon />Copy output</button>
+        }
+      />
 
       <div class="zw-body is-log">
         <div class="zw-big-head zl-data">… 1 051 earlier lines not shown</div>
         <Log text={lines.join("\n")} tall follow />
+        {/* Only while it lives. Once it has ended the head already says the
+            code and the duration, and the log ends where it ends: a second
+            sentence under it would be the third place saying the same thing.
+            While it lives, this is the ONE contextual expression of state --
+            and "No output for 3m12s" is printed in exactly the same ink as
+            "Following the output", because silence on stdout is a fact, not
+            an alarm: it does not prove the process is blocked, and moa gives
+            a background command no stdin to block on. */}
         {(live || stalled) && (
-          <div class={`zw-logstate${stalled ? " is-wait" : ""}`}>
-            <span class={`zw-now-dot is-${stalled ? "waiting" : "working"}`} aria-hidden="true" />
-            {stalled
-              ? <span class="zw-logstate-t">No output for <span class="zl-data">3m12s</span>. It may be blocked on input; moa gives a background command no stdin.</span>
-              : <span class="zw-logstate-t">Following the output. <span class="zl-data">{fmtElapsed(now - t0 + 41000)}</span></span>}
-          </div>
-        )}
-        {stalled && (
-          <div class="zw-banner-acts is-flush">
-            <button type="button" class={`zw-btn${phone ? " is-phone" : ""}`}>Stop the command</button>
-            <button type="button" class={`zw-btn${phone ? " is-phone" : ""}`}>Open a shell here</button>
-          </div>
-        )}
-        {terminal && (
-          <div class={`zw-banner is-${state === "completed" ? "ok" : state === "failed" ? "err" : "cancel"} is-flat`}>
-            <div class="zw-banner-l1">
-              <Mark status={state === "completed" ? "ok" : state === "failed" ? "err" : "cancel"} />
-              <span class="zw-banner-t">
-                {state === "completed" && "Finished · exit 0"}
-                {state === "failed" && "Failed · exit 1"}
-                {state === "cancelled" && "Cancelled"}
-              </span>
-              <span class="zw-banner-m zl-data">
-                {state === "completed" && "6m41s · 1 060 lines"}
-                {state === "failed" && "2m08s · 1 066 lines"}
-                {state === "cancelled" && "1m22s · 1 056 lines emitted"}
-              </span>
-            </div>
-            <div class="zw-banner-acts">
-              <button type="button" class={`zw-btn${phone ? " is-phone" : ""}`}><CopyIcon />Copy output</button>
-              <button type="button" class={`zw-btn is-primary${phone ? " is-phone" : ""}`} onClick={onBack}>Back to the conversation</button>
-            </div>
+          <div class="zw-logstate">
+            <span class="zw-now-dot is-working" aria-hidden="true" />
+            <span class="zw-logstate-t">
+              {stalled
+                ? <>No output for <span class="zl-data">3m12s</span>. The command is still running.</>
+                : <>Following the output.</>}
+            </span>
+            <span class="zw-logstate-el zl-data">{fmtElapsed(now - t0 + 41000)}</span>
           </div>
         )}
       </div>
@@ -956,7 +1061,7 @@ export function WorkLab() {
         id="zw-sub"
         n="2"
         title="Subagent"
-        blurb="A delegated conversation, so it takes the centre: the same back, the same crumb, its own transcript, its own composer while it lives. On the phone it is a pushed screen with a chevron; on desktop it replaces the conversation column and esc is the arrow."
+        blurb="A delegated errand: direct while it runs, a report when it ends. The title is what you asked for, never the agent's name; the agent and its model are the secondary line. Model, tokens and cost are audit, so they live in Run details at the foot — not as a toll strip before the work. One door home, and it says where it goes."
       >
         <Seg label="Subagent state" options={SA_STATES} value={sa} onChange={setSa} />
         <div class="zw-stage">
@@ -973,7 +1078,7 @@ export function WorkLab() {
         id="zw-bash"
         n="3"
         title="Background command"
-        blurb="Same head, same facts strip, different currency: a command spends wall time and returns a code, so that is what it prints — printing a cost it never had would be a lie. The body is all output because there is nothing to say to it."
+        blurb="Not a subagent with different facts: the console of a process. It shares the frame — the same door home, a state word, Stop, Copy output — and nothing else. The command is the title, in mono and copyable; the output owns the centre; the exit code is the result, so it is the state word and there is no report to lift above the log."
       >
         <Seg label="Command state" options={BASH_STATES} value={bash} onChange={setBash} />
         <div class="zw-stage">

@@ -164,6 +164,9 @@ button.zw-row:hover .zw-chev { color: var(--zl-t2); }
 .zw-row.is-open { color: var(--zl-t2); background: var(--zl-hi); }
 .zw-row.is-open .zw-chev { transform: rotate(90deg); color: var(--zl-t2); }
 .zw-chev.is-head.is-open { transform: rotate(90deg); }
+/* A disclosure's chevron turns for the same reason a row's does: it is the
+   same gesture, so it gets the same rotation rather than a second grammar. */
+.zw-disc-b .zw-chev.is-open { transform: rotate(90deg); }
 
 .zw-detail,
 .zw-tail { padding: 2px 10px 10px 32px; background: var(--zl-sheet); }
@@ -310,91 +313,138 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
 .zw-file-act svg { width: 16px; height: 16px; display: block; }
 
 /* ═══ 2 & 3 · THE TWO SCREENS ══════════════════════════════════════════
-   One head, one facts strip, one body, for both. What differs is what the
-   body holds and what the strip prints. */
+   ONE head for both, and its job is the hierarchy: the door home, the state,
+   and then the WORK as the title -- the errand for a subagent, the command
+   for a process. No second strip of facts under it, because model, tokens
+   and cost do not answer any question you arrive with, and on a 390px phone
+   they were charging 64px of toll before a single word of the work.
+
+   The head is two rows and one hairline, not two stacked bars: the controls
+   row, then the title. Nothing else is allowed between it and the body. */
 .zw-hd {
   flex: none;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 52px;
-  padding: 8px 12px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 10px;
   box-shadow: inset 0 -1px 0 var(--zl-line);
 }
-.zw-hd.is-phone { min-height: 60px; padding: 8px 10px; }
+.zw-hd.is-phone { padding: 6px 10px 10px; }
+.zw-hd-top { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.zw-hd.is-phone .zw-hd-top { min-height: 44px; }
 
-.zw-back {
-  flex: none;
+/* The one door out. It NAMES its destination -- desktop prints the parent's
+   own title, the phone prints `Parent`, and both carry the full accessible
+   name "Back to <parent>". There is no `esc` capsule (a shortcut does not
+   earn permanent pixels), no breadcrumb, and no second back button at the
+   foot of a report. One door, and it says where it leads. */
+.zw-home {
+  flex: 0 1 auto;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: transparent;
-  color: var(--zl-t2);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-.zw-back.is-phone { width: 44px; height: 44px; }
-.zw-back svg { width: 17px; height: 17px; display: block; }
-.zw-back:hover { background: var(--zl-hi); color: var(--zl-t1); }
-
-/* The negative margin that pulled the parent's name flush with the back
-   button also pushed its hit box 6px outside the crumb (measured). The crumb
-   is a clipping box, so the button was being clipped: the padding is dropped
-   instead of compensated. */
-.zw-crumb { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 7px; overflow: hidden; }
-/* The parent's name is the thing you came from and the one you are most
-   likely to click, so it gets room to be read; the child's name is already
-   the title and can afford to be the one that shortens. */
-.zw-crumb-p {
-  flex: 0 1 auto;
-  min-width: 6ch;
-  padding: 2px 6px;
+  gap: 4px;
+  min-height: 32px;
+  max-width: 42%;
+  padding: 0 10px 0 4px;
   border: 0;
   border-radius: var(--zl-r-sm);
   background: transparent;
-  color: var(--zl-t4);
+  color: var(--zl-t3);
   font-family: var(--font);
   font-size: var(--zl-fs-body);
+  font-weight: 500;
   letter-spacing: inherit;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
 }
-.zw-crumb-p:hover { background: var(--zl-hi); color: var(--zl-t2); }
-.zw-crumb-sep { flex: none; color: var(--zl-t4); }
-.zw-crumb-c {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
+.zw-home.is-phone { min-height: 44px; padding: 0 12px 0 6px; }
+.zw-home svg { flex: none; width: 16px; height: 16px; display: block; }
+.zw-home-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zw-home:hover { background: var(--zl-hi); color: var(--zl-t1); }
+
+/* The state, and the ONE number that may travel with it. Green breathes,
+   amber is completely still, and a terminal state has no dot at all: a run
+   that stopped has no pulse, and Completed in green would spend the running
+   colour on something that has finished. */
+.zw-state { flex: none; display: inline-flex; align-items: center; gap: 7px; font-size: var(--zl-fs-meta); font-weight: 500; }
+.zw-state-w { white-space: nowrap; }
+.zw-state-t { color: var(--zl-t4); font-weight: 400; white-space: nowrap; }
+.zw-state.is-running { color: var(--zl-green); }
+.zw-state.is-waiting { color: var(--zl-yellow); }
+.zw-state.is-neutral { color: var(--zl-t3); }
+/* A mark in the head takes the head's neutral ink, never the ledger's green:
+   the ledger says "this call worked", the head says "this run has stopped". */
+.zw-state.is-neutral .zw-mark { color: var(--zl-t3); }
+.zw-state.is-failed { color: var(--zl-red); }
+/* bash: the exit code IS the result, so it is the state word. Zero is not
+   "running", so it takes the neutral ink of a finished thing and only the
+   failing code is allowed a colour. */
+.zw-state.is-exit-ok { color: var(--zl-t2); }
+.zw-state.is-exit-err { color: var(--zl-red); }
+
+/* The title IS the work. Two lines maximum on the phone, and it is the last
+   thing allowed to shorten: the secondary line truncates first, the errand
+   never does. In mono only when the work itself is data (a command). */
+.zw-hd-title {
+  margin: 0;
   font-size: var(--zl-fs-title);
   font-weight: 600;
+  line-height: 1.35;
   color: var(--zl-t1);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.zw-hd-title.zl-data { font-size: var(--zl-fs-body); font-weight: 500; overflow-wrap: anywhere; }
+/* The command title as a copy target: full width, the whole string is the
+   button. min-height, not a pseudo-element -- elementFromPoint has to return
+   this button at its centre AND at its edges. */
+.zw-hd-title.is-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t1);
+  font-family: var(--mono);
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.zw-hd-title.is-copy.is-phone { min-height: 44px; }
+.zw-hd-title.is-copy:hover { background: var(--zl-raised); }
+.zw-hd-title-t { flex: 1; min-width: 0; line-height: 1.5; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.zw-hd-title.is-copy svg { flex: none; width: 14px; height: 14px; margin-top: 3px; color: var(--zl-t4); }
+.zw-hd-title.is-copy:hover svg { color: var(--zl-t2); }
+.zw-hd-sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.zw-crumb-task { font-size: var(--zl-fs-body); font-weight: 400; color: var(--zl-t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zw-hd-sep { color: var(--zl-t4); }
 
-.zw-hd-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.zw-hd-t { display: flex; align-items: center; gap: 7px; font-size: var(--zl-fs-title); font-weight: 600; color: var(--zl-t1); }
-.zw-hd-s { font-size: var(--zl-fs-meta); color: var(--zl-t4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.zw-hd-sig { color: var(--zl-t3); font-weight: 500; }
+.zw-sp { flex: 1; min-width: 0; }
 
 /* The identity mark: the same hue function as the project monogram and the
    live bar's dots, so a name is always the same colour.
 
-   It is a RING, not a filled dot, and that is a fix from looking at the
-   waiting state: terra's identity hue is a teal-green, and a filled green
-   circle next to the word "waiting" reads as "running" -- identity was
-   impersonating state. Filled = state, hollow = identity. Now the two can
-   never be confused whatever hue a name lands on. */
+   It is a RING, not a filled dot: terra's identity hue is a teal-green, and
+   a filled green circle next to a state word reads as "running" -- identity
+   was impersonating state. Filled = state, hollow = identity. */
 .zw-dotid {
   flex: none;
   width: 9px;
@@ -402,25 +452,6 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
   border-radius: 50%;
   background: transparent;
   box-shadow: inset 0 0 0 2px hsl(var(--h) 65% 62%);
-}
-
-.zw-chip {
-  flex: none;
-  padding: 3px 8px;
-  border-radius: 999px;
-  box-shadow: var(--zl-rim);
-  font-size: var(--zl-fs-meta);
-  font-weight: 500;
-  color: var(--zl-t3);
-}
-.zw-chip.is-wait { color: var(--zl-yellow); box-shadow: 0 0 0 1px rgba(249, 226, 175, 0.3); }
-.zw-kbd {
-  flex: none;
-  padding: 2px 6px;
-  border-radius: var(--zl-r-sm);
-  box-shadow: var(--zl-rim);
-  font-size: var(--zl-fs-meta);
-  color: var(--zl-t4);
 }
 
 /* Stop: two steps, in place, no dialog. The armed state says "sure?" and
@@ -451,61 +482,6 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
 .zw-stop-sq { width: 8px; height: 8px; border-radius: 2px; background: currentColor; }
 .zw-stop.is-armed { color: var(--zl-red); background: rgba(243, 139, 168, 0.1); box-shadow: 0 0 0 1px rgba(243, 139, 168, 0.35); }
 
-/* The facts strip. Printed, not boxed: boxes are for what you press. It is
-   the same idea as the session panel's run facts, and each screen prints its
-   own currency -- money and tokens for an agent, wall time and an exit code
-   for a command. */
-.zw-facts {
-  flex: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 22px;
-  margin: 0;
-  padding: 9px 16px;
-  box-shadow: inset 0 -1px 0 var(--zl-line);
-}
-.zw-facts > div { display: flex; align-items: baseline; gap: 7px; min-height: 22px; }
-.zw-facts dt { margin: 0; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
-.zw-facts dd { margin: 0; font-size: var(--zl-fs-meta); color: var(--zl-t2); }
-.zw-facts dd.is-ok { color: var(--zl-green); }
-.zw-facts dd.is-err { color: var(--zl-red); }
-.zw-facts dd.is-cancel { color: var(--zl-t3); }
-.zw-facts dd.is-wait { color: var(--zl-yellow); }
-
-/* The siblings rail: only worth its height when there is more than one live
-   child. Chips are identity, and the current one is raised -- not accented,
-   because being where you are is not an action. */
-.zw-rail {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  box-shadow: inset 0 -1px 0 var(--zl-line);
-}
-.zw-rail-k { flex: none; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
-.zw-rail-c {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t3);
-  font-family: var(--font);
-  font-size: var(--zl-fs-meta);
-  font-weight: 500;
-  letter-spacing: inherit;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-.zw-rail-c:hover { background: var(--zl-hi); color: var(--zl-t1); }
-.zw-rail-c.is-on { background: var(--zl-raised); box-shadow: var(--zl-rim-2); color: var(--zl-t1); }
-.zw-rail-h { margin-left: auto; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
-
 .zw-body {
   flex: 1;
   min-height: 0;
@@ -532,7 +508,7 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
 .zw-prose { margin: 0 0 14px; font-size: var(--zl-fs-body); line-height: 1.65; color: var(--zl-t2); }
 .zw-prose p { margin: 0 0 0.8em; }
 .zw-prose > :last-child { margin-bottom: 0; }
-.zw-prose code, .zw-banner-b code {
+.zw-prose code {
   padding: 1px 5px;
   border-radius: 4px;
   background: var(--zl-raised);
@@ -598,29 +574,110 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
 .zw-ask-in::placeholder { color: var(--zl-t4); }
 .zw-ask-in:focus { outline: none; box-shadow: 0 0 0 1px var(--zl-accent-line); }
 
-/* ── the outcome banner ──────────────────────────────────────────────────
-   A lid on the transcript, not a replacement for it: what it did is still
-   there above. The rim carries the outcome; cancelled has no rim colour at
-   all, because it is not news. */
-.zw-banner {
-  margin-top: 12px;
-  padding: 14px;
-  border-radius: var(--zl-r-md);
+/* ── the report ─────────────────────────────────────────────────────────
+   A finished run is not a transcript with a banner stapled to the bottom.
+   The outcome sentence and the result ARE the page, and they get the top of
+   it -- the record moves into a closed disclosure below.
+
+   Completed carries NO colour: in this system green means running, and a
+   green tick on something that stopped teaches the eye that green is
+   decoration. The neutral mark says "there is a result"; the words say what
+   it was. Only failed earns a colour, because a failure is the one outcome
+   that asks you to act. */
+.zw-report { margin: 0 0 18px; }
+.zw-report-h { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.zw-report-t { font-size: var(--zl-fs-title); font-weight: 600; color: var(--zl-t1); }
+.zw-report.is-failed .zw-report-t { color: var(--zl-red); }
+.zw-report .zw-log { margin-top: 0; }
+.zw-result { font-size: var(--zl-fs-body); line-height: 1.65; color: var(--zl-t2); }
+.zw-result p { margin: 0 0 0.85em; }
+.zw-result > :last-child { margin-bottom: 0; }
+.zw-result code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--zl-raised);
+  font-size: 0.9em;
+  color: var(--zl-t1);
+}
+/* Copy is secondary and alone. There is no mauve button to go back: the door
+   is in the head, and a report's only primary action is being read. */
+.zw-report-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+/* ── disclosures: the record, and the audit ─────────────────────────────
+   Both closed by default on a finished run. The record is evidence -- what
+   you open when the report is not enough -- and the audit is audit. Nothing
+   is lost by folding them: the whole transcript and the whole ledger are
+   inside, unabridged. */
+.zw-disc { margin-top: 12px; box-shadow: inset 0 1px 0 var(--zl-line); }
+.zw-disc-b {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--zl-t3);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+.zw-disc-b:hover { color: var(--zl-t1); }
+.zw-disc-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zw-disc-n { flex: none; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
+.zw-disc-body { padding: 4px 0 12px; }
+
+/* Run details: printed rows, not boxes -- boxes are for what you press. */
+.zw-rd { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 18px; margin: 0 0 10px; }
+.zw-rd > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-height: 24px; }
+.zw-rd dt { margin: 0; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
+.zw-rd dd { margin: 0; font-size: var(--zl-fs-meta); color: var(--zl-t2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zw-screen.is-phone .zw-rd { grid-template-columns: 1fr; }
+
+/* The ids are the exception: you press them, so they look pressable. */
+.zw-ids { display: flex; flex-direction: column; gap: 4px; }
+.zw-id {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
   background: var(--zl-sheet);
   box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
 }
-.zw-banner.is-flat { background: transparent; box-shadow: none; padding: 12px 0 0; }
-.zw-banner.is-ok { box-shadow: 0 0 0 1px rgba(166, 227, 161, 0.26); }
-.zw-banner.is-err { box-shadow: 0 0 0 1px rgba(243, 139, 168, 0.3); }
-.zw-banner.is-cancel { box-shadow: var(--zl-rim); }
-.zw-banner.is-flat.is-ok, .zw-banner.is-flat.is-err, .zw-banner.is-flat.is-cancel { box-shadow: inset 0 1px 0 var(--zl-line); }
-.zw-banner-l1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.zw-banner-t { font-size: var(--zl-fs-title); font-weight: 600; color: var(--zl-t1); }
-.zw-banner-m { flex: 1; min-width: 0; font-size: var(--zl-fs-meta); color: var(--zl-t4); text-align: right; }
-.zw-banner-b { margin: 10px 0 0; font-size: var(--zl-fs-body); line-height: 1.6; color: var(--zl-t2); }
-.zw-banner .zw-log { margin-top: 10px; }
-.zw-banner-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.zw-banner-acts.is-flush { margin-top: 10px; }
+.zw-id.is-phone { min-height: 44px; }
+.zw-id:hover { background: var(--zl-raised); color: var(--zl-t1); }
+.zw-id-k { flex: none; color: var(--zl-t4); }
+.zw-id-v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zw-id svg { flex: none; width: 13px; height: 13px; color: var(--zl-t4); }
+.zw-id:hover svg { color: var(--zl-t2); }
+
+/* The label over the record while the run is parked on you: the card above
+   is the action, this is where the evidence starts. Not a disclosure --
+   while it is live the record stays open, because you may need it to answer. */
+.zw-logsep {
+  margin: 20px 0 10px;
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--zl-t4);
+}
 
 .zw-btn {
   display: inline-flex;
@@ -641,28 +698,16 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
   transition: background 120ms ease;
 }
 .zw-btn.is-phone { min-height: 44px; padding: 0 16px; }
+/* In a head, next to Stop, a button matches Stop's height rather than the
+   body's -- so the two controls in the same row read as the same weight. */
+.zw-btn.is-small { flex: none; min-height: 32px; padding: 0 11px; font-size: var(--zl-fs-meta); background: var(--zl-raised); color: var(--zl-t2); }
+.zw-btn.is-small.is-phone { min-height: 44px; padding: 0 14px; font-size: var(--zl-fs-body); }
+.zw-btn.is-small svg { width: 13px; height: 13px; }
 .zw-btn svg { width: 14px; height: 14px; }
 .zw-btn:hover { background: var(--zl-raised); }
 .zw-btn.is-primary { background: var(--zl-accent); color: var(--zl-accent-ink); font-weight: 600; box-shadow: none; }
 .zw-btn.is-primary:hover { background: #d7bafa; }
 
-.zw-icobtn {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: 0;
-  border-radius: var(--zl-r-sm);
-  background: transparent;
-  color: var(--zl-t3);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-.zw-icobtn.is-phone { width: 44px; height: 44px; }
-.zw-icobtn svg { width: 16px; height: 16px; display: block; }
-.zw-icobtn:hover { background: var(--zl-hi); color: var(--zl-t1); }
 
 /* ── the child's dock ───────────────────────────────────────────────────
    The same two pieces as the parent's, in the same order: the sentence about
@@ -726,22 +771,26 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
 .zw-screen.is-phone .zw-send { width: 44px; height: 44px; }
 .zw-screen.is-phone .zw-ta { min-height: 44px; }
 
-/* ── the command screen ─────────────────────────────────────────────── */
-.zw-cmdbox { flex: none; display: flex; align-items: flex-start; gap: 6px; padding: 10px 12px 8px; }
-.zw-cmd.is-full { flex: 1; min-width: 0; margin: 0; max-height: 76px; overflow: auto; }
-
+/* ── the command screen ─────────────────────────────────────────────────
+   The output owns the centre, and the status line under it is one neutral
+   sentence of fact. "No output for 3m12s" is printed in the SAME ink as
+   "Following the output": silence on stdout is not a warning, it does not
+   prove the process is blocked, and moa gives a background command no stdin
+   to block on. Amber here would have invented an alarm out of an absence. */
 .zw-logstate {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  min-height: 26px;
+  margin-top: 10px;
   padding: 0 2px;
   font-size: var(--zl-fs-meta);
   color: var(--zl-t4);
 }
 .zw-logstate-t { flex: 1; min-width: 0; line-height: 1.5; }
-.zw-logstate.is-wait { color: var(--zl-yellow); }
-.zw-logstate .zl-data { color: inherit; }
+.zw-logstate-el { flex: none; }
+.zw-logstate .zl-data { color: var(--zl-t2); }
 .zw-body.is-log .zw-log { max-height: none; flex: 1; }
 .zw-body.is-log { display: flex; flex-direction: column; overflow: hidden; }
 .zw-body.is-log > .zw-log { min-height: 0; }
@@ -757,10 +806,9 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
 .zw-screen.is-phone button.zw-head { min-height: 44px; }
 .zw-screen.is-phone .zw-file { min-height: 60px; }
 .zw-screen.is-phone .zw-linkbtn { min-height: 44px; padding: 0 14px; font-size: var(--zl-fs-body); }
-/* Measured and fixed: the sibling chips were 40 tall and the ledger rows 36,
-   both under the bar. A chip is small in both axes, so it needs the width
-   too; a full-width row only needs the height. */
-.zw-screen.is-phone .zw-rail-c { min-height: 44px; min-width: 72px; padding: 0 14px; justify-content: center; }
+/* Every button in a head must clear the bar too, and a small button in a
+   head is exactly where that gets forgotten. */
+.zw-screen.is-phone .zw-btn.is-small { min-height: 44px; }
 
 /* Dense (a grid pane, and the ledger inside a child's transcript). Rows lose
    4px and the meta line, never the mark and never the chevron: what a row
