@@ -133,6 +133,10 @@
   line-height: var(--leading-normal);
 }
 
+/* A literal keeps its own line breaks: a multi-line command reflowed into one
+   paragraph is no longer the command that ran. */
+.wk-title.is-mono .wk-title-t { white-space: pre-wrap; }
+
 .wk-title.is-copy {
   display: flex;
   align-items: flex-start;
@@ -148,6 +152,18 @@
 }
 
 .wk-title.is-copy.is-phone { min-height: var(--control-touch); }
+
+/* A command is not summarised. Where an errand clamps to three lines (its
+   label is enough and the report is below), a console's title IS the subject,
+   so it wraps in full and scrolls once it is genuinely long. Bounded, because
+   a here-doc must not push the output off the screen. */
+.wk-title.is-scroll .wk-title-t {
+  display: block;
+  -webkit-line-clamp: none;
+  max-height: 22vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 
 .wk-title-t {
   flex: 1;

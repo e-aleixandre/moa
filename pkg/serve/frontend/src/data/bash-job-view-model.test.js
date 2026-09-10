@@ -111,6 +111,35 @@ test('terminal statuses map to the same three outcomes as the subagent view', ()
   expect(outcome('cancelled')).toBe('cancelled');
 });
 
+// ── the exit code, read back from the output ───────────────────────────────
+// The runner appends "Exit code: N" only when N is non-zero, and nothing else
+// in the pipeline carries the code, so the view model reads it from the last
+// line. Invert any of these and the console starts reporting a status the
+// system never observed.
+test('a completed job with no exit line exited 0', () => {
+  const j = job({ status: 'completed' });
+  j.messages[0] = { ...j.messages[0], status: 'done', result: 'PASS\n', streamingResult: null };
+  expect(bashJobView(sessionWith(j), 'b1').exitCode).toBe(0);
+});
+
+test('the exit code comes from the LAST line', () => {
+  const j = job({ status: 'completed' });
+  j.messages[0] = { ...j.messages[0], status: 'done', result: 'boom\nExit code: 2\n', streamingResult: null };
+  expect(bashJobView(sessionWith(j), 'b1').exitCode).toBe(2);
+});
+
+test('a command that merely prints those words mid-output still exited 0', () => {
+  const j = job({ status: 'completed' });
+  j.messages[0] = { ...j.messages[0], status: 'done', result: 'Exit code: 7\nand then it recovered\n', streamingResult: null };
+  expect(bashJobView(sessionWith(j), 'b1').exitCode).toBe(0);
+});
+
+test('a live job has no exit code yet, and a killed or failed one never gets one', () => {
+  expect(bashJobView(sessionWith(job()), 'b1').exitCode).toBeNull();
+  expect(bashJobView(sessionWith(job({ status: 'cancelled' })), 'b1').exitCode).toBeNull();
+  expect(bashJobView(sessionWith(job({ status: 'failed' })), 'b1').exitCode).toBeNull();
+});
+
 // ── container shapes ───────────────────────────────────────────────────────
 test('bashJobView tolerates session.subagents as an array', () => {
   const session = { id: 's1', messages: [], subagents: [job()] };

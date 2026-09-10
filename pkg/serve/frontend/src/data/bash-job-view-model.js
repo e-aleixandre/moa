@@ -38,6 +38,28 @@ function outcomeOf(status) {
   return 'completed';
 }
 
+// EXIT_LINE is the line pkg/tool/bash.go appends to a command's output when
+// its exit code is NOT zero. That trailing line is the only place the system
+// records the code: BashJobInfo has no ExitCode field, and neither
+// bash_job_start/bash_job_end nor the bash_jobs init snapshot carry one.
+const EXIT_LINE = /^Exit code: (\d+)$/;
+
+// exitCodeOf reads that status back, and only from the LAST line — a command
+// that merely prints those words halfway through its output is not mistaken
+// for a failing one. A run that finished with no such line exited 0, because
+// the runner writes the line exactly when the code is non-zero.
+//
+// Null means "the system does not know": while the job is live, and for the
+// ends that have no exit code at all — a cancelled process was killed, and a
+// 'failed' job is a timeout or an exec error, whose reason is the output
+// itself. A screen that printed "exit 0" there would be inventing one.
+function exitCodeOf(status, lines) {
+  if (status !== 'completed' && status !== 'done') return null;
+  const last = lines.length > 0 ? lines[lines.length - 1] : '';
+  const m = EXIT_LINE.exec(last);
+  return m ? Number(m[1]) : 0;
+}
+
 // bashJobView is the single entry point. Returns null when the viewed job is
 // no longer in the session (the "rebound": the caller clears viewingBashJob and
 // falls back to the parent), exactly like subagentView. Otherwise:
@@ -46,8 +68,15 @@ function outcomeOf(status) {
 //     jobId, command, cwd, status,
 //     terminal:boolean, outcome:'completed'|'failed'|'cancelled'|null,
 //     canCancel:boolean, cancelling:boolean,
+//     exitCode:number|null,   // null = the system does not know one
 //     output:string, lines:[string], hiddenLines:number,
 //   }
+//
+// NOT here, because the backend does not send it: a duration. BashJobInfo
+// carries StartedAt/FinishedAt server-side, but neither bash_job_start,
+// bash_job_end nor the bash_jobs init snapshot serialises them, so a client
+// clock would only ever measure "since this tab saw it" — wrong after every
+// reconnect, and absent for a job that predates the tab.
 export function bashJobView(session, jobId) {
   if (!session || !jobId) return null;
   const jobs = normalizeJobs(session.subagents);
@@ -78,6 +107,7 @@ export function bashJobView(session, jobId) {
     // stoppable, so the button reports the pending stop instead of re-arming.
     canCancel: status === 'running',
     cancelling: status === 'cancelling',
+    exitCode: exitCodeOf(status, all),
     output,
     lines: hiddenLines > 0 ? all.slice(hiddenLines) : all,
     hiddenLines,

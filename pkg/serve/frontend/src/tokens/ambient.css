@@ -1804,3 +1804,204 @@ html.mobile-locked[data-ambient="on"] body {
 [data-ambient="on"] .inbox-sheet-list .session-row.variant-card:focus-within {
   background: var(--amb-raised);
 }
+
+/* ── The open-work screens ─────────────────────────────────────────────────
+   The two screens you go INTO: a delegated errand (SubagentView) and a
+   background command (BashJobView). They share WorkChrome, so they are dressed
+   once, here.
+
+   The tonal ladder does the separating, as everywhere in this direction: the
+   head sits on the canvas with a hairline under it, the controls are the
+   control step, and the two things that are literal -- a command, its output --
+   are wells cut into the page. Words in the sans, data in the mono; the state
+   colours are untouched, because they are the only saturated marks these
+   screens are allowed. */
+
+/* the head */
+[data-ambient="on"] .wk-head { border-bottom-color: var(--amb-line); }
+[data-ambient="on"] .wk-home {
+  border-radius: var(--amb-r-ctl);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-3);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .wk-home:hover { background: var(--amb-hi); color: var(--amb-text); }
+}
+
+/* The errand is prose and reads as the page's own heading; the command is a
+   literal and keeps the mono at reading size. */
+[data-ambient="on"] .wk-title {
+  font-family: var(--font);
+  font-size: 20px;
+  font-weight: var(--weight-semibold);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .wk-title.is-mono {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: var(--weight-normal);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .wk-title.is-copy { border-radius: var(--amb-r-ctl); }
+[data-ambient="on"] .wk-title.is-copy svg { color: var(--amb-text-4); }
+@media (hover: hover) {
+  [data-ambient="on"] .wk-title.is-copy:hover { background: var(--amb-hi); }
+  [data-ambient="on"] .wk-title.is-copy:hover svg { color: var(--amb-text-2); }
+}
+[data-ambient="on"] .wk-sub {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .wk-sub .wk-data { font-family: var(--mono); }
+
+/* The state word keeps its colour and its breath; only the elapsed figure
+   beside it moves onto the tonal scale. */
+[data-ambient="on"] .wk-state {
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+}
+[data-ambient="on"] .wk-state.is-neutral { color: var(--amb-text-3); }
+[data-ambient="on"] .wk-state-t { color: var(--amb-text-4); }
+
+/* Controls go achromatic on the control step, like every other control here.
+   The stop button only becomes red once it is ASKING -- an armed question is
+   worth the colour, an idle one is not. */
+[data-ambient="on"] .wk-btn,
+[data-ambient="on"] .wk-stop {
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-2);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .wk-btn:hover,
+  [data-ambient="on"] .wk-stop:hover { background: var(--amb-raised); color: var(--amb-text); }
+}
+[data-ambient="on"] .wk-stop.is-armed {
+  background: color-mix(in srgb, var(--red) 16%, var(--amb-control));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 45%, transparent);
+  color: var(--red);
+}
+[data-ambient="on"] .wk-stopping {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-4);
+}
+
+/* the disclosure and the audit under it */
+[data-ambient="on"] .wk-disc { border-top-color: var(--amb-line); }
+[data-ambient="on"] .wk-disc-b {
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+  color: var(--amb-text-3);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .wk-disc-b:hover { color: var(--amb-text); }
+}
+[data-ambient="on"] .wk-chev { color: var(--amb-text-4); }
+[data-ambient="on"] .wk-disc-n {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .wk-rd dt {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .wk-rd dd {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--amb-text-2);
+}
+/* An identifier is pressable (it copies), so it looks pressable. */
+[data-ambient="on"] .wk-id {
+  border-radius: var(--amb-r-ctl);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .wk-id-k { color: var(--amb-text-4); }
+[data-ambient="on"] .wk-id-v { font-family: var(--mono); }
+[data-ambient="on"] .wk-id svg { color: var(--amb-text-4); }
+@media (hover: hover) {
+  [data-ambient="on"] .wk-id:hover { background: var(--amb-hi); color: var(--amb-text); }
+}
+
+/* ── The errand's report ──────────────────────────────────────────────────
+   The conclusion is the page: prose on the canvas, no card. Only the error
+   gets a surface, because it is evidence and has to look like a quotation. */
+[data-ambient="on"] .subagent-view .sa-headline {
+  font-family: var(--font);
+  font-size: 20px;
+  font-weight: var(--weight-semibold);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .subagent-view .sa-result {
+  font-family: var(--font);
+  font-size: 16px;
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .subagent-view .sa-cancelled {
+  font-family: var(--font);
+  font-size: 16px;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .subagent-view .sa-data { font-family: var(--mono); color: var(--amb-text-2); }
+[data-ambient="on"] .subagent-view .sa-error {
+  border: 0;
+  border-left: 2px solid var(--red);
+  border-radius: var(--amb-r-well);
+  background: var(--amb-well);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .subagent-view .sa-log { border-left-color: var(--amb-line); }
+[data-ambient="on"] .subagent-view .sa-promote {
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-2);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .subagent-view .sa-promote:hover { background: var(--amb-raised); color: var(--amb-text); }
+}
+
+/* ── The console's output ─────────────────────────────────────────────────
+   The log is the deepest well on the screen: it is a literal you read for a
+   long time, so it gets the canvas step and a hairline, not a border and not a
+   card. The write head keeps the running green, like every other live mark. */
+[data-ambient="on"] .bj-out-label {
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .bj-out-n {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .bj-out .bashlog {
+  border: 0;
+  border-radius: var(--amb-r-well);
+  background: var(--amb-well);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .bj-out .bashlog .bashlog-ln.waiting { color: var(--amb-text-4); }
+[data-ambient="on"] .bj-out .bashlog .bashlog-elided { color: var(--amb-text-4); }
+[data-ambient="on"] .bj-out .bashlog .bashlog-cursor::after { color: var(--green); }

@@ -21,14 +21,19 @@ import "./WorkChrome.css";
 // needs — it is the one thing on the screen you take away verbatim, and a 14px
 // icon next to 76 characters of shell is the worse target of the two. An
 // errand is prose, is not copied, and stays a heading.
-export function WorkHead({ phone, parent, onBack, title, titleMono, copyLabel, sub, state, actions }) {
+//
+// `titleScroll` is for a title that must not be summarised: a multi-line
+// command is the identity of a console, so past a few lines it gets its own
+// scroll instead of the three-line clamp an errand uses. It is still bounded —
+// a here-doc cannot be allowed to push the output off the screen.
+export function WorkHead({ phone, parent, onBack, title, titleMono, titleScroll, copyLabel, sub, state, actions }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return undefined;
     const t = setTimeout(() => setCopied(false), 1200);
     return () => clearTimeout(t);
   }, [copied]);
-  const cls = `wk-title${titleMono ? " is-mono" : ""}`;
+  const cls = `wk-title${titleMono ? " is-mono" : ""}${titleScroll ? " is-scroll" : ""}`;
   return (
     <header class={`wk-head${phone ? " is-phone" : ""}`}>
       <div class="wk-head-top">
