@@ -2384,3 +2384,531 @@ html.mobile-locked[data-ambient="on"] body {
 [data-ambient="on"] .bj-out .bashlog .bashlog-ln.waiting { color: var(--amb-text-4); }
 [data-ambient="on"] .bj-out .bashlog .bashlog-elided { color: var(--amb-text-4); }
 [data-ambient="on"] .bj-out .bashlog .bashlog-cursor::after { color: var(--green); }
+
+/* ── What is about to arrive ───────────────────────────────────────────────
+   The skeleton is the FIRST thing seen in every answer and in every session
+   that opens without a cache, so it is the one block whose cost is paid on
+   every interaction. The base skin sweeps a 220%-wide gradient across each
+   bar, which repaints the bar on every frame; here the bars are flat and only
+   their OPACITY moves, which the compositor can do without touching paint.
+   Staggering the three lines is what makes it read as text arriving rather
+   than as a loading widget.
+
+   Tone: the raised step. A placeholder stands where words will be, so it has
+   to be visible against the canvas without pretending to be a surface. */
+[data-ambient="on"] .skel-block .skel-line {
+  height: 12px;
+  border-radius: var(--amb-r-well);
+  background: var(--amb-raised);
+  background-size: auto;
+  animation: amb-skel-breathe 1.6s ease-in-out infinite;
+}
+[data-ambient="on"] .skel-block .skel-line:nth-child(2) { animation-delay: 0.18s; }
+[data-ambient="on"] .skel-block .skel-line:nth-child(3) { animation-delay: 0.36s; }
+@keyframes amb-skel-breathe {
+  50% { opacity: 0.42; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-ambient="on"] .skel-block .skel-line {
+    animation: none;
+    background: var(--amb-raised);
+  }
+}
+/* The typing dots are a live mark, and every live mark in this direction is
+   green. Mauve is the accent and its one state is "unread". */
+[data-ambient="on"] .typing-dots i { background: var(--green); }
+
+/* The hydration tail: the same skeleton, plus a line saying which of the two
+   things is happening. Blue is not a state in this system -- catching up is
+   work in progress (green), and a refresh that failed and is retrying is
+   waiting on something (yellow), not an error. */
+[data-ambient="on"] .history-hydration-rule {
+  font-family: var(--font);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .history-hydration-rule::after {
+  background: var(--amb-line);
+}
+[data-ambient="on"] .history-hydration .spinner {
+  border-color: color-mix(in srgb, var(--green) 30%, transparent);
+  border-top-color: var(--green);
+}
+[data-ambient="on"] .history-hydration--stale,
+[data-ambient="on"] .history-hydration--stale .history-hydration-rule,
+[data-ambient="on"] .history-hydration--empty.history-hydration--stale {
+  color: var(--yellow);
+}
+[data-ambient="on"] .history-hydration--stale .history-hydration-rule::after {
+  background: linear-gradient(to right, color-mix(in srgb, var(--yellow) 35%, transparent), transparent);
+}
+[data-ambient="on"] .history-hydration-stale-copy {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .button.history-hydration-retry { color: var(--amb-text-2); }
+/* The placeholder for a message you sent keeps the peach bar, because that is
+   exactly the shape it is standing in for: the waypoint is a peach edge on the
+   bare page, and its skeleton must not be a card. */
+[data-ambient="on"] .history-hydration-skeleton-user {
+  border-left: 3px solid var(--peach);
+  border-radius: 0;
+  background: transparent;
+  padding: 2px 0 2px 14px;
+}
+/* The placeholder for a ledger is the ledger's own surface. */
+[data-ambient="on"] .history-hydration-skeleton-tool {
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-sheet-solid);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+}
+
+/* ── The servers this project has not been allowed to load ─────────────────
+   A banner, not a card: it does not stop the run, it offers a decision. But it
+   IS the "needs you" state, so it speaks the same language as the two cards
+   that do stop it -- yellow on the edge, never washed across the face, raised
+   tone, achromatic buttons. The base skin tints the whole strip amber and
+   paints a solid yellow button, which makes the least urgent interruption in
+   the product the loudest thing on the screen. */
+[data-ambient="on"] .mcp-banner {
+  border: 0;
+  border-left: 3px solid var(--yellow);
+  border-radius: 4px var(--amb-r-row) var(--amb-r-row) 4px;
+  background: var(--amb-raised);
+}
+[data-ambient="on"] .mcp-banner .mcp-banner-icon { color: var(--yellow); }
+[data-ambient="on"] .mcp-banner .mcp-banner-text {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .mcp-banner .button {
+  min-height: 32px;
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+}
+[data-ambient="on"] .mcp-banner .button.mcp-banner-trust {
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line-strong);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .mcp-banner .button.variant-ghost { color: var(--amb-text-4); }
+@media (hover: hover) {
+  [data-ambient="on"] .mcp-banner .button.mcp-banner-trust:hover:not(:disabled) {
+    background: var(--amb-on);
+  }
+  [data-ambient="on"] .mcp-banner .button.variant-ghost:hover:not(:disabled) {
+    background: var(--amb-hi);
+    color: var(--amb-text-2);
+  }
+}
+
+/* ── What the conversation dropped to keep going ───────────────────────────
+   A compaction is a FACT OF THE HISTORY, not an error and not an achievement.
+   It reports that older turns were replaced by a summary, and the only reason
+   it is on screen at all is so that a gap in the transcript has an explanation
+   with a clock on it. So: the quietest closed row in the product -- no fill,
+   no colour, the tonal ladder's rim and nothing else -- opening onto the same
+   canvas well every other detail surface uses.
+
+   TYPE, as everywhere: the sentence is a word ("Context compacted") and stays
+   in the sans; the clock, the token count and the file paths are data and stay
+   in the mono. The base skin sets the ENTIRE card in mono, which is what made
+   a note about the conversation read like a terminal record of it. */
+[data-ambient="on"] .cc {
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .cc .cc-header {
+  min-height: 36px;
+  background: transparent;
+  color: var(--amb-text-4);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .cc .cc-header:hover { background: var(--amb-hi); }
+}
+[data-ambient="on"] .cc .cc-icon,
+[data-ambient="on"] .cc .cc-chev { color: var(--amb-text-4); }
+[data-ambient="on"] .cc .cc-title { color: var(--amb-text-4); }
+/* The one word in the row that names what happened. */
+[data-ambient="on"] .cc .cc-title b {
+  font-family: var(--font);
+  font-weight: var(--weight-medium);
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .cc .cc-detail {
+  border-top-color: var(--amb-line);
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .cc .cc-detail h4 {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--amb-text-3);
+}
+/* The count beside a heading is data. */
+[data-ambient="on"] .cc .cc-detail h4 span {
+  font-family: var(--mono);
+  color: var(--amb-text-4);
+}
+/* The summary is a literal the model wrote: the deepest well, mono, bounded. */
+[data-ambient="on"] .cc .cc-summary pre {
+  border-radius: var(--amb-r-well);
+  background: var(--amb-well);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-2);
+}
+/* "Show all" is a control, not a link: blue is not a state in this system. */
+[data-ambient="on"] .cc .cc-more {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--amb-text-3);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .cc .cc-more:hover { color: var(--amb-text); }
+}
+[data-ambient="on"] .cc .cc-tokens {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .cc .cc-empty {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .cc .cc-files ul { border-left-color: var(--amb-line); }
+[data-ambient="on"] .cc .cc-files li {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-3);
+}
+
+/* ── An event that arrived on its own ──────────────────────────────────────
+   The base design is already right and this sheet does not argue with it: an
+   event is a margin note, aligned rather than coloured, with the glyph hanging
+   in the gutter. All that changes is the palette and the type split, so it
+   speaks the same language as the rest of the transcript.
+
+   The title is the assistant's prose weight; the provenance line stops being
+   uppercase mono-with-tracking (which shouted louder than the thing it labels)
+   except for the SOURCE, which is a literal server name and stays data. */
+[data-ambient="on"] .evb .evb-head { color: var(--amb-text-3); }
+[data-ambient="on"] .evb .evb-glyph { color: var(--amb-text-4); }
+[data-ambient="on"] .evb .evb-meta {
+  font-family: var(--font);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .evb .evb-meta .evb-source {
+  font-family: var(--mono);
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .evb .evb-title {
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--amb-text);
+}
+[data-ambient="on"] .evb .evb-chev { color: var(--amb-text-4); }
+/* The payload is the ledger's well, like every other raw text this
+   conversation received. */
+[data-ambient="on"] .evb-body {
+  border-radius: var(--amb-r-well);
+  background: var(--amb-well);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+}
+[data-ambient="on"] .evb-more {
+  border-top-color: var(--amb-line);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-4);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .evb-more:hover { color: var(--amb-text-2); }
+}
+/* The inbox's collapsed one-liner: the payload seen from the tray. */
+[data-ambient="on"] .evb-payload-toggle {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .evb-payload .evb-chev { color: var(--amb-text-4); }
+
+/* ── A file the run handed you ─────────────────────────────────────────────
+   The plain download card, for a descriptor that is not an artifact (an older
+   transcript, another tool's file). It is a row about a literal on disk, so it
+   is drawn like the ledger's rows: sheet tone, a hairline, mono for the name
+   and the size, sans nowhere because there are no words on it.
+
+   THE ICON LOSES THE PEACH. Peach is the product's word for "you said this"
+   and a file the assistant produced is the opposite of that. A file type is
+   not a state either, so the glyph goes to the quiet step and the card carries
+   no colour at all. */
+[data-ambient="on"] .file-card {
+  border-top: 0;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-sheet-solid);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+}
+[data-ambient="on"] .file-card .file-card-icon { color: var(--amb-text-4); }
+[data-ambient="on"] .file-card .file-card-name {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--amb-text);
+}
+[data-ambient="on"] .file-card .file-card-size {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .file-card .file-card-download,
+[data-ambient="on"] .file-card .file-card-resource-info {
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  color: var(--amb-text-2);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .file-card .file-card-previewable:hover { background: var(--amb-hi); }
+  [data-ambient="on"] .file-card .file-card-download:hover,
+  [data-ambient="on"] .file-card .file-card-resource-info:hover {
+    background: var(--amb-on);
+    color: var(--amb-text);
+  }
+}
+
+/* The artifact card is the same row with a drawer behind it: same surface, so
+   the two never read as two different kinds of delivery. */
+[data-ambient="on"] .af-card {
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-sheet-solid);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+}
+[data-ambient="on"] .af-card .af-row-file {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .af-card .af-row-file > svg { color: var(--amb-text-4); }
+[data-ambient="on"] .af-card .af-row-title {
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0;
+  color: var(--amb-text);
+}
+[data-ambient="on"] .af-card .af-row-sub {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .af-card .af-row-trailing {
+  font-family: var(--mono);
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .af-card .af-icon-button { color: var(--amb-text-3); }
+@media (hover: hover) {
+  [data-ambient="on"] .af-card .af-row-open:hover { background: var(--amb-hi); }
+  /* The title going peach on hover was the identity colour used as a link
+     underline. It brightens instead, like every other row in this direction. */
+  [data-ambient="on"] .af-card .af-row-open:hover .af-row-title { color: var(--amb-text); }
+  [data-ambient="on"] .af-card .af-icon-button:hover {
+    background: var(--amb-hi);
+    color: var(--amb-text);
+  }
+}
+
+/* ── The rest of the assistant's document ──────────────────────────────────
+   The prose itself is dressed above, with the two voices. What was left is
+   everything markdown can emit that a hand-built AssistantDocument never does:
+   real headings, ordered lists, quotations, rules and links. Until now those
+   fell through to the base skin, so a long answer with an H2 in it was reading
+   in two palettes at once.
+
+   HEADINGS ARE SIZE, NOT COLOUR. The base skin paints .doc h4 mauve, which
+   spends the accent on structure; here the levels are told apart by size and
+   weight on the one text colour, which is what the rest of the direction does.
+   A LINK is the exception that keeps a colour, because a link that looks like
+   text is not a link -- and it takes the accent, since going somewhere is not
+   a state. */
+[data-ambient="on"] .doc h1,
+[data-ambient="on"] .doc h2,
+[data-ambient="on"] .doc h3 {
+  font-family: var(--font);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--amb-text);
+}
+[data-ambient="on"] .doc h1 { font-size: 20px; font-weight: var(--weight-semibold); }
+[data-ambient="on"] .doc h2 { font-size: 16px; font-weight: var(--weight-semibold); }
+[data-ambient="on"] .doc h3 { font-size: 14px; font-weight: var(--weight-semibold); }
+[data-ambient="on"] .doc ol { color: var(--amb-text-2); }
+[data-ambient="on"] .doc a { color: var(--mauve); }
+/* A quotation is text the answer is holding at arm's length: a rule and a
+   step down, never a filled box. */
+[data-ambient="on"] .doc blockquote {
+  border-left: 2px solid var(--amb-line-strong);
+  background: transparent;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .doc hr {
+  border: 0;
+  border-top: 1px solid var(--amb-line);
+}
+/* Inline code inside a heading or a quotation follows the same well as
+   inline code in a paragraph, instead of falling back to the sky. */
+[data-ambient="on"] .doc h1 code,
+[data-ambient="on"] .doc h2 code,
+[data-ambient="on"] .doc h3 code,
+[data-ambient="on"] .doc blockquote code,
+[data-ambient="on"] .doc td code,
+[data-ambient="on"] .doc th code {
+  border-radius: var(--amb-r-well);
+  background: var(--amb-raised);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  font-family: var(--mono);
+  color: var(--amb-text-2);
+}
+/* An ordered list marks its items with the number the markdown gave them, so
+   it keeps the browser's marker and only the colour is brought into range. */
+[data-ambient="on"] .doc ol li::before { color: var(--amb-text-4); }
+
+/* ── Secrets ───────────────────────────────────────────────────────────────
+   The one form in the product where the interesting thing is what must NOT
+   happen: a value must never be visible, never be guessable from the chrome,
+   and never be made to look exciting. So this is the most sober surface here.
+
+   NO ACCENT ANYWHERE. The base skin paints "Add another" and the Send button
+   peach -- the owner's identity colour, spent on the screen where the owner is
+   handing over credentials, which is precisely the wrong association. Both
+   become the achromatic controls every other decided action uses. The green
+   reassurance line goes with them: green means RUNNING in this direction, and
+   nothing is running while a form is being filled.
+
+   The value field is a WELL, one step below the sheet, so a masked input reads
+   as something recessed and closed rather than as a highlighted box. */
+[data-ambient="on"] .secret-batch .secret-batch-intro {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .secret-batch .secret-batch-alias {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .secret-batch .secret-batch-field {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .secret-batch .secret-batch-field .field {
+  border-color: transparent;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-well);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+}
+[data-ambient="on"] .secret-batch .secret-batch-field .field:focus-within {
+  box-shadow: inset 0 0 0 1px var(--amb-line-strong);
+}
+[data-ambient="on"] .secret-batch .secret-batch-field .field-input { color: var(--amb-text); }
+[data-ambient="on"] .secret-batch .secret-batch-field .field-input::placeholder { color: var(--amb-text-4); }
+/* Only a rejected row is coloured, and red is the right word for it. */
+[data-ambient="on"] .secret-batch .secret-batch-field:has(.field-input[aria-invalid="true"]) .field {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 55%, transparent);
+}
+[data-ambient="on"] .secret-batch .secret-batch-field small,
+[data-ambient="on"] .secret-batch .secret-batch-form-error {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--red);
+}
+[data-ambient="on"] .secret-batch .secret-batch-remove {
+  border-radius: var(--amb-r-well);
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .secret-batch .secret-batch-add {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .secret-batch .secret-batch-add:disabled { color: var(--amb-text-4); }
+/* The reassurance about what the model can see is a note, not a success. */
+[data-ambient="on"] .secret-batch .secret-batch-hint {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .secret-batch .secret-batch-actions .button {
+  min-height: 36px;
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+}
+[data-ambient="on"] .secret-batch .button.secret-batch-save {
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line-strong);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .secret-batch .secret-batch-actions .button.variant-ghost {
+  background: transparent;
+  color: var(--amb-text-4);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .secret-batch .secret-batch-remove:hover {
+    background: var(--amb-hi);
+    color: var(--amb-text-2);
+  }
+  [data-ambient="on"] .secret-batch .secret-batch-add:hover { color: var(--amb-text); }
+  [data-ambient="on"] .secret-batch .button.secret-batch-save:hover:not(:disabled) {
+    background: var(--amb-on);
+  }
+  [data-ambient="on"] .secret-batch .secret-batch-actions .button.variant-ghost:hover:not(:disabled) {
+    background: var(--amb-hi);
+    color: var(--amb-text-2);
+  }
+}
+
+/* The record left in the transcript afterwards. It says a batch was sent and
+   names the aliases -- never the values -- so it is a quiet ledger-toned row.
+   The lock keeps a colour only because it is the one glyph that certifies
+   something; it takes the quiet step, not the running green. */
+[data-ambient="on"] .secret-batch-card {
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-sheet-solid);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+}
+[data-ambient="on"] .secret-batch-card .secret-batch-card-lock { color: var(--amb-text-4); }
+[data-ambient="on"] .secret-batch-card b {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .secret-batch-card p {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-4);
+}

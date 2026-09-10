@@ -100,8 +100,10 @@
   font-size: var(--text-sm);
 }
 
-.history-hydration-retry {
-  color: var(--blue) !important;
+/* Two classes, matching .button.variant-ghost's own specificity, which is what
+   the !important here was paying for. */
+.button.history-hydration-retry {
+  color: var(--blue);
 }
 
 .history-hydration-sr {
