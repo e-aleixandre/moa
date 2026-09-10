@@ -68,51 +68,18 @@ export function StatusStrip({
 
   return (
     <div class={`status-strip${compact ? " is-compact" : ""}`}>
-      {/* LEFT: context + cost lead the line, matching the mobile line so the same
-          datum sits on the same side in both densities. They share a segment
-          because the cost is the door to the same Usage panel the ring explains. */}
-      {(hasCtx || hasSpend || costTrigger) && (() => {
-        const body = (
-          <>
-            {hasCtx && (
-              <span class={`status-strip-ctx amb-${statusItemPriority("context")}`}>
-                <span class="status-strip-ring" style={ringStyle} aria-hidden="true" />
-                {compact ? `${ctxPercent}%` : `ctx ${ctxPercent}%`}
-              </span>
-            )}
-            {hasSpend ? (
-              <span class={`status-strip-spend spend-${strip.spendLevel || "normal"}`}>
-                <b>~{spend}</b>
-              </span>
-            ) : (
-              costTrigger && (
-                <span class="status-strip-gauge" aria-hidden="true">
-                  <Gauge />
-                </span>
-              )
-            )}
-          </>
-        );
-        return costTrigger ? (
-          <button
-            type="button"
-            class="status-strip-usage status-strip-usage-btn"
-            onClick={onOpenUsage}
-            aria-label="Show usage"
-            title="Context and session cost"
-          >
-            {body}
-          </button>
-        ) : (
-          <span class="status-strip-usage">{body}</span>
-        );
-      })()}
+      {/* The line reads in three tiers, in the catalogue's order: SETTINGS first
+         (what you glance at while typing and what changes the answer), then the
+         EVENTS that only exist while something is wrong, then the GAUGES at the
+         right edge.
 
-      {compact && (hasCtx || hasSpend) && modelName && (
-        <span class="status-strip-div" aria-hidden="true" />
-      )}
+         It used to lead with the context ring, which put the least actionable
+         number where the eye lands first and left the model — the thing you
+         change — floating in the middle. Reading order is the hierarchy: the
+         model and the permission mode are the two facts that decide what the
+         next turn does, so they come first, on both densities. */}
 
-      {/* Then the activity, the permission chip and the currently-active modes. */}
+      {/* Tier 1 — settings. */}
       {task && <span class={`status-strip-task work${workIsLive ? " is-live" : ""}`}>{task}</span>}
 
       {modelName && (
@@ -169,8 +136,8 @@ export function StatusStrip({
         </span>
       )}
 
-      {/* Active modes — only rendered when the model reports them (off modes
-          are omitted upstream). */}
+      {/* Tier 3 — events, only while they exist. Active modes are only rendered
+          when the model reports them (off modes are omitted upstream). */}
       {!compact && modes.goal && (
         <span class={`status-strip-pill goal amb-${statusItemPriority("goal")}`} title={modes.goal.objective || "Goal active"}>
           <Target />
@@ -186,6 +153,38 @@ export function StatusStrip({
         </span>
       )}
 
+      {session?.mcp && session.mcp.total > 0 && (() => {
+        const unhealthy = session.mcp.unhealthy > 0;
+        const disabledNote = session.mcp.disabled > 0 ? `, ${session.mcp.disabled} disabled` : "";
+        const label = unhealthy
+          ? `MCP: ${session.mcp.unhealthy} of ${session.mcp.total} need attention${disabledNote}`
+          : `MCP: ${session.mcp.total} server${session.mcp.total === 1 ? "" : "s"}${disabledNote} ready`;
+        const body = (
+          <>
+            {unhealthy ? <AlertTriangle /> : <Plug />}
+            {unhealthy ? `${session.mcp.unhealthy}!` : `mcp ${session.mcp.total}`}
+          </>
+        );
+        return onOpenMcp ? (
+          <button
+            type="button"
+            class={`status-strip-mcp status-strip-mcp-btn amb-${statusItemPriority("mcp", unhealthy ? "unhealthy" : "healthy")}${unhealthy ? " status-strip-mcp-bad" : ""}`}
+            onClick={onOpenMcp}
+            aria-label={`${label} — open MCP servers`}
+            title={label}
+          >
+            {body}
+          </button>
+        ) : (
+          <span
+            class={`status-strip-mcp amb-${statusItemPriority("mcp", unhealthy ? "unhealthy" : "healthy")}${unhealthy ? " status-strip-mcp-bad" : ""}`}
+            title={label}
+          >
+            {body}
+          </span>
+        );
+      })()}
+
       {/* Alerts. 🔥 on-extra only while active. */}
       {alerts.onExtra && (
         <span
@@ -197,39 +196,45 @@ export function StatusStrip({
         </span>
       )}
 
-      {/* RIGHT: what is left of the run's telemetry, anchored to the right edge —
-          MCP health and the per-run tokens. margin-left lives on the group (not
-          one segment) so it stays right-aligned no matter which are present. */}
+      {/* Tier 2 — gauges, anchored to the right edge: one button (context +
+          spend: the door to Usage) and one reading (the per-run tokens).
+          margin-left lives on the group, not on one segment, so it stays
+          right-aligned no matter which of them are present. */}
       <span class="status-strip-right">
-        {session?.mcp && session.mcp.total > 0 && (() => {
-          const unhealthy = session.mcp.unhealthy > 0;
-          const disabledNote = session.mcp.disabled > 0 ? `, ${session.mcp.disabled} disabled` : "";
-          const label = unhealthy
-            ? `MCP: ${session.mcp.unhealthy} of ${session.mcp.total} need attention${disabledNote}`
-            : `MCP: ${session.mcp.total} server${session.mcp.total === 1 ? "" : "s"}${disabledNote} ready`;
+        {(hasCtx || hasSpend || costTrigger) && (() => {
           const body = (
             <>
-              {unhealthy ? <AlertTriangle /> : <Plug />}
-              {unhealthy ? `${session.mcp.unhealthy}!` : `mcp ${session.mcp.total}`}
+              {hasCtx && (
+                <span class={`status-strip-ctx amb-${statusItemPriority("context")}`}>
+                  <span class="status-strip-ring" style={ringStyle} aria-hidden="true" />
+                  {compact ? `${ctxPercent}%` : `ctx ${ctxPercent}%`}
+                </span>
+              )}
+              {hasSpend ? (
+                <span class={`status-strip-spend spend-${strip.spendLevel || "normal"}`}>
+                  <b>~{spend}</b>
+                </span>
+              ) : (
+                costTrigger && (
+                  <span class="status-strip-gauge" aria-hidden="true">
+                    <Gauge />
+                  </span>
+                )
+              )}
             </>
           );
-          return onOpenMcp ? (
+          return costTrigger ? (
             <button
               type="button"
-              class={`status-strip-mcp status-strip-mcp-btn amb-${statusItemPriority("mcp", unhealthy ? "unhealthy" : "healthy")}${unhealthy ? " status-strip-mcp-bad" : ""}`}
-              onClick={onOpenMcp}
-              aria-label={`${label} — open MCP servers`}
-              title={label}
+              class="status-strip-usage status-strip-usage-btn"
+              onClick={onOpenUsage}
+              aria-label="Show usage"
+              title="Context and session cost"
             >
               {body}
             </button>
           ) : (
-            <span
-              class={`status-strip-mcp amb-${statusItemPriority("mcp", unhealthy ? "unhealthy" : "healthy")}${unhealthy ? " status-strip-mcp-bad" : ""}`}
-              title={label}
-            >
-              {body}
-            </span>
+            <span class="status-strip-usage">{body}</span>
           );
         })()}
         {showTokens && hasTokens && (

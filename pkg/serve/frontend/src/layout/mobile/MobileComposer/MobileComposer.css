@@ -28,9 +28,11 @@
 }
 
 /* StatusStrip compact is the line's face (shared with desktop). On the phone it
-   has to keep the old .mstatusline density: micro type, no pan, no wrap. */
+   is the catalogue's dock line: 44px tall and 14px, sized in StatusStrip.css.
+   What stays here is the phone's own constraint — it never pans and never
+   wraps, because a line that a finger can drag moves the chrome behind the
+   composer. */
 .mcomposer .status-strip {
-  font-size: var(--text-micro);
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: manipulation;

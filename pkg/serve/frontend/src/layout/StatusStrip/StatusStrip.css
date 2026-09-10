@@ -301,6 +301,75 @@
   overscroll-behavior: none;
 }
 
+/* The phone's line. Compact is shared with the grid pane, where a dense
+   readout beside four other panes is right; on a phone it was the same line
+   shrunk to 10.5px and 30px tall, which made the one persistent readout the
+   least legible thing on the screen and put every door under the 44px floor.
+
+   The catalogue's phone dock: 44px tall, 14px type, --amb-text-3 (its words
+   are read at arm's length, not scanned in a grid). The buttons on it are
+   44px too — they are doors, and a door you cannot reliably hit is a door
+   that is not there. */
+.mcomposer .status-strip.is-compact {
+  height: var(--control-touch);
+  padding: 0 2px;
+  margin-top: var(--space-1);
+  font-size: var(--text-base);
+  gap: 2px;
+}
+
+/* Every segment fills the line's height, so its tap area is the full 44px
+   rather than a 16px run of text with a pseudo-element stretched around it.
+   The two that were doing exactly that (usage, mcp) drop their reach-out
+   pseudo: the element itself is the target now.
+
+   `align-items: stretch` on the line, not `height` on the children: setting a
+   height needs a `display` to go with it, and declaring `display` here would
+   outrank the `display: none` that sheds a segment at a narrow width (a lone
+   class inside a container query cannot beat `.status-strip .x`). Stretch does
+   the same job from the parent and leaves shedding alone. */
+.mcomposer .status-strip.is-compact {
+  align-items: stretch;
+}
+
+.mcomposer .status-strip.is-compact > * {
+  align-self: stretch;
+}
+
+.mcomposer .status-strip.is-compact .status-strip-usage,
+.mcomposer .status-strip.is-compact .status-strip-right {
+  align-items: center;
+}
+
+.mcomposer .status-strip.is-compact .status-strip-usage-btn,
+.mcomposer .status-strip.is-compact .perm-chip,
+.mcomposer .status-strip.is-compact .status-strip-mcp,
+.mcomposer .status-strip.is-compact .status-strip-model .model-pill {
+  align-items: center;
+  padding: 0 6px;
+  border-radius: var(--radius-md);
+}
+
+.mcomposer .status-strip.is-compact .status-strip-div {
+  align-self: center;
+}
+
+.mcomposer .status-strip.is-compact .status-strip-usage-btn::after,
+.mcomposer .status-strip.is-compact .status-strip-mcp-btn::after,
+.mcomposer .status-strip.is-compact .perm-chip::after {
+  content: none;
+}
+
+.mcomposer .status-strip.is-compact .status-strip-right {
+  gap: var(--space-1);
+}
+
+.mcomposer .status-strip.is-compact .status-strip-mcp,
+.mcomposer .status-strip.is-compact .perm-chip,
+.mcomposer .status-strip.is-compact .status-strip-fast {
+  font-size: var(--text-sm);
+}
+
 .status-strip.is-compact .status-strip-div {
   flex: none;
   width: 1px;

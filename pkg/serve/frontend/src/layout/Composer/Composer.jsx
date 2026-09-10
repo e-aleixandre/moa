@@ -1061,7 +1061,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           ))}
         </div>
       )}
-      <div class={`composer${busy ? " is-busy" : ""}${busy || (steer && steer.onStop) ? " has-stop" : ""}`}>
+      {/* `is-armed` — there is something to send. The send button is a quiet
+          control until then, so the accent marks a real action rather than
+          decorating an empty box. Attachments count: a photo with no caption is
+          as sendable as a sentence. */}
+      <div class={`composer${busy ? " is-busy" : ""}${busy || (steer && steer.onStop) ? " has-stop" : ""}${hasText || attachments.length > 0 ? " is-armed" : ""}`}>
         <input
           ref={attachInputRef}
           type="file"

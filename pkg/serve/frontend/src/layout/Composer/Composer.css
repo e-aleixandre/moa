@@ -503,8 +503,13 @@
 .composer-wrap.is-compact .composer-textarea {
   grid-row: 1;
   grid-column: 2;
-  min-height: 36px;
-  padding: 6px 4px;
+  /* 44px, matching the two buttons it sits between: the row is three touch
+     targets wide and the field is the one aimed at most. 22px of line inside
+     11px of padding is what makes 44 without a fixed height, so the box still
+     grows with the text. */
+  min-height: 44px;
+  padding: 11px 6px;
+  line-height: 22px;
 }
 
 .composer-wrap.is-compact .composer-btn-attach {
@@ -533,7 +538,7 @@
   margin-left: 0;
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
 }
 
 .composer-wrap.is-compact .composer-send-wrap {

@@ -375,26 +375,67 @@
   color: var(--amb-text-4);
 }
 
-/* ── The composer ─────────────────────────────────────────────────────────
+/* ── The composer and its dock ─────────────────────────────────────────────
    The bar you touch most, and the last opaque box floating on the canvas: a
    1px-outlined rectangle in --mantle over an aurora reads as a control pasted
-   on top of the design rather than part of it. It becomes a pill of glass, the
-   same material as the drawer. Its container goes transparent too -- it was
-   painting --base across the bottom of the screen and cutting the aurora off. */
+   on top of the design rather than part of it.
+
+   It was glass here for a while, and that was the wrong material. Measured
+   against the catalogue side by side: the catalogue's composer is the one
+   RAISED PLANE on the canvas — opaque --amb-raised, rgb(30,30,41) — while
+   production's was rgba(255,255,255,0.07) over whatever passed behind, i.e. no
+   surface at all. A field you type into that shows the transcript through it is
+   the same "apagado" the header had: the object you use most was the least
+   present thing on the screen.
+
+   The dock is what the composer stands on: a gradient from transparent to
+   rgba(16,16,24,0.8) over its first third, so the bottom of the screen darkens
+   into the composer instead of ending at a seam. */
 [data-ambient="on"] .mcomposer {
-  background: transparent;
+  background: linear-gradient(to bottom, transparent, rgba(16, 16, 24, 0.8) 32%);
 }
 [data-ambient="on"] .composer-wrap.is-compact .composer {
-  background: rgba(255, 255, 255, 0.07);
-  backdrop-filter: var(--amb-blur);
-  -webkit-backdrop-filter: var(--amb-blur);
+  background: var(--amb-raised);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border: 0;
-  border-radius: 22px;
-  box-shadow: inset 0 1px 0 var(--amb-on-edge);
+  border-radius: var(--amb-r-lg);
+  box-shadow: inset 0 0 0 1px var(--amb-line-strong);
 }
+/* Focus is the accent on its rim: the object does not change shape, it is
+   chosen. */
 [data-ambient="on"] .composer-wrap.is-compact .composer:focus-within {
-  background: rgba(255, 255, 255, 0.11);
+  background: var(--amb-raised);
   border: 0;
+  box-shadow: inset 0 0 0 1px rgba(203, 166, 247, 0.45);
+}
+
+/* Send: a quiet control until there is something to send, then the accent.
+   This is the single most visible use of mauve in the product and it marks the
+   primary action — peach stays with the MESSAGE, which is what the text becomes
+   after this button. A send that is already peach spends the identity colour on
+   the button rather than on what the button produces.
+
+   Recording and transcribing keep their own faces: they are states of the
+   microphone, not of the draft, and a red mic that turned grey here would be a
+   live recording made invisible. */
+[data-ambient="on"] .composer-wrap.is-compact .composer-send:not(.recording):not(.transcribing) {
+  background: var(--amb-control);
+  border-radius: var(--amb-r-ctl);
+  color: var(--amb-text-4);
+  box-shadow: none;
+}
+[data-ambient="on"] .composer-wrap.is-compact .composer.is-armed .composer-send:not(.recording):not(.transcribing) {
+  background: var(--mauve);
+  color: var(--amb-canvas);
+}
+[data-ambient="on"] .composer-wrap.is-compact .composer-btn-attach {
+  border-radius: var(--amb-r-ctl);
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .composer-wrap.is-compact .composer-textarea { color: var(--amb-text); }
+[data-ambient="on"] .composer-wrap.is-compact .composer-textarea::placeholder {
+  color: var(--amb-text-4);
 }
 
 /* ── The activity ledger ───────────────────────────────────────────────────
@@ -1246,7 +1287,7 @@
 [data-ambient="on"] .status-strip {
   font-family: var(--font);
   font-variant-numeric: tabular-nums;
-  color: var(--amb-text-4);
+  color: var(--amb-text-3);
 }
 [data-ambient="on"] .status-strip .status-strip-usage-btn { color: inherit; }
 [data-ambient="on"] .status-strip .status-strip-spend b { color: var(--amb-text-2); }
@@ -1255,7 +1296,16 @@
   border: 0;
   color: var(--amb-text-2);
 }
-[data-ambient="on"] .status-strip .model-pill .m-name { color: var(--amb-text); }
+/* The line's items carry no fill at rest. In the catalogue every segment is a
+   transparent 44px target that only tints on hover — the words ARE the line,
+   and a row of filled pills turns a readout into a toolbar. The model kept a
+   well from when it was 10.5px and needed one to be findable; at 14px on a
+   44px row it does not. */
+[data-ambient="on"] .mcomposer .status-strip .model-pill {
+  background: transparent;
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .mcomposer .status-strip .model-pill .m-name { color: var(--amb-text-2); }
 [data-ambient="on"] .status-strip .perm-chip,
 [data-ambient="on"] .status-strip .status-strip-pill {
   font-family: var(--font);
