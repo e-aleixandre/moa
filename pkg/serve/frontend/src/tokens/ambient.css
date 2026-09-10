@@ -1357,8 +1357,7 @@ html.mobile-locked[data-ambient="on"] body {
    what "colour lives in the background" means structurally, not just
    chromatically. */
 [data-ambient="on"] .mconv,
-[data-ambient="on"] .desktop-shell,
-[data-ambient="on"] .conversation-main {
+[data-ambient="on"] .desktop-shell {
   background: transparent;
 }
 
@@ -1374,11 +1373,36 @@ html.mobile-locked[data-ambient="on"] body {
    violet. Secondary text (.who, timestamps, tool result lines) fell to
    2.86:1 against it, under the 4.5:1 floor and under the catalogue's own
    3.53:1.
-   So the scroller gets the frame's surface. Not the message: the message was
-   already right, transparent with its peach rule, in both. What was missing
-   was the sheet underneath it. */
+
+   The sheet belongs to the ZONE, not to the column of text. Put on
+   .stream-col it painted a 780px strip down the middle of a 1296px scroller
+   and left ~258px of bare aurora on either side -- a stripe of surface the
+   width of the words, which the catalogue never shows: its .zl-desk carries
+   one continuous sheet across the whole frame and only the TEXT is narrow.
+   So the host of the whole conversation zone carries it. On the phone the
+   host IS the full width, so .mstream keeps behaving exactly as it did. */
+/* ── The send button is not a message ──────────────────────────────────────
+   Production inherited a peach gradient here from before Ambient had a colour
+   grammar. Peach means "you wrote this" -- it belongs to the user's message,
+   which is what this text BECOMES after the button is pressed, not to the
+   button. The catalogue is explicit about it (zones-lab.css: "peach stays with
+   the message"): the control sits on the control tone while there is nothing
+   to send, and takes the accent once it is armed. */
+[data-ambient="on"] .composer-wrap .composer-send {
+  background: var(--amb-control);
+  color: var(--amb-text-3);
+  box-shadow: none;
+}
+[data-ambient="on"] .composer-wrap .composer.is-armed .composer-send {
+  background: var(--mauve);
+  color: var(--crust);
+}
+[data-ambient="on"] .composer-wrap .composer-send:hover {
+  box-shadow: none;
+}
+
 [data-ambient="on"] .mstream,
-[data-ambient="on"] .stream-col {
+[data-ambient="on"] .conversation-main {
   background: rgba(16, 16, 24, 0.78);
 }
 

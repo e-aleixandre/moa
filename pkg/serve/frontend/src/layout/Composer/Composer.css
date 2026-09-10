@@ -179,6 +179,18 @@
   margin-left: var(--space-1);
 }
 
+/* The desktop mic is part of the right-hand group, not of [+] [/]: dictation
+   produces the message that Send then submits, so the two belong together the
+   way they do in every app that separates them. Whichever of the three comes
+   first owns the auto-push and the rest follow on the bar's own gap. */
+.composer-wrap .composer-btn-mic {
+  margin-left: auto;
+}
+.composer-wrap .composer-stop-ghost + .composer-btn-mic,
+.composer-wrap .composer-btn-mic + .composer-send-wrap {
+  margin-left: 0;
+}
+
 /* Steer hint shown in the queue-note slot while typing during a run: names the
    consequence of Enter (steer, not interrupt). A big-surface label — no motion. */
 .composer-wrap .steer-hint {
@@ -402,6 +414,29 @@
   background: var(--surface1);
   color: var(--text);
 }
+}
+
+/* The desktop's separate dictation button. It lives with the other secondary
+   controls (+ and /) at the left of the bar and wears their face, because that
+   is what it is: the primary action is the arrow at the other end. Its states
+   are the mic's own — a live recording goes red here, not on Send. */
+.composer-wrap .composer-btn-mic.recording {
+  background: color-mix(in srgb, var(--red) 18%, transparent);
+  color: var(--red);
+  animation: composer-mic-pulse 1.5s ease-in-out infinite;
+}
+@media (hover: hover) {
+
+.composer-wrap .composer-btn-mic.recording:hover {
+  background: color-mix(in srgb, var(--red) 26%, transparent);
+  color: var(--red);
+}
+}
+.composer-wrap .composer-btn-mic.transcribing {
+  color: var(--mauve);
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-wrap .composer-btn-mic.recording { animation: none; }
 }
 
 /* Actively recording: red, gently pulsing, white icon for contrast. */

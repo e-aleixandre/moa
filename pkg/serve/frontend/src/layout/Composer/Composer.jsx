@@ -771,6 +771,15 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // MediaRecorder + mic (needs a secure context). Steer mode never records — it
   // targets a subagent, not the parent run.
   const canVoice = canTranscribe && voiceSupported && !steer;
+  // Who owns the send button.
+  //
+  // Phone (compact): voice owns it whenever it is usable — a short press sends,
+  // a hold records even over an existing draft, and transcripts are inserted at
+  // the caret. There is room for exactly one control at the end of that pill.
+  //
+  // Desktop: the arrow is the primary action and always sends; dictation is a
+  // separate secondary button beside it. Same voice machine either way.
+  const voiceButtonMode = usesVoiceSendButton({ canVoice, compact });
 
   // ⌘. (Mac) / Alt+. (elsewhere) toggles push-to-talk for the FOCUSED composer.
   // Ctrl is deliberately excluded (project rule: ⌘ on Mac / Alt elsewhere,
@@ -1024,11 +1033,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
 
   const summary = steer ? null : queueSummary(pendingSteers);
   const short = compact || shortPlaceholder;
-  // shortPlaceholder (mobile): the multi-line keyboard hint doesn't fit the
-  // single-line pill and reads noisy on a phone — use the short prompt.
-  const idlePlaceholder = short
-    ? "Message moa…"
-    : `Message moa — Enter to send, ⇧Enter for a new line, ${formatShortcut("Enter", { mod: true })} to queue…`;
+  // "Message moa" everywhere. The keyboard hints used to be printed here — 71
+  // characters of instructions inside the field, which is the noisiest place in
+  // the product to teach a shortcut and the one the eye returns to most. The
+  // shortcuts themselves are unchanged; only their advertisement is gone.
+  const idlePlaceholder = "Message moa…";
   // Steer mode uses the standard busy placeholder because its header identifies
   // the subagent. Busy (parent run) copy states that Enter STEERS without stopping —
   // the persistent Send button already signals "you can always talk to it", so
@@ -1186,38 +1195,59 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
               <Square size={13} />
             </button>
           )}
+          {canVoice && !voiceButtonMode && (
+            /* The desktop's own dictation control, kept next to Send as a
+               secondary action. It drives the same voice machine as the phone
+               through its pointer-free toggle: click to start dictating, click
+               again to stop and transcribe (⌘./Alt+. does the same).
+               Hold-to-talk is deliberately NOT wired here — that gesture ends a
+               short press with a SEND, which is right for a button that IS Send
+               on a phone and wrong for a mic sitting next to its own arrow. */
+            <button
+              type="button"
+              class={`composer-btn composer-btn-mic${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
+              aria-label={transcribing ? "Transcribing" : recording ? "Stop recording" : "Dictate"}
+              title={
+                transcribing ? "Transcribing…"
+                  : recording ? "Click to stop & transcribe"
+                    : `Dictate (${formatShortcut(".", { mod: true })})`
+              }
+              disabled={transcribing || contentSendPending}
+              onClick={toggleFromShortcut}
+            >
+              {transcribing ? <Loader2 size={15} class="spin" />
+                : recording ? <Square size={13} />
+                  : <Mic size={15} />}
+            </button>
+          )}
           {(() => {
-            // Voice owns the shared send button whenever it is usable. A short
-            // press sends, while a hold records even over an existing draft or
-            // attachment; transcripts are inserted at the caret. Content only
-            // chooses the arrow icon, not whether the gesture is available.
-            const voiceButtonMode = usesVoiceSendButton({
-              canVoice, hasText, attachmentCount: attachments.length,
-            });
             // A shortcut recording can begin while there is text or an
-            // attachment. It must take over the button until it is stopped:
-            // showing Send here would make a live mic invisible and let a tap
-            // submit the unrelated text instead of stopping the recording.
-            const voiceOwnsButton = voiceButtonMode || recording || transcribing;
-            const micMode = canVoice && !hasText && attachments.length === 0;
+            // attachment. On the phone it must take over the button until it is
+            // stopped: showing Send there would make a live mic invisible and
+            // let a tap submit the unrelated text instead of stopping the
+            // recording. On the desktop the mic has its own button, which is
+            // where a live recording shows.
+            const voiceOwnsButton = voiceButtonMode || (compact && (recording || transcribing));
+            const micMode = voiceButtonMode && !hasText && attachments.length === 0;
 
             let icon = <ArrowUp size={16} />;
-            if (contentSendPending || transcribing) icon = <Loader2 size={16} class="spin" />;
-            else if (recording && voiceLocked) icon = <Square size={14} />;
-            else if (recording) icon = <Mic size={16} />;
+            if (contentSendPending || (voiceOwnsButton && transcribing)) icon = <Loader2 size={16} class="spin" />;
+            else if (voiceOwnsButton && recording && voiceLocked) icon = <Square size={14} />;
+            else if (voiceOwnsButton && recording) icon = <Mic size={16} />;
             else if (micMode) icon = <Mic size={16} />;
 
             const cls = [
               "composer-send",
               voiceOwnsButton ? "gesture" : "",
-              recording ? "recording" : "",
-              voiceLocked ? "locked" : "",
-              transcribing ? "transcribing" : "",
+              voiceOwnsButton && recording ? "recording" : "",
+              voiceOwnsButton && voiceLocked ? "locked" : "",
+              voiceOwnsButton && transcribing ? "transcribing" : "",
               micMode ? "mic-mode" : "",
             ].filter(Boolean).join(" ");
 
             const sendTitle = busy ? "Send — steers the agent, doesn't stop it" : "Send";
             const title = contentSendPending ? "Sending…"
+              : !voiceOwnsButton ? sendTitle
               : transcribing ? "Transcribing…"
               : recording ? (voiceLocked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
               : canVoice ? `Hold to talk · tap to send (${formatShortcut(".", { mod: true })} for mic)`
@@ -1234,6 +1264,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
               };
 
             const sendLabel = contentSendPending ? "Sending"
+              : !voiceOwnsButton ? (busy ? "Send steer" : "Send")
               : transcribing ? "Transcribing"
               : recording ? "Stop recording"
               : micMode ? "Record"
@@ -1253,7 +1284,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
                   class={cls}
                   aria-label={sendLabel}
                   title={title}
-                  disabled={transcribing}
+                  disabled={voiceOwnsButton && transcribing}
                   {...gestureProps}
                 >
                   {icon}

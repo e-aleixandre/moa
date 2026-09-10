@@ -1,8 +1,9 @@
 // composer-send-button.js — exactly-once routing for Composer's Send action.
 //
-// Voice gestures own the button whenever voice is available. Content sends
-// still share this reducer, including the iOS pointercancel fallback, so a
-// cancelled touch plus a trailing click cannot submit twice.
+// On the phone, voice gestures own the button whenever voice is available. On
+// the desktop the mic is its own control and Send is always Send. Content
+// sends still share this reducer, including the iOS pointercancel fallback, so
+// a cancelled touch plus a trailing click cannot submit twice.
 
 export const SEND_BUTTON_INITIAL = Object.freeze({
   activePointerId: null,
@@ -19,8 +20,17 @@ export const sendButtonEvent = {
   sendFinished: () => ({ type: "SEND_FINISHED" }),
 };
 
-export function usesVoiceSendButton({ canVoice }) {
-  return canVoice;
+// usesVoiceSendButton — whether the voice gesture takes over the send button.
+//
+// It does on the phone, where there is room for exactly one 44px control at the
+// end of the pill and the hold-to-talk gesture is the natural one for a thumb.
+// On the desktop the composer's bar has room for both, so the primary action
+// keeps its own button (an arrow that always sends) and the mic sits beside it
+// as a secondary control — the arrangement the owner asked for and the one
+// every other desktop chat app uses. A pointer that must be held to dictate is
+// also a worse gesture with a mouse than a click.
+export function usesVoiceSendButton({ canVoice, compact }) {
+  return canVoice && !!compact;
 }
 
 function send(state, terminalActivation) {
