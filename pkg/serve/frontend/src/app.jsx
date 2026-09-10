@@ -10,6 +10,10 @@ import { bindRouter, navigate } from "./data/router.js";
 import { isPulsePairingOpen, subscribePulsePairing, closePulsePairing } from "./data/pulse-pairing-panel.js";
 import { hasBlockingOverlay } from "./data/overlays.js";
 import { globalPaletteContext, isDesktopGridShortcut, shouldLockMobileDocument } from "./data/app-layout.js";
+/* Ambient last on purpose: esbuild emits CSS in import order, so this sheet has
+   to come after every component sheet it is meant to override. It is inert
+   unless data-ambient="on" (see data/ambient.js). Temporary. */
+import "./tokens/ambient.css";
 import {
   loadSessions, startPolling, stopPolling,
   startUsagePolling, stopUsagePolling,
