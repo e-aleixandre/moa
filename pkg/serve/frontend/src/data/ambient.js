@@ -50,3 +50,17 @@ export function initAmbient() {
 
   return on;
 }
+
+// ambientOn — is the switch on right now? initAmbient sets data-ambient before
+// the first render and nothing ever flips it at runtime (the URL parameter is
+// read once, on boot), so this is a stable read.
+//
+// It exists because the migration reached something CSS alone cannot gate: the
+// session panel is a new SURFACE, not a restyle. With the switch off the app
+// must behave exactly as it does today — no extra door on the crumb, no drawer
+// mounted — so the components that host it ask here before rendering it. When
+// Ambient stops being a switch this call goes away with the module.
+export function ambientOn() {
+  if (typeof document === "undefined") return false;
+  return document.documentElement.dataset.ambient === "on";
+}

@@ -1,0 +1,310 @@
+/* SessionPanel — the session's dossier, a right-hand drawer over the
+   conversation. Structure and geometry only: the Ambient look lives in
+   tokens/ambient.css, behind the switch, like every other migrated surface.
+
+   It is absolutely positioned inside the conversation column (which is
+   position:relative) rather than fixed to the window, so in a pane it stays
+   inside its pane. */
+
+.spanel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-overlay);
+  width: min(340px, 100%);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--mantle);
+  border-left: 1px solid var(--surface0);
+  box-shadow: -12px 0 40px rgb(0 0 0 / .28);
+  font-family: var(--font);
+  color: var(--text);
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform 220ms var(--ease), visibility 0s linear 220ms;
+}
+.spanel.is-open {
+  transform: none;
+  visibility: visible;
+  transition: transform 220ms var(--ease), visibility 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .spanel { transition: none; }
+}
+
+/* ── Head ─────────────────────────────────────────────────────────────────
+   One row that changes role, not two heads: an eyebrow at the root, back +
+   page title one level down. The close button never moves. */
+.spanel-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 48px;
+  padding: var(--space-3) var(--space-2) var(--space-2) var(--space-5);
+}
+.spanel-head.is-sub { padding-left: var(--space-2); }
+
+.spanel-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.spanel-title.is-eyebrow {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+.spanel-title.is-page {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+}
+
+.spanel-x,
+.spanel-back {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--subtext0);
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+@media (hover: hover) {
+  .spanel-x:hover,
+  .spanel-back:hover { background: var(--surface0); color: var(--text); }
+}
+.spanel-x:focus-visible,
+.spanel-back:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ── Body ─────────────────────────────────────────────────────────────── */
+.spanel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-2) var(--space-5) var(--space-4);
+}
+.spanel-body.is-sub { padding: var(--space-1) var(--space-3) var(--space-6); }
+
+.spanel-field { display: block; margin-bottom: var(--space-4); }
+.spanel-label {
+  display: block;
+  margin: 0 0 6px 2px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--subtext0);
+}
+.spanel-input {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  background: var(--base);
+  color: var(--text);
+  font-family: var(--font);
+  /* --text-input (16px) is the iOS focus-zoom floor: anything smaller makes
+     the PWA jump when the field takes focus. */
+  font-size: var(--text-input);
+  outline: 0;
+}
+.spanel-input:focus { border-color: var(--mauve); }
+/* A read-only value is not a well: it sits flush, in the type data wears. */
+.spanel-input.is-static {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+  background: transparent;
+  border-color: transparent;
+  padding-left: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  display: block;
+  line-height: 44px;
+}
+.spanel-field-meta {
+  margin: 2px 0 0 2px;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+}
+
+/* ── The run facts ────────────────────────────────────────────────────────
+   PRINTED in two columns, not boxed: these are pairs you scan, and a card
+   around each one would make six objects out of six readings. This is the
+   other end of the status line's shedding rule — whatever the line drops as
+   the dock narrows is here, in full. */
+.spanel-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px var(--space-4);
+  margin: var(--space-4) 0 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--surface0);
+}
+.spanel-facts > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 24px;
+}
+.spanel-facts dt {
+  font-size: var(--text-sm);
+  color: var(--overlay0);
+}
+.spanel-facts dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--subtext1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── The three rows ─────────────────────────────────────────────────────── */
+.spanel-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: var(--space-5) 0 var(--space-2);
+}
+.spanel-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
+}
+@media (hover: hover) {
+  .spanel-row:hover { background: var(--surface0); }
+}
+.spanel-row:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.spanel-row-ico { flex: none; color: var(--overlay1); }
+.spanel-row-t { flex: none; }
+.spanel-row-v {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-normal);
+  color: var(--subtext0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* State colour only when the verdict IS a state. A plain number never wears it. */
+.spanel-row-v.is-warn { color: var(--red); }
+.spanel-row-go { flex: none; color: var(--overlay0); font-size: var(--text-lg); line-height: 1; }
+
+/* ── Pushed pages ─────────────────────────────────────────────────────── */
+.spanel-page-sum {
+  margin: var(--space-1) 2px var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--subtext0);
+}
+.spanel-artifacts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.spanel-artifacts li {
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+}
+
+/* ── Lifecycle, at the foot ─────────────────────────────────────────────── */
+.spanel-acts {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-4) var(--space-3) var(--space-3);
+}
+.spanel-act {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-height: 56px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration) var(--ease);
+}
+@media (hover: hover) {
+  .spanel-act:hover { background: var(--surface0); }
+}
+.spanel-act:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.spanel-act-t { font-size: var(--text-md); font-weight: var(--weight-medium); }
+.spanel-act-d { font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--overlay0); }
+.spanel-act.is-danger .spanel-act-t { color: var(--red); }
+.spanel-act.is-danger[data-confirming="true"] { border-color: var(--red); }
+
+/* The scrim: the panel is read ON a live transcript, so what is behind it is
+   dimmed rather than blurred (a blur over moving text costs more and reads
+   worse than dimming). */
+.spanel-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: calc(var(--z-overlay) - 1);
+  background: color-mix(in srgb, var(--crust) 45%, transparent);
+}
+
+/* Mobile: the dossier is a PAGE, not a 340px drawer over a 390px phone. */
+.spanel.spanel-mobile { width: 100%; border-left: 0; }
+.spanel.spanel-mobile .spanel-head { padding-top: calc(env(safe-area-inset-top, 0px) + var(--space-3)); }
+.spanel.spanel-mobile .spanel-acts { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--space-3)); }
+.spanel.spanel-mobile .spanel-x,
+.spanel.spanel-mobile .spanel-back { width: 44px; height: 44px; }
+.spanel.spanel-mobile .spanel-input { min-height: 48px; }
+.spanel.spanel-mobile .spanel-input.is-static { line-height: 48px; }

@@ -8,6 +8,15 @@ import { ARTIFACTS_CLOSED } from './artifacts-model.js';
 
 const STORAGE_KEY = 'moa-next-ui-state';
 
+// The session panel's closed slice. It lives here rather than in
+// data/session-panel.js because the initial state must not import the
+// controller that reads this store back.
+export const SESSION_PANEL_CLOSED = Object.freeze({
+  ownerSessionId: null,
+  open: false,
+  page: 'root',
+});
+
 function loadPersistedState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -121,6 +130,12 @@ let state = {
   // state of its list request. The collection is server state and is refetched
   // on every open, so it deliberately does not live in session metadata.
   artifacts: ARTIFACTS_CLOSED,
+
+  // Session panel — the same shape of ephemeral, global slice (see
+  // data/session-panel.js): which conversation's dossier is open and which
+  // page inside it. Never persisted: it is a place you are looking, not a
+  // preference.
+  sessionPanel: SESSION_PANEL_CLOSED,
 };
 
 let listeners = new Set();

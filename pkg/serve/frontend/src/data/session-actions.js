@@ -12,6 +12,7 @@ import { allSessionIds, clearSession } from './tileTree.js';
 import { attentionArrival, forgetAttentionArrival, retainAttentionArrivals } from './attention-arrivals.js';
 import { loadEvents } from './events.js'; // wake-on-event
 import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artifacts.js';
+import { closeSessionPanelForSession } from './session-panel.js';
 
 let pollTimer = null;
 let nextRosterRequest = 0;
@@ -94,6 +95,9 @@ function normalizeSessionInfo(info, existing, visible) {
     fastSupported: wsOwns ? existing.fastSupported : !!info.fast_supported,
     fastNote: wsOwns ? existing.fastNote : (info.fast_note || ''),
     cwd: info.cwd,
+    // created — when the session began. Server-owned and immutable, so the
+    // poll is its only source; the session panel prints it as the run's start.
+    created: info.created ? Date.parse(info.created) : (existing ? existing.created : 0),
     updated: info.updated ? Date.parse(info.updated) : (existing ? existing.updated : 0),
     cacheExpiresAt: cacheExpiresAtMs(info.cache_expires_at),
     error: wsOwns ? existing.error : (info.error || null),
@@ -391,6 +395,8 @@ export async function deleteSession(id) {
   // keep showing its collection. Closing (unloading) does not need this: the
   // artifacts API answers for a saved session.
   closeArtifactsForSession(id);
+  // Its dossier goes with it, for the same reason.
+  closeSessionPanelForSession(id);
   setState({ sessions, tileTree, activeSession });
   afterVisibilityChange();
 }
@@ -908,6 +914,21 @@ export async function setSessionFast(id, fast) {
 export async function trustMcp(id) {
   await api('POST', `/api/sessions/${id}/trust-mcp`, undefined, { timeoutMs: 0 });
   updateSession(id, { untrustedMcp: false });
+}
+
+// renameSession sets the conversation's title through the same /rename command
+// the composer already uses, so both doors go through one server path. The
+// command runs instantly even mid-run (PolicyInstant: it only touches side
+// state), and the title is reflected locally because the roster poll lags up
+// to ~15s on mobile.
+export async function renameSession(id, title) {
+  const next = String(title || '').trim();
+  if (!next) throw new Error('a session needs a name');
+  const res = await execCommand(id, `/rename ${next}`);
+  if (!res || !res.ok) throw new Error(res?.message || 'rename failed');
+  const applied = String(res.message || '').replace(/^renamed to:\s*/, '') || next;
+  updateSession(id, { title: applied });
+  return applied;
 }
 
 export async function execCommand(id, command, steerId = '') {
