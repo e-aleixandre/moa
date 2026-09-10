@@ -778,6 +778,17 @@ export async function steerSubagent(id, jobId, text) {
   return api('POST', `/api/sessions/${id}/subagents/${jobId}/steer`, { text });
 }
 
+// epochMs turns the REST projection's RFC3339 timestamp into the epoch millis
+// the live WS path already uses. Go marshals a zero time.Time as
+// "0001-01-01T00:00:00Z", which parses to a real (very negative) number, so
+// anything before 1971 is treated as "not known" rather than as a date.
+function epochMs(value) {
+  if (!value) return 0;
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return ms;
+}
+
 // openPersistedSubagent loads a finished subagent's transcript from disk and
 // opens it in the SubagentView. Used when clicking a subagent card in the chat
 // after the live tray entry is gone.
@@ -822,6 +833,13 @@ export async function openPersistedSubagent(id, jobId, opts = {}) {
     messages: normalizeConversationProjection(transcript, `/api/sessions/${id}/subagents/${jobId}`),
     streamingText: null,
     thinkingText: null,
+    // The two anchors the report's duration is made of. The REST projection
+    // sends them as timestamps (RFC3339), while the live path sends epoch
+    // millis, so they are normalized here into the millis the view model
+    // reads. An unparseable or zero time yields null, and the report then
+    // states the outcome without a duration rather than inventing one.
+    startedAtMs: epochMs(t.started_at) || (existing && existing.startedAtMs) || null,
+    finishedAtMs: epochMs(t.finished_at) || (existing && existing.finishedAtMs) || null,
     usage,
     contextPercent: t.context_percent == null ? -1 : t.context_percent,
   };

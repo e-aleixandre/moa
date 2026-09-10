@@ -1,0 +1,389 @@
+/* WorkChrome — the frame shared by the two open-work screens (a delegated
+   subagent, a background command). Base skin here in the product's existing
+   tokens; the Ambient skin re-dresses the same class names in ambient.css.
+
+   These classes are STRUCTURAL: they exist with the switch off too, because
+   the redesign moved and removed elements rather than only repainting them. */
+
+/* ── head ───────────────────────────────────────────────────────────────── */
+.wk-head {
+  flex: none;
+  padding: var(--space-3) var(--space-6) var(--space-4);
+  border-bottom: 1px solid var(--surface0);
+}
+
+.wk-head.is-phone {
+  padding: calc(env(safe-area-inset-top, 0px) + 8px) var(--space-4) var(--space-3);
+}
+
+.wk-head-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-md);
+}
+
+.wk-head.is-phone .wk-head-top { min-height: var(--control-touch); }
+
+.wk-sp { flex: 1; min-width: 0; }
+
+/* the door home */
+.wk-home {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 240px;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-2) 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--subtext0);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.wk-home.is-phone {
+  min-height: var(--control-touch);
+  padding: 0 var(--space-3) 0 var(--space-2);
+  margin-left: -8px;
+  font-size: var(--text-base);
+}
+
+.wk-home svg { flex: none; }
+
+.wk-home-t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .wk-home:hover { background: var(--surface0); color: var(--text); }
+}
+
+/* the state word */
+.wk-state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.wk-state-w { white-space: nowrap; }
+
+.wk-state-t {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-normal);
+  color: var(--overlay0);
+  white-space: nowrap;
+}
+
+.wk-state.is-running { color: var(--green); }
+.wk-state.is-waiting { color: var(--yellow); }
+.wk-state.is-neutral { color: var(--subtext0); }
+.wk-state.is-failed { color: var(--red); }
+
+.wk-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.wk-dot.is-running { animation: wk-breathe 1.8s ease-in-out infinite; }
+/* Waiting does NOT animate: something parked on you is not making progress,
+   and movement would say it is. */
+.wk-dot.is-waiting { animation: none; }
+
+@keyframes wk-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wk-dot.is-running { animation: none; }
+}
+
+/* the title = the work */
+.wk-title {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  color: var(--text);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.wk-title.is-mono {
+  font-family: var(--mono);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-normal);
+}
+
+.wk-title.is-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2);
+  margin-left: calc(var(--space-2) * -1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.wk-title.is-copy.is-phone { min-height: var(--control-touch); }
+
+.wk-title-t {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.wk-title.is-copy svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--overlay0);
+}
+
+@media (hover: hover) {
+  .wk-title.is-copy:hover { background: var(--surface0); }
+  .wk-title.is-copy:hover svg { color: var(--subtext0); }
+}
+
+/* the line that truncates first */
+.wk-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  font-size: var(--text-sm);
+  color: var(--overlay1);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wk-sub .wk-data {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.wk-sub-sep { color: var(--overlay0); }
+
+/* ── stop ───────────────────────────────────────────────────────────────── */
+.wk-stop {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  background: var(--mantle);
+  color: var(--subtext0);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.wk-stop.is-phone {
+  min-height: var(--control-touch);
+  padding: 0 var(--space-4);
+  font-size: var(--text-base);
+}
+
+.wk-stop.is-armed {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  background: var(--red-dim);
+}
+
+@media (hover: hover) {
+  .wk-stop:hover { background: var(--surface0); color: var(--text); }
+}
+
+.wk-stopping {
+  flex: none;
+  font-size: var(--text-sm);
+  color: var(--overlay1);
+}
+
+/* ── secondary button ───────────────────────────────────────────────────── */
+.wk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  background: var(--mantle);
+  color: var(--subtext0);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.wk-btn.is-phone {
+  min-height: var(--control-touch);
+  padding: 0 var(--space-4);
+  font-size: var(--text-base);
+}
+
+@media (hover: hover) {
+  .wk-btn:hover { background: var(--surface0); color: var(--text); }
+}
+
+/* ── disclosure ─────────────────────────────────────────────────────────── */
+.wk-disc {
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--surface0);
+}
+
+.wk-disc-b {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--control-touch);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--subtext0);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-align: left;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .wk-disc-b:hover { color: var(--text); }
+}
+
+.wk-chev {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--overlay0);
+  transition: transform 150ms var(--ease);
+}
+
+.wk-chev.is-open { transform: rotate(90deg); }
+
+.wk-disc-t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wk-disc-n {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--overlay0);
+}
+
+.wk-disc-body { padding: var(--space-1) 0 var(--space-4); }
+
+@media (prefers-reduced-motion: reduce) {
+  .wk-chev { transition: none; }
+}
+
+/* ── run details ────────────────────────────────────────────────────────── */
+.wk-rd {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px var(--space-6);
+  margin: 0 0 var(--space-3);
+}
+
+.wk-rd > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 26px;
+}
+
+.wk-rd dt {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--overlay0);
+}
+
+.wk-rd dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  color: var(--subtext0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wk-ids { display: flex; flex-direction: column; }
+
+.wk-id {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--control-touch);
+  padding: 0 var(--space-2);
+  margin-left: calc(var(--space-2) * -1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--subtext0);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wk-id-k { flex: none; color: var(--overlay0); }
+
+.wk-id-v {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wk-id svg { flex: none; color: var(--overlay0); }
+
+@media (hover: hover) {
+  .wk-id:hover { background: var(--surface0); color: var(--text); }
+}
+
+@media (max-width: 767px) {
+  .wk-rd { grid-template-columns: 1fr; }
+}

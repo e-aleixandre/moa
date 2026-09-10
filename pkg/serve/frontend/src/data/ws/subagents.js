@@ -213,6 +213,11 @@ export function handleWsSubagentEnd(id, data) {
     status: data.status || 'completed',
     streamingText: null,
     thinkingText: null,
+    // The completion anchor, kept on the CHILD too (not only on the parent's
+    // terminal card): the report's "Completed in 4m12s" is startedAtMs →
+    // finishedAtMs, and without this the duration vanished the moment the run
+    // ended — the one number the criterion keeps next to the outcome.
+    finishedAtMs: data.finished_at_ms || existing.finishedAtMs || null,
     usage: {
       inputTokens: data.input_tokens || 0,
       outputTokens: data.output_tokens || 0,

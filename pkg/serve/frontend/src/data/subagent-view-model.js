@@ -25,6 +25,17 @@ import { activityText, formatElapsed } from './util/activity.js';
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'error', 'done']);
 
+// countActions counts the tool rows in the child's transcript — what the
+// folded work log promises ("Work log · 4 actions"). It counts what is
+// actually in the record, so the number can never claim more evidence than
+// the disclosure holds.
+function countActions(sub) {
+  const msgs = Array.isArray(sub.messages) ? sub.messages : [];
+  let n = 0;
+  for (const m of msgs) if (m && m._type === 'tool_start') n++;
+  return n;
+}
+
 // firstLine returns the first line of a (possibly multi-line) string.
 function firstLine(str) {
   if (!str) return '';
@@ -90,14 +101,31 @@ function resultChip(sub) {
   return line.length > 60 ? line.slice(0, 59) + '…' : line;
 }
 
+// lastProgress describes how far a CANCELLED child actually got, using only
+// what the record holds: the tools it ran, newest last. It returns '' when the
+// transcript shows nothing — an honest blank, never a claim like "nothing was
+// written", which the system cannot prove.
+function lastProgress(sub) {
+  const msgs = Array.isArray(sub.messages) ? sub.messages : [];
+  const seen = [];
+  for (const m of msgs) {
+    if (!m || m._type !== 'tool_start') continue;
+    const name = m.tool_name || 'tool';
+    if (seen[seen.length - 1] !== name) seen.push(name);
+  }
+  if (seen.length === 0) return '';
+  const tail = seen.slice(-4);
+  return tail.join(' → ');
+}
+
 // subagentView is the single entry point. Returns null when the viewed job_id
 // no longer exists in the session (the "rebound": the caller clears
 // viewingSubagent and falls back to the parent). Otherwise a plain descriptor:
 //
 //   {
-//     jobId, name, accent, model, task, async,
+//     jobId, name, errand, accent, model, task, async,
 //     status, terminal:boolean, outcome:'completed'|'failed'|'cancelled'|null,
-//     resultChip, error, usage,
+//     resultChip, error, usage, actionCount?, lastProgress?,
 //     siblings:[{ id, name, accent, action?, time?, active }],  // [] when alone
 //     blocks:[...],           // projectStream() of the sub-conversation
 //     action?, elapsed?,      // live now-line segments (omitted when absent)
@@ -146,6 +174,10 @@ export function subagentView(session, jobId) {
   const view = {
     jobId,
     name: codenameOf(sub),
+    // The errand VERBATIM: what the parent actually asked for. The name above
+    // is its label (a generated title, or its first line); this is the whole
+    // instruction, which the record shows as the child's first message.
+    errand: sub.task || '',
     accent,
     // The model label is the SHORT ALIAS ("Terra"), same as the parent header's
     // ModelPill (modelCodename), never the raw id ("gpt-5.6-terra"). Falls back
@@ -175,10 +207,22 @@ export function subagentView(session, jobId) {
   };
 
   if (terminal) {
+    view.actionCount = countActions(sub);
+    // Duration of a FINISHED run, only when both anchors are known. Omitted
+    // rather than guessed: "Completed" alone is true, "Completed in 0s" is not.
+    if (sub.startedAtMs && sub.finishedAtMs && sub.finishedAtMs >= sub.startedAtMs) {
+      const done = formatElapsed(sub.finishedAtMs - sub.startedAtMs);
+      if (done) view.elapsed = done;
+    }
     if (outcome === 'failed') view.error = lastError(sub);
     if (outcome === 'completed') {
       view.result = resultText(sub);
       view.resultChip = resultChip(sub);
+    }
+    if (outcome === 'cancelled') {
+      // What it had actually done, and nothing more. The system cannot prove
+      // that nothing was written, so the screen does not say so.
+      view.lastProgress = lastProgress(sub);
     }
   } else {
     // Live now-line segments. The action (last in-flight tool / "Working")

@@ -1,39 +1,45 @@
-import { useEffect, useState } from "preact/hooks";
-import { ArrowLeft, GitFork, X, Check, Copy, Info } from "lucide-preact";
-import { Spinner, Kbd, IconButton } from "../../primitives/index.js";
-import { RunModeChip, SubagentDetails } from "../../components/index.js";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Stream } from "../Stream/Stream.jsx";
-import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { Composer } from "../Composer/Composer.jsx";
+import { WorkHead, StateWord, StopButton, CopyAction, Disclosure, RunDetails } from "../WorkChrome/WorkChrome.jsx";
+import "../WorkChrome/WorkChrome.css";
 import "../LiveBar/LiveBar.css";
 import { subagentView, canPromote } from "../../data/subagent-view-model.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
-import { fmtTokens, copyToClipboard, sessionTitle } from "../../data/util/format.js";
-import { modelAccent } from "../../data/selectors.js";
-import { catalogThinkingPosition, modelCatalog } from "../../data/model-catalog.js";
+import { fmtTokens, sessionTitle } from "../../data/util/format.js";
 import { useStore } from "../../hooks/useStore.js";
 import { cancelSubagent, promoteSubagent } from "../../data/session-actions.js";
 import { updateSession } from "../../data/store.js";
 import { useSubagentTranscript } from "../../hooks/useSubagentTranscript.js";
-import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import "./SubagentView.css";
 
-// SubagentView — "inside the fork". Zoom into ONE subagent: its
-// transcript rendered by the SAME Stream as the parent (zero divergence),
-// framed by a breadcrumb header, a sibling rail, a fused
-// now-line, and — on terminal — an outcome banner.
+// SubagentView — a DELEGATED ERRAND, not a conversation with a header.
 //
-// It reuses the pure projection subagentView(session, jobId) for everything
-// data-shaped (accent, siblings, blocks, terminal outcome); this component only
-// paints the frame and wires the actions. When the viewed subagent no longer
-// exists (pruned), the projection returns null → we "rebound" to the parent
-// (clear viewingSubagent) rather than show an empty view.
+// While it lives, the screen follows the errand; when it ends, the screen IS
+// its report. The internal conversation is the record of how it got there, not
+// the identity of the screen. That fixes the hierarchy, and the hierarchy
+// fixes the layout:
+//
+//   1  the errand       what you asked for. It is the title.
+//   2  state or result  what it is doing, or what it concluded.
+//   3  work log         the messages and tools that prove it.
+//   4  run details      model, tokens, cost, ids.
+//
+// What the previous version did wrong: model / started / turns / tokens /
+// spend rode a permanent strip above the transcript, answering none of the
+// questions you arrive with, and the RESULT of a finished run sat in a banner
+// at the very bottom, under the whole record. Both are audit, and audit moved
+// to Run details at the foot; the result moved to the top.
+//
+// Running and terminal are the same object on the same route, so they share
+// the head. They do NOT share the composition: a live errand opens at its live
+// end and offers a steer composer; a finished one opens at the top with the
+// report and folds the record away.
 //
 // Props: { session, jobId, onBack }. onBack clears viewingSubagent.
 
 export function SubagentView({ session, jobId, onBack }) {
   const view = subagentView(session, jobId);
-  const catalog = useStore(modelCatalog);
 
   // A subagent born while this conversation was open holds only the deltas
   // received since; fetch the history that predates opening this view.
@@ -48,7 +54,6 @@ export function SubagentView({ session, jobId, onBack }) {
 
   // Cancel confirm-inline: first click arms ("sure?"), a 2s timeout disarms.
   const [confirmCancel, setConfirmCancel] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   useEffect(() => {
     if (!confirmCancel) return;
     const t = setTimeout(() => setConfirmCancel(false), 2000);
@@ -65,24 +70,18 @@ export function SubagentView({ session, jobId, onBack }) {
     return () => clearInterval(t);
   }, [view?.terminal]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Keyboard: Esc → back; [ / ] → cycle siblings. Skipped while typing in the
-  // steer composer (or any input/textarea/contenteditable) so `[`/`]` can be
-  // typed normally instead of being swallowed by the sibling cycler.
+  // Esc goes back. The `esc` capsule that used to advertise it is gone: a
+  // shortcut does not deserve permanent pixels next to the errand.
+  //
+  // `[`/`]` sibling cycling went with the sibling rail: the LiveBar already
+  // carries awareness of the other running jobs, and a second lane inside this
+  // screen duplicated it.
   useEffect(() => {
     if (!view) return;
     const onKey = (e) => {
-      const t = e.target;
-      const typing = t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable);
-      if (e.key === "Escape") { e.preventDefault(); onBack?.(); return; }
-      if (typing) return;
-      if ((e.key === "[" || e.key === "]") && view.siblings.length > 1) {
-        e.preventDefault();
-        const idx = view.siblings.findIndex((s) => s.active);
-        if (idx < 0) return;
-        const n = view.siblings.length;
-        const next = e.key === "]" ? (idx + 1) % n : (idx - 1 + n) % n;
-        onSibling(view.siblings[next].id);
-      }
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      onBack?.();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -90,16 +89,12 @@ export function SubagentView({ session, jobId, onBack }) {
 
   if (!view) return null;
 
-  const accent = view.accent;
-  const accentVar = `var(--${accent})`;
-
   const onCancel = () => {
     if (!confirmCancel) { setConfirmCancel(true); return; }
     setConfirmCancel(false);
     cancelSubagent(session.id, jobId).catch(() => {});
   };
   const onPromote = () => { promoteSubagent(session.id, jobId).catch(() => {}); };
-  const onSibling = (id) => { updateSession(session.id, { viewingSubagent: id }); };
 
   return (
     <div
@@ -107,200 +102,200 @@ export function SubagentView({ session, jobId, onBack }) {
       role="region"
       aria-label={`Subagent ${view.name}, ${view.status}`}
     >
-      <header class="sa-head">
-        <IconButton label="Back to parent" onClick={onBack}>
-          <ArrowLeft size={15} />
-        </IconButton>
-        <div class="sa-crumb">
-          <GitFork size={13} style={{ color: accentVar }} aria-hidden="true" />
-          <button type="button" class="sa-crumb-parent" onClick={onBack}>
-            {sessionTitle(session)}
-          </button>
-          <span class="sa-crumb-sep" aria-hidden="true">›</span>
-          <span class="sa-crumb-name" style={{ color: accentVar }}>{view.name}</span>
-        </div>
-        <div class="sa-head-actions">
-          <IconButton label="Subagent details" onClick={() => setDetailsOpen(true)}>
-            <Info size={15} />
-          </IconButton>
-          <RunModeChip async={view.async} canPromote={canPromote(view)} onPromote={onPromote} />
-          <Kbd>esc</Kbd>
-        </div>
-      </header>
+      <WorkHead
+        parent={sessionTitle(session)}
+        onBack={onBack}
+        title={view.name}
+        sub={<SubHead view={view} />}
+        state={<SubState view={view} />}
+        actions={
+          view.terminal ? null : (
+            <>
+              {canPromote(view) && (
+                <button type="button" class="sa-promote" onClick={onPromote}>
+                  to background
+                </button>
+              )}
+              <StopButton armed={confirmCancel} onStop={onCancel} />
+            </>
+          )
+        }
+      />
 
-      {view.siblings.length > 1 && (
-        <div class="sa-rail" role="tablist" aria-label="Sibling subagents">
-          {view.siblings.map((s) => (
-            <button
-              type="button"
-              key={s.id}
-              role="tab"
-              aria-selected={s.active}
-              class={`sa-rail-chip${s.active ? " active" : ""}`}
-              style={s.active ? { borderColor: `var(--${s.accent})` } : undefined}
-              onClick={() => onSibling(s.id)}
-            >
-              <Spinner color={s.accent} size={9} />
-              <span class="sa-rail-name" style={{ color: `var(--${s.accent})` }}>{s.name}</span>
-            </button>
-          ))}
-          <Kbd>[ ]</Kbd>
-        </div>
-      )}
+      {view.terminal
+        ? <SubagentReport view={view} session={session} />
+        : <SubagentLive view={view} session={session} jobId={jobId} onBack={onBack} onCancel={onCancel} confirmCancel={confirmCancel} />}
+    </div>
+  );
+}
 
+// SubHead — who ran the errand, as the line that truncates FIRST. The agent
+// and its effort are provenance, not the subject: they answer "who did this",
+// which you ask after you know what it was.
+function SubHead({ view }) {
+  const bits = [view.model, view.thinking && view.thinking !== "off" ? view.thinking : null].filter(Boolean);
+  if (bits.length === 0) return null;
+  return (
+    <>
+      <span class="sa-ident-dot" style={{ background: `var(--${view.accent})` }} aria-hidden="true" />
+      {bits.map((b, i) => (
+        <>
+          {i > 0 && <span class="wk-sub-sep" aria-hidden="true">·</span>}
+          <span key={b}>{b}</span>
+        </>
+      ))}
+    </>
+  );
+}
+
+// SubState — the persistent state in the head. Completed and cancelled are
+// NEUTRAL: in this system green means running, and a green tick on something
+// that stopped teaches the eye that green is decoration.
+function SubState({ view }) {
+  if (!view.terminal) {
+    return <StateWord tone="running" word="Running" time={view.elapsed} />;
+  }
+  if (view.outcome === "failed") return <StateWord tone="failed" word="Failed" />;
+  if (view.outcome === "cancelled") return <StateWord tone="neutral" word="Cancelled" />;
+  return <StateWord tone="neutral" word="Completed" />;
+}
+
+// SubagentLive — direct. The record is the body and opens at its live end; the
+// now-line and the steer composer are the foot. This is the functional reason
+// the fork deserves a whole screen.
+function SubagentLive({ view, session, jobId, onBack, onCancel, confirmCancel }) {
+  return (
+    <>
       <div class="sa-body">
         <Stream
           session={{ id: session.id, messages: [] }}
           blocks={view.blocks}
-          waypointAccent={accent}
+          waypointAccent={view.accent}
         />
       </div>
 
-      {view.terminal ? (
-        <OutcomeBanner view={view} onBack={onBack} />
-      ) : (
-        <>
-          {(view.action || view.elapsed) && (
-            <div class="livebar">
-              <div class="lb-bar">
-                <div class="lb-now" role="status" aria-live="polite">
-                  <span class="lb-dot is-working" aria-hidden="true" />
-                  <span class="lb-txt">{view.action || "working"}</span>
-                  {view.elapsed && <span class="lb-el">{view.elapsed}</span>}
-                </div>
-              </div>
+      {(view.action || view.elapsed) && (
+        <div class="livebar">
+          <div class="lb-bar">
+            <div class="lb-now" role="status" aria-live="polite">
+              <span class="lb-dot is-working" aria-hidden="true" />
+              <span class="lb-txt">{view.action || "working"}</span>
+              {view.elapsed && <span class="lb-el">{view.elapsed}</span>}
             </div>
-          )}
-          <Composer
-            key={`steer-${jobId}`}
-            sessionId={session.id}
-            session={session}
-            steer={{
-              jobId,
-              name: view.name,
-              onRebound: onBack,
-              onStop: onCancel,
-              stopArmed: confirmCancel,
-            }}
-          />
-        </>
+          </div>
+        </div>
       )}
-      <BranchStrip session={session} view={view} catalog={catalog} />
-      <Sheet open={detailsOpen} onClose={() => setDetailsOpen(false)} title="Subagent details">
-        <SubagentDetails session={session} view={view} accent={modelAccent(view.model)} />
-      </Sheet>
-    </div>
-  );
-}
-
-// BranchStrip — the same StatusStrip as the parent conversation. Numbers are
-// the child's (context, spend, model, tokens); permission and fast are the
-// session's, because that is the policy the child's tools run under. Nothing
-// is a door: a child's settings are not changed from inside it. Goal/tasks
-// stay off this line — they belong to the parent run.
-function BranchStrip({ session, view, catalog }) {
-  const usage = view.usage;
-  return (
-    <div class="sa-strip">
-      <StatusStrip
-        ctxPercent={view.contextPercent}
-        tokensUp={(usage && usage.inputTokens) || 0}
-        tokensDown={(usage && usage.outputTokens) || 0}
-        spend={usage && usage.costUSD > 0 ? fmtCost(usage.costUSD) : undefined}
-        session={{
-          permissionMode: session.permissionMode,
-          fast: session.fast,
+      <Composer
+        key={`steer-${jobId}`}
+        sessionId={session.id}
+        session={session}
+        steer={{
+          jobId,
+          name: view.name,
+          onRebound: onBack,
+          onStop: onCancel,
+          stopArmed: confirmCancel,
         }}
-        showTokens={true}
-        modelName={view.model}
-        modelAccent={modelAccent(view.model)}
-        thinking={view.thinking || "off"}
-        thinkingPosition={catalogThinkingPosition(catalog, {
-          model: view.modelSpec,
-          thinking: view.thinking || "off",
-        })}
       />
-    </div>
+    </>
   );
 }
 
-// OutcomeBanner — terminal state: green completed / red failed /
-// neutral cancelled. Enters once (fade+rise) then stays still.
-function OutcomeBanner({ view, onBack }) {
-  const [copied, setCopied] = useState(false);
+// SubagentReport — a finished run is not a banner stapled under a transcript.
+// The outcome sentence and the result ARE the page and get the top of it; the
+// record folds below; the audit closes it. Nothing is pinned to the bottom,
+// because the report wins that space.
+export function SubagentReport({ view, session, phone = false }) {
+  const bodyRef = useRef(null);
+  // Same route, opposite anchor: a report opens at the TOP. Without this the
+  // shared scroller keeps the live end it was following when the run ended.
+  useLayoutEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [view.jobId, view.outcome]);
+
   const usage = view.usage;
-  const segs = [];
-  if (view.elapsed) segs.push(view.elapsed);
-  if (usage && usage.costUSD > 0) segs.push(`$${usage.costUSD.toFixed(3)}`);
+  const details = [];
+  if (view.model) details.push(["Model", view.thinking && view.thinking !== "off" ? `${view.model} · ${view.thinking}` : view.model]);
+  details.push(["Mode", view.async ? "background" : "sync"]);
+  if (view.elapsed) details.push(["Duration", view.elapsed]);
   if (usage && (usage.inputTokens || usage.outputTokens)) {
-    segs.push(`↑${fmtTokens(usage.inputTokens || 0)} ↓${fmtTokens(usage.outputTokens || 0)}`);
+    details.push(["Tokens", `↑${fmtTokens(usage.inputTokens || 0)} ↓${fmtTokens(usage.outputTokens || 0)}`]);
   }
-  const meta = segs.join(" · ");
+  if (usage && usage.costUSD > 0) details.push(["Cost", fmtCost(usage.costUSD)]);
+  if (Number.isInteger(view.actionCount)) details.push(["Actions", String(view.actionCount)]);
 
-  const copy = (text) => {
-    if (!text) return;
-    copyToClipboard(text).then((ok) => {
-      if (!ok) return;
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    });
-  };
+  const ids = [["Job ID", view.jobId]];
+  if (session?.id) ids.push(["Parent session", session.id]);
 
-  if (view.outcome === "failed") {
-    const err = view.error || "The subagent failed.";
-    return (
-      <div class="sa-outcome failed">
-        <div class="sa-outcome-head">
-          <X size={15} aria-hidden="true" />
-          <b>failed</b>
-          {meta && <span class="sa-outcome-meta">· {meta}</span>}
-        </div>
-        {view.error && <div class="sa-outcome-err">{firstLines(view.error)}</div>}
-        <div class="sa-outcome-actions">
-          <button type="button" class="sa-outcome-btn" onClick={() => copy(err)}>
-            {copied ? "copied ✓" : <>{<Copy size={13} />} Copy error</>}
-          </button>
-          <button type="button" class="sa-outcome-btn primary" onClick={onBack}>Back to parent</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (view.outcome === "cancelled") {
-    return (
-      <div class="sa-outcome cancelled">
-        <div class="sa-outcome-head">
-          <b>cancelled</b>
-          {meta && <span class="sa-outcome-meta">· {meta}</span>}
-        </div>
-        <div class="sa-outcome-actions">
-          <button type="button" class="sa-outcome-btn primary" onClick={onBack}>Back to parent</button>
-        </div>
-      </div>
-    );
-  }
-
-  // completed
   return (
-    <div class="sa-outcome completed">
-      <div class="sa-outcome-head">
-        <span class="sa-outcome-check" aria-hidden="true"><Check size={12} strokeWidth={2.5} /></span>
-        <b>completed</b>
-        {meta && <span class="sa-outcome-meta">· {meta}</span>}
-        {view.resultChip && <span class="sa-outcome-chip">{view.resultChip}</span>}
-      </div>
-      <div class="sa-outcome-actions">
-        <button type="button" class="sa-outcome-btn" onClick={() => copy(view.result || "")}>
-          {copied ? "copied ✓" : <>{<Copy size={13} />} Copy result</>}
-        </button>
-        <button type="button" class="sa-outcome-btn primary" onClick={onBack}>Back to parent</button>
+    <div class="sa-report-body" ref={bodyRef}>
+      <div class="sa-report-col">
+        <ReportHeadline view={view} />
+
+        {view.outcome === "completed" && view.result && (
+          <>
+            <div class="sa-result">{view.result}</div>
+            <div class="sa-report-acts">
+              <CopyAction phone={phone} text={view.result} label="Copy result" />
+            </div>
+          </>
+        )}
+
+        {/* The error VERBATIM, and it is the result — not a summary of it,
+            not the first four lines with the rest thrown away. A failure you
+            cannot paste is a failure you cannot report. */}
+        {view.outcome === "failed" && view.error && (
+          <>
+            <pre class="sa-error">{view.error}</pre>
+            <div class="sa-report-acts">
+              <CopyAction phone={phone} text={view.error} label="Copy error" />
+            </div>
+          </>
+        )}
+
+        {view.outcome === "cancelled" && (
+          <p class="sa-cancelled">
+            {view.lastProgress
+              ? <>Last progress: it had run <span class="sa-data">{view.lastProgress}</span>. It reached no conclusion.</>
+              : <>It was stopped before it recorded any work.</>}
+          </p>
+        )}
+
+        <Disclosure
+          label="Work log"
+          count={Number.isInteger(view.actionCount) && view.actionCount > 0
+            ? `${view.actionCount} ${view.actionCount === 1 ? "action" : "actions"}`
+            : undefined}
+        >
+          <div class="sa-log">
+            <Stream
+              session={{ id: `${session?.id}:${view.jobId}`, messages: [] }}
+              blocks={view.blocks}
+              waypointAccent={view.accent}
+            />
+          </div>
+        </Disclosure>
+
+        <RunDetails phone={phone} rows={details} ids={ids} />
       </div>
     </div>
   );
 }
 
-// firstLines trims a long error to a few readable lines for the banner body.
-function firstLines(str, n = 4) {
-  const lines = String(str).split("\n").slice(0, n);
-  return lines.join("\n");
+// The headline sentence. The head above already carries the persistent state,
+// so this does not repeat it with a glyph 100px lower: one state, one
+// persistent place, one contextual expression.
+function ReportHeadline({ view }) {
+  const word = view.outcome === "failed" ? "Failed" : view.outcome === "cancelled" ? "Cancelled" : "Completed";
+  const sentence = view.elapsed
+    ? `${word} ${view.outcome === "completed" ? "in" : "after"} ${view.elapsed}`
+    : word;
+  return <h3 class={`sa-headline is-${view.outcome}`}>{sentence}</h3>;
+}
+
+// openSubagentSibling is the one place that switches which fork is on screen.
+// Kept exported (rather than inlined) because the LiveBar row and the
+// delegation row both reach the same state through it.
+export function openSubagentSibling(sessionId, jobId) {
+  updateSession(sessionId, { viewingSubagent: jobId });
 }

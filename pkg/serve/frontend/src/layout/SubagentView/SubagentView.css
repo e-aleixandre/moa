@@ -1,15 +1,20 @@
-/* SubagentView — "inside the fork". The header is a breadcrumb; the
-   now-line fuses status+pulse below the
-   steer composer (same slot as the parent's status line); the outcome banner
-   replaces both on terminal states.
-*/
+/* SubagentView — a delegated errand, and when it ends, its report.
+ *
+ * The head, the state word, the disclosures and the audit table are shared
+ * with the bash console and live in WorkChrome.css. What is left here is what
+ * only an errand has: the report column, its result, and the live body.
+ *
+ * The previous version of this sheet described a different screen -- crumb,
+ * sibling rail, permanent stat strip, outcome banner pinned at the bottom --
+ * and 31 of its 33 rules had no element left to style. They are not kept
+ * "just in case": dead CSS is a trap for whoever greps this file next.
+ */
 .subagent-view {
   display: flex;
   flex-direction: column;
   min-height: 0;
   flex: 1;
-  /* Enters as a slide-in (spec §6): reads as zooming into a branch, not a page
-     swap. Disabled under reduced-motion. */
+  /* Slide-in reads as zooming into a branch rather than swapping pages. */
   animation: sa-slide-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -22,250 +27,113 @@
   .subagent-view { animation: none; }
 }
 
-/* ── header ─────────────────────────────────────────────────────────────── */
-.subagent-view .sa-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-6);
-  border-bottom: 1px solid var(--surface0);
+/* The identity dot in the head's sub-line: which agent ran this. Provenance,
+   so it sits next to the model name rather than next to the errand. */
+.subagent-view .sa-ident-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
   flex: none;
 }
 
-.subagent-view .sa-crumb {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
+.subagent-view .sa-promote {
+  font: inherit;
+  font-size: var(--text-xs);
   color: var(--subtext0);
-  font-size: var(--text-sm);
-}
-
-.subagent-view .sa-crumb-parent {
-  background: none;
-  border: none;
-  color: var(--subtext0);
+  background: transparent;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
   cursor: pointer;
-  padding: 0;
-  font-size: inherit;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-@media (hover: hover) {
+.subagent-view .sa-promote:hover { color: var(--text); }
 
-
-.subagent-view .sa-crumb-parent:hover {
-  color: var(--text);
-  text-decoration: underline;
-}
-}
-
-.subagent-view .sa-crumb-sep {
-  color: var(--overlay0);
-  flex: none;
-}
-
-.subagent-view .sa-crumb-name {
-  font-weight: var(--weight-semibold);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.subagent-view .sa-head-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-left: auto;
-  flex: none;
-}
-
-/* ── sibling rail ───────────────────────────────────────────────────────── */
-.subagent-view .sa-rail {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-6);
-  border-bottom: 1px solid var(--surface0);
-  overflow-x: auto;
-  flex: none;
-}
-
-.subagent-view .sa-rail-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 4px var(--space-3);
-  border-radius: var(--radius-full);
-  border: 1px solid var(--surface0);
-  background: var(--mantle);
-  color: var(--subtext0);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 150ms var(--ease);
-}
-
-.subagent-view .sa-rail-chip.active {
-  background: var(--surface0);
-}
-
-.subagent-view .sa-rail-name {
-  font-weight: var(--weight-semibold);
-}
-
-.subagent-view .sa-rail .kbd {
-  margin-left: auto;
-  flex: none;
-}
-
-/* ── body: reused Stream (task card is the Stream's lead) ───────────────── */
+/* ── live ───────────────────────────────────────────────────────────────── */
+/* The record scrolls; the live line and the steer composer stay put. */
 .subagent-view .sa-body {
-  position: relative;
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
+}
+
+/* ── report ─────────────────────────────────────────────────────────────── */
+/* A finished errand opens at the top, and the column is measured for reading
+   rather than stretched to the pane: a one-line result across 1000px is a
+   worse answer than the same line across 70 characters. */
+.subagent-view .sa-report-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.subagent-view .sa-report-col {
+  max-width: 76ch;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-6) var(--space-8);
   display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
-/* Task card: the Stream's lead block (scrolls WITH the transcript). It's a
-   normal .waypoint inside .stream-col, so it inherits the column's width and
-   padding — only the accent label is bespoke. */
-.subagent-view .sa-task-label {
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0.06em;
-  margin-bottom: var(--space-1);
-}
-
-/* ── status strip ───────────────────────────────────────────────────────
-   The parent's own strip, measuring the branch (see BranchStrip). It needs no
-   rules of its own — sharing StatusStrip's means the two screens cannot drift
-   — beyond keeping it out of the flex stretch. */
-.subagent-view .sa-strip {
-  flex: none;
-}
-
-/* ── outcome banner ─────────────────────────────────────────────────────── */
-.subagent-view .sa-outcome {
-  margin: var(--space-3) auto var(--space-5);
-  max-width: 844px;
-  width: 100%;
-  padding: var(--space-4) var(--space-6);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--surface0);
-  flex: none;
-  animation: sa-outcome-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.subagent-view .sa-outcome.completed {
-  border-color: color-mix(in srgb, var(--green) 35%, var(--surface0));
-  background: color-mix(in srgb, var(--green) 6%, transparent);
-}
-
-.subagent-view .sa-outcome.failed {
-  border-color: color-mix(in srgb, var(--red) 35%, var(--surface0));
-  background: color-mix(in srgb, var(--red) 6%, transparent);
-}
-
-.subagent-view .sa-outcome.cancelled {
-  border-color: var(--surface1);
-  background: color-mix(in srgb, var(--overlay0) 6%, transparent);
-}
-
-.subagent-view .sa-outcome-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--subtext0);
-}
-
-.subagent-view .sa-outcome.completed .sa-outcome-head b { color: var(--green); }
-.subagent-view .sa-outcome.failed .sa-outcome-head b { color: var(--red); }
-.subagent-view .sa-outcome.cancelled .sa-outcome-head b { color: var(--overlay1); }
-.subagent-view .sa-outcome.failed .sa-outcome-head > svg { color: var(--red); }
-
-.subagent-view .sa-outcome-check {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--green) 18%, transparent);
-  color: var(--green);
-  display: grid;
-  place-items: center;
-  flex: none;
-}
-
-.subagent-view .sa-outcome-meta {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--overlay0);
-}
-
-.subagent-view .sa-outcome-chip {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 12%, transparent);
-  border-radius: var(--radius-sm);
-  padding: 1px var(--space-2);
-  margin-left: var(--space-1);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.subagent-view .sa-outcome-err {
-  margin-top: var(--space-2);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--red);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 140px;
-  overflow: auto;
-}
-
-.subagent-view .sa-outcome-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-}
-
-.subagent-view .sa-outcome-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-height: 32px;
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--surface1);
-  background: var(--mantle);
-  color: var(--subtext0);
-  cursor: pointer;
-  font-size: var(--text-sm);
-}
-@media (hover: hover) {
-
-
-.subagent-view .sa-outcome-btn:hover { background: var(--surface0); color: var(--text); }
-}
-
-.subagent-view .sa-outcome-btn.primary {
-  border-color: transparent;
-  background: var(--surface0);
+/* The outcome sentence. Not a banner and not a glyph: the head already carries
+   the persistent state, this is the one contextual expression of it. */
+.subagent-view .sa-headline {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
   color: var(--text);
 }
 
-@keyframes sa-outcome-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+/* The result is the reason the screen exists, so it reads as prose and gets
+   the space to do it. */
+.subagent-view .sa-result {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .subagent-view .sa-outcome { animation: none; }
+/* An error is evidence: verbatim, monospaced, selectable, and never truncated
+   to a tidy height. A failure you cannot paste is a failure you cannot
+   report. */
+.subagent-view .sa-error {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-left: 2px solid var(--red);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+.subagent-view .sa-cancelled {
+  margin: 0;
+  color: var(--subtext0);
+  line-height: 1.6;
+}
+
+/* A literal inside a sentence stays a literal. */
+.subagent-view .sa-data {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  color: var(--text);
+}
+
+.subagent-view .sa-report-acts {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* The work log inside its disclosure: indented so the record reads as evidence
+   under the report rather than as a second page. */
+.subagent-view .sa-log {
+  border-left: 1px solid var(--surface0);
+  padding-left: var(--space-4);
 }

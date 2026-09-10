@@ -12,7 +12,7 @@ import "./MobileInboxView.css";
 // The header is the pushed-screen header: the way back, and the name of where
 // you are. The list itself is the shared InboxView, so the phone and the
 // desktop cannot drift about what a row says.
-export function MobileInboxView({ cards, onBack, onSend, onNewSession, onIgnore, onIgnoreSource, onOpenSession }) {
+export function MobileInboxView({ cards, health, onRetry, onBack, onSend, onNewSession, onIgnore, onIgnoreSource, onOpenSession }) {
   const { screenRef, dragging, swipeBind } = useEdgeSwipeBack({ onBack });
   return (
     <div class={dragging ? "minbox is-swiping" : "minbox"} ref={screenRef} {...swipeBind}>
@@ -25,6 +25,8 @@ export function MobileInboxView({ cards, onBack, onSend, onNewSession, onIgnore,
       <div class="minbox-body">
         <InboxView
           cards={cards}
+          health={health}
+          onRetry={onRetry}
           onSend={onSend}
           onNewSession={onNewSession}
           onIgnore={onIgnore}
