@@ -1,8 +1,20 @@
-/* MobileSubagentView — full-screen push over the mobile
-   conversation, wearing the parent's chrome: the composer sits in the
-   `.mcomposer` pill, with `.livebar` above it and `.mstatusline` below, all
-   three from the parent's own stylesheets. Bespoke here: the one-row header,
-   the sibling strip, the task-card label and the terminal outcome banner. */
+/* MobileSubagentView — the errand, pushed full-screen over the conversation.
+ *
+ * Everything the screen is made of now comes from the shared sheets:
+ * WorkChrome.css for the head, the state word, the stop control and the audit;
+ * SubagentView.css for the report, its result and the folded record;
+ * LiveBar.css + MobileComposer.css for the live foot. What is left here is
+ * the push, the swipe, and the two places where a 390px screen genuinely
+ * needs different numbers from a 1280px pane.
+ *
+ * The header bar with the codename, the run-mode chip, the details button,
+ * the task-card label and the outcome banner this file used to dress no
+ * longer exist -- the phone mounts the same head and the same report the
+ * desktop does, so the rules that made them differ are gone rather than kept.
+ *
+ * These classes are STRUCTURAL: the redesign moved and removed elements, so
+ * they apply with the Ambient switch off too.
+ */
 .msa {
   position: absolute;
   inset: 0;
@@ -33,221 +45,28 @@
   box-shadow: -8px 0 24px rgb(0 0 0 / 0.35);
 }
 
-/* One row: the way back, who you are looking at, how it runs. The parent screen
-   is headerless (its name floats in MobileTitleChip), so this bar is the whole
-   signal that you are one level in — which is why it stays, and why it is kept
-   as light as a chip: transparent over the transcript, no border, no fill. A
-   solid bar here would be heavier chrome than the screen it branched from. */
-.msa-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  /* Same 12px + inset the parent's floating title chip uses, so the branch
-     starts exactly where the trunk starts instead of a few pixels higher. */
-  padding: calc(env(safe-area-inset-top, 0px) + 12px) var(--space-2) 4px;
-  min-height: 44px;
+/* The head's actions can be two controls (promote + stop) on a screen whose
+   whole width is 390px, so the row wraps rather than squeezing the state word
+   or pushing a target off the edge. */
+.msa .wk-head-top { flex-wrap: wrap; row-gap: var(--space-2); }
+
+/* The record, on the phone's own scroller. MobileStream is shared with the
+   conversation, where it clears a floating title chip and the iOS status bar
+   with 50px of top padding and a mask; inside this screen the head already
+   owns that space, so the transcript starts right under the hairline instead
+   of 50px below it. */
+.msa .mconv-stream {
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
-/* Identity: the fork glyph, the kind, and the codename in the subagent's own
-   accent — the same color the tray, the delegation block and the sibling rail
-   give it, so the branch is recognizable before the name is read. */
-.msa-ident {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-}
+/* Foot: live line + composer, in the parent's own pill (.mcomposer from
+   MobileComposer.css, .livebar from LiveBar.css). Nothing is restyled here;
+   if it looked different, the two screens would have drifted.
 
-.msa-kind {
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--overlay0);
-}
-
-.msa-name {
-  font-size: var(--text-base);
-  font-weight: var(--weight-semibold);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The chip sits at the far end of the row. */
-.msa-head .runmode {
-  margin-left: auto;
-}
-
-/* Details lives in the header as its own control rather than hiding behind the
-   codename: a title that silently opens a sheet is a door with no handle. It
-   claims the free space before the run-mode chip, which keeps the far end. */
-.msa-details-btn {
-  flex: none;
-  margin-left: auto;
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-full);
-  color: var(--overlay1);
-  cursor: pointer;
-}
-
-.msa-details-btn:active { color: var(--text); }
-
-.msa-details-btn ~ .runmode { margin-left: 0; }
-
-/* 44px hit-area for the back chevron. */
-.msa-back {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--subtext0);
-  cursor: pointer;
-  flex: none;
-  /* Pull the tap box back to the screen edge without indenting the row. */
-  margin-left: -10px;
-}
-
-/* body: MobileStream (task card is its lead). The stream is shared, so it
-   scrolls exactly like the normal screen. */
-.msa .mstream {
-  position: relative;
-}
-
-/* Task card: the MobileStream's lead block — a normal .waypoint inside the
-   scroller (scrolls WITH the transcript). Only the accent label is bespoke. */
-.msa-task-label {
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0.06em;
-  margin-bottom: var(--space-1);
-}
-
-/* Foot: live bar, composer, status line — the parent's stack, wearing the
-   parent's rules (.livebar from LiveBar.css, .mstatusline from
-   MobileStatusLine.css). Nothing is restyled here; if it looked different, the
-   two screens would have drifted. */
+   There is deliberately no status line under it any more: the child's context
+   ring, spend, model and effort were audit riding the bar you type in, and
+   none of them is answerable from inside a fork. They are in Run details,
+   with the rest of the audit. */
 .msa-foot { flex: none; }
-
-/* outcome banner */
-.msa-outcome {
-  flex: none;
-  margin: var(--space-3);
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--surface0);
-  animation: msa-outcome-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.msa-outcome.completed {
-  border-color: color-mix(in srgb, var(--green) 35%, var(--surface0));
-  background: color-mix(in srgb, var(--green) 6%, transparent);
-}
-
-.msa-outcome.failed {
-  border-color: color-mix(in srgb, var(--red) 35%, var(--surface0));
-  background: color-mix(in srgb, var(--red) 6%, transparent);
-}
-
-.msa-outcome.cancelled {
-  border-color: var(--surface1);
-  background: color-mix(in srgb, var(--overlay0) 6%, transparent);
-}
-
-.msa-outcome-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--subtext0);
-}
-
-.msa-outcome.completed b { color: var(--green); }
-.msa-outcome.failed b { color: var(--red); }
-.msa-outcome.cancelled b { color: var(--overlay1); }
-
-.msa-outcome-check {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--green) 18%, transparent);
-  color: var(--green);
-  display: grid;
-  place-items: center;
-  flex: none;
-}
-
-.msa-outcome-meta {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--overlay0);
-}
-
-.msa-outcome-chip {
-  margin-top: var(--space-2);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--green);
-}
-
-.msa-outcome-err {
-  margin-top: var(--space-2);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--red);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 120px;
-  overflow: auto;
-}
-
-.msa-outcome-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-}
-
-.msa-outcome-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-height: 44px;
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--surface1);
-  background: var(--mantle);
-  color: var(--subtext0);
-  font-size: var(--text-base);
-  cursor: pointer;
-}
-
-.msa-outcome-back {
-  flex: 1;
-  min-height: 44px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--surface1);
-  background: var(--surface0);
-  color: var(--text);
-  font-size: var(--text-base);
-  cursor: pointer;
-}
-
-@keyframes msa-outcome-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .msa-outcome { animation: none; }
-}

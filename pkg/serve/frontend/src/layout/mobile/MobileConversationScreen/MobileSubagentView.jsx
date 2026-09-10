@@ -1,47 +1,57 @@
 import { useEffect, useState } from "preact/hooks";
-import { ChevronLeft, GitFork, X, Check, Copy, Info } from "lucide-preact";
-import { RunModeChip } from "../../../components/index.js";
 import { Composer } from "../../Composer/Composer.jsx";
-import { StatusStrip } from "../../StatusStrip/StatusStrip.jsx";
 import { MobileStream } from "./MobileStream.jsx";
-import { subagentView, canPromote } from "../../../data/subagent-view-model.js";
-import { fmtTokens, copyToClipboard, sessionTitle } from "../../../data/util/format.js";
-import { fmtCost } from "../../../data/util/usage-pills.js";
-import { modelAccent } from "../../../data/selectors.js";
-import { catalogThinkingPosition, modelCatalog } from "../../../data/model-catalog.js";
-import { useStore } from "../../../hooks/useStore.js";
+import { WorkHead } from "../../WorkChrome/WorkChrome.jsx";
+import {
+  SubagentReport, SubHead, SubState, SubagentActions,
+} from "../../SubagentView/SubagentView.jsx";
+import { subagentView } from "../../../data/subagent-view-model.js";
+import { sessionTitle } from "../../../data/util/format.js";
 import { cancelSubagent, promoteSubagent } from "../../../data/session-actions.js";
-import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
-import { SubagentDetails } from "../../../components/index.js";
 import { useEdgeSwipeBack } from "../../../hooks/useEdgeSwipeBack.js";
 import { useSubagentTranscript } from "../../../hooks/useSubagentTranscript.js";
+import "../../WorkChrome/WorkChrome.css";
+import "../../SubagentView/SubagentView.css";
 // The live line above the composer reuses LiveBar's rules verbatim (same
 // grammar, different subject), so its stylesheet has to be in the graph even
-// though this screen doesn't render that component.
+// though this screen doesn't render that component. The composer sits in the
+// phone's own `.mcomposer` pill, whose sheet belongs to MobileComposer.
 import "../../LiveBar/LiveBar.css";
+import "../MobileComposer/MobileComposer.css";
 import "./MobileSubagentView.css";
 
-// MobileSubagentView — full-screen push counterpart of the desktop SubagentView
-//. It is the parent screen with a different subject: same now-line
-// above the composer, same composer pill, same status line below it
-// (StatusStrip) — except every number in that line is the CHILD's (its own
-// context window, spend, model, effort and tokens), because a screen zoomed
-// into a branch that reported the trunk's figures would be describing something
-// you can't see. Nothing in the line is a door: a child's model or effort isn't
-// changed from inside it.
+// MobileSubagentView — the same DELEGATED ERRAND as the desktop screen,
+// pushed full-screen over the conversation.
 //
-// What stays fork-proper: the full-screen push, a one-row header with the
-// codename in accent and the way back, the run-mode chip, the sibling rail, the
-// terminal outcome banner. The header survives even though
-// the parent screen no longer has one — it is what says "you are one level in,
-// and here is the way out".
+// It no longer reimplements the screen: it mounts the shared head (WorkChrome)
+// and, when the run has ended, the shared report (SubagentReport with
+// phone={true}). What is left here is what a phone actually owes it — the
+// push, the edge-swipe back, and the phone's own live foot (now-line +
+// steer composer in the `.mcomposer` pill).
+//
+// What the previous version did wrong, and what changed with it:
+//   - the title was the CODENAME ("subagent · changelog") in a chat-style
+//     header bar. The title is the ERRAND now; the agent that ran it is
+//     provenance and rides the sub-line, exactly as on the desktop.
+//   - the RESULT of a finished run sat in a banner below the whole
+//     transcript, so the one thing you opened the screen for was the last
+//     thing you reached. A finished run now IS the report, at the top, with
+//     the record folded under it and the audit at the foot.
+//   - completed was green. Green means running in this system; completed and
+//     cancelled are neutral.
+//   - a permanent StatusStrip carried the child's context ring, spend, model
+//     and effort under the composer — audit, on the screen you steer from,
+//     none of it answerable there. The figures live in Run details, where the
+//     desktop keeps them; nothing was lost, it moved.
+//   - the run-mode chip and the "Subagent details" sheet were the phone's own
+//     vocabulary for things the shared chrome says once: promote is a verb in
+//     the head's actions, the rest is Run details.
 //
 // Reuses the pure subagentView() projection; rebounds to the parent when the
 // subagent was pruned.
 
 export function MobileSubagentView({ session, jobId, onBack }) {
   const view = subagentView(session, jobId);
-  const catalog = useStore(modelCatalog);
 
   // Same backfill as the desktop view: see useSubagentTranscript.
   useSubagentTranscript(session?.id, jobId, session?.subagents?.[jobId]?.lifecycleUnverified);
@@ -53,9 +63,8 @@ export function MobileSubagentView({ session, jobId, onBack }) {
   }, [view, session, jobId, onBack]);
 
   const [confirmCancel, setConfirmCancel] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   // Swipe from the left edge to go back, the way a pushed screen is dismissed
-  // on a phone. The header chevron remains the accessible path.
+  // on a phone. The head's own way back remains the accessible path.
   const { screenRef, dragging, swipeBind } = useEdgeSwipeBack({ onBack });
   useEffect(() => {
     if (!confirmCancel) return;
@@ -74,8 +83,6 @@ export function MobileSubagentView({ session, jobId, onBack }) {
 
   if (!view) return null;
 
-  const accent = view.accent;
-
   const onCancel = () => {
     if (!confirmCancel) { setConfirmCancel(true); return; }
     setConfirmCancel(false);
@@ -85,148 +92,78 @@ export function MobileSubagentView({ session, jobId, onBack }) {
 
   return (
     <div class={dragging ? "msa is-swiping" : "msa"} ref={screenRef} {...swipeBind}>
-      <header class="msa-head">
-        <button type="button" class="msa-back" aria-label={`Back to ${sessionTitle(session)}`} onClick={onBack}>
-          <ChevronLeft size={20} />
-        </button>
-        <span class="msa-ident">
-          <GitFork size={13} style={{ color: `var(--${accent})` }} aria-hidden="true" />
-          <span class="msa-kind">subagent</span>
-          <span class="msa-name" style={{ color: `var(--${accent})` }}>{view.name}</span>
-        </span>
-        <button type="button" class="msa-details-btn" aria-label="Subagent details" onClick={() => setDetailsOpen(true)}>
-          <Info size={16} />
-        </button>
-        <RunModeChip async={view.async} canPromote={canPromote(view)} onPromote={onPromote} />
-      </header>
+      <WorkHead
+        phone
+        parent={sessionTitle(session)}
+        onBack={onBack}
+        title={view.name}
+        sub={<SubHead view={view} />}
+        state={<SubState view={view} />}
+        actions={
+          <SubagentActions
+            view={view}
+            phone
+            onPromote={onPromote}
+            onStop={onCancel}
+            confirmCancel={confirmCancel}
+          />
+        }
+      />
 
+      {view.terminal ? (
+        <SubagentReport view={view} session={session} phone />
+      ) : (
+        <MobileSubagentLive
+          view={view}
+          session={session}
+          jobId={jobId}
+          onBack={onBack}
+          onCancel={onCancel}
+          confirmCancel={confirmCancel}
+        />
+      )}
+    </div>
+  );
+}
+
+// MobileSubagentLive — a running errand, on a phone: the record is the body,
+// the now-line and the steer composer are the foot. Same anatomy as the
+// desktop, in the phone's own materials — the transcript is MobileStream (the
+// phone's scroller and density) and the composer sits in the `.mcomposer`
+// pill, so steering a child feels like typing in the parent.
+function MobileSubagentLive({ view, session, jobId, onBack, onCancel, confirmCancel }) {
+  return (
+    <>
       <MobileStream
         session={{ id: `${session.id}:${jobId}`, messages: [] }}
         blocks={view.blocks}
-        waypointAccent={accent}
+        waypointAccent={view.accent}
       />
 
-      {view.terminal && <MobileOutcome view={view} onBack={onBack} />}
-
-      {/* Same anatomy as the parent screen: the ephemeral activity line above
-          the composer, the composer, and — always, terminal or not — the status
-          line pinned below. Only the subject changes. */}
       <div class="mcomposer msa-foot">
-        {!view.terminal && (
-          <>
-            <div class="livebar">
-              <div class="lb-bar">
-                <div class="lb-now" role="status" aria-live="polite">
-                  <span class="lb-dot is-working" aria-hidden="true" />
-                  <span class="lb-txt">{view.action || "working"}</span>
-                  {view.elapsed && <span class="lb-el">{view.elapsed}</span>}
-                </div>
-              </div>
+        <div class="livebar">
+          <div class="lb-bar">
+            <div class="lb-now" role="status" aria-live="polite">
+              <span class="lb-dot is-working" aria-hidden="true" />
+              <span class="lb-txt">{view.action || "working"}</span>
+              {view.elapsed && <span class="lb-el">{view.elapsed}</span>}
             </div>
-            <Composer
-              key={`steer-${jobId}`}
-              sessionId={session.id}
-              session={session}
-              compact
-              steer={{
-                jobId,
-                name: view.name,
-                onRebound: onBack,
-                onStop: onCancel,
-                stopArmed: confirmCancel,
-              }}
-            />
-          </>
-        )}
-        <BranchStatusLine session={session} view={view} catalog={catalog} />
+          </div>
+        </div>
+        <Composer
+          key={`steer-${jobId}`}
+          sessionId={session.id}
+          session={session}
+          compact
+          steer={{
+            jobId,
+            name: view.name,
+            onRebound: onBack,
+            onStop: onCancel,
+            stopArmed: confirmCancel,
+          }}
+        />
       </div>
-      <MobileSheet open={detailsOpen} onClose={() => setDetailsOpen(false)} title="Subagent details" scope="subagent">
-        <SubagentDetails session={session} view={view} accent={accent} />
-      </MobileSheet>
-    </div>
-  );
-}
-
-// BranchStatusLine — the parent's status line, measuring the branch. Every
-// number here belongs to the CHILD (its own context window, its own spend, its
-// own model and effort, its own tokens); the permission mode is the session's,
-// and stays because it is the policy the child's tools run under. Nothing is a
-// door: a child's settings aren't changed from inside it, so each segment is
-// the same face without the tap.
-function BranchStatusLine({ session, view, catalog }) {
-  const usage = view.usage;
-  return (
-    <StatusStrip
-      compact
-      ctxPercent={view.contextPercent}
-      tokensUp={(usage && usage.inputTokens) || 0}
-      tokensDown={(usage && usage.outputTokens) || 0}
-      spend={usage && usage.costUSD > 0 ? fmtCost(usage.costUSD) : undefined}
-      session={{
-        permissionMode: session.permissionMode,
-        fast: session.fast,
-      }}
-      showTokens
-      modelName={view.model}
-      modelAccent={modelAccent(view.model)}
-      thinking={view.thinking || "off"}
-      thinkingPosition={catalogThinkingPosition(catalog, {
-        model: view.modelSpec,
-        thinking: view.thinking || "off",
-      })}
-    />
-  );
-}
-
-function MobileOutcome({ view, onBack }) {
-  const [copied, setCopied] = useState(false);
-  const usage = view.usage;
-  const segs = [];
-  if (view.elapsed) segs.push(view.elapsed);
-  if (usage && usage.costUSD > 0) segs.push(`$${usage.costUSD.toFixed(3)}`);
-  if (usage && (usage.inputTokens || usage.outputTokens)) {
-    segs.push(`↑${fmtTokens(usage.inputTokens || 0)} ↓${fmtTokens(usage.outputTokens || 0)}`);
-  }
-  const meta = segs.join(" · ");
-
-  const copy = (text) => {
-    if (!text) return;
-    copyToClipboard(text).then((ok) => {
-      if (!ok) return;
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    });
-  };
-
-  return (
-    <div class={`msa-outcome ${view.outcome}`}>
-      <div class="msa-outcome-head">
-        {view.outcome === "completed" && (
-          <span class="msa-outcome-check"><Check size={13} strokeWidth={2.5} /></span>
-        )}
-        {view.outcome === "failed" && <X size={15} aria-hidden="true" />}
-        <b>{view.outcome}</b>
-        {meta && <span class="msa-outcome-meta">· {meta}</span>}
-      </div>
-      {view.outcome === "failed" && view.error && (
-        <div class="msa-outcome-err">{String(view.error).split("\n").slice(0, 4).join("\n")}</div>
-      )}
-      {view.outcome === "completed" && view.resultChip && (
-        <div class="msa-outcome-chip">{view.resultChip}</div>
-      )}
-      <div class="msa-outcome-actions">
-        {view.outcome === "failed" && (
-          <button type="button" class="msa-outcome-btn" onClick={() => copy(view.error || "")}>
-            {copied ? "copied ✓" : <>{<Copy size={13} />} Copy error</>}
-          </button>
-        )}
-        {view.outcome === "completed" && (
-          <button type="button" class="msa-outcome-btn" onClick={() => copy(view.result || "")}>
-            {copied ? "copied ✓" : <>{<Copy size={13} />} Copy result</>}
-          </button>
-        )}
-        <button type="button" class="msa-outcome-back" onClick={onBack}>Back to parent</button>
-      </div>
-    </div>
+    </>
   );
 }

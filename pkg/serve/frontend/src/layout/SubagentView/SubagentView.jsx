@@ -108,18 +108,7 @@ export function SubagentView({ session, jobId, onBack }) {
         title={view.name}
         sub={<SubHead view={view} />}
         state={<SubState view={view} />}
-        actions={
-          view.terminal ? null : (
-            <>
-              {canPromote(view) && (
-                <button type="button" class="sa-promote" onClick={onPromote}>
-                  to background
-                </button>
-              )}
-              <StopButton armed={confirmCancel} onStop={onCancel} />
-            </>
-          )
-        }
+        actions={<SubagentActions view={view} onPromote={onPromote} onStop={onCancel} confirmCancel={confirmCancel} />}
       />
 
       {view.terminal
@@ -132,7 +121,11 @@ export function SubagentView({ session, jobId, onBack }) {
 // SubHead — who ran the errand, as the line that truncates FIRST. The agent
 // and its effort are provenance, not the subject: they answer "who did this",
 // which you ask after you know what it was.
-function SubHead({ view }) {
+//
+// Exported because the phone push (MobileSubagentView) mounts the same head:
+// two surfaces reading the same errand must not describe it with two
+// different sub-lines.
+export function SubHead({ view }) {
   const bits = [view.model, view.thinking && view.thinking !== "off" ? view.thinking : null].filter(Boolean);
   if (bits.length === 0) return null;
   return (
@@ -151,13 +144,39 @@ function SubHead({ view }) {
 // SubState — the persistent state in the head. Completed and cancelled are
 // NEUTRAL: in this system green means running, and a green tick on something
 // that stopped teaches the eye that green is decoration.
-function SubState({ view }) {
+//
+// Exported with SubHead, and for the same reason: the state vocabulary is the
+// errand's, not the desktop's.
+export function SubState({ view }) {
   if (!view.terminal) {
     return <StateWord tone="running" word="Running" time={view.elapsed} />;
   }
   if (view.outcome === "failed") return <StateWord tone="failed" word="Failed" />;
   if (view.outcome === "cancelled") return <StateWord tone="neutral" word="Cancelled" />;
   return <StateWord tone="neutral" word="Completed" />;
+}
+
+// SubagentActions — what you can still DO to a running errand: send it to the
+// background, or stop it. Terminal runs get nothing, because there is nothing
+// left to act on. Shared with the phone so the two surfaces cannot end up
+// offering different verbs for the same state; `phone` only grows the targets.
+//
+// The two buttons are ONE group, and that is structural rather than cosmetic:
+// on a 390px head the row has to wrap, and a bare fragment let "Stop" break
+// away from "to background" and land alone on the next line, reading as a
+// second, unrelated control.
+export function SubagentActions({ view, phone = false, onPromote, onStop, confirmCancel }) {
+  if (view.terminal) return null;
+  return (
+    <span class="sa-acts">
+      {canPromote(view) && (
+        <button type="button" class={`sa-promote${phone ? " is-phone" : ""}`} onClick={onPromote}>
+          to background
+        </button>
+      )}
+      <StopButton phone={phone} armed={confirmCancel} onStop={onStop} />
+    </span>
+  );
 }
 
 // SubagentLive — direct. The record is the body and opens at its live end; the
@@ -228,7 +247,7 @@ export function SubagentReport({ view, session, phone = false }) {
   if (session?.id) ids.push(["Parent session", session.id]);
 
   return (
-    <div class="sa-report-body" ref={bodyRef}>
+    <div class={`sa-report-body${phone ? " is-phone" : ""}`} ref={bodyRef}>
       <div class="sa-report-col">
         <ReportHeadline view={view} />
 

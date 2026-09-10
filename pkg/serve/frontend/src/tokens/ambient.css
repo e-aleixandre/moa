@@ -1937,25 +1937,29 @@ html.mobile-locked[data-ambient="on"] body {
 
 /* ── The errand's report ──────────────────────────────────────────────────
    The conclusion is the page: prose on the canvas, no card. Only the error
-   gets a surface, because it is evidence and has to look like a quotation. */
-[data-ambient="on"] .subagent-view .sa-headline {
+   gets a surface, because it is evidence and has to look like a quotation.
+
+   Addressed by the report's own classes rather than through .subagent-view:
+   the phone push (.msa) mounts the same report, and a container-scoped skin
+   would have dressed the desktop and left the phone in the old palette. */
+[data-ambient="on"] .sa-headline {
   font-family: var(--font);
   font-size: 20px;
   font-weight: var(--weight-semibold);
   color: var(--amb-text);
 }
-[data-ambient="on"] .subagent-view .sa-result {
+[data-ambient="on"] .sa-result {
   font-family: var(--font);
   font-size: 16px;
   color: var(--amb-text-2);
 }
-[data-ambient="on"] .subagent-view .sa-cancelled {
+[data-ambient="on"] .sa-cancelled {
   font-family: var(--font);
   font-size: 16px;
   color: var(--amb-text-3);
 }
-[data-ambient="on"] .subagent-view .sa-data { font-family: var(--mono); color: var(--amb-text-2); }
-[data-ambient="on"] .subagent-view .sa-error {
+[data-ambient="on"] .sa-data { font-family: var(--mono); color: var(--amb-text-2); }
+[data-ambient="on"] .sa-error {
   border: 0;
   border-left: 2px solid var(--red);
   border-radius: var(--amb-r-well);
@@ -1964,8 +1968,8 @@ html.mobile-locked[data-ambient="on"] body {
   font-size: 12px;
   color: var(--amb-text-2);
 }
-[data-ambient="on"] .subagent-view .sa-log { border-left-color: var(--amb-line); }
-[data-ambient="on"] .subagent-view .sa-promote {
+[data-ambient="on"] .sa-log { border-left-color: var(--amb-line); }
+[data-ambient="on"] .sa-promote {
   border: 0;
   border-radius: var(--amb-r-ctl);
   background: var(--amb-control);
@@ -1975,7 +1979,7 @@ html.mobile-locked[data-ambient="on"] body {
   color: var(--amb-text-2);
 }
 @media (hover: hover) {
-  [data-ambient="on"] .subagent-view .sa-promote:hover { background: var(--amb-raised); color: var(--amb-text); }
+  [data-ambient="on"] .sa-promote:hover { background: var(--amb-raised); color: var(--amb-text); }
 }
 
 /* ── The console's output ─────────────────────────────────────────────────
