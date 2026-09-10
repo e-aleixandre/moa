@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.4] - 2026-09-10
+
+### Fixed
+
+- OpenAI models on a ChatGPT subscription now read their prompt cache back
+  instead of rewriting it every turn. The backend groups a conversation's cache
+  by a session header Moa was not sending, so each request looked like a new
+  session: the whole prefix was billed as a cache write every turn, which costs
+  more than not caching at all. It affects every OpenAI model over ChatGPT
+  OAuth, and Daybreak Blue worst of all — it was reading nothing whatsoever.
+- A model alias no longer loses its own reasoning between turns. An alias is
+  answered under its target's model id — Daybreak Blue replies as GPT-5.6 Sol —
+  which Moa read as a mid-session model switch: on every request it discarded
+  the encrypted reasoning and the real item ids of all previous turns, a
+  documented cause of stalled or empty turns.
+
 ## [0.37.3] - 2026-09-09
 
 ### Fixed
