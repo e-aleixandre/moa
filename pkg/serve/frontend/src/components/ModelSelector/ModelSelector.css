@@ -248,6 +248,7 @@
   font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   line-height: var(--leading-tight);
+  color: var(--m-accent, var(--text));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -383,6 +384,7 @@
   font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   line-height: var(--leading-tight);
+  color: var(--m-accent, var(--text));
 }
 
 .model-selector .mchip .cv {
@@ -601,12 +603,17 @@
   width: 7px;
   height: 7px;
   border-radius: var(--radius-full);
+  background: var(--m-accent, var(--overlay1));
 }
 
 .model-selector .model-result-copy {
   min-width: 0;
   font-size: var(--text-base);
   font-weight: var(--weight-semibold);
+}
+
+.model-selector .model-result-name {
+  color: var(--m-accent, var(--text));
 }
 
 .model-selector .model-result-copy small {

@@ -678,3 +678,462 @@ html.mobile-locked[data-ambient="on"] body {
 [data-ambient="on"] .spanel .mcp-summary { color: var(--amb-text-4); }
 [data-ambient="on"] .spanel .mcp-name { color: var(--amb-text); }
 [data-ambient="on"] .spanel .mcp-tools { font-family: var(--mono); color: var(--amb-text-4); }
+
+/* ── The line's three controls ─────────────────────────────────────────────
+   The other half of PANEL-CRITERIO-FABLE: the panel holds the record, and the
+   LINE holds what changes the next turn. Three surfaces — model, permissions,
+   context — dressed here so they read as one family with the panel rather than
+   as three products.
+
+   They are DRESSED, not rewritten. ModelSelector, PermissionControl and the
+   Sheet already do the work; what changes is the material (sheet tone, one
+   radius family, hairlines instead of borders), the type (words in Outfit,
+   data in Plex Mono) and where the identity colour lands. The one structural
+   change is the ring's: it stopped opening a popover of its own and now opens
+   the panel's Usage page, so the same numbers have one home.
+
+   Popover on desktop, bottom sheet on the phone — which is what the app
+   already does. The prototype's push-inside-the-popover provider view is NOT
+   copied: production filters and browses in place, and swapping a working
+   navigation for a different one is a rewrite, not a dressing. */
+
+/* ── The floating surfaces ────────────────────────────────────────────────
+   Popover and sheet are the drawer's material one step up from the canvas.
+   They genuinely float over a live transcript, so they are among the few
+   things that earn a shadow. No blur: what is behind them moves. */
+[data-ambient="on"] .conversation-model-popover .model-selector,
+[data-ambient="on"] .pane-model-popover .model-selector,
+[data-ambient="on"] .perm-menu {
+  background: var(--amb-sheet-solid);
+  border: 0;
+  border-radius: var(--amb-r-panel);
+  box-shadow: inset 0 0 0 1px var(--amb-line-strong), 0 16px 48px rgba(0, 0, 0, 0.45);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .msheet {
+  background: var(--amb-sheet-solid);
+  border-top: 0;
+  border-radius: var(--amb-r-panel) var(--amb-r-panel) 0 0;
+  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 -16px 48px rgba(0, 0, 0, 0.45);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .msheet-scrim { background: rgba(6, 6, 12, 0.55); }
+[data-ambient="on"] .msheet-grab-bar { background: var(--amb-line-strong); }
+[data-ambient="on"] .msheet-title {
+  font-size: 20px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+  color: var(--amb-text);
+}
+/* The scope tag is a word about this session, not a code. */
+[data-ambient="on"] .msheet-scope {
+  font-family: var(--font);
+  letter-spacing: 0.08em;
+  color: var(--amb-text-4);
+}
+
+/* ── The model picker ─────────────────────────────────────────────────────
+   Reading order in the popover is the prototype's, and it is the reason the
+   order changed: what you came for (which model am I on, which one do I want)
+   is at the top, and the two knobs that modulate it are under the list. The
+   old order opened on the thinking stepper, which is the answer to a question
+   nobody had yet. */
+/* The popover is a column with ONE scrolling part. Measured against the
+   dressing before this rule: the whole thing came to 790px on a 900px screen,
+   because every block was allowed its natural height and the list was allowed
+   430 on top of them. The prototype's is 540. So the surface takes a ceiling
+   and the LIST absorbs it -- current model, thinking and fast are the fixed
+   furniture, and only the list of models scrolls. */
+[data-ambient="on"] .model-selector {
+  display: flex;
+  flex-direction: column;
+  max-height: min(560px, calc(100vh - 120px));
+  padding: 0 12px 12px;
+}
+[data-ambient="on"] .model-selector .model-selector-view {
+  flex: 1;
+  min-height: 120px;
+  max-height: none;
+  /* The scroll cut has to read as a cut. Without an edge the last row is just
+     sliced by the thinking block below it and looks broken rather than
+     scrollable. */
+  padding-bottom: 8px;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+}
+/* Embedded (the phone sheet) has no ceiling of its own: the sheet's body is
+   the scroller, and a second one inside it traps the gesture. */
+[data-ambient="on"] .model-selector--embedded {
+  max-height: none;
+}
+[data-ambient="on"] .model-selector--embedded .model-selector-view {
+  flex: none;
+  min-height: 0;
+  mask-image: none;
+}
+[data-ambient="on"] .model-selector .sel-head {
+  padding: 14px 4px 6px;
+  font-family: var(--font);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .model-selector--embedded { padding: 0; }
+
+/* order: current → filter → list → thinking → fast. Flex order rather than a
+   second JSX tree, so the switch changes no markup and the DOM (and therefore
+   the tab order, which follows reading order here) stays one thing. */
+[data-ambient="on"] .model-selector .sel-head { order: 0; }
+[data-ambient="on"] .model-selector .cur-row { order: 1; }
+[data-ambient="on"] .model-selector .model-filter { order: 2; }
+[data-ambient="on"] .model-selector .model-selector-view { order: 3; }
+[data-ambient="on"] .model-selector .think-block { order: 4; }
+[data-ambient="on"] .model-selector .fast-block { order: 5; }
+
+/* The current model: a raised row, the identity hue on a MARK rather than on
+   the words. Colouring a model's name is how the old design said "identity",
+   but a coloured word competes with the state colours the line depends on. */
+[data-ambient="on"] .model-selector .cur-row {
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  margin-bottom: 8px;
+  padding: 6px 10px 6px 12px;
+  border: 0;
+  border-radius: var(--amb-r-row);
+  background: var(--amb-raised);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  color: var(--amb-text);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .model-selector .cur-row--button:hover { background: var(--amb-control); }
+}
+[data-ambient="on"] .model-selector .cur-lbl {
+  order: -1;
+  width: 12px;
+  height: 12px;
+  font-size: 0;
+  border-radius: 50%;
+  background: var(--m-accent, var(--amb-text-4));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--m-accent, var(--amb-text-4)) 18%, transparent);
+}
+[data-ambient="on"] .model-selector .cur-name {
+  flex: 1;
+  font-size: 16px;
+  font-weight: var(--weight-semibold);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .model-selector .cur-sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .model-selector .cur-row svg { color: var(--amb-text-4); }
+
+/* The filter is a well cut into the sheet, like the drawer's search. */
+[data-ambient="on"] .model-selector .model-filter.field-box {
+  background: var(--amb-canvas);
+  border-color: transparent;
+  border-radius: var(--amb-r-ctl);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .model-selector .model-filter.field-box:focus-within {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mauve) 55%, transparent);
+}
+[data-ambient="on"] .model-selector .model-filter .field-input { color: var(--amb-text); }
+
+/* Section headings: the panel's eyebrow, and the count next to it rather than
+   at the far end of a rule. The rule goes — a hairline whose only job is to
+   fill the space between two words is decoration. */
+[data-ambient="on"] .model-selector .model-section-heading {
+  gap: 6px;
+  padding: 0 4px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .model-selector .model-section-heading i { display: none; }
+[data-ambient="on"] .model-selector .model-section-count {
+  margin-left: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--amb-text-4);
+}
+
+/* Model chips: transparent tiles on the sheet, a hairline rim, and the chosen
+   one is a raised plane with a check — being chosen is a state of the list,
+   not an action, so it does not get an accent fill. The mark carries identity;
+   mauve carries "this is the one". */
+[data-ambient="on"] .model-selector .chip-grid { gap: 4px; }
+[data-ambient="on"] .model-selector .mchip-wrap {
+  min-height: 52px;
+  border: 0;
+  border-radius: var(--amb-r-row);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .model-selector .mchip-wrap:hover { background: var(--amb-hi); }
+}
+[data-ambient="on"] .model-selector .mchip-wrap.on {
+  background: var(--amb-raised);
+  box-shadow: inset 0 0 0 1px var(--amb-line-strong);
+}
+[data-ambient="on"] .model-selector .mchip {
+  min-height: 52px;
+  padding: 6px 34px 6px 28px;
+}
+[data-ambient="on"] .model-selector .mchip .cn {
+  position: relative;
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+  color: var(--amb-text);
+}
+/* The identity mark, drawn on the name row so the chip keeps one text column
+   and the grid stays two-up at 340px. */
+[data-ambient="on"] .model-selector .mchip .cn::before {
+  content: "";
+  position: absolute;
+  left: -18px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: var(--m-accent, var(--amb-text-4));
+}
+[data-ambient="on"] .model-selector .mchip-wrap.on .cn,
+[data-ambient="on"] .model-selector .mchip-wrap.on .check { color: var(--amb-text); }
+[data-ambient="on"] .model-selector .mchip-wrap.on .check { color: var(--mauve); }
+[data-ambient="on"] .model-selector .mchip .cv {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .model-selector .model-pin {
+  border-radius: 0 var(--amb-r-row) 0 var(--amb-r-row);
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .model-selector .model-pin.on { color: var(--yellow); }
+
+/* Provider rows and the search results: the panel's row, verbatim. */
+[data-ambient="on"] .model-selector .provider-list { gap: 4px; }
+[data-ambient="on"] .model-selector .provider-row,
+[data-ambient="on"] .model-selector .model-result {
+  border: 0;
+  border-radius: var(--amb-r-row);
+  background: var(--amb-raised);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  color: var(--amb-text);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .model-selector .provider-row:hover,
+  [data-ambient="on"] .model-selector .model-result:hover { background: var(--amb-control); }
+}
+[data-ambient="on"] .model-selector .model-result.on {
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line-strong);
+}
+[data-ambient="on"] .model-selector .provider-mark {
+  border-radius: var(--amb-r-ctl);
+  font-family: var(--font);
+  font-size: 12px;
+}
+[data-ambient="on"] .model-selector .provider-name {
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .model-selector .provider-current { background: var(--mauve); }
+[data-ambient="on"] .model-selector .provider-copy small,
+[data-ambient="on"] .model-selector .model-result-copy small {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .model-selector .provider-count {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .model-selector .provider-row svg,
+[data-ambient="on"] .model-selector .provider-back svg { color: var(--amb-text-4); }
+[data-ambient="on"] .model-selector .model-result-name {
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .model-selector .model-provider-badge {
+  border-radius: 6px;
+  background: var(--amb-hi);
+  font-family: var(--font);
+  font-size: 12px;
+  text-transform: none;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .model-selector .provider-view-head > span {
+  font-family: var(--font);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .model-selector .provider-back {
+  border-radius: var(--amb-r-ctl);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.08em;
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .model-selector .pinned-fold,
+[data-ambient="on"] .model-selector .model-empty,
+[data-ambient="on"] .model-selector .pinned-empty {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .model-selector .pinned-empty {
+  border-style: solid;
+  border-color: var(--amb-line);
+  border-radius: var(--amb-r-row);
+}
+
+/* Thinking: the meter that the line prints, as each option's glyph, so the
+   picker and the readout are the same picture. */
+[data-ambient="on"] .model-selector .think-block,
+[data-ambient="on"] .model-selector .fast-block { margin: 10px 0 0; }
+[data-ambient="on"] .model-selector .think-lbl,
+[data-ambient="on"] .model-selector .fast-lbl {
+  margin-bottom: 6px;
+  padding: 0 4px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .model-selector .think-lbl b,
+[data-ambient="on"] .model-selector .fast-lbl b {
+  font-family: var(--font);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .model-selector .think-lbl b.hot { color: var(--peach); }
+[data-ambient="on"] .model-selector .fast-lbl b.on { color: var(--yellow); }
+[data-ambient="on"] .model-selector .segmented.think-steps {
+  border: 0;
+  border-radius: var(--amb-r-row);
+  background: var(--amb-canvas);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+}
+[data-ambient="on"] .model-selector .think-step {
+  border-radius: var(--amb-r-ctl);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .model-selector .think-step.on {
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .model-selector .think-step .tks i,
+[data-ambient="on"] .model-selector .think-step .tks .off { background: var(--amb-line-strong); }
+[data-ambient="on"] .model-selector .think-step.on .tks i.f { background: var(--mauve); }
+[data-ambient="on"] .model-selector .think-step.hot.on {
+  background: var(--amb-control);
+  color: var(--peach);
+}
+[data-ambient="on"] .model-selector .think-step.hot.on .tks i.f { background: var(--peach); }
+
+/* Fast: a raised row with the switch on the right, the same shape as the
+   panel's rows. Yellow stays: it is what the line prints once fast is on. */
+[data-ambient="on"] .model-selector .fast-toggle,
+[data-ambient="on"] .model-selector:not(.model-selector--embedded) .fast-toggle {
+  min-height: 52px;
+  padding: 6px 12px;
+  border-radius: var(--amb-r-row);
+  background: var(--amb-raised);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .model-selector .fast-text { flex: 1; }
+[data-ambient="on"] .model-selector .fast-toggle .fast-track { order: 1; background: var(--amb-control); }
+[data-ambient="on"] .model-selector .fast-toggle.is-on .fast-track { background: var(--yellow); }
+[data-ambient="on"] .model-selector .fast-note {
+  margin-top: 6px;
+  padding: 0 4px;
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+
+/* ── Permissions ──────────────────────────────────────────────────────────
+   Three rows, ordered by autonomy so the list reads as a dial. The state
+   colour stays on the mode's name and on a dot — the mode IS a state, and this
+   is the one place the line's own colours must be repeated exactly. */
+[data-ambient="on"] .perm-menu {
+  width: 260px;
+  padding: 6px;
+}
+[data-ambient="on"] .perm-menu-item,
+[data-ambient="on"] .perm-sheet-list .perm-menu-item {
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 12px 8px 14px;
+  border-radius: var(--amb-r-row);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .perm-menu-item + .perm-menu-item { margin-top: 2px; }
+@media (hover: hover) {
+  [data-ambient="on"] .perm-menu-item:hover { background: var(--amb-hi); }
+}
+[data-ambient="on"] .perm-menu-item.on,
+[data-ambient="on"] .perm-menu-item:focus-visible {
+  background: var(--amb-raised);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+}
+/* The check moves to the right edge: on the left it was a column of empty
+   boxes that made the three rows look disabled until one was chosen. In its
+   place, the mode's dot — the same glyph the status line wears. */
+[data-ambient="on"] .perm-menu-item .perm-menu-check {
+  order: 2;
+  width: auto;
+  height: auto;
+  margin: 0;
+  color: var(--mauve);
+}
+[data-ambient="on"] .perm-menu-item::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+[data-ambient="on"] .perm-menu-item.perm-ask { color: var(--yellow); }
+[data-ambient="on"] .perm-menu-item.perm-auto { color: var(--amb-text-2); }
+[data-ambient="on"] .perm-menu-item.perm-yolo { color: var(--maroon); }
+[data-ambient="on"] .perm-menu-text { flex: 1; gap: 2px; }
+[data-ambient="on"] .perm-menu-label {
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0;
+  text-transform: lowercase;
+}
+[data-ambient="on"] .perm-menu-label.perm-auto { color: var(--amb-text-2); }
+[data-ambient="on"] .perm-menu-desc {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--amb-text-3);
+}

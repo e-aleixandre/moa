@@ -55,13 +55,18 @@ function ThinkingStepper({ value, onChange, options = THINKING_OPTIONS }) {
   );
 }
 
+// The model's accent travels as a custom property (--m-accent) rather than as
+// an inline `color`. Same painted colour either way, but a property can be
+// re-pointed by a stylesheet: Ambient moves the identity hue off the words and
+// onto a mark, which an inline declaration would have made impossible without
+// !important.
+const accentVar = (spec) => (spec?.accent ? { "--m-accent": `var(--${spec.accent})` } : undefined);
+
 function CurrentModelRow({ spec, sessionModel, onOpenProvider }) {
   const content = spec ? (
     <>
       <span class="cur-lbl">Current</span>
-      <span class="cur-name" style={{ color: `var(--${spec.accent})` }}>
-        {spec.codename}
-      </span>
+      <span class="cur-name">{spec.codename}</span>
       {spec.sub && <span class="cur-sub">{spec.sub}</span>}
       {onOpenProvider && <ChevronRight size={13} aria-hidden="true" />}
     </>
@@ -73,9 +78,9 @@ function CurrentModelRow({ spec, sessionModel, onOpenProvider }) {
     </>
   );
 
-  if (!onOpenProvider) return <div class="cur-row">{content}</div>;
+  if (!onOpenProvider) return <div class="cur-row" style={accentVar(spec)}>{content}</div>;
   return (
-    <button type="button" class="cur-row cur-row--button" onClick={onOpenProvider}>
+    <button type="button" class="cur-row cur-row--button" style={accentVar(spec)} onClick={onOpenProvider}>
       {content}
     </button>
   );
@@ -108,14 +113,14 @@ function PinButton({ model, pinned, onToggle }) {
 function ModelChip({ model, selected, pinned, onSelect, onTogglePin, pinnable = true }) {
   const on = model.id === selected;
   return (
-    <div class={`mchip-wrap${on ? " on" : ""}`}>
+    <div class={`mchip-wrap${on ? " on" : ""}`} style={accentVar(model)}>
       <button
         type="button"
         class="mchip"
         onClick={() => onSelect?.(model.id)}
         aria-pressed={on}
       >
-        <span class="cn" style={on ? undefined : { color: `var(--${model.accent})` }}>
+        <span class="cn">
           {model.codename}
           {on && <Check class="check" size={12} aria-hidden="true" />}
         </span>
@@ -151,16 +156,16 @@ function SearchResults({ models, selected, pinnedIDs, onSelect, onTogglePin, pin
         const on = model.id === selected;
         const pinned = pinnedIDs.includes(model.catalogId);
         return (
-          <div key={model.id} class={`model-result${on ? " on" : ""}`}>
+          <div key={model.id} class={`model-result${on ? " on" : ""}`} style={accentVar(model)}>
             <button
               type="button"
               class="model-result-select"
               aria-pressed={on}
               onClick={() => onSelect?.(model.id)}
             >
-              <span class="model-result-dot" style={{ background: `var(--${model.accent})` }} />
+              <span class="model-result-dot" />
               <span class="model-result-copy">
-                <span style={{ color: `var(--${model.accent})` }}>{model.codename}</span>
+                <span class="model-result-name">{model.codename}</span>
                 {model.sub && <small>{model.sub}</small>}
               </span>
               <span class="model-provider-badge">{model.provider}</span>

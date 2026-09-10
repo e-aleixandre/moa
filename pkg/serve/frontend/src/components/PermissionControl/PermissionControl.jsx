@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from "preact/hooks";
 import { createPortal } from "preact/compat";
 import { Check } from "lucide-preact";
 import { registerOverlay } from "../../data/overlays.js";
+import { ambientOn } from "../../data/ambient.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import "./PermissionControl.css";
 
@@ -34,11 +35,52 @@ import "./PermissionControl.css";
 // agent is running (same lock-while-running rule as the rest of session
 // settings).
 
-const MODES = [
+export const PERMISSION_MODES = [
   { value: "yolo", label: "YOLO", desc: "Run everything — never ask" },
   { value: "auto", label: "AUTO", desc: "Ask only for risky commands" },
   { value: "ask", label: "ASK", desc: "Ask before every command" },
 ];
+
+// PermissionOptions — the three rows themselves, shared by every host that
+// offers the choice: this control's desktop popover, its mobile Sheet, and the
+// mobile status line's own sheet. The mobile line used to carry its own copy of
+// the list AND of this markup, with a comment promising it was "the same copy /
+// order as the shared PermissionControl" — a promise nothing enforced. One
+// element renders it now, so a change to a row cannot land in one density only.
+//
+// The mode also rides on the row itself (perm-menu-item perm-ask), not only on
+// its label: a row that IS a mode should be able to wear it — Ambient marks it
+// with a dot, which cannot be drawn from a child's class.
+export function PermissionOptions({ mode, onPick, isDisabled }) {
+  // Ambient reads the three as a DIAL, least autonomy first, so the mode that
+  // never asks is at the far end rather than at the top of a safety menu.
+  // Reversed in the DOM rather than with flex order: the keyboard walks these
+  // in document order, and a list whose tab order disagrees with what is on
+  // screen is worse than either order on its own.
+  const modes = ambientOn() ? [...PERMISSION_MODES].reverse() : PERMISSION_MODES;
+  return modes.map((m) => {
+    const on = m.value === mode;
+    return (
+      <button
+        key={m.value}
+        type="button"
+        role="menuitemradio"
+        aria-checked={on}
+        class={`perm-menu-item perm-${m.value}${on ? " on" : ""}`}
+        disabled={isDisabled ? isDisabled(m.value, on) : false}
+        onClick={() => onPick(m.value)}
+      >
+        <span class="perm-menu-check" aria-hidden="true">
+          {on && <Check />}
+        </span>
+        <span class="perm-menu-text">
+          <span class={`perm-menu-label perm-${m.value}`}>{m.label}</span>
+          <span class="perm-menu-desc">{m.desc}</span>
+        </span>
+      </button>
+    );
+  });
+}
 
 const MENU_WIDTH = 220;
 const MENU_GAP = 8;
@@ -113,24 +155,7 @@ export function PermissionControl({ mode = "yolo", disabled = false, onChange, s
     setOpen(false);
   };
 
-  const options = MODES.map((m) => (
-    <button
-      key={m.value}
-      type="button"
-      role="menuitemradio"
-      aria-checked={m.value === mode}
-      class={`perm-menu-item ${m.value === mode ? "on" : ""}`}
-      onClick={() => pick(m.value)}
-    >
-      <span class="perm-menu-check" aria-hidden="true">
-        {m.value === mode && <Check />}
-      </span>
-      <span class="perm-menu-text">
-        <span class={`perm-menu-label perm-${m.value}`}>{m.label}</span>
-        <span class="perm-menu-desc">{m.desc}</span>
-      </span>
-    </button>
-  ));
+  const options = <PermissionOptions mode={mode} onPick={pick} />;
 
   const desktopMenu = open && !sheet && menuPos && typeof document !== "undefined" && document.body
     ? createPortal(
