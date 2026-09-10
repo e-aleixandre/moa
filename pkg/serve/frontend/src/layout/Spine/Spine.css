@@ -146,12 +146,36 @@
 }
 
 .spine .spine-label {
-  font-size: var(--text-micro);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
   color: var(--overlay0);
-  padding: var(--space-2) var(--space-1) var(--space-1);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-1);
+}
+
+.spine .spine-sessions > .spine-label:first-child,
+.spine .spine-project:first-child .spine-label {
+  margin-top: 0;
+}
+
+/* The count has TWO representations, because it answers two questions. Under
+   Active and Saved it sizes the group: a quiet mono number, a datum. Under
+   Needs attention it is the call itself, so it becomes a solid yellow pill —
+   the one mark that group earns, since the rows below already carry their own
+   colour and a coloured band over coloured rows is how a list stops being
+   scannable. */
+.spine .spine-group-n {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-normal);
+  letter-spacing: normal;
+  font-variant-numeric: tabular-nums;
+  color: var(--overlay0);
 }
 
 .spine .spine-list {
@@ -198,16 +222,28 @@
 }
 }
 .spine .spine-session-card .session-row.variant-card .session-row-hit {
-  padding: 8px 36px 8px 10px;
-  gap: 2px;
+  padding: 7px 12px;
+  min-height: 52px;
 }
 
-/* A list of conversations, not a stack of cards. Two lines: title+time, then
-   one quiet line of what is happening (or the path, if nothing is). */
+/* The ⋯ button lives over the row's top-right corner, exactly where the age
+   sits. Rather than tax every row with a permanent 36px reserve for a control
+   that is invisible until you hover, the age steps aside for it and the row
+   keeps its resting geometry. `opacity` and not `display`, so nothing reflows
+   and the state dot beside it does not move. */
+.spine .spine-session-card:hover .session-row.variant-card .when,
+.spine .spine-session-card:focus-within .session-row.variant-card .when {
+  opacity: 0;
+}
+
+/* A queue of things to do, not a stack of cards. Two lines: title with its
+   state and age, then WHY the session wants you — or where it lives, when it
+   wants nothing. Sizes belong to the row itself; the spine only says how the
+   surface behaves. */
 .spine .session-row.variant-card {
   background: transparent;
   border-color: transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   min-width: 0;
 }
 @media (hover: hover) {
@@ -223,29 +259,6 @@
   background: var(--surface0);
   border-color: transparent;
   box-shadow: none;
-}
-
-.spine .session-row.variant-card .r1 {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  color: var(--text);
-}
-
-.spine .session-row.variant-card .r1 .title {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.spine .session-row.variant-card .when {
-  font-size: var(--text-nano);
-  color: var(--overlay0);
-}
-
-.spine .session-row.variant-card .brief,
-.spine .session-row.variant-card .path {
-  padding-left: 18px;
-  font-size: var(--text-xs);
-  color: var(--overlay1);
 }
 
 .spine .session-row.variant-card .r2 {
@@ -274,14 +287,6 @@
 .spine .session-row.variant-card.needs-red .r1,
 .spine .session-row.variant-card.needs-red .r2 {
   color: var(--text);
-}
-
-.spine .session-row.variant-card.needs-yellow .brief {
-  color: var(--yellow);
-}
-
-.spine .session-row.variant-card.needs-red .brief {
-  color: var(--red);
 }
 
 .spine .spine-foot {
@@ -313,18 +318,15 @@
   gap: var(--space-2);
   color: var(--text);
 }
-.spine .spine-attention-n {
+.spine .spine-group-n.is-attention {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
+  min-width: 19px;
   height: 18px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--yellow);
   color: var(--crust);
-  font-family: var(--mono);
-  font-size: var(--text-nano);
   font-weight: var(--weight-semibold);
-  letter-spacing: normal;
 }

@@ -155,11 +155,14 @@
   color: var(--overlay0);
 }
 
-/* ── variant C: stacked card ─────────────────────────────────────── */
+/* ── variant C: the list row ──────────────────────────────────────────────
+   Not a card any more: a row with a leading monogram column and two lines of
+   text beside it. The old stacked card indented its second line under the
+   dot, which meant the reason had to share the title's width AND start in a
+   different place on every row. */
 
 .session-row.variant-card {
-  flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   min-width: 170px;
   background: var(--mantle);
   border: 1px solid var(--surface0);
@@ -168,11 +171,37 @@
 }
 
 .session-row.variant-card .session-row-hit {
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   width: 100%;
+}
+
+/* The monogram is the project's identity: one hue per project name, always
+   the same for the same folder, never overridden by state. */
+.session-row.variant-card .mono {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: hsl(var(--mono-h) 50% 60% / 0.16);
+  box-shadow: 0 0 0 1px hsl(var(--mono-h) 50% 65% / 0.18);
+  color: hsl(var(--mono-h) 65% 78%);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0;
+}
+
+.session-row.variant-card .body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 @media (hover: hover) {
 
@@ -188,64 +217,87 @@
 
 .session-row.variant-card .r1 {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--space-2);
   font-size: var(--text-base);
   font-weight: var(--weight-medium);
   color: var(--text);
 }
 
-/* Only rows that carry a `when` stretch the title, so the age lands on the far
-   right. Scoped with :has() on purpose — stretching it unconditionally would
-   also push the `unseen` dot to the edge on rows without one, moving a pixel on
-   the desktop Spine that has no reason to move. */
-.session-row.variant-card .r1:has(.when) .title {
-  flex: 1 1 auto;
+.session-row.variant-card .r1 .title {
+  flex: 1;
   min-width: 0;
+  line-height: 20px;
+  color: var(--subtext1);
+}
+
+/* The current row is the one full-white title in the list. */
+.session-row.variant-card.on .r1 .title {
+  color: var(--text);
+  font-weight: var(--weight-semibold);
+}
+
+/* State and age, in that order, at the end of the title line. */
+.session-row.variant-card .edge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
 }
 
 .session-row.variant-card .r2 {
   font-family: var(--mono);
   font-size: var(--text-xs);
   color: var(--overlay0);
-  padding-left: var(--space-4);
 }
 
-/* when / brief / path — the optional extras. All three are omitted unless the
-   caller passes them, so a card that only gets title+state+meta is unchanged.
-   They share the title's left inset so the three text lines align under it,
-   clear of the state dot. */
+/* when / brief / path — the optional extras. All are omitted unless the caller
+   passes them, so a row that only gets title+state renders as one line.
+   The age is set to the width of its longest form and aligned left, so the
+   dot beside it lands on the same x in every row. */
 .session-row.variant-card .when {
   font-family: var(--mono);
-  font-size: var(--text-nano);
+  font-size: var(--text-sm);
   color: var(--overlay0);
   flex: none;
+  min-width: 3ch;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
 }
 
+/* The reason line: WHY this session wants you, coloured by what it says.
+   Neutral grey when it is only reporting progress — a running session asks
+   for nothing, so it must not compete with the ones that do. */
 .session-row.variant-card .brief {
-  font-size: var(--text-xs);
-  color: var(--subtext0);
-  padding-left: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 16px;
+  color: var(--overlay0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.session-row.variant-card .brief.tone-neutral { color: var(--overlay1); }
+.session-row.variant-card .brief.tone-yellow { color: var(--yellow); }
+.session-row.variant-card .brief.tone-red { color: var(--red); }
+.session-row.variant-card .brief.tone-mauve { color: var(--mauve); }
 
 .session-row.variant-card .path {
   font-family: var(--mono);
-  font-size: var(--text-nano);
+  font-size: var(--text-sm);
+  line-height: 16px;
   color: var(--overlay0);
-  padding-left: var(--space-4);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.session-row.variant-card.needs-yellow .brief {
+/* A caller that passes no tone keeps the old row-level tinting, so the
+   inbox's candidate rows and the gallery are unaffected. */
+.session-row.variant-card.needs-yellow .brief:not([class*="tone-"]) {
   color: var(--yellow);
 }
 
-.session-row.variant-card.needs-red .brief {
+.session-row.variant-card.needs-red .brief:not([class*="tone-"]) {
   color: var(--red);
 }
 

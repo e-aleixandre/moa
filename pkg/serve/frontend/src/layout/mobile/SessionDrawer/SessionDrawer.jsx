@@ -48,12 +48,7 @@ function DrawerVersion({ version }) {
 // `onClose` X is deliberately not used, because lifecycle here is a menu
 // (close/reopen/delete), not a single dismiss.
 function SessionDrawerCard({ session, hidePath = false, onSelect, onCloseSession, onReopenSession, onDeleteSession }) {
-  const { id, title, state, when, last, needsLabel, path, unseen, origin } = session;
-  const brief = last
-    ? needsLabel
-      ? <><b class="sdcard-needs-label">{needsLabel} </b>{last}</>
-      : last
-    : needsLabel ? <b class="sdcard-needs-label">{needsLabel}</b> : null;
+  const { id, title, state, when, last, lastTone, mono, path, unseen, origin } = session;
   return (
     <div class="sdcard-slot">
       <SessionRow
@@ -64,8 +59,10 @@ function SessionDrawerCard({ session, hidePath = false, onSelect, onCloseSession
         unseen={unseen}
         when={when}
         origin={origin}
-        brief={brief}
-        path={hidePath || brief ? undefined : path}
+        brief={last}
+        briefTone={lastTone}
+        mono={mono}
+        path={hidePath || last ? undefined : path}
         onClick={() => onSelect?.(id)}
       />
       <SessionCardMenu

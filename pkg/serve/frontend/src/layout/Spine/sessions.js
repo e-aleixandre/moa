@@ -1,5 +1,6 @@
 import { focusedSessionId } from "../../data/selectors.js";
 import { sessionDisplayDotState, sessionTitle, shortPath } from "../../data/util/format.js";
+import { attentionKind } from "../../data/util/project-sessions.js";
 import { allTileIds, findTile } from "../../data/tileTree.js";
 import { inboxCards, inboxHealth, inboxHealthSig, inboxSig } from "../../data/events.js"; // wake-on-event
 
@@ -15,27 +16,58 @@ function relAge(updated) {
   return `${d}d`;
 }
 
+/* ── The second line of a session row ─────────────────────────────────────
+   It says WHY the session wants you, not what the conversation was about.
+   The list is a queue of things to do; the summary of the talk is inside the
+   session, one click away, and it never told you whether to open it.
+
+   Nothing here is a new datum: the reason is the display state that already
+   colours the dot (sessionDisplayDotState) narrowed through attentionKind,
+   which is the same predicate the Needs attention group partitions with — so
+   the group and the sentence can never disagree. The elapsed minutes come
+   from runStartedAtMs, already in the store for the live bar's timer.
+
+   A session with no reason (idle, saved) returns null and the row falls back
+   to its path: two lines is the budget, and the more useful datum wins. */
+const REASON_TONE = { permission: "yellow", error: "red", unseen: "mauve" };
+
+function runningFor(sess, now) {
+  const started = sess.runStartedAtMs || 0;
+  if (!started) return "";
+  const min = Math.floor(Math.max(0, now - started) / 60000);
+  if (min < 1) return "";
+  if (min < 60) return `${min}m`;
+  return `${Math.floor(min / 60)}h`;
+}
+
+export function sessionRowReason(sess, now = Date.now()) {
+  if (!sess) return null;
+  const kind = attentionKind(sess);
+  if (kind === "permission") return { text: "Needs your answer", tone: REASON_TONE.permission };
+  if (kind === "error") return { text: "Stopped with an error", tone: REASON_TONE.error };
+  if (kind === "unseen") return { text: "Answered · not read yet", tone: REASON_TONE.unseen };
+  if (sessionDisplayDotState(sess) === "running") {
+    const age = runningFor(sess, now);
+    return { text: age ? `Running · ${age}` : "Running", tone: "neutral" };
+  }
+  return null;
+}
+
 export function sessionRowBrief(sess) {
-  const dot = sessionDisplayDotState(sess);
-  if (dot === "permission") return "Needs you";
-  if (dot === "error") return sess.error || "Error";
-  if (dot === "unseen") return "New result";
-  if (sess.briefProgress) return sess.briefProgress;
-  if (sess.briefAttempting) return sess.briefAttempting;
-  if (sess.state === "running") return "Working…";
-  return "";
+  return sessionRowReason(sess)?.text || "";
 }
 
 function toSpineRow(s, extra = {}) {
-  const brief = sessionRowBrief(s);
+  const reason = sessionRowReason(s);
   return {
     id: s.id,
     title: sessionTitle(s),
     state: sessionDisplayDotState(s),
     unseen: !!s.unseen,
     when: relAge(s.updated),
-    brief,
-    path: brief ? "" : (shortPath(s.cwd) || s.cwd || ""),
+    brief: reason?.text || "",
+    briefTone: reason?.tone || "",
+    path: reason ? "" : (shortPath(s.cwd) || s.cwd || ""),
     origin: s.origin || undefined,
     cwd: s.cwd || "",
     updated: s.updated || 0,

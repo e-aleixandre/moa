@@ -4,6 +4,7 @@ import { IconButton, Kbd } from "../../primitives/index.js";
 import { InboxButton, InboxView, SessionCardMenu, SessionRow } from "../../components/index.js"; // wake-on-event: InboxButton/InboxView
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { groupProjectSessions, hiddenProjectSavedCount, partitionByAttention, visibleProjectSessions } from "../../data/util/project-sessions.js";
+import { projectMonogram } from "../../data/util/format.js";
 import { inboxPendingCount } from "../../data/events.js"; // wake-on-event
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
 import "./Spine.css";
@@ -41,15 +42,15 @@ function SpineVersion({ version }) {
 // fallback for isolated rendering (e.g. galleries) — with real data the
 // container always supplies the props.
 const ACTIVE_SESSIONS = [
-  { id: "ws-race-fix", title: "ws race fix", state: "running", when: "now", brief: "Working…", path: "~/dev/moa/main" },
-  { id: "deploy-pulse-api", title: "deploy pulse api", state: "permission", when: "now", brief: "Needs you", path: "~/dev/moa/pulse-api", unseen: true },
-  { id: "frontend-polish", title: "frontend polish", state: "idle", when: "2h", path: "~/dev/moa/frontend-polish" },
-  { id: "migrate-sqlite", title: "migrate sqlite", state: "error", when: "18m", brief: "Error", path: "~/dev/moa/migrate", unseen: true },
+  { id: "ws-race-fix", title: "ws race fix", state: "running", when: "now", brief: "Running · 4m", briefTone: "neutral", cwd: "/home/me/dev/moa/main" },
+  { id: "deploy-pulse-api", title: "deploy pulse api", state: "permission", when: "now", brief: "Needs your answer", briefTone: "yellow", cwd: "/home/me/dev/moa/pulse-api", unseen: true },
+  { id: "frontend-polish", title: "frontend polish", state: "idle", when: "2h", path: "~/dev/moa/frontend-polish", cwd: "/home/me/dev/moa/frontend-polish" },
+  { id: "migrate-sqlite", title: "migrate sqlite", state: "error", when: "18m", brief: "Stopped with an error", briefTone: "red", cwd: "/home/me/dev/moa/migrate", unseen: true },
 ];
 
 const SAVED_SESSIONS = [
-  { id: "verifier-design-notes", title: "verifier design notes", when: "3d", path: "~/dev/moa/main", saved: true },
-  { id: "changelog-0-10", title: "changelog 0.10", when: "6d", path: "~/dev/moa/main", saved: true },
+  { id: "verifier-design-notes", title: "verifier design notes", when: "3d", path: "~/dev/moa/main", cwd: "/home/me/dev/moa/main", saved: true },
+  { id: "changelog-0-10", title: "changelog 0.10", when: "6d", path: "~/dev/moa/main", cwd: "/home/me/dev/moa/main", saved: true },
 ];
 
 function SpineGroupMenu({ groupByProject, onChange }) {
@@ -118,6 +119,12 @@ export function Spine({
         unseen={s.unseen}
         when={s.when || s.meta}
         brief={s.brief}
+        briefTone={s.briefTone}
+        /* The monogram replaces the path as the project's mark: it is the same
+           datum in a form you can read at a glance, and it frees the second
+           line for the reason. Derived here rather than in the selector so a
+           row's shape stays the presentation layer's business. */
+        mono={projectMonogram(s.cwd)}
         path={s.path}
         pane={s.pane}
         origin={s.origin}
@@ -190,16 +197,18 @@ export function Spine({
               project would be the same row printed twice, so there the alarm
               rides on the project heading instead. */}
           {needsAttention.length > 0 && <>
-            <div class="spine-label is-attention">Needs attention<span class="spine-attention-n">{needsAttention.length}</span></div>
+            <div class="spine-label is-attention">Needs attention<span class="spine-group-n is-attention">{needsAttention.length}</span></div>
             <div class="spine-list">{needsAttention.map(row)}</div>
           </>}
           {/* Open sessions carry a header like every other group: without one,
               the first list reads as the continuation of whatever sits above
-              it (new results, the inbox) instead of a section of its own. */}
-          {restActive.length > 0 && <div class="spine-label">Active</div>}
+              it (new results, the inbox) instead of a section of its own.
+              The count is a plain quiet number here — it sizes the group, it
+              does not call you to it, and only Needs attention does that. */}
+          {restActive.length > 0 && <div class="spine-label">Active<span class="spine-group-n">{restActive.length}</span></div>}
           <div class="spine-list">{restActive.map(row)}</div>
           {savedSessions.length > 0 && <>
-            <div class="spine-label">Saved</div>
+            <div class="spine-label">Saved<span class="spine-group-n">{savedSessions.length}</span></div>
             <div class="spine-list">{savedSessions.map(row)}</div>
           </>}
         </>}

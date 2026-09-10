@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { spineSessions, paneBadges, focusedTileSessionId, sessionRowBrief, selectDesktopChrome, __resetDesktopChromeForTests } from "./sessions.js";
+import { spineSessions, paneBadges, focusedTileSessionId, sessionRowBrief, sessionRowReason, selectDesktopChrome, __resetDesktopChromeForTests } from "./sessions.js";
 
 test("open sessions sort newest first and keep saved in their own list", () => {
   const { active, saved } = spineSessions({
@@ -9,21 +9,60 @@ test("open sessions sort newest first and keep saved in their own list", () => {
   });
   expect(active.map((s) => s.id)).toEqual(["b", "a"]);
   expect(saved.map((s) => s.id)).toEqual(["c"]);
-  expect(active[0].brief).toBe("Working…");
+  expect(active[0].brief).toBe("Running");
   expect(active[1].path).toContain("main");
 });
 
-test("a permission paints Needs you in the brief, not as idle chrome", () => {
+test("a permission says what it wants, not that something is idle", () => {
   const { active } = spineSessions({
     p: { id: "p", title: "Deploy", state: "permission", updated: 1 },
   });
-  expect(active[0].brief).toBe("Needs you");
+  expect(active[0].brief).toBe("Needs your answer");
+  expect(active[0].briefTone).toBe("yellow");
   expect(active[0].path).toBe("");
 });
 
-test("idle has no brief, while attention owns the second line", () => {
+/* The second line answers "why does this want me?", so every state that can
+   want you has to have a sentence, and the ones that cannot must stay silent
+   and give the line back to the path. */
+test("each reason names its state and carries the tone that state owns", () => {
+  expect(sessionRowReason({ state: "permission" })).toEqual({ text: "Needs your answer", tone: "yellow" });
+  expect(sessionRowReason({ state: "error" })).toEqual({ text: "Stopped with an error", tone: "red" });
+  expect(sessionRowReason({ state: "idle", unseen: true })).toEqual({ text: "Answered · not read yet", tone: "mauve" });
+  expect(sessionRowReason({ state: "idle" })).toBeNull();
+  expect(sessionRowReason({ state: "saved" })).toBeNull();
+});
+
+/* Peach means "you wrote this" and is not a state, so no reason may claim it;
+   and a running session asks for nothing, so it must not borrow the colours of
+   the ones that do. */
+test("a running session reports in neutral and never in an attention colour", () => {
+  const reason = sessionRowReason({ state: "running" });
+  expect(reason.tone).toBe("neutral");
+  expect(["yellow", "red", "mauve", "peach"]).not.toContain(reason.tone);
+});
+
+/* The elapsed time comes from runStartedAtMs, the same stamp the live bar's
+   timer reads. Under a minute there is no number worth printing. */
+test("a run that has been going a while says how long, and a fresh one does not", () => {
+  const now = 10 * 60_000;
+  expect(sessionRowReason({ state: "running", runStartedAtMs: 6 * 60_000 }, now).text).toBe("Running · 4m");
+  expect(sessionRowReason({ state: "running", runStartedAtMs: now - 20_000 }, now).text).toBe("Running");
+  expect(sessionRowReason({ state: "running" }, now).text).toBe("Running");
+  expect(sessionRowReason({ state: "running", runStartedAtMs: 1 }, 3 * 3600_000).text).toBe("Running · 2h");
+});
+
+/* The sentence and the Needs attention group must never disagree: both are
+   decided by attentionKind, so a session in the group always has a coloured
+   reason and one outside it never does. Saved is the owner's decision: parked
+   on purpose, so it asks for nothing even with unread work. */
+test("a saved session with unread work stays silent, as it stays out of the group", () => {
+  expect(sessionRowReason({ state: "saved", unseen: true })).toBeNull();
+});
+
+test("idle has no reason, while attention owns the second line", () => {
   expect(sessionRowBrief({ state: "idle" })).toBe("");
-  expect(sessionRowBrief({ state: "permission" })).toBe("Needs you");
+  expect(sessionRowBrief({ state: "permission" })).toBe("Needs your answer");
 });
 
 test("grid badges attach only when the session sits in a pane", () => {
@@ -66,7 +105,7 @@ test("selectDesktopChrome reuses the snapshot when only streaming text changes",
   });
   expect(second).toBe(first);
   expect(first.active[0].id).toBe("a");
-  expect(first.active[0].brief).toBe("Working…");
+  expect(first.active[0].brief).toBe("Running");
 });
 
 test("selectDesktopChrome replaces the snapshot when the brief or title changes", () => {
@@ -84,5 +123,5 @@ test("selectDesktopChrome replaces the snapshot when the brief or title changes"
   });
   expect(second).not.toBe(first);
   expect(second.active[0].title).toBe("Renamed");
-  expect(second.active[0].brief).toBe("Needs you");
+  expect(second.active[0].brief).toBe("Needs your answer");
 });

@@ -1,6 +1,6 @@
 // format.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { formatDiff, toolPreview, sessionDotState, sessionDisplayDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens, contextWindowLabel, sessionTitle, copyToClipboard } from './format.js';
+import { formatDiff, toolPreview, sessionDotState, sessionDisplayDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens, contextWindowLabel, sessionTitle, copyToClipboard, projectMonogram } from './format.js';
 
 test('copyToClipboard falls back to execCommand when Clipboard.writeText is unavailable', async () => {
   const nav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -259,4 +259,37 @@ test('contextWindowLabel: missing/invalid is the empty string', () => {
   expect(contextWindowLabel(undefined)).toBe('');
   expect(contextWindowLabel(-1)).toBe('');
   expect(contextWindowLabel(NaN)).toBe('');
+});
+
+/* ── The project monogram ────────────────────────────────────────────────── */
+
+test('projectMonogram takes its two letters from the folder the session runs in', () => {
+  expect(projectMonogram('/home/me/dev/moa/main').text).toBe('mo');
+  expect(projectMonogram('/home/me/dev/gugo').text).toBe('gu');
+  expect(projectMonogram('/home/me/dev/Tienda').text).toBe('ti');
+});
+
+test('a session with no cwd has no monogram rather than an empty square', () => {
+  expect(projectMonogram('')).toBeNull();
+  expect(projectMonogram(undefined)).toBeNull();
+});
+
+// The point of the monogram is recognition, which only works if the same repo
+// is the same colour every time — including across reloads, so the hash has to
+// be of the name and not of anything positional.
+test('the same project always gets the same hue, and a trailing slash is the same project', () => {
+  expect(projectMonogram('/home/me/dev/moa/main').hue).toBe(projectMonogram('/home/me/dev/moa/main').hue);
+  expect(projectMonogram('/home/me/dev/moa/main/').hue).toBe(projectMonogram('/home/me/dev/moa/main').hue);
+});
+
+// Peach (#fab387, hue ~23) means "you wrote this": spending it on decoration
+// would make the one colour that identifies the owner's own words ambiguous.
+// The nearest identity hue is 40, deliberately past the amber line.
+const PEACH_HUE = 23;
+test('no monogram hue lands on peach, whatever the project is called', () => {
+  const names = ['moa', 'main', 'gugo', 'tienda', 'menuapp', 'dev', 'x', 'a-very-long-project-name'];
+  for (const name of names) {
+    const { hue } = projectMonogram(`/home/me/dev/${name}`);
+    expect(Math.abs(hue - PEACH_HUE)).toBeGreaterThanOrEqual(15);
+  }
 });

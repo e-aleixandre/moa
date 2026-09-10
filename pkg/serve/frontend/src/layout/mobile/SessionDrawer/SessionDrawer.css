@@ -261,7 +261,7 @@
   width: 100%;
   background: transparent;
   border-color: transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   min-width: 0;
 }
 .sdcard-slot .session-row.variant-card.on {
@@ -296,24 +296,17 @@
 .sdcard-slot .session-row.variant-card.needs-red .r2 {
   color: var(--text);
 }
-.sdcard-slot .session-row.variant-card.needs-yellow .brief {
-  color: var(--yellow);
-}
-.sdcard-slot .session-row.variant-card.needs-red .brief {
-  color: var(--red);
-}
 
 /* Reserve the top-right corner the ⋯ button occupies, so the age never slides
-   under it. Matches the variant's own selector strength — a plain
-   `.sdcard-slot .session-row-hit` loses to `.session-row.variant-card
-   .session-row-hit` and the padding silently does nothing. */
+   under it. On a phone the button has no hover to hide behind — it is always
+   visible — so the space is reserved for good, unlike the desktop where the
+   age only steps aside while you are pointing at the row. Matches the
+   variant's own selector strength — a plain `.sdcard-slot .session-row-hit`
+   loses to `.session-row.variant-card .session-row-hit` and the padding
+   silently does nothing. */
 .sdcard-slot .session-row.variant-card .session-row-hit {
-  padding: 11px 40px 11px 13px;
-}
-
-.sdcard-needs-label {
-  color: var(--yellow);
-  font-weight: var(--weight-medium);
+  padding: 9px 40px 9px 12px;
+  min-height: 56px;
 }
 
 /* Footer — global Settings only. Session lifecycle lives on the cards and "new"

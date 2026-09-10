@@ -1,6 +1,6 @@
 import { focusedSessionId } from "../../../data/selectors.js";
-import { shortPath, sessionDisplayDotState, sessionTitle } from "../../../data/util/format.js";
-import { sessionRowBrief } from "../../Spine/sessions.js";
+import { shortPath, sessionDisplayDotState, sessionTitle, projectMonogram } from "../../../data/util/format.js";
+import { sessionRowReason } from "../../Spine/sessions.js";
 import { aggregateAttention, newResultSessions } from "./attention-model.js";
 import { inboxCards, inboxHealth, inboxHealthSig, inboxSig } from "../../../data/events.js"; // wake-on-event
 
@@ -17,7 +17,7 @@ function relAge(updated) {
 }
 
 function sessionBrief(sess) {
-  return sessionRowBrief(sess);
+  return sessionRowReason(sess);
 }
 
 export function drawerSessions(sessions, activeId) {
@@ -30,14 +30,19 @@ export function drawerSessions(sessions, activeId) {
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
   const toCard = (s) => {
     const dotState = sessionDisplayDotState(s);
-    const needs = dotState === "permission";
+    /* The phone gets the same second line as the desktop: why the session
+       wants you. The "Needs you:" lead-in goes with it — it existed to bold a
+       prefix in front of a conversation summary, and there is no summary on
+       that line any more for it to introduce. */
+    const reason = sessionBrief(s);
     return {
       id: s.id,
       title: sessionTitle(s),
       state: dotState,
       when: relAge(s.updated),
-      last: sessionBrief(s),
-      needsLabel: needs ? "Needs you:" : undefined,
+      last: reason?.text || "",
+      lastTone: reason?.tone || "",
+      mono: projectMonogram(s.cwd),
       path: shortPath(s.cwd) || s.cwd || "",
       unseen: !!s.unseen,
       active: s.id === activeId,
@@ -84,7 +89,7 @@ export function recentSavedSessions(sessions, limit = 3) {
 
 function cardSig(row) {
   return [
-    row.id, row.title, row.state, row.when, row.last, row.needsLabel || "",
+    row.id, row.title, row.state, row.when, row.last, row.lastTone || "",
     row.path, row.unseen ? 1 : 0, row.active ? 1 : 0, row.saved ? 1 : 0,
     row.origin || "",
   ].join("\0");

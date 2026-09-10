@@ -347,7 +347,10 @@ export function inboxCards(sessions, events) {
         title: sessionTitle(s),
         state: s.state || 'idle',
         when: relAge(s.updated),
-        brief: s.last || s.needsLabel,
+        // `last` is whatever the mobile chrome projected onto the session; the
+        // "Needs you:" lead-in it used to fall back to is gone, because the
+        // reason is now the whole line rather than a prefix on a summary.
+        brief: s.last,
         path: s.cwd,
         origin: s.origin,
       }));

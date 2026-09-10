@@ -155,12 +155,26 @@
   border-radius: var(--amb-r-row);
 }
 [data-ambient="on"] .session-row.variant-card .r1 { color: var(--amb-text); }
+[data-ambient="on"] .session-row.variant-card .r1 .title { color: var(--amb-text-2); }
+[data-ambient="on"] .session-row.variant-card.on .r1 .title { color: var(--amb-text); }
+/* The age stays mono: it is a datum, and in this list it is also a column —
+   tabular figures are what keep the dots beside it on one x. */
 [data-ambient="on"] .session-row.variant-card .when {
-  font-family: var(--font);
   font-variant-numeric: tabular-nums;
   color: var(--amb-text-4);
 }
-[data-ambient="on"] .session-row.variant-card .brief { color: var(--amb-text-3); }
+/* The reason line is neutral only when it reports; when it asks, its state
+   colour is the whole point and must survive the achromatic treatment. */
+[data-ambient="on"] .session-row.variant-card .brief { color: var(--amb-text-4); }
+[data-ambient="on"] .session-row.variant-card .brief.tone-neutral { color: var(--amb-text-3); }
+/* The reason line is coloured by WHAT IT SAYS. An earlier Ambient rule set one
+   grey for every brief -- written when that line still held the conversation
+   summary, where one grey was right. Now it says why the session wants you,
+   and "Needs your answer" in the same grey as everything else is the sentence
+   without its urgency. Same tones the state dot uses, on the words instead. */
+[data-ambient="on"] .session-row.variant-card .brief.tone-yellow { color: var(--yellow); }
+[data-ambient="on"] .session-row.variant-card .brief.tone-red { color: var(--red); }
+[data-ambient="on"] .session-row.variant-card .brief.tone-mauve { color: var(--mauve); }
 /* paths stay mono: they are code. Everything else that was mono becomes sans. */
 [data-ambient="on"] .session-row.variant-card .path {
   font-family: var(--mono);
@@ -169,8 +183,9 @@
 
 /* The state dot is the only saturated mark left, so it gets a little more
    presence rather than less. These halos are the reason the controls can
-   afford to be grey. */
-[data-ambient="on"] .session-row.variant-card .r1 .state-dot { width: 9px; height: 9px; }
+   afford to be grey. (The dot's SIZE is not set here: StateDot writes it as an
+   inline style, which no stylesheet rule can win against — the 9px that used
+   to sit here never applied.) */
 [data-ambient="on"] .state-dot.idle { box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
 [data-ambient="on"] .state-dot.running { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent); }
 [data-ambient="on"] .state-dot.permission { box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 26%, transparent); }
@@ -189,9 +204,10 @@
   letter-spacing: -0.01em;
   color: var(--amb-text);
 }
-[data-ambient="on"] .spine .spine-label,
+/* Age and path are the row's quietest data, at the bottom of the text ladder:
+   the catalog's t4, not t3. They are there to be found, not read. */
 [data-ambient="on"] .spine .session-row.variant-card .when,
-[data-ambient="on"] .spine .session-row.variant-card .path { color: var(--amb-text-3); }
+[data-ambient="on"] .spine .session-row.variant-card .path { color: var(--amb-text-4); }
 [data-ambient="on"] .spine .spine-jump,
 [data-ambient="on"] .spine .spine-new,
 [data-ambient="on"] .spine .inbox-btn {
@@ -253,6 +269,15 @@
   letter-spacing: 0.08em;
   color: var(--amb-text-4);
 }
+/* Needs attention is the one heading that is not background: it is the group
+   you are meant to land on, so it comes up to full text while the others stay
+   at t4. Its pill keeps the yellow — that is the mark. */
+[data-ambient="on"] .spine .spine-label.is-attention { color: var(--amb-text); }
+[data-ambient="on"] .spine .spine-group-n {
+  font-family: var(--mono);
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .spine .spine-group-n.is-attention { color: var(--amb-canvas); }
 
 /* The head reads as a title rather than a toolbar label. */
 [data-ambient="on"] .sdrawer-head h2 {
