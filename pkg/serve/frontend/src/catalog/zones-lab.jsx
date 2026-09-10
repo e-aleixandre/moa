@@ -63,6 +63,26 @@ const ATTENTION = SESSIONS.filter(wantsYou).sort((a, b) => RANK[a.state] - RANK[
 const ACTIVE = SESSIONS.filter((s) => s.state !== "idle" && !wantsYou(s));
 const SAVED = SESSIONS.filter((s) => s.state === "idle");
 
+/* By project: every session of a folder together, the folders ordered by their
+   most recent work. Sessions that need you keep their place at the top of
+   their own project instead of being pulled out -- in this view the question
+   being asked is "what is going on in this repo", and lifting them out would
+   answer a different one. */
+const BY_PROJECT = (() => {
+  const seen = new Map();
+  for (const s of SESSIONS) {
+    if (!seen.has(s.project)) seen.set(s.project, { project: s.project, path: s.path, sessions: [] });
+    seen.get(s.project).sessions.push(s);
+  }
+  for (const g of seen.values()) {
+    g.sessions.sort((a, b) => (wantsYou(b) ? 1 : 0) - (wantsYou(a) ? 1 : 0));
+    const waiting = g.sessions.filter(wantsYou);
+    g.attention = waiting.length;
+    g.worst = waiting.length ? waiting.map((x) => x.state).sort((a, b) => RANK[a] - RANK[b])[0] : null;
+  }
+  return [...seen.values()];
+})();
+
 function Dot({ state }) {
   return <span class={`zl-dot is-${state}`} aria-hidden="true" />;
 }
@@ -102,10 +122,31 @@ function Row({ s, current, onPick }) {
   );
 }
 
-function SessionList({ onPick }) {
+function SessionList({ onPick, view, onView }) {
   return (
     <div class="zl-list">
-      {ATTENTION.length > 0 && (
+      {/* How the list is ORDERED is a property of the list, so it sits in the
+          list's own head rather than in global settings: two segments, both
+          visible, because a hidden "..." menu made a mode you cannot see you
+          are in. Needs attention is exempt -- it is above the ordering, in
+          both views, or it would scatter across project groups. */}
+      <div class="zl-view" role="radiogroup" aria-label="Session order">
+        {[["recent", "Recent"], ["project", "By project"]].map(([id, label]) => (
+          <button
+            type="button"
+            role="radio"
+            aria-checked={view === id}
+            class={`zl-view-b${view === id ? " is-on" : ""}`}
+            onClick={() => onView(id)}
+            key={id}
+          >{label}</button>
+        ))}
+      </div>
+      {/* Needs attention belongs to the recency view only. By project, the
+          question is "what is going on in this repo", and a session listed
+          both at the top and inside its folder is the same row twice. There
+          the project heading carries the alarm instead. */}
+      {view === "recent" && ATTENTION.length > 0 && (
         <>
           <div class="zl-group is-attn">
             <span>Needs attention</span>
@@ -114,16 +155,33 @@ function SessionList({ onPick }) {
           {ATTENTION.map((s) => <Row s={s} current={false} onPick={onPick} key={s.title} />)}
         </>
       )}
-      <div class="zl-group"><span>Active</span><span class="zl-group-n zl-data">{ACTIVE.length}</span></div>
-      {ACTIVE.map((s, i) => <Row s={s} current={i === 0} onPick={onPick} key={s.title} />)}
-      <div class="zl-group"><span>Saved</span><span class="zl-group-n zl-data">{SAVED.length}</span></div>
-      {SAVED.map((s) => <Row s={s} current={false} onPick={onPick} key={s.title} />)}
+      {view === "recent" ? (
+        <>
+          <div class="zl-group"><span>Active</span><span class="zl-group-n zl-data">{ACTIVE.length}</span></div>
+          {ACTIVE.map((s, i) => <Row s={s} current={i === 0} onPick={onPick} key={s.title} />)}
+          <div class="zl-group"><span>Saved</span><span class="zl-group-n zl-data">{SAVED.length}</span></div>
+          {SAVED.map((s) => <Row s={s} current={false} onPick={onPick} key={s.title} />)}
+        </>
+      ) : (
+        BY_PROJECT.map((g) => (
+          <div class="zl-proj" key={g.project}>
+            <div class="zl-group is-proj">
+              <Monogram project={g.project} />
+              <span>{g.project}</span>
+              {g.attention > 0 && <Dot state={g.worst} />}
+              <span class="zl-proj-path zl-data">{g.path}</span>
+              <span class="zl-group-n zl-data">{g.sessions.length}</span>
+            </div>
+            {g.sessions.map((s) => <Row s={s} current={s === SESSIONS[0]} onPick={onPick} key={s.title} />)}
+          </div>
+        ))
+      )}
     </div>
   );
 }
 
 /* The left drawer body, shared by both densities. */
-function Sidebar({ onPick, desktop }) {
+function Sidebar({ onPick, desktop, onSettings, view, onView }) {
   return (
     <>
       <div class="zl-side-head">
@@ -140,7 +198,7 @@ function Sidebar({ onPick, desktop }) {
           {desktop && <kbd class="zl-kbd zl-data">⌘K</kbd>}
         </label>
       </div>
-      <SessionList onPick={onPick} />
+      <SessionList onPick={onPick} view={view} onView={onView} />
       {/* New anchors the bottom, where the thumb is and where the empty half of
           the column was. It is the one action, so it gets the width. */}
       <button type="button" class="zl-side-new">
@@ -155,8 +213,77 @@ function Sidebar({ onPick, desktop }) {
           <span class="zl-inbox-n zl-data">1</span>
         </button>
         <span class="zl-ver zl-data">v0.37.2</span>
+        {/* Settings are GLOBAL, so they live in the sidebar's foot next to the
+            version, not in the session panel: that drawer means "this session"
+            and admitting app-wide settings would empty the word. Same place
+            production keeps it (layout/Spine/Spine.jsx:193). */}
+        <button type="button" class="zl-gear" aria-label="Settings" onClick={onSettings}>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5" />
+            <path d="M8 1.6v1.6M8 12.8v1.6M14.4 8h-1.6M3.2 8H1.6M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1M12.5 12.5l-1.1-1.1M4.6 4.6L3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+        </button>
       </div>
     </>
+  );
+}
+
+/* ── Global settings ───────────────────────────────────────────────────────
+   The sections are production's own (components/GlobalSettings): Context with
+   its compaction threshold and the model that summarises, Notifications,
+   Subagents, and About. Deliberately NOT in the session panel: these outlive
+   every session, and the panel means "this one".
+
+   A centred sheet on the desktop and a bottom sheet on the phone, because it
+   belongs to no edge: the left is other sessions, the right is this one. */
+function SettingsSheet({ phone, onClose }) {
+  return (
+    <div class={`zl-set${phone ? " is-phone" : ""}`} role="dialog" aria-label="Settings" aria-modal="true">
+      <div class="zl-set-head">
+        <span class="zl-side-title is-eyebrow">Settings</span>
+        <button type="button" class="zl-x" onClick={onClose} aria-label="Close">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+        </button>
+      </div>
+      <div class="zl-set-body">
+        <div class="zl-set-sec">
+          <span class="zl-set-k">Context</span>
+          <label class="zl-set-row">
+            <span class="zl-set-l">Before compacting<em>How full the window gets before moa summarises.</em></span>
+            <span class="zl-set-v zl-data">80%</span>
+          </label>
+          <label class="zl-set-row">
+            <span class="zl-set-l">Summarize with<em>The model that writes the summary.</em></span>
+            <span class="zl-set-v zl-data">Luna<span class="zl-set-caret">›</span></span>
+          </label>
+        </div>
+        <div class="zl-set-sec">
+          <span class="zl-set-k">Notifications</span>
+          <label class="zl-set-row">
+            <span class="zl-set-l">Sound<em>A chime when a session needs you.</em></span>
+            <span class="zl-sw is-on" role="switch" aria-checked="true" tabIndex={0}><i /></span>
+          </label>
+          <label class="zl-set-row">
+            <span class="zl-set-l">On this device<em>Push, even when moa is closed.</em></span>
+            <span class="zl-sw" role="switch" aria-checked="false" tabIndex={0}><i /></span>
+          </label>
+        </div>
+        <div class="zl-set-sec">
+          <span class="zl-set-k">Subagents</span>
+          <label class="zl-set-row">
+            <span class="zl-set-l">Inherit the model<em>Children start on the parent's model.</em></span>
+            <span class="zl-sw is-on" role="switch" aria-checked="true" tabIndex={0}><i /></span>
+          </label>
+        </div>
+        <div class="zl-set-sec">
+          <span class="zl-set-k">About</span>
+          <div class="zl-set-row is-static">
+            <span class="zl-set-l">Version</span>
+            <span class="zl-set-v zl-data">v0.37.2</span>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1532,6 +1659,8 @@ function usePanel(forced, setOpen) {
 
 /* ── Phone ─────────────────────────────────────────────────────────────── */
 function Phone({ label, live: preset, surface }) {
+  const [view, setView] = useState("recent");
+  const [settings, setSettings] = useState(false);
   const host = useRef(null);
   const d = useEdgeDrawers(host);
   const panel = usePanel(surface, d.setRight);
@@ -1587,11 +1716,13 @@ function Phone({ label, live: preset, surface }) {
             onClick={() => { d.setLeft(false); closeRight(); }}
           />
         )}
+        {settings && <div class="zl-scrim is-on" onClick={() => setSettings(false)} />}
+        {settings && <SettingsSheet phone onClose={() => setSettings(false)} />}
         <div
           class={`zl-side zl-side-left${d.left ? " is-open" : ""}`}
           style={d.leftX != null ? `transform:translateX(${d.leftX}px);transition:none` : ""}
         >
-          <Sidebar onPick={() => d.setLeft(false)} />
+          <Sidebar onPick={() => d.setLeft(false)} onSettings={() => setSettings(true)} view={view} onView={setView} />
         </div>
         <div
           class={`zl-side zl-side-right${d.right ? " is-open" : ""}`}
@@ -1632,6 +1763,8 @@ function HeadActions() {
 }
 
 function Desktop({ label, live: preset, surface }) {
+  const [view, setView] = useState("recent");
+  const [settings, setSettings] = useState(false);
   const [open, setOpen] = useState(false);
   const panel = usePanel(surface, setOpen);
   const set = useSettings(FULL_STATUS, surface);
@@ -1640,8 +1773,10 @@ function Desktop({ label, live: preset, surface }) {
     <div class="zl-desk-wrap">
       <div class="zl-density-label">{label}</div>
       <div class="zl-desk">
+        {settings && <div class="zl-scrim is-on" onClick={() => setSettings(false)} />}
+        {settings && <SettingsSheet onClose={() => setSettings(false)} />}
         <div class="zl-desk-side">
-          <Sidebar onPick={() => {}} desktop />
+          <Sidebar onPick={() => {}} desktop onSettings={() => setSettings(true)} view={view} onView={setView} />
         </div>
         <div class="zl-desk-main">
           <div class="zl-desk-head">

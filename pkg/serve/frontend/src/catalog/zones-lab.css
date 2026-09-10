@@ -2217,3 +2217,150 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
   padding: 0 6px;
   font-weight: 600;
 }
+
+/* ── The list's own order ──────────────────────────────────────────────────
+   Both options visible: a "..." menu made a mode you cannot see you are in,
+   and there are only two. Sunken track, raised selection -- the same grammar
+   as the thinking stepper, so it reads as one product. */
+.zl-view {
+  display: flex;
+  gap: 2px;
+  margin: 0 0 10px;
+  padding: 2px;
+  background: var(--zl-canvas);
+  border: 1px solid var(--zl-line);
+  border-radius: 8px;
+}
+.zl-view-b {
+  flex: 1;
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--zl-t3);
+  font: 500 12px/1 var(--zl-font);
+  cursor: pointer;
+}
+.zl-view-b.is-on { background: var(--zl-raised); color: var(--zl-text); box-shadow: 0 1px 0 rgba(255,255,255,.04) inset; }
+.zl-view-b:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -2px; }
+.zl-phone .zl-view-b { min-height: 44px; font-size: 14px; }
+
+/* Project heading: the monogram identifies, the path locates, the count sizes.
+   Same row grammar as a session, one step quieter. */
+.zl-group.is-proj { display: flex; align-items: center; gap: 8px; padding-top: 4px; }
+.zl-group.is-proj .zl-mono { width: 20px; height: 20px; font-size: 10px; border-radius: 6px; }
+.zl-proj-path { flex: 1; min-width: 0; color: var(--zl-t4); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zl-proj + .zl-proj { margin-top: 10px; }
+
+/* ── Settings ──────────────────────────────────────────────────────────────
+   Belongs to no edge, so it is centred on the desktop and a bottom sheet on
+   the phone. It floats for real, so it may have a shadow. */
+.zl-set {
+  position: absolute;
+  z-index: 40;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100% - 48px));
+  max-height: calc(100% - 80px);
+  display: flex;
+  flex-direction: column;
+  background: var(--zl-sheet);
+  border: 1px solid var(--zl-line);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
+  overflow: hidden;
+}
+.zl-set.is-phone {
+  left: 0;
+  top: auto;
+  bottom: 0;
+  width: 100%;
+  max-height: 82%;
+  transform: none;
+  border-radius: 16px 16px 0 0;
+  border-bottom: 0;
+}
+.zl-set-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 14px 10px 16px;
+  border-bottom: 1px solid var(--zl-line);
+}
+.zl-set-body { overflow-y: auto; padding: 6px 16px 16px; }
+.zl-set-sec { padding: 12px 0; }
+.zl-set-sec + .zl-set-sec { border-top: 1px solid var(--zl-line); }
+.zl-set-k {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--zl-t4);
+  font: 600 11px/1 var(--zl-font);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.zl-set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.zl-set-row.is-static { cursor: default; }
+.zl-set-l { display: flex; flex-direction: column; gap: 2px; min-width: 0; font: 500 14px/1.3 var(--zl-font); color: var(--zl-text); }
+.zl-set-l em { font: 400 12px/1.35 var(--zl-font); color: var(--zl-t4); font-style: normal; }
+.zl-set-v { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--zl-t2); font-size: 13px; }
+.zl-set-caret { color: var(--zl-t4); }
+
+/* The switch is accent, not green: it is a setting you chose, not a state the
+   system is in. */
+.zl-sw {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--zl-control);
+  border: 1px solid var(--zl-line);
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+.zl-sw i {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--zl-t3);
+  transition: transform 140ms ease, background 140ms ease;
+}
+.zl-sw.is-on { background: var(--zl-accent-med); border-color: var(--zl-accent-line); }
+.zl-sw.is-on i { transform: translateX(16px); background: var(--zl-accent); }
+.zl-sw:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+/* The gear sits with the version: both are about the app, not the session. */
+.zl-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--zl-t3);
+  cursor: pointer;
+}
+.zl-gear svg { width: 16px; height: 16px; }
+.zl-gear:hover { background: var(--zl-control); color: var(--zl-text); }
+.zl-gear:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -2px; }
+.zl-phone .zl-gear { width: 44px; height: 44px; }
+/* The settings scrim rides just under its own sheet, not at the drawer's
+   level: at z-index 5 it sat below the transcript and the sheet looked like it
+   was floating over a page that was still fully lit. */
+.zl-scrim.is-on { z-index: 39; opacity: 1; pointer-events: auto; }
