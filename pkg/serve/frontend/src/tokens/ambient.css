@@ -48,6 +48,9 @@
   --amb-r-panel: 24px;
   --amb-r-row: 12px;
   --amb-r-ctl: 10px;
+  /* the smallest step, for wells nested inside a control-sized surface (a log
+     or a diff inside a ledger row's detail) */
+  --amb-r-well: 6px;
 
   /* the canvas carries the colour, so text can be neutral-warm */
   --amb-text: #f4f4f7;
@@ -341,29 +344,300 @@
   border: 0;
 }
 
-/* ── The transcript ────────────────────────────────────────────────────────
-   This is the half that was missing: the canvas changed but the blocks on it
-   were still Terminal, so the screen read as two designs at once. Tool groups
-   lose their 1px outline and become a recessed well; the mono labels that are
-   not code become sans; text moves onto the warm neutral scale. */
+/* ── The activity ledger ───────────────────────────────────────────────────
+   The most repeated object in the product: every batch of tool calls the
+   assistant makes is one of these, and a long session is mostly this. It was
+   also the last thing still wearing Terminal, so the transcript read as two
+   designs stacked on one page.
+
+   WHAT CHANGES, AND WHY
+   TONE     The card was an outlined box on a black wash. It becomes a recess
+            cut into the page: sheet tone, one hairline rim, 10px radius. The
+            prose above it is the page; the machine work is subordinate to it,
+            and "recessed" is the honest way to say that.
+   TYPE     The whole card used to be mono, which is what made it read as a
+            terminal readout. Now the split is the one this direction is built
+            on: the TOOL NAME is a word (Outfit, medium) and its ARGUMENT is
+            data (Plex Mono) -- a path, a command, a pattern. Results
+            ("232 lines", "exit 1") are data too, tabular so a column of them
+            lines up. Nothing else in the row is mono.
+   COLOUR   Strict semantics, and this is where the ledger changes meaning:
+            green now says RUNNING and nothing else. A completed call is not
+            news, so its check goes neutral -- what you scan a finished ledger
+            for is the failures, and with every row wearing a green tick they
+            were the hardest thing to find in it. Red still means failed,
+            yellow still means you refused. The blue tint on the running row
+            goes: blue is not a state in this system, and the row already says
+            it is live with a breathing dot, a brighter line and the sweep.
+
+   Cheap on purpose: this block can be on screen a hundred times. No blur, no
+   shadow, no per-row transition beyond the hover colour, and the only
+   animation is on the ONE live row (opacity, not box-shadow). */
 [data-ambient="on"] .tg {
   border: 0;
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.22);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-sheet-solid);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  font-family: var(--font);
+  font-size: 14px;
   color: var(--amb-text-3);
 }
 [data-ambient="on"] .tg .tg-row {
-  border-bottom-color: rgba(255, 255, 255, 0.045);
+  gap: 8px;
+  border-bottom-color: var(--amb-line);
   color: var(--amb-text-3);
 }
-[data-ambient="on"] .tg .tg-row .tool { color: var(--amb-text-2); }
-[data-ambient="on"] .doc p { color: var(--amb-text-2); }
-[data-ambient="on"] .doc p strong { color: var(--amb-text); }
-[data-ambient="on"] .waypoint .who { color: var(--amb-text-2); }
-[data-ambient="on"] .waypoint .who time {
-  font-family: var(--font);
+[data-ambient="on"] .tg .tg-row .ic { color: var(--amb-text-4); }
+/* The argument is the data half of the row, so the row itself is mono and the
+   tool name -- a word -- is pulled back into the sans. Doing it this way round
+   is what lets a bare text node (the arg is not wrapped in an element) carry
+   the mono without touching the markup. */
+[data-ambient="on"] .tg .tg-row .txt {
+  font-family: var(--mono);
   color: var(--amb-text-3);
+}
+[data-ambient="on"] .tg .tg-row .txt b {
+  font-family: var(--font);
+  font-weight: var(--weight-medium);
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .tg .tg-row .txt .dim { color: var(--amb-text-4); }
+[data-ambient="on"] .tg .tg-row .res {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--amb-text-4);
+}
+/* A finished call is not news. Only failure and refusal keep a colour. */
+[data-ambient="on"] .tg .tg-row .res.ok { color: var(--amb-text-4); }
+[data-ambient="on"] .tg .tg-row .res.err { color: var(--red); }
+[data-ambient="on"] .tg .tg-row .mark.ok { color: var(--amb-text-4); }
+[data-ambient="on"] .tg .tg-row .chev { color: var(--amb-text-4); }
+@media (hover: hover) {
+  [data-ambient="on"] .tg button.tg-row:hover {
+    background: var(--amb-hi);
+    color: var(--amb-text-2);
+  }
+}
+
+/* The fold header: a sentence about what is hidden, so it stays in the sans
+   and one step darker than the rows it summarises. */
+[data-ambient="on"] .tg .tg-fold {
+  background: transparent;
+  font-size: 14px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .tg .tg-fold .txt {
+  font-family: var(--font);
+  color: var(--amb-text-4);
+}
+
+/* The running row. No fill and no left bar: it separates itself by being the
+   brightest line in the card, by the green dot, and by the sweep underneath.
+   That also means a live ledger repaints one hairline, not a tinted row. */
+[data-ambient="on"] .tg .tg-row.live,
+[data-ambient="on"] .tg button.tg-row.live {
+  background: transparent;
+  box-shadow: none;
+  color: var(--amb-text-2);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .tg button.tg-row.live:hover { background: var(--amb-hi); }
+}
+[data-ambient="on"] .tg .tg-row.live .txt { color: var(--amb-text-2); }
+/* The verb ("running", "reading") is a word and inherits the row; only the
+   object is data, and it is the brightest thing in the card. */
+[data-ambient="on"] .tg .tg-row.live .txt .verb {
+  font-family: var(--font);
+  font-weight: var(--weight-medium);
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .tg .tg-row.live .txt .dim { color: var(--amb-text-4); }
+[data-ambient="on"] .tg .tg-row.live .res { color: var(--amb-text-3); }
+/* Green is the state, and the breath is opacity only -- the shared dot
+   animates a box-shadow ring, which on a row that can be one of many is a
+   repaint nobody asked for. */
+[data-ambient="on"] .tg .tg-row.live .ic .state-dot.running {
+  background: var(--green);
+  animation: amb-tg-breathe 1.8s ease-in-out infinite;
+}
+@keyframes amb-tg-breathe {
+  50% { opacity: 0.45; }
+}
+[data-ambient="on"] .tg .tg-row.live .hair::after {
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
+  opacity: 0.7;
+}
+
+/* The detail a row opens: one step further down, into the canvas, so the
+   ledger reads as sheet-over-canvas rather than as a stack of cards. */
+[data-ambient="on"] .tg .tg-detail {
+  background: var(--amb-canvas);
+  border-bottom-color: var(--amb-line);
+  box-shadow: inset 0 1px 0 var(--amb-line);
+}
+[data-ambient="on"] .tg .tg-detail .doc-mono {
+  font-size: 12px;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .tg .tg-detail .doc-mono .dim { color: var(--amb-text-4); }
+[data-ambient="on"] .tg .tg-detail .tg-cmd,
+[data-ambient="on"] .tg .tg-detail .tg-input { color: var(--amb-text-2); }
+/* The prompt sigil is punctuation, not a state: it loses the teal. */
+[data-ambient="on"] .tg .tg-detail .tg-cmd-prompt { color: var(--amb-text-4); }
+[data-ambient="on"] .tg .tg-detail .tg-detail-divider { background: var(--amb-line); }
+[data-ambient="on"] .tg .tg-detail .code.flush:not(.diff) pre code { color: var(--amb-text-3); }
+
+/* The rolling output under a running tool: the same canvas well as the
+   detail, closed by a hairline rather than by a blue edge. */
+[data-ambient="on"] .tg .tg-log {
+  background: var(--amb-canvas);
+  border-bottom-color: var(--amb-line);
+  font-size: 12px;
+  color: var(--amb-text-3);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .tg button.tg-log:hover { background: var(--amb-raised); }
+}
+[data-ambient="on"] .tg .tg-log .ln.ctx { color: var(--amb-text-3); }
+/* The write head is the one thing still moving, so it wears the running
+   colour like the dot above it. */
+[data-ambient="on"] .tg .tg-log .ln .ln-cursor::after { color: var(--green); }
+[data-ambient="on"] .tg .tg-log .live-log-affordance { color: var(--amb-text-4); }
+[data-ambient="on"] .tg .tg-log.expanded .live-log-affordance { color: var(--amb-text-2); }
+
+/* ── The two voices ───────────────────────────────────────────────────────
+   The conversation is one voice in two colours, not two typographies. Both
+   halves read at the same size and the same rhythm; what tells them apart is
+   that yours has a peach edge and the assistant's has the bare page.
+
+   THE USER MESSAGE loses its box. A filled, outlined card made every thing you
+   said into an object sitting on the transcript, and it is not an object -- it
+   is one of the two speakers. What is left is the peach bar, which is the
+   product's word for "you said this" and the ONE place peach is allowed.
+
+   THE ASSISTANT'S TEXT is the page itself, so it gets no surface at all: only
+   the tonal scale, and the mono where a word is actually data. Inline code
+   moves off sky (a colour with no meaning here) onto the control tone, which
+   is how every other piece of literal data in this direction is drawn. */
+[data-ambient="on"] .waypoint {
+  border: 0;
+  border-left: 3px solid var(--peach);
+  border-radius: 0;
+  background: transparent;
+  padding: 2px 0 2px 14px;
+}
+[data-ambient="on"] .waypoint .who {
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: var(--weight-semibold);
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .waypoint .who time {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .waypoint .body {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--amb-text);
+}
+[data-ambient="on"] .waypoint .body code {
+  border-radius: var(--amb-r-well);
+  background: var(--amb-raised);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  color: var(--amb-text-2);
+}
+/* A branch point from another conversation keeps its own accent on the bar and
+   on the label -- that accent identifies the parent session, and it is the one
+   thing here that is not about you. */
+[data-ambient="on"] .waypoint.waypoint-parent {
+  border-left-color: var(--waypoint-accent);
+  background: transparent;
+}
+/* The attachments skirt has no card left to be the foot of, so it becomes a
+   plain list hanging off the same bar. */
+[data-ambient="on"] .wp-attachments {
+  margin: 10px 0 0;
+  border-top: 0;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-sheet-solid);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+}
+[data-ambient="on"] .waypoint.has-skirt { padding-bottom: 2px; }
+[data-ambient="on"] .skirt-head {
+  font-family: var(--font);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .skirt-name { color: var(--amb-text-2); }
+[data-ambient="on"] .skirt-meta { color: var(--amb-text-4); }
+[data-ambient="on"] .skirt-head + .skirt-row,
+[data-ambient="on"] .skirt-row + .skirt-row,
+[data-ambient="on"] .skirt-rest .skirt-row { border-top-color: var(--amb-line); }
+
+/* The assistant's prose. */
+[data-ambient="on"] .doc p,
+[data-ambient="on"] .doc li { color: var(--amb-text-2); }
+[data-ambient="on"] .doc p strong,
+[data-ambient="on"] .doc li strong { color: var(--amb-text); }
+/* The list mark is punctuation. Mauve is the product's accent and its one
+   state is "unread": spending it on every bullet in the transcript is what
+   made it stop meaning anything. */
+[data-ambient="on"] .doc li::before { color: var(--amb-text-4); }
+[data-ambient="on"] .doc h4 {
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--amb-text);
+}
+[data-ambient="on"] .doc p code,
+[data-ambient="on"] .doc li code {
+  border-radius: var(--amb-r-well);
+  background: var(--amb-raised);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  color: var(--amb-text-2);
+}
+/* The write head, wherever it is: one colour for "still being written", the
+   same green the running row wears. */
+[data-ambient="on"] .doc .doc-cursor { background: var(--green); }
+[data-ambient="on"] .doc .md-table-wrap table { font-size: 14px; }
+[data-ambient="on"] .doc .md-table-wrap th,
+[data-ambient="on"] .doc .md-table-wrap td { border-color: var(--amb-line); }
+[data-ambient="on"] .doc .md-table-wrap th {
+  background: var(--amb-raised);
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .doc .md-table-wrap td { color: var(--amb-text-3); }
+
+/* The rules between turns: a tick and a system line. Both are notes about the
+   conversation rather than part of it, so they stay at the quietest step. */
+[data-ambient="on"] .stream .stream-tick {
+  font-family: var(--font);
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .stream .stream-tick::before,
+[data-ambient="on"] .stream .stream-tick::after { background: var(--amb-line); }
+[data-ambient="on"] .stream .stream-system {
+  font-family: var(--font);
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--amb-text-4);
+}
+/* "New messages below": it floats over the transcript, so it is one of the few
+   things that earns a shadow. Peach is not available to it -- it is not you
+   speaking -- so it takes the control tone and the accent's text. */
+[data-ambient="on"] .stream .stream-new-btn {
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line-strong), 0 6px 20px rgba(0, 0, 0, 0.45);
+  color: var(--amb-text);
+  font-size: 12px;
 }
 
 /* ── The live bar ──────────────────────────────────────────────────────────
@@ -460,22 +734,83 @@
   border-radius: var(--amb-r-ctl);
 }
 
-/* ── Code blocks ──────────────────────────────────────────────────────────
-   The code stays mono, obviously. What changes is the chrome around it: the
-   outline becomes a recessed surface and the filename header stops being a
-   bordered strip, so a code block reads as a well cut into the page rather
-   than a box dropped on it. */
-[data-ambient="on"] .code {
+/* ── Code, in both places it appears ───────────────────────────────────────
+   Two chassis render the same thing: the CodeBlock component (.code) for tool
+   output and a fence rendered by the markdown pipeline (.doc .code-block).
+   They must not read as two different objects, so both become the same well:
+   canvas tone one step below the page, one hairline rim, 10px radius, and a
+   header that is a line of labels rather than a bordered strip.
+
+   The highlighting is NOT touched. Those colours are the only place in the
+   product where saturation is carrying meaning that is not state -- they say
+   "keyword", "string", "number" -- and dulling them to fit the palette would
+   cost real reading. The chrome around the code is what changes.
+
+   Diff colour is state colour used literally: green added, red removed, and
+   the tint stays low so a long diff is text rather than a wall of blocks. */
+[data-ambient="on"] .code,
+[data-ambient="on"] .doc .code-block {
   border: 0;
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.28);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-canvas);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
   overflow: hidden;
 }
-[data-ambient="on"] .code .code-head {
+[data-ambient="on"] .code .code-head,
+[data-ambient="on"] .doc .code-block-header {
   background: transparent;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--amb-line);
+  font-size: 12px;
   color: var(--amb-text-4);
+}
+/* The language is a label on data, so it keeps the mono, but it stops being a
+   mauve badge: the accent has one job and this is not it. */
+[data-ambient="on"] .code .code-head .lang,
+[data-ambient="on"] .doc .code-block-lang {
+  letter-spacing: 0;
+  text-transform: lowercase;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .code .code-head .filename { color: var(--amb-text-3); }
+[data-ambient="on"] .code .code-head .copy,
+[data-ambient="on"] .doc .code-block-copy { color: var(--amb-text-4); }
+@media (hover: hover) {
+  [data-ambient="on"] .code .code-head .copy:hover,
+  [data-ambient="on"] .doc .code-block-copy:hover { color: var(--amb-text); }
+}
+[data-ambient="on"] .code pre,
+[data-ambient="on"] .doc .code-block pre { background: transparent; }
+[data-ambient="on"] .code pre code,
+[data-ambient="on"] .doc .code-block pre code { color: var(--amb-text-2); }
+/* A flush block is drawn by its host panel, so it must not paint a second
+   surface on top of it. */
+[data-ambient="on"] .code.flush {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+/* The diff. The line number gutter is data at the quietest step; the sign
+   column carries the colour so the text of the line stays readable. */
+[data-ambient="on"] .code.diff .code-head .lang { color: var(--amb-text-4); }
+[data-ambient="on"] .code.diff .dl .no { color: var(--amb-text-4); }
+[data-ambient="on"] .code.diff .dl.ctx { color: var(--amb-text-3); }
+[data-ambient="on"] .code.diff .dl.add {
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .code.diff .dl.del {
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  color: var(--amb-text-2);
+}
+/* The live diff inside a running row follows the same rule. */
+[data-ambient="on"] .tg .tg-log .ln.add {
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .tg .tg-log .ln.del {
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  color: var(--amb-text-2);
 }
 
 /* ── Ask cards ────────────────────────────────────────────────────────────
@@ -527,15 +862,6 @@
   -webkit-backdrop-filter: blur(20px) saturate(1.3);
   border: 0;
   box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 8px 24px rgba(0, 0, 0, 0.45);
-}
-
-/* ── The user message keeps its bar ─────────────────────────────────────────
-   Rounded to match the radius family, but the peach 3px bar stays exactly as
-   it is. It is the one piece of colour language this direction must not
-   touch. */
-[data-ambient="on"] .waypoint {
-  border-radius: 4px var(--amb-r-row) var(--amb-r-row) 4px;
-  background: rgba(255, 255, 255, 0.08);
 }
 
 /* The app renders into #root; it has to stand above the aurora, which is
