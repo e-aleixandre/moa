@@ -216,3 +216,62 @@ test("a delivering event says delivering in its row and detail", () => {
   expect(text(open)).toContain("Delivering event");
   expect(text(open)).toContain("Delivery is in progress");
 });
+
+// ── what the surface is allowed to say ──────────────────────────────────────
+// The regression these pin is one sentence: with a failed load and no list,
+// the view printed "Nothing waiting." Remove the status branch and the first
+// of these fails on that exact string.
+
+test("a failed first load says so, and never claims the inbox is empty", () => {
+  const nodes = render({}, {
+    cards: [],
+    health: { status: "error", error: "GET /api/events · 502: upstream is down" },
+  });
+  const body = text(nodes);
+  expect(body).toContain("Can't reach the inbox");
+  expect(body).toContain("GET /api/events · 502: upstream is down");
+  expect(body).not.toContain("Nothing waiting.");
+  expect(body).not.toContain("No events yet.");
+});
+
+test("the failed state offers a retry that calls back", () => {
+  const onRetry = mock(() => {});
+  const nodes = render({}, { cards: [], health: { status: "error", error: "x" }, onRetry });
+  const [retry] = byClass(nodes, "inbox-state-retry");
+  expect(retry).toBeTruthy();
+  retry.props.onClick();
+  expect(onRetry).toHaveBeenCalled();
+});
+
+test("a retry in flight says it is retrying instead of offering the same tap twice", () => {
+  const nodes = render({}, { cards: [], health: { status: "error", error: "x", retrying: true }, onRetry: () => {} });
+  const [retry] = byClass(nodes, "inbox-state-retry");
+  expect(retry.props.disabled).toBe(true);
+  expect(text(retry)).toBe("Retrying…");
+});
+
+test("a first load in flight shows ghosts, not an empty inbox", () => {
+  const nodes = render({}, { cards: [], health: { status: "loading" } });
+  expect(byClass(nodes, "inbox-ghost")).toHaveLength(3);
+  const body = text(nodes);
+  expect(body).toContain("Loading events");
+  expect(body).not.toContain("Nothing waiting.");
+});
+
+test("a stale inbox keeps its rows and says since when they stopped being current", () => {
+  const nodes = render({}, {
+    cards: [CARD],
+    health: { status: "stale", error: "GET /api/events · 502", checkedAt: Date.now() - 4 * 60000 },
+  });
+  const body = text(nodes);
+  expect(body).toContain("Not updating");
+  expect(body).toContain("last checked 4m ago");
+  // The list is still there: a failed poll must not hide what is waiting.
+  expect(byClass(nodes, "inbox-row")).toHaveLength(1);
+  expect(body).toContain(EVENT.title);
+});
+
+test("a healthy empty inbox still says nothing is waiting", () => {
+  const nodes = render({}, { cards: [], health: { status: "ready" } });
+  expect(text(nodes)).toContain("Nothing waiting.");
+});

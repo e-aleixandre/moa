@@ -151,8 +151,18 @@ export function announceArrivals(arrivals, { visible = [], now = Date.now() } = 
   return toastId;
 }
 
-// loadEvents refreshes the inbox. A failure keeps the previous list: an event
-// that is still waiting must not vanish because one poll failed.
+// loadEvents refreshes the inbox. A failure keeps the previous list — an event
+// that is still waiting must not vanish because one poll failed — but it is
+// also RECORDED, which is the part that used to be missing: the failure only
+// reached console.error, so a first load that never succeeded left the surface
+// showing "Nothing waiting." A user reading that has been told the inbox is
+// empty when the truth is that we could not ask.
+//
+// Two facts come out of every attempt and the surface needs both:
+//   eventsLoaded  — has this client EVER seen the real list? (false + error =
+//                   nothing to show and no right to claim empty)
+//   eventsError   — is the list on screen still current? (a list plus an error
+//                   is stale data, worth showing, but not worth trusting)
 export async function loadEvents() {
   try {
     const events = await api('GET', '/api/events');
@@ -166,11 +176,72 @@ export async function loadEvents() {
         announceArrivals(arrivals, { visible: visibleSessionIds(store.get()) });
       }
     }
-    if (sameEvents(store.get().events, list)) return;
-    setState({ events: list });
+    const patch = { eventsLoaded: true, eventsError: null, eventsCheckedAt: Date.now() };
+    if (!sameEvents(store.get().events, list)) patch.events = list;
+    setState(patch);
   } catch (e) {
-    console.error('loadEvents failed:', e);
+    // The message is kept as the user's evidence, not as a log line: the
+    // surface prints the request that failed so the report is checkable.
+    setState({ eventsError: eventLoadErrorMessage(e) });
   }
+}
+
+// eventLoadErrorMessage is what the failed inbox row says under its title. A
+// bare Error keeps its message ("502: ..." from api()); anything without one
+// falls back to naming the request, never to an empty line.
+function eventLoadErrorMessage(e) {
+  const message = String(e?.message || e || '').trim();
+  return message ? `GET /api/events · ${message}` : 'GET /api/events failed';
+}
+
+// inboxStatus is the ONE place that decides which of the four things the inbox
+// is allowed to say. The surface renders the answer; it does not re-derive it,
+// so the desktop spine and the phone screen cannot disagree about whether the
+// list on screen is true.
+//
+//   'loading' — nothing known yet and no failure to report
+//   'error'   — never loaded AND the last attempt failed: no list, and saying
+//               "empty" here is the lie this exists to prevent
+//   'stale'   — a list was loaded once and the last attempt failed: show it,
+//               and say since when it stopped being current
+//   'ready'   — the list on screen is what the server last said
+export function inboxStatus(state) {
+  const loaded = !!state?.eventsLoaded;
+  const error = state?.eventsError || null;
+  if (!loaded) return error ? 'error' : 'loading';
+  return error ? 'stale' : 'ready';
+}
+
+// inboxHealth is what the surfaces are handed: the status plus the two facts a
+// failed or stale inbox has to state (what failed, and when the list was last
+// true). Kept next to inboxCards so a chrome selector can compare it cheaply.
+export function inboxHealth(state) {
+  return {
+    status: inboxStatus(state),
+    error: state?.eventsError || '',
+    checkedAt: state?.eventsCheckedAt || null,
+    retrying: !!state?.eventsRetrying,
+  };
+}
+
+export function inboxHealthSig(health) {
+  return [
+    health?.status || '',
+    health?.error || '',
+    health?.checkedAt || '',
+    health?.retrying ? 'retrying' : '',
+  ].join('\0');
+}
+
+// retryEvents is the Retry button's action. It does NOT clear the recorded
+// failure first: on a stale list that would drop the "not updating" strip and
+// put it back a second later, which reads as the list flickering between true
+// and false. The attempt is announced with its own flag instead, so the button
+// can say it is working while what is on screen keeps telling the truth.
+export function retryEvents() {
+  if (store.get().eventsRetrying) return Promise.resolve();
+  setState({ eventsRetrying: true });
+  return loadEvents().finally(() => setState({ eventsRetrying: false }));
 }
 
 // settleEvent marks an event as decided locally the moment it is acted on, so

@@ -6,7 +6,7 @@ import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
 import { setGroupByProject } from "../../data/drawer.js";
 import { closeSession, deleteSession, resumeSession } from "../../data/session-actions.js";
-import { dismissEvent, dismissSource, routeEvent, routeEventToNewSession, toggleInbox } from "../../data/events.js"; // wake-on-event
+import { dismissEvent, dismissSource, retryEvents, routeEvent, routeEventToNewSession, toggleInbox } from "../../data/events.js"; // wake-on-event
 import { selectDesktopChrome } from "../Spine/sessions.js";
 import "./DesktopShell.css";
 
@@ -25,8 +25,10 @@ export function DesktopShell({ version, children }) {
         version={version}
         activeSessions={chrome.active}
         inbox={chrome.inbox}
+        inboxHealth={chrome.inboxHealth}
         inboxOpen={chrome.inboxOpen}
         onToggleInbox={toggleInbox}
+        onRetryInbox={() => { retryEvents().catch(() => {}); }}
         onRouteEvent={(id, sessionId) => { routeEvent(id, sessionId).catch(() => {}); }}
         onNewSessionForEvent={(id, spec) => { routeEventToNewSession(id, spec).catch(() => {}); }}
         onDismissEvent={(id) => { dismissEvent(id).catch(() => {}); }}

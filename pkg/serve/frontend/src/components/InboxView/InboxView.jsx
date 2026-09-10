@@ -39,6 +39,19 @@ const FILTERS = [
   { value: "all", label: "All" },
 ];
 
+// relSince is how long ago the list was last true. Same clock as the rows'
+// ages (data/events.js relAge), so "4m" on the strip and "4m" on a row mean
+// the same thing.
+function relSince(at) {
+  if (!at) return "";
+  const min = Math.floor((Date.now() - at) / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 // The models the create action names. Loaded once per open sheet and shared by
 // the action's label and the model step, so the two cannot disagree about
 // which model the next tap would use.
@@ -294,10 +307,83 @@ function InboxRowButton({ card, onClick }) {
   );
 }
 
+// ── the four things the inbox is allowed to say ─────────────────────────────
+// A list on screen is a CLAIM about the server. Three of these exist because
+// that claim can be false in three different ways, and the product used to
+// collapse all of them into "Nothing waiting." — the one sentence that is a
+// lie when the request failed.
+
+// First load, nothing known yet. Ghosts at the row's own rhythm so the list
+// does not jump when it lands.
+function InboxLoading() {
+  return (
+    <div class="inbox-ghosts" aria-busy="true">
+      <span class="inbox-sr-only">Loading events</span>
+      {[0, 1, 2].map((i) => (
+        <div class="inbox-ghost" aria-hidden="true" key={i}>
+          <span class="inbox-ghost-bar" style="width:38%" />
+          <span class="inbox-ghost-bar is-title" style="width:82%" />
+          <span class="inbox-ghost-bar" style="width:56%" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Never loaded and the request failed. THE state this whole change exists for:
+// before it, this looked exactly like an empty inbox. Red because it is an
+// error, not a wait — yellow stays reserved for what needs an answer. The
+// detail is the request that failed, in mono, so the report is checkable.
+function InboxError({ detail, retrying, onRetry }) {
+  return (
+    <div class="inbox-state is-error" role="alert">
+      <span class="inbox-state-title">
+        <span class="state-dot error" aria-hidden="true" />
+        Can't reach the inbox
+      </span>
+      {detail && <span class="inbox-state-detail">{detail}</span>}
+      <span class="inbox-state-body">
+        Whatever arrived is still waiting on the server. Try again, or check that moa is up.
+      </span>
+      {onRetry && (
+        <button type="button" class="inbox-state-retry" onClick={onRetry} disabled={retrying}>
+          {retrying ? "Retrying…" : "Retry"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Loaded once, the poll now failing. The list is worth more than the error, so
+// the list stays and a strip says since when it stopped being current.
+function InboxStale({ checkedAt, retrying, onRetry }) {
+  const since = relSince(checkedAt);
+  return (
+    <div class="inbox-stale" role="status">
+      <span class="inbox-stale-line">
+        <span class="state-dot error" aria-hidden="true" />
+        <span class="inbox-stale-text">Not updating</span>
+        {onRetry && (
+          <button type="button" class="inbox-stale-retry" onClick={onRetry} disabled={retrying}>
+            {retrying ? "Retrying…" : "Retry"}
+          </button>
+        )}
+      </span>
+      <span class="inbox-stale-since">{since ? `last checked ${since}` : "the last check failed"}</span>
+    </div>
+  );
+}
+
 // InboxView — `cards` comes from inboxCards(); every handler is the caller's,
 // so this component decides nothing about routing, only how it is asked.
+//
+// `health` comes from inboxHealth(): 'loading' | 'error' | 'stale' | 'ready'.
+// It defaults to ready so a caller that has no opinion (the catalog, a test
+// rendering a fixed list) keeps today's behaviour.
 export function InboxView({
   cards = [],
+  health,
+  onRetry,
   onSend,
   onNewSession,
   onIgnore,
@@ -307,6 +393,7 @@ export function InboxView({
 }) {
   const [filter, setFilter] = useState("pending");
   const [selected, setSelected] = useState(null);
+  const status = health?.status || "ready";
   const groups = inboxGroups(cards, filter);
   const shown = groups.reduce((n, group) => n + group.cards.length, 0);
   const card = selected ? cards.find((c) => c.event.id === selected) : null;
@@ -319,8 +406,30 @@ export function InboxView({
     Promise.resolve(fn?.(...args)).then(() => close()).catch(() => {});
   };
 
+  // Nothing is known yet: not the list, and not the filter's answer either. The
+  // filter is hidden with it — a segmented control over three ghosts offers a
+  // choice between two things that are both unknown.
+  if (status === "loading") {
+    return (
+      <div class={`inbox${className ? ` ${className}` : ""}`}>
+        <InboxLoading />
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div class={`inbox${className ? ` ${className}` : ""}`}>
+        <InboxError detail={health?.error} retrying={health?.retrying} onRetry={onRetry} />
+      </div>
+    );
+  }
+
   return (
     <div class={`inbox${className ? ` ${className}` : ""}`}>
+      {status === "stale" && (
+        <InboxStale checkedAt={health?.checkedAt} retrying={health?.retrying} onRetry={onRetry} />
+      )}
       <Segmented
         options={FILTERS}
         value={filter}
@@ -329,10 +438,13 @@ export function InboxView({
         aria-label="Inbox filter"
       />
       {shown === 0 && (
+        // Only reachable once a load has SUCCEEDED (loading and error return
+        // above), so this sentence is now a fact rather than a guess.
         <p class="inbox-empty">
           {filter === "pending" ? "Nothing waiting." : "No events yet."}
         </p>
       )}
+
       {groups.map((group) => (
         <div class="inbox-group" key={group.key || "all"}>
           {group.label && <span class="inbox-group-label">{group.label}</span>}

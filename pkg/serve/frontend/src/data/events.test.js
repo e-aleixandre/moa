@@ -4,7 +4,7 @@
 // event, and an arrival can only be announced when it is really news, so both
 // are decided here — in the projection, not in a component — and pinned.
 import { afterEach, expect, test } from "bun:test";
-import { __resetEventAnnouncementsForTests, announceArrivals, dismissSource, eventCreateActionLabel, eventCreateSpec, inboxCards, inboxGroups, inboxPendingCount, inboxSig, isOpenEventCandidate, pendingReasonLabel, routeEvent } from "./events.js";
+import { __resetEventAnnouncementsForTests, announceArrivals, dismissSource, eventCreateActionLabel, eventCreateSpec, inboxCards, inboxGroups, inboxHealth, inboxHealthSig, inboxPendingCount, inboxSig, inboxStatus, isOpenEventCandidate, loadEvents, pendingReasonLabel, retryEvents, routeEvent } from "./events.js";
 import { getToasts, removeToast } from "./notifications.js";
 import { setState, store } from "./store.js";
 import { allSessionIds, createTile, initIds } from "./tileTree.js";
@@ -275,4 +275,107 @@ test("a failed route keeps the row pending, the inbox open, and toasts the error
   const [toast] = getToasts();
   expect(toast.type).toBe("error");
   expect(toast.title).toBe("Could not send event");
+});
+
+// ── the failed load ─────────────────────────────────────────────────────────
+// The bug these pin: loadEvents caught its failure into console.error and left
+// `events` at []. The inbox then rendered "Nothing waiting." — the app telling
+// the user the server had nothing for them when it had not managed to ask.
+// Invert any of these (drop the error record, or default eventsLoaded to true)
+// and they fail.
+
+const OK_EVENTS = () => new Response(JSON.stringify([event()]), { status: 200 });
+const FAIL = () => new Response("upstream is down", { status: 502 });
+
+async function withFetch(handler, fn) {
+  const real = globalThis.fetch;
+  globalThis.fetch = handler;
+  try { return await fn(); } finally { globalThis.fetch = real; }
+}
+
+function resetInboxHealth() {
+  setState({ events: [], eventsLoaded: false, eventsError: null, eventsCheckedAt: null, eventsRetrying: false });
+  __resetEventAnnouncementsForTests();
+}
+
+test("a first load that fails is recorded as an error, never as an empty inbox", async () => {
+  resetInboxHealth();
+  await withFetch(FAIL, () => loadEvents());
+
+  const state = store.get();
+  expect(state.eventsLoaded).toBe(false);
+  expect(state.eventsError).toContain("/api/events");
+  expect(state.eventsError).toContain("502");
+  // The status is what the surface branches on: it must NOT be able to reach
+  // the empty state ('ready' with no rows) from here.
+  expect(inboxStatus(state)).toBe("error");
+  expect(inboxStatus(state)).not.toBe("ready");
+});
+
+test("an inbox that loaded and then failed is stale, not empty and not broken", async () => {
+  resetInboxHealth();
+  await withFetch(OK_EVENTS, () => loadEvents());
+  expect(inboxStatus(store.get())).toBe("ready");
+  const loadedAt = store.get().eventsCheckedAt;
+  expect(loadedAt).toBeGreaterThan(0);
+
+  await withFetch(FAIL, () => loadEvents());
+  const state = store.get();
+  expect(inboxStatus(state)).toBe("stale");
+  // The rows survive the failure: they are still the best thing known.
+  expect(state.events).toHaveLength(1);
+  // And the clock does not move: "last checked" must name the last SUCCESS.
+  expect(state.eventsCheckedAt).toBe(loadedAt);
+});
+
+test("nothing known and nothing failed is loading, not empty", () => {
+  resetInboxHealth();
+  expect(inboxStatus(store.get())).toBe("loading");
+});
+
+test("an empty list is only claimed after a load actually succeeded", async () => {
+  resetInboxHealth();
+  await withFetch(() => new Response("[]", { status: 200 }), () => loadEvents());
+  const state = store.get();
+  expect(inboxStatus(state)).toBe("ready");
+  expect(state.events).toHaveLength(0);
+  expect(state.eventsError).toBeNull();
+});
+
+test("a success after a failure clears the error and the inbox is trusted again", async () => {
+  resetInboxHealth();
+  await withFetch(FAIL, () => loadEvents());
+  expect(inboxStatus(store.get())).toBe("error");
+
+  await withFetch(OK_EVENTS, () => retryEvents());
+  const state = store.get();
+  expect(inboxStatus(state)).toBe("ready");
+  expect(state.eventsError).toBeNull();
+  expect(state.eventsRetrying).toBe(false);
+});
+
+test("a retry keeps the failure visible while it is in flight", async () => {
+  resetInboxHealth();
+  await withFetch(FAIL, () => loadEvents());
+
+  let seenDuringFlight = null;
+  await withFetch(async () => {
+    // What the surface would render at this instant: still the error, plus a
+    // retry in progress. Clearing the error first would blink the state.
+    seenDuringFlight = inboxHealth(store.get());
+    return OK_EVENTS();
+  }, () => retryEvents());
+
+  expect(seenDuringFlight.status).toBe("error");
+  expect(seenDuringFlight.retrying).toBe(true);
+  expect(inboxStatus(store.get())).toBe("ready");
+});
+
+test("inboxHealth carries what a failed inbox has to state", async () => {
+  resetInboxHealth();
+  await withFetch(FAIL, () => loadEvents());
+  const health = inboxHealth(store.get());
+  expect(health.status).toBe("error");
+  expect(health.error).toContain("502");
+  expect(inboxHealthSig(health)).not.toBe(inboxHealthSig({ status: "ready", error: "", checkedAt: null }));
 });

@@ -110,6 +110,19 @@ let state = {
   // can open the inbox without knowing which layout it is talking to.
   events: [],
   inboxOpen: false,
+  // What the inbox is allowed to CLAIM about itself. Without these three the
+  // surface cannot tell "nothing arrived" from "I could not ask": a failed
+  // first load left `events` at [] and the view said "Nothing waiting.",
+  // which is the app inventing an answer it does not have.
+  //   eventsLoaded    — a GET /api/events has succeeded at least once
+  //   eventsError     — the message of the LAST failed load, cleared on success
+  //   eventsCheckedAt — when the last SUCCESSFUL load happened (ms)
+  eventsLoaded: false,
+  eventsError: null,
+  eventsCheckedAt: null,
+  // A retry in flight. Only the button reads it: the list keeps saying what is
+  // still true while the request is out.
+  eventsRetrying: false,
 
   // Command palette (⌘K). Lives in the store so the global mount in
   // app.jsx and the per-screen Spine buttons (onSearch/onNewSession) read and

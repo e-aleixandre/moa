@@ -93,8 +93,10 @@ export function Spine({
   // session list. `inboxOpen` swaps which one this same column shows, so an
   // event arriving never pushes the sessions down.
   inbox = [],
+  inboxHealth,
   inboxOpen = false,
   onToggleInbox,
+  onRetryInbox,
   onRouteEvent,
   onNewSessionForEvent,
   onDismissEvent,
@@ -143,8 +145,10 @@ export function Spine({
         </button>
         {/* wake-on-event: the inbox's door. It appears once anything has ever
             arrived — a permanent icon for someone with no hooks configured
-            would be chrome that never does anything. */}
-        {inbox.length > 0 && (
+            would be chrome that never does anything. It also appears when the
+            inbox could NOT be read: with no list there is no way to know that
+            nothing arrived, and hiding the door would hide the failure too. */}
+        {(inbox.length > 0 || inboxHealth?.status === "error") && (
           <InboxButton count={pendingInbox} open={inboxOpen} onClick={onToggleInbox} size={15} />
         )}
         <SpineGroupMenu groupByProject={groupByProject} onChange={onGroupByProject} />
@@ -154,6 +158,8 @@ export function Spine({
         <div class="spine-sessions spine-inbox">
           <InboxView
             cards={inbox}
+            health={inboxHealth}
+            onRetry={onRetryInbox}
             onSend={onRouteEvent}
             onNewSession={onNewSessionForEvent}
             onIgnore={onDismissEvent}

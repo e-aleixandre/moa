@@ -8,7 +8,7 @@ import { openSession, setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
-import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, openInbox, routeEvent, routeEventToNewSession } from "../../../data/events.js";
+import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, openInbox, retryEvents, routeEvent, routeEventToNewSession } from "../../../data/events.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
 import { LivePreview } from "../../../components/LivePreview/LivePreview.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
@@ -371,6 +371,8 @@ function MobileSessionChrome({ version, forceMobile = false }) {
       {chrome.inboxOpen && (
         <MobileInboxView
           cards={chrome.inbox}
+          health={chrome.inboxHealth}
+          onRetry={() => { retryEvents().catch(() => {}); }}
           onBack={closeInbox}
           onSend={(id, sessionId) => { routeEvent(id, sessionId).catch(() => {}); }}
           onNewSession={(id, spec) => { routeEventToNewSession(id, spec).catch(() => {}); }}
@@ -395,7 +397,10 @@ function MobileSessionChrome({ version, forceMobile = false }) {
         onSettings={onSettingsFromDrawer}
         onInbox={onInboxFromDrawer}
         inboxCount={inboxCount}
-        inboxVisible={chrome.inbox.length > 0}
+        // The door also appears when the inbox could not be read: with no list
+        // there is nothing that proves nothing arrived, so hiding the button
+        // would hide the failure with it.
+        inboxVisible={chrome.inbox.length > 0 || chrome.inboxHealth?.status === "error"}
         version={version}
         onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
         onReopenSession={(id) => { resumeSession(id).catch(() => {}); }}
