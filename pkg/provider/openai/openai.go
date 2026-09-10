@@ -155,6 +155,24 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 				// we don't claim a specific Codex release.
 				r.Header.Set("originator", codexOriginator)
 				r.Header.Set("User-Agent", codexUserAgent)
+				// The ChatGPT backend groups a conversation's prompt cache by
+				// this header, not by the body's prompt_cache_key. Without it
+				// every request looks like a fresh session: the prefix is
+				// written to cache each turn and never read back, which costs
+				// more than not caching at all (a write is billed above plain
+				// input). Measured live against /codex/responses with a
+				// byte-identical body, only this header differing:
+				// gpt-daybreak-blue-latest went from cached=0/write=16102 to
+				// cached=16102 on the repeat call, gpt-5.6-sol from cached=0 to
+				// cached=15872.
+				//
+				// The value only has to be stable per conversation — the
+				// backend accepts any string, not just a UUID — so the routing
+				// key the request already carries doubles as the session id and
+				// keeps sibling subagents grouped exactly as it does in-body.
+				if req.Options.PromptCacheKey != "" {
+					r.Header.Set("session-id", req.Options.PromptCacheKey)
+				}
 			}
 			return r, nil
 		}
