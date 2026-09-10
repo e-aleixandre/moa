@@ -79,3 +79,38 @@ export function statusStripModel(session, globalUsage) {
     usage,
   };
 }
+
+/* ── Priority ──────────────────────────────────────────────────────────────
+   The status line sheds items low-first as the dock narrows, and everything it
+   sheds is reachable in the session panel. Declaring the order here, next to
+   the model both densities already share, is what stops it from drifting into
+   per-element breakpoints in two different stylesheets.
+
+   The order is the owner's: model, permissions and context never drop -- they
+   are what you glance at while typing and what changes the answer. Real alarms
+   outrank plain numbers because they only exist while something is wrong.
+   Tokens and spend are read after the fact. Fast, goal, tasks and a healthy
+   MCP go first.
+
+   Note that MCP takes its priority from its STATE, not its type: healthy it
+   drops early, unhealthy it stays. A rule keyed on the kind of datum alone
+   could not express that. */
+export const STATUS_PRIORITY = { p1: 1, p2: 2, p3: 3, p4: 4 };
+
+export function statusItemPriority(kind, state) {
+  switch (kind) {
+    case "model":
+    case "perm":
+    case "context":
+      return "p1";
+    case "mcp":
+      return state === "unhealthy" ? "p2" : "p4";
+    case "extra":
+      return "p2";
+    case "tokens":
+    case "spend":
+      return "p3";
+    default:
+      return "p4";
+  }
+}

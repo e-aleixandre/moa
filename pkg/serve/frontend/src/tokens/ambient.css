@@ -510,3 +510,46 @@ html.mobile-locked[data-ambient="on"] body {
 [data-ambient="on"] .conversation-main {
   background: transparent;
 }
+
+/* ── The status line sheds by declared priority ────────────────────────────
+   Production's line wraps, so a narrow dock does not overlap: it grows a
+   second row and pushes the transcript up. That is a quieter failure than
+   overlapping, and a worse one -- the line stops being a line.
+
+   So the items drop in the order declared in data/util/status-strip-model.js,
+   low first, and everything that drops is in the session panel. The widths are
+   measured against the content, not chosen as round numbers: a 390pt phone
+   gives this dock 366.
+
+   Container queries need a container: the strip declares itself one, which is
+   free when nothing queries it. */
+[data-ambient="on"] .status-strip {
+  container-type: inline-size;
+  container-name: statusline;
+  flex-wrap: nowrap;
+}
+
+/* Two things decide how these are written.
+
+   Selectors inside a container query resolve against the CONTAINER, and
+   [data-ambient="on"] sits on <html>, outside it -- so the ambient prefix
+   cannot appear here. The classes only exist on the strip and the container
+   only exists because Ambient declared it above, so scoping by the priority
+   class alone is exact, not lax.
+
+   The class is doubled because the base sheet styles these items as
+   `.status-strip .status-strip-mcp` (0,2,0), which outranks a lone class, and
+   a descendant selector cannot help: a selector inside a container query
+   cannot match the container itself. `.amb-p4.amb-p4` is the same element at
+   the weight needed to win. */
+@container statusline (max-width: 560px) {
+  .amb-p4.amb-p4 { display: none; }
+}
+@container statusline (max-width: 470px) {
+  .amb-p3.amb-p3 { display: none; }
+}
+@container statusline (max-width: 400px) {
+  /* p2 sheds its words, never itself: an alarm you cannot see is worse than a
+     cramped line, and its number survives. */
+  .amb-p2.amb-p2 .status-strip-word { display: none; }
+}

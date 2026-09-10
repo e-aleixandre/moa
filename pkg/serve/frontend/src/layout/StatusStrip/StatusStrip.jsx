@@ -1,6 +1,6 @@
 import "./StatusStrip.css";
 import { ClipboardList, Flame, Target, Gauge, Plug, AlertTriangle } from "lucide-preact";
-import { statusStripModel } from "../../data/util/status-strip-model.js";
+import { statusItemPriority, statusStripModel } from "../../data/util/status-strip-model.js";
 import { PermissionControl } from "../../components/PermissionControl/PermissionControl.jsx";
 import { ModelPill, TokenFlow } from "../../components/index.js";
 import { activityPhase } from "../../data/util/activity.js";
@@ -75,7 +75,7 @@ export function StatusStrip({
         const body = (
           <>
             {hasCtx && (
-              <span class="status-strip-ctx">
+              <span class={`status-strip-ctx amb-${statusItemPriority("context")}`}>
                 <span class="status-strip-ring" style={ringStyle} aria-hidden="true" />
                 {compact ? `${ctxPercent}%` : `ctx ${ctxPercent}%`}
               </span>
@@ -116,7 +116,7 @@ export function StatusStrip({
       {task && <span class={`status-strip-task work${workIsLive ? " is-live" : ""}`}>{task}</span>}
 
       {modelName && (
-        <span class="status-strip-model" ref={modelAnchorRef}>
+        <span class={`status-strip-model amb-${statusItemPriority("model")}`} ref={modelAnchorRef}>
           <ModelPill
             model={modelName}
             accent={modelAccent}
@@ -144,7 +144,7 @@ export function StatusStrip({
       {onPerm ? (
         <button
           type="button"
-          class={`perm-chip perm-${perm.mode}`}
+          class={`perm-chip perm-${perm.mode} amb-${statusItemPriority("perm")}`}
           onClick={onPerm}
           aria-haspopup="dialog"
           aria-expanded={permOpen}
@@ -155,7 +155,7 @@ export function StatusStrip({
       ) : onPermChange ? (
         <PermissionControl mode={perm.mode} disabled={permBusy} onChange={onPermChange} />
       ) : (
-        <span class={`perm-chip perm-${perm.mode}`} title={`Permission mode: ${perm.mode}`}>
+        <span class={`perm-chip perm-${perm.mode} amb-${statusItemPriority("perm")}`} title={`Permission mode: ${perm.mode}`}>
           {perm.mode}
         </span>
       )}
@@ -164,7 +164,7 @@ export function StatusStrip({
           one: a word, not a glyph, and only while it's on. Same place and
           wording as the mobile line. */}
       {session?.fast && (
-        <span class="status-strip-fast" aria-label="Fast mode on — this session is billed at a premium rate">
+        <span class={`status-strip-fast amb-${statusItemPriority("fast")}`} aria-label="Fast mode on — this session is billed at a premium rate">
           fast
         </span>
       )}
@@ -172,14 +172,14 @@ export function StatusStrip({
       {/* Active modes — only rendered when the model reports them (off modes
           are omitted upstream). */}
       {!compact && modes.goal && (
-        <span class="status-strip-pill goal" title={modes.goal.objective || "Goal active"}>
+        <span class={`status-strip-pill goal amb-${statusItemPriority("goal")}`} title={modes.goal.objective || "Goal active"}>
           <Target />
           {modes.goal.verifying ? "goal · verifying…" : `goal${modes.goal.iteration ? ` ${modes.goal.iteration}` : ""}`}
         </span>
       )}
 
       {!compact && modes.tasks && (
-        <span class="status-strip-pill tasks">
+        <span class={`status-strip-pill tasks amb-${statusItemPriority("tasks")}`}>
           <ClipboardList />
           {modes.tasks.done}/{modes.tasks.total}
           {modes.tasks.complete && " ✓"}
@@ -189,7 +189,7 @@ export function StatusStrip({
       {/* Alerts. 🔥 on-extra only while active. */}
       {alerts.onExtra && (
         <span
-          class="status-strip-pill session-overage"
+          class={`status-strip-pill session-overage amb-${statusItemPriority("extra")}`}
           title="This session is being served from extra usage (pay-as-you-go)"
         >
           <Flame />
@@ -216,7 +216,7 @@ export function StatusStrip({
           return onOpenMcp ? (
             <button
               type="button"
-              class={`status-strip-mcp status-strip-mcp-btn${unhealthy ? " status-strip-mcp-bad" : ""}`}
+              class={`status-strip-mcp status-strip-mcp-btn amb-${statusItemPriority("mcp", unhealthy ? "unhealthy" : "healthy")}${unhealthy ? " status-strip-mcp-bad" : ""}`}
               onClick={onOpenMcp}
               aria-label={`${label} — open MCP servers`}
               title={label}
@@ -225,7 +225,7 @@ export function StatusStrip({
             </button>
           ) : (
             <span
-              class={`status-strip-mcp${unhealthy ? " status-strip-mcp-bad" : ""}`}
+              class={`status-strip-mcp amb-${statusItemPriority("mcp", unhealthy ? "unhealthy" : "healthy")}${unhealthy ? " status-strip-mcp-bad" : ""}`}
               title={label}
             >
               {body}
@@ -233,7 +233,7 @@ export function StatusStrip({
           );
         })()}
         {showTokens && hasTokens && (
-          <span class="status-strip-tokens"><TokenFlow up={tokensUp} down={tokensDown} variant={tokenFlowVariant(compact)} /></span>
+          <span class={`status-strip-tokens amb-${statusItemPriority("tokens")}`}><TokenFlow up={tokensUp} down={tokensDown} variant={tokenFlowVariant(compact)} /></span>
         )}
       </span>
       {children}
