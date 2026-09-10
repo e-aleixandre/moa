@@ -6,6 +6,7 @@
 
 import { store, setState } from './store.js';
 import { api } from './api.js';
+import { closeSessionPanel } from './session-panel.js';
 import {
   ARTIFACTS_CLOSED, EMPTY_ARTIFACTS, acceptsResponse, artifactFileId,
   normalizeArtifacts, seedFromFile,
@@ -70,7 +71,23 @@ export async function loadArtifacts(sessionId, { token } = {}) {
   }
 }
 
+// ONE right-hand surface at a time. The dossier and the reader are both the
+// right-hand side of the screen, and the reader (600px, 1100 expanded) is wider
+// than the dossier (340), so an open reader covers the dossier completely.
+//
+// While the dossier was a drawer that cost nothing, being covered was
+// harmless. As the shell's third zone it is not: the covered dossier still
+// TAKES ITS COLUMN, so the centre pays 340px for a zone nobody can see — the
+// transcript is squeezed to make room for something invisible. Measured at
+// 1600: centre 264..1260, dossier 1260..1600, reader 1000..1600.
+//
+// So every door into the reader closes the dossier first. This is the rule the
+// panel's own Artifacts page already kept ("the reader never lives in 340px");
+// it lived on that one door because covering used to be free. It belongs here,
+// on the funnel every door goes through — head entry, pane button, send_file
+// card and the panel's own list — rather than repeated on each of them.
 function beginRequest(sessionId, next) {
+  closeSessionPanel();
   const previous = artifactsSlice(store.get());
   const token = previous.token + 1;
   const sameOwner = previous.ownerSessionId === sessionId;

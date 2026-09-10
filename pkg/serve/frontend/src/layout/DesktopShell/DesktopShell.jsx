@@ -1,5 +1,6 @@
 import { useState } from "preact/hooks";
 import { Spine } from "../Spine/Spine.jsx";
+import { DesktopDossier } from "./DesktopDossier.jsx";
 import { Sheet, GlobalSettings } from "../../components/index.js";
 import { useStore } from "../../hooks/useStore.js";
 import { openSession } from "../../data/tile-actions.js";
@@ -10,10 +11,17 @@ import { dismissEvent, dismissSource, retryEvents, routeEvent, routeEventToNewSe
 import { selectDesktopChrome } from "../Spine/sessions.js";
 import "./DesktopShell.css";
 
-// DesktopShell — the desktop chrome. Spine lives here once. Conversation and
-// grid only swap the main column, so Close / reopen / delete cannot drift
-// between views. Subscribes to the roster snapshot, not the whole store: a
-// streaming token must not rebuild the sidebar.
+// DesktopShell — the desktop chrome, in THREE ZONES: the other sessions on the
+// left, the result in the middle, this session's dossier on the right.
+// Conversation and grid only swap the middle zone, so Close / reopen / delete
+// cannot drift between views. Subscribes to the roster snapshot, not the whole
+// store: a streaming token must not rebuild the sidebar (which is also why the
+// dossier subscribes on its own, inside DesktopDossier).
+//
+// The third zone is a real column only where one fits; narrower than that it
+// stays the drawer it has always been. Both live at the same place in the DOM —
+// the switch is in DesktopShell.css, because a media query can restyle a node
+// but cannot move it.
 
 export function DesktopShell({ version, children }) {
   const chrome = useStore(selectDesktopChrome);
@@ -46,6 +54,7 @@ export function DesktopShell({ version, children }) {
         onDeleteSession={(id) => { deleteSession(id).catch(() => {}); }}
       />
       {children}
+      <DesktopDossier />
       <Sheet
         open={globalSettingsOpen}
         onClose={() => setGlobalSettingsOpen(false)}

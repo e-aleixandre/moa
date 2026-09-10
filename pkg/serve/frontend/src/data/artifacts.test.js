@@ -2,8 +2,9 @@
 // Run with `bun test`.
 
 import { test, expect, beforeEach, afterEach } from 'bun:test';
-import { store, setState } from './store.js';
+import { store, setState, SESSION_PANEL_CLOSED } from './store.js';
 import { ARTIFACTS_CLOSED } from './artifacts-model.js';
+import { openSessionPanel, sessionPanelView } from './session-panel.js';
 import {
   artifactsSlice, closeArtifacts, closeArtifactsForMissingOwner, closeArtifactsForSession, loadArtifacts,
   openArtifactFromCard, openArtifactFromList, openArtifactsList,
@@ -40,7 +41,7 @@ function serveDeferred() {
 }
 
 beforeEach(() => {
-  setState({ artifacts: ARTIFACTS_CLOSED, sessions: {}, isMobile: false });
+  setState({ artifacts: ARTIFACTS_CLOSED, sessions: {}, isMobile: false, sessionPanel: SESSION_PANEL_CLOSED });
 });
 
 afterEach(() => {
@@ -230,4 +231,33 @@ test('a roster poll with the drawer closed does nothing', () => {
   closeArtifactsForMissingOwner(new Set([]));
   expect(artifactsSlice(store.get()).view).toBeNull();
   expect(calls).toEqual([]);
+});
+
+// ── One right-hand surface at a time ──────────────────────────────────────
+// The dossier is the shell's third zone: covered by the 600px reader it would
+// still hold its 340px column, so the centre would pay for a zone nobody can
+// see. Every door into the reader closes it first, which is why the rule is
+// asserted on the controller and not on one of the buttons.
+
+test('opening the reader closes the session dossier', async () => {
+  serveImmediately({ A: ['a1'] });
+  openSessionPanel('A');
+  expect(sessionPanelView(store.get(), 'A').open).toBe(true);
+
+  openArtifactsList('A');
+  expect(sessionPanelView(store.get(), 'A').open).toBe(false);
+});
+
+test('a send_file card closes it too: it is the same right-hand side', async () => {
+  serveImmediately({ A: ['a1'] });
+  openSessionPanel('A', 'usage');
+  openArtifactFromCard('A', { url: '/api/sessions/A/files/a1', name: 'a1.md', mime: 'text/markdown' });
+  expect(sessionPanelView(store.get(), 'A').open).toBe(false);
+});
+
+test('a dossier open on ANOTHER conversation is closed as well: one drawer, one screen', async () => {
+  serveImmediately({ A: ['a1'], B: [] });
+  openSessionPanel('B');
+  openArtifactsList('A');
+  expect(sessionPanelView(store.get(), 'B').open).toBe(false);
 });

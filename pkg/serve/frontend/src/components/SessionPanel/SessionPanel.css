@@ -1,18 +1,17 @@
-/* SessionPanel — the session's dossier, a right-hand drawer over the
-   conversation. Structure and geometry only: the Ambient look lives in
-   tokens/ambient.css, behind the switch, like every other migrated surface.
+/* SessionPanel — the session's dossier. Structure and geometry only: the
+   Ambient look lives in tokens/ambient.css, behind the switch, like every
+   other migrated surface.
 
-   It is absolutely positioned inside the conversation column (which is
-   position:relative) rather than fixed to the window, so in a pane it stays
-   inside its pane. */
+   It fills whatever zone hosts it (layout/DesktopShell — docked column at wide
+   widths, overlaying drawer below them), so the panel itself owns no width and
+   no place on the screen: it slides within its host and nothing more. */
 
 .spanel {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: var(--z-overlay);
-  width: min(340px, 100%);
+  left: 0;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -289,22 +288,3 @@
 .spanel-act-d { font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--overlay0); }
 .spanel-act.is-danger .spanel-act-t { color: var(--red); }
 .spanel-act.is-danger[data-confirming="true"] { border-color: var(--red); }
-
-/* The scrim: the panel is read ON a live transcript, so what is behind it is
-   dimmed rather than blurred (a blur over moving text costs more and reads
-   worse than dimming). */
-.spanel-scrim {
-  position: absolute;
-  inset: 0;
-  z-index: calc(var(--z-overlay) - 1);
-  background: color-mix(in srgb, var(--crust) 45%, transparent);
-}
-
-/* Mobile: the dossier is a PAGE, not a 340px drawer over a 390px phone. */
-.spanel.spanel-mobile { width: 100%; border-left: 0; }
-.spanel.spanel-mobile .spanel-head { padding-top: calc(env(safe-area-inset-top, 0px) + var(--space-3)); }
-.spanel.spanel-mobile .spanel-acts { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--space-3)); }
-.spanel.spanel-mobile .spanel-x,
-.spanel.spanel-mobile .spanel-back { width: 44px; height: 44px; }
-.spanel.spanel-mobile .spanel-input { min-height: 48px; }
-.spanel.spanel-mobile .spanel-input.is-static { line-height: 48px; }

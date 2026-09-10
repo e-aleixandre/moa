@@ -1,10 +1,90 @@
+/* DesktopShell — the desktop chrome in THREE ZONES.
+   Left: the other sessions. Middle: the result. Right: this session's dossier.
+
+   The third zone is a real column only where one fits. The number is the sum of
+   what the zones need, not a round breakpoint: 264 (spine) + 844 (the centre's
+   own declared measure — .composer-wrap and .status-strip are max-width:844px)
+   + 340 (the dossier) = 1448. At 1448 the centre is at FULL size with the
+   dossier docked, so the third column costs the conversation nothing; below it
+   the centre would start paying for the column out of the composer and the
+   status line, and what the line sheds first is exactly what the dossier is
+   there to hold. See layout/DesktopShell/dossier.js — the same number lives
+   there, with the measurements, because JS is where it is testable.
+
+   Narrower than that the dossier stays the drawer it has always been. Both are
+   the same node: a media query can restyle an element but cannot move it. */
+
 .desktop-shell {
+  position: relative;
   display: grid;
-  grid-template-columns: var(--spine-width) 1fr;
+  grid-template-columns: var(--spine-width) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
   background: var(--base);
   color: var(--text);
   font-family: var(--font);
+}
+
+/* ── The third zone, overlaying ───────────────────────────────────────────
+   Out of the grid flow, so the closed dossier never claims a column and never
+   pushes itself onto an implicit second row. The panel inside keeps its own
+   slide, so this wrapper only owns geometry. */
+.desktop-dossier {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-overlay);
+  width: var(--dossier-width);
+  max-width: 100%;
+  display: flex;
+  min-width: 0;
+  pointer-events: none; /* closed, it is not there for the mouse either */
+}
+.desktop-dossier.is-open { pointer-events: auto; }
+.desktop-dossier .spanel { width: 100%; }
+
+/* The veil dims what the dossier covers and nothing else: it starts where the
+   spine ends, so the other sessions stay reachable behind an open dossier. */
+.desktop-dossier-scrim {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: var(--spine-width);
+  z-index: calc(var(--z-overlay) - 1);
+  background: color-mix(in srgb, var(--crust) 45%, transparent);
+}
+
+/* ── The third zone, docked ───────────────────────────────────────────────
+   Only while it is OPEN: a closed dossier that still held 340px would be a
+   permanent gutter of nothing. :has is the gate, so the shell knows without
+   the shell subscribing to the panel's state — and with Ambient off the node
+   is never rendered, so this cannot match and the shell stays two columns. */
+@media (min-width: 1448px) {
+  .desktop-shell:has(.desktop-dossier.is-open) {
+    grid-template-columns: var(--spine-width) minmax(0, 1fr) var(--dossier-width);
+  }
+  .desktop-shell:has(.desktop-dossier.is-open) .desktop-dossier {
+    position: relative;
+    grid-column: 3;
+    grid-row: 1;
+    z-index: auto;
+    width: auto;
+  }
+  /* Nothing to dim: the zone does not cover the centre, it stands beside it. */
+  .desktop-shell:has(.desktop-dossier.is-open) .desktop-dossier-scrim { display: none; }
+  /* A zone that lives there does not float, so it drops the drawer's shadow
+     and its outer radius, and separates with a hairline instead. */
+  .desktop-shell:has(.desktop-dossier.is-open) .spanel {
+    border-radius: 0;
+    box-shadow: none;
+    border-left: 1px solid var(--surface0);
+  }
+  /* The artifacts drawer reserves 600px of the centre from 1280px up
+     (Artifacts.css). With the dossier docked the centre has already given up
+     340, and reserving again would leave a transcript nobody can read — so at
+     these widths the reader overlays, exactly as it does on a narrow one. */
+  .desktop-shell:has(.desktop-dossier.is-open) .conversation-main { margin-right: 0; }
 }

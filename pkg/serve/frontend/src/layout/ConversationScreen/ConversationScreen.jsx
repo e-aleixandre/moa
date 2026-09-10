@@ -9,7 +9,7 @@ import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
-import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, UsagePanel, Sheet, ArtifactsEntry, SessionPanel } from "../../components/index.js";
+import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, UsagePanel, Sheet, ArtifactsEntry } from "../../components/index.js";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
@@ -27,7 +27,7 @@ import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { addToast } from "../../data/notifications.js";
 import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast } from "../../data/session-actions.js";
-import { sessionPanelView, toggleSessionPanel } from "../../data/session-panel.js";
+import { toggleSessionPanel } from "../../data/session-panel.js";
 import { ambientOn } from "../../data/ambient.js";
 import { positionModelPopover } from "../PaneGrid/model-popover-position.js";
 import "./ConversationScreen.css";
@@ -51,10 +51,11 @@ export function ConversationScreen() {
   const usage = useStore((s) => s.usage);
 
   // The session panel (Ambient only): the crumb is its door, and the context
-  // ring promotes it straight to Usage. With the switch off none of this is
-  // mounted and the strip keeps its own popovers.
+  // ring promotes it straight to Usage. The panel itself is not mounted here —
+  // it is the shell's third zone (layout/DesktopShell/DesktopDossier.jsx), so
+  // docking it can take width from this column instead of covering it. With
+  // the switch off there is no panel and the strip keeps its own popovers.
   const ambient = ambientOn();
-  const panel = useStore((s) => sessionPanelView(s, activeId));
 
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
   // The dock is the permanent home for live ASYNC work (async subagents + bash)
@@ -385,15 +386,6 @@ export function ConversationScreen() {
             inline
             onClose={() => updateSession(session.id, { previewOpen: false })}
           />
-        )}
-        {/* The dossier slides in over the transcript, inside the conversation
-            column: the sidebar stays put and the composer is not covered by a
-            window-wide overlay. Its scrim only dims what it covers. */}
-        {ambient && session && (
-          <>
-            {panel.open && <div class="spanel-scrim" onClick={() => toggleSessionPanel(session.id)} />}
-            <SessionPanel session={session} usage={usage} open={panel.open} page={panel.page} />
-          </>
         )}
       </main>
       {session && (
