@@ -298,7 +298,10 @@ func convertAssistantMessageForDialect(msg core.Message, provider, modelID strin
 	// Responses messages written before model provenance was added still carry
 	// their provider. Preserve that known-provider legacy metadata, while
 	// continuing to reject unknown-provider and explicitly cross-model state.
-	sameOrigin := msg.Provider != "" && modelID != "" && msg.Provider == provider && (msg.Model == "" || msg.Model == modelID)
+	// An alias is answered under its target's id, so its own turns are
+	// recorded as the target's; SameResponseOrigin accepts those instead of
+	// discarding the session's whole reasoning history on every replay.
+	sameOrigin := msg.Provider != "" && modelID != "" && msg.Provider == provider && (msg.Model == "" || core.SameResponseOrigin(modelID, msg.Model))
 	foreignModel := !sameOrigin
 
 	var items []map[string]any
