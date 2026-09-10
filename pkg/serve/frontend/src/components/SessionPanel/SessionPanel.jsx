@@ -48,8 +48,10 @@ function PanelRow({ id, icon: Icon, title, verdict, onOpen }) {
 
 // ArtifactsPage — the LIST, never the reader. Choosing one hands off to the
 // existing shared drawer, which is where a document is actually readable: the
-// reader never lives in 340px. That is also why the two right-hand surfaces
-// cannot collide — opening an artifact closes this panel on its way out.
+// reader never lives in 340px. Handing off also CLOSES this panel, so the two
+// right-hand surfaces never stack — that rule now lives on the artifacts
+// controller itself (data/artifacts.js), which is the funnel every door into
+// the reader goes through, rather than only on this one.
 function ArtifactsPage({ sessionId }) {
   const slice = useStore(artifactsSlice);
   const mine = slice.ownerSessionId === sessionId;
@@ -64,10 +66,10 @@ function ArtifactsPage({ sessionId }) {
   }, [sessionId]);
 
   const open = (artifact) => {
-    closeSessionPanel();
     openArtifactsList(sessionId);
     // The list is already loading for this conversation; the drawer opens on
-    // its own list view, where the reader has the width it needs.
+    // its own list view, where the reader has the width it needs. Closing this
+    // panel is the controller's job, on the way in.
     void artifact;
   };
 

@@ -711,27 +711,197 @@
   }
 }
 
-/* ── Permission cards ──────────────────────────────────────────────────────
-   The card that interrupts you. It keeps its yellow -- that is the state, and
-   state colour is the one thing this direction must not touch -- but the
-   yellow moves from a 1px outline to a filled left bar and a tinted surface,
-   which is how Ambient separates things everywhere else. */
-[data-ambient="on"] .perm-card {
+/* ── The two cards that stop the run ───────────────────────────────────────
+   A permission prompt and an ask are the same event wearing two shapes: the
+   session is PARKED ON YOU and nothing moves until you answer. They are
+   dressed together so they cannot read as two unrelated interruptions.
+
+   YELLOW ON THE EDGE, NOT ACROSS THE FACE. Yellow is the product's word for
+   "needs you", so it carries the left bar and the one label that names the
+   state. The surface is the ladder's raised step -- the same step every other
+   object you act on uses. The base skin tints the whole card amber instead,
+   which lowers the contrast of every word inside it and buys no urgency: the
+   card is already the only thing between you and the run continuing.
+
+   STATIC, DELIBERATELY. The base card breathes a yellow ring every 2.2s.
+   Animating something that is stopped is a lie about the state, and this is
+   the one card that can sit on screen for minutes -- the pulse is dropped,
+   not merely overridden per state.
+
+   ACHROMATIC CONTROLS. The affirmative button was solid green with a glow, on
+   both cards. Green here says RUNNING, and a running-green button on a halted
+   run is the wrong word; it also made the card's own yellow the second-loudest
+   mark on it. The buttons become the control tone at three weights (accept =
+   filled with a rim and full-strength text, secondary = bare, deny = bare and
+   dim). What stays saturated is the state edge, a destructive prompt's red,
+   and the error line. */
+[data-ambient="on"] .perm-card,
+[data-ambient="on"] .ask {
   border: 0;
   border-left: 3px solid var(--yellow);
   border-radius: 4px var(--amb-r-row) var(--amb-r-row) 4px;
-  background: color-mix(in srgb, var(--yellow) 7%, rgba(0, 0, 0, 0.22));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: var(--amb-raised);
+  box-shadow: none;
+  font-family: var(--font);
+  color: var(--amb-text-2);
+  animation: none;
 }
+/* A destructive prompt swaps the state: this is not "waiting on you", it is
+   "this deletes things". Red owns the edge and the glyph. */
+[data-ambient="on"] .perm-card.danger { border-left-color: var(--red); }
+
+/* The head. The icon carries the state colour; the sentence is the brightest
+   text on the card, because it is what you are being asked. */
+[data-ambient="on"] .perm-card .perm-head .p-t {
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: var(--weight-semibold);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .perm-card.danger .perm-head .p-t { color: var(--amb-text); }
 [data-ambient="on"] .perm-card .perm-head .p-timer {
   font-family: var(--font);
   font-variant-numeric: tabular-nums;
   color: var(--amb-text-4);
 }
+
+/* .scope is the ROW that holds the chips, not a chip. The previous rule gave
+   it a filled radius, which painted a band the full width of the card behind
+   two small chips. The surface belongs on the chips themselves. */
 [data-ambient="on"] .perm-card .scope {
   border: 0;
+  background: none;
+  border-radius: 0;
+}
+[data-ambient="on"] .perm-card .scope .chip {
+  border: 0;
+  border-radius: var(--amb-r-well);
   background: var(--amb-hi);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .perm-card .scope .chip.tone-warning {
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+  color: var(--red);
+}
+
+/* The command is the evidence: the deepest well on the card, mono, and the
+   only place a token can be red. The $ is punctuation, not a state. */
+[data-ambient="on"] .perm-card .perm-cmd {
+  border: 0;
+  border-radius: var(--amb-r-well);
+  background: var(--amb-well);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--amb-text);
+}
+[data-ambient="on"] .perm-card .perm-cmd .dollar { color: var(--amb-text-4); }
+
+[data-ambient="on"] .perm-card .perm-error {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--red);
+}
+
+/* The three weights of action. */
+[data-ambient="on"] .perm-card .perm-actions .button {
+  min-height: 32px;
+  border: 0;
   border-radius: var(--amb-r-ctl);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+}
+[data-ambient="on"] .perm-card .perm-actions .button.variant-success {
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line-strong);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .perm-card .perm-actions .button.variant-danger-solid {
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 45%, transparent);
+  color: var(--red);
+}
+[data-ambient="on"] .perm-card .perm-actions .button.variant-ghost {
+  background: transparent;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .perm-card .perm-actions .button.btn-deny,
+[data-ambient="on"] .perm-card.danger .perm-actions .button.btn-deny {
+  border: 0;
+  color: var(--amb-text-4);
+}
+/* The pattern a rule would be written for is data. */
+[data-ambient="on"] .perm-card .perm-actions .btn-always b {
+  font-family: var(--mono);
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .perm-card .perm-actions .button[aria-pressed="true"] {
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  color: var(--amb-text);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .perm-card .perm-actions .button.variant-success:hover:not(:disabled) {
+    background: var(--amb-on);
+  }
+  [data-ambient="on"] .perm-card .perm-actions .button.variant-ghost:hover:not(:disabled) {
+    background: var(--amb-hi);
+    color: var(--amb-text);
+  }
+  [data-ambient="on"] .perm-card .perm-actions .button.btn-deny:hover:not(:disabled) {
+    background: var(--amb-hi);
+    color: var(--red);
+  }
+  [data-ambient="on"] .perm-card .perm-actions .button.variant-danger-solid:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--red) 24%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 60%, transparent);
+  }
+}
+[data-ambient="on"] .perm-card .perm-actions .hint {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--amb-text-4);
+}
+
+/* The inline editors (feedback / add rule). A field on a card sits one step
+   BELOW it, like every other well in this direction, and borrows the state
+   colour while focused. */
+[data-ambient="on"] .perm-card .perm-inline-editor .perm-inline-field,
+[data-ambient="on"] .ask .ask-free-field {
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-canvas);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+}
+[data-ambient="on"] .perm-card .perm-inline-editor .perm-inline-field:focus-within,
+[data-ambient="on"] .ask .ask-free-field:focus-within {
+  box-shadow: inset 0 0 0 1px var(--yellow);
+}
+/* --text is not re-pointed by this sheet, so the field primitive's own colour
+   has to be moved here or the input keeps the old palette's blue-white. */
+[data-ambient="on"] .perm-card .perm-inline-field .field-input,
+[data-ambient="on"] .ask .ask-free-field .field-input { color: var(--amb-text); }
+[data-ambient="on"] .perm-card .perm-inline-field .field-input::placeholder,
+[data-ambient="on"] .ask .ask-free-field .field-input::placeholder { color: var(--amb-text-4); }
+[data-ambient="on"] .perm-card .perm-inline-editor .perm-inline-save {
+  min-height: 36px;
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-2);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .perm-card .perm-inline-editor .perm-inline-save:hover:not(:disabled) {
+    background: var(--amb-on);
+    color: var(--amb-text);
+  }
 }
 
 /* ── Code, in both places it appears ───────────────────────────────────────
@@ -813,18 +983,208 @@
   color: var(--amb-text-2);
 }
 
-/* ── Ask cards ────────────────────────────────────────────────────────────
-   Same treatment as the permission card: this is also a session waiting on
-   you, so it wears the same yellow gesture rather than an outline. */
-[data-ambient="on"] .ask {
+/* ── The ask, and the question set it belongs to ──────────────────────────
+   The chassis is dressed above, with the permission card. What is left is
+   what only an ask has: a stack of options you pick from, a free-text answer,
+   and (when the agent asked several things) the pager under it.
+
+   AN OPTION IS A ROW, NOT A BUTTON. They are a list of alternatives, so they
+   read as ledger rows: hairline between them, the whole row a target, the
+   number in a well on the left. The chosen one goes green in the base skin --
+   green is RUNNING here, and the run is stopped -- so it becomes the raised
+   step with full-strength text and a check, which is how "selected" is drawn
+   everywhere else in this direction. */
+[data-ambient="on"] .ask .ask-q .who {
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  color: var(--yellow);
+}
+[data-ambient="on"] .ask .ask-q p {
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--amb-text);
+}
+[data-ambient="on"] .ask .ask-opts { border-top-color: var(--amb-line); }
+[data-ambient="on"] .ask .ask-opt {
+  min-height: 44px;
+  border-bottom-color: var(--amb-line);
+  font-family: var(--font);
+  font-size: 16px;
+  color: var(--amb-text-2);
+}
+[data-ambient="on"] .ask .ask-opt.chosen {
+  background: var(--amb-control);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .ask .ask-opt .k {
+  width: 22px;
+  height: 22px;
   border: 0;
-  border-left: 3px solid var(--yellow);
-  border-radius: 4px var(--amb-r-row) var(--amb-r-row) 4px;
-  background: color-mix(in srgb, var(--yellow) 7%, rgba(0, 0, 0, 0.22));
+  border-radius: var(--amb-r-well);
+  background: var(--amb-hi);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amb-text-4);
 }
-[data-ambient="on"] .ask .ask-free {
-  border-top-color: rgba(255, 255, 255, 0.06);
+[data-ambient="on"] .ask .ask-opt.chosen .k {
+  background: var(--amb-on);
+  border: 0;
+  color: var(--amb-text-2);
 }
+[data-ambient="on"] .ask .ask-opt-check { color: var(--amb-text-2); }
+[data-ambient="on"] .ask .ask-opt.chosen .ask-opt-check { color: var(--amb-text); }
+/* "RECOMMENDED" is a hint from the agent, not a state: it loses the teal and
+   becomes the quietest label on the row. */
+[data-ambient="on"] .ask .ask-opt .rec {
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.06em;
+  color: var(--amb-text-4);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .ask .ask-opt:not(.chosen):hover {
+    background: var(--amb-hi);
+    color: var(--amb-text);
+  }
+  [data-ambient="on"] .ask .ask-opt:not(.chosen):hover .k {
+    background: var(--amb-on);
+    border-color: transparent;
+    color: var(--amb-text-2);
+  }
+}
+[data-ambient="on"] .ask .ask-free { border-top-color: var(--amb-line); }
+/* The send/mic control: the same achromatic weight as the permission card's
+   accept. Red stays on RECORDING, which is a live state and the one thing on
+   this card that is genuinely moving. */
+[data-ambient="on"] .ask .ask-free-submit {
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line-strong);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .ask .ask-free-submit.mic-mode {
+  background: var(--amb-hi);
+  box-shadow: none;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .ask .ask-free-submit.recording {
+  background: var(--red);
+  box-shadow: none;
+  color: var(--amb-canvas);
+}
+[data-ambient="on"] .ask .ask-free-submit.transcribing {
+  background: var(--amb-hi);
+  box-shadow: none;
+  color: var(--amb-text-3);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .ask .ask-free-submit:hover { background: var(--amb-on); box-shadow: none; }
+  [data-ambient="on"] .ask .ask-free-submit.mic-mode:hover { background: var(--amb-on); color: var(--amb-text); }
+  [data-ambient="on"] .ask .ask-free-submit.recording:hover { background: var(--red); box-shadow: none; }
+}
+[data-ambient="on"] .ask .ask-voice-lock-hint {
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line-strong), 0 6px 20px rgba(0, 0, 0, 0.45);
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--amb-text-2);
+}
+
+/* The pager, when the agent asked more than one thing. Answered dots keep the
+   yellow: unanswered questions are exactly what is holding the run. */
+[data-ambient="on"] .ask-user-prompt-head {
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  color: var(--amb-text-4);
+}
+[data-ambient="on"] .ask-user-prompt-nav button {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-3);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .ask-user-prompt-nav button:hover:not(:disabled) { color: var(--amb-text); }
+}
+[data-ambient="on"] .ask-user-prompt-dot::before { background: var(--amb-control); }
+[data-ambient="on"] .ask-user-prompt-dot.answered::before { background: var(--yellow); }
+[data-ambient="on"] .ask-user-prompt-dot.active::before { outline-color: var(--amb-text-3); }
+/* Submit and Skip: the same two weights as Allow/Deny, so the two blocking
+   cards answer with the same pair of controls. */
+[data-ambient="on"] .ask-user-prompt-submit {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-control);
+  box-shadow: inset 0 0 0 1px var(--amb-line-strong);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+  color: var(--amb-text);
+}
+[data-ambient="on"] .ask-user-prompt-skip {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  background: transparent;
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-4);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .ask-user-prompt-submit:hover:not(:disabled) {
+    background: var(--amb-on);
+    box-shadow: inset 0 0 0 1px var(--amb-line-strong);
+  }
+  [data-ambient="on"] .ask-user-prompt-skip:hover {
+    background: var(--amb-hi);
+    border-color: transparent;
+    color: var(--amb-text-2);
+  }
+}
+/* Answered: a note, not a green banner. The card is gone, the run moved on. */
+[data-ambient="on"] .ask-user-resolved {
+  border: 0;
+  border-radius: var(--amb-r-row);
+  background: var(--amb-sheet-solid);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .ask-user-prompt-voice-error {
+  border: 0;
+  border-left: 2px solid var(--red);
+  border-radius: var(--amb-r-well);
+  background: var(--amb-well);
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--red);
+}
+
+/* The same answer, read back in a finished ledger row. It is a record, so it
+   is all one voice; the mono stays (these are the literal strings that were
+   sent) and only the chosen option and a typed answer are marked. Peach is
+   NOT available for "you wrote this here": it belongs to the message bar. */
+[data-ambient="on"] .ask-detail-text { color: var(--amb-text-2); }
+[data-ambient="on"] .ask-detail-question + .ask-detail-question {
+  border-top-color: var(--amb-line);
+}
+[data-ambient="on"] .ask-detail-option { color: var(--amb-text-4); }
+[data-ambient="on"] .ask-detail-option.chosen { color: var(--amb-text-2); }
+[data-ambient="on"] .ask-detail-answer { color: var(--amb-text-3); }
+[data-ambient="on"] .ask-detail-answer.custom { color: var(--amb-text-2); }
+[data-ambient="on"] .ask-detail-answer.skipped,
+[data-ambient="on"] .ask-detail-answer.missing { color: var(--amb-text-4); }
 
 /* ── The status strip ──────────────────────────────────────────────────────
    The densest run of mono in the app, sitting right under the composer. It
