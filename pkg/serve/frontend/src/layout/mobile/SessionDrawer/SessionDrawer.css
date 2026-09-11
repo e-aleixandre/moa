@@ -1,54 +1,63 @@
-/* SessionDrawer — the session list, unfurled from the title chip. Anchors to
-   the nearest positioned ancestor (the conversation screen, or the phone frame
-   in the gallery), not the window, so it stays inside the device on screen.
+/* SessionDrawer — the phone's chassis for the sidebar: the veil, the sheet, and
+   the "new session" screen's own furniture. The LIST's styles are not here any
+   more; they live in layout/Sidebar/Sidebar.css, which both densities share.
 
-   Animation (MOBILE-POLISH-SPEC §5): only the panel (transform + opacity) and
-   the veil (opacity) move — the conversation behind stays perfectly still. The
-   closed REST state is the default (panel folded up and faded into the chip);
-   the `.is-open` class transitions to the open rest state, so both the enter
-   AND the leave animate (JS keeps the node mounted through the close). */
+   It anchors to the nearest positioned ancestor (the conversation screen, or
+   the phone frame in the gallery), not the window, so it stays inside the
+   device on screen.
+
+   The sheet comes in FROM THE LEFT EDGE at 300px, not down from the title at
+   390px. At the full width the conversation was gone and there was nothing on
+   screen to say what "back" meant; at 300 the transcript stays visible down the
+   right side, so the drawer reads as something on top of your session. The left
+   edge is also where the other sessions live in the product's spatial grammar
+   (the right edge is this session).
+
+   Animation: only the panel (transform) and the veil (opacity) move — the
+   conversation behind stays perfectly still. The closed REST state is the
+   default (the sheet parked outside the left edge); `.is-open` transitions to
+   the open rest state, so both the enter AND the leave animate (JS keeps the
+   node mounted through the close). */
 
 .sdrawer-veil {
   position: absolute;
   inset: 0;
   z-index: var(--z-sheet);
-  background: color-mix(in srgb, var(--crust) 62%, transparent);
-  /* Constant blur — animating backdrop-filter forces a full-viewport recomposite
-     that reads as the page "shifting" on iOS, so only opacity transitions. */
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
+  /* No blur, at any dose: what sits behind is a live transcript, so anything
+     legible through the veil also MOVES while you read the list. Dimming is
+     calmer and one less full-viewport backdrop-filter. 55% and not the 90% the
+     dropdown needed — the sheet no longer covers the screen, and the point of
+     a 300px sheet is that you can see there is a conversation behind it. */
+  background: color-mix(in srgb, var(--crust) 55%, transparent);
   opacity: 0;
-  transition: opacity 160ms var(--ease);
+  transition: opacity 200ms var(--ease);
   overscroll-behavior: contain;
 }
 .sdrawer-veil.is-open {
   opacity: 1;
 }
 
-/* The panel hangs from just under the header capsules (top:12px, 44px tall),
-   inset from both edges so it reads as a dropdown rather than a page. */
 .sdrawer {
   position: absolute;
-  top: 64px;
-  left: 12px;
-  right: 12px;
-  max-height: 78%;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  /* 300px, and never more than most of a narrow screen: the visible strip of
+     transcript is the whole point, so it may not be squeezed to nothing. */
+  width: min(300px, 88vw);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   background: var(--mantle);
-  border: 1px solid var(--surface1);
-  border-radius: 18px;
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
   box-shadow: var(--shadow-lg);
-  transform-origin: top center;
-  transform: translateY(-8px) scale(0.97);
-  opacity: 0;
-  will-change: transform, opacity;
-  transition: transform 200ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 140ms var(--ease);
+  transform: translateX(-100%);
+  will-change: transform;
+  transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .sdrawer.is-open {
-  transform: none;
-  opacity: 1;
+  transform: translateX(0);
 }
 /* The panel takes focus on open so the dialog is announced, but it is not an
    interactive target — a ring around the whole sheet would just read as an
@@ -57,10 +66,22 @@
 .sdrawer:focus-visible {
   outline: none;
 }
-/* Leave uses the ease-in curve/duration; the JS state machine drops .is-open
-   for the close, so this governs the fold back up into the chip. */
-.sdrawer:not(.is-open) {
-  transition: transform 180ms cubic-bezier(0.4, 0, 1, 1), opacity 140ms var(--ease);
+
+/* The sidebar fills the sheet and drops the docked column's seam. */
+.sdrawer .sidebar {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: transparent;
+}
+
+/* ── "New session" — the drawer's second screen ────────────────────────────
+   Same head/list/foot skeleton as the sidebar so swapping between the two
+   doesn't move the panel's furniture around. */
+.sdrawer-new-view {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .sdrawer-head {
@@ -72,330 +93,15 @@
 }
 
 .sdrawer-head h2 {
-  font-size: var(--text-md);
+  font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
   color: var(--text);
   margin-right: auto;
 }
 
-.sdrawer-head .sdrawer-count {
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  color: var(--overlay1);
-}
-
-/* New session — a list tool, not a row. Optical 28px; 44px reach via ::after. */
-.sdrawer-new {
-  position: relative;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: none;
-  color: var(--overlay1);
-  cursor: pointer;
-}
-.sdrawer-new::after {
-  content: "";
-  position: absolute;
-  inset: -8px;
-}
-.sdrawer-new:active {
-  background: var(--surface0);
-  color: var(--text);
-}
-@media (hover: hover) {
-
-.sdrawer-new:hover{
-  background: var(--surface0);
-  color: var(--text);
-}
-}
-.sdrawer-new:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-/* Empty drawer only: the instruction the header glyph can't carry alone. */
-.sdrawer-empty-new {
-  position: relative;
-  align-self: flex-start;
-  padding: 10px 4px;
-  border: 0;
-  background: none;
-  color: var(--mauve);
-  font: inherit;
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.sdrawer-empty-new::after {
-  content: "";
-  position: absolute;
-  inset: -6px -8px;
-}
-
-/* Inbox — the door to waiting events, beside New session in the head row. The
-   shared InboxButton is a 44px control; inside this row it takes the head's
-   optical 28px so the three tools line up, and keeps its reach via ::after. */
-.sdrawer-head .inbox-btn {
-  width: 28px;
-  height: 28px;
-}
-.sdrawer-head .inbox-btn::after {
-  content: "";
-  position: absolute;
-  inset: -8px;
-}
-.sdrawer-head .inbox-btn:active { background: var(--surface0); color: var(--text); }
-.sdrawer-head .inbox-btn-badge { top: -2px; right: -2px; }
-
-.sdrawer-more-wrap { position: relative; flex: none; }
-.sdrawer-more {
-  position: relative;
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border: 0; border-radius: var(--radius-md);
-  background: none; color: var(--overlay1); cursor: pointer;
-}
-.sdrawer-more::after {
-  content: "";
-  position: absolute;
-  inset: -8px;
-} .sdrawer-more:active { background: var(--surface0); color: var(--text); }
-@media (hover: hover) {
-
-.sdrawer-more:hover{ background: var(--surface0); color: var(--text); }
-}
-.sdrawer-more:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
-.sdrawer-group-menu {
-  position: absolute; top: calc(100% + 5px); right: 0; z-index: var(--z-overlay);
-  min-width: 196px; padding: var(--space-1); background: var(--surface0);
-  border: 1px solid var(--surface1); border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
-}
-.sdrawer-group-menu--up { top: auto; bottom: calc(100% + 5px); }
-.sdrawer-group-menu-label { display: block; padding: 7px 10px 5px; font-family: var(--mono); font-size: var(--text-nano); color: var(--overlay0); text-transform: uppercase; letter-spacing: var(--tracking-wide); }
-.sdrawer-group-menu button { display: flex; align-items: center; min-height: 44px; width: 100%; padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--subtext0); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; } .sdrawer-group-menu button:focus-visible { background: var(--surface1); color: var(--text); outline: none; }
-@media (hover: hover) {
-
-.sdrawer-group-menu button:hover{ background: var(--surface1); color: var(--text); outline: none; }
-}
-.sdrawer-group-menu-tick { width: 14px; margin-right: 9px; color: var(--mauve); }
-
-/* Project accordion: cwd is spoken once in this 44px target, leaving card
-   space for the live brief. Its compact type distinguishes hierarchy without
-   giving a quiet navigator a competing, heavy background. */
-.sdrawer-project-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 44px; padding: var(--space-1) var(--space-1); border: 0; border-radius: var(--radius-md); background: none; color: inherit; text-align: left; cursor: pointer; } .sdrawer-project-head:active { background: color-mix(in srgb, var(--surface0) 55%, transparent); }
-@media (hover: hover) {
-
-.sdrawer-project-head:hover{ background: color-mix(in srgb, var(--surface0) 55%, transparent); }
-}
-.sdrawer-project-head:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
-.sdrawer-project-chevron { flex: none; display: inline-flex; color: var(--overlay1); transition: transform var(--duration) var(--ease); }
-.sdrawer-project.is-open .sdrawer-project-chevron { transform: rotate(90deg); }
-.sdrawer-project-id { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.sdrawer-project-name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-family: var(--mono); font-size: var(--text-sm); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-wide); text-transform: uppercase; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sdrawer-project-path, .sdrawer-project-count { font-family: var(--mono); font-size: var(--text-nano); color: var(--overlay0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sdrawer-project-count { flex: none; max-width: 40%; }
-.sdrawer-project-attention { width: 7px; height: 7px; }
-.sdrawer-project-cards { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) 0 0 var(--space-1); }
-.sdrawer-project + .sdrawer-project .sdrawer-project-head { margin-top: var(--space-2); }
-.sdrawer-show-all { min-height: 36px; align-self: flex-start; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--mauve); font: inherit; font-size: var(--text-sm); cursor: pointer; } .sdrawer-show-all:active { background: var(--surface0); color: var(--text); }
-@media (hover: hover) {
-
-.sdrawer-show-all:hover{ background: var(--surface0); color: var(--text); }
-}
-.sdrawer-show-all:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
-
-/* Search — filters the list below in place. It is a real field, not a door to
-   somewhere else: sending the user to the command palette meant leaving the
-   drawer for a second session list with its own look and its own way back. */
-/* The control is the Field primitive (inset/lg): surface, border, height, the
-   16px iOS floor and the focus ring all come from there. What belongs to the
-   drawer is only where it sits. */
-.sdrawer-search {
-  flex: none;
-  margin: 0 12px 10px;
-}
-
-/* Empty result / empty project list — a quiet line where a card would be. */
-.sdrawer-note {
-  padding: 10px 4px;
-  font-size: var(--text-sm);
-  color: var(--overlay0);
-}
-
-.sdrawer-list {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  min-height: 0;
-  padding: 2px 12px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-/* Group label — same "Active / Saved" split the desktop Spine uses. Active
-   needs no label: it is what the drawer opens on. */
-.sdrawer-group {
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  color: var(--overlay0);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  padding: 8px 4px 2px;
-}
-.sdrawer-group-new { color: var(--mauve); }
-
-/* Card slot — the shared SessionRow, full width, with the ⋯ overflow laid over
-   its top-right corner. The row reserves that corner so the age never slides
-   under the button. */
-.sdcard-slot {
-  position: relative;
-}
-
-.sdcard-slot .session-row {
-  width: 100%;
-  background: transparent;
-  border-color: transparent;
-  border-radius: var(--radius-md);
-  min-width: 0;
-}
-.sdcard-slot .session-row.variant-card.on {
-  background: var(--surface0);
-  border-color: transparent;
-}
-@media (hover: hover) {
-
-.sdcard-slot .session-row.variant-card:hover{
-  background: var(--surface0);
-  border-color: transparent;
-}
-}
-.sdcard-slot .session-row.variant-card.needs-yellow,
-.sdcard-slot .session-row.variant-card.needs-red {
-  background: transparent;
-}
-.sdcard-slot .session-row.variant-card.needs-yellow.on,
-.sdcard-slot .session-row.variant-card.needs-red.on {
-  background: var(--surface0);
-}
-@media (hover: hover) {
-
-.sdcard-slot .session-row.variant-card.needs-yellow:hover,
-.sdcard-slot .session-row.variant-card.needs-red:hover{
-  background: var(--surface0);
-}
-}
-.sdcard-slot .session-row.variant-card.needs-yellow .r1,
-.sdcard-slot .session-row.variant-card.needs-yellow .r2,
-.sdcard-slot .session-row.variant-card.needs-red .r1,
-.sdcard-slot .session-row.variant-card.needs-red .r2 {
-  color: var(--text);
-}
-
-/* Reserve the top-right corner the ⋯ button occupies, so the age never slides
-   under it. On a phone the button has no hover to hide behind — it is always
-   visible — so the space is reserved for good, unlike the desktop where the
-   age only steps aside while you are pointing at the row. Matches the
-   variant's own selector strength — a plain `.sdcard-slot .session-row-hit`
-   loses to `.session-row.variant-card .session-row-hit` and the padding
-   silently does nothing. */
-.sdcard-slot .session-row.variant-card .session-row-hit {
-  padding: 9px 40px 9px 12px;
-  min-height: 56px;
-}
-
-/* Footer — global Settings only. Session lifecycle lives on the cards and "new"
-   lives in the header, so what is left here is the one thing that is neither:
-   preferences that apply everywhere. */
-.sdrawer-foot {
-  position: relative;
-  z-index: 1;
-  flex: none;
-  display: flex;
-  align-items: stretch;
-  background: var(--mantle);
-  border-top: 1px solid var(--surface0);
-}
-
-/* Build version, trailing the Settings button. Mono + dim so it reads as a
-   quiet status stamp, not an action; the update variant lifts to peach and is a
-   real link to the latest release. */
-.sdrawer-ver {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 var(--space-4);
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  color: var(--overlay0);
-  white-space: nowrap;
-  text-decoration: none;
-}
-.sdrawer-ver-update {
-  color: var(--peach);
-  font-weight: var(--weight-medium);
-}
-.sdrawer-ver-update:active {
-  background: var(--surface0);
-}
-@media (hover: hover) {
-
-.sdrawer-ver-update:hover{
-  background: var(--surface0);
-}
-}
-.sdrawer-ver-update:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: calc(-1 * var(--focus-ring-width));
-}
-
-.sdrawer-settings {
-  flex: 1;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  padding: 13px;
-  border: 0;
-  background: none;
-  color: var(--overlay1);
-  font-family: var(--font);
-  font-weight: var(--weight-medium);
-  font-size: var(--text-sm);
-}
-.sdrawer-settings:active {
-  background: var(--surface0);
-  color: var(--text);
-}
-@media (hover: hover) {
-
-.sdrawer-settings:hover{
-  background: var(--surface0);
-  color: var(--text);
-}
-}
-.sdrawer-settings:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: calc(-1 * var(--focus-ring-width));
-}
-
-/* ── "New session" — the drawer's second screen ────────────────────────────
-   Same head/list/foot skeleton as the list view so swapping between the two
-   doesn't move the panel's furniture around. */
-.sdrawer-new-view {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
 .sdrawer-back {
+  position: relative;
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -409,6 +115,8 @@
   color: var(--subtext0);
   cursor: pointer;
 }
+/* 28px optically, 44px of reach. */
+.sdrawer-back::after { content: ""; position: absolute; inset: -8px; }
 .sdrawer-back:active {
   background: var(--surface0);
   color: var(--text);
@@ -425,8 +133,44 @@
   outline-offset: var(--focus-ring-offset);
 }
 
+/* The path field. The control is the Field primitive (inset/lg): surface,
+   border, height, the 16px iOS floor and the focus ring all come from there.
+   What belongs to this screen is only where it sits. */
+.sdrawer-search {
+  flex: none;
+  margin: 0 12px 10px;
+}
+
+.sdrawer-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  padding: 2px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sdrawer-group {
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--overlay0);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  padding: 8px 4px 2px;
+}
+
+/* Empty result / empty project list — a quiet line where a row would be. */
+.sdrawer-note {
+  padding: 10px 4px;
+  font-size: var(--text-sm);
+  color: var(--overlay0);
+}
+
 /* One project per row: name first, path underneath — the same two-line rhythm
-   the session cards use, so the list reads as the same kind of list. */
+   the session rows use, so the list reads as the same kind of list. */
 .sdnew-project {
   display: flex;
   flex-direction: column;
@@ -478,6 +222,7 @@
   align-items: center;
   gap: 9px;
   width: 100%;
+  min-height: 44px;
   padding: 10px 13px;
   border: 0;
   border-radius: var(--radius-md);
@@ -513,17 +258,29 @@
   outline-offset: calc(-1 * var(--focus-ring-width));
 }
 
-/* The commit. Sits in the footer slot the list view gives to Settings, so the
-   panel's furniture doesn't move when the two screens swap. */
+/* The foot of the create screen: the commit, in the slot the sidebar gives to
+   its own New session button, so the panel's furniture doesn't move when the
+   two screens swap. */
+.sdrawer-foot {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  background: var(--mantle);
+  border-top: 1px solid var(--surface0);
+}
+
 .sdnew-create {
   flex: 1;
+  min-height: 48px;
   padding: 13px;
   border: 0;
   background: none;
   font-family: var(--font);
   font-weight: var(--weight-medium);
   font-size: var(--text-sm);
-  color: var(--peach);
+  color: var(--mauve);
   cursor: pointer;
 }
 .sdnew-create:active {

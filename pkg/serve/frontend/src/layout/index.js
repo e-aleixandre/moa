@@ -1,4 +1,4 @@
-export { Spine } from "./Spine/Spine.jsx";
+export { Sidebar } from "./Sidebar/Sidebar.jsx";
 export { ChatHead } from "./ChatHead/ChatHead.jsx";
 export { Stream } from "./Stream/Stream.jsx";
 export { LiveBar } from "./LiveBar/LiveBar.jsx";

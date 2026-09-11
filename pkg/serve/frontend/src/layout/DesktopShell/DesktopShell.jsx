@@ -1,14 +1,14 @@
 import { useState } from "preact/hooks";
-import { Spine } from "../Spine/Spine.jsx";
+import { Sidebar } from "../Sidebar/Sidebar.jsx";
 import { DesktopDossier } from "./DesktopDossier.jsx";
 import { Sheet, GlobalSettings } from "../../components/index.js";
 import { useStore } from "../../hooks/useStore.js";
 import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
-import { setGroupByProject } from "../../data/drawer.js";
+import { setDrawerProjectCollapsed, setGroupByProject } from "../../data/drawer.js";
 import { closeSession, deleteSession, resumeSession } from "../../data/session-actions.js";
 import { dismissEvent, dismissSource, retryEvents, routeEvent, routeEventToNewSession, toggleInbox } from "../../data/events.js"; // wake-on-event
-import { selectDesktopChrome } from "../Spine/sessions.js";
+import { selectDesktopChrome } from "../Sidebar/sessions.js";
 import "./DesktopShell.css";
 
 // DesktopShell — the desktop chrome, in THREE ZONES: the other sessions on the
@@ -29,22 +29,29 @@ export function DesktopShell({ version, children }) {
 
   return (
     <div class="desktop-shell">
-      <Spine
+      <Sidebar
         version={version}
-        activeSessions={chrome.active}
+        active={chrome.active}
         inbox={chrome.inbox}
         inboxHealth={chrome.inboxHealth}
         inboxOpen={chrome.inboxOpen}
-        onToggleInbox={toggleInbox}
+        inboxCount={chrome.inboxPending}
+        /* wake-on-event: the door appears once anything has ever arrived, and
+           also when the inbox could NOT be read — with no list there is no way
+           to know that nothing arrived, and hiding the door hides the failure. */
+        inboxVisible={chrome.inbox.length > 0 || chrome.inboxHealth?.status === "error"}
+        onInbox={toggleInbox}
         onRetryInbox={() => { retryEvents().catch(() => {}); }}
         onRouteEvent={(id, sessionId) => { routeEvent(id, sessionId).catch(() => {}); }}
         onNewSessionForEvent={(id, spec) => { routeEventToNewSession(id, spec).catch(() => {}); }}
         onDismissEvent={(id) => { dismissEvent(id).catch(() => {}); }}
         onDismissEventSource={(source) => { dismissSource(source).catch(() => {}); }}
-        savedSessions={chrome.saved}
+        saved={chrome.saved}
         activeId={chrome.activeId}
         groupByProject={chrome.groupByProject}
         onGroupByProject={setGroupByProject}
+        collapsedProjects={chrome.drawerCollapsed}
+        onToggleProject={setDrawerProjectCollapsed}
         onSelectSession={(id) => openSession(id)}
         onNewSession={() => openPalette("create")}
         onSearch={() => openPalette("search")}

@@ -1,6 +1,6 @@
 import { focusedSessionId } from "../../../data/selectors.js";
 import { shortPath, sessionDisplayDotState, sessionTitle, projectMonogram } from "../../../data/util/format.js";
-import { sessionRowReason } from "../../Spine/sessions.js";
+import { sessionRowReason } from "../../Sidebar/sessions.js";
 import { aggregateAttention, newResultSessions } from "./attention-model.js";
 import { inboxCards, inboxHealth, inboxHealthSig, inboxSig } from "../../../data/events.js"; // wake-on-event
 

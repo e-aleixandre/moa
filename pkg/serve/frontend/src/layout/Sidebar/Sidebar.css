@@ -1,0 +1,499 @@
+/* Sidebar — the other sessions, one piece for both densities.
+
+   GEOMETRY lives here (sizes, paddings, radii, the touch floors); the SURFACES
+   are re-pointed by tokens/ambient.css, the same division the rest of the
+   product uses. What was two sheets (Spine.css, SessionDrawer.css) is one, and
+   the density is a class on the root rather than a different component:
+
+     .sidebar            docked, 272px, the desktop column
+     .sidebar.is-phone   the same thing inside a 300px sheet that slides in
+
+   Every size below that changes with density changes for ONE reason: a thumb
+   needs 44px and a pointer does not. Nothing else forks. */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--mantle);
+  border-right: 1px solid var(--surface0);
+}
+.sidebar.is-phone {
+  border-right: 0;
+}
+
+/* ── 1. Head: the wordmark and the filter ─────────────────────────────── */
+
+.sidebar-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 12px 8px 20px;
+}
+
+.sidebar-wordmark {
+  flex: none;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+/* The field's surface, height and 16px floor come from the Field primitive;
+   this only says where it sits and how wide. */
+.sidebar .sidebar-search {
+  flex: 1;
+  min-width: 0;
+  padding-right: var(--space-2);
+}
+
+/* The keycap is the door to the palette, inside the field that filters. It is
+   a real control, so it has a real target: 28px optically, 44 via ::after. */
+.sidebar-jump {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--overlay1);
+  cursor: pointer;
+}
+.sidebar-jump::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+}
+.sidebar-jump .kbd {
+  font-size: var(--text-nano);
+  padding: 0 4px;
+  line-height: 1.5;
+  border-bottom-width: 1px;
+  color: inherit;
+}
+@media (hover: hover) {
+  .sidebar-jump:hover { color: var(--text); }
+}
+.sidebar-jump:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ── 2. List ──────────────────────────────────────────────────────────── */
+
+.sidebar-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  padding: 4px 8px 8px;
+}
+
+/* wake-on-event: the inbox occupies the same slot the sessions do, so the swap
+   changes what the list is about without moving the head or the foot. */
+.sidebar-list.is-inbox { padding: 0; }
+.sidebar-list.is-inbox .inbox { padding: var(--space-2) var(--space-4) var(--space-6); }
+
+/* How the list is ORDERED is a property of the list, so it sits in the list's
+   own head rather than in global settings or behind a "⋯": a hidden menu made
+   a mode you cannot see you are in, and there are only two options. Sunken
+   track, raised selection — the same grammar as the thinking stepper. */
+.sidebar-order {
+  display: flex;
+  gap: 2px;
+  margin: 0 0 10px;
+  padding: 2px;
+  background: var(--crust);
+  border: 1px solid var(--surface0);
+  border-radius: 8px;
+}
+.sidebar-order-b {
+  flex: 1;
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--subtext0);
+  font-family: var(--font);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-sm);
+  line-height: 1;
+  cursor: pointer;
+}
+.sidebar-order-b.is-on {
+  background: var(--surface0);
+  color: var(--text);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+.sidebar-order-b:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.sidebar.is-phone .sidebar-order-b {
+  min-height: 44px;
+  font-size: var(--text-base);
+}
+
+/* Rhythm: air between groups, none inside them. */
+.sidebar-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  border: 0;
+  background: none;
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+  text-align: left;
+}
+.sidebar-list > .sidebar-label:first-of-type { margin-top: 0; }
+.sidebar-order + .sidebar-label { margin-top: 0; }
+
+/* The count has TWO representations, because it answers two questions. Under
+   Active and Saved it sizes the group: a quiet number, a datum. Under Needs
+   attention it IS the call, so it becomes a solid yellow pill — the one mark
+   that group earns, since the rows below already carry their own colour and a
+   coloured band over coloured rows is how a list stops being scannable. */
+.sidebar-count {
+  flex: none;
+  font-family: var(--mono);
+  font-weight: var(--weight-normal);
+  letter-spacing: normal;
+  font-variant-numeric: tabular-nums;
+  color: var(--overlay0);
+}
+.sidebar-label.is-attention { align-items: center; color: var(--text); }
+.sidebar-count.is-attention {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--yellow);
+  color: var(--crust);
+  font-weight: var(--weight-semibold);
+}
+/* wake-on-event: an unread answer is not a fourth group — it is the third way
+   a session waits for you, so it rides under Needs attention with its own
+   mauve dot, which is what the product has always used for unread work. */
+
+.sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--space-2);
+}
+
+.sidebar-show-all {
+  min-height: 30px;
+  align-self: flex-start;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--mauve);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.sidebar.is-phone .sidebar-show-all { min-height: 44px; }
+@media (hover: hover) {
+  .sidebar-show-all:hover { background: var(--surface0); color: var(--text); }
+}
+.sidebar-show-all:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Empty list, and no filter typed: the one instruction the bottom button's
+   label cannot give, in the place the rows would have been. */
+.sidebar-empty-new {
+  position: relative;
+  align-self: flex-start;
+  margin: var(--space-2) var(--space-3);
+  padding: var(--space-2) 2px;
+  border: 0;
+  background: none;
+  color: var(--mauve);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.sidebar-empty-new::after { content: ""; position: absolute; inset: -8px; }
+
+/* Empty filter result — a quiet line where a row would be. */
+.sidebar-note {
+  display: block;
+  padding: 10px var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--overlay0);
+}
+
+/* ── Project headings ─────────────────────────────────────────────────────
+   The chevron collapses, the monogram identifies, the path locates, the count
+   sizes. Same row grammar as a session, one step quieter. */
+.sidebar-label.is-project {
+  align-items: center;
+  min-height: 36px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.sidebar.is-phone .sidebar-label.is-project { min-height: 44px; }
+@media (hover: hover) {
+  .sidebar-label.is-project:hover { background: color-mix(in srgb, var(--surface0) 55%, transparent); }
+}
+.sidebar-label.is-project:active { background: color-mix(in srgb, var(--surface0) 55%, transparent); }
+.sidebar-label.is-project:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.sidebar-project-chevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--overlay1);
+  transition: transform var(--duration) var(--ease);
+}
+.sidebar-project.is-open .sidebar-project-chevron { transform: rotate(90deg); }
+/* The heading's monogram is the row's, two steps down: same hue, same shape,
+   small enough that it labels the group instead of competing with the rows. */
+.sidebar-project-mono {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: hsl(var(--mono-h) 50% 60% / 0.16);
+  box-shadow: 0 0 0 1px hsl(var(--mono-h) 50% 65% / 0.18);
+  color: hsl(var(--mono-h) 65% 78%);
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-normal);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.sidebar-project-name {
+  flex: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-label.is-project .state-dot { flex: none; width: 7px; height: 7px; }
+.sidebar-project-path {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--overlay0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-project + .sidebar-project { margin-top: var(--space-2); }
+
+/* ── Rows ─────────────────────────────────────────────────────────────────
+   A queue of things to do, not a stack of cards. Two lines: title with its
+   state and age, then WHY the session wants you — or where it lives, when it
+   wants nothing. Sizes belong to SessionRow; the sidebar only says how the
+   surface behaves. */
+.sidebar-session { position: relative; }
+.sidebar-session .session-row { width: 100%; }
+
+.sidebar .session-row.variant-card {
+  background: transparent;
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+@media (hover: hover) {
+  .sidebar .session-row.variant-card:hover {
+    background: var(--surface0);
+    border-color: transparent;
+  }
+}
+.sidebar .session-row.variant-card.on {
+  background: var(--surface0);
+  border-color: transparent;
+  box-shadow: none;
+}
+.sidebar .session-row.variant-card .r2 { display: none; }
+.sidebar .session-row.variant-card.needs-yellow,
+.sidebar .session-row.variant-card.needs-red { background: transparent; }
+.sidebar .session-row.variant-card.needs-yellow.on,
+.sidebar .session-row.variant-card.needs-red.on { background: var(--surface0); }
+@media (hover: hover) {
+  .sidebar .session-row.variant-card.needs-yellow:hover,
+  .sidebar .session-row.variant-card.needs-red:hover { background: var(--surface0); }
+}
+.sidebar .session-row.variant-card.needs-yellow .r1,
+.sidebar .session-row.variant-card.needs-red .r1 { color: var(--text); }
+
+/* ── The ⋯ per row ────────────────────────────────────────────────────────
+   With a pointer it appears on hover and the age steps aside for it, so the
+   row keeps its resting geometry instead of taxing every row with a permanent
+   36px reserve. With a thumb there is no hover, so the button is always there
+   and the space is reserved for good. Matches the variant's own selector
+   strength — a plain `.sidebar .session-row-hit` loses to
+   `.session-row.variant-card .session-row-hit` and does nothing. */
+.sidebar .session-row.variant-card .session-row-hit {
+  padding: 7px 12px;
+  min-height: 52px;
+}
+.sidebar:not(.is-phone) .session-card-menu {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration) var(--ease);
+}
+.sidebar:not(.is-phone) .sidebar-session:focus-within .session-card-menu {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: hover) {
+  .sidebar:not(.is-phone) .sidebar-session:hover .session-card-menu {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .sidebar:not(.is-phone) .sidebar-session:hover .session-row.variant-card .when {
+    opacity: 0;
+  }
+}
+.sidebar:not(.is-phone) .sidebar-session:focus-within .session-row.variant-card .when {
+  opacity: 0;
+}
+.sidebar.is-phone .session-row.variant-card .session-row-hit {
+  padding: 9px 40px 9px 12px;
+  min-height: 56px;
+}
+
+/* ── 3. New session ──────────────────────────────────────────────────────
+   It anchors the bottom, where the thumb is and where the empty half of the
+   column was. It is the one action, so it gets the width — and the word, which
+   a 28px "+" in the head never had room for. The accent is contained: the list
+   is the point of the sidebar, so this reads as available, not as a beacon. */
+.sidebar-new {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  margin: 4px 12px 8px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--mauve-dim);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--mauve) 22%, transparent);
+  color: var(--mauve);
+  font-family: var(--font);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), transform var(--duration) var(--ease);
+}
+.sidebar.is-phone .sidebar-new { height: 48px; margin: 4px 12px 10px; }
+@media (hover: hover) {
+  .sidebar-new:hover { background: color-mix(in srgb, var(--mauve) 22%, transparent); }
+}
+.sidebar-new:active { transform: translateY(1px); }
+.sidebar-new:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ── 4. Foot: the things about the APP ───────────────────────────────────
+   The inbox, the build and the global settings. Deliberately not the session
+   panel's business: these outlive every session. */
+.sidebar-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 20px 12px 8px;
+  font-size: var(--text-base);
+  color: var(--overlay1);
+}
+.sidebar-foot-spacer { flex: 1; }
+
+.sidebar-inbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--subtext0);
+  font-family: var(--font);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.sidebar.is-phone .sidebar-inbox { height: 44px; }
+.sidebar-inbox svg { flex: none; color: var(--overlay1); }
+@media (hover: hover) {
+  .sidebar-inbox:hover { background: var(--surface0); color: var(--text); }
+}
+.sidebar-inbox:active { background: var(--surface0); color: var(--text); }
+.sidebar-inbox.is-on { background: var(--surface0); color: var(--text); }
+.sidebar-inbox:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+/* The count is yellow because the inbox IS "needs you": state, not accent. */
+.sidebar-inbox-n {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-md);
+  background: var(--yellow);
+  color: var(--crust);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: 18px;
+  text-align: center;
+}
+
+.sidebar-ver {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  color: var(--overlay0);
+  white-space: nowrap;
+  text-decoration: none;
+}
+a.sidebar-ver-update {
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 14%, var(--surface0));
+}
+@media (hover: hover) {
+  a.sidebar-ver-update:hover { background: color-mix(in srgb, var(--yellow) 22%, var(--surface0)); }
+}
+a.sidebar-ver-update:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.sidebar-foot > .icon-button { flex: none; }
+.sidebar.is-phone .sidebar-foot > .icon-button { width: 44px; height: 44px; }

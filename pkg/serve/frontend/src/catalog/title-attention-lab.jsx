@@ -155,8 +155,6 @@ function DrawerSpecimen({ variant, width, replay }) {
           newResults={DRAWER_NEW_RESULTS}
           active={DRAWER_ACTIVE}
           saved={[]}
-          activeCount={3}
-          savedCount={1}
           projects={[]}
           onSelect={noop}
           onCreate={noop}

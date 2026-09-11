@@ -26,7 +26,8 @@ const { setState, store } = await import('../../../data/store.js');
 const { artifactsSlice } = await import('../../../data/artifacts.js');
 const { ARTIFACTS_CLOSED } = await import('../../../data/artifacts-model.js');
 const { ConversationScreen } = await import('../../ConversationScreen/ConversationScreen.jsx');
-const { Spine } = await import('../../Spine/Spine.jsx');
+const { Sidebar } = await import('../../Sidebar/Sidebar.jsx');
+const { SessionDrawer } = await import('../SessionDrawer/SessionDrawer.jsx');
 
 function componentNode(node, name) {
   if (Array.isArray(node)) {
@@ -194,13 +195,26 @@ test('drawer cards suppress paths when their second line is a brief or Needs you
   const tree = MobileConversationScreen({});
   const drawer = componentNode(tree, 'SessionDrawer');
   const drawerTree = drawer.type({ ...drawer.props, open: true, active: [{
-    id: 'permission', title: 'Deploy', state: 'permission', last: 'Needs you', path: '/repo',
-  }], activeCount: 1 });
-  const card = componentNode(drawerTree, 'SessionDrawerCard');
-  const cardTree = card.type(card.props);
-  const row = componentNode(cardTree, 'SessionRow');
+    id: 'permission', title: 'Deploy', state: 'permission', brief: 'Needs you', path: '/repo',
+  }] });
+  const sidebar = componentNode(drawerTree, 'Sidebar');
+  const row = componentNode(sidebar.type(sidebar.props), 'SessionRow');
   expect(row.props.brief).toBe('Needs you');
   expect(row.props.path).toBeUndefined();
+});
+
+test('a row with nothing to say keeps its path: the second line is not wasted', () => {
+  // The inverse of the case above, so the assertion above cannot pass by the
+  // row simply never having a path.
+  const tree = MobileConversationScreen({});
+  const drawer = componentNode(tree, 'SessionDrawer');
+  const drawerTree = drawer.type({ ...drawer.props, open: true, active: [{
+    id: 'quiet', title: 'Quiet', state: 'idle', path: '~/repo',
+  }] });
+  const sidebar = componentNode(drawerTree, 'Sidebar');
+  const row = componentNode(sidebar.type(sidebar.props), 'SessionRow');
+  expect(row.props.brief).toBeFalsy();
+  expect(row.props.path).toBe('~/repo');
 });
 
 test('the closed mobile screen mounts its sheet and an opened drawer without render-time errors', () => {
@@ -216,28 +230,70 @@ test('the closed mobile screen mounts its sheet and an opened drawer without ren
   const session = { id: 's1', title: 'Session', state: 'idle', subagents: {} };
   let drawerTree;
   expect(() => {
-    drawerTree = drawer.type({ ...drawer.props, open: true, active: [session], activeCount: 1 });
+    drawerTree = drawer.type({ ...drawer.props, open: true, active: [session] });
   }).not.toThrow();
-  const groupMenu = componentNode(drawerTree, 'DrawerGroupMenu');
-  const card = componentNode(drawerTree, 'SessionDrawerCard');
-  expect(() => groupMenu.type(groupMenu.props)).not.toThrow();
-  const cardTree = card.type(card.props);
-  const cardMenu = componentNode(cardTree, 'SessionCardMenu');
+  const sidebar = componentNode(drawerTree, 'Sidebar');
+  let sidebarTree;
+  expect(() => { sidebarTree = sidebar.type(sidebar.props); }).not.toThrow();
+  const cardMenu = componentNode(sidebarTree, 'SessionCardMenu');
   expect(() => cardMenu.type(cardMenu.props)).not.toThrow();
-  expect(layoutEffects).toBeGreaterThanOrEqual(3);
+  expect(layoutEffects).toBeGreaterThanOrEqual(1);
 });
 
-test('desktop session cards use the shared lifecycle menu and forward its actions', () => {
+test('both densities mount the SAME sidebar, and only the frame differs', () => {
+  // The point of the unification: the phone does not get its own list any
+  // more. If someone re-forks it, this fails — the drawer would stop having a
+  // <Sidebar/> inside, or it would mount one that is not in phone density.
+  const screen = MobileConversationScreen({});
+  const drawer = componentNode(screen, 'SessionDrawer');
+  const drawerTree = drawer.type({ ...drawer.props, open: true, active: [] });
+  const phoneSidebar = componentNode(drawerTree, 'Sidebar');
+  expect(phoneSidebar).toBeTruthy();
+  expect(phoneSidebar.type).toBe(Sidebar);
+  expect(phoneSidebar.props.density).toBe('phone');
+});
+
+test('New session on a phone goes to the working-directory screen, not straight to a session', () => {
+  // The claim that was once made without opening the file, as a test: the
+  // phone's New session opens NewSessionView (choose where it runs) and does
+  // NOT call onCreate by itself.
+  const onCreate = () => { throw new Error('a session was created without a folder being chosen'); };
+  let step = 'list';
+  const drawerTree = SessionDrawer({
+    open: true, step, onCreate, active: [], saved: [], projects: [{ cwd: '/repo' }],
+  });
+  const sidebar = componentNode(drawerTree, 'Sidebar');
+  expect(sidebar).toBeTruthy();
+  expect(typeof sidebar.props.onNewSession).toBe('function');
+
+  // And the other way in — the palette and the empty state open the drawer on
+  // step "new", which lands on that same screen rather than on the list.
+  step = 'new';
+  const onNewTree = SessionDrawer({
+    open: true, step, onCreate, active: [], saved: [], projects: [{ cwd: '/repo' }],
+  });
+  expect(componentNode(onNewTree, 'NewSessionView')).toBeTruthy();
+  expect(componentNode(onNewTree, 'Sidebar')).toBeNull();
+});
+
+test('the sidebar filter and the command palette are two different jobs', () => {
+  // The owner's decision: the field in the head FILTERS this list, ⌘K JUMPS.
+  // On the desktop both exist; on a phone there is no keycap, because there is
+  // no keyboard — but the filter is there in both.
+  const desktop = Sidebar({ active: [], saved: [], onSearch: () => {} });
+  const phone = Sidebar({ density: 'phone', active: [], saved: [], onSearch: () => {} });
+  const field = (tree) => componentNode(tree, 'Field');
+  expect(field(desktop)).toBeTruthy();
+  expect(field(phone)).toBeTruthy();
+  // The keycap rides in the field's trailing slot, and only with a keyboard.
+  expect(field(desktop).props.trailing).toBeTruthy();
+  expect(field(phone).props.trailing).toBeFalsy();
+});
+
+test('session lifecycle menus are the shared ones, in both densities', () => {
   const onCloseSession = () => {};
   const onReopenSession = () => {};
   const onDeleteSession = () => {};
-  const tree = Spine({
-    activeSessions: [{ id: 'open', title: 'Open', state: 'idle' }],
-    savedSessions: [{ id: 'saved', title: 'Saved', saved: true }],
-    onCloseSession,
-    onReopenSession,
-    onDeleteSession,
-  });
   const menus = [];
   const collectMenus = (node) => {
     if (Array.isArray(node)) return node.forEach(collectMenus);
@@ -245,14 +301,22 @@ test('desktop session cards use the shared lifecycle menu and forward its action
     if (node.type?.name === 'SessionCardMenu') menus.push(node);
     collectMenus(node.props?.children);
   };
-  collectMenus(tree);
+  collectMenus(Sidebar({
+    active: [{ id: 'open', title: 'Open', state: 'idle' }],
+    saved: [{ id: 'saved', title: 'Saved', saved: true }],
+    onCloseSession,
+    onReopenSession,
+    onDeleteSession,
+  }));
 
   expect(menus).toHaveLength(2);
   expect(menus[0].props).toMatchObject({
     onClose: onCloseSession,
     onReopen: onReopenSession,
     onDelete: onDeleteSession,
-    scrollContainerSelector: '.spine-sessions',
+    // One list, one scroller: the menu flips upwards against the same element
+    // in both densities.
+    scrollContainerSelector: '.sidebar-list',
   });
 });
 
@@ -363,11 +427,14 @@ test('the mobile inbox door lives in the drawer and opens after the drawer leave
     drawer.props.onClosed();
     expect(store.get().inboxOpen).toBe(true);
 
-    const head = componentNode(
-      drawer.type({ ...drawer.props, open: true }),
-      'InboxButton',
-    );
-    expect(head.props.count).toBe(1);
+    // The door itself moved from the drawer's head to the sidebar's foot when
+    // the two lists became one component -- which is where the catalogue puts
+    // it, beside the version. What this test defends is the handoff and the
+    // count, not the corner they live in.
+    const open = drawer.type({ ...drawer.props, open: true });
+    const foot = componentNode(open, 'Sidebar');
+    expect(foot.props.inboxCount).toBe(1);
+    expect(foot.props.inboxVisible).toBe(true);
   } finally {
     setState(previous);
   }

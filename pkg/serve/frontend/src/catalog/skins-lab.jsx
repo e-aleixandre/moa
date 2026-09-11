@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 import { AppWindow } from "lucide-preact";
-import { Spine } from "../layout/Spine/Spine.jsx";
+import { Sidebar } from "../layout/Sidebar/Sidebar.jsx";
 import { ChatHead } from "../layout/ChatHead/ChatHead.jsx";
 import { Composer } from "../layout/Composer/Composer.jsx";
 import { StatusStrip } from "../layout/StatusStrip/StatusStrip.jsx";
@@ -9,7 +9,7 @@ import { MobileChrome } from "../layout/mobile/MobileChrome/MobileChrome.jsx";
 import { SessionDrawer } from "../layout/mobile/SessionDrawer/SessionDrawer.jsx";
 import { UserWaypoint, AssistantDocument, ActivityLedger } from "../components/index.js";
 import { drawerSessions, drawerProjects } from "../layout/mobile/MobileConversationScreen/chrome.js";
-import { spineSessions } from "../layout/Spine/sessions.js";
+import { spineSessions } from "../layout/Sidebar/sessions.js";
 import { sessionTitle, shortPath } from "../data/util/format.js";
 import { ACTIVE_ID, REDESIGN_SESSIONS } from "./redesign-fixtures.js";
 import "../layout/mobile/MobileConversationScreen/MobileConversationScreen.css";
@@ -18,7 +18,7 @@ import "./skins-lab.css";
 
 // skins-lab — the STYLE axis only, with the screen architecture frozen.
 //
-// Every frame here is built from the production components (Spine, ChatHead,
+// Every frame here is built from the production components (Sidebar, ChatHead,
 // Composer, StatusStrip, LiveBar, SessionDrawer, MobileChrome, the stream
 // blocks) fed by the redesign fixtures through the real selectors. A skin is a
 // class on the frame (.sk-<key>) and a block of CSS overrides in
@@ -68,7 +68,7 @@ const RUN_SESSION = {
 };
 
 const LEDGER_ROWS = [
-  { id: "l1", tool: "read", arg: { text: "src/layout/Spine/Spine.css" }, out: "312 lines", status: "ok" },
+  { id: "l1", tool: "read", arg: { text: "src/layout/Sidebar/Sidebar.css" }, out: "312 lines", status: "ok" },
   { id: "l2", tool: "grep", arg: { text: '"variant-card" — src/', detail: "5 files" }, out: "23 matches", status: "ok" },
   { id: "l3", tool: "bash", arg: { text: "npm run catalog", detail: "PORT=7322" }, out: "listening", status: "ok" },
   { id: "l4", tool: "write", arg: { text: "src/catalog/skins-lab.css" }, live: true, startedAt: Date.now() - 6000 },
@@ -153,8 +153,7 @@ export function SkinPhone({ skin, drawer = false, variant = "" }) {
         newResults={DRAWER.newResults}
         active={DRAWER.active}
         saved={DRAWER.saved}
-        activeCount={DRAWER.activeCount}
-        savedCount={DRAWER.savedCount}
+        activeId={ACTIVE_ID}
         projects={PROJECTS}
         inboxVisible
         inboxCount={INBOX_COUNT}
@@ -175,12 +174,14 @@ export function SkinDesktop({ skin, variant = "" }) {
   return (
     <div class={`sk-desk sk-${skin}${variant ? ` ${variant}` : ""}`}>
       <div class="sk-aurora" aria-hidden="true" />
-      <Spine
+      <Sidebar
         version={VERSION}
-        activeSessions={SPINE.active}
-        savedSessions={SPINE.saved}
+        active={SPINE.active}
+        saved={SPINE.saved}
         activeId={ACTIVE_ID}
         inbox={INBOX}
+        inboxVisible
+        inboxCount={INBOX_COUNT}
         onSelectSession={noop}
         onNewSession={noop}
         onSearch={noop}
@@ -189,7 +190,7 @@ export function SkinDesktop({ skin, variant = "" }) {
         onReopenSession={noop}
         onDeleteSession={noop}
         onGroupByProject={noop}
-        onToggleInbox={noop}
+        onInbox={noop}
       />
       <div class="conversation-main sk-main">
         <ChatHead title={ACTIVE_TITLE} path={ACTIVE_PATH} onGridToggle={noop} onPreviewToggle={noop} />
@@ -251,7 +252,7 @@ function SkinRow({ skin }) {
           <SkinPhone skin={skin.key} variant={variant} />
         </figure>
         <figure class="sk-figure" data-density="desktop">
-          <figcaption class="sk-caption">Escritorio · 940×640 · Spine + conversación + composer</figcaption>
+          <figcaption class="sk-caption">Escritorio · 940×640 · Sidebar + conversación + composer</figcaption>
           <SkinDesktop skin={skin.key} variant={variant} />
         </figure>
       </div>
@@ -266,7 +267,7 @@ export function SkinsLab() {
         <h1>moa studio · <em>ambient</em></h1>
         <p>
           La dirección de estilo elegida, sobre la arquitectura actual: son los componentes de
-          producción (Spine, SessionDrawer, ChatHead, Composer, StatusStrip, LiveBar, los bloques
+          producción (Sidebar, SessionDrawer, ChatHead, Composer, StatusStrip, LiveBar, los bloques
           del stream) con los mismos datos ({DRAWER.activeCount} abiertas · {DRAWER.savedCount}{" "}
           guardadas, seis estados) y una hoja de overrides con ámbito. Nada cambia de sitio.
           El estilo actual se ve en <a href="?view=desktop">Desktop</a> y{" "}

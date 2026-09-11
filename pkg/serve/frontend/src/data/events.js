@@ -16,7 +16,7 @@ import { openSession } from './tile-actions.js';
 import { addToast, removeToast } from './notifications.js';
 import { modelCodename, projectKey, projectLabel, sessionTitle } from './util/format.js';
 
-// relAge is the session list's clock, kept identical to Spine/sessions.js and
+// relAge is the session list's clock, kept identical to Sidebar/sessions.js and
 // the mobile chrome's: an event's age must not read like a different clock.
 function relAge(at) {
   const ms = eventCreatedAt(at);

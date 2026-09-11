@@ -2,7 +2,7 @@ import { focusedSessionId } from "../../data/selectors.js";
 import { sessionDisplayDotState, sessionTitle, shortPath } from "../../data/util/format.js";
 import { attentionKind } from "../../data/util/project-sessions.js";
 import { allTileIds, findTile } from "../../data/tileTree.js";
-import { inboxCards, inboxHealth, inboxHealthSig, inboxSig } from "../../data/events.js"; // wake-on-event
+import { inboxCards, inboxHealth, inboxHealthSig, inboxPendingCount, inboxSig } from "../../data/events.js"; // wake-on-event
 
 function relAge(updated) {
   if (!updated) return "";
@@ -119,8 +119,10 @@ function spineListSig(list) {
 function desktopChromeEqual(a, b) {
   return a.activeId === b.activeId
     && a.groupByProject === b.groupByProject
+    && a.drawerCollapsed === b.drawerCollapsed
     && a.soundEnabled === b.soundEnabled
     && a.inboxOpen === b.inboxOpen // wake-on-event
+    && a.inboxPending === b.inboxPending // wake-on-event
     && inboxSig(a.inbox) === inboxSig(b.inbox) // wake-on-event
     && inboxHealthSig(a.inboxHealth) === inboxHealthSig(b.inboxHealth) // wake-on-event
     && spineListSig(a.active) === spineListSig(b.active)
@@ -134,17 +136,26 @@ export function selectDesktopChrome(state) {
   const inGrid = state.view === "grid";
   const paneOf = inGrid ? paneBadges(state.tileTree) : undefined;
   const { active, saved } = spineSessions(state.sessions, paneOf);
+  const inbox = inboxCards(state.sessions, state.events); // wake-on-event
   const next = {
     active,
     saved,
-    inbox: inboxCards(state.sessions, state.events), // wake-on-event
+    inbox,
     // Whether that list can be believed. It travels WITH the list: a chrome
     // holding the rows but not their truthfulness is exactly what let the
     // surface say "Nothing waiting." after a load that never succeeded.
     inboxHealth: inboxHealth(state), // wake-on-event
     inboxOpen: !!state.inboxOpen, // wake-on-event
+    // The count the foot's door shows. It travels with the list for the same
+    // reason the health does: a chrome that held the rows but not their count
+    // would make the door and the list disagree.
+    inboxPending: inboxPendingCount(inbox), // wake-on-event
     activeId: inGrid ? focusedTileSessionId(state) : focusedSessionId(state),
     groupByProject: !!state.groupByProject,
+    // The folder accordion is one persisted preference, not one per surface:
+    // collapsing a folder on the phone and finding it open on the desktop was
+    // the same list disagreeing with itself.
+    drawerCollapsed: state.drawerCollapsed,
     soundEnabled: !!state.soundEnabled,
   };
   const prev = selectDesktopChrome._prev;

@@ -197,77 +197,56 @@
 [data-ambient="on"] .state-dot.unseen { box-shadow: 0 0 0 3px color-mix(in srgb, var(--mauve) 24%, transparent); }
 [data-ambient="on"] .state-dot.saved { box-shadow: none; opacity: 0.7; }
 
-/* ── Desktop: the Spine ─────────────────────────────────────────────────── */
-[data-ambient="on"] .spine {
+/* ── The sidebar, both densities ────────────────────────────────────────────
+   One component, so one block of Ambient rules. What used to be here was two
+   (.spine and .sdrawer), which is how the desktop ended up with a tonal ladder
+   the phone never got. */
+[data-ambient="on"] .sidebar {
   background: rgba(12, 12, 22, 0.34);
   backdrop-filter: blur(20px) saturate(1.2);
   -webkit-backdrop-filter: blur(20px) saturate(1.2);
   border-right: 0;
 }
-[data-ambient="on"] .spine .wordmark {
+/* Inside the phone's sheet the glass is already the sheet's, so the column
+   stops painting a second one over it. */
+[data-ambient="on"] .sdrawer .sidebar {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+[data-ambient="on"] .sidebar-wordmark {
   letter-spacing: -0.01em;
   color: var(--amb-text);
 }
 /* Age and path are the row's quietest data, at the bottom of the text ladder:
    the catalog's t4, not t3. They are there to be found, not read. */
-[data-ambient="on"] .spine .session-row.variant-card .when,
-[data-ambient="on"] .spine .session-row.variant-card .path { color: var(--amb-text-4); }
-[data-ambient="on"] .spine .spine-jump,
-[data-ambient="on"] .spine .spine-new,
-[data-ambient="on"] .spine .inbox-btn {
-  border-radius: var(--amb-r-ctl);
-  color: var(--amb-text-3);
-}
+[data-ambient="on"] .sidebar .session-row.variant-card .when,
+[data-ambient="on"] .sidebar .session-row.variant-card .path { color: var(--amb-text-4); }
 
-/* ── Mobile: drawer and veil ────────────────────────────────────────────────
-   The veil does NOT blur, at any dose. Blurring it turned the composer's send
-   button into a bright smear under the open drawer, and what sits behind the
-   drawer is a live transcript: anything legible through the veil also moves
-   while you read the list. Dimming is both calmer and one less full-viewport
-   backdrop-filter, which is the expensive kind. */
-[data-ambient="on"] .sdrawer-veil {
-  /* 0.90, not the 0.72 the lab used. The drawer does not fill the screen --
-     there are ~50px above it and ~155px below where only the veil covers the
-     transcript -- and at 0.72 the text underneath stayed readable in those
-     bands. The lab hid this: it sat over a short frozen mock, so the uncovered
-     strips happened to be empty. */
-  background: rgba(6, 6, 12, 0.90);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-[data-ambient="on"] .sdrawer {
-  background: var(--amb-glass);
-  backdrop-filter: var(--amb-blur);
-  -webkit-backdrop-filter: var(--amb-blur);
-  border: 0;
-  /* 24px against the app's 18px: the radius family is one of the few things
-     that reads as a different design at a glance on a phone. */
-  border-radius: var(--amb-r-panel);
-  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 30px 70px rgba(0, 0, 0, 0.55);
-}
-
-/* Rows: no dividers, no card borders. Ambient tells surfaces apart by
-   luminosity, so a selected row is a lighter plane rather than an outlined
-   box, and the separators go entirely -- the gap does that work. */
-[data-ambient="on"] .sdrawer .session-row.variant-card {
-  border: 0;
-  box-shadow: none;
-}
-[data-ambient="on"] .sdrawer .session-row.variant-card.is-active,
-[data-ambient="on"] .sdrawer .session-row.variant-card[aria-current="true"] {
-  background: var(--amb-on);
-}
-[data-ambient="on"] .sdrawer-foot {
+/* The filter is a well cut into the sheet: recessed, not a bordered box drawn
+   on top of it. Field's own sizing is untouched — this only changes surface. */
+[data-ambient="on"] .sidebar-search.field-inset {
+  background: var(--amb-well);
   border-color: transparent;
 }
+/* The order segmented control: sunken track, raised selection — the same
+   grammar as the thinking stepper, so the list reads as one product. */
+[data-ambient="on"] .sidebar-order {
+  background: var(--amb-canvas);
+  border-color: var(--amb-line);
+}
+[data-ambient="on"] .sidebar-order-b { color: var(--amb-text-3); }
+[data-ambient="on"] .sidebar-order-b.is-on {
+  background: var(--amb-raised);
+  color: var(--amb-text);
+}
 
-/* Section labels (ACTIVE / SAVED) and project names: the app sets them in
-   mono, which is the loudest "terminal" signal left on the screen. Ambient is
-   not a terminal, so the labels become sans -- paths stay mono, because paths
-   are code. */
-[data-ambient="on"] .sdrawer-group,
-[data-ambient="on"] .sdrawer-project-name,
-[data-ambient="on"] .spine .spine-label {
+/* Section headings (NEEDS ATTENTION / ACTIVE / SAVED) and folder names: the app
+   set them in mono, which is the loudest "terminal" signal left on screen.
+   Ambient is not a terminal, so the labels become sans — paths stay mono,
+   because paths are code. */
+[data-ambient="on"] .sidebar-label,
+[data-ambient="on"] .sidebar-project-name {
   font-family: var(--font);
   font-weight: var(--weight-semibold);
   letter-spacing: 0.08em;
@@ -276,30 +255,83 @@
 /* Needs attention is the one heading that is not background: it is the group
    you are meant to land on, so it comes up to full text while the others stay
    at t4. Its pill keeps the yellow — that is the mark. */
-[data-ambient="on"] .spine .spine-label.is-attention { color: var(--amb-text); }
-[data-ambient="on"] .spine .spine-group-n {
-  font-family: var(--mono);
+[data-ambient="on"] .sidebar-label.is-attention { color: var(--amb-text); }
+[data-ambient="on"] .sidebar-count { color: var(--amb-text-4); }
+[data-ambient="on"] .sidebar-count.is-attention { color: var(--amb-canvas); }
+
+/* Rows: no dividers, no card borders. Ambient tells surfaces apart by
+   luminosity, so the current row is a lighter plane rather than an outlined
+   box, and the separators go entirely — the gap does that work. */
+[data-ambient="on"] .sidebar .session-row.variant-card { box-shadow: none; }
+[data-ambient="on"] .sidebar .session-row.variant-card.on { background: var(--amb-on); }
+
+/* New session: the contained accent button. The list is the point of the
+   sidebar, so this reads as available, not as a beacon. */
+[data-ambient="on"] .sidebar-new { border-radius: var(--amb-r-ctl); }
+
+/* Foot: the remaining outlined controls become the same soft wells the rest of
+   the chrome uses. */
+[data-ambient="on"] .sidebar-inbox,
+[data-ambient="on"] .sidebar-show-all,
+[data-ambient="on"] .sidebar-jump,
+[data-ambient="on"] .session-card-menu .icon-button {
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  color: var(--amb-text-3);
+}
+[data-ambient="on"] .sidebar-ver {
+  font-family: var(--font);
   color: var(--amb-text-4);
 }
-[data-ambient="on"] .spine .spine-group-n.is-attention { color: var(--amb-canvas); }
 
-/* The head reads as a title rather than a toolbar label. */
+/* ── Mobile: the sheet and its veil ─────────────────────────────────────────
+   The veil does NOT blur, at any dose. Blurring it turned the composer's send
+   button into a bright smear under the open drawer, and what sits behind is a
+   live transcript: anything legible through the veil also moves while you read
+   the list. Dimming is calmer and one less full-viewport backdrop-filter.
+
+   0.55 and not the 0.90 the old dropdown needed: that number existed because a
+   390px panel left uncovered bands of transcript above and below it. A 300px
+   sheet leaves a whole COLUMN of conversation showing on purpose — that is how
+   you know there is something behind it — so the veil dims rather than hides. */
+[data-ambient="on"] .sdrawer-veil {
+  background: rgba(6, 6, 12, 0.55);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+[data-ambient="on"] .sdrawer {
+  background: var(--amb-glass);
+  backdrop-filter: var(--amb-blur);
+  -webkit-backdrop-filter: var(--amb-blur);
+  border: 0;
+  /* Only the trailing corners: the sheet is flush with the left edge it came
+     out of. 24px against the app's 18px — the radius family is one of the few
+     things that reads as a different design at a glance on a phone. */
+  border-radius: 0 var(--amb-r-panel) var(--amb-r-panel) 0;
+  box-shadow: inset -1px 0 0 var(--amb-on-edge), 16px 0 48px rgba(0, 0, 0, 0.55);
+}
+[data-ambient="on"] .sdrawer-foot {
+  border-color: transparent;
+}
+/* The create screen's head reads as a title rather than a toolbar label. */
 [data-ambient="on"] .sdrawer-head h2 {
   font-size: 20px;
   font-weight: var(--weight-semibold);
   letter-spacing: -0.01em;
 }
-[data-ambient="on"] .sdrawer-head .sdrawer-count {
+[data-ambient="on"] .sdrawer-group {
   font-family: var(--font);
   color: var(--amb-text-4);
 }
-
-/* The search field is a well, not a bordered box: recessed into the drawer
-   rather than drawn on top of it. Field's own sizing is untouched -- this only
-   changes the surface. */
 [data-ambient="on"] .sdrawer-search.field-inset {
   background: var(--amb-well);
   border-color: transparent;
+}
+[data-ambient="on"] .sdrawer-back,
+[data-ambient="on"] .sdnew-dir {
+  border: 0;
+  border-radius: var(--amb-r-ctl);
+  color: var(--amb-text-3);
 }
 
 /* ── The desktop head ─────────────────────────────────────────────────────
@@ -357,23 +389,6 @@
 [data-ambient="on"] .mtchip.is-open .mtchip-chev { color: var(--amb-text-2); }
 /* the attention dot rings against the canvas, not against the old --base */
 [data-ambient="on"] .mcap-badge { border-color: var(--amb-canvas); }
-
-/* Drawer chrome: the remaining outlined controls. */
-[data-ambient="on"] .sdrawer-new,
-[data-ambient="on"] .sdrawer-more,
-[data-ambient="on"] .sdrawer-settings,
-[data-ambient="on"] .sdrawer-show-all,
-[data-ambient="on"] .session-card-menu .icon-button {
-  border: 0;
-  background: var(--amb-hi);
-  border-radius: var(--amb-r-ctl);
-  color: var(--amb-text-3);
-}
-[data-ambient="on"] .sdrawer-ver,
-[data-ambient="on"] .spine .ver {
-  font-family: var(--font);
-  color: var(--amb-text-4);
-}
 
 /* ── The composer and its dock ─────────────────────────────────────────────
    The bar you touch most, and the last opaque box floating on the canvas: a

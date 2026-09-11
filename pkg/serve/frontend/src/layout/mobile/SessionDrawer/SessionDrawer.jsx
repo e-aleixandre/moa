@@ -1,139 +1,42 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import { Plus, MoreHorizontal, Settings, Search, Check, ChevronRight } from "lucide-preact";
-import { InboxButton, SessionCardMenu, SessionRow } from "../../../components/index.js"; // wake-on-event: InboxButton
-import { Field } from "../../../primitives/index.js";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { Sidebar } from "../../Sidebar/Sidebar.jsx";
 import { openOverlay } from "../../../data/overlay-history.js";
-import { filterProjectSections, groupProjectSessions, hiddenProjectSavedCount, previewSavedSessions, projectCollapsed, sessionSearchMatch, visibleProjectSessions } from "../../../data/util/project-sessions.js";
-import { useMenuKeyboard } from "../../../hooks/useMenuKeyboard.js";
 import { NewSessionView } from "./NewSessionView.jsx";
 import "./SessionDrawer.css";
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-// DrawerVersion — the build version in the drawer footer, mirroring the desktop
-// Spine's SpineVersion: plain "vX.Y.Z" normally, or a link to the latest release
-// when the server's update check reports one available. The mobile app had no
-// version surface after the redesign; this is it (gap #3 decision: it lives on
-// the drawer, next to Settings).
-function DrawerVersion({ version }) {
-  if (!version?.current) return null;
-  // current/latest already arrive v-prefixed from the server (release
-  // DisplayVersion / cache), so use them verbatim — don't add another "v".
-  const current = version.current;
-  if (version.update_available && version.latest) {
-    return (
-      <a
-        class="sdrawer-ver sdrawer-ver-update"
-        href="https://github.com/e-aleixandre/moa/releases/latest"
-        target="_blank"
-        rel="noreferrer"
-        title={`Update available: ${version.latest}`}
-      >
-        {current} ↑ {version.latest}
-      </a>
-    );
-  }
-  return (
-    <span class="sdrawer-ver" title="moa version">
-      {current}
-    </span>
-  );
-}
-
-// SessionDrawerCard — one session in the list. The card itself is the SHARED
-// SessionRow in its `card` variant — the very same component the desktop Spine
-// lists sessions with, so the two surfaces can't drift apart. The mobile-only
-// part is the ⋯ overflow laid over its top-right corner; SessionRow's own
-// `onClose` X is deliberately not used, because lifecycle here is a menu
-// (close/reopen/delete), not a single dismiss.
-function SessionDrawerCard({ session, hidePath = false, onSelect, onCloseSession, onReopenSession, onDeleteSession }) {
-  const { id, title, state, when, last, lastTone, mono, path, unseen, origin } = session;
-  return (
-    <div class="sdcard-slot">
-      <SessionRow
-        variant="card"
-        title={title}
-        state={state}
-        active={session.active}
-        unseen={unseen}
-        when={when}
-        origin={origin}
-        brief={last}
-        briefTone={lastTone}
-        mono={mono}
-        path={hidePath || last ? undefined : path}
-        onClick={() => onSelect?.(id)}
-      />
-      <SessionCardMenu
-        session={session}
-        onClose={onCloseSession}
-        onReopen={onReopenSession}
-        onDelete={onDeleteSession}
-        scrollContainerSelector=".sdrawer-list"
-      />
-    </div>
-  );
-}
-
-function DrawerGroupMenu({ groupByProject, onChange }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  const menuRef = useRef(null);
-  const triggerRef = useRef(null);
-  const [dropUp, setDropUp] = useState(false);
-  const { onMenuKeyDown, closeMenu } = useMenuKeyboard(open, setOpen, triggerRef, menuRef);
-  useEffect(() => {
-    if (!open) return;
-    const onDocDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDocDown);
-    return () => { document.removeEventListener("mousedown", onDocDown); };
-  }, [open]);
-  useLayoutEffect(() => {
-    if (!open || !ref.current || !menuRef.current) return;
-    const drawer = ref.current.closest(".sdrawer");
-    setDropUp(menuRef.current.offsetHeight + 8 > drawer.getBoundingClientRect().bottom - ref.current.getBoundingClientRect().bottom);
-  }, [open]);
-  const choose = (on) => { onChange?.(on); closeMenu(); };
-  return <div class="sdrawer-more-wrap" ref={ref}>
-    <button type="button" ref={triggerRef} class="sdrawer-more" aria-label="Session grouping" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-      <MoreHorizontal size={16} aria-hidden="true" />
-    </button>
-    {open && <div class={`sdrawer-group-menu${dropUp ? " sdrawer-group-menu--up" : ""}`} role="menu" aria-label="Session grouping" ref={menuRef} onKeyDown={onMenuKeyDown}>
-      <span class="sdrawer-group-menu-label">Group sessions</span>
-      <button type="button" role="menuitemradio" aria-checked={!groupByProject} onClick={() => choose(false)}><span class="sdrawer-group-menu-tick">{!groupByProject && <Check size={14} />}</span>By recency</button>
-      <button type="button" role="menuitemradio" aria-checked={groupByProject} onClick={() => choose(true)}><span class="sdrawer-group-menu-tick">{groupByProject && <Check size={14} />}</span>By folder</button>
-    </div>}
-  </div>;
-}
-
-// SessionDrawer — the mobile session list, unfurled from the title chip it is
-// anchored under (MobileTitleChip). It is a DROPDOWN, not a bottom sheet: the
-// title is the door, so the list has to visibly hang from it, and the composer
-// stays put underneath the veil where the eye left it.
+// SessionDrawer — the phone's CHASSIS for the sidebar. It owns the veil, the
+// slide, the focus trap and the second screen; it does not own the list.
 //
-// Its structure deliberately mirrors the desktop Spine — search, then active
-// sessions, then saved — so the same job looks like the same job on both
-// frontends. What differs is only what the form factor forces: the desktop
-// keeps the list permanently in a column, mobile borrows the screen for it.
+// It used to own all of it: its own head ("Sessions", "N open · M saved"), its
+// own search field, its own group labels, its own footer. That was a second
+// implementation of the desktop Spine, kept in step by hand — and by the time
+// anyone looked, the phone had no "Needs attention" group and the desktop had
+// no filter. Now both mount the same <Sidebar/> and this file is the 300px
+// sheet it arrives in.
 //
-// Open/close is a small state machine so both the enter and the LEAVE animate
-// (MOBILE-POLISH-SPEC §5): `open` is the caller's intent; internally we keep the
-// panel mounted through the close transition (`visible`) and toggle `entered`
-// one frame after mount so the CSS `.is-open` transition plays from the closed
-// rest state. Only the panel (transform/opacity) and veil (opacity) move — the
-// conversation behind stays perfectly still.
+// A SHEET FROM THE LEFT EDGE, not a dropdown. It used to hang from the title
+// chip at 390px wide, which covered the screen: the conversation you came from
+// was gone, and there was nothing to say where "back" was. At 300px the
+// transcript stays visible down the right-hand side, so the drawer reads as a
+// thing on top of your session rather than a different page — and the left
+// edge is where the other sessions live in the catalogue's spatial grammar.
 //
-// Global Settings is NOT rendered here: the footer's ⚙ button only signals
-// `onSettings` and the parent screen performs a sheet HANDOFF — the drawer
-// fully exits, then the global Settings bottom-sheet slides up in its place
-// (one overlay at a time, the approved mock's closeAll→open grammar). The
-// `onClosed` callback fires once the leave animation has settled (mirroring
-// MobileSheet.onClosed) so the parent can sequence that handoff without
-// stacking overlays or racing the shared overlay-history back()/popstate.
+// Open/close is a small state machine so both the enter and the LEAVE animate:
+// `open` is the caller's intent; internally the panel stays mounted through the
+// close transition (`visible`) and `entered` flips one frame after mount so the
+// CSS `.is-open` transition plays from the closed rest state. Only the panel
+// (transform) and the veil (opacity) move — the conversation behind stays
+// perfectly still.
 //
-// The Inbox door in the head row takes the SAME handoff: it only signals
-// `onInbox`, and the parent opens the inbox view once the drawer has left.
+// Global Settings is NOT rendered here: the foot's ⚙ only signals `onSettings`
+// and the parent screen performs a sheet HANDOFF — the drawer fully exits, then
+// the Settings sheet slides up in its place (one overlay at a time). `onClosed`
+// fires once the leave animation has settled, so the parent can sequence that
+// handoff without stacking overlays or racing overlay-history's popstate. The
+// Inbox door in the foot takes the SAME handoff.
 export function SessionDrawer({
   open,
   step = "list",
@@ -142,8 +45,7 @@ export function SessionDrawer({
   newResults = [],
   active = [],
   saved = [],
-  activeCount = 0,
-  savedCount = 0,
+  activeId,
   projects = [],
   onSelect,
   onCreate,
@@ -172,17 +74,13 @@ export function SessionDrawer({
   const [visible, setVisible] = useState(open);
   const [entered, setEntered] = useState(open);
   // The drawer has two screens: the list, and "new session". They swap in place
-  // instead of handing off to another overlay — the whole point of the dropdown
-  // is that everything about sessions happens inside the thing hanging from the
-  // title. Which one an open lands on comes from the caller (`step`), because
-  // creating a session on a phone is ALWAYS this screen: the empty state and
-  // the command palette open the drawer on "new" rather than standing up a
-  // second create flow. Both reset on every open, so it never reopens mid-task.
+  // instead of handing off to another overlay — the whole point is that
+  // everything about sessions happens inside the one sheet. Which one an open
+  // lands on comes from the caller (`step`), because creating a session on a
+  // phone is ALWAYS this screen: the empty state and the command palette open
+  // the drawer on "new" rather than standing up a second create flow. It resets
+  // on every open, so it never reopens mid-task.
   const [view, setView] = useState(step);
-  const [query, setQuery] = useState("");
-  const [expandedProjects, setExpandedProjects] = useState(() => new Set());
-  const [showAllNew, setShowAllNew] = useState(false);
-  const [showAllSaved, setShowAllSaved] = useState(false);
 
   // The screen an open lands on — and a step change while the drawer is
   // already open (the palette handing over to an open drawer) — both come from
@@ -206,8 +104,8 @@ export function SessionDrawer({
 
   // Enter/leave state machine driven by `open`. Enter: mount, then flip
   // `entered` on the next frame so the .is-open transition runs. Leave: drop
-  // `entered` (panel folds back up into the chip) and unmount after the close
-  // duration. Reduced motion snaps both ways.
+  // `entered` (the sheet slides back out through the left edge) and unmount
+  // after the close duration. Reduced motion snaps both ways.
   useEffect(() => {
     const reduce =
       typeof window !== "undefined" &&
@@ -217,8 +115,6 @@ export function SessionDrawer({
       wasOpenRef.current = true;
       clearTimeout(closeTimerRef.current);
       setVisible(true);
-      setQuery("");
-      setShowAllSaved(false);
       if (reduce) {
         setEntered(true);
       } else {
@@ -228,8 +124,8 @@ export function SessionDrawer({
     } else {
       setEntered(false);
       // Fire onClosed only on a real open→close transition, once the drawer
-      // has fully dismissed — so the parent can hand off to the global
-      // Settings sheet without stacking it above the outgoing drawer.
+      // has fully dismissed — so the parent can hand off to the Settings sheet
+      // or the inbox without stacking it above the outgoing drawer.
       const fireClosed = () => {
         if (!wasOpenRef.current) return;
         wasOpenRef.current = false;
@@ -242,7 +138,7 @@ export function SessionDrawer({
         closeTimerRef.current = setTimeout(() => {
           setVisible(false);
           fireClosed();
-        }, 180);
+        }, 260);
       }
     }
     return undefined;
@@ -285,7 +181,7 @@ export function SessionDrawer({
   }, [open, onClose]);
 
   // On open: remember the trigger and focus the panel's first focusable.
-  // On close: restore focus to the remembered element (the title chip).
+  // On close: restore focus to the remembered element (the sessions capsule).
   useEffect(() => {
     if (!open) return;
     previousFocusRef.current = document.activeElement;
@@ -310,45 +206,6 @@ export function SessionDrawer({
     }
   };
 
-  // Search filters the list in place — no second surface, no second list.
-  // Session search intentionally uses word substrings rather than the command
-  // palette's subsequence matcher; long session titles otherwise match noise.
-  //
-  // Memoized on the inputs because this runs on every render, and a render
-  // happens on every keystroke: with a few hundred saved sessions the
-  // unmemoized version re-filtered and re-grouped the whole roster per typed
-  // character, which is felt as a laggy keyboard on a phone.
-  const q = query.trim();
-  const { shownNew, shownActive, shownSaved, hitCount, projectSections } = useMemo(() => {
-    const hit = (s) => sessionSearchMatch(q, s);
-    const newHits = newResults.filter(hit);
-    const activeHits = active.filter(hit);
-    const savedHits = saved.filter(hit);
-    return {
-      shownNew: newHits,
-      shownActive: activeHits,
-      shownSaved: savedHits,
-      hitCount: newHits.length + activeHits.length + savedHits.length,
-      projectSections: filterProjectSections(groupProjectSessions([...active, ...saved]), query),
-    };
-  }, [q, query, newResults, active, saved]);
-
-  // Recency view: cap the saved tail behind the same "Show all" affordance the
-  // grouped view already uses for its own tail.
-  const savedPreview = previewSavedSessions(shownSaved, { expanded: showAllSaved, searching: !!q });
-
-  const card = (s, hidePath = false) => (
-    <SessionDrawerCard
-      key={s.id}
-      session={s}
-      hidePath={hidePath}
-      onSelect={onSelect}
-      onCloseSession={onCloseSession}
-      onReopenSession={onReopenSession}
-      onDeleteSession={onDeleteSession}
-    />
-  );
-
   return (
     <div class={`sdrawer-veil${entered ? " is-open" : ""}`} onClick={onVeilClick}>
       <div
@@ -366,93 +223,31 @@ export function SessionDrawer({
             onCreate={(cwd) => onCreate?.(cwd)}
           />
         ) : (
-          <>
-            <div class="sdrawer-head">
-              <h2>Sessions</h2>
-              <span class="sdrawer-count">
-                {q
-                  ? `${hitCount} ${hitCount === 1 ? "match" : "matches"}`
-                  : `${activeCount} open · ${savedCount} saved`}
-              </span>
-              <button
-                type="button"
-                class="sdrawer-new"
-                aria-label="New session"
-                onClick={() => setView("new")}
-              >
-                <Plus size={16} aria-hidden="true" />
-              </button>
-              {inboxVisible && (
-                <InboxButton count={inboxCount} onClick={() => onInbox?.()} size={16} />
-              )}
-              <DrawerGroupMenu groupByProject={groupByProject} onChange={onGroupByProject} />
-            </div>
-
-            <Field
-              variant="inset"
-              size="lg"
-              class="sdrawer-search"
-              leading={<Search size={15} />}
-              type="text"
-              aria-label="Search sessions"
-              placeholder="Search sessions…"
-              autocomplete="off"
-              autocapitalize="off"
-              spellcheck={false}
-              value={query}
-              onInput={(e) => setQuery(e.target.value)}
-            />
-
-            <div class="sdrawer-list">
-              {!q && hitCount === 0 && (
-                <button
-                  type="button"
-                  class="sdrawer-empty-new"
-                  onClick={() => setView("new")}
-                >
-                  + New session
-                </button>
-              )}
-              {q && hitCount === 0 && (
-                <span class="sdrawer-note">No session matches “{query}”</span>
-              )}
-              {shownNew.length > 0 && <>
-                <span class="sdrawer-group sdrawer-group-new">New results · {shownNew.length}</span>
-                {shownNew.slice(0, showAllNew ? undefined : 3).map((s) => card(s))}
-                {!showAllNew && shownNew.length > 3 && <button type="button" class="sdrawer-show-all" onClick={() => setShowAllNew(true)}>Show all {shownNew.length} new results</button>}
-              </>}
-              {groupByProject ? projectSections.map((section) => {
-                const collapsed = projectCollapsed(section, drawerCollapsed, !!q);
-                const expanded = expandedProjects.has(section.key);
-                const shownSessions = visibleProjectSessions(section, expanded, !!q);
-                const hiddenSaved = hiddenProjectSavedCount(section, expanded, !!q);
-                const needs = section.attention === "permission" ? `${section.label}, ${section.openCount} open, ${section.attentionCount} needs permission` : section.attention === "error" ? `${section.label}, ${section.openCount} open, ${section.attentionCount} has an error` : `${section.label}, ${section.openCount} open${section.savedCount ? `, ${section.savedCount} saved` : ""}`;
-                return <section class={`sdrawer-project${collapsed ? "" : " is-open"}`} key={section.key}>
-                  <button type="button" class="sdrawer-project-head" aria-expanded={!collapsed} aria-label={needs} onClick={() => onToggleProject?.(section.key, !collapsed)}>
-                    <span class="sdrawer-project-chevron"><ChevronRight size={14} aria-hidden="true" /></span>
-                    <span class="sdrawer-project-id"><span class="sdrawer-project-name">{section.label}{section.attention && <span class={`state-dot sdrawer-project-attention ${section.attention}`} aria-hidden="true" />}</span>{section.path && <span class="sdrawer-project-path">{section.path}</span>}</span>
-                    <span class="sdrawer-project-count">{section.openCount} open{section.savedCount ? ` · ${section.savedCount} saved` : ""}</span>
-                  </button>
-                  {!collapsed && <div class="sdrawer-project-cards">
-                    {shownSessions.map((s) => card(s, true))}
-                    {hiddenSaved > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setExpandedProjects((keys) => new Set(keys).add(section.key))}>Show all {hiddenSaved} saved</button>}
-                  </div>}
-                </section>;
-              }) : <>{shownActive.length > 0 && <span class="sdrawer-group">Active</span>}{shownActive.map((s) => card(s))}{shownSaved.length > 0 && <span class="sdrawer-group">Saved</span>}{savedPreview.visible.map((s) => card(s))}{savedPreview.hidden > 0 && <button type="button" class="sdrawer-show-all" onClick={() => setShowAllSaved(true)}>Show all {shownSaved.length} saved</button>}</>}
-            </div>
-
-            <div class="sdrawer-foot">
-              <button
-                type="button"
-                class="sdrawer-settings"
-                onClick={() => onSettings?.()}
-                aria-haspopup="dialog"
-              >
-                <Settings size={14} aria-hidden="true" /> Settings
-              </button>
-              <DrawerVersion version={version} />
-            </div>
-          </>
+          <Sidebar
+            density="phone"
+            version={version}
+            active={active}
+            saved={saved}
+            newResults={newResults}
+            activeId={activeId}
+            onSelectSession={onSelect}
+            /* The one door to creating a session on a phone: the drawer's own
+               second screen, where the working directory is chosen. It is NOT
+               the command palette — on a phone that is a whole other chassis
+               carrying its own session list (NewSessionView.jsx:6). */
+            onNewSession={() => setView("new")}
+            onSettings={onSettings}
+            onCloseSession={onCloseSession}
+            onReopenSession={onReopenSession}
+            onDeleteSession={onDeleteSession}
+            groupByProject={groupByProject}
+            onGroupByProject={onGroupByProject}
+            collapsedProjects={drawerCollapsed}
+            onToggleProject={onToggleProject}
+            inboxCount={inboxCount}
+            inboxVisible={inboxVisible}
+            onInbox={onInbox}
+          />
         )}
       </div>
     </div>

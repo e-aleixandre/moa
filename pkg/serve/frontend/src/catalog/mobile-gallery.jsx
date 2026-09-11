@@ -330,8 +330,6 @@ function DrawerSpecimen() {
         onClose={noop}
         active={DRAWER_SESSIONS.filter((s) => !s.saved)}
         saved={DRAWER_SESSIONS.filter((s) => s.saved)}
-        activeCount={4}
-        savedCount={2}
         projects={[{ cwd: "/home/dev/moa" }, { cwd: "/home/dev/moa/pulse-api" }]}
         onSelect={noop}
         onCreate={noop}
