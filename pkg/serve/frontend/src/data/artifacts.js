@@ -88,6 +88,15 @@ export async function loadArtifacts(sessionId, { token } = {}) {
 // card and the panel's own list — rather than repeated on each of them.
 function beginRequest(sessionId, next) {
   closeSessionPanel();
+  return claimRequest(sessionId, next);
+}
+
+// claimRequest is beginRequest without the panel-closing: taking ownership and
+// a fresh token is bookkeeping, while closing the dossier is the drawer's
+// entry behaviour (two right-hand surfaces must never stack). The dossier's
+// own artifacts page needs the first and must not do the second -- it IS the
+// panel.
+function claimRequest(sessionId, next) {
   const previous = artifactsSlice(store.get());
   const token = previous.token + 1;
   const sameOwner = previous.ownerSessionId === sessionId;
@@ -102,6 +111,29 @@ function beginRequest(sessionId, next) {
     ...next,
   });
   return token;
+}
+
+// listArtifactsInPanel — the dossier's own page needs the collection WITHOUT
+// opening the drawer over it. It was calling loadArtifacts() directly, which
+// looks right and silently never worked: acceptsResponse requires slice.view
+// to be set, and the panel never sets it, so every 200 was dropped on arrival
+// and the page said "no files in this conversation yet" while the API was
+// returning three. Measured, not deduced: GET .../artifacts returned 200 with
+// artifacts[] while the panel showed its empty state.
+//
+// So the panel claims ownership and a token like any other reader, with
+// view:'panel'. That view is a claim, not a door: ArtifactsDrawer opens on
+// 'list' and 'reader' only, so the response is accepted and nothing slides
+// over the page. (I first wrote that no drawer rendered 'panel' without
+// checking; the drawer opened on ANY truthy view and covered the dossier with
+// "Not in this conversation". Seen on screen, not in the diff.) The
+// alternative, loosening acceptsResponse to allow a null view, would have let
+// a late response from a closed drawer land on whatever is on screen now; that
+// guard is what protects a fast A→B switch.
+export function listArtifactsInPanel(sessionId) {
+  if (!sessionId) return;
+  const token = claimRequest(sessionId, { view: 'panel', fileId: null, from: 'panel', expanded: false, seed: null });
+  loadArtifacts(sessionId, { token });
 }
 
 // openArtifactsList — the discreet per-pane/head entry. Explicitly scoped: the

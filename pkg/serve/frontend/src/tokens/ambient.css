@@ -1599,6 +1599,34 @@ html.mobile-locked[data-ambient="on"] body {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 45%, transparent);
 }
 [data-ambient="on"] .spanel-page-sum { color: var(--amb-text-3); }
+
+/* The pushed page's own vocabulary in the Ambient material: a section heading
+   that names the group, and a raised card whose rows are cut by the tonal
+   ladder's line rather than outlined. Structure and type live in
+   SessionPanel.css; only the material is here. */
+[data-ambient="on"] .spanel-group { color: var(--amb-text-4); }
+[data-ambient="on"] .spanel-kv {
+  border-radius: var(--amb-r-ctl);
+  background: var(--amb-raised);
+  box-shadow: inset 0 0 0 1px var(--amb-line);
+}
+[data-ambient="on"] .spanel-kv-row { color: var(--amb-text); }
+[data-ambient="on"] .spanel-kv-row + .spanel-kv-row {
+  box-shadow: inset 0 1px 0 var(--amb-line);
+}
+@media (hover: hover) {
+  [data-ambient="on"] .spanel-kv-row.is-btn:hover { background: var(--amb-hi); }
+}
+[data-ambient="on"] .spanel-kv-k { color: var(--amb-text-3); }
+[data-ambient="on"] .spanel-kv-v { color: var(--amb-text-2); }
+[data-ambient="on"] .spanel-kv-v.is-id { color: var(--amb-text-3); }
+[data-ambient="on"] .spanel-kv-dim,
+[data-ambient="on"] .spanel-kv-hint,
+[data-ambient="on"] .spanel-kv-note { color: var(--amb-text-4); }
+/* The meter's track is a LINE at its stronger step, not a control surface: a
+   filled rule reads as a measurement, a well reads as something to press. */
+[data-ambient="on"] .spanel-meter { background: var(--amb-on-edge); }
+
 [data-ambient="on"] .spanel-artifacts li {
   border: 0;
   border-radius: var(--amb-r-row);
@@ -1606,22 +1634,12 @@ html.mobile-locked[data-ambient="on"] body {
   box-shadow: inset 0 0 0 1px var(--amb-line);
 }
 
-/* The two panels reused inside the pushed pages come from the old telemetry
-   grammar (mono everywhere, hairline groups). Inside the dossier they wear the
-   panel's tone: words in sans, data in mono, groups cut by the panel's line. */
-[data-ambient="on"] .spanel .usage-panel { font-family: var(--font); color: var(--amb-text-3); }
-[data-ambient="on"] .spanel .usage-panel-head { display: none; } /* the head already says "Usage" */
-[data-ambient="on"] .spanel .usage-panel-group {
-  border-top-color: var(--amb-line);
-}
-[data-ambient="on"] .spanel .usage-panel-key { color: var(--amb-text-3); }
-[data-ambient="on"] .spanel .usage-panel-val {
-  font-family: var(--mono);
-  color: var(--amb-text-2);
-}
-[data-ambient="on"] .spanel .usage-panel-note { color: var(--amb-text-4); }
-[data-ambient="on"] .spanel .usage-panel-meter { background: var(--amb-control); }
-
+/* The MCP panel reused inside a pushed page comes from the old telemetry
+   grammar (mono everywhere, hairline groups). Inside the dossier it wears the
+   panel's tone: words in sans, data in mono, groups cut by the panel's line.
+   Usage is NOT here any more: its page is written with the panel's own
+   vocabulary (components/SessionPanel/UsagePage.jsx), so there is nothing left
+   to reshape from outside. */
 [data-ambient="on"] .spanel .mcp-item,
 [data-ambient="on"] .spanel .mcp-item:last-child {
   border-color: var(--amb-line);

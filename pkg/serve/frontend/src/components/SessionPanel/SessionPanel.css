@@ -233,6 +233,136 @@
 .spanel-row-go { flex: none; color: var(--overlay0); font-size: var(--text-lg); line-height: 1; }
 
 /* ── Pushed pages ─────────────────────────────────────────────────────── */
+
+/* The page's own vocabulary, shared by Usage and any page that follows it: a
+   named SECTION heading, then a raised card of rows cut by hairlines. It is
+   the catalogue's structure (zones-lab.css:1825-1874) brought over as the
+   component's own CSS, so no override in ambient.css has to reshape a panel
+   built for somewhere else. */
+.spanel-page { display: block; }
+.spanel-group {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3) 4px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+.spanel-page > .spanel-group:first-child { margin-top: 4px; }
+
+.spanel-kv {
+  border-radius: var(--radius-md);
+  background: var(--surface0);
+  overflow: hidden;
+}
+/* A row reads at the panel's body size; only the DATA inside it steps down to
+   the size a measurement wears. */
+.spanel-kv-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px var(--space-3);
+  width: 100%;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--text-base);
+  text-align: left;
+}
+/* One hairline BETWEEN rows, never around the card: the surface already says
+   where the group starts and ends. */
+.spanel-kv-row + .spanel-kv-row { box-shadow: inset 0 1px 0 var(--surface1); }
+.spanel-kv-row.is-btn { cursor: pointer; transition: background var(--duration) var(--ease); }
+@media (hover: hover) {
+  .spanel-kv-row.is-btn:hover { background: var(--surface1); }
+}
+.spanel-kv-row.is-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: calc(var(--focus-ring-offset) * -1);
+}
+/* Words in the text font, data in mono: the house rule, applied per role
+   rather than per component. The key never wraps: it is a two-word label, and
+   breaking "Session ID" over two lines turns a row into a paragraph. */
+.spanel-kv-k {
+  flex: 1;
+  min-width: 0;
+  font-weight: var(--weight-medium);
+  color: var(--subtext0);
+  white-space: nowrap;
+}
+.spanel-kv-v {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--subtext1);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The key is a WORD: panel body size, sans. The id is an identifier, not a
+   measurement — it gives up width before the key does and truncates, rather
+   than wrapping a two-word label onto a second line. */
+.spanel-kv-v.is-id { flex: 0 1 auto; color: var(--overlay1); }
+.spanel-kv-dim { color: var(--overlay0); }
+.spanel-kv-hint {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-sm);
+  color: var(--overlay0);
+}
+/* The note sits on its own line under the row it belongs to, in mono: it is a
+   second reading of the same measurement, not a label. */
+.spanel-kv-note {
+  flex-basis: 100%;
+  margin-top: -2px;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--overlay0);
+}
+/* A meter row gives the bar the full width under its key and value. */
+.spanel-kv-row.is-meter .spanel-meter { flex-basis: 100%; }
+
+/* A row you can PRESS gets a thumb-sized target where there is a thumb. The
+   catalogue sets this on its phone frame (zones-lab.css:1967); production has
+   no frame to hang it on, so it hangs on the pointer instead. */
+@media (pointer: coarse) {
+  .spanel-kv-row.is-btn { min-height: 48px; }
+}
+
+/* The track is the line colour at its stronger step, not a surface: a meter is
+   a rule with a filled portion, not a well. */
+.spanel-meter {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / .12);
+  overflow: hidden;
+}
+.spanel-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--mauve);
+  transition: width 400ms var(--ease);
+}
+/* Accent while there is room, state colour as it fills. */
+.spanel-meter.is-warm .spanel-meter-fill { background: var(--yellow); }
+.spanel-meter.is-hot .spanel-meter-fill { background: var(--red); }
+
+@media (prefers-reduced-motion: reduce) {
+  .spanel-meter-fill { transition: none; }
+}
+
 .spanel-page-sum {
   margin: var(--space-1) 2px var(--space-3);
   font-size: var(--text-sm);

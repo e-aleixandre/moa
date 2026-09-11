@@ -57,7 +57,10 @@ export function ArtifactsDrawer() {
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
 
-  const open = !!slice.view;
+  // 'panel' is a claim, not a door: the dossier's own artifacts page needs the
+  // collection loaded under its own token without this drawer sliding over it.
+  // Only 'list' and 'reader' are surfaces this component renders.
+  const open = slice.view === 'list' || slice.view === 'reader';
   const list = slice.view === 'list';
   const fromList = slice.view === 'reader' && slice.from === 'list';
   const modal = isMobile || slice.expanded;

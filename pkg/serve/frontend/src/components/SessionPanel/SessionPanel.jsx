@@ -7,8 +7,8 @@ import {
   PANEL_PAGES, artifactsVerdict, closeSessionPanel, mcpVerdict, runFacts,
   setSessionPanelPage, usageVerdict,
 } from "../../data/session-panel.js";
-import { artifactsSlice, loadArtifacts, openArtifactsList } from "../../data/artifacts.js";
-import { UsagePanel } from "../UsagePanel/UsagePanel.jsx";
+import { artifactsSlice, listArtifactsInPanel, openArtifactsList } from "../../data/artifacts.js";
+import { UsagePage } from "./UsagePage.jsx";
 import { McpPanel } from "../McpPanel/McpPanel.jsx";
 import { ArtifactRow } from "../Artifacts/ArtifactRow.jsx";
 import { closeSession, deleteSession, resumeSession } from "../../data/session-actions.js";
@@ -62,7 +62,7 @@ function ArtifactsPage({ sessionId }) {
   useEffect(() => {
     if (!sessionId) return;
     if (mine && slice.status === "ready") return;
-    loadArtifacts(sessionId);
+    listArtifactsInPanel(sessionId);
   }, [sessionId]);
 
   const open = (artifact) => {
@@ -210,7 +210,7 @@ export function SessionPanel({ session, usage, open, page = "root", variant = ""
       {sub ? (
         <div class="spanel-body is-sub" key={page}>
           {page === "usage" && (
-            <UsagePanel
+            <UsagePage
               session={session}
               usage={usage}
               ctxPercent={session.contextPercent}
