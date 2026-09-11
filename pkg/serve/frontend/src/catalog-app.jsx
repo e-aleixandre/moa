@@ -136,8 +136,26 @@ function PhoneAlone() {
   // paints. "working" is the zones page's own default (LIVE_STATES[1]).
   const params = new URLSearchParams(location.search);
   const live = LIVE_STATES.find((s) => s.id === params.get("live")) || LIVE_STATES[1];
+
+  // The phone keeps its 390x780 and is scaled to fit. Resizing it instead --
+  // which is what "fullscreen" suggests -- changes every proportion, because
+  // the type does not grow with the box. The factor is min(vw/390, vh/780),
+  // a ratio of two lengths, which CSS has no way to express.
+  useEffect(() => {
+    const fit = () => {
+      const k = Math.min(innerWidth / 390, innerHeight / 780);
+      document.documentElement.style.setProperty("--cat-phone-scale", String(k));
+    };
+    fit();
+    addEventListener("resize", fit);
+    return () => removeEventListener("resize", fit);
+  }, []);
+
   return (
-    <div class="cat-phone-alone">
+    // `.zl` is the prototype's own stage: its thirty tokens and its aurora are
+    // defined there, so the phone has to be INSIDE it to look like itself.
+    <div class="zl is-phone-alone">
+      <div class="zl-aurora" aria-hidden="true" />
       <ZonesPhone label="" live={live} surface={params.get("surface") || "none"} />
     </div>
   );
