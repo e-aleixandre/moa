@@ -1,7 +1,6 @@
 import { useState } from "preact/hooks";
 import {
   SessionRow,
-  ModelPill,
   ModelSelector,
   PermissionCard,
   AskUserCard,
@@ -78,16 +77,6 @@ function SessionRowBoard() {
   );
 }
 
-function ModelPillRow() {
-  return (
-    <div class="molecule-row tight">
-      <ModelPill model="sol" level="high" accent="lavender" />
-      <ModelPill model="fable" level="xhigh" accent="peach" hot />
-      <ModelPill model="terra" level="low" accent="teal" />
-      <ModelPill model="haiku" level="off" accent="overlay1" />
-    </div>
-  );
-}
 
 function ModelSelectorDemo() {
   const [selected, setSelected] = useState("sol");
@@ -101,11 +90,6 @@ function ModelSelectorDemo() {
         thinking={thinking}
         onSelect={setSelected}
         onThinkingChange={setThinking}
-      />
-      <ModelPill
-        model={selectedModel?.name ?? selected}
-        level={thinking}
-        accent={selectedModel?.accent ?? "lavender"}
       />
     </div>
   );
@@ -368,8 +352,6 @@ export function MoleculesGallery() {
       <h3>SessionRow</h3>
       <SessionRowBoard />
 
-      <h3>ModelPill</h3>
-      <ModelPillRow />
 
       <h3>ModelSelector</h3>
       <ModelSelectorDemo />

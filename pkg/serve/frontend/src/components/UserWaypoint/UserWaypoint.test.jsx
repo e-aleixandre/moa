@@ -1,12 +1,38 @@
-import { expect, test } from "bun:test";
-import { UserWaypoint } from "./UserWaypoint.jsx";
-import {
+import { expect, mock, test } from "bun:test";
+
+// These tests call UserWaypoint as a plain function, outside any render, and
+// it uses useState. That worked only because another test file's global
+// mock.module("preact/hooks") leaked into this one -- bun's module mocks are
+// process-wide and are never restored. The leak was load-order dependent, so
+// this file passed or failed depending on what ran beside it.
+//
+// Nothing to do with the migration itself: it surfaced when the status line
+// stopped importing ModelPill and the import graph shifted. The fix is for
+// this file to declare the hooks it needs instead of borrowing someone else's
+// accident.
+mock.module("preact/hooks", () => ({
+  useState(initial) { return [typeof initial === "function" ? initial() : initial, () => {}]; },
+  useEffect() {},
+  useLayoutEffect() {},
+  useRef(initial) { return { current: initial }; },
+  useCallback(callback) { return callback; },
+  useMemo(factory) { return factory(); },
+  useContext(context) { return context?._defaultValue; },
+  useReducer(reducer, initial) { return [initial, () => {}]; },
+  useErrorBoundary() { return [undefined, () => {}]; },
+  useId() { return "test-id"; },
+  useDebugValue() {},
+  useImperativeHandle() {},
+}));
+
+const { UserWaypoint } = await import("./UserWaypoint.jsx");
+const {
   WaypointAttachments,
   AttachmentRow,
   attachmentImageSrc,
   attachmentBytes,
   attachmentType,
-} from "./WaypointAttachments.jsx";
+} = await import("./WaypointAttachments.jsx");
 
 function descendants(node, nodes = []) {
   if (node == null || typeof node === "string") return nodes;

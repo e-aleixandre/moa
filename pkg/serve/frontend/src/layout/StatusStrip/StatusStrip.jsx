@@ -1,23 +1,64 @@
 import "./StatusStrip.css";
-import { ClipboardList, Flame, Target, Gauge, Plug, AlertTriangle } from "lucide-preact";
 import { statusItemPriority, statusStripModel } from "../../data/util/status-strip-model.js";
-import { PermissionControl } from "../../components/PermissionControl/PermissionControl.jsx";
-import { ModelPill, TokenFlow } from "../../components/index.js";
 import { activityPhase } from "../../data/util/activity.js";
-import { tokenFlowVariant } from "./status-strip-view-model.js";
+import { TokenFlow } from "../../components/index.js";
 
-// StatusStrip — mono strip under the composer: the app's bottom telemetry line,
-// mirroring the TUI statusline. This is the TWO-LEVEL redesign (TELEMETRY-
-// SETTINGS-REDESIGN spec §2/§5): the line is glance + the door to the Usage
-// panel, NOT the whole accounting dump.
+// StatusStrip — the line under the composer. Markup and CSS are the
+// catalogue's (catalog/zones-lab.jsx:1472 `StatusLine`, zones-lab.css:611 the
+// `.zl-status` block), MOVED here rather than imitated: the classes travelled
+// with the rules, so the line IS the accepted design instead of a translation
+// of it. The catalogue imports this component now, which is what makes one
+// definition rather than two.
 //
-// Level 1 (this line): the context ring + session cost (leading the line, same
-// side as the mobile line), the model (same pill as mobile, here instead of
-// in the header), per-run tokens, the permission chip, fast mode when it's on,
-// and the modes that are currently ACTIVE (goal/tasks) plus the on-extra alert.
-// The foreground run's ACTIVITY is not here: it lives in the LiveBar above the
-// composer. Compact density (phone, grid pane) is the same line with less
-// padding and without goal/tasks pills.
+// Three tiers, three places, in the catalogue's order: SETTINGS left (model,
+// permissions, fast — what you glance at while typing and what changes the
+// answer), EVENTS in the middle (goal, tasks, mcp, on-extra — only while they
+// exist), GAUGES right (context+spend, the door to Usage; and the per-run
+// tokens). The line is its own container, so it degrades by its OWN width and
+// the same component behaves in the desktop column, a pane and the phone dock.
+//
+// What is NOT the catalogue's is everything the prototype never had, grafted on
+// top: real sessions, accessible names, the model popover and permission menu
+// anchored by their hosts, the MCP door, the busy lock, and the house rule that
+// a missing datum hides its segment rather than drawing a zero.
+//
+// The five data the imitation carried (and their order) are gone with it: the
+// line now carries the nine the catalogue declares, and sheds them by the
+// priority declared in data/util/status-strip-model.js.
+
+// The catalogue's meter: four bars lit from the left in the accent. Production
+// has five thinking LEVELS ("off" lights none), and its stable selector
+// position is what decides how many are lit — not the provider's effort word.
+const THINK_POSITIONS = ["off", "low", "medium", "high", "xhigh"];
+
+function ThinkMeter({ level }) {
+  const n = THINK_POSITIONS.indexOf(level);
+  return (
+    <span class="zl-think" aria-hidden="true">
+      {[1, 2, 3, 4].map((k) => <i class={k <= n ? "" : "is-off"} key={k} />)}
+    </span>
+  );
+}
+
+// The context ring: accent while there is room, state colour as it fills. An
+// SVG arc, not a conic-gradient: the catalogue's ring animates its dasharray,
+// and a 2.4px stroke reads at 14px where a masked gradient goes muddy.
+function CtxRing({ pct }) {
+  const r = 6.5;
+  const c = 2 * Math.PI * r;
+  const tone = pct >= 90 ? "is-hot" : pct >= 70 ? "is-warm" : "";
+  return (
+    <svg class={`zl-ring ${tone}`} viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r={r} class="zl-ring-track" />
+      <circle
+        cx="8" cy="8" r={r} class="zl-ring-arc"
+        stroke-dasharray={`${(c * pct) / 100} ${c}`}
+        transform="rotate(-90 8 8)"
+      />
+    </svg>
+  );
+}
+
 export function StatusStrip({
   ctxPercent,
   tokensUp,
@@ -30,13 +71,13 @@ export function StatusStrip({
   compact = false,
   onOpenUsage,
   onOpenMcp,
-  onPermChange,
   onPerm,
   permOpen,
   permBusy = false,
+  permPopover,
+  permAnchorRef,
   showTokens = true,
   modelName,
-  modelAccent = "lavender",
   thinking = "off",
   thinkingPosition = thinking,
   onModel,
@@ -46,10 +87,9 @@ export function StatusStrip({
   children,
 }) {
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
-  const hasTokens = tokensUp != null && tokensDown != null;
-  const ringStyle = hasCtx
-    ? { background: `conic-gradient(var(--teal) 0 ${ctxPercent}%, var(--surface0) ${ctxPercent}% 100%)` }
-    : undefined;
+  // `(a || b) && <div>` would paint a bare 0 for a run that has moved nothing.
+  // The tally is a heartbeat: absent until it beats.
+  const hasTokens = (tokensUp || 0) > 0 || (tokensDown || 0) > 0;
 
   const strip = statusStripModel(session, usage);
   const { perm, modes, alerts } = strip;
@@ -60,187 +100,179 @@ export function StatusStrip({
   // belongs to something other than the main run — a subagent's, whose activity
   // can be live while the parent sits idle (an async child), or the reverse.
   const workIsLive = taskLive == null ? phase === "working" || phase === "thinking" : taskLive;
-  // The cost segment is the natural door to the Usage panel: it is the only
-  // "money" datum on the line, so tapping it to see "more money" is self-
-  // explanatory. When there is no cost yet but the panel is still reachable, a
-  // discreet gauge affordance stands in so the panel can ALWAYS be opened.
-  const costTrigger = !!onOpenUsage;
+  // The gauges are the door to Usage whether or not there is a cost yet: the
+  // ring alone opens it, so a fresh session can still reach the panel.
+  const usageTrigger = !!onOpenUsage;
+  // The meter draws the stable selector position. An explicit null means the
+  // catalog has not answered yet, and drawing "off" would state an effort the
+  // session does not have.
+  const meterPosition = thinkingPosition === null ? null : (thinkingPosition || thinking);
+
+  const mcp = session?.mcp;
+  const mcpUnhealthy = !!(mcp && mcp.unhealthy > 0);
+  const mcpLabel = mcp
+    ? (mcpUnhealthy
+        ? `MCP: ${mcp.unhealthy} of ${mcp.total} need attention`
+        : `MCP: ${mcp.total} server${mcp.total === 1 ? "" : "s"} ready`)
+      + (mcp.disabled > 0 ? `, ${mcp.disabled} disabled` : "")
+    : "";
 
   return (
-    <div class={`status-strip${compact ? " is-compact" : ""}`}>
-      {/* The line reads in three tiers, in the catalogue's order: SETTINGS first
-         (what you glance at while typing and what changes the answer), then the
-         EVENTS that only exist while something is wrong, then the GAUGES at the
-         right edge.
+    <div class={`zl-status${compact ? " is-compact" : ""}`}>
+      {/* tier 1 — settings */}
+      <div class="zl-st-group is-settings">
+        {task && <span class={`zl-st zl-st-task${workIsLive ? " is-live" : ""}`}>{task}</span>}
 
-         It used to lead with the context ring, which put the least actionable
-         number where the eye lands first and left the model — the thing you
-         change — floating in the middle. Reading order is the hierarchy: the
-         model and the permission mode are the two facts that decide what the
-         next turn does, so they come first, on both densities. */}
-
-      {/* Tier 1 — settings. */}
-      {task && <span class={`status-strip-task work${workIsLive ? " is-live" : ""}`}>{task}</span>}
-
-      {modelName && (
-        <span class={`status-strip-model amb-${statusItemPriority("model")}`} ref={modelAnchorRef}>
-          <ModelPill
-            model={modelName}
-            accent={modelAccent}
-            variant="bars"
-            level={thinking}
-            thinkingPosition={thinkingPosition}
-            readOnly={!onModel}
-            onClick={onModel}
-            aria-haspopup={onModel ? "dialog" : undefined}
-            aria-expanded={onModel ? modelOpen : undefined}
-            aria-label="Model & thinking"
-          />
-          {modelPopover}
-        </span>
-      )}
-
-      {compact && modelName && (
-        <span class="status-strip-div" aria-hidden="true" />
-      )}
-
-      {/* Permission chip — a control (subphase b): tap opens a 3-option menu
-          (never cycles). onPermChange is optional so gallery/other consumers can
-          render it read-only; without it, it's the same chip as a plain span, so
-          the read-only line looks identical to the interactive one. */}
-      {onPerm ? (
-        <button
-          type="button"
-          class={`perm-chip perm-${perm.mode} amb-${statusItemPriority("perm")}`}
-          onClick={onPerm}
-          aria-haspopup="dialog"
-          aria-expanded={permOpen}
-          aria-label={`Permission mode: ${perm.mode}`}
-        >
-          {perm.mode}
-        </button>
-      ) : onPermChange ? (
-        <PermissionControl mode={perm.mode} disabled={permBusy} onChange={onPermChange} />
-      ) : (
-        <span class={`perm-chip perm-${perm.mode} amb-${statusItemPriority("perm")}`} title={`Permission mode: ${perm.mode}`}>
-          {perm.mode}
-        </span>
-      )}
-
-      {/* Fast mode is session state, like the permission chip, so it reads as
-          one: a word, not a glyph, and only while it's on. Same place and
-          wording as the mobile line. */}
-      {session?.fast && (
-        <span class={`status-strip-fast amb-${statusItemPriority("fast")}`} aria-label="Fast mode on — this session is billed at a premium rate">
-          fast
-        </span>
-      )}
-
-      {/* Tier 3 — events, only while they exist. Active modes are only rendered
-          when the model reports them (off modes are omitted upstream). */}
-      {!compact && modes.goal && (
-        <span class={`status-strip-pill goal amb-${statusItemPriority("goal")}`} title={modes.goal.objective || "Goal active"}>
-          <Target />
-          {modes.goal.verifying ? "goal · verifying…" : `goal${modes.goal.iteration ? ` ${modes.goal.iteration}` : ""}`}
-        </span>
-      )}
-
-      {!compact && modes.tasks && (
-        <span class={`status-strip-pill tasks amb-${statusItemPriority("tasks")}`}>
-          <ClipboardList />
-          {modes.tasks.done}/{modes.tasks.total}
-          {modes.tasks.complete && " ✓"}
-        </span>
-      )}
-
-      {session?.mcp && session.mcp.total > 0 && (() => {
-        const unhealthy = session.mcp.unhealthy > 0;
-        const disabledNote = session.mcp.disabled > 0 ? `, ${session.mcp.disabled} disabled` : "";
-        const label = unhealthy
-          ? `MCP: ${session.mcp.unhealthy} of ${session.mcp.total} need attention${disabledNote}`
-          : `MCP: ${session.mcp.total} server${session.mcp.total === 1 ? "" : "s"}${disabledNote} ready`;
-        const body = (
-          <>
-            {unhealthy ? <AlertTriangle /> : <Plug />}
-            {unhealthy ? `${session.mcp.unhealthy}!` : `mcp ${session.mcp.total}`}
-          </>
-        );
-        return onOpenMcp ? (
-          <button
-            type="button"
-            class={`status-strip-mcp status-strip-mcp-btn amb-${statusItemPriority("mcp", unhealthy ? "unhealthy" : "healthy")}${unhealthy ? " status-strip-mcp-bad" : ""}`}
-            onClick={onOpenMcp}
-            aria-label={`${label} — open MCP servers`}
-            title={label}
-          >
-            {body}
-          </button>
-        ) : (
-          <span
-            class={`status-strip-mcp amb-${statusItemPriority("mcp", unhealthy ? "unhealthy" : "healthy")}${unhealthy ? " status-strip-mcp-bad" : ""}`}
-            title={label}
-          >
-            {body}
-          </span>
-        );
-      })()}
-
-      {/* Alerts. 🔥 on-extra only while active. */}
-      {alerts.onExtra && (
-        <span
-          class={`status-strip-pill session-overage amb-${statusItemPriority("extra")}`}
-          title="This session is being served from extra usage (pay-as-you-go)"
-        >
-          <Flame />
-          on extra
-        </span>
-      )}
-
-      {/* Tier 2 — gauges, anchored to the right edge: one button (context +
-          spend: the door to Usage) and one reading (the per-run tokens).
-          margin-left lives on the group, not on one segment, so it stays
-          right-aligned no matter which of them are present. */}
-      <span class="status-strip-right">
-        {(hasCtx || hasSpend || costTrigger) && (() => {
-          const body = (
-            <>
-              {hasCtx && (
-                <span class={`status-strip-ctx amb-${statusItemPriority("context")}`}>
-                  <span class="status-strip-ring" style={ringStyle} aria-hidden="true" />
-                  {compact ? `${ctxPercent}%` : `ctx ${ctxPercent}%`}
-                </span>
-              )}
-              {hasSpend ? (
-                <span class={`status-strip-spend spend-${strip.spendLevel || "normal"}`}>
-                  <b>~{spend}</b>
-                </span>
-              ) : (
-                costTrigger && (
-                  <span class="status-strip-gauge" aria-hidden="true">
-                    <Gauge />
-                  </span>
-                )
-              )}
-            </>
-          );
-          return costTrigger ? (
+        {modelName && (
+          <span class="zl-st-anchor" ref={modelAnchorRef}>
             <button
               type="button"
-              class="status-strip-usage status-strip-usage-btn"
-              onClick={onOpenUsage}
-              aria-label="Show usage"
-              title="Context and session cost"
+              class={`zl-st zl-st-model zl-${statusItemPriority("model")}${modelOpen ? " is-open" : ""}`}
+              onClick={onModel}
+              disabled={!onModel}
+              aria-expanded={onModel ? !!modelOpen : undefined}
+              aria-haspopup={onModel ? "dialog" : undefined}
+              aria-label={`Model & thinking: ${modelName}, ${thinking}`}
             >
+              <span class="zl-st-word zl-st-model-name">{modelName}</span>
+              {meterPosition !== null && <ThinkMeter level={meterPosition} />}
+            </button>
+            {modelPopover}
+          </span>
+        )}
+
+        {/* Permission mode is the one setting you must never misread, so it is
+            the one setting in a state colour. A tap OPENS the choice; it never
+            cycles — a stray touch must not be able to drop a session into
+            YOLO. Locked while the agent is running, like the rest of the
+            session settings. */}
+        <span class="zl-st-anchor" ref={permAnchorRef}>
+          {onPerm ? (
+            <button
+              type="button"
+              class={`zl-st zl-st-perm zl-${statusItemPriority("perm")} is-${perm.mode}${permOpen ? " is-open" : ""}`}
+              onClick={onPerm}
+              disabled={permBusy}
+              aria-haspopup="dialog"
+              aria-expanded={!!permOpen}
+              aria-label={permBusy
+                ? `Permission mode: ${perm.mode} (locked while the agent is running)`
+                : `Permission mode: ${perm.mode}`}
+            >
+              <span class="zl-st-word">{perm.mode}</span>
+            </button>
+          ) : (
+            <span
+              class={`zl-st zl-st-perm zl-${statusItemPriority("perm")} is-${perm.mode}`}
+              title={`Permission mode: ${perm.mode}`}
+            >
+              <span class="zl-st-word">{perm.mode}</span>
+            </span>
+          )}
+          {permPopover}
+        </span>
+
+        {session?.fast && (
+          <span class={`zl-st zl-st-fast zl-${statusItemPriority("fast")}`} title="Fast mode: billed at a premium rate">
+            <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5L3.5 9h4l-.5 5.5L12.5 7h-4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
+            <span class="zl-st-word">fast</span>
+          </span>
+        )}
+      </div>
+
+      {/* tier 3 — events, only while they exist */}
+      <div class="zl-st-group is-events">
+        {!compact && modes.goal && (
+          <span
+            class={`zl-st zl-st-ev zl-${statusItemPriority("goal")}`}
+            title={modes.goal.objective || "Goal active"}
+          >
+            <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5" /><circle cx="8" cy="8" r="1.8" fill="currentColor" /></svg>
+            <span class="zl-st-word">goal</span>
+            {modes.goal.verifying
+              ? <span class="zl-data">✓?</span>
+              : !!modes.goal.iteration && <span class="zl-data">{modes.goal.iteration}</span>}
+          </span>
+        )}
+
+        {!compact && modes.tasks && (
+          <span
+            class={`zl-st zl-st-ev zl-${statusItemPriority("tasks")}`}
+            title={`Tasks: ${modes.tasks.done} of ${modes.tasks.total} done`}
+          >
+            <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5l1.5 1.5 3-3M3 10.5l1.5 1.5 3-3M9 5h4M9 11h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <span class="zl-st-word">tasks</span>
+            <span class="zl-data">{modes.tasks.done}/{modes.tasks.total}</span>
+          </span>
+        )}
+
+        {/* MCP takes its priority from its STATE, not its type: healthy it
+            drops early, unhealthy it stays and keeps its number. */}
+        {mcp && mcp.total > 0 && (() => {
+          const cls = `zl-st zl-st-ev zl-st-mcp zl-${statusItemPriority("mcp", mcpUnhealthy ? "unhealthy" : "healthy")}${mcpUnhealthy ? " is-alarm-red" : ""}`;
+          const body = (
+            <>
+              <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2v3M11 2v3M3.5 5h9v3a4.5 4.5 0 0 1-9 0zM8 12.5V15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              <span class="zl-st-word">mcp</span>
+              <span class="zl-data">{mcpUnhealthy ? `${mcp.unhealthy}/${mcp.total}` : mcp.total}</span>
+            </>
+          );
+          return onOpenMcp ? (
+            <button type="button" class={cls} onClick={onOpenMcp} aria-label={`${mcpLabel} — open MCP servers`} title={mcpLabel}>
               {body}
             </button>
           ) : (
-            <span class="status-strip-usage">{body}</span>
+            <span class={cls} title={mcpLabel}>{body}</span>
           );
         })()}
-        {showTokens && hasTokens && (
-          <span class={`status-strip-tokens amb-${statusItemPriority("tokens")}`}><TokenFlow up={tokensUp} down={tokensDown} variant={tokenFlowVariant(compact)} /></span>
+
+        {alerts.onExtra && (
+          <span
+            class={`zl-st zl-st-ev zl-${statusItemPriority("extra")} is-alarm-yellow`}
+            title="This session is being served from extra usage (pay-as-you-go)"
+          >
+            <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5c.5 3-3 4-3 8a3 3 0 0 0 6 0c0-1.5-.6-2.5-1.2-3.2-.3 1.2-1 1.7-1.3 1.7C9 6 9.5 3.5 8 1.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
+            <span class="zl-st-word">extra</span>
+          </span>
         )}
-      </span>
+      </div>
+
+      {/* tier 2 — gauges. One button (ctx + spend: the door to Usage), one
+          reading. Every datum hides itself when it is missing, so the group is
+          only rendered while it has something to say. */}
+      <div class="zl-st-group is-gauges">
+        {(hasCtx || hasSpend) && (() => {
+          const body = (
+            <>
+              {hasCtx && <CtxRing pct={ctxPercent} />}
+              {hasCtx && <span class={`zl-data zl-num zl-${statusItemPriority("context")}`}>{ctxPercent}<span class="zl-unit">%</span></span>}
+              {hasCtx && hasSpend && <span class={`zl-st-sep zl-${statusItemPriority("spend")}`} aria-hidden="true" />}
+              {hasSpend && (
+                <span class={`zl-data zl-num zl-st-spend spend-${strip.spendLevel || "normal"} zl-${statusItemPriority("spend")}`}>
+                  {spend}
+                </span>
+              )}
+            </>
+          );
+          const label = [
+            hasCtx ? `Context ${ctxPercent}% used` : null,
+            hasSpend ? `${spend} spent` : null,
+          ].filter(Boolean).join(", ");
+          return usageTrigger ? (
+            <button type="button" class="zl-st zl-st-ctx zl-p1" onClick={onOpenUsage} aria-label={`${label} — show usage`}>
+              {body}
+            </button>
+          ) : (
+            <span class="zl-st zl-st-ctx zl-p1" title={label}>{body}</span>
+          );
+        })()}
+
+        {showTokens && hasTokens && (
+          <span class={`zl-st zl-st-tok zl-data zl-${statusItemPriority("tokens")}`} title="Tokens this run">
+            <TokenFlow up={tokensUp} down={tokensDown} />
+          </span>
+        )}
+      </div>
       {children}
     </div>
   );

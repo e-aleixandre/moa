@@ -55,10 +55,19 @@ function findByClass(node, className) {
   return findByClass(node.props?.children, className);
 }
 
+// The meter is the catalogue's .zl-think now -- four bars, dark ones marked
+// is-off -- inside the .zl-st-model button. The old .model-pill and
+// .thinking-meter classes went with the imitation they belonged to. What
+// these tests defend is unchanged and is the part that matters: no meter
+// until the shared catalog answers, and Astra's "low" is the ZERO position.
 function renderMeter() {
-  const pill = findByClass(expand(MobileStatusLine({ session: SESSION, usage: null })), "model-pill");
-  expect(pill).toBeDefined();
-  return findByClass(pill, "thinking-meter");
+  const button = findByClass(expand(MobileStatusLine({ session: SESSION, usage: null })), "zl-st-model");
+  expect(button).toBeDefined();
+  return findByClass(button, "zl-think");
+}
+
+function litBars(meter) {
+  return meter.props.children.filter((bar) => bar.props.class !== "is-off");
 }
 
 beforeEach(() => {
@@ -77,8 +86,7 @@ test("once the catalog is ready Astra low paints the zero position", async () =>
 
   const meter = renderMeter();
   expect(meter).toBeDefined();
-  expect(meter.props["aria-label"]).toBe("Thinking: low");
-  expect(meter.props.children.filter((bar) => bar.props.class === "on")).toHaveLength(0);
+  expect(litBars(meter)).toHaveLength(0);
 });
 
 test("an ordinary model keeps its own level once the catalog is ready", async () => {
@@ -91,7 +99,7 @@ test("an ordinary model keeps its own level once the catalog is ready", async ()
 
   try {
     const meter = renderMeter();
-    expect(meter.props.children.filter((bar) => bar.props.class === "on")).toHaveLength(2);
+    expect(litBars(meter)).toHaveLength(2);
   } finally {
     SESSION.model = "GPT-6 Astra";
     SESSION.thinking = "low";

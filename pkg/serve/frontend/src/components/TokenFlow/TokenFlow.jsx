@@ -2,18 +2,22 @@ import { useRef, useState, useEffect } from "preact/hooks";
 import { fmtTokens } from "../../data/util/format.js";
 import "./TokenFlow.css";
 
-// TokenFlow — the live per-run token heartbeat (↑ input · ↓ output). Shared by
-// the desktop StatusStrip and the mobile status line so both densities pulse
-// identically (parity). It is the "the agent is alive / chewing" signal, not
-// conversation accounting — the values are per-RUN and reset each run.
+// TokenFlow — the live per-run token heartbeat (↑ input ↓ output). Shared by
+// every density so they pulse identically (parity). It is the "the agent is
+// alive / chewing" signal, not conversation accounting — the values are
+// per-RUN and reset each run.
 //
-// When a value CHANGES (tokens flow in on ↑ or out on ↓) the corresponding
-// arrow+number pulses a soft color for a beat: ↑ blue (input coming in), ↓ teal
-// (output coming out). It's a glance-only breath of life; reduced-motion users
-// get the color tint without the fade animation (CSS decides).
+// The INSIDE is the catalogue's (catalog/zones-lab.jsx:1537, the `.zl-st-tok`
+// segment), moved with the status line: two arrows in the quiet tone, two
+// numbers in the read tone, no separator and no unit word. The unit used to be
+// appended on the desktop line only ("1.8k tok") and dropped on the phone,
+// which made one datum read two ways; there is one reading now, so the
+// `variant` prop that chose between them is gone with it.
 //
-// `variant` only tweaks the trailing unit label: "strip" appends " tok" (the
-// desktop line has room), "compact" (mobile) omits it.
+// When a value CHANGES the corresponding arrow+number pulses a soft color for a
+// beat: ↑ blue (input coming in), ↓ teal (output coming out). It's a
+// glance-only breath of life; reduced-motion users get the color tint without
+// the fade animation (CSS decides).
 
 // PULSE_MS must match the CSS animation duration (--token-pulse below).
 const PULSE_MS = 900;
@@ -46,15 +50,15 @@ function usePulse(value) {
   return pulsing;
 }
 
-export function TokenFlow({ up, down, variant = "strip" }) {
+export function TokenFlow({ up, down }) {
   const upPulse = usePulse(up);
   const downPulse = usePulse(down);
-  const unit = variant === "strip" ? " tok" : "";
   return (
     <span class="token-flow" aria-label={`${up || 0} input, ${down || 0} output tokens this run`}>
-      <span class={`token-flow-in${upPulse ? " pulse" : ""}`}>↑ {fmtTokens(up || 0)}</span>
-      <span class="token-flow-sep" aria-hidden="true"> · </span>
-      <span class={`token-flow-out${downPulse ? " pulse" : ""}`}>↓ {fmtTokens(down || 0)}{unit}</span>
+      <span class="zl-arrow" aria-hidden="true">↑</span>
+      <span class={`zl-num token-flow-in${upPulse ? " pulse" : ""}`}>{fmtTokens(up || 0)}</span>
+      <span class="zl-arrow" aria-hidden="true">↓</span>
+      <span class={`zl-num token-flow-out${downPulse ? " pulse" : ""}`}>{fmtTokens(down || 0)}</span>
     </span>
   );
 }

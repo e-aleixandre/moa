@@ -6,7 +6,6 @@ import {
   IconButton,
   Field,
   Kbd,
-  ThinkingMeter,
 } from "../primitives/index.js";
 import "./primitives-gallery.css";
 
@@ -124,58 +123,6 @@ function KbdRow() {
   );
 }
 
-function ThinkingMeterTable() {
-  return (
-    <div class="meter-table">
-      {METER_VARIANTS.map((variant) => (
-        <div class="meter-table-row" key={variant}>
-          <span class="meter-table-label">{variant}</span>
-          <div class="meter-table-cells">
-            {METER_LEVELS.map((level) => (
-              <div class="meter-table-cell" key={level}>
-                <ThinkingMeter variant={variant} level={level} />
-                <span class="meter-table-cell-label">{level}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-      <div class="meter-table-row">
-        <span class="meter-table-label">bars (hot)</span>
-        <div class="meter-table-cells">
-          {METER_LEVELS.map((level) => (
-            <div class="meter-table-cell" key={level}>
-              <ThinkingMeter variant="bars" level={level} hot />
-              <span class="meter-table-cell-label">{level}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div class="meter-table-row">
-        <span class="meter-table-label">dial (hot)</span>
-        <div class="meter-table-cells">
-          {METER_LEVELS.map((level) => (
-            <div class="meter-table-cell" key={level}>
-              <ThinkingMeter variant="dial" level={level} hot />
-              <span class="meter-table-cell-label">{level}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div class="meter-table-row">
-        <span class="meter-table-label">glyph (hot)</span>
-        <div class="meter-table-cells">
-          {METER_LEVELS.map((level) => (
-            <div class="meter-table-cell" key={level}>
-              <ThinkingMeter variant="glyph" level={level} hot />
-              <span class="meter-table-cell-label">{level}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // PrimitivesGallery — shows the component system's atoms
 // in all their states, for visual review on /next.
@@ -202,8 +149,6 @@ export function PrimitivesGallery() {
       <h3>Kbd</h3>
       <KbdRow />
 
-      <h3>ThinkingMeter</h3>
-      <ThinkingMeterTable />
     </section>
   );
 }

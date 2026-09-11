@@ -10,12 +10,13 @@ import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Sheet, ArtifactsEntry } from "../../components/index.js";
+import { usePermissionMenu } from "../../components/PermissionControl/PermissionControl.jsx";
 import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { updateSession } from "../../data/store.js";
 import { useStore } from "../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
-import { focusedSession, focusedSessionId, modelAccent, matchSelectedModel } from "../../data/selectors.js";
+import { focusedSession, focusedSessionId, matchSelectedModel } from "../../data/selectors.js";
 import { catalogThinkingPosition, ensureModelCatalog, modelCatalog } from "../../data/model-catalog.js";
 import { navigate } from "../../data/router.js";
 import { openPalette } from "../../data/palette.js";
@@ -126,6 +127,17 @@ export function ConversationScreen() {
 
   const usageAnchorRef = useRef(null);
 
+  // The permission menu belongs to the chip on the status line, so the screen
+  // owns its open state the way it owns the model popover's. Hooks run before
+  // the body branches: a screen with no session still has to call them.
+  const busy = !!session && (session.state === "running" || session.state === "permission");
+  const permMenu = usePermissionMenu({
+    mode: session?.permissionMode || "yolo",
+    disabled: busy,
+    onChange: (mode) => configureSession(session.id, { permissionMode: mode }),
+  });
+  useEffect(() => { permMenu.close(); }, [activeId]);
+
   let body;
   if (!loaded) {
     body = <div class="conversation-placeholder">Loading sessions…</div>;
@@ -150,7 +162,7 @@ export function ConversationScreen() {
     const specs = catalog.entries || [];
     const selectedModel = matchSelectedModel(specs, session.model);
     const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
-    const settingsBusy = session.state === "running" || session.state === "permission";
+    const settingsBusy = busy;
     // When a subagent is being viewed, the SubagentView takes over the main
     // column (in place of the parent stream/composer/status). Its jobId must
     // still exist in the session (the view itself rebounds to null via onBack if
@@ -289,11 +301,13 @@ export function ConversationScreen() {
                   usage={usage}
                   onOpenUsage={() => toggleSessionPanel(session.id, "usage")}
                   onOpenMcp={() => toggleSessionPanel(session.id, "mcp")}
-                  onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
+                  onPerm={permMenu.toggle}
+                  permOpen={permMenu.open}
+                  permAnchorRef={permMenu.anchorRef}
+                  permPopover={permMenu.menu}
                   permBusy={settingsBusy}
                   showTokens={true}
                   modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
-                  modelAccent={modelAccent(session.model)}
                   thinking={thinking}
                   thinkingPosition={catalogThinkingPosition(catalog, {
                     model: session.model,

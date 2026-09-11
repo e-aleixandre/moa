@@ -2,37 +2,24 @@ import { useState, useRef, useEffect, useLayoutEffect } from "preact/hooks";
 import { createPortal } from "preact/compat";
 import { Check } from "lucide-preact";
 import { registerOverlay } from "../../data/overlays.js";
-import { Sheet } from "../Sheet/Sheet.jsx";
 import "./PermissionControl.css";
 
-// PermissionControl — the permission-mode datum turned into a CONTROL
-// (TELEMETRY-SETTINGS-REDESIGN §3.2). The old design MERELY showed the mode in
-// the StatusStrip and hid the actual switch inside a desktop-only settings
-// popover; here the chip itself is the switch, in EVERY density. That both
-// removes a redundant popover and fixes mobile, where there was no way to change
-// permissions at all.
+// PermissionControl — the permission mode's MENU. The chip that opens it lives
+// on the status line (layout/StatusStrip), which is the catalogue's
+// `.zl-st-perm`: one element is the glanceable safety colour AND the door, and
+// it cannot be two elements without them drifting apart. This file owns what
+// opens, and the rules for opening it.
 //
 // Interaction rule (deliberate): a tap OPENS a 3-option menu — it NEVER cycles.
 // Cycling on tap could silently drop a session into YOLO with a stray touch,
-// which is unacceptable for a safety setting. Two deliberate taps (open → pick),
-// each option carrying a one-line description of what it does.
+// which is unacceptable for a safety setting. Two deliberate taps (open →
+// pick), each option carrying a one-line description of what it does.
 //
-// Presentation (MOBILE-POLISH-SPEC §2): on desktop the options open in an
-// upward popover; on mobile (`sheet` prop) they open in the existing modal Sheet
-// instead. Its fixed overlay is viewport-anchored and the panel fills the
-// available viewport width, so it can never clip off-screen the way a popover
-// anchored to a mid-line chip did. The chip itself stays on the status line in
-// both densities so its accent color remains a glanceable safety signal — only
-// the act of changing moves into the sheet.
-//
-// Desktop popover is PORTALLED to <body> with fixed coords: panes use
-// overflow:hidden, so an absolute menu clipped at the pane edge (grid). Portal
-// keeps the same upward-from-chip placement without fighting pane overflow.
-//
-// Self-contained: owns its open state, click-outside, Escape and overlay-history
-// registration, so the call sites just drop it in. `disabled` locks it while the
-// agent is running (same lock-while-running rule as the rest of session
-// settings).
+// The desktop menu is PORTALLED to <body> with fixed coords: panes use
+// overflow:hidden, so an absolute menu is clipped at the pane edge (grid). The
+// portal keeps the same upward-from-chip placement without fighting pane
+// overflow. On the phone the same rows go in the bottom sheet the line's other
+// doors use (MobileStatusLine), so nothing here has to know about that density.
 
 export const PERMISSION_MODES = [
   { value: "yolo", label: "YOLO", desc: "Run everything — never ask" },
@@ -41,11 +28,11 @@ export const PERMISSION_MODES = [
 ];
 
 // PermissionOptions — the three rows themselves, shared by every host that
-// offers the choice: this control's desktop popover, its mobile Sheet, and the
-// mobile status line's own sheet. The mobile line used to carry its own copy of
-// the list AND of this markup, with a comment promising it was "the same copy /
-// order as the shared PermissionControl" — a promise nothing enforced. One
-// element renders it now, so a change to a row cannot land in one density only.
+// offers the choice: this control's desktop popover and the mobile status
+// line's sheet. The mobile line used to carry its own copy of the list AND of
+// this markup, with a comment promising it was "the same copy / order as the
+// shared PermissionControl" — a promise nothing enforced. One element renders
+// it now, so a change to a row cannot land in one density only.
 //
 // The mode also rides on the row itself (perm-menu-item perm-ask), not only on
 // its label: a row that IS a mode should be able to wear it — Ambient marks it
@@ -84,7 +71,14 @@ export function PermissionOptions({ mode, onPick, isDisabled }) {
 const MENU_WIDTH = 220;
 const MENU_GAP = 8;
 
-export function PermissionControl({ mode = "yolo", disabled = false, onChange, sheet = false }) {
+// usePermissionMenu — the open state and lifecycle of the desktop menu, for a
+// host that renders the chip itself. It returns the chip's props and the
+// portalled menu, so a host wires three values and owns no behaviour:
+//
+//   const perm = usePermissionMenu({ mode, disabled, onChange });
+//   <StatusStrip onPerm={perm.toggle} permOpen={perm.open}
+//                permAnchorRef={perm.anchorRef} permPopover={perm.menu} />
+export function usePermissionMenu({ mode = "yolo", disabled = false, onChange } = {}) {
   const [open, setOpen] = useState(false);
   const [menuPos, setMenuPos] = useState(null);
   const anchorRef = useRef(null);
@@ -92,12 +86,11 @@ export function PermissionControl({ mode = "yolo", disabled = false, onChange, s
 
   // Place the portal menu above the chip, right-aligned, clamped to the viewport.
   const placeMenu = () => {
-    const chip = anchorRef.current?.querySelector(".perm-chip") || anchorRef.current;
+    const chip = anchorRef.current?.querySelector("button") || anchorRef.current;
     if (!chip) return;
     const r = chip.getBoundingClientRect();
-    const width = MENU_WIDTH;
     let right = window.innerWidth - r.right;
-    right = Math.max(8, Math.min(right, window.innerWidth - width - 8));
+    right = Math.max(8, Math.min(right, window.innerWidth - MENU_WIDTH - 8));
     // Prefer above the chip; if not enough room, flip below.
     const menuH = menuRef.current?.offsetHeight || 160;
     const spaceAbove = r.top;
@@ -110,7 +103,7 @@ export function PermissionControl({ mode = "yolo", disabled = false, onChange, s
   };
 
   useLayoutEffect(() => {
-    if (!open || sheet) {
+    if (!open) {
       setMenuPos(null);
       return undefined;
     }
@@ -123,13 +116,10 @@ export function PermissionControl({ mode = "yolo", disabled = false, onChange, s
       window.removeEventListener("resize", onReposition);
       window.removeEventListener("scroll", onReposition, true);
     };
-  }, [open, sheet]);
+  }, [open]);
 
-  // Popover-only lifecycle: click-outside / Escape / overlay-history are handled
-  // here for the desktop popover. The Sheet variant gets all of that from the
-  // Sheet component itself, so we skip this wiring when `sheet` is set.
   useEffect(() => {
-    if (!open || sheet) return;
+    if (!open) return undefined;
     const unregister = registerOverlay("permission-menu");
     const onDocDown = (e) => {
       if (anchorRef.current && anchorRef.current.contains(e.target)) return;
@@ -144,7 +134,7 @@ export function PermissionControl({ mode = "yolo", disabled = false, onChange, s
       document.removeEventListener("mousedown", onDocDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [open, sheet]);
+  }, [open]);
 
   // Close if the control becomes disabled mid-open (agent started running).
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
@@ -154,9 +144,7 @@ export function PermissionControl({ mode = "yolo", disabled = false, onChange, s
     setOpen(false);
   };
 
-  const options = <PermissionOptions mode={mode} onPick={pick} />;
-
-  const desktopMenu = open && !sheet && menuPos && typeof document !== "undefined" && document.body
+  const menu = open && menuPos && typeof document !== "undefined" && document.body
     ? createPortal(
         <div
           class="perm-menu perm-menu-portal"
@@ -169,35 +157,17 @@ export function PermissionControl({ mode = "yolo", disabled = false, onChange, s
             right: menuPos.right,
           }}
         >
-          {options}
+          <PermissionOptions mode={mode} onPick={pick} />
         </div>,
         document.body,
       )
     : null;
 
-  return (
-    <span class="perm-control" ref={anchorRef}>
-      <button
-        type="button"
-        class={`perm-chip perm-${mode}`}
-        disabled={disabled}
-        aria-haspopup={sheet ? "dialog" : "menu"}
-        aria-expanded={open}
-        title={disabled ? "Permission mode (locked while the agent is running)" : "Permission mode"}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {mode}
-      </button>
-
-      {sheet ? (
-        <Sheet open={open} onClose={() => setOpen(false)} title="Permissions">
-          <div class="perm-sheet-list" role="menu" aria-label="Permission mode">
-            {options}
-          </div>
-        </Sheet>
-      ) : (
-        desktopMenu
-      )}
-    </span>
-  );
+  return {
+    open,
+    anchorRef,
+    menu,
+    close: () => setOpen(false),
+    toggle: () => setOpen((v) => !v),
+  };
 }

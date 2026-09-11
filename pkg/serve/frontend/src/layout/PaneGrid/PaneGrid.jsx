@@ -24,7 +24,7 @@ import { getTileCount, updateSession } from "../../data/store.js";
 import { useStore } from "../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { openPersistedSubagent, openBashJob, configureSession, setSessionFast } from "../../data/session-actions.js";
-import { modelAccent, matchSelectedModel } from "../../data/selectors.js";
+import { matchSelectedModel } from "../../data/selectors.js";
 import { catalogThinkingPosition, ensureModelCatalog, modelCatalog } from "../../data/model-catalog.js";
 import { shortModel, shortPath, sessionDisplayDotState, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
@@ -434,11 +434,13 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
               setModelOpen(false);
               setMcpOpen((v) => !v);
             }}
-            onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
+            onPerm={permMenu.toggle}
+            permOpen={permMenu.open}
+            permAnchorRef={permMenu.anchorRef}
+            permPopover={permMenu.menu}
             permBusy={settingsBusy}
             showTokens
             modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
-            modelAccent={modelAccent(session.model)}
             thinking={thinking}
             thinkingPosition={catalogThinkingPosition(catalog, {
               model: session.model,

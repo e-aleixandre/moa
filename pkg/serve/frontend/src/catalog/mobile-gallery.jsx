@@ -5,7 +5,7 @@ import {
   CodeBlock,
   DiffBlock,
   PermissionCard,
-  PermissionControl,
+  PermissionOptions,
   TokenFlow,
 } from "../components/index.js";
 import { SessionDrawer } from "../layout/mobile/SessionDrawer/SessionDrawer.jsx";
@@ -176,7 +176,7 @@ function MobileComposerSpecimen({ status, perm = "yolo", spend, tokensUp, tokens
       <div class="mcomposer-status">
         <span class="work">● {status}</span>
         {hasTokens && <span class="tokens"><TokenFlow up={tokensUp} down={tokensDown} variant="compact" /></span>}
-        <PermissionControl mode={perm} sheet onChange={() => {}} />
+        <PermissionOptions mode={perm} onPick={() => {}} />
         <button type="button" class="spend spend-btn" aria-label="Show usage" title="Estimated session cost">
           ~{spend}
         </button>

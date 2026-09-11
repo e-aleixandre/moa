@@ -1,384 +1,234 @@
-.status-strip {
+/* StatusStrip — the line under the composer.
+
+   This sheet is the catalogue's, MOVED (catalog/zones-lab.css:605-765, the
+   `.zl-status` block plus `.zl-st-anchor` / `.zl-pop` from its picker block),
+   not translated. The class names came with the rules on purpose: a rule that
+   is copied is a rule that can drift, and the drift is what this migration
+   exists to end. The catalogue imports the component now, so these are the
+   only status-line rules in the product.
+
+   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
+   ?view=zones they resolve from `.zl` (zones-lab.css:22); everywhere else the
+   fallback IS the catalogue's own value, so production gets the accepted
+   colour rather than a near-miss re-derived from another token set.
+
+   What is added below the catalogue's block is only what the prototype never
+   had: the focus ring, the disabled state, the popover hosts production
+   anchors to the line, and the densities (pane, phone dock) that the prototype
+   expressed as frame-specific rules.
+
+   Three tiers, three places. Settings left, gauges right, events between. The
+   line is a container: it degrades by its OWN width, so the same component
+   behaves in the desktop column, a pane and the phone dock.
+
+   Words are Outfit 14/500 in t3; data is Plex Mono 12 in t2. That contrast is
+   the hierarchy: the number is what you read, the word is what tells you which
+   number. Nothing on the line is white; the transcript is. */
+.zl-status {
+  container-type: inline-size;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-  padding: var(--space-2) var(--space-2) 0;
-  max-width: 844px;
-  margin: 0 auto var(--space-4);
-  width: 100%;
-  font-size: var(--text-xs);
-  color: var(--overlay1);
-  font-family: var(--mono);
-  flex: none;
-}
-
-/* Context + cost lead the line, mirroring the mobile line so the same datum
-   lives on the same side in both densities. They sit in one group because the
-   cost opens the very Usage panel the ring summarises. */
-.status-strip .status-strip-usage {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-  flex: none;
-}
-
-.status-strip .status-strip-ctx {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.status-strip .status-strip-ring {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  -webkit-mask: radial-gradient(circle at center, transparent 4.2px, #000 4.5px);
-  mask: radial-gradient(circle at center, transparent 4.2px, #000 4.5px);
-}
-
-.status-strip .status-strip-task {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--subtext0);
-}
-
-.status-strip .status-strip-task::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 2px;
-  background: var(--blue);
-  flex: none;
-}
-
-.status-strip .work.is-live {
-  background: linear-gradient(
-    90deg,
-    var(--subtext0) 0%,
-    var(--subtext0) 35%,
-    var(--sky) 50%,
-    var(--subtext0) 65%,
-    var(--subtext0) 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  background-size: 200% 100%;
-  animation: work-shimmer 2.5s ease-in-out infinite;
-}
-
-@keyframes work-shimmer {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: -100% 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .status-strip .work.is-live {
-    animation: none;
-    background: none;
-    -webkit-background-clip: border-box;
-    background-clip: border-box;
-    color: var(--subtext0);
-  }
-}
-
-/* Right-anchored telemetry group: tokens + context ring + cost. margin-left
-   lives here (not on an individual segment) so the group hugs the right edge
-   regardless of which segments are present, while the activity + mode pills
-   stay left. */
-.status-strip .status-strip-right {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-}
-
-.status-strip .status-strip-spend {
-  flex: none;
-}
-
-/* MCP health — a plug + count on the right group, mirroring the mobile chip. A
-   quiet mono segment normally; the alert variant (any server failed/exited)
-   turns red so a crashed server reads at a glance. The button form is the door
-   onto the MCP panel. */
-.status-strip .status-strip-mcp {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--subtext0);
-  font-size: var(--text-xs);
-  white-space: nowrap;
-}
-.status-strip .status-strip-mcp svg {
-  width: 13px;
-  height: 13px;
-}
-.status-strip .status-strip-mcp-bad {
-  color: var(--red);
-  font-weight: var(--weight-medium);
-}
-.status-strip .status-strip-mcp-btn {
-  position: relative;
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-}
-.status-strip .status-strip-mcp-btn::after {
-  content: "";
-  position: absolute;
-  inset: -14px -8px;
-}
-@media (hover: hover) {
-  .status-strip .status-strip-mcp-btn:hover {
-    color: var(--text);
-  }
-  .status-strip .status-strip-mcp-btn.status-strip-mcp-bad:hover {
-    color: var(--red);
-    filter: brightness(1.15);
-  }
-}
-
-.status-strip .status-strip-spend b {
-  color: var(--subtext0);
-  font-weight: var(--weight-medium);
-}
-
-.status-strip .status-strip-spend.spend-med b { color: var(--yellow); }
-.status-strip .status-strip-spend.spend-high b { color: var(--red); }
-
-/* Cost segment as the Usage panel trigger. Compact visual, but a ≥44px hit
-   area via a pseudo-element (the same technique used elsewhere). Dotted
-   underline on hover (desktop) signals it opens the panel. */
-.status-strip .status-strip-usage-btn {
-  position: relative;
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-}
-.status-strip .status-strip-usage-btn::after {
-  content: "";
-  position: absolute;
-  inset: -14px -8px;
-}
-.status-strip .status-strip-usage-btn:focus-visible {
-  outline: 2px solid var(--lavender);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
-
-/* Gauge affordance — the panel is reachable even before a session has any
-   cost. Discreet, right-aligned, with a ≥44px hit area. */
-.status-strip .status-strip-gauge {
-  position: relative;
-  border: 0;
-  background: none;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  color: var(--overlay0);
-  cursor: pointer;
-}
-
-.status-strip .status-strip-gauge svg {
-  width: 14px;
-  height: 14px;
-}
-
-.status-strip .status-strip-gauge::after {
-  content: "";
-  position: absolute;
-  inset: -14px -10px;
-}
-
-@media (hover: hover) {
-  .status-strip .status-strip-gauge:hover {
-    color: var(--subtext0);
-  }
-}
-
-.status-strip .status-strip-gauge:focus-visible {
-  outline: 2px solid var(--lavender);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
-
-/* Ported TaskBar pills: compact uppercase badges (permissions, modes,
-   on-extra). Colors are Catppuccin Mocha tokens only. */
-.status-strip .status-strip-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 1px var(--space-2);
-  border-radius: var(--radius-full);
-  font-weight: var(--weight-semibold);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  white-space: nowrap;
-  flex: none;
-}
-
-.status-strip .status-strip-pill svg {
-  width: 11px;
-  height: 11px;
-}
-
-/* Fast mode — after the permission chip, same word and hue as the mobile
-   line, so turning it on here doesn't invent a second code to learn. The
-   strip is already mono and xs, so color is the only extra. */
-.status-strip .status-strip-fast {
-  flex: none;
-  color: var(--yellow);
-}
-
-.status-strip .status-strip-model {
-  position: relative;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-}
-
-.status-strip .status-strip-model .head-popover {
-  position: absolute;
-  top: auto;
-  right: auto;
-  bottom: calc(100% + var(--space-2));
-  left: 0;
-}
-
-.status-strip .status-strip-model .model-pill {
-  padding: 1px var(--space-2);
-  font-size: var(--text-xs);
-  background: transparent;
-  border-color: transparent;
-}
-@media (hover: hover) {
-
-
-.status-strip .status-strip-model .model-pill:hover {
-  border-color: var(--surface1);
-  background: var(--surface0);
-}
-}
-
-/* Permission mode */
-.status-strip .status-strip-pill.perm-yolo { color: var(--maroon); background: var(--maroon-dim); }
-.status-strip .status-strip-pill.perm-ask { color: var(--yellow); background: var(--yellow-dim); }
-.status-strip .status-strip-pill.perm-auto { color: var(--blue); background: var(--blue-dim); }
-
-/* Goal */
-.status-strip .status-strip-pill.goal { color: var(--mauve); background: var(--mauve-dim); }
-
-/* Per-session "on extra usage right now" flag — the loudest badge, shown only
-   while a request is actively being served from pay-as-you-go. */
-.status-strip .status-strip-pill.session-overage { color: var(--base); background: var(--red); }
-
-/* Task progress counter. */
-.status-strip .status-strip-pill.tasks { color: var(--subtext1); background: var(--surface0); }
-
-.status-strip.is-compact {
-  flex-wrap: nowrap;
-  max-width: none;
-  margin: 0;
-  padding: 7px var(--space-2) 3px;
-  gap: var(--space-2);
-  /* Never overflow-x: auto: on iOS that makes the whole line a pan target, so a
-     finger hold drags the chrome behind the composer. Clip instead of scroll. */
-  overflow: hidden;
-  overscroll-behavior: none;
-}
-
-/* The phone's line. Compact is shared with the grid pane, where a dense
-   readout beside four other panes is right; on a phone it was the same line
-   shrunk to 10.5px and 30px tall, which made the one persistent readout the
-   least legible thing on the screen and put every door under the 44px floor.
-
-   The catalogue's phone dock: 44px tall, 14px type, --amb-text-3 (its words
-   are read at arm's length, not scanned in a grid). The buttons on it are
-   44px too — they are doors, and a door you cannot reliably hit is a door
-   that is not there. */
-.mcomposer .status-strip.is-compact {
-  height: var(--control-touch);
+  gap: 4px;
+  height: 36px;
   padding: 0 2px;
-  margin-top: var(--space-1);
-  font-size: var(--text-base);
-  gap: 2px;
-}
-
-/* Every segment fills the line's height, so its tap area is the full 44px
-   rather than a 16px run of text with a pseudo-element stretched around it.
-   The two that were doing exactly that (usage, mcp) drop their reach-out
-   pseudo: the element itself is the target now.
-
-   `align-items: stretch` on the line, not `height` on the children: setting a
-   height needs a `display` to go with it, and declaring `display` here would
-   outrank the `display: none` that sheds a segment at a narrow width (a lone
-   class inside a container query cannot beat `.status-strip .x`). Stretch does
-   the same job from the parent and leaves shedding alone. */
-.mcomposer .status-strip.is-compact {
-  align-items: stretch;
-}
-
-.mcomposer .status-strip.is-compact > * {
-  align-self: stretch;
-}
-
-.mcomposer .status-strip.is-compact .status-strip-usage,
-.mcomposer .status-strip.is-compact .status-strip-right {
-  align-items: center;
-}
-
-.mcomposer .status-strip.is-compact .status-strip-usage-btn,
-.mcomposer .status-strip.is-compact .perm-chip,
-.mcomposer .status-strip.is-compact .status-strip-mcp,
-.mcomposer .status-strip.is-compact .status-strip-model .model-pill {
-  align-items: center;
-  padding: 0 6px;
-  border-radius: var(--radius-md);
-}
-
-.mcomposer .status-strip.is-compact .status-strip-div {
-  align-self: center;
-}
-
-.mcomposer .status-strip.is-compact .status-strip-usage-btn::after,
-.mcomposer .status-strip.is-compact .status-strip-mcp-btn::after,
-.mcomposer .status-strip.is-compact .perm-chip::after {
-  content: none;
-}
-
-.mcomposer .status-strip.is-compact .status-strip-right {
-  gap: var(--space-1);
-}
-
-.mcomposer .status-strip.is-compact .status-strip-mcp,
-.mcomposer .status-strip.is-compact .perm-chip,
-.mcomposer .status-strip.is-compact .status-strip-fast {
-  font-size: var(--text-sm);
-}
-
-.status-strip.is-compact .status-strip-div {
+  margin-top: 4px;
+  color: var(--zl-t3, #9091a6);
+  font-family: var(--font);
+  letter-spacing: -0.005em;
   flex: none;
-  width: 1px;
-  height: 12px;
-  background: var(--surface1);
+}
+.zl-st-group { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.zl-st-group.is-settings { flex: none; }
+.zl-st-group.is-gauges { flex: none; margin-left: auto; }
+
+.zl-st {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--zl-r-md, 10px);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--zl-fs-body, 14px);
+  font-weight: 500;
+  letter-spacing: inherit;
+  white-space: nowrap;
+  min-width: 0;
+}
+button.zl-st { cursor: pointer; transition: background 120ms ease; }
+@media (hover: hover) {
+  button.zl-st:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t2, #c3c4d1); }
+}
+.zl-st-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.zl-st-ico { width: 14px; height: 14px; flex: none; }
+/* Data is mono; words are not. The catalogue's pairing, declared once here
+   because production's reset gives the line its --font and nothing else. */
+.zl-status .zl-data { font-family: var(--mono); font-size: var(--zl-fs-meta, 12px); font-variant-numeric: tabular-nums; }
+
+/* tier 1: settings */
+.zl-st-model { color: var(--zl-t2, #c3c4d1); }
+/* Thinking meter: four bars (low..xhigh; production's fifth level, off, lights
+   none), lit from the left in the accent. A setting, not a state. */
+.zl-think { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; flex: none; }
+.zl-think i { display: block; width: 3px; border-radius: 1px; background: var(--zl-accent, #cba6f7); font-style: normal; }
+.zl-think i:nth-child(1) { height: 4px; }
+.zl-think i:nth-child(2) { height: 6px; }
+.zl-think i:nth-child(3) { height: 8px; }
+.zl-think i:nth-child(4) { height: 11px; }
+.zl-think i.is-off { background: var(--zl-line-2, rgba(255, 255, 255, 0.12)); }
+
+/* Permission mode is the one setting you must never misread, so it is the
+   one setting in a state colour: yolo maroon (nothing will ask), ask
+   yellow (it will stop for you), auto neutral. */
+.zl-st-perm { font-weight: 600; }
+.zl-st-perm::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.zl-st-perm.is-yolo { color: var(--zl-maroon, #eba0ac); }
+.zl-st-perm.is-ask { color: var(--zl-yellow, #f9e2af); }
+.zl-st-perm.is-auto { color: var(--zl-t2, #c3c4d1); }
+.zl-st-fast { color: var(--zl-t3, #9091a6); padding: 0 6px; gap: 3px; }
+
+/* tier 3: events. Neutral by default; an alarm takes its state colour. */
+.zl-st-ev { gap: 5px; padding: 0 7px; color: var(--zl-t3, #9091a6); }
+.zl-st-ev .zl-data { color: var(--zl-t2, #c3c4d1); }
+.zl-st-ev.is-alarm-red, .zl-st-ev.is-alarm-red .zl-data { color: var(--zl-red, #f38ba8); }
+.zl-st-ev.is-alarm-yellow, .zl-st-ev.is-alarm-yellow .zl-data { color: var(--zl-yellow, #f9e2af); }
+
+/* tier 2: gauges. One button (ctx + spend: the door to Usage), one reading. */
+.zl-st-ctx { gap: 5px; padding: 0 8px 0 6px; }
+.zl-st-sep { width: 1px; height: 12px; margin: 0 3px; background: var(--zl-line-2, rgba(255, 255, 255, 0.12)); flex: none; }
+.zl-st-tok { gap: 3px; padding: 0 6px; }
+.zl-num { color: var(--zl-t2, #c3c4d1); }
+.zl-unit, .zl-arrow { color: var(--zl-t4, #66677c); }
+.zl-st-tok .zl-num + .zl-arrow { margin-left: 5px; }
+/* The spend takes a severity colour from the plan window it is measured
+   against, the way the ring takes one from how full the context is. */
+.zl-st-spend.spend-med { color: var(--zl-yellow, #f9e2af); }
+.zl-st-spend.spend-high { color: var(--zl-red, #f38ba8); }
+
+/* Context ring: accent while there is room, state colour as it fills. */
+.zl-ring { width: 14px; height: 14px; flex: none; }
+.zl-ring-track { fill: none; stroke: var(--zl-line-2, rgba(255, 255, 255, 0.12)); stroke-width: 2.4; }
+.zl-ring-arc {
+  fill: none;
+  stroke: var(--zl-accent, #cba6f7);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  transition: stroke-dasharray 400ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+}
+.zl-ring.is-warm .zl-ring-arc { stroke: var(--zl-yellow, #f9e2af); }
+.zl-ring.is-hot .zl-ring-arc { stroke: var(--zl-red, #f38ba8); }
+.zl-ring.is-warm + .zl-num { color: var(--zl-yellow, #f9e2af); }
+.zl-ring.is-hot + .zl-num { color: var(--zl-red, #f38ba8); }
+
+/* ── Priority, declared once ──────────────────────────────────────────────
+   Every item carries a priority class (data/util/status-strip-model.js
+   statusItemPriority) and the line sheds them in order, low first, as the dock
+   narrows. That is the whole rule -- no per-element exceptions, so adding a
+   datum later means choosing its priority, not inventing another breakpoint.
+
+   The order is the owner's: "mejor poder ver modelo, contexto, permisos que
+   ver si está en fast o no, o ver los MCPs".
+
+     p1  model, permissions, context  — never drops. What you glance at while
+                                        typing, and what changes the answer.
+     p2  real alarms (mcp down, on extra) — only exist while something is
+                                        wrong, so they outrank normal numbers.
+     p3  tokens, spend                — read after the fact, not during.
+     p4  fast, goal, tasks, healthy mcp — settings and progress, not warnings.
+
+   Everything that drops is reachable in the session panel, so narrow means
+   fewer things ON THE LINE, never fewer things known.
+
+   The widths are measured against the content, not chosen as round numbers.
+   Measured with all eleven data: words+data need ~790px; icon+data ~600; the
+   phone dock (366, compact) fits settings + alarms + ring. */
+@container (max-width: 640px) {
+  .zl-p4 { display: none; }
+}
+@container (max-width: 560px) {
+  /* 560, not 470: at 544 the tokens pair still ran 3.7px past the dock.
+     The number that decides is the widest content, not a round figure. */
+  .zl-p3 { display: none; }
+}
+@container (max-width: 400px) {
+  /* p2 only sheds its words, never itself: an alarm you cannot see is worse
+     than a cramped line, and its number survives. 400 and not 360 because a
+     390pt phone gives the dock 366, and there the three groups still asked
+     for 386 -- measured, after the events group stopped being squeezable. */
+  .zl-p2 .zl-st-word { display: none; }
+  .zl-st { padding: 0 5px; }
+}
+@container (max-width: 320px) {
+  /* The floor. Below this the ring drops its percent and keeps the arc: the
+     shape still says "how full", and the number lives in the panel like every
+     other datum the line sheds. The model name truncates last of all. */
+  .zl-st-model .zl-st-word { max-width: 68px; }
+  .zl-st-ctx .zl-data { display: none; }
+  .zl-st { padding: 0 4px; gap: 4px; }
+}
+/* The events group never squeezes its children: if room runs out the line
+   gives, not the legibility of a warning. */
+.zl-st-group.is-events { flex: none; overflow: visible; gap: 6px; }
+.zl-st-fast .zl-st-word,
+.zl-st-ev .zl-st-word { overflow: visible; text-overflow: clip; flex: none; }
+
+/* Compact (grid pane, phone): goal and tasks are already dropped in the JSX;
+   the line itself only tightens. */
+.zl-status.is-compact { gap: 2px; }
+.zl-status.is-compact .zl-st { padding: 0 6px; }
+
+/* ── What the prototype never had ─────────────────────────────────────────
+   Below this line is production's own: the states a static mock has no reason
+   to draw, and the hosts it has no popovers to anchor. */
+
+.zl-status :is(button, [tabindex]):focus-visible {
+  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline-offset: 2px;
 }
 
-.status-strip.is-compact .status-strip-model .model-pill {
-  padding: 2px 0;
-  font-size: inherit;
-  gap: 6px;
+/* Locked while the agent is running (permissions) or while there is nothing to
+   open (a read-only line in a subagent view). It stays legible: the datum is
+   still the answer to "what mode is this in", only the door is shut. */
+button.zl-st:disabled { cursor: default; }
+@media (hover: hover) {
+  button.zl-st:disabled:hover { background: transparent; color: inherit; }
 }
+
+/* The open control keeps its well while its picker is up, so you can see which
+   button the surface belongs to. */
+.zl-st.is-open {
+  background: var(--zl-control, #262633);
+  color: var(--zl-t1, #f4f4f7);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+}
+
+/* The anchor a popover is positioned against. It adds no box of its own. */
+.zl-st-anchor { position: relative; display: inline-flex; min-width: 0; }
+
+/* TokenFlow carries the pulse the catalogue's static line could not show, and
+   an accessible name for a pair of arrows that read as nothing spoken aloud.
+   It is a box, so it repeats the segment's own layout rather than being made
+   to disappear with `display: contents` — which is what takes an element's
+   aria-label out of the tree in more than one browser. */
+.zl-st-tok .token-flow { display: inline-flex; align-items: center; gap: 3px; }
+
+/* The phone dock. 44px tall, and every segment fills that height so its tap
+   area is the whole row rather than a run of text: they are doors, and a door
+   you cannot reliably hit is a door that is not there.
+
+   `align-items: stretch` on the line, not a height on the children: setting a
+   height needs a `display` to go with it, and declaring `display` here would
+   outrank the `display: none` that sheds a segment at a narrow width. */
+.mcomposer .zl-status {
+  height: var(--control-touch);
+  align-items: stretch;
+  margin-top: var(--space-1);
+}
+.mcomposer .zl-status > * { align-self: stretch; }
+.mcomposer .zl-status .zl-st { height: auto; align-items: center; }
+
+/* The pane's line is the compact one in a shorter dock. */
+.pane .zl-status { height: 32px; margin-top: 2px; }

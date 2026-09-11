@@ -21,7 +21,13 @@ test("the conversation header is a title, not a toolbar of session controls", ()
 });
 
 test("the model lives on the status strip next to permission", () => {
-  expect(strip).toContain("ModelPill");
+  // ModelPill is gone: the status line now carries the catalogue's own markup,
+  // where the model is a .zl-st-model button beside .zl-st-perm rather than a
+  // separate production component. What this test defends is where the control
+  // lives -- on the strip, next to permission -- not the name of the class it
+  // used to be made of.
+  expect(strip).toContain("zl-st-model");
+  expect(strip).toContain("zl-st-perm");
   expect(strip).toContain("modelName");
 });
 

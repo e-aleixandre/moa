@@ -1,22 +1,20 @@
-/* TokenFlow — live per-run ↑/↓ token heartbeat with a soft color pulse when a
-   value grows. The base color is dim (telemetry, not a headline); the pulse
-   briefly lifts the arrow+number to its accent then fades back. */
+/* TokenFlow — the live per-run ↑/↓ token heartbeat. Its SHAPE (the arrows, the
+   numbers, the gaps) belongs to the status line's segment, which is the
+   catalogue's `.zl-st-tok`; this sheet only owns the PULSE, the one thing a
+   static mock has no way to draw.
+
+   The resting colours are the line's own (.zl-num / .zl-arrow). The pulse
+   briefly lifts a number to its accent and fades back. */
 .token-flow {
   white-space: nowrap;
   flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
 }
 
 .token-flow-in,
 .token-flow-out {
-  color: var(--overlay1);
   border-radius: var(--radius-sm);
   /* Fade the tint back to the resting color after a pulse. */
   transition: color var(--token-pulse-fade) var(--ease);
-}
-
-.token-flow-sep {
-  color: var(--overlay0);
 }
 
 /* Pulse: ↑ input = blue (coming in), ↓ output = teal (coming out). A soft glow
