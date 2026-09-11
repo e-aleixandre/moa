@@ -1431,7 +1431,18 @@ html.mobile-locked[data-ambient="on"] body {
   box-shadow: none;
 }
 
-[data-ambient="on"] .mstream,
+/* The phone had the same bug the desktop had, and I introduced it the same
+   way: the sheet went on .mstream, the SCROLLER, which stops where the
+   composer starts. So the reading surface ended at y=726 and the dock below it
+   sat on the bare aurora -- a hard horizontal seam right above the input,
+   measured as a jump from rgb(16,16,26) to rgb(19,21,31) across the full
+   width.
+
+   On the desktop I moved it to .conversation-main and the seam went away; I
+   did not check whether the phone had the same shape. It does. .mconv is the
+   whole screen, so the sheet is continuous from the header to the bottom edge
+   and the dock gradient now fades over the surface instead of over nothing. */
+[data-ambient="on"] .mconv,
 [data-ambient="on"] .conversation-main {
   background: rgba(16, 16, 24, 0.78);
 }
