@@ -9,8 +9,7 @@ import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
-import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, UsagePanel, Sheet, ArtifactsEntry } from "../../components/index.js";
-import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
+import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Sheet, ArtifactsEntry } from "../../components/index.js";
 import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { updateSession } from "../../data/store.js";
@@ -28,7 +27,6 @@ import { Plus } from "lucide-preact";
 import { addToast } from "../../data/notifications.js";
 import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast } from "../../data/session-actions.js";
 import { toggleSessionPanel } from "../../data/session-panel.js";
-import { ambientOn } from "../../data/ambient.js";
 import { positionModelPopover } from "../PaneGrid/model-popover-position.js";
 import "./ConversationScreen.css";
 
@@ -49,13 +47,6 @@ export function ConversationScreen() {
   const activeId = useStore(focusedSessionId);
   const loaded = useStore((s) => s.sessionsLoaded);
   const usage = useStore((s) => s.usage);
-
-  // The session panel (Ambient only): the crumb is its door, and the context
-  // ring promotes it straight to Usage. The panel itself is not mounted here —
-  // it is the shell's third zone (layout/DesktopShell/DesktopDossier.jsx), so
-  // docking it can take width from this column instead of covering it. With
-  // the switch off there is no panel and the strip keeps its own popovers.
-  const ambient = ambientOn();
 
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
   // The dock is the permanent home for live ASYNC work (async subagents + bash)
@@ -133,48 +124,7 @@ export function ConversationScreen() {
   useEffect(() => { setRewindOpen(false); }, [activeId]);
   useEffect(() => { setSecretAliases(null); }, [activeId]);
 
-  // --- Usage panel popover (StatusStrip's cost segment) — level 2 telemetry
-  // (TELEMETRY-SETTINGS-REDESIGN §2). Anchored to the strip, not the head, but
-  // reuses the exact same click-outside + Escape wiring as the head popovers.
-  const [usageOpen, setUsageOpen] = useState(false);
   const usageAnchorRef = useRef(null);
-  useEffect(() => { setUsageOpen(false); }, [activeId]);
-  useEffect(() => {
-    if (!usageOpen) return;
-    const unregister = registerOverlay("conv-usage-popover");
-    const onDocDown = (e) => {
-      if (usageAnchorRef.current && !usageAnchorRef.current.contains(e.target)) setUsageOpen(false);
-    };
-    const onKeyDown = (e) => { if (e.key === "Escape") setUsageOpen(false); };
-    document.addEventListener("mousedown", onDocDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      unregister();
-      document.removeEventListener("mousedown", onDocDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [usageOpen]);
-
-  // --- MCP panel popover (StatusStrip's MCP segment) — per-session server
-  // health + restart. Same anchor/click-outside/Escape wiring as the usage
-  // popover; its own anchor so the two don't fight over one ref.
-  const [mcpOpen, setMcpOpen] = useState(false);
-  useEffect(() => { setMcpOpen(false); }, [activeId]);
-  useEffect(() => {
-    if (!mcpOpen) return;
-    const unregister = registerOverlay("conv-mcp-popover");
-    const onDocDown = (e) => {
-      if (usageAnchorRef.current && !usageAnchorRef.current.contains(e.target)) setMcpOpen(false);
-    };
-    const onKeyDown = (e) => { if (e.key === "Escape") setMcpOpen(false); };
-    document.addEventListener("mousedown", onDocDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      unregister();
-      document.removeEventListener("mousedown", onDocDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [mcpOpen]);
 
   let body;
   if (!loaded) {
@@ -266,7 +216,7 @@ export function ConversationScreen() {
         <ChatHead
           title={sessionTitle(session)}
           path={shortPath(session.cwd) || session.cwd || ""}
-          onTitleClick={ambient ? () => toggleSessionPanel(session.id) : undefined}
+          onTitleClick={() => toggleSessionPanel(session.id)}
           onGridToggle={() => navigate("grid")}
           previewOpen={!!session.previewOpen}
           onPreviewToggle={() => updateSession(session.id, { previewOpen: !session.previewOpen })}
@@ -331,12 +281,8 @@ export function ConversationScreen() {
                 spend={fmtSpend(session.costUSD)}
                 session={session}
                 usage={usage}
-                onOpenUsage={ambient
-                  ? () => toggleSessionPanel(session.id, "usage")
-                  : () => setUsageOpen((v) => !v)}
-                onOpenMcp={ambient
-                  ? () => toggleSessionPanel(session.id, "mcp")
-                  : () => setMcpOpen((v) => !v)}
+                onOpenUsage={() => toggleSessionPanel(session.id, "usage")}
+                onOpenMcp={() => toggleSessionPanel(session.id, "mcp")}
                 onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
                 permBusy={settingsBusy}
                 showTokens={true}
@@ -353,21 +299,6 @@ export function ConversationScreen() {
                 modelPopover={modelPopover}
                 modelAnchorRef={modelAnchorRef}
               />
-              {usageOpen && !ambient && (
-                <div class="status-strip-usage-popover">
-                  <UsagePanel
-                    session={session}
-                    usage={usage}
-                    ctxPercent={session.contextPercent}
-                    costUSD={session.costUSD}
-                  />
-                </div>
-              )}
-              {mcpOpen && !ambient && (
-                <div class="status-strip-usage-popover status-strip-mcp-popover">
-                  <McpPanel sessionId={session.id} mcpTick={session.mcpTick} />
-                </div>
-              )}
             </div>
           </>
         )}

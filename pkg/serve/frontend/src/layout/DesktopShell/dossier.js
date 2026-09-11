@@ -4,9 +4,6 @@
 
 // ── Who owns it ────────────────────────────────────────────────────────────
 //
-//   - Ambient off: there is no dossier at all. The switch gates a new surface,
-//     not a restyle, so with it off the desktop is the same two-zone shell it
-//     has always been — same DOM, same CSS.
 //   - The pane grid: NO dossier. The grid shows several sessions at once and
 //     "this session" has no single answer there: a third zone fed by the
 //     focused tile would silently swap what it shows as focus moves, and a
@@ -14,8 +11,7 @@
 //     had one; this keeps it that way rather than inventing an owner.
 //   - No focused session (still loading, or nothing open): nothing to hold a
 //     dossier for.
-export function desktopDossierView({ ambient, view, session, panel }) {
-  if (!ambient) return null;
+export function desktopDossierView({ view, session, panel }) {
   if (view === 'grid') return null;
   if (!session) return null;
   return { open: !!panel?.open, page: panel?.page || 'root' };

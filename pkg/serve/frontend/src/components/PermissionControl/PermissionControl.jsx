@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useLayoutEffect } from "preact/hooks";
 import { createPortal } from "preact/compat";
 import { Check } from "lucide-preact";
 import { registerOverlay } from "../../data/overlays.js";
-import { ambientOn } from "../../data/ambient.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import "./PermissionControl.css";
 
@@ -57,7 +56,7 @@ export function PermissionOptions({ mode, onPick, isDisabled }) {
   // Reversed in the DOM rather than with flex order: the keyboard walks these
   // in document order, and a list whose tab order disagrees with what is on
   // screen is worse than either order on its own.
-  const modes = ambientOn() ? [...PERMISSION_MODES].reverse() : PERMISSION_MODES;
+  const modes = [...PERMISSION_MODES].reverse();
   return modes.map((m) => {
     const on = m.value === mode;
     return (

@@ -2,7 +2,6 @@ import { useStore } from "../../hooks/useStore.js";
 import { SessionPanel } from "../../components/index.js";
 import { focusedSession, focusedSessionId } from "../../data/selectors.js";
 import { sessionPanelView, toggleSessionPanel } from "../../data/session-panel.js";
-import { ambientOn } from "../../data/ambient.js";
 import { desktopDossierView } from "./dossier.js";
 
 // DesktopDossier — the shell's THIRD ZONE, and the reason it is its own
@@ -25,7 +24,7 @@ export function DesktopDossier() {
   const usage = useStore((s) => s.usage);
   const panel = useStore((s) => sessionPanelView(s, activeId));
 
-  const shown = desktopDossierView({ ambient: ambientOn(), view, session, panel });
+  const shown = desktopDossierView({ view, session, panel });
   if (!shown) return null;
 
   return (
