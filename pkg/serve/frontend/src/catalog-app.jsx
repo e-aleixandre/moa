@@ -1,3 +1,9 @@
+// fidelity-freeze first, deliberately: it patches Date.now and Math.random,
+// and the fixtures read the clock at module scope (specimen.js:10,
+// catalog-backend.js:48). An import placed lower would freeze the clock after
+// the ages had already been computed from the real one. Inert unless
+// ?view=scene.
+import "./catalog/fidelity-freeze.js";
 import { render } from "preact";
 import { useEffect } from "preact/hooks";
 import "./index.css";
@@ -15,6 +21,7 @@ import { SubagentGallery } from "./catalog/subagent-gallery.jsx";
 import { DesktopLab, PhoneLab } from "./catalog/desktop-lab.jsx";
 import { SkinsLab } from "./catalog/skins-lab.jsx";
 import { ZonesLab } from "./catalog/zones-lab.jsx";
+import { Scene } from "./catalog/scene.jsx";
 import { InboxLab } from "./catalog/zones-inbox.jsx";
 import { WorkLab } from "./catalog/zones-work.jsx";
 import { seedCatalogStore } from "./catalog/specimen.js";
@@ -162,4 +169,13 @@ function CatalogApp() {
   );
 }
 
-render(<CatalogApp />, document.getElementById("root"));
+// ?view=scene is not a view of the catalogue app: it is ONE scene with nothing
+// around it, for the fidelity harness. Short-circuited here rather than added
+// to the chain above because everything CatalogApp mounts around `body` would
+// land in the capture — the nav, the palette, and the arrival toast that
+// useCatalogBootstrap fires 700ms after load, which is both chrome and a race.
+if (typeof location !== "undefined" && new URLSearchParams(location.search).get("view") === "scene") {
+  render(<Scene />, document.getElementById("root"));
+} else {
+  render(<CatalogApp />, document.getElementById("root"));
+}

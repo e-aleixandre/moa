@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import "./zones-lab.css";
+import { FROZEN } from "./fidelity-freeze.js";
 
 /* The three-zone skeleton, both densities side by side.
    This is a PROTOTYPE, not production: it draws the shell only (where things
@@ -814,7 +815,12 @@ function inline(text) {
   return out;
 }
 
-function useStream(playing) {
+function useStream(playingProp) {
+  // FROZEN is the fidelity scene (?view=scene), and only that: a timer-driven
+  // stream cannot be captured twice the same way, whatever the clock says. It
+  // settles on the finished text, which is the state the prose spends most of
+  // its life in anyway. Everywhere else `playing` is untouched.
+  const playing = playingProp && !FROZEN;
   const tokens = useRef(tokenize(STREAM_SOURCE));
   // Not playing = the turn is already finished: show it settled.
   const [state, setState] = useState(() => ({ i: playing ? 0 : tokens.current.length, bursts: [], idle: true }));
@@ -974,6 +980,7 @@ function LiveZone({ fg, bg, open, onToggle, dense, t0 }) {
   // Spotlight: only when the background owns the sentence.
   const [spot, setSpot] = useState(0);
   useEffect(() => {
+    if (FROZEN) return; // the fidelity scene captures the first item, always
     if (fg || bg.length < 2) return;
     const t = setInterval(() => setSpot((i) => (i + 1) % bg.length), 3500);
     return () => clearInterval(t);
@@ -2043,3 +2050,9 @@ export function ZonesLab() {
     </div>
   );
 }
+
+/* Exported for the fidelity harness only (scene.jsx). The prototype's own
+   entry point is still ZonesLab; these are the same hosts it renders, mounted
+   one at a time so a capture frames one thing. Nothing about the prototype
+   changes by naming them. */
+export { Phone as ZonesPhone, Desktop as ZonesDesktop, Grid as ZonesGrid, Sidebar as ZonesSidebar, StatusLineStudy, LiveZoneStudy, LIVE_STATES };

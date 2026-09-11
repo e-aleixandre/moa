@@ -1,0 +1,78 @@
+/* scene.css — the fidelity scene host.
+
+   Not product and not lab chrome either: this sheet exists so a capture frames
+   ONE thing. Everything here either removes lab furniture (headings, hints,
+   nav) or stops something moving. It is never loaded outside ?view=scene. */
+
+.fx-scene {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 20px;
+  background: var(--zl-canvas, #101018);
+}
+
+/* The .zl variables live on .zl, and the hosts below are .zl children in the
+   prototype. The scene host takes the class too, so nothing is unresolved. */
+
+/* Lab furniture the prototype puts around the hosts. It is text about the
+   design, not the design, and it would put prose diffs into a pixel diff. */
+.fx-scene .zl-density-label,
+.fx-scene .zl-hint {
+  display: none;
+}
+
+/* The aurora is position:fixed and bleeds over the whole viewport: it is part
+   of the page, not of the frame, and the frames are translucent over it
+   (zones-lab.css:129). Kept, so a frame's tone is the real one. */
+
+/* A free-standing piece (the sidebar, a study) has no device frame, so the
+   harness gives it one: a fixed box with the sheet's own tone. */
+.fx-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--zl-r-lg, 16px);
+  background: var(--zl-sheet, #171720);
+  box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12));
+  display: flex;
+  flex-direction: column;
+}
+.fx-frame.is-side-phone { width: 300px; height: 780px; } /* .zl-side-left */
+.fx-frame.is-side-desktop { width: 272px; height: 780px; } /* .zl-desk-side */
+.fx-frame.is-side-desktop { box-shadow: inset -1px 0 0 var(--zl-line, rgba(255, 255, 255, 0.07)); }
+
+/* Determinism. The harness also sets prefers-reduced-motion via the browser,
+   which the prototype honours for the animations it guards (zones-lab.css:509,
+   1438, 1533, 1824, 1998); this rule covers the ones it does not, because a
+   guard that exists for five of ten animations is not determinism. The
+   breathing dot (1.6s, infinite) and the ledger sweep (2.2s, infinite) are the
+   two that would otherwise decide the diff on their own: two captures a second
+   apart land on different frames of both.
+
+   `animation: none` rather than `animation-play-state: paused`, deliberately.
+   Pausing freezes an animation at its FIRST frame, and half of these are
+   one-shot entrances whose first frame is "not there yet": the bottom sheet
+   starts at translateY(100%) (zones-lab.css:2023), so a paused capture would
+   show an empty frame. Removing the animation leaves each element at its
+   static CSS state, which is its settled state — the same thing the
+   reduced-motion guards already do for the five they cover. */
+.fx-scene *,
+.fx-scene *::before,
+.fx-scene *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Scrollbars are drawn by the platform and differ between a developer's
+   machine and a captured frame. The transcript and the list both scroll
+   (zones-lab.css:217, 867), and a 6px gutter appearing on one run and not on
+   another is exactly the noise that kills a comparator. */
+.fx-scene ::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.fx-scene * {
+  scrollbar-width: none !important;
+}
