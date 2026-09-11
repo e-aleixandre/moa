@@ -434,6 +434,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
               setModelOpen(false);
               setMcpOpen((v) => !v);
             }}
+            mcpOpen={mcpOpen}
             onPerm={permMenu.toggle}
             permOpen={permMenu.open}
             permAnchorRef={permMenu.anchorRef}

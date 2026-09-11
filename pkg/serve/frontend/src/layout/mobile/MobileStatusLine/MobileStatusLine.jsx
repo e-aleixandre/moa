@@ -1,268 +1,46 @@
 import { useState, useEffect } from "preact/hooks";
-import { Copy } from "lucide-preact";
 import { ModelSelector } from "../../../components/index.js";
 import { PermissionOptions } from "../../../components/PermissionControl/PermissionControl.jsx";
 import { statusStripModel } from "../../../data/util/status-strip-model.js";
-import {
-  usageForSession,
-  usageLevel,
-  fmtReset,
-  fmtCost,
-  money,
-} from "../../../data/util/usage-pills.js";
+import { fmtCost } from "../../../data/util/usage-pills.js";
 import { matchSelectedModel, modelAccent } from "../../../data/selectors.js";
 import { catalogThinkingPosition, ensureModelCatalog, modelCatalog } from "../../../data/model-catalog.js";
 import { useStore } from "../../../hooks/useStore.js";
 import { configureSession, setSessionFast } from "../../../data/session-actions.js";
+import { toggleSessionPanel } from "../../../data/session-panel.js";
 import { addToast } from "../../../data/notifications.js";
-import { modelCodename, shortModel, fmtTokens } from "../../../data/util/format.js";
-import { copyToClipboard } from "../../../data/util/format.js";
+import { modelCodename, shortModel } from "../../../data/util/format.js";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { StatusStrip } from "../../StatusStrip/StatusStrip.jsx";
 import { McpPanel } from "../../../components/McpPanel/McpPanel.jsx";
-import "./MobileStatusLine.css";
 
-// MobileStatusLine — the persistent mobile chrome. One line pinned under the
-// composer holding three single-scope doors, each its own hit area and
-// destination, each opening the approved bottom sheet (MobileSheet) that STOPS
-// above the composer — never the centered generic <Sheet> modal — plus one
-// read-only telemetry at the far right:
+// MobileStatusLine — the phone's host for the status line. The line's FACE is
+// StatusStrip, the same component as desktop and grid; what lives here is what
+// each of its doors OPENS at this density.
 //
-//   1. context ring + cost (LEFT) — the canonical teal SVG ring + pct + the
-//      estimated session cost (~, spend severity). Tap → "Context & usage":
-//      session cost · context · plan windows · extra, and the auto-compaction
-//      limit — the one setting measured on the very ring this door wears.
-//   2. ModelPill — current model + thinking. Tap → "Model & thinking": the real
-//      ModelSelector, and nothing else. It used to also carry two unbuilt
-//      session-settings rows and Rewind, which made it the sheet you opened for
-//      anything and found nothing in; the limit moved to door 1 (its scope) and
-//      Rewind onto the waypoints themselves (UserWaypoint), where "rewind to
-//      WHERE" is answered by the tap instead of by a second screen.
-//   3. permission chip — the glanceable safety color AND the door. ONE tap
-//      reveals the complete YOLO/AUTO/ASK choice directly in the sheet (no
-//      intermediate chip, no second tap). The rows come from PermissionControl,
-//      so the two densities cannot drift apart.
-//   4. TokenFlow (RIGHT) — the per-run ↑/↓ heartbeat. NOT a door: it is the
-//      same shared component the desktop StatusStrip carries in the same
-//      corner, so "is it still chewing?" is answered identically on both.
+// Every door on the line opens over the line, as a bottom sheet (MobileSheet)
+// — never the centered generic <Sheet> modal. They are the phone's form of the
+// desktop's popovers, and they hold the settings for the NEXT turn:
 //
-// Sessions is deliberately NOT here: the door to the session list is the
-// floating title chip at the top of the screen (MobileTitleChip), which also
-// carries the cross-session attention dot. One door per destination, and the
-// one that switches session belongs next to the session's own name.
+//   • model — "Model & thinking": the real ModelSelector, and nothing else.
+//   • permission — the glanceable safety colour AND the door. ONE tap reveals
+//     the complete YOLO/AUTO/ASK choice, from PermissionControl's own rows, so
+//     the two densities cannot drift apart.
+//   • mcp — the per-session server health, from the shared McpPanel.
 //
-// The line's FACE is StatusStrip, the same component as desktop and grid.
+// The gauges are the exception, and the only door here that does NOT open over
+// the line: the ring opens the session PANEL on its Usage page, the same
+// component and controller the desktop dossier uses (data/session-panel.js),
+// hosted by MobileConversationScreen. It used to open a sheet written here,
+// which re-laid the panel's Usage page in a second vocabulary (.msl-usage) —
+// the auto-compaction slider was the only thing it owned, and that moved onto
+// the page itself (components/SessionPanel/UsagePage.jsx).
 //
-// Every destination lays out real shared data (usageForSession / ModelSelector /
-// the canonical MODES / configureSession) in the mock's visual structure. Global
-// settings (notifications) live behind the SessionDrawer footer, not here.
-
-// Granularity of the context-limit slider, in percentage points. 5 rather than
-// 10 because the honest answer to "where should this compact?" is a number, not
-// a menu — and a phone can't offer a number without a keyboard. 5 gets close
-// enough to freehand that the difference stops mattering, while every stop is
-// still a comfortable thumb width apart.
-const LIMIT_STEP = 5;
-
-// The limit is expressed in percent, not tokens, because the ring right above
-// reads in percent against the SAME denominator (the server computes
-// context_percent from model.MaxInput, never from the limit) — so "compact at
-// 70%" is literally "compact when that ring reaches 70". Tokens would be a
-// second unit for one fact, and would need the window known by heart.
-const pctToTokens = (pct, win) => Math.round((win * pct) / 100);
-const tokensToPct = (tokens, win) => Math.round((tokens * 100) / win);
-
-// ContextLimitRow — the session's auto-compaction threshold. Sets CompactAt on
-// the agent (pkg/agent/agent.go), which caps the effective window so compaction
-// fires early instead of at the brim. Hidden when the window is unknown (an
-// unrecognized model), and locked while the session is busy: SetCompactAt
-// reconfigures the agent and the server refuses it mid-run with a 409.
-//
-// One slider, and 100% IS "auto" — not a separate chip beside it. That is not a
-// label trick: core.EffectiveWindow clamps any threshold at or above the window
-// back to the window, so the far right of this track is exactly the behavior a
-// session has with no limit set. Ending the scale there keeps the control to one
-// axis with one unit, and reads the way the setting actually works — the further
-// left you drag, the earlier it summarizes.
-function ContextLimitRow({ session, disabled }) {
-  const win = session.contextWindow || 0;
-  const compactAt = session.compactAt || 0;
-  // The server's own floor (ReserveTokens + KeepRecent + tail margin): below it
-  // the engine raises the threshold, so offering lower would promise a
-  // compaction point it will not honor. Ceiling twice — floor→percent, then
-  // percent→step — because rounding either one down would put the lowest
-  // reachable stop back under the floor: on a 200k window the floor is 20.19%,
-  // and a rounded 20% would be 384 tokens short of it. So 25%, not 20%.
-  const minPct = Math.min(
-    100 - LIMIT_STEP,
-    Math.ceil(Math.ceil(((session.compactAtMin || 0) * 100) / (win || 1)) / LIMIT_STEP) *
-      LIMIT_STEP,
-  );
-  const settledPct = compactAt > 0 ? tokensToPct(compactAt, win) : 100;
-
-  // Local while dragging so the readout tracks the thumb; the store only hears
-  // about it on release (onChange), since each commit reconfigures the agent.
-  const [dragPct, setDragPct] = useState(null);
-  useEffect(() => setDragPct(null), [compactAt, win]);
-  if (!win) return null;
-  const pct = dragPct ?? settledPct;
-
-  const commit = (next) => {
-    setDragPct(next);
-    const tokens = next >= 100 ? 0 : pctToTokens(next, win);
-    if (tokens === compactAt) return;
-    configureSession(session.id, { compactAt: tokens }).catch((e) => {
-      setDragPct(null);
-      addToast({
-        title: "Could not set the context limit",
-        detail: String(e.message || e),
-        type: "error",
-      });
-    });
-  };
-
-  return (
-    <div class="msl-ugroup">
-      <div class="msl-urow msl-limit">
-        <span class="uk">Compact at</span>
-        <span class="msl-limit-val">
-          {pct >= 100 ? "auto" : `${pct}%`}
-          {pct < 100 && (
-            <span class="msl-limit-tok">{fmtTokens(pctToTokens(pct, win))}</span>
-          )}
-        </span>
-      </div>
-      <input
-        type="range"
-        class="msl-limit-slider"
-        min={minPct}
-        max={100}
-        step={LIMIT_STEP}
-        value={pct}
-        disabled={disabled}
-        style={{ "--fill": `${((pct - minPct) * 100) / (100 - minPct)}%` }}
-        aria-label="Compact at"
-        aria-valuetext={pct >= 100 ? "auto" : `${pct} percent`}
-        onInput={(e) => setDragPct(Number(e.currentTarget.value))}
-        onChange={(e) => commit(Number(e.currentTarget.value))}
-      />
-      <span class="msl-limit-note">
-        {pct < 100
-          ? `Summarizes and keeps going once the ring hits ${pct}%.`
-          : "Summarizes only when the model's window is nearly full."}
-      </span>
-    </div>
-  );
-}
-
-// UsageSheetBody — the approved "Context & usage" presentation (fx-shared
-// FX_USAGE_BODY): a session group (cost · context) then a plan group (5h meter ·
-// week meter · extra). Real data from usageForSession; every row hides when its
-// datum is missing (house rule — nothing fabricated). NOT the old UsagePanel.
-function UsageSheetBody({ session, usage, busy }) {
-  const u = usageForSession(session, usage);
-  const ctx = session.contextPercent;
-  const hasCtx = typeof ctx === "number" && ctx >= 0;
-  const hasCost = typeof session.costUSD === "number" && session.costUSD > 0;
-  const extra = u.extra;
-  const extraMoney = (v) =>
-    money(v, { decimal_places: extra.decimalPlaces, currency: extra.currency });
-  const planReset = (m) => m.resetsAt ? `resets in ${fmtReset(m.resetsAt)}` : "";
-
-  return (
-    <div class="msl-usage">
-      {(hasCost || hasCtx) && (
-        <div class="msl-ugroup">
-          {hasCost && (
-            <div class="msl-urow">
-              <span class="uk">Session</span>
-              <span class="uv">~{fmtCost(session.costUSD)}</span>
-            </div>
-          )}
-          {hasCtx && (
-            <div class="msl-urow">
-              <span class="uk">Context</span>
-              <span class="uv">{ctx}%</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {!!(u.fiveHour || u.week || extra || (u.moneyBuckets || []).length) && (
-        <div class="msl-ugroup">
-          {u.fiveHour && (
-            <div class="msl-urow">
-              <span class="uk">Plan · {u.fiveHour.label || "5h"}</span>
-              <span class={`umeter u-${usageLevel(u.fiveHour.pct)}`} aria-hidden="true">
-                <span style={{ width: `${Math.min(100, Math.max(0, u.fiveHour.pct))}%` }} />
-              </span>
-              <span class="uv">{u.fiveHour.pct}%</span>
-              {planReset(u.fiveHour) && <span class="unote">{planReset(u.fiveHour)}</span>}
-            </div>
-          )}
-          {u.week && (
-            <div class="msl-urow">
-              <span class="uk">Plan · {u.week.label || "week"}</span>
-              <span class={`umeter u-${usageLevel(u.week.pct)}`} aria-hidden="true">
-                <span style={{ width: `${Math.min(100, Math.max(0, u.week.pct))}%` }} />
-              </span>
-              <span class="uv">{u.week.pct}%</span>
-              {planReset(u.week) && <span class="unote">{planReset(u.week)}</span>}
-            </div>
-          )}
-          {extra && (
-            <div class="msl-urow">
-              <span class="uk">Extra</span>
-              <span class="uv">
-                {extraMoney(extra.used)}
-                {extra.limit != null && ` of ${extraMoney(extra.limit)}`}
-              </span>
-              <span class="unote">pay-as-you-go</span>
-            </div>
-          )}
-          {(u.moneyBuckets || []).filter((bucket) => bucket.id !== "payg").map((bucket) => (
-            <div class="msl-urow" key={bucket.id}>
-              <span class="uk">{bucket.label || bucket.id}</span>
-              <span class="uv">
-                {bucket.remaining_minor != null
-                  ? money(bucket.remaining_minor, { decimal_places: bucket.decimals, currency: bucket.currency })
-                  : "—"}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {(u.tier || u.stale) && (
-        <div class="msl-ugroup">
-          <div class="msl-urow">
-            {u.tier && <><span class="uk">Plan</span><span class="uv">{u.tier}</span></>}
-            {u.stale && <span class="unote">stale</span>}
-          </div>
-        </div>
-      )}
-      {u.providerStatus && u.providerStatus.reason === "plan_unsupported" && (
-        <div class="msl-ugroup">
-          <div class="msl-urow"><span class="unote">Consumer plan quota is unavailable for an xAI API key.</span></div>
-        </div>
-      )}
-
-      <ContextLimitRow session={session} disabled={busy} />
-      {session.id && (
-        <div class="msl-ugroup">
-          <button type="button" class="msl-urow msl-idrow" onClick={() => copyToClipboard(session.id)} aria-label="Copy session ID">
-            <span class="uk">Session ID</span>
-            <span class="uv uid">{session.id}</span>
-            <span class="uact"><Copy size={14} /></span>
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
+// Sessions is deliberately NOT here: the door to the other sessions is the
+// header's left capsule (MobileChrome), which also carries the cross-session
+// attention dot. One door per destination.
 
 export function MobileStatusLine({ session, usage }) {
-  const [usageOpen, setUsageOpen] = useState(false);
   const [sessionOpen, setSessionOpen] = useState(false);
   const [permsOpen, setPermsOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
@@ -270,7 +48,6 @@ export function MobileStatusLine({ session, usage }) {
 
   const sessionId = session ? session.id : null;
   useEffect(() => {
-    setUsageOpen(false);
     setSessionOpen(false);
     setPermsOpen(false);
     setMcpOpen(false);
@@ -319,8 +96,9 @@ export function MobileStatusLine({ session, usage }) {
       spend={spend}
       session={session}
       usage={usage}
-      onOpenUsage={hasSession ? () => setUsageOpen(true) : undefined}
+      onOpenUsage={hasSession ? () => toggleSessionPanel(session.id, "usage") : undefined}
       onOpenMcp={hasSession ? () => setMcpOpen(true) : undefined}
+      mcpOpen={mcpOpen}
       onPerm={hasSession ? () => setPermsOpen(true) : undefined}
       permOpen={permsOpen}
       showTokens
@@ -335,17 +113,6 @@ export function MobileStatusLine({ session, usage }) {
       onModel={hasSession ? () => setSessionOpen(true) : undefined}
       modelOpen={sessionOpen}
     >
-      {hasSession && (
-        <MobileSheet
-          open={usageOpen}
-          onClose={() => setUsageOpen(false)}
-          title="Context & usage"
-          scope="this session"
-        >
-          <UsageSheetBody session={session} usage={usage} busy={busy} />
-        </MobileSheet>
-      )}
-
       {hasSession && (
         <MobileSheet
           open={sessionOpen}

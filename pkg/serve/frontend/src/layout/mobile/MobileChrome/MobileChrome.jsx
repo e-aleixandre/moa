@@ -19,9 +19,12 @@ import "./MobileChrome.css";
 // thing you are reading was the smallest type on the screen.
 //
 // Nothing here invents a destination. The left capsule opens the SessionDrawer
-// that already exists (the chip's own tap opened it before, and still does),
-// and the right capsule opens that drawer on its create step — the same
-// openDrawer("new") the empty state's "New session" button has always used.
+// that already exists, and the right capsule opens that drawer on its create
+// step — the same openDrawer("new") the empty state's "New session" button has
+// always used. The middle capsule opens THIS session's panel (the dossier the
+// desktop opens from its crumb): it used to open the session list too, which
+// left the left capsule and the name pointing at the same place and the
+// session's own dossier with no door on the phone at all.
 //
 // The cross-session attention badge moves here, onto the sessions door: it says
 // "another session wants you", so it belongs on the button that goes to them
@@ -33,6 +36,8 @@ export function MobileChrome({
   attention = {},
   open = false,
   onToggle,
+  panelOpen = false,
+  onPanel,
   onNew,
   inboxCount = 0,
 }) {
@@ -59,8 +64,8 @@ export function MobileChrome({
       </button>
       <MobileTitleChip
         title={title}
-        open={open}
-        onToggle={onToggle}
+        open={panelOpen}
+        onToggle={onPanel}
         inboxCount={inboxCount}
       />
       <button

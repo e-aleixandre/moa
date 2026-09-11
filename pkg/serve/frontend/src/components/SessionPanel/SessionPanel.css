@@ -332,6 +332,63 @@
 /* A meter row gives the bar the full width under its key and value. */
 .spanel-kv-row.is-meter .spanel-meter { flex-basis: 100%; }
 
+/* ── The context limit ─────────────────────────────────────────────────────
+   A kv row whose value is a CHOICE rather than a reading, so the slider owns
+   its own line under the number: a full-width track is what makes 5% steps
+   reachable with a thumb. Moved here from the phone's usage sheet
+   (.msl-limit-*) when the phone started hosting this panel. */
+.spanel-kv-row.is-limit { padding-bottom: var(--space-2); }
+.spanel-kv-row.is-limit .spanel-kv-v { color: var(--teal); font-variant-numeric: tabular-nums; }
+.spanel-limit {
+  -webkit-appearance: none;
+  appearance: none;
+  flex-basis: 100%;
+  width: 100%;
+  /* 18px of visible thumb, but the input's own height is the touch target —
+     the pointer only has to land on the track, not on the dot. */
+  height: 28px;
+  margin: 2px 0 0;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.spanel-limit:disabled { opacity: 0.45; cursor: default; }
+/* Track filled to --fill (set inline from the value): teal to the left of the
+   thumb, track to the right, so the bar reads as "summarize by here" rather
+   than as a neutral scale. */
+.spanel-limit::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(to right, var(--teal) 0 var(--fill), var(--surface1) var(--fill) 100%);
+}
+.spanel-limit::-moz-range-track {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(to right, var(--teal) 0 var(--fill), var(--surface1) var(--fill) 100%);
+}
+.spanel-limit::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--teal);
+}
+.spanel-limit::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--teal);
+}
+.spanel-limit:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-full);
+}
+
 /* A row you can PRESS gets a thumb-sized target where there is a thumb. The
    catalogue sets this on its phone frame (zones-lab.css:1967); production has
    no frame to hang it on, so it hangs on the pointer instead. */

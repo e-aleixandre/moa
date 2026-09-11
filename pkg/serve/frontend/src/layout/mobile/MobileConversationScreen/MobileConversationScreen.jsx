@@ -15,6 +15,8 @@ import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileChrome } from "../MobileChrome/MobileChrome.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
+import { SessionPanel } from "../../../components/index.js";
+import { sessionPanelView, closeSessionPanel, toggleSessionPanel } from "../../../data/session-panel.js";
 import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
@@ -38,11 +40,15 @@ import "./MobileConversationScreen.css";
 // the top (MobileChrome — sessions, this session's name, new session) and
 // whatever overlay is open.
 //
-// The screen owns only the OVERLAYS it opens (the SessionDrawer and the
-// RewindTimeline) and the store→props wiring. Model/thinking, permissions, path
-// and usage live behind the status line's doors (MobileStatusLine); global
-// settings (notifications) live behind the SessionDrawer footer. All reuse the
-// real shared components.
+// The screen owns only the OVERLAYS it opens (the SessionDrawer, the session
+// panel and the RewindTimeline) and the store→props wiring. Model/thinking and
+// permissions live behind the status line's doors (MobileStatusLine); what the
+// session IS and what it HAS DONE lives in the session panel, opened by the
+// name at the top or by the context ring (on its Usage page) — the same doors,
+// the same controller and the same component as the desktop dossier, hosted as
+// a bottom sheet because that is this density's drawer. Global settings
+// (notifications) live behind the SessionDrawer footer. All reuse the real
+// shared components.
 //
 // Architecture (OPTION B): the mobile screen reuses the desktop's data
 // projection (projectStream) and shared components; the only divergence is the
@@ -82,6 +88,10 @@ function MobileConversationBody({ forceMobile = false }) {
   const loaded = useStore((s) => s.sessionsLoaded);
   const usage = useStore((s) => s.usage);
   const chrome = useStore((s) => selectMobileChrome(s, forceMobile));
+  // The session panel is a peer of the drawer here, not a child of the status
+  // line: it is opened from the name AND from the ring, and an overlay owned by
+  // one of its doors would unmount with it.
+  const panel = useStore((s) => sessionPanelView(s, activeId));
 
   const [rewindOpen, setRewindOpen] = useState(false);
   const [secretAliases, setSecretAliases] = useState(null);
@@ -284,6 +294,22 @@ function MobileConversationBody({ forceMobile = false }) {
       {body}
       {session && (
         <MobileSheet
+          open={panel.open}
+          onClose={closeSessionPanel}
+          title="This session"
+          bare
+        >
+          <SessionPanel
+            session={session}
+            usage={usage}
+            open={panel.open}
+            page={panel.page}
+            variant="sheet"
+          />
+        </MobileSheet>
+      )}
+      {session && (
+        <MobileSheet
           open={secretAliases !== null}
           onClose={() => setSecretAliases(null)}
           title="Send secrets"
@@ -317,6 +343,7 @@ function MobileConversationBody({ forceMobile = false }) {
 
 function MobileSessionChrome({ version, forceMobile = false }) {
   const chrome = useStore((s) => selectMobileChrome(s, forceMobile));
+  const panel = useStore((s) => sessionPanelView(s, chrome.activeId));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsPendingRef = useRef(false);
   // The drawer hands off to another overlay by CLOSING FIRST (see the HANDOFF
@@ -365,6 +392,8 @@ function MobileSessionChrome({ version, forceMobile = false }) {
           attention={chrome.attention}
           open={chrome.drawerOpen}
           onToggle={setDrawerOpen}
+          panelOpen={panel.open}
+          onPanel={() => toggleSessionPanel(chrome.activeId)}
           onNew={() => openDrawer("new")}
           inboxCount={inboxCount}
         />

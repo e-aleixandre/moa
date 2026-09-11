@@ -10,6 +10,7 @@ import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Sheet, ArtifactsEntry } from "../../components/index.js";
+import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { usePermissionMenu } from "../../components/PermissionControl/PermissionControl.jsx";
 import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
@@ -126,6 +127,32 @@ export function ConversationScreen() {
   useEffect(() => { setSecretAliases(null); }, [activeId]);
 
   const usageAnchorRef = useRef(null);
+
+  // --- MCP popover (StatusStrip's mcp chip) ---
+  // The chip is a SETTING of the next turn, not a fact of the session, so it
+  // opens over its own button like model and permissions do — not the dossier.
+  // Sending it to the panel made one tap on the line replace the whole right
+  // column, which is the panel's own door's job (the crumb). The pane grid has
+  // opened it as a popover from the start (layout/PaneGrid); this is the single
+  // conversation catching up to it.
+  const [mcpOpen, setMcpOpen] = useState(false);
+  useEffect(() => { setMcpOpen(false); }, [activeId]);
+  useEffect(() => {
+    if (!mcpOpen) return undefined;
+    const unregister = registerOverlay("conv-mcp-popover");
+    const onDocDown = (e) => {
+      if (usageAnchorRef.current?.contains(e.target)) return;
+      setMcpOpen(false);
+    };
+    const onKeyDown = (e) => { if (e.key === "Escape") setMcpOpen(false); };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      unregister();
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [mcpOpen]);
 
   // The permission menu belongs to the chip on the status line, so the screen
   // owns its open state the way it owns the model popover's. Hooks run before
@@ -300,7 +327,8 @@ export function ConversationScreen() {
                   session={session}
                   usage={usage}
                   onOpenUsage={() => toggleSessionPanel(session.id, "usage")}
-                  onOpenMcp={() => toggleSessionPanel(session.id, "mcp")}
+                  onOpenMcp={() => { setModelOpen(false); setMcpOpen((v) => !v); }}
+                  mcpOpen={mcpOpen}
                   onPerm={permMenu.toggle}
                   permOpen={permMenu.open}
                   permAnchorRef={permMenu.anchorRef}
@@ -319,6 +347,11 @@ export function ConversationScreen() {
                   modelPopover={modelPopover}
                   modelAnchorRef={modelAnchorRef}
                 />
+                {mcpOpen && (
+                  <div class="status-strip-usage-popover status-strip-mcp-popover">
+                    <McpPanel sessionId={session.id} mcpTick={session.mcpTick} />
+                  </div>
+                )}
               </div>
             </div>
           </>

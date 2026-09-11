@@ -64,8 +64,12 @@ export function mobileSessionsDoorLabel(attention = {}) {
   return `Sessions; ${count} other session${count === 1 ? "" : "s"} need attention`;
 }
 
+// The label of the header's MIDDLE capsule: the name of the session you are
+// reading, and the door to its panel — what it is and what it has done. It used
+// to open the session LIST, which is the left capsule's job; one door per
+// destination, and the name of a session belongs on the door to that session.
 export function mobileTitleChipLabel(title, inboxCount = 0) {
-  const parts = [`${title} — sessions`];
+  const parts = [`${title} — this session`];
   // The chip is the only place the inbox count is legible without opening the
   // drawer, so the accessible label has to name it too.
   if (inboxCount > 0) parts.push(`${inboxCount} event${inboxCount === 1 ? "" : "s"} waiting in the inbox`);

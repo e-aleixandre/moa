@@ -23,7 +23,12 @@ const FOCUSABLE_SELECTOR =
 // Placement: the panel/scrim are absolutely positioned inside the nearest
 // positioned ancestor (.mconv), pinned to its edges (scrim inset:0, sheet
 // bottom:0) — same anchoring the SessionDrawer uses.
-export function MobileSheet({ open, onClose, onClosed, title, scope, children }) {
+//
+// `bare` is for a child that IS a surface with its own head — the session panel,
+// which carries the eyebrow/back/X the dossier keeps in both densities. The
+// sheet still owns the scrim, the enter/leave, the focus trap, the back gesture
+// and the grabber; it just does not draw a second title over the child's.
+export function MobileSheet({ open, onClose, onClosed, title, scope, bare = false, children }) {
   const { sheetRef, veilRef, dragging, grabBind } = useSheetDismiss({ onClose });
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
@@ -169,7 +174,7 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, children })
       onClick={onScrimClick}
     >
       <section
-        class={`msheet${isOpen ? " is-open" : ""}${dragging ? " is-drag" : ""}`}
+        class={`msheet${isOpen ? " is-open" : ""}${dragging ? " is-drag" : ""}${bare ? " is-bare" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -191,11 +196,17 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, children })
         >
           <span class="msheet-grab-bar" aria-hidden="true" />
         </button>
-        <div class="msheet-head" {...grabBind}>
-          <span class="msheet-title">{title}</span>
-          {scope && <span class="msheet-scope">{scope}</span>}
-        </div>
-        <div class="msheet-body">{children}</div>
+        {bare ? (
+          children
+        ) : (
+          <>
+            <div class="msheet-head" {...grabBind}>
+              <span class="msheet-title">{title}</span>
+              {scope && <span class="msheet-scope">{scope}</span>}
+            </div>
+            <div class="msheet-body">{children}</div>
+          </>
+        )}
       </section>
     </div>
   );

@@ -18,9 +18,13 @@ import { TokenFlow } from "../../components/index.js";
 // the same component behaves in the desktop column, a pane and the phone dock.
 //
 // What is NOT the catalogue's is everything the prototype never had, grafted on
-// top: real sessions, accessible names, the model popover and permission menu
-// anchored by their hosts, the MCP door, the busy lock, and the house rule that
-// a missing datum hides its segment rather than drawing a zero.
+// top: real sessions, accessible names, the model popover, the permission menu
+// and the MCP panel anchored by their hosts, the busy lock, and the house rule
+// that a missing datum hides its segment rather than drawing a zero.
+//
+// Every door on the line opens OVER the line (model, permissions, mcp); the one
+// exception is the gauges, which open the session's panel on its Usage page,
+// because that reading has a home in the dossier and the others do not.
 //
 // The five data the imitation carried (and their order) are gone with it: the
 // line now carries the nine the catalogue declares, and sheds them by the
@@ -71,6 +75,7 @@ export function StatusStrip({
   compact = false,
   onOpenUsage,
   onOpenMcp,
+  mcpOpen,
   onPerm,
   permOpen,
   permBusy = false,
@@ -218,7 +223,15 @@ export function StatusStrip({
             </>
           );
           return onOpenMcp ? (
-            <button type="button" class={cls} onClick={onOpenMcp} aria-label={`${mcpLabel} — open MCP servers`} title={mcpLabel}>
+            <button
+              type="button"
+              class={`${cls}${mcpOpen ? " is-open" : ""}`}
+              onClick={onOpenMcp}
+              aria-haspopup="dialog"
+              aria-expanded={!!mcpOpen}
+              aria-label={`${mcpLabel} — open MCP servers`}
+              title={mcpLabel}
+            >
               {body}
             </button>
           ) : (

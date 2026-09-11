@@ -1,3 +1,4 @@
+import { useEffect, useState } from "preact/hooks";
 import { Copy } from "lucide-preact";
 import {
   usageForSession,
@@ -6,6 +7,8 @@ import {
   money,
 } from "../../data/util/usage-pills.js";
 import { copyToClipboard, fmtTokens } from "../../data/util/format.js";
+import { configureSession } from "../../data/session-actions.js";
+import { addToast } from "../../data/notifications.js";
 
 // UsagePage — the dossier's Usage page, written with the panel's own
 // vocabulary instead of hosting the old telemetry component inside a new
@@ -48,6 +51,92 @@ function providerName(provider) {
   return provider;
 }
 
+// ── The context limit ─────────────────────────────────────────────────────
+// The session's auto-compaction threshold (CompactAt on the agent). It lives on
+// this page and nowhere else, because it is measured on the very ring this
+// page's door wears: "compact at 70%" is literally "compact when that ring
+// reaches 70". It came from the phone's usage sheet, which is gone — the phone
+// hosts this panel now, so the setting is one control in both densities instead
+// of one per density.
+//
+// Hidden when the window is unknown (an unrecognized model), and locked while
+// the session is busy: SetCompactAt reconfigures the agent and the server
+// refuses it mid-run with a 409.
+//
+// One slider, and 100% IS "auto" — not a separate chip beside it.
+// core.EffectiveWindow clamps any threshold at or above the window back to the
+// window, so the far right of this track is exactly the behavior a session has
+// with no limit set.
+const LIMIT_STEP = 5;
+const pctToTokens = (pct, win) => Math.round((win * pct) / 100);
+const tokensToPct = (tokens, win) => Math.round((tokens * 100) / win);
+
+function ContextLimitRow({ session, disabled }) {
+  const win = session?.contextWindow || 0;
+  const compactAt = session?.compactAt || 0;
+  // The server's own floor (ReserveTokens + KeepRecent + tail margin): below it
+  // the engine raises the threshold, so offering lower would promise a
+  // compaction point it will not honor. Ceiling twice — floor→percent, then
+  // percent→step — because rounding either one down would put the lowest
+  // reachable stop back under the floor: on a 200k window the floor is 20.19%,
+  // and a rounded 20% would be 384 tokens short of it. So 25%, not 20%.
+  const minPct = Math.min(
+    100 - LIMIT_STEP,
+    Math.ceil(Math.ceil(((session?.compactAtMin || 0) * 100) / (win || 1)) / LIMIT_STEP) * LIMIT_STEP,
+  );
+  const settledPct = compactAt > 0 ? tokensToPct(compactAt, win) : 100;
+
+  // Local while dragging so the readout tracks the thumb; the store only hears
+  // about it on release (onChange), since each commit reconfigures the agent.
+  const [dragPct, setDragPct] = useState(null);
+  useEffect(() => setDragPct(null), [compactAt, win]);
+  if (!win) return null;
+  const pct = dragPct ?? settledPct;
+
+  const commit = (next) => {
+    setDragPct(next);
+    const tokens = next >= 100 ? 0 : pctToTokens(next, win);
+    if (tokens === compactAt) return;
+    configureSession(session.id, { compactAt: tokens }).catch((e) => {
+      setDragPct(null);
+      addToast({
+        title: "Could not set the context limit",
+        detail: String(e.message || e),
+        type: "error",
+      });
+    });
+  };
+
+  return (
+    <div class="spanel-kv-row is-limit">
+      <span class="spanel-kv-k">Compact at</span>
+      <span class="spanel-kv-v">
+        {pct >= 100 ? "auto" : `${pct}%`}
+        {pct < 100 && <span class="spanel-kv-dim"> {fmtTokens(pctToTokens(pct, win))}</span>}
+      </span>
+      <input
+        type="range"
+        class="spanel-limit"
+        min={minPct}
+        max={100}
+        step={LIMIT_STEP}
+        value={pct}
+        disabled={disabled}
+        style={{ "--fill": `${((pct - minPct) * 100) / (100 - minPct)}%` }}
+        aria-label="Compact at"
+        aria-valuetext={pct >= 100 ? "auto" : `${pct} percent`}
+        onInput={(e) => setDragPct(Number(e.currentTarget.value))}
+        onChange={(e) => commit(Number(e.currentTarget.value))}
+      />
+      <span class="spanel-kv-note">
+        {pct < 100
+          ? `Summarizes and keeps going once the ring hits ${pct}%.`
+          : "Summarizes only when the model's window is nearly full."}
+      </span>
+    </div>
+  );
+}
+
 // contextNote turns the percent into the absolute reading ("126k of 200k").
 // It is only computable when the session carries its window; when it does not,
 // there is no note rather than a number derived from a guessed window.
@@ -59,6 +148,7 @@ function contextNote(session, pct) {
 
 export function UsagePage({ session, usage, ctxPercent, costUSD }) {
   const u = usageForSession(session, usage);
+  const busy = session?.state === "running" || session?.state === "permission";
 
   const hasCost = typeof costUSD === "number" && costUSD > 0;
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
@@ -115,6 +205,7 @@ export function UsagePage({ session, usage, ctxPercent, costUSD }) {
             <span class="spanel-kv-hint">this run</span>
           </div>
         )}
+        <ContextLimitRow session={session} disabled={busy} />
         {session?.id && (
           <button
             type="button"
