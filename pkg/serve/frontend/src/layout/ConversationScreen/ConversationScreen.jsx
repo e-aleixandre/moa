@@ -255,50 +255,57 @@ export function ConversationScreen() {
                 {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
               </div>
             )}
-            {/* One bar of live work, right above the input: what is happening
-                NOW belongs next to where you'd interrupt it, while the strip
-                below keeps the standing telemetry (context, cost, permissions,
-                MCP, tokens). The foreground owns the sentence; the background
-                takes it only when the foreground is silent, and its tally is
-                the door to the panel. The panel's open state persists per
-                session (session.dockOpen). flex:none, so it pushes the stream
-                up instead of overlaying the composer. */}
-            <LiveBar
-              session={session}
-              agents={liveAgents}
-              open={!!session.dockOpen}
-              onToggle={(next) => updateSession(session.id, { dockOpen: next })}
-              onOpen={(id, kind) => (kind === "bash"
-                ? openBashJob(session.id, id)
-                : openPersistedSubagent(session.id, id))}
-            />
-            <Composer key={session.id} sessionId={session.id} session={session} onSecret={setSecretAliases} />
-            <div class="status-strip-anchor" ref={usageAnchorRef}>
-              <StatusStrip
-                ctxPercent={session.contextPercent}
-                tokensUp={session.runTokensUp}
-                tokensDown={session.runTokensDown}
-                spend={fmtSpend(session.costUSD)}
+            {/* The dock: live bar, composer and status line are ONE instrument,
+                so they share a box and the box carries the transition out of the
+                transcript. Without it the reading sheet ended in a seam against
+                the input — the two read as cut apart rather than as the page and
+                the thing you type on it. The phone's equivalent is .mcomposer. */}
+            <div class="conversation-dock">
+              {/* One bar of live work, right above the input: what is happening
+                  NOW belongs next to where you'd interrupt it, while the strip
+                  below keeps the standing telemetry (context, cost, permissions,
+                  MCP, tokens). The foreground owns the sentence; the background
+                  takes it only when the foreground is silent, and its tally is
+                  the door to the panel. The panel's open state persists per
+                  session (session.dockOpen). flex:none, so it pushes the stream
+                  up instead of overlaying the composer. */}
+              <LiveBar
                 session={session}
-                usage={usage}
-                onOpenUsage={() => toggleSessionPanel(session.id, "usage")}
-                onOpenMcp={() => toggleSessionPanel(session.id, "mcp")}
-                onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
-                permBusy={settingsBusy}
-                showTokens={true}
-                modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
-                modelAccent={modelAccent(session.model)}
-                thinking={thinking}
-                thinkingPosition={catalogThinkingPosition(catalog, {
-                  model: session.model,
-                  provider: session.provider,
-                  thinking,
-                })}
-                onModel={() => setModelOpen((v) => !v)}
-                modelOpen={modelOpen}
-                modelPopover={modelPopover}
-                modelAnchorRef={modelAnchorRef}
+                agents={liveAgents}
+                open={!!session.dockOpen}
+                onToggle={(next) => updateSession(session.id, { dockOpen: next })}
+                onOpen={(id, kind) => (kind === "bash"
+                  ? openBashJob(session.id, id)
+                  : openPersistedSubagent(session.id, id))}
               />
+              <Composer key={session.id} sessionId={session.id} session={session} onSecret={setSecretAliases} />
+              <div class="status-strip-anchor" ref={usageAnchorRef}>
+                <StatusStrip
+                  ctxPercent={session.contextPercent}
+                  tokensUp={session.runTokensUp}
+                  tokensDown={session.runTokensDown}
+                  spend={fmtSpend(session.costUSD)}
+                  session={session}
+                  usage={usage}
+                  onOpenUsage={() => toggleSessionPanel(session.id, "usage")}
+                  onOpenMcp={() => toggleSessionPanel(session.id, "mcp")}
+                  onPermChange={(mode) => configureSession(session.id, { permissionMode: mode })}
+                  permBusy={settingsBusy}
+                  showTokens={true}
+                  modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
+                  modelAccent={modelAccent(session.model)}
+                  thinking={thinking}
+                  thinkingPosition={catalogThinkingPosition(catalog, {
+                    model: session.model,
+                    provider: session.provider,
+                    thinking,
+                  })}
+                  onModel={() => setModelOpen((v) => !v)}
+                  modelOpen={modelOpen}
+                  modelPopover={modelPopover}
+                  modelAnchorRef={modelAnchorRef}
+                />
+              </div>
             </div>
           </>
         )}

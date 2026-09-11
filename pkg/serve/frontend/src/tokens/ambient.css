@@ -389,12 +389,29 @@
    present thing on the screen.
 
    The dock is what the composer stands on: a gradient from transparent to
-   rgba(16,16,24,0.8) over its first third, so the bottom of the screen darkens
-   into the composer instead of ending at a seam. */
-[data-ambient="on"] .mcomposer {
-  background: linear-gradient(to bottom, transparent, rgba(16, 16, 24, 0.8) 32%);
+   rgba(16,16,24,0.8), so the bottom of the screen darkens into the composer
+   instead of ending at a seam.
+
+   THE RAMP IS IN PIXELS, not the catalogue's 32%. A percentage is a fraction of
+   the dock's own height, and production's dock is not a fixed box: it grows with
+   the live bar, a queue note or a wrapped status line. At the catalogue's 124px
+   dock, 32% is a 40px ramp; production's 193px dock stretched the same 32% to
+   62px and delivered barely half the tone over the 18px that is actually VISIBLE
+   above the composer (alpha 0.23 instead of 0.36). 40px reproduces the
+   catalogue's curve exactly and keeps reproducing it when a live bar appears.
+
+   BOTH DENSITIES, one rule. These used to be scoped to `.is-compact`, which is
+   the phone and a grid pane — so the desktop column never got any of it and
+   kept the base skin's --mantle box: rgb(15,15,26) OUTLINED on a rgba(16,16,24,
+   0.78) sheet. Darker than what it sits on, with a hairline around it, is how a
+   control reads as a HOLE cut in the page; the catalogue's is LIGHTER than its
+   canvas, which is how it reads as a plane raised off it. That, plus the missing
+   dock fade, is what "el input y el chat se notan cortados" was. */
+[data-ambient="on"] .mcomposer,
+[data-ambient="on"] .conversation-dock {
+  background: linear-gradient(to bottom, transparent, rgba(16, 16, 24, 0.8) 40px);
 }
-[data-ambient="on"] .composer-wrap.is-compact .composer {
+[data-ambient="on"] .composer-wrap .composer {
   background: var(--amb-raised);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -404,7 +421,7 @@
 }
 /* Focus is the accent on its rim: the object does not change shape, it is
    chosen. */
-[data-ambient="on"] .composer-wrap.is-compact .composer:focus-within {
+[data-ambient="on"] .composer-wrap .composer:focus-within {
   background: var(--amb-raised);
   border: 0;
   box-shadow: inset 0 0 0 1px rgba(203, 166, 247, 0.45);
@@ -419,22 +436,22 @@
    Recording and transcribing keep their own faces: they are states of the
    microphone, not of the draft, and a red mic that turned grey here would be a
    live recording made invisible. */
-[data-ambient="on"] .composer-wrap.is-compact .composer-send:not(.recording):not(.transcribing) {
+[data-ambient="on"] .composer-wrap .composer-send:not(.recording):not(.transcribing) {
   background: var(--amb-control);
   border-radius: var(--amb-r-ctl);
   color: var(--amb-text-4);
   box-shadow: none;
 }
-[data-ambient="on"] .composer-wrap.is-compact .composer.is-armed .composer-send:not(.recording):not(.transcribing) {
+[data-ambient="on"] .composer-wrap .composer.is-armed .composer-send:not(.recording):not(.transcribing) {
   background: var(--mauve);
   color: var(--amb-canvas);
 }
-[data-ambient="on"] .composer-wrap.is-compact .composer-btn-attach {
+[data-ambient="on"] .composer-wrap .composer-btn-attach {
   border-radius: var(--amb-r-ctl);
   color: var(--amb-text-3);
 }
-[data-ambient="on"] .composer-wrap.is-compact .composer-textarea { color: var(--amb-text); }
-[data-ambient="on"] .composer-wrap.is-compact .composer-textarea::placeholder {
+[data-ambient="on"] .composer-wrap .composer-textarea { color: var(--amb-text); }
+[data-ambient="on"] .composer-wrap .composer-textarea::placeholder {
   color: var(--amb-text-4);
 }
 
@@ -1387,16 +1404,14 @@ html.mobile-locked[data-ambient="on"] body {
    which is what this text BECOMES after the button is pressed, not to the
    button. The catalogue is explicit about it (zones-lab.css: "peach stays with
    the message"): the control sits on the control tone while there is nothing
-   to send, and takes the accent once it is armed. */
-[data-ambient="on"] .composer-wrap .composer-send {
-  background: var(--amb-control);
-  color: var(--amb-text-3);
-  box-shadow: none;
-}
-[data-ambient="on"] .composer-wrap .composer.is-armed .composer-send {
-  background: var(--mauve);
-  color: var(--crust);
-}
+   to send, and takes the accent once it is armed.
+
+   The tones themselves are set once, above, with the rest of the composer. What
+   is left here is only the glow: the base skin hangs a peach box-shadow off
+   :hover, and that is the last peach on a control. The colour rules that used
+   to sit here were a second, blunter copy without the :not(.recording) guards,
+   so they also repainted a LIVE RECORDING grey — a red mic made invisible by a
+   duplicate. */
 [data-ambient="on"] .composer-wrap .composer-send:hover {
   box-shadow: none;
 }
