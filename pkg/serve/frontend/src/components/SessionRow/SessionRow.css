@@ -1,371 +1,248 @@
-/* SessionRow — 3 switchable variants: pill (A) · tab (B) · card (C) */
+/* SessionRow — the session row.
 
-.session-row {
-  display: inline-flex;
-  align-items: center;
+   This sheet is the catalogue's, MOVED (catalog/zones-lab.css:884-976, the
+   `.zl-row` block), not translated. The class names came with the rules on
+   purpose: a rule that is copied is a rule that can drift, and the drift is
+   what this migration exists to end. The catalogue imports the component now,
+   so these are the only session-row rules in the product.
+
+   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
+   ?view=zones they resolve from `.zl` (zones-lab.css:22); everywhere else the
+   fallback IS the catalogue's own value, so production gets the accepted
+   colour rather than a near-miss re-derived from another token set. That is
+   the substitution: one set of numbers, in one place.
+
+   What is added below the catalogue's block is only what the prototype never
+   had: the focus ring, the close button, the origin and pane badges, and the
+   tone classes that let the reason line be coloured by what it says. */
+
+/* The slot exists for one reason: the catalogue's row IS a <button>, and a
+   close button cannot nest inside another button. It adds no box of its own. */
+.zl-row-slot {
+  display: block;
   position: relative;
 }
+.zl-row-slot + .zl-row-slot { margin-top: 2px; }
 
-.session-row .session-row-hit {
-  display: inline-flex;
+.zl-row {
+  display: flex;
   align-items: center;
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.session-row .session-row-hit:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.session-row .title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The close button always stays in the tree/tabbable (never
-   display:none), it's only visually hidden by default and revealed on
-   container hover or on receiving keyboard focus. */
-.session-row .x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  padding: 0;
-  margin-left: var(--space-1);
-  color: var(--overlay0);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--duration) var(--ease), color var(--duration) var(--ease);
-}
-.session-row .x:focus-within,
-.session-row .x:focus-visible {
-  opacity: 1;
-}
-@media (hover: hover) {
-
-
-.session-row:hover .x{
-  opacity: 1;
-}
-}
-@media (hover: hover) {
-
-
-.session-row .x:hover {
-  color: var(--red);
-}
-}
-
-.session-row .x:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-/* ── variant A: round pill ───────────────────────────────────────── */
-
-.session-row.variant-pill {
-  gap: var(--space-2);
-  background: var(--mantle);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-full);
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--text-base);
-  color: var(--subtext1);
-  transition: border-color var(--duration) var(--ease), color var(--duration) var(--ease),
-    background var(--duration) var(--ease);
-}
-
-.session-row.variant-pill .session-row-hit {
-  gap: var(--space-2);
-}
-@media (hover: hover) {
-
-
-.session-row.variant-pill:hover {
-  border-color: var(--surface1);
-  color: var(--text);
-}
-}
-
-.session-row.variant-pill.on {
-  border-color: color-mix(in srgb, var(--peach) 55%, var(--surface1));
-  color: var(--text);
-  background: color-mix(in srgb, var(--peach) 8%, var(--mantle));
-}
-
-.session-row.variant-pill.needs-yellow {
-  border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
-  color: var(--yellow);
-  background: color-mix(in srgb, var(--yellow) 6%, var(--mantle));
-}
-
-.session-row.variant-pill.needs-red {
-  border-color: color-mix(in srgb, var(--red) 45%, transparent);
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 6%, var(--mantle));
-}
-
-/* ── variant B: underline tab ────────────────────────────────────── */
-
-.session-row.variant-tab {
-  font-size: var(--text-base);
-  color: var(--overlay1);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
-}
-
-.session-row.variant-tab .session-row-hit {
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-}
-@media (hover: hover) {
-
-
-.session-row.variant-tab:hover {
-  color: var(--subtext1);
-}
-}
-
-.session-row.variant-tab.on {
-  color: var(--text);
-  border-bottom-color: var(--peach);
-}
-
-.session-row.variant-tab.needs-yellow {
-  color: var(--yellow);
-}
-
-.session-row.variant-tab.needs-red {
-  color: var(--red);
-}
-
-.session-row.variant-tab .n {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--overlay0);
-}
-
-/* ── variant C: the list row ──────────────────────────────────────────────
-   Not a card any more: a row with a leading monogram column and two lines of
-   text beside it. The old stacked card indented its second line under the
-   dot, which meant the reason had to share the title's width AND start in a
-   different place on every row. */
-
-.session-row.variant-card {
-  align-items: center;
-  min-width: 170px;
-  background: var(--mantle);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-lg);
-  transition: border-color var(--duration) var(--ease);
-}
-
-.session-row.variant-card .session-row-hit {
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  gap: 12px;
   width: 100%;
+  min-height: 52px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: var(--zl-r-md, 10px);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+@media (hover: hover) {
+  .zl-row:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
 }
 
-/* The monogram is the project's identity: one hue per project name, always
-   the same for the same folder, never overridden by state. */
-.session-row.variant-card .mono {
+/* The current row is a raised plane on the sheet, with the title in full
+   white. No bar, no accent: the only edge bar in the product means "you said
+   this", and the accent is for actions, not for where you are. */
+.zl-row.is-current {
+  background: var(--zl-raised, #1e1e29);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+}
+@media (hover: hover) {
+  .zl-row.is-current:hover { background: var(--zl-control, #262633); }
+}
+.zl-row.is-current .zl-row-title { color: var(--zl-t1, #f4f4f7); font-weight: 600; }
+.zl-row.is-current .zl-row-when { color: var(--zl-t3, #9091a6); }
+
+/* Keyboard focus is the accent's first job. The prototype gets this from
+   `.zl :is(button…):focus-visible` (zones-lab.css:78), which does not exist
+   outside the lab, so the row carries its own — the product's focus tokens,
+   whose colour is the same mauve. */
+.zl-row:focus-visible,
+.zl-row-x:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: var(--focus-ring-offset, 2px);
+}
+
+/* The monogram is the project's identity: hue derived from its name, always
+   the same for the same repo, never overridden by state. */
+.zl-mono {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: var(--radius-md);
-  background: hsl(var(--mono-h) 50% 60% / 0.16);
-  box-shadow: 0 0 0 1px hsl(var(--mono-h) 50% 65% / 0.18);
-  color: hsl(var(--mono-h) 65% 78%);
+  border-radius: var(--zl-r-md, 10px);
+  background: hsl(var(--h) 50% 60% / 0.16);
+  box-shadow: 0 0 0 1px hsl(var(--h) 50% 65% / 0.18);
+  color: hsl(var(--h) 65% 78%);
   font-family: var(--mono);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 500;
   letter-spacing: 0;
 }
 
-.session-row.variant-card .body {
+.zl-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.zl-row-l1 { display: flex; align-items: baseline; gap: 8px; }
+/* Row titles sit at body size: at 16 they truncated one word earlier in a
+   272px column, and the list is scanned, not read. The one session you are
+   in gets title size, in the crumb and the chip. */
+.zl-row-title {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-@media (hover: hover) {
-
-
-.session-row.variant-card:hover {
-  border-color: var(--surface1);
-}
-}
-
-.session-row.variant-card.on {
-  border-color: color-mix(in srgb, var(--peach) 55%, var(--surface1));
-}
-
-.session-row.variant-card .r1 {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  font-size: var(--text-base);
-  font-weight: var(--weight-medium);
-  color: var(--text);
-}
-
-.session-row.variant-card .r1 .title {
-  flex: 1;
-  min-width: 0;
+  font-weight: 500;
   line-height: 20px;
-  color: var(--subtext1);
+  color: var(--zl-t2, #c3c4d1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* State and age ride together at the end of the title line: both are
+   metadata about the row. */
+.zl-row-meta { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+/* The timestamp is set to the width of its longest form and aligned left, so
+   the dot beside it lands on the same x in every row. Ragged dots read as a
+   wobble down the list: the eye follows the column, not the number. */
+.zl-row-when { color: var(--zl-t4, #66677c); min-width: 3ch; text-align: left; font-variant-numeric: tabular-nums; }
+.zl-row-path,
+.zl-row-brief {
+  font-size: var(--zl-fs-meta, 12px);
+  line-height: 16px;
+  color: var(--zl-t4, #66677c);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* The current row is the one full-white title in the list. */
-.session-row.variant-card.on .r1 .title {
-  color: var(--text);
-  font-weight: var(--weight-semibold);
-}
-
-/* State and age, in that order, at the end of the title line. */
-.session-row.variant-card .edge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-}
-
-.session-row.variant-card .r2 {
+/* Data is mono: ages, paths, the monogram. Scoped to the row rather than
+   declared globally, so it cannot collide with the catalogue's own `.zl-data`
+   (zones-lab.css:1668) — same declarations, one extra class of specificity. */
+.zl-row .zl-data {
   font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--overlay0);
-}
-
-/* when / brief / path — the optional extras. All are omitted unless the caller
-   passes them, so a row that only gets title+state renders as one line.
-   The age is set to the width of its longest form and aligned left, so the
-   dot beside it lands on the same x in every row. */
-.session-row.variant-card .when {
-  font-family: var(--mono);
-  font-size: var(--text-sm);
-  color: var(--overlay0);
-  flex: none;
-  min-width: 3ch;
-  text-align: left;
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 400;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
-/* The reason line: WHY this session wants you, coloured by what it says.
-   Neutral grey when it is only reporting progress — a running session asks
-   for nothing, so it must not compete with the ones that do. */
-.session-row.variant-card .brief {
-  font-size: var(--text-sm);
+.zl-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+.zl-dot.is-running { background: var(--zl-green, #a6e3a1); box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18); }
+.zl-dot.is-permission { background: var(--zl-yellow, #f9e2af); box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22); }
+.zl-dot.is-error { background: var(--zl-red, #f38ba8); box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.2); }
+/* Unseen keeps production's mauve: it is the colour this product has always
+   used for work you have not read, and it separates cleanly from idle grey.
+   The cost is that mauve now says two things -- accent and unseen -- so the
+   accent has to stay off anything that could be mistaken for a state. */
+.zl-dot.is-unseen { background: var(--zl-accent, #cba6f7); box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.2); }
+.zl-dot.is-idle { display: none; }
+/* `saved` is production's sixth state and the prototype has no word for it: a
+   parked session is not running and not asking, so it is drawn the way idle
+   is — not drawn at all. */
+.zl-dot.is-saved { display: none; }
+
+/* ── The reason line's tone ───────────────────────────────────────────────
+   The catalogue colours it by the STATE class of the row's session
+   (zones-lab.css:962-964, `.is-running` / `.is-needs` / `.is-error`). In
+   production the caller names the tone instead (Sidebar/sessions.js:69), which
+   is the same four colours addressed by what the sentence says rather than by
+   what the row is — an inbox candidate row has a brief and no state of its
+   own. Values are the catalogue's, one for one. */
+.zl-row-brief.tone-neutral { color: var(--zl-t3, #9091a6); }
+.zl-row-brief.tone-yellow { color: var(--zl-yellow, #f9e2af); }
+.zl-row-brief.tone-red { color: var(--zl-red, #f38ba8); }
+.zl-row-brief.tone-mauve { color: var(--zl-accent, #cba6f7); }
+/* A caller with no tone to give keeps the old row-level tinting, so a surface
+   that has not been given tones is not left with one grey for every reason. */
+.zl-row.needs-yellow .zl-row-brief:not([class*="tone-"]) { color: var(--zl-yellow, #f9e2af); }
+.zl-row.needs-red .zl-row-brief:not([class*="tone-"]) { color: var(--zl-red, #f38ba8); }
+
+/* ── What the prototype never drew ────────────────────────────────────────
+   Everything below this line is production behaviour re-grafted onto the
+   catalogue's skeleton. None of it renders unless its prop is passed, so a
+   row that gets only title and state is exactly the catalogue's row. */
+
+/* The second mono line the old card called `.r2`. Only the gallery passes it;
+   the sidebar hides it, because the reason line says the same thing better. */
+.zl-row-meta-line {
   line-height: 16px;
-  color: var(--overlay0);
+  color: var(--zl-t4, #66677c);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.session-row.variant-card .brief.tone-neutral { color: var(--overlay1); }
-.session-row.variant-card .brief.tone-yellow { color: var(--yellow); }
-.session-row.variant-card .brief.tone-red { color: var(--red); }
-.session-row.variant-card .brief.tone-mauve { color: var(--mauve); }
 
-.session-row.variant-card .path {
+/* pane — which grid pane the session is anchored to (P1/P2…). */
+.zl-row-pane {
   font-family: var(--mono);
-  font-size: var(--text-sm);
-  line-height: 16px;
-  color: var(--overlay0);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* A caller that passes no tone keeps the old row-level tinting, so the
-   inbox's candidate rows and the gallery are unaffected. */
-.session-row.variant-card.needs-yellow .brief:not([class*="tone-"]) {
-  color: var(--yellow);
-}
-
-.session-row.variant-card.needs-red .brief:not([class*="tone-"]) {
-  color: var(--red);
-}
-
-/* pane — optional mono badge (P1/P2/P3…) indicating the grid pane the
-   session is anchored to. Backward-compatible: if `pane` isn't passed, nothing
-   is rendered. */
-.session-row.variant-card .pane {
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  color: var(--peach);
+  font-size: var(--text-nano, 9px);
+  color: var(--zl-accent, #cba6f7);
   flex: none;
   margin-left: auto;
-  border: 1px solid color-mix(in srgb, var(--peach) 40%, transparent);
-  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--zl-accent, #cba6f7) 40%, transparent);
+  border-radius: var(--zl-r-sm, 6px);
   padding: 0 5px;
   line-height: 15px;
   letter-spacing: 0.05em;
-  background: color-mix(in srgb, var(--peach) 8%, transparent);
+  background: color-mix(in srgb, var(--zl-accent, #cba6f7) 8%, transparent);
 }
-
-.session-row.variant-card:not(.on) .pane {
-  color: var(--overlay1);
-  border-color: var(--surface1);
+.zl-row:not(.is-current) .zl-row-pane {
+  color: var(--zl-t3, #9091a6);
+  border-color: var(--zl-line-2, rgba(255, 255, 255, 0.12));
   background: transparent;
 }
 
-/* origin — optional quiet badge naming who started the session when it wasn't
-   you ("automation", "linear-webhook"…). Same badge shape as .pane but always
-   neutral: it is information, not a call to action. Width-capped so a long
-   caller label can never push the age off a narrow phone row. */
-/* An event-started session is marked with the transcript's own Import glyph
-   rather than a truncated label: it says "this came from outside" at a glance
-   and costs almost no width. The full source stays in the accessible name. */
-.session-row.variant-card .origin-event {
+/* origin — who started the session when it wasn't you. Information, not a call
+   to action, so it stays neutral; width-capped so a long caller label can never
+   push the age off a narrow phone row. An event-started session gets the
+   transcript's own Import glyph instead: the full source stays in the
+   accessible name, where a truncated "event:a…" was naming nothing. */
+.zl-row-origin-event {
   display: inline-flex;
   align-items: center;
-  color: var(--overlay1);
+  color: var(--zl-t3, #9091a6);
   flex: none;
 }
-
-.session-row.variant-card .origin {
+.zl-row-origin {
   font-family: var(--mono);
-  font-size: var(--text-nano);
-  color: var(--overlay1);
+  font-size: var(--text-nano, 9px);
+  color: var(--zl-t3, #9091a6);
   flex: none;
   max-width: 7em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--zl-line-2, rgba(255, 255, 255, 0.12));
+  border-radius: var(--zl-r-sm, 6px);
   padding: 0 5px;
   line-height: 15px;
   letter-spacing: 0.05em;
 }
 
-.session-row.variant-card.needs-yellow .r1,
-.session-row.variant-card.needs-yellow .r2 {
-  color: var(--yellow);
-}
-
-.session-row.variant-card.needs-red .r1,
-.session-row.variant-card.needs-red .r2 {
-  color: var(--red);
-}
-
-.session-row.variant-card .x {
+/* The close button always stays in the tree and tabbable (never
+   display:none): it is only visually hidden, and it comes back on container
+   hover or on keyboard focus. */
+.zl-row-x {
   position: absolute;
-  top: var(--space-2);
-  right: var(--space-3);
+  top: 8px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--zl-t4, #66677c);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--duration, 150ms) var(--ease, ease), color var(--duration, 150ms) var(--ease, ease);
+}
+.zl-row-x:focus-visible { opacity: 1; }
+@media (hover: hover) {
+  .zl-row-slot:hover .zl-row-x { opacity: 1; }
+  .zl-row-x:hover { color: var(--zl-red, #f38ba8); }
 }

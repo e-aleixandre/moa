@@ -881,99 +881,15 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-list > .zl-group:first-child { margin-top: 0; }
 .zl-group-n { letter-spacing: 0; color: var(--zl-t4); }
 
-.zl-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 52px;
-  padding: 7px 12px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: transparent;
-  color: inherit;
-  font-family: inherit;
-  letter-spacing: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background 120ms ease;
-}
-.zl-row + .zl-row { margin-top: 2px; }
-.zl-row:hover { background: var(--zl-hi); }
+/* ── The session row ─────────────────────────────────────────────────────
+   MIGRATED. `.zl-row`, `.zl-mono` and `.zl-dot` used to be defined here, in 93
+   lines. They now live in components/SessionRow/SessionRow.css, unchanged,
+   class names and all, and this file no longer has a copy of them: the
+   prototype imports the shipped component (zones-lab.jsx:9) and the rules
+   arrive with it.
 
-/* The current row is a raised plane on the sheet, with the title in full
-   white. No bar, no accent: the only edge bar in the product means "you said
-   this", and the accent is for actions, not for where you are. */
-.zl-row.is-current { background: var(--zl-raised); box-shadow: var(--zl-rim); }
-.zl-row.is-current:hover { background: var(--zl-control); }
-.zl-row.is-current .zl-row-title { color: var(--zl-t1); font-weight: 600; }
-.zl-row.is-current .zl-row-when { color: var(--zl-t3); }
-
-/* The monogram is the project's identity: hue derived from its name, always
-   the same for the same repo, never overridden by state. */
-.zl-mono {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--zl-r-md);
-  background: hsl(var(--h) 50% 60% / 0.16);
-  box-shadow: 0 0 0 1px hsl(var(--h) 50% 65% / 0.18);
-  color: hsl(var(--h) 65% 78%);
-  font-family: var(--mono);
-  font-size: var(--zl-fs-meta);
-  font-weight: 500;
-  letter-spacing: 0;
-}
-
-.zl-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.zl-row-l1 { display: flex; align-items: baseline; gap: 8px; }
-/* Row titles sit at body size: at 16 they truncated one word earlier in a
-   272px column, and the list is scanned, not read. The one session you are
-   in gets title size, in the crumb and the chip. */
-.zl-row-title {
-  flex: 1;
-  min-width: 0;
-  font-weight: 500;
-  line-height: 20px;
-  color: var(--zl-t2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* State and age ride together at the end of the title line: both are
-   metadata about the row. */
-.zl-row-meta { display: inline-flex; align-items: center; gap: 6px; flex: none; }
-/* The timestamp is set to the width of its longest form and aligned left, so
-   the dot beside it lands on the same x in every row. Ragged dots read as a
-   wobble down the list: the eye follows the column, not the number. */
-.zl-row-when { color: var(--zl-t4); min-width: 3ch; text-align: left; font-variant-numeric: tabular-nums; }
-.zl-row-path,
-.zl-row-brief {
-  font-size: var(--zl-fs-meta);
-  line-height: 16px;
-  color: var(--zl-t4);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.zl-row-brief.is-running { color: var(--zl-t3); }
-.zl-row-brief.is-needs { color: var(--zl-yellow); }
-.zl-row-brief.is-error { color: var(--zl-red); }
-
-.zl-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
-.zl-dot.is-running { background: var(--zl-green); box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18); }
-.zl-dot.is-needs { background: var(--zl-yellow); box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22); }
-.zl-dot.is-error { background: var(--zl-red); box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.2); }
-/* Unseen keeps production's mauve: it is the colour this product has always
-   used for work you have not read, and it separates cleanly from idle grey.
-   The cost is that mauve now says two things -- accent and unseen -- so the
-   accent has to stay off anything that could be mistaken for a state. */
-.zl-dot.is-unseen { background: var(--zl-accent); box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.2); }
-.zl-row-brief.is-unseen { color: var(--zl-accent); }
-.zl-dot.is-idle { display: none; }
+   What is still here is what the LIST says about a row inside it, not what a
+   row is. */
 
 /* New session: the contained accent button. The list is the point of the
    sidebar, so this reads as available, not as a beacon. */

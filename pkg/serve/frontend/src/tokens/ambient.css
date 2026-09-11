@@ -153,43 +153,24 @@
   }
 }
 
-/* ── Session rows (shared by the desktop Spine and the mobile drawer) ────── */
-[data-ambient="on"] .session-row.variant-card {
-  border: 0;
-  border-radius: var(--amb-r-row);
-}
-[data-ambient="on"] .session-row.variant-card .r1 { color: var(--amb-text); }
-[data-ambient="on"] .session-row.variant-card .r1 .title { color: var(--amb-text-2); }
-[data-ambient="on"] .session-row.variant-card.on .r1 .title { color: var(--amb-text); }
-/* The age stays mono: it is a datum, and in this list it is also a column —
-   tabular figures are what keep the dots beside it on one x. */
-[data-ambient="on"] .session-row.variant-card .when {
-  font-variant-numeric: tabular-nums;
-  color: var(--amb-text-4);
-}
-/* The reason line is neutral only when it reports; when it asks, its state
-   colour is the whole point and must survive the achromatic treatment. */
-[data-ambient="on"] .session-row.variant-card .brief { color: var(--amb-text-4); }
-[data-ambient="on"] .session-row.variant-card .brief.tone-neutral { color: var(--amb-text-3); }
-/* The reason line is coloured by WHAT IT SAYS. An earlier Ambient rule set one
-   grey for every brief -- written when that line still held the conversation
-   summary, where one grey was right. Now it says why the session wants you,
-   and "Needs your answer" in the same grey as everything else is the sentence
-   without its urgency. Same tones the state dot uses, on the words instead. */
-[data-ambient="on"] .session-row.variant-card .brief.tone-yellow { color: var(--yellow); }
-[data-ambient="on"] .session-row.variant-card .brief.tone-red { color: var(--red); }
-[data-ambient="on"] .session-row.variant-card .brief.tone-mauve { color: var(--mauve); }
-/* paths stay mono: they are code. Everything else that was mono becomes sans. */
-[data-ambient="on"] .session-row.variant-card .path {
-  font-family: var(--mono);
-  color: var(--amb-text-4);
-}
+/* ── Session rows ─────────────────────────────────────────────────────────
+   GONE. There used to be 30 lines here re-dressing the row for Ambient: no
+   border, --amb-r-row, the four text steps, the mono age, the four brief
+   tones, the mono path. Every one of them was a hand-copy of a value the
+   catalogue already had, and each was a chance to copy it slightly wrong.
+
+   The row's own sheet is now the catalogue's sheet (components/SessionRow,
+   moved from zones-lab.css), so it arrives dressed. Nothing to override. */
 
 /* The state dot is the only saturated mark left, so it gets a little more
    presence rather than less. These halos are the reason the controls can
    afford to be grey. (The dot's SIZE is not set here: StateDot writes it as an
    inline style, which no stylesheet rule can win against — the 9px that used
-   to sit here never applied.) */
+   to sit here never applied.)
+
+   The session row no longer uses this primitive: it carries the catalogue's
+   own .zl-dot, halo included. These rules are for the dot's other homes — the
+   pane head, the chips, the ledger. */
 [data-ambient="on"] .state-dot.idle { box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
 [data-ambient="on"] .state-dot.running { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent); }
 [data-ambient="on"] .state-dot.permission { box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 26%, transparent); }
@@ -218,10 +199,9 @@
   letter-spacing: -0.01em;
   color: var(--amb-text);
 }
-/* Age and path are the row's quietest data, at the bottom of the text ladder:
-   the catalog's t4, not t3. They are there to be found, not read. */
-[data-ambient="on"] .sidebar .session-row.variant-card .when,
-[data-ambient="on"] .sidebar .session-row.variant-card .path { color: var(--amb-text-4); }
+/* Age and path are the row's quietest data, at the bottom of the text ladder.
+   Not re-stated here any more: the row's own sheet puts them on --zl-t4, which
+   is the value this rule was copying. */
 
 /* The filter is a well cut into the sheet: recessed, not a bordered box drawn
    on top of it. Field's own sizing is untouched — this only changes surface. */
@@ -261,9 +241,8 @@
 
 /* Rows: no dividers, no card borders. Ambient tells surfaces apart by
    luminosity, so the current row is a lighter plane rather than an outlined
-   box, and the separators go entirely — the gap does that work. */
-[data-ambient="on"] .sidebar .session-row.variant-card { box-shadow: none; }
-[data-ambient="on"] .sidebar .session-row.variant-card.on { background: var(--amb-on); }
+   box, and the separators go entirely — the gap does that work. Both of those
+   are now the row's own resting state; nothing to say here. */
 
 /* New session: the contained accent button. The list is the point of the
    sidebar, so this reads as available, not as a beacon. */
@@ -2375,13 +2354,13 @@ html.mobile-locked[data-ambient="on"] body {
   [data-ambient="on"] .inbox-sheet-change:hover { background: var(--amb-hi); color: var(--amb-text); }
   [data-ambient="on"] .inbox-sheet-back:hover { color: var(--amb-text); }
 }
-[data-ambient="on"] .inbox-sheet-list .session-row.variant-card {
+[data-ambient="on"] .inbox-sheet-list .zl-row {
   border-radius: var(--amb-r-row);
 }
 @media (hover: hover) {
-  [data-ambient="on"] .inbox-sheet-list .session-row.variant-card:hover { background: var(--amb-hi); }
+  [data-ambient="on"] .inbox-sheet-list .zl-row:hover { background: var(--amb-hi); }
 }
-[data-ambient="on"] .inbox-sheet-list .session-row.variant-card:focus-within {
+[data-ambient="on"] .inbox-sheet-list .zl-row-slot:focus-within .zl-row {
   background: var(--amb-raised);
 }
 

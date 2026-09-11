@@ -153,7 +153,7 @@ test("the sheet offers open sessions as session rows and sends the event to one"
   const nodes = render(OPEN, { onSend });
   const rows = mounted.filter((node) => node.type.name === "SessionRow");
   expect(rows.length).toBe(1);
-  const hit = nodes.find((node) => node.props?.class === "session-row-hit");
+  const [hit] = byClass(nodes, "zl-row");
   hit.props.onClick();
   expect(onSend).toHaveBeenCalledWith(EVENT.id, "s1");
 });
@@ -162,14 +162,14 @@ test("the sheet offers open sessions as session rows and sends the event to one"
 // path under each row would say the same thing N times.
 test("candidates of a project event drop the path the sheet already states", () => {
   const nodes = render(OPEN);
-  expect(byClass(nodes, "path")).toHaveLength(0);
+  expect(byClass(nodes, "zl-row-path")).toHaveLength(0);
 
   const projectless = { ...CARD, event: { ...EVENT, project: "" } };
   calls = 0;
   mounted.length = 0;
   pick = (index) => OPEN[index];
   const spanning = descendants(expand(InboxView({ cards: [projectless] })));
-  expect(byClass(spanning, "path")).toHaveLength(1);
+  expect(byClass(spanning, "zl-row-path")).toHaveLength(1);
 });
 
 const SETTLED_CARD = {

@@ -158,7 +158,6 @@ export function Sidebar({
   const row = (s, hidePath = false) => (
     <div class="sidebar-session" key={s.id}>
       <SessionRow
-        variant="card"
         title={s.title}
         state={s.state || (s.saved ? "saved" : "idle")}
         active={s.active ?? s.id === activeId}

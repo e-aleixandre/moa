@@ -17,12 +17,10 @@ import { Button } from "../primitives/index.js";
 import { parsePreviewReference, feedbackMessage } from "../data/util/preview-reference.js";
 import "./molecules-gallery.css";
 
-const SESSION_VARIANTS = ["pill", "tab", "card"];
-
 const SESSION_SAMPLES = [
   { title: "ws race fix", state: "running", active: true, meta: "running full suite · 0:41" },
   { title: "deploy pulse api", state: "permission", unseen: true, meta: "waiting for permission" },
-  { title: "frontend polish", state: "idle", age: "2h", meta: "done · pushed 3 commits" },
+  { title: "frontend polish", state: "idle", when: "2h", meta: "done · pushed 3 commits" },
   { title: "migrate sqlite", state: "error", unseen: true, meta: "provider 429 · retrying" },
   { title: "changelog 0.10", state: "saved", meta: "saved · no changes pending" },
 ];
@@ -66,11 +64,15 @@ const MODELS = [
   },
 ];
 
-function SessionRowVariant({ variant }) {
+// SessionRow has ONE shape now: its markup and CSS were MOVED from the
+// catalogue's zones lab (METODO §4), and the prototype only ever drew one row.
+// The pill and tab variants went with the imitation they belonged to — nothing
+// but this gallery ever mounted them.
+function SessionRowBoard() {
   return (
-    <div class={`molecule-row session-row-board${variant === "tab" ? " tabline" : ""}`}>
+    <div class="molecule-row session-row-board">
       {SESSION_SAMPLES.map((s) => (
-        <SessionRow key={s.title} variant={variant} onClose={() => {}} {...s} />
+        <SessionRow key={s.title} onClose={() => {}} {...s} />
       ))}
     </div>
   );
@@ -363,14 +365,8 @@ export function MoleculesGallery() {
     <section>
       <h2>Moléculas</h2>
 
-      <h3>SessionRow — variant "pill"</h3>
-      <SessionRowVariant variant="pill" />
-
-      <h3>SessionRow — variant "tab"</h3>
-      <SessionRowVariant variant="tab" />
-
-      <h3>SessionRow — variant "card"</h3>
-      <SessionRowVariant variant="card" />
+      <h3>SessionRow</h3>
+      <SessionRowBoard />
 
       <h3>ModelPill</h3>
       <ModelPillRow />

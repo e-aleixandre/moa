@@ -173,7 +173,6 @@ function RouteSheet({ card, sameSourcePending, onSend, onNewSession, onIgnore, o
             {card.sessions.map((session) => (
               <SessionRow
                 key={session.id}
-                variant="card"
                 title={session.title}
                 state={session.state}
                 when={session.when}

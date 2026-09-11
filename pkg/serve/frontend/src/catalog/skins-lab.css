@@ -175,22 +175,22 @@
 .sk-ambient > .sk-main { position: relative; z-index: 1; }
 
 /* ── shared: the session row (Spine + drawer render the same SessionRow) ── */
-.sk-ambient .session-row.variant-card {
+.sk-ambient .zl-row {
   border: 0;
   border-radius: var(--amb-r-row);
   transition: background var(--duration) var(--ease);
 }
-.sk-ambient .session-row.variant-card .r1 { font-size: var(--amb-title); color: var(--amb-text); }
-.sk-ambient .session-row.variant-card .when {
+.sk-ambient .zl-row-l1 { font-size: var(--amb-title); color: var(--amb-text); }
+.sk-ambient .zl-row-when {
   font-family: var(--font);
   font-size: var(--amb-meta);
   font-variant-numeric: tabular-nums;
   color: var(--amb-text-4);
 }
-.sk-ambient .session-row.variant-card .brief { font-size: 12.5px; color: var(--amb-text-3); }
-.sk-ambient .session-row.variant-card .path { font-size: var(--amb-meta); color: var(--amb-text-4); }
+.sk-ambient .zl-row-brief { font-size: 12.5px; color: var(--amb-text-3); }
+.sk-ambient .zl-row-path { font-size: var(--amb-meta); color: var(--amb-text-4); }
 /* the state dot is the only saturated mark: give it a hair more presence */
-.sk-ambient .session-row.variant-card .r1 .state-dot { width: 9px; height: 9px; }
+.sk-ambient .zl-row .zl-dot { width: 9px; height: 9px; }
 .sk-ambient .state-dot.idle { box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
 .sk-ambient .state-dot.running { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent); }
 .sk-ambient .state-dot.permission { box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 26%, transparent); }
@@ -198,11 +198,11 @@
 .sk-ambient .state-dot.unseen { box-shadow: 0 0 0 3px color-mix(in srgb, var(--mauve) 24%, transparent); }
 .sk-ambient .state-dot.saved { box-shadow: none; opacity: 0.7; }
 /* paths stay mono (they are code); everything else that was mono is sans */
-.sk-ambient .session-row.variant-card .path { font-family: var(--mono); }
+.sk-ambient .zl-row-path { font-family: var(--mono); }
 /* "needs you" rows keep their semantic colour ON THE BRIEF, never on the row */
-.sk-ambient .session-row.variant-card.needs-yellow .brief,
+.sk-ambient .zl-row.needs-yellow .zl-row-brief,
 .sk-ambient .sdcard-needs-label { color: var(--yellow); }
-.sk-ambient .session-row.variant-card.needs-red .brief { color: var(--red); }
+.sk-ambient .zl-row.needs-red .zl-row-brief { color: var(--red); }
 .sk-ambient .session-card-menu button,
 .sk-ambient .session-card-menu .icon-button { color: var(--amb-text-3); }
 
@@ -216,8 +216,8 @@
   border-right: 0;
 }
 .sk-ambient .spine .spine-label,
-.sk-ambient .spine .session-row.variant-card .when,
-.sk-ambient .spine .session-row.variant-card .path { color: var(--amb-text-3); }
+.sk-ambient .spine .zl-row-when,
+.sk-ambient .spine .zl-row-path { color: var(--amb-text-3); }
 .sk-ambient .spine .spine-head { padding: 18px 16px 8px; }
 .sk-ambient .spine .wordmark { font-size: var(--amb-head); font-weight: var(--weight-semibold); letter-spacing: -0.01em; color: var(--amb-text); }
 .sk-ambient .spine .spine-jump,
@@ -252,16 +252,16 @@
   padding: 12px 8px 6px;
 }
 .sk-ambient .spine .spine-list { gap: 1px; }
-.sk-ambient .spine .spine-session-card .session-row.variant-card .session-row-hit { padding: 9px 36px 9px 11px; gap: 3px; }
-.sk-ambient .spine .session-row.variant-card .r1 { font-size: 13px; }
-.sk-ambient .spine .session-row.variant-card .brief,
-.sk-ambient .spine .session-row.variant-card .path { padding-left: 19px; }
+.sk-ambient .spine .spine-session-card .zl-row { padding: 9px 36px 9px 11px; gap: 3px; }
+.sk-ambient .spine .zl-row-l1 { font-size: 13px; }
+.sk-ambient .spine .zl-row-brief,
+.sk-ambient .spine .zl-row-path { padding-left: 19px; }
 @media (hover: hover) {
-  .sk-ambient .spine .session-row.variant-card:hover { background: var(--amb-hi); }
+  .sk-ambient .spine .zl-row:hover { background: var(--amb-hi); }
 }
-.sk-ambient .spine .session-row.variant-card.on,
-.sk-ambient .spine .session-row.variant-card.needs-yellow.on,
-.sk-ambient .spine .session-row.variant-card.needs-red.on {
+.sk-ambient .spine .zl-row.is-current,
+.sk-ambient .spine .zl-row.needs-yellow.is-current,
+.sk-ambient .spine .zl-row.needs-red.is-current {
   background: rgba(255, 255, 255, 0.10);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -473,12 +473,12 @@
   padding: 12px 8px 4px;
 }
 .sk-ambient .sdrawer-group-new { color: var(--mauve); }
-.sk-ambient .sdcard-slot .session-row.variant-card .session-row-hit { padding: 11px 40px 11px 13px; gap: 3px; }
-.sk-ambient .sdcard-slot .session-row.variant-card .r1 { font-size: 15px; }
-.sk-ambient .sdcard-slot .session-row.variant-card .brief { font-size: 13px; }
-.sk-ambient .sdcard-slot .session-row.variant-card.on,
-.sk-ambient .sdcard-slot .session-row.variant-card.needs-yellow.on,
-.sk-ambient .sdcard-slot .session-row.variant-card.needs-red.on {
+.sk-ambient .sdcard-slot .zl-row { padding: 11px 40px 11px 13px; gap: 3px; }
+.sk-ambient .sdcard-slot .zl-row-l1 { font-size: 15px; }
+.sk-ambient .sdcard-slot .zl-row-brief { font-size: 13px; }
+.sk-ambient .sdcard-slot .zl-row.is-current,
+.sk-ambient .sdcard-slot .zl-row.needs-yellow.is-current,
+.sk-ambient .sdcard-slot .zl-row.needs-red.is-current {
   background: rgba(255, 255, 255, 0.11);
   box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 8px 24px rgba(0, 0, 0, 0.22);
 }

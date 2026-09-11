@@ -312,51 +312,32 @@
 /* ── Rows ─────────────────────────────────────────────────────────────────
    A queue of things to do, not a stack of cards. Two lines: title with its
    state and age, then WHY the session wants you — or where it lives, when it
-   wants nothing. Sizes belong to SessionRow; the sidebar only says how the
-   surface behaves. */
-.sidebar-session { position: relative; }
-.sidebar-session .session-row { width: 100%; }
+   wants nothing.
 
-.sidebar .session-row.variant-card {
-  background: transparent;
-  border-color: transparent;
-  border-radius: var(--radius-md);
-  min-width: 0;
-}
-@media (hover: hover) {
-  .sidebar .session-row.variant-card:hover {
-    background: var(--surface0);
-    border-color: transparent;
-  }
-}
-.sidebar .session-row.variant-card.on {
-  background: var(--surface0);
-  border-color: transparent;
-  box-shadow: none;
-}
-.sidebar .session-row.variant-card .r2 { display: none; }
-.sidebar .session-row.variant-card.needs-yellow,
-.sidebar .session-row.variant-card.needs-red { background: transparent; }
-.sidebar .session-row.variant-card.needs-yellow.on,
-.sidebar .session-row.variant-card.needs-red.on { background: var(--surface0); }
-@media (hover: hover) {
-  .sidebar .session-row.variant-card.needs-yellow:hover,
-  .sidebar .session-row.variant-card.needs-red:hover { background: var(--surface0); }
-}
-.sidebar .session-row.variant-card.needs-yellow .r1,
-.sidebar .session-row.variant-card.needs-red .r1 { color: var(--text); }
+   This block used to be 27 lines re-deriving the row's surface: transparent at
+   rest, --surface0 on hover, --surface0 when current, 7px/12px padding, 52px
+   tall. Every one of those is now what the row IS (SessionRow.css, moved from
+   the catalogue), so the sidebar stopped saying it a second time. What is left
+   is only what this container adds: the reserve for the ⋯, and the phone's
+   taller thumb target. */
+.sidebar-session { position: relative; }
+.sidebar-session .zl-row-slot { width: 100%; }
+/* The list draws its own rhythm through .sidebar-group's gap, so the row's own
+   stacking margin would double it. */
+.sidebar-session .zl-row-slot + .zl-row-slot { margin-top: 0; }
+/* The gallery's mono second line is the reason line said worse; the sidebar
+   has the reason. */
+.sidebar .zl-row-meta-line { display: none; }
+/* A row that asks keeps its title at full text: the reason line beside it
+   carries the colour, so tinting the title too would say it twice. */
+.sidebar .zl-row.needs-yellow .zl-row-title,
+.sidebar .zl-row.needs-red .zl-row-title { color: var(--zl-t1, #f4f4f7); }
 
 /* ── The ⋯ per row ────────────────────────────────────────────────────────
    With a pointer it appears on hover and the age steps aside for it, so the
    row keeps its resting geometry instead of taxing every row with a permanent
    36px reserve. With a thumb there is no hover, so the button is always there
-   and the space is reserved for good. Matches the variant's own selector
-   strength — a plain `.sidebar .session-row-hit` loses to
-   `.session-row.variant-card .session-row-hit` and does nothing. */
-.sidebar .session-row.variant-card .session-row-hit {
-  padding: 7px 12px;
-  min-height: 52px;
-}
+   and the space is reserved for good. */
 .sidebar:not(.is-phone) .session-card-menu {
   opacity: 0;
   pointer-events: none;
@@ -371,14 +352,14 @@
     opacity: 1;
     pointer-events: auto;
   }
-  .sidebar:not(.is-phone) .sidebar-session:hover .session-row.variant-card .when {
+  .sidebar:not(.is-phone) .sidebar-session:hover .zl-row-when {
     opacity: 0;
   }
 }
-.sidebar:not(.is-phone) .sidebar-session:focus-within .session-row.variant-card .when {
+.sidebar:not(.is-phone) .sidebar-session:focus-within .zl-row-when {
   opacity: 0;
 }
-.sidebar.is-phone .session-row.variant-card .session-row-hit {
+.sidebar.is-phone .zl-row {
   padding: 9px 40px 9px 12px;
   min-height: 56px;
 }

@@ -15,12 +15,6 @@
   align-items: center;
 }
 
-.molecule-row.session-row-board.tabline {
-  gap: 2px;
-  border-bottom: 1px solid var(--surface0);
-  align-items: stretch;
-}
-
 .molecule-col {
   display: flex;
   flex-direction: column;

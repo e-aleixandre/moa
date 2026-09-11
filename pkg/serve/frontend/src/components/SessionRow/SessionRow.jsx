@@ -1,14 +1,25 @@
 import { Import, X } from "lucide-preact";
-import { StateDot } from "../../primitives/index.js";
 import "./SessionRow.css";
 
-// SessionRow — the session piece, a single component with 3 switchable
-// variants (pill | tab | card) to compare directions A/B/C live,
-// just like ThinkingMeter with `variant`.
+// SessionRow — the session piece. Markup and CSS are the catalogue's
+// (catalog/zones-lab.jsx:99 `Row`, zones-lab.css:884 `.zl-row`), MOVED here
+// rather than imitated: the class names travelled with the rules, so the sheet
+// is the accepted design rather than a translation of it. The catalogue now
+// imports this component (catalog/zones-lab.jsx), which is what makes one
+// definition instead of two.
 //
-// `state` "permission" and "error" tint the whole row ("needs you"), not just the
-// dot: permission uses yellow (like the mockup), error uses the same pattern
-// in red to keep the system's traffic-light convention.
+// What is NOT the catalogue's is everything the prototype never had, and it is
+// re-grafted on top: the accessible name, the close button that stays tabbable,
+// the origin mark, the pane badge, the unseen state and the focus ring.
+//
+// The variants (pill | tab) the old imitation carried are gone with it: nothing
+// mounted them but the molecules gallery, and the catalogue only ever drew one
+// row.
+
+// `state` "permission" and "error" tint the whole row ("needs you"), not just
+// the dot. Kept as a class the row's own sheet can key on, because the
+// catalogue's reason line is coloured by what it says (`is-permission`) while
+// a caller with no tone still gets the old row-level tinting.
 const NEEDS_TONE = {
   permission: "yellow",
   error: "red",
@@ -21,8 +32,8 @@ const STATE_LABEL_SUFFIX = {
   error: ", error",
 };
 
-// The card variant takes three OPTIONAL extras, all additive — omit them and the
-// card renders exactly as it always has:
+// The row takes these OPTIONAL extras, all additive — omit them and the row
+// renders as a single line:
 //   when  — short age, right-aligned on the title row ("now", "18m")
 //   brief — one line of live status under the title. Renderable, not just text,
 //           so a caller can bold a lead-in (<><b>Needs you: </b>…</>)
@@ -40,25 +51,35 @@ const isEventOrigin = (origin) => typeof origin === "string" && origin.startsWit
 // projectMonogram) rather than a cwd, so the row stays a pure presentation
 // piece and the hash lives with the other project helpers.
 //
-// Hue only: the surface is hsl(h 50% 60% / .16) and the ink hsl(h 65% 78%),
-// so every project lands on the same lightness and none of them can shout
-// louder than the state colours next to it.
+// The catalogue's own words: "Identity and state are two data: the monogram
+// says WHICH project, the dot says WHAT it is doing. Folding state into the
+// monogram made the same repo change colour from row to row, which defeats the
+// point of a monogram." (zones-lab.jsx:39-41)
 function Monogram({ mono }) {
   return (
-    <span class="mono" style={`--mono-h:${mono.hue}`} aria-hidden="true">
+    <span class="zl-mono" style={`--h:${mono.hue}`} aria-hidden="true">
       {mono.text}
     </span>
   );
 }
 
+// Dot — the state mark. The catalogue's own span with a state class, not the
+// StateDot primitive: the halo, the size and the "idle is not drawn" rule are
+// all in .zl-dot, and StateDot writes its size as an inline style no sheet can
+// win against — which is how the 9px Ambient asked for never applied.
+//
+// The catalogue names the "needs you" state `needs`; production calls it
+// `permission`. The class is production's, so one vocabulary reaches the CSS.
+export function Dot({ state }) {
+  return <span class={`zl-dot is-${state}`} aria-hidden="true" />;
+}
+
 export function SessionRow({
   title,
   state = "idle",
-  variant = "card",
   active = false,
   unseen = false,
   meta,
-  age,
   pane,
   when,
   origin,
@@ -72,10 +93,10 @@ export function SessionRow({
 }) {
   const needs = NEEDS_TONE[state];
   const isUnseenResult = unseen && (state === "idle" || state === "running" || state === "unseen");
+  const dotState = isUnseenResult ? "unseen" : state;
   const classes = [
-    "session-row",
-    `variant-${variant}`,
-    active ? "on" : "",
+    "zl-row",
+    active ? "is-current" : "",
     needs ? `needs-${needs}` : "",
   ]
     .filter(Boolean)
@@ -89,57 +110,49 @@ export function SessionRow({
   const hitLabel = `${title}${origin ? `, started by ${origin}` : ""}${pane ? `, pane ${pane}` : ""}${isUnseenResult ? ", new result" : STATE_LABEL_SUFFIX[state] ?? ""}`;
 
   return (
-    <span class={classes} {...rest}>
+    <span class={`zl-row-slot${onClose ? " has-close" : ""}`} {...rest}>
+      {/* The catalogue's row IS the button (zones-lab.jsx:100-106): one hit
+          target for the whole row, which is what gives a thumb its 52px. The
+          close button cannot nest inside it, so the button keeps the row's
+          class and the slot around it only positions the ✕. */}
       <button
         type="button"
-        class="session-row-hit"
+        class={classes}
         onClick={onClick}
         aria-current={active ? "true" : undefined}
         aria-label={hitLabel}
       >
-        {variant === "card" ? (
-          /* The card is a LIST ROW, not a stack of lines: the monogram is a
-             fixed leading column and the two text lines share the remaining
-             width. That is what lets the ages line up down the list and what
-             gives the reason a full line to be read on. */
-          <>
-            {mono && <Monogram mono={mono} />}
-            <span class="body">
-              <span class="r1">
-                <span class="title" aria-hidden="true">{title}</span>
-                {/* An event origin is shown as the same Import mark the event
-                    block uses in the transcript: the source name never fit in a
-                    7em badge, and "event:a…" told the owner nothing. */}
-                {origin && (isEventOrigin(origin)
-                  ? <span class="origin-event" aria-hidden="true"><Import size={12} /></span>
-                  : <span class="origin" aria-hidden="true">{origin}</span>)}
-                {pane && <span class="pane" aria-hidden="true">{pane}</span>}
-                {/* State and age travel together at the end of the title line:
-                    both are metadata about the row, and pinning the age to a
-                    fixed width lands every dot on the same x. Ragged dots read
-                    as a wobble down the list. */}
-                <span class="edge">
-                  <StateDot state={isUnseenResult ? "unseen" : state} size={7} />
-                  {when && <span class="when" aria-hidden="true">{when}</span>}
-                </span>
-              </span>
-              {meta && <span class="r2" aria-hidden="true">{meta}</span>}
-              {brief && <span class={`brief${briefTone ? ` tone-${briefTone}` : ""}`} aria-hidden="true">{brief}</span>}
-              {path && <span class="path" aria-hidden="true">{path}</span>}
+        {mono && <Monogram mono={mono} />}
+        <span class="zl-row-main">
+          <span class="zl-row-l1">
+            <span class="zl-row-title" aria-hidden="true">{title}</span>
+            {/* An event origin is shown as the same Import mark the event
+                block uses in the transcript: the source name never fit in a
+                7em badge, and "event:a…" told the owner nothing. */}
+            {origin && (isEventOrigin(origin)
+              ? <span class="zl-row-origin-event" aria-hidden="true"><Import size={12} /></span>
+              : <span class="zl-row-origin" aria-hidden="true">{origin}</span>)}
+            {pane && <span class="zl-row-pane" aria-hidden="true">{pane}</span>}
+            {/* State and age travel together at the end of the title line:
+                both are metadata about the row, and pinning the age to a
+                fixed width lands every dot on the same x. Ragged dots read
+                as a wobble down the list. */}
+            <span class="zl-row-meta">
+              <Dot state={dotState} />
+              {when && <span class="zl-row-when zl-data" aria-hidden="true">{when}</span>}
             </span>
-          </>
-        ) : (
-          <>
-            <StateDot state={isUnseenResult ? "unseen" : state} size={8} />
-            <span class="title" aria-hidden="true">{title}</span>
-            {variant === "tab" && age && <span class="n" aria-hidden="true">{age}</span>}
-          </>
-        )}
+          </span>
+          {meta && <span class="zl-row-meta-line zl-data" aria-hidden="true">{meta}</span>}
+          {/* Active sessions say what they are doing; saved ones say where they
+              live. Two lines is the budget, so the more useful datum wins. */}
+          {brief && <span class={`zl-row-brief${briefTone ? ` tone-${briefTone}` : ""}`} aria-hidden="true">{brief}</span>}
+          {path && <span class="zl-row-path zl-data" aria-hidden="true">{path}</span>}
+        </span>
       </button>
       {onClose && (
         <button
           type="button"
-          class="x"
+          class="zl-row-x"
           aria-label={`Close ${title}`}
           onClick={handleClose}
         >

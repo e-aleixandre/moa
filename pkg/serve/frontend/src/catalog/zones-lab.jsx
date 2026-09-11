@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import "./zones-lab.css";
 import { FROZEN } from "./fidelity-freeze.js";
+/* MIGRATED (METODO §4, piece 1 of the list): the session row no longer has a
+   private copy here. Its markup and its CSS were MOVED to
+   components/SessionRow, class names and all, and the prototype imports them
+   back. There is one definition now, and a change to it can only land in one
+   place. The dot comes with it, because a dot alone is not a piece. */
+import { SessionRow, Dot } from "../components/SessionRow/SessionRow.jsx";
 
 /* The three-zone skeleton, both densities side by side.
    This is a PROTOTYPE, not production: it draws the shell only (where things
@@ -15,11 +21,16 @@ import { FROZEN } from "./fidelity-freeze.js";
    actually navigate by, so it earns the slot. Colour is derived from the
    project name, so the same repo always looks the same. State is a separate
    datum and lives in the dot next to the age. */
+/* The state vocabulary is PRODUCTION's, not the prototype's: what this file
+   used to call "needs" is `permission` everywhere else in the product
+   (data/util/format.js sessionDisplayDotState), and the row these fixtures now
+   feed is production's. One word per state, or the migrated piece would need a
+   translation table at its door — which is the exact thing being removed. */
 const SESSIONS = [
-  { title: "Buscar un bug bounty", when: "now", path: "~/dev/moa", project: "moa", state: "running", brief: "Running · 4m" },
-  { title: "Check access to two repos", when: "28m", path: "~/dev/gugo", project: "gugo", state: "needs", brief: "Needs your answer" },
-  { title: "Deploy fails on ARM runner", when: "1h", path: "~/dev/tienda", project: "tienda", state: "error", brief: "Stopped with an error" },
-  { title: "Resumen de la factura de octubre", when: "12m", path: "~/dev/moa", project: "moa", state: "unseen", brief: "Answered · not read yet" },
+  { title: "Buscar un bug bounty", when: "now", path: "~/dev/moa", project: "moa", state: "running", brief: "Running · 4m", tone: "neutral" },
+  { title: "Check access to two repos", when: "28m", path: "~/dev/gugo", project: "gugo", state: "permission", brief: "Needs your answer", tone: "yellow" },
+  { title: "Deploy fails on ARM runner", when: "1h", path: "~/dev/tienda", project: "tienda", state: "error", brief: "Stopped with an error", tone: "red" },
+  { title: "Resumen de la factura de octubre", when: "12m", path: "~/dev/moa", project: "moa", state: "unseen", brief: "Answered · not read yet", tone: "mauve" },
   { title: "Limpiar Docker y worktrees", when: "35m", path: "~/dev", project: "dev", state: "idle" },
   { title: "Búscame un dominio para el side project", when: "36m", path: "~/dev", project: "dev", state: "idle" },
   { title: "Browse Gugo GitLab", when: "39d", path: "~/dev/gugo", project: "gugo", state: "idle" },
@@ -55,11 +66,11 @@ function Monogram({ project }) {
    The predicate is production's own (data/util/project-sessions.js:7 counts
    permission and error) plus unseen, which sessionDisplayDotState already
    treats as its own display state (data/util/format.js:472). */
-const NEEDS = ["needs", "error", "unseen"];
+const NEEDS = ["permission", "error", "unseen"];
 const wantsYou = (s) => NEEDS.includes(s.state);
 /* Blocked before broken before merely unread: the order is how much of your
    work is stopped, not when it happened. */
-const RANK = { needs: 0, error: 1, unseen: 2 };
+const RANK = { permission: 0, error: 1, unseen: 2 };
 const ATTENTION = SESSIONS.filter(wantsYou).sort((a, b) => RANK[a.state] - RANK[b.state]);
 const ACTIVE = SESSIONS.filter((s) => s.state !== "idle" && !wantsYou(s));
 const SAVED = SESSIONS.filter((s) => s.state === "idle");
@@ -84,10 +95,6 @@ const BY_PROJECT = (() => {
   return [...seen.values()];
 })();
 
-function Dot({ state }) {
-  return <span class={`zl-dot is-${state}`} aria-hidden="true" />;
-}
-
 function PlusIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -96,30 +103,26 @@ function PlusIcon() {
   );
 }
 
+/* The row is production's component now, called with the prototype's fixtures.
+   What used to be 26 lines of private markup is this adapter: the fixture's
+   shape mapped onto the props the shipped row takes.
+
+   Active sessions say what they are doing; saved ones say where they live. Two
+   lines is the budget, so the more useful datum wins — which is why `path` is
+   only passed when there is no reason to show instead. */
 function Row({ s, current, onPick }) {
   return (
-    <button
-      type="button"
-      class={`zl-row${current ? " is-current" : ""}`}
-      aria-current={current ? "true" : undefined}
+    <SessionRow
+      title={s.title}
+      state={s.state}
+      active={current}
+      when={s.when}
+      brief={s.brief}
+      briefTone={s.tone}
+      mono={{ text: s.project.slice(0, 2), hue: projectHue(s.project) }}
+      path={s.brief ? undefined : s.path}
       onClick={onPick}
-    >
-      <Monogram project={s.project} />
-      <span class="zl-row-main">
-        <span class="zl-row-l1">
-          <span class="zl-row-title">{s.title}</span>
-          <span class="zl-row-meta">
-            <Dot state={s.state} />
-            <span class="zl-row-when zl-data">{s.when}</span>
-          </span>
-        </span>
-        {/* Active sessions say what they are doing; saved ones say where they
-            live. Two lines is the budget, so the more useful datum wins. */}
-        {s.brief
-          ? <span class={`zl-row-brief is-${s.state}`}>{s.brief}</span>
-          : <span class="zl-row-path zl-data">{s.path}</span>}
-      </span>
-    </button>
+    />
   );
 }
 
@@ -1831,7 +1834,7 @@ function Desktop({ label, live: preset, surface }) {
 const PANES = [
   { title: "Buscar un bug bounty", path: "~/dev/moa", state: "running", focus: true, n: 1,
     status: { ...FULL_STATUS, goal: null, tasks: null, mcp: null, onExtra: false, fast: false, ctx: 63, spend: "$1.84" } },
-  { title: "Check access to two repos", path: "~/dev/gugo", state: "needs", n: 2,
+  { title: "Check access to two repos", path: "~/dev/gugo", state: "permission", n: 2,
     status: { ...FULL_STATUS, model: "Terra", thinking: "high", perm: "ask", goal: null, tasks: null, mcp: null, onExtra: false, fast: false, ctx: 21, spend: "$0.42", up: "3.1k", down: "640" },
     tail: ASK_CARD },
   { title: "Deploy fails on ARM runner", path: "~/dev/tienda", state: "error", n: 3,
