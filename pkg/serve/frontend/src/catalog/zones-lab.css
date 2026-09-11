@@ -719,13 +719,6 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
   border-radius: 0 var(--zl-r-lg) var(--zl-r-lg) 0;
   box-shadow: inset -1px 0 0 var(--zl-line-2), 16px 0 48px rgba(0, 0, 0, 0.45);
 }
-.zl-side-right {
-  right: 0;
-  width: 320px;
-  transform: translateX(100%);
-  border-radius: var(--zl-r-lg) 0 0 var(--zl-r-lg);
-  box-shadow: inset 1px 0 0 var(--zl-line-2), -16px 0 48px rgba(0, 0, 0, 0.45);
-}
 .zl-side.is-open { transform: translateX(0); }
 
 .zl-side-head {
@@ -748,6 +741,32 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
   text-transform: uppercase;
   color: var(--zl-t4);
 }
+.zl-side-head.is-sub { padding-left: 12px; gap: 6px; }
+.zl-side-title.is-page {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--zl-fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.zl-back {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-t2);
+  cursor: pointer;
+}
+.zl-back svg { width: 16px; height: 16px; }
+.zl-back:hover { background: var(--zl-hi); color: var(--zl-t1); }
 
 /* Search is a recess in the sheet: canvas tone, hairline rim. */
 .zl-search {
@@ -879,101 +898,6 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
   text-align: center;
 }
 .zl-ver { color: var(--zl-t4); }
-
-/* ── Session drawer body ─────────────────────────────────────────────── */
-.zl-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-raised);
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t2);
-  cursor: pointer;
-}
-.zl-x svg { width: 16px; height: 16px; }
-.zl-x:hover { background: var(--zl-control); color: var(--zl-t1); }
-
-.zl-panel-body { flex: 1; padding: 8px 20px 0; overflow-y: auto; }
-.zl-field { display: block; margin-bottom: 16px; }
-.zl-label {
-  display: block;
-  margin: 0 0 6px 2px;
-  font-weight: 500;
-  color: var(--zl-t3);
-}
-.zl-input {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  height: 44px;
-  padding: 0 12px;
-  border: 0;
-  outline: 0;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-canvas);
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t1);
-  font-family: inherit;
-  font-size: var(--zl-fs-title); /* 16: iOS focus-zoom floor */
-  letter-spacing: inherit;
-  transition: box-shadow 140ms ease;
-}
-.zl-input:focus { box-shadow: 0 0 0 1px var(--zl-accent-line); }
-/* A read-only value is not a recess: it sits flush, in data type. */
-.zl-input.is-static { background: var(--zl-raised); color: var(--zl-t2); }
-.zl-path-dir { color: var(--zl-t4); }
-
-.zl-facts {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 6px;
-  margin: 20px 0 0;
-}
-.zl-facts div {
-  padding: 10px 12px;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-raised);
-  box-shadow: var(--zl-rim);
-}
-.zl-facts dt { margin-bottom: 4px; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
-.zl-facts dd {
-  margin: 0;
-  color: var(--zl-t2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.zl-panel-acts { display: flex; flex-direction: column; gap: 6px; padding: 16px 12px 12px; }
-.zl-act {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  min-height: 56px;
-  padding: 10px 14px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-raised);
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t1);
-  font-family: inherit;
-  letter-spacing: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background 120ms ease, transform 120ms var(--zl-ease);
-}
-.zl-act:hover { background: var(--zl-control); }
-.zl-act:active { transform: translateY(1px); }
-.zl-act-t { font-size: var(--zl-fs-title); font-weight: 500; }
-.zl-act-d { line-height: 1.4; color: var(--zl-t4); }
-.zl-act.is-danger .zl-act-t { color: var(--zl-red); }
-.zl-act.is-danger:hover { background: rgba(243, 139, 168, 0.1); }
 
 /* ── Desktop ─────────────────────────────────────────────────────────────
    The same sheet the phone slides in, docked: same tone, same hairline seam. */
@@ -1188,14 +1112,14 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 }
 
 /* ── Phone sizing: every control that gets a thumb is at least 44px. ──── */
-.zl-phone .zl-x { width: 44px; height: 44px; }
+.zl-phone .zl-x,
+.zl-phone .zl-back { width: 44px; height: 44px; }
 .zl-phone .zl-side-new { height: 48px; margin: 4px 12px 10px; }
 .zl-phone .zl-status { height: 44px; }
 .zl-phone button.zl-st { height: 44px; }
 .zl-phone .zl-inbox { height: 44px; }
 .zl-phone .zl-search,
 .zl-phone .zl-search-in { height: 44px; }
-.zl-phone .zl-input { height: 48px; }
 /* Ledger rows are 32 on desktop (a pointer); on the phone every row that
    opens something is 44. Inert rows stay 36 so a long ledger keeps its
    density -- only the ones you tap need the thumb. */
@@ -1509,7 +1433,6 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
-.zl-input.is-static.zl-data { font-size: var(--zl-fs-body); }
 /* Inside the ledger the arg follows the row size (14 desktop, 12 dense) so
    "read" and its path sit on one baseline. */
 .zl-lg-arg.zl-data { font-size: inherit; }
@@ -1579,230 +1502,6 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-st-ev .zl-st-word { overflow: visible; text-overflow: clip; flex: none; }
 
 
-
-/* The run facts: the overflow home for whatever the status line drops. Two
-   columns, because these are pairs you scan, not prose. */
-.zl-facts.is-run {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px 12px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--zl-line);
-}
-.zl-facts.is-run > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.zl-facts.is-run dd.is-warn { color: var(--zl-red); }
-
-/* ── The panel's second level ───────────────────────────────────────────────
-   Usage, MCP and Artifacts are rows on the panel's root, and each pushes a
-   page INSIDE the panel: same sheet, the head swaps its eyebrow for back +
-   title, the body swaps. Nothing floats over the drawer. The same head shape
-   is reused one level down inside the model popover, so "back" means the
-   same thing everywhere it appears. */
-.zl-prows { display: flex; flex-direction: column; gap: 4px; margin: 18px 0 8px; }
-.zl-prow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 48px;
-  padding: 0 10px 0 12px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-raised);
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t1);
-  font-family: inherit;
-  font-size: var(--zl-fs-body);
-  font-weight: 500;
-  letter-spacing: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background 120ms ease;
-}
-.zl-prow:hover { background: var(--zl-control); }
-.zl-prow:hover .zl-go { color: var(--zl-t2); }
-.zl-prow-ico { width: 15px; height: 15px; flex: none; color: var(--zl-t3); }
-.zl-prow-t { flex: none; }
-.zl-prow-v { flex: 1; min-width: 0; text-align: right; color: var(--zl-t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.zl-prow-v.is-warn { color: var(--zl-red); }
-.zl-go { width: 12px; height: 12px; flex: none; color: var(--zl-t4); transition: transform 140ms var(--zl-ease), color 120ms ease; }
-.zl-go.is-open { transform: rotate(90deg); color: var(--zl-t2); }
-
-.zl-side-head.is-sub { padding-left: 12px; gap: 6px; }
-.zl-back {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: transparent;
-  color: var(--zl-t2);
-  cursor: pointer;
-}
-.zl-back svg { width: 16px; height: 16px; }
-.zl-back:hover { background: var(--zl-hi); color: var(--zl-t1); }
-.zl-side-title.is-page {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--zl-fs-title);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  animation: zl-push 200ms var(--zl-ease);
-}
-.zl-panel-body.is-sub { padding: 4px 12px 16px; animation: zl-push 200ms var(--zl-ease); }
-@keyframes zl-push { from { opacity: 0; transform: translateX(12px); } }
-@media (prefers-reduced-motion: reduce) { .zl-panel-body.is-sub, .zl-side-title.is-page { animation: none; } }
-.zl-page .zl-group { padding-left: 10px; }
-.zl-page > .zl-group:first-child { margin-top: 4px; }
-.zl-page-sum { margin: 4px 10px 12px; line-height: 1.5; color: var(--zl-t3); }
-.zl-page-sum .zl-data { color: var(--zl-t2); }
-
-/* Key/value list: the panel's reading surface. One raised sheet, rows cut
-   by hairlines. Keys are words (t3), values are data (t2, right-aligned);
-   a row that acts is a button with the same shape. */
-.zl-kv {
-  border-radius: var(--zl-r-md);
-  background: var(--zl-raised);
-  box-shadow: var(--zl-rim);
-  overflow: hidden;
-}
-.zl-kv.is-flush { background: transparent; box-shadow: none; border-radius: 0; }
-.zl-kv-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  width: 100%;
-  min-height: 40px;
-  padding: 8px 12px;
-  border: 0;
-  background: transparent;
-  color: var(--zl-t1);
-  font-family: inherit;
-  font-size: var(--zl-fs-body);
-  letter-spacing: inherit;
-  text-align: left;
-}
-.zl-kv-row + .zl-kv-row, .zl-kv > * + * { box-shadow: inset 0 1px 0 var(--zl-line); }
-.zl-kv-row.is-btn { cursor: pointer; transition: background 120ms ease; }
-.zl-kv-row.is-btn:hover { background: var(--zl-hi); }
-.zl-kv-row.is-btn:hover .zl-go { color: var(--zl-t2); }
-.zl-kv-k { flex: 1; min-width: 0; color: var(--zl-t3); font-weight: 500; }
-.zl-kv-k.is-strong { color: var(--zl-t1); }
-.zl-kv-v { flex: none; color: var(--zl-t2); }
-.zl-kv-v.is-id { color: var(--zl-t3); }
-.zl-kv-dim { color: var(--zl-t4); }
-.zl-kv-hint { flex: none; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
-.zl-kv-note { flex-basis: 100%; margin-top: -2px; color: var(--zl-t4); }
-.zl-kv-row.is-meter .zl-meter { flex-basis: 100%; }
-
-/* Meter: the ring's rule laid flat. 4px track, accent fill, state colour as
-   it fills. */
-.zl-meter { display: block; height: 4px; border-radius: 2px; background: var(--zl-line-2); overflow: hidden; }
-.zl-meter-fill { display: block; height: 100%; border-radius: 2px; background: var(--zl-accent); transition: width 400ms var(--zl-ease); }
-.zl-meter.is-warm .zl-meter-fill { background: var(--zl-yellow); }
-.zl-meter.is-hot .zl-meter-fill { background: var(--zl-red); }
-
-/* Switch: 36×20 track, accent when on. The button around it is the hit
-   area, 44 tall on every host: the track is the picture, not the target. */
-.zl-switch {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 44px;
-  margin: -6px -8px -6px 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-}
-.zl-switch:disabled { cursor: not-allowed; opacity: 0.5; }
-.zl-switch-track {
-  display: block;
-  width: 36px;
-  height: 20px;
-  padding: 2px;
-  border-radius: 10px;
-  background: var(--zl-control);
-  box-shadow: var(--zl-rim-2);
-  transition: background 160ms ease;
-}
-.zl-switch-knob {
-  display: block;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--zl-t3);
-  transition: transform 160ms var(--zl-ease), background 160ms ease;
-}
-.zl-switch.is-on .zl-switch-track { background: var(--zl-accent); box-shadow: none; }
-.zl-switch.is-on .zl-switch-knob { background: var(--zl-accent-ink); transform: translateX(16px); }
-
-/* MCP page. */
-.zl-mcp-head { flex-wrap: nowrap; }
-.zl-mcp-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
-.zl-mcp-dot.is-ok { background: var(--zl-green); }
-.zl-mcp-dot.is-bad { background: var(--zl-red); }
-.zl-mcp-dot.is-off { background: var(--zl-t4); }
-.zl-mcp-state { flex: none; font-size: var(--zl-fs-meta); font-weight: 500; }
-.zl-mcp-state.is-ok { color: var(--zl-green); }
-.zl-mcp-state.is-bad { color: var(--zl-red); }
-.zl-mcp-state.is-off { color: var(--zl-t4); }
-.zl-mcp-body { padding: 4px 12px 12px 29px; background: var(--zl-sheet); box-shadow: inset 0 1px 0 var(--zl-line); }
-.zl-mcp-verdict { margin: 6px 0 10px; line-height: 1.45; color: var(--zl-t2); }
-.zl-scope { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 0; }
-.zl-scope + .zl-scope { box-shadow: inset 0 1px 0 var(--zl-line); }
-.zl-scope-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.zl-scope-k { font-weight: 500; color: var(--zl-t1); }
-.zl-scope-why { font-size: var(--zl-fs-meta); line-height: 1.4; color: var(--zl-t4); }
-.zl-mcp-err {
-  margin-top: 10px;
-  padding: 8px 10px;
-  border-radius: var(--zl-r-sm);
-  background: rgba(243, 139, 168, 0.08);
-  box-shadow: 0 0 0 1px rgba(243, 139, 168, 0.25);
-  color: var(--zl-red);
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-.zl-mcp-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
-.zl-btn {
-  height: 36px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: var(--zl-r-sm);
-  background: var(--zl-control);
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t1);
-  font-family: inherit;
-  font-size: var(--zl-fs-body);
-  font-weight: 500;
-  letter-spacing: inherit;
-  cursor: pointer;
-}
-.zl-btn:hover { background: var(--zl-raised); box-shadow: var(--zl-rim-2); }
-
-/* Artifacts page: the transcript's artifact card as a list row. */
-.zl-artrow { flex-wrap: nowrap; min-height: 56px; }
-.zl-artrow-ico { flex: none; width: 22px; height: 26px; color: var(--zl-t3); }
-.zl-artrow-ico svg { width: 22px; height: 26px; }
-.zl-artrow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.zl-artrow-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.zl-artrow-meta { color: var(--zl-t4); }
-
-/* Phone: every row that acts is 44 or more; the switch already is. */
-.zl-phone .zl-back { width: 44px; height: 44px; }
-.zl-phone .zl-prow { min-height: 52px; }
-.zl-phone .zl-kv-row.is-btn { min-height: 48px; }
-.zl-phone .zl-btn { height: 44px; }
 
 /* ── Pickers: what a setting opens ─────────────────────────────────────────
    One content, two hosts. The popover is anchored to its button and opens
@@ -2024,24 +1723,6 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 /* In a dense pane the popover keeps its size: a pane narrower than the
    popover has already lost its composer. */
 .zl-dock.is-pane .zl-pop { bottom: calc(100% + 6px); }
-
-/* Hierarchy of the panel root, measured: with six raised tiles for the run
-   facts, the panel had eleven framed boxes above the fold and the three
-   dossier rows -- the things you tap -- were the least distinct of them. So
-   the run facts are printed, not boxed: two quiet columns under the identity
-   block, hairline above and below. The boxes are for what acts (rows, the
-   lifecycle buttons) and what you edit (the name). */
-.zl-field-meta { margin: 6px 2px 0; color: var(--zl-t4); }
-.zl-facts.is-run {
-  gap: 0 16px;
-  margin-top: 6px;
-  padding: 10px 2px 8px;
-  border-top: 1px solid var(--zl-line);
-  border-bottom: 1px solid var(--zl-line);
-}
-.zl-facts.is-run > div { min-height: 28px; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
-.zl-facts.is-run dt { margin: 0; }
-.zl-prows { margin-top: 14px; }
 
 /* The attention heading earns one mark and no more: the rows underneath
    already carry their own colour, and a coloured band on top of coloured rows

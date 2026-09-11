@@ -13,6 +13,11 @@ import { Composer as ProductionComposer } from "../layout/Composer/Composer.jsx"
 /* Same move, the settings sheet: markup and CSS live in
    components/GlobalSettings now, and the prototype draws the shipped one. */
 import { GlobalSettings } from "../components/GlobalSettings/GlobalSettings.jsx";
+/* Same move, the session panel: markup and CSS live in
+   components/SessionPanel now, and the prototype draws the shipped one.
+   See the adapter at `SessionPanel`. */
+import { SessionPanel as ProductionSessionPanel } from "../components/SessionPanel/SessionPanel.jsx";
+import { PANEL_PAGES } from "../data/session-panel.js";
 
 /* The three-zone skeleton, both densities side by side.
    This is a PROTOTYPE, not production: it draws the shell only (where things
@@ -258,32 +263,14 @@ function Sidebar({ onPick, desktop, onSettings, view, onView }) {
    the right is this one. */
 
 /* ── The right drawer: this session's dossier ──────────────────────────────
-   The rule (PANEL-CRITERIO-FABLE.md): the LINE holds the controls for the
-   next turn (model, thinking, fast, permissions); the PANEL is the dossier
-   of the session -- what it is and what it has done; the CENTRE shows the
-   result. So the panel never shows model or permissions, not even as a
-   reading: one datum, one place.
+   MIGRATED (METODO §4): the panel has no private copy here. Its markup and
+   its CSS were MOVED to components/SessionPanel, class names and all, and
+   the prototype imports them back. What sits here now is only an adapter:
+   the prototype's fixtures mapped onto the props the shipped panel takes,
+   plus the icons the pickers still share with it (back, go, the switch).
 
-   Hierarchy, top to bottom, in the order you need it:
-     1  identity     name (editable), folder            -- what this is
-     2  run facts    started, turns, branch; tokens,    -- what it has done,
-                     context, spend, fast, goal, tasks     the line's overflow
-     3  dossiers     usage, MCP, artifacts              -- three rows, each
-                                                          pushes a second page
-     4  lifecycle    save for later, close              -- anchored at the foot
-
-   The three dossiers are rows, not inline content: each is a screen's worth
-   of detail, and a 320px sheet that scrolls through three of them is a
-   settings page nobody finishes. A row says its one-line verdict (the thing
-   you came to check); the page behind it is the full detail, pushed INSIDE
-   the panel with a back button. No modal ever opens over the drawer. */
-const PANEL_PAGES = { usage: "Usage", mcp: "MCP", artifacts: "Artifacts" };
-
-const PANEL_ICONS = {
-  usage: <><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 8V4.5M8 8l2.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></>,
-  mcp: <path d="M5 2v3M11 2v3M3.5 5h9v3a4.5 4.5 0 0 1-9 0zM8 12.5V15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />,
-  artifacts: <path d="M3.5 2.5h6l3 3v8h-9z M9.5 2.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
-};
+   The rule is unchanged: the LINE holds the controls for the next turn;
+   the PANEL is the dossier of the session. */
 
 function BackIcon() {
   return (
@@ -300,32 +287,9 @@ function GoIcon() {
   );
 }
 
-/* A dossier row: icon, title, one-line verdict, chevron. The verdict is data
-   (mono) and may carry state colour when it IS a state (MCP down). */
-function PanelRow({ id, title, verdict, warn, onOpen }) {
-  return (
-    <button type="button" class="zl-prow" onClick={() => onOpen(id)} aria-label={`${title}: ${verdict}`}>
-      <svg class="zl-prow-ico" viewBox="0 0 16 16" aria-hidden="true">{PANEL_ICONS[id]}</svg>
-      <span class="zl-prow-t">{title}</span>
-      <span class={`zl-prow-v zl-data${warn ? " is-warn" : ""}`}>{verdict}</span>
-      <GoIcon />
-    </button>
-  );
-}
-
-/* Meter: the ring's rule laid flat. Accent while there is room, state colour
-   as it fills (≥70 yellow, ≥90 red). */
-function Meter({ pct }) {
-  const tone = pct >= 90 ? "is-hot" : pct >= 70 ? "is-warm" : "";
-  return (
-    <span class={`zl-meter ${tone}`} aria-hidden="true">
-      <span class="zl-meter-fill" style={`width:${pct}%`} />
-    </span>
-  );
-}
-
 /* Switch: the one toggle shape in the product. Accent when on -- a setting
-   you chose, not a state. Used by Fast and by the MCP scopes. */
+   you chose, not a state. Used by Fast in the model picker; the panel's MCP
+   page has its own copy, shipped with it. */
 function Switch({ on, onChange, label, disabled }) {
   return (
     <button
@@ -342,226 +306,86 @@ function Switch({ on, onChange, label, disabled }) {
   );
 }
 
-/* Usage page: the answer to "can this session keep going?". Two groups: what
-   this session has spent, and the quota of the provider it is using -- the
-   provider is named so the quota never reads as global. Session ID is here
-   because it is what you paste into a bug report about THIS session. */
-function UsagePage() {
-  return (
-    <div class="zl-page">
-      <div class="zl-group"><span>This session</span></div>
-      <div class="zl-kv">
-        <div class="zl-kv-row"><span class="zl-kv-k">Spend</span><span class="zl-kv-v zl-data">$1.84</span></div>
-        <div class="zl-kv-row is-meter">
-          <span class="zl-kv-k">Context</span>
-          <span class="zl-kv-v zl-data">63%</span>
-          <Meter pct={63} />
-          <span class="zl-kv-note zl-data">126k of 200k</span>
-        </div>
-        <div class="zl-kv-row"><span class="zl-kv-k">Tokens</span><span class="zl-kv-v zl-data">↑12.4k ↓1.8k</span></div>
-        <button type="button" class="zl-kv-row is-btn" aria-label="Copy session ID">
-          <span class="zl-kv-k">Session ID</span>
-          <span class="zl-kv-v zl-data is-id">a3f91c…7c2e</span>
-          <span class="zl-kv-hint">copy</span>
-        </button>
-      </div>
-      <div class="zl-group"><span>Plan · Anthropic</span></div>
-      <div class="zl-kv">
-        <div class="zl-kv-row is-meter">
-          <span class="zl-kv-k">5 hours</span>
-          <span class="zl-kv-v zl-data">62%</span>
-          <Meter pct={62} />
-          <span class="zl-kv-note zl-data">resets in 2h 10m</span>
-        </div>
-        <div class="zl-kv-row is-meter">
-          <span class="zl-kv-k">Week</span>
-          <span class="zl-kv-v zl-data">31%</span>
-          <Meter pct={31} />
-          <span class="zl-kv-note zl-data">resets Mon 09:00</span>
-        </div>
-        <div class="zl-kv-row">
-          <span class="zl-kv-k">Extra</span>
-          <span class="zl-kv-v zl-data">$4.20 <span class="zl-kv-dim">of $20</span></span>
-          <span class="zl-kv-hint">pay-as-you-go</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* MCP page: production's dossier layout, in the panel's tone. One calm row
-   per server; the one you open shows its verdict, its three scopes -- each
-   switch says its reach on the same line -- and its error. A control here
-   can reach beyond the session because its row says so; that is the rule. */
-const MCP_SERVERS = [
+const PANEL_CREATED = (() => {
+  const d = new Date(Date.now());
+  d.setHours(9, 12, 0, 0);
+  return d.toISOString();
+})();
+const PANEL_SESSION = {
+  id: "a3f91c…7c2e",
+  title: "Buscar un bug bounty",
+  cwd: "/home/ealeixandre/dev/moa/main",
+  created: PANEL_CREATED,
+  state: "running",
+  provider: "anthropic",
+  fast: true,
+  costUSD: 1.84,
+  contextPercent: 63,
+  contextWindow: 200000,
+  runTokensUp: 12400,
+  runTokensDown: 1800,
+  runTokenHint: false,
+  tokenLabel: "↑12.4k ↓1.8k",
+  worktree: "design-visual",
+  planResetNotes: { week: "resets Mon 09:00" },
+  goalActive: true,
+  goalIteration: 3,
+  tasks: [
+    { status: "done" }, { status: "done" },
+    { status: "pending" }, { status: "pending" }, { status: "pending" },
+  ],
+  mcp: { total: 3, unhealthy: 1 },
+  messages: Array.from({ length: 14 }, (_, i) => ({ role: "user", id: `u${i}` })),
+};
+const PANEL_FACTS = [
+  { id: "tokens", label: "Tokens", value: "↑12.4k ↓1.8k" },
+  { id: "spend", label: "Spend", value: "$1.84" },
+  { id: "turns", label: "Turns", value: "14" },
+  { id: "fast", label: "Fast", value: "on" },
+  { id: "goal", label: "Goal", value: "iteration 3" },
+  { id: "tasks", label: "Tasks", value: "2/5" },
+];
+const PANEL_USAGE = {
+  available: true,
+  five_hour: { utilization: 62, resets_at: new Date(Date.now() + (2 * 3600 + 10 * 60) * 1000).toISOString() },
+  seven_day: { utilization: 31, resets_at: new Date(Date.now() + 4 * 86400000).toISOString() },
+  extra_usage: { is_enabled: true, used_credits: 420, monthly_limit: 2000, currency: "USD", decimal_places: 2 },
+};
+const PANEL_MCP = [
   { name: "github", tools: 12, state: "ready" },
   { name: "playwright", tools: 24, state: "ready" },
-  { name: "linear", tools: 0, state: "failed", error: "spawn npx ENOENT — is Node on PATH for the service?" },
+  {
+    name: "linear", tools: 0, state: "failed",
+    error: "spawn npx ENOENT — is Node on PATH for the service?",
+    foot: "stdio · 2 restarts",
+    whys: {
+      session: "Only this conversation, until it ends",
+      project: "Whenever you work in ~/dev/moa",
+      global: "Every project and future session",
+    },
+  },
 ];
-const MCP_SCOPES = [
-  { id: "session", label: "This session", why: "Only this conversation, until it ends" },
-  { id: "project", label: "This project", why: "Whenever you work in ~/dev/moa" },
-  { id: "global", label: "Global", why: "Every project and future session" },
+const PANEL_ARTIFACTS = [
+  { id: "1", name: "attach-race-report.md", sizeLabel: "4.2 kB", when: "09:28" },
+  { id: "2", name: "race-test.log", sizeLabel: "1.1 kB", when: "09:33" },
+  { id: "3", name: "coverage.html", sizeLabel: "38 kB", when: "09:34" },
 ];
-const MCP_STATE = { ready: ["running", "is-ok"], failed: ["failed", "is-bad"], disabled: ["off", "is-off"] };
 
-function McpPage() {
-  const [open, setOpen] = useState("linear");
-  const [scopes, setScopes] = useState({ session: true, project: true, global: true });
-  const up = MCP_SERVERS.filter((s) => s.state === "ready").length;
+function SessionPanel({ onClose, page = "root", onPage, open = true, style }) {
   return (
-    <div class="zl-page">
-      <p class="zl-page-sum"><span class="zl-data">{up}</span> of <span class="zl-data">{MCP_SERVERS.length}</span> running. A server runs only when every scope has it on.</p>
-      <div class="zl-kv">
-        {MCP_SERVERS.map((s) => {
-          const [label, tone] = MCP_STATE[s.state];
-          const isOpen = open === s.name;
-          return (
-            <div class={`zl-mcp${isOpen ? " is-open" : ""}`} key={s.name}>
-              <button type="button" class="zl-kv-row is-btn zl-mcp-head" onClick={() => setOpen(isOpen ? null : s.name)} aria-expanded={isOpen}>
-                <span class={`zl-mcp-dot ${tone}`} aria-hidden="true" />
-                <span class="zl-kv-k is-strong">{s.name}</span>
-                <span class="zl-kv-hint zl-data">{s.tools} tools</span>
-                <span class={`zl-mcp-state ${tone}`}>{label}</span>
-                <svg class={`zl-go${isOpen ? " is-open" : ""}`} viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-              </button>
-              {isOpen && (
-                <div class="zl-mcp-body">
-                  <p class="zl-mcp-verdict">
-                    {s.state === "failed" ? "On everywhere, but it isn’t running — see the error below." : "On everywhere and running."}
-                  </p>
-                  {MCP_SCOPES.map((sc) => (
-                    <div class="zl-scope" key={sc.id}>
-                      <span class="zl-scope-txt">
-                        <span class="zl-scope-k">{sc.label}</span>
-                        <span class="zl-scope-why">{sc.why}</span>
-                      </span>
-                      <Switch on={scopes[sc.id]} onChange={(v) => setScopes({ ...scopes, [sc.id]: v })} label={`${s.name} in ${sc.label}`} />
-                    </div>
-                  ))}
-                  {s.error && <div class="zl-mcp-err zl-data">{s.error}</div>}
-                  <div class="zl-mcp-foot">
-                    <button type="button" class="zl-btn">Restart</button>
-                    <span class="zl-kv-hint zl-data">stdio · 2 restarts</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/* Artifacts page: the list. Choosing one opens it in the CENTRE (inline on
-   desktop, full screen on the phone) -- the reader never lives in 320px. The
-   row is the transcript's artifact card, reduced to a list row: same glyph,
-   same name, same meta, plus the turn it came from. */
-const ARTIFACTS = [
-  { name: "attach-race-report.md", kind: "md", size: "4.2 kB", when: "09:28" },
-  { name: "race-test.log", kind: "log", size: "1.1 kB", when: "09:33" },
-  { name: "coverage.html", kind: "html", size: "38 kB", when: "09:34" },
-];
-function ArtifactsPage() {
-  return (
-    <div class="zl-page">
-      <p class="zl-page-sum"><span class="zl-data">{ARTIFACTS.length}</span> files this session. Open one to view it in the conversation.</p>
-      <div class="zl-kv">
-        {ARTIFACTS.map((a) => (
-          <button type="button" class="zl-kv-row is-btn zl-artrow" key={a.name} aria-label={`Open ${a.name}`}>
-            <span class="zl-artrow-ico" aria-hidden="true">
-              <svg viewBox="0 0 20 24">
-                <path d="M2.75 1h8.5L17.25 7v15.25a.75.75 0 0 1-.75.75h-13a.75.75 0 0 1-.75-.75V1.75A.75.75 0 0 1 2.75 1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
-                <path d="M11.25 1v5.25a.75.75 0 0 0 .75.75h5.25" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
-              </svg>
-            </span>
-            <span class="zl-artrow-main">
-              <span class="zl-artrow-name">{a.name}</span>
-              <span class="zl-artrow-meta zl-data">{a.kind} · {a.size} · {a.when}</span>
-            </span>
-            <GoIcon />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function SessionPanel({ onClose, page = "root", onPage }) {
-  const sub = page !== "root";
-  return (
-    <>
-      <div class={`zl-side-head${sub ? " is-sub" : ""}`}>
-        {sub ? (
-          <>
-            <button type="button" class="zl-back" onClick={() => onPage("root")} aria-label="Back to this session">
-              <BackIcon />
-            </button>
-            <span class="zl-side-title is-page" key={page}>{PANEL_PAGES[page]}</span>
-          </>
-        ) : (
-          <span class="zl-side-title is-eyebrow">This session</span>
-        )}
-        <button type="button" class="zl-x" onClick={onClose} aria-label="Close">
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-          </svg>
-        </button>
-      </div>
-      {sub ? (
-        <div class="zl-panel-body is-sub" key={page}>
-          {page === "usage" && <UsagePage />}
-          {page === "mcp" && <McpPage />}
-          {page === "artifacts" && <ArtifactsPage />}
-        </div>
-      ) : (
-        <>
-          <div class="zl-panel-body">
-            <label class="zl-field">
-              <span class="zl-label">Name</span>
-              <input class="zl-input" defaultValue="Buscar un bug bounty" />
-            </label>
-            <div class="zl-field">
-              <span class="zl-label">Folder</span>
-              <div class="zl-input is-static zl-data">
-                <span class="zl-path-dir">~/dev/moa/</span>main
-              </div>
-              <div class="zl-field-meta zl-data">design-visual · started 09:12</div>
-            </div>
-            {/* The other end of the status line's priority rule: everything the
-                line sheds when the dock narrows is here, in full, always. A
-                narrow screen shows fewer things on the line -- never fewer
-                things known. Context is not here: it never leaves the line,
-                and it is on the Usage page. Fast is here as a FACT of the run;
-                the control for it is in the model picker. */}
-            <dl class="zl-facts is-run">
-              <div><dt>Tokens</dt><dd class="zl-data">↑12.4k ↓1.8k</dd></div>
-              <div><dt>Spend</dt><dd class="zl-data">$1.84</dd></div>
-              <div><dt>Turns</dt><dd class="zl-data">14</dd></div>
-              <div><dt>Fast</dt><dd class="zl-data">on</dd></div>
-              <div><dt>Goal</dt><dd class="zl-data">iteration 3</dd></div>
-              <div><dt>Tasks</dt><dd class="zl-data">2/5</dd></div>
-            </dl>
-            <div class="zl-prows">
-              <PanelRow id="usage" title="Usage" verdict="Anthropic · 5h 62%" onOpen={onPage} />
-              <PanelRow id="mcp" title="MCP" verdict="1 of 3 down" warn onOpen={onPage} />
-              <PanelRow id="artifacts" title="Artifacts" verdict="3 files" onOpen={onPage} />
-            </div>
-          </div>
-          <div class="zl-panel-acts">
-            <button type="button" class="zl-act">
-              <span class="zl-act-t">Save for later</span>
-              <span class="zl-act-d">Stops the agent, keeps the session in Saved.</span>
-            </button>
-            <button type="button" class="zl-act is-danger">
-              <span class="zl-act-t">Close session</span>
-              <span class="zl-act-d">Removes it from the list. The transcript stays on disk.</span>
-            </button>
-          </div>
-        </>
-      )}
-    </>
+    <ProductionSessionPanel
+      session={PANEL_SESSION}
+      usage={PANEL_USAGE}
+      open={open}
+      page={page}
+      onClose={onClose}
+      onPage={onPage}
+      mcpServers={PANEL_MCP}
+      artifacts={PANEL_ARTIFACTS}
+      facts={PANEL_FACTS}
+      inline
+      style={style}
+    />
   );
 }
 
@@ -1695,15 +1519,13 @@ function Phone({ label, live: preset, surface }) {
         >
           <Sidebar onPick={() => d.setLeft(false)} onSettings={settings.show} view={view} onView={setView} />
         </div>
-        <div
-          class={`zl-side zl-side-right${d.right ? " is-open" : ""}`}
-          role="dialog"
-          aria-label="This session"
-          aria-hidden={!d.right}
-          style={d.rightX != null ? `transform:translateX(${d.rightX}px);transition:none` : ""}
-        >
-          <SessionPanel onClose={closeRight} page={panel.page} onPage={panel.setPage} />
-        </div>
+        <SessionPanel
+          open={d.right}
+          onClose={closeRight}
+          page={panel.page}
+          onPage={panel.setPage}
+          style={d.rightX != null ? `transform:translateX(${d.rightX}px);transition:none` : undefined}
+        />
       </div>
       <p class="zl-hint">
         Swipe in from the left edge for the other sessions, from the right edge
@@ -1774,14 +1596,7 @@ function Desktop({ label, live: preset, surface }) {
             <StatusLine inline s={set.s} pick={set.pick} onPick={set.setPick} onChange={set.onChange} onUsage={() => panel.show("usage")} />
           </div>
           {open && <div class="zl-scrim" onClick={panel.close} />}
-          <div
-            class={`zl-side zl-side-right${open ? " is-open" : ""}`}
-            role="dialog"
-            aria-label="This session"
-            aria-hidden={!open}
-          >
-            <SessionPanel onClose={panel.close} page={panel.page} onPage={panel.setPage} />
-          </div>
+          <SessionPanel open={open} onClose={panel.close} page={panel.page} onPage={panel.setPage} />
         </div>
       </div>
       <p class="zl-hint">

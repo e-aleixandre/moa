@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "preact/hooks";
-import { ArrowLeft, Clock3, FileText, Plug, X } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { openOverlay } from "../../data/overlay-history.js";
@@ -9,8 +8,7 @@ import {
 } from "../../data/session-panel.js";
 import { artifactsSlice, listArtifactsInPanel, openArtifactsList } from "../../data/artifacts.js";
 import { UsagePage } from "./UsagePage.jsx";
-import { McpPanel } from "../McpPanel/McpPanel.jsx";
-import { ArtifactRow } from "../Artifacts/ArtifactRow.jsx";
+import { McpPage } from "./McpPage.jsx";
 import { closeSession, deleteSession, resumeSession } from "../../data/session-actions.js";
 import { sessionTitle, shortPath } from "../../data/util/format.js";
 import { renameSession } from "../../data/session-actions.js";
@@ -19,111 +17,184 @@ import "./SessionPanel.css";
 
 // SessionPanel — the session's DOSSIER, in a right-hand drawer.
 //
+// Markup and CSS are the catalogue's (catalog/zones-lab.jsx `SessionPanel`,
+// zones-lab.css the `.zl-side-right` / `.zl-panel*` block), MOVED here rather
+// than imitated: the classes travelled with the rules, so the panel IS the
+// accepted design instead of a translation of it. The catalogue imports this
+// component now, which is what makes one definition rather than two.
+//
+// What is NOT the catalogue's is everything the prototype never had, grafted
+// on top: real sessions, the overlay stack, rename, lifecycle, the artifacts
+// claim that does not open the reader (`listArtifactsInPanel` / view:'panel'),
+// and the house rule that a missing datum hides its row rather than drawing a
+// zero.
+//
 // The rule (PANEL-CRITERIO-FABLE): the status line holds the controls for the
 // NEXT turn — model, thinking, permissions, fast — and this panel holds what
 // the session IS and what it HAS DONE. Model and permissions are deliberately
-// absent, not even as a reading: a datum with two homes is a datum that drifts,
-// and a control you can see but not touch is a false affordance.
-//
-// Its second level is a PUSH, not a modal: Usage, MCP and Artifacts are rows,
-// and the one you open replaces the body while the head swaps its eyebrow for
-// back + title. Nothing ever floats over the panel — a modal on top of a drawer
-// is the definition of a surface without a home.
+// absent. Its second level is a PUSH, not a modal.
 
-function PanelRow({ id, icon: Icon, title, verdict, onOpen }) {
+const PANEL_ICONS = {
+  usage: <><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 8V4.5M8 8l2.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></>,
+  mcp: <path d="M5 2v3M11 2v3M3.5 5h9v3a4.5 4.5 0 0 1-9 0zM8 12.5V15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />,
+  artifacts: <path d="M3.5 2.5h6l3 3v8h-9z M9.5 2.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
+};
+
+function BackIcon() {
   return (
-    <button
-      type="button"
-      class="spanel-row"
-      onClick={() => onOpen(id)}
-      aria-label={`${title}: ${verdict.text}`}
-    >
-      <Icon size={15} aria-hidden="true" class="spanel-row-ico" />
-      <span class="spanel-row-t">{title}</span>
-      <span class={`spanel-row-v${verdict.warn ? " is-warn" : ""}`}>{verdict.text}</span>
-      <span class="spanel-row-go" aria-hidden="true">›</span>
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
+function GoIcon() {
+  return (
+    <svg class="zl-go" viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
+
+function PanelRow({ id, title, verdict, warn, onOpen }) {
+  return (
+    <button type="button" class="zl-prow" onClick={() => onOpen(id)} aria-label={`${title}: ${verdict}`}>
+      <svg class="zl-prow-ico" viewBox="0 0 16 16" aria-hidden="true">{PANEL_ICONS[id]}</svg>
+      <span class="zl-prow-t">{title}</span>
+      <span class={`zl-prow-v zl-data${warn ? " is-warn" : ""}`}>{verdict}</span>
+      <GoIcon />
     </button>
   );
 }
 
-// ArtifactsPage — the LIST, never the reader. Choosing one hands off to the
-// existing shared drawer, which is where a document is actually readable: the
-// reader never lives in 340px. Handing off also CLOSES this panel, so the two
-// right-hand surfaces never stack — that rule now lives on the artifacts
-// controller itself (data/artifacts.js), which is the funnel every door into
-// the reader goes through, rather than only on this one.
-function ArtifactsPage({ sessionId }) {
+function splitPath(cwd) {
+  const p = shortPath(cwd, 64) || cwd || "";
+  const i = p.lastIndexOf("/");
+  if (i <= 0) return { dir: "", base: p || "—" };
+  return { dir: p.slice(0, i + 1), base: p.slice(i + 1) };
+}
+
+function fmtSize(n) {
+  const v = Number(n) || 0;
+  if (v < 1024) return `${v} B`;
+  const k = v / 1024;
+  if (k < 10) return `${k.toFixed(1)} kB`;
+  if (k < 1024) return `${Math.round(k)} kB`;
+  return `${(v / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function artifactKind(artifact) {
+  const name = String(artifact?.name || "");
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+  return ext || (artifact?.mime || "").split("/").pop() || "file";
+}
+
+function artifactWhen(artifact) {
+  const raw = artifact?.createdAt || artifact?.updatedAt;
+  if (!raw) return "";
+  const d = new Date(raw);
+  if (!Number.isFinite(d.getTime())) return "";
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function ArtifactsPage({ sessionId, items: fixtureItems, inline }) {
   const slice = useStore(artifactsSlice);
   const mine = slice.ownerSessionId === sessionId;
-  const items = mine ? slice.items : [];
+  const fetched = mine ? slice.items : [];
+  const items = fixtureItems || fetched;
 
-  // The collection is server state: load it on open like every other consumer
-  // rather than trusting whatever the drawer last held.
   useEffect(() => {
-    if (!sessionId) return;
+    if (fixtureItems || !sessionId) return;
     if (mine && slice.status === "ready") return;
     listArtifactsInPanel(sessionId);
   }, [sessionId]);
 
   const open = (artifact) => {
+    if (inline || !sessionId) return;
     openArtifactsList(sessionId);
-    // The list is already loading for this conversation; the drawer opens on
-    // its own list view, where the reader has the width it needs. Closing this
-    // panel is the controller's job, on the way in.
     void artifact;
   };
 
-  if (mine && slice.status === "loading" && items.length === 0) {
-    return <p class="spanel-page-sum">Loading…</p>;
+  if (!fixtureItems && mine && slice.status === "loading" && items.length === 0) {
+    return <p class="zl-page-sum">Loading…</p>;
   }
   if (items.length === 0) {
-    return <p class="spanel-page-sum">No files in this conversation yet. Ask the agent to send you one.</p>;
+    return <p class="zl-page-sum">No files in this conversation yet. Ask the agent to send you one.</p>;
   }
   return (
-    <>
-      <p class="spanel-page-sum">
-        {items.length === 1 ? "1 file" : `${items.length} files`} in this conversation. Opening one shows it in the reader.
+    <div class="zl-page">
+      <p class="zl-page-sum">
+        <span class="zl-data">{items.length}</span>
+        {items.length === 1 ? " file" : " files"} this session. Open one to view it in the conversation.
       </p>
-      <ul class="spanel-artifacts">
-        {items.map((entry) => (
-          <li key={entry.id}>
-            <ArtifactRow artifact={entry} onOpen={open} />
-          </li>
-        ))}
-      </ul>
-    </>
+      <div class="zl-kv">
+        {items.map((a) => {
+          const kind = artifactKind(a);
+          const size = a.sizeLabel || fmtSize(a.size);
+          const when = a.when || artifactWhen(a);
+          const meta = [kind, size, when].filter(Boolean).join(" · ");
+          return (
+            <button
+              type="button"
+              class="zl-kv-row is-btn zl-artrow"
+              key={a.id || a.name}
+              onClick={() => open(a)}
+              aria-label={`Open ${a.name}`}
+            >
+              <span class="zl-artrow-ico" aria-hidden="true">
+                <svg viewBox="0 0 20 24">
+                  <path d="M2.75 1h8.5L17.25 7v15.25a.75.75 0 0 1-.75.75h-13a.75.75 0 0 1-.75-.75V1.75A.75.75 0 0 1 2.75 1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+                  <path d="M11.25 1v5.25a.75.75 0 0 0 .75.75h5.25" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+                </svg>
+              </span>
+              <span class="zl-artrow-main">
+                <span class="zl-artrow-name">{a.name}</span>
+                {meta && <span class="zl-artrow-meta zl-data">{meta}</span>}
+              </span>
+              <GoIcon />
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
-function LifecycleActions({ session }) {
+function LifecycleActions({ session, inline }) {
   const saved = session.state === "saved";
   const confirm = useRef(null);
+  const run = (fn) => {
+    if (inline) return;
+    fn();
+  };
   return (
-    <div class="spanel-acts">
+    <div class="zl-panel-acts">
       {saved ? (
         <button
           type="button"
-          class="spanel-act"
-          onClick={() => { resumeSession(session.id).catch(() => {}); }}
+          class="zl-act"
+          onClick={() => run(() => { resumeSession(session.id).catch(() => {}); })}
         >
-          <span class="spanel-act-t">Reopen session</span>
-          <span class="spanel-act-d">Loads it back into memory and picks up where it left off.</span>
+          <span class="zl-act-t">Reopen session</span>
+          <span class="zl-act-d">Loads it back into memory and picks up where it left off.</span>
         </button>
       ) : (
         <button
           type="button"
-          class="spanel-act"
-          onClick={() => { closeSession(session.id).then(closeSessionPanel).catch(() => {}); }}
+          class="zl-act"
+          onClick={() => run(() => { closeSession(session.id).then(closeSessionPanel).catch(() => {}); })}
         >
-          <span class="spanel-act-t">Save for later</span>
-          <span class="spanel-act-d">Stops the agent and keeps the session in Saved.</span>
+          <span class="zl-act-t">Save for later</span>
+          <span class="zl-act-d">Stops the agent, keeps the session in Saved.</span>
         </button>
       )}
       <button
         type="button"
-        class="spanel-act is-danger"
+        class="zl-act is-danger"
         ref={confirm}
         onClick={(event) => {
+          if (inline) return;
           const node = event.currentTarget;
           if (node.dataset.confirming !== "true") {
             node.dataset.confirming = "true";
@@ -132,83 +203,99 @@ function LifecycleActions({ session }) {
           deleteSession(session.id).then(closeSessionPanel).catch(() => {});
         }}
       >
-        <span class="spanel-act-t">Delete session…</span>
-        <span class="spanel-act-d">Removes it for good. Click again to confirm.</span>
+        <span class="zl-act-t">{inline ? "Close session" : "Delete session…"}</span>
+        <span class="zl-act-d">
+          {inline
+            ? "Removes it from the list. The transcript stays on disk."
+            : "Removes it for good. Click again to confirm."}
+        </span>
       </button>
     </div>
   );
 }
 
-export function SessionPanel({ session, usage, open, page = "root", variant = "" }) {
+export function SessionPanel({
+  session,
+  usage,
+  open,
+  page = "root",
+  variant = "",
+  onClose,
+  onPage,
+  mcpServers,
+  artifacts,
+  facts: factList,
+  inline = false,
+  style,
+}) {
   const panelRef = useRef(null);
   const sub = page !== "root";
-
-  // The back gesture / browser Back closes the panel, and while a page is
-  // pushed it returns to the root first — one entry per level, the same
-  // contract every sheet in the app keeps.
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = openOverlay("session-panel", () => closeSessionPanel());
-    return () => close();
-  }, [open]);
-  useEffect(() => {
-    if (!open || !sub) return undefined;
-    const close = openOverlay("session-panel-page", () => setSessionPanelPage("root"));
-    return () => close();
-  }, [open, sub]);
+  const close = onClose || closeSessionPanel;
+  const goPage = onPage || setSessionPanelPage;
 
   useEffect(() => {
+    if (!open || inline) return undefined;
+    const stop = openOverlay("session-panel", () => closeSessionPanel());
+    return () => stop();
+  }, [open, inline]);
+  useEffect(() => {
+    if (!open || !sub || inline) return undefined;
+    const stop = openOverlay("session-panel-page", () => setSessionPanelPage("root"));
+    return () => stop();
+  }, [open, sub, inline]);
+
+  useEffect(() => {
     if (!open) return undefined;
-    const unregister = registerOverlay("session-panel");
+    const unregister = inline ? () => {} : registerOverlay("session-panel");
     const onKey = (event) => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
-      if (sub) setSessionPanelPage("root");
-      else closeSessionPanel();
+      if (sub) goPage("root");
+      else close();
     };
     document.addEventListener("keydown", onKey);
     return () => {
       unregister();
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, sub]);
+  }, [open, sub, inline]);
 
   if (!session) return null;
 
-  const facts = runFacts(session);
+  const facts = factList || runFacts(session);
   const mcp = mcpVerdict(session);
+  const usageRow = usageVerdict(session, usage);
+  const sheet = variant === "sheet";
 
   return (
     <aside
       ref={panelRef}
-      class={`spanel${open ? " is-open" : ""}${variant ? ` spanel-${variant}` : ""}`}
+      class={`zl-side zl-side-right${open ? " is-open" : ""}${sheet ? " is-sheet" : ""}`}
       role="dialog"
       aria-label="This session"
       aria-hidden={!open}
+      style={style}
     >
-      <div class={`spanel-head${sub ? " is-sub" : ""}`}>
+      <div class={`zl-side-head${sub ? " is-sub" : ""}`}>
         {sub ? (
           <>
-            <button
-              type="button"
-              class="spanel-back"
-              onClick={() => setSessionPanelPage("root")}
-              aria-label="Back to this session"
-            >
-              <ArrowLeft size={16} aria-hidden="true" />
+            <button type="button" class="zl-back" onClick={() => goPage("root")} aria-label="Back to this session">
+              <BackIcon />
             </button>
-            <span class="spanel-title is-page">{PANEL_PAGES[page]}</span>
+            <span class="zl-side-title is-page" key={page}>{PANEL_PAGES[page]}</span>
           </>
         ) : (
-          <span class="spanel-title is-eyebrow">This session</span>
+          <span class="zl-side-title is-eyebrow">This session</span>
         )}
-        <button type="button" class="spanel-x" onClick={closeSessionPanel} aria-label="Close">
-          <X size={16} aria-hidden="true" />
+        <button type="button" class="zl-x" onClick={close} aria-label="Close">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          </svg>
         </button>
       </div>
 
       {sub ? (
-        <div class="spanel-body is-sub" key={page}>
+        <div class="zl-panel-body is-sub" key={page}>
           {page === "usage" && (
             <UsagePage
               session={session}
@@ -217,67 +304,72 @@ export function SessionPanel({ session, usage, open, page = "root", variant = ""
               costUSD={session.costUSD}
             />
           )}
-          {page === "mcp" && <McpPanel sessionId={session.id} mcpTick={session.mcpTick} />}
-          {page === "artifacts" && <ArtifactsPage sessionId={session.id} />}
+          {page === "mcp" && (
+            <McpPage sessionId={session.id} mcpTick={session.mcpTick} servers={mcpServers} inline={inline} />
+          )}
+          {page === "artifacts" && (
+            <ArtifactsPage sessionId={session.id} items={artifacts} inline={inline} />
+          )}
         </div>
       ) : (
         <>
-          <div class="spanel-body">
-            <SessionIdentity session={session} />
+          <div class="zl-panel-body">
+            <SessionIdentity session={session} inline={inline} />
             {facts.length > 0 && (
-              <dl class="spanel-facts">
+              <dl class="zl-facts is-run">
                 {facts.map((fact) => (
                   <div key={fact.id}>
                     <dt>{fact.label}</dt>
-                    <dd>{fact.value}</dd>
+                    <dd class="zl-data">{fact.value}</dd>
                   </div>
                 ))}
               </dl>
             )}
-            <div class="spanel-rows">
+            <div class="zl-prows">
               <PanelRow
                 id="usage"
-                icon={Clock3}
                 title="Usage"
-                verdict={usageVerdict(session, usage)}
-                onOpen={setSessionPanelPage}
+                verdict={usageRow.text}
+                warn={usageRow.warn}
+                onOpen={goPage}
               />
               {mcp && (
-                <PanelRow id="mcp" icon={Plug} title="MCP" verdict={mcp} onOpen={setSessionPanelPage} />
+                <PanelRow id="mcp" title="MCP" verdict={mcp.text} warn={mcp.warn} onOpen={goPage} />
               )}
-              <ArtifactsRow sessionId={session.id} />
+              <ArtifactsRow sessionId={session.id} items={artifacts} onOpen={goPage} />
             </div>
           </div>
-          <LifecycleActions session={session} />
+          <LifecycleActions session={session} inline={inline} />
         </>
       )}
     </aside>
   );
 }
 
-function ArtifactsRow({ sessionId }) {
+function ArtifactsRow({ sessionId, items, onOpen }) {
   const slice = useStore(artifactsSlice);
   const mine = slice.ownerSessionId === sessionId;
-  const count = mine ? slice.items.length : 0;
+  const count = items ? items.length : (mine ? slice.items.length : 0);
+  const status = items ? "ready" : (mine ? slice.status : "idle");
+  const verdict = artifactsVerdict(count, status);
   return (
     <PanelRow
       id="artifacts"
-      icon={FileText}
       title="Artifacts"
-      verdict={artifactsVerdict(count, mine ? slice.status : "idle")}
-      onOpen={setSessionPanelPage}
+      verdict={verdict.text}
+      warn={verdict.warn}
+      onOpen={onOpen}
     />
   );
 }
 
-// SessionIdentity — the name is editable HERE, and nowhere else in the UI: the
-// only other way to rename was typing /rename into the composer. The folder and
-// the meta line are read-only facts of where the session runs.
-function SessionIdentity({ session }) {
+function SessionIdentity({ session, inline }) {
   const inputRef = useRef(null);
   const title = sessionTitle(session);
+  const path = splitPath(session.cwd);
 
   const commit = (event) => {
+    if (inline) return;
     const next = event.currentTarget.value.trim();
     if (!next || next === title) {
       event.currentTarget.value = title;
@@ -293,26 +385,23 @@ function SessionIdentity({ session }) {
     });
   };
 
-  // The start time, and the day when it was not today: a bare "09:12" on a
-  // three-day-old session says the wrong thing. The branch the prototype also
-  // showed here is deliberately absent: no API field carries it, and the last
-  // path segment only looks like a branch in a worktree layout — printing it
-  // would be a guess dressed as a fact.
+  // Date.now(), not `new Date()`, so a frozen lab clock (fidelity-freeze
+  // patches Date.now only) still counts as "today".
   const startedAt = session.created ? new Date(session.created) : null;
-  const started = startedAt
+  const started = startedAt && Number.isFinite(startedAt.getTime())
     ? (() => {
       const time = startedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      const today = new Date().toDateString() === startedAt.toDateString();
+      const today = new Date(Date.now()).toDateString() === startedAt.toDateString();
       return today ? time : `${startedAt.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`;
     })()
     : "";
 
   return (
     <>
-      <label class="spanel-field">
-        <span class="spanel-label">Name</span>
+      <label class="zl-field">
+        <span class="zl-label">Name</span>
         <input
-          class="spanel-input"
+          class="zl-input"
           ref={inputRef}
           defaultValue={title}
           key={`${session.id}:${title}`}
@@ -327,10 +416,17 @@ function SessionIdentity({ session }) {
           aria-label="Session name"
         />
       </label>
-      <div class="spanel-field">
-        <span class="spanel-label">Folder</span>
-        <div class="spanel-input is-static">{shortPath(session.cwd, 64) || session.cwd || "—"}</div>
-        {started && <div class="spanel-field-meta">started {started}</div>}
+      <div class="zl-field">
+        <span class="zl-label">Folder</span>
+        <div class="zl-input is-static zl-data">
+          {path.dir && <span class="zl-path-dir">{path.dir}</span>}
+          {path.base}
+        </div>
+        {started && (
+          <div class="zl-field-meta zl-data">
+            {session.worktree ? `${session.worktree} · ` : ""}started {started}
+          </div>
+        )}
       </div>
     </>
   );

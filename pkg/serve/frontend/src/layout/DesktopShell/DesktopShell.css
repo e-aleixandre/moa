@@ -43,7 +43,7 @@
   pointer-events: none; /* closed, it is not there for the mouse either */
 }
 .desktop-dossier.is-open { pointer-events: auto; }
-.desktop-dossier .spanel { width: 100%; }
+.desktop-dossier .zl-side-right { width: 100%; height: 100%; }
 
 /* The veil dims what the dossier covers and nothing else: it starts where the
    spine ends, so the other sessions stay reachable behind an open dossier. */
@@ -54,7 +54,7 @@
   bottom: 0;
   left: var(--spine-width);
   z-index: calc(var(--z-overlay) - 1);
-  background: color-mix(in srgb, var(--crust) 45%, transparent);
+  background: rgba(8, 8, 16, 0.55);
 }
 
 /* ── The third zone, docked ───────────────────────────────────────────────
@@ -77,10 +77,9 @@
   .desktop-shell:has(.desktop-dossier.is-open) .desktop-dossier-scrim { display: none; }
   /* A zone that lives there does not float, so it drops the drawer's shadow
      and its outer radius, and separates with a hairline instead. */
-  .desktop-shell:has(.desktop-dossier.is-open) .spanel {
+  .desktop-shell:has(.desktop-dossier.is-open) .zl-side-right {
     border-radius: 0;
-    box-shadow: none;
-    border-left: 1px solid var(--surface0);
+    box-shadow: inset 1px 0 0 var(--zl-line-2, rgba(255, 255, 255, 0.12));
   }
   /* The artifacts drawer reserves 600px of the centre from 1280px up
      (Artifacts.css). With the dossier docked the centre has already given up
