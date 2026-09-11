@@ -27,7 +27,9 @@ const ALLOWED_RAW = new Map([
   ["layout/Composer/Composer.jsx", "type=file (hidden picker) and the composer textarea, which grows with content"],
   ["components/CommandPalette/CommandPalette.jsx", "leading slot is sometimes an interactive breadcrumb button; Field marks that slot aria-hidden"],
   ["layout/mobile/MobileStatusLine/MobileStatusLine.jsx", "type=range slider, not a text field"],
-  ["components/GlobalSettings/CompactAt.jsx", "type=number with its own stepper affordance"],
+  ["components/GlobalSettings/GlobalSettings.jsx", "type=number with its own stepper affordance (the compaction threshold), and the allowlist's type=search, both inside the moved catalogue sheet whose field chrome is its own"],
+  ["components/SessionPanel/SessionPanel.jsx", "the session name, whose chrome is the catalogue field (16px, iOS floor), not the Field primitive"],
+  ["components/SessionPanel/UsagePage.jsx", "type=range slider for compact-at, not a text field"],
   ["primitives/Field/Field.jsx", "the primitive itself"],
 ]);
 

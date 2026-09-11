@@ -12,44 +12,9 @@
   overflow: hidden;
 }
 
-.mconv-stream {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden; /* wide blocks (code/table) scroll inside their own box */
-  /* There is no header bar: the stream owns the top safe-area inset so the first
-     message clears the iOS status bar in an installed PWA, plus enough room for
-     the header capsules that hover over it (top 12px + 44px tall). Later
-     messages still scroll UNDER them — that is what their blur is for — but the
-     top of the transcript is never born hidden behind them. */
-  padding: calc(64px + env(safe-area-inset-top)) var(--space-4) var(--space-2);
-  /* Both edges dissolve with the SAME technique: fade the content's own alpha
-     rather than painting a slab of --base over it, so nothing is laid on top of
-     what sits around the stream (the status bar's --base above, the now-line
-     below) and there is no seam where two color layers meet. Top: hold fully
-     masked through the iOS safe area (so a message scrolling up clears the
-     status bar) then ease in over ~32px. Bottom: short 28px fade so text still
-     being read is not dimmed. */
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent env(safe-area-inset-top),
-    #000 calc(env(safe-area-inset-top) + 32px),
-    #000 calc(100% - 28px),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent env(safe-area-inset-top),
-    #000 calc(env(safe-area-inset-top) + 32px),
-    #000 calc(100% - 28px),
-    transparent 100%
-  );
-}
-
-/* The user's waypoint opens the stream: no extra top margin. */
-.mconv-stream > .mstream-col > .waypoint:first-child {
+/* The user's message opens the stream: no extra top margin. */
+.mconv .zl-transcript > .zl-user:first-child,
+.mconv .zl-transcript > [data-stream-anchor]:first-child .zl-user {
   margin-top: 0;
 }
 

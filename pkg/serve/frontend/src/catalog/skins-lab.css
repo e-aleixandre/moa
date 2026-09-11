@@ -43,7 +43,7 @@
   font-family: var(--font);
   color: var(--text);
 }
-.sk-phone .mconv-stream { padding-top: 50px; }
+.sk-phone .zl-transcript { padding-top: 50px; }
 .sk-phone .mcomposer { flex: none; padding: var(--space-2) var(--space-3) 6px; }
 .sk-phone .mcomposer .status-strip { font-size: var(--text-micro); overflow: hidden; }
 .sk-phone .mtchip { top: 12px; }
@@ -65,9 +65,8 @@
 }
 .sk-desk .spine { min-height: 0; }
 .sk-desk .sk-main { min-height: 0; height: 100%; }
-.sk-desk .stream-scroll { overflow: hidden; }
-.sk-desk .stream-col { padding-top: var(--space-4); }
-.sk-desk .stream-col .waypoint { margin-top: 0; }
+.sk-desk .zl-transcript { padding-top: var(--space-4); }
+.sk-desk .zl-transcript .zl-user { margin-top: 0; }
 
 /* the aurora layer exists in every frame but only paints under ambient */
 .sk-aurora { display: none; }
@@ -168,7 +167,7 @@
 }
 /* lift the static children above the aurora; the chip and the veil are
    already absolute with their own z-index and must not be touched */
-.sk-ambient > .mstream,
+.sk-ambient > .zl-transcript,
 .sk-ambient > .mcomposer,
 .sk-ambient > .spine,
 .sk-ambient > .sk-main { position: relative; z-index: 1; }
@@ -296,20 +295,11 @@
   color: var(--amb-text-2);
 }
 .sk-ambient .chat-head .grid-toggle .kbd { font-family: var(--font); font-size: 10px; background: var(--amb-hi); border: 0; color: var(--amb-text-3); }
-.sk-ambient .stream-col { padding-left: 28px; padding-right: 28px; }
+.sk-ambient .zl-transcript { padding-left: 28px; padding-right: 28px; }
 
-/* transcript blocks: the user's left bar stays — that gesture is reserved */
-.sk-ambient .waypoint {
-  background: var(--amb-hi);
-  border: 0;
-  border-left: 3px solid var(--peach);
-  border-radius: 4px 16px 16px 4px;
-}
-.sk-ambient .waypoint .who { color: var(--amb-text-2); font-size: var(--amb-caps); }
-.sk-ambient .waypoint .who time { font-family: var(--font); color: var(--amb-text-3); }
-.sk-ambient .waypoint .body,
-.sk-ambient .doc p { color: var(--amb-text-2); font-size: var(--amb-body); }
-.sk-ambient .doc p strong { color: var(--amb-text); }
+/* transcript: the user's left bar stays — that gesture is reserved */
+.sk-ambient .zl-prose p { color: var(--amb-text-2); font-size: var(--amb-body); }
+.sk-ambient .zl-prose p strong { color: var(--amb-text); }
 .sk-ambient .tg {
   border: 0;
   border-radius: 14px;
@@ -387,8 +377,7 @@
     radial-gradient(70% 30% at 85% 98%, rgba(148, 226, 213, 0.46), transparent 70%);
 }
 .sk-ambient.mconv { background: transparent; }
-.sk-ambient .mconv-stream { padding-left: 14px; padding-right: 14px; }
-.sk-ambient.mconv .waypoint { border-radius: 4px 14px 14px 4px; background: rgba(255, 255, 255, 0.08); }
+.sk-ambient.sk-phone .zl-transcript { padding-left: 14px; padding-right: 14px; }
 .sk-ambient .mcomposer { background: transparent; }
 .sk-ambient.sk-phone .zl-composer {
   background: rgba(255, 255, 255, 0.08);

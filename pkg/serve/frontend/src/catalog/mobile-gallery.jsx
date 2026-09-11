@@ -275,7 +275,7 @@ function MobileSubagentSpecimen({ spec }) {
 export function MobileConversationSpecimen() {
   return (
     <div class="mconv">
-      <div class="mconv-stream">
+      <div class="zl-transcript">
         <UserWaypoint time="10:41">
           <p>
             Fix the reconnect race in <code>ws.go</code>, with a regression

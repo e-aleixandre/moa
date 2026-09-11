@@ -123,12 +123,8 @@ export function SkinPhone({ skin, drawer = false, variant = "" }) {
   return (
     <div class={`sk-phone mconv sk-${skin}${variant ? ` ${variant}` : ""}`}>
       <div class="sk-aurora" aria-hidden="true" />
-      <div class="mstream">
-        <div class="mconv-stream">
-          <div class="mstream-col">
+      <div class="zl-transcript">
             <Transcript />
-          </div>
-        </div>
       </div>
       <div class="mcomposer zl-dock">
         <Composer
@@ -194,12 +190,8 @@ export function SkinDesktop({ skin, variant = "" }) {
       />
       <div class="conversation-main sk-main">
         <ChatHead title={ACTIVE_TITLE} path={ACTIVE_PATH} onGridToggle={noop} onPreviewToggle={noop} />
-        <div class="stream">
-          <div class="stream-scroll">
-            <div class="stream-col">
+        <div class="zl-transcript">
               <Transcript />
-            </div>
-          </div>
         </div>
         <LiveBar session={RUN_SESSION} />
         <Composer sessionId={`sk-${skin}-desk`} session={RUN_SESSION} />

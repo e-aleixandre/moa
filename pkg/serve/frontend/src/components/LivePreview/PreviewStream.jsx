@@ -197,7 +197,7 @@ function StreamingDocument({ text, streaming }) {
   return (
     <span
       ref={docRef}
-      class={`lp-card-doc doc${hasHiddenAbove ? " has-hidden-above" : ""}`}
+      class={`lp-card-doc zl-prose${hasHiddenAbove ? " has-hidden-above" : ""}`}
       dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
     />
   );

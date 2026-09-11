@@ -182,7 +182,7 @@
   padding-left: var(--space-3);
 }
 
-.sa-report-body.is-phone .sa-log .stream-col {
+.sa-report-body.is-phone .sa-log .zl-transcript {
   max-width: none;
   padding: 0;
 }

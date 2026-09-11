@@ -6,12 +6,17 @@ import { WaypointAttachments, attachmentImageSrc, attachmentLabel } from "./Wayp
 import { PreviewReference } from "./PreviewReference.jsx";
 import "./UserWaypoint.css";
 
-// UserWaypoint — the user's prompt as a waypoint card inside
-// the stream: peach border on the left, "YOU" header + time, text
-// body. `html` allows passing an already-rendered body (e.g. markdown); if not
-// given, `children` is used as-is (usually a <p>). `label` overrides the "You"
-// header text (e.g. "You — steer" for a mid-run course-correction). `tone`
-// selects a semantic source treatment; ordinary user messages remain peach.
+// UserWaypoint — the user's message. Markup and CSS are the catalogue's
+// (catalog/zones-lab.jsx `UserMessage`, zones-lab.css `.zl-user`), MOVED here
+// rather than imitated: the peach edge is the identity, and the one place in
+// the product peach is allowed. There is no card and no "YOU" header — the
+// bar is the speaker. The catalogue imports this component now, which is
+// what makes one definition rather than two.
+//
+// What is NOT the catalogue's is everything the prototype never had, grafted
+// on top: rewind, attachments, the live-preview reference, a parent-session
+// accent, and the confirmation sheet. Ordinary messages show none of that.
+
 function ImageLightbox({ attachment, sessionId, onClose }) {
   const src = attachmentImageSrc(attachment, sessionId);
   if (!src) return null;
@@ -75,7 +80,7 @@ export function UserWaypoint({
   time,
   children,
   html,
-  label = "You",
+  label,
   tone = "user",
   accent,
   className = "",
@@ -99,34 +104,39 @@ export function UserWaypoint({
   // The attachments skirt is the card's own foot: it bleeds to the edges and
   // closes the bottom corners, so the card gives up its bottom padding.
   const hasSkirt = Array.isArray(attachments) && attachments.filter(Boolean).length > 0;
+  // Ordinary messages have no label: the peach edge is the identity. Steer and
+  // parent-session messages still name their source, because that is not "you".
+  const showLabel = label && label !== "You";
 
   return (
     <>
       <div
-        class={`waypoint waypoint-${tone}${hasSkirt ? " has-skirt" : ""} ${className}`.trim()}
+        class={`zl-user${tone === "parent" ? " is-parent" : ""}${hasSkirt ? " has-skirt" : ""}${className ? ` ${className}` : ""}`}
         style={accent ? { "--waypoint-accent": `var(--${accent})` } : undefined}
         {...rest}
       >
-        <div class="who">
-          <span class="who-label">{label}</span>
-          {time && <time>{time}</time>}
-          {onRewind && (
-            <button
-              type="button"
-              class="wp-rewind"
-              disabled={rewindDisabled}
-              onClick={() => setConfirmRewind(true)}
-              aria-label="Rewind the conversation to this message"
-              title="Rewind here"
-            >
-              <RewindIcon size={12} aria-hidden="true" />
-            </button>
-          )}
-        </div>
-        <div class="body">
+        {showLabel && <div class="zl-user-label">{label}</div>}
+        <div class="zl-user-body">
           {reference && <PreviewReference reference={reference} />}
           {html != null ? <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} /> : children}
         </div>
+        {(time || onRewind) && (
+          <span class="zl-user-when zl-data">
+            {time && <time>{time}</time>}
+            {onRewind && (
+              <button
+                type="button"
+                class="wp-rewind"
+                disabled={rewindDisabled}
+                onClick={() => setConfirmRewind(true)}
+                aria-label="Rewind the conversation to this message"
+                title="Rewind here"
+              >
+                <RewindIcon size={12} aria-hidden="true" />
+              </button>
+            )}
+          </span>
+        )}
         <WaypointAttachments attachments={attachments} sessionId={sessionId} onOpenImage={setOpenAttachment} />
       </div>
       {openAttachment && (

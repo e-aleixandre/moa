@@ -1,99 +1,16 @@
-/* MobileStream — the scrollable mobile conversation area. `.mstream` is the
-   flexed, positioned frame (anchors the floating "new messages" button);
-   `.mconv-stream` (shared with MobileConversationScreen.css) is the scroller. */
-.mstream {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
+/* MobileStream — the phone's conversation scroller is now `.zl-transcript`
+   (layout/Stream/Stream.css). This sheet keeps only the phone-density
+   overrides for pieces that are NOT the transcript: the ledger's 44px
+   rows, and code blocks at mobile scale. User messages and prose take
+   the catalogue's own sizes from UserWaypoint/AssistantDocument. */
 
-.mstream .mconv-stream {
-  flex: 1;
-}
-
-/* No painted top cover: the transcript's hard top edge is dissolved by the
-   scroller's own top mask (see .mconv-stream in MobileConversationScreen.css),
-   which fades the content's alpha into the --base that .mconv paints behind it.
-   A ::before slab of --base used to sit here, but layering one color band over
-   another is exactly what read as a hard seam under the status bar. */
-
-.mstream-system {
-  text-align: center;
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  color: var(--overlay0);
-  padding: var(--space-2) 0;
-}
-
-.mstream-new-btn {
-  position: absolute;
-  left: 50%;
-  bottom: var(--space-3);
-  transform: translateX(-50%);
-  min-height: 44px;
-  padding: var(--space-1) var(--space-4);
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-full);
-  background: var(--surface0);
-  color: var(--text);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  box-shadow: var(--shadow-md);
-}
-
-/* ── Mobile density for the shared content components ──
-   The stream reuses the desktop content components (AssistantDocument prose,
-   UserWaypoint, CodeBlock/DiffBlock), whose sizes/margins are tuned for a wide
-   column. Scope a phone rhythm to .mconv only (mockup .m-ai / .m-user / .m-code),
-   never touching the shared component CSS or the desktop .stream. */
-
-/* Assistant prose */
-.mconv .doc {
-  margin: 0 0 14px; /* px structural (mockup .m-ai) */
-}
-
-.mconv .doc p {
-  font-size: var(--text-base);
-  line-height: 1.55; /* mockup .m-ai p; no exact token */
-  margin: 0 0 10px; /* px structural (mockup) */
-  max-width: none; /* 68ch is irrelevant at 390px */
-}
-
-.mconv .doc p:last-child {
-  margin-bottom: 0;
-}
-
-.mconv .doc ul {
-  margin-bottom: 10px;
-}
-
-/* User waypoint */
-.mconv .waypoint {
-  border: 0;
-  border-left: 3px solid var(--peach);
-  border-radius: 3px 12px 12px 3px; /* px structural (mockup .m-user) */
-  padding: 10px 13px; /* px structural (mockup .m-user) */
-  margin: 0 0 var(--space-4);
-}
-
-.mconv .waypoint .body {
-  font-size: var(--text-base);
-}
-
-.mconv .waypoint .who {
-  font-size: var(--text-nano);
-}
-
-/* Code & diff blocks at mobile scale */
 .mconv .code {
   border-radius: var(--radius-md);
   margin: var(--space-2) 0 var(--space-3);
 }
 
 .mconv .code pre {
-  padding: 10px 13px; /* px structural (mockup .m-code) */
+  padding: 10px 13px;
 }
 
 .mconv .code pre code,
@@ -102,9 +19,6 @@
   line-height: var(--leading-relaxed);
 }
 
-/* The unified tool-group card (.tg) at mobile scale: 44px rows so the tappable
-   header/detail rows meet the ≥44px touch target (the row has no vertical
-   padding, so its min-height IS the hit area), denser detail code. */
 .mconv .tg {
   --tg-row-h: 44px;
 }

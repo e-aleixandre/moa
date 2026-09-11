@@ -11,6 +11,7 @@ import {
   HistoryHydrationTail,
   historyHydrationTailVisible,
 } from "../../components/index.js";
+import { Prose } from "../../components/AssistantDocument/AssistantDocument.jsx";
 import { SecretBatchCard } from "../../components/SecretBatchCard/SecretBatchCard.jsx";
 import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { parsePreviewReference } from "../../data/util/preview-reference.js";
@@ -48,10 +49,11 @@ function docChildren(blocks, onOpenSubagent, visibleDone, sessionId) {
     switch (b.type) {
       case "prose":
         out.push(
-          <div
+          <Prose
             key={b.id}
-            class={`doc-prose${b.caret ? " doc-prose--live" : ""}`}
-            dangerouslySetInnerHTML={{ __html: b.caret ? renderMarkdownWithCaret(b.text) : renderMarkdown(b.text) }}
+            streaming={!!b.caret}
+            live={!!b.caret}
+            html={b.caret ? renderMarkdownWithCaret(b.text) : renderMarkdown(b.text)}
           />
         );
         break;
@@ -91,10 +93,10 @@ function docChildren(blocks, onOpenSubagent, visibleDone, sessionId) {
   return out;
 }
 
-function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent, visibleDone, classPrefix }) {
+function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent, visibleDone }) {
   switch (block.kind) {
     case "system":
-      return <div class={`${classPrefix}-system`}>{block.text}</div>;
+      return <div class="zl-sys">{block.text}</div>;
     case "secret_batch":
       return <SecretBatchCard aliases={block.aliases} />;
     case "compaction":
@@ -147,7 +149,7 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
 // drift between desktop and mobile implementations.
 export function ConversationStream({
   session, blocks = [], lead = null, tail = null, onOpenSubagent, onScrollEl, rewind, waypointAccent,
-  visibleDone, classPrefix = "stream",
+  visibleDone, dense = false,
 }) {
   const hydrationAnchor = useRef(null);
   // Length of the in-flight tool's streaming output (a tool_update grows this
@@ -202,17 +204,17 @@ export function ConversationStream({
   }, [session, blocks, placeReadAnchor]);
 
   return (
-    <div class={classPrefix}>
+    <div class="zl-transcript-frame">
       <div
-        class={classPrefix === "mstream" ? "mconv-stream" : `${classPrefix}-scroll`}
+        class={`zl-transcript${dense ? " is-dense" : ""}`}
         ref={setScrollEl}
         onScroll={checkScroll}
       >
-        <div class={`${classPrefix}-col`} ref={contentRef}>
+        <div ref={contentRef}>
           {lead}
           {blocks.map((block) => (
             <div key={block.id} data-stream-anchor={block.id}>
-              <StreamBlock block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} waypointAccent={waypointAccent} visibleDone={visibleDone} classPrefix={classPrefix} />
+              <StreamBlock block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} waypointAccent={waypointAccent} visibleDone={visibleDone} />
             </div>
           ))}
           {tail}
@@ -227,7 +229,7 @@ export function ConversationStream({
       </div>
 
       {showNewBtn && (
-        <button class={`${classPrefix}-new-btn`} onClick={scrollToBottom} title="Scroll to latest">
+        <button class="zl-transcript-new" onClick={scrollToBottom} title="Scroll to latest">
           ↓ New messages
         </button>
       )}

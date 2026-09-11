@@ -95,7 +95,7 @@ html.mobile-locked body {
 .spine-sessions,
 .pane .p-body,
 .pane .p-blocking,
-.mconv-stream {
+.zl-transcript {
   scrollbar-width: thin;
   scrollbar-color: var(--surface1) transparent;
 }
@@ -104,7 +104,7 @@ html.mobile-locked body {
 .spine-sessions::-webkit-scrollbar,
 .pane .p-body::-webkit-scrollbar,
 .pane .p-blocking::-webkit-scrollbar,
-.mconv-stream::-webkit-scrollbar {
+.zl-transcript::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
@@ -113,7 +113,7 @@ html.mobile-locked body {
 .spine-sessions::-webkit-scrollbar-thumb,
 .pane .p-body::-webkit-scrollbar-thumb,
 .pane .p-blocking::-webkit-scrollbar-thumb,
-.mconv-stream::-webkit-scrollbar-thumb {
+.zl-transcript::-webkit-scrollbar-thumb {
   background: var(--surface1);
   border-radius: var(--radius-full);
 }
@@ -122,6 +122,6 @@ html.mobile-locked body {
 .spine-sessions::-webkit-scrollbar-track,
 .pane .p-body::-webkit-scrollbar-track,
 .pane .p-blocking::-webkit-scrollbar-track,
-.mconv-stream::-webkit-scrollbar-track {
+.zl-transcript::-webkit-scrollbar-track {
   background: transparent;
 }

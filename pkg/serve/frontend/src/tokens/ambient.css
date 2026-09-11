@@ -531,140 +531,6 @@
 [data-ambient="on"] .tg .tg-log .live-log-affordance { color: var(--amb-text-4); }
 [data-ambient="on"] .tg .tg-log.expanded .live-log-affordance { color: var(--amb-text-2); }
 
-/* ── The two voices ───────────────────────────────────────────────────────
-   The conversation is one voice in two colours, not two typographies. Both
-   halves read at the same size and the same rhythm; what tells them apart is
-   that yours has a peach edge and the assistant's has the bare page.
-
-   THE USER MESSAGE loses its box. A filled, outlined card made every thing you
-   said into an object sitting on the transcript, and it is not an object -- it
-   is one of the two speakers. What is left is the peach bar, which is the
-   product's word for "you said this" and the ONE place peach is allowed.
-
-   THE ASSISTANT'S TEXT is the page itself, so it gets no surface at all: only
-   the tonal scale, and the mono where a word is actually data. Inline code
-   moves off sky (a colour with no meaning here) onto the control tone, which
-   is how every other piece of literal data in this direction is drawn. */
-[data-ambient="on"] .waypoint {
-  border: 0;
-  border-left: 3px solid var(--peach);
-  border-radius: 0;
-  background: transparent;
-  padding: 2px 0 2px 14px;
-}
-[data-ambient="on"] .waypoint .who {
-  font-family: var(--font);
-  font-size: 12px;
-  font-weight: var(--weight-semibold);
-  color: var(--amb-text-4);
-}
-[data-ambient="on"] .waypoint .who time {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--amb-text-4);
-}
-[data-ambient="on"] .waypoint .body {
-  font-size: 16px;
-  line-height: 1.6;
-  color: var(--amb-text);
-}
-[data-ambient="on"] .waypoint .body code {
-  border-radius: var(--amb-r-well);
-  background: var(--amb-raised);
-  box-shadow: inset 0 0 0 1px var(--amb-line);
-  color: var(--amb-text-2);
-}
-/* A branch point from another conversation keeps its own accent on the bar and
-   on the label -- that accent identifies the parent session, and it is the one
-   thing here that is not about you. */
-[data-ambient="on"] .waypoint.waypoint-parent {
-  border-left-color: var(--waypoint-accent);
-  background: transparent;
-}
-/* The attachments skirt has no card left to be the foot of, so it becomes a
-   plain list hanging off the same bar. */
-[data-ambient="on"] .wp-attachments {
-  margin: 10px 0 0;
-  border-top: 0;
-  border-radius: var(--amb-r-ctl);
-  background: var(--amb-sheet-solid);
-  box-shadow: inset 0 0 0 1px var(--amb-line);
-}
-[data-ambient="on"] .waypoint.has-skirt { padding-bottom: 2px; }
-[data-ambient="on"] .skirt-head {
-  font-family: var(--font);
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--amb-text-4);
-}
-[data-ambient="on"] .skirt-name { color: var(--amb-text-2); }
-[data-ambient="on"] .skirt-meta { color: var(--amb-text-4); }
-[data-ambient="on"] .skirt-head + .skirt-row,
-[data-ambient="on"] .skirt-row + .skirt-row,
-[data-ambient="on"] .skirt-rest .skirt-row { border-top-color: var(--amb-line); }
-
-/* The assistant's prose. */
-[data-ambient="on"] .doc p,
-[data-ambient="on"] .doc li { color: var(--amb-text-2); }
-[data-ambient="on"] .doc p strong,
-[data-ambient="on"] .doc li strong { color: var(--amb-text); }
-/* The list mark is punctuation. Mauve is the product's accent and its one
-   state is "unread": spending it on every bullet in the transcript is what
-   made it stop meaning anything. */
-[data-ambient="on"] .doc li::before { color: var(--amb-text-4); }
-[data-ambient="on"] .doc h4 {
-  font-size: 14px;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--amb-text);
-}
-[data-ambient="on"] .doc p code,
-[data-ambient="on"] .doc li code {
-  border-radius: var(--amb-r-well);
-  background: var(--amb-raised);
-  box-shadow: inset 0 0 0 1px var(--amb-line);
-  color: var(--amb-text-2);
-}
-/* The write head, wherever it is: one colour for "still being written", the
-   same green the running row wears. */
-[data-ambient="on"] .doc .doc-cursor { background: var(--green); }
-[data-ambient="on"] .doc .md-table-wrap table { font-size: 14px; }
-[data-ambient="on"] .doc .md-table-wrap th,
-[data-ambient="on"] .doc .md-table-wrap td { border-color: var(--amb-line); }
-[data-ambient="on"] .doc .md-table-wrap th {
-  background: var(--amb-raised);
-  color: var(--amb-text-2);
-}
-[data-ambient="on"] .doc .md-table-wrap td { color: var(--amb-text-3); }
-
-/* The rules between turns: a tick and a system line. Both are notes about the
-   conversation rather than part of it, so they stay at the quietest step. */
-[data-ambient="on"] .stream .stream-tick {
-  font-family: var(--font);
-  font-size: 12px;
-  letter-spacing: 0;
-  color: var(--amb-text-4);
-}
-[data-ambient="on"] .stream .stream-tick::before,
-[data-ambient="on"] .stream .stream-tick::after { background: var(--amb-line); }
-[data-ambient="on"] .stream .stream-system {
-  font-family: var(--font);
-  font-size: 12px;
-  letter-spacing: 0;
-  color: var(--amb-text-4);
-}
-/* "New messages below": it floats over the transcript, so it is one of the few
-   things that earns a shadow. Peach is not available to it -- it is not you
-   speaking -- so it takes the control tone and the accent's text. */
-[data-ambient="on"] .stream .stream-new-btn {
-  border: 0;
-  border-radius: var(--amb-r-ctl);
-  background: var(--amb-control);
-  box-shadow: inset 0 0 0 1px var(--amb-line-strong), 0 6px 20px rgba(0, 0, 0, 0.45);
-  color: var(--amb-text);
-  font-size: 12px;
-}
-
 /* ── The live bar ──────────────────────────────────────────────────────────
    The single row of live work above the composer. Words in the sans, because
    the sentence is prose about what is happening; the elapsed counter, the
@@ -929,54 +795,36 @@
   }
 }
 
-/* ── Code, in both places it appears ───────────────────────────────────────
-   Two chassis render the same thing: the CodeBlock component (.code) for tool
-   output and a fence rendered by the markdown pipeline (.doc .code-block).
-   They must not read as two different objects, so both become the same well:
-   canvas tone one step below the page, one hairline rim, 10px radius, and a
-   header that is a line of labels rather than a bordered strip.
-
-   The highlighting is NOT touched. Those colours are the only place in the
-   product where saturation is carrying meaning that is not state -- they say
-   "keyword", "string", "number" -- and dulling them to fit the palette would
-   cost real reading. The chrome around the code is what changes.
-
-   Diff colour is state colour used literally: green added, red removed, and
-   the tint stays low so a long diff is text rather than a wall of blocks. */
-[data-ambient="on"] .code,
-[data-ambient="on"] .doc .code-block {
+/* ── Code ──────────────────────────────────────────────────────────────────
+   The CodeBlock component (.code) for tool output. Fenced markdown
+   (`.zl-prose .code-block`) now lives on AssistantDocument, so it is not
+   restated here. They must still read as the same well: canvas tone, one
+   hairline rim, 10px radius. Highlighting colours are untouched. */
+[data-ambient="on"] .code {
   border: 0;
   border-radius: var(--amb-r-ctl);
   background: var(--amb-canvas);
   box-shadow: inset 0 0 0 1px var(--amb-line);
   overflow: hidden;
 }
-[data-ambient="on"] .code .code-head,
-[data-ambient="on"] .doc .code-block-header {
+[data-ambient="on"] .code .code-head {
   background: transparent;
   border-bottom: 1px solid var(--amb-line);
   font-size: 12px;
   color: var(--amb-text-4);
 }
-/* The language is a label on data, so it keeps the mono, but it stops being a
-   mauve badge: the accent has one job and this is not it. */
-[data-ambient="on"] .code .code-head .lang,
-[data-ambient="on"] .doc .code-block-lang {
+[data-ambient="on"] .code .code-head .lang {
   letter-spacing: 0;
   text-transform: lowercase;
   color: var(--amb-text-4);
 }
 [data-ambient="on"] .code .code-head .filename { color: var(--amb-text-3); }
-[data-ambient="on"] .code .code-head .copy,
-[data-ambient="on"] .doc .code-block-copy { color: var(--amb-text-4); }
+[data-ambient="on"] .code .code-head .copy { color: var(--amb-text-4); }
 @media (hover: hover) {
-  [data-ambient="on"] .code .code-head .copy:hover,
-  [data-ambient="on"] .doc .code-block-copy:hover { color: var(--amb-text); }
+  [data-ambient="on"] .code .code-head .copy:hover { color: var(--amb-text); }
 }
-[data-ambient="on"] .code pre,
-[data-ambient="on"] .doc .code-block pre { background: transparent; }
-[data-ambient="on"] .code pre code,
-[data-ambient="on"] .doc .code-block pre code { color: var(--amb-text-2); }
+[data-ambient="on"] .code pre { background: transparent; }
+[data-ambient="on"] .code pre code { color: var(--amb-text-2); }
 /* A flush block is drawn by its host panel, so it must not paint a second
    surface on top of it. */
 [data-ambient="on"] .code.flush {
@@ -2664,61 +2512,6 @@ html.mobile-locked[data-ambient="on"] body {
     color: var(--amb-text);
   }
 }
-
-/* ── The rest of the assistant's document ──────────────────────────────────
-   The prose itself is dressed above, with the two voices. What was left is
-   everything markdown can emit that a hand-built AssistantDocument never does:
-   real headings, ordered lists, quotations, rules and links. Until now those
-   fell through to the base skin, so a long answer with an H2 in it was reading
-   in two palettes at once.
-
-   HEADINGS ARE SIZE, NOT COLOUR. The base skin paints .doc h4 mauve, which
-   spends the accent on structure; here the levels are told apart by size and
-   weight on the one text colour, which is what the rest of the direction does.
-   A LINK is the exception that keeps a colour, because a link that looks like
-   text is not a link -- and it takes the accent, since going somewhere is not
-   a state. */
-[data-ambient="on"] .doc h1,
-[data-ambient="on"] .doc h2,
-[data-ambient="on"] .doc h3 {
-  font-family: var(--font);
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--amb-text);
-}
-[data-ambient="on"] .doc h1 { font-size: 20px; font-weight: var(--weight-semibold); }
-[data-ambient="on"] .doc h2 { font-size: 16px; font-weight: var(--weight-semibold); }
-[data-ambient="on"] .doc h3 { font-size: 14px; font-weight: var(--weight-semibold); }
-[data-ambient="on"] .doc ol { color: var(--amb-text-2); }
-[data-ambient="on"] .doc a { color: var(--mauve); }
-/* A quotation is text the answer is holding at arm's length: a rule and a
-   step down, never a filled box. */
-[data-ambient="on"] .doc blockquote {
-  border-left: 2px solid var(--amb-line-strong);
-  background: transparent;
-  color: var(--amb-text-3);
-}
-[data-ambient="on"] .doc hr {
-  border: 0;
-  border-top: 1px solid var(--amb-line);
-}
-/* Inline code inside a heading or a quotation follows the same well as
-   inline code in a paragraph, instead of falling back to the sky. */
-[data-ambient="on"] .doc h1 code,
-[data-ambient="on"] .doc h2 code,
-[data-ambient="on"] .doc h3 code,
-[data-ambient="on"] .doc blockquote code,
-[data-ambient="on"] .doc td code,
-[data-ambient="on"] .doc th code {
-  border-radius: var(--amb-r-well);
-  background: var(--amb-raised);
-  box-shadow: inset 0 0 0 1px var(--amb-line);
-  font-family: var(--mono);
-  color: var(--amb-text-2);
-}
-/* An ordered list marks its items with the number the markdown gave them, so
-   it keeps the browser's marker and only the colour is brought into range. */
-[data-ambient="on"] .doc ol li::before { color: var(--amb-text-4); }
 
 /* ── Secrets ───────────────────────────────────────────────────────────────
    The one form in the product where the interesting thing is what must NOT

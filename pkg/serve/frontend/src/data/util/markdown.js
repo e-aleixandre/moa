@@ -184,8 +184,8 @@ export function renderMarkdown(text) {
 // Append the caret to the markdown source so marked keeps it in the final
 // inline context instead of placing it after the prose block.
 export function renderMarkdownWithCaret(text) {
-  if (!text) return '<span class="doc-cursor"></span>';
+  if (!text) return '<span class="zl-caret"></span>';
   // The streaming source changes for every token, so caching it would evict
   // stable transcript entries without producing cache hits.
-  return renderAndSanitizeMarkdown(`${text}<span class="doc-cursor"></span>`);
+  return renderAndSanitizeMarkdown(`${text}<span class="zl-caret"></span>`);
 }

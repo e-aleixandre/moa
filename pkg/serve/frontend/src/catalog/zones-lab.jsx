@@ -18,6 +18,13 @@ import { GlobalSettings } from "../components/GlobalSettings/GlobalSettings.jsx"
    See the adapter at `SessionPanel`. */
 import { SessionPanel as ProductionSessionPanel } from "../components/SessionPanel/SessionPanel.jsx";
 import { PANEL_PAGES } from "../data/session-panel.js";
+/* Same move, the transcript: markup and CSS live in layout/Stream,
+   components/UserWaypoint and components/AssistantDocument now, and the
+   prototype draws the shipped ones. See the adapters at `Transcript`,
+   `UserMessage`, `StreamingProse`. */
+import { Transcript as ProductionTranscript } from "../layout/Stream/Stream.jsx";
+import { UserWaypoint } from "../components/UserWaypoint/UserWaypoint.jsx";
+import { AssistantDocument, Prose } from "../components/AssistantDocument/AssistantDocument.jsx";
 
 /* The three-zone skeleton, both densities side by side.
    This is a PROTOTYPE, not production: it draws the shell only (where things
@@ -555,13 +562,22 @@ function Artifact({ name, kind, size, dense }) {
   );
 }
 
+/* ── Transcript ──────────────────────────────────────────────────────────
+   MIGRATED (METODO §4): the transcript, the user message and the prose have
+   no private copy here. Their markup and CSS were MOVED to layout/Stream,
+   components/UserWaypoint and components/AssistantDocument, class names and
+   all, and the prototype imports them back. What sits here now is only an
+   adapter: the prototype's fixtures mapped onto the props the shipped
+   pieces take, plus the burst-span lab that feeds Prose the way a websocket
+   feeds production markdown.
+
+   The rule is unchanged: the user's message is the only thing with a peach
+   edge; the assistant's turn has no frame at all -- it is the page. Tool
+   work and deliverables are objects ON the page (ledger, artifact) and are
+   not this piece. */
+
 function UserMessage({ children, when }) {
-  return (
-    <div class="zl-user">
-      <div class="zl-user-body">{children}</div>
-      <span class="zl-user-when zl-data">{when}</span>
-    </div>
-  );
+  return <UserWaypoint time={when}>{children}</UserWaypoint>;
 }
 
 /* ── Streaming: the arriving-text effect ──────────────────────────────────
@@ -666,7 +682,7 @@ function StreamingProse({ playing }) {
     });
   }
   return (
-    <div class={`zl-prose is-streaming${s.done ? " is-done" : ""}`} aria-busy={!s.done}>
+    <Prose streaming={!s.done} done={s.done}>
       {paras.map((children, k) => (
         <p key={k}>
           {children}
@@ -675,7 +691,7 @@ function StreamingProse({ playing }) {
           )}
         </p>
       ))}
-    </div>
+    </Prose>
   );
 }
 
@@ -877,11 +893,11 @@ function Transcript({ dense, streaming = true, short, tail }) {
     el.scrollTop = el.scrollHeight;
     if (!streaming) return;
     const ro = new ResizeObserver(() => { el.scrollTop = el.scrollHeight; });
-    for (const c of el.children) ro.observe(c);
+    ro.observe(el);
     return () => ro.disconnect();
   }, [streaming]);
   return (
-    <div class={`zl-transcript${dense ? " is-dense" : ""}`} ref={ref}>
+    <ProductionTranscript dense={dense} scrollRef={ref}>
       {short && (
         <UserMessage when="09:31">
           Vale. Confírmalo con un test de concurrencia y pasa vet antes de dar por bueno el cambio.
@@ -893,12 +909,12 @@ function Transcript({ dense, streaming = true, short, tail }) {
             El store de attachments pierde blobs si dos sesiones borran el mismo a la vez. ¿Es carrera o es el índice?
           </UserMessage>
 
-          <div class="zl-turn">
-            <div class="zl-prose">
+          <AssistantDocument>
+            <Prose>
               <p>Voy a mirar primero cómo se ordena el borrado respecto al índice, porque el síntoma que describes (un blob que sobrevive sin dueño) es más típico de una escritura sin lock que de una corrupción del índice.</p>
-            </div>
+            </Prose>
             <Ledger rows={LEDGER_A} dense={dense} />
-            <div class="zl-prose">
+            <Prose>
               <h3>Qué he encontrado</h3>
               <p>Es una carrera, no el índice. <code>Delete</code> quita la entrada del mapa <em>antes</em> de comprobar que existe, así que el segundo borrado no falla y decrementa el contador dos veces:</p>
               <ol>
@@ -907,9 +923,9 @@ function Transcript({ dense, streaming = true, short, tail }) {
                 <li>Las dos decrementan <code>refs</code>; el blob queda en −1 y el GC no lo toca nunca.</li>
               </ol>
               <p>El test que fallaba arriba es el que lo demuestra: esperaba <code>ErrNotFound</code> en el segundo borrado y recibía <code>nil</code>. Con la comprobación dentro del lock pasa.</p>
-            </div>
+            </Prose>
             <Artifact name="attach-race-report.md" kind="md" size="4.2 kB" dense={dense} />
-          </div>
+          </AssistantDocument>
 
           <UserMessage when="09:31">
             Vale. Confírmalo con un test de concurrencia y pasa vet antes de dar por bueno el cambio.
@@ -917,12 +933,12 @@ function Transcript({ dense, streaming = true, short, tail }) {
         </>
       )}
 
-      <div class="zl-turn">
+      <AssistantDocument>
         <Ledger rows={streaming ? LEDGER_B : LEDGER_B_DONE} dense={dense} folded={false} />
         <StreamingProse playing={streaming} />
-      </div>
+      </AssistantDocument>
       {tail}
-    </div>
+    </ProductionTranscript>
   );
 }
 

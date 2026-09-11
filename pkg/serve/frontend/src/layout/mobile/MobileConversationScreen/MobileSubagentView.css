@@ -55,7 +55,7 @@
    with 50px of top padding and a mask; inside this screen the head already
    owns that space, so the transcript starts right under the hairline instead
    of 50px below it. */
-.msa .mconv-stream {
+.msa .zl-transcript {
   padding: var(--space-3) var(--space-4) var(--space-2);
   -webkit-mask-image: none;
   mask-image: none;

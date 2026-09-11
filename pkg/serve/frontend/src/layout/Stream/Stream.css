@@ -1,90 +1,113 @@
-.stream {
+/* Stream — the scrollable conversation.
+
+   This sheet is the catalogue's, MOVED (catalog/zones-lab.css `.zl-transcript`
+   / `.zl-sys`), not translated. The class names came with the rules on
+   purpose: a rule that is copied is a rule that can drift, and the drift is
+   what this migration exists to end. The catalogue imports the Transcript
+   shell now, so these are the only transcript-scroller rules in the product.
+
+   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
+   ?view=zones they resolve from `.zl` (zones-lab.css); everywhere else the
+   fallback IS the catalogue's own value.
+
+   What is added below the catalogue's block is only what the prototype never
+   had: the frame that anchors "new messages", the iOS safe-area on the phone,
+   the desktop and pane hosts, and stick-to-bottom. The catalogue's 68ch
+   measure travelled with the rules — the text is narrow, the sheet is not. */
+
+.zl-transcript-frame {
+  position: relative;
   flex: 1;
   min-height: 0;
-  position: relative;
   display: flex;
   flex-direction: column;
 }
 
-.stream .stream-scroll {
+.zl-transcript {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden; /* horizontal scrolling is a block affordance (pre/table), never page-level */
   min-height: 0;
+  padding: 74px 18px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--zl-line-2, rgba(255, 255, 255, 0.12)) transparent;
 }
 
-.stream .stream-col {
-  max-width: 780px;
-  margin: 0 auto;
-  padding: 30px var(--space-8) 40px;
+.zl-transcript.is-dense { padding: 12px 16px 16px; }
+
+/* Desktop conversation column: the catalogue's `.zl-desk .zl-transcript`.
+   The column is wide; the text is not. 68ch of 16px Outfit is ~640px. */
+.zl-desk .zl-transcript,
+.conversation-main .zl-transcript { padding: 10px 22px 24px; }
+.zl-desk .zl-transcript:not(.is-dense) > *,
+.conversation-main .zl-transcript:not(.is-dense) > * { max-width: 68ch; }
+
+/* Grid pane: tighter padding, no measure cap — the pane is the cap. */
+.zl-pane .zl-transcript,
+.pane .zl-transcript { padding: 8px 16px 16px; }
+
+.conversation-main .zl-transcript,
+.mconv .zl-transcript { overflow-x: hidden; }
+
+/* Phone: the capsules float over the transcript, so it fades out under them.
+   Production adds the iOS safe-area the catalogue's device frame never had,
+   and a short bottom fade so the dock is not a hard edge. */
+.mconv .zl-transcript {
+  padding: calc(74px + env(safe-area-inset-top, 0px)) 18px 24px;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent env(safe-area-inset-top, 0px),
+    transparent calc(env(safe-area-inset-top, 0px) + 44px),
+    #000 calc(env(safe-area-inset-top, 0px) + 84px),
+    #000 calc(100% - 28px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent env(safe-area-inset-top, 0px),
+    transparent calc(env(safe-area-inset-top, 0px) + 44px),
+    #000 calc(env(safe-area-inset-top, 0px) + 84px),
+    #000 calc(100% - 28px),
+    transparent 100%
+  );
 }
 
-/* A flex/grid child can only honor its blocks' overflow-x if it may shrink. */
-.stream .doc-prose {
-  min-width: 0;
-  max-width: 100%;
+/* A subagent screen already has a head: no capsule padding, no mask. */
+.msa .zl-transcript {
+  padding: 12px 16px 8px;
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
-.stream .stream-tick {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  margin: 26px 0 var(--space-5);
-  color: var(--overlay0);
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  letter-spacing: var(--tracking-wide);
+/* System line: a note about the conversation rather than part of it. */
+.zl-sys {
+  padding: 8px 0;
+  font-size: var(--zl-fs-meta, 12px);
+  line-height: 1.5;
+  color: var(--zl-t3, #9091a6);
 }
+.zl-sys.is-error { color: var(--zl-red, #f38ba8); }
+.zl-sys .zl-data { color: inherit; }
 
-.stream .stream-tick::before,
-.stream .stream-tick::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--surface0);
-}
-
-/* System line (clear/compact/branch/goal marker, truncation notice): a thin,
-   dimmed separator that closes the current assistant turn. */
-.stream .stream-system {
-  margin: var(--space-5) 0;
-  color: var(--overlay0);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  letter-spacing: var(--tracking-wide);
-  text-align: center;
-}
-
-/* Assistant prose block: the markdown HTML injected (sanitized) into
-   AssistantDocument. It reuses the .doc typography by sitting inside .doc. */
-.stream .doc-prose > :first-child {
-  margin-top: 0;
-}
-
-.stream .doc-prose > :last-child {
-  margin-bottom: 0;
-}
-
-.stream .stream-new-btn {
+/* "New messages below": it floats over the transcript, so it earns a shadow.
+   Peach is not available to it — it is not you speaking. */
+.zl-transcript-new {
   position: absolute;
-  bottom: var(--space-4);
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: var(--z-overlay);
-  border: 1px solid var(--surface1);
-  background: var(--crust);
-  color: var(--peach);
-  border-radius: var(--radius-full);
-  padding: var(--space-2) var(--space-4);
+  z-index: 5;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--zl-r-sm, 6px);
+  background: var(--zl-control, #262633);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07)), 0 6px 20px rgba(0, 0, 0, 0.45);
+  color: var(--zl-t1, #f4f4f7);
   font-family: var(--font);
-  font-size: var(--text-xs);
+  font-size: var(--zl-fs-meta, 12px);
   cursor: pointer;
-  box-shadow: var(--shadow-md);
 }
-@media (hover: hover) {
-
-
-.stream .stream-new-btn:hover {
-  border-color: var(--peach);
-}
-}
+.mconv .zl-transcript-new { min-height: 44px; padding: 0 16px; font-size: var(--zl-fs-body, 14px); }

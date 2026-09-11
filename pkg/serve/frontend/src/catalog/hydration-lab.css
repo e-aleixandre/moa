@@ -84,7 +84,7 @@
   --hydra-top: 50px;
 }
 
-.hydra-screen .mconv-stream { padding-top: var(--hydra-top); }
+.hydra-screen .zl-transcript { padding-top: var(--hydra-top); }
 
 /* SR-only utility: there is no global one (ActivityLedger scopes its own). */
 .hydra-screen .sr-only {
@@ -234,7 +234,7 @@
   pointer-events: none;
 }
 
-.hydra--veil.is-waiting .mstream::after {
+.hydra--veil.is-waiting .zl-transcript::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -290,7 +290,7 @@
    rather than popping: the point of the lab is to judge the swap, not just the
    endpoints. */
 
-.hydra-screen:not(.is-waiting) .doc:last-of-type {
+.hydra-screen:not(.is-waiting) .zl-turn:last-of-type {
   animation: hydra-settle calc(var(--duration) * 3) var(--ease) 1;
 }
 
@@ -303,5 +303,5 @@
    StreamingSkeleton.css; here the arrival stops moving and the spinners stop
    spinning via Spinner.css. Nothing else needs disabling. */
 @media (prefers-reduced-motion: reduce) {
-  .hydra-screen:not(.is-waiting) .doc:last-of-type { animation: none; }
+  .hydra-screen:not(.is-waiting) .zl-turn:last-of-type { animation: none; }
 }

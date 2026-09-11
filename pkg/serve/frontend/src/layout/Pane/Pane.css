@@ -367,9 +367,8 @@
   line-height: var(--leading-normal);
 }
 
-.pane .p-body-live .stream .stream-col {
-  max-width: none;
-  padding: var(--space-4) var(--space-4) var(--space-5);
+.pane .p-body-live .zl-transcript {
+  padding: 8px 16px 16px;
 }
 
 /* Blocking strip (McpBanner / permission / ask_user) above the composer. */

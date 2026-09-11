@@ -178,8 +178,7 @@ function Screen({ variant, resolved }) {
   }, [resolved, variant]);
   return (
     <div class={`mconv hydra-screen hydra--${variant}${waiting ? " is-waiting" : ""}`}>
-      <div class="mstream">
-        <div class="mconv-stream" ref={scrollerRef}>
+      <div class="zl-transcript" ref={scrollerRef}>
           {variant === "banner" && waiting && (
             <div class="hydra-banner-spacer" aria-hidden="true" />
           )}
@@ -231,7 +230,6 @@ function Screen({ variant, resolved }) {
             Catching up — showing your last view while the newest messages load
           </span>
         )}
-      </div>
 
       <ComposerBar />
 

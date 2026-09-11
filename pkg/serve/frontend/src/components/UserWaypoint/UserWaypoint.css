@@ -1,49 +1,87 @@
-.waypoint {
-  background: color-mix(in srgb, var(--surface0) 45%, transparent);
-  border: 1px solid var(--surface0);
-  border-left: 3px solid var(--peach);
-  border-radius: 4px var(--radius-lg) var(--radius-lg) 4px;
-  padding: var(--space-3) var(--space-4);
-  margin: var(--space-5) 0 var(--space-6);
-}
+/* UserWaypoint — the user's message.
 
-.waypoint .who {
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--peach);
-  margin-bottom: var(--space-1);
+   This sheet is the catalogue's, MOVED (catalog/zones-lab.jsx `UserMessage`,
+   zones-lab.css `.zl-user` / `.zl-user-body` / `.zl-user-when`), not translated.
+   Peach is the left edge and ONLY the left edge: the one place in the product
+   it is allowed. There is no card and no "YOU" header — the bar is the speaker.
+   The catalogue imports this component now, so these are the only user-message
+   rules in the product.
+
+   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
+   ?view=zones they resolve from `.zl` (zones-lab.css); everywhere else the
+   fallback IS the catalogue's own value.
+
+   What is added below the catalogue's block is only what the prototype never
+   had: rewind, attachments, the live-preview reference, a parent-session
+   accent, and the confirmation sheet. */
+
+.zl-user {
+  position: relative;
+  margin: 0 0 24px;
+  padding: 2px 0 2px 14px;
+  border-left: 3px solid var(--peach, #fab387);
+  font-size: var(--zl-fs-title, 16px);
+  line-height: 1.6;
+  color: var(--zl-t1, #f4f4f7);
+}
+.zl-user-body { overflow-wrap: anywhere; }
+.zl-user-body p { margin: 0; }
+.zl-user-body p + p { margin-top: 8px; }
+.zl-user-when {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--zl-t4, #66677c);
+}
+.zl-user .zl-data {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.waypoint .who time {
-  color: var(--overlay0);
+/* Optional source label (steer, from parent). Ordinary messages have none. */
+.zl-user-label {
+  margin-bottom: 4px;
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 600;
+  color: var(--zl-t4, #66677c);
+}
+
+.zl-user.is-parent { border-left-color: var(--waypoint-accent); }
+.zl-user.is-parent .zl-user-label { color: var(--waypoint-accent); }
+
+.zl-user-body code {
+  padding: 1px 5px;
+  border-radius: var(--zl-r-sm, 6px);
+  background: var(--zl-raised, #1e1e29);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
   font-family: var(--mono);
-  letter-spacing: normal;
-  font-weight: var(--weight-normal);
-  text-transform: none;
-  font-size: var(--text-xs);
+  font-size: 0.875em;
+  color: var(--zl-t2, #c3c4d1);
+}
+
+.zl-transcript.is-dense .zl-user {
+  margin-bottom: 16px;
+  padding-left: 12px;
+  font-size: var(--zl-fs-body, 14px);
+  line-height: 1.55;
 }
 
 /* the rewind mark — every user message is a branch point, so this sits on every
    one of them and must be quiet enough to disappear while reading. It rides the
-   header row next to the timestamp (not over the text, not a floating overlay),
-   inherits the peach the header already wears, and rests at 45% opacity: legible
-   as a mark, not loud enough to compete with the message. Full strength on
-   hover/focus. It is pushed to the right edge so the eye meets it only when
-   looking for it. */
-.waypoint .wp-rewind {
+   timestamp row (not over the text, not a floating overlay) and rests at 45%
+   opacity: legible as a mark, not loud enough to compete with the message. */
+.zl-user .wp-rewind {
   margin-left: auto;
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   /* 26px, not 44: it repeats down the whole transcript, and a full tap target on
-     every message would put a row of buttons beside every thing you wrote. The
-     negative margin claws back the padding so it doesn't grow the header row. */
+     every message would put a row of buttons beside every thing you wrote. */
   width: 26px;
   height: 26px;
   margin-top: -5px;
@@ -52,67 +90,32 @@
   border: 0;
   border-radius: var(--radius-full);
   background: none;
-  color: var(--peach);
+  color: var(--peach, #fab387);
   opacity: 0.45;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: opacity var(--duration) var(--ease), background var(--duration) var(--ease);
 }
-.waypoint .wp-rewind:active:not(:disabled) {
+.zl-user .wp-rewind:active:not(:disabled) {
   opacity: 1;
-  background: color-mix(in srgb, var(--peach) 14%, transparent);
+  background: color-mix(in srgb, var(--peach, #fab387) 14%, transparent);
 }
 @media (hover: hover) {
-
-
-.waypoint .wp-rewind:hover:not(:disabled){
-  opacity: 1;
-  background: color-mix(in srgb, var(--peach) 14%, transparent);
-}
+  .zl-user .wp-rewind:hover:not(:disabled) {
+    opacity: 1;
+    background: color-mix(in srgb, var(--peach, #fab387) 14%, transparent);
+  }
 }
 
-.waypoint .wp-rewind:disabled {
+.zl-user .wp-rewind:disabled {
   opacity: 0.18;
   cursor: default;
 }
 
-.waypoint .wp-rewind:focus-visible {
+.zl-user .wp-rewind:focus-visible {
   opacity: 1;
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
-}
-
-.waypoint .body {
-  color: var(--text);
-  font-size: var(--text-md);
-  line-height: var(--leading-normal);
-}
-
-.waypoint .body p {
-  margin: 0;
-}
-
-.waypoint .body p + p {
-  margin-top: var(--space-2);
-}
-
-.waypoint-parent {
-  border-color: color-mix(in srgb, var(--waypoint-accent) 24%, var(--surface0));
-  border-left-color: var(--waypoint-accent);
-  background: color-mix(in srgb, var(--waypoint-accent) 7%, var(--surface0));
-}
-
-.waypoint-parent .who {
-  color: var(--waypoint-accent);
-}
-
-.waypoint .body code {
-  font-family: var(--mono);
-  font-size: 0.88em;
-  color: var(--flamingo);
-  background: color-mix(in srgb, var(--crust) 60%, transparent);
-  border-radius: var(--radius-sm);
-  padding: 1px 5px;
 }
 
 /* the preview reference — "anclado al lomo": a short peach dash comes out of
@@ -125,10 +128,10 @@
   align-items: baseline;
   flex-wrap: wrap;
   gap: 0 var(--space-2);
-  /* pulls left into the card's padding so the dash starts at the spine */
-  width: calc(100% + var(--space-4));
-  margin: 2px 0 var(--space-2) calc(var(--space-4) * -1);
-  padding: 2px 0 2px var(--space-4);
+  /* pulls left into the 14px padding so the dash starts at the peach spine */
+  width: calc(100% + 14px);
+  margin: 2px 0 var(--space-2) -14px;
+  padding: 2px 0 2px 14px;
   border: 0;
   background: none;
   text-align: left;
@@ -227,19 +230,16 @@
   font-size: inherit;
 }
 
-/* the attachments skirt — "faldón": one box that IS the foot of the message.
-   It bleeds to the card's edges and closes its bottom corners instead of
-   nesting a second card inside the bubble. */
-.waypoint.has-skirt {
-  padding-bottom: 0;
-}
+/* the attachments skirt — there is no card left to be the foot of, so it is a
+   plain list hanging off the same peach bar. */
+.zl-user.has-skirt { padding-bottom: 2px; }
 
 .wp-attachments {
-  margin: var(--space-3) calc(var(--space-4) * -1) 0;
-  border-top: 1px solid var(--surface0);
-  background: color-mix(in srgb, var(--mantle) 70%, transparent);
-  /* mirrors the card's own radii: round on the right, near-square by the spine */
-  border-radius: 0 0 var(--radius-lg) 2px;
+  margin: 10px 0 0;
+  border-top: 0;
+  border-radius: var(--zl-r-sm, 6px);
+  background: var(--zl-sheet, #171720);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
   overflow: hidden;
 }
 
@@ -248,11 +248,11 @@
   align-items: center;
   gap: var(--space-2);
   padding: 8px var(--space-4) 6px;
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--overlay1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta, 12px);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--zl-t4, #66677c);
 }
 
 .skirt-head .lucide {

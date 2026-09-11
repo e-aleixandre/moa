@@ -952,7 +952,7 @@
 .live-preview-attachment.is-empty::before { color: var(--surface2); }
 /* the whole message, read properly: the same AssistantDocument the transcript
    renders, plus the way back to the conversation it came from. */
-.lp-msg-sheet .doc {
+.lp-msg-sheet .zl-turn {
   max-height: 60vh;
   overflow: auto;
 }
@@ -987,16 +987,19 @@
    sheet is portalled to <body>, outside it — without this the same message would
    read at a different line height here than in the transcript it came from. */
 @media (max-width: 768px) {
-  .lp-msg-sheet .doc p {
+  .lp-msg-sheet .zl-turn p,
+  .lp-msg-sheet .zl-prose p {
     font-size: var(--text-base);
     line-height: 1.55;
     max-width: none;
     margin: 0 0 10px;
   }
-  .lp-msg-sheet .doc p:last-child {
+  .lp-msg-sheet .zl-turn p:last-child,
+  .lp-msg-sheet .zl-prose p:last-child {
     margin-bottom: 0;
   }
-  .lp-msg-sheet .doc ul {
+  .lp-msg-sheet .zl-turn ul,
+  .lp-msg-sheet .zl-prose ul {
     margin-bottom: 10px;
   }
   /* Same behaviour, phone widths: the lane hugs the screen and clears the home

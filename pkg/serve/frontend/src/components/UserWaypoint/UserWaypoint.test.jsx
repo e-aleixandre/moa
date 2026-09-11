@@ -224,7 +224,10 @@ test("a parent task uses the parent label and subagent accent", () => {
     label: "↳ FROM PARENT",
     children: <p>Review this change.</p>,
   });
-  const card = descendants(waypoint).find((node) => node.props?.class === "waypoint waypoint-parent");
+  const card = descendants(waypoint).find((node) =>
+    String(node.props?.class || "").split(/\s+/).includes("zl-user")
+    && String(node.props?.class || "").split(/\s+/).includes("is-parent")
+  );
 
   expect(card).toBeDefined();
   expect(card.props.style).toEqual({ "--waypoint-accent": "var(--teal)" });
@@ -232,10 +235,15 @@ test("a parent task uses the parent label and subagent accent", () => {
   expect(textContent(waypoint)).not.toContain("You");
 });
 
-test("an ordinary user waypoint remains labeled You", () => {
-  const waypoint = UserWaypoint({ children: <p>Steer the child.</p> });
-  const card = descendants(waypoint).find((node) => node.props?.class === "waypoint waypoint-user");
+test("an ordinary user message is the peach edge, not a You label", () => {
+  const waypoint = UserWaypoint({ time: "09:12", children: <p>Steer the child.</p> });
+  const card = descendants(waypoint).find((node) =>
+    String(node.props?.class || "").split(/\s+/).includes("zl-user")
+  );
 
   expect(card).toBeDefined();
-  expect(textContent(waypoint)).toContain("You");
+  expect(String(card.props.class).split(/\s+/)).not.toContain("is-parent");
+  expect(textContent(waypoint)).not.toContain("You");
+  expect(textContent(waypoint)).toContain("09:12");
+  expect(textContent(waypoint)).toContain("Steer the child.");
 });

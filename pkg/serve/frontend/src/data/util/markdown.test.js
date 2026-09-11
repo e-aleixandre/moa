@@ -54,8 +54,8 @@ test('a streaming caret stays inside the final prose paragraph', () => {
   DOMPurify.sanitize = (html) => html;
   try {
     const html = renderMarkdownWithCaret('hello');
-    const caret = '<span class="doc-cursor"></span>';
-    expect(html).toContain('doc-cursor');
+    const caret = '<span class="zl-caret"></span>';
+    expect(html).toContain('zl-caret');
     expect(html.indexOf(caret)).toBeGreaterThan(html.indexOf('hello'));
     expect(html.indexOf(caret)).toBeLessThan(html.lastIndexOf('</p>'));
   } finally {
@@ -75,7 +75,7 @@ test('a streaming caret is passed through DOMPurify sanitization', () => {
   try {
     renderMarkdownWithCaret('hello');
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain('doc-cursor');
+    expect(calls[0]).toContain('zl-caret');
   } finally {
     DOMPurify.sanitize = sanitize;
   }

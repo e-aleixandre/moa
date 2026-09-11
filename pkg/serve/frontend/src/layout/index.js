@@ -1,6 +1,6 @@
 export { Sidebar } from "./Sidebar/Sidebar.jsx";
 export { ChatHead } from "./ChatHead/ChatHead.jsx";
-export { Stream } from "./Stream/Stream.jsx";
+export { Stream, Transcript } from "./Stream/Stream.jsx";
 export { LiveBar } from "./LiveBar/LiveBar.jsx";
 export { SubagentView } from "./SubagentView/SubagentView.jsx";
 export { BashJobView } from "./BashJobView/BashJobView.jsx";
