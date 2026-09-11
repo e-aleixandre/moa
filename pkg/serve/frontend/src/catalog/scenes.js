@@ -35,6 +35,8 @@ export const SCENES = [
   { name: "phone-artifacts", host: "phone", live: "working", surface: "artifacts", piece: "session-panel" },
   { name: "phone-model-sheet", host: "phone", live: "working", surface: "model", piece: "pickers" },
   { name: "phone-perm-sheet", host: "phone", live: "working", surface: "perm", piece: "pickers" },
+  { name: "phone-settings", host: "phone", live: "working", surface: "settings", piece: "global-settings" },
+  { name: "phone-settings-page", host: "phone", live: "working", surface: "settings-page", piece: "global-settings" },
 
   // ── Desktop shell, 860×780 (zones-lab.css:144) ───────────────────────────
   { name: "desktop-idle", host: "desktop", live: "idle", surface: "none", width: 1500, piece: "shell-desktop" },
@@ -47,6 +49,8 @@ export const SCENES = [
   { name: "desktop-artifacts", host: "desktop", live: "working", surface: "artifacts", width: 1500, piece: "session-panel" },
   { name: "desktop-model-popover", host: "desktop", live: "working", surface: "model", width: 1500, piece: "pickers" },
   { name: "desktop-perm-popover", host: "desktop", live: "working", surface: "perm", width: 1500, piece: "pickers" },
+  { name: "desktop-settings", host: "desktop", live: "working", surface: "settings", width: 1500, piece: "global-settings" },
+  { name: "desktop-settings-page", host: "desktop", live: "working", surface: "settings-page", width: 1500, piece: "global-settings" },
 
   // ── Grid, 1298×820 (zones-lab.css:1210) ──────────────────────────────────
   { name: "grid-working", host: "grid", live: "working", surface: "none", width: 1500, height: 1000, piece: "shell-grid" },

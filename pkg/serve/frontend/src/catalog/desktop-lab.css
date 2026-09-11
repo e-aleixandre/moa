@@ -55,3 +55,41 @@
   width: 100%;
   max-height: 100%;
 }
+
+/* ?view=phone -- the prototype's phone as the SCREEN, not as an object on a
+   table. The zones page draws it at a fixed 390x780 with a radius and a drop
+   shadow, which is what you want when three densities sit side by side for
+   comparison. Opened on its own it should just be the phone, edge to edge,
+   with nothing to scroll past to reach it. */
+.cat-phone-alone {
+  position: fixed;
+  inset: 0;
+  background: var(--amb-canvas, #101018);
+}
+/* The phone is not a direct child: Phone() wraps it in .zl-phone-wrap, which
+   has no height of its own, so the phone's `height: 100%` had nothing to
+   resolve against and fell back to its content -- 1494px in a 900px window.
+   The chain has to be unbroken for a percentage height to mean anything. */
+.cat-phone-alone .zl-phone-wrap {
+  height: 100%;
+  min-height: 0;
+}
+/* The compound selector beats .zl-phone's own `height: 780px`
+   (zones-lab.css:139), which is same-specificity and loaded later. */
+.cat-phone-alone > .zl-phone,
+.cat-phone-alone .zl-phone {
+  width: 100%;
+  /* The prototype's phone is a flex column with a FIXED 780px height. Given no
+     height to divide up it grows to fit the transcript instead -- 1450px in a
+     900px window, chrome off the top and composer off the bottom. The fixed
+     parent supplies the height; min-height:0 lets the transcript inside it
+     scroll rather than push the ends out. */
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--amb-canvas, #101018);
+}
+/* The density caption is the zones page talking about the phone. Here the
+   phone is not being labelled, it is being used. */
+.cat-phone-alone .zl-density-label { display: none; }

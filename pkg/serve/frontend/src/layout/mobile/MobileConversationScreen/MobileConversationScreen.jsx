@@ -439,14 +439,17 @@ function MobileSessionChrome({ version, forceMobile = false }) {
         onGroupByProject={setGroupByProject}
         onToggleProject={setDrawerProjectCollapsed}
       />
-      <MobileSheet
+      {/* The settings sheet is its own surface in both densities: `phone`
+          swaps the centred panel for a bottom sheet, which is the one thing
+          that genuinely differs. Wrapping it in MobileSheet would give it a
+          second head and a second shell. */}
+      <GlobalSettings
+        phone
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        title="Settings"
-        scope="everywhere"
-      >
-        <GlobalSettings soundEnabled={chrome.soundEnabled} version={version} />
-      </MobileSheet>
+        soundEnabled={chrome.soundEnabled}
+        version={version}
+      />
     </>
   );
 }

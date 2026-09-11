@@ -296,10 +296,8 @@ export function ConversationScreen() {
             )}
             {/* The dock: live bar, composer and status line are ONE instrument,
                 so they share a box and the box carries the transition out of the
-                transcript. Without it the reading sheet ended in a seam against
-                the input — the two read as cut apart rather than as the page and
-                the thing you type on it. The phone's equivalent is .mcomposer. */}
-            <div class="conversation-dock">
+                transcript. The phone's equivalent is .mcomposer.zl-dock. */}
+            <div class="zl-dock">
               {/* One bar of live work, right above the input: what is happening
                   NOW belongs next to where you'd interrupt it, while the strip
                   below keeps the standing telemetry (context, cost, permissions,

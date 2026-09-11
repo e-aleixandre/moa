@@ -55,25 +55,6 @@
   gap: var(--space-3);
 }
 
-/* conversation-dock — the live bar, the composer and the status line in one
-   box. Its only job in the base skin is to group them and to open a band above
-   the composer; the surface that makes the transcript dissolve across that band
-   is Ambient's (tokens/ambient.css), because the fade is a property of that
-   material, not of the layout.
-
-   The 18px is the catalogue's (.zl-desk .zl-dock, zones-lab.css). Without it
-   the composer starts at the dock's first pixel and the fade has nowhere to
-   happen: the gradient would be painted entirely BEHIND the opaque composer and
-   the transcript would still end against a hard edge. The composer keeps its
-   own bottom padding, so only the top is added here. */
-.conversation-main .conversation-dock {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding-top: 18px;
-}
-
 /* conversation-blocking — fixed strip between the Stream and the AgentTray/
    Composer for untrusted MCP banners and pending permissions. */
 .conversation-main .conversation-blocking {

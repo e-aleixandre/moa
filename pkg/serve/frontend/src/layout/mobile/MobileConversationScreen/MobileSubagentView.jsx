@@ -140,7 +140,7 @@ function MobileSubagentLive({ view, session, jobId, onBack, onCancel, confirmCan
         waypointAccent={view.accent}
       />
 
-      <div class="mcomposer msa-foot">
+      <div class="mcomposer zl-dock msa-foot">
         <div class="livebar">
           <div class="lb-bar">
             <div class="lb-now" role="status" aria-live="polite">

@@ -119,7 +119,7 @@
 }
 
 .lsg-convo .agent-tray,
-.lsg-convo .composer-wrap,
+.lsg-convo .zl-composer,
 .lsg-convo .status-strip {
   padding-left: var(--space-6);
   padding-right: var(--space-6);

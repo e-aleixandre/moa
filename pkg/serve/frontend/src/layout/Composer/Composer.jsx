@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Plus, Paperclip, Slash, ArrowUp, Square, X, Mic, Loader2, ChevronUp, Image as ImageIcon } from "lucide-preact";
+import { Paperclip, Square, X, Mic, Loader2, ChevronUp, Image as ImageIcon } from "lucide-preact";
 import { Chip } from "../../primitives/index.js";
 import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
@@ -31,24 +31,48 @@ import {
 } from "../../data/composer-composition.js";
 import "./Composer.css";
 
-// Composer — the conversation input: send a message, steer/queue while the
-// agent works, recall the queue to edit, and stop the run. This is a STATEFUL
-// container (unlike the presentational Spine/ChatHead/etc.) because it owns a
-// lot of DOM-bound state — the textarea ref, per-session drafts, and input
-// history — that can't be lifted without churn. It receives `sessionId` and
-// `session` by props (the ConversationScreen container reads them from the
-// store), exactly like the old SPA's InputBar. The queue/recall/abort/history/
-// draft logic plus slash commands/@-mentions/attachments/shell escapes/
-// cache warning are ported faithfully from pkg/serve/frontend/src/
-// components/InputBar.jsx.
+// Composer — the conversation input. Markup and CSS are the catalogue's
+// (catalog/zones-lab.jsx `Composer`, zones-lab.css the `.zl-composer` /
+// `.zl-dock` / `.zl-ta` / `.zl-attach` / `.zl-send` block), MOVED here rather
+// than imitated: the classes travelled with the rules, so the slab IS the
+// accepted design instead of a translation of it. The catalogue imports this
+// component now, which is what makes one definition rather than two.
+//
+// What is NOT the catalogue's is everything the prototype never had, grafted
+// on top: send / queue / slash / @-mention / attachments / stop / dictation /
+// the draft that survives a reload / the anti-double-send barrier. The mic
+// sits next to the arrow as a secondary control; on the phone the send button
+// IS the mic. Send is never peach — peach is the message the text becomes
+// after this button.
 //
 // Subagent steering: when `steer` is set ({ jobId, name, onRebound }) the
 // composer becomes a STEER box for a live subagent. It stays visually IDENTICAL
-// to the normal composer (same pill, no accent border) — the subagent view's
-// header identifies who you're writing to, so the input uses the standard
-// running placeholder. Enter routes the text
-// through steerSubagent(sessionId, jobId, text) instead of sendMessage, and
-// there is no queue/slash/shell semantics (those belong to the parent run).
+// to the normal composer — the subagent view's header identifies who you're
+// writing to. Enter routes the text through steerSubagent instead of
+// sendMessage, and there is no queue/slash/shell semantics (those belong to
+// the parent run).
+//
+// `plusActions` turns the `+` into a menu instead of a direct file picker: the
+// surface that hosts the composer contributes the extra entries that belong
+// next to Attach files there. Only the phone passes any (Live preview, which
+// has no room of its own since the mobile header is gone); on the desktop the
+// prop stays empty and `+` opens the picker with a single tap, as before.
+
+function AttachIcon({ size = 18 }) {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true">
+      <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 13V3.5M8 3.5L3.8 7.7M8 3.5l4.2 4.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
 
 const MAX_ATTACHMENTS = 8;
 
@@ -82,12 +106,7 @@ export function keepCommandSuggestionVisible(list, index) {
 // backgrounded PWAs freely) doesn't lose what you were typing. The prefix is
 // deliberately DISTINCT from the old SPA's `moa-draft-` so the two frontends
 // don't clobber each other's drafts while they coexist under /next.
-// `plusActions` turns the `+` into a menu instead of a direct file picker: the
-// surface that hosts the composer contributes the extra entries that belong
-// next to Attach files there. Only the phone passes any (Live preview, which
-// has no room of its own since the mobile header is gone); on the desktop the
-// prop stays empty and `+` opens the picker with a single tap, as before.
-export function Composer({ sessionId, session, shortPlaceholder = false, compact = false, steer = null, onSecret, transformMessage, onSent, plusActions = [] }) {
+export function Composer({ sessionId, session, shortPlaceholder = false, compact = false, steer = null, onSecret, transformMessage, onSent, plusActions = [], onFocusChange }) {
   const { skills, refreshSkills } = useSessionSkills(sessionId);
   const textareaRef = useRef(null);
   const attachInputRef = useRef(null);
@@ -167,6 +186,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // InputBar's capabilities check). `transcribe` drives whether the send button
   // doubles as a push-to-talk mic.
   useEffect(() => {
+    if (!sessionId) return;
     fetch('/api/capabilities', { headers: { 'X-Moa-Request': '1' } })
       .then(r => r.json())
       .then(caps => {
@@ -174,13 +194,13 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         setCanTranscribe(!!caps.transcribe);
       })
       .catch(() => {});
-  }, []);
+  }, [sessionId]);
 
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 160) + "px";
+    el.style.height = "0";
+    el.style.height = Math.min(el.scrollHeight, 132) + "px";
   }, []);
 
   // Restore the persisted draft on mount. The composer is keyed by session in
@@ -430,21 +450,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       if (interceptSecretCommand(nextValue.trim()) !== null) saveDraft(sessionId, "");
     }
   }, [addFiles, sessionId]);
-
-  // The composer bar has no dedicated "/" affordance in the old SPA (the popup
-  // only appears once you type "/" yourself). We give the button a concrete
-  // job instead of leaving it a no-op: insert "/" at the cursor and focus, which
-  // opens the same popup as typing it manually.
-  const handleSlashButton = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    if (el.value === '') {
-      writeComposer(el, '/');
-      el.selectionStart = el.selectionEnd = 1;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    el.focus();
-  }, []);
 
   // --- Send / enqueue ---
   // Ported from InputBar.handleSendInner. Slash commands and shell escapes are
@@ -1037,7 +1042,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // characters of instructions inside the field, which is the noisiest place in
   // the product to teach a shortcut and the one the eye returns to most. The
   // shortcuts themselves are unchanged; only their advertisement is gone.
-  const idlePlaceholder = "Message moa…";
+  const idlePlaceholder = "Message moa";
   // Steer mode uses the standard busy placeholder because its header identifies
   // the subagent. Busy (parent run) copy states that Enter STEERS without stopping —
   // the persistent Send button already signals "you can always talk to it", so
@@ -1047,8 +1052,14 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     : "Steer the agent — ⏎ sends while it works, it won't stop it…";
   const placeholder = (steer || busy) ? busyPlaceholder : idlePlaceholder;
 
+  /* `is-armed` — there is something to send. The send button is a quiet
+      control until then, so the accent marks a real action rather than
+      decorating an empty box. Attachments count: a photo with no caption is
+      as sendable as a sentence. */
+  const armed = hasText || attachments.length > 0;
+
   return (
-    <div class={`composer-wrap${compact ? " is-compact" : ""}`}>
+    <div class={`zl-composer${busy ? " is-busy" : ""}${armed ? " is-armed" : ""}`}>
       {cacheExpired && (
         <div class="cache-warn" title="The prompt cache for this conversation has expired. Your next message will pay for a fresh cache write (more expensive).">
           <span class="cache-warn-dot" />
@@ -1070,230 +1081,217 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           ))}
         </div>
       )}
-      {/* `is-armed` — there is something to send. The send button is a quiet
-          control until then, so the accent marks a real action rather than
-          decorating an empty box. Attachments count: a photo with no caption is
-          as sendable as a sentence. */}
-      <div class={`composer${busy ? " is-busy" : ""}${busy || (steer && steer.onStop) ? " has-stop" : ""}${hasText || attachments.length > 0 ? " is-armed" : ""}`}>
-        <input
-          ref={attachInputRef}
-          type="file"
-          multiple
-          hidden
-          accept={ATTACH_ACCEPT}
-          onChange={handleAttachChange}
+      <input
+        ref={attachInputRef}
+        type="file"
+        multiple
+        hidden
+        accept={ATTACH_ACCEPT}
+        onChange={handleAttachChange}
+      />
+      {fileSuggestions && !cmdSuggestions && (
+        <FileSuggestions
+          items={fileSuggestions}
+          cursor={fileCursor}
+          onSelect={acceptFileMention}
+          onHover={setFileCursor}
         />
-        {fileSuggestions && !cmdSuggestions && (
-          <FileSuggestions
-            items={fileSuggestions}
-            cursor={fileCursor}
-            onSelect={acceptFileMention}
-            onHover={setFileCursor}
-          />
-        )}
-        {cmdSuggestions && (
-          <div class="cmd-suggestions" ref={cmdSuggestionsRef}>
-            {cmdSuggestions.map((cmd, i) => (
-              <div
-                key={cmd.__flag ? cmd.name : '/' + cmd.name}
-                class={`cmd-suggestion-item ${i === cmdCursor ? "selected" : ""}`}
-                onMouseDown={(e) => { e.preventDefault(); acceptSuggestion(cmd); }}
-                onMouseEnter={() => setCmdCursor(i)}
-              >
-                <span class="cmd-suggestion-name">{cmd.__flag ? cmd.name : '/' + cmd.name}</span>
-                {cmd.args && <span class="cmd-suggestion-args">{cmd.args}</span>}
-                <span class="cmd-suggestion-desc">{cmd.desc}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        <textarea
-          ref={textareaRef}
-          rows={1}
-          class="composer-textarea"
-          aria-label="Message moa"
-          placeholder={placeholder}
-          onInput={handleInput}
-          onKeyDown={handleKey}
-          onCompositionStart={handleCompositionStart}
-          onCompositionEnd={handleCompositionEnd}
-          onPaste={handlePaste}
-          readOnly={contentSendPending}
-        />
-        <div class="composer-bar">
-          {plusActions.length > 0 ? (
-            <ActionMenu
-              open={plusMenuOpen}
-              onOpenChange={setPlusMenuOpen}
-              icon={Plus}
-              label="More"
-              triggerClass="composer-btn composer-btn-attach"
-              placement="up"
-              disabled={contentSendPending}
-              actions={[
-                { id: "attach", icon: Paperclip, label: "Attach files", onClick: handleAttachClick },
-                ...plusActions,
-              ]}
-            />
-          ) : (
-            <button type="button" class="composer-btn composer-btn-attach" title="Attach files" aria-label="Attach" onClick={handleAttachClick} disabled={contentSendPending}>
-              <Plus size={15} />
-            </button>
-          )}
-          <button type="button" class="composer-btn composer-btn-slash" title="Slash commands" aria-label="Slash commands" onClick={handleSlashButton} disabled={contentSendPending}>
-            <Slash size={14} />
-          </button>
-          {summary && (
-            <button
-              type="button"
-              class="queue-note"
-              title="Click or Alt+↑ to edit queued messages"
-              onPointerDown={(e) => { recallPointerDown.current = e.pointerId ?? true; }}
-              onPointerCancel={() => { recallPointerDown.current = null; }}
-              onClick={(e) => handleDequeueSteers({ pointerId: e.pointerId, detail: e.detail })}
-              onKeyDown={(e) => {
-                if (e.key !== "Enter" && e.key !== " ") return;
-                e.preventDefault();
-                handleDequeueSteers({ fromKeyboard: true });
-              }}
+      )}
+      {cmdSuggestions && (
+        <div class="cmd-suggestions" ref={cmdSuggestionsRef}>
+          {cmdSuggestions.map((cmd, i) => (
+            <div
+              key={cmd.__flag ? cmd.name : '/' + cmd.name}
+              class={`cmd-suggestion-item ${i === cmdCursor ? "selected" : ""}`}
+              onMouseDown={(e) => { e.preventDefault(); acceptSuggestion(cmd); }}
+              onMouseEnter={() => setCmdCursor(i)}
             >
-              <Chip size="sm" mono>{summary.count} queued</Chip>
-              <span>
-                {summary.lastImages > 0 && <ImageIcon size={13} aria-hidden="true" />}
-                {summary.lastIsCommand && <span aria-hidden="true">/</span>}
-                “{summary.lastText}”
-              </span>
-            </button>
-          )}
-          {busy && hasText && !summary && (
-            <span class="steer-hint" aria-hidden="true">⏎ steers — won't interrupt</span>
-          )}
-          {(busy || (steer && steer.onStop)) && (
-            /* Stop no longer REPLACES Send while busy — it joins it as a
-               secondary (ghost) action. Send keeps its identity in every state
-               so "you can always talk to it" (steer) reads at a glance; on
-               mobile this ghost is also the only Stop (no Esc).
-
-               In steer mode it stops the SUBAGENT, not the parent run: the
-               composer is aimed at the child, so the stop next to it has to be
-               too. The owner passes the action (and arms the confirm), since
-               "are you sure" belongs with the view that knows which child this
-               is. */
-            <button
-              type="button"
-              class={`composer-stop-ghost${steer && steer.stopArmed ? " is-armed" : ""}`}
-              aria-label={steer && steer.onStop ? `Stop ${steer.name}` : "Stop the run (Esc)"}
-              title={
-                steer && steer.onStop
-                  ? steer.stopArmed
-                    ? "Tap again to stop this subagent"
-                    : `Stop — cancels ${steer.name}`
-                  : "Stop — ends the run (Esc)"
-              }
-              onClick={steer && steer.onStop ? steer.onStop : handleStop}
-            >
-              <Square size={13} />
-            </button>
-          )}
-          {canVoice && !voiceButtonMode && (
-            /* The desktop's own dictation control, kept next to Send as a
-               secondary action. It drives the same voice machine as the phone
-               through its pointer-free toggle: click to start dictating, click
-               again to stop and transcribe (⌘./Alt+. does the same).
-               Hold-to-talk is deliberately NOT wired here — that gesture ends a
-               short press with a SEND, which is right for a button that IS Send
-               on a phone and wrong for a mic sitting next to its own arrow. */
-            <button
-              type="button"
-              class={`composer-btn composer-btn-mic${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
-              aria-label={transcribing ? "Transcribing" : recording ? "Stop recording" : "Dictate"}
-              title={
-                transcribing ? "Transcribing…"
-                  : recording ? "Click to stop & transcribe"
-                    : `Dictate (${formatShortcut(".", { mod: true })})`
-              }
-              disabled={transcribing || contentSendPending}
-              onClick={toggleFromShortcut}
-            >
-              {transcribing ? <Loader2 size={15} class="spin" />
-                : recording ? <Square size={13} />
-                  : <Mic size={15} />}
-            </button>
-          )}
-          {(() => {
-            // A shortcut recording can begin while there is text or an
-            // attachment. On the phone it must take over the button until it is
-            // stopped: showing Send there would make a live mic invisible and
-            // let a tap submit the unrelated text instead of stopping the
-            // recording. On the desktop the mic has its own button, which is
-            // where a live recording shows.
-            const voiceOwnsButton = voiceButtonMode || (compact && (recording || transcribing));
-            const micMode = voiceButtonMode && !hasText && attachments.length === 0;
-
-            let icon = <ArrowUp size={16} />;
-            if (contentSendPending || (voiceOwnsButton && transcribing)) icon = <Loader2 size={16} class="spin" />;
-            else if (voiceOwnsButton && recording && voiceLocked) icon = <Square size={14} />;
-            else if (voiceOwnsButton && recording) icon = <Mic size={16} />;
-            else if (micMode) icon = <Mic size={16} />;
-
-            const cls = [
-              "composer-send",
-              voiceOwnsButton ? "gesture" : "",
-              voiceOwnsButton && recording ? "recording" : "",
-              voiceOwnsButton && voiceLocked ? "locked" : "",
-              voiceOwnsButton && transcribing ? "transcribing" : "",
-              micMode ? "mic-mode" : "",
-            ].filter(Boolean).join(" ");
-
-            const sendTitle = busy ? "Send — steers the agent, doesn't stop it" : "Send";
-            const title = contentSendPending ? "Sending…"
-              : !voiceOwnsButton ? sendTitle
-              : transcribing ? "Transcribing…"
-              : recording ? (voiceLocked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
-              : canVoice ? `Hold to talk · tap to send (${formatShortcut(".", { mod: true })} for mic)`
-              : sendTitle;
-
-            const gestureProps = voiceOwnsButton
-              ? voiceHandlers
-              : {
-                onPointerDown: handleContentSendPointerDown,
-                onPointerUp: handleContentSendPointerUp,
-                onPointerCancel: handleContentSendPointerCancel,
-                onClick: handleContentSendClick,
-                onKeyDown: handleContentSendKeyDown,
-              };
-
-            const sendLabel = contentSendPending ? "Sending"
-              : !voiceOwnsButton ? (busy ? "Send steer" : "Send")
-              : transcribing ? "Transcribing"
-              : recording ? "Stop recording"
-              : micMode ? "Record"
-              : busy ? "Send steer"
-              : "Send";
-
-            return (
-              <div class="composer-send-wrap">
-                {showSlideHint && (
-                  <div class="voice-lock-hint">
-                    <ChevronUp size={14} />
-                    <span>Slide up to lock</span>
-                  </div>
-                )}
-                <button
-                  type="button"
-                  class={cls}
-                  aria-label={sendLabel}
-                  title={title}
-                  disabled={voiceOwnsButton && transcribing}
-                  {...gestureProps}
-                >
-                  {icon}
-                </button>
-              </div>
-            );
-          })()}
+              <span class="cmd-suggestion-name">{cmd.__flag ? cmd.name : '/' + cmd.name}</span>
+              {cmd.args && <span class="cmd-suggestion-args">{cmd.args}</span>}
+              <span class="cmd-suggestion-desc">{cmd.desc}</span>
+            </div>
+          ))}
         </div>
-      </div>
+      )}
+      {plusActions.length > 0 ? (
+        <ActionMenu
+          open={plusMenuOpen}
+          onOpenChange={setPlusMenuOpen}
+          icon={AttachIcon}
+          label="More"
+          triggerClass="zl-attach"
+          triggerSize={18}
+          placement="up"
+          disabled={contentSendPending}
+          actions={[
+            { id: "attach", icon: Paperclip, label: "Attach files", onClick: handleAttachClick },
+            ...plusActions,
+          ]}
+        />
+      ) : (
+        <button type="button" class="zl-attach" title="Attach files" aria-label="Attach" onClick={handleAttachClick} disabled={contentSendPending}>
+          <AttachIcon />
+        </button>
+      )}
+      <textarea
+        ref={textareaRef}
+        rows={1}
+        class="zl-ta"
+        aria-label="Message moa"
+        placeholder={placeholder}
+        onInput={handleInput}
+        onKeyDown={handleKey}
+        onCompositionStart={handleCompositionStart}
+        onCompositionEnd={handleCompositionEnd}
+        onPaste={handlePaste}
+        onFocus={onFocusChange ? () => onFocusChange(true) : undefined}
+        onBlur={onFocusChange ? () => onFocusChange(false) : undefined}
+        readOnly={contentSendPending}
+      />
+      {summary && (
+        <button
+          type="button"
+          class="queue-note"
+          title="Click or Alt+↑ to edit queued messages"
+          onPointerDown={(e) => { recallPointerDown.current = e.pointerId ?? true; }}
+          onPointerCancel={() => { recallPointerDown.current = null; }}
+          onClick={(e) => handleDequeueSteers({ pointerId: e.pointerId, detail: e.detail })}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
+            handleDequeueSteers({ fromKeyboard: true });
+          }}
+        >
+          <Chip size="sm" mono>{summary.count} queued</Chip>
+          <span>
+            {summary.lastImages > 0 && <ImageIcon size={13} aria-hidden="true" />}
+            {summary.lastIsCommand && <span aria-hidden="true">/</span>}
+            “{summary.lastText}”
+          </span>
+        </button>
+      )}
+      {busy && hasText && !summary && (
+        <span class="steer-hint" aria-hidden="true">⏎ steers — won't interrupt</span>
+      )}
+      {(busy || (steer && steer.onStop)) && (
+        /* Stop joins Send as a secondary (ghost) action. Send keeps its
+           identity in every state so "you can always talk to it" reads at a
+           glance; on mobile this ghost is also the only Stop (no Esc).
+
+           In steer mode it stops the SUBAGENT, not the parent run. */
+        <button
+          type="button"
+          class={`composer-stop-ghost${steer && steer.stopArmed ? " is-armed" : ""}`}
+          aria-label={steer && steer.onStop ? `Stop ${steer.name}` : "Stop the run (Esc)"}
+          title={
+            steer && steer.onStop
+              ? steer.stopArmed
+                ? "Tap again to stop this subagent"
+                : `Stop — cancels ${steer.name}`
+              : "Stop — ends the run (Esc)"
+          }
+          onClick={steer && steer.onStop ? steer.onStop : handleStop}
+        >
+          <Square size={13} />
+        </button>
+      )}
+      {canVoice && !voiceButtonMode && (
+        /* The desktop's own dictation control, kept next to Send as a
+           secondary action. It drives the same voice machine as the phone
+           through its pointer-free toggle: click to start dictating, click
+           again to stop and transcribe (⌘./Alt+. does the same).
+           Hold-to-talk is deliberately NOT wired here — that gesture ends a
+           short press with a SEND, which is right for a button that IS Send
+           on a phone and wrong for a mic sitting next to its own arrow. */
+        <button
+          type="button"
+          class={`zl-attach zl-mic${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
+          aria-label={transcribing ? "Transcribing" : recording ? "Stop recording" : "Dictate"}
+          title={
+            transcribing ? "Transcribing…"
+              : recording ? "Click to stop & transcribe"
+                : `Dictate (${formatShortcut(".", { mod: true })})`
+          }
+          disabled={transcribing || contentSendPending}
+          onClick={toggleFromShortcut}
+        >
+          {transcribing ? <Loader2 size={15} class="spin" />
+            : recording ? <Square size={13} />
+              : <Mic size={15} />}
+        </button>
+      )}
+      {(() => {
+        // A shortcut recording can begin while there is text or an
+        // attachment. On the phone it must take over the button until it is
+        // stopped: showing Send there would make a live mic invisible and
+        // let a tap submit the unrelated text instead of stopping the
+        // recording. On the desktop the mic has its own button, which is
+        // where a live recording shows.
+        const voiceOwnsButton = voiceButtonMode || (compact && (recording || transcribing));
+        const micMode = voiceButtonMode && !hasText && attachments.length === 0;
+
+        let icon = <SendIcon />;
+        if (contentSendPending || (voiceOwnsButton && transcribing)) icon = <Loader2 size={16} class="spin" />;
+        else if (voiceOwnsButton && recording && voiceLocked) icon = <Square size={14} />;
+        else if (voiceOwnsButton && recording) icon = <Mic size={16} />;
+        else if (micMode) icon = <Mic size={16} />;
+
+        const cls = [
+          "zl-send",
+          voiceOwnsButton ? "gesture" : "",
+          voiceOwnsButton && recording ? "recording" : "",
+          voiceOwnsButton && voiceLocked ? "locked" : "",
+          voiceOwnsButton && transcribing ? "transcribing" : "",
+          micMode ? "mic-mode" : "",
+        ].filter(Boolean).join(" ");
+
+        const sendTitle = busy ? "Send — steers the agent, doesn't stop it" : "Send";
+        const title = contentSendPending ? "Sending…"
+          : !voiceOwnsButton ? sendTitle
+          : transcribing ? "Transcribing…"
+          : recording ? (voiceLocked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
+          : canVoice ? `Hold to talk · tap to send (${formatShortcut(".", { mod: true })} for mic)`
+          : sendTitle;
+
+        const gestureProps = voiceOwnsButton
+          ? voiceHandlers
+          : {
+            onPointerDown: handleContentSendPointerDown,
+            onPointerUp: handleContentSendPointerUp,
+            onPointerCancel: handleContentSendPointerCancel,
+            onClick: handleContentSendClick,
+            onKeyDown: handleContentSendKeyDown,
+          };
+
+        const sendLabel = contentSendPending ? "Sending"
+          : !voiceOwnsButton ? (busy ? "Send steer" : "Send")
+          : transcribing ? "Transcribing"
+          : recording ? "Stop recording"
+          : micMode ? "Record"
+          : busy ? "Send steer"
+          : "Send";
+
+        return (
+          <div class="zl-send-wrap">
+            {showSlideHint && (
+              <div class="voice-lock-hint">
+                <ChevronUp size={14} />
+                <span>Slide up to lock</span>
+              </div>
+            )}
+            <button
+              type="button"
+              class={cls}
+              aria-label={sendLabel}
+              title={title}
+              disabled={(voiceOwnsButton && transcribing) || (!voiceOwnsButton && !armed)}
+              {...gestureProps}
+            >
+              {icon}
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }

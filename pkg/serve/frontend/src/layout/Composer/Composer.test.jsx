@@ -428,7 +428,7 @@ test("the desktop + opens the file picker directly, with no menu", () => {
   const tree = Composer({ sessionId: "s1", session: { state: "idle" } });
   const nodes = descendants(tree);
   expect(nodes.some((node) => node.type?.name === "ActionMenu")).toBe(false);
-  const plus = nodes.find((node) => node.props?.class === "composer-btn composer-btn-attach");
+  const plus = nodes.find((node) => node.props?.class === "zl-attach");
   expect(plus.props["aria-label"]).toBe("Attach");
 
   // Composer's second ref is the hidden file input; clicking + must reach it.
@@ -436,6 +436,19 @@ test("the desktop + opens the file picker directly, with no menu", () => {
   refs[1].current = { click() { clicked += 1; } };
   plus.props.onClick();
   expect(clicked).toBe(1);
+});
+
+test("the slab is the catalogue's: zl-composer, zl-ta, zl-attach, zl-send — and send is never peach", () => {
+  refs.length = 0;
+  const tree = Composer({ sessionId: "s1", session: { state: "idle" } });
+  const nodes = descendants(tree);
+  const root = nodes.find((node) => String(node.props?.class || "").split(/\s+/).includes("zl-composer"));
+  expect(root).toBeDefined();
+  expect(nodes.some((node) => node.type === "textarea" && node.props?.class === "zl-ta")).toBe(true);
+  expect(nodes.some((node) => node.props?.class === "zl-attach")).toBe(true);
+  const send = nodes.find((node) => String(node.props?.class || "").split(/\s+/).includes("zl-send"));
+  expect(send).toBeDefined();
+  expect(send.props.class).not.toMatch(/peach/);
 });
 
 test("plusActions turn + into a menu whose first entry is still Attach files", () => {

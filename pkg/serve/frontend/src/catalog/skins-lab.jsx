@@ -130,7 +130,7 @@ export function SkinPhone({ skin, drawer = false, variant = "" }) {
           </div>
         </div>
       </div>
-      <div class="mcomposer">
+      <div class="mcomposer zl-dock">
         <Composer
           sessionId={`sk-${skin}-phone`}
           session={RUN_SESSION}

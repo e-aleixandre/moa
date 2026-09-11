@@ -44,8 +44,7 @@
   color: var(--text);
 }
 .sk-phone .mconv-stream { padding-top: 50px; }
-.sk-phone .mcomposer { flex: none; background: var(--base); padding: var(--space-2) var(--space-3) 6px; }
-.sk-phone .mcomposer .composer-wrap { margin: 0; padding: 0; max-width: none; }
+.sk-phone .mcomposer { flex: none; padding: var(--space-2) var(--space-3) 6px; }
 .sk-phone .mcomposer .status-strip { font-size: var(--text-micro); overflow: hidden; }
 .sk-phone .mtchip { top: 12px; }
 
@@ -325,8 +324,7 @@
 .sk-ambient .nowline { font-family: var(--font); font-size: 12.5px; padding-left: 28px; padding-right: 28px; }
 .sk-ambient .nowline-act { color: var(--amb-text-3); }
 .sk-ambient .nowline-elapsed { font-variant-numeric: tabular-nums; color: var(--amb-text-4); }
-.sk-ambient .composer-wrap { padding-left: 28px; padding-right: 28px; }
-.sk-ambient .composer-wrap .composer {
+.sk-ambient .zl-composer {
   background: rgba(255, 255, 255, 0.06);
   border: 0;
   border-radius: 18px;
@@ -334,33 +332,33 @@
   -webkit-backdrop-filter: blur(18px);
   box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 14px 36px rgba(0, 0, 0, 0.32);
 }
-.sk-ambient .composer-wrap .composer:focus-within {
+.sk-ambient .zl-composer:focus-within {
   background: rgba(255, 255, 255, 0.07);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 0 1px rgba(255, 255, 255, 0.10), 0 10px 30px rgba(0, 0, 0, 0.25);
 }
-.sk-ambient .composer-wrap .composer-textarea { color: var(--amb-text); }
-.sk-ambient .composer-wrap .composer-textarea::placeholder { color: var(--amb-text-4); }
-.sk-ambient .composer-wrap .composer-btn { border-radius: var(--amb-r-ctl); color: var(--amb-text-3); }
+.sk-ambient .zl-ta { color: var(--amb-text); }
+.sk-ambient .zl-ta::placeholder { color: var(--amb-text-4); }
+.sk-ambient .zl-attach { border-radius: var(--amb-r-ctl); color: var(--amb-text-3); }
 @media (hover: hover) {
-  .sk-ambient .composer-wrap .composer-btn:hover { background: var(--amb-on); color: var(--amb-text); }
+  .sk-ambient .zl-attach:hover { background: var(--amb-on); color: var(--amb-text); }
 }
 /* the one filled control is ink, not identity colour */
-.sk-ambient .composer-wrap .composer-send {
+.sk-ambient .zl-send {
   background: var(--amb-ink);
   color: #14141f;
   border-radius: var(--amb-r-ctl);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.30);
 }
 @media (hover: hover) {
-  .sk-ambient .composer-wrap .composer-send:hover { transform: none; background: #fff; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
+  .sk-ambient .zl-send:hover { transform: none; background: #fff; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 }
 /* Stop stays red — it is the destructive state, not decoration */
-.sk-ambient .composer-wrap .composer-stop-ghost {
+.sk-ambient .composer-stop-ghost {
   border: 0;
   background: color-mix(in srgb, var(--red) 12%, transparent);
   border-radius: var(--amb-r-ctl);
 }
-.sk-ambient .composer-wrap .steer-hint { font-family: var(--font); color: var(--amb-text-4); }
+.sk-ambient .steer-hint { font-family: var(--font); color: var(--amb-text-4); }
 .sk-ambient .status-strip {
   font-family: var(--font);
   font-size: 12px;
@@ -392,7 +390,7 @@
 .sk-ambient .mconv-stream { padding-left: 14px; padding-right: 14px; }
 .sk-ambient.mconv .waypoint { border-radius: 4px 14px 14px 4px; background: rgba(255, 255, 255, 0.08); }
 .sk-ambient .mcomposer { background: transparent; }
-.sk-ambient .composer-wrap.is-compact .composer {
+.sk-ambient.sk-phone .zl-composer {
   background: rgba(255, 255, 255, 0.08);
   border: 0;
   border-radius: 22px;
@@ -400,10 +398,10 @@
   -webkit-backdrop-filter: var(--amb-blur);
   box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 10px 30px rgba(0, 0, 0, 0.25);
 }
-.sk-ambient .composer-wrap.is-compact .composer:focus-within { background: rgba(255, 255, 255, 0.09); }
-.sk-ambient .composer-wrap.is-compact .composer-send { border-radius: 16px; }
-.sk-ambient .composer-wrap.is-compact .composer-stop-ghost { border-radius: 14px; }
-.sk-ambient .composer-wrap.is-compact .composer-btn-attach { border-radius: 16px; }
+.sk-ambient.sk-phone .zl-composer:focus-within { background: rgba(255, 255, 255, 0.09); }
+.sk-ambient.sk-phone .zl-send { border-radius: 16px; }
+.sk-ambient.sk-phone .composer-stop-ghost { border-radius: 14px; }
+.sk-ambient.sk-phone .zl-attach { border-radius: 16px; }
 
 /* the chip: glass pill over the transcript */
 .sk-ambient .mtchip {

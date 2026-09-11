@@ -163,20 +163,24 @@ export function Pane({
 
       {blocking && <div class="p-blocking">{blocking}</div>}
 
-      {dock && <div class="p-dock">{dock}</div>}
-
-      {/* Connected pane: the REAL Composer replaces the mock input. The mock
-          `p-input` survives only for the galleries (no `composer` prop). */}
-      {composer
-        ? composer
-        : !hideComposer && (
+      {composer ? (
+        <div class="zl-dock is-pane">
+          {dock}
+          {composer}
+          {status}
+        </div>
+      ) : (
+        <>
+          {dock && <div class="p-dock">{dock}</div>}
+          {!hideComposer && (
             <div class="p-input">
               <span class="p-input-text">Message moa…</span>
               <span class="send" aria-hidden="true">↑</span>
-          </div>
-        )}
-
-      {status && <div class="p-status">{status}</div>}
+            </div>
+          )}
+          {status && <div class="p-status">{status}</div>}
+        </>
+      )}
       {overlay}
     </section>
   );

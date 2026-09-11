@@ -372,11 +372,6 @@
   padding: var(--space-4) var(--space-4) var(--space-5);
 }
 
-.pane .composer-wrap {
-  flex: none;
-  padding: var(--space-2) var(--space-3) var(--space-3);
-}
-
 /* Blocking strip (McpBanner / permission / ask_user) above the composer. */
 .pane .p-blocking {
   flex: none;

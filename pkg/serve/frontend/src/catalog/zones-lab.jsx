@@ -7,6 +7,12 @@ import { FROZEN } from "./fidelity-freeze.js";
    back. There is one definition now, and a change to it can only land in one
    place. The dot comes with it, because a dot alone is not a piece. */
 import { SessionRow, Dot } from "../components/SessionRow/SessionRow.jsx";
+/* Same move, the composer: markup and CSS live in layout/Composer now, and
+   the prototype draws the shipped one. See the adapter at `Composer`. */
+import { Composer as ProductionComposer } from "../layout/Composer/Composer.jsx";
+/* Same move, the settings sheet: markup and CSS live in
+   components/GlobalSettings now, and the prototype draws the shipped one. */
+import { GlobalSettings } from "../components/GlobalSettings/GlobalSettings.jsx";
 
 /* The three-zone skeleton, both densities side by side.
    This is a PROTOTYPE, not production: it draws the shell only (where things
@@ -233,63 +239,23 @@ function Sidebar({ onPick, desktop, onSettings, view, onView }) {
 }
 
 /* ── Global settings ───────────────────────────────────────────────────────
-   The sections are production's own (components/GlobalSettings): Context with
-   its compaction threshold and the model that summarises, Notifications,
-   Subagents, and About. Deliberately NOT in the session panel: these outlive
-   every session, and the panel means "this one".
+   MIGRATED (METODO §4): the sheet has no private copy here. Its markup and
+   its CSS were MOVED to components/GlobalSettings, class names and all, and
+   the prototype imports them back (see the import at the top of this file).
 
-   A centred sheet on the desktop and a bottom sheet on the phone, because it
-   belongs to no edge: the left is other sessions, the right is this one. */
-function SettingsSheet({ phone, onClose }) {
-  return (
-    <div class={`zl-set${phone ? " is-phone" : ""}`} role="dialog" aria-label="Settings" aria-modal="true">
-      <div class="zl-set-head">
-        <span class="zl-side-title is-eyebrow">Settings</span>
-        <button type="button" class="zl-x" onClick={onClose} aria-label="Close">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
-        </button>
-      </div>
-      <div class="zl-set-body">
-        <div class="zl-set-sec">
-          <span class="zl-set-k">Context</span>
-          <label class="zl-set-row">
-            <span class="zl-set-l">Before compacting<em>How full the window gets before moa summarises.</em></span>
-            <span class="zl-set-v zl-data">80%</span>
-          </label>
-          <label class="zl-set-row">
-            <span class="zl-set-l">Summarize with<em>The model that writes the summary.</em></span>
-            <span class="zl-set-v zl-data">Luna<span class="zl-set-caret">›</span></span>
-          </label>
-        </div>
-        <div class="zl-set-sec">
-          <span class="zl-set-k">Notifications</span>
-          <label class="zl-set-row">
-            <span class="zl-set-l">Sound<em>A chime when a session needs you.</em></span>
-            <span class="zl-sw is-on" role="switch" aria-checked="true" tabIndex={0}><i /></span>
-          </label>
-          <label class="zl-set-row">
-            <span class="zl-set-l">On this device<em>Push, even when moa is closed.</em></span>
-            <span class="zl-sw" role="switch" aria-checked="false" tabIndex={0}><i /></span>
-          </label>
-        </div>
-        <div class="zl-set-sec">
-          <span class="zl-set-k">Subagents</span>
-          <label class="zl-set-row">
-            <span class="zl-set-l">Inherit the model<em>Children start on the parent's model.</em></span>
-            <span class="zl-sw is-on" role="switch" aria-checked="true" tabIndex={0}><i /></span>
-          </label>
-        </div>
-        <div class="zl-set-sec">
-          <span class="zl-set-k">About</span>
-          <div class="zl-set-row is-static">
-            <span class="zl-set-l">Version</span>
-            <span class="zl-set-v zl-data">v0.37.2</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+   The prototype drew four sections and two of them were placeholders: a "80%"
+   that was a picture of a number, and an "Inherit the model" switch for a
+   setting that does not exist. What ships in their place are the settings
+   production actually has — the compaction threshold, what the agent is told
+   on the way there, the summarizing model and the subagent allowlist — each
+   as one row in THIS grammar, with its options on a page pushed inside the
+   same sheet. So this file now renders four real settings where it used to
+   draw two fictional ones, in the shape the owner accepted.
+
+   Deliberately NOT in the session panel: these outlive every session, and the
+   panel means "this one". A centred sheet on the desktop and a bottom sheet
+   on the phone, because it belongs to no edge: the left is other sessions,
+   the right is this one. */
 
 /* ── The right drawer: this session's dossier ──────────────────────────────
    The rule (PANEL-CRITERIO-FABLE.md): the LINE holds the controls for the
@@ -1543,44 +1509,15 @@ function StatusLine({ s = FULL_STATUS, compact, pick, onPick, onUsage, onChange,
   );
 }
 
-/* Composer. A raised slab floating over the transcript, not a hole in it:
-   the field is the thing you look at most, so it gets the most careful
-   surface. The send button arms when there is something to send and takes
-   the accent -- peach is "you said this", which is what the message becomes
-   AFTER sending, not the button. */
+/* MIGRATED (METODO §4, the composer): the slab has no private copy here.
+   Its markup and its CSS were MOVED to layout/Composer, class names and all,
+   and the prototype imports them back. What sits here now is only an
+   adapter: the prototype's `onFocusChange` (the phone's typing veil) mapped
+   onto the shipped component. A change to the slab can only land in one
+   place -- and, unlike a copy, this file FAILS the pixel harness when
+   production's composer changes, which is the whole point of the move. */
 function Composer({ onFocusChange }) {
-  const [draft, setDraft] = useState("");
-  const ref = useRef(null);
-  const onInput = (e) => {
-    setDraft(e.currentTarget.value);
-    const el = e.currentTarget;
-    el.style.height = "0";
-    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
-  };
-  const armed = draft.trim().length > 0;
-  return (
-    <div class={`zl-composer${armed ? " is-armed" : ""}`}>
-      <button type="button" class="zl-attach" aria-label="Attach">
-        <PlusIcon />
-      </button>
-      <textarea
-        ref={ref}
-        class="zl-ta"
-        rows="1"
-        placeholder="Message moa"
-        value={draft}
-        onInput={onInput}
-        onFocus={onFocusChange ? () => onFocusChange(true) : undefined}
-        onBlur={onFocusChange ? () => onFocusChange(false) : undefined}
-        aria-label="Message"
-      />
-      <button type="button" class="zl-send" aria-label="Send" disabled={!armed}>
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M8 13V3.5M8 3.5L3.8 7.7M8 3.5l4.2 4.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
-    </div>
-  );
+  return <ProductionComposer onFocusChange={onFocusChange} />;
 }
 
 /* Edge gestures, mirrored. A 28px zone on either edge starts a drag that
@@ -1651,6 +1588,21 @@ function useEdgeDrawers(hostRef) {
   };
 }
 
+/* The settings sheet, owned by the host like every other surface, so the lab's
+   preset can open it and the harness can capture it. Two presets, because the
+   sheet has two levels: "settings" is the root list of rows, "settings-page"
+   is a row's second page pushed in place. */
+function useSettingsSurface(forced) {
+  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState("root");
+  useEffect(() => {
+    if (forced === "settings") { setOpen(true); setPage("root"); }
+    else if (forced === "settings-page") { setOpen(true); setPage("compact-strategy"); }
+    else { setOpen(false); setPage("root"); }
+  }, [forced]);
+  return { open, page, setPage, show: () => setOpen(true), close: () => { setOpen(false); setPage("root"); } };
+}
+
 /* The session panel's page, owned by the host: the ring on the line opens
    the panel straight on Usage; closing resets to the root. `forced` is the
    lab's preset (a page name, or "panel" for the root). */
@@ -1670,7 +1622,7 @@ function usePanel(forced, setOpen) {
 /* ── Phone ─────────────────────────────────────────────────────────────── */
 function Phone({ label, live: preset, surface }) {
   const [view, setView] = useState("recent");
-  const [settings, setSettings] = useState(false);
+  const settings = useSettingsSurface(surface);
   const host = useRef(null);
   const d = useEdgeDrawers(host);
   const panel = usePanel(surface, d.setRight);
@@ -1726,13 +1678,22 @@ function Phone({ label, live: preset, surface }) {
             onClick={() => { d.setLeft(false); closeRight(); }}
           />
         )}
-        {settings && <div class="zl-scrim is-on" onClick={() => setSettings(false)} />}
-        {settings && <SettingsSheet phone onClose={() => setSettings(false)} />}
+        {settings.open && (
+          <GlobalSettings
+            phone
+            inline
+            open
+            onClose={settings.close}
+            initialPage={settings.page}
+            soundEnabled
+            version={{ current: "v0.37.2" }}
+          />
+        )}
         <div
           class={`zl-side zl-side-left${d.left ? " is-open" : ""}`}
           style={d.leftX != null ? `transform:translateX(${d.leftX}px);transition:none` : ""}
         >
-          <Sidebar onPick={() => d.setLeft(false)} onSettings={() => setSettings(true)} view={view} onView={setView} />
+          <Sidebar onPick={() => d.setLeft(false)} onSettings={settings.show} view={view} onView={setView} />
         </div>
         <div
           class={`zl-side zl-side-right${d.right ? " is-open" : ""}`}
@@ -1774,7 +1735,7 @@ function HeadActions() {
 
 function Desktop({ label, live: preset, surface }) {
   const [view, setView] = useState("recent");
-  const [settings, setSettings] = useState(false);
+  const settings = useSettingsSurface(surface);
   const [open, setOpen] = useState(false);
   const panel = usePanel(surface, setOpen);
   const set = useSettings(FULL_STATUS, surface);
@@ -1783,10 +1744,18 @@ function Desktop({ label, live: preset, surface }) {
     <div class="zl-desk-wrap">
       <div class="zl-density-label">{label}</div>
       <div class="zl-desk">
-        {settings && <div class="zl-scrim is-on" onClick={() => setSettings(false)} />}
-        {settings && <SettingsSheet onClose={() => setSettings(false)} />}
+        {settings.open && (
+          <GlobalSettings
+            inline
+            open
+            onClose={settings.close}
+            initialPage={settings.page}
+            soundEnabled
+            version={{ current: "v0.37.2" }}
+          />
+        )}
         <div class="zl-desk-side">
-          <Sidebar onPick={() => {}} desktop onSettings={() => setSettings(true)} view={view} onView={setView} />
+          <Sidebar onPick={() => {}} desktop onSettings={settings.show} view={view} onView={setView} />
         </div>
         <div class="zl-desk-main">
           <div class="zl-desk-head">
@@ -1998,6 +1967,8 @@ const SURFACES = [
   { id: "artifacts", label: "Panel · Artifacts", note: "The list. Opening one goes to the centre (inline on desktop, full screen on the phone). The reader never lives in 320px." },
   { id: "model", label: "Model picker", note: "What the model tap opens: a popover above its button on desktop and in a pane, a bottom sheet on the phone. Current model, pinned, the door to all providers (pushed inside with back), thinking, fast." },
   { id: "perm", label: "Permissions", note: "What the permission tap opens: three rows in the line's own colours, one line each of what it does. Pick one and it closes." },
+  { id: "settings", label: "Settings", note: "What the gear opens: the GLOBAL settings, so it belongs to no edge — centred on the desktop, a bottom sheet on the phone. Rows, not a form: name and one line of explanation on the left, the value on the right. A choice between several opens a second page inside the same panel." },
+  { id: "settings-page", label: "Settings · a page", note: "The second level: a row whose value is a choice pushes a page in place, with back + title in the head. Same idiom as the panel's dossiers and the model picker's providers." },
 ];
 function LiveSwitch({ value, onChange }) {
   const cur = LIVE_STATES.find((s) => s.id === value);

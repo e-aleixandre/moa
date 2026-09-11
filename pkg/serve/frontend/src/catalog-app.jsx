@@ -20,7 +20,7 @@ import { MobileGallery } from "./catalog/mobile-gallery.jsx";
 import { SubagentGallery } from "./catalog/subagent-gallery.jsx";
 import { DesktopLab, PhoneLab } from "./catalog/desktop-lab.jsx";
 import { SkinsLab } from "./catalog/skins-lab.jsx";
-import { ZonesLab } from "./catalog/zones-lab.jsx";
+import { ZonesLab, ZonesPhone, LIVE_STATES } from "./catalog/zones-lab.jsx";
 import { Scene } from "./catalog/scene.jsx";
 import { InboxLab } from "./catalog/zones-inbox.jsx";
 import { WorkLab } from "./catalog/zones-work.jsx";
@@ -46,6 +46,7 @@ const LINKS = [
   { key: "pieces", label: "Mobile pieces", href: "?view=pieces" },
   { key: "skins", label: "Ambient", href: "?view=skins" },
   { key: "zones", label: "Zones", href: "?view=zones" },
+  { key: "phone", label: "Phone", href: "?view=phone" },
   { key: "inbox", label: "Inbox", href: "?view=inbox" },
   { key: "work", label: "Work", href: "?view=work" },
 ];
@@ -118,6 +119,30 @@ function LabPalette() {
   );
 }
 
+/* The phone alone, filling the window.
+
+   ?view=zones draws every density on one scrollable page, which is the right
+   shape for COMPARING them and the wrong one for LOOKING at the phone: you
+   open it and have to go find it. This route opens straight into the phone.
+
+   The prototype's phone is a 390x780 box with a radius and a drop shadow --
+   it is drawn as an object sitting on a table. Here it is the screen itself,
+   so the frame comes off (no radius, no shadow, no fixed size) and the phone
+   fills whatever window it is given. Nothing else changes: same component,
+   same markup, same CSS as the zones page. */
+function PhoneAlone() {
+  // `live` is required, not optional: useLive reads preset.open on the first
+  // render (zones-lab.jsx:1026), so an absent preset throws before anything
+  // paints. "working" is the zones page's own default (LIVE_STATES[1]).
+  const params = new URLSearchParams(location.search);
+  const live = LIVE_STATES.find((s) => s.id === params.get("live")) || LIVE_STATES[1];
+  return (
+    <div class="cat-phone-alone">
+      <ZonesPhone label="" live={live} surface={params.get("surface") || "none"} />
+    </div>
+  );
+}
+
 function CatalogApp() {
   useCatalogBootstrap();
   const view = useStore((s) => s.view || "desktop");
@@ -133,6 +158,12 @@ function CatalogApp() {
   else if (view === "pieces") body = <MobileGallery />;
   else if (view === "skins") body = <SkinsLab />;
   else if (view === "zones") body = <ZonesLab />;
+  // ?view=phone is the prototype's phone ALONE, filling the window. ?view=zones
+  // shows every density at once on a scrollable page, which is right for
+  // comparing them and wrong for looking at one: the owner asked to open a URL
+  // and land in the phone, not to scroll to it. Same component as the zones
+  // page -- the frame is what the wrapper drops, not the screen.
+  else if (view === "phone") body = <PhoneAlone />;
   else if (view === "inbox") body = <InboxLab />;
   else if (view === "work") body = <WorkLab />;
   else if (view === "mobile") {

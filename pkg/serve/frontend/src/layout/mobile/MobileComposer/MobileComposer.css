@@ -1,30 +1,14 @@
 /* MobileComposer — wraps the shared Composer (compact density) and the
-   status strip. Safe-area padding lives here; the pill itself is Composer.css. */
-/* NO `position: relative` here. The status line's bottom sheets are
-   `position: absolute; inset: 0`, so they resolve against the nearest positioned
-   ancestor: making this box one shrinks every sheet down to the composer's own
-   ~110px. The fade into the chrome lives on the stream's mask instead
-   (MobileConversationScreen.css), which needs no containing block at all. */
+   status strip. The dock fade and padding live on `.zl-dock` (Composer.css);
+   what stays here is the phone's own constraint: safe-area below the line,
+   and a status line that never pans. */
 .mcomposer {
   flex: none;
-  background: var(--base);
-  /* Bottom = the LARGER of a small visual gap or the home-indicator safe area,
-     never their sum. This reserve sits below whatever the composer stacks on top
-     of it — the persistent status line (main conversation) or the subagent
-     now-line — so neither needs to re-add it. env(safe-area-inset-bottom) varies
-     by device (0 on a phone with no home indicator, ~20-34px with one); max()
-     lets the browser pick, so the layout adapts instead of being calibrated to
-     one device's inset (which left a dead band on phones with a larger inset). */
-  padding: var(--space-2) var(--space-3)
-    max(calc(var(--space-1) + 2px), env(safe-area-inset-bottom, 0px));
-}
-
-/* The shared Composer brings its own .composer-wrap/.composer; drop its own
-   outer padding since .mcomposer already provides it. */
-.mcomposer .composer-wrap {
-  margin: 0;
-  padding: 0;
-  max-width: none;
+  /* Bottom = the LARGER of the catalogue dock's 8px or the home-indicator
+     safe area, never their sum. env(safe-area-inset-bottom) varies by device
+     (0 with no home indicator, ~20-34px with one); max() lets the browser
+     pick. */
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
 }
 
 /* StatusStrip compact is the line's face (shared with desktop). On the phone it

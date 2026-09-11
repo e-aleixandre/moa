@@ -39,7 +39,7 @@ export function MobileComposer({ session, usage, onSecret }) {
     artifactsMobileAction(session.id),
   ];
   return (
-    <div class="mcomposer">
+    <div class="mcomposer zl-dock">
       <Composer sessionId={session.id} session={session} compact onSecret={onSecret} plusActions={plusActions} />
       <MobileStatusLine session={session} usage={usage} />
     </div>

@@ -520,85 +520,10 @@ button.zl-lg-row:hover, button.zl-lg-head:hover { background: var(--zl-hi); }
 .zl-caret.is-idle { animation: zl-blink 1.1s steps(2, jump-none) infinite; }
 @keyframes zl-blink { 50% { opacity: 0; } }
 
-/* ── Dock: composer + status line ────────────────────────────────────────
-   One instrument: the field you type into and the readout printed under it,
-   in the same margins. The fade lets the transcript slide beneath. */
-.zl-dock {
-  position: relative;
-  flex: none;
-  padding: 18px 12px 8px;
-  background: linear-gradient(to bottom, transparent, rgba(16, 16, 24, 0.8) 32%);
-}
-
-/* The composer is the one raised plane on the canvas. Focus is the accent
-   on its rim: the object does not change shape, it is chosen. */
-.zl-composer {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  padding: 6px;
-  border-radius: var(--zl-r-lg);
-  background: var(--zl-raised);
-  box-shadow: var(--zl-rim-2);
-  transition: box-shadow 160ms ease;
-}
-.zl-composer:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line); }
-
-.zl-ta {
-  flex: 1;
-  min-width: 0;
-  min-height: 44px;
-  max-height: 132px;
-  margin: 0;
-  padding: 11px 6px;
-  border: 0;
-  outline: 0;
-  resize: none;
-  background: transparent;
-  color: var(--zl-t1);
-  font-family: inherit;
-  font-size: var(--zl-fs-title); /* 16: iOS focus-zoom floor */
-  letter-spacing: inherit;
-  line-height: 22px;
-  overflow-y: auto;
-}
-.zl-ta::placeholder { color: var(--zl-t4); }
-
-.zl-attach,
-.zl-send {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 140ms ease, color 140ms ease, transform 140ms var(--zl-ease);
-}
-.zl-attach svg,
-.zl-send svg { width: 18px; height: 18px; }
-.zl-attach { background: transparent; color: var(--zl-t3); }
-.zl-attach:hover { background: var(--zl-hi); color: var(--zl-t1); }
-
-/* Send: a quiet control until there is something to send, then the accent.
-   This is the single most visible use of mauve in the product and it marks
-   the primary action -- peach stays with the message, which is what the
-   text becomes AFTER this button. */
-.zl-send {
-  background: var(--zl-control);
-  color: var(--zl-t4);
-  cursor: default;
-}
-.zl-composer.is-armed .zl-send {
-  background: var(--zl-accent);
-  color: var(--zl-accent-ink);
-  cursor: pointer;
-}
-.zl-composer.is-armed .zl-send:hover { transform: translateY(-1px); }
-.zl-composer.is-armed .zl-send:active { transform: translateY(0) scale(0.96); }
+/* ── Dock + composer ──────────────────────────────────────────────────────
+   MOVED to layout/Composer/Composer.css. The prototype imports the shipped
+   component, so these are no longer defined here. Frame-specific padding
+   (`.zl-desk .zl-dock`) stays with the desktop frame below. */
 
 /* ── Status line ───────────────────────────────────────────────────────────
    Three tiers, three places. Settings left, gauges right, events between.
@@ -1199,10 +1124,6 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-pane-head .zl-desk-act svg { width: 15px; height: 15px; }
 .zl-pane-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .zl-pane .zl-transcript { padding-top: 8px; }
-.zl-dock.is-pane { padding: 14px 12px 6px; }
-.zl-dock.is-pane .zl-composer { padding: 4px; border-radius: var(--zl-r-md); }
-.zl-dock.is-pane .zl-ta { min-height: 40px; padding: 9px 6px; }
-.zl-dock.is-pane .zl-attach, .zl-dock.is-pane .zl-send { width: 40px; height: 40px; border-radius: var(--zl-r-sm); }
 .zl-dock.is-pane .zl-status { height: 32px; margin-top: 2px; }
 .zl-dock.is-pane .zl-st { height: 28px; }
 
@@ -1918,7 +1839,7 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
    picker closes it. Transparent on purpose: a popover is a light thing and
    the transcript stays readable behind it. */
 .zl-veil { position: absolute; inset: 0; z-index: 2; }
-.zl-dock { z-index: 3; }
+.zl-dock { position: relative; z-index: 3; }
 
 /* The phone's sheet. A grabber, the drawer's head, the same picker. It
    never takes more than ~80% of the screen; the transcript stays behind. */
@@ -2169,95 +2090,19 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-proj + .zl-proj { margin-top: 10px; }
 
 /* ── Settings ──────────────────────────────────────────────────────────────
-   Belongs to no edge, so it is centred on the desktop and a bottom sheet on
-   the phone. It floats for real, so it may have a shadow. */
-.zl-set {
-  position: absolute;
-  z-index: 40;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: min(420px, calc(100% - 48px));
-  max-height: calc(100% - 80px);
-  display: flex;
-  flex-direction: column;
-  background: var(--zl-sheet);
-  border: 1px solid var(--zl-line);
-  border-radius: 16px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
-  overflow: hidden;
-}
-.zl-set.is-phone {
-  left: 0;
-  top: auto;
-  bottom: 0;
-  width: 100%;
-  max-height: 82%;
-  transform: none;
-  border-radius: 16px 16px 0 0;
-  border-bottom: 0;
-}
-.zl-set-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 14px 14px 10px 16px;
-  border-bottom: 1px solid var(--zl-line);
-}
-.zl-set-body { overflow-y: auto; padding: 6px 16px 16px; }
-.zl-set-sec { padding: 12px 0; }
-.zl-set-sec + .zl-set-sec { border-top: 1px solid var(--zl-line); }
-.zl-set-k {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--zl-t4);
-  font: 600 11px/1 var(--zl-font);
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.zl-set-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 44px;
-  padding: 4px 0;
-  cursor: pointer;
-}
-.zl-set-row.is-static { cursor: default; }
-.zl-set-l { display: flex; flex-direction: column; gap: 2px; min-width: 0; font: 500 14px/1.3 var(--zl-font); color: var(--zl-text); }
-.zl-set-l em { font: 400 12px/1.35 var(--zl-font); color: var(--zl-t4); font-style: normal; }
-.zl-set-v { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--zl-t2); font-size: 13px; }
-.zl-set-caret { color: var(--zl-t4); }
+   MIGRATED. `.zl-set*` and `.zl-sw` used to be defined here, in 90 lines.
+   They now live in components/GlobalSettings/GlobalSettings.css, class names
+   and all, and this file no longer has a copy of them: the prototype imports
+   the shipped component (zones-lab.jsx:15) and the rules arrive with it.
 
-/* The switch is accent, not green: it is a setting you chose, not a state the
-   system is in. */
-.zl-sw {
-  position: relative;
-  flex: none;
-  width: 40px;
-  height: 24px;
-  border-radius: 999px;
-  background: var(--zl-control);
-  border: 1px solid var(--zl-line);
-  cursor: pointer;
-  transition: background 140ms ease;
-}
-.zl-sw i {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--zl-t3);
-  transition: transform 140ms ease, background 140ms ease;
-}
-.zl-sw.is-on { background: var(--zl-accent-med); border-color: var(--zl-accent-line); }
-.zl-sw.is-on i { transform: translateX(16px); background: var(--zl-accent); }
-.zl-sw:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+   `.zl-x` is the exception and it stays HERE (line 884): the session panel and
+   the picker sheet still render it, so it is not the settings sheet's rule to
+   take. The settings sheet carries its own copy of it, which is the one
+   duplication this move leaves behind — it ends when those two surfaces move
+   as well, and it is stated rather than hidden.
 
+   What is still here is the GEAR that opens the sheet, which belongs to the
+   sidebar's foot, not to the sheet. */
 /* The gear sits with the version: both are about the app, not the session. */
 .zl-gear {
   display: inline-flex;

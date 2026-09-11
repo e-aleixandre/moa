@@ -1,7 +1,7 @@
 import { useState } from "preact/hooks";
 import { Sidebar } from "../Sidebar/Sidebar.jsx";
 import { DesktopDossier } from "./DesktopDossier.jsx";
-import { Sheet, GlobalSettings } from "../../components/index.js";
+import { GlobalSettings } from "../../components/index.js";
 import { useStore } from "../../hooks/useStore.js";
 import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
@@ -62,14 +62,16 @@ export function DesktopShell({ version, children }) {
       />
       {children}
       <DesktopDossier />
-      <Sheet
+      {/* The settings sheet draws its own surface now: it is the catalogue's
+          centred panel, with its own head, scrim and pushed pages, so wrapping
+          it in the generic Sheet would give it a second head and a second
+          shell. See components/GlobalSettings. */}
+      <GlobalSettings
         open={globalSettingsOpen}
         onClose={() => setGlobalSettingsOpen(false)}
-        title="Settings"
-        class="global-settings-sheet"
-      >
-        <GlobalSettings soundEnabled={chrome.soundEnabled} version={version} />
-      </Sheet>
+        soundEnabled={chrome.soundEnabled}
+        version={version}
+      />
     </div>
   );
 }

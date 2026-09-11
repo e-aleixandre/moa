@@ -35,6 +35,13 @@ export const CATALOG_CAPS = {
   ],
 };
 
+// The models offered as summarizers. The server filters by credential, so
+// this is the subset the lab pretends has one — enough to show the page
+// behind "Summarize with" as a list rather than a single option.
+export const COMPACT_MODEL_CHOICES = CATALOG_MODELS
+  .filter((m) => m.alias === "luna" || m.alias === "sonnet" || m.alias === "terra")
+  .map((m) => ({ spec: `${m.provider}/${m.id}`, name: m.name, provider: m.provider }));
+
 const CATALOG_SKILLS = [
   { name: "review", description: "Review the current diff" },
   { name: "release-check", description: "Prepare a release decision" },
@@ -134,7 +141,13 @@ export function catalogResponse(method, path, body = null, sessions = CATALOG_SE
   if (m === "PATCH" && p === "/api/compact-at") return { compact_at: body?.compact_at || 0, compact_at_min: 0 };
   if (m === "GET" && p === "/api/compact-strategy") return { compact_strategy: "notify" };
   if (m === "PATCH" && p === "/api/compact-strategy") return { compact_strategy: body?.compact_strategy || "notify" };
+  // The summarizing model. The lab needs the CHOICES too: without them the
+  // page behind "Summarize with" would offer only "Session model", which is a
+  // different picture from the one production draws.
+  if (m === "GET" && p === "/api/compact-model") return { compact_model: "session", choices: COMPACT_MODEL_CHOICES };
+  if (m === "PATCH" && p === "/api/compact-model") return { compact_model: body?.compact_model || "session", choices: COMPACT_MODEL_CHOICES };
   if (m === "GET" && p === "/api/subagent-models") return { allowed_models: [] };
+  if (m === "PATCH" && p === "/api/subagent-models") return { allowed_models: body?.allowed_models || [] };
   if (m === "GET" && p === "/api/sessions") return rosterOf(sessions);
   if (m === "GET" && p === "/api/fs/complete") {
     const dir = (queryOf(path).get("path") || "").replace(/\/+$/, "") || "/";

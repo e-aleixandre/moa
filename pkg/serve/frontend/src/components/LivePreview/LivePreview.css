@@ -471,10 +471,9 @@
   -webkit-backdrop-filter: blur(12px);
   box-shadow: var(--shadow-lg);
 }
-.live-preview-composer .composer-wrap {
+.live-preview-composer .zl-composer {
   width: auto;
   margin: 0;
-  padding: 0;
 }
 .live-preview-composer .attach-preview-strip {
   max-height: 88px;

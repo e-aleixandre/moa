@@ -217,15 +217,23 @@ test('a row with nothing to say keeps its path: the second line is not wasted', 
   expect(row.props.path).toBe('~/repo');
 });
 
-test('the closed mobile screen mounts its sheet and an opened drawer without render-time errors', () => {
-  // Exercise the always-mounted sheet from the screen root, then the drawer's
-  // menu-bearing rows. The hook shim is enough here because this regression is
-  // an undefined render-time binding, not an effect lifecycle behavior.
+test('the closed mobile screen mounts its settings surface and an opened drawer without render-time errors', () => {
+  // Exercise the always-mounted global settings from the screen root, then the
+  // drawer's menu-bearing rows. The hook shim is enough here because this
+  // regression is an undefined render-time binding, not effect lifecycle.
+  //
+  // The surface used to be a MobileSheet wrapping the settings body; it is now
+  // GlobalSettings itself, which draws its own sheet (it is the catalogue's
+  // panel, with its own head and its own pushed pages). What this test defends
+  // is unchanged and is not the wrapper's name: settings are mounted CLOSED
+  // from the screen root, and rendering them in that state throws nothing.
   const screen = MobileConversationScreen({});
-  const sheet = componentNode(screen, 'MobileSheet');
+  const settings = componentNode(screen, 'GlobalSettings');
   const drawer = componentNode(screen, 'SessionDrawer');
-  expect(sheet.props.open).toBe(false);
-  expect(() => sheet.type(sheet.props)).not.toThrow();
+  expect(settings.props.open).toBe(false);
+  // Closed, it renders nothing at all — and asking for nothing must not throw.
+  expect(() => settings.type(settings.props)).not.toThrow();
+  expect(settings.type(settings.props)).toBe(null);
 
   const session = { id: 's1', title: 'Session', state: 'idle', subagents: {} };
   let drawerTree;

@@ -1,450 +1,527 @@
-/* GlobalSettings — body for the device-wide Settings sheet (desktop + mobile).
-   NotificationSettings ships as a bordered dropdown for the head popover; inside
-   this shell it sheds its own chrome and fills the width. */
+/* GlobalSettings — the device-wide settings sheet.
 
-.global-settings {
+   This sheet is the catalogue's, MOVED (catalog/zones-lab.css:2172-2260, the
+   `.zl-set*` / `.zl-sw` block, plus `.zl-x` from its drawer block and
+   `.zl-scrim.is-on`), not translated. The class names came with the rules on
+   purpose: a rule that is copied is a rule that can drift, and the drift is
+   what this migration exists to end. The catalogue imports the component now,
+   so these are the only settings-sheet rules in the product.
+
+   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
+   ?view=zones they resolve from `.zl` (zones-lab.css:22); everywhere else the
+   fallback IS the catalogue's own value, so production gets the accepted
+   colour rather than a near-miss re-derived from another token set.
+
+   What is added below the catalogue's block is only what the prototype never
+   had: the fixed host that gives `.zl-set` its containing block outside a
+   device frame, the button resets (the prototype's rows are <label>s and its
+   switches are <span>s; production's have to be operable), the focus rings,
+   the loading and disabled states, and the SECOND PAGE — the prototype drew
+   one level, and production has four settings that are a choice between
+   several, which is a page each.
+
+   MEASURED, and deliberately not "fixed": three of the catalogue's rules use
+   `font: … var(--zl-font)`, and `--zl-font` is defined nowhere — in the
+   catalogue either. The shorthand is therefore invalid at computed-value time
+   and drops whole, so `.zl-set-l`, `.zl-set-l em` and `.zl-set-k` all render
+   at the inherited 14px/21px 400 rather than at the 500/12px/11px they appear
+   to ask for. That inherited rendering is what the owner looked at and
+   accepted, so it is what moves here, written as the longhand it actually
+   computes to. Making the shorthand valid would be a redesign of the type
+   scale wearing a bug-fix's clothes; it is flagged in the hand-over instead.
+   Same for `color: var(--zl-text)`, which is undefined and inherits t1. */
+
+/* ── The host ─────────────────────────────────────────────────────────────
+   The prototype's `.zl-set` is `position: absolute` inside a device frame
+   that is `position: relative; overflow: hidden` (zones-lab.css:129). Outside
+   that frame there is no such frame, so production supplies one: a fixed,
+   full-viewport box, portalled to <body>. The sheet's own geometry is then
+   the catalogue's, unchanged, in both homes — rather than a second set of
+   coordinates for production that would have to be kept in step by hand. */
+.zl-set-host {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sheet, 200);
+}
+/* Inline (the catalogue's device frame): the frame is the positioned ancestor
+   and it clips, so the host fills IT rather than the browser window. */
+.zl-set-host.is-inline { position: absolute; z-index: 40; }
+
+/* ── Settings ──────────────────────────────────────────────────────────────
+   Belongs to no edge, so it is centred on the desktop and a bottom sheet on
+   the phone. It floats for real, so it may have a shadow. */
+.zl-set {
+  position: absolute;
+  z-index: 40;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100% - 48px));
+  max-height: calc(100% - 80px);
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
-  min-width: 280px;
+  background: var(--zl-sheet, #171720);
+  border: 1px solid var(--zl-line, rgba(255, 255, 255, 0.07));
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
+  overflow: hidden;
+  color: var(--zl-t1, #f4f4f7);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body, 14px);
+  letter-spacing: -0.005em;
 }
-
-/* Desktop Sheet body padding — Sheet.css leaves body padding to consumers. */
-.global-settings-sheet .sheet-body {
-  padding: var(--space-4) var(--space-6) var(--space-6);
-}
-
-.global-settings-lbl {
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  color: var(--overlay0);
-  margin-bottom: var(--space-3);
-}
-
-.global-settings .notif-dropdown {
+.zl-set.is-phone {
+  left: 0;
+  top: auto;
+  bottom: 0;
   width: 100%;
-  border: 0;
-  box-shadow: none;
-  background: none;
-  padding: 0;
+  max-height: 82%;
+  transform: none;
+  border-radius: 16px 16px 0 0;
+  border-bottom: 0;
 }
-
-/* Section label already says "Notifications". */
-.global-settings .notif-dropdown .notif-title {
-  display: none;
-}
-
-.global-settings-about-row {
+.zl-set-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
-  min-height: 40px;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--base);
-  border: 1px solid var(--surface0);
+  gap: 8px;
+  padding: 14px 14px 10px 16px;
+  border-bottom: 1px solid var(--zl-line, rgba(255, 255, 255, 0.07));
 }
-
-.global-settings-about-key {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  color: var(--subtext1);
+.zl-set-body { overflow-y: auto; padding: 6px 16px 16px; }
+.zl-set-sec { padding: 12px 0; }
+.zl-set-sec + .zl-set-sec { border-top: 1px solid var(--zl-line, rgba(255, 255, 255, 0.07)); }
+.zl-set-k {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--zl-t4, #66677c);
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
-
-.global-settings-about-val {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--subtext0);
-}
-
-.global-settings-about-update {
-  color: var(--yellow);
-}
-
-.global-settings-about-muted {
-  color: var(--overlay0);
-}
-
-/* Subagent model allowlist — same vocabulary as ModelSelector (filter field,
-   folded provider rows, per-model row) so picking models reads the same way
-   everywhere in the app. Where the selector uses a star for "pinned", this
-   uses a check for "allowed": a permission is not a favourite, and the two
-   must not share a glyph. */
-.subagent-models {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.subagent-models-hint {
-  margin: 0;
-  font-size: var(--text-xs);
-  line-height: 1.5;
-  color: var(--overlay1);
-}
-
-.subagent-models-picker {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-
-.subagent-filter-clear {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  margin: -5px -7px -5px 0;
-  background: none;
-  border: 0;
-  color: var(--overlay1);
-  cursor: pointer;
-}
-
-.subagent-models-tally {
+.zl-set-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2);
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--overlay0);
-}
-
-.subagent-models-lock {
-  color: var(--overlay1);
-  text-transform: none;
-  letter-spacing: normal;
-}
-
-.subagent-models-providers,
-.subagent-models-results {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.subagent-provider {
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface0) 34%, transparent);
-}
-
-.subagent-provider.open {
-  background: none;
-}
-
-.subagent-provider-row {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  min-height: 56px;
-  padding: var(--space-2) var(--space-3);
-  background: none;
-  border: 0;
-  border-radius: inherit;
-  color: var(--text);
-  font: inherit;
-  text-align: left;
+  gap: 12px;
+  min-height: 44px;
+  padding: 4px 0;
   cursor: pointer;
 }
-
-.subagent-provider-mark {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-md);
-  font-family: var(--mono);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  text-transform: uppercase;
-}
-
-.subagent-provider-copy {
-  min-width: 0;
-}
-
-.subagent-provider-name {
-  display: block;
-  font-size: var(--text-base);
-  font-weight: var(--weight-semibold);
-  text-transform: capitalize;
-}
-
-.subagent-provider-copy small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-top: 1px;
-  color: var(--overlay1);
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-}
-
-.subagent-provider-count {
-  padding: 3px 6px;
-  border-radius: var(--radius-sm);
-  background: var(--surface0);
-  color: var(--overlay1);
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-}
-
-/* Mauve, not green: green is the product's `.ok` state (a run that succeeded).
-   Being allowed is a property of the model, not an outcome, so it borrows the
-   identity accent that already marks models elsewhere (ModelPill). */
-.subagent-provider-count.on {
-  background: color-mix(in srgb, var(--mauve) 14%, transparent);
-  color: var(--mauve);
-}
-
-.subagent-provider-chevron {
-  color: var(--overlay0);
-  transition: transform var(--duration) var(--ease);
-}
-
-.subagent-provider.open .subagent-provider-chevron {
-  transform: rotate(90deg);
-}
-
-.subagent-provider-body {
-  display: grid;
-  gap: var(--space-1);
-  padding: 0 var(--space-1) var(--space-1);
-}
-
-.subagent-model-row {
-  display: grid;
-  grid-template-columns: 7px minmax(0, 1fr) auto auto;
+.zl-set-row.is-static { cursor: default; }
+.zl-set-l { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.zl-set-l em { color: var(--zl-t4, #66677c); font-style: normal; }
+.zl-set-v {
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  min-height: 48px;
-  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  gap: 6px;
+  flex: none;
+  color: var(--zl-t2, #c3c4d1);
+  font-size: 13px;
 }
-@media (hover: hover) {
+.zl-set-caret { color: var(--zl-t4, #66677c); }
 
+/* The sheet moves focus on open and on every page change, so a keyboard is
+   never left behind on the row that pushed a page. The target is the head's
+   TITLE, which is not interactive — a button would paint its :focus-visible
+   ring, and a close button ringed the moment the panel opens reads as "you
+   are about to close this".
 
-.subagent-model-row:hover {
-  background: color-mix(in srgb, var(--surface0) 35%, transparent);
-}
-}
+   It needs outline:none, and plain `outline: none` LOSES: the catalogue's own
+   blanket rule `.zl :is(button, input, textarea, [tabindex]):focus-visible`
+   matches it through the tabindex, scores the same (0,2,0), and its sheet is
+   loaded after this one, so source order decides. Doubling the class ties the
+   same way. The ring is therefore removed where the rule cannot be outranked
+   — on the element's own style, via the one declaration that outranks a
+   stylesheet without touching anyone else's cascade.
 
-/* The check alone carries the state. Tinting the row as well repeated the same
-   fact three times (fill + border + box) and read as an alert; the model
-   selector's pin does the same with icon colour only. */
-.subagent-model-row.on {
-  background: none;
-}
+   Diagnosed with CSS.getMatchedStylesForNode, and caught by the pixel harness
+   after two silent failures. */
+.zl-set-title[tabindex]:focus,
+.zl-set-title[tabindex]:focus-visible { outline: none !important; }
 
-.subagent-model-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-full);
-}
-
-.subagent-model-copy {
-  min-width: 0;
-  font-size: var(--text-base);
-  font-weight: var(--weight-semibold);
-}
-
-.subagent-model-copy small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--overlay1);
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  font-weight: var(--weight-normal);
-}
-
-.subagent-provider-badge {
-  max-width: 68px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 3px 5px;
-  border-radius: var(--radius-sm);
-  background: var(--surface0);
-  color: var(--overlay1);
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  text-transform: uppercase;
-}
-
-/* The whole 40px square is the hit target; the 20px box is what the eye
-   reads, so the control stays tappable on a 390px phone. */
-.subagent-allow {
-  display: grid;
-  place-items: center;
+/* The switch is accent, not green: it is a setting you chose, not a state the
+   system is in. */
+.zl-sw {
+  position: relative;
+  flex: none;
   width: 40px;
-  height: 40px;
-  padding: 0;
-  background: none;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--zl-control, #262633);
+  border: 1px solid var(--zl-line, rgba(255, 255, 255, 0.07));
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+.zl-sw i {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--zl-t3, #9091a6);
+  transition: transform 140ms ease, background 140ms ease;
+}
+.zl-sw.is-on { background: var(--zl-accent-med, rgba(203, 166, 247, 0.22)); border-color: var(--zl-accent-line, rgba(203, 166, 247, 0.45)); }
+.zl-sw.is-on i { transform: translateX(16px); background: var(--zl-accent, #cba6f7); }
+.zl-sw:focus-visible { outline: 2px solid var(--zl-accent, #cba6f7); outline-offset: 2px; }
+
+/* The close button, from the same sheet (zones-lab.css:959). It is the
+   drawer's X: the settings sheet and the session drawer shut the same way. */
+.zl-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
   border: 0;
+  border-radius: var(--zl-r-md, 10px);
+  background: var(--zl-raised, #1e1e29);
+  box-shadow: 0 0 0 1px var(--zl-line, rgba(255, 255, 255, 0.07));
+  color: var(--zl-t2, #c3c4d1);
   cursor: pointer;
 }
+.zl-x svg { width: 16px; height: 16px; }
+.zl-x:hover { background: var(--zl-control, #262633); color: var(--zl-t1, #f4f4f7); }
 
-.subagent-allow:disabled {
-  cursor: default;
+.zl-set-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 39;
+  border: 0;
+  background: rgba(8, 8, 16, 0.55);
+  animation: zl-set-fade 200ms ease;
 }
+@keyframes zl-set-fade { from { opacity: 0; } }
 
-.subagent-allow-box {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--radius-sm);
-  border: 1.5px solid var(--surface2);
-  color: transparent;
-  transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease),
-    color var(--duration) var(--ease);
+/* ── What the prototype never had ─────────────────────────────────────────
+   A row that opens something is a <button> and a switch is a <button>: the
+   prototype's <label>/<span role="switch"> draw the right picture but cannot
+   be reached by a keyboard or fired by a click. These resets make the button
+   box identical to the box the prototype measured, and nothing else.
+
+   Scoped one class at a time on purpose. A shared `button.zl-set-row,
+   button.zl-sw { width: … }` rule is how the switches first shipped, and
+   because a type+class selector outranks the plain `.zl-sw`, `width: auto`
+   quietly beat the 40px track: the switch rendered as a bare knob with no
+   track at all. Caught in the desktop capture, not in a test. */
+button.zl-set-row {
+  width: 100%;
+  appearance: none;
+  border: 0;
+  padding: 4px 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+}
+button.zl-sw { padding: 0; appearance: none; }
+button.zl-x, button.zl-set-back { appearance: none; font: inherit; }
+button.zl-set-row:focus-visible,
+button.zl-set-back:focus-visible,
+button.zl-x:focus-visible {
+  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline-offset: 2px;
+  border-radius: var(--zl-r-sm, 6px);
 }
 @media (hover: hover) {
-
-
-.subagent-allow:hover .subagent-allow-box {
-  border-color: var(--overlay0);
+  button.zl-set-row:hover .zl-set-caret { color: var(--zl-t2, #c3c4d1); }
 }
-}
+/* Until the value has been read from the server there is nothing true to put
+   on the right, so the row says so rather than showing a default that might
+   not be the stored one. */
+.zl-set-v.is-loading { color: var(--zl-t4, #66677c); }
+button.zl-set-row[disabled] { cursor: default; }
 
-.subagent-allow.on .subagent-allow-box {
-  border-color: color-mix(in srgb, var(--mauve) 55%, transparent);
-  color: var(--mauve);
-}
+/* The phone's touch floor. The prototype states it for its own controls
+   (zones-lab.css:1191); these are the ones it never drew. */
+.zl-set.is-phone .zl-x,
+.zl-set.is-phone .zl-set-back { width: 44px; height: 44px; }
+.zl-set.is-phone .zl-set-row { min-height: 48px; }
+.zl-set.is-phone .zl-sw { width: 46px; height: 28px; }
+.zl-set.is-phone .zl-sw i { width: 22px; height: 22px; }
+.zl-set.is-phone .zl-sw.is-on i { transform: translateX(18px); }
 
-.subagent-allow.on:disabled .subagent-allow-box {
-  border-color: color-mix(in srgb, var(--mauve) 30%, transparent);
-  color: color-mix(in srgb, var(--mauve) 50%, transparent);
-}
-
-.subagent-models-empty {
-  padding: var(--space-3);
-  color: var(--overlay1);
-  font-size: var(--text-sm);
-  text-align: center;
-}
-
-.subagent-provider-row:focus-visible,
-.subagent-allow:focus-visible,
-.subagent-filter-clear:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: -2px;
-  border-radius: var(--radius-md);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .subagent-model-row,
-  .subagent-allow-box,
-  .subagent-provider-chevron {
-    transition: none;
-  }
-}
-
-/* Global auto-compaction threshold. Same column rhythm as the allowlist above,
-   so both server-side settings read as one family. The number field borrows the
-   filter field's chrome rather than inventing a third input style. */
-.compact-at {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.compact-at-hint {
-  margin: 0;
-  font-size: var(--text-xs);
-  line-height: 1.5;
-  color: var(--overlay1);
-}
-
-.compact-at-field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.compact-at-input {
-  display: flex;
+/* ── The second page ──────────────────────────────────────────────────────
+   The prototype drew ONE level of settings, because the four settings that
+   are a choice between several were not among the ones it drew. They are
+   real, so each becomes a page pushed INSIDE this sheet — the same idiom the
+   session dossier uses for Usage / MCP / Artifacts (SessionPanel.jsx): the
+   head swaps its eyebrow for back + title, the body swaps, and nothing ever
+   floats over the sheet. One navigation for every second level in the
+   product. */
+.zl-set-head.is-sub { padding-left: 12px; gap: 6px; }
+.zl-set-back {
+  flex: none;
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: var(--base);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-md);
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--zl-r-md, 10px);
+  background: transparent;
+  color: var(--zl-t2, #c3c4d1);
+  cursor: pointer;
 }
-
-.compact-at-input:focus-within {
-  border-color: var(--surface2);
-}
-
-.compact-at-input input {
+.zl-set-back svg { width: 16px; height: 16px; }
+.zl-set-back:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+.zl-set-title {
   flex: 1;
   min-width: 0;
-  background: none;
-  border: 0;
-  outline: none;
-  color: var(--text);
-  font-family: var(--mono);
-  /* --text-input (16px) — anything smaller makes iOS zoom on focus. */
-  font-size: var(--text-input);
-  line-height: var(--leading-tight);
+  font-size: var(--zl-fs-title, 16px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: zl-set-push 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+.zl-set-title.is-eyebrow {
+  flex: 1;
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--zl-t4, #66677c);
+  animation: none;
+}
+.zl-set-body.is-sub { animation: zl-set-push 200ms cubic-bezier(0.2, 0, 0, 1); }
+@keyframes zl-set-push { from { opacity: 0; transform: translateX(12px); } }
+@media (prefers-reduced-motion: reduce) {
+  .zl-set-body.is-sub, .zl-set-title, .zl-set-scrim { animation: none; }
+  .zl-sw, .zl-sw i { transition: none; }
 }
 
-.compact-at-input input::placeholder {
-  color: var(--overlay0);
-}
-
-.compact-at-unit {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--overlay1);
-}
-
-.compact-at-note {
-  font-size: var(--text-xs);
+/* A page's own prose: what this setting does, once, at the top. The rows
+   underneath say what each option is, so the summary never repeats them. */
+.zl-set-sum {
+  margin: 6px 2px 12px;
   line-height: 1.5;
-  color: var(--overlay1);
+  color: var(--zl-t3, #9091a6);
+}
+.zl-set-sum .zl-set-num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--zl-t2, #c3c4d1);
 }
 
-.compact-model-picker-trigger {
+/* An option on a page: the same two-line shape as a row, with the mark of
+   which one is current on the right. The prototype's permission picker
+   (.zl-perm) is this shape; these are its rules for a list that has no state
+   colour to carry. */
+.zl-set-opt {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
   width: 100%;
-  min-height: 44px;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  background: var(--base);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-md);
-  color: var(--text);
-  cursor: pointer;
+  min-height: 56px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--zl-r-md, 10px);
+  background: transparent;
+  color: var(--zl-t1, #f4f4f7);
   font: inherit;
+  letter-spacing: inherit;
   text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
 }
-.compact-model-picker-trigger:hover { border-color: var(--surface2); }
-.compact-model-picker-trigger:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
-.compact-model-picker-choice { display: flex; min-width: 0; align-items: baseline; gap: var(--space-2); }
-.compact-model-picker-choice > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.compact-model-picker-choice small { flex: none; color: var(--overlay1); font-family: var(--mono); font-size: var(--text-xs); }
-.compact-model-picker-layer { position: fixed; z-index: calc(var(--z-sheet) + 1); inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; background: color-mix(in srgb, var(--crust) 60%, transparent); }
-.compact-model-picker-popover { width: min(360px, calc(100vw - 32px)) !important; max-height: min(620px, calc(100vh - 32px)); overflow: auto; }
-.compact-model-picker-popover .model-selector { width: 100%; }
-@media (max-width: 600px) {
-  .compact-model-picker-layer { align-items: flex-end; padding: 0; }
-  .compact-model-picker-popover { position: relative; top: auto !important; left: auto !important; width: 100% !important; max-height: min(75dvh, 620px); border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
-  .compact-model-picker-popover .model-selector { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+.zl-set-opt + .zl-set-opt { margin-top: 2px; }
+.zl-set-opt:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+.zl-set-opt.is-on { background: var(--zl-raised, #1e1e29); box-shadow: 0 0 0 1px var(--zl-line, rgba(255, 255, 255, 0.07)); }
+.zl-set-opt:focus-visible { outline: 2px solid var(--zl-accent, #cba6f7); outline-offset: -2px; }
+.zl-set-opt[disabled] { cursor: default; opacity: .5; }
+.zl-set-opt-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.zl-set-opt-l { font-size: var(--zl-fs-title, 16px); font-weight: 600; }
+.zl-set-opt-d { color: var(--zl-t3, #9091a6); line-height: 1.4; }
+.zl-set-check { flex: none; width: 12px; height: 12px; color: var(--zl-accent, #cba6f7); }
+
+/* The one editable number in these settings. A recess cut into the sheet,
+   like the sidebar's search (zones-lab.css:826): canvas tone, hairline rim.
+   16px is the floor, not a choice — iOS zooms the page on a smaller field. */
+.zl-set-field { margin: 14px 2px 0; }
+.zl-set-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 10px;
+  border-radius: var(--zl-r-md, 10px);
+  background: var(--zl-canvas, #101018);
+  box-shadow: 0 0 0 1px var(--zl-line, rgba(255, 255, 255, 0.07));
+  transition: box-shadow 140ms ease;
 }
+.zl-set-input:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line, rgba(203, 166, 247, 0.45)); }
+.zl-set-input input {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--zl-t1, #f4f4f7);
+  font-family: var(--mono);
+  /* 16px: the iOS focus-zoom floor. Not negotiable, see scripts/check-fields. */
+  font-size: var(--zl-fs-title, 16px);
+  font-variant-numeric: tabular-nums;
+}
+.zl-set-input input::placeholder { color: var(--zl-t4, #66677c); }
+.zl-set-unit { flex: none; font-family: var(--mono); font-size: var(--zl-fs-meta, 12px); color: var(--zl-t4, #66677c); }
+.zl-set-note { margin: 8px 2px 0; line-height: 1.4; color: var(--zl-t4, #66677c); }
+.zl-set-note.is-warn { color: var(--zl-yellow, #f9e2af); }
+
+/* ── The models page ──────────────────────────────────────────────────────
+   The allowlist is a page, not a row: today's fourteen models are a screen's
+   worth on their own, and folding them by provider is what keeps it one
+   screen when there are fifty. Filter first, because typing three letters
+   beats opening four folds. */
+.zl-set-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  margin: 0 2px 10px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--zl-r-md, 10px);
+  background: var(--zl-canvas, #101018);
+  box-shadow: 0 0 0 1px var(--zl-line, rgba(255, 255, 255, 0.07));
+  color: var(--zl-t4, #66677c);
+  transition: box-shadow 140ms ease, color 140ms ease;
+}
+.zl-set-filter:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line, rgba(203, 166, 247, 0.45)); color: var(--zl-t2, #c3c4d1); }
+.zl-set-filter input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--zl-t1, #f4f4f7);
+  font-family: inherit;
+  /* 16px: the iOS focus-zoom floor. */
+  font-size: var(--zl-fs-title, 16px);
+  letter-spacing: inherit;
+}
+.zl-set-filter input::placeholder { color: var(--zl-t4, #66677c); }
+.zl-set-filter svg { flex: none; width: 15px; height: 15px; }
+.zl-set-filter-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--zl-r-sm, 6px);
+  background: transparent;
+  color: var(--zl-t4, #66677c);
+  cursor: pointer;
+}
+.zl-set-filter-x:hover { color: var(--zl-t2, #c3c4d1); }
+
+.zl-set-tally {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 2px 6px;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta, 12px);
+  color: var(--zl-t4, #66677c);
+}
+.zl-set-tally .is-lock { font-family: var(--font); color: var(--zl-yellow, #f9e2af); }
+
+/* One fold per provider: the same row grammar as everything else here, with
+   the identity mark the rest of the product already gives a provider. */
+.zl-set-prov + .zl-set-prov { margin-top: 2px; }
+.zl-set-prov-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--zl-r-md, 10px);
+  background: transparent;
+  color: var(--zl-t1, #f4f4f7);
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.zl-set-prov-row:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+.zl-set-prov-row:focus-visible { outline: 2px solid var(--zl-accent, #cba6f7); outline-offset: -2px; }
+.zl-set-prov-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--zl-r-sm, 6px);
+  background: hsl(var(--h) 50% 60% / 0.16);
+  box-shadow: 0 0 0 1px hsl(var(--h) 50% 65% / 0.18);
+  color: hsl(var(--h) 65% 78%);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta, 12px);
+  text-transform: uppercase;
+}
+.zl-set-prov-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.zl-set-prov-n { font-weight: 500; text-transform: capitalize; }
+.zl-set-prov-sub {
+  font-size: var(--zl-fs-meta, 12px);
+  color: var(--zl-t4, #66677c);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.zl-set-prov-n-on {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta, 12px);
+  color: var(--zl-t4, #66677c);
+}
+.zl-set-prov-n-on.is-on { color: var(--zl-accent, #cba6f7); }
+.zl-set-prov-go {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--zl-t4, #66677c);
+  transition: transform 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+.zl-set-prov.is-open .zl-set-prov-go { transform: rotate(90deg); }
+.zl-set-prov-body { padding: 0 0 4px 10px; }
+
+/* A model, and whether the agent may delegate to it. The switch is the one
+   this sheet already uses: a permission you granted is a setting you chose,
+   which is exactly what .zl-sw means everywhere else on this surface. */
+.zl-set-model {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 2px 10px 2px 6px;
+}
+.zl-set-model-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+.zl-set-model-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.zl-set-model-n { font-weight: 500; }
+.zl-set-model-sub {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta, 12px);
+  color: var(--zl-t4, #66677c);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.zl-set-model-prov {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta, 12px);
+  color: var(--zl-t4, #66677c);
+  text-transform: uppercase;
+}
+.zl-set-empty { padding: 16px 2px; color: var(--zl-t4, #66677c); text-align: center; }

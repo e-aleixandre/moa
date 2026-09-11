@@ -23,7 +23,6 @@ export { StreamingSkeleton, TypingDots } from "./StreamingSkeleton/StreamingSkel
 export { HistoryHydrationTail, historyHydrationTailVisible } from "./HistoryHydrationTail/HistoryHydrationTail.jsx";
 export { FileSuggestions } from "./FileSuggestions/FileSuggestions.jsx";
 export { CommandPalette } from "./CommandPalette/CommandPalette.jsx";
-export { NotificationSettings } from "./NotificationSettings/NotificationSettings.jsx";
 export { GlobalSettings } from "./GlobalSettings/GlobalSettings.jsx";
 export { PulsePairingPanel } from "./PulsePairingPanel/PulsePairingPanel.jsx";
 export { ToastContainer } from "./Toast/ToastContainer.jsx";
