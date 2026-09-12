@@ -597,6 +597,8 @@ function ModelToggle({ model, allowed, locked, onToggle, showProvider }) {
 export function GlobalSettings({ soundEnabled, version = null, phone = false, open = true, onClose, initialPage = "root", inline = false }) {
   const [page, setPage] = useState(initialPage);
   const titleRef = useRef(null);
+  // The dialog box itself: the Tab trap needs its bounds to know what is inside.
+  const sheetRef = useRef(null);
   const sub = page !== "root";
   useEffect(() => { setPage(initialPage); }, [initialPage]);
 
@@ -635,10 +637,35 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
     if (!open) return undefined;
     const unregister = registerOverlay("global-settings");
     const onKey = (event) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      if (sub) setPage("root");
-      else onClose?.();
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        if (sub) setPage("root");
+        else onClose?.();
+        return;
+      }
+      // aria-modal="true" is a promise that the rest of the app is not
+      // reachable. Without a trap it is only a label: Tab walks straight out
+      // of the dialog into the conversation behind it. This came free from
+      // Sheet/MobileSheet before the settings moved out of them.
+      if (event.key !== "Tab") return;
+      const panel = sheetRef.current;
+      if (!panel) return;
+      const focusable = Array.from(
+        panel.querySelectorAll(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !panel.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => {
@@ -646,6 +673,14 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
       document.removeEventListener("keydown", onKey);
     };
   }, [open, sub]);
+
+  // Closing returns the keyboard where it came from -- the Settings button --
+  // rather than dropping it at the top of the document.
+  useEffect(() => {
+    if (!open) return undefined;
+    const opener = document.activeElement;
+    return () => opener?.focus?.();
+  }, [open]);
 
   // Focus moves into the sheet on open and follows a page change, so a
   // keyboard is never left behind on the row that pushed the page. The head's
@@ -670,6 +705,7 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
       <div class="zl-set-scrim" onClick={() => onClose?.()} />
       <div
         class={`zl-set${phone ? " is-phone" : ""}`}
+        ref={sheetRef}
         role="dialog"
         aria-label="Settings"
         aria-modal="true"

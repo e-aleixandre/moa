@@ -1,6 +1,16 @@
 /* LiveBar — the single row of live work between the transcript and the
-   composer, in every density. It replaces the two things that used to stack
-   here (the now-line and the live dock).
+   composer, in every density.
+
+   This sheet is the catalogue's, MOVED (catalog/zones-lab.css the `.zl-live*`
+   block), not translated. The class names came with the rules on purpose: a
+   rule that is copied is a rule that can drift, and the drift is what this
+   migration exists to end. The catalogue imports the component now, so these
+   are the only live-zone rules in the product.
+
+   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
+   ?view=zones they resolve from `.zl` (zones-lab.css); everywhere else the
+   fallback IS the catalogue's own value, so production gets the accepted
+   colour rather than a near-miss re-derived from another token set.
 
    flex:none is the whole layout contract: the stream is the flexible sibling,
    so the bar's mere presence REDUCES the stream's height — it pushes the
@@ -10,344 +20,343 @@
 
    Deliberately not a header or a rail: no fill, no box, no full-width border on
    the bar itself. It reads as the last, living line of the conversation. The
-   panel is the only surface, because it is a list you read. */
-.livebar {
-  flex: none;
-  min-width: 0;
-  width: 100%;
-  max-width: 844px;
-  margin: 0 auto;
-  padding: 0 var(--space-8) var(--space-2);
-  box-sizing: border-box;
-  container-type: inline-size;
-}
+   panel is the only surface, because it is a list you read.
 
-.lb-bar {
+   What is added below the catalogue's block is only what the prototype never
+   had: the focus ring, the hover-as-hover (so a thumb does not leave a sticky
+   well), and the production phone's own host (the bar sits above the dock, not
+   inside a `.zl-phone` frame). */
+
+/* ── Live zone ─────────────────────────────────────────────────────────────
+   One row, in the dock's margins, between the transcript and the composer.
+   It is a flex sibling (flex: none): present, it pushes the transcript up;
+   absent, the transcript has the space. It never overlays and never blocks.
+
+   Tone: the row is the DOCK, not an object on it. No fill, no rim: a
+   sentence printed in the margin above the composer, in t3, with a state
+   dot. The one framed thing is the tally, and only because it is a button
+   (control tone, hairline). The panel that opens is the sheet tone with a
+   hairline -- the same recess as the ledger, because it is the same class
+   of thing: a list of work. No shadow: it does not float, it unfolds.
+
+   Sizes: 32px row on desktop (a pointer), 44px on the phone (a thumb),
+   32px in a dense pane. The row is always the one size in its host; the
+   panel adds rows of the same height. */
+.zl-live {
+  flex: none;
+  container-type: inline-size;
+  margin: 0 0 6px;
+}
+.zl-live-bar {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  min-height: 32px; /* px: pointer-sized row; 44 on the phone */
-  min-width: 0;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 4px 0 8px;
 }
 
-/* The sentence: one verb, whoever owns it. Words carry the voice of the status
-   line; the counter is data. */
-.lb-now {
+/* The sentence: dot, words, counter. Words in Outfit 14/500 t3 (the same
+   voice as the status line), the counter in mono t4. */
+.zl-live-now {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--subtext0);
-  overflow: hidden;
-  animation: lb-in 0.2s var(--ease);
+  gap: 8px;
+  color: var(--zl-t3, #9091a6);
+  font-weight: 500;
 }
-
-@keyframes lb-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-.lb-txt {
+.zl-live-txt {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.zl-live-el { flex: none; color: var(--zl-t4, #66677c); }
 
-/* State is the dot, and only the dot. Sky breathes: alive. Amber is still: the
-   run is parked on you, and animating something that is not moving would lie. */
-.lb-dot {
+/* Data is mono: the elapsed counter, the tally's count, a command. Scoped
+   to the bar rather than declared globally, so it cannot collide with the
+   catalogue's own `.zl-data`. */
+.zl-live .zl-data {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* State is the dot, and only the dot. Green breathes: alive. Amber is
+   still: parked on you. The words go one step brighter while waiting, so
+   the line is readable at a glance from across the room, but they do not
+   go amber -- the dot is enough, and amber text next to the yellow ask
+   card above would double the alarm. */
+.zl-live-dot {
   flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-full);
-  background: var(--sky);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
 }
-
-.lb-dot.is-working {
-  animation: lb-breathe 1.8s ease-in-out infinite;
+.zl-live-dot.is-working,
+.zl-live-dot.is-thinking {
+  background: var(--zl-green, #a6e3a1);
+  box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18);
+  animation: zl-breathe 1.6s ease-in-out infinite;
 }
-
-@keyframes lb-breathe {
-  50% { opacity: 0.4; }
+.zl-live-dot.is-waiting {
+  background: var(--zl-yellow, #f9e2af);
+  box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22);
 }
+.zl-live-now.is-waiting { color: var(--zl-t2, #c3c4d1); }
+@keyframes zl-breathe { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .zl-live-dot { animation: none; } }
 
-.lb-now.is-waiting { color: var(--yellow); }
-.lb-now.is-waiting .lb-dot { background: var(--yellow); animation: none; }
-
-/* The background spotlight: the sentence belongs to a background item, so it is
-   prefixed with that item's identity mark and the item's name is the subject.
-   It crossfades when the spotlight moves — opacity only. */
-.lb-spot {
+/* Background spotlight: the sentence belongs to a background item, so it
+   is prefixed with that item's identity mark and the item's name is the
+   subject. It crossfades when the spotlight moves: opacity only. */
+.zl-live-spot {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  animation: lb-arrive 260ms var(--ease);
+  gap: 8px;
+  animation: zl-arrive 260ms ease-out both;
 }
+@keyframes zl-arrive { from { opacity: 0; } }
+.zl-live-who { color: var(--zl-t2, #c3c4d1); }
+.zl-live-now.is-bg .zl-live-txt.zl-data { font-size: var(--zl-fs-body, 14px); color: var(--zl-t3, #9091a6); }
 
-@keyframes lb-arrive {
-  from { opacity: 0; }
-}
+/* Identity marks. A subagent is a 7px dot in its own hue, exactly the
+   project monogram's palette, never green/yellow/red. A command is a mono
+   `$` in t3: neutral, and it says "shell" without an icon. In the tally
+   the marks cluster; in the sentence and the panel each stands alone.
 
-.lb-who {
-  font-weight: var(--weight-semibold);
-}
-
-.lb-txt.is-data {
-  font-family: var(--mono);
-  color: var(--overlay1);
-}
-
-/* The elapsed counter — the honest progress signal (formatElapsed: "12s",
-   "1m03s"). Never truncates, always tabular. */
-.lb-el {
-  flex: none;
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  color: var(--overlay0);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.02em;
-}
-
-/* Identity marks. A subagent is a dot in its own fanout hue — identity, never a
-   state colour. A command is a mono `$`: neutral, and it says "shell" without
-   an icon. */
-.lb-id {
+   Production agents carry a named accent (`--zl-live-accent: var(--sky)`);
+   the catalogue's model chips and fixture names carry a hue (`--h`). */
+.zl-live-id {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 12px;
   height: 12px;
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  line-height: 1;
-  color: var(--overlay1);
 }
-
-.lb-id.is-agent::before {
+.zl-live-id.is-agent::before {
   content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-full);
-  background: var(--lb-accent, var(--blue));
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--zl-live-accent, hsl(var(--h, 210) 65% 72%));
 }
+.zl-live-id.is-bash { color: var(--zl-t3, #9091a6); font-weight: 500; line-height: 1; }
 
-/* The tally: the door to the panel. It only exists while something async is
-   alive. A control-tone chip with the identity marks, the count and a chevron
-   pointing where the panel will open. */
-.lb-tally {
+/* The tally: the door to the panel. A control-tone chip with the identity
+   marks, the count and a chevron pointing where the panel will open (up). */
+.zl-live-tally {
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  height: 26px;
-  padding: 0 var(--space-1) 0 var(--space-2);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-md);
-  background: var(--mantle);
-  color: var(--subtext0);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px 0 8px;
+  border: 0;
+  border-radius: var(--zl-r-md, 10px);
+  background: var(--zl-control, #262633);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  color: var(--zl-t2, #c3c4d1);
+  font-family: inherit;
   cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
 }
-
-.lb-tally:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
 @media (hover: hover) {
-  .lb-tally:hover { background: var(--surface0); color: var(--text); }
+  .zl-live-tally:hover { background: var(--zl-raised, #1e1e29); color: var(--zl-t1, #f4f4f7); box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12)); }
 }
-
-.lb-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
+.zl-live-tally:focus-visible {
+  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline-offset: 2px;
 }
-
-.lb-dots .lb-id { width: 10px; }
-
+.zl-live-dots { display: inline-flex; align-items: center; gap: 1px; }
+.zl-live-dots .zl-live-id { width: 10px; }
 /* In the cluster a command is a neutral dot, not a `$`: two of them side by
    side read as a price. The glyph stays where the item stands alone. */
-.lb-dots .lb-id.is-bash { font-size: 0; }
-.lb-dots .lb-id.is-bash::before {
+.zl-live-dots .zl-live-id.is-bash { font-size: 0; }
+.zl-live-dots .zl-live-id.is-bash::before {
   content: "";
   width: 5px;
   height: 5px;
-  border-radius: var(--radius-full);
-  background: var(--overlay0);
+  border-radius: 50%;
+  background: var(--zl-t3, #9091a6);
 }
-
-.lb-chev {
+.zl-live-n { color: inherit; }
+.zl-live-chev {
+  width: 12px;
+  height: 12px;
   flex: none;
-  display: inline-grid;
-  place-items: center;
-  color: var(--overlay1);
+  color: var(--zl-t3, #9091a6);
+  transition: transform 160ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
 }
+.zl-live-chev.is-up { transform: rotate(180deg); }
 
-/* The panel: a recess ABOVE the bar, so opening it leaves the tally where it
-   was rather than shoving it under the thumb. Capped and scrolling inside
-   itself, so N live jobs can never eat the conversation. */
-.lb-panel {
-  max-height: 198px; /* px: the cap measured in the lab — see the header note */
-  margin: 0 0 var(--space-1);
-  padding: var(--space-1);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-md);
-  background: var(--mantle);
+/* The panel: a recess above the row, the ledger's tone. Capped so it can
+   never eat the conversation: measured on the phone, bar + open panel =
+   242px of a 780px screen, and the transcript keeps 398px. */
+.zl-live-panel {
+  max-height: 208px;
+  margin: 0 0 4px;
+  padding: 2px 4px 4px;
+  border-radius: var(--zl-r-md, 10px);
+  background: var(--zl-sheet, #171720);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
   overflow-y: auto;
   scrollbar-width: thin;
-  animation: lb-unfold 180ms var(--ease);
+  scrollbar-color: var(--zl-line-2, rgba(255, 255, 255, 0.12)) transparent;
+  animation: zl-unfold 180ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
   transform-origin: bottom;
 }
-
-@keyframes lb-unfold {
-  from { opacity: 0; transform: translateY(6px); }
+@keyframes zl-unfold { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) {
+  .zl-live-panel, .zl-live-spot { animation: none; }
 }
-
-.lb-grp-h {
+.zl-live-panel .zl-group {
   display: flex;
   align-items: baseline;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  letter-spacing: var(--tracking-wide);
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 8px 2px;
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--overlay0);
+  color: var(--zl-t4, #66677c);
 }
+.zl-live-grp:first-child .zl-group { margin-top: 0; }
+.zl-live-panel .zl-group-n { letter-spacing: 0; color: var(--zl-t4, #66677c); }
 
-.lb-grp:first-child .lb-grp-h { margin-top: 0; }
-.lb-grp-n { letter-spacing: 0; }
-
-.lb-row {
+.zl-live-row {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 10px;
   width: 100%;
-  min-height: 32px; /* px: pointer row; 44 on the phone */
-  padding: var(--space-1) var(--space-2);
+  min-height: 36px;
+  padding: 4px 8px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--zl-r-sm, 6px);
   background: transparent;
-  color: var(--subtext0);
-  font-family: var(--font);
-  font-size: var(--text-xs);
+  color: var(--zl-t2, #c3c4d1);
+  font-family: inherit;
+  font-size: var(--zl-fs-body, 14px);
+  letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
-  box-sizing: border-box;
+  transition: background 120ms ease;
 }
-
-div.lb-row { cursor: default; }
-
-.lb-row:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: calc(-1 * var(--focus-ring-width));
+div.zl-live-row { cursor: default; }
+.zl-live-row:focus-visible {
+  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline-offset: calc(-1 * 2px);
 }
-
 @media (hover: hover) {
-  button.lb-row:hover { background: var(--surface0); color: var(--text); }
-  button.lb-row:hover .lb-go { color: var(--subtext0); }
+  button.zl-live-row:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+  button.zl-live-row:hover .zl-live-go { color: var(--zl-t2, #c3c4d1); }
 }
-
-.lb-row-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.lb-row-t {
-  font-weight: var(--weight-semibold);
+.zl-live-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.zl-live-row-t {
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.lb-row-t.is-data {
-  font-family: var(--mono);
-  font-weight: var(--weight-normal);
-  color: var(--overlay1);
-}
-
-.lb-row-d {
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  color: var(--overlay0);
+.zl-live-row-t.zl-data { font-size: var(--zl-fs-body, 14px); font-weight: 400; }
+.zl-live-row-task { font-weight: 400; color: var(--zl-t3, #9091a6); }
+.zl-live-row-d {
+  font-size: var(--zl-fs-meta, 12px);
+  color: var(--zl-t4, #66677c);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.zl-live-go { width: 12px; height: 12px; flex: none; color: var(--zl-t4, #66677c); }
 
-.lb-go {
-  flex: none;
-  display: inline-grid;
-  place-items: center;
-  color: var(--overlay0);
+/* Phone: the row and every panel row are 44 for the thumb; the tally is
+   a full 44 hit too, with its visible chip inside.
+
+   Two hosts, same numbers: the catalogue's `.zl-phone` frame (a 390px stage
+   inside a wide window, so a max-width media query would miss it) and the
+   production phone (a real 390px viewport). */
+.zl-phone .zl-live-bar,
+.mconv .zl-live-bar { min-height: 44px; }
+/* The button itself is 44 tall; the chip look comes from its own inner
+   surface, not from shrinking the control. The invisible-halo trick was
+   measured and did not work -- a transparent pseudo-element does not answer
+   elementFromPoint, so the target existed on paper only. Making the real
+   button the real size needs no trick. */
+.zl-phone .zl-live-tally,
+.mconv .zl-live-tally {
+  /* position:relative is what makes the inset chip below anchor to THIS
+     button. Without it the pseudo-element resolved against the dock and
+     covered the whole open panel -- which is why the panel came out black. */
+  position: relative;
+  height: 44px;
+  background: transparent;
+  box-shadow: none;
+  padding: 0 3px;
 }
-
-/* Dense (a pane): everything one notch tighter, and the row's second line goes
-   — in a pane the name is what identifies the job. */
-.livebar.is-dense { padding: 0 var(--space-3) var(--space-1); }
-.livebar.is-dense .lb-row-d { display: none; }
-.livebar.is-dense .lb-panel { max-height: 160px; }
-
-/* Phone: the bar, the tally and every panel row are a full 44 for the thumb.
-   The tally's chip look comes from its own inner surface, not from shrinking
-   the control — a transparent halo does not answer elementFromPoint, so a
-   target made that way exists on paper only. position:relative is what anchors
-   that inner surface to THIS button instead of the bar. */
-@media (max-width: 767px) {
-  .livebar { padding: 0 var(--space-4) var(--space-2); }
-  .lb-bar { min-height: 44px; }
-  .lb-row { min-height: 44px; }
-  .lb-panel { max-height: 232px; }
-  .lb-tally {
-    position: relative;
-    /* 44 in BOTH axes. Measured: with only a count and a chevron the chip came
-       out 36px wide, which is a target on paper and a miss under a thumb. */
-    min-width: 44px;
-    height: 44px;
-    justify-content: center;
-    padding: 0 var(--space-1);
-    border: 0;
-    background: transparent;
-  }
-  .lb-tally > * { position: relative; }
-  .lb-tally::before {
-    content: "";
-    position: absolute;
-    inset: 8px 0;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--surface0);
-    background: var(--mantle);
-  }
+/* Production phone: 44 in BOTH axes. Measured: with only a count and a
+   chevron the chip came out 36px wide, which is a target on paper and a miss
+   under a thumb. The catalogue's 390px frame already had the dots, so it did
+   not need this floor — applying it there stretched the chip and failed the
+   golden. */
+.mconv .zl-live-tally {
+  min-width: 44px;
+  justify-content: center;
 }
+.zl-phone .zl-live-tally > *,
+.mconv .zl-live-tally > * { position: relative; }
+.zl-phone .zl-live-tally::before,
+.mconv .zl-live-tally::before {
+  content: "";
+  position: absolute;
+  inset: 4px 0;
+  border-radius: var(--zl-r-md, 10px);
+  background: var(--zl-hi, rgba(255, 255, 255, 0.04));
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+}
+@media (hover: hover) {
+  .zl-phone .zl-live-tally:hover::before,
+  .mconv .zl-live-tally:hover::before { background: var(--zl-raised, #1e1e29); }
+}
+.zl-phone .zl-live-row,
+.mconv .zl-live-row { min-height: 44px; }
+.zl-phone .zl-live-panel,
+.mconv .zl-live-panel { max-height: 232px; }
 
-/* Degradation by the bar's own width: the tally loses its dots first (the count
-   says the same thing), then the counter goes. The verb is the last thing, and
-   it only truncates. */
+/* Dense (pane): 32px row, the panel's rows too, three of them before it
+   scrolls. */
+.zl-live.is-dense .zl-live-bar { min-height: 32px; padding-left: 6px; gap: 6px; }
+.zl-live.is-dense .zl-live-now { font-size: var(--zl-fs-body, 14px); }
+.zl-live.is-dense .zl-live-tally { height: 26px; }
+.zl-live.is-dense .zl-live-row { min-height: 32px; }
+.zl-live.is-dense .zl-live-row-d { display: none; }
+.zl-live.is-dense .zl-live-panel { max-height: 160px; }
+
+/* Degradation by the zone's own width: the tally loses its dots first
+   (the count says the same thing), then the counter goes. The verb is the
+   last thing, and it only truncates. */
 @container (max-width: 420px) {
-  .lb-dots { display: none; }
-  .lb-tally { padding-left: var(--space-2); }
+  .zl-live-dots { display: none; }
+  .zl-live-tally { padding-left: 7px; }
 }
-
 @container (max-width: 340px) {
-  .lb-now > .lb-el, .lb-spot > .lb-el { display: none; }
+  .zl-live-now > .zl-live-el, .zl-live-spot > .zl-live-el { display: none; }
 }
 
-/* Reduced motion — no shimmerless deception to preserve here, just stillness:
-   the bar still appears and disappears, only without the reveal. */
-@media (prefers-reduced-motion: reduce) {
-  .lb-now, .lb-spot, .lb-panel { animation: none; }
-  .lb-dot { animation: none; }
+/* Production hosts: the dock is a column flex, so the bar has to take the
+   cross-axis instead of sizing to its contents (which is what let the
+   catalogue's phone frame keep its dots — the container query never saw a
+   definite width). */
+.conversation-main .zl-live,
+.pane .p-dock .zl-live,
+.mcomposer .zl-live {
+  min-width: 0;
+  width: 100%;
 }
+

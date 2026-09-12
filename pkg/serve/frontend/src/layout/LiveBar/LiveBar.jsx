@@ -1,13 +1,18 @@
 import { useEffect, useState } from "preact/hooks";
-import { ChevronUp, ChevronDown, ChevronRight } from "lucide-preact";
 import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
 import "./LiveBar.css";
 
-// LiveBar — ONE bar of live work above the composer, the merge of what used to
-// be two stacked things fighting for the same slot (NowLine, the foreground
-// activity phrase; LiveDock, the permanent home of async work). They said two
-// verbs at once and pushed the transcript twice; now there is a single row with
-// two fixed slots:
+// LiveBar — ONE bar of live work above the composer. Markup and CSS are the
+// catalogue's (catalog/zones-lab.jsx `LiveZone`, zones-lab.css the `.zl-live*`
+// block), MOVED here rather than imitated: the classes travelled with the
+// rules, so the strip IS the accepted design instead of a translation of it.
+// The catalogue imports this component now, which is what makes one definition
+// rather than two.
+//
+// It is the merge of what used to be two stacked things fighting for the same
+// slot (NowLine, the foreground activity phrase; LiveDock, the permanent home
+// of async work). They said two verbs at once and pushed the transcript twice;
+// now there is a single row with two fixed slots:
 //
 //   [ sentence ..................................... ] [ tally ]
 //
@@ -20,20 +25,18 @@ import "./LiveBar.css";
 // kind, opening UPWARD so the bar stays where it was. Opening a row goes to its
 // screen (a subagent's conversation, a background bash's output).
 //
+// What is NOT the catalogue's is everything the prototype never had, grafted
+// on top: the real elapsed clock (origin = server-stamped runStartedAtMs),
+// liveTrayAgents() for the background, `open`/`onToggle` so the caller persists
+// the panel per session (session.dockOpen), `forceCompact` collapsing the panel
+// while the mobile keyboard is up WITHOUT touching that stored preference, and
+// the house rule that a missing datum hides its segment rather than drawing a
+// zero.
+//
 // What the old now-line taught, kept verbatim: the bar is flex:none, so its
 // presence PUSHES the transcript up instead of overlaying the composer; it is
 // absent in repose (returns null); and while the run is parked on you it goes
 // amber WITHOUT motion — animating something that is not moving would lie.
-//
-// The panel is capped and scrolls inside itself: N live jobs can never eat the
-// conversation.
-//
-// Data: activityPhase / activityText / formatElapsed for the foreground (the
-// same source as the TUI statusline, never duplicated), liveTrayAgents(session)
-// for the background. `open`/`onToggle` keep the panel CONTROLLED so the caller
-// persists it per session (session.dockOpen). `forceCompact` collapses the
-// panel while the mobile keyboard is up (writing wins) WITHOUT touching that
-// stored preference. `dense` is the pane dressing.
 
 // foregroundLine decides WHAT the foreground says: the phrase, whether the run
 // is parked on the user, and the elapsed counter (empty unless the agent is
@@ -42,7 +45,9 @@ export function foregroundLine(session, nowMs) {
   const phase = activityPhase(session);
   if (!phase) return null;
 
-  const text = activityText(session);
+  // liveLabel is the catalogue adapter's fixture phrase. Production never sets
+  // it: activityText is the single source the TUI and this bar share.
+  const text = session.liveLabel || activityText(session);
   if (!text) return null;
 
   const waiting = phase === "waiting";
@@ -78,8 +83,9 @@ export function liveBarModel(session, agents, nowMs, spot = 0) {
 
 // useSpotlight rotates an index across `count` items, so the bar can cycle
 // through what each live thing is doing without expanding. Rotation stops (and
-// pins index 0) under prefers-reduced-motion, with a single item, or when it is
-// not the background's turn to speak.
+// pins index 0) under prefers-reduced-motion, with a single item, when it is
+// not the background's turn to speak, or in a fidelity scene (the capture has
+// to land on the first item, always).
 export function useSpotlight(count, active, intervalMs = 4000) {
   const [index, setIndex] = useState(0);
 
@@ -95,7 +101,10 @@ export function useSpotlight(count, active, intervalMs = 4000) {
     const reduced =
       typeof matchMedia !== "undefined" &&
       matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduced) return;
+    const scene =
+      typeof location !== "undefined" &&
+      new URLSearchParams(location.search).get("view") === "scene";
+    if (reduced || scene) return;
     const t = setInterval(() => setIndex((i) => (i + 1) % count), intervalMs);
     return () => clearInterval(t);
   }, [count, active, intervalMs]);
@@ -172,16 +181,18 @@ export function LiveBar({
   const { sentence, tally } = model;
   const subs = list.filter((a) => a.kind === "subagent");
   const bashes = list.filter((a) => a.kind !== "subagent");
+  const waiting = sentence.waiting;
+  const item = sentence.kind === "background" ? sentence.agent : null;
 
   return (
-    <div class={`livebar${dense ? " is-dense" : ""}${openPanel ? " is-open" : ""}`}>
+    <div class={`zl-live${dense ? " is-dense" : ""}${openPanel ? " is-open" : ""}`}>
       {openPanel && (
-        <div class="lb-panel" role="region" aria-label="Live in the background">
+        <div class="zl-live-panel" role="region" aria-label="Live in the background">
           {[["Subagents", subs], ["Commands", bashes]].map(([title, items]) => items.length > 0 && (
-            <div class="lb-grp" key={title}>
-              <div class="lb-grp-h">
+            <div class="zl-live-grp" key={title}>
+              <div class="zl-group">
                 <span>{title}</span>
-                <span class="lb-grp-n">{items.length}</span>
+                <span class="zl-group-n zl-data">{items.length}</span>
               </div>
               {items.map((a) => <LiveRow key={a.id} agent={a} onOpen={onOpen} />)}
             </div>
@@ -189,48 +200,43 @@ export function LiveBar({
         </div>
       )}
 
-      <div class="lb-bar">
-        <div
-          class={`lb-now${sentence.waiting ? " is-waiting" : ""}${sentence.kind === "background" ? " is-bg" : ""}`}
-          role="status"
-          aria-live="polite"
-        >
-          {sentence.kind === "foreground" ? (
-            <>
-              <span class={`lb-dot is-${sentence.waiting ? "waiting" : "working"}`} aria-hidden="true" />
-              <span class="lb-txt">{sentence.text}</span>
-            </>
-          ) : (
-            <span class="lb-spot" key={sentence.agent.id}>
-              <LiveId agent={sentence.agent} />
-              {sentence.agent.kind === "subagent" ? (
-                <span class="lb-txt">
-                  <span class="lb-who" style={accentStyle(sentence.agent)}>{sentence.agent.name}</span>
-                  {sentence.agent.action ? ` · ${sentence.agent.action}` : ""}
-                </span>
-              ) : (
-                <span class="lb-txt is-data">{sentence.agent.action || sentence.agent.name}</span>
-              )}
+      <div class="zl-live-bar">
+        {sentence.kind === "foreground" ? (
+          <div class={`zl-live-now${waiting ? " is-waiting" : ""}`} role="status" aria-live="polite">
+            <span class={`zl-live-dot is-${sentence.phase || "working"}`} aria-hidden="true" />
+            <span class="zl-live-txt">{sentence.text}</span>
+            {!!sentence.elapsed && <span class="zl-live-el zl-data">{sentence.elapsed}</span>}
+          </div>
+        ) : (
+          <div class="zl-live-now is-bg" role="status" aria-live="polite">
+            <span class="zl-live-spot" key={item.id}>
+              <LiveId agent={item} />
+              {item.kind === "subagent"
+                ? (
+                  <span class="zl-live-txt">
+                    <span class="zl-live-who">{item.name}</span>
+                    {item.action ? ` · ${item.action}` : ""}
+                  </span>
+                )
+                : <span class="zl-live-txt zl-data">{item.action || item.name}</span>}
+              {!!sentence.elapsed && <span class="zl-live-el zl-data">{sentence.elapsed}</span>}
             </span>
-          )}
-          {sentence.elapsed && <span class="lb-el">{sentence.elapsed}</span>}
-        </div>
+          </div>
+        )}
 
         {tally && (
           <button
             type="button"
-            class="lb-tally"
+            class="zl-live-tally"
             onClick={toggle}
             aria-expanded={openPanel}
             aria-label={`${tally.count} in the background${openPanel ? ", collapse" : ", expand"}`}
           >
-            <span class="lb-dots" aria-hidden="true">
+            <span class="zl-live-dots" aria-hidden="true">
               {tally.agents.map((a) => <LiveId agent={a} key={a.id} />)}
             </span>
-            <span class="lb-n">{tally.count}</span>
-            <span class="lb-chev" aria-hidden="true">
-              {openPanel ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-            </span>
+            <span class="zl-live-n zl-data">{tally.count}</span>
+            <ChevIcon up={!openPanel} />
           </button>
         )}
       </div>
@@ -242,12 +248,21 @@ export function LiveBar({
 // accent (identity, never a state colour); a command gets a mono `$`, which
 // says "shell" without borrowing a hue that would mean something else. In the
 // tally cluster the `$` becomes a neutral dot: two of them side by side read as
-// a price.
+// a price. The catalogue's model chips reuse this mark with a hue (`--h`);
+// production agents carry a named accent (`--sky` etc.).
 function LiveId({ agent }) {
   if (agent.kind === "subagent") {
-    return <span class="lb-id is-agent" style={accentVar(agent)} aria-hidden="true" />;
+    return <span class="zl-live-id is-agent" style={liveIdStyle(agent)} aria-hidden="true" />;
   }
-  return <span class="lb-id is-bash" aria-hidden="true">$</span>;
+  return <span class="zl-live-id is-bash zl-data" aria-hidden="true">$</span>;
+}
+
+function ChevIcon({ up }) {
+  return (
+    <svg class={`zl-live-chev${up ? " is-up" : ""}`} viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M2.5 4.5L6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
 }
 
 function LiveRow({ agent, onOpen }) {
@@ -260,7 +275,7 @@ function LiveRow({ agent, onOpen }) {
   const isBash = agent.kind !== "subagent";
   return (
     <Tag
-      class={`lb-row${isBash ? " is-bash" : ""}`}
+      class="zl-live-row"
       type={openable ? "button" : undefined}
       onClick={openable ? () => onOpen(agent.id, agent.kind) : undefined}
       aria-label={openable
@@ -268,32 +283,29 @@ function LiveRow({ agent, onOpen }) {
         : undefined}
     >
       <LiveId agent={agent} />
-      <span class="lb-row-main">
+      <span class="zl-live-row-main">
         {isBash ? (
-          <span class="lb-row-t is-data">{agent.action || agent.name}</span>
+          <span class="zl-live-row-t zl-data">{agent.action || agent.name}</span>
         ) : (
           <>
-            <span class="lb-row-t" style={accentStyle(agent)}>{agent.name}</span>
-            {agent.action && <span class="lb-row-d">{agent.action}</span>}
+            <span class="zl-live-row-t">{agent.name}{!!agent.task && <> <span class="zl-live-row-task">· {agent.task}</span></>}</span>
+            {!!agent.action && <span class="zl-live-row-d">{agent.action}</span>}
           </>
         )}
       </span>
-      {agent.time && <span class="lb-el">{agent.time}</span>}
-      {openable && <span class="lb-go" aria-hidden="true"><ChevronRight size={14} /></span>}
+      {!!agent.time && <span class="zl-live-el zl-data">{agent.time}</span>}
+      {openable && (
+        <svg class="zl-live-go" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      )}
     </Tag>
   );
 }
 
-// The fanout accent is the subagent's IDENTITY, assigned by the stream model.
-// bash carries none by design.
-function accentStyle(agent) {
-  if (agent.kind !== "subagent" || !agent.accent) return undefined;
-  return { color: `var(--${agent.accent})` };
-}
-
-// The identity dot is a ::before, which an inline colour cannot reach, so the
-// accent travels as a custom property the stylesheet reads.
-function accentVar(agent) {
-  if (agent.kind !== "subagent" || !agent.accent) return undefined;
-  return { "--lb-accent": `var(--${agent.accent})` };
+function liveIdStyle(agent) {
+  if (agent.kind !== "subagent") return undefined;
+  if (agent.accent) return { "--zl-live-accent": `var(--${agent.accent})` };
+  if (agent.hue != null) return { "--h": agent.hue };
+  return undefined;
 }

@@ -194,12 +194,12 @@ function SubagentLive({ view, session, jobId, onBack, onCancel, confirmCancel })
       </div>
 
       {(view.action || view.elapsed) && (
-        <div class="livebar">
-          <div class="lb-bar">
-            <div class="lb-now" role="status" aria-live="polite">
-              <span class="lb-dot is-working" aria-hidden="true" />
-              <span class="lb-txt">{view.action || "working"}</span>
-              {view.elapsed && <span class="lb-el">{view.elapsed}</span>}
+        <div class="zl-live">
+          <div class="zl-live-bar">
+            <div class="zl-live-now" role="status" aria-live="polite">
+              <span class="zl-live-dot is-working" aria-hidden="true" />
+              <span class="zl-live-txt">{view.action || "working"}</span>
+              {!!view.elapsed && <span class="zl-live-el zl-data">{view.elapsed}</span>}
             </div>
           </div>
         </div>

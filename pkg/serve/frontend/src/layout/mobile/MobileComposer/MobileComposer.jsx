@@ -14,8 +14,8 @@ import "./MobileComposer.css";
 // and the permission chip (→ Permissions) — plus the per-run token heartbeat at the
 // right. Sessions is NOT among them: that door is the floating title chip at the
 // top of the screen (MobileTitleChip). Live activity is not in the line either:
-// it lives in the ephemeral now-line rendered above this composer
-// (LiveBar). Each door opens the approved bottom sheet (MobileSheet),
+// it lives in the LiveBar rendered as a child of this dock, above the slab.
+// Each door opens the approved bottom sheet (MobileSheet),
 // which — per device feedback — covers the full mobile container (scrim + sheet
 // flush to the bottom), so the composer is never left exposed under it.
 //
@@ -27,7 +27,7 @@ import "./MobileComposer.css";
 // header any more, so per-session actions with nowhere else to live hang off it
 // (Live preview, Artifacts). They need no visibility condition — there is no
 // composer without a session.
-export function MobileComposer({ session, usage, onSecret }) {
+export function MobileComposer({ session, usage, onSecret, children }) {
   const plusActions = [
     {
       id: "preview",
@@ -40,6 +40,7 @@ export function MobileComposer({ session, usage, onSecret }) {
   ];
   return (
     <div class="mcomposer zl-dock">
+      {children}
       <Composer sessionId={session.id} session={session} compact onSecret={onSecret} plusActions={plusActions} />
       <MobileStatusLine session={session} usage={usage} />
     </div>

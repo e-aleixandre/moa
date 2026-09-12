@@ -62,7 +62,7 @@
 }
 
 /* Foot: live line + composer, in the parent's own pill (.mcomposer from
-   MobileComposer.css, .livebar from LiveBar.css). Nothing is restyled here;
+   MobileComposer.css, .zl-live from LiveBar.css). Nothing is restyled here;
    if it looked different, the two screens would have drifted.
 
    There is deliberately no status line under it any more: the child's context

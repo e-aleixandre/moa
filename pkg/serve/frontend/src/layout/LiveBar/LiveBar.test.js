@@ -1,4 +1,5 @@
 import { test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { foregroundLine, liveBarModel } from './LiveBar.jsx';
 
 // The live bar is the ONE row of live work above the composer, the merge of the
@@ -33,6 +34,15 @@ test('waiting on the user drops the timer and flags the amber state', () => {
     text: 'Waiting for you',
     waiting: true,
     elapsed: '',
+  });
+});
+
+test('a catalogue fixture phrase wins over activityText, which the adapter needs', () => {
+  const session = { state: 'running', runStartedAtMs: 1000, liveLabel: 'Running go vet' };
+  expect(foregroundLine(session, 5000)).toMatchObject({
+    text: 'Running go vet',
+    waiting: false,
+    elapsed: '4s',
   });
 });
 
@@ -123,4 +133,14 @@ test('a background sentence carries the item elapsed', () => {
 test('a missing or malformed agent list is simply no background', () => {
   expect(liveBarModel(WORKING, undefined, 13000).tally).toBe(null);
   expect(liveBarModel(IDLE, undefined, 13000)).toBe(null);
+});
+
+test('the bar carries the catalogue classes, not a translation of them', () => {
+  const src = readFileSync(new URL('./LiveBar.jsx', import.meta.url), 'utf8');
+  expect(src).toContain('zl-live');
+  expect(src).toContain('zl-live-tally');
+  expect(src).toContain('zl-live-dot');
+  expect(src).not.toContain('class={`livebar');
+  expect(src).not.toContain('"lb-now"');
+  expect(src).not.toContain('"lb-tally"');
 });

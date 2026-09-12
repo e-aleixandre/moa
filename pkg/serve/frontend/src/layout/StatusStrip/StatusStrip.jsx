@@ -47,7 +47,7 @@ function ThinkMeter({ level }) {
 // The context ring: accent while there is room, state colour as it fills. An
 // SVG arc, not a conic-gradient: the catalogue's ring animates its dasharray,
 // and a 2.4px stroke reads at 14px where a masked gradient goes muddy.
-function CtxRing({ pct }) {
+export function CtxRing({ pct }) {
   const r = 6.5;
   const c = 2 * Math.PI * r;
   const tone = pct >= 90 ? "is-hot" : pct >= 70 ? "is-warm" : "";
@@ -254,7 +254,7 @@ export function StatusStrip({
           reading. Every datum hides itself when it is missing, so the group is
           only rendered while it has something to say. */}
       <div class="zl-st-group is-gauges">
-        {(hasCtx || hasSpend) && (() => {
+        {(hasCtx || hasSpend || usageTrigger) && (() => {
           const body = (
             <>
               {hasCtx && <CtxRing pct={ctxPercent} />}

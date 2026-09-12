@@ -25,6 +25,14 @@ import { PANEL_PAGES } from "../data/session-panel.js";
 import { Transcript as ProductionTranscript } from "../layout/Stream/Stream.jsx";
 import { UserWaypoint } from "../components/UserWaypoint/UserWaypoint.jsx";
 import { AssistantDocument, Prose } from "../components/AssistantDocument/AssistantDocument.jsx";
+/* Same move, the live zone: markup and CSS live in layout/LiveBar now, and
+   the prototype draws the shipped one. See the adapter at `LiveZone`. */
+import { LiveBar as ProductionLiveBar } from "../layout/LiveBar/LiveBar.jsx";
+import { formatElapsed } from "../data/util/activity.js";
+/* CtxRing moved with the status line (layout/StatusStrip). The prototype's
+   StatusLine still draws the gauges itself; the ring is the one piece of
+   that line that already has a single definition. */
+import { CtxRing } from "../layout/StatusStrip/StatusStrip.jsx";
 
 /* The three-zone skeleton, both densities side by side.
    This is a PROTOTYPE, not production: it draws the shell only (where things
@@ -696,38 +704,16 @@ function StreamingProse({ playing }) {
 }
 
 /* ── Live zone ─────────────────────────────────────────────────────────────
-   The strip between the transcript and the composer. In production two
-   components compete for it: NowLine (the foreground run: alive? since
-   when? parked on me?) and LiveDock (the async work: subagents and
-   background commands that never block the conversation). Here they are ONE
-   row with two fixed slots, and the row is what stays constant:
+   MIGRATED (METODO §4): the strip has no private copy here. Its markup and
+   its CSS were MOVED to layout/LiveBar, class names and all, and the
+   prototype imports them back. What sits here now is only an adapter: the
+   lab's `{ fg, bg, t0 }` fixtures mapped onto the shipped session + agents
+   shape. Production streams the phrase from activityText and the background
+   from liveTrayAgents(); the fixtures are scaffolding for a demo.
 
-     [ the sentence ........................ ]  [ tally ▸ ]
-
-   The sentence is the one thing being said about "now". The foreground run
-   owns it whenever it exists (it is the thing you are actually waiting on);
-   with nothing in the foreground, the background takes the slot and
-   rotates a spotlight through its items, each one prefixed with its OWN
-   identity mark (a coloured dot for a subagent, a mono `$` for a command)
-   so it never reads as the foreground. The tally is the door to the panel
-   and is only there while something async is alive. Two sentences never
-   share the line: when the foreground is busy, the background is reduced to
-   its dots and its count. That is the answer to "agent working + two bash
-   + a subagent": one verb, one counter, and a small cluster you can open.
-
-   State is the dot, and only the dot: green breathing = running, amber and
-   still = waiting on you. Waiting also drops the counter, because an
-   elapsed-as-work number would lie while the run is parked. Nothing else
-   moves: the counter ticks and the dot breathes, and that is the whole
-   "alive" signal -- no shimmer, no sweep, so the strip is quieter than the
-   live ledger row it sits under.
-
-   The panel opens UPWARD from the row (the row is what your thumb found;
-   it does not move), one row per live thing grouped by kind, capped at four
-   rows before it scrolls. Height budget: the zone is one row unless you
-   open it, and open it never takes more than ~200px, a quarter of the
-   phone's transcript. On the phone, typing wins: focusing the composer
-   collapses the panel. */
+   The panel's open state is still owned by the host (`useLive`), so the
+   phone can force it shut while typing without the adapter growing a
+   keyboard of its own. */
 const LIVE_BG = [
   { kind: "agent", name: "terra", task: "review the diff", doing: "Reading pkg/attach/store.go", ago: 134 },
   { kind: "bash", cmd: "go test ./... -race", ago: 41 },
@@ -758,106 +744,54 @@ function useNow(active) {
   return now;
 }
 
-function fmtElapsed(ms) {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  if (m < 60) return r === 0 ? `${m}m` : `${m}m${String(r).padStart(2, "0")}s`;
-  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`;
+function fixtureSession(fg, t0) {
+  if (!fg) return { state: "idle" };
+  if (fg.phase === "waiting") return { state: "permission", runStartedAtMs: t0 };
+  return {
+    state: "running",
+    runStartedAtMs: t0 - (fg.ago || 0) * 1000,
+    liveLabel: fg.text,
+  };
 }
 
-/* Identity mark for a background item: colour for a subagent (same hue
-   function as the project monogram, so the same name is always the same
-   colour), a mono glyph for a command. Neither is a state colour. */
-function LiveId({ item }) {
-  if (item.kind === "agent") return <span class="zl-live-id is-agent" style={`--h:${projectHue(item.name)}`} aria-hidden="true" />;
-  return <span class="zl-live-id is-bash zl-data" aria-hidden="true">$</span>;
+function fixtureAgents(bg, t0, now) {
+  return (bg || []).map((b, i) => {
+    const time = formatElapsed(now - (t0 - (b.ago || 0) * 1000));
+    if (b.kind === "agent" || b.kind === "subagent") {
+      return {
+        id: b.id || b.name || `a${i}`,
+        kind: "subagent",
+        name: b.name,
+        hue: projectHue(b.name),
+        action: b.doing || b.action,
+        task: b.task,
+        time,
+      };
+    }
+    return {
+      id: b.id || b.cmd || `b${i}`,
+      kind: "bash",
+      name: "bash",
+      action: b.cmd || b.action,
+      time,
+    };
+  });
 }
 
-function ChevIcon({ up }) {
-  return (
-    <svg class={`zl-live-chev${up ? " is-up" : ""}`} viewBox="0 0 12 12" aria-hidden="true">
-      <path d="M2.5 4.5L6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
-  );
-}
-
-function LiveZone({ fg, bg, open, onToggle, dense, t0 }) {
+function LiveZone({ fg, bg = [], open, onToggle, dense, t0 }) {
   const alive = !!fg || bg.length > 0;
   const now = useNow(alive);
-  // Spotlight: only when the background owns the sentence.
-  const [spot, setSpot] = useState(0);
-  useEffect(() => {
-    if (FROZEN) return; // the fidelity scene captures the first item, always
-    if (fg || bg.length < 2) return;
-    const t = setInterval(() => setSpot((i) => (i + 1) % bg.length), 3500);
-    return () => clearInterval(t);
-  }, [fg, bg.length]);
-  if (!alive) return null;
-
-  const el = (ago) => fmtElapsed(now - (t0 - ago * 1000));
-  const item = bg.length ? bg[spot % bg.length] : null;
-  const waiting = fg?.phase === "waiting";
-
+  const origin = t0 || now;
   return (
-    <div class={`zl-live${dense ? " is-dense" : ""}${open ? " is-open" : ""}`}>
-      {open && bg.length > 0 && (
-        <div class="zl-live-panel" role="region" aria-label="Live in the background">
-          {[["Subagents", bg.filter((b) => b.kind === "agent")], ["Commands", bg.filter((b) => b.kind === "bash")]].map(([title, items]) => items.length > 0 && (
-            <div class="zl-live-grp" key={title}>
-              <div class="zl-group"><span>{title}</span><span class="zl-group-n zl-data">{items.length}</span></div>
-              {items.map((b, i) => (
-                <button type="button" class="zl-live-row" key={i} aria-label={b.kind === "agent" ? `Open subagent ${b.name}` : `Show output of ${b.cmd}`}>
-                  <LiveId item={b} />
-                  <span class="zl-live-row-main">
-                    {b.kind === "agent"
-                      ? <><span class="zl-live-row-t">{b.name} <span class="zl-live-row-task">· {b.task}</span></span><span class="zl-live-row-d">{b.doing}</span></>
-                      : <span class="zl-live-row-t zl-data">{b.cmd}</span>}
-                  </span>
-                  <span class="zl-live-el zl-data">{el(b.ago)}</span>
-                  <svg class="zl-live-go" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
-      <div class="zl-live-bar">
-        {fg ? (
-          <div class={`zl-live-now${waiting ? " is-waiting" : ""}`} role="status" aria-live="polite">
-            <span class={`zl-live-dot is-${fg.phase}`} aria-hidden="true" />
-            <span class="zl-live-txt">{fg.text}</span>
-            {!waiting && <span class="zl-live-el zl-data">{el(fg.ago)}</span>}
-          </div>
-        ) : (
-          <div class="zl-live-now is-bg" role="status" aria-live="polite">
-            <span class="zl-live-spot" key={spot}>
-              <LiveId item={item} />
-              {item.kind === "agent"
-                ? <span class="zl-live-txt"><span class="zl-live-who">{item.name}</span> · {item.doing}</span>
-                : <span class="zl-live-txt zl-data">{item.cmd}</span>}
-              <span class="zl-live-el zl-data">{el(item.ago)}</span>
-            </span>
-          </div>
-        )}
-        {bg.length > 0 && (
-          <button
-            type="button"
-            class="zl-live-tally"
-            onClick={onToggle}
-            aria-expanded={open}
-            aria-label={`${bg.length} in the background${open ? ", collapse" : ", expand"}`}
-          >
-            <span class="zl-live-dots" aria-hidden="true">
-              {bg.map((b, i) => <LiveId item={b} key={i} />)}
-            </span>
-            <span class="zl-live-n zl-data">{bg.length}</span>
-            <ChevIcon up={!open} />
-          </button>
-        )}
-      </div>
-    </div>
+    <ProductionLiveBar
+      session={fixtureSession(fg, origin)}
+      agents={fixtureAgents(bg, origin, now)}
+      open={open}
+      onToggle={onToggle}
+      dense={dense}
+      nowMs={now}
+      onOpen={() => {}}
+    />
   );
 }
 
@@ -970,22 +904,6 @@ function ThinkMeter({ level }) {
     <span class="zl-think" aria-hidden="true">
       {[1, 2, 3, 4].map((k) => <i class={k <= n ? "" : "is-off"} key={k} />)}
     </span>
-  );
-}
-
-function CtxRing({ pct }) {
-  const r = 6.5;
-  const c = 2 * Math.PI * r;
-  const tone = pct >= 90 ? "is-hot" : pct >= 70 ? "is-warm" : "";
-  return (
-    <svg class={`zl-ring ${tone}`} viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r={r} class="zl-ring-track" />
-      <circle
-        cx="8" cy="8" r={r} class="zl-ring-arc"
-        stroke-dasharray={`${(c * pct) / 100} ${c}`}
-        transform="rotate(-90 8 8)"
-      />
-    </svg>
   );
 }
 

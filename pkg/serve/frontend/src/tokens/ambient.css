@@ -531,77 +531,6 @@
 [data-ambient="on"] .tg .tg-log .live-log-affordance { color: var(--amb-text-4); }
 [data-ambient="on"] .tg .tg-log.expanded .live-log-affordance { color: var(--amb-text-2); }
 
-/* ── The live bar ──────────────────────────────────────────────────────────
-   The single row of live work above the composer. Words in the sans, because
-   the sentence is prose about what is happening; the elapsed counter, the
-   tally's count and a command's text stay in the mono, because those are data.
-   The tally and the panel are surfaces from the tonal ladder -- control tone
-   for the chip, sheet tone for the list -- with hairlines instead of borders,
-   exactly like every other control in this direction. State colour is
-   untouched: green/amber remain the only saturated marks here. */
-[data-ambient="on"] .lb-now {
-  font-family: var(--font);
-  color: var(--amb-text-3);
-}
-[data-ambient="on"] .lb-el {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--amb-text-4);
-}
-[data-ambient="on"] .lb-txt.is-data { color: var(--amb-text-3); }
-[data-ambient="on"] .lb-now.is-waiting { color: var(--amb-text-2); }
-[data-ambient="on"] .lb-id.is-bash { color: var(--amb-text-3); }
-
-[data-ambient="on"] .lb-tally {
-  border: 0;
-  border-radius: var(--amb-r-ctl);
-  background: var(--amb-control);
-  box-shadow: inset 0 0 0 1px var(--amb-line);
-  color: var(--amb-text-2);
-}
-@media (hover: hover) {
-  [data-ambient="on"] .lb-tally:hover {
-    background: var(--amb-raised);
-    color: var(--amb-text);
-  }
-}
-[data-ambient="on"] .lb-chev { color: var(--amb-text-3); }
-[data-ambient="on"] .lb-dots .lb-id.is-bash::before { background: var(--amb-text-3); }
-
-[data-ambient="on"] .lb-panel {
-  border: 0;
-  border-radius: var(--amb-r-row);
-  background: var(--amb-sheet-solid);
-  box-shadow: inset 0 0 0 1px var(--amb-line);
-}
-[data-ambient="on"] .lb-grp-h {
-  font-family: var(--font);
-  color: var(--amb-text-4);
-}
-[data-ambient="on"] .lb-row {
-  border-radius: var(--amb-r-ctl);
-  color: var(--amb-text-2);
-}
-@media (hover: hover) {
-  [data-ambient="on"] button.lb-row:hover {
-    background: var(--amb-hi);
-    color: var(--amb-text);
-  }
-}
-[data-ambient="on"] .lb-row-d { font-family: var(--font); color: var(--amb-text-4); }
-[data-ambient="on"] .lb-go { color: var(--amb-text-4); }
-
-/* Phone: the tally's inner chip is the surface, the 44px button around it is
-   the target. */
-@media (max-width: 767px) {
-  [data-ambient="on"] .lb-tally { background: transparent; box-shadow: none; }
-  [data-ambient="on"] .lb-tally::before {
-    border: 0;
-    background: var(--amb-control);
-    box-shadow: inset 0 0 0 1px var(--amb-line);
-  }
-}
-
 /* ── The two cards that stop the run ───────────────────────────────────────
    A permission prompt and an ask are the same event wearing two shapes: the
    session is PARKED ON YOU and nothing moves until you answer. They are
@@ -1059,39 +988,6 @@
 [data-ambient="on"] .ask-detail-answer.skipped,
 [data-ambient="on"] .ask-detail-answer.missing { color: var(--amb-text-4); }
 
-/* ── The status strip ──────────────────────────────────────────────────────
-   The densest run of mono in the app, sitting right under the composer. It
-   stays tabular (these are numbers you compare at a glance) but stops being
-   monospaced, which is what made it read as a terminal readout. */
-[data-ambient="on"] .status-strip {
-  font-family: var(--font);
-  font-variant-numeric: tabular-nums;
-  color: var(--amb-text-3);
-}
-[data-ambient="on"] .status-strip .status-strip-usage-btn { color: inherit; }
-[data-ambient="on"] .status-strip .status-strip-spend b { color: var(--amb-text-2); }
-[data-ambient="on"] .status-strip .model-pill {
-  background: var(--amb-hi);
-  border: 0;
-  color: var(--amb-text-2);
-}
-/* The line's items carry no fill at rest. In the catalogue every segment is a
-   transparent 44px target that only tints on hover — the words ARE the line,
-   and a row of filled pills turns a readout into a toolbar. The model kept a
-   well from when it was 10.5px and needed one to be findable; at 14px on a
-   44px row it does not. */
-[data-ambient="on"] .mcomposer .status-strip .model-pill {
-  background: transparent;
-  color: var(--amb-text-2);
-}
-[data-ambient="on"] .mcomposer .status-strip .model-pill .m-name { color: var(--amb-text-2); }
-[data-ambient="on"] .status-strip .perm-chip,
-[data-ambient="on"] .status-strip .status-strip-pill {
-  font-family: var(--font);
-  border-radius: 6px;
-}
-[data-ambient="on"] .status-strip .token-flow { color: var(--amb-text-4); }
-
 /* ── The floating chip ─────────────────────────────────────────────────────
    It hovers over a scrolling transcript, so it has to separate itself from
    whatever passes underneath. At the app's 72% the words behind it stayed
@@ -1174,49 +1070,6 @@ html.mobile-locked[data-ambient="on"] body {
 [data-ambient="on"] .mconv,
 [data-ambient="on"] .conversation-main {
   background: rgba(16, 16, 24, 0.78);
-}
-
-/* ── The status line sheds by declared priority ────────────────────────────
-   Production's line wraps, so a narrow dock does not overlap: it grows a
-   second row and pushes the transcript up. That is a quieter failure than
-   overlapping, and a worse one -- the line stops being a line.
-
-   So the items drop in the order declared in data/util/status-strip-model.js,
-   low first, and everything that drops is in the session panel. The widths are
-   measured against the content, not chosen as round numbers: a 390pt phone
-   gives this dock 366.
-
-   Container queries need a container: the strip declares itself one, which is
-   free when nothing queries it. */
-[data-ambient="on"] .status-strip {
-  container-type: inline-size;
-  container-name: statusline;
-  flex-wrap: nowrap;
-}
-
-/* Two things decide how these are written.
-
-   Selectors inside a container query resolve against the CONTAINER, and
-   [data-ambient="on"] sits on <html>, outside it -- so the ambient prefix
-   cannot appear here. The classes only exist on the strip and the container
-   only exists because Ambient declared it above, so scoping by the priority
-   class alone is exact, not lax.
-
-   The class is doubled because the base sheet styles these items as
-   `.status-strip .status-strip-mcp` (0,2,0), which outranks a lone class, and
-   a descendant selector cannot help: a selector inside a container query
-   cannot match the container itself. `.amb-p4.amb-p4` is the same element at
-   the weight needed to win. */
-@container statusline (max-width: 560px) {
-  .amb-p4.amb-p4 { display: none; }
-}
-@container statusline (max-width: 470px) {
-  .amb-p3.amb-p3 { display: none; }
-}
-@container statusline (max-width: 400px) {
-  /* p2 sheds its words, never itself: an alarm you cannot see is worse than a
-     cramped line, and its number survives. */
-  .amb-p2.amb-p2 .status-strip-word { display: none; }
 }
 
 /* ── The line's three controls ─────────────────────────────────────────────

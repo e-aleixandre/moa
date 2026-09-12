@@ -274,6 +274,14 @@ export function SessionPanel({
       role="dialog"
       aria-label="This session"
       aria-hidden={!open}
+      /* Closed it is slid off-screen, not gone: its Close, its name field,
+         Usage and Delete stay in the DOM, and aria-hidden removes them from
+         the accessibility TREE but not from the tab order -- so tabbing across
+         the conversation landed the focus on controls nobody can see.
+         inert is the narrow tool for it: focus and hit-testing only, nothing
+         about painting. visibility:hidden also worked and was wrong, because
+         it killed the panel's edge shadow and shifted every desktop scene. */
+      inert={!open}
       style={style}
     >
       <div class={`zl-side-head${sub ? " is-sub" : ""}`}>

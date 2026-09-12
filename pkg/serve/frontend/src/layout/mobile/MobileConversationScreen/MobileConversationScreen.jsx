@@ -272,18 +272,20 @@ function MobileConversationBody({ forceMobile = false }) {
               foreground run owns the sentence, the background takes it only
               when the foreground is silent, and the tally is the door to the
               panel. While the keyboard is up the panel stays shut (writing
-              wins) without losing the stored preference. */}
-          <LiveBar
-            session={session}
-            agents={liveAgents}
-            open={!!session.dockOpen}
-            onToggle={(next) => updateSession(session.id, { dockOpen: next })}
-            onOpen={(id, kind) => (kind === "bash"
-              ? openBashJob(session.id, id)
-              : openPersistedSubagent(session.id, id))}
-            forceCompact={kbdOpen}
-          />
-          <MobileComposer key={session.id} session={session} usage={usage} onSecret={setSecretAliases} />
+              wins) without losing the stored preference. Inside the dock, so
+              the fade stretches over the bar the way the catalogue drew it. */}
+          <MobileComposer key={session.id} session={session} usage={usage} onSecret={setSecretAliases}>
+            <LiveBar
+              session={session}
+              agents={liveAgents}
+              open={!!session.dockOpen}
+              onToggle={(next) => updateSession(session.id, { dockOpen: next })}
+              onOpen={(id, kind) => (kind === "bash"
+                ? openBashJob(session.id, id)
+                : openPersistedSubagent(session.id, id))}
+              forceCompact={kbdOpen}
+            />
+          </MobileComposer>
         </>
       );
     }
