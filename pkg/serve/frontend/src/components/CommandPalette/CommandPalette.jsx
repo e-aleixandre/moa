@@ -2,12 +2,15 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "preact/hooks"
 import {
   Search, Plus, LayoutGrid, MessageSquare, CornerDownLeft,
   ArrowLeft, Folder, FolderOpen, ChevronRight, Smartphone, Check,
+  Paperclip, Link2,
 } from "lucide-preact";
 import { store } from "../../data/store.js";
 import { useStore } from "../../hooks/useStore.js";
 import { api } from "../../data/api.js";
 import { closePalette } from "../../data/palette.js";
 import { openDrawer } from "../../data/drawer.js";
+import { chooseShareSession } from "../../data/share.js";
+import { shareComposerText } from "../../data/share-target.js";
 import { openPulsePairing } from "../../data/pulse-pairing-panel.js";
 import { fuzzyMatch, fuzzyMatchIndices } from "../../data/fuzzy.js";
 import {
@@ -170,21 +173,41 @@ function Highlight({ text, query }) {
 const CAP_NO_QUERY = 8; // spec §2 — cap the no-query session list; scroll for more
 const PALETTE_CLOSED = Object.freeze({ sessions: {}, tileTree: null, focusedTile: null });
 
+// shareSummary — the one line that says WHAT is being placed, so the list of
+// sessions is not a question without a subject. Names the files (the useful
+// datum: you shared a specific thing) and falls back to the shared text.
+export function shareSummary(share) {
+  const files = share?.files || [];
+  if (files.length === 1) return files[0].name;
+  if (files.length > 1) return `${files.length} files · ${files.map((f) => f.name).join(", ")}`;
+  const text = shareComposerText(share).replace(/\s+/g, " ").trim();
+  return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+}
+
 // CommandPalette — the ⌘K palette. One ranked list of sessions + actions
 // (no modes), plus a create-session step. Mounted ONCE globally in app.jsx,
 // outside the view switch, so it's the same organism over conversation / grid /
 // mobile. While open it reads the live session list from the store; while
 // closed the selector returns a frozen empty snapshot so a stream token does
 // not rebuild the palette.
+// `share` turns the palette into the destination picker for something shared
+// INTO moa from another app (data/share.js). It is the SAME search step —
+// the same ranked session list, the same search, the same rows and keyboard —
+// with the actions removed (you cannot pair a phone with a file in your hand)
+// and one verb instead: put this in that conversation's composer. A second
+// chassis listing sessions is exactly what the drawer/palette split already
+// taught us not to build.
 export function CommandPalette({
   open,
   onClose,
   context = "conversation",
   focusedPane = null,
   initialStep = "search",
+  share = null,
 }) {
   const live = useStore((s) => (open ? s : null));
   const state = live || PALETTE_CLOSED;
+  const sharing = !!share;
 
   const [step, setStep] = useState(initialStep);
   const [query, setQuery] = useState("");
@@ -229,12 +252,12 @@ export function CommandPalette({
     openerRef.current = document.activeElement;
     // The create step doesn't exist on a phone any more (it lives in the
     // SessionDrawer), so an open asking for it hands over instead.
-    if (isMobile && initialStep === "create") {
+    if (isMobile && initialStep === "create" && !sharing) {
       onClose();
       openDrawer("new");
       return;
     }
-    setStep(initialStep);
+    setStep(sharing ? "search" : initialStep);
     setQuery("");
     setSelectedIdx(0);
     setCreating(false);
@@ -417,8 +440,10 @@ export function CommandPalette({
       out.push(...cappedSessions);
     }
 
-    // Actions (fuzzy over label when there's a query; all when empty).
-    const actRows = actions.filter((a) => !q || fuzzyMatch(q, a.label.toLowerCase()));
+    // Actions (fuzzy over label when there's a query; all when empty). A share
+    // has one verb — pick the conversation — so the palette's own actions are
+    // not offered next to it.
+    const actRows = sharing ? [] : actions.filter((a) => !q || fuzzyMatch(q, a.label.toLowerCase()));
     if (actRows.length) {
       out.push({ kind: "group", label: "Actions" });
       for (const a of actRows) out.push({ kind: "action", ...a });
@@ -428,10 +453,12 @@ export function CommandPalette({
     // "create from query" row (CORE fallback = open create with the query).
     const hasHits = cappedSessions.length > 0 || actRows.length > 0;
     if (q && !hasHits) {
-      out.push({ kind: "create-from-query", query });
+      out.push(sharing
+        ? { kind: "note", text: `No session matches “${query}”` }
+        : { kind: "create-from-query", query });
     }
     return out;
-  }, [state.sessions, state.tileTree, query, actions]);
+  }, [state.sessions, state.tileTree, query, actions, sharing]);
 
   // ── Build the flat item list for the CREATE step ───────────────────────────
   const createItems = useMemo(() => {
@@ -536,6 +563,15 @@ export function CommandPalette({
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     const id = item.id;
+    // A share is not "open this session": it hands the payload to that
+    // session's composer (resuming it first if it was closed) and the owner
+    // writes what to do with it there. Nothing is sent here.
+    if (sharing) {
+      const placed = await chooseShareSession(id);
+      inFlightRef.current = false;
+      if (placed) onClose();
+      return;
+    }
     // Saved sessions auto-resume once visible (afterVisibilityChange,
     // already ported) — assigning/opening is enough; resumeSession is only used
     // for the explicit conversation-open path so the reader gets immediate focus.
@@ -561,7 +597,7 @@ export function CommandPalette({
     }
     inFlightRef.current = false;
     onClose();
-  }, [context, focusedPane, onClose]);
+  }, [context, focusedPane, onClose, sharing]);
 
   // ── Create a session on the chosen dir (spec §5) ────────────────────────────
   const doCreate = useCallback(async (dir) => {
@@ -694,7 +730,7 @@ export function CommandPalette({
       if (step === "model") goBack(); else onClose();
       return;
     }
-    if (meta && (e.key === "n" || e.key === "N") && step === "search") {
+    if (meta && (e.key === "n" || e.key === "N") && step === "search" && !sharing) {
       e.preventDefault(); goToCreate(); return;
     }
     if (meta && (e.key === "m" || e.key === "M") && step === "create") {
@@ -726,16 +762,32 @@ export function CommandPalette({
       goBack();
       return;
     }
-  }, [step, query, selectable, selectedIdx, onClose, goToModel, goToDir, activateSelected, goBack, goToCreate]);
+  }, [step, query, selectable, selectedIdx, onClose, goToModel, goToDir, activateSelected, goBack, goToCreate, sharing]);
 
   if (!open) return null;
 
   const activeDescId = selectable.length ? `pal-opt-${selectedIdx}` : undefined;
-  const placeholder = step === "create"
-    ? "Search a project or type a path…"
-    : step === "model"
-      ? "Search models…"
-      : "Jump to session or type a command…";
+  const placeholder = sharing
+    ? "Search the conversation to put this in…"
+    : step === "create"
+      ? "Search a project or type a path…"
+      : step === "model"
+        ? "Search models…"
+        : "Jump to session or type a command…";
+
+  // The share banner: what is being placed, above the list of where it can go.
+  // The copy instructs the next action rather than explaining the feature —
+  // the owner already knows he shared something; what he does not know is that
+  // it lands in a composer for him to send, not on its way to the agent.
+  const shareBanner = sharing ? (
+    <div class="pal-share">
+      <span class="pal-share-ico" aria-hidden="true">
+        {(share.files?.length || 0) > 0 ? <Paperclip size={13} /> : <Link2 size={13} />}
+      </span>
+      <span class="pal-share-what">{shareSummary(share)}</span>
+      <span class="pal-share-verb">Pick a conversation — it waits in its composer</span>
+    </div>
+  ) : null;
 
   // Render a single selectable row, tracking its selectable index so hover/
   // click/aria line up with keyboard selection.
@@ -861,7 +913,11 @@ export function CommandPalette({
   // Footer verb hints (spec §4) — desktop only.
   let primaryHint = "open";
   let secondaryHint = null;
-  if (step === "search") {
+  if (sharing) {
+    // One verb: there is no "also open it in a pane" for a share — the session
+    // it goes to is brought into view anyway.
+    primaryHint = "put it here";
+  } else if (step === "search") {
     if (context === "grid") {
       primaryHint = focusedPane != null ? `→ pane ${focusedPane}` : "→ pane";
       secondaryHint = "open full";
@@ -907,10 +963,11 @@ export function CommandPalette({
           class="m-sheet"
           role="dialog"
           aria-modal="true"
-          aria-label="Command palette"
+          aria-label={sharing ? "Put the shared item in a conversation" : "Command palette"}
           onKeyDown={onKeyDown}
         >
           <div class="grab" aria-hidden="true" />
+          {shareBanner}
           <div class="m-input-row">
             {step === "create"
               ? <button type="button" class="crumb-chip" onClick={onCrumbBack}><ArrowLeft size={11} /> New session</button>
@@ -966,9 +1023,10 @@ export function CommandPalette({
         class="palette"
         role="dialog"
         aria-modal="true"
-        aria-label="Command palette"
+        aria-label={sharing ? "Put the shared item in a conversation" : "Command palette"}
         onKeyDown={onKeyDown}
       >
+        {shareBanner}
         <div class="pal-input-row">
           {step === "search"
             ? <Search size={16} aria-hidden="true" />

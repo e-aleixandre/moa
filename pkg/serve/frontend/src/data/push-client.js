@@ -61,7 +61,7 @@ function withTimeout(promise, ms, label) {
 // stay pending forever when the page isn't yet controlled by a worker. Instead
 // we register (or reuse) the ROOT worker (/sw.js) and wait for it to reach
 // 'activated'.
-async function readyRegistration() {
+export async function readyRegistration() {
   let reg = await navigator.serviceWorker.getRegistration('/');
   if (!reg) reg = await navigator.serviceWorker.register('/sw.js');
   if (reg.active) return reg;

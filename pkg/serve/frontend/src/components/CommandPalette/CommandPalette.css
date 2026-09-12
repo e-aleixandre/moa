@@ -456,6 +456,56 @@
 .m-row .when { font-family: var(--mono); font-size: 10px; color: var(--surface2); flex: none; }
 .m-row .path { font-family: var(--mono); font-size: 12.5px; color: var(--subtext1); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
+/* ── share target: what is being placed ───────────────────────────────────
+   A band above the input naming the shared item, because a list of sessions
+   with no subject is a question you cannot answer. It is quiet on purpose:
+   the decision is in the list below it, not here. */
+.pal-share {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--surface0);
+  background: var(--mauve-dim);
+  min-width: 0;
+}
+.pal-share-ico {
+  display: inline-flex;
+  flex: none;
+  color: var(--mauve);
+}
+.pal-share-what {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pal-share-verb {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--text-nano);
+  letter-spacing: 0.06em;
+  color: var(--overlay0);
+}
+
+/* On the phone the two lines stack: the verb does not fit beside a filename at
+   390px, and truncating either would hide the one thing the band exists for. */
+.m-sheet .pal-share {
+  flex-wrap: wrap;
+  border-bottom: 0;
+  padding: 4px 16px 6px;
+  background: transparent;
+}
+.m-sheet .pal-share-verb {
+  flex: 1 0 100%;
+  font-size: 11px;
+}
+
 /* ── reduced motion — no entrance animation (spec §9) ─────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .palette, .m-sheet { animation: none; }

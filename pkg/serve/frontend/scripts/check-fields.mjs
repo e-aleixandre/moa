@@ -30,6 +30,7 @@ const ALLOWED_RAW = new Map([
   ["components/GlobalSettings/GlobalSettings.jsx", "type=number with its own stepper affordance (the compaction threshold), and the allowlist's type=search, both inside the moved catalogue sheet whose field chrome is its own"],
   ["components/SessionPanel/SessionPanel.jsx", "the session name, whose chrome is the catalogue field (16px, iOS floor), not the Field primitive"],
   ["components/SessionPanel/UsagePage.jsx", "type=range slider for compact-at, not a text field"],
+  ["layout/Sidebar/Sidebar.jsx", "the catalogue's search well (16px, iOS floor); Field's chrome is a different surface"],
   ["primitives/Field/Field.jsx", "the primitive itself"],
 ]);
 

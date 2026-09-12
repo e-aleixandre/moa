@@ -17,6 +17,18 @@ export const SESSION_PANEL_CLOSED = Object.freeze({
   page: 'root',
 });
 
+// The share picker's closed slice (see data/share.js). Same reason it lives
+// here rather than in the controller: the initial state must not import the
+// module that reads this store back.
+export const SHARE_CLOSED = Object.freeze({
+  id: '',
+  status: 'idle', // 'idle' | 'loading' | 'ready'
+  title: '',
+  text: '',
+  url: '',
+  files: [],
+});
+
 function loadPersistedState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -149,6 +161,18 @@ let state = {
   // page inside it. Never persisted: it is a place you are looking, not a
   // preference.
   sessionPanel: SESSION_PANEL_CLOSED,
+
+  // Something shared into moa from another app, waiting for the owner to say
+  // which session it belongs to (see data/share.js). Ephemeral by nature: the
+  // durable copy is the service worker's, and it is dropped the moment the
+  // share lands in a composer or the picker is dismissed.
+  share: SHARE_CLOSED,
+
+  // Payloads handed to a specific session's composer: { [sessionId]: { id,
+  // text, files } }. Keyed by session because the composer is mounted per
+  // session and may not exist yet when the choice is made — picking a saved
+  // session resumes it first, and its composer mounts a beat later.
+  composerDrops: {},
 };
 
 let listeners = new Set();

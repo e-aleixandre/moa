@@ -4,11 +4,14 @@ import { Chip } from "../../primitives/index.js";
 import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
+import { useStore } from "../../hooks/useStore.js";
 import {
   sendMessage, cancelRun, cancelSteers, execCommand, execShell, newSteerId,
   steerSubagent,
 } from "../../data/session-actions.js";
 import { store, updateSession } from "../../data/store.js";
+import { consumeComposerDrop } from "../../data/share.js";
+import { appendSharedText } from "../../data/share-target.js";
 import { addToast } from "../../data/notifications.js";
 import { combineQueueText, droppedImageCount, queueSummary, recallActivates, sendMayClear } from "../../data/composer-queue.js";
 import {
@@ -76,10 +79,13 @@ function SendIcon() {
 
 const MAX_ATTACHMENTS = 8;
 
-// Same broad allow-list as the old SPA's attach <input accept="…">: images
-// plus the file kinds the agent can read off disk (server saves non-image/PDF
-// attachments to disk; images/PDFs go to the model natively).
-const ATTACH_ACCEPT = 'image/*,application/pdf,.pdf,.txt,.md,.csv,.json,.log,.yaml,.yml,.xml,.html,.css,.js,.ts,.jsx,.tsx,.go,.py,.sh,.sql,.toml,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.zip,.tar,.gz';
+// No allow-list. The old one was a list of extensions, and it never defended
+// anything: `accept` only filters what the file picker offers you, and the
+// server validates size and count but no format at all -- anything that
+// arrives is stored and the agent can read it. All it did was hide a .key, an
+// .odp or whatever else the phone reported with a MIME type nobody enumerated,
+// and send the owner to scp a file he could have attached.
+const ATTACH_ACCEPT = '*/*';
 
 // Per-session input history (survives re-renders, not a page reload). Ported
 // from InputBar: getHistory/pushHistory + cursorRow drive the ↑/↓ recall.
@@ -429,6 +435,31 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     addFiles(e.target.files);
     e.target.value = ''; // allow re-selecting the same file
   }, [addFiles]);
+
+  // Something shared into moa from another app, routed to THIS session by the
+  // share picker (data/share.js). It lands exactly where a picked file lands —
+  // an attachment chip, plus the shared text at the caret — and nothing is
+  // sent: the owner writes what to do with it and presses send himself.
+  //
+  // Not a prop: the choice is made in an overlay that has no path to this
+  // component, and the chosen session's composer may not be mounted yet (a
+  // saved session is resumed first). The store is the handoff; the drop is
+  // consumed on arrival so a re-render cannot place it twice.
+  const drop = useStore((s) => (sessionId ? s.composerDrops[sessionId] : null));
+  useEffect(() => {
+    if (!drop || !sessionId || steer) return;
+    consumeComposerDrop(sessionId);
+    if (drop.text) {
+      const el = textareaRef.current;
+      if (el) {
+        writeComposer(el, appendSharedText(el.value, drop.text));
+        setHasText(!!el.value.trim());
+        saveDraft(sessionId, el.value);
+        autoResize();
+      }
+    }
+    if (drop.files?.length) addFiles(drop.files);
+  }, [drop, sessionId, steer, addFiles, autoResize, writeComposer]);
 
   const handlePaste = useCallback((e) => {
     const files = Array.from(e.clipboardData?.files || []).filter((f) => f.type.startsWith('image/'));

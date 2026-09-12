@@ -8,7 +8,7 @@ import { useStore } from "./hooks/useStore.js";
 import { togglePalette, closePalette } from "./data/palette.js";
 import { bindRouter, navigate } from "./data/router.js";
 import { isPulsePairingOpen, subscribePulsePairing, closePulsePairing } from "./data/pulse-pairing-panel.js";
-import { hasBlockingOverlay } from "./data/overlays.js";
+import { hasBlockingOverlay, registerOverlay } from "./data/overlays.js";
 import { globalPaletteContext, isDesktopGridShortcut, shouldLockMobileDocument } from "./data/app-layout.js";
 /* Ambient comes last so its visual rules override component sheets. */
 import "./tokens/ambient.css";
@@ -23,6 +23,8 @@ import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
 import { refreshPushState } from "./data/push-client.js";
 import { installOpenSessionNavigation } from "./data/push-navigation.js";
+import { installShareNavigation, openShare, dismissShare } from "./data/share.js";
+import { shareIdFromLocation } from "./data/share-target.js";
 import {
   setMobile, autoFillTiles, autoSelectMobile, openSession, afterVisibilityChange,
 } from "./data/tile-actions.js";
@@ -64,6 +66,12 @@ function useBootstrap() {
   // Warm notification taps use the same openSession behavior as a cold
   // ?session= deep link, waiting for the authoritative initial session list.
   useEffect(() => installOpenSessionNavigation(), []);
+
+  // Something shared into moa from another app arrives twice by design: the
+  // service worker messages a live window, and its 303 redirect navigates to
+  // ?share=<id> for a cold start. Both paths land in openShare, which takes
+  // each id only once.
+  useEffect(() => installShareNavigation(), []);
 
   // Mobile breakpoint → setMobile. The App below decides whether the current
   // view owns document scrolling: galleries need native document scroll while
@@ -108,6 +116,7 @@ function useBootstrap() {
         const params = new URLSearchParams(location.search);
         const wanted = params.get("session");
         const wantedInbox = params.get("inbox") === "1";
+        const wantedShare = shareIdFromLocation(location.search);
         let stripped = false;
         if (wanted && openSession(wanted)) {
           // Strip only ?session= (a one-shot deep-link that must not re-pin on
@@ -123,6 +132,14 @@ function useBootstrap() {
         if (wantedInbox) {
           openInbox();
           params.delete("inbox");
+          stripped = true;
+        }
+        // The share picker opens after the roster is loaded, because the
+        // question it asks IS the session list. Stripped like ?session=: a
+        // refresh must not re-open a picker for a share already placed.
+        if (wantedShare) {
+          openShare(wantedShare);
+          params.delete("share");
           stripped = true;
         }
         if (stripped) {
@@ -275,6 +292,30 @@ function GlobalPalette() {
   );
 }
 
+// GlobalSharePicker — the destination picker for something shared INTO moa
+// (data/share.js). It is the palette's search step with one verb, mounted
+// SEPARATELY from GlobalPalette so a share arriving while ⌘K is open does not
+// fight it for the same open flag: the share is a question with an answer
+// pending, and it sits on top.
+function GlobalSharePicker() {
+  const share = useStore((s) => s.share);
+  const context = useStore(globalPaletteContext);
+  const ready = share.status === "ready";
+  // While the picker is up it IS the top layer: ⌘K must not open the command
+  // palette underneath a question that is still waiting for an answer.
+  useEffect(() => (ready ? registerOverlay("share-picker") : undefined), [ready]);
+  if (!ready) return null;
+  return (
+    <CommandPalette
+      open
+      onClose={dismissShare}
+      context={context}
+      initialStep="search"
+      share={share}
+    />
+  );
+}
+
 // allTileIdsSafe — DFS tile order without importing tileTree's helper twice
 // (findTile is already imported for other derivations); a tiny local walk keeps
 // the focusedPane derivation self-contained.
@@ -302,6 +343,7 @@ function App() {
       <>
         <MobileConversationScreen version={version} />
         <GlobalPalette />
+        <GlobalSharePicker />
         <GlobalPairingPanel />
         <ArtifactsDrawer />
         <ToastContainer />
@@ -314,6 +356,7 @@ function App() {
         {view === "grid" ? <PaneGridScreen /> : <ConversationScreen />}
       </DesktopShell>
       <GlobalPalette />
+      <GlobalSharePicker />
       <GlobalPairingPanel />
       {/* Artifacts — ONE shared drawer for conversation and grid, mounted
           globally so switching screens never duplicates or loses a reader. */}
