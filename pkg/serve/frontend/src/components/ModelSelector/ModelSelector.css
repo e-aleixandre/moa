@@ -218,13 +218,15 @@
   font-size: var(--zl-fs-body, 14px);
   letter-spacing: inherit;
   text-align: left;
-  cursor: pointer;
   appearance: none;
   transition: background 120ms ease;
 }
+/* The current model is a statement, not a target: no pointer, and no hover
+   lift promising something to press. Only .zl-pick-all is still a button. */
+.zl-pick-all { cursor: pointer; }
 @media (hover: hover) {
-  .zl-pick-cur:hover, .zl-pick-all:hover { background: var(--zl-control, #262633); }
-  .zl-pick-cur:hover .zl-go, .zl-pick-all:hover .zl-go { color: var(--zl-t2, #c3c4d1); }
+  .zl-pick-all:hover { background: var(--zl-control, #262633); }
+  .zl-pick-all:hover .zl-go { color: var(--zl-t2, #c3c4d1); }
 }
 .zl-pick-cur-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .zl-pick-cur-name { font-size: var(--zl-fs-title, 16px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -438,7 +440,6 @@
 .zl-pop .zl-back:focus-visible,
 .zl-sheet .zl-back:focus-visible,
 .zl-sheet .zl-x:focus-visible,
-.zl-pick-cur:focus-visible,
 .zl-pick-all:focus-visible,
 .zl-mchip:focus-visible,
 .zl-seg-opt:focus-visible,

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { thinkingPositionFor } from "../../data/selectors.js";
 import { thinkingButtonsFor } from "./ModelSelector.jsx";
 
@@ -33,4 +34,27 @@ test("Astra low is the zero thinking position in the picker", () => {
 test("an ordinary model keeps its own level in the picker", () => {
   const option = selectedOption("medium", TERRA, "openai");
   expect(option).toMatchObject({ value: "medium", label: "med", bars: 2 });
+});
+
+// The current-model row is a STATEMENT, not a door. It used to be a button
+// that jumped into its provider's page, which read as "this is what you are
+// running" while behaving as "go somewhere else". Asserted against the source
+// because the row has no behaviour left to call: the proof is that it renders
+// no button, no chevron and no navigation handler.
+test("the current model is not a control", () => {
+  const src = readFileSync(new URL("./ModelSelector.jsx", import.meta.url), "utf8");
+  const row = src.slice(src.indexOf('<div class="zl-pick-cur">'), src.indexOf('class="zl-pick-all"'));
+  expect(row).toContain('<div class="zl-pick-cur">');
+  expect(row).not.toContain("<GoIcon />");
+  expect(row).not.toContain("onClick");
+  expect(row).not.toContain("setView(selectedSpec");
+});
+
+// Nothing may paint it as pressable either: a hover lift or a hand cursor is
+// the same promise made in CSS.
+test("the current model is not styled as pressable", () => {
+  const css = readFileSync(new URL("./ModelSelector.css", import.meta.url), "utf8");
+  expect(css).not.toContain(".zl-pick-cur:hover");
+  expect(css).not.toContain(".zl-pick-cur:focus-visible");
+  expect(css).toContain(".zl-pick-all { cursor: pointer; }");
 });

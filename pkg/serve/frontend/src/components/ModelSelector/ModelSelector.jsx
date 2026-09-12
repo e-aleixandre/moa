@@ -269,20 +269,20 @@ export function ModelSelector({
         </div>
       ) : (
         <>
+          {/* The model you are on, as a STATEMENT. It used to be a button that
+              jumped into its provider's page: the one element that answers
+              "what am I running?" also navigated somewhere else, and the
+              chevron promised a destination nobody was looking for. Picking is
+              what the rest of this sheet is for -- Pinned right below, every
+              provider one row further down. */}
           {!modelOnly && (currentName || sessionModel) && (
-            <button
-              type="button"
-              class="zl-pick-cur"
-              onClick={() => setView(selectedSpec?.provider || "providers")}
-              aria-label={`Current model ${currentName}, ${selectedSpec?.provider || "custom"}. Show provider`}
-            >
+            <div class="zl-pick-cur">
               <ModelMark name={currentName} />
               <span class="zl-pick-cur-txt">
                 <span class="zl-pick-cur-name">{currentName}</span>
                 <span class="zl-pick-cur-sub zl-data">{currentSub}</span>
               </span>
-              <GoIcon />
-            </button>
+            </div>
           )}
           {!modelOnly && (
             <>
