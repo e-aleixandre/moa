@@ -43,6 +43,12 @@ import { PermissionOptions } from "../components/PermissionControl/PermissionCon
    the prototype draws the shipped one. See the adapter at `Sidebar`. */
 import { Sidebar as ProductionSidebar } from "../layout/Sidebar/Sidebar.jsx";
 import { projectMonogram } from "../data/util/format.js";
+/* Same move, the tool ledger: markup and CSS live in ActivityLedger now, and
+   the prototype draws the shipped one. See the adapter at `Ledger`. Diffs
+   that open inside a row use LedgerDiff; the artifact card is the shipped
+   Artifact. */
+import { ActivityLedger as ProductionLedger, LedgerDiff } from "../components/ActivityLedger/ActivityLedger.jsx";
+import { Artifact } from "../components/Artifacts/Artifact.jsx";
 
 /* The three-zone skeleton, both densities side by side.
    This is a PROTOTYPE, not production: it draws the shell only (where things
@@ -248,115 +254,48 @@ function SessionPanel({ onClose, page = "root", onPage, open = true, style }) {
    Representative content, not grey bars. The user's message is the only
    thing with a peach edge; the assistant's turn has no frame at all -- it is
    the page. Tool work and deliverables are objects ON the page: ledger
-   (recessed, sheet tone) and artifact (raised, the one thing you take away). */
+   (recessed, sheet tone) and artifact (raised, the one thing you take away).
 
-const SMALL_ICONS = {
-  read: <path d="M3.5 2.5h6l3 3v8h-9z M9.5 2.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
-  grep: <><circle cx="7" cy="7" r="4" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M10 10l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></>,
-  bash: <path d="M3 4l4 4-4 4M8.5 12H13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />,
-  edit: <path d="M11.5 2.5l2 2L6 12H4v-2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
-  write: <path d="M3.5 2.5h6l3 3v8h-9z M8 7v4M6 9h4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
-};
-function ToolIcon({ tool }) {
-  return <svg class="zl-tool-ico" viewBox="0 0 16 16" aria-hidden="true">{SMALL_ICONS[tool] || SMALL_ICONS.bash}</svg>;
+   MIGRATED (METODO §4, the tool ledger): Ledger / LedgerRow / Diff / Artifact
+   have no private copy here. Their markup and CSS were MOVED to
+   ActivityLedger and Artifacts/Artifact, class names and all, and the
+   prototype imports them back. What sits here now is only an adapter: the
+   prototype's fixtures mapped onto the props the shipped pieces take. */
+
+const DIFF_LINES = [
+  ["ctx", 14, "func (s *Store) Delete(id string) error {"],
+  ["ctx", 15, "\ts.mu.Lock()"],
+  ["del", 16, "\tdelete(s.index, id)"],
+  ["add", 16, "\tif _, ok := s.index[id]; !ok {"],
+  ["add", 17, "\t\ts.mu.Unlock()"],
+  ["add", 18, "\t\treturn ErrNotFound"],
+  ["add", 19, "\t}"],
+  ["add", 20, "\tdelete(s.index, id)"],
+  ["ctx", 21, "\ts.mu.Unlock()"],
+];
+
+function adaptLedgerRow(row, i) {
+  const arg = typeof row.arg === "object" && row.arg
+    ? row.arg
+    : { text: row.arg, detail: row.dim };
+  const detail = row.detail == null
+    ? undefined
+    : (row.detail.node != null ? row.detail : { node: row.detail });
+  return {
+    ...row,
+    id: row.id ?? `${row.tool}:${arg.text ?? ""}:${i}`,
+    arg,
+    detail,
+  };
 }
 
-/* One row of the ledger. Terminated rows with a detail are buttons that open
-   it inline; the running row shows its elapsed time in place of a result. */
-function LedgerRow({ tool, arg, dim, out, status, detail, open, onToggle, live, elapsed }) {
-  const Tag = detail ? "button" : "div";
+function Ledger({ rows, folded = true, dense }) {
   return (
-    <>
-      <Tag
-        type={detail ? "button" : undefined}
-        class={`zl-lg-row${live ? " is-live" : ""}${open ? " is-open" : ""}`}
-        onClick={detail ? onToggle : undefined}
-        aria-expanded={detail ? open : undefined}
-      >
-        <ToolIcon tool={tool} />
-        <span class="zl-lg-txt">
-          <span class="zl-lg-tool">{tool}</span>
-          <span class="zl-lg-arg zl-data">{arg}</span>
-          {dim && <span class="zl-lg-dim"> · {dim}</span>}
-        </span>
-        {live
-          ? <span class="zl-lg-out zl-data">{elapsed}</span>
-          : out && <span class={`zl-lg-out zl-data${status === "err" ? " is-err" : ""}`}>{out}</span>}
-        <span class={`zl-lg-mark is-${live ? "live" : status}`} aria-hidden="true">
-          {status === "ok" && !live && <svg viewBox="0 0 12 12"><path d="M2.5 6.5l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>}
-          {status === "err" && <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>}
-        </span>
-        {detail && (
-          <span class="zl-lg-chev" aria-hidden="true">
-            <svg viewBox="0 0 12 12"><path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-          </span>
-        )}
-        {!live && <span class="sr-only">{status === "err" ? "failed" : "completed"}</span>}
-        {live && <span class="sr-only">running</span>}
-      </Tag>
-      {detail && open && <div class="zl-lg-detail">{detail}</div>}
-    </>
-  );
-}
-
-/* Diff detail: the production DiffBlock is a code block with gutter numbers.
-   Here it lives INSIDE a ledger row (the product fuses a diff that follows a
-   ledger into its rows), so it is recessed one more step, not a new card. */
-function Diff() {
-  const lines = [
-    ["ctx", 14, "func (s *Store) Delete(id string) error {"],
-    ["ctx", 15, "\ts.mu.Lock()"],
-    ["del", 16, "\tdelete(s.index, id)"],
-    ["add", 16, "\tif _, ok := s.index[id]; !ok {"],
-    ["add", 17, "\t\ts.mu.Unlock()"],
-    ["add", 18, "\t\treturn ErrNotFound"],
-    ["add", 19, "\t}"],
-    ["add", 20, "\tdelete(s.index, id)"],
-    ["ctx", 21, "\ts.mu.Unlock()"],
-  ];
-  return (
-    <pre class="zl-diff zl-data">
-      {lines.map(([t, n, s], i) => (
-        <span class={`zl-dl is-${t}`} key={i}>
-          <span class="zl-dl-no">{n}</span>
-          <span class="zl-dl-sign">{t === "add" ? "+" : t === "del" ? "−" : " "}</span>
-          <span class="zl-dl-txt">{s}</span>
-        </span>
-      ))}
-    </pre>
-  );
-}
-
-function Ledger({ rows, folded: foldedInit = true, dense }) {
-  const [open, setOpen] = useState(() => new Set());
-  const toggle = (k) => setOpen((v) => { const n = new Set(v); n.has(k) ? n.delete(k) : n.add(k); return n; });
-  const [folded, setFolded] = useState(foldedInit && rows.length > 3);
-  const hidden = folded ? rows.slice(0, rows.length - 2) : [];
-  const shown = folded ? rows.slice(rows.length - 2) : rows;
-  const live = rows.some((r) => r.live);
-  const failed = rows.some((r) => r.status === "err");
-  return (
-    <div class={`zl-ledger${live ? " is-live" : ""}${dense ? " is-dense" : ""}`}>
-      {rows.length > 3 && (
-        <button type="button" class="zl-lg-head" onClick={() => setFolded((v) => !v)} aria-expanded={!folded}>
-          <svg class={`zl-lg-chev${folded ? "" : " is-open"}`} viewBox="0 0 12 12" aria-hidden="true">
-            <path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-          <span class="zl-lg-head-t">
-            {folded ? <><span class="zl-data">{hidden.length}</span> earlier actions</> : <><span class="zl-data">{rows.length}</span> actions</>}
-          </span>
-          {failed && <span class="zl-lg-head-fail"><span class="zl-data">1</span> failed</span>}
-        </button>
-      )}
-      {shown.map((r, i) => (
-        <LedgerRow
-          key={r.arg + i}
-          {...r}
-          open={open.has(r.arg)}
-          onToggle={() => toggle(r.arg)}
-        />
-      ))}
-    </div>
+    <ProductionLedger
+      rows={rows.map(adaptLedgerRow)}
+      folded={folded}
+      dense={dense}
+    />
   );
 }
 
@@ -370,7 +309,7 @@ const LEDGER_A = [
 FAIL
 FAIL    moa/pkg/attach  0.014s`}</pre>
   ) },
-  { tool: "edit", arg: "pkg/attach/store.go", dim: "+5 −1", out: "ok", status: "ok", detail: <Diff /> },
+  { tool: "edit", arg: "pkg/attach/store.go", dim: "+5 −1", out: "ok", status: "ok", detail: <LedgerDiff lines={DIFF_LINES} /> },
 ];
 const LEDGER_B = [
   { tool: "bash", arg: "go test ./pkg/attach/", out: "ok", status: "ok", detail: (
@@ -381,34 +320,6 @@ ok    moa/pkg/attach/store  0.088s`}</pre>
 ];
 // The same ledger once the turn has finished: the live row has returned.
 const LEDGER_B_DONE = LEDGER_B.map((r) => (r.live ? { ...r, live: false, out: "ok", elapsed: undefined } : r));
-
-/* Artifact: a deliverable. Raised one step above the page, a real file
-   glyph, and the whole card is the open action -- it is what you take away
-   from the turn, so it is the one framed object in the assistant's prose. */
-function Artifact({ name, kind, size, dense }) {
-  return (
-    <button type="button" class={`zl-art${dense ? " is-dense" : ""}`} aria-label={`Open artifact ${name}`}>
-      {/* One clean sheet-with-folded-corner. The extension was stamped across
-          the glyph, which read as a sticker rather than a file; it belongs in
-          the metadata line with the size, where the other facts already are. */}
-      <span class="zl-art-ico" aria-hidden="true">
-        <svg viewBox="0 0 20 24">
-          <path d="M2.75 1h8.5L17.25 7v15.25a.75.75 0 0 1-.75.75h-13a.75.75 0 0 1-.75-.75V1.75A.75.75 0 0 1 2.75 1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
-          <path d="M11.25 1v5.25a.75.75 0 0 0 .75.75h5.25" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
-        </svg>
-      </span>
-      <span class="zl-art-main">
-        <span class="zl-art-name">{name}</span>
-        <span class="zl-art-meta zl-data">{kind} · {size}</span>
-      </span>
-      <span class="zl-art-act" aria-hidden="true">
-        <svg viewBox="0 0 16 16">
-          <path d="M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </span>
-    </button>
-  );
-}
 
 /* ── Transcript ──────────────────────────────────────────────────────────
    MIGRATED (METODO §4): the transcript, the user message and the prose have

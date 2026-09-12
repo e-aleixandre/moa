@@ -19,11 +19,7 @@
   line-height: var(--leading-relaxed);
 }
 
-.mconv .tg {
-  --tg-row-h: 44px;
-}
-
-.mconv .tg .tg-detail .code pre code,
-.mconv .tg .tg-detail .code.diff pre {
+.mconv .zl-ledger .zl-lg-detail .code pre code,
+.mconv .zl-ledger .zl-lg-detail .code.diff pre {
   font-size: var(--text-micro);
 }

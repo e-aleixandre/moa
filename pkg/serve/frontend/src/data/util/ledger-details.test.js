@@ -63,14 +63,14 @@ test('a bash command detail puts the full command before its output', () => {
   const out = fuseLedgerDetails([row('bash', { command, body: '12 tests passed' })], null);
   const node = out[0].detail.node;
   expect(detailText(node)).toBe(`$ ${command}12 tests passed`);
-  expect(detailClasses(node)).toContain('doc-mono tg-cmd');
-  expect(detailClasses(node)).toContain('tg-detail-divider');
+  expect(detailClasses(node)).toContain('doc-mono zl-lg-cmd');
+  expect(detailClasses(node)).toContain('zl-lg-divider');
 });
 
 test('a command-only bash row gets a command detail without a divider', () => {
   const out = fuseLedgerDetails([row('bash', { command: 'true' })], null);
   expect(detailText(out[0].detail.node)).toBe('$ true');
-  expect(detailClasses(out[0].detail.node)).not.toContain('tg-detail-divider');
+  expect(detailClasses(out[0].detail.node)).not.toContain('zl-lg-divider');
 });
 
 test('an input-first row shows its full input before output with a divider', () => {
@@ -79,8 +79,8 @@ test('an input-first row shows its full input before output with a divider', () 
   const node = out[0].detail.node;
   expect(detailText(node)).toBe(`${path}contents`);
   expect(detailText(node).indexOf(path)).toBeLessThan(detailText(node).indexOf('contents'));
-  expect(detailClasses(node)).toContain('doc-mono tg-input');
-  expect(detailClasses(node)).toContain('tg-detail-divider');
+  expect(detailClasses(node)).toContain('doc-mono zl-lg-input');
+  expect(detailClasses(node)).toContain('zl-lg-divider');
 });
 
 test('an input-first row without output remains expandable without a divider', () => {
@@ -88,20 +88,20 @@ test('an input-first row without output remains expandable without a divider', (
   const out = fuseLedgerDetails([row('read', { inputLine: path })], null);
   expect(out[0].detail).toBeTruthy();
   expect(detailText(out[0].detail.node)).toBe(path);
-  expect(detailClasses(out[0].detail.node)).not.toContain('tg-detail-divider');
+  expect(detailClasses(out[0].detail.node)).not.toContain('zl-lg-divider');
 });
 
 test('a grep input line appears before its output', () => {
   const inputLine = 'TODO · pkg/serve · include:*.go · literal';
   const out = fuseLedgerDetails([row('grep', { inputLine, body: 'pkg/serve/server.go: TODO' })], null);
   expect(detailText(out[0].detail.node)).toBe(`${inputLine}pkg/serve/server.go: TODO`);
-  expect(detailClasses(out[0].detail.node)).toContain('doc-mono tg-input');
+  expect(detailClasses(out[0].detail.node)).toContain('doc-mono zl-lg-input');
 });
 
 test('a non-bash output-only row remains an output detail', () => {
   const out = fuseLedgerDetails([row('read', { body: 'contents' })], null);
   expect(detailClasses(out[0].detail.node)).toContain('flush');
-  expect(detailClasses(out[0].detail.node)).not.toContain('tg-cmd');
+  expect(detailClasses(out[0].detail.node)).not.toContain('zl-lg-cmd');
 });
 
 test('a body-less non-edit row gets no detail', () => {
@@ -153,7 +153,7 @@ test('an edit row prefers its diff sibling over a body', () => {
   // the diff node wins (it's the real change); we don't attach both
   expect(out[0].detail).toBeTruthy();
   expect(detailClasses(out[0].detail.node)).toContain('flush');
-  expect(detailClasses(out[0].detail.node)).not.toContain('tg-cmd');
+  expect(detailClasses(out[0].detail.node)).not.toContain('zl-lg-cmd');
 });
 
 test('source rows are not mutated', () => {

@@ -216,212 +216,12 @@
   -webkit-mask-image: linear-gradient(to bottom, transparent 44px, #000 84px);
 }
 
-/* ── Ledger: tool calls ──────────────────────────────────────────────────
-   A recess, not a card: sheet tone (one step DOWN from the canvas wash),
-   hairline, small radius. Rows are 32px: enough for a pointer, and the
-   mono arg at 12 keeps the line quiet. Nothing here competes with prose --
-   the loudest thing is the outcome mark, 12px, and only red when it failed.
-   The live row has the one moving thing in the block: a slow sweep under
-   the row, in the state green, which stops the moment the tool returns. */
-.zl-ledger {
-  border-radius: var(--zl-r-md);
-  background: var(--zl-sheet);
-  box-shadow: var(--zl-rim);
-  overflow: hidden;
-}
-.zl-lg-head,
-.zl-lg-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 32px;
-  padding: 0 10px 0 10px;
-  border: 0;
-  background: transparent;
-  color: var(--zl-t3);
-  font-family: inherit;
-  font-size: var(--zl-fs-body);
-  letter-spacing: inherit;
-  text-align: left;
-}
-.zl-lg-row + .zl-lg-row,
-.zl-lg-head + .zl-lg-row,
-.zl-lg-detail + .zl-lg-row { box-shadow: inset 0 1px 0 var(--zl-line); }
-button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background 120ms ease; }
-button.zl-lg-row:hover, button.zl-lg-head:hover { background: var(--zl-hi); }
-
-.zl-lg-head { color: var(--zl-t3); font-weight: 500; }
-.zl-lg-chev { width: 12px; height: 12px; flex: none; transition: transform 160ms var(--zl-ease); }
-.zl-lg-chev.is-open { transform: rotate(90deg); }
-.zl-lg-head-t { flex: 1; }
-.zl-lg-head-fail { color: var(--zl-red); }
-
-.zl-tool-ico { width: 14px; height: 14px; flex: none; color: var(--zl-t4); }
-.zl-lg-txt {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.zl-lg-tool { flex: none; font-weight: 500; color: var(--zl-t2); }
-.zl-lg-arg { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--zl-t3); }
-.zl-lg-dim { flex: none; color: var(--zl-t4); }
-.zl-lg-out { flex: none; color: var(--zl-t4); }
-.zl-lg-out.is-err { color: var(--zl-red); }
-
-.zl-lg-mark {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-}
-.zl-lg-mark svg { width: 12px; height: 12px; }
-.zl-lg-mark.is-ok { color: var(--zl-green); }
-.zl-lg-mark.is-err { color: var(--zl-red); }
-/* running: a dot that breathes, in the state green */
-.zl-lg-mark.is-live::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--zl-green);
-  animation: zl-breathe 1.6s ease-in-out infinite;
-}
-@keyframes zl-breathe { 50% { opacity: 0.35; } }
-
-.zl-lg-row.is-live { position: relative; color: var(--zl-t2); }
-.zl-lg-row.is-live .zl-lg-tool { color: var(--zl-t1); }
-/* The sweep: a 1px line under the live row, running left to right. It is a
-   transform on a 1px box, cheap, and it says "busy" without a spinner. */
-.zl-lg-row.is-live::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--zl-green) 40%, var(--zl-green) 60%, transparent);
-  transform: translateX(-100%);
-  animation: zl-sweep 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  opacity: 0.7;
-}
-@keyframes zl-sweep { to { transform: translateX(100%); } }
-
-.zl-lg-row.is-open { color: var(--zl-t2); }
-
-/* Detail: one more step down. Canvas tone inside the sheet. */
-.zl-lg-detail {
-  padding: 8px 10px 10px 32px;
-  background: var(--zl-canvas);
-  box-shadow: inset 0 1px 0 var(--zl-line);
-}
-.zl-log,
-.zl-diff {
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: var(--zl-r-sm);
-  background: var(--zl-sheet);
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t3);
-  line-height: 18px;
-  white-space: pre;
-  overflow-x: auto;
-  tab-size: 4;
-}
-.zl-diff { padding: 6px 0; }
-.zl-dl { display: flex; min-height: 18px; }
-.zl-dl-no { flex: none; width: 32px; padding-right: 10px; text-align: right; color: var(--zl-t4); user-select: none; }
-.zl-dl-sign { flex: none; width: 14px; text-align: center; user-select: none; }
-.zl-dl-txt { flex: 1; padding-right: 10px; white-space: pre; }
-/* Diff colour is state colour used for its meaning: green added, red removed.
-   Tints at 10-12% so a long diff is still readable as text, not as blocks. */
-.zl-dl.is-add { background: rgba(166, 227, 161, 0.1); color: var(--zl-t1); }
-.zl-dl.is-add .zl-dl-sign { color: var(--zl-green); }
-.zl-dl.is-del { background: rgba(243, 139, 168, 0.1); color: var(--zl-t2); }
-.zl-dl.is-del .zl-dl-sign { color: var(--zl-red); }
-
-.zl-ledger.is-dense .zl-lg-head,
-.zl-ledger.is-dense .zl-lg-row { min-height: 28px; font-size: var(--zl-fs-meta); gap: 6px; padding: 0 8px; }
-.zl-ledger.is-dense .zl-lg-detail { padding-left: 24px; }
-
-/* ── Artifact: the deliverable ─────────────────────────────────────────────
-   The only framed, raised object inside an assistant turn. Raised tone, a
-   full hairline, medium radius, 56px tall: the same height as the composer,
-   because it is the same class of thing -- something you act on. The glyph
-   is a real file with its extension printed on it; the trailing arrow says
-   what the whole card does. Hover lifts to control tone; no shadow. */
-.zl-art {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  max-width: 420px;
-  min-height: 56px;
-  padding: 8px 12px 8px 10px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-raised);
-  box-shadow: var(--zl-rim-2);
-  color: var(--zl-t1);
-  font-family: inherit;
-  letter-spacing: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background 120ms ease, transform 120ms var(--zl-ease);
-}
-.zl-art:hover { background: var(--zl-control); }
-.zl-art:hover .zl-art-act { color: var(--zl-t1); }
-.zl-art:active { transform: translateY(1px); }
-.zl-art-ico {
-  position: relative;
-  flex: none;
-  width: 34px;
-  height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--zl-t3);
-}
-.zl-art-ico svg { width: 26px; height: 32px; }
-.zl-art-ext {
-  position: absolute;
-  left: 50%;
-  bottom: 6px;
-  transform: translateX(-50%);
-  padding: 0 3px;
-  border-radius: 2px; /* sub-6 radii on 2-3px hairline shapes (caret, meter
-                         bars, this tag) are not "a fourth radius": at that
-                         size 6px would be a pill. */
-  background: var(--zl-accent);
-  color: var(--zl-accent-ink);
-  font-weight: 500;
-  font-size: 9px; /* the one exception to the four sizes: a label inside a
-                     26px glyph. It is decorative (aria-hidden); the name
-                     next to it carries the information at full size. */
-  line-height: 12px;
-  text-transform: uppercase;
-}
-.zl-art-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.zl-art-name {
-  font-size: var(--zl-fs-body);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.zl-art-meta { color: var(--zl-t4); }
-.zl-art-act { flex: none; width: 16px; height: 16px; color: var(--zl-t3); }
-.zl-art-act svg { width: 16px; height: 16px; }
-.zl-art.is-dense { min-height: 48px; max-width: none; gap: 10px; }
-.zl-art.is-dense .zl-art-ico { width: 28px; height: 32px; }
-.zl-art.is-dense .zl-art-ico svg { width: 22px; height: 27px; }
-.zl-art.is-dense .zl-art-ext { bottom: 3px; }
+/* ── Ledger + artifact ─────────────────────────────────────────────────
+   MOVED to components/ActivityLedger/ActivityLedger.css (`.zl-ledger` /
+   `.zl-lg-*` / `.zl-diff` / `.zl-log`) and components/Artifacts/Artifact.css
+   (`.zl-art*`). The prototype imports the shipped pieces, so these are no
+   longer defined here. Phone sizing for rows that open something lives
+   with those sheets (`.zl-phone` / `.mconv`). */
 
 /* ── Streaming ───────────────────────────────────────────────────────────
    MOVED to components/AssistantDocument/AssistantDocument.css (`.zl-new`,
@@ -721,13 +521,6 @@ button.zl-lg-row:hover, button.zl-lg-head:hover { background: var(--zl-hi); }
 .zl-phone .zl-back { width: 44px; height: 44px; }
 .zl-phone .zl-status { height: 44px; }
 .zl-phone button.zl-st { height: 44px; }
-/* Ledger rows are 32 on desktop (a pointer); on the phone every row that
-   opens something is 44. Inert rows stay 36 so a long ledger keeps its
-   density -- only the ones you tap need the thumb. */
-.zl-phone .zl-lg-row, .zl-phone .zl-lg-head { min-height: 36px; }
-.zl-phone button.zl-lg-row, .zl-phone button.zl-lg-head { min-height: 44px; }
-.zl-phone .zl-art { min-height: 60px; max-width: none; }
-
 /* ── Live zone ─────────────────────────────────────────────────────────────
    MOVED to layout/LiveBar/LiveBar.css (`.zl-live*`). The prototype imports
    the shipped component, so these are no longer defined here. */
@@ -781,10 +574,6 @@ button.zl-lg-row:hover, button.zl-lg-head:hover { background: var(--zl-hi); }
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
-/* Inside the ledger the arg follows the row size (14 desktop, 12 dense) so
-   "read" and its path sit on one baseline. */
-.zl-lg-arg.zl-data { font-size: inherit; }
-.zl-ledger.is-dense .zl-lg-arg.zl-data { font-size: var(--zl-fs-meta); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ── A breath of aurora, inside the product ───────────────────────────────
@@ -814,22 +603,6 @@ button.zl-lg-row:hover, button.zl-lg-head:hover { background: var(--zl-hi); }
    can never paint over a child's surface: at z-index:-1 without one, the live
    panel came out as an empty black slab. */
 .zl-phone, .zl-desk-main { isolation: isolate; }
-
-/* The ledger's expand affordance. Half the rows have a detail and half do not,
-   and until now nothing on screen said which -- you had to click to find out.
-   The chevron is the tell, and it turns when the row opens. */
-.zl-lg-chev {
-  flex: none;
-  display: inline-flex;
-  width: 12px;
-  height: 12px;
-  margin-left: 2px;
-  color: var(--zl-t4);
-  transition: transform 140ms var(--zl-ease), color 140ms ease;
-}
-.zl-lg-chev svg { width: 100%; height: 100%; }
-.zl-lg-row:hover .zl-lg-chev { color: var(--zl-t2); }
-.zl-lg-row.is-open .zl-lg-chev { transform: rotate(90deg); color: var(--zl-t2); }
 
 /* ── Pickers ──────────────────────────────────────────────────────────────
    MIGRATED. `.zl-pop`, `.zl-sheet`, `.zl-pick*`, `.zl-mchip*`, `.zl-seg*`,

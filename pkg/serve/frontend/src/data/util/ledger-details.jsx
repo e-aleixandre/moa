@@ -8,7 +8,7 @@ import { mapToolToKind } from "../util/tool-kind.js";
 
 export function projectedToolDetailNode(tool, path, detail) {
   const preview = toolPreview(tool, detail?.args, detail?.output, 'done');
-  if (!preview?.text) return <div className="doc-mono tg-input">No output</div>;
+  if (!preview?.text) return <div className="doc-mono zl-lg-input">No output</div>;
   if (preview.kind === 'diff') {
     return <DiffBlock className="flush" diffText={preview.text} filename={path || detail?.args?.path || ''} />;
   }
@@ -27,19 +27,19 @@ export function ProjectedToolDetail({ url, tool, path }) {
     });
     return () => { active = false; };
   }, [url]);
-  if (failed) return <div className="doc-mono tg-input">Could not load output</div>;
-  if (!detail) return <div className="doc-mono tg-input">Loading…</div>;
+  if (failed) return <div className="doc-mono zl-lg-input">Could not load output</div>;
+  if (!detail) return <div className="doc-mono zl-lg-input">Loading…</div>;
   return projectedToolDetailNode(tool, path, detail);
 }
 
 function inputDetailNode(inputText, output, prompt = null) {
   return (
     <>
-      <div className={`doc-mono ${prompt ? "tg-cmd" : "tg-input"}`}>
-        {prompt ? <span className="tg-cmd-prompt" aria-hidden="true">{prompt}</span> : null}
+      <div className={`doc-mono ${prompt ? "zl-lg-cmd" : "zl-lg-input"}`}>
+        {prompt ? <span className="zl-lg-prompt" aria-hidden="true">{prompt}</span> : null}
         {inputText}
       </div>
-      {output && <div className="tg-detail-divider" />}
+      {output && <div className="zl-lg-divider" />}
       {output}
     </>
   );
@@ -51,7 +51,7 @@ function inputDetailNode(inputText, output, prompt = null) {
 // edit, for older single-sibling callers). Supported tool input lines precede
 // their output; other rows carrying a text `body` get an output detail. Bash
 // commands precede their output in the same panel. Diffs/outputs
-// render BORDERLESS (className="flush") since the .tg-detail panel is the only
+// render BORDERLESS (className="flush") since the .zl-lg-detail panel is the only
 // surface. Shared by the desktop Stream and mobile MobileStream so both fuse
 // identically (parity). Returns rows, each possibly with a `detail:{node}`.
 export function fuseLedgerDetails(rows, siblingDiff) {

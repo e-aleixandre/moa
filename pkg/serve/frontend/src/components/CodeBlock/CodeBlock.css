@@ -6,7 +6,7 @@
 }
 
 /* flush — borderless mode for code/diff rendered INSIDE another surface (the
-   tool-group card's .tg-detail panel). No border/radius/margin and a
+   tool-group card's .zl-lg-detail panel). No border/radius/margin and a
    transparent, unpadded body so the host panel is the only surface (kills the
    "card inside a card"). */
 .code.flush {

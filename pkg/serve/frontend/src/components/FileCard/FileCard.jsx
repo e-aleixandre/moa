@@ -1,17 +1,14 @@
 import { useState } from 'preact/hooks';
-import { Download, FileText, FileImage, FileArchive, File as FileIcon, Info, Loader2 } from 'lucide-preact';
+import { Info } from 'lucide-preact';
 import { FileViewer } from '../FileViewer/FileViewer.jsx';
 import { HtmlResourceInfo } from '../HtmlResourceInfo/HtmlResourceInfo.jsx';
+import { Artifact, artifactKind } from '../Artifacts/Artifact.jsx';
 import { downloadFile } from '../../data/util/file-download.js';
-import { isPreviewable, isHTMLPreviewable, iconKindFor, humanSize } from '../../data/util/file-card.js';
-import './FileCard.css';
+import { isPreviewable, isHTMLPreviewable, humanSize } from '../../data/util/file-card.js';
 
-const ICONS = { image: FileImage, text: FileText, archive: FileArchive, file: FileIcon };
-
-// FileCard — the download card a send_file tool result renders as (instead of
-// raw text). `file` is the {name, size, mime, url} descriptor already parsed
-// from the tool result by stream-model.js's toFileBlock (see
-// data/util/file-card.js#parseFileCardData for the parsing rule).
+// FileCard — a send_file result that is not an artifact URL. Markup is the
+// catalogue's Artifact card; download and (for HTML) resource inspection are
+// grafted as extra targets the prototype never had.
 export function FileCard({ file }) {
   const [busy, setBusy] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -19,16 +16,9 @@ export function FileCard({ file }) {
 
   if (!file) return null;
   const { name, size, mime, url } = file;
-  const Icon = ICONS[iconKindFor(mime)] || FileIcon;
   const previewable = isPreviewable(name, mime);
   const htmlPreviewable = isHTMLPreviewable(name, mime);
 
-  // Fetch the file as a blob and hand it off via the OS share sheet (mobile)
-  // or a same-origin blob: URL (desktop), instead of navigating the WebView
-  // to the download URL directly. Installed PWAs run with no browser chrome
-  // (display: standalone), so a direct <a href> download opens a full-screen,
-  // chrome-less "file downloaded" view with no way to dismiss it short of
-  // force-closing the app. blob: URLs never trigger that full-page navigation.
   const handleDownload = async (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -43,50 +33,30 @@ export function FileCard({ file }) {
     }
   };
 
-  const openPreview = () => previewable && setPreviewOpen(true);
-  const openResourceInfo = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setResourceInfoOpen(true);
-  };
+  const extra = htmlPreviewable ? (
+    <button
+      type="button"
+      class="zl-art-act is-btn"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setResourceInfoOpen(true); }}
+      title="Inspect external resources"
+      aria-label="Inspect external resources"
+    >
+      <Info size={16} />
+    </button>
+  ) : null;
 
   return (
     <>
-      <div class="file-card">
-        <button
-          type="button"
-          class={`file-card-open ${previewable ? 'file-card-previewable' : ''}`}
-          onClick={openPreview}
-          disabled={!previewable}
-        >
-          <Icon class="file-card-icon" />
-          <div class="file-card-info">
-            <div class="file-card-name">{name}</div>
-            <div class="file-card-size">{humanSize(size)}</div>
-          </div>
-        </button>
-        {htmlPreviewable && (
-          <button
-            type="button"
-            class="file-card-resource-info"
-            onClick={openResourceInfo}
-            title="Inspect external resources"
-            aria-label="Inspect external resources"
-          >
-            <Info />
-          </button>
-        )}
-        <button
-          type="button"
-          class="file-card-download"
-          onClick={handleDownload}
-          disabled={busy}
-          title="Download or share"
-          aria-label="Download or share"
-        >
-          {busy ? <Loader2 class="spin" /> : <Download />}
-        </button>
-      </div>
+      <Artifact
+        name={name}
+        kind={artifactKind(file)}
+        size={humanSize(size)}
+        onOpen={previewable ? () => setPreviewOpen(true) : undefined}
+        onAction={handleDownload}
+        actionLabel="Download or share"
+        busy={busy}
+        extra={extra}
+      />
       {previewOpen && (
         <FileViewer name={name} mime={mime} url={url} size={size} onClose={() => setPreviewOpen(false)} />
       )}

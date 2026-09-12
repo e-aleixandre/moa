@@ -54,7 +54,7 @@ function rowByClass(nodes, className) {
 }
 
 function labelCell(nodes) {
-  return nodes.find((node) => node.props?.class === "txt");
+  return nodes.find((node) => node.props?.class === "zl-lg-txt");
 }
 
 const LONG = `find / -name '*.go' -type f | grep -v vendor | ${"x".repeat(120)} > out.txt`;
@@ -88,15 +88,15 @@ test("a live bash row with NO output at all can still be opened to read the comm
 
   stateValue = false;
   const collapsed = render([row]);
-  const collapsedRow = rowByClass(collapsed, "tg-row live");
+  const collapsedRow = rowByClass(collapsed, "zl-lg-row is-live");
   expect(collapsedRow.type).toBe("button");
   expect(collapsedRow.props["aria-expanded"]).toBe(false);
-  expect(collapsed.some((node) => node.props?.class === "tg-detail")).toBe(false);
+  expect(collapsed.some((node) => node.props?.class === "zl-lg-detail")).toBe(false);
 
   stateValue = true;
   const opened = render([row]);
-  expect(rowByClass(opened, "tg-row live").props["aria-expanded"]).toBe(true);
-  const detail = opened.find((node) => node.props?.class === "tg-detail");
+  expect(rowByClass(opened, "zl-lg-row is-live").props["aria-expanded"]).toBe(true);
+  const detail = opened.find((node) => node.props?.class === "zl-lg-detail");
   expect(detail).toBeDefined();
   expect(textContent(detail)).toContain(LONG);
 });
@@ -107,7 +107,7 @@ test("a live row without a command stays the inert div it is today", () => {
     { tool: "read", arg: { text: "pkg/serve/frontend/src/app.jsx" }, status: "ok", id: "r1", live: true },
   ]);
 
-  const liveRow = rowByClass(nodes, "tg-row live");
+  const liveRow = rowByClass(nodes, "zl-lg-row is-live");
   expect(liveRow.type).toBe("div");
   expect(liveRow.props["aria-expanded"]).toBeUndefined();
   expect(liveRow.props.role).toBe("status");

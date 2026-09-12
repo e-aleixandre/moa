@@ -3,7 +3,7 @@
 
    1. `.hydra-*` — the lab's own chrome (390px phone frame, composer stand-in,
       replay control) plus the four experimental treatments. They target the
-      REAL production markup (`.mconv`, `.mconv-stream`, `.doc`, `.tg`,
+      REAL production markup (`.mconv`, `.zl-transcript`, `.zl-turn`, `.zl-ledger`,
       `.waypoint`, `.skel-block`) but only under a `.hydra--{variant}` wrapper,
       so production CSS is untouched and the specimens render with real tokens.
 

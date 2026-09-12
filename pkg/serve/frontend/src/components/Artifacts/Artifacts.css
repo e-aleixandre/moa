@@ -1,6 +1,6 @@
-/* Artifacts — same material family as the ledger (.tg) and the assistant
-   document (.doc): mantle wash, --surface0 hairlines, --radius-md, tokens only.
-   No identity color of its own; state colors stay state colors. */
+/* Artifacts — drawer, list and reader. The conversation card lives in
+   Artifact.css (the catalogue's `.zl-art`). This sheet is the rest of the
+   collection: the shared list row, the drawer, the reader. */
 
 /* ── Shared row: file line (mono) · title · description · share ──────────── */
 .af-row { display: flex; align-items: stretch; gap: var(--space-2); min-width: 0; }

@@ -1,137 +1,130 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import {
-  FileText,
-  Search,
-  Terminal,
-  Pencil,
-  FilePlus,
-  Globe,
-  Database,
-  ListTodo,
-  Wrench,
-  ChevronRight,
-  Check,
-  X,
-  AlertTriangle,
-} from "lucide-preact";
-import { liveVerb, formatElapsed } from "../../data/util/activity.js";
-import { StateDot } from "../../primitives/index.js";
+import { formatElapsed } from "../../data/util/activity.js";
 import { useElapsed } from "../../data/util/use-elapsed.js";
 import { useTailWindow } from "./tail-dwell.js";
 import "./ActivityLedger.css";
 
-// TOOL_ICONS — tool → lucide icon (Variant B: the left column is the KIND of
-// action). `Wrench` is the fallback for unmapped tools.
-const TOOL_ICONS = {
-  read: FileText,
-  ls: FileText,
-  grep: Search,
-  find: Search,
-  bash: Terminal,
-  edit: Pencil,
-  multiedit: Pencil,
-  write: FilePlus,
-  fetch: Globe,
-  fetch_content: Globe,
-  db: Database,
-  task: ListTodo,
-  tasks: ListTodo,
+// ActivityLedger — a batch of tool calls. Markup and CSS are the catalogue's
+// (catalog/zones-lab.jsx `Ledger` / `LedgerRow`, zones-lab.css `.zl-ledger` /
+// `.zl-lg-*`), MOVED here rather than imitated. The class names travelled
+// with the rules, so the sheet IS the accepted design instead of a translation
+// of it. The catalogue imports this component now, which is what makes one
+// definition rather than two.
+//
+// What is NOT the catalogue's is everything the prototype never had, grafted
+// on top: the live output window, the full-command panel on a running bash,
+// the untruncated tooltip, the dwell-fold animation, rejected/warn marks,
+// lazy-loaded bodies, and the elapsed timer from a real start timestamp.
+
+const ICONS = {
+  read: <path d="M3.5 2.5h6l3 3v8h-9z M9.5 2.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
+  ls: <path d="M3.5 2.5h6l3 3v8h-9z M9.5 2.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
+  grep: <><circle cx="7" cy="7" r="4" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M10 10l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></>,
+  find: <><circle cx="7" cy="7" r="4" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M10 10l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></>,
+  bash: <path d="M3 4l4 4-4 4M8.5 12H13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />,
+  edit: <path d="M11.5 2.5l2 2L6 12H4v-2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
+  multiedit: <path d="M11.5 2.5l2 2L6 12H4v-2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
+  write: <path d="M3.5 2.5h6l3 3v8h-9z M8 7v4M6 9h4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
+  fetch: <><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M2.5 8h11M8 2.5c1.6 1.8 2.4 3.6 2.4 5.5S9.6 12.2 8 13.5C6.4 12.2 5.6 10 5.6 8S6.4 4.3 8 2.5z" fill="none" stroke="currentColor" stroke-width="1.4" /></>,
+  fetch_content: <><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M2.5 8h11M8 2.5c1.6 1.8 2.4 3.6 2.4 5.5S9.6 12.2 8 13.5C6.4 12.2 5.6 10 5.6 8S6.4 4.3 8 2.5z" fill="none" stroke="currentColor" stroke-width="1.4" /></>,
+  tasks: <path d="M3 4.5l1.5 1.5 3-3M3 10.5l1.5 1.5 3-3M9.5 5h3.5M9.5 11H13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />,
+  task: <path d="M3 4.5l1.5 1.5 3-3M3 10.5l1.5 1.5 3-3M9.5 5h3.5M9.5 11H13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />,
+  mcp: <path d="M5 2v3M11 2v3M3.5 5h9v3a4.5 4.5 0 0 1-9 0zM8 12.5V15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />,
+  ask: <><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M6.4 6.2a1.7 1.7 0 1 1 2 2v1.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /><circle cx="8.4" cy="11.4" r="0.75" fill="currentColor" /></>,
+  ask_user: <><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M6.4 6.2a1.7 1.7 0 1 1 2 2v1.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /><circle cx="8.4" cy="11.4" r="0.75" fill="currentColor" /></>,
+  agent: <><circle cx="8" cy="5.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M3 13.5c.6-2.6 2.5-4 5-4s4.4 1.4 5 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></>,
+  subagent: <><circle cx="8" cy="5.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M3 13.5c.6-2.6 2.5-4 5-4s4.4 1.4 5 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></>,
+  tool: <path d="M10.8 2.6a3.4 3.4 0 0 0-4 4.4L3 10.8a1.5 1.5 0 0 0 2.1 2.1L8.9 9.2a3.4 3.4 0 0 0 4.4-4l-2 2-1.6-1.6z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
 };
 
-function toolIcon(tool) {
-  return TOOL_ICONS[(tool || "").toLowerCase()] || Wrench;
+function iconKind(tool) {
+  const name = (tool || "").toLowerCase();
+  if (ICONS[name]) return name;
+  if (name.startsWith("mcp__")) return "mcp";
+  return "tool";
 }
 
-// argParts splits a row's `arg` into its display text + optional dim detail.
+function ToolIcon({ tool }) {
+  return <svg class="zl-tool-ico" viewBox="0 0 16 16" aria-hidden="true">{ICONS[iconKind(tool)]}</svg>;
+}
+
+function Chevron({ open }) {
+  return (
+    <svg class={`zl-lg-chev${open ? " is-open" : ""}`} viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
+
 function argParts(arg) {
   if (arg && typeof arg === "object") return { text: arg.text, detail: arg.detail };
   return { text: arg, detail: null };
 }
 
-// fullLabel — the UNTRUNCATED value behind a row's one-line label, exposed as
-// a native tooltip. The short label is deliberate (a row is ONE line), but the
-// user still has to be able to read what a tool is actually acting on: paths,
-// patterns and urls reach the DOM whole and are only clipped by CSS, while a
-// bash command is shortened in JS and travels apart on `row.command`.
 export function fullLabel(row, text) {
   const value = row.command || (typeof text === "string" ? text : "");
   return value || undefined;
 }
 
-// StatusMark — the small outcome mark on the RIGHT of a done row (Variant B):
-// ✓ ok (green) / ✗ error (red) / ! rejected (yellow). Running rows have none.
-// The glyph is decorative; the outcome is named for screen readers via an
-// SR-only label (an "232 lines"/"exit 1" result doesn't always convey it).
-function StatusMark({ status }) {
-  const kind = status === "err" ? "err" : status === "warn" ? "warn" : "ok";
-  const Icon = kind === "err" ? X : kind === "warn" ? AlertTriangle : Check;
-  const label = kind === "err" ? "failed" : kind === "warn" ? "rejected" : "completed";
+function detailNode(detail) {
+  if (detail == null) return null;
+  if (typeof detail === "object" && detail.node != null) return detail.node;
+  return detail;
+}
+
+const SR = { ok: "completed", err: "failed", warn: "rejected", live: "running" };
+
+function StatusMark({ status, live }) {
+  const kind = live ? "live" : status === "err" ? "err" : status === "warn" ? "warn" : "ok";
   return (
-    <span class={`mark ${kind}`}>
-      <Icon size={11} aria-hidden="true" />
-      <span class="sr-only">{label}</span>
+    <span class={`zl-lg-mark is-${kind}`} aria-hidden="true">
+      {kind === "ok" && (
+        <svg viewBox="0 0 12 12"><path d="M2.5 6.5l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      )}
+      {kind === "err" && (
+        <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>
+      )}
+      {kind === "warn" && (
+        <svg viewBox="0 0 12 12"><path d="M6 2.5v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /><circle cx="6" cy="9" r="0.9" fill="currentColor" /></svg>
+      )}
     </span>
   );
 }
 
-// DoneRow — a terminated tool call. The SAME atom as the live/header rows,
-// just frozen: tool icon, bold tool + object, short result, outcome mark. If it
-// carries a `detail` (diff / output body) it's a <button> that toggles a
-// recessed `.tg-detail` panel INSIDE the card (no nested card); otherwise it's
-// a plain inert <div> (nothing to open — not a disabled button, which SRs would
-// announce as an unavailable action).
 function DoneRow({ row }) {
   const [open, setOpen] = useState(false);
   const { text, detail: argDetail } = argParts(row.arg);
-  const Icon = toolIcon(row.tool);
-  const hasDetail = row.detail != null;
+  const dim = argDetail || row.dim;
+  const detail = detailNode(row.detail);
+  const hasDetail = detail != null;
   const Tag = hasDetail ? "button" : "div";
 
   return (
     <>
       <Tag
         type={hasDetail ? "button" : undefined}
-        class={`tg-row${open ? " open" : ""}${row._folding ? " folding" : ""}`}
+        class={`zl-lg-row${open ? " is-open" : ""}${row._folding ? " is-folding" : ""}`}
         onClick={hasDetail ? () => setOpen((v) => !v) : undefined}
         aria-expanded={hasDetail ? open : undefined}
       >
-        <span class="ic" aria-hidden="true">
-          <Icon size={14} />
-        </span>
-        <span class="txt" title={fullLabel(row, text)}>
-          <b>{row.tool}</b> {text}
-          {argDetail && <span class="dim"> · {argDetail}</span>}
+        <ToolIcon tool={row.tool} />
+        <span class="zl-lg-txt" title={fullLabel(row, text)}>
+          <span class="zl-lg-tool">{row.tool}</span>
+          <span class="zl-lg-arg zl-data">{text}</span>
+          {dim && <span class="zl-lg-dim"> · {dim}</span>}
         </span>
         {row.out && (
-          <span class={`res ${row.status === "err" ? "err" : row.status === "ok" ? "ok" : ""}`.trim()}>
-            {row.out}
-          </span>
+          <span class={`zl-lg-out zl-data${row.status === "err" ? " is-err" : ""}`}>{row.out}</span>
         )}
         <StatusMark status={row.status} />
-        {hasDetail && (
-          <span class="chev" aria-hidden="true">
-            <ChevronRight size={12} />
-          </span>
-        )}
+        {hasDetail && <Chevron open={open} />}
+        <span class="sr-only">{SR[row.status] || SR.ok}</span>
       </Tag>
-      {hasDetail && open && <RowDetail detail={row.detail} />}
+      {hasDetail && open && <div class="zl-lg-detail">{detail}</div>}
     </>
   );
 }
 
-// RowDetail — the recessed panel a row opens INSIDE the card. Diffs/outputs
-// render BORDERLESS (className="flush") so the .tg-detail panel is the only
-// surface — the fix for the "card inside a card" ugliness.
-function RowDetail({ detail }) {
-  return (
-    <div class="tg-detail">
-      {detail.node}
-    </div>
-  );
-}
-
-// LiveWindow renders a running tool's skim or bounded full content window.
-// Diff rows retain their parsed type so the shared log can color them.
 function LiveWindow({ lines, start = 0, diff = false, expanded, onToggle }) {
   const logRef = useRef(null);
   const stickToBottom = useRef(true);
@@ -150,7 +143,7 @@ function LiveWindow({ lines, start = 0, diff = false, expanded, onToggle }) {
     <button
       ref={logRef}
       type="button"
-      class={`tg-log${diff ? " diff" : ""}${start > 0 && !expanded ? " fade" : ""}${expanded ? " expanded" : ""}`}
+      class={`zl-lg-log${diff ? " is-diff" : ""}${start > 0 && !expanded ? " is-fade" : ""}${expanded ? " is-expanded" : ""}`}
       aria-expanded={expanded}
       aria-label={expanded ? "Collapse live output" : "Show all live output"}
       onClick={onToggle}
@@ -165,42 +158,36 @@ function LiveWindow({ lines, start = 0, diff = false, expanded, onToggle }) {
           ? `${type === "add" ? "+" : type === "del" ? "-" : ""}${line.text}`
           : line;
         return (
-          <span key={start + i} class={`ln${type ? ` ${type}` : ""}`}>
+          <span key={start + i} class={`zl-lg-ln${type ? ` is-${type}` : ""}`}>
             {text}
-            {i === lines.length - 1 && <span class="ln-cursor" aria-hidden="true" />}
+            {i === lines.length - 1 && <span class="zl-lg-cursor" aria-hidden="true" />}
           </span>
         );
       })}
-      <span class="live-log-affordance" aria-hidden="true">
-        <ChevronRight size={12} />
+      <span class="zl-lg-log-affordance" aria-hidden="true">
+        <Chevron open={expanded} />
       </span>
     </button>
   );
 }
 
-// LiveCommand — the full command of a RUNNING tool, in the same recessed
-// panel a done row opens (.tg-detail + the $ prompt of ledger-details). A live
-// bash writing to a file streams nothing, so without this there is literally
-// nothing to look at and the only way to learn what is running is to cancel it.
 function LiveCommand({ command }) {
   return (
-    <div class="tg-detail">
-      <div class="doc-mono tg-cmd">
-        <span class="tg-cmd-prompt" aria-hidden="true">$ </span>
+    <div class="zl-lg-detail">
+      <div class="doc-mono zl-lg-cmd">
+        <span class="zl-lg-prompt" aria-hidden="true">$ </span>
         {command}
       </div>
     </div>
   );
 }
 
-// LiveRow — the running tool call: the SAME atom, tinted blue. Breathing dot in
-// the icon column, blue verb + bright object, elapsed (from 3s), a 1px progress
-// sweep. Every tool streams through the same rolling `.tg-log` panel below.
 function LiveRow({ row }) {
   const [expanded, setExpanded] = useState(false);
-  const elapsed = useElapsed(row.startedAt);
-  const verb = liveVerb(row.tool);
+  const elapsedMs = useElapsed(row.startedAt);
+  const elapsed = row.elapsed || (elapsedMs >= 3000 ? formatElapsed(elapsedMs) : null);
   const { text, detail: argDetail } = argParts(row.arg);
+  const dim = argDetail || row.dim;
   const livePreview = row.livePreview;
   const liveWindow = livePreview
     ? { lines: livePreview.lines, start: livePreview.start, diff: livePreview.kind === "diff" }
@@ -211,37 +198,28 @@ function LiveRow({ row }) {
     ? { lines: row.liveFull.lines, start: row.liveFull.start || 0, diff: row.liveFull.kind === "diff" }
     : null;
   const displayedWindow = expanded && fullWindow ? fullWindow : liveWindow;
-  // The live row opens ONLY when it has something the collapsed line can't
-  // show: the whole command. Rows with nothing extra stay the inert <div> they
-  // are today (not a disabled button, which SRs announce as an unavailable
-  // action). The row shares the `expanded` state with the output window, so
-  // opening either shows everything the running tool can offer.
   const expandable = !!row.command;
   const Tag = expandable ? "button" : "div";
   return (
     <>
       <Tag
         type={expandable ? "button" : undefined}
-        class={`tg-row live${expanded && expandable ? " open" : ""}`}
+        class={`zl-lg-row is-live${expanded && expandable ? " is-open" : ""}`}
         role={expandable ? undefined : "status"}
         aria-live={expandable ? undefined : "off"}
         onClick={expandable ? () => setExpanded((value) => !value) : undefined}
         aria-expanded={expandable ? expanded : undefined}
       >
-        <span class="ic" aria-hidden="true">
-          <StateDot state="running" size={6} />
+        <ToolIcon tool={row.tool} />
+        <span class="zl-lg-txt" title={fullLabel(row, text)}>
+          <span class="zl-lg-tool">{row.tool}</span>
+          <span class="zl-lg-arg zl-data">{text}</span>
+          {dim && <span class="zl-lg-dim"> · {dim}</span>}
         </span>
-        <span class="txt" title={fullLabel(row, text)}>
-          <span class="verb">{verb}</span> {text}
-          {argDetail && <span class="dim"> {argDetail}</span>}
-        </span>
-        {elapsed >= 3000 && <span class="res">{formatElapsed(elapsed)}</span>}
-        {expandable && (
-          <span class="chev" aria-hidden="true">
-            <ChevronRight size={12} />
-          </span>
-        )}
-        <span class="hair" aria-hidden="true" />
+        {elapsed && <span class="zl-lg-out zl-data">{elapsed}</span>}
+        <StatusMark live />
+        {expandable && <Chevron open={expanded} />}
+        <span class="sr-only">{SR.live}</span>
       </Tag>
       {expandable && expanded && <LiveCommand command={row.command} />}
       {displayedWindow && (
@@ -255,44 +233,13 @@ function LiveRow({ row }) {
   );
 }
 
-// FoldHeader — the dim header row that appears when the card hides rows. The
-// SAME atom. Collapsed: "· N earlier actions" (+ "· K errors" red). Expanded:
-// the textual summary ("7 actions · 3 reads · 2 greps · 1 bash"). Tapping it
-// toggles the card between collapsed and expanded.
-function FoldHeader({ expanded, earlierCount, earlierErrors, summary, onToggle }) {
-  return (
-    <button
-      type="button"
-      class={`tg-row tg-fold${expanded ? " open" : ""}`}
-      aria-expanded={expanded}
-      onClick={onToggle}
-    >
-      <span class="chev" aria-hidden="true">
-        <ChevronRight size={12} />
-      </span>
-      <span class="txt">
-        {expanded ? summary : `· ${earlierCount} earlier action${earlierCount === 1 ? "" : "s"}`}
-      </span>
-      {!expanded && earlierErrors > 0 && (
-        <span class="err-n">· {earlierErrors} error{earlierErrors === 1 ? "" : "s"}</span>
-      )}
-    </button>
-  );
-}
-
-// pluralizeTool renders "N <tool>" with the right plural. Most tools read fine
-// with a trailing "s" ("3 reads", "2 greps", "1 edit"), matching the mockup;
-// a few don't take one as a countable noun ("3 bash", "2 ls") or are already
-// plural ("2 tasks"), so they stay invariant.
-const INVARIANT_TOOLS = new Set(["bash", "ls", "tasks"]);
+const INVARIANT_TOOLS = new Set(["bash", "ls", "tasks", "grep", "write", "fetch_content", "ask_user"]);
 
 function pluralizeTool(tool, n) {
   if (n === 1 || INVARIANT_TOOLS.has(tool)) return tool;
   return `${tool}s`;
 }
 
-// summarizeRows builds the expanded header's textual summary, grouped by tool
-// kind in first-appearance order: "7 actions · 3 reads · 2 greps · 1 bash".
 function summarizeRows(rows) {
   const order = [];
   const counts = {};
@@ -306,36 +253,40 @@ function summarizeRows(rows) {
   return `${total} action${total === 1 ? "" : "s"} · ${parts.join(" · ")}`;
 }
 
-// rowKey derives a stable Preact key for a row (consumer SHOULD pass row.id).
+function FoldHeader({ expanded, earlierCount, failed, summary, onToggle }) {
+  return (
+    <button type="button" class="zl-lg-head" onClick={onToggle} aria-expanded={expanded}>
+      <Chevron open={expanded} />
+      <span class="zl-lg-head-t">
+        {expanded
+          ? summary
+          : <><span class="zl-data">{earlierCount}</span> earlier action{earlierCount === 1 ? "" : "s"}</>}
+      </span>
+      {failed > 0 && (
+        <span class="zl-lg-head-fail"><span class="zl-data">{failed}</span> failed</span>
+      )}
+    </button>
+  );
+}
+
 function rowKey(row, i) {
   if (row.id != null) return row.id;
   const { text } = argParts(row.arg);
   return `${row.tool ?? "row"}:${text ?? ""}:${i}`;
 }
 
-// FOLD_THRESHOLD — a batch folds (oldest rows collapse into the "N earlier
-// actions" header) only when it has MORE than this many rows total, live or
-// not (mockup: "above ~3 rows the oldest fold"). `visibleDone` is a separate
-// knob: how many terminated rows the ALREADY-collapsed tail keeps visible
-// (desktop 2 / mobile 1) — it does NOT decide when to fold.
 const FOLD_THRESHOLD = 3;
 
-// ActivityLedger — the unified tool-group card (.tg). ONE shape across every
-// phase (TOOLCALLS-UNIFIED-IMPL-SPEC): running/collapsed/expanded/finished are
-// the same card and the same row atom, differing only by which rows show and a
-// `.live` modifier. `rows` is the projectStream ledger's rows (each
-// `{ tool, arg, out, status, id, body?, live?, startedAt?, livePreview?, liveTail?, liveTailStart?, liveFull?, detail? }`,
-// `detail` a fused diff/output node attached by the caller).
-//
-// FOLD: a batch of more than FOLD_THRESHOLD rows collapses its oldest done rows
-// into a dim header ("N earlier actions"); tapping it expands to the full list.
-// A short batch (≤3 rows) renders as the plain list — no header — whether it's
-// live or finished. The card is a SINGLE component (never swapped): the dwell
-// hook (useTailWindow) is always mounted and simply gets a smaller `target`
-// when the batch crosses the fold threshold, so the row that folds away
-// animates out instead of being dropped in one frame.
-export function ActivityLedger({ rows = [], children, visibleDone = 2, className = "", ...rest }) {
-  const [expanded, setExpanded] = useState(false);
+export function ActivityLedger({
+  rows = [],
+  children,
+  visibleDone = 2,
+  dense,
+  folded: foldedInit,
+  className = "",
+  ...rest
+}) {
+  const [expanded, setExpanded] = useState(foldedInit === false);
 
   const isLive = rows.length > 0 && rows[rows.length - 1].live === true;
   const liveRow = isLive ? rows[rows.length - 1] : null;
@@ -344,36 +295,27 @@ export function ActivityLedger({ rows = [], children, visibleDone = 2, className
   const foldable = rows.length > FOLD_THRESHOLD;
   const folded = foldable && !expanded;
 
-  // The dwell hook is ALWAYS mounted (Rules of Hooks + no remount at the fold
-  // threshold): its `target` is the last `visibleDone` done rows when folded,
-  // or all of them otherwise. Shrinking the target on the 3→4 crossing makes
-  // the newly-hidden row fold out with animation rather than vanish.
   const target = folded ? doneRows.slice(-visibleDone) : doneRows;
   const visible = useTailWindow(target);
-  // The header count reflects the LOGICAL fold (rows not in `target`), NOT the
-  // dwell-expanded `visible` set — during the fold-out animation a row still
-  // lingers in `visible`, and counting off that would keep the header at 0 and
-  // then pop it in abruptly once the animation ends. `target` is exact.
   const targetIds = new Set(target.map((r) => r.id));
   const earlier = folded ? doneRows.filter((r) => !targetIds.has(r.id)) : [];
-  const earlierErrors = earlier.filter((r) => r.status === "err").length;
+  const failed = rows.filter((r) => r.status === "err").length;
 
-  // Empty ledger: a bare card wrapping arbitrary children (used by specimens).
   if (rows.length === 0) {
     return (
-      <div class={`tg ${className}`.trim()} {...rest}>
+      <div class={`zl-ledger${dense ? " is-dense" : ""}${className ? ` ${className}` : ""}`.trim()} {...rest}>
         {children}
       </div>
     );
   }
 
   return (
-    <div class={`tg ${className}`.trim()} {...rest}>
+    <div class={`zl-ledger${isLive ? " is-live" : ""}${dense ? " is-dense" : ""}${className ? ` ${className}` : ""}`.trim()} {...rest}>
       {folded && earlier.length > 0 && (
         <FoldHeader
           expanded={false}
           earlierCount={earlier.length}
-          earlierErrors={earlierErrors}
+          failed={failed}
           onToggle={() => setExpanded(true)}
         />
       )}
@@ -381,6 +323,7 @@ export function ActivityLedger({ rows = [], children, visibleDone = 2, className
         <FoldHeader
           expanded
           summary={summarizeRows(doneRows.concat(liveRow ? [liveRow] : []))}
+          failed={failed}
           onToggle={() => setExpanded(false)}
         />
       )}
@@ -389,5 +332,22 @@ export function ActivityLedger({ rows = [], children, visibleDone = 2, className
       ))}
       {liveRow && <LiveRow key={rowKey(liveRow, doneRows.length)} row={liveRow} />}
     </div>
+  );
+}
+
+// LedgerDiff — the recessed in-ledger diff the catalogue designed (zones-lab
+// `Diff`). Standalone diffs still use DiffBlock; this is the one that opens
+// INSIDE a row, one step further down, not a new card.
+export function LedgerDiff({ lines = [] }) {
+  return (
+    <pre class="zl-diff zl-data">
+      {lines.map(([t, n, s], i) => (
+        <span class={`zl-dl is-${t}`} key={i}>
+          <span class="zl-dl-no">{n}</span>
+          <span class="zl-dl-sign">{t === "add" ? "+" : t === "del" ? "−" : " "}</span>
+          <span class="zl-dl-txt">{s}</span>
+        </span>
+      ))}
+    </pre>
   );
 }
