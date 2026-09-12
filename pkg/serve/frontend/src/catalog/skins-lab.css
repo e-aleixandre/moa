@@ -46,7 +46,7 @@
 .sk-phone .zl-transcript { padding-top: 50px; }
 .sk-phone .mcomposer { flex: none; padding: var(--space-2) var(--space-3) 6px; }
 .sk-phone .mcomposer .status-strip { font-size: var(--text-micro); overflow: hidden; }
-.sk-phone .mtchip { top: 12px; }
+.sk-phone .zl-chrome { top: 12px; }
 
 .sk-desk {
   position: relative;
@@ -393,7 +393,7 @@
 .sk-ambient.sk-phone .zl-attach { border-radius: 16px; }
 
 /* the chip: glass pill over the transcript */
-.sk-ambient .mtchip {
+.sk-ambient .zl-chip {
   background: rgba(24, 24, 38, 0.55);
   backdrop-filter: var(--amb-blur);
   -webkit-backdrop-filter: var(--amb-blur);
@@ -401,12 +401,12 @@
   box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 6px 20px rgba(0, 0, 0, 0.30);
   padding: 7px 8px 7px 15px;
 }
-.sk-ambient .mtchip.is-open { background: rgba(48, 48, 66, 0.92); border: 0; }
-.sk-ambient .mtchip-title { font-size: 12.5px; }
-.sk-ambient .mtchip-chev { background: var(--amb-on); }
-.sk-ambient .mtchip.is-open .mtchip-chev { background: rgba(255, 255, 255, 0.16); }
+.sk-ambient .zl-chip.is-open { background: rgba(48, 48, 66, 0.92); border: 0; }
+.sk-ambient .zl-chip-name { font-size: 12.5px; }
+.sk-ambient .zl-chip .zl-chev { background: var(--amb-on); }
+.sk-ambient .zl-chip.is-open .zl-chev { background: rgba(255, 255, 255, 0.16); }
 /* the attention dot keeps the border ring colour of the canvas, not --base */
-.sk-ambient .mtchip-attn { border-color: var(--amb-canvas); }
+.sk-ambient .zl-cap-badge { border-color: var(--amb-canvas); }
 /* the inbox count is a state (unseen work): it keeps mauve */
 
 /* veil + drawer

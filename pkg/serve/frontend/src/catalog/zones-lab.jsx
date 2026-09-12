@@ -49,6 +49,9 @@ import { projectMonogram } from "../data/util/format.js";
    Artifact. */
 import { ActivityLedger as ProductionLedger, LedgerDiff } from "../components/ActivityLedger/ActivityLedger.jsx";
 import { Artifact } from "../components/Artifacts/Artifact.jsx";
+/* Same move, the phone header: markup and CSS live in layout/mobile/MobileChrome
+   now, and the prototype draws the shipped one. See the adapter in `Phone`. */
+import { MobileChrome } from "../layout/mobile/MobileChrome/MobileChrome.jsx";
 
 /* The three-zone skeleton, both densities side by side.
    This is a PROTOTYPE, not production: it draws the shell only (where things
@@ -78,14 +81,6 @@ const SESSIONS = [
   { title: "Browse Gugo GitLab", when: "39d", path: "~/dev/gugo", project: "gugo", state: "idle" },
   { title: "MenuApp", when: "41d", path: "~/dev/menuapp", project: "menuapp", state: "idle" },
 ];
-
-function PlusIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-    </svg>
-  );
-}
 
 /* MIGRATED (METODO §4, the sidebar): the left column has no private copy here.
    Its markup and CSS were MOVED to layout/Sidebar, class names and all, and
@@ -941,20 +936,22 @@ function Phone({ label, live: preset, surface }) {
       <div class="zl-phone" ref={host} {...d.handlers}>
         <Transcript streaming={!!preset.fg && preset.fg.phase === "working"} tail={preset.fg?.phase === "waiting" ? ASK_CARD : null} />
 
-        {/* three floating capsules: sidebar / this session / new */}
-        <div class="zl-chrome">
-          <button type="button" class="zl-cap zl-cap-left" onClick={() => d.setLeft(true)} aria-label="Sessions">
-            <span class="zl-burger" aria-hidden="true" />
-            <span class="zl-cap-badge" />
-          </button>
-          <button type="button" class="zl-cap zl-chip" onClick={() => d.setRight(true)}>
-            <span class="zl-chip-name">Buscar un bug bounty</span>
-            <svg class="zl-chev" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M4.5 6.5L8 10l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-          <button type="button" class="zl-cap zl-cap-right" aria-label="New session"><PlusIcon /></button>
-        </div>
+        {/* MIGRATED (METODO §4, the phone header): the three capsules have no
+            private copy here. Markup and CSS were MOVED to MobileChrome, class
+            names and all, and the prototype imports them back. What sits here
+            now is only an adapter: the lab's drawers and the yellow specimen
+            badge mapped onto the shipped props. The frame (390×780), the
+            scrim, the edge gestures and the density label stay — they are
+            the host, not the piece. */}
+        <MobileChrome
+          title="Buscar un bug bounty"
+          attention={{ permission: 1, urgent: 1 }}
+          open={d.left}
+          onToggle={d.setLeft}
+          panelOpen={d.right}
+          onPanel={(next) => next ? d.setRight(true) : closeRight()}
+          inboxCount={0}
+        />
 
         <div class="zl-dock">
           <LiveZone {...live} />

@@ -1,103 +1,55 @@
 /* MobileTitleChip — the middle capsule of the phone's header.
 
-   It is the same object as the two side capsules (.mcap in MobileChrome.css),
-   at whatever width is left: same 44px height, same 16px radius, same surface.
-   That is the point of the header being one row — the name is not a different
-   kind of thing from the buttons beside it.
+   This sheet is the catalogue's, MOVED (catalog/zones-lab.css `.zl-chip`,
+   `.zl-chip-name`, `.zl-chip .zl-chev`), not translated. The shared capsule
+   (`.zl-cap`: 44px, 16px radius, the glass) lives in MobileChrome.css; this
+   file is only what the name adds: it grows, the title ellipsises, the
+   chevron is a glyph in the title's own row.
 
-   Catalogue: .zl-chip, `flex: 1` in a 366px row between two 44px caps, so it
-   measures 260px on a 390pt phone. The title is .zl-fs-title (16px) at weight
-   500 in --zl-t1: the largest, brightest type on the screen, because it names
-   what you are reading.
+   What is added below the catalogue's block is only what the prototype never
+   had: the inbox count, the open face (chevron flipped — the panel is a
+   bottom sheet on the phone, so the chip stays on screen), and the focus
+   ring the catalogue declared on `.zl` rather than on the chip. */
 
-   While the drawer is open the chip lifts above the veil and turns solid: it is
-   the anchor the list hangs from, so it has to stay readable and tappable. */
-
-.mtchip {
-  flex: 1;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-  height: var(--control-touch);
-  padding: 0 12px;
-  border: 1px solid color-mix(in srgb, var(--surface2) 70%, transparent);
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--base) 82%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: var(--shadow-sm);
-  cursor: pointer;
-  font-family: var(--font);
-  transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
-}
-
-.mtchip:active {
-  transform: scale(0.98);
-}
-
-.mtchip:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.mtchip-title {
-  min-width: 0;
-  font-size: var(--text-input); /* 16: the catalogue's title size */
-  font-weight: var(--weight-medium);
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.zl-chip { flex: 1; min-width: 0; gap: 6px; }
+.zl-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zl-chip .zl-chev {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--zl-t3, #9091a6);
+  transition: transform 160ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
 }
 
 /* Inbox count — events waiting behind the drawer's Inbox door. Mauve (the
-   product's "unseen work" colour, shared with InboxButton's badge). */
-.mtchip-inbox {
+   product's "unseen work" colour, shared with InboxButton's badge). The
+   catalogue never had this; it is grafted, not translated. */
+.zl-chip-inbox {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   flex: none;
   padding: 1px 6px 1px 5px;
-  border-radius: var(--radius-full);
-  background: var(--mauve);
-  color: var(--crust);
+  border-radius: 9999px;
+  background: var(--zl-accent, #cba6f7);
+  color: var(--zl-accent-ink, #1a1424);
   font-family: var(--mono);
-  font-size: var(--text-nano);
-  font-weight: var(--weight-semibold);
+  font-size: 9px;
+  font-weight: 600;
   line-height: 14px;
 }
 
-/* The chevron says the name is a door. It is a glyph in the title's own row
-   now, not a filled disc: at 44px the capsule no longer needs a second shape
-   inside it to look tappable. */
-.mtchip-chev {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  color: var(--overlay1);
-  transition: transform var(--duration) var(--ease);
-}
-
-/* Open — solid, above the veil, chevron flipped to point back at the chip. */
-.mtchip.is-open {
-  z-index: calc(var(--z-sheet) + 2);
-  background: var(--surface1);
-  border-color: var(--surface2);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-
-.mtchip.is-open .mtchip-chev {
-  color: var(--subtext1);
+/* Open — the chevron says the name is a door, and flips to point back at
+   the chip while the dossier is up. The fill stays the catalogue's glass:
+   the panel is a bottom sheet, the chip is still the header, not an anchor
+   hanging into a veil. */
+.zl-chip.is-open .zl-chev {
+  color: var(--zl-t2, #c3c4d1);
   transform: rotate(180deg);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mtchip,
-  .mtchip-chev {
+  .zl-chip .zl-chev {
     transition: none;
   }
 }

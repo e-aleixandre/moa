@@ -147,67 +147,16 @@
   height: 780px;
 }
 
-/* ── Phone capsules ──────────────────────────────────────────────────── */
-.zl-chrome {
-  position: absolute;
-  top: 14px;
-  left: 12px;
-  right: 12px;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.zl-cap {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 44px;
-  min-width: 44px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: var(--zl-r-lg);
-  background: rgba(30, 30, 41, 0.82);
-  backdrop-filter: blur(12px);
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t1);
-  font-family: inherit;
-  font-size: var(--zl-fs-title);
-  font-weight: 500;
-  letter-spacing: inherit;
-  cursor: pointer;
-}
-.zl-cap svg { width: 18px; height: 18px; }
-
-.zl-cap-left { position: relative; }
-.zl-burger {
-  width: 16px;
-  height: 10px;
-  border-top: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-}
-.zl-cap-badge {
-  position: absolute;
-  top: 9px;
-  right: 9px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--zl-yellow);
-  border: 2px solid var(--zl-canvas);
-}
-
-.zl-chip { flex: 1; min-width: 0; gap: 6px; }
-.zl-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.zl-chip .zl-chev { width: 14px; height: 14px; flex: none; color: var(--zl-t3); }
-
 /* ── Transcript ──────────────────────────────────────────────────────────
    MOVED to layout/Stream/Stream.css, components/UserWaypoint and
    components/AssistantDocument. The prototype imports the shipped pieces,
    so the column, the peach edge and the prose are no longer defined here.
    Frame-specific padding (`.zl-desk .zl-transcript`, `.zl-phone .zl-transcript`,
-   `.zl-pane .zl-transcript`) stays with the frames below. */
+   `.zl-pane .zl-transcript`) stays with the frames below.
+
+   The phone's floating capsules MOVED to layout/mobile/MobileChrome
+   (`.zl-chrome` / `.zl-cap` / `.zl-chip`). The prototype imports the shipped
+   header, so those rules are no longer defined here. */
 
 /* On the phone the capsules float over the transcript: the transcript fades
    out under them so text scrolls into a soft edge, not behind a button. */

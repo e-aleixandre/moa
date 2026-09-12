@@ -254,36 +254,6 @@
   color: var(--amb-text-3);
 }
 
-/* ── The header's three capsules ───────────────────────────────────────────
-   They hover over a scrolling transcript, so they have to separate themselves
-   from whatever passes underneath. At the app's 72% the words behind them
-   stayed legible through the glass; over an aurora that is worse, because what
-   is behind is no longer a flat colour. Solid surface, real blur, and a shadow
-   so the row reads as floating ABOVE the text rather than sitting in it.
-
-   The catalogue's own value, measured: rgba(30,30,41,0.82) — the raised step of
-   the tonal ladder, at the opacity that still lets the aurora tint it. */
-[data-ambient="on"] .mcap,
-[data-ambient="on"] .mtchip {
-  background: rgba(30, 30, 41, 0.82);
-  backdrop-filter: blur(12px) saturate(1.3);
-  -webkit-backdrop-filter: blur(12px) saturate(1.3);
-  border: 0;
-  border-radius: var(--amb-r-lg);
-  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 8px 24px rgba(0, 0, 0, 0.45);
-  color: var(--amb-text-2);
-}
-[data-ambient="on"] .mtchip-title { color: var(--amb-text); }
-[data-ambient="on"] .mtchip-chev { color: var(--amb-text-3); }
-[data-ambient="on"] .mtchip.is-open {
-  background: var(--amb-control);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-[data-ambient="on"] .mtchip.is-open .mtchip-chev { color: var(--amb-text-2); }
-/* the attention dot rings against the canvas, not against the old --base */
-[data-ambient="on"] .mcap-badge { border-color: var(--amb-canvas); }
-
 /* ── The two cards that stop the run ───────────────────────────────────────
    A permission prompt and an ask are the same event wearing two shapes: the
    session is PARKED ON YOU and nothing moves until you answer. They are
@@ -730,20 +700,6 @@
 [data-ambient="on"] .ask-detail-answer.custom { color: var(--amb-text-2); }
 [data-ambient="on"] .ask-detail-answer.skipped,
 [data-ambient="on"] .ask-detail-answer.missing { color: var(--amb-text-4); }
-
-/* ── The floating chip ─────────────────────────────────────────────────────
-   It hovers over a scrolling transcript, so it has to separate itself from
-   whatever passes underneath. At the app's 72% the words behind it stayed
-   legible through the pill; over an aurora that is worse, because what is
-   behind is no longer a flat colour. Solid surface, real blur, and a shadow so
-   it reads as floating ABOVE the text rather than sitting in it. */
-[data-ambient="on"] .mtchip {
-  background: rgba(26, 26, 42, 0.94);
-  backdrop-filter: blur(20px) saturate(1.3);
-  -webkit-backdrop-filter: blur(20px) saturate(1.3);
-  border: 0;
-  box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 8px 24px rgba(0, 0, 0, 0.45);
-}
 
 /* The app renders into #root; it has to stand above the aurora, which is
    painted on body. One stacking context, set once.

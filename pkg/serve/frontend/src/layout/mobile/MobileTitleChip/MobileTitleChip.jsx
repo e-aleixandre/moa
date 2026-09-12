@@ -1,45 +1,39 @@
-import { ChevronDown, Inbox } from "lucide-preact";
+import { Inbox } from "lucide-preact";
 import { mobileTitleChipLabel } from "../MobileConversationScreen/attention-model.js";
 import "./MobileTitleChip.css";
 
 // MobileTitleChip — the session's name, the middle capsule of the phone's
-// header (MobileChrome), and a door to the SessionDrawer.
+// header (MobileChrome). Markup and CSS are the catalogue's (catalog/zones-lab.jsx
+// `Phone` the `.zl-cap.zl-chip` button, zones-lab.css `.zl-chip` / `.zl-chip-name`
+// / `.zl-chev`), MOVED here rather than imitated. The catalogue imports
+// MobileChrome now, so this is the only title chip in the product.
 //
-// It used to be the WHOLE header: one pill, centred, floating alone over the
-// transcript, carrying the name AND the session list AND the cross-session
-// attention dot AND the inbox count. The name paid for that: 11px semibold in
-// --subtext1 was the smallest type on a screen whose subject it named. Now the
-// header is three capsules, the attention badge rides the sessions door next to
-// it (that is where the other sessions are), and the chip does one job at the
-// size the catalogue gives it: 16px, medium, in --text.
-//
-// It is still A door to the drawer — tapping the name you are reading to see
-// the others is the gesture the phone has always had, and removing it would
-// take a working affordance away to make room for a new one.
-//
-// The inbox count stays here. Events waiting have to be legible WITHOUT opening
-// anything, and the count belongs beside a name rather than inside a 44px icon
-// button, which has no room for a number next to its glyph.
+// What is NOT the catalogue's is everything the prototype never had, grafted
+// on top: it is a door to THIS session's panel (the dossier), not to the
+// session list; the accessible name says so; and the inbox count stays here
+// because events waiting have to be legible WITHOUT opening anything, and a
+// 44px icon button has no room for a number next to its glyph.
+
 export function MobileTitleChip({ title, open = false, onToggle, inboxCount = 0 }) {
   return (
     <button
       type="button"
-      class={`mtchip${open ? " is-open" : ""}`}
+      class={`zl-cap zl-chip${open ? " is-open" : ""}`}
       onClick={() => onToggle?.(!open)}
       aria-haspopup="dialog"
       aria-expanded={open}
       aria-label={mobileTitleChipLabel(title, inboxCount)}
     >
-      <span class="mtchip-title">{title}</span>
+      <span class="zl-chip-name">{title}</span>
       {inboxCount > 0 && (
-        <span class="mtchip-inbox" aria-hidden="true">
+        <span class="zl-chip-inbox" aria-hidden="true">
           <Inbox size={12} />
           {inboxCount > 9 ? "9+" : inboxCount}
         </span>
       )}
-      <span class="mtchip-chev" aria-hidden="true">
-        <ChevronDown size={14} />
-      </span>
+      <svg class="zl-chev" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M4.5 6.5L8 10l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
     </button>
   );
 }

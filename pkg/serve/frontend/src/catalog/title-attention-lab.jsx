@@ -12,7 +12,7 @@ import "./title-attention-lab.css";
 // target the production markup, so nothing here touches production CSS or
 // components.
 //
-// The indicator's home is the header's SESSIONS capsule (`.mcap-left`), not the
+// The indicator's home is the header's SESSIONS capsule (`.zl-cap-left`), not the
 // title: it says "another session wants you", so it rides the button that goes
 // to those sessions. The specimens follow it there.
 //

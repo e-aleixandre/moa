@@ -36,12 +36,14 @@ test('quiet mobile title chips do not mount a ripple presentation', () => {
   expect(mobileTitleChipPresentation({})).toMatchObject({ hasAttention: false, tone: null });
 });
 
-test('the arrival ring is static under reduced motion', () => {
-  // A ripple announcing an arrival is motion with a job; repeating it at
-  // someone who asked for no motion is not.
+test('the arrival ring does not paint under reduced motion', () => {
+  // A ripple announcing an arrival is motion with a job; painting a leftover
+  // halo at someone who asked for no motion is not. The badge itself stays.
   const css = readFileSync(new URL('../MobileChrome/MobileChrome.css', import.meta.url), 'utf8');
   expect(css).toContain('@media (prefers-reduced-motion: reduce)');
   expect(css).toContain('animation: none');
+  const reduce = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+  expect(reduce).toMatch(/\.zl-cap-badge::before[\s\S]*?opacity:\s*0/);
 });
 
 test('mobile title chip keeps its dialog ARIA and hides decorative marks', () => {
@@ -50,6 +52,25 @@ test('mobile title chip keeps its dialog ARIA and hides decorative marks', () =>
   expect(source).toContain('aria-expanded={open}');
   expect(source).toContain('aria-label={mobileTitleChipLabel(');
   expect(source).toContain('aria-hidden="true"');
+});
+
+test('the phone header is the catalogue\'s three capsules, defined once', () => {
+  // METODO §4: the lab imports the shipped header and does not draw its own
+  // capsules. A private copy here would be the exact drift this move ends.
+  const lab = readFileSync(new URL('../../../catalog/zones-lab.jsx', import.meta.url), 'utf8');
+  expect(lab).toMatch(/import \{ MobileChrome \} from ["'].*MobileChrome\/MobileChrome\.jsx["']/);
+  expect(lab).not.toMatch(/<div class="zl-chrome">/);
+
+  const chrome = readFileSync(new URL('../MobileChrome/MobileChrome.jsx', import.meta.url), 'utf8');
+  expect(chrome).toContain('class="zl-chrome"');
+  expect(chrome).toContain('zl-cap zl-cap-left');
+  expect(chrome).toContain('class="zl-burger"');
+  expect(chrome).toContain('aria-label={mobileSessionsDoorLabel(');
+  expect(chrome).toContain('aria-haspopup="dialog"');
+  // The badge mounts only when another session needs you — inverting this
+  // (always painting the dot) would bring back the catalogue specimen as
+  // production behaviour.
+  expect(chrome).toContain('presentation.hasAttention &&');
 });
 
 test('the production app does not import the design catalog', () => {

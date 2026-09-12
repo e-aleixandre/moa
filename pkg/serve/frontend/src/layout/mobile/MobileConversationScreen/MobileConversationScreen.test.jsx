@@ -480,7 +480,7 @@ test('the title chip carries the waiting inbox count without opening the drawer'
     const chip = componentNode(MobileConversationScreen({}), 'MobileTitleChip');
     expect(chip.props.inboxCount).toBe(2);
     const rendered = JSON.stringify(chip.type(chip.props));
-    expect(rendered).toContain('mtchip-inbox');
+    expect(rendered).toContain('zl-chip-inbox');
   } finally {
     setState(previous);
   }
