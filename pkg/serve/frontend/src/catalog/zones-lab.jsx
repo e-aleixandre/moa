@@ -47,6 +47,7 @@ import { PermissionOptions } from "../components/PermissionControl/PermissionCon
 /* Same move, the sidebar: markup and CSS live in layout/Sidebar now, and
    the prototype draws the shipped one. See the adapter at `Sidebar`. */
 import { Sidebar as ProductionSidebar } from "../layout/Sidebar/Sidebar.jsx";
+import { PermissionCard } from "../components/PermissionCard/PermissionCard.jsx";
 import { projectMonogram } from "../data/util/format.js";
 /* Same move, the tool ledger: markup and CSS live in ActivityLedger now, and
    the prototype draws the shipped one. See the adapter at `Ledger`. Diffs
@@ -557,17 +558,13 @@ function useLive(preset, forceCompact) {
   return { fg: preset.fg, bg: preset.bg, open: open && !forceCompact, onToggle: () => setOpen((v) => !v), t0 };
 }
 
-/* The blocking card, out of scope here (it has its own component in
-   production); this stub only shows WHERE it sits -- after the transcript,
-   before the composer -- and that "needs you" is yellow. */
+/* MIGRATED (METODO §4, the permission card): ASK_CARD has no private copy
+   here. Its markup and CSS were MOVED to components/PermissionCard, class
+   names and all, and the prototype imports them back. What sits here now is
+   only an adapter: the lab's fixture command mapped onto the shipped props.
+   Allow/Deny with no Always, because that is what the prototype drew. */
 const ASK_CARD = (
-  <div class="zl-ask" role="group" aria-label="Permission requested">
-    <div class="zl-ask-t">Run <code class="zl-data">git push origin fix/attach-race</code>?</div>
-    <div class="zl-ask-acts">
-      <button type="button" class="zl-ask-btn is-primary">Allow</button>
-      <button type="button" class="zl-ask-btn">Deny</button>
-    </div>
-  </div>
+  <PermissionCard command="git push origin fix/attach-race" />
 );
 
 function Transcript({ dense, streaming = true, short, tail }) {

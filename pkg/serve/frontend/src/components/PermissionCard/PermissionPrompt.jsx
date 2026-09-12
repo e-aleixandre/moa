@@ -4,6 +4,29 @@ import { resolvePermission, addPermissionRule } from "../../data/session-actions
 import { formatArgs } from "../../data/util/format.js";
 import { Field } from "../../primitives/index.js";
 
+// The card prints the command in the sentence. A bash permission carries
+// `command` plus bookkeeping (cwd, timeout, async). Unwrap the command so
+// the user reads the exact string that will run; the leftover fields become
+// scope chips so they stay visible. Any other shape still goes through
+// formatArgs, unabridged.
+function permissionCommand(perm) {
+  const args = perm?.args;
+  if (args && typeof args === "object" && !Array.isArray(args) && typeof args.command === "string") {
+    return args.command;
+  }
+  return formatArgs(args);
+}
+
+function permissionScope(perm) {
+  const args = perm?.args;
+  if (!args || typeof args !== "object" || Array.isArray(args) || typeof args.command !== "string") return [];
+  const chips = [];
+  if (args.cwd) chips.push(`cwd ${args.cwd}`);
+  if (args.timeout) chips.push(`timeout ${args.timeout}`);
+  if (args.async) chips.push("async");
+  return chips;
+}
+
 // PermissionPrompt — stateful container around the presentational PermissionCard
 // mock. Ports the semantics of the old SPA's permission-prompt-bar
 // (pkg/serve/frontend/src/components/InputBar.jsx: permissionActive /
@@ -92,7 +115,8 @@ export function PermissionPrompt({ session }) {
   return (
     <PermissionCard
       title={title}
-      command={formatArgs(perm.args)}
+      command={permissionCommand(perm)}
+      scope={permissionScope(perm)}
       alwaysLabel={permissionMode === "ask" ? perm.allow_pattern || undefined : undefined}
       disabled={busy}
       error={error}

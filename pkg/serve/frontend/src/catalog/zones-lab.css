@@ -294,34 +294,11 @@
 .zl-desk.zl-grid { flex-direction: column; width: 1298px; height: 820px; }
 @media (max-width: 1400px) { .zl-desk.zl-grid { width: 1200px; } }
 
-/* Blocking tail of a pane: a "needs you" card and a system line. Both are
-   stubs for placement; the real components already exist in production.
-   The card is raised and yellow-rimmed because yellow IS "needs you";
-   the primary button is the accent because it is the action. */
-.zl-ask {
-  margin: 4px 0 0;
-  padding: 12px 14px;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-raised);
-  box-shadow: 0 0 0 1px rgba(249, 226, 175, 0.4);
-}
-.zl-ask-t { font-size: var(--zl-fs-body); color: var(--zl-t1); line-height: 1.5; }
-.zl-ask-t code { color: var(--zl-t2); }
-.zl-ask-acts { display: flex; gap: 6px; margin-top: 10px; }
-.zl-ask-btn {
-  height: 32px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: var(--zl-r-sm);
-  background: var(--zl-control);
-  color: var(--zl-t1);
-  font-family: inherit;
-  font-size: var(--zl-fs-body);
-  font-weight: 500;
-  letter-spacing: inherit;
-  cursor: pointer;
-}
-.zl-ask-btn.is-primary { background: var(--zl-accent); color: var(--zl-accent-ink); font-weight: 600; }
+/* ── Permission card ──────────────────────────────────────────────────────
+   MIGRATED. `.zl-ask*` used to be defined here. They now live in
+   PermissionCard.css, class names and all, and this file no longer has a
+   copy of them: the prototype imports the shipped component (ASK_CARD in
+   zones-lab.jsx) and the rules arrive with it. */
 
 /* ── Status line study ─────────────────────────────────────────────────────── */
 .zl-study { position: relative; max-width: 1298px; margin: 56px auto 0; }

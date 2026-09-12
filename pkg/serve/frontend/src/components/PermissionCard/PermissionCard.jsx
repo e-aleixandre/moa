@@ -1,5 +1,3 @@
-import { TriangleAlert, AlertOctagon } from "lucide-preact";
-import { Kbd, Button, Chip } from "../../primitives/index.js";
 import "./PermissionCard.css";
 
 // buildCommandFragments — locates every occurrence of dangerTokens in
@@ -8,29 +6,26 @@ import "./PermissionCard.css";
 // resolved by preferring the longest match at the same start position;
 // empty/non-string tokens are ignored.
 function buildCommandFragments(command, dangerTokens = []) {
+  const text = command == null ? "" : String(command);
   const tokens = (dangerTokens || []).filter(
     (t) => typeof t === "string" && t.length > 0
   );
-  if (!tokens.length) return [command];
+  if (!tokens.length) return [text];
 
-  // Collects all (start, end) matches for all tokens.
   const matches = [];
   for (const token of tokens) {
     let from = 0;
-    while (from <= command.length) {
-      const idx = command.indexOf(token, from);
+    while (from <= text.length) {
+      const idx = text.indexOf(token, from);
       if (idx === -1) break;
       matches.push({ start: idx, end: idx + token.length, token });
       from = idx + 1;
     }
   }
-  if (!matches.length) return [command];
+  if (!matches.length) return [text];
 
-  // Sort by start asc, and on tie by length desc (longest match wins).
   matches.sort((a, b) => a.start - b.start || b.end - a.end - (a.end - a.start));
 
-  // Select non-overlapping matches, left to right, preferring the
-  // longest one when competing for the same start position.
   const selected = [];
   let cursor = 0;
   for (const m of matches) {
@@ -42,39 +37,44 @@ function buildCommandFragments(command, dangerTokens = []) {
   const fragments = [];
   let pos = 0;
   for (const m of selected) {
-    if (m.start > pos) fragments.push(command.slice(pos, m.start));
-    fragments.push({ danger: command.slice(m.start, m.end) });
+    if (m.start > pos) fragments.push(text.slice(pos, m.start));
+    fragments.push({ danger: text.slice(m.start, m.end) });
     pos = m.end;
   }
-  if (pos < command.length) fragments.push(command.slice(pos));
+  if (pos < text.length) fragments.push(text.slice(pos));
   return fragments;
 }
 
 function CommandLine({ command, dangerTokens = [] }) {
   const fragments = buildCommandFragments(command, dangerTokens);
-  return (
-    <>
-      {fragments.map((frag, i) =>
-        typeof frag === "string" ? (
-          <span key={i}>{frag}</span>
-        ) : (
-          <span key={i} class="danger">
-            {frag.danger}
-          </span>
-        )
-      )}
-    </>
+  if (fragments.length === 1 && typeof fragments[0] === "string") return fragments[0];
+  return fragments.map((frag, i) =>
+    typeof frag === "string" ? frag : (
+      <span key={i} class="danger">{frag.danger}</span>
+    )
   );
 }
 
-// PermissionCard is a presentational-only mock used by the galleries and by
-// the real PermissionPrompt container (see ./PermissionPrompt.jsx). The extra
-// props below (disabled, error, onFeedbackToggle/feedbackActive,
-// onRuleToggle/ruleActive, children) are all OPTIONAL and only used by the
-// real container — omitting them (as every gallery demo does) reproduces the
-// exact previous markup/behavior.
+function scopeLabel(chip) {
+  return typeof chip === "object" ? chip.label : chip;
+}
+
+function scopeWarn(chip) {
+  return typeof chip === "object" && chip.warn;
+}
+
+// PermissionCard — the blocking "run this?" card. Markup and CSS are the
+// catalogue's (catalog/zones-lab.jsx ASK_CARD, zones-lab.css `.zl-ask*`),
+// MOVED here rather than imitated. Raised, yellow-rimmed, the command in
+// the sentence, Allow then Deny. The catalogue imports this component now.
+//
+// What is NOT the catalogue's is the production behavior plugged on top:
+// Always, Add rule, + feedback, the error line, a destructive variant,
+// danger tokens inside the command, and the optional scope/timer. The
+// prototype had Allow/Deny; production still has to let you mean those
+// extra things without changing what Allow and Deny do.
 export function PermissionCard({
-  title,
+  title: _title,
   command,
   dangerTokens,
   scope = [],
@@ -94,83 +94,70 @@ export function PermissionCard({
   ...rest
 }) {
   const destructive = variant === "destructive";
+  const allowLabel = destructive ? "Allow anyway" : alwaysLabel ? "Allow once" : "Allow";
   return (
-    <div class={`perm-card${destructive ? " danger" : ""}`} {...rest}>
-      <div class="perm-head">
-        <span class="p-icon" aria-hidden="true">
-          {destructive ? <AlertOctagon size={15} /> : <TriangleAlert size={15} />}
-        </span>
-        <span class="p-t">{title}</span>
-        {timer && <span class="p-timer">{timer}</span>}
+    <div
+      class={`zl-ask${destructive ? " is-danger" : ""}`}
+      role="group"
+      aria-label="Permission requested"
+      {...rest}
+    >
+      <div class="zl-ask-t">
+        Run <code class="zl-data"><CommandLine command={command} dangerTokens={dangerTokens} /></code>?
+        {timer && <span class="zl-ask-timer zl-data">{timer}</span>}
       </div>
       {scope.length > 0 && (
-        <div class="scope">
-          {scope.map((chip, i) => {
-            const label = typeof chip === "object" ? chip.label : chip;
-            const warn = typeof chip === "object" && chip.warn;
-            return (
-              <Chip key={label ?? i} size="sm" mono tone={warn ? "warning" : undefined}>
-                {label}
-              </Chip>
-            );
-          })}
+        <div class="zl-ask-scope">
+          {scope.map((chip, i) => (
+            <span
+              key={scopeLabel(chip) ?? i}
+              class={`zl-ask-chip${scopeWarn(chip) ? " is-warn" : ""}`}
+            >
+              {scopeLabel(chip)}
+            </span>
+          ))}
         </div>
       )}
-      <div class="perm-cmd">
-        <span class="dollar">$</span>{" "}
-        <CommandLine command={command} dangerTokens={dangerTokens} />
-      </div>
-      {error && <div class="perm-error">{error}</div>}
-      <div class="perm-actions">
-        <Button
-          variant={destructive ? "danger-solid" : "success"}
-          size="sm"
+      {error && <div class="zl-ask-error">{error}</div>}
+      <div class="zl-ask-acts">
+        <button
+          type="button"
+          class={`zl-ask-btn is-primary${destructive ? " is-danger" : ""}`}
           disabled={disabled}
           onClick={onAllow}
         >
-          {destructive ? "Allow anyway" : "Allow once"}
-        </Button>
+          {allowLabel}
+        </button>
         {!destructive && alwaysLabel && (
-          <Button variant="ghost" size="sm" className="btn-always" disabled={disabled} onClick={onAlways}>
+          <button type="button" class="zl-ask-btn" disabled={disabled} onClick={onAlways}>
             Always for <b>{alwaysLabel}</b>
-          </Button>
+          </button>
         )}
-        <Button variant="ghost" size="sm" className="btn-deny" disabled={disabled} onClick={onDeny}>
+        <button type="button" class="zl-ask-btn" disabled={disabled} onClick={onDeny}>
           Deny
-        </Button>
+        </button>
         {onRuleToggle && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="btn-rule"
+          <button
+            type="button"
+            class="zl-ask-btn"
             disabled={disabled}
             aria-pressed={ruleActive}
             onClick={onRuleToggle}
           >
             Add rule
-          </Button>
+          </button>
         )}
         {onFeedbackToggle && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="btn-feedback"
+          <button
+            type="button"
+            class="zl-ask-btn"
             disabled={disabled}
             aria-pressed={feedbackActive}
             onClick={onFeedbackToggle}
           >
             + feedback
-          </Button>
+          </button>
         )}
-        <span class="hint">
-          {destructive ? (
-            "no always for destructive ops"
-          ) : (
-            <>
-              <Kbd>Y</Kbd> / <Kbd>N</Kbd>
-            </>
-          )}
-        </span>
       </div>
       {children}
     </div>
