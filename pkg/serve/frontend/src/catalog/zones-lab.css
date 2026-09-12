@@ -434,154 +434,11 @@ button.zl-lg-row:hover, button.zl-lg-head:hover { background: var(--zl-hi); }
    (`.zl-desk .zl-dock`) stays with the desktop frame below. */
 
 /* ── Status line ───────────────────────────────────────────────────────────
-   Three tiers, three places. Settings left, gauges right, events between.
-   The line is a container: it degrades by its OWN width, so the same
-   component behaves in the desktop column, a pane and the phone dock.
-
-   Words are Outfit 14/500 in t3; data is Plex Mono 12 in t2. That contrast
-   is the hierarchy: the number is what you read, the word is what tells you
-   which number. Nothing on the line is white; the transcript is. */
-.zl-status {
-  container-type: inline-size;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 36px;
-  padding: 0 2px;
-  margin-top: 4px;
-  color: var(--zl-t3);
-}
-.zl-st-group { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.zl-st-group.is-settings { flex: none; }
-.zl-st-group.is-events { flex: 1; justify-content: center; min-width: 0; overflow: hidden; gap: 0; }
-.zl-st-group.is-gauges { flex: none; margin-left: auto; }
-
-.zl-st {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: transparent;
-  color: inherit;
-  font-family: inherit;
-  font-size: var(--zl-fs-body);
-  font-weight: 500;
-  letter-spacing: inherit;
-  white-space: nowrap;
-  min-width: 0;
-}
-button.zl-st { cursor: pointer; transition: background 120ms ease; }
-button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
-.zl-st-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.zl-st-ico { width: 14px; height: 14px; flex: none; }
-
-/* tier 1: settings */
-.zl-st-model { color: var(--zl-t2); }
-/* Thinking meter: four bars (low..xhigh, production has five levels
-   including off), lit from the left in the accent. A setting, not a state. */
-.zl-think { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; flex: none; }
-.zl-think i { display: block; width: 3px; border-radius: 1px; background: var(--zl-accent); }
-.zl-think i:nth-child(1) { height: 4px; }
-.zl-think i:nth-child(2) { height: 6px; }
-.zl-think i:nth-child(3) { height: 8px; }
-.zl-think i:nth-child(4) { height: 11px; }
-.zl-think i.is-off { background: var(--zl-line-2); }
-
-/* Permission mode is the one setting you must never misread, so it is the
-   one setting in a state colour: yolo maroon (nothing will ask), ask
-   yellow (it will stop for you), auto neutral. */
-.zl-st-perm { font-weight: 600; }
-.zl-st-perm::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
-.zl-st-perm.is-yolo { color: var(--zl-maroon); }
-.zl-st-perm.is-ask { color: var(--zl-yellow); }
-.zl-st-perm.is-auto { color: var(--zl-t2); }
-.zl-st-fast { color: var(--zl-t3); padding: 0 6px; gap: 3px; }
-
-/* tier 3: events. Neutral by default; an alarm takes its state colour. */
-.zl-st-ev { gap: 5px; padding: 0 7px; color: var(--zl-t3); }
-.zl-st-ev .zl-data { color: var(--zl-t2); }
-.zl-st-ev.is-alarm-red, .zl-st-ev.is-alarm-red .zl-data { color: var(--zl-red); }
-.zl-st-ev.is-alarm-yellow, .zl-st-ev.is-alarm-yellow .zl-data { color: var(--zl-yellow); }
-
-/* tier 2: gauges. One button (ctx + spend: the door to Usage), one reading. */
-.zl-st-ctx { gap: 5px; padding: 0 8px 0 6px; }
-.zl-st-sep { width: 1px; height: 12px; margin: 0 3px; background: var(--zl-line-2); flex: none; }
-.zl-st-tok { gap: 3px; padding: 0 6px; }
-.zl-num { color: var(--zl-t2); }
-.zl-unit, .zl-arrow { color: var(--zl-t4); }
-.zl-st-tok .zl-num + .zl-arrow { margin-left: 5px; }
-
-/* Context ring: MOVED to layout/StatusStrip/StatusStrip.css (`.zl-ring*`).
-   StatusLine imports production's CtxRing, so these are no longer defined here. */
-
-/* Degradation, by container width, tier by tier. The events tier is the
-   one that flexes: it is the only tier whose content is optional. Measured
-   with all eleven data: words+data need ~790px; icon+data ~600; the phone
-   dock (366, compact) fits settings + alarms + ring.
-   ≥ 800: everything, words and data.
-   < 800: events lose their words (icon + datum). Settings and gauges intact.
-   < 620: tokens go. They are the least-read number on the line.
-   < 420: spend folds into the ring's popover; the ring and its percent stay.
-          The model name is capped (Daybreak Blue still fits).
-   < 340: non-alarm events shrink to their icon; alarms keep their datum;
-          the model name truncates. Below ~300 the line is out of design:
-          a pane that narrow has already lost its composer. */
-/* ── Priority, declared once ──────────────────────────────────────────────
-   Every item carries a priority class and the line sheds them in order, low
-   first, as the dock narrows. That is the whole rule -- no per-element
-   exceptions, so adding a datum later means choosing its priority, not
-   inventing another breakpoint.
-
-   The order is the owner's: "mejor poder ver modelo, contexto, permisos que
-   ver si está en fast o no, o ver los MCPs".
-
-     p1  model, permissions, context  — never drops. What you glance at while
-                                        typing, and what changes the answer.
-     p2  real alarms (mcp down, on extra) — only exist while something is
-                                        wrong, so they outrank normal numbers.
-     p3  tokens, spend                — read after the fact, not during.
-     p4  fast, goal, tasks, healthy mcp — settings and progress, not warnings.
-
-   Everything that drops is reachable in the session panel, so narrow means
-   fewer things ON THE LINE, never fewer things known. */
-@container (max-width: 640px) {
-  .zl-p4 { display: none; }
-}
-@container (max-width: 560px) {
-  /* 560, not 470: at 544 the tokens pair still ran 3.7px past the dock.
-     The number that decides is the widest content, not a round figure. */
-  .zl-p3 { display: none; }
-  .zl-st-ctx .zl-st-sep, .zl-st-ctx .zl-st-spend { display: none; }
-}
-@container (max-width: 400px) {
-  /* p2 only sheds its words, never itself: an alarm you cannot see is worse
-     than a cramped line, and its number survives. 400 and not 360 because a
-     390pt phone gives the dock 366, and there the three groups still asked
-     for 386 -- measured, after the events group stopped being squeezable. */
-  .zl-p2 .zl-st-word { display: none; }
-  .zl-st { padding: 0 5px; }
-}
-@container (max-width: 320px) {
-  /* The floor. Below this the ring drops its percent and keeps the arc: the
-     shape still says "how full", and the number lives in the panel like every
-     other datum the line sheds. The model name truncates last of all. */
-  .zl-st-model .zl-st-word { max-width: 68px; }
-  .zl-st-ctx .zl-data { display: none; }
-  .zl-st { padding: 0 4px; gap: 4px; }
-}
-/* The events group never squeezes its children: if room runs out the line
-   gives, not the legibility of a warning. */
-.zl-st-group.is-events { flex: none; overflow: visible; gap: 6px; }
-.zl-st-fast .zl-st-word,
-.zl-st-ev .zl-st-word { overflow: visible; text-overflow: clip; flex: none; }
-
-/* Compact (grid pane, phone): the existing production prop. Goal and tasks
-   are already dropped in the JSX; the line itself only tightens. */
-.zl-status.is-compact { gap: 2px; }
-.zl-status.is-compact .zl-st { padding: 0 6px; }
+   MOVED to layout/StatusStrip/StatusStrip.css. The prototype imports the
+   shipped component, so the face of the line is no longer defined here.
+   What stays is the LAB HOST around it: the phone dock's 44px row, the
+   pane's shorter dock, and the study's zero top margin (below, with those
+   frames). */
 
 /* ── Drawers, mirrored ─────────────────────────────────────────────────
    Left = the other sessions. Right = this session. The same sheet, the same
@@ -973,26 +830,6 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-lg-chev svg { width: 100%; height: 100%; }
 .zl-lg-row:hover .zl-lg-chev { color: var(--zl-t2); }
 .zl-lg-row.is-open .zl-lg-chev { transform: rotate(90deg); color: var(--zl-t2); }
-
-/* The status line's two glyph-only events. A lightning bolt and a flame mean
-   nothing on their own -- the owner asked what they were, which is the answer.
-   They keep their word down to the narrowest dock; only the datum-bearing
-   events (mcp, tasks) may fall back to a glyph, because their number stays. */
-@container (max-width: 800px) {
-  .zl-st-fast .zl-st-word,
-  .zl-st-ev.is-alarm-yellow .zl-st-word { display: inline; }
-}
-@container (max-width: 420px) {
-  .zl-st-fast .zl-st-word { display: inline; }
-}
-
-/* Only the model name is long enough to earn an ellipsis. The event words are
-   four or five characters: truncating "extra" to "ex..." costs more clarity
-   than the 4px it saves, which is the whole reason these words came back. */
-.zl-st-fast .zl-st-word,
-.zl-st-ev .zl-st-word { overflow: visible; text-overflow: clip; flex: none; }
-
-
 
 /* ── Pickers ──────────────────────────────────────────────────────────────
    MIGRATED. `.zl-pop`, `.zl-sheet`, `.zl-pick*`, `.zl-mchip*`, `.zl-seg*`,

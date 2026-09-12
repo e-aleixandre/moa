@@ -174,6 +174,11 @@ button.zl-st { cursor: pointer; transition: background 120ms ease; }
 .zl-st-group.is-events { flex: none; overflow: visible; gap: 6px; }
 .zl-st-fast .zl-st-word,
 .zl-st-ev .zl-st-word { overflow: visible; text-overflow: clip; flex: none; }
+/* A flame means nothing on its own — the owner asked what it was. Extra
+   keeps its word down to the narrowest dock; only a datum-bearing alarm
+   (unhealthy MCP) may fall back to a glyph, because its number stays.
+   Specificity beats `.zl-p2 .zl-st-word { display: none }` on purpose. */
+.zl-st-ev.is-alarm-yellow .zl-st-word { display: inline; }
 
 /* Compact (grid pane, phone): goal and tasks are already dropped in the JSX;
    the line itself only tightens. */
@@ -198,12 +203,17 @@ button.zl-st:disabled { cursor: default; }
 }
 
 /* The open control keeps its well while its picker is up, so you can see which
-   button the surface belongs to. */
+   button the surface belongs to. Permission mode is the exception: its colour
+   IS the setting, and turning it t1 while the menu is open would hide the one
+   thing you must never misread. */
 .zl-st.is-open {
   background: var(--zl-control, #262633);
   color: var(--zl-t1, #f4f4f7);
   box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
 }
+.zl-st-perm.is-open.is-yolo { color: var(--zl-maroon, #eba0ac); }
+.zl-st-perm.is-open.is-ask { color: var(--zl-yellow, #f9e2af); }
+.zl-st-perm.is-open.is-auto { color: var(--zl-t2, #c3c4d1); }
 
 /* The anchor a popover is positioned against. It adds no box of its own. */
 .zl-st-anchor { position: relative; display: inline-flex; min-width: 0; }

@@ -29,10 +29,11 @@ import { AssistantDocument, Prose } from "../components/AssistantDocument/Assist
    the prototype draws the shipped one. See the adapter at `LiveZone`. */
 import { LiveBar as ProductionLiveBar } from "../layout/LiveBar/LiveBar.jsx";
 import { formatElapsed } from "../data/util/activity.js";
-/* CtxRing moved with the status line (layout/StatusStrip). The prototype's
-   StatusLine still draws the gauges itself; the ring is the one piece of
-   that line that already has a single definition. */
-import { CtxRing } from "../layout/StatusStrip/StatusStrip.jsx";
+/* Same move, the status line: markup and CSS live in layout/StatusStrip
+   now, and the prototype draws the shipped one. See the adapter at
+   `StatusLine`. ThinkMeter lives inside that component; there is not a
+   second meter. */
+import { StatusStrip } from "../layout/StatusStrip/StatusStrip.jsx";
 /* Same move, the model and permission pickers: markup and CSS live in
    ModelSelector / PermissionControl now, and the prototype draws the shipped
    ones. See the adapters at `ModelPicker`, `PermPicker`, `Popover`, `Sheet`. */
@@ -715,37 +716,10 @@ function Transcript({ dense, streaming = true, short, tail }) {
   );
 }
 
-/* ── Status line ─────────────────────────────────────────────────────────
-   Eleven data can be on this line. They are not equal, and the line should
-   not pretend they are. Three tiers, and a tier is a place, not a colour:
-
-   1  SETTINGS  (left)   model+thinking, permissions, fast   -- what you set.
-                         Buttons: they open pickers. Always present.
-   2  GAUGES    (right)  context ring, spend, tokens        -- what the run
-                         costs. Read constantly, so they are stable, mono,
-                         and never jump around. Context+spend are one button
-                         (the door to Usage); tokens are text.
-   3  EVENTS    (centre) goal, tasks, MCP, on extra          -- only there
-                         while something is happening. They appear between
-                         the two fixed groups so neither group moves when an
-                         event comes and goes. Each is a word plus a datum,
-                         and only the ones that are alarms carry state colour
-                         (MCP unhealthy: red; on extra: yellow). Goal and
-                         tasks are neutral: progress, not danger.
-
-   Width degrades tier by tier, never element by element: at each step a
-   whole tier loses its words and keeps its data, so the line always reads
-   the same order of things. */
-const LEVELS = ["off", "low", "medium", "high", "xhigh"];
-function ThinkMeter({ level }) {
-  const n = LEVELS.indexOf(level);
-  return (
-    <span class="zl-think" aria-hidden="true">
-      {[1, 2, 3, 4].map((k) => <i class={k <= n ? "" : "is-off"} key={k} />)}
-    </span>
-  );
-}
-
+/* MIGRATED (METODO §4, the status line): the line has no private copy here.
+   Its markup and CSS were MOVED to layout/StatusStrip, class names and all,
+   and the prototype imports them back. FULL_STATUS is the lab fixture the
+   adapter maps onto the shipped props. ThinkMeter lives inside StatusStrip. */
 const FULL_STATUS = {
   model: "Daybreak Blue", thinking: "medium", perm: "yolo", fast: true,
   ctx: 63, spend: "$1.84", up: "12.4k", down: "1.8k",
@@ -865,77 +839,60 @@ function useSettings(initial, forced) {
   return { s, onChange, pick, setPick, close: () => setPick(null) };
 }
 
+function catalogTokens(v) {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const raw = String(v || "").trim();
+  const k = /^([\d.]+)\s*k$/i.exec(raw);
+  if (k) return Math.round(parseFloat(k[1]) * 1000);
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function catalogSession(s) {
+  const session = {
+    permissionMode: s.perm,
+    fast: !!s.fast,
+    onOverage: !!s.onExtra,
+  };
+  if (s.mcp && s.mcp.total > 0) session.mcp = s.mcp;
+  if (s.goal) {
+    session.goalActive = true;
+    session.goalIteration = s.goal.iteration || 0;
+  }
+  if (s.tasks) {
+    session.tasks = Array.from({ length: s.tasks.total }, (_, i) => ({
+      status: i < s.tasks.done ? "done" : "open",
+    }));
+  }
+  return session;
+}
+
 function StatusLine({ s = FULL_STATUS, compact, pick, onPick, onUsage, onChange, inline }) {
-  const open = (k) => onPick && onPick(pick === k ? null : k);
-  const pop = (k) => inline && pick === k && <Popover kind={k} s={s} onChange={onChange} onClose={() => onPick(null)} />;
+  const toggle = (k) => onPick?.(pick === k ? null : k);
+  const pop = (k) => inline && pick === k
+    ? <Popover kind={k} s={s} onChange={onChange} onClose={() => onPick(null)} />
+    : null;
   return (
-    <div class={`zl-status${compact ? " is-compact" : ""}`}>
-      {/* tier 1 — settings */}
-      <div class="zl-st-group is-settings">
-        <span class="zl-st-anchor">
-          <button type="button" class={`zl-st zl-st-model zl-p1${pick === "model" ? " is-open" : ""}`} onClick={() => open("model")} aria-expanded={pick === "model"} aria-haspopup="dialog" aria-label={`Model & thinking: ${s.model}, ${s.thinking}`}>
-            <span class="zl-st-word zl-st-model-name">{s.model}</span>
-            <ThinkMeter level={s.thinking} />
-          </button>
-          {pop("model")}
-        </span>
-        <span class="zl-st-anchor">
-          <button type="button" class={`zl-st zl-st-perm zl-p1 is-${s.perm}${pick === "perm" ? " is-open" : ""}`} onClick={() => open("perm")} aria-expanded={pick === "perm"} aria-haspopup="dialog" aria-label={`Permission mode: ${s.perm}`}>
-            <span class="zl-st-word">{s.perm}</span>
-          </button>
-          {pop("perm")}
-        </span>
-        {s.fast && (
-          <span class="zl-st zl-st-fast zl-p4" title="Fast mode: billed at a premium rate">
-            <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5L3.5 9h4l-.5 5.5L12.5 7h-4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
-            <span class="zl-st-word">fast</span>
-          </span>
-        )}
-      </div>
-
-      {/* tier 3 — events, only while they exist */}
-      <div class="zl-st-group is-events">
-        {!compact && s.goal && (
-          <span class="zl-st zl-st-ev zl-p4" title="Goal active, iteration 3">
-            <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5" /><circle cx="8" cy="8" r="1.8" fill="currentColor" /></svg>
-            <span class="zl-st-word">goal</span><span class="zl-data">{s.goal.iteration}</span>
-          </span>
-        )}
-        {!compact && s.tasks && (
-          <span class="zl-st zl-st-ev zl-p4" title="Tasks: 2 of 5 done">
-            <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5l1.5 1.5 3-3M3 10.5l1.5 1.5 3-3M9 5h4M9 11h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-            <span class="zl-st-word">tasks</span><span class="zl-data">{s.tasks.done}/{s.tasks.total}</span>
-          </span>
-        )}
-        {s.mcp && s.mcp.total > 0 && (
-          <button type="button" class={`zl-st zl-st-ev ${s.mcp.unhealthy ? "zl-p2 is-alarm-red" : "zl-p4"}`} aria-label={s.mcp.unhealthy ? `MCP: ${s.mcp.unhealthy} of ${s.mcp.total} need attention` : `MCP: ${s.mcp.total} servers`}>
-            <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2v3M11 2v3M3.5 5h9v3a4.5 4.5 0 0 1-9 0zM8 12.5V15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-            <span class="zl-st-word">mcp</span>
-            <span class="zl-data">{s.mcp.unhealthy ? `${s.mcp.unhealthy}/${s.mcp.total}` : s.mcp.total}</span>
-          </button>
-        )}
-        {s.onExtra && (
-          <span class="zl-st zl-st-ev zl-p2 is-alarm-yellow" title="Served from extra usage (pay-as-you-go)">
-            <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5c.5 3-3 4-3 8a3 3 0 0 0 6 0c0-1.5-.6-2.5-1.2-3.2-.3 1.2-1 1.7-1.3 1.7C9 6 9.5 3.5 8 1.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
-            <span class="zl-st-word">extra</span>
-          </span>
-        )}
-      </div>
-
-      {/* tier 2 — gauges */}
-      <div class="zl-st-group is-gauges">
-        <button type="button" class="zl-st zl-st-ctx zl-p1" onClick={onUsage} aria-label={`Context ${s.ctx}% used, ${s.spend} spent — show usage`}>
-          <CtxRing pct={s.ctx} />
-          <span class="zl-data zl-num">{s.ctx}<span class="zl-unit">%</span></span>
-          <span class="zl-st-sep" aria-hidden="true" />
-          <span class="zl-data zl-num zl-st-spend">{s.spend}</span>
-        </button>
-        <span class="zl-st zl-st-tok zl-data zl-p3" title="Tokens this run">
-          <span class="zl-arrow" aria-hidden="true">↑</span><span class="zl-num">{s.up}</span>
-          <span class="zl-arrow" aria-hidden="true">↓</span><span class="zl-num">{s.down}</span>
-        </span>
-      </div>
-    </div>
+    <StatusStrip
+      compact={!!compact}
+      ctxPercent={s.ctx}
+      tokensUp={catalogTokens(s.up)}
+      tokensDown={catalogTokens(s.down)}
+      spend={s.spend}
+      session={catalogSession(s)}
+      onOpenUsage={onUsage || (() => {})}
+      onOpenMcp={() => {}}
+      onPerm={() => toggle("perm")}
+      permOpen={pick === "perm"}
+      permPopover={pop("perm")}
+      showTokens
+      modelName={s.model}
+      thinking={s.thinking}
+      thinkingPosition={s.thinking}
+      onModel={() => toggle("model")}
+      modelOpen={pick === "model"}
+      modelPopover={pop("model")}
+    />
   );
 }
 
