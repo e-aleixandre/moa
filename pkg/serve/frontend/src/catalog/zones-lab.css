@@ -617,37 +617,17 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 }
 .zl-side.is-open { transform: translateX(0); }
 
-.zl-side-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 16px 12px 8px 20px;
-}
-.zl-side-title {
-  flex: none;
-  font-size: var(--zl-fs-display);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-.zl-side-title.is-eyebrow {
-  flex: 1;
-  font-size: var(--zl-fs-meta);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--zl-t4);
-}
-.zl-side-head.is-sub { padding-left: 12px; gap: 6px; }
-.zl-side-title.is-page {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--zl-fs-title);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* Head / search / list / new / foot MOVED to layout/Sidebar/Sidebar.css
+   (`.zl-side-head` wordmark, `.zl-search*`, `.zl-list`, `.zl-group*`, `.zl-view*`,
+   `.zl-side-new`, `.zl-side-foot`, `.zl-inbox*`, `.zl-ver`, `.zl-gear`, `.zl-proj*`).
+   The prototype imports the shipped component, so these are no longer defined
+   here. `.zl-side-title.is-eyebrow` / `.is-page` live on SessionPanel and the
+   pickers, which already carry their own copies.
+
+   What stays is the PHONE FRAME (`.zl-side` / `.zl-side-left`): the chassis
+   that slides, equivalent to production's SessionDrawer. The sidebar body
+   fills it. */
+
 .zl-back {
   flex: none;
   display: inline-flex;
@@ -664,37 +644,9 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-back svg { width: 16px; height: 16px; }
 .zl-back:hover { background: var(--zl-hi); color: var(--zl-t1); }
 
-/* Search is a recess in the sheet: canvas tone, hairline rim. */
-.zl-search {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 8px 0 10px;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-canvas);
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t4);
-  transition: box-shadow 140ms ease, color 140ms ease;
-}
-.zl-search:hover { color: var(--zl-t3); box-shadow: var(--zl-rim-2); }
-.zl-search:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line); color: var(--zl-t2); }
-.zl-search-ico { width: 15px; height: 15px; flex: none; }
-.zl-search-in {
-  flex: 1;
-  min-width: 0;
-  height: 36px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--zl-t1);
-  font-family: inherit;
-  font-size: var(--zl-fs-title); /* 16: iOS focus-zoom floor */
-  letter-spacing: inherit;
-}
-.zl-search-in::placeholder { color: var(--zl-t4); }
+/* `.zl-kbd` stays: the grid pane head still prints shortcut chips, and the
+   sidebar's copy of the same rule lives in Sidebar.css. */
+
 .zl-kbd {
   padding: 2px 5px;
   border-radius: var(--zl-r-sm);
@@ -702,98 +654,6 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
   box-shadow: var(--zl-rim);
   color: var(--zl-t3);
 }
-
-/* ── Session list ────────────────────────────────────────────────────── */
-.zl-list { flex: 1; overflow-y: auto; padding: 4px 8px 8px; }
-/* Rhythm: air between groups, none inside them. */
-.zl-group {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 8px 12px 4px;
-  font-size: var(--zl-fs-meta);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--zl-t4);
-}
-.zl-list > .zl-group:first-child { margin-top: 0; }
-.zl-group-n { letter-spacing: 0; color: var(--zl-t4); }
-
-/* ── The session row ─────────────────────────────────────────────────────
-   MIGRATED. `.zl-row`, `.zl-mono` and `.zl-dot` used to be defined here, in 93
-   lines. They now live in components/SessionRow/SessionRow.css, unchanged,
-   class names and all, and this file no longer has a copy of them: the
-   prototype imports the shipped component (zones-lab.jsx:9) and the rules
-   arrive with it.
-
-   What is still here is what the LIST says about a row inside it, not what a
-   row is. */
-
-/* New session: the contained accent button. The list is the point of the
-   sidebar, so this reads as available, not as a beacon. */
-.zl-side-new {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 40px;
-  margin: 4px 12px 8px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-accent-dim);
-  box-shadow: 0 0 0 1px var(--zl-accent-med);
-  color: var(--zl-accent);
-  font-family: inherit;
-  font-size: var(--zl-fs-body);
-  font-weight: 600;
-  letter-spacing: inherit;
-  cursor: pointer;
-  transition: background 120ms ease, transform 120ms var(--zl-ease);
-}
-.zl-side-new:hover { background: var(--zl-accent-med); }
-.zl-side-new:active { transform: translateY(1px); }
-.zl-side-new svg { width: 16px; height: 16px; }
-
-.zl-side-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px 12px 8px;
-}
-.zl-inbox {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: transparent;
-  color: var(--zl-t2);
-  font-family: inherit;
-  font-size: var(--zl-fs-body);
-  font-weight: 500;
-  letter-spacing: inherit;
-  cursor: pointer;
-}
-.zl-inbox:hover { background: var(--zl-hi); }
-.zl-inbox svg { width: 16px; height: 16px; color: var(--zl-t3); }
-/* The count is yellow because the inbox IS "needs you": state, not accent. */
-.zl-inbox-n {
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-yellow);
-  color: #1a1a28;
-  font-weight: 600;
-  line-height: 18px;
-  text-align: center;
-}
-.zl-ver { color: var(--zl-t4); }
 
 /* ── Desktop ─────────────────────────────────────────────────────────────
    The same sheet the phone slides in, docked: same tone, same hairline seam. */
@@ -1002,12 +862,8 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 /* ── Phone sizing: every control that gets a thumb is at least 44px. ──── */
 .zl-phone .zl-x,
 .zl-phone .zl-back { width: 44px; height: 44px; }
-.zl-phone .zl-side-new { height: 48px; margin: 4px 12px 10px; }
 .zl-phone .zl-status { height: 44px; }
 .zl-phone button.zl-st { height: 44px; }
-.zl-phone .zl-inbox { height: 44px; }
-.zl-phone .zl-search,
-.zl-phone .zl-search-in { height: 44px; }
 /* Ledger rows are 32 on desktop (a pointer); on the phone every row that
    opens something is 44. Inert rows stay 36 so a long ledger keeps its
    density -- only the ones you tap need the thumb. */
@@ -1155,84 +1011,19 @@ button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zl-pane .zl-dock { position: relative; z-index: 3; }
 .zl-dock.is-pane .zl-pop { bottom: calc(100% + 6px); }
 
-/* The attention heading earns one mark and no more: the rows underneath
-   already carry their own colour, and a coloured band on top of coloured rows
-   is how a list stops being scannable. */
-.zl-group.is-attn { color: var(--zl-text); }
-.zl-group.is-attn .zl-group-n {
-  color: var(--zl-canvas);
-  background: var(--zl-yellow);
-  border-radius: 999px;
-  padding: 0 6px;
-  font-weight: 600;
-}
-
-/* ── The list's own order ──────────────────────────────────────────────────
-   Both options visible: a "..." menu made a mode you cannot see you are in,
-   and there are only two. Sunken track, raised selection -- the same grammar
-   as the thinking stepper, so it reads as one product. */
-.zl-view {
-  display: flex;
-  gap: 2px;
-  margin: 0 0 10px;
-  padding: 2px;
-  background: var(--zl-canvas);
-  border: 1px solid var(--zl-line);
-  border-radius: 8px;
-}
-.zl-view-b {
-  flex: 1;
-  min-height: 30px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--zl-t3);
-  font: 500 12px/1 var(--zl-font);
-  cursor: pointer;
-}
-.zl-view-b.is-on { background: var(--zl-raised); color: var(--zl-text); box-shadow: 0 1px 0 rgba(255,255,255,.04) inset; }
-.zl-view-b:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -2px; }
-.zl-phone .zl-view-b { min-height: 44px; font-size: 14px; }
-
-/* Project heading: the monogram identifies, the path locates, the count sizes.
-   Same row grammar as a session, one step quieter. */
-.zl-group.is-proj { display: flex; align-items: center; gap: 8px; padding-top: 4px; }
-.zl-group.is-proj .zl-mono { width: 20px; height: 20px; font-size: 10px; border-radius: 6px; }
-.zl-proj-path { flex: 1; min-width: 0; color: var(--zl-t4); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.zl-proj + .zl-proj { margin-top: 10px; }
-
 /* ── Settings ──────────────────────────────────────────────────────────────
    MIGRATED. `.zl-set*` and `.zl-sw` used to be defined here, in 90 lines.
    They now live in components/GlobalSettings/GlobalSettings.css, class names
    and all, and this file no longer has a copy of them: the prototype imports
    the shipped component (zones-lab.jsx:15) and the rules arrive with it.
 
-   `.zl-x` is the exception and it stays HERE (line 884): the session panel and
+   `.zl-x` is the exception and it stays HERE: the session panel and
    the picker sheet still render it, so it is not the settings sheet's rule to
    take. The settings sheet carries its own copy of it, which is the one
    duplication this move leaves behind — it ends when those two surfaces move
    as well, and it is stated rather than hidden.
 
-   What is still here is the GEAR that opens the sheet, which belongs to the
-   sidebar's foot, not to the sheet. */
-/* The gear sits with the version: both are about the app, not the session. */
-.zl-gear {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  flex: none;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--zl-t3);
-  cursor: pointer;
-}
-.zl-gear svg { width: 16px; height: 16px; }
-.zl-gear:hover { background: var(--zl-control); color: var(--zl-text); }
-.zl-gear:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -2px; }
-.zl-phone .zl-gear { width: 44px; height: 44px; }
+   The GEAR that opens the sheet moved with the sidebar (layout/Sidebar). */
 /* The settings scrim rides just under its own sheet, not at the drawer's
    level: at z-index 5 it sat below the transcript and the sheet looked like it
    was floating over a page that was still fully lit. */

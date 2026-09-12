@@ -3,7 +3,7 @@
 //
 // Both rules are structural decisions a reviewer cannot check by reading a
 // diff: the grid must NOT grow a dossier (several sessions, no single "this
-// session"), and the dock threshold is a measurement — 264 + 844 + 340 — not
+// session"), and the dock threshold is a measurement — 272 + 844 + 340 — not
 // a round number, so it is asserted against its parts.
 
 import { test, expect } from 'bun:test';
@@ -31,7 +31,7 @@ test('a closed panel still mounts the zone: it slides, it does not appear', () =
 });
 
 test('the dock threshold is the sum of the three zones, not a round number', () => {
-  const spine = 264; // --spine-width
+  const spine = 272; // --spine-width
   const centre = 844; // .composer-wrap / .status-strip max-width
   const dossier = 340; // --dossier-width
   expect(DOSSIER_DOCK_MIN).toBe(spine + centre + dossier);

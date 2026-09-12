@@ -6,7 +6,7 @@ import { FROZEN } from "./fidelity-freeze.js";
    components/SessionRow, class names and all, and the prototype imports them
    back. There is one definition now, and a change to it can only land in one
    place. The dot comes with it, because a dot alone is not a piece. */
-import { SessionRow, Dot } from "../components/SessionRow/SessionRow.jsx";
+import { Dot } from "../components/SessionRow/SessionRow.jsx";
 /* Same move, the composer: markup and CSS live in layout/Composer now, and
    the prototype draws the shipped one. See the adapter at `Composer`. */
 import { Composer as ProductionComposer } from "../layout/Composer/Composer.jsx";
@@ -38,6 +38,10 @@ import { CtxRing } from "../layout/StatusStrip/StatusStrip.jsx";
    ones. See the adapters at `ModelPicker`, `PermPicker`, `Popover`, `Sheet`. */
 import { ModelSelector as ProductionModelSelector, PickerPopover, PickerSheet } from "../components/ModelSelector/ModelSelector.jsx";
 import { PermissionOptions } from "../components/PermissionControl/PermissionControl.jsx";
+/* Same move, the sidebar: markup and CSS live in layout/Sidebar now, and
+   the prototype draws the shipped one. See the adapter at `Sidebar`. */
+import { Sidebar as ProductionSidebar } from "../layout/Sidebar/Sidebar.jsx";
+import { projectMonogram } from "../data/util/format.js";
 
 /* The three-zone skeleton, both densities side by side.
    This is a PROTOTYPE, not production: it draws the shell only (where things
@@ -68,64 +72,6 @@ const SESSIONS = [
   { title: "MenuApp", when: "41d", path: "~/dev/menuapp", project: "menuapp", state: "idle" },
 ];
 
-/* Identity hues, deliberately none of them peach: that one means "you wrote
-   this" and may not be spent on decoration. */
-const HUES = [210, 265, 170, 320, 40, 190];
-function projectHue(name) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return HUES[h % HUES.length];
-}
-
-/* Identity and state are two data: the monogram says WHICH project, the dot
-   says WHAT it is doing. Folding state into the monogram made the same repo
-   change colour from row to row, which defeats the point of a monogram. */
-function Monogram({ project }) {
-  const hue = projectHue(project);
-  return (
-    <span class="zl-mono" style={`--h:${hue}`} aria-hidden="true">
-      {project.slice(0, 2)}
-    </span>
-  );
-}
-
-/* Three groups, not two. "Needs attention" is not a nicer name for "active":
-   it is the list of sessions that stop unless you do something -- a permission
-   or question waiting, a run that died, an answer nobody has read. Running and
-   idle stay in Active precisely because they need nothing from you.
-
-   The predicate is production's own (data/util/project-sessions.js:7 counts
-   permission and error) plus unseen, which sessionDisplayDotState already
-   treats as its own display state (data/util/format.js:472). */
-const NEEDS = ["permission", "error", "unseen"];
-const wantsYou = (s) => NEEDS.includes(s.state);
-/* Blocked before broken before merely unread: the order is how much of your
-   work is stopped, not when it happened. */
-const RANK = { permission: 0, error: 1, unseen: 2 };
-const ATTENTION = SESSIONS.filter(wantsYou).sort((a, b) => RANK[a.state] - RANK[b.state]);
-const ACTIVE = SESSIONS.filter((s) => s.state !== "idle" && !wantsYou(s));
-const SAVED = SESSIONS.filter((s) => s.state === "idle");
-
-/* By project: every session of a folder together, the folders ordered by their
-   most recent work. Sessions that need you keep their place at the top of
-   their own project instead of being pulled out -- in this view the question
-   being asked is "what is going on in this repo", and lifting them out would
-   answer a different one. */
-const BY_PROJECT = (() => {
-  const seen = new Map();
-  for (const s of SESSIONS) {
-    if (!seen.has(s.project)) seen.set(s.project, { project: s.project, path: s.path, sessions: [] });
-    seen.get(s.project).sessions.push(s);
-  }
-  for (const g of seen.values()) {
-    g.sessions.sort((a, b) => (wantsYou(b) ? 1 : 0) - (wantsYou(a) ? 1 : 0));
-    const waiting = g.sessions.filter(wantsYou);
-    g.attention = waiting.length;
-    g.worst = waiting.length ? waiting.map((x) => x.state).sort((a, b) => RANK[a] - RANK[b])[0] : null;
-  }
-  return [...seen.values()];
-})();
-
 function PlusIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -134,132 +80,55 @@ function PlusIcon() {
   );
 }
 
-/* The row is production's component now, called with the prototype's fixtures.
-   What used to be 26 lines of private markup is this adapter: the fixture's
-   shape mapped onto the props the shipped row takes.
+/* MIGRATED (METODO §4, the sidebar): the left column has no private copy here.
+   Its markup and CSS were MOVED to layout/Sidebar, class names and all, and
+   the prototype imports them back. What sits here now is only an adapter: the
+   prototype's fixtures mapped onto the props the shipped column takes.
 
-   Active sessions say what they are doing; saved ones say where they live. Two
-   lines is the budget, so the more useful datum wins — which is why `path` is
-   only passed when there is no reason to show instead. */
-function Row({ s, current, onPick }) {
+   Search FILTERS this list; the ⌘K keycap is decoration in the lab (production
+   wires it to the palette). Inbox, version and settings are the things about
+   the APP, so they live in the foot — the same place production keeps them. */
+const SIDEBAR_ROWS = SESSIONS.map((s, i) => ({
+  id: `zl-${i}`,
+  title: s.title,
+  state: s.state,
+  unseen: s.state === "unseen",
+  when: s.when,
+  brief: s.brief || "",
+  briefTone: s.tone || "",
+  path: s.brief ? "" : s.path,
+  cwd: s.path,
+  mono: projectMonogram(s.path) || { text: s.project.slice(0, 2), hue: 210 },
+  saved: s.state === "idle",
+}));
+const SIDEBAR_ACTIVE = SIDEBAR_ROWS.filter((s) => !s.saved);
+const SIDEBAR_SAVED = SIDEBAR_ROWS.filter((s) => s.saved);
+
+/* Identity hues, used by the live-zone fixtures (a name is always the same
+   colour). The sidebar's monograms now come from production's projectMonogram. */
+const HUES = [210, 265, 170, 320, 40, 190];
+function projectHue(name) {
+  let h = 0;
+  for (let i = 0; i < (name || "").length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return HUES[h % HUES.length];
+}
+
+function Sidebar({ onPick, desktop, density = "desktop", onSettings, view, onView }) {
   return (
-    <SessionRow
-      title={s.title}
-      state={s.state}
-      active={current}
-      when={s.when}
-      brief={s.brief}
-      briefTone={s.tone}
-      mono={{ text: s.project.slice(0, 2), hue: projectHue(s.project) }}
-      path={s.brief ? undefined : s.path}
-      onClick={onPick}
+    <ProductionSidebar
+      density={density}
+      jump={!!desktop}
+      version={{ current: "v0.37.2" }}
+      active={SIDEBAR_ACTIVE}
+      saved={SIDEBAR_SAVED}
+      activeId={SIDEBAR_ROWS[0].id}
+      inboxVisible
+      inboxCount={1}
+      groupByProject={view === "project"}
+      onGroupByProject={(folder) => onView?.(folder ? "project" : "recent")}
+      onSelectSession={() => onPick?.()}
+      onSettings={onSettings}
     />
-  );
-}
-
-function SessionList({ onPick, view, onView }) {
-  return (
-    <div class="zl-list">
-      {/* How the list is ORDERED is a property of the list, so it sits in the
-          list's own head rather than in global settings: two segments, both
-          visible, because a hidden "..." menu made a mode you cannot see you
-          are in. Needs attention is exempt -- it is above the ordering, in
-          both views, or it would scatter across project groups. */}
-      <div class="zl-view" role="radiogroup" aria-label="Session order">
-        {[["recent", "Recent"], ["project", "By project"]].map(([id, label]) => (
-          <button
-            type="button"
-            role="radio"
-            aria-checked={view === id}
-            class={`zl-view-b${view === id ? " is-on" : ""}`}
-            onClick={() => onView(id)}
-            key={id}
-          >{label}</button>
-        ))}
-      </div>
-      {/* Needs attention belongs to the recency view only. By project, the
-          question is "what is going on in this repo", and a session listed
-          both at the top and inside its folder is the same row twice. There
-          the project heading carries the alarm instead. */}
-      {view === "recent" && ATTENTION.length > 0 && (
-        <>
-          <div class="zl-group is-attn">
-            <span>Needs attention</span>
-            <span class="zl-group-n zl-data">{ATTENTION.length}</span>
-          </div>
-          {ATTENTION.map((s) => <Row s={s} current={false} onPick={onPick} key={s.title} />)}
-        </>
-      )}
-      {view === "recent" ? (
-        <>
-          <div class="zl-group"><span>Active</span><span class="zl-group-n zl-data">{ACTIVE.length}</span></div>
-          {ACTIVE.map((s, i) => <Row s={s} current={i === 0} onPick={onPick} key={s.title} />)}
-          <div class="zl-group"><span>Saved</span><span class="zl-group-n zl-data">{SAVED.length}</span></div>
-          {SAVED.map((s) => <Row s={s} current={false} onPick={onPick} key={s.title} />)}
-        </>
-      ) : (
-        BY_PROJECT.map((g) => (
-          <div class="zl-proj" key={g.project}>
-            <div class="zl-group is-proj">
-              <Monogram project={g.project} />
-              <span>{g.project}</span>
-              {g.attention > 0 && <Dot state={g.worst} />}
-              <span class="zl-proj-path zl-data">{g.path}</span>
-              <span class="zl-group-n zl-data">{g.sessions.length}</span>
-            </div>
-            {g.sessions.map((s) => <Row s={s} current={s === SESSIONS[0]} onPick={onPick} key={s.title} />)}
-          </div>
-        ))
-      )}
-    </div>
-  );
-}
-
-/* The left drawer body, shared by both densities. */
-function Sidebar({ onPick, desktop, onSettings, view, onView }) {
-  return (
-    <>
-      <div class="zl-side-head">
-        <span class="zl-side-title">moa</span>
-        {/* Search is a recess cut into the sheet: present at rest, so it reads
-            as an object you can reach for, but sunken so it never competes
-            with the raised things (the active row, New session). */}
-        <label class="zl-search">
-          <svg class="zl-search-ico" viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6" />
-            <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-          </svg>
-          <input class="zl-search-in" placeholder="Search" aria-label="Search sessions" />
-          {desktop && <kbd class="zl-kbd zl-data">⌘K</kbd>}
-        </label>
-      </div>
-      <SessionList onPick={onPick} view={view} onView={onView} />
-      {/* New anchors the bottom, where the thumb is and where the empty half of
-          the column was. It is the one action, so it gets the width. */}
-      <button type="button" class="zl-side-new">
-        <PlusIcon />New session
-      </button>
-      <div class="zl-side-foot">
-        <button type="button" class="zl-inbox">
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M2 9.5V12a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.5M2 9.5h3.2l.8 1.5h4l.8-1.5H14M2 9.5l1.6-5.2A1 1 0 0 1 4.6 3.5h6.8a1 1 0 0 1 1 .8L14 9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-          </svg>
-          Inbox
-          <span class="zl-inbox-n zl-data">1</span>
-        </button>
-        <span class="zl-ver zl-data">v0.37.2</span>
-        {/* Settings are GLOBAL, so they live in the sidebar's foot next to the
-            version, not in the session panel: that drawer means "this session"
-            and admitting app-wide settings would empty the word. Same place
-            production keeps it (layout/Spine/Spine.jsx:193). */}
-        <button type="button" class="zl-gear" aria-label="Settings" onClick={onSettings}>
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5" />
-            <path d="M8 1.6v1.6M8 12.8v1.6M14.4 8h-1.6M3.2 8H1.6M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1M12.5 12.5l-1.1-1.1M4.6 4.6L3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-          </svg>
-        </button>
-      </div>
-    </>
   );
 }
 
@@ -1254,7 +1123,7 @@ function Phone({ label, live: preset, surface }) {
           class={`zl-side zl-side-left${d.left ? " is-open" : ""}`}
           style={d.leftX != null ? `transform:translateX(${d.leftX}px);transition:none` : ""}
         >
-          <Sidebar onPick={() => d.setLeft(false)} onSettings={settings.show} view={view} onView={setView} />
+          <Sidebar density="phone" onPick={() => d.setLeft(false)} onSettings={settings.show} view={view} onView={setView} />
         </div>
         <SessionPanel
           open={d.right}

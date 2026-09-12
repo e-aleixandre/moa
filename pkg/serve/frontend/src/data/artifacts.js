@@ -79,7 +79,7 @@ export async function loadArtifacts(sessionId, { token } = {}) {
 // harmless. As the shell's third zone it is not: the covered dossier still
 // TAKES ITS COLUMN, so the centre pays 340px for a zone nobody can see — the
 // transcript is squeezed to make room for something invisible. Measured at
-// 1600: centre 264..1260, dossier 1260..1600, reader 1000..1600.
+// 1600: centre 272..1260, dossier 1260..1600, reader 1000..1600.
 //
 // So every door into the reader closes the dossier first. This is the rule the
 // panel's own Artifacts page already kept ("the reader never lives in 340px");

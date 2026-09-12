@@ -2,9 +2,9 @@
    Left: the other sessions. Middle: the result. Right: this session's dossier.
 
    The third zone is a real column only where one fits. The number is the sum of
-   what the zones need, not a round breakpoint: 264 (spine) + 844 (the centre's
+   what the zones need, not a round breakpoint: 272 (spine) + 844 (the centre's
    own declared measure — .composer-wrap and .status-strip are max-width:844px)
-   + 340 (the dossier) = 1448. At 1448 the centre is at FULL size with the
+   + 340 (the dossier) = 1456. At 1456 the centre is at FULL size with the
    dossier docked, so the third column costs the conversation nothing; below it
    the centre would start paying for the column out of the composer and the
    status line, and what the line sheds first is exactly what the dossier is
@@ -62,7 +62,7 @@
    permanent gutter of nothing. :has is the gate, so the shell knows without
    the shell subscribing to the panel's state — and with Ambient off the node
    is never rendered, so this cannot match and the shell stays two columns. */
-@media (min-width: 1448px) {
+@media (min-width: 1456px) {
   .desktop-shell:has(.desktop-dossier.is-open) {
     grid-template-columns: var(--spine-width) minmax(0, 1fr) var(--dossier-width);
   }

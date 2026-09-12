@@ -290,12 +290,25 @@ test('the sidebar filter and the command palette are two different jobs', () => 
   // no keyboard — but the filter is there in both.
   const desktop = Sidebar({ active: [], saved: [], onSearch: () => {} });
   const phone = Sidebar({ density: 'phone', active: [], saved: [], onSearch: () => {} });
-  const field = (tree) => componentNode(tree, 'Field');
-  expect(field(desktop)).toBeTruthy();
-  expect(field(phone)).toBeTruthy();
-  // The keycap rides in the field's trailing slot, and only with a keyboard.
-  expect(field(desktop).props.trailing).toBeTruthy();
-  expect(field(phone).props.trailing).toBeFalsy();
+  const find = (node, pred) => {
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const hit = find(child, pred);
+        if (hit) return hit;
+      }
+      return null;
+    }
+    if (!node || typeof node !== 'object') return null;
+    if (pred(node)) return node;
+    return find(node.props?.children, pred);
+  };
+  const search = (tree) => find(tree, (n) => n.type === 'input' && n.props?.['aria-label'] === 'Search sessions');
+  expect(search(desktop)).toBeTruthy();
+  expect(search(phone)).toBeTruthy();
+  const jump = (tree) => find(tree, (n) => n.props?.class === 'zl-kbd zl-data');
+  expect(jump(desktop)).toBeTruthy();
+  expect(jump(desktop).type).toBe('button');
+  expect(jump(phone)).toBeNull();
 });
 
 test('session lifecycle menus are the shared ones, in both densities', () => {
@@ -324,7 +337,7 @@ test('session lifecycle menus are the shared ones, in both densities', () => {
     onDelete: onDeleteSession,
     // One list, one scroller: the menu flips upwards against the same element
     // in both densities.
-    scrollContainerSelector: '.sidebar-list',
+    scrollContainerSelector: '.zl-list',
   });
 });
 

@@ -1,9 +1,10 @@
-import { Plus, Search, Settings, Inbox, ChevronRight } from "lucide-preact";
 import { useMemo, useState } from "preact/hooks";
-import { Field, IconButton, Kbd } from "../../primitives/index.js";
-import { InboxView, SessionCardMenu, SessionRow } from "../../components/index.js"; // wake-on-event: InboxView
+import { InboxView } from "../../components/InboxView/InboxView.jsx";
+import { SessionCardMenu } from "../../components/SessionCardMenu/SessionCardMenu.jsx";
+import { SessionRow, Dot } from "../../components/SessionRow/SessionRow.jsx";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import {
+  attentionKind,
   filterProjectSections,
   groupProjectSessions,
   hiddenProjectSavedCount,
@@ -16,41 +17,75 @@ import {
 import { projectMonogram } from "../../data/util/format.js";
 import "./Sidebar.css";
 
-// Sidebar — the other sessions. ONE component, both densities.
+// Sidebar — the other sessions. Markup and CSS are the catalogue's
+// (catalog/zones-lab.jsx `Sidebar` / `SessionList` / `Monogram`, zones-lab.css
+// the `.zl-side-head` / `.zl-list` / `.zl-side-new` / `.zl-side-foot` block),
+// MOVED here rather than imitated: the classes travelled with the rules, so
+// the column IS the accepted design instead of a translation of it. The
+// catalogue imports this component now, which is what makes one definition
+// rather than two.
 //
-// It used to be two: `Spine` (a permanent desktop column) and `SessionDrawer`
-// (a phone dropdown that covered the screen, with its own head, its own search
-// field and its own group labels). They were kept in step by hand, and drifted:
-// the phone had no "Needs attention" group at all, the desktop had no filter,
-// and the two spelled the same list with two different sets of class names.
-//
-// The catalogue draws it as one piece (zones-lab.jsx:185 — "The left drawer
-// body, shared by both densities"), and that is what this is. The densities
-// differ in exactly two things, both of them presentation:
-//   · the frame — 272px docked on the desktop, a 300px sheet that slides in
-//     from the left edge on the phone (the chassis is SessionDrawer, which now
-//     owns nothing but the veil, the focus trap and the "new session" screen);
-//   · the ⌘K keycap, which only means something where there is a keyboard.
+// What is NOT the catalogue's is everything the prototype never had, grafted
+// on top: the real roster, search that FILTERS, ⌘K that JUMPS, the inbox
+// taking over the list, session lifecycle menus, the saved-tail cap, and the
+// folder accordion. The densities differ in presentation only: 272px docked
+// on the desktop, a 300px sheet on the phone (the chassis is SessionDrawer);
+// the ⌘K keycap only where there is a keyboard.
 //
 // Four pieces, top to bottom, the catalogue's own:
 //   1. head — the wordmark and the search field
 //   2. list — the groups and their rows (or the inbox, on the desktop)
 //   3. new  — one labelled action, at the bottom, where the thumb is
 //   4. foot — the inbox, the version and settings: the things about the APP
-//
-// SEARCH vs ⌘K. The field FILTERS this list; ⌘K JUMPS to a session from
-// anywhere. Two jobs, so two controls, and the keycap inside the field is a
-// real button to the palette rather than a decoration.
 
-// The list's own order. Both options visible, per the catalogue: a "⋯" menu
-// (what both surfaces used before) made a mode you cannot see you are in, and
-// there are only two of them. The second is worded "By folder" and not "By
-// project" on purpose — data/drawer.js:36 argues it, and it is still true: this
-// groups by cwd, and memory's notion of a project is wider.
 const ORDERS = [
   ["recent", "Recent"],
-  ["folder", "By folder"],
+  ["project", "By project"],
 ];
+
+const ATTENTION_RANK = { permission: 0, error: 1, unseen: 2 };
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg class="zl-search-ico" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6" />
+      <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+function InboxIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2 9.5V12a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.5M2 9.5h3.2l.8 1.5h4l.8-1.5H14M2 9.5l1.6-5.2A1 1 0 0 1 4.6 3.5h6.8a1 1 0 0 1 1 .8L14 9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5" />
+      <path d="M8 1.6v1.6M8 12.8v1.6M14.4 8h-1.6M3.2 8H1.6M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1M12.5 12.5l-1.1-1.1M4.6 4.6L3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg class="zl-proj-chev" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M6 3.5L10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
 
 function SidebarVersion({ version }) {
   if (!version?.current) return null;
@@ -60,7 +95,7 @@ function SidebarVersion({ version }) {
   if (version.update_available && version.latest) {
     return (
       <a
-        class="sidebar-ver sidebar-ver-update"
+        class="zl-ver zl-data is-update"
         href="https://github.com/e-aleixandre/moa/releases/latest"
         target="_blank"
         rel="noreferrer"
@@ -71,10 +106,16 @@ function SidebarVersion({ version }) {
     );
   }
   return (
-    <span class="sidebar-ver" title="moa version">
+    <span class="zl-ver zl-data" title="moa version">
       {current}
     </span>
   );
+}
+
+function sectionWorst(section) {
+  const kinds = section.sessions.map(attentionKind).filter(Boolean);
+  if (!kinds.length) return null;
+  return kinds.sort((a, b) => ATTENTION_RANK[a] - ATTENTION_RANK[b])[0];
 }
 
 export function Sidebar({
@@ -113,27 +154,27 @@ export function Sidebar({
   onNewSessionForEvent,
   onDismissEvent,
   onDismissEventSource,
+  // Catalogue scenes at 300px are the drawer WIDTH with pointer sizing; the
+  // phone's 44px floor is a density, not a width. `jump` defaults to "there
+  // is a keyboard" (!phone) so production does not have to pass it.
+  jump,
 }) {
   const phone = density === "phone";
+  const showJump = jump ?? !phone;
   const [query, setQuery] = useState("");
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const [showAllSaved, setShowAllSaved] = useState(false);
+  const hasMenu = !!(onCloseSession || onReopenSession || onDeleteSession);
 
   // Session search is word-substring, not the palette's subsequence matcher:
   // session titles are sentence-length and a few hundred rows turn ordinary
   // words into noise (project-sessions.js:80).
-  //
-  // Memoized because this runs on every render and a render happens on every
-  // keystroke: unmemoized, a few hundred saved sessions were re-filtered and
-  // re-grouped per typed character, which is felt as a laggy keyboard.
   const q = query.trim();
   const { shownActive, shownSaved, hitCount, projectSections } = useMemo(() => {
     // The phone's selector lifts unread answers out of `active` into their own
     // `newResults` list (chrome.js:55). They go straight back in here: unread
     // IS one of the three ways a session waits for you, so it belongs in Needs
-    // attention with the other two — which is where the desktop has always put
-    // it, and what the catalogue draws (zones-lab.jsx:59). Two headings for one
-    // idea, one per density, is the drift this component exists to end.
+    // attention with the other two.
     const hit = (s) => sessionSearchMatch(q, s);
     const allActive = [...newResults, ...active];
     const activeHits = allActive.filter(hit);
@@ -150,13 +191,13 @@ export function Sidebar({
      session is parked on purpose, so it belongs under Saved even if it ended
      badly. */
   const { needs: needsAttention, rest: restActive } = partitionByAttention(shownActive);
-  // The recency view caps its saved tail behind the same "Show all" the grouped
-  // view uses for its own: without one, a roster of 273 builds a row each on
-  // open, which a phone pays for in dropped frames before the first one reads.
   const savedPreview = previewSavedSessions(shownSaved, { expanded: showAllSaved, searching: !!q });
+  // The catalogue draws ⌘K. The binding still accepts both modifiers
+  // (formatShortcut is how the palette NAMES the same shortcut); the keycap
+  // is the accepted drawing, not a platform translation of it.
 
   const row = (s, hidePath = false) => (
-    <div class="sidebar-session" key={s.id}>
+    <div class={`zl-session${hasMenu ? " is-menu" : ""}`} key={s.id}>
       <SessionRow
         title={s.title}
         state={s.state || (s.saved ? "saved" : "idle")}
@@ -165,70 +206,71 @@ export function Sidebar({
         when={s.when || s.meta}
         brief={s.brief}
         briefTone={s.briefTone}
-        /* The monogram is the project's identity, in a form you can read at a
-           glance, and it frees the second line for the reason. */
         mono={s.mono || projectMonogram(s.cwd)}
-        /* Two lines is the budget: a row that says WHY it wants you has spent
-           the second one, so the path stands down. Inside a project group the
-           heading has already said where these live. */
-        path={hidePath || s.brief ? undefined : s.path}
+        path={s.brief ? undefined : s.path}
         pane={s.pane}
         origin={s.origin}
         onClick={() => onSelectSession?.(s.id)}
       />
-      <SessionCardMenu
-        session={s}
-        onClose={onCloseSession}
-        onReopen={onReopenSession}
-        onDelete={onDeleteSession}
-        scrollContainerSelector=".sidebar-list"
-      />
+      {hasMenu && (
+        <SessionCardMenu
+          session={s}
+          onClose={onCloseSession}
+          onReopen={onReopenSession}
+          onDelete={onDeleteSession}
+          scrollContainerSelector=".zl-list"
+        />
+      )}
     </div>
   );
 
+  const jumpCap = showJump && (
+    onSearch ? (
+      <button
+        type="button"
+        class="zl-kbd zl-data"
+        onClick={onSearch}
+        aria-label={`Jump to session ${formatShortcut("K", { mod: true })}`}
+        title={`Jump to session ${formatShortcut("K", { mod: true })}`}
+      >
+        ⌘K
+      </button>
+    ) : (
+      <kbd class="zl-kbd zl-data">⌘K</kbd>
+    )
+  );
+
   return (
-    <aside class={`sidebar${phone ? " is-phone" : ""}`}>
-      <div class="sidebar-head">
-        <span class="sidebar-wordmark">moa</span>
+    <aside class={`zl-side-body${phone ? " is-phone" : ""}`}>
+      <div class="zl-side-head">
+        <span class="zl-side-title">moa</span>
         {/* Search is a recess cut into the sheet: present at rest, so it reads
             as an object you can reach for, but sunken so it never competes
-            with the raised things (the current row, New session). The control
-            is the Field primitive — surface, height and the 16px iOS floor come
-            from there; what belongs to the sidebar is only where it sits.
+            with the raised things (the current row, New session).
 
             The keycap is a BUTTON, not an ornament: this field FILTERS the list
             and ⌘K JUMPS to a session from anywhere, so the two do not get in
             each other's way. Only where there is a keyboard. */}
-        <Field
-          variant="inset"
-          size={phone ? "lg" : "md"}
-          class="sidebar-search"
-          leading={<Search size={15} />}
-          trailing={phone ? undefined : (
-            <button
-              type="button"
-              class="sidebar-jump"
-              onClick={onSearch}
-              aria-label={`Jump to session ${formatShortcut("K", { mod: true })}`}
-              title={`Jump to session ${formatShortcut("K", { mod: true })}`}
-            >
-              <Kbd>{formatShortcut("K", { mod: true })}</Kbd>
-            </button>
-          )}
-          type="text"
-          aria-label="Filter sessions"
-          placeholder="Search"
-          autocomplete="off"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck={false}
-          value={query}
-          onInput={(e) => setQuery(e.target.value)}
-        />
+        <label class="zl-search">
+          <SearchIcon />
+          <input
+            class="zl-search-in"
+            type="text"
+            placeholder="Search"
+            aria-label="Search sessions"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck={false}
+            value={query}
+            onInput={(e) => setQuery(e.target.value)}
+          />
+          {jumpCap}
+        </label>
       </div>
 
       {inboxOpen ? (
-        <div class="sidebar-list is-inbox">
+        <div class="zl-list is-inbox">
           <InboxView
             cards={inbox}
             health={inboxHealth}
@@ -241,17 +283,17 @@ export function Sidebar({
           />
         </div>
       ) : (
-        <div class="sidebar-list">
-          <div class="sidebar-order" role="radiogroup" aria-label="Session order">
+        <div class="zl-list">
+          <div class="zl-view" role="radiogroup" aria-label="Session order">
             {ORDERS.map(([id, label]) => {
-              const on = (id === "folder") === !!groupByProject;
+              const on = (id === "project") === !!groupByProject;
               return (
                 <button
                   type="button"
                   role="radio"
                   aria-checked={on}
-                  class={`sidebar-order-b${on ? " is-on" : ""}`}
-                  onClick={() => onGroupByProject?.(id === "folder")}
+                  class={`zl-view-b${on ? " is-on" : ""}`}
+                  onClick={() => onGroupByProject?.(id === "project")}
                   key={id}
                 >
                   {label}
@@ -261,64 +303,72 @@ export function Sidebar({
           </div>
 
           {!q && hitCount === 0 && (
-            <button type="button" class="sidebar-empty-new" onClick={onNewSession}>
+            <button type="button" class="zl-empty-new" onClick={onNewSession}>
               + New session
             </button>
           )}
           {q && hitCount === 0 && (
-            <span class="sidebar-note">No session matches “{query}”</span>
+            <span class="zl-note">No session matches “{query}”</span>
           )}
 
-          {/* wake-on-event note: unread answers are NOT a fourth group. They
-              are the third state that makes a session wait for you, so they sit
-              at the top of Needs attention, after blocked and broken
-              (project-sessions.js:150). */}
-
           {groupByProject ? projectSections.map((section) => {
-            const collapsed = projectCollapsed(section, collapsedProjects, !!q);
+            const canToggle = typeof onToggleProject === "function";
+            const collapsed = canToggle ? projectCollapsed(section, collapsedProjects, !!q) : false;
             const expanded = expandedProjects.has(section.key);
             const shownSessions = visibleProjectSessions(section, expanded, !!q);
             const hiddenSaved = hiddenProjectSavedCount(section, expanded, !!q);
+            const mono = projectMonogram(section.key);
+            const worst = sectionWorst(section);
+            const name = mono?.name || section.label;
             const label = section.attention === "permission"
               ? `${section.label}, ${section.openCount} open, ${section.attentionCount} needs permission`
               : section.attention === "error"
                 ? `${section.label}, ${section.openCount} open, ${section.attentionCount} has an error`
                 : `${section.label}, ${section.openCount} open${section.savedCount ? `, ${section.savedCount} saved` : ""}`;
-            return (
-              <section class={`sidebar-project${collapsed ? "" : " is-open"}`} key={section.key}>
-                {/* The monogram identifies, the path locates, the count sizes.
-                    Same row grammar as a session, one step quieter. */}
-                <button
-                  type="button"
-                  class="sidebar-label is-project"
-                  aria-expanded={!collapsed}
-                  aria-label={label}
-                  onClick={() => onToggleProject?.(section.key, !collapsed)}
-                >
-                  <span class="sidebar-project-chevron"><ChevronRight size={14} aria-hidden="true" /></span>
-                  <span class="mono sidebar-project-mono" style={`--mono-h:${projectMonogram(section.key).hue}`} aria-hidden="true">
-                    {projectMonogram(section.key).text}
+            const heading = (
+              <>
+                {canToggle && <ChevronIcon />}
+                {mono && (
+                  <span class="zl-mono" style={`--h:${mono.hue}`} aria-hidden="true">
+                    {mono.text}
                   </span>
-                  <span class="sidebar-project-name">{section.label}</span>
-                  {section.attention && <span class={`state-dot ${section.attention}`} aria-hidden="true" />}
-                  <span class="sidebar-project-path">{section.path}</span>
-                  <span class="sidebar-count">{section.sessions.length}</span>
-                </button>
+                )}
+                <span>{name}</span>
+                {worst && <Dot state={worst} />}
+                <span class="zl-proj-path zl-data">{section.path}</span>
+                <span class="zl-group-n zl-data">{section.sessions.length}</span>
+              </>
+            );
+            return (
+              <div class={`zl-proj${collapsed ? "" : " is-open"}`} key={section.key}>
+                {canToggle ? (
+                  <button
+                    type="button"
+                    class="zl-group is-proj"
+                    aria-expanded={!collapsed}
+                    aria-label={label}
+                    onClick={() => onToggleProject(section.key, !collapsed)}
+                  >
+                    {heading}
+                  </button>
+                ) : (
+                  <div class="zl-group is-proj">{heading}</div>
+                )}
                 {!collapsed && (
-                  <div class="sidebar-group">
+                  <>
                     {shownSessions.map((s) => row(s, true))}
                     {hiddenSaved > 0 && (
                       <button
                         type="button"
-                        class="sidebar-show-all"
+                        class="zl-show-all"
                         onClick={() => setExpandedProjects((keys) => new Set(keys).add(section.key))}
                       >
                         Show all {hiddenSaved} saved
                       </button>
                     )}
-                  </div>
+                  </>
                 )}
-              </section>
+              </div>
             );
           }) : (
             <>
@@ -328,29 +378,28 @@ export function Sidebar({
                   folder heading instead. */}
               {needsAttention.length > 0 && (
                 <>
-                  <div class="sidebar-label is-attention">
-                    Needs attention<span class="sidebar-count is-attention">{needsAttention.length}</span>
+                  <div class="zl-group is-attn">
+                    <span>Needs attention</span>
+                    <span class="zl-group-n zl-data">{needsAttention.length}</span>
                   </div>
-                  <div class="sidebar-group">{needsAttention.map((s) => row(s))}</div>
+                  {needsAttention.map((s) => row(s))}
                 </>
               )}
               {restActive.length > 0 && (
                 <>
-                  <div class="sidebar-label">Active<span class="sidebar-count">{restActive.length}</span></div>
-                  <div class="sidebar-group">{restActive.map((s) => row(s))}</div>
+                  <div class="zl-group"><span>Active</span><span class="zl-group-n zl-data">{restActive.length}</span></div>
+                  {restActive.map((s) => row(s))}
                 </>
               )}
               {shownSaved.length > 0 && (
                 <>
-                  <div class="sidebar-label">Saved<span class="sidebar-count">{shownSaved.length}</span></div>
-                  <div class="sidebar-group">
-                    {savedPreview.visible.map((s) => row(s))}
-                    {savedPreview.hidden > 0 && (
-                      <button type="button" class="sidebar-show-all" onClick={() => setShowAllSaved(true)}>
-                        Show all {shownSaved.length} saved
-                      </button>
-                    )}
-                  </div>
+                  <div class="zl-group"><span>Saved</span><span class="zl-group-n zl-data">{shownSaved.length}</span></div>
+                  {savedPreview.visible.map((s) => row(s))}
+                  {savedPreview.hidden > 0 && (
+                    <button type="button" class="zl-show-all" onClick={() => setShowAllSaved(true)}>
+                      Show all {shownSaved.length} saved
+                    </button>
+                  )}
                 </>
               )}
             </>
@@ -361,13 +410,13 @@ export function Sidebar({
       {/* New anchors the bottom, where the thumb is. It is the one action, so
           it gets the width — and the word, which a 28px "+" in the head never
           had room for. */}
-      <button type="button" class="sidebar-new" onClick={onNewSession}>
-        <Plus size={16} aria-hidden="true" />New session
+      <button type="button" class="zl-side-new" onClick={onNewSession}>
+        <PlusIcon />New session
       </button>
 
       {/* The foot is about the APP, not about a session: the inbox, the build,
           and the global settings. Same place both densities kept settings. */}
-      <div class="sidebar-foot">
+      <div class="zl-side-foot">
         {/* wake-on-event: the door appears once anything has ever arrived — a
             permanent icon for someone with no hooks configured would be chrome
             that never does anything. It also appears when the inbox could NOT
@@ -376,23 +425,20 @@ export function Sidebar({
         {inboxVisible && (
           <button
             type="button"
-            class={`sidebar-inbox${inboxOpen ? " is-on" : ""}`}
+            class={`zl-inbox${inboxOpen ? " is-on" : ""}`}
             aria-pressed={inboxOpen}
             aria-label={inboxCount > 0 ? `Inbox, ${inboxCount} waiting` : "Inbox"}
             onClick={onInbox}
           >
-            <Inbox size={16} aria-hidden="true" />
+            <InboxIcon />
             Inbox
-            {/* The count is yellow because the inbox IS "needs you": state, not
-                accent. */}
-            {inboxCount > 0 && <span class="sidebar-inbox-n">{inboxCount > 9 ? "9+" : inboxCount}</span>}
+            {inboxCount > 0 && <span class="zl-inbox-n zl-data">{inboxCount > 9 ? "9+" : inboxCount}</span>}
           </button>
         )}
-        <span class="sidebar-foot-spacer" />
         <SidebarVersion version={version} />
-        <IconButton label="Settings" onClick={onSettings}>
-          <Settings size={16} />
-        </IconButton>
+        <button type="button" class="zl-gear" aria-label="Settings" onClick={onSettings}>
+          <GearIcon />
+        </button>
       </div>
     </aside>
   );

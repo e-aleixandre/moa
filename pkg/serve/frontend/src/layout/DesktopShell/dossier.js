@@ -24,7 +24,7 @@ export function desktopDossierView({ view, session, panel }) {
 //
 // The number is the sum of what the three zones need, not a round breakpoint:
 //
-//   spine        264px  --spine-width
+//   spine        272px  --spine-width (the catalogue's desktop column)
 //   centre       844px  the conversation's OWN declared measure: .composer-wrap
 //                       and .status-strip are max-width:844px and .stream-col
 //                       780px. At 844 the centre is at full size, so docking
@@ -36,12 +36,12 @@ export function desktopDossierView({ view, session, panel }) {
 //                       the centre would be paying twice.
 //   dossier      340px  --dossier-width, the panel's width today.
 //                ─────
-//                1448px
+//                1456px
 //
-// Verified in the browser at 1600 / 1448 / 1447 / 1400 / 1100 / 900 on a real
-// session: at 1448 the centre measures 844 with the dossier docked and nothing
+// Verified in the browser at 1600 / 1456 / 1455 / 1400 / 1100 / 900 on a real
+// session: at 1456 the centre measures 844 with the dossier docked and nothing
 // sheds; one pixel under, the zone flips back to a drawer.
-export const DOSSIER_DOCK_MIN = 1448;
+export const DOSSIER_DOCK_MIN = 1456;
 
 export function dossierDocks(viewportWidth) {
   return Number(viewportWidth) >= DOSSIER_DOCK_MIN;

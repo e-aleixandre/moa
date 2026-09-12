@@ -68,7 +68,7 @@
 }
 
 /* The sidebar fills the sheet and drops the docked column's seam. */
-.sdrawer .sidebar {
+.sdrawer .zl-side-body {
   flex: 1 1 auto;
   min-height: 0;
   background: transparent;

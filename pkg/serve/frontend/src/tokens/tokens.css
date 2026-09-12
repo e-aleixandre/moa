@@ -134,7 +134,7 @@
   --z-toast:   300;
 
   /* Layout — structural measures shared across screens */
-  --spine-width: 264px;
+  --spine-width: 272px;
   /* The dossier zone. Same width docked as adrift: it is one surface with two
      behaviours, and a panel that changed size when it stopped floating would
      re-wrap every row it holds. */

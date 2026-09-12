@@ -31,6 +31,14 @@ test("orders active, saved, and attention rows by descending recency within each
   expect(group.sessions.map((s) => s.id)).toEqual(["blocked-new", "blocked-old", "active-new", "active-old", "saved-new", "saved-old"]);
 });
 
+test("an unread session rises above running in its project, like the other needs-you states", () => {
+  const [group] = groupProjectSessions([
+    session("run", "/work/a", "running", 20),
+    session("unread", "/work/a", "idle", 10, { unseen: true }),
+  ]);
+  expect(group.sessions.map((s) => s.id)).toEqual(["unread", "run"]);
+});
+
 test("uses the newest session in a project, not its first row, to order projects", () => {
   const groups = groupProjectSessions([
     session("a-old", "/work/a", "idle", 1), session("a-new", "/work/a", "idle", 100), session("b", "/work/b", "idle", 90),

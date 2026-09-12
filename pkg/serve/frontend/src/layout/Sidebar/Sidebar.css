@@ -1,375 +1,357 @@
 /* Sidebar — the other sessions, one piece for both densities.
 
-   GEOMETRY lives here (sizes, paddings, radii, the touch floors); the SURFACES
-   are re-pointed by tokens/ambient.css, the same division the rest of the
-   product uses. What was two sheets (Spine.css, SessionDrawer.css) is one, and
-   the density is a class on the root rather than a different component:
+   This sheet is the catalogue's, MOVED (catalog/zones-lab.jsx `Sidebar` /
+   `SessionList`, zones-lab.css the `.zl-side-head` / `.zl-search*` / `.zl-list`
+   / `.zl-group*` / `.zl-view*` / `.zl-side-new` / `.zl-side-foot` / `.zl-inbox*`
+   / `.zl-ver` / `.zl-gear` / `.zl-proj*` block), not translated. The class
+   names came with the rules on purpose: a rule that is copied is a rule that
+   can drift, and the drift is what this migration exists to end. The catalogue
+   imports the component now, so these are the only sidebar-body rules in the
+   product.
 
-     .sidebar            docked, 272px, the desktop column
-     .sidebar.is-phone   the same thing inside a 300px sheet that slides in
+   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
+   ?view=zones they resolve from `.zl` (zones-lab.css); everywhere else the
+   fallback IS the catalogue's own value, so production gets the accepted
+   colour rather than a near-miss re-derived from another token set.
 
-   Every size below that changes with density changes for ONE reason: a thumb
-   needs 44px and a pointer does not. Nothing else forks. */
+   What is added below the catalogue's block is only what the prototype never
+   had: the host fill (the body lives inside DesktopShell's first zone or a
+   SessionDrawer sheet, neither of which exists in the lab), the focus rings,
+   the folder accordion, the saved-tail cap, the ⋯ menu, and the phone density
+   as a class on the root rather than a `.zl-phone` ancestor. */
 
-.sidebar {
+/* ── Host ─────────────────────────────────────────────────────────────────
+   Production owns the column: 272px from --spine-width on the desktop, a
+   300px sheet on the phone (SessionDrawer). The catalogue's frames
+   (`.zl-desk-side`, `.zl-side-left`) already paint the sheet, so the body
+   goes transparent inside them. */
+
+.zl-side-body {
   display: flex;
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: var(--mantle);
-  border-right: 1px solid var(--surface0);
+  background: var(--zl-sheet, #171720);
+  box-shadow: inset -1px 0 0 var(--zl-line, rgba(255, 255, 255, 0.07));
+  color: var(--zl-t1, #f4f4f7);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body, 14px);
+  letter-spacing: -0.005em;
 }
-.sidebar.is-phone {
-  border-right: 0;
+.zl-desk-side .zl-side-body,
+.zl-side-left .zl-side-body,
+.fx-frame .zl-side-body,
+.sdrawer .zl-side-body {
+  background: transparent;
+  box-shadow: none;
+}
+
+.zl-side-body .zl-data {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── 1. Head: the wordmark and the filter ─────────────────────────────── */
 
-.sidebar-head {
+.zl-side-body .zl-side-head {
   flex: none;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 16px 12px 8px 20px;
 }
-
-.sidebar-wordmark {
+.zl-side-body .zl-side-title {
   flex: none;
-  font-size: var(--text-xl);
-  font-weight: var(--weight-semibold);
+  font-size: var(--zl-fs-display, 20px);
+  font-weight: 600;
   letter-spacing: -0.02em;
-  color: var(--text);
 }
 
-/* The field's surface, height and 16px floor come from the Field primitive;
-   this only says where it sits and how wide. */
-.sidebar .sidebar-search {
+/* Search is a recess in the sheet: canvas tone, hairline rim. */
+.zl-search {
   flex: 1;
   min-width: 0;
-  padding-right: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--zl-r-md, 10px);
+  background: var(--zl-canvas, #101018);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  color: var(--zl-t4, #66677c);
+  transition: box-shadow 140ms ease, color 140ms ease;
 }
-
-/* The keycap is the door to the palette, inside the field that filters. It is
-   a real control, so it has a real target: 28px optically, 44 via ::after. */
-.sidebar-jump {
-  position: relative;
+.zl-search:hover { color: var(--zl-t3, #9091a6); box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12)); }
+.zl-search:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line, rgba(203, 166, 247, 0.45)); color: var(--zl-t2, #c3c4d1); }
+.zl-search-ico { width: 15px; height: 15px; flex: none; }
+.zl-search-in {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--zl-t1, #f4f4f7);
+  font-family: inherit;
+  font-size: var(--zl-fs-title, 16px); /* 16: iOS focus-zoom floor */
+  letter-spacing: inherit;
+}
+.zl-search-in::placeholder { color: var(--zl-t4, #66677c); }
+.zl-kbd {
+  padding: 2px 5px;
+  border-radius: var(--zl-r-sm, 6px);
+  background: var(--zl-raised, #1e1e29);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  color: var(--zl-t3, #9091a6);
+}
+button.zl-kbd {
+  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 24px;
-  padding: 0 2px;
+  margin: 0;
   border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--overlay1);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
+  appearance: none;
 }
-.sidebar-jump::after {
-  content: "";
-  position: absolute;
-  inset: -10px;
-}
-.sidebar-jump .kbd {
-  font-size: var(--text-nano);
-  padding: 0 4px;
-  line-height: 1.5;
-  border-bottom-width: 1px;
-  color: inherit;
-}
-@media (hover: hover) {
-  .sidebar-jump:hover { color: var(--text); }
-}
-.sidebar-jump:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
+button.zl-kbd:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: var(--focus-ring-offset, 2px);
 }
 
 /* ── 2. List ──────────────────────────────────────────────────────────── */
 
-.sidebar-list {
+.zl-list {
   flex: 1 1 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
   min-height: 0;
   padding: 4px 8px 8px;
 }
+.zl-list.is-inbox { padding: 0; }
+.zl-list.is-inbox .inbox { padding: 8px 16px 24px; }
 
-/* wake-on-event: the inbox occupies the same slot the sessions do, so the swap
-   changes what the list is about without moving the head or the foot. */
-.sidebar-list.is-inbox { padding: 0; }
-.sidebar-list.is-inbox .inbox { padding: var(--space-2) var(--space-4) var(--space-6); }
+/* Rhythm: air between groups, none inside them. */
+.zl-list .zl-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 12px 4px;
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--zl-t4, #66677c);
+}
+.zl-list > .zl-group:first-child { margin-top: 0; }
+.zl-list .zl-group-n { letter-spacing: 0; color: var(--zl-t4, #66677c); }
+
+/* The attention heading earns one mark and no more: the rows underneath
+   already carry their own colour, and a coloured band on top of coloured rows
+   is how a list stops being scannable. */
+.zl-list .zl-group.is-attn { color: var(--zl-t1, #f4f4f7); }
+.zl-list .zl-group.is-attn .zl-group-n {
+  color: var(--zl-canvas, #101018);
+  background: var(--zl-yellow, #f9e2af);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-weight: 600;
+}
 
 /* How the list is ORDERED is a property of the list, so it sits in the list's
    own head rather than in global settings or behind a "⋯": a hidden menu made
    a mode you cannot see you are in, and there are only two options. Sunken
    track, raised selection — the same grammar as the thinking stepper. */
-.sidebar-order {
+.zl-view {
   display: flex;
   gap: 2px;
   margin: 0 0 10px;
   padding: 2px;
-  background: var(--crust);
-  border: 1px solid var(--surface0);
+  background: var(--zl-canvas, #101018);
+  border: 1px solid var(--zl-line, rgba(255, 255, 255, 0.07));
   border-radius: 8px;
 }
-.sidebar-order-b {
+.zl-view-b {
   flex: 1;
   min-height: 30px;
   border: 0;
   border-radius: 6px;
-  background: none;
-  color: var(--subtext0);
-  font-family: var(--font);
-  font-weight: var(--weight-medium);
-  font-size: var(--text-sm);
-  line-height: 1;
+  background: transparent;
+  color: var(--zl-t3, #9091a6);
+  /* Catalogue wrote `font: 500 12px/1 var(--zl-font)` with --zl-font undefined,
+     so the shorthand dropped and this inherited 14px/400 from `.zl`. Written
+     as that computed value, not as the 12px/500 the shorthand appears to ask. */
   cursor: pointer;
 }
-.sidebar-order-b.is-on {
-  background: var(--surface0);
-  color: var(--text);
+.zl-view-b.is-on {
+  background: var(--zl-raised, #1e1e29);
+  color: var(--zl-t1, #f4f4f7);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
 }
-.sidebar-order-b:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
+.zl-view-b:focus-visible {
+  outline: 2px solid var(--zl-accent, #cba6f7);
   outline-offset: -2px;
 }
-.sidebar.is-phone .sidebar-order-b {
-  min-height: 44px;
-  font-size: var(--text-base);
-}
+.zl-side-body.is-phone .zl-view-b { min-height: 44px; font-size: 14px; }
 
-/* Rhythm: air between groups, none inside them. */
-.sidebar-label {
+/* Project heading: the monogram identifies, the path locates, the count sizes.
+   Same row grammar as a session, one step quieter. */
+.zl-list .zl-group.is-proj {
   display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
+  align-items: center;
+  gap: 8px;
   width: 100%;
-  margin-top: var(--space-3);
-  padding: var(--space-2) var(--space-3) var(--space-1);
+  padding-top: 4px;
   border: 0;
   background: none;
   font-family: var(--font);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--overlay0);
   text-align: left;
+  cursor: default;
 }
-.sidebar-list > .sidebar-label:first-of-type { margin-top: 0; }
-.sidebar-order + .sidebar-label { margin-top: 0; }
-
-/* The count has TWO representations, because it answers two questions. Under
-   Active and Saved it sizes the group: a quiet number, a datum. Under Needs
-   attention it IS the call, so it becomes a solid yellow pill — the one mark
-   that group earns, since the rows below already carry their own colour and a
-   coloured band over coloured rows is how a list stops being scannable. */
-.sidebar-count {
-  flex: none;
-  font-family: var(--mono);
-  font-weight: var(--weight-normal);
-  letter-spacing: normal;
-  font-variant-numeric: tabular-nums;
-  color: var(--overlay0);
-}
-.sidebar-label.is-attention { align-items: center; color: var(--text); }
-.sidebar-count.is-attention {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 19px;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: var(--radius-full);
-  background: var(--yellow);
-  color: var(--crust);
-  font-weight: var(--weight-semibold);
-}
-/* wake-on-event: an unread answer is not a fourth group — it is the third way
-   a session waits for you, so it rides under Needs attention with its own
-   mauve dot, which is what the product has always used for unread work. */
-
-.sidebar-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: var(--space-2);
-}
-
-.sidebar-show-all {
-  min-height: 30px;
-  align-self: flex-start;
-  padding: 0 var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--mauve);
-  font: inherit;
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.sidebar.is-phone .sidebar-show-all { min-height: 44px; }
-@media (hover: hover) {
-  .sidebar-show-all:hover { background: var(--surface0); color: var(--text); }
-}
-.sidebar-show-all:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-/* Empty list, and no filter typed: the one instruction the bottom button's
-   label cannot give, in the place the rows would have been. */
-.sidebar-empty-new {
-  position: relative;
-  align-self: flex-start;
-  margin: var(--space-2) var(--space-3);
-  padding: var(--space-2) 2px;
-  border: 0;
-  background: none;
-  color: var(--mauve);
-  font: inherit;
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.sidebar-empty-new::after { content: ""; position: absolute; inset: -8px; }
-
-/* Empty filter result — a quiet line where a row would be. */
-.sidebar-note {
-  display: block;
-  padding: 10px var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--overlay0);
-}
-
-/* ── Project headings ─────────────────────────────────────────────────────
-   The chevron collapses, the monogram identifies, the path locates, the count
-   sizes. Same row grammar as a session, one step quieter. */
-.sidebar-label.is-project {
-  align-items: center;
-  min-height: 36px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-}
-.sidebar.is-phone .sidebar-label.is-project { min-height: 44px; }
-@media (hover: hover) {
-  .sidebar-label.is-project:hover { background: color-mix(in srgb, var(--surface0) 55%, transparent); }
-}
-.sidebar-label.is-project:active { background: color-mix(in srgb, var(--surface0) 55%, transparent); }
-.sidebar-label.is-project:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-.sidebar-project-chevron {
-  flex: none;
-  display: inline-flex;
-  color: var(--overlay1);
-  transition: transform var(--duration) var(--ease);
-}
-.sidebar-project.is-open .sidebar-project-chevron { transform: rotate(90deg); }
-/* The heading's monogram is the row's, two steps down: same hue, same shape,
-   small enough that it labels the group instead of competing with the rows. */
-.sidebar-project-mono {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  background: hsl(var(--mono-h) 50% 60% / 0.16);
-  box-shadow: 0 0 0 1px hsl(var(--mono-h) 50% 65% / 0.18);
-  color: hsl(var(--mono-h) 65% 78%);
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  font-weight: var(--weight-normal);
-  letter-spacing: 0;
-  text-transform: none;
-}
-.sidebar-project-name {
-  flex: none;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sidebar-label.is-project .state-dot { flex: none; width: 7px; height: 7px; }
-.sidebar-project-path {
+button.zl-group.is-proj { cursor: pointer; }
+.zl-list .zl-group.is-proj .zl-mono { width: 20px; height: 20px; font-size: 10px; border-radius: 6px; }
+.zl-proj-path {
   flex: 1;
   min-width: 0;
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-normal);
-  letter-spacing: normal;
-  text-transform: none;
-  color: var(--overlay0);
+  color: var(--zl-t4, #66677c);
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sidebar-project + .sidebar-project { margin-top: var(--space-2); }
+.zl-proj + .zl-proj { margin-top: 10px; }
+.zl-proj-chev {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--zl-t3, #9091a6);
+  transform: rotate(0deg);
+  transition: transform 150ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+}
+.zl-proj.is-open .zl-proj-chev { transform: rotate(90deg); }
+button.zl-group.is-proj:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: var(--focus-ring-offset, 2px);
+  border-radius: var(--zl-r-md, 10px);
+}
+.zl-side-body.is-phone button.zl-group.is-proj { min-height: 44px; }
+@media (hover: hover) {
+  button.zl-group.is-proj:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+}
+
+.zl-show-all {
+  min-height: 30px;
+  align-self: flex-start;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--zl-r-sm, 6px);
+  background: none;
+  color: var(--zl-accent, #cba6f7);
+  font: inherit;
+  font-size: var(--zl-fs-meta, 12px);
+  cursor: pointer;
+}
+.zl-side-body.is-phone .zl-show-all { min-height: 44px; }
+@media (hover: hover) {
+  .zl-show-all:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+}
+.zl-show-all:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: var(--focus-ring-offset, 2px);
+}
+
+.zl-empty-new {
+  position: relative;
+  align-self: flex-start;
+  margin: 8px 12px;
+  padding: 8px 2px;
+  border: 0;
+  background: none;
+  color: var(--zl-accent, #cba6f7);
+  font: inherit;
+  font-size: var(--zl-fs-meta, 12px);
+  cursor: pointer;
+}
+.zl-empty-new::after { content: ""; position: absolute; inset: -8px; }
+.zl-empty-new:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: var(--focus-ring-offset, 2px);
+}
+
+.zl-note {
+  display: block;
+  padding: 10px 12px;
+  font-size: var(--zl-fs-meta, 12px);
+  color: var(--zl-t4, #66677c);
+}
 
 /* ── Rows ─────────────────────────────────────────────────────────────────
-   A queue of things to do, not a stack of cards. Two lines: title with its
-   state and age, then WHY the session wants you — or where it lives, when it
-   wants nothing.
-
-   This block used to be 27 lines re-deriving the row's surface: transparent at
-   rest, --surface0 on hover, --surface0 when current, 7px/12px padding, 52px
-   tall. Every one of those is now what the row IS (SessionRow.css, moved from
-   the catalogue), so the sidebar stopped saying it a second time. What is left
-   is only what this container adds: the reserve for the ⋯, and the phone's
-   taller thumb target. */
-.sidebar-session { position: relative; }
-.sidebar-session .zl-row-slot { width: 100%; }
-/* The list draws its own rhythm through .sidebar-group's gap, so the row's own
-   stacking margin would double it. */
-.sidebar-session .zl-row-slot + .zl-row-slot { margin-top: 0; }
+   The list draws its own rhythm through the row's stacking margin. The wrap
+   exists so a ⋯ can sit on the row without nesting a button in a button. */
+.zl-session.is-menu { position: relative; }
+.zl-session .zl-row-slot { width: 100%; }
+.zl-session .zl-row-slot + .zl-row-slot { margin-top: 0; }
+.zl-session + .zl-session { margin-top: 2px; }
 /* The gallery's mono second line is the reason line said worse; the sidebar
    has the reason. */
-.sidebar .zl-row-meta-line { display: none; }
+.zl-side-body .zl-row-meta-line { display: none; }
 /* A row that asks keeps its title at full text: the reason line beside it
    carries the colour, so tinting the title too would say it twice. */
-.sidebar .zl-row.needs-yellow .zl-row-title,
-.sidebar .zl-row.needs-red .zl-row-title { color: var(--zl-t1, #f4f4f7); }
+.zl-side-body .zl-row.needs-yellow .zl-row-title,
+.zl-side-body .zl-row.needs-red .zl-row-title { color: var(--zl-t1, #f4f4f7); }
 
 /* ── The ⋯ per row ────────────────────────────────────────────────────────
    With a pointer it appears on hover and the age steps aside for it, so the
    row keeps its resting geometry instead of taxing every row with a permanent
    36px reserve. With a thumb there is no hover, so the button is always there
    and the space is reserved for good. */
-.sidebar:not(.is-phone) .session-card-menu {
+.zl-side-body:not(.is-phone) .session-card-menu {
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--duration) var(--ease);
+  transition: opacity var(--duration, 150ms) var(--ease, cubic-bezier(0.4, 0, 0.2, 1));
 }
-.sidebar:not(.is-phone) .sidebar-session:focus-within .session-card-menu {
+.zl-side-body:not(.is-phone) .zl-session.is-menu:focus-within .session-card-menu {
   opacity: 1;
   pointer-events: auto;
 }
 @media (hover: hover) {
-  .sidebar:not(.is-phone) .sidebar-session:hover .session-card-menu {
+  .zl-side-body:not(.is-phone) .zl-session.is-menu:hover .session-card-menu {
     opacity: 1;
     pointer-events: auto;
   }
-  .sidebar:not(.is-phone) .sidebar-session:hover .zl-row-when {
+  .zl-side-body:not(.is-phone) .zl-session.is-menu:hover .zl-row-when {
     opacity: 0;
   }
 }
-.sidebar:not(.is-phone) .sidebar-session:focus-within .zl-row-when {
+.zl-side-body:not(.is-phone) .zl-session.is-menu:focus-within .zl-row-when {
   opacity: 0;
 }
-.sidebar.is-phone .zl-row {
+.zl-side-body.is-phone .zl-row {
   padding: 9px 40px 9px 12px;
   min-height: 56px;
+}
+.zl-side-body .session-card-menu .icon-button {
+  border: 0;
+  border-radius: var(--zl-r-sm, 6px);
+  color: var(--zl-t3, #9091a6);
 }
 
 /* ── 3. New session ──────────────────────────────────────────────────────
    It anchors the bottom, where the thumb is and where the empty half of the
-   column was. It is the one action, so it gets the width — and the word, which
-   a 28px "+" in the head never had room for. The accent is contained: the list
-   is the point of the sidebar, so this reads as available, not as a beacon. */
-.sidebar-new {
+   column was. It is the one action, so it gets the width — and the word. The
+   accent is contained: the list is the point of the sidebar, so this reads as
+   available, not as a beacon. */
+.zl-side-new {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -379,102 +361,110 @@
   margin: 4px 12px 8px;
   padding: 0 14px;
   border: 0;
-  border-radius: var(--radius-md);
-  background: var(--mauve-dim);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--mauve) 22%, transparent);
-  color: var(--mauve);
-  font-family: var(--font);
-  font-size: var(--text-base);
-  font-weight: var(--weight-semibold);
+  border-radius: var(--zl-r-md, 10px);
+  background: var(--zl-accent-dim, rgba(203, 166, 247, 0.12));
+  box-shadow: 0 0 0 1px var(--zl-accent-med, rgba(203, 166, 247, 0.22));
+  color: var(--zl-accent, #cba6f7);
+  font-family: inherit;
+  font-size: var(--zl-fs-body, 14px);
+  font-weight: 600;
+  letter-spacing: inherit;
   cursor: pointer;
-  transition: background var(--duration) var(--ease), transform var(--duration) var(--ease);
+  transition: background 120ms ease, transform 120ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
 }
-.sidebar.is-phone .sidebar-new { height: 48px; margin: 4px 12px 10px; }
-@media (hover: hover) {
-  .sidebar-new:hover { background: color-mix(in srgb, var(--mauve) 22%, transparent); }
-}
-.sidebar-new:active { transform: translateY(1px); }
-.sidebar-new:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
+.zl-side-new:hover { background: var(--zl-accent-med, rgba(203, 166, 247, 0.22)); }
+.zl-side-new:active { transform: translateY(1px); }
+.zl-side-new svg { width: 16px; height: 16px; }
+.zl-side-new:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: var(--focus-ring-offset, 2px);
 }
 
 /* ── 4. Foot: the things about the APP ───────────────────────────────────
    The inbox, the build and the global settings. Deliberately not the session
    panel's business: these outlive every session. */
-.sidebar-foot {
+.zl-side-foot {
   flex: none;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  justify-content: space-between;
   padding: 0 20px 12px 8px;
-  font-size: var(--text-base);
-  color: var(--overlay1);
 }
-.sidebar-foot-spacer { flex: 1; }
-
-.sidebar-inbox {
+.zl-inbox {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 8px;
   height: 40px;
   padding: 0 12px;
   border: 0;
-  border-radius: var(--radius-md);
-  background: none;
-  color: var(--subtext0);
-  font-family: var(--font);
-  font-size: var(--text-base);
-  font-weight: var(--weight-medium);
+  border-radius: var(--zl-r-md, 10px);
+  background: transparent;
+  color: var(--zl-t2, #c3c4d1);
+  font-family: inherit;
+  font-size: var(--zl-fs-body, 14px);
+  font-weight: 500;
+  letter-spacing: inherit;
   cursor: pointer;
 }
-.sidebar.is-phone .sidebar-inbox { height: 44px; }
-.sidebar-inbox svg { flex: none; color: var(--overlay1); }
-@media (hover: hover) {
-  .sidebar-inbox:hover { background: var(--surface0); color: var(--text); }
-}
-.sidebar-inbox:active { background: var(--surface0); color: var(--text); }
-.sidebar-inbox.is-on { background: var(--surface0); color: var(--text); }
-.sidebar-inbox:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
+.zl-inbox:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+.zl-inbox.is-on { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+.zl-inbox svg { width: 16px; height: 16px; color: var(--zl-t3, #9091a6); }
+.zl-inbox:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: var(--focus-ring-offset, 2px);
 }
 /* The count is yellow because the inbox IS "needs you": state, not accent. */
-.sidebar-inbox-n {
+.zl-inbox-n {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: var(--radius-md);
-  background: var(--yellow);
-  color: var(--crust);
-  font-family: var(--mono);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
+  border-radius: var(--zl-r-md, 10px);
+  background: var(--zl-yellow, #f9e2af);
+  color: #1a1a28;
+  font-weight: 600;
   line-height: 18px;
   text-align: center;
 }
-
-.sidebar-ver {
-  flex: none;
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  color: var(--overlay0);
-  white-space: nowrap;
+.zl-ver { color: var(--zl-t4, #66677c); }
+a.zl-ver.is-update {
+  padding: 2px 5px;
+  border-radius: var(--zl-r-sm, 6px);
+  color: var(--zl-yellow, #f9e2af);
+  background: color-mix(in srgb, var(--zl-yellow, #f9e2af) 14%, var(--zl-raised, #1e1e29));
   text-decoration: none;
 }
-a.sidebar-ver-update {
-  padding: 2px 5px;
-  border-radius: var(--radius-sm);
-  color: var(--yellow);
-  background: color-mix(in srgb, var(--yellow) 14%, var(--surface0));
-}
 @media (hover: hover) {
-  a.sidebar-ver-update:hover { background: color-mix(in srgb, var(--yellow) 22%, var(--surface0)); }
+  a.zl-ver.is-update:hover { background: color-mix(in srgb, var(--zl-yellow, #f9e2af) 22%, var(--zl-raised, #1e1e29)); }
 }
-a.sidebar-ver-update:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
+a.zl-ver.is-update:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: var(--focus-ring-offset, 2px);
 }
 
-.sidebar-foot > .icon-button { flex: none; }
-.sidebar.is-phone .sidebar-foot > .icon-button { width: 44px; height: 44px; }
+/* The gear sits with the version: both are about the app, not the session. */
+.zl-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--zl-t3, #9091a6);
+  cursor: pointer;
+}
+.zl-gear svg { width: 16px; height: 16px; }
+.zl-gear:hover { background: var(--zl-control, #262633); color: var(--zl-t1, #f4f4f7); }
+.zl-gear:focus-visible {
+  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline-offset: -2px;
+}
+
+/* ── Phone sizing: every control that gets a thumb is at least 44px. ──── */
+.zl-side-body.is-phone .zl-side-new { height: 48px; margin: 4px 12px 10px; }
+.zl-side-body.is-phone .zl-inbox { height: 44px; }
+.zl-side-body.is-phone .zl-search,
+.zl-side-body.is-phone .zl-search-in { height: 44px; }
+.zl-side-body.is-phone .zl-gear { width: 44px; height: 44px; }

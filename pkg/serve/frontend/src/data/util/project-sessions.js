@@ -7,10 +7,16 @@ const isSaved = (session) => session.state === "saved" || session.saved;
 const attention = (session) => session.state === "permission" ? "permission" : session.state === "error" ? "error" : null;
 
 function sessionOrder(a, b) {
-  const aAttention = attention(a);
-  const bAttention = attention(b);
-  if (aAttention && !bAttention) return -1;
-  if (!aAttention && bAttention) return 1;
+  // Unseen is a needs-you state in the list (attentionKind), so it rises to
+  // the top of its project the same way permission and error do. The older
+  // `attention()` helper still drives the heading's permission/error mark.
+  const aKind = attentionKind(a);
+  const bKind = attentionKind(b);
+  if (aKind || bKind) {
+    const aRank = aKind ? ATTENTION_RANK[aKind] : 99;
+    const bRank = bKind ? ATTENTION_RANK[bKind] : 99;
+    if (aRank !== bRank) return aRank - bRank;
+  }
   if (isSaved(a) !== isSaved(b)) return isSaved(a) ? 1 : -1;
   return updated(b) - updated(a);
 }
