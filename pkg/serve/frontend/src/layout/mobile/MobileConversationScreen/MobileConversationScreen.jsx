@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import { Plus } from "lucide-preact";
 import { updateSession, store } from "../../../data/store.js";
 import { useStore } from "../../../hooks/useStore.js";
@@ -96,6 +96,10 @@ function MobileConversationBody({ forceMobile = false }) {
 
   const [rewindOpen, setRewindOpen] = useState(false);
   const [secretAliases, setSecretAliases] = useState(null);
+  const [swipeParentMounted, setSwipeParentMounted] = useState(false);
+  const onSwipeDraggingChange = useCallback((dragging) => {
+    setSwipeParentMounted((mounted) => mounted === dragging ? mounted : dragging);
+  }, []);
 
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
   // The dock is the permanent home for live ASYNC work (async subagents + bash)
@@ -220,75 +224,80 @@ function MobileConversationBody({ forceMobile = false }) {
   } else {
     const blocks = projectStream(session);
     const blocking = session.untrustedMcp || session.pendingPerm;
+    const conversation = (
+      <>
+        <MobileStream
+          key={session.id}
+          session={session}
+          blocks={blocks}
+          // Rewind lives on the waypoints themselves now, not behind a door in
+          // the status line: the mark is ON the message you want to go back to,
+          // so "rewind to where" is answered by the tap. The full timeline
+          // (assistant turns too, and existing branches) is still one link away
+          // inside the confirmation — this is its only door on mobile.
+          rewind={{
+            to: (msgId) => rewindToMessage(session.id, msgId),
+            openTimeline: () => setRewindOpen(true),
+            disabled: session.state === "running" || session.state === "permission",
+          }}
+          onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
+          tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
+        />
+        {blocking && (
+          <div class="mconv-blocking">
+            {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
+            {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
+          </div>
+        )}
+        {/* One bar of live work between the transcript and the composer: the
+            foreground run owns the sentence, the background takes it only
+            when the foreground is silent, and the tally is the door to the
+            panel. While the keyboard is up the panel stays shut (writing
+            wins) without losing the stored preference. Inside the dock, so
+            the fade stretches over the bar the way the catalogue drew it. */}
+        <MobileComposer key={session.id} session={session} usage={usage} onSecret={setSecretAliases}>
+          <LiveBar
+            session={session}
+            agents={liveAgents}
+            open={!!session.dockOpen}
+            onToggle={(next) => updateSession(session.id, { dockOpen: next })}
+            onOpen={(id, kind) => (kind === "bash"
+              ? openBashJob(session.id, id)
+              : openPersistedSubagent(session.id, id))}
+            forceCompact={kbdOpen}
+          />
+        </MobileComposer>
+      </>
+    );
     if (session.viewingSubagent) {
       // The subagent view takes over the whole conversation surface (below
       // the header/strip), pushed full-screen. onBack clears viewingSubagent.
-      body = (
+      body = (<>
+        {swipeParentMounted && <div class="mconv-swipe-parent" aria-hidden="true" inert>{conversation}</div>}
         <MobileSubagentView
           key={session.viewingSubagent}
           session={session}
           jobId={session.viewingSubagent}
           onBack={() => updateSession(session.id, { viewingSubagent: null })}
+          onDraggingChange={onSwipeDraggingChange}
         />
-      );
+      </>);
     } else if (session.viewingBashJob) {
       // Same full-screen push for a background bash job's read-only view — the
       // dock's other openable row. Mutually exclusive with the subagent view by
       // construction (opening one clears the other).
-      body = (
+      body = (<>
+        {swipeParentMounted && <div class="mconv-swipe-parent" aria-hidden="true" inert>{conversation}</div>}
         <MobileBashJobView
           key={session.viewingBashJob}
           session={session}
           jobId={session.viewingBashJob}
           onBack={() => updateSession(session.id, { viewingBashJob: null })}
+          onDraggingChange={onSwipeDraggingChange}
         />
-      );
+      </>);
     } else {
-      body = (
-        <>
-          <MobileStream
-            key={session.id}
-            session={session}
-            blocks={blocks}
-            // Rewind lives on the waypoints themselves now, not behind a door in
-            // the status line: the mark is ON the message you want to go back to,
-            // so "rewind to where" is answered by the tap. The full timeline
-            // (assistant turns too, and existing branches) is still one link away
-            // inside the confirmation — this is its only door on mobile.
-            rewind={{
-              to: (msgId) => rewindToMessage(session.id, msgId),
-              openTimeline: () => setRewindOpen(true),
-              disabled: session.state === "running" || session.state === "permission",
-            }}
-            onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
-            tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
-          />
-          {blocking && (
-            <div class="mconv-blocking">
-              {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
-              {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
-            </div>
-          )}
-          {/* One bar of live work between the transcript and the composer: the
-              foreground run owns the sentence, the background takes it only
-              when the foreground is silent, and the tally is the door to the
-              panel. While the keyboard is up the panel stays shut (writing
-              wins) without losing the stored preference. Inside the dock, so
-              the fade stretches over the bar the way the catalogue drew it. */}
-          <MobileComposer key={session.id} session={session} usage={usage} onSecret={setSecretAliases}>
-            <LiveBar
-              session={session}
-              agents={liveAgents}
-              open={!!session.dockOpen}
-              onToggle={(next) => updateSession(session.id, { dockOpen: next })}
-              onOpen={(id, kind) => (kind === "bash"
-                ? openBashJob(session.id, id)
-                : openPersistedSubagent(session.id, id))}
-              forceCompact={kbdOpen}
-            />
-          </MobileComposer>
-        </>
-      );
+      body = conversation;
     }
   }
 

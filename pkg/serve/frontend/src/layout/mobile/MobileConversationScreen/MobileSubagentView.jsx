@@ -50,7 +50,7 @@ import "./MobileSubagentView.css";
 // Reuses the pure subagentView() projection; rebounds to the parent when the
 // subagent was pruned.
 
-export function MobileSubagentView({ session, jobId, onBack }) {
+export function MobileSubagentView({ session, jobId, onBack, onDraggingChange }) {
   const view = subagentView(session, jobId);
 
   // Same backfill as the desktop view: see useSubagentTranscript.
@@ -66,6 +66,10 @@ export function MobileSubagentView({ session, jobId, onBack }) {
   // Swipe from the left edge to go back, the way a pushed screen is dismissed
   // on a phone. The head's own way back remains the accessible path.
   const { screenRef, dragging, swipeBind } = useEdgeSwipeBack({ onBack });
+  useEffect(() => {
+    onDraggingChange?.(dragging);
+    return () => onDraggingChange?.(false);
+  }, [dragging, onDraggingChange]);
   useEffect(() => {
     if (!confirmCancel) return;
     const t = setTimeout(() => setConfirmCancel(false), 2000);

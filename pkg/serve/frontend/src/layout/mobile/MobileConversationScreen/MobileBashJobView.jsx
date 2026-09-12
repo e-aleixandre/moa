@@ -19,7 +19,7 @@ import "./MobileBashJobView.css";
 // Reuses the pure bashJobView() projection and rebounds to the conversation
 // when the job is gone from the store.
 
-export function MobileBashJobView({ session, jobId, onBack }) {
+export function MobileBashJobView({ session, jobId, onBack, onDraggingChange }) {
   const view = bashJobView(session, jobId);
 
   // All hooks run on EVERY render regardless of `view` (rules of hooks); each
@@ -32,6 +32,10 @@ export function MobileBashJobView({ session, jobId, onBack }) {
   // Swipe from the left edge to go back, the way a pushed screen is dismissed
   // on a phone. The head's own way back remains the accessible path.
   const { screenRef, dragging, swipeBind } = useEdgeSwipeBack({ onBack });
+  useEffect(() => {
+    onDraggingChange?.(dragging);
+    return () => onDraggingChange?.(false);
+  }, [dragging, onDraggingChange]);
   useEffect(() => {
     if (!confirmStop) return;
     const t = setTimeout(() => setConfirmStop(false), 2000);

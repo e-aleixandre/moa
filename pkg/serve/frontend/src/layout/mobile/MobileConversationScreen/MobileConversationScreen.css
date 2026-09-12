@@ -34,6 +34,17 @@
     radial-gradient(78% 46% at 12% 0%, rgba(137, 180, 250, 0.11), transparent 72%),
     radial-gradient(64% 42% at 96% 8%, rgba(203, 166, 247, 0.09), transparent 74%);
 }
+
+/* A pushed child normally replaces this tree. Keep the real conversation
+   mounted only for the interactive back drag, where it is the surface being
+   revealed. It cannot receive input while the child is still on top. */
+.mconv-swipe-parent {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
 /* No rule on the children: the wash is already behind them. Touching them was
    the bug -- `position: relative` tore the absolutely positioned header out of
    its top inset, and a blanket `z-index: 1` overrode the header's own 4 and

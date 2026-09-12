@@ -347,6 +347,18 @@ test('mobile session changes remount the transcript scroller', async () => {
   expect(source).toMatch(/<MobileStream\s+key=\{session\.id\}/);
 });
 
+test('a pushed work view mounts the real conversation only while its back swipe drags', async () => {
+  const source = await Bun.file(new URL('./MobileConversationScreen.jsx', import.meta.url)).text();
+  const subagent = await Bun.file(new URL('./MobileSubagentView.jsx', import.meta.url)).text();
+  const bash = await Bun.file(new URL('./MobileBashJobView.jsx', import.meta.url)).text();
+
+  expect(source).toContain('swipeParentMounted && <div class="mconv-swipe-parent"');
+  expect(source).toContain('aria-hidden="true" inert');
+  expect(source).toContain('onDraggingChange={onSwipeDraggingChange}');
+  expect(subagent).toContain('onDraggingChange?.(dragging)');
+  expect(bash).toContain('onDraggingChange?.(dragging)');
+});
+
 test('a delivered inbox event with a deleted destination cannot replace the active mobile session', () => {
   const previous = store.get();
   setState({
