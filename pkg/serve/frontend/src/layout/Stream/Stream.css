@@ -43,8 +43,7 @@
 .conversation-main .zl-transcript:not(.is-dense) > * { max-width: 68ch; }
 
 /* Grid pane: tighter padding, no measure cap — the pane is the cap. */
-.zl-pane .zl-transcript,
-.pane .zl-transcript { padding: 8px 16px 16px; }
+.zl-pane .zl-transcript { padding: 8px 16px 16px; }
 
 .conversation-main .zl-transcript,
 .mconv .zl-transcript { overflow-x: hidden; }

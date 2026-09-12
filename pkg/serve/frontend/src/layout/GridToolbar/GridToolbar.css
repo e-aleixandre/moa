@@ -1,147 +1,112 @@
-.grid-toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--surface0);
-  background: color-mix(in srgb, var(--mantle) 50%, var(--base));
+/* GridToolbar — the grid's top bar.
+
+   This sheet is the catalogue's, MOVED (catalog/zones-lab.css `.zl-grid-bar`
+   / `.zl-grid-bar-t` / `.zl-grid-needs`), not translated. The class names
+   came with the rules on purpose. The catalogue imports the component now,
+   so these are the only grid-bar rules in the product.
+
+   "needs you" is state: yellow, like the dot and the inbox count.
+
+   What is added below the catalogue's block is only what the prototype never
+   had: layout presets, split actions, the shortcut hint. */
+
+.zl-grid-bar {
   flex: none;
-}
-
-.grid-toolbar .gt-label {
-  font-size: var(--text-sm);
-  color: var(--overlay1);
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  white-space: nowrap;
+  gap: 12px;
+  height: 40px;
+  padding: 0 16px;
+  background: var(--zl-sheet, #171720);
+  box-shadow: inset 0 -1px 0 var(--zl-line, rgba(255, 255, 255, 0.07));
+  color: var(--zl-t3, #9091a6);
+  font-weight: 500;
+}
+.zl-grid-bar .zl-data {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--zl-t2, #c3c4d1);
+}
+.zl-grid-needs {
+  margin-left: auto;
+  color: var(--zl-yellow, #f9e2af);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: default;
+}
+button.zl-grid-needs { cursor: pointer; }
+.zl-grid-needs .zl-data { color: inherit; }
+button.zl-grid-needs:focus-visible {
+  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline-offset: 2px;
 }
 
-.grid-toolbar .gt-label b {
-  color: var(--subtext0);
-  font-weight: var(--weight-semibold);
-}
+/* ── What the prototype never had ───────────────────────────────────────── */
 
-.grid-toolbar .presets {
+.zl-grid-presets {
   display: flex;
-  gap: 4px;
-  background: var(--crust);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-md);
+  gap: 2px;
   padding: 3px;
+  border-radius: var(--zl-r-sm, 6px);
+  background: var(--zl-raised, #1e1e29);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
 }
-
-.grid-toolbar .preset {
-  border-radius: var(--radius-sm);
+.zl-grid-preset {
+  border: 0;
+  border-radius: 4px;
   display: grid;
   place-items: center;
-  padding: 4px 5px;
+  padding: 3px 4px;
   cursor: pointer;
   background: transparent;
-  border: none;
-  transition: background var(--duration) var(--ease);
 }
-
-.grid-toolbar .preset-mini i {
-  background: var(--surface1);
+.zl-grid-preset-mini i {
+  background: var(--zl-line-2, rgba(255, 255, 255, 0.12));
   border-radius: 1.5px;
   display: block;
   font-style: normal;
 }
 @media (hover: hover) {
-
-
-.grid-toolbar .preset:hover {
-  background: var(--surface0);
+  .zl-grid-preset:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
 }
+.zl-grid-preset:focus-visible {
+  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline-offset: 2px;
 }
+.zl-grid-preset.is-on { background: var(--zl-accent-dim, rgba(203, 166, 247, 0.12)); }
+.zl-grid-preset.is-on .zl-grid-preset-mini i { background: var(--zl-accent, #cba6f7); }
 
-.grid-toolbar .preset:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.grid-toolbar .preset.on {
-  background: color-mix(in srgb, var(--peach) 18%, transparent);
-}
-
-.grid-toolbar .preset.on .preset-mini i {
-  background: var(--peach);
-}
-
-.grid-toolbar .gt-btn {
-  display: flex;
+.zl-grid-bar .zl-desk-act {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px var(--space-3);
-  border-radius: var(--radius-sm);
-  border: none;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--zl-r-md, 10px);
   background: transparent;
-  color: var(--overlay1);
-  font-family: var(--font);
-  font-size: var(--text-sm);
+  color: var(--zl-t3, #9091a6);
   cursor: pointer;
-  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
 }
-@media (hover: hover) {
-
-
-.grid-toolbar .gt-btn:hover {
-  background: var(--surface0);
-  color: var(--text);
-}
+.zl-grid-bar .zl-desk-act svg { width: 15px; height: 15px; display: block; }
+.zl-grid-bar .zl-desk-act:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+.zl-grid-bar .zl-desk-act:focus-visible {
+  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline-offset: 2px;
 }
 
-.grid-toolbar .gt-btn:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.grid-toolbar .gt-hint {
+.zl-grid-hint {
   font-family: var(--mono);
-  font-size: var(--text-micro);
-  color: var(--overlay0);
+  font-size: var(--zl-fs-meta, 12px);
+  color: var(--zl-t4, #66677c);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.grid-toolbar .gt-right {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.grid-toolbar .attn-lamp {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  background: color-mix(in srgb, var(--yellow) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--yellow) 35%, transparent);
-  color: var(--yellow);
-  border-radius: var(--radius-full);
-  padding: 4px var(--space-4);
-  font-family: var(--font);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  animation: attn-lamp-glow 2s ease-in-out infinite;
-}
-
-.grid-toolbar .attn-lamp .n {
-  font-family: var(--mono);
-  font-weight: var(--weight-semibold);
-}
-
-@keyframes attn-lamp-glow {
-  50% {
-    box-shadow: 0 0 14px color-mix(in srgb, var(--yellow) 25%, transparent);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .grid-toolbar .attn-lamp {
-    animation: none;
-  }
 }

@@ -6,10 +6,15 @@ import { FROZEN } from "./fidelity-freeze.js";
    components/SessionRow, class names and all, and the prototype imports them
    back. There is one definition now, and a change to it can only land in one
    place. The dot comes with it, because a dot alone is not a piece. */
-import { Dot } from "../components/SessionRow/SessionRow.jsx";
 /* Same move, the composer: markup and CSS live in layout/Composer now, and
    the prototype draws the shipped one. See the adapter at `Composer`. */
 import { Composer as ProductionComposer } from "../layout/Composer/Composer.jsx";
+/* Same move, the grid: markup and CSS live in layout/Pane, PaneGrid and
+   GridToolbar now, and the prototype draws the shipped ones. See the
+   adapters at `Pane` and `Grid`. */
+import { Pane as ProductionPane } from "../layout/Pane/Pane.jsx";
+import { PaneGrid as ProductionPaneGrid } from "../layout/PaneGrid/PaneGrid.jsx";
+import { GridToolbar } from "../layout/GridToolbar/GridToolbar.jsx";
 /* Same move, the settings sheet: markup and CSS live in
    components/GlobalSettings now, and the prototype draws the shipped one. */
 import { GlobalSettings } from "../components/GlobalSettings/GlobalSettings.jsx";
@@ -1079,13 +1084,15 @@ function Desktop({ label, live: preset, surface }) {
 }
 
 /* ── Grid ──────────────────────────────────────────────────────────────────
-   Several sessions on one screen. A pane is the conversation column with its
-   chrome compressed, not a different product: same transcript, same dock,
-   same status line in its compact form (the existing `compact` prop: goal
-   and tasks drop, context loses its word). What a pane adds is a head that
-   says which session and whether it needs you; what it loses is width, so
-   the transcript switches to its dense rhythm (tighter measure, smaller
-   ledger and artifact) and the composer sits at one line. */
+   MIGRATED (METODO §4): Pane and the bar have no private copy here. Markup
+   and CSS were MOVED to layout/Pane, PaneGrid and GridToolbar, class names
+   and all, and the prototype imports them back. What sits here now is only
+   an adapter: the prototype's 2+1 fixtures mapped onto the shipped pane,
+   plus the lab frame (density label, drawn 1298×820 desk, hint) which is
+   the host, not the piece.
+
+   A pane is still the conversation column with its chrome compressed: same
+   transcript, same dock, same status line in its compact form. */
 const PANES = [
   { title: "Buscar un bug bounty", path: "~/dev/moa", state: "running", focus: true, n: 1,
     status: { ...FULL_STATUS, goal: null, tasks: null, mcp: null, onExtra: false, fast: false, ctx: 63, spend: "$1.84" } },
@@ -1103,27 +1110,28 @@ function Pane({ p, streaming, live: preset, surface }) {
   const live = useLive(preset || LIVE_STATES[0], false);
   const set = useSettings(p.status, surface);
   return (
-    <section class={`zl-pane${p.focus ? " is-focus" : ""}`} aria-label={`Pane ${p.n}: ${p.title}`}>
-      <div class="zl-pane-head">
-        <Dot state={p.state} />
-        <button type="button" class="zl-pane-title">
-          <span class="zl-pane-t">{p.title}</span>
-          <span class="zl-pane-path zl-data">{p.path}</span>
-        </button>
-        <span class="zl-spacer" />
-        <kbd class="zl-kbd zl-data" title={`Focus with ⌘${p.n}`}>⌘{p.n}</kbd>
-        <HeadActions />
-      </div>
-      <div class="zl-pane-body">
-        <Transcript dense streaming={streaming} short={p.n !== 1} tail={p.tail} />
-      </div>
-      {set.pick && <div class="zl-veil" onClick={set.close} />}
-      <div class="zl-dock is-pane">
-        <LiveZone {...live} dense />
-        <Composer />
-        <StatusLine inline s={set.s} compact pick={set.pick} onPick={set.setPick} onChange={set.onChange} />
-      </div>
-    </section>
+    <ProductionPane
+      title={p.title}
+      path={p.path}
+      state={p.state}
+      focused={!!p.focus}
+      tileNumber={p.n}
+      composer={<Composer />}
+      dock={<LiveZone {...live} dense />}
+      status={(
+        <StatusLine
+          inline
+          s={set.s}
+          compact
+          pick={set.pick}
+          onPick={set.setPick}
+          onChange={set.onChange}
+        />
+      )}
+      overlay={set.pick ? <div class="zl-veil" onClick={set.close} /> : null}
+    >
+      <Transcript dense streaming={streaming} short={p.n !== 1} tail={p.tail} />
+    </ProductionPane>
   );
 }
 
@@ -1132,18 +1140,14 @@ function Grid({ label, live, surface }) {
     <div class="zl-grid-wrap">
       <div class="zl-density-label">{label}</div>
       <div class="zl-desk zl-grid">
-        <div class="zl-grid-bar">
-          <span class="zl-grid-bar-t">Layout · <span class="zl-data">3</span> panes</span>
-          <span class="zl-spacer" />
-          <span class="zl-grid-needs"><span class="zl-data">1</span> needs you</span>
-        </div>
-        <div class="zl-grid-panes">
+        <GridToolbar paneCount={3} needsYouCount={1} />
+        <ProductionPaneGrid>
           <Pane p={PANES[0]} streaming={!!live.fg && live.fg.phase === "working"} live={live} surface={surface} />
           <div class="zl-grid-col">
             <Pane p={PANES[1]} streaming={false} />
             <Pane p={PANES[2]} streaming={false} />
           </div>
-        </div>
+        </ProductionPaneGrid>
       </div>
       <p class="zl-hint">
         The 2+1 preset. Each pane is the single conversation with the compact

@@ -93,8 +93,8 @@ html.mobile-locked body {
    scrollbar-*; Chromium/WebKit via ::-webkit-scrollbar. */
 .stream-scroll,
 .spine-sessions,
-.pane .p-body,
-.pane .p-blocking,
+.zl-pane-body,
+.zl-pane-blocking,
 .zl-transcript {
   scrollbar-width: thin;
   scrollbar-color: var(--surface1) transparent;
@@ -102,8 +102,8 @@ html.mobile-locked body {
 
 .stream-scroll::-webkit-scrollbar,
 .spine-sessions::-webkit-scrollbar,
-.pane .p-body::-webkit-scrollbar,
-.pane .p-blocking::-webkit-scrollbar,
+.zl-pane-body::-webkit-scrollbar,
+.zl-pane-blocking::-webkit-scrollbar,
 .zl-transcript::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -111,8 +111,8 @@ html.mobile-locked body {
 
 .stream-scroll::-webkit-scrollbar-thumb,
 .spine-sessions::-webkit-scrollbar-thumb,
-.pane .p-body::-webkit-scrollbar-thumb,
-.pane .p-blocking::-webkit-scrollbar-thumb,
+.zl-pane-body::-webkit-scrollbar-thumb,
+.zl-pane-blocking::-webkit-scrollbar-thumb,
 .zl-transcript::-webkit-scrollbar-thumb {
   background: var(--surface1);
   border-radius: var(--radius-full);
@@ -120,8 +120,8 @@ html.mobile-locked body {
 
 .stream-scroll::-webkit-scrollbar-track,
 .spine-sessions::-webkit-scrollbar-track,
-.pane .p-body::-webkit-scrollbar-track,
-.pane .p-blocking::-webkit-scrollbar-track,
+.zl-pane-body::-webkit-scrollbar-track,
+.zl-pane-blocking::-webkit-scrollbar-track,
 .zl-transcript::-webkit-scrollbar-track {
   background: transparent;
 }

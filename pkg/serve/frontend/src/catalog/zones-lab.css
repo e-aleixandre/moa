@@ -250,17 +250,6 @@
 .zl-back svg { width: 16px; height: 16px; }
 .zl-back:hover { background: var(--zl-hi); color: var(--zl-t1); }
 
-/* `.zl-kbd` stays: the grid pane head still prints shortcut chips, and the
-   sidebar's copy of the same rule lives in Sidebar.css. */
-
-.zl-kbd {
-  padding: 2px 5px;
-  border-radius: var(--zl-r-sm);
-  background: var(--zl-raised);
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t3);
-}
-
 /* ── Desktop ─────────────────────────────────────────────────────────────
    The same sheet the phone slides in, docked: same tone, same hairline seam. */
 .zl-desk-side {
@@ -327,91 +316,18 @@
 .zl-desk .zl-dock { padding: 18px 22px 10px; }
 .zl-desk .zl-side-right { width: 340px; }
 
-/* ── Grid ──────────────────────────────────────────────────────────────────
-   Panes are the canvas cut by hairlines, not cards on a canvas: the same
-   tonal rule as the desktop (sheet column next to canvas main) applied N
-   times. The focused pane is told by its head: title in t1 and a raised
-   head tone. No accent ring, no shadow, no coloured frame -- the state dot
-   in the head is the only colour, and it means what it means everywhere. */
+/* ── Grid host (not product) ───────────────────────────────────────────────
+   MIGRATED. `.zl-grid-bar*` / `.zl-grid-panes` / `.zl-grid-col` / `.zl-pane*`
+   used to be defined here. They now live in layout/Pane, PaneGrid and
+   GridToolbar, class names and all, and this file no longer has a copy of
+   them: the prototype imports the shipped components (zones-lab.jsx) and the
+   rules arrive with them.
+
+   What is still here is the LAB FRAME around those pieces: the density
+   label, the drawn 1298×820 desk, the hint. Those belong to the host. */
 .zl-grid-wrap { display: flex; flex-direction: column; align-items: center; }
 .zl-desk.zl-grid { flex-direction: column; width: 1298px; height: 820px; }
 @media (max-width: 1400px) { .zl-desk.zl-grid { width: 1200px; } }
-.zl-grid-bar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 40px;
-  padding: 0 16px;
-  background: var(--zl-sheet);
-  box-shadow: inset 0 -1px 0 var(--zl-line);
-  color: var(--zl-t3);
-  font-weight: 500;
-}
-.zl-grid-bar .zl-data { color: var(--zl-t2); }
-/* "needs you" is state: yellow, like the dot and the inbox count. */
-.zl-grid-needs { color: var(--zl-yellow); }
-.zl-grid-needs .zl-data { color: inherit; }
-
-.zl-grid-panes { flex: 1; min-height: 0; display: flex; }
-.zl-grid-panes > .zl-pane { flex: 1.15; }
-.zl-grid-col { flex: 1; min-width: 0; display: flex; flex-direction: column; box-shadow: inset 1px 0 0 var(--zl-line); }
-.zl-grid-col > .zl-pane { flex: 1; min-height: 0; }
-.zl-grid-col > .zl-pane + .zl-pane { box-shadow: inset 0 1px 0 var(--zl-line); }
-
-.zl-pane {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-.zl-pane-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 8px 0 14px;
-  color: var(--zl-t3);
-}
-.zl-pane.is-focus .zl-pane-head { background: var(--zl-hi); }
-.zl-pane-head .zl-dot { display: block; }
-.zl-pane-head .zl-dot.is-idle { display: block; background: var(--zl-t4); }
-.zl-pane-title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-  height: 32px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: transparent;
-  color: inherit;
-  font-family: inherit;
-  letter-spacing: inherit;
-  cursor: pointer;
-}
-.zl-pane-title:hover { background: var(--zl-hi); }
-.zl-pane-t {
-  min-width: 0;
-  font-size: var(--zl-fs-body);
-  font-weight: 600;
-  color: var(--zl-t2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.zl-pane.is-focus .zl-pane-t { color: var(--zl-t1); }
-.zl-pane-path { color: var(--zl-t4); flex: none; }
-.zl-pane-head .zl-desk-act { width: 32px; height: 32px; }
-.zl-pane-head .zl-desk-act svg { width: 15px; height: 15px; }
-.zl-pane-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.zl-pane .zl-transcript { padding-top: 8px; }
-.zl-dock.is-pane .zl-status { height: 32px; margin-top: 2px; }
-.zl-dock.is-pane .zl-st { height: 28px; }
 
 /* Blocking tail of a pane: a "needs you" card and a system line. Both are
    stubs for placement; the real components already exist in production.

@@ -10,6 +10,7 @@ import {
   McpBanner, PermissionPrompt, AskUserPrompt, UsagePanel, ModelSelector, ArtifactsPaneButton,
 } from "../../components/index.js";
 import { PickerPopover } from "../../components/ModelSelector/ModelSelector.jsx";
+import { usePermissionMenu } from "../../components/PermissionControl/PermissionControl.jsx";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
@@ -185,9 +186,9 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   const handleFocus = useCallback((e) => {
     const t = e.target;
     if (t && t.closest && t.closest(
-      'input, textarea, [contenteditable="true"], .ask-user-card, .composer, '
-      + '.status-strip, .status-strip-anchor, '
-      + '.p-tools, .head-popover, .status-strip-usage-popover, button, a, [role="menu"]'
+      'input, textarea, [contenteditable="true"], .ask-user-card, .zl-composer, .composer, '
+      + '.zl-status, .status-strip, .status-strip-anchor, '
+      + '.zl-pane-head, .p-tools, .head-popover, .status-strip-usage-popover, button, a, [role="menu"]'
     )) {
       focusTile(tileId, { focusInput: false });
       return;
@@ -218,10 +219,21 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   const modelPopoverRef = useRef(null);
   const [modelPopoverPosition, setModelPopoverPosition] = useState(null);
 
+  const settingsBusy = !!session && (session.state === "running" || session.state === "permission");
+  const permMenu = usePermissionMenu({
+    mode: session?.permissionMode || "yolo",
+    disabled: settingsBusy,
+    onChange: (mode) => {
+      if (!session) return;
+      configureSession(session.id, { permissionMode: mode });
+    },
+  });
+
   useEffect(() => {
     setUsageOpen(false);
     setMcpOpen(false);
     setModelOpen(false);
+    permMenu.close();
   }, [node.sessionId]);
 
   useEffect(() => {
@@ -318,10 +330,10 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
         empty
         hideComposer
       >
-        <div class="pane-empty">
+        <div class="zl-pane-empty">
           <MessageSquarePlus aria-hidden="true" />
-          <span class="pane-empty-title">Drag a session here</span>
-          <span class="pane-empty-hint">{formatShortcut("K", { mod: true })} to pick a session</span>
+          <span class="zl-pane-empty-title">Drag a session here</span>
+          <span class="zl-pane-empty-hint">{formatShortcut("K", { mod: true })} to pick a session</span>
         </div>
       </Pane>
     );
@@ -331,7 +343,6 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   const liveAgents = liveTrayAgents(session);
   const dotState = sessionDisplayDotState(session);
   const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
-  const settingsBusy = session.state === "running" || session.state === "permission";
   const blocking = (session.untrustedMcp || session.pendingPerm || session.pendingAsk) ? (
     <>
       {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
@@ -402,7 +413,6 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
       headExtra={<ArtifactsPaneButton sessionId={session.id} />}
       onMaximize={handleMaximize}
       blocking={blocking}
-      bodyLive
       composer={(
         <Composer key={session.id} sessionId={session.id} session={session} compact onSecret={(aliases) => onSecret(session.id, aliases)} />
       )}
@@ -529,7 +539,7 @@ function TileNode({ node, path, tileIndexMap, onSecret }) {
   );
 }
 
-export function PaneGrid() {
+export function PaneGrid({ children }) {
   const tileTree = useStore((s) => s.tileTree);
   const [secretBatch, setSecretBatch] = useState(null);
   const tileIndexMap = useMemo(() => {
@@ -539,9 +549,15 @@ export function PaneGrid() {
     return m;
   }, [tileTree]);
 
+  // The catalogue's 2+1 fixture arrives as children: same panes container,
+  // no store tree. Production renders the binary split into the same wrap.
+  if (children) {
+    return <div class="zl-grid-panes">{children}</div>;
+  }
+
   return (
     <>
-      <div class="pane-grid">
+      <div class="zl-grid-panes">
         <TileNode
           node={tileTree}
           path={[]}

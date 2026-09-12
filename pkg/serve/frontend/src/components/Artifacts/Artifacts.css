@@ -43,7 +43,7 @@
 }
 .af-share:disabled { opacity: .55; cursor: wait; }
 .af-icon-button.is-on,
-.p-tools [data-artifacts-trigger][aria-pressed="true"] { color: var(--mauve); background: color-mix(in srgb, var(--mauve) 12%, transparent); }
+.zl-pane-tools [data-artifacts-trigger][aria-pressed="true"] { color: var(--mauve); background: color-mix(in srgb, var(--mauve) 12%, transparent); }
 .af-text-button { border: 0; padding: 6px 0; min-height: 32px; background: none; color: var(--peach); font: var(--text-sm) var(--font); cursor: pointer; white-space: nowrap; }
 
 /* ── Entries ─────────────────────────────────────────────────────────────── */

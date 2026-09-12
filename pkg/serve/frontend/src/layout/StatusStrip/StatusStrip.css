@@ -240,5 +240,7 @@ button.zl-st:disabled { cursor: default; }
 .mcomposer .zl-status > * { align-self: stretch; }
 .mcomposer .zl-status .zl-st { height: auto; align-items: center; }
 
-/* The pane's line is the compact one in a shorter dock. */
-.pane .zl-status { height: 32px; margin-top: 2px; }
+/* The pane's line is the compact one in a shorter dock. Catalogue:
+   `.zl-dock.is-pane .zl-status` / `.zl-st`. */
+.zl-dock.is-pane .zl-status { height: 32px; margin-top: 2px; }
+.zl-dock.is-pane .zl-st { height: 28px; }

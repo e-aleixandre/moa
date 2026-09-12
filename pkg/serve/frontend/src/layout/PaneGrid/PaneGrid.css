@@ -1,82 +1,84 @@
-/* PaneGrid: the real binary split-tree layout. The container fills the
-   main column; the tree is a nest of flex splits with thin resize handles. */
+/* PaneGrid: the real binary split-tree layout, drawn in the catalogue's
+   language. Panes are the canvas cut by hairlines, not cards on a canvas.
 
-.pane-grid {
+   `.zl-grid-panes` / `.zl-grid-col` are the catalogue's (zones-lab.css),
+   MOVED here. The recursive `.split*` tree is what the prototype never had:
+   a free-form binary split with a pointer-driven resize handle. It uses the
+   same hairline, not a gutter of padded cards. */
+
+.zl-grid-panes {
   flex: 1;
-  display: flex;
-  min-width: 0;
   min-height: 0;
-  padding: 6px;
+  min-width: 0;
+  display: flex;
   overflow: hidden;
 }
+.zl-grid-panes > .zl-pane { flex: 1.15; min-width: 0; min-height: 0; }
+.zl-grid-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  box-shadow: inset 1px 0 0 var(--zl-line, rgba(255, 255, 255, 0.07));
+}
+.zl-grid-col > .zl-pane { flex: 1; min-height: 0; }
+.zl-grid-col > .zl-pane + .zl-pane { box-shadow: inset 0 1px 0 var(--zl-line, rgba(255, 255, 255, 0.07)); }
 
-/* ── Split tree (ported from the old SPA's tile-tree.css) ── */
+/* ── Split tree (production: the prototype never had a free-form tree) ── */
 
-.pane-grid .split {
+.zl-grid-panes > .split { flex: 1; }
+.zl-grid-panes .split {
   display: flex;
   flex: 1;
   min-width: 0;
   min-height: 0;
   gap: 0;
 }
+.zl-grid-panes .split-h { flex-direction: row; }
+.zl-grid-panes .split-v { flex-direction: column; }
 
-.pane-grid .split-h { flex-direction: row; }
-.pane-grid .split-v { flex-direction: column; }
-
-.pane-grid .split-pane {
+.zl-grid-panes .split-pane {
   display: flex;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  padding: 3px;
+}
+.zl-grid-panes .split-pane > .zl-pane,
+.zl-grid-panes .split-pane > .split { flex: 1; }
+
+.zl-grid-panes .split-h > .split-pane + .resize-handle + .split-pane {
+  box-shadow: inset 1px 0 0 var(--zl-line, rgba(255, 255, 255, 0.07));
+}
+.zl-grid-panes .split-v > .split-pane + .resize-handle + .split-pane {
+  box-shadow: inset 0 1px 0 var(--zl-line, rgba(255, 255, 255, 0.07));
 }
 
-/* Resize handle — thin (~6px), with a wider invisible hit area and a highlight
-   on hover/active. */
-.pane-grid .resize-handle {
+/* Resize handle — thin, with a wider invisible hit area. The hairline is the
+   visible split; the handle lights mauve only while dragging or hovering. */
+.zl-grid-panes .resize-handle {
   flex-shrink: 0;
-  z-index: var(--z-sticky);
+  z-index: var(--z-sticky, 5);
   position: relative;
   background: transparent;
-  transition: background var(--duration) var(--ease);
 }
-
-.pane-grid .resize-h { width: 6px; cursor: col-resize; }
-.pane-grid .resize-v { height: 6px; cursor: row-resize; }
-
-/* Wider hit area than the visible track. */
-.pane-grid .resize-handle::after { content: ""; position: absolute; }
-.pane-grid .resize-h::after { top: 0; bottom: 0; left: -3px; right: -3px; }
-.pane-grid .resize-v::after { left: 0; right: 0; top: -3px; bottom: -3px; }
-
-/* Visible track sits centred inside the handle. */
-.pane-grid .resize-handle::before {
+.zl-grid-panes .resize-h { width: 6px; margin-left: -3px; margin-right: -3px; cursor: col-resize; }
+.zl-grid-panes .resize-v { height: 6px; margin-top: -3px; margin-bottom: -3px; cursor: row-resize; }
+.zl-grid-panes .resize-handle::after { content: ""; position: absolute; }
+.zl-grid-panes .resize-h::after { top: 0; bottom: 0; left: -3px; right: -3px; }
+.zl-grid-panes .resize-v::after { left: 0; right: 0; top: -3px; bottom: -3px; }
+.zl-grid-panes .resize-handle::before {
   content: "";
   position: absolute;
   border-radius: 2px;
   background: transparent;
-  transition: background var(--duration) var(--ease);
 }
-
-.pane-grid .resize-h::before { top: 20%; bottom: 20%; left: 2px; right: 2px; }
-.pane-grid .resize-v::before { left: 20%; right: 20%; top: 2px; bottom: 2px; }
-.pane-grid .resize-handle.active::before {
-  background: color-mix(in srgb, var(--mauve) 55%, transparent);
+.zl-grid-panes .resize-h::before { top: 20%; bottom: 20%; left: 2px; right: 2px; }
+.zl-grid-panes .resize-v::before { left: 20%; right: 20%; top: 2px; bottom: 2px; }
+.zl-grid-panes .resize-handle.active::before {
+  background: color-mix(in srgb, var(--zl-accent, #cba6f7) 55%, transparent);
 }
 @media (hover: hover) {
-
-
-.pane-grid .resize-handle:hover::before{
-  background: color-mix(in srgb, var(--mauve) 55%, transparent);
-}
-}
-
-/* A single tile fills the whole grid (no split). */
-.pane-grid > .pane {
-  flex: 1;
-}
-
-/* Panes inside split-panes grow to fill their slot. */
-.pane-grid .split-pane > .pane {
-  flex: 1;
+  .zl-grid-panes .resize-handle:hover::before {
+    background: color-mix(in srgb, var(--zl-accent, #cba6f7) 55%, transparent);
+  }
 }

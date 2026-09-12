@@ -1,467 +1,219 @@
-.pane {
-  background: var(--base);
-  border-radius: var(--radius-lg);
+/* Pane — one conversation column in the grid.
+
+   This sheet is the catalogue's, MOVED (catalog/zones-lab.jsx `Pane`,
+   zones-lab.css the `.zl-pane*` block), not translated. The class names came
+   with the rules on purpose: a rule that is copied is a rule that can drift,
+   and the drift is what this migration exists to end. The catalogue imports
+   the component now, so these are the only pane-chrome rules in the product.
+
+   The catalogue's own words: panes are the canvas cut by hairlines, not cards
+   on a canvas. The focused pane is told by its head — title in t1 and a
+   raised head tone. No accent ring, no shadow, no coloured frame. The state
+   dot in the head is the only colour, and it means what it means everywhere.
+
+   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
+   ?view=zones they resolve from `.zl` (zones-lab.css); everywhere else the
+   fallback IS the catalogue's own value.
+
+   What is added below the catalogue's block is only what the prototype never
+   had: the drag handle, split-down / maximize / close, the empty dropzone,
+   blocking cards, and the popovers a live status line opens. */
+
+.zl-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 0;
   min-width: 0;
-  border: 1px solid var(--surface0);
-  position: relative;
+  min-height: 0;
   overflow: hidden;
-  transition: border-color var(--duration) var(--ease), box-shadow var(--duration) var(--ease);
 }
+.zl-pane.is-tall { grid-row: 1 / 3; }
 
-.pane.focused {
-  border-color: color-mix(in srgb, var(--peach) 55%, var(--surface1));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--peach) 35%, transparent),
-    0 0 28px color-mix(in srgb, var(--peach) 7%, transparent);
-}
-
-.pane.p-tall {
-  grid-row: 1 / 3;
-}
-
-.pane:not(.focused) {
-  filter: saturate(0.85);
-}
-
-.pane:not(.focused) .p-body {
-  opacity: 0.82;
-}
-
-.pane .focus-tag {
-  position: absolute;
-  top: 5px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  color: var(--peach);
-  background: color-mix(in srgb, var(--peach) 12%, var(--base));
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-  padding: 1px var(--space-2) 2px;
-  letter-spacing: var(--tracking-wide);
-  pointer-events: none;
-  z-index: var(--z-sticky);
-}
-
-.pane .p-head {
+.zl-pane-head {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 70%, transparent);
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px 0 14px;
+  color: var(--zl-t3, #9091a6);
+}
+.zl-pane.is-focus .zl-pane-head { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+.zl-pane-head.is-drag { cursor: grab; }
+.zl-pane-head.is-drag:active { cursor: grabbing; }
+.zl-pane-grip {
+  width: 12px;
+  height: 12px;
   flex: none;
+  color: var(--zl-t4, #66677c);
+  opacity: 0.55;
 }
+.zl-pane-head .zl-dot { display: block; }
+.zl-pane-head .zl-dot.is-idle { display: block; background: var(--zl-t4, #66677c); }
 
-/* Draggable header: the whole head is the drag handle in a connected pane. */
-.pane .p-head-drag {
-  cursor: grab;
-}
-
-.pane .p-head-drag:active {
-  cursor: grabbing;
-}
-
-.pane .p-grip {
-  color: var(--surface2);
-  flex: none;
-  opacity: 0.5;
-  transition: opacity var(--duration) var(--ease);
-}
-@media (hover: hover) {
-
-
-.pane .p-head-drag:hover .p-grip {
-  opacity: 1;
-}
-}
-
-/* Tile number badge (⌘+N target) */
-.pane .p-badge {
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  font-weight: var(--weight-bold);
-  color: var(--overlay0);
-  background: var(--surface0);
-  min-width: 17px;
-  height: 17px;
-  line-height: 17px;
-  text-align: center;
-  border-radius: var(--radius-sm);
-  flex: none;
-}
-
-.pane.focused .p-badge {
-  color: var(--peach);
-  background: color-mix(in srgb, var(--peach) 16%, var(--base));
-}
-
-.pane .p-head .state-dot {
-  flex: none;
-}
-
-.pane .p-title {
-  background: none;
-  border: none;
-  padding: 0;
-  font-family: var(--font);
-  font-weight: var(--weight-semibold);
-  font-size: var(--text-base);
-  color: var(--text);
+.zl-pane-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--zl-r-md, 10px);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  letter-spacing: inherit;
   cursor: pointer;
-  /* A long title stays on one line and ellipsizes instead of wrapping to
-     several rows and stretching the header. min-width:0 lets it shrink inside
-     the flex row; the path/model/tools keep their space. */
+}
+.zl-pane-title:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+.zl-pane-title:focus-visible {
+  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline-offset: 2px;
+}
+.zl-pane-t {
   min-width: 0;
-  flex-shrink: 1;
+  font-size: var(--zl-fs-body, 14px);
+  font-weight: 600;
+  color: var(--zl-t2, #c3c4d1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-@media (hover: hover) {
-
-
-.pane .p-title:hover {
-  color: var(--rosewater);
-}
-}
-
-.pane .p-title:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.pane .p-path {
+.zl-pane.is-focus .zl-pane-t { color: var(--zl-t1, #f4f4f7); }
+.zl-pane-path { color: var(--zl-t4, #66677c); flex: none; }
+.zl-pane .zl-data {
   font-family: var(--mono);
-  font-size: var(--text-micro);
-  color: var(--overlay0);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.pane .p-model {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--lavender);
-  background: var(--surface0);
-  border-radius: var(--radius-sm);
-  padding: 2px var(--space-2);
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  flex: none;
-}
-
-.pane .p-tools {
+.zl-pane-tools {
   margin-left: auto;
   display: flex;
-  gap: var(--space-1);
   align-items: center;
-  opacity: 0;
-  transition: opacity var(--duration) var(--ease);
+  gap: 8px;
+  flex: none;
+  padding-left: 8px;
 }
-.pane.focused .p-tools,
-.pane:focus-within .p-tools {
-  opacity: 1;
-}
-@media (hover: hover) {
-
-
-.pane:hover .p-tools{
-  opacity: 1;
-}
-}
-@media (hover: hover) {
-
-
-.pane .p-tools .icon-button.variant-ghost.p-close:hover {
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 12%, transparent);
-}
-}
-.pane .p-tools .p-preview.is-on {
-  color: var(--mauve);
-  background: color-mix(in srgb, var(--mauve) 12%, transparent);
+.zl-pane-head .zl-kbd {
+  padding: 2px 5px;
+  border-radius: var(--zl-r-sm, 6px);
+  background: var(--zl-raised, #1e1e29);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  color: var(--zl-t3, #9091a6);
 }
 
-.pane .p-max-wrap {
-  position: relative;
+/* The two actions the catalogue drew, and the extras production grafts.
+   32px in the pane head (the desktop crumb's copy of this class is 36). */
+.zl-pane-head .zl-desk-act {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--zl-r-md, 10px);
+  background: transparent;
+  color: var(--zl-t3, #9091a6);
+  cursor: pointer;
 }
-
-.pane .p-max-tip {
-  position: absolute;
-  /* Preserve the existing --space-1 gap below the now-28px action control. */
-  top: var(--space-8);
-  right: 0;
-  white-space: nowrap;
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  color: var(--peach);
-  background: var(--crust);
-  border: 1px solid color-mix(in srgb, var(--peach) 35%, var(--surface0));
-  border-radius: var(--radius-sm);
-  padding: 3px var(--space-2);
-  opacity: 0;
-  transition: opacity var(--duration) var(--ease);
-  pointer-events: none;
-  z-index: var(--z-sticky);
+.zl-pane-head .zl-desk-act svg { width: 15px; height: 15px; display: block; }
+.zl-pane-head .zl-desk-act:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+.zl-pane-head .zl-desk-act:focus-visible {
+  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline-offset: 2px;
 }
-@media (hover: hover) {
-
-
-.pane.focused .p-max-wrap:hover .p-max-tip {
-  opacity: 1;
+.zl-pane-head .zl-desk-act.is-on {
+  color: var(--zl-accent, #cba6f7);
+  background: var(--zl-accent-dim, rgba(203, 166, 247, 0.12));
 }
-}
+.zl-pane-head .zl-desk-act.is-close:hover { color: var(--zl-red, #f38ba8); }
 
-.pane .p-body {
+.zl-pane-body {
   flex: 1;
-  overflow-y: auto;
-  padding: var(--space-4);
   min-height: 0;
-  font-size: var(--text-sm);
-  line-height: var(--leading-relaxed);
-}
-
-.pane .p-status {
-  flex: none;
-  border-top: 1px solid color-mix(in srgb, var(--surface0) 70%, transparent);
-}
-
-.pane .p-dock {
-  flex: none;
-}
-
-.pane .p-dock .zl-live {
-  max-width: none;
-}
-
-.pane .p-status .status-strip {
-  max-width: none;
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-}
-
-.pane .p-input {
-  flex: none;
-  margin: var(--space-2) var(--space-3) var(--space-3);
-  background: var(--mantle);
-  border: 1px solid var(--surface0);
-  border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
-  color: var(--overlay0);
-  font-family: var(--font);
-  font-size: var(--text-sm);
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.pane.focused .p-input {
-  border-color: var(--surface1);
-  color: var(--overlay1);
-}
-
-.pane.focused .p-input::before {
-  content: "";
-  width: 2px;
-  height: 14px;
-  background: var(--mauve);
-  border-radius: 1px;
-  animation: pane-input-blink 1s steps(2) infinite;
-  flex: none;
-}
-
-@keyframes pane-input-blink {
-  50% {
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pane.focused .p-input::before {
-    animation: none;
-  }
-}
-
-.pane .p-input .send {
-  margin-left: auto;
-  width: var(--space-6);
-  height: var(--space-6);
-  border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, var(--peach), color-mix(in srgb, var(--peach) 60%, var(--mauve)));
-  color: var(--crust);
-  display: grid;
-  place-items: center;
-  font-size: var(--text-xs);
-  flex: none;
-}
-
-/* p-foot — pane pulse ("● streaming", "waiting 0:42"…), optional
-   footer between the body and the fake composer. */
-.pane .p-foot {
-  flex: none;
-  padding: var(--space-2) var(--space-4);
-  border-top: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  color: var(--overlay0);
-  display: flex;
-  gap: var(--space-3);
-  align-items: center;
-}
-
-.pane .p-foot .pulse-b {
-  color: var(--blue);
-}
-
-.pane .p-foot .pulse-y {
-  color: var(--yellow);
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.pane .p-foot .spacer {
-  margin-left: auto;
-}
-
-/* ── drag-and-drop + attention ── */
-
-.pane.drag-over {
-  outline: 2px dashed var(--mauve);
-  outline-offset: -2px;
-}
-
-.pane.attention.blocked {
-  border-color: color-mix(in srgb, var(--yellow) 45%, var(--surface1));
-}
-
-.pane.attention.errored {
-  border-color: color-mix(in srgb, var(--red) 45%, var(--surface1));
-}
-
-/* Touch drag ghost (appended to <body> by useTouchDrag) */
-.touch-drag-ghost {
-  background: var(--mantle);
-  border: 1px solid var(--surface1);
-}
-
-/* ── connected pane body — Stream + Composer + blocking ──
-   In a connected pane the body is the live Stream (its own scroll), so we drop
-   the generic p-body padding/overflow and let Stream/Composer own their layout
-   at panel density. */
-.pane .p-body.p-body-live {
-  padding: 0;
+  flex-direction: column;
   overflow: hidden;
+}
+.zl-pane .zl-dock { position: relative; z-index: 3; }
+
+/* ── What the prototype never had ───────────────────────────────────────── */
+
+.zl-pane.is-drag {
+  outline: 1px dashed var(--zl-accent-line, rgba(203, 166, 247, 0.45));
+  outline-offset: -1px;
+}
+
+.zl-pane-foot {
+  flex: none;
+  padding: 6px 14px;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta, 12px);
+  color: var(--zl-t4, #66677c);
   display: flex;
-  flex-direction: column;
-  /* Reading text never compresses with density: prose is --text-base (14px) in
-     single, grid and mobile alike. The pane's --text-sm above is for the mock
-     gallery body; the live stream reads at full size. Density compresses chrome
-     (padding, headers, ledger, badges), not the words. */
-  font-size: var(--text-base);
-  line-height: var(--leading-normal);
+  gap: 12px;
+  align-items: center;
 }
+.zl-pane-foot .pulse-b { color: var(--zl-accent, #cba6f7); }
+.zl-pane-foot .pulse-y { color: var(--zl-yellow, #f9e2af); display: inline-flex; align-items: center; gap: 4px; }
+.zl-pane-foot .spacer { margin-left: auto; }
 
-.pane .p-body-live .zl-transcript {
-  padding: 8px 16px 16px;
-}
-
-/* Blocking strip (McpBanner / permission / ask_user) above the composer. */
-.pane .p-blocking {
+.zl-pane-blocking {
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3) 0;
+  gap: 8px;
+  padding: 8px 12px 0;
   overflow-y: auto;
   max-height: 50%;
 }
 
-/* Empty (session-less) pane dropzone — ports the old .tile-empty. */
-.pane .pane-empty {
+.zl-pane-empty {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-6);
+  gap: 10px;
+  padding: 24px;
   text-align: center;
-  color: var(--overlay0);
+  color: var(--zl-t4, #66677c);
 }
-
-.pane .pane-empty .lucide {
+.zl-pane-empty .lucide {
   width: 34px;
   height: 34px;
-  color: var(--surface2);
+  color: var(--zl-t4, #66677c);
   stroke-width: 1.25;
 }
+.zl-pane-empty-title { font-size: var(--zl-fs-body, 14px); color: var(--zl-t3, #9091a6); }
+.zl-pane-empty-hint { font-size: var(--zl-fs-meta, 12px); color: var(--zl-t4, #66677c); }
 
-.pane .pane-empty-title {
-  font-size: var(--text-sm);
-  color: var(--overlay1);
-}
-
-.pane .pane-empty-hint {
-  font-size: var(--text-xs);
-  color: var(--surface2);
-}
-
-/* Model badge as control (grid): same look as .p-model, clickable. */
-.pane .p-model-wrap {
-  position: relative;
-  flex: none;
-  display: inline-flex;
-}
-
-.pane button.p-model-btn {
-  cursor: pointer;
-  border: 0;
-  font: inherit;
-  color: inherit;
-}
-@media (hover: hover) {
-
-
-.pane button.p-model-btn:hover {
-  filter: brightness(1.08);
-}
-}
-
-.pane button.p-model-btn:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-/* ModelSelector is portalled to body because a grid pane clips its children.
-   PickerPopover.is-fixed carries the coordinates. */
-
-/* Usage / MCP popovers above the pane status strip. */
-.pane .pane-status-anchor {
-  position: relative;
-}
-
-.pane .status-strip-usage-popover {
+/* Usage / MCP popovers above the pane status strip. A grid pane clips its
+   children, so these sit just above the line inside the pane. */
+.zl-pane .pane-status-anchor { position: relative; }
+.zl-pane .status-strip-usage-popover {
   position: absolute;
-  left: var(--space-2);
+  left: 8px;
   right: auto;
-  bottom: calc(100% + var(--space-1));
-  z-index: var(--z-overlay);
-  background: var(--mantle);
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  padding: var(--space-3);
+  bottom: calc(100% + 4px);
+  z-index: var(--z-overlay, 40);
+  background: var(--zl-sheet, #171720);
+  border: 0;
+  border-radius: var(--zl-r-lg, 16px);
+  box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12)), 0 16px 48px rgba(0, 0, 0, 0.45);
+  padding: 12px;
   max-width: min(360px, 90vw);
   max-height: min(70vh, 480px);
   overflow: auto;
 }
-.pane .status-strip-mcp-popover {
-  left: auto;
-  right: var(--space-2);
+.zl-pane .status-strip-mcp-popover { left: auto; right: 8px; }
+
+/* Touch drag ghost (appended to <body> by useTouchDrag). */
+.touch-drag-ghost {
+  background: var(--zl-sheet, #171720);
+  box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12));
 }

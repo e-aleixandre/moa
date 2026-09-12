@@ -169,8 +169,8 @@
    to sit here never applied.)
 
    The session row no longer uses this primitive: it carries the catalogue's
-   own .zl-dot, halo included. These rules are for the dot's other homes — the
-   pane head, the chips, the ledger. */
+   own .zl-dot, halo included. The pane head now uses that same .zl-dot.
+   These rules are for the remaining StateDot homes — the chips, the ledger. */
 [data-ambient="on"] .state-dot.idle { box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
 [data-ambient="on"] .state-dot.running { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent); }
 [data-ambient="on"] .state-dot.permission { box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 26%, transparent); }

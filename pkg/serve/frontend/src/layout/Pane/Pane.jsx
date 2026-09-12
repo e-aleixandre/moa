@@ -1,33 +1,84 @@
-import { Maximize2, X, GripHorizontal, Columns2, Rows2, AppWindow } from "lucide-preact";
-import { StateDot, IconButton } from "../../primitives/index.js";
+import { Dot } from "../../components/SessionRow/SessionRow.jsx";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import "./Pane.css";
 
-// Pane — a single grid panel. Title and path in the header; model and
-// thinking live on the status strip, same as the conversation screen.
+// Pane — a single grid panel. Markup and CSS are the catalogue's
+// (catalog/zones-lab.jsx `Pane`, zones-lab.css the `.zl-pane*` block), MOVED
+// here rather than imitated: the class names travelled with the rules, so the
+// pane IS the accepted design instead of a translation of it. The catalogue
+// imports this component now, which is what makes one definition rather than
+// two.
 //
-// `footer` — optional slot for the pane's pulse ("● streaming",
-// "waiting 0:42"…), like in the "grid alive" section of the live
-// states mockup. `hideComposer` hides the fake input when the footer already
-// visually closes the panel (avoids duplicating send affordances in the live
-// panes of the demo gallery).
+// What is NOT the catalogue's is everything the prototype never had, grafted
+// on top: drag between panes, split down / maximize / close, the empty
+// dropzone, a live Stream in the body, blocking cards above the composer,
+// and the real Composer / LiveBar / StatusStrip the connected grid supplies.
 //
-// The pane is the leaf of the REAL tile tree. All the wiring props
-// below are OPTIONAL and retro-compatible: without them the component renders
-// exactly as the galleries expect (the mock `p-input` and no drag/split/focus
-// affordances). The connected grid (PaneGrid) supplies them:
-//   tileNumber   — the pane's DFS index+1 badge (⌘+N target).
-//   onSplitRight/onSplitDown — split this pane horizontally/vertically.
-//   onFocus      — click-to-focus this pane (the leaf owns the caret logic).
-//   canClose     — whether the close button is shown (never below 1 tile).
-//   draggable + onDragStart / touchDrag / onDragOver/Leave/Drop — HTML5 + touch
-//                  drag-and-drop of sessions between panes and from the Spine.
-//   dragOver     — highlight while a drag hovers this pane.
-//   empty        — render the "Drag a session here" dropzone instead of body.
-//   composer     — the REAL Composer node, replacing the mock `p-input`.
-//   blocking     — a slot (McpBanner/permission/ask_user) above the composer.
-//   paneRef / dataTileId — the section element ref + data-tile-id (focusTile
-//                  queries the tile's textarea by this attribute).
+// The catalogue's own head: state dot, title + path as one button, a ⌘N
+// chip, then the two actions the prototype drew (preview, split). Focus is
+// told by the head — title in t1, a raised head tone — not by a ring, a
+// shadow or a "FOCUS" tag.
+
+function PreviewIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
+      <path d="M2 6.5h12" stroke="currentColor" stroke-width="1.5" />
+    </svg>
+  );
+}
+
+function SplitIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
+      <path d="M8 3v10" stroke="currentColor" stroke-width="1.5" />
+    </svg>
+  );
+}
+
+function SplitDownIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
+      <path d="M2 8h12" stroke="currentColor" stroke-width="1.5" />
+    </svg>
+  );
+}
+
+function MaximizeIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M5.5 3.5H3.5v2M10.5 3.5h2v2M5.5 12.5H3.5v-2M10.5 12.5h2v-2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+function GripIcon() {
+  return (
+    <svg class="zl-pane-grip" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M5.5 4h5M5.5 8h5M5.5 12h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+const STATE_LABEL = {
+  running: "running",
+  permission: "requires permission",
+  error: "error",
+  saved: "saved",
+  idle: "idle",
+  unseen: "new result",
+};
+
 export function Pane({
   title,
   path,
@@ -41,7 +92,6 @@ export function Pane({
   children,
   footer,
   hideComposer = false,
-  // --- connected props (all optional) ---
   tileNumber,
   onSplitRight,
   onSplitDown,
@@ -62,124 +112,113 @@ export function Pane({
   blocking,
   paneRef,
   dataTileId,
-  bodyLive = false,
   overlay,
   onPreviewToggle,
   previewOpen = false,
-  // headExtra — extra pane-header actions (the Artifacts entry), in the same
-  // icon family as the existing tools.
   headExtra,
 }) {
-  const classes = [
-    "pane",
-    variant === "tall" ? "p-tall" : "",
-    focused ? "focused" : "",
-    dragOver ? "drag-over" : "",
-    attention ? `attention ${state === "error" ? "errored" : "blocked"}` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  // The pane's state (running/permission/error) is encoded via color and
-  // animation on the StateDot; for screen readers we expose it as
-  // text in the panel's and the dot's accessible names.
-  const STATE_LABEL = {
-    running: "running",
-    permission: "requires permission",
-    error: "error",
-    saved: "saved",
-    idle: "idle",
-    unseen: "new result",
-  };
   const stateText = STATE_LABEL[state] ?? state;
+  const classes = [
+    "zl-pane",
+    focused ? "is-focus" : "",
+    variant === "tall" ? "is-tall" : "",
+    dragOver ? "is-drag" : "",
+    empty ? "is-empty" : "",
+    attention ? "is-attention" : "",
+  ].filter(Boolean).join(" ");
+
+  const ariaName = tileNumber != null
+    ? `Pane ${tileNumber}: ${title || "Empty"}`
+    : (title || "Empty");
 
   const dragProps = draggable
     ? { draggable: true, onDragStart, ...(touchDrag || {}) }
     : {};
+
+  const showDock = !hideComposer && (composer || dock || status);
 
   return (
     <section
       ref={paneRef}
       data-tile-id={dataTileId}
       class={classes}
-      aria-label={`${title || "Empty"}, ${stateText}`}
+      aria-label={`${ariaName}, ${stateText}`}
       onClick={onFocus}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      {focused && <span class="focus-tag">FOCUS</span>}
-
-      <div class={draggable ? "p-head p-head-drag" : "p-head"} {...dragProps}>
-        {draggable && <GripHorizontal size={13} class="p-grip" aria-hidden="true" />}
-        {tileNumber != null && (
-          <span class="p-badge" title={formatShortcut(String(tileNumber), { mod: true })}>{tileNumber}</span>
-        )}
-        <StateDot state={state} size={9} label={stateText} />
+      <div class={draggable ? "zl-pane-head is-drag" : "zl-pane-head"} {...dragProps}>
+        {draggable && <GripIcon />}
+        <Dot state={state} />
         <button
           type="button"
-          class="p-title"
+          class="zl-pane-title"
           style={titleTone ? { color: `var(--${titleTone})` } : undefined}
           onClick={onTitleClick}
         >
-          {title || "Empty"}
+          <span class="zl-pane-t">{title || "Empty"}</span>
+          {path && <span class="zl-pane-path zl-data">{path}</span>}
         </button>
-        {path && <span class="p-path">{path}</span>}
-
-        <div class="p-tools">
+        <div class="zl-pane-tools">
+          {tileNumber != null && (
+            <kbd class="zl-kbd zl-data" title={`Focus with ${formatShortcut(String(tileNumber), { mod: true })}`}>
+              ⌘{tileNumber}
+            </kbd>
+          )}
           {headExtra}
-          {onPreviewToggle && (
-            <IconButton label="Live preview" onClick={onPreviewToggle} className={previewOpen ? "p-preview is-on" : "p-preview"}>
-              <AppWindow size={15} />
-            </IconButton>
-          )}
-          {onSplitRight && (
-            <IconButton label="Split right" onClick={onSplitRight}>
-              <Columns2 size={15} />
-            </IconButton>
-          )}
+          <button
+            type="button"
+            class={`zl-desk-act${previewOpen ? " is-on" : ""}`}
+            aria-label="Live preview"
+            aria-pressed={previewOpen || undefined}
+            onClick={onPreviewToggle}
+          >
+            <PreviewIcon />
+          </button>
+          <button
+            type="button"
+            class="zl-desk-act"
+            aria-label="Split right"
+            onClick={onSplitRight}
+          >
+            <SplitIcon />
+          </button>
           {onSplitDown && (
-            <IconButton label="Split down" onClick={onSplitDown}>
-              <Rows2 size={15} />
-            </IconButton>
+            <button type="button" class="zl-desk-act" aria-label="Split down" onClick={onSplitDown}>
+              <SplitDownIcon />
+            </button>
           )}
-          <div class="p-max-wrap">
-            <IconButton label="Maximize into conversation view" onClick={onMaximize}>
-              <Maximize2 size={15} />
-            </IconButton>
-            <span class="p-max-tip" aria-hidden="true">→ conversation view</span>
-          </div>
-          {canClose && (
-            <IconButton label="Close pane" variant="ghost" className="p-close" onClick={onClose}>
-              <X size={15} />
-            </IconButton>
+          {onMaximize && (
+            <button
+              type="button"
+              class="zl-desk-act"
+              aria-label="Maximize into conversation view"
+              title="→ conversation view"
+              onClick={onMaximize}
+            >
+              <MaximizeIcon />
+            </button>
+          )}
+          {canClose && onClose && (
+            <button type="button" class="zl-desk-act is-close" aria-label="Close pane" onClick={onClose}>
+              <CloseIcon />
+            </button>
           )}
         </div>
       </div>
 
-      <div class={bodyLive ? "p-body p-body-live" : "p-body"}>{children}</div>
+      <div class="zl-pane-body">{children}</div>
 
-      {footer && <div class="p-foot">{footer}</div>}
+      {footer && <div class="zl-pane-foot">{footer}</div>}
+      {blocking && <div class="zl-pane-blocking">{blocking}</div>}
 
-      {blocking && <div class="p-blocking">{blocking}</div>}
-
-      {composer ? (
+      {showDock && (
         <div class="zl-dock is-pane">
           {dock}
           {composer}
           {status}
         </div>
-      ) : (
-        <>
-          {dock && <div class="p-dock">{dock}</div>}
-          {!hideComposer && (
-            <div class="p-input">
-              <span class="p-input-text">Message moa…</span>
-              <span class="send" aria-hidden="true">↑</span>
-            </div>
-          )}
-          {status && <div class="p-status">{status}</div>}
-        </>
       )}
       {overlay}
     </section>

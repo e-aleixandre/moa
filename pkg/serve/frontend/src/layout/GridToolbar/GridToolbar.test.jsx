@@ -9,8 +9,29 @@ function buttons(node, result = []) {
   return result;
 }
 
-test("split controls retain their visual copy but expose distinct labels", () => {
-  const splitButtons = buttons(GridToolbar({})).filter((button) => button.props.class === "gt-btn");
+function textOf(node) {
+  if (node == null || typeof node !== "object") return String(node ?? "");
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  return textOf(node.props?.children);
+}
+
+test("the catalogue bar is Layout · N panes and the yellow needs-you count", () => {
+  const tree = GridToolbar({ paneCount: 3, needsYouCount: 1 });
+  expect(tree.props.class).toBe("zl-grid-bar");
+  expect(textOf(tree)).toContain("Layout");
+  expect(textOf(tree)).toContain("3");
+  expect(textOf(tree)).toContain("panes");
+  expect(textOf(tree)).toContain("needs you");
+  expect(buttons(tree).length).toBe(0);
+});
+
+test("split controls expose distinct labels", () => {
+  // The two splits used to share the visible word "split"; the labels are
+  // what a screen reader uses to tell them apart. Inverting them (same
+  // label twice) would make the second control unannounced.
+  const splitButtons = buttons(GridToolbar({
+    onSplitRight: () => {},
+    onSplitDown: () => {},
+  })).filter((button) => /Split/.test(button.props["aria-label"] || ""));
   expect(splitButtons.map((button) => button.props["aria-label"])).toEqual(["Split right", "Split down"]);
-  expect(splitButtons.map((button) => button.props.children.at(-1))).toEqual([" split", " split"]);
 });

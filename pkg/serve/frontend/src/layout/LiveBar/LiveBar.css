@@ -354,7 +354,7 @@ div.zl-live-row { cursor: default; }
    catalogue's phone frame keep its dots — the container query never saw a
    definite width). */
 .conversation-main .zl-live,
-.pane .p-dock .zl-live,
+.zl-dock.is-pane .zl-live,
 .mcomposer .zl-live {
   min-width: 0;
   width: 100%;
