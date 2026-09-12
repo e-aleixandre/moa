@@ -359,6 +359,28 @@ test('a pushed work view mounts the real conversation only while its back swipe 
   expect(bash).toContain('onDraggingChange?.(dragging)');
 });
 
+test('the drawer edge gesture is confined to the normal conversation, leaving pushed views to back navigation', async () => {
+  const screen = await Bun.file(new URL('./MobileConversationScreen.jsx', import.meta.url)).text();
+  const drawerHook = await Bun.file(new URL('../../../hooks/useEdgeSwipeDrawer.js', import.meta.url)).text();
+
+  // Inversion checks: removing either the pushed-view guard or the root binding
+  // makes this fail, rather than merely proving the hook file happens to exist.
+  expect(screen).toContain('enabled: !hasPushedView');
+  expect(screen).toContain('ref={drawerGesture.surfaceRef} {...drawerGesture.swipeBind}');
+  expect(screen).toContain('drawerPanelRef={drawerGesture.panelRef}');
+  expect(drawerHook).toContain('if (!enabledRef.current || settlingRef.current');
+  expect(drawerHook).toContain('if (opening) onOpen?.();');
+});
+
+test('the mobile drawer keeps a visible conversation strip while widening session titles', async () => {
+  const css = await Bun.file(new URL('../SessionDrawer/SessionDrawer.css', import.meta.url)).text();
+
+  // 340px at a 390px viewport leaves 50px visible; the calc protects 48px on
+  // smaller handsets too. Reverting to the old 300px width fails this check.
+  expect(css).toContain('width: min(340px, calc(100% - 48px));');
+  expect(css).not.toContain('width: min(300px, 88vw);');
+});
+
 test('a delivered inbox event with a deleted destination cannot replace the active mobile session', () => {
   const previous = store.get();
   setState({

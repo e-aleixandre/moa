@@ -6,9 +6,9 @@
    the phone frame in the gallery), not the window, so it stays inside the
    device on screen.
 
-   The sheet comes in FROM THE LEFT EDGE at 300px, not down from the title at
+   The sheet comes in FROM THE LEFT EDGE at 340px, not down from the title at
    390px. At the full width the conversation was gone and there was nothing on
-   screen to say what "back" meant; at 300 the transcript stays visible down the
+   screen to say what "back" meant; at 340 the transcript stays visible down the
    right side, so the drawer reads as something on top of your session. The left
    edge is also where the other sessions live in the product's spatial grammar
    (the right edge is this session).
@@ -42,9 +42,9 @@
   top: 0;
   bottom: 0;
   left: 0;
-  /* 300px, and never more than most of a narrow screen: the visible strip of
-     transcript is the whole point, so it may not be squeezed to nothing. */
-  width: min(300px, 88vw);
+  /* 340px gives session titles another 40px on a 390px phone, while this
+     lower bound preserves a 48px conversation strip on narrower handsets. */
+  width: min(340px, calc(100% - 48px));
   display: flex;
   flex-direction: column;
   overflow: hidden;

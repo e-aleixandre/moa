@@ -61,6 +61,7 @@ export function SessionDrawer({
   drawerCollapsed = {},
   onGroupByProject,
   onToggleProject,
+  panelRef: externalPanelRef,
 }) {
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
@@ -206,6 +207,11 @@ export function SessionDrawer({
     }
   };
 
+  const setPanelRef = (node) => {
+    panelRef.current = node;
+    externalPanelRef?.(node);
+  };
+
   return (
     <div class={`sdrawer-veil${entered ? " is-open" : ""}`} onClick={onVeilClick}>
       <div
@@ -214,7 +220,7 @@ export function SessionDrawer({
         aria-modal="true"
         aria-label="Sessions"
         tabIndex={-1}
-        ref={panelRef}
+        ref={setPanelRef}
       >
         {view === "new" ? (
           <NewSessionView

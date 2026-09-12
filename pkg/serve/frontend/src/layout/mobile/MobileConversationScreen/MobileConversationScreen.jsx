@@ -25,6 +25,7 @@ import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import { MobileBashJobView } from "./MobileBashJobView.jsx";
 import { MobileInboxView } from "./MobileInboxView.jsx"; // wake-on-event
 import { LiveBar } from "../../LiveBar/LiveBar.jsx";
+import { useEdgeSwipeDrawer } from "../../../hooks/useEdgeSwipeDrawer.js";
 import { selectMobileChrome } from "./chrome.js";
 import "./MobileConversationScreen.css";
 
@@ -75,10 +76,23 @@ export function selectMobileDrawerSession(session, { resume, activate, close }) 
 }
 
 export function MobileConversationScreen({ version = null, forceMobile = false }) {
+  const drawerOpen = useStore((s) => s.drawerOpen);
+  const inboxOpen = useStore((s) => s.inboxOpen);
+  const activeSession = useStore((s) => mobileFocusedSession(s, forceMobile).session);
+  const panelOpen = useStore((s) => sessionPanelView(s, mobileFocusedSession(s, forceMobile).id).open);
+  const hasPushedView = !!(activeSession?.viewingSubagent || activeSession?.viewingBashJob || inboxOpen);
+  const drawerGesture = useEdgeSwipeDrawer({
+    open: drawerOpen,
+    // A pushed view owns this edge for back navigation; modal surfaces own
+    // their interaction too. The drawer gesture belongs only to conversation.
+    enabled: !hasPushedView && !panelOpen && !activeSession?.previewOpen,
+    onOpen: () => openDrawer("list"),
+    onClose: closeDrawer,
+  });
   return (
-    <div class="mconv">
+    <div class={drawerGesture.dragging ? "mconv is-dragging-drawer" : "mconv"} ref={drawerGesture.surfaceRef} {...drawerGesture.swipeBind}>
       <MobileConversationBody forceMobile={forceMobile} />
-      <MobileSessionChrome version={version} forceMobile={forceMobile} />
+      <MobileSessionChrome version={version} forceMobile={forceMobile} drawerPanelRef={drawerGesture.panelRef} />
     </div>
   );
 }
@@ -353,7 +367,7 @@ function MobileConversationBody({ forceMobile = false }) {
   );
 }
 
-function MobileSessionChrome({ version, forceMobile = false }) {
+function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   const chrome = useStore((s) => selectMobileChrome(s, forceMobile));
   const panel = useStore((s) => sessionPanelView(s, chrome.activeId));
   // The alarm of the session being read, for its own capsule. Read from the
@@ -454,6 +468,7 @@ function MobileSessionChrome({ version, forceMobile = false }) {
         drawerCollapsed={chrome.drawerCollapsed}
         onGroupByProject={setGroupByProject}
         onToggleProject={setDrawerProjectCollapsed}
+        panelRef={drawerPanelRef}
       />
       {/* The settings sheet is its own surface in both densities: `phone`
           swaps the centred panel for a bottom sheet, which is the one thing
