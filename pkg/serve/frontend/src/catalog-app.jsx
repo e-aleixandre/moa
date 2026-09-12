@@ -11,7 +11,6 @@ import { ConversationScreen, PaneGridScreen, MobileConversationScreen, DesktopSh
 import { ToastContainer, CommandPalette } from "./components/index.js";
 import { store } from "./data/store.js";
 import { useStore } from "./hooks/useStore.js";
-import { bindRouter } from "./data/router.js";
 import { closePalette } from "./data/palette.js";
 import { setMobile } from "./data/tile-actions.js";
 import { Catalog } from "./catalog/catalog.jsx";
@@ -84,7 +83,6 @@ function Nav({ current }) {
 }
 
 function useCatalogBootstrap() {
-  useEffect(() => bindRouter(), []);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
     const handler = (e) => setMobile(e.matches);

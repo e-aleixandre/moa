@@ -948,14 +948,9 @@ export function CommandPalette({
   };
 
   // ── Mobile chassis (bottom sheet) ───────────────────────────────────────────
-  // TODO (overlay-history hook): the palette doesn't use Sheet — it has its
-  // own two chassis (mobile bottom sheet / desktop centered veil) and Escape
-  // here doesn't always close (it steps back from the "create" step first,
-  // see onKeyDown above), so wiring it to data/overlay-history.js needs a bit
-  // more care than a drop-in openOverlay() call to keep that step-back
-  // behavior correct on the back gesture too. Left out of this pass; the
-  // Sheet-based overlays (RewindTimeline, file/HTML viewers, drawers) already
-  // get the back-gesture hook via Sheet.
+  // The palette doesn't use Sheet — it has its own two chassis (mobile bottom
+  // sheet / desktop centered veil) and its own Escape, which steps back from
+  // the "create" step before closing (see onKeyDown above).
   if (isMobile) {
     return (
       <div class="pal-veil pal-veil-mobile" onClick={onVeil}>

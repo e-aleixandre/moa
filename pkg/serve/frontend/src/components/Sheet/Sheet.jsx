@@ -2,7 +2,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { createPortal } from "preact/compat";
 import { X } from "lucide-preact";
 import { IconButton } from "../../primitives/index.js";
-import { openOverlay } from "../../data/overlay-history.js";
+import { pushLayer } from "../../data/overlay-layers.js";
 import "./Sheet.css";
 
 const FOCUSABLE_SELECTOR =
@@ -12,10 +12,11 @@ let sheetIdCounter = 0;
 
 // Sheet — centered modal panel with overlay. Closes with Escape and click on the
 // overlay, traps focus while open and restores it to the trigger on close.
-// While open, it registers itself with the shared overlay-history stack
-// (data/overlay-history.js) so the browser/PWA back gesture closes it instead
-// of navigating away — every consumer (RewindTimeline, file/HTML viewers,
-// drawers…) gets that for free just by using Sheet.
+// While open, it registers itself as the top layer (data/overlay-layers.js) so
+// a capture-phase key handler BELOW it (the artifacts drawer) knows to leave
+// Escape to this Sheet. It does not touch browser history: a back/forward
+// gesture has no meaning in the installed app, and every Sheet already closes
+// through Escape, its X or the backdrop.
 //
 // The overlay is PORTALLED to <body>. `.sheet-overlay` is position:fixed with
 // --z-sheet (200), above the composer/dock's --z-overlay (100), but z-index is
@@ -28,34 +29,28 @@ let sheetIdCounter = 0;
 export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabelAttr, children, class: className, ...rest }) {
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
-  const closeOverlayRef = useRef(null);
+  const popLayerRef = useRef(null);
   const idRef = useRef(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
   const label = ariaLabel ?? ariaLabelAttr ?? title;
   if (idRef.current === null) idRef.current = `sheet-${++sheetIdCounter}`;
 
-  // Register/unregister with overlay-history whenever `open` toggles. Closing
-  // via popstate (back gesture) calls onClose the same as any other close
-  // path — the overlay-history module already made sure not to double-pop.
-  // Reads onClose through a ref so an identity change while open doesn't
-  // tear down and re-push a history entry.
+  // Register/unregister as the top layer whenever `open` toggles. Cleanup
+  // covers unmount-while-open too, so the layer never outlives the panel.
   useEffect(() => {
     if (!open) return undefined;
-    closeOverlayRef.current = openOverlay(idRef.current, () => onCloseRef.current?.());
+    popLayerRef.current = pushLayer(idRef.current);
     return () => {
-      // Cleanup covers unmount-while-open too, not just the normal close
-      // path — either way the history entry must be consumed.
-      closeOverlayRef.current?.();
-      closeOverlayRef.current = null;
+      popLayerRef.current?.();
+      popLayerRef.current = null;
     };
   }, [open]);
 
-  // requestClose funnels every close path (Escape, backdrop, close button)
-  // through overlay-history so the pushed entry gets consumed with a single
-  // history.back() — bypassing it here would leave a dangling entry.
+  // requestClose is the single close path (Escape, backdrop, close button): it
+  // drops the layer claim immediately, so an overlay below stops deferring to
+  // this Sheet even before the unmount effect runs.
   const requestClose = () => {
-    closeOverlayRef.current?.();
+    popLayerRef.current?.();
+    popLayerRef.current = null;
     onClose?.();
   };
 

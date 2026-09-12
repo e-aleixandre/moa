@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Sidebar } from "../../Sidebar/Sidebar.jsx";
-import { openOverlay } from "../../../data/overlay-history.js";
 import { NewSessionView } from "./NewSessionView.jsx";
 import "./SessionDrawer.css";
 
@@ -35,8 +34,8 @@ const FOCUSABLE_SELECTOR =
 // and the parent screen performs a sheet HANDOFF — the drawer fully exits, then
 // the Settings sheet slides up in its place (one overlay at a time). `onClosed`
 // fires once the leave animation has settled, so the parent can sequence that
-// handoff without stacking overlays or racing overlay-history's popstate. The
-// Inbox door in the foot takes the SAME handoff.
+// handoff without stacking overlays. The Inbox door in the foot takes the SAME
+// handoff.
 export function SessionDrawer({
   open,
   step = "list",
@@ -66,9 +65,6 @@ export function SessionDrawer({
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
   const closeTimerRef = useRef(null);
-  const closeOverlayRef = useRef(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
   const onClosedRef = useRef(onClosed);
   onClosedRef.current = onClosed;
   const wasOpenRef = useRef(open);
@@ -89,19 +85,6 @@ export function SessionDrawer({
   useEffect(() => {
     if (open) setView(step);
   }, [step, open]);
-
-  // Register with the shared overlay-history stack whenever open toggles, so
-  // the browser/PWA back gesture closes the drawer instead of navigating away
-  // (same contract as Sheet/MobileSheet). The effect cleanup consumes the
-  // history entry on every close path, and the returned close() is idempotent.
-  useEffect(() => {
-    if (!open) return undefined;
-    closeOverlayRef.current = openOverlay("session-drawer", () => onCloseRef.current?.());
-    return () => {
-      closeOverlayRef.current?.();
-      closeOverlayRef.current = null;
-    };
-  }, [open]);
 
   // Enter/leave state machine driven by `open`. Enter: mount, then flip
   // `entered` on the next frame so the .is-open transition runs. Leave: drop
@@ -152,7 +135,6 @@ export function SessionDrawer({
     if (!open) return;
     const onKeyDown = (e) => {
       if (e.key === "Escape") {
-        closeOverlayRef.current?.();
         onClose?.();
         return;
       }
@@ -202,7 +184,6 @@ export function SessionDrawer({
 
   const onVeilClick = (e) => {
     if (e.target === e.currentTarget) {
-      closeOverlayRef.current?.();
       onClose?.();
     }
   };

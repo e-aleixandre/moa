@@ -7,31 +7,12 @@ import { test, expect, beforeEach, afterEach } from 'bun:test';
 import { store, setState } from '../../data/store.js';
 import { ARTIFACTS_CLOSED, artifactRevision, originLabel } from '../../data/artifacts-model.js';
 import { artifactsOrigin, openArtifactsList } from '../../data/artifacts.js';
-import { openOverlay, __resetOverlayHistoryForTests } from '../../data/overlay-history.js';
+import { pushLayer, isTopLayer, __resetOverlayLayersForTests } from '../../data/overlay-layers.js';
 
 const originalFetch = globalThis.fetch;
 
-// openOverlay skips its stack entirely when there is no history (bun has no
-// DOM), so the ordering tests install the same minimal fake the
-// overlay-history tests use.
-function installFakeHistory() {
-  const listeners = new Set();
-  const history = { state: null, pushState() {}, back() {} };
-  globalThis.window = {
-    history,
-    addEventListener(type, fn) { if (type === 'popstate') listeners.add(fn); },
-    removeEventListener(type, fn) { if (type === 'popstate') listeners.delete(fn); },
-  };
-  globalThis.history = history;
-}
-
-function uninstallFakeHistory() {
-  delete globalThis.window;
-  delete globalThis.history;
-}
-
 beforeEach(() => {
-  __resetOverlayHistoryForTests();
+  __resetOverlayLayersForTests();
   globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({ artifacts: [] }), { status: 200 }));
   setState({
     artifacts: ARTIFACTS_CLOSED,
@@ -49,8 +30,7 @@ afterEach(() => {
   // The store is a singleton for the whole bun run: leaving isMobile true here
   // would hand the phone layout to unrelated test files.
   setState({ isMobile: false, activeSession: null });
-  __resetOverlayHistoryForTests();
-  uninstallFakeHistory();
+  __resetOverlayLayersForTests();
 });
 
 // ── origin identity ──────────────────────────────────────────────────────────
@@ -93,36 +73,31 @@ test('the accessible name always carries the origin, even where it is hidden', (
 
 // ── Escape ownership between stacked overlays ────────────────────────────────
 // The drawer listens on capture, so it also sees keys aimed at overlays ABOVE
-// it (an HtmlResourceInfo Sheet opened from a row). isTopOverlay is what keeps
+// it (an HtmlResourceInfo Sheet opened from a row). isTopLayer is what keeps
 // those keys with their own overlay.
 
-test('the drawer only owns Escape while it is the top overlay', async () => {
-  const { isTopOverlay } = await import('../../data/overlay-history.js');
-  installFakeHistory();
-  openOverlay('artifacts', () => {});
-  expect(isTopOverlay('artifacts')).toBe(true);
+test('the drawer only owns Escape while it is the top layer', () => {
+  pushLayer('artifacts');
+  expect(isTopLayer('artifacts')).toBe(true);
 
-  const closeSheet = openOverlay('sheet-1', () => {});
+  const popSheet = pushLayer('sheet-1');
   // A Sheet (HtmlResourceInfo) is now on top: the drawer must not act.
-  expect(isTopOverlay('artifacts')).toBe(false);
-  expect(isTopOverlay('sheet-1')).toBe(true);
+  expect(isTopLayer('artifacts')).toBe(false);
+  expect(isTopLayer('sheet-1')).toBe(true);
 
-  closeSheet();
-  expect(isTopOverlay('artifacts')).toBe(true);
+  popSheet();
+  expect(isTopLayer('artifacts')).toBe(true);
 });
 
-test('a reader opened from the list owns Escape through its own entry', async () => {
-  const { isTopOverlay } = await import('../../data/overlay-history.js');
-  installFakeHistory();
-  openOverlay('artifacts', () => {});
-  openOverlay('artifact-reader', () => {});
-  expect(isTopOverlay('artifact-reader')).toBe(true);
-  expect(isTopOverlay('artifacts')).toBe(false);
+test('a reader opened from the list owns Escape through its own layer', () => {
+  pushLayer('artifacts');
+  pushLayer('artifact-reader');
+  expect(isTopLayer('artifact-reader')).toBe(true);
+  expect(isTopLayer('artifacts')).toBe(false);
 });
 
-test('isTopOverlay is false when nothing is open', async () => {
-  const { isTopOverlay } = await import('../../data/overlay-history.js');
-  expect(isTopOverlay('artifacts')).toBe(false);
+test('isTopLayer is false when nothing is open', () => {
+  expect(isTopLayer('artifacts')).toBe(false);
 });
 
 // ── an open reader after a republication ────────────────────────────────────

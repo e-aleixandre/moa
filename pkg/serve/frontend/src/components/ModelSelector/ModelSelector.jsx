@@ -3,7 +3,6 @@ import { api } from "../../data/api.js";
 import { thinkingOptionsFor, thinkingPositionFor } from "../../data/selectors.js";
 import { groupByProvider, pinnedModelSpecs } from "./model-selector-model.js";
 import { useSheetDismiss } from "../../hooks/useSheetDismiss.js";
-import { openOverlay } from "../../data/overlay-history.js";
 import "./ModelSelector.css";
 
 // ModelSelector — the catalogue's model picker, MOVED
@@ -16,7 +15,7 @@ import "./ModelSelector.css";
 // What is NOT the catalogue's is everything the prototype never had, grafted
 // on top: the real /api/models catalog, thinkingOptionsFor / thinkingPositionFor
 // (Astra's "low" is position zero), pinned IDs from /api/model-preferences,
-// session writes, the busy/disabled lock, overlay-history and swipe on the
+// session writes, the busy/disabled lock, Escape and swipe on the
 // phone sheet, and the house rule that a missing datum hides its segment
 // rather than drawing a zero.
 //
@@ -385,32 +384,30 @@ export function PickerPopover({
 // and X), a grabber because it is the one surface you can also drag away.
 // `includeScrim` is for production, which has no lab veil of its own;
 // the catalogue Phone already paints `.zl-scrim.is-sheet` next to this.
+// `dismissible` is the other production-only half: the swipe-down gesture and
+// the Escape key. The catalogue's static mock wires neither, so it opts out.
 export function PickerSheet({
   kind,
   models,
   onClose,
   includeScrim = false,
-  overlayHistory = false,
+  dismissible = false,
   children,
 }) {
   const v = usePickView(kind, models);
-  const dismiss = useSheetDismiss({ onClose: overlayHistory ? onClose : undefined });
+  const dismiss = useSheetDismiss({ onClose: dismissible ? onClose : undefined });
   useEffect(() => {
-    if (!overlayHistory || !onClose) return undefined;
-    const close = openOverlay("picker-sheet", onClose);
+    if (!dismissible || !onClose) return undefined;
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
-    return () => {
-      close?.();
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [overlayHistory, onClose]);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [dismissible, onClose]);
   return (
     <>
       {includeScrim && (
         <div
           class="zl-scrim is-sheet"
-          ref={overlayHistory ? dismiss.veilRef : undefined}
+          ref={dismissible ? dismiss.veilRef : undefined}
           onClick={onClose}
         />
       )}
@@ -418,12 +415,12 @@ export function PickerSheet({
         class="zl-sheet"
         role="dialog"
         aria-label={PICK_TITLES[kind] || kind}
-        ref={overlayHistory ? dismiss.sheetRef : undefined}
+        ref={dismissible ? dismiss.sheetRef : undefined}
       >
         <span class="zl-grab" aria-hidden="true" />
         <div
           class={`zl-side-head is-sheet${v.sub ? " is-sub" : ""}`}
-          {...(overlayHistory ? dismiss.grabBind : {})}
+          {...(dismissible ? dismiss.grabBind : {})}
         >
           {v.head}
           <button type="button" class="zl-x" onClick={onClose} aria-label="Close">

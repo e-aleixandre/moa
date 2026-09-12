@@ -13,8 +13,8 @@ const labels = { script: 'Scripts', style: 'Styles', font: 'Fonts', image: 'Imag
 // load if previewed, plus any non-HTTPS resources (blocked by the preview's
 // sandbox/CSP). Opening the preview loads these automatically — this panel
 // only tells the user what to expect, it never fetches the resources itself.
-// The back-gesture/history binding lives once in the Sheet this component
-// renders into (data/overlay-history.js via components/Sheet/Sheet.jsx).
+// Closing (Escape, backdrop, X) belongs to the Sheet this component renders
+// into (components/Sheet/Sheet.jsx).
 export function HtmlResourceInfo({ name, url, onClose }) {
   const [state, setState] = useState({ kind: 'loading' });
 

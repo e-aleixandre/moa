@@ -20,9 +20,8 @@ export function FileViewer({ name, mime, url, size, onClose }) {
   const [expanded, setExpanded] = useState(false);
   const { containerRef, contentRef, zoomed } = usePinchZoom();
 
-  // Scroll-lock only — the back-gesture/history binding lives once in the
-  // Sheet this component renders into (data/overlay-history.js via
-  // components/Sheet/Sheet.jsx), so it isn't duplicated here.
+  // Scroll-lock only — closing (Escape, backdrop, X) belongs to the Sheet this
+  // component renders into (components/Sheet/Sheet.jsx), not duplicated here.
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';

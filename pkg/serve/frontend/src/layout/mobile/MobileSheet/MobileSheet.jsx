@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useSheetDismiss } from "../../../hooks/useSheetDismiss.js";
-import { openOverlay } from "../../../data/overlay-history.js";
 import "./MobileSheet.css";
 
 const FOCUSABLE_SELECTOR =
@@ -17,8 +16,7 @@ const FOCUSABLE_SELECTOR =
 //
 // It reuses the exact proven mobile-sheet plumbing the SessionDrawer already
 // ships: the enter/leave state machine (both directions animate, MOBILE-POLISH
-// §5), swipe-down-to-dismiss via useSheetDismiss, focus trap + restore, and the
-// shared overlay-history stack so the browser/PWA back gesture closes it.
+// §5), swipe-down-to-dismiss via useSheetDismiss, and focus trap + restore.
 //
 // Placement: the panel/scrim are absolutely positioned inside the nearest
 // positioned ancestor (.mconv), pinned to its edges (scrim inset:0, sheet
@@ -26,32 +24,18 @@ const FOCUSABLE_SELECTOR =
 //
 // `bare` is for a child that IS a surface with its own head — the session panel,
 // which carries the eyebrow/back/X the dossier keeps in both densities. The
-// sheet still owns the scrim, the enter/leave, the focus trap, the back gesture
-// and the grabber; it just does not draw a second title over the child's.
+// sheet still owns the scrim, the enter/leave, the focus trap and the grabber;
+// it just does not draw a second title over the child's.
 export function MobileSheet({ open, onClose, onClosed, title, scope, bare = false, children }) {
   const { sheetRef, veilRef, dragging, grabBind } = useSheetDismiss({ onClose });
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
   const closeTimerRef = useRef(null);
-  const closeOverlayRef = useRef(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
   const onClosedRef = useRef(onClosed);
   onClosedRef.current = onClosed;
   const wasOpenRef = useRef(open);
   const [visible, setVisible] = useState(open);
   const [entered, setEntered] = useState(open);
-
-  // Register with overlay-history whenever open toggles so the back gesture
-  // closes the sheet instead of navigating away (same contract as <Sheet>).
-  useEffect(() => {
-    if (!open) return undefined;
-    closeOverlayRef.current = openOverlay("mobile-sheet", () => onCloseRef.current?.());
-    return () => {
-      closeOverlayRef.current?.();
-      closeOverlayRef.current = null;
-    };
-  }, [open]);
 
   // Enter/leave state machine (mirrors SessionDrawer): mount then flip `entered`
   // next frame so the .is-open transition runs; on close drop `entered` and
@@ -75,8 +59,7 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, bare = fals
       setEntered(false);
       // Fire onClosed only on a real open→close transition, once the sheet has
       // fully dismissed/unmounted — so a caller can hand off to another overlay
-      // (e.g. the Rewind timeline) without stacking it above an outgoing sheet
-      // or racing the shared overlay-history back()/popstate.
+      // (e.g. the Rewind timeline) without stacking it above an outgoing sheet.
       const fireClosed = () => {
         if (!wasOpenRef.current) return;
         wasOpenRef.current = false;
@@ -116,7 +99,6 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, bare = fals
     if (!open) return;
     const onKeyDown = (e) => {
       if (e.key === "Escape") {
-        closeOverlayRef.current?.();
         onClose?.();
         return;
       }
@@ -162,7 +144,6 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, bare = fals
   const isOpen = entered && !dragging;
   const onScrimClick = (e) => {
     if (e.target === e.currentTarget) {
-      closeOverlayRef.current?.();
       onClose?.();
     }
   };
@@ -188,10 +169,7 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, bare = fals
           type="button"
           class="msheet-grab"
           aria-label="Close"
-          onClick={() => {
-            closeOverlayRef.current?.();
-            onClose?.();
-          }}
+          onClick={() => onClose?.()}
           {...grabBind}
         >
           <span class="msheet-grab-bar" aria-hidden="true" />

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "preact/hooks";
 import { useStore } from "../../hooks/useStore.js";
 import { registerOverlay } from "../../data/overlays.js";
-import { openOverlay } from "../../data/overlay-history.js";
 import {
   PANEL_PAGES, artifactsVerdict, closeSessionPanel, mcpVerdict, runFacts,
   setSessionPanelPage, usageVerdict,
@@ -233,17 +232,6 @@ export function SessionPanel({
   const sub = page !== "root";
   const close = onClose || closeSessionPanel;
   const goPage = onPage || setSessionPanelPage;
-
-  useEffect(() => {
-    if (!open || inline) return undefined;
-    const stop = openOverlay("session-panel", () => closeSessionPanel());
-    return () => stop();
-  }, [open, inline]);
-  useEffect(() => {
-    if (!open || !sub || inline) return undefined;
-    const stop = openOverlay("session-panel-page", () => setSessionPanelPage("root"));
-    return () => stop();
-  }, [open, sub, inline]);
 
   useEffect(() => {
     if (!open) return undefined;

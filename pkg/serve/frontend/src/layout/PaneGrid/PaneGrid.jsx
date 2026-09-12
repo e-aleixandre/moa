@@ -200,7 +200,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   const handleMaximize = useCallback(() => {
     if (!node.sessionId) return;
     // Keep the session in the focused tile, then leave the grid in place: the
-    // router flips the view (pushState, no reload) and the conversation screen
+    // router flips the view in place (no reload) and the conversation screen
     // renders the focused tile's session. navigate({session}) focuses it first.
     assignToTile(tileId, node.sessionId);
     navigate(null, { session: node.sessionId });

@@ -6,7 +6,7 @@ import { CommandPalette, ToastContainer, PulsePairingPanel, ArtifactsDrawer } fr
 import { store, setState as setStoreState } from "./data/store.js";
 import { useStore } from "./hooks/useStore.js";
 import { togglePalette, closePalette } from "./data/palette.js";
-import { bindRouter, navigate } from "./data/router.js";
+import { navigate } from "./data/router.js";
 import { isPulsePairingOpen, subscribePulsePairing, closePulsePairing } from "./data/pulse-pairing-panel.js";
 import { hasBlockingOverlay, registerOverlay } from "./data/overlays.js";
 import { globalPaletteContext, isDesktopGridShortcut, shouldLockMobileDocument } from "./data/app-layout.js";
@@ -57,11 +57,6 @@ function useBootstrap() {
   const [version, setVersion] = useState(null);
   const isMobile = useStore((s) => s.isMobile);
   const sessionCount = useStore((s) => Object.keys(s.sessions).length);
-
-  // Install the single popstate listener so the browser Back/Forward buttons
-  // keep the store's `view` in sync with the URL (in-app conversation ⇄ grid
-  // hops use pushState, no reload — see data/router.js).
-  useEffect(() => bindRouter(), []);
 
   // Warm notification taps use the same openSession behavior as a cold
   // ?session= deep link, waiting for the authoritative initial session list.

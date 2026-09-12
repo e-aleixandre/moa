@@ -4,7 +4,6 @@ import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
 import { toggleSound } from "../../data/tile-actions.js";
 import { registerOverlay } from "../../data/overlays.js";
-import { openOverlay } from "../../data/overlay-history.js";
 import { getPushState, subscribePushState, enablePush, disablePush } from "../../data/push-client.js";
 import { deriveModelSpecs } from "../../data/selectors.js";
 import { groupByProvider, specMatches } from "../ModelSelector/model-selector-model.js";
@@ -618,20 +617,6 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
     subscribed: "Push, even when moa is closed.",
     busy: "Applying…",
   };
-
-  // The back gesture / browser Back closes the sheet, and while a page is
-  // pushed it returns to the root first — one entry per level, the same
-  // contract every other surface in the app keeps.
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = openOverlay("global-settings", () => onClose?.());
-    return () => close();
-  }, [open]);
-  useEffect(() => {
-    if (!open || !sub) return undefined;
-    const close = openOverlay("global-settings-page", () => setPage("root"));
-    return () => close();
-  }, [open, sub]);
 
   useEffect(() => {
     if (!open) return undefined;

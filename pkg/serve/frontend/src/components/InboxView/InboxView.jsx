@@ -6,9 +6,8 @@
 // imports this component now, which is what makes one definition rather than two.
 //
 // What is NOT the catalogue's is everything the prototype never had, grafted
-// on top: the real event store, routing/create/dismiss, overlay-history so the
-// phone sheet closes on back, the models /api actually offers, retrying a
-// failed load, and opening the session a settled row went to.
+// on top: the real event store, routing/create/dismiss, the models /api actually
+// offers, retrying a failed load, and opening the session a settled row went to.
 //
 // Two hosts, one body. On the desktop the inbox swaps the sidebar's list in
 // place (variant="column") and a decision is a page pushed inside that column,
@@ -20,7 +19,6 @@ import { deriveModelSpecs } from "../../data/selectors.js";
 import { defaultModelSpec } from "../CommandPalette/command-palette-model.js";
 import { eventCreateSpec, inboxGroups, pendingReasonLabel } from "../../data/events.js";
 import { modelCodename } from "../../data/util/format.js";
-import { openOverlay } from "../../data/overlay-history.js";
 import "./InboxView.css";
 
 const HUES = [210, 265, 170, 320, 40, 190];
@@ -410,7 +408,6 @@ export function InboxView({
   const status = health?.status || "ready";
   const card = selected ? cards.find((c) => c.event.id === selected) : null;
   const phone = variant === "sheet";
-  const closeOverlayRef = useRef(null);
   const stepRef = useRef(step);
   stepRef.current = step;
 
@@ -441,19 +438,6 @@ export function InboxView({
           : onIgnoreSource?.(event.source);
     Promise.resolve(run).then(() => close()).catch(() => {});
   };
-
-  // The phone sheet (and the desktop push) register as one overlay so the
-  // browser/PWA back gesture closes the decision rather than leaving the app.
-  // The model step's own back stays in-component: overlay close ends the
-  // decision, matching the catalogue's "one decision, not a stack of sheets".
-  useEffect(() => {
-    if (!selected) return undefined;
-    closeOverlayRef.current = openOverlay("inbox-decision", () => close());
-    return () => {
-      closeOverlayRef.current?.();
-      closeOverlayRef.current = null;
-    };
-  }, [selected]);
 
   const headBack = card && variant === "column"
     ? () => (step === "model" ? setStep("route") : close())

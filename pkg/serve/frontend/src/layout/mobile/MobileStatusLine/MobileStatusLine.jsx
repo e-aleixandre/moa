@@ -118,7 +118,7 @@ export function MobileStatusLine({ session, usage }) {
           kind="model"
           models={specs}
           includeScrim
-          overlayHistory
+          dismissible
           onClose={() => setSessionOpen(false)}
         >
           {(v) => (
@@ -160,7 +160,7 @@ export function MobileStatusLine({ session, usage }) {
         <PickerSheet
           kind="perm"
           includeScrim
-          overlayHistory
+          dismissible
           onClose={() => setPermsOpen(false)}
         >
           <PermissionOptions

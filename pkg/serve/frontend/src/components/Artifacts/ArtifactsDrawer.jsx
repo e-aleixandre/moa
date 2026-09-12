@@ -2,7 +2,7 @@ import { createPortal } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { ArrowLeft, Layers, Loader2, Maximize2, Minimize2, Search, X } from 'lucide-preact';
 import { useStore } from '../../hooks/useStore.js';
-import { isTopOverlay, openOverlay } from '../../data/overlay-history.js';
+import { isTopLayer, pushLayer } from '../../data/overlay-layers.js';
 import { registerOverlay } from '../../data/overlays.js';
 import {
   artifactsOrigin, artifactsSlice, backToArtifactsList, closeArtifacts, openArtifactFromList,
@@ -78,20 +78,19 @@ export function ArtifactsDrawer() {
     searchWasOpen.current = searching;
   }, [list, searching]);
 
-  // Back gesture / browser Back: one entry for the whole drawer (the shared
-  // overlay-history module), plus a second layer while a reader opened FROM the
-  // list is showing, so Back returns to the list first. Cleanup closes through
-  // the module (no fromPop flag) so the guard entry is consumed exactly like
-  // every Sheet does; an already-popped entry makes it a no-op.
+  // Layer claim, for Escape ownership only (data/overlay-layers.js): one entry
+  // for the drawer, plus a second while a reader opened FROM the list is
+  // showing, so the drawer's capture-phase key handler below knows which of its
+  // two surfaces the key belongs to and defers to any Sheet opened above it.
+  // Nothing here touches browser history — closing is the X, Escape, the
+  // backdrop or the reader's own Back.
   useEffect(() => {
     if (!open) return undefined;
-    const close = openOverlay('artifacts', () => closeArtifacts());
-    return () => close();
+    return pushLayer('artifacts');
   }, [open]);
   useEffect(() => {
     if (!fromList) return undefined;
-    const close = openOverlay('artifact-reader', () => backToArtifactsList());
-    return () => close();
+    return pushLayer('artifact-reader');
   }, [fromList]);
 
   // While modal, the drawer is the top layer: global chords defer to it.
@@ -104,21 +103,21 @@ export function ArtifactsDrawer() {
       else if (fromList) backToArtifactsList();
       else closeArtifacts();
     };
-    // The drawer's topmost overlay id: the reader opened from the list pushes
-    // its own entry, so that is what must be on top for the key to be ours.
+    // The drawer's topmost layer id: the reader opened from the list claims
+    // its own layer, so that is what must be on top for the key to be ours.
     const ownId = () => (fromList ? 'artifact-reader' : 'artifacts');
     const onKey = (event) => {
       if (event.key === 'Escape') {
         // This handler is on capture, so it also sees keys aimed at overlays
         // ABOVE the drawer (an HtmlResourceInfo Sheet opened from a row).
-        // Those own their Escape; only act when the drawer is the top overlay.
-        if (!isTopOverlay(ownId())) return;
+        // Those own their Escape; only act when the drawer is the top layer.
+        if (!isTopLayer(ownId())) return;
         event.preventDefault();
         event.stopPropagation();
         dismiss();
         return;
       }
-      if (event.key !== 'Tab' || !modal || !isTopOverlay(ownId())) return;
+      if (event.key !== 'Tab' || !modal || !isTopLayer(ownId())) return;
       // Modal means the dialog owns the tab ring: wrap at both ends instead of
       // letting Tab walk into the (inert) app behind it.
       const nodes = focusableIn(panel.current);

@@ -1,23 +1,23 @@
 // router.test.js — run with `bun test`.
 //
 // bun's default test env has no DOM. These tests install a minimal fake
-// window/history/location so the router can push/replace state and fire
-// popstate deterministically. They verify the core promise of the module:
-// navigate() flips the store's `view` WITHOUT a full-page reload (no
-// location.href assignment), keeps the URL in sync via pushState, and a Back
-// gesture (popstate) re-derives the view from the URL.
+// window/history/location so the router can replace state deterministically.
+// They verify the core promise of the module: navigate() flips the store's
+// `view` WITHOUT a full-page reload (no location.href assignment), keeps the
+// URL in sync so a RELOAD or a shared link lands on the same view, and — the
+// inversion this module must honour — never adds a history entry, because a
+// browser back/forward gesture has no meaning in the installed app.
 
 import { test, expect, beforeEach, afterEach } from 'bun:test';
-import { navigate, viewFromLocation, bindRouter, __resetRouterForTests } from './router.js';
-import { openOverlay, __resetOverlayHistoryForTests } from './overlay-history.js';
+import { navigate, viewFromLocation } from './router.js';
 import { store, setState } from './store.js';
 
-let popListeners;
 let reloads;
+let pushes;
 
 function installFakeEnv(initialSearch = '') {
-  popListeners = new Set();
   reloads = 0;
+  pushes = 0;
   const loc = {
     pathname: '/next/',
     search: initialSearch,
@@ -29,30 +29,29 @@ function installFakeEnv(initialSearch = '') {
   const history = {
     state: null,
     lastMethod: null,
+    // Counted, never expected: a pushState here would give the PWA a back
+    // gesture that navigates inside the app.
     pushState(state, _title, url) {
+      pushes++;
       this.lastMethod = 'push';
       this.state = state;
-      loc.search = url && url.startsWith('?') ? url : '';
+      loc.search = url && url.includes('?') ? url.slice(url.indexOf('?')) : '';
     },
     replaceState(state, _title, url) {
       this.lastMethod = 'replace';
       this.state = state;
-      loc.search = url && url.startsWith('?') ? url : '';
+      loc.search = url && url.includes('?') ? url.slice(url.indexOf('?')) : '';
     },
   };
   const win = {
     history,
     location: loc,
-    addEventListener(type, fn) { if (type === 'popstate') popListeners.add(fn); },
-    removeEventListener(type, fn) { if (type === 'popstate') popListeners.delete(fn); },
+    addEventListener() {},
+    removeEventListener() {},
   };
   globalThis.window = win;
   globalThis.history = history;
   globalThis.location = loc;
-}
-
-function firePopstate() {
-  popListeners.forEach((fn) => fn({ type: 'popstate' }));
 }
 
 function uninstallFakeEnv() {
@@ -62,14 +61,10 @@ function uninstallFakeEnv() {
 }
 
 beforeEach(() => {
-  __resetRouterForTests();
-  __resetOverlayHistoryForTests();
   setState({ view: null });
 });
 
 afterEach(() => {
-  __resetRouterForTests();
-  __resetOverlayHistoryForTests();
   uninstallFakeEnv();
 });
 
@@ -100,54 +95,29 @@ test('navigate to null returns to the conversation view (no ?view=)', () => {
   expect(reloads).toBe(0);
 });
 
-test('navigate pushes a history entry tagged with the view', () => {
+// The inversion that matters: no entry is created, in either direction.
+test('navigate never pushes a history entry — it replaces', () => {
+  installFakeEnv('');
+  navigate('grid');
+  expect(history.lastMethod).toBe('replace');
+  navigate(null);
+  expect(history.lastMethod).toBe('replace');
+  expect(pushes).toBe(0);
+});
+
+test('the replaced entry still names the view, so a reload lands on it', () => {
   installFakeEnv('');
   navigate('grid');
   expect(history.state).toEqual({ moaView: 'grid' });
+  // A fresh load reads the URL, not the state.
+  expect(viewFromLocation()).toBe('grid');
 });
 
-test('a Back gesture re-derives the view from the URL', () => {
-  installFakeEnv('');
-  bindRouter();
+test('navigate preserves unrelated query parameters', () => {
+  installFakeEnv('?share=abc');
   navigate('grid');
-  expect(store.get().view).toBe('grid');
-  // Simulate the browser popping back to the pre-navigate URL.
-  location.search = '';
-  firePopstate();
-  expect(store.get().view).toBe(null);
-});
-
-test('a popstate with the URL unchanged is a no-op (overlay guard pop)', () => {
-  installFakeEnv('?view=grid');
-  setState({ view: 'grid' });
-  bindRouter();
-  let writes = 0;
-  const unsub = store.subscribe(() => { writes++; });
-  // URL still says grid (an overlay-history guard pop leaves it untouched).
-  firePopstate();
-  unsub();
-  expect(store.get().view).toBe('grid');
-  expect(writes).toBe(0);
-});
-
-test('navigating with an overlay open closes it and overwrites its guard (replaceState)', () => {
-  installFakeEnv('');
-  // An open Sheet pushes a single history guard on top of the conversation URL.
-  let closedWith = null;
-  openOverlay('sheet-a', (fromPop) => { closedWith = fromPop; });
-  navigate('grid');
-  // The overlay was closed as a history-driven close (fromPop=true → it must
-  // not fire its own back()).
-  expect(closedWith).toBe(true);
-  // The router overwrote the guard entry instead of pushing a new one, so
-  // history stays [conversation, grid] with no stranded guard.
-  expect(history.lastMethod).toBe('replace');
-  expect(store.get().view).toBe('grid');
-  expect(reloads).toBe(0);
-});
-
-test('navigating with no overlay open pushes a new entry', () => {
-  installFakeEnv('');
-  navigate('grid');
-  expect(history.lastMethod).toBe('push');
+  expect(location.search).toContain('share=abc');
+  expect(location.search).toContain('view=grid');
+  navigate(null);
+  expect(location.search).toBe('?share=abc');
 });
