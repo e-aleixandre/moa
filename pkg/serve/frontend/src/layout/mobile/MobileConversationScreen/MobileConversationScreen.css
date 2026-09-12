@@ -34,9 +34,11 @@
     radial-gradient(78% 46% at 12% 0%, rgba(137, 180, 250, 0.11), transparent 72%),
     radial-gradient(64% 42% at 96% 8%, rgba(203, 166, 247, 0.09), transparent 74%);
 }
-/* The wash sits at the bottom of its own stacking context; the children ride
-   above it. */
-.mconv > * { position: relative; z-index: 1; }
+/* No rule on the children: the wash is already behind them. Touching them was
+   the bug -- `position: relative` tore the absolutely positioned header out of
+   its top inset, and a blanket `z-index: 1` overrode the header's own 4 and
+   dropped it under the composer. The pseudo element sits at z-index 0 and the
+   children keep the stacking the layout gave them. */
 
 /* The user's message opens the stream: no extra top margin. */
 .mconv .zl-transcript > .zl-user:first-child,
