@@ -29,7 +29,7 @@ import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { addToast } from "../../data/notifications.js";
 import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast } from "../../data/session-actions.js";
-import { toggleSessionPanel } from "../../data/session-panel.js";
+import { toggleSessionPanel, sessionPanelView } from "../../data/session-panel.js";
 import { positionModelPopover } from "../PaneGrid/model-popover-position.js";
 import "./ConversationScreen.css";
 
@@ -50,6 +50,7 @@ export function ConversationScreen() {
   const activeId = useStore(focusedSessionId);
   const loaded = useStore((s) => s.sessionsLoaded);
   const usage = useStore((s) => s.usage);
+  const panel = useStore((s) => sessionPanelView(s, activeId));
 
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
   // The dock is the permanent home for live ASYNC work (async subagents + bash)
@@ -263,6 +264,7 @@ export function ConversationScreen() {
         <ChatHead
           title={sessionTitle(session)}
           path={shortPath(session.cwd) || session.cwd || ""}
+          panelOpen={panel.open}
           onTitleClick={() => toggleSessionPanel(session.id)}
           onGridToggle={() => navigate("grid")}
           previewOpen={!!session.previewOpen}

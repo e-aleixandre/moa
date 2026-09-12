@@ -57,6 +57,9 @@ import { Artifact } from "../components/Artifacts/Artifact.jsx";
 /* Same move, the phone header: markup and CSS live in layout/mobile/MobileChrome
    now, and the prototype draws the shipped one. See the adapter in `Phone`. */
 import { MobileChrome } from "../layout/mobile/MobileChrome/MobileChrome.jsx";
+/* Same move, the desktop head: markup and CSS live in layout/ChatHead now,
+   and the prototype draws the shipped one. See the adapter in `Desktop`. */
+import { ChatHead } from "../layout/ChatHead/ChatHead.jsx";
 
 /* The three-zone skeleton, both densities side by side.
    This is a PROTOTYPE, not production: it draws the shell only (where things
@@ -1011,26 +1014,13 @@ function Phone({ label, live: preset, surface }) {
   );
 }
 
-/* ── Desktop ───────────────────────────────────────────────────────────── */
-function HeadActions() {
-  return (
-    <>
-      <button type="button" class="zl-desk-act" aria-label="Live preview">
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
-          <path d="M2 6.5h12" stroke="currentColor" stroke-width="1.5" />
-        </svg>
-      </button>
-      <button type="button" class="zl-desk-act" aria-label="Split">
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
-          <path d="M8 3v10" stroke="currentColor" stroke-width="1.5" />
-        </svg>
-      </button>
-    </>
-  );
-}
-
+/* ── Desktop ─────────────────────────────────────────────────────────────
+   MIGRATED (METODO §4): the crumb has no private copy here. Markup and CSS
+   were MOVED to layout/ChatHead, class names and all, and the prototype
+   imports them back. What sits here now is only an adapter: the lab's
+   session title, path and panel toggle mapped onto the shipped head, plus
+   the lab frame (density label, drawn desk, hint) which is the host, not
+   the piece. */
 function Desktop({ label, live: preset, surface }) {
   const [view, setView] = useState("recent");
   const settings = useSettingsSurface(surface);
@@ -1056,14 +1046,14 @@ function Desktop({ label, live: preset, surface }) {
           <Sidebar onPick={() => {}} desktop onSettings={settings.show} view={view} onView={setView} />
         </div>
         <div class="zl-desk-main">
-          <div class="zl-desk-head">
-            <button type="button" class="zl-crumb" onClick={() => panel.show()} aria-expanded={open}>
-              <span class="zl-crumb-title">Buscar un bug bounty</span>
-              <span class="zl-crumb-path zl-data">~/dev/moa</span>
-            </button>
-            <span class="zl-spacer" />
-            <HeadActions />
-          </div>
+          <ChatHead
+            title="Buscar un bug bounty"
+            path="~/dev/moa"
+            panelOpen={open}
+            onTitleClick={() => open ? panel.close() : panel.show()}
+            onPreviewToggle={() => {}}
+            onGridToggle={() => {}}
+          />
           <Transcript streaming={!!preset.fg && preset.fg.phase === "working"} tail={preset.fg?.phase === "waiting" ? ASK_CARD : null} />
           {set.pick && <div class="zl-veil" onClick={set.close} />}
           <div class="zl-dock">

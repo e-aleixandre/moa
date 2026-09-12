@@ -283,18 +283,13 @@
   box-shadow: inset 0 1px 0 var(--amb-on-edge), 0 24px 60px rgba(0, 0, 0, 0.45);
   overflow: hidden;
 }
-.sk-ambient .chat-head { background: transparent; padding: 16px 28px 6px; }
-.sk-ambient .chat-head .crumb-title { font-size: var(--amb-head); color: var(--amb-text); }
-.sk-ambient .chat-head .crumb-path { font-size: var(--amb-meta); color: var(--amb-text-4); }
-.sk-ambient .chat-head .grid-toggle,
-.sk-ambient .chat-head .head-action-icon,
-.sk-ambient .chat-head .icon-button {
-  border: 0;
+.sk-ambient .zl-desk-head { padding: 16px 28px 6px; }
+.sk-ambient .zl-crumb-title { font-size: var(--amb-head); color: var(--amb-text); }
+.sk-ambient .zl-crumb-path { font-size: var(--amb-meta); color: var(--amb-text-4); }
+.sk-ambient .zl-desk-act {
   background: var(--amb-hi);
-  border-radius: var(--amb-r-ctl);
   color: var(--amb-text-2);
 }
-.sk-ambient .chat-head .grid-toggle .kbd { font-family: var(--font); font-size: 10px; background: var(--amb-hi); border: 0; color: var(--amb-text-3); }
 .sk-ambient .zl-transcript { padding-left: 28px; padding-right: 28px; }
 
 /* transcript: the user's left bar stays — that gesture is reserved */

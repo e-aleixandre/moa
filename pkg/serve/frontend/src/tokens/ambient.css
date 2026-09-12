@@ -228,23 +228,9 @@
   color: var(--amb-text-3);
 }
 
-/* ── The desktop head ─────────────────────────────────────────────────────
-   The head sits on the sheet, so it does not need its own surface; its icon
-   buttons stop being outlined boxes and become the same soft wells the rest of
-   the controls use. */
-[data-ambient="on"] .chat-head { background: transparent; }
-[data-ambient="on"] .chat-head .crumb-title { color: var(--amb-text); }
-[data-ambient="on"] .chat-head .crumb-path { color: var(--amb-text-4); }
-[data-ambient="on"] .chat-head .grid-toggle,
-[data-ambient="on"] .chat-head .head-action-icon,
-[data-ambient="on"] .chat-head .icon-button {
-  border: 0;
-  background: var(--amb-hi);
-  border-radius: var(--amb-r-ctl);
-  color: var(--amb-text-2);
-}
-/* Keycaps: a bordered box in mono is the most terminal-looking thing in the
-   head. Same well, sans, no outline. */
+/* Keycaps: a bordered box in mono is the most terminal-looking thing on a
+   control. Same well, sans, no outline. The desktop head's own chrome moved
+   with ChatHead (catalogue classes); this is the leftover keycap restyle. */
 [data-ambient="on"] .kbd {
   font-family: var(--font);
   font-weight: var(--weight-medium);

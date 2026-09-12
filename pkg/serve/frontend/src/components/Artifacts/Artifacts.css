@@ -47,9 +47,9 @@
 .af-text-button { border: 0; padding: 6px 0; min-height: 32px; background: none; color: var(--peach); font: var(--text-sm) var(--font); cursor: pointer; white-space: nowrap; }
 
 /* ── Entries ─────────────────────────────────────────────────────────────── */
-.chat-head .head-action-icon.af-entry { width: auto; min-width: 28px; gap: 5px; padding: 0 7px 0 6px; }
-.chat-head .af-entry .af-count { font: var(--text-xs) var(--mono); line-height: 1; color: var(--overlay1); }
-.chat-head .af-entry.is-on .af-count { color: inherit; }
+.zl-desk-head .zl-desk-act.af-entry { width: auto; min-width: 36px; gap: 5px; padding: 0 7px 0 6px; }
+.zl-desk-head .af-entry .af-count { font: var(--text-xs) var(--mono); line-height: 1; color: var(--overlay1); }
+.zl-desk-head .af-entry.is-on .af-count { color: inherit; }
 
 /* ── Layer / panel ───────────────────────────────────────────────────────── */
 .af-layer { position: fixed; inset: 0; z-index: var(--z-sheet); pointer-events: none; }
@@ -74,7 +74,7 @@
    Grid cells keep their dimensions; the drawer overlays them. */
 @media (min-width: 1280px) {
   .artifacts-open .conversation-main { margin-right: 600px; }
-  .artifacts-open .chat-head .crumb-path { display: none; }
+  .artifacts-open .zl-crumb-path { display: none; }
 }
 
 /* One header row: back · name · actions. Same geometry as .msa-head. */

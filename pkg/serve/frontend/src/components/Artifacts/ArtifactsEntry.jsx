@@ -21,14 +21,14 @@ function isArtifactsOwner(state, sessionId) {
 }
 
 // ArtifactsEntry — the conversation head entry: a neighbour of the existing
-// head actions, in the same 28px icon-button family.
+// head actions, in the same 36px zl-desk-act family.
 export function ArtifactsEntry({ sessionId }) {
   const active = useStore((s) => isArtifactsOwner(s, sessionId));
   if (!sessionId) return null;
   return (
     <button
       type="button"
-      class={`head-action-icon af-entry${active ? ' is-on' : ''}`}
+      class={`zl-desk-act af-entry${active ? ' is-on' : ''}`}
       data-artifacts-trigger="true"
       onClick={() => openArtifactsList(sessionId)}
       aria-label="Artifacts in this conversation"

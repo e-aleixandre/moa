@@ -17,7 +17,42 @@ test("the conversation header is a title, not a toolbar of session controls", ()
   expect(head).not.toContain("onRewind");
   expect(head).not.toContain("head-rewind");
   expect(head).not.toContain("StateDot");
-  expect(head).toContain("grid");
+  expect(head).toContain("onGridToggle");
+});
+
+test("the desktop head is the catalogue's crumb, defined once", () => {
+  // METODO §4: the lab imports the shipped head and does not draw its own
+  // crumb. A private copy here would be the exact drift this move ends.
+  const lab = readFileSync(new URL("../../catalog/zones-lab.jsx", import.meta.url), "utf8");
+  expect(lab).toMatch(/import \{ ChatHead \} from ["'].*ChatHead\/ChatHead\.jsx["']/);
+  expect(lab).not.toMatch(/<div class="zl-desk-head">/);
+  expect(lab).not.toContain("function HeadActions");
+
+  expect(head).toContain('class="zl-desk-head"');
+  expect(head).toContain('class="zl-crumb"');
+  expect(head).toContain('class="zl-crumb-title"');
+  expect(head).toContain("zl-crumb-path");
+  expect(head).toContain("zl-desk-act");
+  expect(head).not.toContain("chat-head");
+  expect(head).not.toContain('class="crumb-title"');
+  expect(head).not.toContain("grid-toggle");
+});
+
+test("the crumb is a door to the session dossier, with ARIA that says so", () => {
+  // Inverting this (always painting a span, or dropping aria-expanded) would
+  // bring back a title that does not tell a screen reader it opens anything.
+  expect(head).toContain('aria-haspopup={onTitleClick ? "dialog" : undefined}');
+  expect(head).toContain("aria-expanded={onTitleClick ? panelOpen : undefined}");
+  expect(conv).toContain("panelOpen={panel.open}");
+  expect(conv).toContain("toggleSessionPanel(session.id)");
+});
+
+test("preview and grid stay wired, and preview keeps the focus return hook", () => {
+  expect(head).toContain('data-preview-trigger="true"');
+  expect(head).toContain("aria-label=\"Live preview\"");
+  expect(head).toContain("aria-label=\"Back to the grid\"");
+  expect(head).toContain("onGridToggle &&");
+  expect(head).toContain("onPreviewToggle &&");
 });
 
 test("the model lives on the status strip next to permission", () => {
