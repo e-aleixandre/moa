@@ -118,3 +118,41 @@ test('unsupported wake locks are safe no-ops', async () => {
   expect(() => claimWakeLock()()).not.toThrow();
   expect(__wakeLockStateForTests().supported).toBe(false);
 });
+
+// The bug this pair defends: iOS can revoke a granted lock on its own, and
+// nothing reclaimed it. The recording carried on with no lock and the screen
+// slept -- which is exactly "sometimes it works and sometimes it doesn't".
+test('a platform revoke while recording is reclaimed', async () => {
+  installFakeEnv();
+  const { claimWakeLock, __wakeLockStateForTests } = await freshModule();
+  claimWakeLock();
+  await Promise.resolve();
+  expect(__wakeLockStateForTests().held).toBe(true);
+
+  sentinels[0].fireRelease();
+  await Promise.resolve();
+  expect(__wakeLockStateForTests().held).toBe(false);
+
+  // The first rung of the ladder.
+  await new Promise((r) => setTimeout(r, 700));
+  expect(__wakeLockStateForTests().held).toBe(true);
+  expect(requests).toBe(2);
+});
+
+// And the brake: a platform that refuses to keep the lock must not be asked
+// forever. Without it a retry fired 647 times in 700ms.
+test('a platform that revokes instantly is not hammered', async () => {
+  installFakeEnv();
+  const { claimWakeLock } = await freshModule();
+  const doc = globalThis.document;
+  const original = globalThis.navigator.wakeLock.request;
+  globalThis.navigator.wakeLock.request = async function revoking() {
+    const sentinel = await original.call(this);
+    setTimeout(() => sentinel.fireRelease(), 0);
+    return sentinel;
+  };
+  claimWakeLock();
+  await new Promise((r) => setTimeout(r, 1500));
+  expect(requests).toBeLessThan(6);
+  expect(doc).toBeTruthy();
+});

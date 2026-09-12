@@ -17,6 +17,25 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Double-tap to zoom is the accidental gesture here: a missed tap on a row, or
+   a finger resting while scrolling, leaves the whole app scaled up with no
+   obvious way back. `manipulation` disables that and nothing else -- pinch to
+   zoom still works, which is what accessibility depends on and what
+   `user-scalable=no` would have taken away (WebKit ignores it anyway).
+
+   It has to be universal rather than a rule on body. The browser intersects
+   touch-action from the touched element up to the first scrolling ancestor and
+   stops there, so with the rule on body the transcript's own scroller swallows
+   it and the taps that actually zoom are never covered -- measured: the chain
+   above .zl-transcript read auto.
+
+   A bare `*` has zero specificity, so every deliberate value still wins: the
+   image viewers keep touch-action: none and drive pinch through usePinchZoom,
+   and the sheets keep theirs. */
+* {
+  touch-action: manipulation;
+}
+
 body {
   min-height: 100vh;
   background: var(--base);
