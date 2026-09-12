@@ -29,7 +29,10 @@ test("the desktop head is the catalogue's crumb, defined once", () => {
   expect(lab).not.toContain("function HeadActions");
 
   expect(head).toContain('class="zl-desk-head"');
-  expect(head).toContain('class="zl-crumb"');
+  // The crumb's class is now a template (it gains `has-alert` when this session
+  // is alerting), so the assertion is the class NAME rather than the old
+  // literal attribute.
+  expect(head).toContain("zl-crumb");
   expect(head).toContain('class="zl-crumb-title"');
   expect(head).toContain("zl-crumb-path");
   expect(head).toContain("zl-desk-act");
@@ -44,7 +47,24 @@ test("the crumb is a door to the session dossier, with ARIA that says so", () =>
   expect(head).toContain('aria-haspopup={onTitleClick ? "dialog" : undefined}');
   expect(head).toContain("aria-expanded={onTitleClick ? panelOpen : undefined}");
   expect(conv).toContain("panelOpen={panel.open}");
-  expect(conv).toContain("toggleSessionPanel(session.id)");
+  // The crumb still opens THIS session's panel. It now names a page too: an
+  // alerting session goes straight to Usage, where the alarm is explained.
+  expect(conv).toContain("toggleSessionPanel(");
+  expect(conv).toContain("session.id,");
+  expect(conv).toContain('cacheAlertLabel(session) ? "usage" : "root"');
+});
+
+test("the crumb carries this session's own alarm, and it is not on the status line", () => {
+  // The cache streak is a fact ABOUT THE SESSION, so it belongs on the door to
+  // the session's dossier. The status line is the controls for the NEXT turn
+  // and is already full; putting it there was explicitly rejected.
+  expect(head).toContain("alert");
+  expect(head).toContain("zl-crumb-alert");
+  expect(head).toContain('aria-hidden="true"');
+  // The dot is decorative; the sentence travels in the accessible name.
+  expect(head).toContain("aria-label={alert ?");
+  expect(strip).not.toContain("cacheAlert");
+  expect(strip).not.toContain("cacheUsage");
 });
 
 test("preview and grid stay wired, and preview keeps the focus return hook", () => {

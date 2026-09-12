@@ -44,6 +44,15 @@ export function ChatHead({
   onGridToggle,
   onPreviewToggle,
   previewOpen = false,
+  // alert — this session's own alarm, on this session's own door. Today that
+  // is the prompt cache burning money with a streak of turns that write and
+  // never read. It is NOT on the status line: that line is full and it is the
+  // controls for the next turn, whereas this is a fact about the session, which
+  // is what the panel behind this crumb is for.
+  //
+  // { label } only; the dot carries no number. The count lives in the label
+  // and in the Usage page, where there is room for the sentence.
+  alert,
   // headExtra — extra head actions (the Artifacts entry), rendered as a
   // neighbour of the existing ones rather than as a second bar.
   headExtra,
@@ -54,12 +63,14 @@ export function ChatHead({
     <header class="zl-desk-head">
       <Crumb
         type={onTitleClick ? "button" : undefined}
-        class="zl-crumb"
+        class={`zl-crumb${alert ? " has-alert" : ""}`}
         onClick={onTitleClick}
         aria-haspopup={onTitleClick ? "dialog" : undefined}
         aria-expanded={onTitleClick ? panelOpen : undefined}
+        aria-label={alert ? `${title}; ${alert}` : undefined}
       >
         <span class="zl-crumb-title">{title}</span>
+        {alert && <span class="zl-crumb-alert" aria-hidden="true" />}
         {path && <span class="zl-crumb-path zl-data">{path}</span>}
       </Crumb>
 

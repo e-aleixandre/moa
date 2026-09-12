@@ -220,20 +220,27 @@
 .mconv-empty-firstrun .mconv-empty-sub {
   margin-bottom: var(--space-4);
 }
+/* Mauve, like every other New session in the product (.zl-side-new). This was
+   peach, which the prototype reserves for "you wrote this" -- and spending the
+   user-message colour on the biggest button of the first screen is exactly the
+   kind of drift this migration exists to end. */
 .mconv-empty-new-primary {
   align-self: stretch;
-  background: var(--peach);
+  background: var(--zl-accent-dim, rgba(203, 166, 247, 0.12));
+  box-shadow: 0 0 0 1px var(--zl-accent-med, rgba(203, 166, 247, 0.22));
   border: 0;
-  color: var(--crust);
+  color: var(--zl-accent, #cba6f7);
   font-weight: var(--weight-semibold);
 }
 .mconv-empty-new-primary:active {
-  box-shadow: 0 0 16px color-mix(in srgb, var(--peach) 40%, transparent);
+  box-shadow: 0 0 0 1px var(--zl-accent-med, rgba(203, 166, 247, 0.22)),
+    0 0 16px color-mix(in srgb, var(--zl-accent, #cba6f7) 30%, transparent);
 }
 @media (hover: hover) {
 
 .mconv-empty-new-primary:hover{
-  box-shadow: 0 0 16px color-mix(in srgb, var(--peach) 40%, transparent);
+  box-shadow: 0 0 0 1px var(--zl-accent-med, rgba(203, 166, 247, 0.22)),
+    0 0 16px color-mix(in srgb, var(--zl-accent, #cba6f7) 30%, transparent);
 }
 }
 

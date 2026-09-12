@@ -55,12 +55,13 @@ function GoIcon() {
   );
 }
 
-function PanelRow({ id, title, verdict, warn, onOpen }) {
+function PanelRow({ id, title, verdict, warn, tone, onOpen }) {
+  const verdictTone = warn ? (tone === "warn" ? " is-warn-soft" : " is-warn") : "";
   return (
     <button type="button" class="zl-prow" onClick={() => onOpen(id)} aria-label={`${title}: ${verdict}`}>
       <svg class="zl-prow-ico" viewBox="0 0 16 16" aria-hidden="true">{PANEL_ICONS[id]}</svg>
       <span class="zl-prow-t">{title}</span>
-      <span class={`zl-prow-v zl-data${warn ? " is-warn" : ""}`}>{verdict}</span>
+      <span class={`zl-prow-v zl-data${verdictTone}`}>{verdict}</span>
       <GoIcon />
     </button>
   );
@@ -339,6 +340,7 @@ export function SessionPanel({
                 title="Usage"
                 verdict={usageRow.text}
                 warn={usageRow.warn}
+                tone={usageRow.tone}
                 onOpen={goPage}
               />
               {mcp && (

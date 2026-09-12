@@ -39,6 +39,17 @@
   line-height: 14px;
 }
 
+/* The session's own alarm: the cache streak. Yellow (warning), distinct from
+   the mauve inbox count beside it — one says "events are waiting", the other
+   says "this session is burning money". */
+.zl-chip-alert {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--zl-yellow, #f9e2af);
+}
+
 /* Open — the chevron says the name is a door, and flips to point back at
    the chip while the dossier is up. The fill stays the catalogue's glass:
    the panel is a bottom sheet, the chip is still the header, not an anchor

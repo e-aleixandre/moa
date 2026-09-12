@@ -189,6 +189,18 @@ const PANEL_SESSION = {
   contextWindow: 200000,
   runTokensUp: 12400,
   runTokensDown: 1800,
+  // A healthy prompt cache, so the Usage page's cache rows are exercised by
+  // the golden instead of frozen in their empty state. This is the shape of a
+  // real Anthropic reading: most of the context replayed from cache, a small
+  // write per turn, no streak — so nothing warns.
+  cacheUsage: {
+    available: true,
+    ratio: 0.948,
+    read: 16193532,
+    written: 879314,
+    streak: 1,
+    alert: false,
+  },
   runTokenHint: false,
   tokenLabel: "↑12.4k ↓1.8k",
   worktree: "design-visual",

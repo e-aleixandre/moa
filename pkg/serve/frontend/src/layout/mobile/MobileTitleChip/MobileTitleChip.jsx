@@ -14,7 +14,7 @@ import "./MobileTitleChip.css";
 // because events waiting have to be legible WITHOUT opening anything, and a
 // 44px icon button has no room for a number next to its glyph.
 
-export function MobileTitleChip({ title, open = false, onToggle, inboxCount = 0 }) {
+export function MobileTitleChip({ title, open = false, onToggle, inboxCount = 0, alert = "" }) {
   return (
     <button
       type="button"
@@ -22,9 +22,15 @@ export function MobileTitleChip({ title, open = false, onToggle, inboxCount = 0 
       onClick={() => onToggle?.(!open)}
       aria-haspopup="dialog"
       aria-expanded={open}
-      aria-label={mobileTitleChipLabel(title, inboxCount)}
+      aria-label={alert
+        ? `${mobileTitleChipLabel(title, inboxCount)}; ${alert}`
+        : mobileTitleChipLabel(title, inboxCount)}
     >
       <span class="zl-chip-name">{title}</span>
+      {/* This session's own alarm (the cache streak), on this session's own
+          door. Yellow, and a dot rather than a number: the capsule is 44px of
+          name and the count belongs in the sentence behind it. */}
+      {alert && <span class="zl-chip-alert" aria-hidden="true" />}
       {inboxCount > 0 && (
         <span class="zl-chip-inbox" aria-hidden="true">
           <Inbox size={12} />

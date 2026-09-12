@@ -11,6 +11,7 @@
 
 import { store, setState, SESSION_PANEL_CLOSED } from './store.js';
 import { fmtCost, fmtReset, usageForSession } from './util/usage-pills.js';
+import { cacheVerdict } from './cache-usage.js';
 import { fmtTokens } from './util/format.js';
 
 // The second level. A row on the root pushes one of these INSIDE the panel;
@@ -136,6 +137,12 @@ export function runFacts(session) {
 // answer to "can THIS session keep going?", and usageForSession already picks
 // the window of the provider this session is on.
 export function usageVerdict(session, globalUsage) {
+  // A cache streak outranks the quota reading. The quota says how much is
+  // left; the streak says the session is spending it several times faster
+  // than it should, which is the thing you would want to act on first.
+  const cache = cacheVerdict(session);
+  if (cache.warn) return cache;
+
   const u = usageForSession(session, globalUsage);
   const provider = session?.provider || 'anthropic';
   const name = provider === 'openai' ? 'OpenAI' : provider === 'anthropic' ? 'Anthropic' : provider;

@@ -50,8 +50,25 @@ test('mobile title chip keeps its dialog ARIA and hides decorative marks', () =>
   const source = readFileSync(new URL('./MobileTitleChip.jsx', import.meta.url), 'utf8');
   expect(source).toContain('aria-haspopup="dialog"');
   expect(source).toContain('aria-expanded={open}');
-  expect(source).toContain('aria-label={mobileTitleChipLabel(');
+  // The label is still built from mobileTitleChipLabel; an alerting session
+  // appends its alarm to it rather than replacing it.
+  expect(source).toContain('mobileTitleChipLabel(title, inboxCount)');
   expect(source).toContain('aria-hidden="true"');
+});
+
+test("the title chip carries this session's own alarm, distinct from the inbox count", () => {
+  const source = readFileSync(new URL('./MobileTitleChip.jsx', import.meta.url), 'utf8');
+  // The alarm is a dot, not a number: the capsule is 44px of name. The count
+  // lives in the accessible name and on the Usage page.
+  expect(source).toContain('zl-chip-alert');
+  expect(source).toContain('{alert && <span class="zl-chip-alert"');
+  // Yellow (warning), not the mauve of the inbox badge: one says events are
+  // waiting, the other says this session is burning money.
+  const css = readFileSync(new URL('./MobileTitleChip.css', import.meta.url), 'utf8');
+  const alertRule = css.slice(css.indexOf('.zl-chip-alert'));
+  expect(alertRule).toContain('--zl-yellow');
+  // The peach is reserved for the user message's left border.
+  expect(css).not.toContain('#fab387');
 });
 
 test('the phone header is the catalogue\'s three capsules, defined once', () => {

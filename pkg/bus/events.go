@@ -310,6 +310,15 @@ type MCPChanged struct {
 	Pending   int
 }
 
+// CacheUsageUpdated carries the session's prompt-cache summary after a turn
+// closes. Unlike RunTokensUpdated it is conversation-wide, not per-run: the
+// streak it reports is what turns a silent cost leak into something the panel
+// button can show.
+type CacheUsageUpdated struct {
+	SessionID string
+	Summary   core.CacheUsageSummary
+}
+
 // RunTokensUpdated carries the current run's estimated logical input and
 // output traffic, excluding resent context and provider cache usage.
 type RunTokensUpdated struct {

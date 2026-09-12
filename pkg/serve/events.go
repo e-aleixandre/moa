@@ -55,7 +55,10 @@ type InitData struct {
 	RunStartedAtMs     int64               `json:"run_started_at_ms,omitempty"`
 	PendingSteers      []PendingSteerData  `json:"pending_steers,omitempty"`
 	CostUSD            float64             `json:"cost_usd,omitempty"`
-	Subagents          []SubagentInitData  `json:"subagents,omitempty"`
+	// CacheUsage survives reload and reconnect: it is computed server-side over
+	// the WHOLE display history, which the bounded Messages above may not be.
+	CacheUsage CacheUsageData     `json:"cache_usage"`
+	Subagents  []SubagentInitData `json:"subagents,omitempty"`
 	// SubagentOutcomes restores terminal child cards after reconnect/restart.
 	// It is separate from live Subagents because terminal jobs do not belong in
 	// the Live Dock.
@@ -262,6 +265,32 @@ type MCPChangeData struct {
 type RunTokensData struct {
 	Up   int `json:"up"`
 	Down int `json:"down"`
+}
+
+// CacheUsageData carries the session's prompt-cache summary. Available is the
+// field that matters at the boundary: false means the session has reported no
+// input or cache tokens yet, and the client must say so instead of printing a
+// 0% that reads like a diagnosis. Streak is the trailing run of turns that
+// wrote cache and read none, and Alert is its verdict.
+type CacheUsageData struct {
+	Available bool    `json:"available"`
+	Ratio     float64 `json:"ratio"`
+	Read      int     `json:"read"`
+	Written   int     `json:"written"`
+	Streak    int     `json:"streak"`
+	Alert     bool    `json:"alert"`
+}
+
+// cacheUsageData projects the core summary onto the wire shape.
+func cacheUsageData(s core.CacheUsageSummary) CacheUsageData {
+	return CacheUsageData{
+		Available: s.Available,
+		Ratio:     s.Ratio,
+		Read:      s.Read,
+		Written:   s.Written,
+		Streak:    s.Streak,
+		Alert:     s.Alert,
+	}
 }
 
 // SessionCostData carries the accumulated session spend (main run + subagents).

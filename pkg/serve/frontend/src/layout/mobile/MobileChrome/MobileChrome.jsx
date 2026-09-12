@@ -45,6 +45,10 @@ export function MobileChrome({
   onPanel,
   onNew,
   inboxCount = 0,
+  // alert — THIS session's alarm, on the capsule that opens this session's
+  // panel. Distinct from `attention`, which is about the OTHER sessions and
+  // lives on the left capsule.
+  alert = "",
 }) {
   const presentation = mobileTitleChipPresentation(attention);
   const arrivalRef = useRef(0);
@@ -72,6 +76,7 @@ export function MobileChrome({
         open={panelOpen}
         onToggle={onPanel}
         inboxCount={inboxCount}
+        alert={alert}
       />
       <button
         type="button"

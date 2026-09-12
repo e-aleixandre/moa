@@ -59,6 +59,15 @@ type GetEffectiveCompactAt struct{ SessionID string }
 // Handler returns: float64
 type GetSessionCost struct{ SessionID string }
 
+// GetCacheUsage returns the session's prompt-cache summary over its WHOLE
+// display history. It is a query rather than a client-side computation on the
+// transcript because the init payload is bounded (initHistoryMaxMessages is
+// 150): a long session reaches the client truncated, and a ratio measured on a
+// truncated tail would be quietly wrong in exactly the sessions that need it
+// most — the 130-turn one that burned a weekly plan.
+// Handler returns: core.CacheUsageSummary
+type GetCacheUsage struct{ SessionID string }
+
 // GetRunTokens returns the current run's estimated logical input/output traffic.
 // Handler returns: RunTokens
 type GetRunTokens struct{ SessionID string }

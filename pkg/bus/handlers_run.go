@@ -320,6 +320,19 @@ func registerRunReactors(sctx *SessionContext) {
 	b.Subscribe(func(e CommandExecuted) { publishContextUpdate() })
 	b.Subscribe(func(e ConfigChanged) { publishContextUpdate() })
 
+	// -------------------------------------------------------------------
+	// CacheUsageUpdated reactor — the cache summary can only change when a
+	// turn closes, so RunEnded is its whole trigger. The TreeSyncer runs on
+	// SubscribeAll, which is delivered before typed subscribers, so the turn
+	// that just ended is already in the display projection this reads.
+	// -------------------------------------------------------------------
+	b.Subscribe(func(e RunEnded) {
+		sctx.Bus.Publish(CacheUsageUpdated{
+			SessionID: sctx.SessionID,
+			Summary:   core.SummarizeCacheUsage(sctx.displayMessages()),
+		})
+	})
+
 	// Queue pump: at every idle point, drain the unified queue rail — execute
 	// queued barrier commands and start runs for trailing steers. RunEnded is
 	// the normal idle signal; the manual compact/verify paths call requestPump

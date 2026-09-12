@@ -90,3 +90,20 @@
   color: var(--zl-accent, #cba6f7);
   background: var(--zl-accent-dim, rgba(203, 166, 247, 0.12));
 }
+
+/* The session's own alarm, beside its name. Yellow: the cache streak costs
+   money, it does not break anything — red stays for failure, mauve for unseen
+   work, green for running. The peach is the user message's border and is not
+   available here.
+
+   A dot rather than a number: the crumb is a name, and the count belongs in
+   the sentence the Usage page prints. The accessible name carries it too, so
+   the dot is decorative and aria-hidden. */
+.zl-crumb-alert {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  align-self: center;
+  border-radius: 50%;
+  background: var(--zl-yellow, #f9e2af);
+}

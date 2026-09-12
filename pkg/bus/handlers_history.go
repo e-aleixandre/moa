@@ -346,6 +346,13 @@ func registerSessionQueryHandlers(sctx *SessionContext) {
 		return sctx.sessionCostTotal(), nil
 	})
 
+	// The cache summary reads the same display projection the transcript does,
+	// so the ratio the panel prints is measured over exactly the conversation
+	// the user is looking at — including the in-flight turn.
+	b.OnQuery(func(q GetCacheUsage) (core.CacheUsageSummary, error) {
+		return core.SummarizeCacheUsage(sctx.displayMessages()), nil
+	})
+
 	b.OnQuery(func(q GetRunTokens) (RunTokens, error) {
 		sctx.runTokenMu.Lock()
 		defer sctx.runTokenMu.Unlock()
@@ -468,20 +475,7 @@ func registerTreeHandlers(sctx *SessionContext) {
 	})
 
 	b.OnQuery(func(q GetDisplayMessages) ([]core.AgentMessage, error) {
-		// Prefer the syncer: it composes the tree history with the in-flight
-		// turn (agent messages not yet synced), so a mid-run snapshot is
-		// complete. Falls back to tree/agent when no syncer is registered.
-		if sctx.treeSyncer != nil {
-			return sctx.treeSyncer.DisplayMessages(), nil
-		}
-		sctx.historyMu.RLock()
-		defer sctx.historyMu.RUnlock()
-		if sctx.Tree != nil {
-			if msgs := sctx.Tree.AllMessages(); len(msgs) > 0 {
-				return msgs, nil
-			}
-		}
-		return sctx.Agent.Messages(), nil
+		return sctx.displayMessages(), nil
 	})
 
 	b.OnQuery(func(q GetDisplayMessagesSince) (DisplayMessagesSince, error) {

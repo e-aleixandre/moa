@@ -6,6 +6,7 @@ import {
   money,
 } from "../../data/util/usage-pills.js";
 import { copyToClipboard, fmtTokens } from "../../data/util/format.js";
+import { cacheAdvice, cacheUsage } from "../../data/cache-usage.js";
 import { configureSession } from "../../data/session-actions.js";
 import { addToast } from "../../data/notifications.js";
 
@@ -14,9 +15,14 @@ import { addToast } from "../../data/notifications.js";
 // grafted onto the production readings and the house rule that a row prints
 // a datum or it is absent. A `0` is not a reading.
 
-function Meter({ pct }) {
+// Meter's tone ladder is for meters where FULL IS BAD: context filling up, a
+// plan window running out. `neutral` turns it off for the one meter where full
+// is GOOD — the cache ratio, where 96% is the healthiest reading there is and
+// would otherwise paint red. It also keeps a percentage threshold from
+// re-entering through the colour: the cache's only alarm is the streak.
+function Meter({ pct, neutral = false }) {
   const value = Math.min(100, Math.max(0, pct));
-  const tone = value >= 90 ? "is-hot" : value >= 70 ? "is-warm" : "";
+  const tone = neutral ? "" : value >= 90 ? "is-hot" : value >= 70 ? "is-warm" : "";
   return (
     <span class={`zl-meter ${tone}`} aria-hidden="true">
       <span class="zl-meter-fill" style={`width:${value}%`} />
@@ -101,6 +107,58 @@ function contextNote(session, pct) {
   return `${fmtTokens(Math.round((win * pct) / 100))} of ${fmtTokens(win)}`;
 }
 
+// CacheRows — the prompt cache, in the accounting where the money is.
+//
+// Two rows, never one: the ratio is the verdict, the read/written split is the
+// evidence behind it. A session that reads nothing shows `0%` next to
+// `↓0 ↑15.6M`, and the second row is what makes the first one legible as a
+// leak rather than as a low score.
+//
+// When there is no reading the row says so. `Available` false means no turn
+// has reported input or cache tokens yet — printing 0% there would invent a
+// diagnosis out of a session that has simply not spoken to a provider.
+//
+// The alert is the STREAK, and it prints as a sentence with a number in it:
+// "12 turns without a cache read" says both that it is wrong and how long it
+// has been wrong, which a lit dot cannot. The note under it instructs the next
+// action instead of explaining prompt caching.
+function CacheRows({ session }) {
+  const u = cacheUsage(session);
+
+  if (!u.available) {
+    return (
+      <div class="zl-kv-row">
+        <span class="zl-kv-k">Cache</span>
+        <span class="zl-kv-v zl-data is-dim">no reading yet</span>
+      </div>
+    );
+  }
+
+  const pct = Math.round(u.ratio * 100);
+  return (
+    <>
+      <div class={`zl-kv-row is-meter${u.alert ? " is-cache-alert" : ""}`}>
+        <span class="zl-kv-k">Cache</span>
+        <span class={`zl-kv-v zl-data${u.alert ? " is-warn" : ""}`}>{pct}%</span>
+        <Meter pct={pct} neutral />
+        {u.alert && (
+          <span class="zl-kv-note zl-data is-warn">
+            {u.streak} turns without a cache read
+          </span>
+        )}
+      </div>
+      <div class="zl-kv-row is-cache-tokens">
+        <span class="zl-kv-k">Cache tokens</span>
+        <span class="zl-kv-v zl-data">
+          ↓{fmtTokens(u.read)} read
+          <span class="zl-kv-dim"> · ↑{fmtTokens(u.written)} written</span>
+        </span>
+        {u.alert && <span class="zl-kv-note">{cacheAdvice(session)}</span>}
+      </div>
+    </>
+  );
+}
+
 export function UsagePage({ session, usage, ctxPercent, costUSD }) {
   const u = usageForSession(session, usage);
   const busy = session?.state === "running" || session?.state === "permission";
@@ -153,6 +211,7 @@ export function UsagePage({ session, usage, ctxPercent, costUSD }) {
           </div>
         )}
         <ContextLimitRow session={session} disabled={busy} />
+        <CacheRows session={session} />
         {!!session?.id && (
           <button
             type="button"

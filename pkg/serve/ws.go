@@ -245,6 +245,8 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "run_tokens", Data: RunTokensData{Up: e.Up, Down: e.Down}}, true
 	case bus.SessionCostUpdated:
 		return Event{Type: "session_cost", Data: SessionCostData{CostUSD: e.TotalUSD}}, true
+	case bus.CacheUsageUpdated:
+		return Event{Type: "cache_usage", Data: cacheUsageData(e.Summary)}, true
 	case bus.RateLimitUpdated:
 		rl := e.RateLimit
 		return Event{Type: "ratelimit", Data: RateLimitData{
@@ -599,6 +601,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	subagents, _ := bus.QueryTyped[bus.GetSubagents, []bus.SubagentSnapshot](b, bus.GetSubagents{})
 	goalInfo, _ := bus.QueryTyped[bus.GetGoal, bus.GoalInfo](b, bus.GetGoal{})
 	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
+	cacheUsage, _ := bus.QueryTyped[bus.GetCacheUsage, core.CacheUsageSummary](b, bus.GetCacheUsage{})
 	runTokens, _ := bus.QueryTyped[bus.GetRunTokens, bus.RunTokens](b, bus.GetRunTokens{})
 	compacting, _ := bus.QueryTyped[bus.GetCompacting, bool](b, bus.GetCompacting{})
 	autoVerifying, _ := bus.QueryTyped[bus.GetAutoVerifying, bool](b, bus.GetAutoVerifying{})
@@ -623,6 +626,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		Tasks:              taskList,
 		PathScope:          pathInfo.Scope,
 		CostUSD:            cost,
+		CacheUsage:         cacheUsageData(cacheUsage),
 		RunTokensUp:        runTokens.Up,
 		RunTokensDown:      runTokens.Down,
 		Compacting:         compacting,

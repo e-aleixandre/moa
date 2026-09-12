@@ -30,6 +30,7 @@ import { Plus } from "lucide-preact";
 import { addToast } from "../../data/notifications.js";
 import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast } from "../../data/session-actions.js";
 import { toggleSessionPanel, sessionPanelView } from "../../data/session-panel.js";
+import { cacheAlertLabel } from "../../data/cache-usage.js";
 import { positionModelPopover } from "../PaneGrid/model-popover-position.js";
 import "./ConversationScreen.css";
 
@@ -265,7 +266,14 @@ export function ConversationScreen() {
           title={sessionTitle(session)}
           path={shortPath(session.cwd) || session.cwd || ""}
           panelOpen={panel.open}
-          onTitleClick={() => toggleSessionPanel(session.id)}
+          alert={cacheAlertLabel(session)}
+          // When the session is alerting, the crumb goes straight to the page
+          // that explains the alarm. With nothing wrong it opens the dossier's
+          // root as before — the alert is what promotes the destination.
+          onTitleClick={() => toggleSessionPanel(
+            session.id,
+            cacheAlertLabel(session) ? "usage" : "root",
+          )}
           onGridToggle={() => navigate("grid")}
           previewOpen={!!session.previewOpen}
           onPreviewToggle={() => updateSession(session.id, { previewOpen: !session.previewOpen })}

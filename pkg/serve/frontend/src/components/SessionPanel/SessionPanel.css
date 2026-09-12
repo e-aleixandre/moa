@@ -312,6 +312,9 @@
   font-variant-numeric: tabular-nums;
 }
 .zl-prow-v.is-warn { color: var(--zl-red, #f38ba8); }
+/* is-warn-soft — a row that is EXPENSIVE rather than broken (the cache
+   streak). Yellow is the product's warning; red stays for failure. */
+.zl-prow-v.is-warn-soft { color: var(--zl-yellow, #f9e2af); }
 .zl-go {
   width: 12px;
   height: 12px;
@@ -431,6 +434,28 @@
   font-variant-numeric: tabular-nums;
 }
 .zl-kv-row.is-meter .zl-meter { flex-basis: 100%; }
+
+/* ── The prompt cache (production: the prototype never drew this) ─────────
+   Yellow, not red: a session with no cache reads is burning money, but it is
+   still working — nothing has failed. Red is reserved for what is broken.
+   The peach `#fab387` is NOT available here; it belongs to the left border of
+   user messages and nowhere else.
+
+   Only the streak lights this up. There is no percentage threshold: real
+   ratios run from 48% to 96% by provider, so a fixed cut would cry wolf on a
+   healthy session and stay quiet on the one that burned a weekly plan in
+   eleven hours. */
+.zl-kv-v.is-warn { color: var(--zl-yellow, #f9e2af); }
+.zl-kv-note.is-warn { color: var(--zl-yellow, #f9e2af); }
+.zl-kv-v.is-dim { color: var(--zl-t4, #66677c); }
+.zl-kv-row.is-cache-alert .zl-meter-fill { background: var(--zl-yellow, #f9e2af); }
+/* "↓16194k read · ↑879k written" is longer than any other value in this list,
+   and the row cannot reflow on its own: the key is nowrap and the value is
+   flex: none, so on a 390px phone the two collided and the text overlapped.
+   Letting this row wrap gives the value its own line when it does not fit,
+   and changes nothing when it does. */
+.zl-kv-row.is-cache-tokens .zl-kv-k { flex: none; }
+.zl-kv-row.is-cache-tokens .zl-kv-v { flex: 1; min-width: 0; text-align: right; }
 
 .zl-data {
   font-family: var(--mono);

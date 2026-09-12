@@ -129,6 +129,24 @@ export function handleWsSessionCost(id, data) {
   }
 }
 
+// handleWsCacheUsage reflects the session's prompt-cache summary after a turn
+// closes. The server computes it over the WHOLE display history, so this is a
+// replacement rather than an accumulation: the client never derives the ratio
+// from its own bounded transcript.
+export function handleWsCacheUsage(id, data) {
+  if (!data) return;
+  updateSession(id, {
+    cacheUsage: {
+      available: !!data.available,
+      ratio: Number(data.ratio) || 0,
+      read: Number(data.read) || 0,
+      written: Number(data.written) || 0,
+      streak: Number(data.streak) || 0,
+      alert: !!data.alert,
+    },
+  });
+}
+
 // handleWsRateLimit reflects a request's live rate-limit headers. OpenAI/Codex
 // has no usage endpoint, so its last observed account-wide windows are kept in
 // the global snapshot. Anthropic also patches its global plan snapshot here so

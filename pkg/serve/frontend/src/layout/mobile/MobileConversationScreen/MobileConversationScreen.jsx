@@ -17,6 +17,7 @@ import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SessionPanel } from "../../../components/index.js";
 import { sessionPanelView, closeSessionPanel, toggleSessionPanel } from "../../../data/session-panel.js";
+import { cacheAlertLabel } from "../../../data/cache-usage.js";
 import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
@@ -346,6 +347,9 @@ function MobileConversationBody({ forceMobile = false }) {
 function MobileSessionChrome({ version, forceMobile = false }) {
   const chrome = useStore((s) => selectMobileChrome(s, forceMobile));
   const panel = useStore((s) => sessionPanelView(s, chrome.activeId));
+  // The alarm of the session being read, for its own capsule. Read from the
+  // store rather than from `chrome` so it tracks the live cache summary.
+  const cacheAlert = useStore((s) => cacheAlertLabel(s.sessions?.[chrome.activeId]));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsPendingRef = useRef(false);
   // The drawer hands off to another overlay by CLOSING FIRST (see the HANDOFF
@@ -395,7 +399,8 @@ function MobileSessionChrome({ version, forceMobile = false }) {
           open={chrome.drawerOpen}
           onToggle={setDrawerOpen}
           panelOpen={panel.open}
-          onPanel={() => toggleSessionPanel(chrome.activeId)}
+          alert={cacheAlert}
+          onPanel={() => toggleSessionPanel(chrome.activeId, cacheAlert ? "usage" : "root")}
           onNew={() => openDrawer("new")}
           inboxCount={inboxCount}
         />

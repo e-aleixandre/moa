@@ -130,6 +130,17 @@ export function handleWsInit(id, data) {
     autoVerifying: !!data.auto_verifying,
     tasks: data.tasks || [],
     costUSD: data.cost_usd || 0,
+    // The cache summary is authoritative in every init snapshot: it is measured
+    // server-side over the whole history, so a reload or a reconnect restores
+    // the real streak instead of starting the count again from this socket.
+    cacheUsage: {
+      available: !!data.cache_usage?.available,
+      ratio: Number(data.cache_usage?.ratio) || 0,
+      read: Number(data.cache_usage?.read) || 0,
+      written: Number(data.cache_usage?.written) || 0,
+      streak: Number(data.cache_usage?.streak) || 0,
+      alert: !!data.cache_usage?.alert,
+    },
     // Logical per-run traffic is authoritative in every init snapshot, so a
     // reconnect replaces stale local totals even when the run is already idle.
     runTokensUp: data.run_tokens_up || 0,

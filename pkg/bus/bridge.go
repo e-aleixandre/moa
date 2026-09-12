@@ -456,6 +456,25 @@ func (sctx *SessionContext) StreamingAggregate() (text, thinking, msgID string) 
 	return string(sctx.streamText), string(sctx.streamThinking), sctx.streamMsgID
 }
 
+// displayMessages returns the full display history: the tree's branch composed
+// with the in-flight turn when a TreeSyncer is present. Falls back to the
+// tree/agent when no syncer is registered. It is the one projection both
+// GetDisplayMessages and GetCacheUsage read, so the cache ratio can never be
+// measured over a different conversation than the one on screen.
+func (sctx *SessionContext) displayMessages() []core.AgentMessage {
+	if sctx.treeSyncer != nil {
+		return sctx.treeSyncer.DisplayMessages()
+	}
+	sctx.historyMu.RLock()
+	defer sctx.historyMu.RUnlock()
+	if sctx.Tree != nil {
+		if msgs := sctx.Tree.AllMessages(); len(msgs) > 0 {
+			return msgs
+		}
+	}
+	return sctx.Agent.Messages()
+}
+
 // SnapshotTranscriptPath returns the active transcript branch, including a
 // visible in-flight turn when a TreeSyncer is present. It is a snapshot only:
 // it never mutates the tree or the sync baseline.
