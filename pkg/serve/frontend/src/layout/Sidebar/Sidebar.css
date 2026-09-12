@@ -137,8 +137,8 @@ button.zl-kbd:focus-visible {
   min-height: 0;
   padding: 4px 8px 8px;
 }
-.zl-list.is-inbox { padding: 0; }
-.zl-list.is-inbox .inbox { padding: 8px 16px 24px; }
+.zl-list.is-inbox { padding: 0; display: flex; flex-direction: column; }
+.zl-list.is-inbox .zi-inbox { flex: 1; min-height: 0; }
 
 /* Rhythm: air between groups, none inside them. */
 .zl-list .zl-group {

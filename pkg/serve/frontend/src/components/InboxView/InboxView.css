@@ -1,567 +1,408 @@
-/* wake-on-event — InboxView styles.
+/* InboxView — the event inbox.
 
-   The inbox is its own surface, so it does not borrow the session card's
-   filled chrome: rows are separated by hairlines and nothing else. What is
-   still waiting is in normal text; what has been settled recedes to the muted
-   role — the list stays as history without competing with the decisions that
-   are still open. */
+   This sheet is the catalogue's, MOVED (catalog/zones-inbox.css, the product
+   `zi-*` block), not translated. The class names came with the rules on
+   purpose: a rule that is copied is a rule that can drift, and the drift is
+   what this migration exists to end. The catalogue imports the component now,
+   so these are the only inbox-surface rules in the product.
 
-.inbox {
+   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
+   ?view=zones they resolve from `.zl`; everywhere else the fallback IS the
+   catalogue's own value. Lab chrome (frames, notes, the density switcher)
+   stays in catalog/zones-inbox.css.
+
+   What is grafted below the catalogue's block is only what the prototype
+   never had: the host fill (the body lives inside the sidebar column or a
+   full-screen phone push) and the safe-area inset on the phone head. */
+
+.zi-inbox {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4) var(--space-6);
+  min-height: 0;
+  height: 100%;
+  color: var(--zl-t1, #f4f4f7);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body, 14px);
+  letter-spacing: -0.005em;
 }
 
-.inbox .inbox-filter {
-  align-self: flex-start;
-  min-width: 180px;
-}
-
-.inbox .inbox-filter .segmented-item {
-  min-height: 32px;
-  font-size: var(--text-sm);
-}
-
-.inbox-group {
-  display: flex;
-  flex-direction: column;
-}
-
-/* Project header: the same mono/uppercase voice the drawer and spine use for
-   a folder, so grouping reads the same wherever it happens. */
-.inbox-group-label {
-  padding: var(--space-3) 0 var(--space-2);
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--overlay0);
-}
-
-.inbox-row {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 100%;
-  min-height: 56px;
-  padding: var(--space-3) 0;
-  border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 60%, transparent);
-  background: transparent;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.inbox-row:last-child { border-bottom: none; }
-
-.inbox-row:active { background: color-mix(in srgb, var(--surface0) 45%, transparent); }
-
-@media (hover: hover) {
-  .inbox-row:hover { background: color-mix(in srgb, var(--surface0) 45%, transparent); }
-}
-
-.inbox-row:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: -2px;
-  border-radius: var(--radius-sm);
-}
-
-.inbox-row-meta {
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--overlay0);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.inbox-row-title {
-  font-size: var(--text-base);
-  line-height: var(--leading-normal);
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
-/* The reason it is still waiting. Muted, never a colour: the row's job is to
-   be scanned, and a coloured line per row would make the list shout. */
-.inbox-row-reason {
-  font-size: var(--text-sm);
-  color: var(--overlay0);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Where it went. Muted, and never a colour: delivery is a fact, not a state
-   that needs anyone. */
-.inbox-row-dest {
-  font-size: var(--text-sm);
-  color: var(--overlay1);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.inbox-row-settled .inbox-row-title { color: var(--subtext0); }
-
-.inbox-empty {
-  padding: var(--space-6) 0;
-  font-size: var(--text-base);
-  color: var(--overlay0);
-}
-
-/* ── the three things that are not a list ───────────────────────────────────
-
-   Loading, failed-to-load and stale. They exist because "the list is empty"
-   and "I could not read the list" used to be the same picture, which made the
-   app assert something it did not know. */
-
-/* Never loaded and the request failed. A block of its own: an error is not a
-   row of a list that does not exist. Red because it is a failure — yellow
-   stays the colour of what needs an answer. */
-.inbox-state {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-  padding: var(--space-4) var(--space-3);
-  border-radius: var(--radius-md);
-  line-height: var(--leading-normal);
-  color: var(--overlay1);
-}
-
-.inbox-state.is-error { background: var(--surface0); }
-
-.inbox-state-title {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-base);
-  font-weight: var(--weight-medium);
-  color: var(--red);
-}
-
-/* The request that failed, verbatim and in mono: the report has to be
-   checkable, not a mood. */
-.inbox-state-detail {
-  font-family: var(--mono);
-  font-size: var(--text-sm);
-  color: var(--overlay1);
-  overflow-wrap: anywhere;
-}
-
-.inbox-state-body { font-size: var(--text-sm); color: var(--overlay1); }
-
-.inbox-state-retry {
-  min-height: 44px;
-  margin-top: var(--space-1);
-  padding: 0 var(--space-4);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--surface1);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--text-base);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-}
-.inbox-state-retry:disabled { cursor: default; color: var(--overlay1); }
-.inbox-state-retry:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
+.zi-inbox :is(button, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--zl-accent, #cba6f7);
   outline-offset: 2px;
 }
 
-/* Loaded once, the poll now failing: a strip over a list that is still worth
-   reading. It says since WHEN it stopped being true, which is the one thing
-   the rows themselves cannot say. Two lines rather than three columns: the
-   spine is 240px wide, and a name + a datum + a verb on one line wraps into
-   ragged fragments there. */
-.inbox-stale {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--surface0);
-}
-
-.inbox-stale-line {
+/* ── Head: back, title ─────────────────────────────────────────────────── */
+.zi-head {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  min-height: 28px;
-}
-
-.inbox-stale-text {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--text-base);
-  font-weight: var(--weight-medium);
-  color: var(--text);
-}
-
-.inbox-stale-since {
-  padding-left: calc(8px + var(--space-2));
-  font-family: var(--mono);
-  font-size: var(--text-sm);
-  color: var(--overlay1);
-}
-
-.inbox-stale-retry {
-  flex: none;
-  min-height: 32px;
-  padding: 0 var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--overlay1);
-  font: inherit;
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.inbox-stale-retry:disabled { cursor: default; }
-/* On a phone the strip is not squeezed into a 240px column and the button has
-   to be a real touch target. Checked in the browser with elementFromPoint at
-   the centre and the edges, not by trusting the min-height. */
-@media (pointer: coarse) {
-  .inbox-stale-line { min-height: 44px; }
-  .inbox-stale-retry { min-height: 44px; padding: 0 var(--space-3); }
-}
-@media (hover: hover) {
-  .inbox-stale-retry:hover { color: var(--text); }
-}
-.inbox-stale-retry:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: -2px;
-}
-
-/* First load: the row's own geometry, breathing, so nothing jumps when the
-   real list lands. */
-.inbox-ghosts { display: flex; flex-direction: column; }
-
-/* The one thing a screen reader gets from three ghosts: that they are ghosts.
-   There is no global .sr-only in this codebase, so it is scoped here. */
-.inbox-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.inbox-ghost {
-  display: flex;
-  flex-direction: column;
   gap: 6px;
-  min-height: 56px;
-  padding: var(--space-3) 0;
-  animation: inbox-breathe 1.6s ease-in-out infinite;
+  min-height: 60px;
+  padding: 12px 12px 4px 8px;
 }
-/* nth-child counts the sr-only announcement as the first child. */
-.inbox-ghost:nth-child(3) { animation-delay: 0.2s; }
-.inbox-ghost:nth-child(4) { animation-delay: 0.4s; }
-
-.inbox-ghost-bar {
-  display: block;
-  height: 10px;
-  border-radius: var(--radius-sm);
-  background: var(--surface0);
-}
-.inbox-ghost-bar.is-title { height: 14px; }
-
-@keyframes inbox-breathe {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .inbox-ghost { animation: none; opacity: 0.7; }
-}
-
-/* ── the routing sheet ─────────────────────────────────────────────────────
-
-   One decision, one idiom. The sheet reads top to bottom as: what arrived (the
-   event's identity and payload, on the base surface so it is evidence rather
-   than another choice), then the destinations, each a 44px row of the SAME
-   shape under a mono section label — the drawer's grouping voice, which the
-   inbox list and the spine already speak.
-
-   The candidates keep the shipped SessionRow so a session still looks like a
-   session, but the card variant's own surface is dropped here: inside a panel
-   that already has a surface, a second filled card with its own border reads
-   as a foreign object pasted in. What is kept is what identifies a session —
-   state dot, title, age, live line. No colour identity is introduced: peach is
-   the owner and yellow/red are states that need someone, and the dot already
-   carries the state. */
-
-.inbox-sheet .sheet-body {
-  display: flex;
-  flex-direction: column;
-  padding: var(--space-4) var(--space-5) var(--space-5);
-}
-
-/* Narrower than the generic 600px sheet: this panel is a column of one-line
-   destinations, and stretched to the full modal width the rows turn into long
-   empty runs between a name and its age. */
-.inbox-sheet { max-width: 460px; }
-
-/* What arrived. Recessed on the base surface, so the top of the sheet is
-   evidence and everything under it is a choice. */
-.inbox-sheet-event {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--base);
-}
-
-.inbox-detail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.inbox-detail-status {
-  margin: 0;
-  font-size: var(--text-base);
-  line-height: var(--leading-normal);
-  color: var(--subtext0);
-}
-
-.inbox-sheet-from {
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--overlay0);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.inbox-sheet-title {
-  font-size: var(--text-base);
-  line-height: var(--leading-normal);
-  color: var(--text);
-}
-
-.inbox-sheet-reason {
-  font-size: var(--text-sm);
-  color: var(--overlay0);
-}
-
-/* The payload's toggle is a row of this block, not a control floating between
-   sections: it sits on the block's own hairline, flush with its text column. */
-.inbox-sheet .evb-payload {
-  margin-top: var(--space-1);
-  border-top: 1px solid color-mix(in srgb, var(--surface0) 70%, transparent);
-}
-
-.inbox-sheet .evb-payload-toggle { min-height: 44px; }
-
-/* Section label — the drawer/spine's mono voice for "a group of things". */
-.inbox-sheet-sec {
-  padding: var(--space-4) var(--space-1) var(--space-2);
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--overlay0);
-}
-
-.inbox-sheet-note {
-  margin: 0;
-  padding: 0 var(--space-2) 0 calc(var(--space-2) + 8px + var(--space-2));
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  font-size: var(--text-sm);
-  color: var(--overlay0);
-}
-
-.inbox-sheet-list {
-  display: flex;
-  flex-direction: column;
-}
-
-/* The quiet footer: ignoring is separated by a hairline rather than by a third
-   section label, so the sheet ends instead of offering one more heading. */
-.inbox-sheet-foot {
-  margin-top: var(--space-4);
-  padding-top: var(--space-2);
-  border-top: 1px solid color-mix(in srgb, var(--surface0) 70%, transparent);
-}
-
-/* SessionRow, stripped of the list row's geometry: same content, this panel's
-   chrome. A candidate here is a DESTINATION, not a list entry, so it centres
-   in a 44px target instead of standing as a 52px row with a monogram column. */
-.inbox-sheet-list .zl-row {
-  min-width: 0;
-  min-height: 44px;
-  border-radius: var(--radius-sm);
-  justify-content: center;
-  gap: 2px;
-  padding: var(--space-2);
-}
-.inbox-sheet-list .zl-row-slot:focus-within .zl-row {
-  background: var(--surface0);
-}
-@media (hover: hover) {
-
-
-.inbox-sheet-list .zl-row:hover{
-  background: var(--surface0);
-}
-}
-
-.inbox-sheet-list .zl-row-title {
-  font-weight: var(--weight-normal);
-  color: var(--subtext0);
-}
-@media (hover: hover) {
-
-
-.inbox-sheet-list .zl-row:hover .zl-row-title { color: var(--text); }
-}
-
-.inbox-sheet-list .zl-row-brief,
-.inbox-sheet-list .zl-row-path {
-  font-size: var(--text-xs);
-  color: var(--overlay0);
-}
-
-/* The create action and its override are one decision on one row: the model is
-   named by the action itself, so "Change…" is the trailing verb of that row and
-   not a second, equal-weight item under it. */
-.inbox-sheet-pair {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-/* The create row's label starts on the session titles' text column (row
-   padding + dot + gap), so the destinations read as one column of names
-   instead of two indents. */
-.inbox-sheet-pair .inbox-sheet-item {
-  flex: 1;
-  min-width: 0;
-}
-
-.inbox-sheet-item-mark {
+.zi-head.is-sheet { min-height: 52px; padding: 6px 8px 4px 8px; }
+.zi-head.is-sheet .zi-title { padding-left: 12px; }
+.zi-head.is-sheet .zi-back + .zi-title { padding-left: 0; }
+.zi-back,
+.zi-x {
   flex: none;
-  width: 8px;
-  height: 8px;
-  color: var(--overlay1);
-}
-
-.inbox-sheet-change {
-  flex: none;
-  min-height: 44px;
-  padding: 0 var(--space-3);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--overlay1);
-  font: inherit;
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.inbox-sheet-change:focus-visible {
-  background: var(--surface0);
-  color: var(--text);
-  outline: none;
-}
-@media (hover: hover) {
-
-
-.inbox-sheet-change:hover{
-  background: var(--surface0);
-  color: var(--text);
-  outline: none;
-}
-}
-
-/* The model step's way back, in the same shape the ModelSelector's own
-   provider step uses to return to "All models". */
-.inbox-sheet-back {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  align-self: flex-start;
-  min-height: 44px;
-  margin-bottom: var(--space-2);
-  padding: 0 var(--space-2) 0 0;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
   border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--overlay1);
-  font: inherit;
-  font-size: var(--text-sm);
+  border-radius: var(--zl-r-md, 10px);
+  background: transparent;
+  color: var(--zl-t2, #c3c4d1);
   cursor: pointer;
 }
-@media (hover: hover) {
-
-
-.inbox-sheet-back:hover { color: var(--text); }
-}
-
-.inbox-sheet-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  min-height: 44px;
-  padding: 0 var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--subtext0);
-  font: inherit;
-  font-size: var(--text-base);
-  text-align: left;
-  cursor: pointer;
-}
-.inbox-sheet-item:focus-visible {
-  background: var(--surface0);
-  color: var(--text);
-  outline: none;
-}
-@media (hover: hover) {
-
-
-.inbox-sheet-item:hover{
-  background: var(--surface0);
-  color: var(--text);
-  outline: none;
-}
-}
-
-.inbox-sheet-item-name {
+.zi-back svg, .zi-x svg { width: 16px; height: 16px; }
+.zi-back:hover, .zi-x:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+.zi-x { margin-left: auto; background: var(--zl-raised, #1e1e29); box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07)); }
+.zi-x:hover { background: var(--zl-control, #262633); }
+.zi-title {
   flex: 1;
   min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--zl-fs-title, 16px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zi-pill {
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--zl-yellow, #f9e2af);
+  color: var(--zl-canvas, #101018);
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+}
+
+/* ── Body and list ─────────────────────────────────────────────────── */
+.zi-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--zl-line-2, rgba(255, 255, 255, 0.12)) transparent;
+}
+.zi-body.is-sub { animation: zi-push 200ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1)); }
+@keyframes zi-push { from { opacity: 0; transform: translateX(12px); } }
+.zi-list { padding: 0 8px 16px; }
+.zi-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 12px 4px;
+  min-height: 32px;
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--zl-t4, #66677c);
+}
+.zi-list > .zi-group:first-child, .zi-stale + .zi-group { margin-top: 0; }
+.zi-group-n { letter-spacing: 0; color: var(--zl-t4, #66677c); }
+.zi-group.is-attn { color: var(--zl-t1, #f4f4f7); }
+.zi-group.is-attn .zi-pill { height: 18px; min-width: 18px; line-height: 18px; }
+.zi-quiet { margin: 4px 12px 8px; line-height: 20px; color: var(--zl-t4, #66677c); }
+
+.zi-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--zl-r-md, 10px);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.zi-row + .zi-row { margin-top: 2px; }
+.zi-row:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+.zi-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.zi-row-l1 { display: flex; align-items: center; gap: 8px; min-height: 16px; }
+.zi-row-from { flex: 1; min-width: 0; color: var(--zl-t3, #9091a6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zi-row-proj { color: var(--zl-t4, #66677c); }
+.zi-row-meta { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.zi-row-when { color: var(--zl-t4, #66677c); min-width: 3ch; text-align: left; font-variant-numeric: tabular-nums; }
+.zi-row-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--zl-t1, #f4f4f7);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.zi-row-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 16px;
+  font-size: var(--zl-fs-meta, 12px);
+  line-height: 16px;
+  color: var(--zl-t3, #9091a6);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.zi-row-sub.is-dest { color: var(--zl-t3, #9091a6); }
+.zi-row-sub.is-live { color: var(--zl-t3, #9091a6); }
+.zi-row-sub.is-broken { color: var(--zl-red, #f38ba8); }
 
-.inbox-sheet-item-age {
+.zi-row.is-settled .zi-row-title { color: var(--zl-t3, #9091a6); font-weight: 400; }
+.zi-row.is-settled .zi-row-from { color: var(--zl-t4, #66677c); }
+.zi-row.is-settled .zi-mono { opacity: 0.55; }
+
+.zi-mono {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-top: 2px;
+  border-radius: var(--zl-r-md, 10px);
+  background: hsl(var(--h) 50% 60% / 0.16);
+  box-shadow: 0 0 0 1px hsl(var(--h) 50% 65% / 0.18);
+  color: hsl(var(--h) 65% 78%);
   font-family: var(--mono);
-  font-size: var(--text-micro);
-  color: var(--overlay0);
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: lowercase;
+}
+.zi-mono.is-sm { width: 26px; height: 26px; margin-top: 0; border-radius: var(--zl-r-sm, 6px); }
+
+.zi-dot { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+.zi-dot.is-needs, .zi-dot.is-permission { background: var(--zl-yellow, #f9e2af); box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22); }
+.zi-dot.is-running { background: var(--zl-green, #a6e3a1); box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18); }
+.zi-dot.is-error { background: var(--zl-red, #f38ba8); box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.2); }
+.zi-dot.is-idle { background: var(--zl-t4, #66677c); }
+
+/* ── States that are not a list ─────────────────────────────────────── */
+.zi-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 8px 0;
+  padding: 16px 12px;
+  border-radius: var(--zl-r-md, 10px);
+  line-height: 1.5;
+  color: var(--zl-t3, #9091a6);
+}
+.zi-state.is-error { background: var(--zl-raised, #1e1e29); box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07)); }
+.zi-state-t { display: inline-flex; align-items: center; gap: 10px; font-size: var(--zl-fs-title, 16px); font-weight: 500; color: var(--zl-t1, #f4f4f7); }
+.zi-state.is-error .zi-state-t { color: var(--zl-red, #f38ba8); }
+.zi-state.is-empty { padding-top: 8px; }
+.zi-state.is-empty .zi-state-t { font-size: var(--zl-fs-body, 14px); font-weight: 400; color: var(--zl-t3, #9091a6); }
+.zi-state-d { color: var(--zl-t3, #9091a6); }
+.zi-state-p { color: var(--zl-t3, #9091a6); }
+.zi-state .zi-btn { margin-top: 4px; }
+
+.zi-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--zl-r-md, 10px);
+  background: var(--zl-control, #262633);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  color: var(--zl-t1, #f4f4f7);
+  font-family: inherit;
+  font-size: var(--zl-fs-body, 14px);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.zi-btn:hover { background: var(--zl-raised, #1e1e29); box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12)); }
+.zi-btn:disabled { cursor: default; color: var(--zl-t4, #66677c); }
+.zi-btn.is-quiet { background: transparent; box-shadow: none; color: var(--zl-t2, #c3c4d1); }
+.zi-btn.is-quiet:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+.zi-btn.is-wide { width: 100%; justify-content: flex-start; height: 44px; padding: 0 12px; }
+.zi-btn.is-wide .zi-group-n { color: var(--zl-t4, #66677c); }
+
+.zi-stale {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 4px 4px 4px 14px;
+  min-height: 44px;
+  border-radius: var(--zl-r-md, 10px);
+  background: var(--zl-raised, #1e1e29);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+}
+.zi-stale-t { flex: 1; min-width: 0; font-weight: 500; line-height: 18px; color: var(--zl-t1, #f4f4f7); }
+.zi-stale-d { display: block; font-weight: 400; color: var(--zl-t3, #9091a6); }
+
+.zi-ghost { display: flex; align-items: flex-start; gap: 12px; min-height: 72px; padding: 10px 12px; }
+.zi-ghost + .zi-ghost { margin-top: 2px; }
+.zi-ghost-mono { flex: none; width: 32px; height: 32px; margin-top: 2px; border-radius: var(--zl-r-md, 10px); background: var(--zl-raised, #1e1e29); }
+.zi-ghost-main { flex: 1; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.zi-ghost-bar { display: block; height: 10px; border-radius: var(--zl-r-sm, 6px); background: var(--zl-raised, #1e1e29); }
+.zi-ghost-bar.is-t { height: 14px; }
+.zi-ghost { animation: zi-breathe 1.6s ease-in-out infinite; }
+.zi-ghost:nth-child(2) { animation-delay: 0.2s; }
+.zi-ghost:nth-child(3) { animation-delay: 0.4s; }
+@keyframes zi-breathe { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) {
+  .zi-ghost { animation: none; }
+  .zi-body.is-sub, .zi-sheet { animation: none; }
 }
 
-.inbox-sheet-item-quiet { color: var(--overlay1); }
+/* ── The decision ────────────────────────────────────────────────────── */
+.zi-decide { padding: 0 8px 16px; }
+.zi-ev { display: flex; flex-direction: column; gap: 2px; padding: 4px 12px 8px; }
+.zi-ev-from { color: var(--zl-t3, #9091a6); }
+.zi-ev-title { font-size: var(--zl-fs-title, 16px); font-weight: 600; line-height: 1.35; letter-spacing: -0.01em; color: var(--zl-t1, #f4f4f7); overflow-wrap: anywhere; }
+.zi-ev-reason { font-size: var(--zl-fs-meta, 12px); line-height: 16px; color: var(--zl-t3, #9091a6); }
+.zi-payload {
+  margin: 8px 0 0;
+  max-height: 128px;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: var(--zl-r-sm, 6px);
+  background: var(--zl-canvas, #101018);
+  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  color: var(--zl-t2, #c3c4d1);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+  scrollbar-color: var(--zl-line-2, rgba(255, 255, 255, 0.12)) transparent;
+}
+.zi-detail-p { margin: 4px 12px 8px; line-height: 1.5; color: var(--zl-t2, #c3c4d1); }
+
+.zi-dests { display: flex; flex-direction: column; border-radius: var(--zl-r-md, 10px); background: var(--zl-raised, #1e1e29); box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07)); overflow: hidden; }
+.zi-dests .zi-quiet { margin: 12px; }
+.zi-dest {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 12px 8px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.zi-dest + .zi-dest, .zi-dest + .zi-dest-pair, .zi-quiet + .zi-dest-pair, .zi-dest-pair + .zi-dest { box-shadow: inset 0 1px 0 var(--zl-line, rgba(255, 255, 255, 0.07)); }
+.zi-dest:hover { background: var(--zl-control, #262633); }
+.zi-dest-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.zi-dest-l1 { display: flex; align-items: baseline; gap: 8px; }
+.zi-dest-t { flex: 1; min-width: 0; font-weight: 500; line-height: 20px; color: var(--zl-t1, #f4f4f7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zi-dest-b { font-size: var(--zl-fs-meta, 12px); line-height: 16px; color: var(--zl-t4, #66677c); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zi-dest-b.is-running { color: var(--zl-t3, #9091a6); }
+.zi-dest-b.is-permission { color: var(--zl-yellow, #f9e2af); }
+.zi-dest > svg { flex: none; width: 16px; height: 16px; color: var(--zl-t3, #9091a6); }
+.zi-dest.is-new { padding-left: 10px; }
+.zi-dest.is-new > svg { margin: 0 -3px 0 -1px; }
+.zi-dest-pair { display: flex; align-items: stretch; }
+.zi-dest-pair .zi-dest.is-new { flex: 1; min-width: 0; }
+.zi-dest.is-change {
+  flex: none;
+  width: auto;
+  justify-content: center;
+  padding: 0 14px;
+  box-shadow: inset 1px 0 0 var(--zl-line, rgba(255, 255, 255, 0.07));
+  color: var(--zl-t3, #9091a6);
+  font-size: var(--zl-fs-body, 14px);
+  font-weight: 500;
+}
+.zi-dest.is-change:hover { color: var(--zl-t1, #f4f4f7); }
+.zi-dest.is-pick { min-height: 44px; gap: 10px; }
+.zi-dest.is-pick.is-on { background: var(--zl-control, #262633); }
+.zi-dest.is-pick.is-on .zi-dest-t { font-weight: 600; }
+.zi-foot { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
+
+.zi-seg { display: flex; gap: 2px; padding: 3px; border-radius: var(--zl-r-md, 10px); background: var(--zl-canvas, #101018); box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07)); }
+.zi-seg-opt {
+  flex: 1;
+  height: 38px;
+  border: 0;
+  border-radius: var(--zl-r-sm, 6px);
+  background: transparent;
+  color: var(--zl-t3, #9091a6);
+  font-family: inherit;
+  font-size: var(--zl-fs-body, 14px);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+.zi-seg-opt:hover { color: var(--zl-t1, #f4f4f7); }
+.zi-seg-opt.is-on { background: var(--zl-control, #262633); color: var(--zl-t1, #f4f4f7); box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07)); }
+
+/* ── Phone sheet ─────────────────────────────────────────────────────── */
+.zi-scrim { position: absolute; inset: 0; z-index: 5; background: rgba(8, 8, 16, 0.55); animation: zi-fade 200ms ease; }
+@keyframes zi-fade { from { opacity: 0; } }
+.zi-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  max-height: 88%;
+  padding-top: 6px;
+  border-radius: var(--zl-r-lg, 16px) var(--zl-r-lg, 16px) 0 0;
+  background: var(--zl-sheet, #171720);
+  box-shadow: inset 0 1px 0 var(--zl-line-2, rgba(255, 255, 255, 0.12)), 0 -16px 48px rgba(0, 0, 0, 0.45);
+  animation: zi-rise 260ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+}
+@keyframes zi-rise { from { transform: translateY(100%); } }
+.zi-grab { display: block; width: 36px; height: 4px; margin: 0 auto; border-radius: 2px; background: var(--zl-line-2, rgba(255, 255, 255, 0.12)); }
+.zi-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 4px 8px; }
+
+/* ── Phone sizing: everything the thumb reaches is 44 or more. ─────── */
+.zi-inbox.is-phone .zi-back, .zi-inbox.is-phone .zi-x { width: 44px; height: 44px; }
+.zi-inbox.is-phone .zi-head { min-height: 64px; padding-top: calc(env(safe-area-inset-top, 0px) + 14px); }
+.zi-inbox.is-phone .zi-head.is-sheet { min-height: 56px; padding-top: 4px; }
+.zi-inbox.is-phone .zi-btn { height: 44px; }
+.zi-inbox.is-phone .zi-dest { min-height: 56px; }
+.zi-inbox.is-phone .zi-dest.is-pick { min-height: 48px; }
+.zi-inbox.is-phone .zi-seg-opt { height: 44px; }
+.zi-inbox.is-phone .zi-row { min-height: 76px; }
+
+.zi-data {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta, 12px);
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.zi-pill.zi-data { font-weight: 600; }
+.zi-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

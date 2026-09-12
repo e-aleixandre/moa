@@ -101,21 +101,38 @@ test("the badge counts only what still holds a decision", () => {
 });
 
 // ── grouping ────────────────────────────────────────────────────────────────
-// A header repeating what the whole screen already is would be noise, so a
-// single project is not grouped at all.
-test("one project is not grouped, several are", () => {
-  const one = inboxGroups(inboxCards(sessions, [event(), event({ id: "ev_2" })]));
-  expect(one).toHaveLength(1);
-  expect(one[0].label).toBe("");
+// Waiting / Settled, not Pending / All: the badge is the length of Waiting,
+// always, and settled rows stay as the receipt. Project is a datum on the
+// row (projectName), not a third grouping level.
 
-  const many = inboxGroups(inboxCards(sessions, [event(), event({ id: "ev_2", project: "/home/u/moa" })]));
-  expect(many.map((g) => g.label)).toEqual(["u/tienda", "u/moa"]);
+test("waiting and settled are two sections of one list", () => {
+  const cards = inboxCards(sessions, [event(), event({ id: "ev_2", state: "routed", routed_to: "b" })]);
+  const groups = inboxGroups(cards);
+  expect(groups.map((g) => g.label)).toEqual(["Waiting", "Settled"]);
+  expect(groups[0].cards.map((c) => c.event.id)).toEqual(["ev_1"]);
+  expect(groups[1].cards.map((c) => c.event.id)).toEqual(["ev_2"]);
 });
 
-test("the Pending filter hides settled events, All keeps them as history", () => {
-  const cards = inboxCards(sessions, [event(), event({ id: "ev_2", state: "routed", routed_to: "b" })]);
-  expect(inboxGroups(cards, "pending")[0].cards.map((c) => c.event.id)).toEqual(["ev_1"]);
-  expect(inboxGroups(cards, "all")[0].cards.map((c) => c.event.id).sort()).toEqual(["ev_1", "ev_2"]);
+test("settled is omitted when nothing has been filed yet", () => {
+  const groups = inboxGroups(inboxCards(sessions, [event()]));
+  expect(groups.map((g) => g.label)).toEqual(["Waiting"]);
+});
+
+test("an empty inbox has no sections", () => {
+  expect(inboxGroups([])).toEqual([]);
+});
+
+test("several projects still share Waiting / Settled, not a project header", () => {
+  const groups = inboxGroups(inboxCards(sessions, [event(), event({ id: "ev_2", project: "/home/u/moa" })]));
+  expect(groups).toHaveLength(1);
+  expect(groups[0].label).toBe("Waiting");
+  expect(groups[0].cards.map((c) => c.event.id).sort()).toEqual(["ev_1", "ev_2"]);
+});
+
+test("the row names the project by its last segment", () => {
+  const [card] = inboxCards(sessions, [event()]);
+  expect(card.projectName).toBe("tienda");
+  expect(card.projectLabel).toBe("u/tienda");
 });
 
 test("rows are newest first", () => {
@@ -124,7 +141,7 @@ test("rows are newest first", () => {
     event({ id: "old", created: now - 3600000 }),
     event({ id: "new", created: now }),
   ]);
-  expect(inboxGroups(cards, "all")[0].cards.map((c) => c.event.id)).toEqual(["new", "old"]);
+  expect(inboxGroups(cards)[0].cards.map((c) => c.event.id)).toEqual(["new", "old"]);
 });
 
 test("server ISO creation times sort newest first", () => {
@@ -132,7 +149,7 @@ test("server ISO creation times sort newest first", () => {
     event({ id: "old", created: "2026-09-03T09:00:00Z" }),
     event({ id: "new", created: "2026-09-03T10:00:00Z" }),
   ]);
-  expect(inboxGroups(cards, "all")[0].cards.map((c) => c.event.id)).toEqual(["new", "old"]);
+  expect(inboxGroups(cards)[0].cards.map((c) => c.event.id)).toEqual(["new", "old"]);
 });
 
 // ── the change signal ───────────────────────────────────────────────────────

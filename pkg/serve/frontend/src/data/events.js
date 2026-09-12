@@ -14,7 +14,7 @@ import { store, setState, visibleSessionIds } from './store.js';
 import { loadSessions } from './session-actions.js';
 import { openSession } from './tile-actions.js';
 import { addToast, removeToast } from './notifications.js';
-import { modelCodename, projectKey, projectLabel, sessionTitle } from './util/format.js';
+import { basename, modelCodename, projectKey, projectLabel, sessionTitle } from './util/format.js';
 
 // relAge is the session list's clock, kept identical to Sidebar/sessions.js and
 // the mobile chrome's: an event's age must not read like a different clock.
@@ -364,6 +364,9 @@ export function inboxCards(sessions, events) {
       sessions: targets,
       project,
       projectLabel: projectLabel(event.project),
+      // Last path segment: the row's meta line, so "moa/main" in a 272px
+      // column does not eat the age. The decision head keeps projectLabel.
+      projectName: event.project ? basename(event.project) : '',
       routedToTitle: routedTo ? sessionTitle(routedTo) : '',
       routedToAvailable: Boolean(routedTo),
     };
@@ -374,24 +377,20 @@ export function inboxPendingCount(cards) {
   return (cards || []).filter((card) => card.pending).length;
 }
 
-// inboxGroups is what the surface paints: the chosen filter, newest first,
-// grouped by project ONLY when more than one project is involved — a single
-// project would be a header repeating what the whole screen already is.
-export function inboxGroups(cards, filter = 'pending') {
-  const shown = (cards || [])
-    .filter((card) => (filter === 'pending' ? card.pending : true))
+// inboxGroups is what the surface paints: one list, two sections, newest
+// first inside each. Waiting is always present (the badge is its length);
+// Settled is the receipt and only appears when there is history. There is
+// no Pending/All filter — a filter hid the relationship between the badge
+// and the list. Project is a datum on the row, not a third grouping level.
+export function inboxGroups(cards) {
+  if (!(cards || []).length) return [];
+  const shown = cards
+    .slice()
     .sort((a, b) => eventCreatedAt(b.event.created) - eventCreatedAt(a.event.created));
-  const projects = new Set(shown.map((card) => card.project));
-  if (projects.size <= 1) return [{ key: '', label: '', cards: shown }];
-  const groups = [];
-  for (const card of shown) {
-    let group = groups.find((g) => g.key === card.project);
-    if (!group) {
-      group = { key: card.project, label: card.projectLabel, cards: [] };
-      groups.push(group);
-    }
-    group.cards.push(card);
-  }
+  const waiting = shown.filter((card) => card.pending);
+  const settled = shown.filter((card) => !card.pending);
+  const groups = [{ key: 'waiting', label: 'Waiting', attn: true, cards: waiting }];
+  if (settled.length) groups.push({ key: 'settled', label: 'Settled', attn: false, cards: settled });
   return groups;
 }
 

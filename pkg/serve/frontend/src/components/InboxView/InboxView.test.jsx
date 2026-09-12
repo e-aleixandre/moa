@@ -2,7 +2,7 @@ import { test, expect, mock } from "bun:test";
 
 // The sheet is walked as a plain vnode tree (no DOM), so its hooks are stubbed:
 // `pick` decides what each useState returns, in call order, which is how a test
-// can render the routing step and the model step of the same sheet. Only the
+// can render the routing step and the model step of the same decision. Only the
 // hooks this component uses are replaced — the rest of preact/hooks is kept, so
 // anything else importing the module still gets a complete one.
 const realHooks = await import("preact/hooks");
@@ -25,8 +25,6 @@ mock.module("preact/hooks", () => ({
   useMemo(factory) { return factory(); },
 }));
 
-// The models the sheet would fetch. useEventCreateModels' effect never runs
-// under the stub, so the specs are injected through its useState defaults.
 const SPECS = [
   { id: "openai/terra", catalogId: "terra", codename: "Terra", provider: "openai", accent: "green" },
   { id: "anthropic/opus", catalogId: "opus", codename: "Opus", provider: "anthropic", accent: "peach" },
@@ -53,6 +51,7 @@ const CARD = {
   sessions: [{ id: "s1", title: "ws race fix", state: "idle", when: "1m", path: "/home/x/dev/moa/main" }],
   project: "moa/main",
   projectLabel: "moa/main",
+  projectName: "main",
   routedToTitle: "",
 };
 
@@ -67,9 +66,6 @@ function descendants(node, nodes = []) {
   return nodes;
 }
 
-// expand renders component vnodes in place so the assertions reach real
-// markup; the components themselves are collected first, so a test can also
-// assert on the props a shipped primitive (ModelSelector) was given.
 const mounted = [];
 function expand(node, depth = 0) {
   if (node == null || typeof node !== "object" || depth > 10) return node;
@@ -89,13 +85,20 @@ function text(node) {
   return text(node.props?.children);
 }
 
-function byClass(nodes, className) {
-  return nodes.filter((node) => typeof node.props?.class === "string" && node.props.class.split(" ").includes(className));
+function classesOf(node) {
+  return typeof node.props?.class === "string" ? node.props.class.split(" ") : [];
 }
 
-// render — the inbox with its routing sheet open on the one pending card.
-// `states` maps a useState index to the value it should return; everything else
-// falls through to the component's own initial value.
+function byClass(nodes, className) {
+  return nodes.filter((node) => classesOf(node).includes(className));
+}
+
+function byClasses(nodes, ...need) {
+  return nodes.filter((node) => need.every((c) => classesOf(node).includes(c)));
+}
+
+// useState call order under the vnode walk:
+//   0 selected · 1 step · 2 override · 3 models · 4 defaultModel
 function render(states, props = {}) {
   calls = 0;
   setters.length = 0;
@@ -104,72 +107,62 @@ function render(states, props = {}) {
   return descendants(expand(InboxView({ cards: [CARD], ...props })));
 }
 
-// The useState call order under the vnode walk:
-//   0 filter · 1 routing · 2 models · 3 defaultModel · 4 step · 5 override
-const OPEN = { 1: EVENT.id, 2: SPECS, 3: "openai/terra" };
-const MODEL_STEP = { ...OPEN, 4: "model" };
+const OPEN = { 0: EVENT.id, 3: SPECS, 4: "openai/terra" };
+const MODEL_STEP = { ...OPEN, 1: "model" };
 
-test("the routing sheet names the model its create action would use", () => {
+test("the routing step names the model its create action would use", () => {
   const nodes = render(OPEN);
-  const [action] = byClass(nodes, "inbox-sheet-item");
-  expect(text(action)).toBe("New session · Terra low");
+  const [action] = byClasses(nodes, "zi-dest", "is-new");
+  expect(text(action)).toContain("New session");
+  expect(text(action)).toContain("Terra · low");
 });
 
-// The bug this replaces: ModelSelector's onSelect called onCreate, so picking a
-// model created the session and closed the sheet in the same tap. Choosing is a
-// step, not a decision — like the palette's model step, it only returns.
 test("choosing a model returns to the routing step instead of creating the session", () => {
   const onNewSession = mock(() => {});
   const nodes = render(MODEL_STEP, { onNewSession });
   expect(nodes.length).toBeGreaterThan(0);
-  const selector = mounted.find((node) => node.type.name === "ModelSelector");
-  expect(selector).toBeTruthy();
+  const pickers = byClasses(nodes, "zi-dest", "is-pick");
+  const opus = pickers.find((node) => text(node).includes("Opus"));
+  expect(opus).toBeTruthy();
 
-  selector.props.onSelect("anthropic/opus");
+  opus.props.onClick();
   expect(onNewSession).not.toHaveBeenCalled();
-  // useState call order in the sheet: filter, routing, models, defaultModel,
-  // step, override. The pick writes the override and returns to "route" —
-  // nothing is sent to the server.
-  expect(setters[5].mock.calls).toHaveLength(1);
-  expect(setters[4]).toHaveBeenCalledWith("route");
+  expect(setters[2].mock.calls).toHaveLength(1);
+  expect(setters[1]).toHaveBeenCalledWith("route");
 });
 
-// The choice is local to the open sheet: it changes what the create action
-// SAYS and what it would send, and nothing else.
 test("an overridden model is what the create action names and sends", () => {
   const onNewSession = mock(() => {});
-  const nodes = render({ ...OPEN, 5: { model: "anthropic/opus", thinking: "high" } }, { onNewSession });
-  const [action] = byClass(nodes, "inbox-sheet-item");
-  expect(text(action)).toBe("New session · Opus high");
+  const nodes = render({ ...OPEN, 2: { model: "anthropic/opus", thinking: "high" } }, { onNewSession });
+  const [action] = byClasses(nodes, "zi-dest", "is-new");
+  expect(text(action)).toContain("Opus · high");
 
   action.props.onClick();
   expect(onNewSession).toHaveBeenCalledWith(EVENT.id, { model: "anthropic/opus", thinking: "high" });
 });
 
-// The candidates are the shipped SessionRow, not a shape invented for the
-// sheet — a session has to look like a session wherever it is offered.
-test("the sheet offers open sessions as session rows and sends the event to one", () => {
+test("the decision offers open sessions as destinations and sends the event to one", () => {
   const onSend = mock(() => {});
   const nodes = render(OPEN, { onSend });
-  const rows = mounted.filter((node) => node.type.name === "SessionRow");
-  expect(rows.length).toBe(1);
-  const [hit] = byClass(nodes, "zl-row");
-  hit.props.onClick();
+  const dests = byClass(nodes, "zi-dest").filter((node) => !classesOf(node).includes("is-new") && !classesOf(node).includes("is-change") && !classesOf(node).includes("is-pick"));
+  expect(dests.length).toBe(1);
+  expect(text(dests[0])).toContain("ws race fix");
+  dests[0].props.onClick();
   expect(onSend).toHaveBeenCalledWith(EVENT.id, "s1");
 });
 
-// Every candidate of a project event lives in that project, so repeating the
-// path under each row would say the same thing N times.
-test("candidates of a project event drop the path the sheet already states", () => {
+test("candidates of a project event drop the path the decision already states", () => {
   const nodes = render(OPEN);
-  expect(byClass(nodes, "zl-row-path")).toHaveLength(0);
+  const dests = byClass(nodes, "zi-dest").filter((node) => !classesOf(node).includes("is-new") && !classesOf(node).includes("is-change"));
+  expect(text(dests[0])).not.toContain("moa/main");
 
   const projectless = { ...CARD, event: { ...EVENT, project: "" } };
   calls = 0;
   mounted.length = 0;
   pick = (index) => OPEN[index];
   const spanning = descendants(expand(InboxView({ cards: [projectless] })));
-  expect(byClass(spanning, "zl-row-path")).toHaveLength(1);
+  const spanningDests = byClass(spanning, "zi-dest").filter((node) => !classesOf(node).includes("is-new") && !classesOf(node).includes("is-change"));
+  expect(text(spanningDests[0])).toContain("moa/main");
 });
 
 const SETTLED_CARD = {
@@ -188,12 +181,12 @@ function settledCard(state) {
 
 test("a routed event whose destination is gone opens a read-only detail", () => {
   const card = settledCard("routed");
-  const closed = render({ 0: "all" }, { cards: [card] });
-  const [row] = byClass(closed, "inbox-row");
+  const closed = render({}, { cards: [card] });
+  const [row] = byClass(closed, "zi-row");
   row.props.onClick();
-  expect(setters[1]).toHaveBeenCalledWith(EVENT.id);
+  expect(setters[0]).toHaveBeenCalledWith(EVENT.id);
 
-  const open = render({ 0: "all", 1: EVENT.id }, { cards: [card] });
+  const open = render({ 0: EVENT.id }, { cards: [card] });
   expect(text(open)).toContain("Destination unavailable");
   expect(text(open)).toContain("Arrived 6m ago");
   expect(text(open)).toContain(EVENT.body);
@@ -201,26 +194,32 @@ test("a routed event whose destination is gone opens a read-only detail", () => 
 
 test("an ignored event opens an ignored read-only detail", () => {
   const card = settledCard("dismissed");
-  const open = render({ 0: "all", 1: EVENT.id }, { cards: [card] });
+  const open = render({ 0: EVENT.id }, { cards: [card] });
   expect(text(open)).toContain("Ignored");
   expect(text(open)).toContain("This event was ignored");
 });
 
 test("a delivering event says delivering in its row and detail", () => {
   const card = settledCard("routing");
-  const closed = render({ 0: "all" }, { cards: [card] });
-  expect(text(closed)).toContain("delivering");
-  expect(text(closed)).not.toContain("ignored");
+  const closed = render({}, { cards: [card] });
+  expect(text(closed)).toContain("Delivering");
+  expect(text(closed)).not.toContain("Ignored");
 
-  const open = render({ 0: "all", 1: EVENT.id }, { cards: [card] });
-  expect(text(open)).toContain("Delivering event");
+  const open = render({ 0: EVENT.id }, { cards: [card] });
+  expect(text(open)).toContain("Delivering");
   expect(text(open)).toContain("Delivery is in progress");
 });
 
-// ── what the surface is allowed to say ──────────────────────────────────────
-// The regression these pin is one sentence: with a failed load and no list,
-// the view printed "Nothing waiting." Remove the status branch and the first
-// of these fails on that exact string.
+test("waiting and settled share one list; there is no pending/all filter", () => {
+  const nodes = render({}, { cards: [CARD, settledCard("dismissed")] });
+  const body = text(nodes);
+  expect(body).toContain("Waiting");
+  expect(body).toContain("Settled");
+  expect(body).toContain("Ignored");
+  expect(body).toContain(EVENT.title);
+  expect(body).not.toContain("Pending");
+  expect(byClass(nodes, "zi-row")).toHaveLength(2);
+});
 
 test("a failed first load says so, and never claims the inbox is empty", () => {
   const nodes = render({}, {
@@ -231,13 +230,13 @@ test("a failed first load says so, and never claims the inbox is empty", () => {
   expect(body).toContain("Can't reach the inbox");
   expect(body).toContain("GET /api/events · 502: upstream is down");
   expect(body).not.toContain("Nothing waiting.");
-  expect(body).not.toContain("No events yet.");
+  expect(body).not.toContain("Nothing has arrived yet.");
 });
 
 test("the failed state offers a retry that calls back", () => {
   const onRetry = mock(() => {});
   const nodes = render({}, { cards: [], health: { status: "error", error: "x" }, onRetry });
-  const [retry] = byClass(nodes, "inbox-state-retry");
+  const retry = byClass(nodes, "zi-btn").find((node) => text(node) === "Retry");
   expect(retry).toBeTruthy();
   retry.props.onClick();
   expect(onRetry).toHaveBeenCalled();
@@ -245,14 +244,14 @@ test("the failed state offers a retry that calls back", () => {
 
 test("a retry in flight says it is retrying instead of offering the same tap twice", () => {
   const nodes = render({}, { cards: [], health: { status: "error", error: "x", retrying: true }, onRetry: () => {} });
-  const [retry] = byClass(nodes, "inbox-state-retry");
+  const retry = byClass(nodes, "zi-btn").find((node) => text(node).includes("Retry"));
   expect(retry.props.disabled).toBe(true);
   expect(text(retry)).toBe("Retrying…");
 });
 
 test("a first load in flight shows ghosts, not an empty inbox", () => {
   const nodes = render({}, { cards: [], health: { status: "loading" } });
-  expect(byClass(nodes, "inbox-ghost")).toHaveLength(3);
+  expect(byClass(nodes, "zi-ghost")).toHaveLength(3);
   const body = text(nodes);
   expect(body).toContain("Loading events");
   expect(body).not.toContain("Nothing waiting.");
@@ -266,12 +265,11 @@ test("a stale inbox keeps its rows and says since when they stopped being curren
   const body = text(nodes);
   expect(body).toContain("Not updating");
   expect(body).toContain("last checked 4m ago");
-  // The list is still there: a failed poll must not hide what is waiting.
-  expect(byClass(nodes, "inbox-row")).toHaveLength(1);
+  expect(byClass(nodes, "zi-row")).toHaveLength(1);
   expect(body).toContain(EVENT.title);
 });
 
-test("a healthy empty inbox still says nothing is waiting", () => {
+test("a healthy empty inbox still says nothing has arrived", () => {
   const nodes = render({}, { cards: [], health: { status: "ready" } });
-  expect(text(nodes)).toContain("Nothing waiting.");
+  expect(text(nodes)).toContain("Nothing has arrived yet.");
 });

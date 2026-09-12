@@ -1,13 +1,7 @@
-/* The event inbox, Ambient direction. Prototype, self-contained: the tokens
-   are the zones lab's (zones-lab.css:22-75), repeated here under the `zi-`
-   prefix because that sheet is being edited in parallel. Fold on merge.
-
-   The inbox borrows the session list's grammar -- sheet column, uppercase
-   sections with a count, a monogram slot, a title line with a dot and an
-   age, one brief line -- and adds nothing to the system: no new radius,
-   size, weight, colour or shadow. Yellow is "needs you" (the count pill,
-   the dot on a waiting row), red is a failed load, green is a delivery in
-   progress. Mauve appears only as the focus ring. Peach does not appear. */
+/* The event inbox lab. Product markup and CSS live in components/InboxView
+   now (classes `zi-*`); this sheet is only the laboratory: the page, the
+   density frames, the switcher and the notes. Tokens stay on `.zi` so the
+   frames match the zones lab when this view is opened on its own. */
 
 .zi {
   position: relative;
@@ -56,7 +50,6 @@
   outline-offset: 2px;
 }
 
-/* ── Lab chrome (not product) ─────────────────────────────────────────── */
 .zi-lab-head { position: relative; max-width: 720px; margin: 0 auto 28px; text-align: center; }
 .zi-lab-head h1 { margin: 0 0 8px; font-size: var(--zi-fs-display); font-weight: 600; letter-spacing: -0.01em; }
 .zi-lab-head p { margin: 0; line-height: 1.6; color: var(--zi-t3); }
@@ -89,7 +82,6 @@
 .zi-notes dd { margin: 0; line-height: 1.6; color: var(--zi-t3); }
 .zi-notes em { font-style: italic; color: var(--zi-t2); }
 
-/* ── Frames ──────────────────────────────────────────────────────────── */
 .zi-phone,
 .zi-desk {
   position: relative;
@@ -101,8 +93,6 @@
 .zi-phone { width: 390px; height: 780px; display: flex; flex-direction: column; }
 .zi-desk { display: flex; width: 860px; height: 780px; }
 .zi-screen { display: flex; flex-direction: column; height: 100%; background: var(--zi-sheet); }
-/* 272: the zones lab's own column (zones-lab.css:1140). The inbox swaps
-   into it, so it must work at that width, not at a kinder one. */
 .zi-desk-side {
   width: 272px;
   flex: none;
@@ -112,6 +102,8 @@
   background: var(--zi-sheet);
   box-shadow: inset -1px 0 0 var(--zi-line);
 }
+.zi-desk-side .zi-inbox,
+.zi-screen .zi-inbox { flex: 1; min-height: 0; }
 .zi-desk-main { position: relative; flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .zi-desk-head { display: flex; align-items: center; gap: 6px; padding: 12px 16px 4px; }
 .zi-crumb {
@@ -136,396 +128,8 @@
 .zi-stub > * { max-width: 68ch; }
 .zi-stub p { margin: 0 0 1em; }
 .zi-stub code { padding: 1px 5px; border-radius: var(--zi-r-sm); background: var(--zi-raised); box-shadow: var(--zi-rim); font-family: var(--mono); font-size: 0.875em; color: var(--zi-t2); }
-.zi-stub-user { margin: 0 0 24px; padding: 2px 0 2px 14px; border-left: 3px solid #fab387; /* peach: user messages only */ }
+.zi-stub-user { margin: 0 0 24px; padding: 2px 0 2px 14px; border-left: 3px solid #fab387; }
 
-/* ── Head: back, title, count ───────────────────────────────────────────
-   The same head the session panel uses for its pushed pages: a back button
-   where the eyebrow would be, a 16/600 title. The count pill sits next to
-   the title, not on the back button: it is the number of the list, and it
-   is the number the door's badge showed a second ago. */
-.zi-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 60px;
-  padding: 12px 12px 4px 8px;
-}
-.zi-head.is-sheet { min-height: 52px; padding: 6px 8px 4px 8px; }
-.zi-head.is-sheet .zi-title { padding-left: 12px; }
-.zi-head.is-sheet .zi-back + .zi-title { padding-left: 0; }
-.zi-back,
-.zi-x {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: 0;
-  border-radius: var(--zi-r-md);
-  background: transparent;
-  color: var(--zi-t2);
-  cursor: pointer;
-}
-.zi-back svg, .zi-x svg { width: 16px; height: 16px; }
-.zi-back:hover, .zi-x:hover { background: var(--zi-hi); color: var(--zi-t1); }
-.zi-x { margin-left: auto; background: var(--zi-raised); box-shadow: var(--zi-rim); }
-.zi-x:hover { background: var(--zi-control); }
-.zi-title {
-  flex: 1;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--zi-fs-title);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.zi-head > .zi-pill { margin-left: -2px; }
-.zi-title + .zi-pill { margin-right: auto; }
-
-/* The count. Yellow on canvas ink: the sidebar's "Needs attention" pill,
-   exactly. It is the one place the inbox spends colour on a number. */
-.zi-pill {
-  flex: none;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--zi-yellow);
-  color: var(--zi-canvas);
-  font-weight: 600;
-  line-height: 20px;
-  text-align: center;
-}
-
-/* ── Body and list ─────────────────────────────────────────────────── */
-.zi-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--zi-line-2) transparent; }
-.zi-body.is-sub { animation: zi-push 200ms var(--zi-ease); }
-@keyframes zi-push { from { opacity: 0; transform: translateX(12px); } }
-.zi-list { padding: 0 8px 16px; }
-.zi-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 8px 12px 4px;
-  min-height: 32px;
-  font-size: var(--zi-fs-meta);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--zi-t4);
-}
-.zi-list > .zi-group:first-child, .zi-stale + .zi-group { margin-top: 0; }
-.zi-group-n { letter-spacing: 0; color: var(--zi-t4); }
-.zi-group.is-attn { color: var(--zi-t1); }
-.zi-group.is-attn .zi-pill { height: 18px; min-width: 18px; line-height: 18px; }
-.zi-quiet { margin: 4px 12px 8px; line-height: 20px; color: var(--zi-t4); }
-
-/* A row: monogram, then three lines -- from · project and the age with the
-   dot on line one, the title on line two, the reason or destination on
-   three. Three lines because a waiting event has three data you need
-   before you tap (who, what, why it waits); the session row's two-line
-   budget does not fit it and forcing it would drop the reason, which is
-   the line that tells you whether to bother. */
-.zi-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  width: 100%;
-  min-height: 72px;
-  padding: 10px 12px;
-  border: 0;
-  border-radius: var(--zi-r-md);
-  background: transparent;
-  color: inherit;
-  font-family: inherit;
-  letter-spacing: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background 120ms ease;
-}
-.zi-row + .zi-row { margin-top: 2px; }
-.zi-row:hover { background: var(--zi-hi); }
-.zi-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.zi-row-l1 { display: flex; align-items: center; gap: 8px; min-height: 16px; }
-.zi-row-from { flex: 1; min-width: 0; color: var(--zi-t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.zi-row-proj { color: var(--zi-t4); }
-.zi-row-meta { display: inline-flex; align-items: center; gap: 6px; flex: none; }
-.zi-row-when { color: var(--zi-t4); min-width: 3ch; text-align: left; font-variant-numeric: tabular-nums; }
-/* The title is the only text you have to decide on, so it may take two
-   lines before it truncates. A session row truncates at one because you
-   already know your own sessions; an event's title you are reading for the
-   first time. */
-.zi-row-title {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  font-weight: 500;
-  line-height: 20px;
-  color: var(--zi-t1);
-  overflow: hidden;
-  overflow-wrap: anywhere;
-}
-.zi-row-sub {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 16px;
-  font-size: var(--zi-fs-meta);
-  line-height: 16px;
-  color: var(--zi-t3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.zi-row-sub.is-dest { color: var(--zi-t3); }
-.zi-row-sub.is-live { color: var(--zi-t3); }
-.zi-row-sub.is-broken { color: var(--zi-red); }
-
-/* Settled: the same row, one step down the text ladder and no dot. Not
-   struck through, not dimmed to nothing -- it still has to be read to
-   answer "where did that go". */
-.zi-row.is-settled .zi-row-title { color: var(--zi-t3); font-weight: 400; }
-.zi-row.is-settled .zi-row-from { color: var(--zi-t4); }
-.zi-row.is-settled .zi-mono { opacity: 0.55; }
-
-/* Monogram: the source, coloured by its name. Same shape as the session
-   list's project monogram so the two columns rhyme. */
-.zi-mono {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-top: 2px;
-  border-radius: var(--zi-r-md);
-  background: hsl(var(--h) 50% 60% / 0.16);
-  box-shadow: 0 0 0 1px hsl(var(--h) 50% 65% / 0.18);
-  color: hsl(var(--h) 65% 78%);
-  font-family: var(--mono);
-  font-size: var(--zi-fs-meta);
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: lowercase;
-}
-.zi-mono.is-sm { width: 26px; height: 26px; margin-top: 0; border-radius: var(--zi-r-sm); }
-
-/* Dots: the session list's, unchanged. Real elements, never pseudo. */
-.zi-dot { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
-.zi-dot.is-needs, .zi-dot.is-permission { background: var(--zi-yellow); box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22); }
-.zi-dot.is-running { background: var(--zi-green); box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18); }
-.zi-dot.is-error { background: var(--zi-red); box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.2); }
-.zi-dot.is-idle { background: var(--zi-t4); }
-
-/* ── States that are not a list ─────────────────────────────────────── */
-.zi-state {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 4px 8px 0;
-  padding: 16px 12px;
-  border-radius: var(--zi-r-md);
-  line-height: 1.5;
-  color: var(--zi-t3);
-}
-.zi-state.is-error { background: var(--zi-raised); box-shadow: var(--zi-rim); }
-.zi-state-t { display: inline-flex; align-items: center; gap: 10px; font-size: var(--zi-fs-title); font-weight: 500; color: var(--zi-t1); }
-.zi-state.is-error .zi-state-t { color: var(--zi-red); }
-/* Never anything: one quiet line, no box. There is no next action. */
-.zi-state.is-empty { padding-top: 8px; }
-.zi-state.is-empty .zi-state-t { font-size: var(--zi-fs-body); font-weight: 400; color: var(--zi-t3); }
-.zi-state-d { color: var(--zi-t3); }
-.zi-state-p { color: var(--zi-t3); }
-.zi-state .zi-btn { margin-top: 4px; }
-
-.zi-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: var(--zi-r-md);
-  background: var(--zi-control);
-  box-shadow: var(--zi-rim);
-  color: var(--zi-t1);
-  font-family: inherit;
-  font-size: var(--zi-fs-body);
-  font-weight: 500;
-  letter-spacing: inherit;
-  cursor: pointer;
-  transition: background 120ms ease;
-}
-.zi-btn:hover { background: var(--zi-raised); box-shadow: var(--zi-rim-2); }
-.zi-btn.is-quiet { background: transparent; box-shadow: none; color: var(--zi-t2); }
-.zi-btn.is-quiet:hover { background: var(--zi-hi); color: var(--zi-t1); }
-.zi-btn.is-wide { width: 100%; justify-content: flex-start; height: 44px; padding: 0 12px; }
-.zi-btn.is-wide .zi-group-n { color: var(--zi-t4); }
-
-/* Loaded once, poll failing: a strip the list scrolls under, red dot,
-   one line, a quiet retry. Raised so it reads as a note on the list, not
-   a row of it. */
-.zi-stale {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 8px;
-  padding: 4px 4px 4px 14px;
-  min-height: 44px;
-  border-radius: var(--zi-r-md);
-  background: var(--zi-raised);
-  box-shadow: var(--zi-rim);
-}
-.zi-stale-t { flex: 1; min-width: 0; font-weight: 500; line-height: 18px; color: var(--zi-t1); }
-.zi-stale-d { display: block; font-weight: 400; color: var(--zi-t3); }
-
-/* Ghost rows: the row's own geometry, breathing. */
-.zi-ghost { display: flex; align-items: flex-start; gap: 12px; min-height: 72px; padding: 10px 12px; }
-.zi-ghost + .zi-ghost { margin-top: 2px; }
-.zi-ghost-mono { flex: none; width: 32px; height: 32px; margin-top: 2px; border-radius: var(--zi-r-md); background: var(--zi-raised); }
-.zi-ghost-main { flex: 1; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
-.zi-ghost-bar { display: block; height: 10px; border-radius: var(--zi-r-sm); background: var(--zi-raised); }
-.zi-ghost-bar.is-t { height: 14px; }
-.zi-ghost { animation: zi-breathe 1.6s ease-in-out infinite; }
-.zi-ghost:nth-child(2) { animation-delay: 0.2s; }
-.zi-ghost:nth-child(3) { animation-delay: 0.4s; }
-@keyframes zi-breathe { 50% { opacity: 0.45; } }
-@media (prefers-reduced-motion: reduce) { .zi-ghost { animation: none; } .zi-body.is-sub, .zi-sheet { animation: none; } }
-
-/* ── The decision ────────────────────────────────────────────────────── */
-.zi-decide { padding: 0 8px 16px; }
-.zi-ev { display: flex; flex-direction: column; gap: 2px; padding: 4px 12px 8px; }
-.zi-ev-from { color: var(--zi-t3); }
-.zi-ev-title { font-size: var(--zi-fs-title); font-weight: 600; line-height: 1.35; letter-spacing: -0.01em; color: var(--zi-t1); overflow-wrap: anywhere; }
-.zi-ev-reason { font-size: var(--zi-fs-meta); line-height: 16px; color: var(--zi-t3); }
-/* The payload is a recess: canvas tone, hairline, mono, capped. */
-.zi-payload {
-  margin: 8px 0 0;
-  max-height: 128px;
-  padding: 8px 10px;
-  overflow: auto;
-  border-radius: var(--zi-r-sm);
-  background: var(--zi-canvas);
-  box-shadow: var(--zi-rim);
-  color: var(--zi-t2);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  scrollbar-width: thin;
-  scrollbar-color: var(--zi-line-2) transparent;
-}
-.zi-detail-p { margin: 4px 12px 8px; line-height: 1.5; color: var(--zi-t2); }
-
-/* Destinations: one raised block, rows cut by hairlines. A session row
-   carries its state dot; the new-session row carries a plus in the same
-   column, neutral, because a session that does not exist has no state. */
-.zi-dests { display: flex; flex-direction: column; border-radius: var(--zi-r-md); background: var(--zi-raised); box-shadow: var(--zi-rim); overflow: hidden; }
-.zi-dests .zi-quiet { margin: 12px; }
-.zi-dest {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 52px;
-  padding: 8px 12px 8px 14px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-family: inherit;
-  letter-spacing: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background 120ms ease;
-}
-.zi-dest + .zi-dest, .zi-dest + .zi-dest-pair, .zi-quiet + .zi-dest-pair, .zi-dest-pair + .zi-dest { box-shadow: inset 0 1px 0 var(--zi-line); }
-.zi-dest:hover { background: var(--zi-control); }
-.zi-dest-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.zi-dest-l1 { display: flex; align-items: baseline; gap: 8px; }
-.zi-dest-t { flex: 1; min-width: 0; font-weight: 500; line-height: 20px; color: var(--zi-t1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.zi-dest-b { font-size: var(--zi-fs-meta); line-height: 16px; color: var(--zi-t4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.zi-dest-b.is-running { color: var(--zi-t3); }
-.zi-dest-b.is-permission { color: var(--zi-yellow); }
-.zi-dest > svg { flex: none; width: 16px; height: 16px; color: var(--zi-t3); }
-.zi-dest.is-new { padding-left: 10px; }
-.zi-dest.is-new > svg { margin: 0 -3px 0 -1px; }
-.zi-dest-pair { display: flex; align-items: stretch; }
-.zi-dest-pair .zi-dest.is-new { flex: 1; min-width: 0; }
-.zi-dest.is-change {
-  flex: none;
-  width: auto;
-  justify-content: center;
-  padding: 0 14px;
-  box-shadow: inset 1px 0 0 var(--zi-line);
-  color: var(--zi-t3);
-  font-size: var(--zi-fs-body);
-  font-weight: 500;
-}
-.zi-dest.is-change:hover { color: var(--zi-t1); }
-.zi-dest.is-pick { min-height: 44px; gap: 10px; }
-.zi-dest.is-pick.is-on { background: var(--zi-control); }
-.zi-dest.is-pick.is-on .zi-dest-t { font-weight: 600; }
-.zi-foot { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
-
-/* Thinking: a segmented control, the product's own. */
-.zi-seg { display: flex; gap: 2px; padding: 3px; border-radius: var(--zi-r-md); background: var(--zi-canvas); box-shadow: var(--zi-rim); }
-.zi-seg-opt {
-  flex: 1;
-  height: 38px;
-  border: 0;
-  border-radius: var(--zi-r-sm);
-  background: transparent;
-  color: var(--zi-t3);
-  font-family: inherit;
-  font-size: var(--zi-fs-body);
-  font-weight: 500;
-  letter-spacing: inherit;
-  cursor: pointer;
-}
-.zi-seg-opt:hover { color: var(--zi-t1); }
-.zi-seg-opt.is-on { background: var(--zi-control); color: var(--zi-t1); box-shadow: var(--zi-rim); }
-
-/* ── Phone sheet ─────────────────────────────────────────────────────── */
-.zi-scrim { position: absolute; inset: 0; z-index: 5; background: rgba(8, 8, 16, 0.55); animation: zi-fade 200ms ease; }
-@keyframes zi-fade { from { opacity: 0; } }
-.zi-sheet {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 6;
-  display: flex;
-  flex-direction: column;
-  max-height: 88%;
-  padding-top: 6px;
-  border-radius: var(--zi-r-lg) var(--zi-r-lg) 0 0;
-  background: var(--zi-sheet);
-  box-shadow: inset 0 1px 0 var(--zi-line-2), 0 -16px 48px rgba(0, 0, 0, 0.45);
-  animation: zi-rise 260ms var(--zi-ease);
-}
-@keyframes zi-rise { from { transform: translateY(100%); } }
-.zi-grab { display: block; width: 36px; height: 4px; margin: 0 auto; border-radius: 2px; background: var(--zi-line-2); }
-.zi-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 4px 8px; }
-
-/* ── Phone sizing: everything the thumb reaches is 44 or more. ─────── */
-.zi-phone .zi-back, .zi-phone .zi-x { width: 44px; height: 44px; }
-.zi-phone .zi-head { min-height: 64px; padding-top: 14px; }
-.zi-phone .zi-head.is-sheet { min-height: 56px; padding-top: 4px; }
-.zi-phone .zi-btn { height: 44px; }
-.zi-phone .zi-dest { min-height: 56px; }
-.zi-phone .zi-dest.is-pick { min-height: 48px; }
-.zi-phone .zi-seg-opt { height: 44px; }
-.zi-phone .zi-row { min-height: 76px; }
-
-/* ── Data is mono ────────────────────────────────────────────────────── */
 .zi-data {
   font-family: var(--mono);
   font-size: var(--zi-fs-meta);
@@ -533,5 +137,3 @@
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
-.zi-pill.zi-data { font-weight: 600; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

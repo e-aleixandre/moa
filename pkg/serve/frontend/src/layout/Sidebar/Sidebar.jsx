@@ -242,32 +242,34 @@ export function Sidebar({
 
   return (
     <aside class={`zl-side-body${phone ? " is-phone" : ""}`}>
-      <div class="zl-side-head">
-        <span class="zl-side-title">moa</span>
-        {/* Search is a recess cut into the sheet: present at rest, so it reads
-            as an object you can reach for, but sunken so it never competes
-            with the raised things (the current row, New session).
+      {!inboxOpen && (
+        <div class="zl-side-head">
+          <span class="zl-side-title">moa</span>
+          {/* Search is a recess cut into the sheet: present at rest, so it reads
+              as an object you can reach for, but sunken so it never competes
+              with the raised things (the current row, New session).
 
-            The keycap is a BUTTON, not an ornament: this field FILTERS the list
-            and ⌘K JUMPS to a session from anywhere, so the two do not get in
-            each other's way. Only where there is a keyboard. */}
-        <label class="zl-search">
-          <SearchIcon />
-          <input
-            class="zl-search-in"
-            type="text"
-            placeholder="Search"
-            aria-label="Search sessions"
-            autocomplete="off"
-            autocapitalize="off"
-            autocorrect="off"
-            spellcheck={false}
-            value={query}
-            onInput={(e) => setQuery(e.target.value)}
-          />
-          {jumpCap}
-        </label>
-      </div>
+              The keycap is a BUTTON, not an ornament: this field FILTERS the list
+              and ⌘K JUMPS to a session from anywhere, so the two do not get in
+              each other's way. Only where there is a keyboard. */}
+          <label class="zl-search">
+            <SearchIcon />
+            <input
+              class="zl-search-in"
+              type="text"
+              placeholder="Search"
+              aria-label="Search sessions"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck={false}
+              value={query}
+              onInput={(e) => setQuery(e.target.value)}
+            />
+            {jumpCap}
+          </label>
+        </div>
+      )}
 
       {inboxOpen ? (
         <div class="zl-list is-inbox">
@@ -280,6 +282,7 @@ export function Sidebar({
             onIgnore={onDismissEvent}
             onIgnoreSource={onDismissEventSource}
             onOpenSession={onSelectSession}
+            onBack={onInbox}
           />
         </div>
       ) : (
@@ -409,10 +412,13 @@ export function Sidebar({
 
       {/* New anchors the bottom, where the thumb is. It is the one action, so
           it gets the width — and the word, which a 28px "+" in the head never
-          had room for. */}
-      <button type="button" class="zl-side-new" onClick={onNewSession}>
-        <PlusIcon />New session
-      </button>
+          had room for. Hidden while the inbox has the list: filing is not
+          starting a session. */}
+      {!inboxOpen && (
+        <button type="button" class="zl-side-new" onClick={onNewSession}>
+          <PlusIcon />New session
+        </button>
+      )}
 
       {/* The foot is about the APP, not about a session: the inbox, the build,
           and the global settings. Same place both densities kept settings. */}

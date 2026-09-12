@@ -1,5 +1,4 @@
-import { ChevronLeft } from "lucide-preact";
-import { InboxView } from "../../../components/index.js";
+import { InboxView } from "../../../components/InboxView/InboxView.jsx";
 import { useEdgeSwipeBack } from "../../../hooks/useEdgeSwipeBack.js";
 import "./MobileInboxView.css";
 
@@ -9,31 +8,25 @@ import "./MobileInboxView.css";
 // the session list: nothing on the conversation screen moves when an event
 // arrives, and coming back leaves the transcript exactly where it was.
 //
-// The header is the pushed-screen header: the way back, and the name of where
-// you are. The list itself is the shared InboxView, so the phone and the
-// desktop cannot drift about what a row says.
+// The list itself is the shared InboxView (variant="sheet"), so the phone and
+// the desktop cannot drift about what a row says. The head lives inside that
+// component; this wrapper is only the push chrome and the edge-swipe.
 export function MobileInboxView({ cards, health, onRetry, onBack, onSend, onNewSession, onIgnore, onIgnoreSource, onOpenSession }) {
   const { screenRef, dragging, swipeBind } = useEdgeSwipeBack({ onBack });
   return (
     <div class={dragging ? "minbox is-swiping" : "minbox"} ref={screenRef} {...swipeBind}>
-      <header class="minbox-head">
-        <button type="button" class="minbox-back" aria-label="Back to conversation" onClick={onBack}>
-          <ChevronLeft size={20} />
-        </button>
-        <span class="minbox-name">Inbox</span>
-      </header>
-      <div class="minbox-body">
-        <InboxView
-          cards={cards}
-          health={health}
-          onRetry={onRetry}
-          onSend={onSend}
-          onNewSession={onNewSession}
-          onIgnore={onIgnore}
-          onIgnoreSource={onIgnoreSource}
-          onOpenSession={onOpenSession}
-        />
-      </div>
+      <InboxView
+        variant="sheet"
+        cards={cards}
+        health={health}
+        onRetry={onRetry}
+        onSend={onSend}
+        onNewSession={onNewSession}
+        onIgnore={onIgnore}
+        onIgnoreSource={onIgnoreSource}
+        onOpenSession={onOpenSession}
+        onBack={onBack}
+      />
     </div>
   );
 }
