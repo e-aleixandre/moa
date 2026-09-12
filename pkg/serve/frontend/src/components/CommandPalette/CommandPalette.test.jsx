@@ -13,7 +13,14 @@ function areEqual(a, b) {
   return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
 }
 
+// Spread the real hooks first. bun's mock.module replaces the module for the
+// whole process and never restores it, so a factory listing only some hooks
+// deletes the rest for every file loaded afterwards -- the
+// "Export named 'useMemo' not found" that only appears when these files run
+// together.
+const realHooks = await import("preact/hooks");
 mock.module("preact/hooks", () => ({
+  ...realHooks,
   useState(initial) {
     const cell = hooks[cursor] || (hooks[cursor] = { value: typeof initial === "function" ? initial() : initial });
     const at = cursor++;
@@ -65,7 +72,11 @@ const MODELS = [
   { id: "gpt-5-sol", name: "GPT Sol", provider: "openai", alias: "sol" },
 ];
 
-globalThis.document = { activeElement: null };
+// This stub is global and permanent, so it has to survive every other module
+// the run imports -- not just this file's needs. markdown.js registers a click
+// listener at import time behind a `typeof document !== 'undefined'` guard,
+// which a document without addEventListener passes and then crashes.
+globalThis.document = { activeElement: null, addEventListener() {}, removeEventListener() {} };
 globalThis.requestAnimationFrame = (fn) => { fn(); return 0; };
 globalThis.fetch = (url) => {
   const body = url.startsWith("/api/capabilities")
@@ -77,7 +88,12 @@ globalThis.fetch = (url) => {
 };
 
 const created = [];
+// Spread the real module first: mock.module replaces it process-wide and is
+// never restored, so listing only two exports deletes the other thirty for
+// every file that loads afterwards.
+const realSessionActions = await import("../../data/session-actions.js");
 mock.module("../../data/session-actions.js", () => ({
+  ...realSessionActions,
   createSession: (opts) => { created.push(opts); return Promise.resolve("s1"); },
   resumeSession: () => Promise.resolve(),
 }));

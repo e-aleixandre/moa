@@ -4,7 +4,14 @@ import { expect, mock, test } from "bun:test";
 // function outside any render, and the component uses hooks. It only ever
 // worked because another file's process-wide mock.module("preact/hooks")
 // happened to load first. It declares its own now.
+// Spread the real hooks first. bun's mock.module replaces the module for the
+// whole process and never restores it, so a factory that lists only some hooks
+// deletes the rest for every file loaded afterwards -- that is the
+// "Export named 'useMemo' not found" that appears only when these files run
+// beside one another.
+const realHooks = await import("preact/hooks");
 mock.module("preact/hooks", () => ({
+  ...realHooks,
   useState(initial) { return [typeof initial === "function" ? initial() : initial, () => {}]; },
   useEffect() {},
   useLayoutEffect() {},

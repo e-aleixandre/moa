@@ -10,7 +10,14 @@ import { expect, mock, test } from "bun:test";
 // stopped importing ModelPill and the import graph shifted. The fix is for
 // this file to declare the hooks it needs instead of borrowing someone else's
 // accident.
+// Spread the real hooks first. bun's mock.module replaces the module for the
+// whole process and never restores it, so a factory that lists only some hooks
+// deletes the rest for every file loaded afterwards -- that is the
+// "Export named 'useMemo' not found" that appears only when these files run
+// beside one another.
+const realHooks = await import("preact/hooks");
 mock.module("preact/hooks", () => ({
+  ...realHooks,
   useState(initial) { return [typeof initial === "function" ? initial() : initial, () => {}]; },
   useEffect() {},
   useLayoutEffect() {},

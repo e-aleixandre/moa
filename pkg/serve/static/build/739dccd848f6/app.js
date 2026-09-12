@@ -201,4 +201,4 @@ dompurify/dist/purify.es.mjs:
   (*! @license DOMPurify 3.4.12 | (c) Cure53 and other contributors | Released under the Apache license 2.0 and Mozilla Public License 2.0 | github.com/cure53/DOMPurify/blob/3.4.12/LICENSE *)
 */
 
-globalThis.__MOA_BUILD_ID__="d3f9d2356f4c";
+globalThis.__MOA_BUILD_ID__="739dccd848f6";

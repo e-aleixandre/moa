@@ -18,7 +18,14 @@ let sendResult;
 
 let voiceOptions;
 
+// Spread the real hooks first. bun's mock.module replaces the module for the
+// whole process and never restores it, so a factory listing only some hooks
+// deletes the rest for every file loaded afterwards -- the
+// "Export named 'useMemo' not found" that only appears when these files run
+// together.
+const realHooks = await import("preact/hooks");
 mock.module("preact/hooks", () => ({
+  ...realHooks,
   useRef(initial) {
     const ref = { current: initial };
     refs.push(ref);
@@ -45,7 +52,14 @@ mock.module("../../hooks/useVoiceGesture.js", () => ({
   },
 }));
 
+// Spread the real module first. bun's mock.module REPLACES the whole module
+// for the entire process and is never restored, so a partial factory deletes
+// every export it does not list -- which is how AskUserPrompt's tests started
+// dying on "Export named 'resolveAskUser' not found" whenever this file
+// happened to load first. Overriding only what we simulate keeps the rest.
+const realSessionActions = await import("../../data/session-actions.js");
 mock.module("../../data/session-actions.js", () => ({
+  ...realSessionActions,
   sendMessage: async (...args) => { sent.push(args); await sendResult; },
   newSteerId: () => "test-id",
   cancelRun: async () => ({}),

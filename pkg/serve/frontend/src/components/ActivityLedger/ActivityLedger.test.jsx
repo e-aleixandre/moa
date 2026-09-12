@@ -4,7 +4,14 @@ import { test, expect, mock } from "bun:test";
 // hooks are stubbed: `expanded` is driven by the value this stub returns, which
 // is how a test can assert both the collapsed and the opened live row.
 let stateValue = null;
+// Spread the real hooks first. bun's mock.module replaces the module for the
+// whole process and never restores it, so a factory listing only some hooks
+// deletes the rest for every file loaded afterwards -- the
+// "Export named 'useMemo' not found" that only appears when these files run
+// together.
+const realHooks = await import("preact/hooks");
 mock.module("preact/hooks", () => ({
+  ...realHooks,
   useState(initial) {
     const value = stateValue == null ? (typeof initial === "function" ? initial() : initial) : stateValue;
     return [value, () => {}];

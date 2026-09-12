@@ -3,7 +3,14 @@ import { expect, mock, test } from "bun:test";
 const refs = [];
 const resolved = [];
 
+// Spread the real hooks first. bun's mock.module replaces the module for the
+// whole process and never restores it, so a factory listing only some hooks
+// deletes the rest for every file loaded afterwards -- the
+// "Export named 'useMemo' not found" that only appears when these files run
+// together.
+const realHooks = await import("preact/hooks");
 mock.module("preact/hooks", () => ({
+  ...realHooks,
   useState(initial) { return [typeof initial === "function" ? initial() : initial, () => {}]; },
   useEffect() {},
   useRef(initial) {

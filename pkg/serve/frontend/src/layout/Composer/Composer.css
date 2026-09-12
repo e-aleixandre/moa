@@ -184,8 +184,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Neutral on purpose. Queued messages are information, not a warning and not
+   something you wrote: peach means "you wrote this" and belongs to the user
+   message's edge. */
 .zl-composer .queue-note .chip {
-  color: var(--peach, #fab387);
+  color: var(--zl-t2, #c3c4d1);
   flex: none;
 }
 .zl-composer .queue-note span .lucide {
@@ -442,12 +445,14 @@
   padding: 4px 8px;
   font-size: var(--zl-fs-meta, 12px);
   font-weight: 500;
-  color: var(--peach, #fab387);
+  /* Yellow is the warning colour. This was peach, which the prototype reserves
+     for "you wrote this". */
+  color: var(--yellow, #f9e2af);
 }
 .zl-composer .cache-warn-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--peach, #fab387);
+  background: var(--yellow, #f9e2af);
   flex-shrink: 0;
 }
