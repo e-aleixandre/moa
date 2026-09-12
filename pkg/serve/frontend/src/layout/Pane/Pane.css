@@ -439,22 +439,7 @@
 }
 
 /* ModelSelector is portalled to body because a grid pane clips its children.
-   Fixed coordinates are supplied from the badge's viewport rect. */
-.pane-model-popover {
-  position: fixed;
-  right: auto;
-  z-index: var(--z-overlay);
-  max-width: calc(100vw - var(--space-4));
-}
-
-.pane-model-popover .model-selector {
-  box-sizing: border-box;
-  max-height: calc(100vh - var(--space-4));
-}
-
-.pane-model-popover .model-selector-view {
-  max-height: min(430px, calc(100vh - 250px));
-}
+   PickerPopover.is-fixed carries the coordinates. */
 
 /* Usage / MCP popovers above the pane status strip. */
 .pane .pane-status-anchor {

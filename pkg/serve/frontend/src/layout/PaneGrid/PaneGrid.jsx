@@ -9,6 +9,7 @@ import { LiveBar } from "../LiveBar/LiveBar.jsx";
 import {
   McpBanner, PermissionPrompt, AskUserPrompt, UsagePanel, ModelSelector, ArtifactsPaneButton,
 } from "../../components/index.js";
+import { PickerPopover } from "../../components/ModelSelector/ModelSelector.jsx";
 import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
@@ -342,43 +343,50 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   const specs = catalog.entries || [];
   const selectedModel = matchSelectedModel(specs, session.model);
   const modelPopover = modelOpen && typeof document !== "undefined" && document.body && createPortal(
-    <div
-      class="head-popover pane-model-popover"
-      ref={modelPopoverRef}
+    <PickerPopover
+      kind="model"
+      class="is-fixed"
+      models={specs}
+      popoverRef={modelPopoverRef}
       style={{
         left: modelPopoverPosition?.left,
         top: modelPopoverPosition?.top,
         visibility: modelPopoverPosition ? undefined : "hidden",
       }}
+      onClose={() => setModelOpen(false)}
     >
-      <ModelSelector
-        models={specs}
-        selected={selectedModel}
-        thinking={thinking}
-        sessionModel={session.model || ""}
-        sessionProvider={session.provider}
-        onSelect={(spec) => {
-          configureSession(session.id, { model: spec })
-            .then(() => setModelOpen(false))
-            .catch((error) => addToast({
-              title: "Could not change model",
-              detail: error.message,
+      {(v) => (
+        <ModelSelector
+          models={specs}
+          selected={selectedModel}
+          thinking={thinking}
+          sessionModel={session.model || ""}
+          sessionProvider={session.provider}
+          view={v.view}
+          setView={v.setView}
+          onSelect={(spec) => {
+            configureSession(session.id, { model: spec })
+              .then(() => setModelOpen(false))
+              .catch((error) => addToast({
+                title: "Could not change model",
+                detail: error.message,
+                type: "error",
+              }));
+          }}
+          onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
+          fast={!!session.fast}
+          fastSupported={!!session.fastSupported}
+          fastNote={session.fastNote || ""}
+          onFastChange={(value) => {
+            setSessionFast(session.id, value).catch((error) => addToast({
+              title: "Could not change fast mode",
+              detail: String(error.message || error),
               type: "error",
             }));
-        }}
-        onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
-        fast={!!session.fast}
-        fastSupported={!!session.fastSupported}
-        fastNote={session.fastNote || ""}
-        onFastChange={(value) => {
-          setSessionFast(session.id, value).catch((error) => addToast({
-            title: "Could not change fast mode",
-            detail: String(error.message || error),
-            type: "error",
-          }));
-        }}
-      />
-    </div>,
+          }}
+        />
+      )}
+    </PickerPopover>,
     document.body,
   );
 

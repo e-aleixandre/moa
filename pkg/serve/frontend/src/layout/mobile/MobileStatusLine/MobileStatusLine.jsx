@@ -1,5 +1,5 @@
 import { useState, useEffect } from "preact/hooks";
-import { ModelSelector } from "../../../components/index.js";
+import { ModelSelector, PickerSheet } from "../../../components/ModelSelector/ModelSelector.jsx";
 import { PermissionOptions } from "../../../components/PermissionControl/PermissionControl.jsx";
 import { statusStripModel } from "../../../data/util/status-strip-model.js";
 import { fmtCost } from "../../../data/util/usage-pills.js";
@@ -22,9 +22,9 @@ import { McpPanel } from "../../../components/McpPanel/McpPanel.jsx";
 // — never the centered generic <Sheet> modal. They are the phone's form of the
 // desktop's popovers, and they hold the settings for the NEXT turn:
 //
-//   • model — "Model & thinking": the real ModelSelector, and nothing else.
+//   • model — "Model": the real ModelSelector, hosted in the catalogue sheet.
 //   • permission — the glanceable safety colour AND the door. ONE tap reveals
-//     the complete YOLO/AUTO/ASK choice, from PermissionControl's own rows, so
+//     the complete ask/auto/yolo choice, from PermissionControl's own rows, so
 //     the two densities cannot drift apart.
 //   • mcp — the per-session server health, from the shared McpPanel.
 //
@@ -113,64 +113,62 @@ export function MobileStatusLine({ session, usage }) {
       onModel={hasSession ? () => setSessionOpen(true) : undefined}
       modelOpen={sessionOpen}
     >
-      {hasSession && (
-        <MobileSheet
-          open={sessionOpen}
+      {hasSession && sessionOpen && (
+        <PickerSheet
+          kind="model"
+          models={specs}
+          includeScrim
+          overlayHistory
           onClose={() => setSessionOpen(false)}
-          // No `scope` here: the path was this sheet's header back when it was
-          // "This session" and the question was where the session runs. On a
-          // sheet that only picks a model it is one more piece of session info
-          // nobody asked for — and long enough to wrap the title onto two
-          // lines. The cwd lives with the sessions, in the drawer.
-          title="Model & thinking"
         >
-          <ModelSelector
-            models={specs}
-            selected={matchSelectedModel(specs, session.model)}
-            thinking={thinking}
-            embedded
-            sessionModel={session.model || ""}
-            sessionProvider={session.provider}
-            onSelect={(spec) => {
-              configureSession(session.id, { model: spec })
-                .then(() => setSessionOpen(false))
-                .catch((error) => addToast({
-                  title: "Could not change model",
-                  detail: error.message,
+          {(v) => (
+            <ModelSelector
+              models={specs}
+              selected={matchSelectedModel(specs, session.model)}
+              thinking={thinking}
+              embedded
+              sessionModel={session.model || ""}
+              sessionProvider={session.provider}
+              view={v.view}
+              setView={v.setView}
+              onSelect={(spec) => {
+                configureSession(session.id, { model: spec })
+                  .then(() => setSessionOpen(false))
+                  .catch((error) => addToast({
+                    title: "Could not change model",
+                    detail: error.message,
+                    type: "error",
+                  }));
+              }}
+              onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
+              fast={!!session.fast}
+              fastSupported={!!session.fastSupported}
+              fastNote={session.fastNote || ""}
+              onFastChange={(value) => {
+                setSessionFast(session.id, value).catch((error) => addToast({
+                  title: "Could not change fast mode",
+                  detail: String(error.message || error),
                   type: "error",
                 }));
-            }}
-            onThinkingChange={(value) => configureSession(session.id, { thinking: value })}
-            fast={!!session.fast}
-            fastSupported={!!session.fastSupported}
-            fastNote={session.fastNote || ""}
-            onFastChange={(value) => {
-              setSessionFast(session.id, value).catch((error) => addToast({
-                title: "Could not change fast mode",
-                detail: String(error.message || error),
-                type: "error",
-              }));
-            }}
-          />
-
-        </MobileSheet>
+              }}
+            />
+          )}
+        </PickerSheet>
       )}
 
-      {hasSession && (
-        <MobileSheet
-          open={permsOpen}
+      {hasSession && permsOpen && (
+        <PickerSheet
+          kind="perm"
+          includeScrim
+          overlayHistory
           onClose={() => setPermsOpen(false)}
-          title="Permissions"
-          scope="this session"
         >
-          <div class="perm-sheet-list" role="menu" aria-label="Permission mode">
-            <PermissionOptions
-              mode={permMode}
-              onPick={changePerm}
-              isDisabled={(_value, on) => busy && !on}
-            />
-          </div>
-        </MobileSheet>
+          <PermissionOptions
+            mode={permMode}
+            onPick={changePerm}
+            isDisabled={(_value, on) => busy && !on}
+          />
+        </PickerSheet>
       )}
 
       {hasSession && session.mcp && session.mcp.total > 0 && (

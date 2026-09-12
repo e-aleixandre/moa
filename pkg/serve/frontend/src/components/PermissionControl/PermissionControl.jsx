@@ -1,75 +1,67 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "preact/hooks";
 import { createPortal } from "preact/compat";
-import { Check } from "lucide-preact";
 import { registerOverlay } from "../../data/overlays.js";
+import { PickerPopover } from "../ModelSelector/ModelSelector.jsx";
+import { positionModelPopover } from "../../layout/PaneGrid/model-popover-position.js";
 import "./PermissionControl.css";
 
-// PermissionControl — the permission mode's MENU. The chip that opens it lives
-// on the status line (layout/StatusStrip), which is the catalogue's
-// `.zl-st-perm`: one element is the glanceable safety colour AND the door, and
-// it cannot be two elements without them drifting apart. This file owns what
-// opens, and the rules for opening it.
+// PermissionControl — the permission mode's MENU. Markup is the catalogue's
+// (catalog/zones-lab.jsx `PermPicker`, classes `.zl-perm*`), MOVED here rather
+// than dressed onto the old perm-menu rows. The chip that opens it lives on
+// the status line (layout/StatusStrip), which is the catalogue's `.zl-st-perm`.
+// This file owns what opens, and the rules for opening it.
 //
 // Interaction rule (deliberate): a tap OPENS a 3-option menu — it NEVER cycles.
-// Cycling on tap could silently drop a session into YOLO with a stray touch,
-// which is unacceptable for a safety setting. Two deliberate taps (open →
-// pick), each option carrying a one-line description of what it does.
+// Cycling on tap could silently drop a session into YOLO with a stray touch.
+// Two deliberate taps (open → pick), each option carrying a one-line
+// description of what it does.
 //
 // The desktop menu is PORTALLED to <body> with fixed coords: panes use
-// overflow:hidden, so an absolute menu is clipped at the pane edge (grid). The
-// portal keeps the same upward-from-chip placement without fighting pane
-// overflow. On the phone the same rows go in the bottom sheet the line's other
-// doors use (MobileStatusLine), so nothing here has to know about that density.
+// overflow:hidden, so an absolute menu is clipped at the pane edge (grid).
+// On the phone the same rows go in the catalogue sheet the line's other
+// doors use (PickerSheet), so nothing here has to know about that density.
 
 export const PERMISSION_MODES = [
-  { value: "yolo", label: "YOLO", desc: "Run everything — never ask" },
-  { value: "auto", label: "AUTO", desc: "Ask only for risky commands" },
-  { value: "ask", label: "ASK", desc: "Ask before every command" },
+  { value: "ask", label: "ask", desc: "Ask before every command" },
+  { value: "auto", label: "auto", desc: "Ask only for risky commands" },
+  { value: "yolo", label: "yolo", desc: "Run everything — never ask" },
 ];
 
 // PermissionOptions — the three rows themselves, shared by every host that
-// offers the choice: this control's desktop popover and the mobile status
-// line's sheet. The mobile line used to carry its own copy of the list AND of
-// this markup, with a comment promising it was "the same copy / order as the
-// shared PermissionControl" — a promise nothing enforced. One element renders
-// it now, so a change to a row cannot land in one density only.
-//
-// The mode also rides on the row itself (perm-menu-item perm-ask), not only on
-// its label: a row that IS a mode should be able to wear it — Ambient marks it
-// with a dot, which cannot be drawn from a child's class.
+// offers the choice: the desktop popover and the phone sheet. Order is by
+// autonomy, ask → auto → yolo, so the list reads as a dial. The keyboard
+// walks these in document order, which is also the painted order.
 export function PermissionOptions({ mode, onPick, isDisabled }) {
-  // Ambient reads the three as a DIAL, least autonomy first, so the mode that
-  // never asks is at the far end rather than at the top of a safety menu.
-  // Reversed in the DOM rather than with flex order: the keyboard walks these
-  // in document order, and a list whose tab order disagrees with what is on
-  // screen is worse than either order on its own.
-  const modes = [...PERMISSION_MODES].reverse();
-  return modes.map((m) => {
-    const on = m.value === mode;
-    return (
-      <button
-        key={m.value}
-        type="button"
-        role="menuitemradio"
-        aria-checked={on}
-        class={`perm-menu-item perm-${m.value}${on ? " on" : ""}`}
-        disabled={isDisabled ? isDisabled(m.value, on) : false}
-        onClick={() => onPick(m.value)}
-      >
-        <span class="perm-menu-check" aria-hidden="true">
-          {on && <Check />}
-        </span>
-        <span class="perm-menu-text">
-          <span class={`perm-menu-label perm-${m.value}`}>{m.label}</span>
-          <span class="perm-menu-desc">{m.desc}</span>
-        </span>
-      </button>
-    );
-  });
+  return (
+    <div class="zl-pick" role="radiogroup" aria-label="Permission mode">
+      {PERMISSION_MODES.map((p) => {
+        const on = mode === p.value;
+        return (
+          <button
+            type="button"
+            role="radio"
+            aria-checked={on}
+            class={`zl-perm is-${p.value}${on ? " is-on" : ""}`}
+            disabled={isDisabled ? isDisabled(p.value, on) : false}
+            onClick={() => onPick(p.value)}
+            key={p.value}
+          >
+            <span class="zl-perm-dot" aria-hidden="true" />
+            <span class="zl-perm-txt">
+              <span class="zl-perm-l">{p.label}</span>
+              <span class="zl-perm-d">{p.desc}</span>
+            </span>
+            {on ? (
+              <svg class="zl-mchip-check" viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M2.5 6.5l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
-
-const MENU_WIDTH = 220;
-const MENU_GAP = 8;
 
 // usePermissionMenu — the open state and lifecycle of the desktop menu, for a
 // host that renders the chip itself. It returns the chip's props and the
@@ -84,22 +76,16 @@ export function usePermissionMenu({ mode = "yolo", disabled = false, onChange } 
   const anchorRef = useRef(null);
   const menuRef = useRef(null);
 
-  // Place the portal menu above the chip, right-aligned, clamped to the viewport.
   const placeMenu = () => {
     const chip = anchorRef.current?.querySelector("button") || anchorRef.current;
-    if (!chip) return;
-    const r = chip.getBoundingClientRect();
-    let right = window.innerWidth - r.right;
-    right = Math.max(8, Math.min(right, window.innerWidth - MENU_WIDTH - 8));
-    // Prefer above the chip; if not enough room, flip below.
-    const menuH = menuRef.current?.offsetHeight || 160;
-    const spaceAbove = r.top;
-    const openBelow = spaceAbove < menuH + MENU_GAP && window.innerHeight - r.bottom > spaceAbove;
-    if (openBelow) {
-      setMenuPos({ top: r.bottom + MENU_GAP, right, bottom: "auto" });
-    } else {
-      setMenuPos({ bottom: window.innerHeight - r.top + MENU_GAP, right, top: "auto" });
-    }
+    const popover = menuRef.current;
+    if (!chip || !popover) return;
+    const pos = positionModelPopover(
+      chip.getBoundingClientRect(),
+      popover.getBoundingClientRect(),
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    setMenuPos(pos);
   };
 
   useLayoutEffect(() => {
@@ -110,11 +96,18 @@ export function usePermissionMenu({ mode = "yolo", disabled = false, onChange } 
     placeMenu();
     const onReposition = () => placeMenu();
     window.addEventListener("resize", onReposition);
-    // Capture scroll in nested panes (stream, grid splits).
     window.addEventListener("scroll", onReposition, true);
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(onReposition);
+    if (observer) {
+      if (anchorRef.current) observer.observe(anchorRef.current);
+      if (menuRef.current) observer.observe(menuRef.current);
+    }
     return () => {
       window.removeEventListener("resize", onReposition);
       window.removeEventListener("scroll", onReposition, true);
+      observer?.disconnect();
     };
   }, [open]);
 
@@ -136,7 +129,6 @@ export function usePermissionMenu({ mode = "yolo", disabled = false, onChange } 
     };
   }, [open]);
 
-  // Close if the control becomes disabled mid-open (agent started running).
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
 
   const pick = (value) => {
@@ -144,21 +136,22 @@ export function usePermissionMenu({ mode = "yolo", disabled = false, onChange } 
     setOpen(false);
   };
 
-  const menu = open && menuPos && typeof document !== "undefined" && document.body
+  const menu = open && typeof document !== "undefined" && document.body
     ? createPortal(
-        <div
-          class="perm-menu perm-menu-portal"
-          role="menu"
-          aria-label="Permission mode"
-          ref={menuRef}
+        <PickerPopover
+          kind="perm"
+          class="is-fixed"
+          popoverRef={menuRef}
           style={{
-            top: menuPos.top === "auto" ? undefined : menuPos.top,
-            bottom: menuPos.bottom === "auto" ? undefined : menuPos.bottom,
-            right: menuPos.right,
+            left: menuPos?.left,
+            top: menuPos?.top,
+            visibility: menuPos ? undefined : "hidden",
+            zIndex: "var(--z-overlay, 40)",
           }}
+          onClose={() => setOpen(false)}
         >
           <PermissionOptions mode={mode} onPick={pick} />
-        </div>,
+        </PickerPopover>,
         document.body,
       )
     : null;

@@ -1,6 +1,6 @@
 export { SessionRow } from "./SessionRow/SessionRow.jsx";
 export { SessionCardMenu } from "./SessionCardMenu/SessionCardMenu.jsx";
-export { ModelSelector } from "./ModelSelector/ModelSelector.jsx";
+export { ModelSelector, PickerPopover, PickerSheet, usePickView } from "./ModelSelector/ModelSelector.jsx";
 export { Segmented } from "./Segmented/Segmented.jsx";
 export { PermissionCard } from "./PermissionCard/PermissionCard.jsx";
 export { PermissionPrompt } from "./PermissionCard/PermissionPrompt.jsx";

@@ -33,6 +33,11 @@ import { formatElapsed } from "../data/util/activity.js";
    StatusLine still draws the gauges itself; the ring is the one piece of
    that line that already has a single definition. */
 import { CtxRing } from "../layout/StatusStrip/StatusStrip.jsx";
+/* Same move, the model and permission pickers: markup and CSS live in
+   ModelSelector / PermissionControl now, and the prototype draws the shipped
+   ones. See the adapters at `ModelPicker`, `PermPicker`, `Popover`, `Sheet`. */
+import { ModelSelector as ProductionModelSelector, PickerPopover, PickerSheet } from "../components/ModelSelector/ModelSelector.jsx";
+import { PermissionOptions } from "../components/PermissionControl/PermissionControl.jsx";
 
 /* The three-zone skeleton, both densities side by side.
    This is a PROTOTYPE, not production: it draws the shell only (where things
@@ -281,45 +286,10 @@ function Sidebar({ onPick, desktop, onSettings, view, onView }) {
    MIGRATED (METODO §4): the panel has no private copy here. Its markup and
    its CSS were MOVED to components/SessionPanel, class names and all, and
    the prototype imports them back. What sits here now is only an adapter:
-   the prototype's fixtures mapped onto the props the shipped panel takes,
-   plus the icons the pickers still share with it (back, go, the switch).
+   the prototype's fixtures mapped onto the props the shipped panel takes.
 
    The rule is unchanged: the LINE holds the controls for the next turn;
    the PANEL is the dossier of the session. */
-
-function BackIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
-  );
-}
-function GoIcon() {
-  return (
-    <svg class="zl-go" viewBox="0 0 12 12" aria-hidden="true">
-      <path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
-  );
-}
-
-/* Switch: the one toggle shape in the product. Accent when on -- a setting
-   you chose, not a state. Used by Fast in the model picker; the panel's MCP
-   page has its own copy, shipped with it. */
-function Switch({ on, onChange, label, disabled }) {
-  return (
-    <button
-      type="button"
-      class={`zl-switch${on ? " is-on" : ""}`}
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onChange ? () => onChange(!on) : undefined}
-    >
-      <span class="zl-switch-track" aria-hidden="true"><span class="zl-switch-knob" /></span>
-    </button>
-  );
-}
 
 const PANEL_CREATED = (() => {
   const d = new Date(Date.now());
@@ -950,234 +920,67 @@ const MODELS = [
   { name: "Grok", sub: "4.2 · 256k ctx", provider: "xAI" },
   { name: "Grok Fast", sub: "4.2 · 128k ctx", provider: "xAI" },
 ];
-const PROVIDERS = [...new Set(MODELS.map((m) => m.provider))];
-const THINK_STEPS = [
-  { id: "off", label: "off", bars: 0 },
-  { id: "low", label: "low", bars: 1 },
-  { id: "medium", label: "med", bars: 2 },
-  { id: "high", label: "high", bars: 3 },
-  { id: "xhigh", label: "xhigh", bars: 4 },
-];
 
-/* A model's identity mark: the same hue function as the project monogram and
-   the subagent dot, so the same name is the same colour everywhere. */
-function ModelMark({ name }) {
-  return <span class="zl-live-id is-agent" style={`--h:${projectHue(name)}`} aria-hidden="true" />;
-}
-
-function ModelChip({ m, on, onPick }) {
-  return (
-    <button type="button" class={`zl-mchip${on ? " is-on" : ""}`} onClick={() => onPick(m.name)} aria-pressed={on}>
-      <ModelMark name={m.name} />
-      <span class="zl-mchip-txt">
-        <span class="zl-mchip-name">{m.name}</span>
-        <span class="zl-mchip-sub zl-data">{m.sub}</span>
-      </span>
-      {on && (
-        <svg class="zl-mchip-check" viewBox="0 0 12 12" aria-hidden="true">
-          <path d="M2.5 6.5l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      )}
-    </button>
-  );
-}
-
-/* The head every second-level surface shares: back + title, in place of the
-   eyebrow -- exactly what the panel does for its pages. The X, where the
-   host has one, stays. */
-function SubHead({ title, count, onBack }) {
-  return (
-    <>
-      <button type="button" class="zl-back" onClick={onBack} aria-label="Back">
-        <BackIcon />
-      </button>
-      <span class="zl-side-title is-page" key={title}>{title}{count != null && <span class="zl-group-n zl-data"> {count}</span>}</span>
-    </>
-  );
-}
+/* MIGRATED (METODO §4, the pickers): ModelPicker, PermPicker, Popover and
+   Sheet have no private copy here. Their markup and CSS were MOVED to
+   ModelSelector / PermissionControl, class names and all, and the prototype
+   imports them back. What sits here now is only an adapter: the prototype's
+   invented catalog mapped onto the props the shipped picker takes. */
+const CATALOG_SPECS = MODELS.map((m) => ({
+  id: m.name,
+  catalogId: m.name,
+  name: m.name,
+  provider: m.provider,
+  codename: m.name,
+  sub: m.sub,
+}));
+const CATALOG_PINNED = MODELS.filter((m) => m.pinned).map((m) => m.name);
 
 function ModelPicker({ s, onChange, onDone, view, setView }) {
-  const current = MODELS.find((m) => m.name === s.model);
-  const pick = (name) => { onChange({ model: name }); onDone(); };
-
-  if (view === "providers") {
-    return (
-      <div class="zl-pick" key="providers">
-        <div class="zl-kv is-flush">
-          {PROVIDERS.map((p) => {
-            const items = MODELS.filter((m) => m.provider === p);
-            const has = items.some((m) => m.name === s.model);
-            return (
-              <button type="button" class="zl-kv-row is-btn zl-prov" key={p} onClick={() => setView(p)}>
-                <span class="zl-mono is-sm" style={`--h:${projectHue(p)}`} aria-hidden="true">{p.slice(0, 1)}</span>
-                <span class="zl-prov-txt">
-                  <span class="zl-kv-k is-strong">{p}{has && <span class="zl-prov-cur" aria-label="contains the current model" />}</span>
-                  <span class="zl-prov-sub">{items.map((m) => m.name).join(", ")}</span>
-                </span>
-                <span class="zl-kv-hint zl-data">{items.length}</span>
-                <GoIcon />
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-  if (view !== "root") {
-    const items = MODELS.filter((m) => m.provider === view);
-    return (
-      <div class="zl-pick" key={view}>
-        <div class="zl-chips">
-          {items.map((m) => <ModelChip m={m} on={m.name === s.model} onPick={pick} key={m.name} />)}
-        </div>
-      </div>
-    );
-  }
   return (
-    <div class="zl-pick" key="root">
-      <button type="button" class="zl-pick-cur" onClick={() => setView(current?.provider || "providers")} aria-label={`Current model ${s.model}, ${current?.provider}. Show provider`}>
-        <ModelMark name={s.model} />
-        <span class="zl-pick-cur-txt">
-          <span class="zl-pick-cur-name">{s.model}</span>
-          <span class="zl-pick-cur-sub zl-data">{current ? `${current.provider} · ${current.sub}` : "custom · not in catalog"}</span>
-        </span>
-        <GoIcon />
-      </button>
-      <div class="zl-group"><span>Pinned</span><span class="zl-group-n zl-data">{MODELS.filter((m) => m.pinned).length}</span></div>
-      <div class="zl-chips">
-        {MODELS.filter((m) => m.pinned).map((m) => <ModelChip m={m} on={m.name === s.model} onPick={pick} key={m.name} />)}
-      </div>
-      <button type="button" class="zl-pick-all" onClick={() => setView("providers")}>
-        <span class="zl-pick-all-t">All models</span>
-        <span class="zl-kv-hint zl-data">{MODELS.length} · {PROVIDERS.length} providers</span>
-        <GoIcon />
-      </button>
-      <div class="zl-group"><span>Thinking</span><span class="zl-group-n zl-data">{s.thinking}</span></div>
-      <div class="zl-seg" role="radiogroup" aria-label="Thinking level">
-        {THINK_STEPS.map((t) => (
-          <button
-            type="button"
-            role="radio"
-            aria-checked={s.thinking === t.id}
-            class={`zl-seg-opt${s.thinking === t.id ? " is-on" : ""}`}
-            onClick={() => onChange({ thinking: t.id })}
-            key={t.id}
-          >
-            <span class="zl-seg-bars" aria-hidden="true">
-              {t.bars === 0 ? <i class="is-none" /> : [1, 2, 3, 4].map((k) => <i class={k <= t.bars ? "" : "is-off"} key={k} />)}
-            </span>
-            <span class="zl-seg-l">{t.label}</span>
-          </button>
-        ))}
-      </div>
-      <div class="zl-fast">
-        <span class="zl-fast-txt">
-          <span class="zl-fast-k">Fast</span>
-          <span class="zl-fast-d">Same model, less waiting · billed at a premium rate</span>
-        </span>
-        <Switch on={s.fast} onChange={(v) => onChange({ fast: v })} label="Fast mode" />
-      </div>
-    </div>
+    <ProductionModelSelector
+      models={CATALOG_SPECS}
+      selected={s.model}
+      sessionModel={s.model}
+      thinking={s.thinking}
+      fast={s.fast}
+      fastSupported
+      pinnedIDs={CATALOG_PINNED}
+      view={view}
+      setView={setView}
+      onSelect={(id) => { onChange({ model: id }); onDone(); }}
+      onThinkingChange={(thinking) => onChange({ thinking })}
+      onFastChange={(fast) => onChange({ fast })}
+    />
   );
 }
 
-/* Permissions: three rows, label in the mode's colour (the same colour the
-   line prints), one line of what it does, a check on the current one. Order
-   is by autonomy, ask → auto → yolo, so the list reads as a dial. */
-const PERMS = [
-  { id: "ask", label: "ask", desc: "Ask before every command" },
-  { id: "auto", label: "auto", desc: "Ask only for risky commands" },
-  { id: "yolo", label: "yolo", desc: "Run everything — never ask" },
-];
 function PermPicker({ s, onChange, onDone }) {
   return (
-    <div class="zl-pick" role="radiogroup" aria-label="Permission mode">
-      {PERMS.map((p) => {
-        const on = s.perm === p.id;
-        return (
-          <button
-            type="button"
-            role="radio"
-            aria-checked={on}
-            class={`zl-perm is-${p.id}${on ? " is-on" : ""}`}
-            onClick={() => { onChange({ perm: p.id }); onDone(); }}
-            key={p.id}
-          >
-            <span class="zl-perm-dot" aria-hidden="true" />
-            <span class="zl-perm-txt">
-              <span class="zl-perm-l">{p.label}</span>
-              <span class="zl-perm-d">{p.desc}</span>
-            </span>
-            {on && (
-              <svg class="zl-mchip-check" viewBox="0 0 12 12" aria-hidden="true">
-                <path d="M2.5 6.5l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            )}
-          </button>
-        );
-      })}
-    </div>
+    <PermissionOptions
+      mode={s.perm}
+      onPick={(perm) => { onChange({ perm }); onDone(); }}
+    />
   );
 }
 
-const PICK_TITLES = { model: "Model", perm: "Permissions" };
-
-/* The model picker's second level lives in the host, so the host's head can
-   swap eyebrow for back + title (the panel's idiom). */
-function usePickView(kind) {
-  const [view, setView] = useState("root"); // root | providers | <provider>
-  useEffect(() => { setView("root"); }, [kind]);
-  const head = view === "root"
-    ? <span class="zl-side-title is-eyebrow">{PICK_TITLES[kind]}</span>
-    : view === "providers"
-      ? <SubHead title="All models" count={MODELS.length} onBack={() => setView("root")} />
-      : <SubHead title={view} count={MODELS.filter((m) => m.provider === view).length} onBack={() => setView("providers")} />;
-  return { view, setView, head, sub: view !== "root" };
-}
-
-function Picker({ kind, s, onChange, onDone, view, setView }) {
-  return kind === "model"
-    ? <ModelPicker s={s} onChange={onChange} onDone={onDone} view={view} setView={setView} />
-    : <PermPicker s={s} onChange={onChange} onDone={onDone} />;
-}
-
-/* Desktop: the popover, anchored to its button. Closes on Escape or a click
-   anywhere else (the veil is the host's, so the popover can rise above the
-   dock's siblings). */
 function Popover({ kind, s, onChange, onClose }) {
-  const v = usePickView(kind);
-  useEffect(() => {
-    const k = (e) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", k);
-    return () => window.removeEventListener("keydown", k);
-  }, [onClose]);
   return (
-    <div class="zl-pop" role="dialog" aria-label={PICK_TITLES[kind]}>
-      <div class={`zl-side-head is-pop${v.sub ? " is-sub" : ""}`}>{v.head}</div>
-      <Picker kind={kind} s={s} onChange={onChange} onDone={onClose} view={v.view} setView={v.setView} />
-    </div>
+    <PickerPopover kind={kind} models={CATALOG_SPECS} onClose={onClose}>
+      {(v) => kind === "model"
+        ? <ModelPicker s={s} onChange={onChange} onDone={onClose} view={v.view} setView={v.setView} />
+        : <PermPicker s={s} onChange={onChange} onDone={onClose} />}
+    </PickerPopover>
   );
 }
 
-/* Phone: the bottom sheet. Same content, same head as the drawer (eyebrow
-   and X), a grabber because it is the one surface you can also drag away. */
 function Sheet({ kind, s, onChange, onClose }) {
-  const v = usePickView(kind);
   return (
-    <div class="zl-sheet" role="dialog" aria-label={PICK_TITLES[kind]}>
-      <span class="zl-grab" aria-hidden="true" />
-      <div class={`zl-side-head is-sheet${v.sub ? " is-sub" : ""}`}>
-        {v.head}
-        <button type="button" class="zl-x" onClick={onClose} aria-label="Close">
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-          </svg>
-        </button>
-      </div>
-      <div class="zl-sheet-body">
-        <Picker kind={kind} s={s} onChange={onChange} onDone={onClose} view={v.view} setView={v.setView} />
-      </div>
-    </div>
+    <PickerSheet kind={kind} models={CATALOG_SPECS} onClose={onClose}>
+      {(v) => kind === "model"
+        ? <ModelPicker s={s} onChange={onChange} onDone={onClose} view={v.view} setView={v.setView} />
+        : <PermPicker s={s} onChange={onChange} onDone={onClose} />}
+    </PickerSheet>
   );
 }
 

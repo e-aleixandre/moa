@@ -1,257 +1,148 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { Check, ChevronLeft, ChevronRight, Search, Star, X } from "lucide-preact";
 import { api } from "../../data/api.js";
-import { addToast } from "../../data/notifications.js";
 import { thinkingOptionsFor, thinkingPositionFor } from "../../data/selectors.js";
-import { Segmented } from "../Segmented/Segmented.jsx";
-import { Field } from "../../primitives/index.js";
-import {
-  groupByProvider,
-  pinnedModelSpecs,
-  specMatches,
-  visiblePinnedSpecs,
-} from "./model-selector-model.js";
+import { groupByProvider, pinnedModelSpecs } from "./model-selector-model.js";
+import { useSheetDismiss } from "../../hooks/useSheetDismiss.js";
+import { openOverlay } from "../../data/overlay-history.js";
 import "./ModelSelector.css";
 
-const THINKING_OPTIONS = [
-  { value: "off", label: "off", bars: 0 },
-  { value: "low", label: "low", bars: 1 },
-  { value: "medium", label: "med", bars: 2 },
-  { value: "high", label: "high", bars: 3 },
-  { value: "xhigh", label: "xhigh", bars: 4 },
-];
+// ModelSelector — the catalogue's model picker, MOVED
+// (catalog/zones-lab.jsx `ModelPicker` / `Popover` / `Sheet`, zones-lab.css the
+// `.zl-pick*` / `.zl-pop` / `.zl-sheet` block), not translated. The classes
+// travelled with the rules, so the picker IS the accepted design instead of a
+// dressing of the old ModelSelector. The catalogue imports this component now,
+// which is what makes one definition rather than two.
+//
+// What is NOT the catalogue's is everything the prototype never had, grafted
+// on top: the real /api/models catalog, thinkingOptionsFor / thinkingPositionFor
+// (Astra's "low" is position zero), pinned IDs from /api/model-preferences,
+// session writes, the busy/disabled lock, overlay-history and swipe on the
+// phone sheet, and the house rule that a missing datum hides its segment
+// rather than drawing a zero.
+//
+// The prototype's search box, pin stars and "show more" fold are not here:
+// they were a different navigation. The accepted design pushes providers
+// inside the same surface the panel uses for its pages (eyebrow → back +
+// title). Pinning is still *read* so the Pinned group is the user's, not a
+// fixture; there is no star on a chip to write it.
 
-const PINNED_COLLAPSE_THRESHOLD = 4;
+const HUES = [210, 265, 170, 320, 40, 190];
 
-function ThinkingStepper({ value, onChange, options = THINKING_OPTIONS }) {
-  const selected = options.find((option) => option.value === value) || options[0];
-  const hot = selected?.value === "xhigh";
+function hueFor(name) {
+  const s = String(name || "");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return HUES[h % HUES.length];
+}
+
+function BackIcon() {
   return (
-    <div class="think-block">
-      <div class="think-lbl" id="model-selector-thinking-label">
-        Thinking <b class={hot ? "hot" : ""}>{selected?.label.toUpperCase()}</b>
-      </div>
-      <Segmented
-        options={options}
-        value={value}
-        onChange={onChange}
-        aria-labelledby="model-selector-thinking-label"
-        className="think-steps"
-        itemClassName={(opt) => (opt.id === "xhigh" ? "think-step hot" : "think-step")}
-        renderOption={(opt) => (
-          <>
-            <span class="tks" aria-hidden="true">
-              {opt.bars === 0 ? (
-                <span class="off" />
-              ) : (
-                [0, 1, 2, 3].map((i) => <i key={i} class={i < opt.bars ? "f" : ""} />)
-              )}
-            </span>
-            {opt.label}
-          </>
-        )}
-      />
-    </div>
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
   );
 }
 
-// The model's accent travels as a custom property (--m-accent) rather than as
-// an inline `color`. Same painted colour either way, but a property can be
-// re-pointed by a stylesheet: Ambient moves the identity hue off the words and
-// onto a mark, which an inline declaration would have made impossible without
-// !important.
-const accentVar = (spec) => (spec?.accent ? { "--m-accent": `var(--${spec.accent})` } : undefined);
-
-function CurrentModelRow({ spec, sessionModel, onOpenProvider }) {
-  const content = spec ? (
-    <>
-      <span class="cur-lbl">Current</span>
-      <span class="cur-name">{spec.codename}</span>
-      {spec.sub && <span class="cur-sub">{spec.sub}</span>}
-      {onOpenProvider && <ChevronRight size={13} aria-hidden="true" />}
-    </>
-  ) : (
-    <>
-      <span class="cur-lbl">Current</span>
-      <span class="cur-name">{sessionModel}</span>
-      <span class="cur-sub">custom · not in catalog</span>
-    </>
-  );
-
-  if (!onOpenProvider) return <div class="cur-row" style={accentVar(spec)}>{content}</div>;
+function GoIcon() {
   return (
-    <button type="button" class="cur-row cur-row--button" style={accentVar(spec)} onClick={onOpenProvider}>
-      {content}
-    </button>
+    <svg class="zl-go" viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M4 2.5L7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
   );
 }
 
-function SectionHeading({ children, trailing }) {
-  return (
-    <div class="model-section-heading">
-      <span>{children}</span>
-      <i aria-hidden="true" />
-      {trailing && <span class="model-section-count">{trailing}</span>}
-    </div>
-  );
-}
-
-function PinButton({ model, pinned, onToggle }) {
+function Switch({ on, onChange, label, disabled }) {
   return (
     <button
       type="button"
-      class={`model-pin${pinned ? " on" : ""}`}
-      aria-label={`${pinned ? "Unpin" : "Pin"} ${model.codename}${model.sub ? ` ${model.sub}` : ""}`}
-      aria-pressed={pinned}
-      onClick={() => onToggle?.(model, !pinned)}
+      class={`zl-switch${on ? " is-on" : ""}`}
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onChange ? () => onChange(!on) : undefined}
     >
-      <Star size={15} fill={pinned ? "currentColor" : "none"} aria-hidden="true" />
+      <span class="zl-switch-track" aria-hidden="true"><span class="zl-switch-knob" /></span>
     </button>
   );
 }
 
-function ModelChip({ model, selected, pinned, onSelect, onTogglePin, pinnable = true }) {
-  const on = model.id === selected;
-  return (
-    <div class={`mchip-wrap${on ? " on" : ""}`} style={accentVar(model)}>
-      <button
-        type="button"
-        class="mchip"
-        onClick={() => onSelect?.(model.id)}
-        aria-pressed={on}
-      >
-        <span class="cn">
-          {model.codename}
-          {on && <Check class="check" size={12} aria-hidden="true" />}
-        </span>
-        {model.sub && <span class="cv">{model.sub}</span>}
-      </button>
-      {pinnable && <PinButton model={model} pinned={pinned} onToggle={onTogglePin} />}
-    </div>
-  );
+function ModelMark({ name }) {
+  return <span class="zl-live-id is-agent" style={`--h:${hueFor(name)}`} aria-hidden="true" />;
 }
 
-function ModelGrid({ models, selected, pinnedIDs, onSelect, onTogglePin, pinnable = true }) {
+function ModelChip({ model, on, onPick }) {
+  const name = model.codename || model.name;
   return (
-    <div class="chip-grid">
-      {models.map((model) => (
-        <ModelChip
-          key={model.id}
-          model={model}
-          selected={selected}
-          pinned={pinnedIDs.includes(model.catalogId)}
-          onSelect={onSelect}
-          onTogglePin={onTogglePin}
-          pinnable={pinnable}
-        />
-      ))}
-    </div>
-  );
-}
-
-function SearchResults({ models, selected, pinnedIDs, onSelect, onTogglePin, pinnable = true }) {
-  return (
-    <div class="model-results">
-      {models.map((model) => {
-        const on = model.id === selected;
-        const pinned = pinnedIDs.includes(model.catalogId);
-        return (
-          <div key={model.id} class={`model-result${on ? " on" : ""}`} style={accentVar(model)}>
-            <button
-              type="button"
-              class="model-result-select"
-              aria-pressed={on}
-              onClick={() => onSelect?.(model.id)}
-            >
-              <span class="model-result-dot" />
-              <span class="model-result-copy">
-                <span class="model-result-name">{model.codename}</span>
-                {model.sub && <small>{model.sub}</small>}
-              </span>
-              <span class="model-provider-badge">{model.provider}</span>
-              {on && <Check size={12} aria-hidden="true" />}
-            </button>
-            {pinnable && <PinButton model={model} pinned={pinned} onToggle={onTogglePin} />}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function ProviderList({ groups, selected, onOpen }) {
-  return (
-    <div class="provider-list">
-      {groups.map((group) => {
-        const current = group.items.some((model) => model.id === selected);
-        const preview = group.items.slice(0, 3).map((model) => model.codename).join(", ");
-        const accent = group.items[0]?.accent || "overlay1";
-        const initial = (group.provider || "?").slice(0, 1).toUpperCase();
-        return (
-          <button
-            key={group.provider}
-            type="button"
-            class="provider-row"
-            onClick={() => onOpen(group.provider)}
-          >
-            <span
-              class="provider-mark"
-              style={{ color: `var(--${accent})`, background: `color-mix(in srgb, var(--${accent}) 14%, transparent)` }}
-              aria-hidden="true"
-            >
-              {initial}
-            </span>
-            <span class="provider-copy">
-              <span class="provider-name">
-                {group.provider}
-                {current && <i class="provider-current" aria-label="Contains current model" />}
-              </span>
-              <small>{preview}</small>
-            </span>
-            <span class="provider-count">{group.items.length}</span>
-            <ChevronRight size={15} aria-hidden="true" />
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// FastRow — the speed switch, sibling to the thinking stepper: one buys depth,
-// the other buys time. A two-state toggle rather than a segmented control,
-// because the options are not peers — standard is the default and fast is an
-// opt-in that costs more. On a model that can't serve it the row stays visible
-// but disabled: hiding it would make the option seem to come and go, leaving
-// you to memorise which models have it.
-function FastRow({ value, supported, note, onChange }) {
-  const on = value && supported;
-  return (
-    <div class="fast-block">
-      <div class="fast-lbl" id="model-selector-fast-label">
-        Fast <b class={on ? "on" : ""}>{on ? "ON" : "OFF"}</b>
-      </div>
-      <button
-        type="button"
-        class={`fast-toggle${on ? " is-on" : ""}`}
-        role="switch"
-        aria-checked={on}
-        aria-labelledby="model-selector-fast-label"
-        aria-describedby="model-selector-fast-note"
-        disabled={!supported || !onChange}
-        onClick={onChange ? () => onChange(!on) : undefined}
-      >
-        <span class="fast-track" aria-hidden="true">
-          <span class="fast-knob" />
-        </span>
-        <span class="fast-text">{supported ? "Same model, less waiting" : "Not available on this model"}</span>
-      </button>
-      {supported && note && (
-        <p class="fast-note" id="model-selector-fast-note">
-          {note}
-        </p>
+    <button type="button" class={`zl-mchip${on ? " is-on" : ""}`} onClick={() => onPick(model.id)} aria-pressed={on}>
+      <ModelMark name={name} />
+      <span class="zl-mchip-txt">
+        <span class="zl-mchip-name">{name}</span>
+        {model.sub && <span class="zl-mchip-sub zl-data">{model.sub}</span>}
+      </span>
+      {on && (
+        <svg class="zl-mchip-check" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M2.5 6.5l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
       )}
-    </div>
+    </button>
   );
+}
+
+function SubHead({ title, count, onBack }) {
+  return (
+    <>
+      <button type="button" class="zl-back" onClick={onBack} aria-label="Back">
+        <BackIcon />
+      </button>
+      <span class="zl-side-title is-page" key={title}>
+        {title}{count != null && <span class="zl-group-n zl-data"> {count}</span>}
+      </span>
+    </>
+  );
+}
+
+const PICK_TITLES = { model: "Model", perm: "Permissions" };
+
+const POSITION_LABELS = {
+  off: "off",
+  low: "low",
+  medium: "med",
+  high: "high",
+  xhigh: "xhigh",
+};
+
+export function thinkingButtonsFor(spec, sessionProvider) {
+  const options = thinkingOptionsFor(spec, sessionProvider);
+  const custom = spec?.reasoningEfforts?.length > 0;
+  return options.map((option) => ({
+    ...option,
+    label: custom ? option.label : (POSITION_LABELS[option.value] || option.label),
+  }));
+}
+
+function modelIsSelected(model, selected) {
+  return model.id === selected || model.name === selected;
+}
+
+// usePickView — the host's second-level navigation. The model picker's
+// provider list is a PUSH inside the popover/sheet, the same idiom the
+// session panel uses for its pages, so the HOST's head swaps eyebrow for
+// back + title. Permissions have no second level.
+export function usePickView(kind, models = []) {
+  const [view, setView] = useState("root");
+  useEffect(() => { setView("root"); }, [kind]);
+  const groups = useMemo(() => groupByProvider(models), [models]);
+  const head = view === "root"
+    ? <span class="zl-side-title is-eyebrow">{PICK_TITLES[kind] || kind}</span>
+    : view === "providers"
+      ? <SubHead title="All models" count={models.length} onBack={() => setView("root")} />
+      : <SubHead
+          title={view}
+          count={groups.find((g) => g.provider === view)?.items.length}
+          onBack={() => setView("providers")}
+        />;
+  return { view, setView, head, sub: view !== "root" };
 }
 
 export function ModelSelector({
@@ -268,39 +159,45 @@ export function ModelSelector({
   modelOnly = false,
   sessionModel,
   sessionProvider,
+  view: viewProp,
+  setView: setViewProp,
+  pinnedIDs: pinnedIDsProp,
   ...rest
 }) {
-  const [query, setQuery] = useState("");
-  const [provider, setProvider] = useState(null);
-  const [pinnedIDs, setPinnedIDs] = useState([]);
-  const pinnedIDsRef = useRef([]);
+  const hosted = typeof setViewProp === "function";
+  const [innerView, setInnerView] = useState("root");
+  const view = hosted ? viewProp : innerView;
+  const setView = hosted ? setViewProp : setInnerView;
+  const [fetchedPins, setFetchedPins] = useState([]);
   const preferenceRevisionRef = useRef(0);
-  const preferenceQueueRef = useRef(Promise.resolve());
-  const [pinsExpanded, setPinsExpanded] = useState(false);
+  const controlledPins = pinnedIDsProp != null;
+  const pinnedIDs = controlledPins ? pinnedIDsProp : fetchedPins;
+
   const groups = useMemo(() => groupByProvider(models), [models]);
   const selectedSpec = useMemo(
-    () => models.find((model) => model.id === selected),
-    [models, selected]
+    () => models.find((model) => modelIsSelected(model, selected)),
+    [models, selected],
   );
   const pinned = useMemo(
-    () => pinnedModelSpecs(models, pinnedIDs),
-    [models, pinnedIDs]
+    () => (controlledPins
+      ? models.filter((model) => pinnedIDs.includes(model.catalogId) || pinnedIDs.includes(model.id) || pinnedIDs.includes(model.name))
+      : pinnedModelSpecs(models, pinnedIDs)),
+    [models, pinnedIDs, controlledPins],
   );
-  const visiblePins = visiblePinnedSpecs(pinned, pinsExpanded, PINNED_COLLAPSE_THRESHOLD);
-  const q = query.trim().toLowerCase();
-  const filtered = useMemo(
-    () => (q ? models.filter((model) => specMatches(model, q)) : []),
-    [models, q]
-  );
-  const providerGroup = groups.find((group) => group.provider === provider);
+  const currentName = selectedSpec
+    ? (selectedSpec.codename || selectedSpec.name)
+    : (sessionModel || selected || "");
+  const currentSub = selectedSpec
+    ? `${selectedSpec.provider} · ${selectedSpec.sub}`
+    : (sessionModel || selected ? "custom · not in catalog" : "");
+  const thinkOpts = thinkingButtonsFor(selectedSpec, sessionProvider);
+  const thinkValue = thinkingPositionFor(thinking, selectedSpec, sessionProvider);
+  const providerGroup = groups.find((group) => group.provider === view);
 
-  const applyPinnedIDs = (ids) => {
-    pinnedIDsRef.current = ids;
-    setPinnedIDs(ids);
-  };
+  const applyPinnedIDs = (ids) => setFetchedPins(ids);
 
   useEffect(() => {
-    if (modelOnly) return undefined;
+    if (modelOnly || controlledPins) return undefined;
     let live = true;
     const revision = preferenceRevisionRef.current;
     api("GET", "/api/model-preferences")
@@ -313,160 +210,234 @@ export function ModelSelector({
         if (live && revision === preferenceRevisionRef.current) applyPinnedIDs([]);
       });
     return () => { live = false; };
-  }, [modelOnly]);
+  }, [modelOnly, controlledPins]);
 
-  const updatePin = (model, shouldPin, { offerUndo = true } = {}) => {
-    const before = pinnedIDsRef.current;
-    const optimistic = shouldPin
-      ? [...before.filter((id) => id !== model.catalogId), model.catalogId]
-      : before.filter((id) => id !== model.catalogId);
-    const revision = ++preferenceRevisionRef.current;
-    applyPinnedIDs(optimistic);
+  const pick = (id) => onSelect?.(id);
 
-    const request = preferenceQueueRef.current
-      .catch(() => {})
-      .then(() => api("PATCH", "/api/model-preferences", {
-        model_id: model.catalogId,
-        pinned: shouldPin,
-      }));
-    preferenceQueueRef.current = request;
-    request.then((preferences) => {
-      if (revision === preferenceRevisionRef.current) {
-        applyPinnedIDs(preferences?.pinned_models || optimistic);
-      }
-      if (!shouldPin && offerUndo) {
-        addToast({
-          title: `Unpinned ${model.codename}`,
-          type: "info",
-          action: {
-            label: "Undo",
-            onClick: () => updatePin(model, true, { offerUndo: false }),
-          },
-        });
-      }
-    }).catch((error) => {
-      if (revision === preferenceRevisionRef.current) applyPinnedIDs(before);
-      addToast({ title: "Could not update pinned models", detail: error.message, type: "error" });
-    });
-  };
+  const showRoot = () => setView("root");
 
-  const openProvider = (nextProvider) => {
-    setQuery("");
-    setProvider(nextProvider);
-  };
-
-  const showRoot = () => {
-    setQuery("");
-    setProvider(null);
-    setPinsExpanded(false);
-  };
+  const unhostedHead = !hosted && view !== "root" && (
+    view === "providers"
+      ? <SubHead title="All models" count={models.length} onBack={showRoot} />
+      : <SubHead
+          title={view}
+          count={providerGroup?.items.length}
+          onBack={() => setView("providers")}
+        />
+  );
 
   return (
-    <div class={`model-selector${embedded ? " model-selector--embedded" : ""}${modelOnly ? " model-selector--model-only" : ""}`} {...rest}>
-      {!embedded && !modelOnly && <div class="sel-head">Model &amp; thinking</div>}
-      {!modelOnly && <ThinkingStepper
-        value={thinkingPositionFor(thinking, selectedSpec, sessionProvider)}
-        onChange={onThinkingChange}
-        options={thinkingOptionsFor(selectedSpec, sessionProvider)}
-      />}
-      {!modelOnly && <FastRow value={fast} supported={fastSupported} note={fastNote} onChange={onFastChange} />}
-      {!modelOnly && !!sessionModel && (
-        <CurrentModelRow
-          spec={selectedSpec}
-          sessionModel={sessionModel}
-          onOpenProvider={selectedSpec ? () => openProvider(selectedSpec.provider) : undefined}
-        />
-      )}
-      <Field
-        variant="box"
-        size="lg"
-        class="model-filter"
-        leading={<Search size={15} />}
-        trailing={query ? (
-          <button type="button" class="model-filter-clear" aria-label="Clear filter" onClick={showRoot}>
-            <X size={14} aria-hidden="true" />
-          </button>
-        ) : null}
-        type="search"
-        value={query}
-        onInput={(event) => setQuery(event.currentTarget.value)}
-        placeholder="Filter models…"
-        aria-label="Filter models"
-        autocomplete="off"
-        autocorrect="off"
-        autocapitalize="off"
-        spellcheck={false}
-      />
+    <div
+      class={`zl-pick model-selector${embedded ? " model-selector--embedded" : ""}`}
+      {...rest}
+    >
+      {unhostedHead && <div class={`zl-side-head is-pop is-sub`}>{unhostedHead}</div>}
 
-      {q ? (
-        <div class="model-selector-view">
-          <SectionHeading trailing={`${filtered.length}`}>Results</SectionHeading>
-          {filtered.length > 0 ? (
-            <SearchResults
-              models={filtered}
-              selected={selected}
-              pinnedIDs={pinnedIDs}
-              onSelect={onSelect}
-              onTogglePin={updatePin}
-              pinnable={!modelOnly}
-            />
-          ) : (
-            <div class="model-empty">No models match “{query.trim()}”</div>
-          )}
+      {view === "providers" ? (
+        <div class="zl-kv is-flush">
+          {groups.map((group) => {
+            const items = group.items;
+            const has = items.some((m) => modelIsSelected(m, selected));
+            return (
+              <button
+                type="button"
+                class="zl-kv-row is-btn zl-prov"
+                key={group.provider}
+                onClick={() => setView(group.provider)}
+              >
+                <span class="zl-mono is-sm" style={`--h:${hueFor(group.provider)}`} aria-hidden="true">
+                  {(group.provider || "?").slice(0, 1)}
+                </span>
+                <span class="zl-prov-txt">
+                  <span class="zl-kv-k is-strong">
+                    {group.provider}
+                    {has && <span class="zl-prov-cur" aria-label="contains the current model" />}
+                  </span>
+                  <span class="zl-prov-sub">{items.map((m) => m.codename || m.name).join(", ")}</span>
+                </span>
+                <span class="zl-kv-hint zl-data">{items.length}</span>
+                <GoIcon />
+              </button>
+            );
+          })}
         </div>
-      ) : providerGroup ? (
-        <div class="model-selector-view model-provider-view">
-          <div class="provider-view-head">
-            <button type="button" class="provider-back" onClick={showRoot}>
-              <ChevronLeft size={14} aria-hidden="true" /> All models
-            </button>
-            <span>{providerGroup.provider} · {providerGroup.items.length}</span>
-          </div>
-          <ModelGrid
-            models={providerGroup.items}
-            selected={selected}
-            pinnedIDs={pinnedIDs}
-            onSelect={onSelect}
-            onTogglePin={updatePin}
-            pinnable={!modelOnly}
-          />
+      ) : view !== "root" ? (
+        <div class="zl-chips">
+          {(providerGroup?.items || []).map((m) => (
+            <ModelChip model={m} on={modelIsSelected(m, selected)} onPick={pick} key={m.id} />
+          ))}
         </div>
       ) : (
-        <div class="model-selector-view">
-          {!modelOnly && <SectionHeading trailing={`★ ${pinned.length}`}>Pinned</SectionHeading>}
-          {!modelOnly && (pinned.length > 0 ? (
+        <>
+          {!modelOnly && (currentName || sessionModel) && (
+            <button
+              type="button"
+              class="zl-pick-cur"
+              onClick={() => setView(selectedSpec?.provider || "providers")}
+              aria-label={`Current model ${currentName}, ${selectedSpec?.provider || "custom"}. Show provider`}
+            >
+              <ModelMark name={currentName} />
+              <span class="zl-pick-cur-txt">
+                <span class="zl-pick-cur-name">{currentName}</span>
+                <span class="zl-pick-cur-sub zl-data">{currentSub}</span>
+              </span>
+              <GoIcon />
+            </button>
+          )}
+          {!modelOnly && (
             <>
-              <ModelGrid
-                models={visiblePins}
-                selected={selected}
-                pinnedIDs={pinnedIDs}
-                onSelect={onSelect}
-                onTogglePin={updatePin}
-                pinnable={!modelOnly}
-              />
-              {pinned.length > PINNED_COLLAPSE_THRESHOLD && (
-                <button
-                  type="button"
-                  class="pinned-fold"
-                  aria-expanded={pinsExpanded}
-                  onClick={() => setPinsExpanded((expanded) => !expanded)}
-                >
-                  {pinsExpanded
-                    ? "Show less"
-                    : `Show ${pinned.length - PINNED_COLLAPSE_THRESHOLD} more`}
-                </button>
+              <div class="zl-group"><span>Pinned</span><span class="zl-group-n zl-data">{pinned.length}</span></div>
+              {pinned.length > 0 && (
+                <div class="zl-chips">
+                  {pinned.map((m) => (
+                    <ModelChip model={m} on={modelIsSelected(m, selected)} onPick={pick} key={m.id} />
+                  ))}
+                </div>
               )}
             </>
-          ) : (
-            <div class="pinned-empty">
-              <Star size={14} aria-hidden="true" />
-              Pin your go-to models — tap <Star size={12} aria-hidden="true" /> on any model
-            </div>
-          ))}
-          <SectionHeading>All models</SectionHeading>
-          <ProviderList groups={groups} selected={selected} onOpen={openProvider} />
-        </div>
+          )}
+          <button type="button" class="zl-pick-all" onClick={() => setView("providers")}>
+            <span class="zl-pick-all-t">All models</span>
+            <span class="zl-kv-hint zl-data">{models.length} · {groups.length} providers</span>
+            <GoIcon />
+          </button>
+          {!modelOnly && (
+            <>
+              <div class="zl-group"><span>Thinking</span><span class="zl-group-n zl-data">{thinkValue}</span></div>
+              <div class="zl-seg" role="radiogroup" aria-label="Thinking level">
+                {thinkOpts.map((t) => (
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={thinkValue === t.value}
+                    class={`zl-seg-opt${thinkValue === t.value ? " is-on" : ""}`}
+                    onClick={() => onThinkingChange?.(t.value)}
+                    key={t.value}
+                  >
+                    <span class="zl-seg-bars" aria-hidden="true">
+                      {t.bars === 0
+                        ? <i class="is-none" />
+                        : [1, 2, 3, 4].map((k) => <i class={k <= t.bars ? "" : "is-off"} key={k} />)}
+                    </span>
+                    <span class="zl-seg-l">{t.label}</span>
+                  </button>
+                ))}
+              </div>
+              <div class="zl-fast">
+                <span class="zl-fast-txt">
+                  <span class="zl-fast-k">Fast</span>
+                  <span class="zl-fast-d">
+                    {fastSupported
+                      ? (fastNote || "Same model, less waiting · billed at a premium rate")
+                      : "Not available on this model"}
+                  </span>
+                </span>
+                <Switch
+                  on={!!fast && fastSupported}
+                  onChange={onFastChange}
+                  label="Fast mode"
+                  disabled={!fastSupported || !onFastChange}
+                />
+              </div>
+            </>
+          )}
+        </>
       )}
     </div>
   );
 }
+
+// PickerPopover — desktop host. Anchored to its button, opens upward. The
+// catalogue renders it inside `.zl-st-anchor`; production portals it so a
+// pane's overflow:hidden cannot clip it. Escape and a click on the veil
+// (owned by the host) close it.
+export function PickerPopover({
+  kind,
+  models,
+  onClose,
+  children,
+  class: extraClass,
+  style,
+  popoverRef,
+}) {
+  const v = usePickView(kind, models);
+  useEffect(() => {
+    if (!onClose) return undefined;
+    const k = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+  return (
+    <div
+      class={`zl-pop${extraClass ? ` ${extraClass}` : ""}`}
+      role="dialog"
+      aria-label={PICK_TITLES[kind] || kind}
+      style={style}
+      ref={popoverRef}
+    >
+      <div class={`zl-side-head is-pop${v.sub ? " is-sub" : ""}`}>{v.head}</div>
+      {typeof children === "function" ? children(v) : children}
+    </div>
+  );
+}
+
+// PickerSheet — phone host. Same content, same head as the drawer (eyebrow
+// and X), a grabber because it is the one surface you can also drag away.
+// `includeScrim` is for production, which has no lab veil of its own;
+// the catalogue Phone already paints `.zl-scrim.is-sheet` next to this.
+export function PickerSheet({
+  kind,
+  models,
+  onClose,
+  includeScrim = false,
+  overlayHistory = false,
+  children,
+}) {
+  const v = usePickView(kind, models);
+  const dismiss = useSheetDismiss({ onClose: overlayHistory ? onClose : undefined });
+  useEffect(() => {
+    if (!overlayHistory || !onClose) return undefined;
+    const close = openOverlay("picker-sheet", onClose);
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      close?.();
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [overlayHistory, onClose]);
+  return (
+    <>
+      {includeScrim && (
+        <div
+          class="zl-scrim is-sheet"
+          ref={overlayHistory ? dismiss.veilRef : undefined}
+          onClick={onClose}
+        />
+      )}
+      <div
+        class="zl-sheet"
+        role="dialog"
+        aria-label={PICK_TITLES[kind] || kind}
+        ref={overlayHistory ? dismiss.sheetRef : undefined}
+      >
+        <span class="zl-grab" aria-hidden="true" />
+        <div
+          class={`zl-side-head is-sheet${v.sub ? " is-sub" : ""}`}
+          {...(overlayHistory ? dismiss.grabBind : {})}
+        >
+          {v.head}
+          <button type="button" class="zl-x" onClick={onClose} aria-label="Close">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
+        <div class="zl-sheet-body">
+          {typeof children === "function" ? children(v) : children}
+        </div>
+      </div>
+    </>
+  );
+}
+
+export { PICK_TITLES };

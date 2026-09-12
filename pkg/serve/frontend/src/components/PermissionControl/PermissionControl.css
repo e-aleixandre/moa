@@ -1,145 +1,57 @@
-/* PermissionControl — the permission chip as a control + its 3-option menu.
-   The chip wears the status-line language (mono/lowercase/no fill), identical on
-   desktop and mobile; the menu reuses the head-popover panel chrome
-   (mantle/border/shadow) but opens UPWARD, since the strip lives at the bottom
-   of the viewport. Catppuccin Mocha tokens only. */
-.perm-control {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-}
+/* PermissionControl — the three permission rows.
 
-/* The chip. It speaks the STATUS-LINE language in every density: mono,
-   lowercase, no fill and no icon — only the mode's color, which is what carries
-   the safety signal. It carries the ≥44px tap target via a pseudo-element so
-   the visual stays dense (technique already used across the redesign). */
-.perm-chip {
-  position: relative;
-  display: inline-flex;
+   This sheet is the catalogue's, MOVED (catalog/zones-lab.css `.zl-perm*`),
+   not translated. The class names came with the rules on purpose: a rule
+   that is copied is a rule that can drift. The catalogue imports the
+   component now, so these are the only permission-row rules in the product.
+
+   The chip that opens this lives on the status line. The popover/sheet that
+   hosts it live in ModelSelector.css (`.zl-pop` / `.zl-sheet`), the same
+   hosts the model picker uses.
+
+   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
+   ?view=zones they resolve from `.zl`; everywhere else the fallback IS the
+   catalogue's own value.
+
+   What is added below the catalogue's block is only the focus ring and the
+   disabled state the prototype never had. */
+
+.zl-perm {
+  display: flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: 0;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 12px 8px 14px;
   border: 0;
-  background: none;
-  border-radius: var(--radius-full);
-  font-family: var(--mono);
-  font-weight: var(--weight-normal);
-  font-size: var(--text-micro);
-  text-transform: lowercase;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.perm-chip::after {
-  content: "";
-  position: absolute;
-  inset: -13px -6px;
-}
-.perm-chip svg {
-  width: 11px;
-  height: 11px;
-}
-.perm-chip:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-/* YOLO is maroon, not green: it is the mode that never asks, so it should read
-   as "you took the brakes off", not as "all good". */
-.perm-chip.perm-yolo { color: var(--maroon); }
-.perm-chip.perm-ask { color: var(--yellow); }
-.perm-chip.perm-auto { color: var(--blue); }
-@media (hover: hover) {
-
-.perm-chip:not(:disabled):hover { filter: brightness(1.15); }
-}
-
-/* The menu — opens upward from the chip. Portalled to <body> with fixed
-   positioning (see PermissionControl.jsx) so pane overflow:hidden cannot clip
-   it in the grid. right/top/bottom come from inline style. */
-.perm-menu {
-  z-index: var(--z-overlay);
-  width: 220px;
-  max-width: calc(100vw - var(--space-4));
-  background: var(--mantle);
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  padding: var(--space-1);
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.perm-menu-portal {
-  position: fixed;
-}
-
-/* The mobile Sheet variant reuses the same rows (.perm-menu-item) laid out
-   full-width inside the modal panel — no absolute positioning, so overflow is
-   structurally impossible. */
-.perm-sheet-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-.perm-sheet-list .perm-menu-item {
-  min-height: 48px;
-  border-radius: var(--radius-md);
-}
-
-.perm-menu-item {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  padding: var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
+  border-radius: var(--zl-r-md, 10px);
+  background: transparent;
+  color: var(--zl-t1, #f4f4f7);
+  font-family: inherit;
+  font-size: var(--zl-fs-body, 14px);
+  letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
-  /* comfortable, ≥44px tall row */
-  min-height: 44px;
+  appearance: none;
+  transition: background 120ms ease;
 }
-.perm-menu-item:focus-visible {
-  background: var(--surface0);
-}
+.zl-perm + .zl-perm { margin-top: 2px; }
 @media (hover: hover) {
+  .zl-perm:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+}
+.zl-perm.is-on { background: var(--zl-raised, #1e1e29); box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07)); }
+.zl-perm:disabled { cursor: default; opacity: 0.55; }
+.zl-perm-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.zl-perm-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.zl-perm-l { font-size: var(--zl-fs-title, 16px); font-weight: 600; }
+.zl-perm-d { color: var(--zl-t3, #9091a6); line-height: 1.4; }
+.zl-perm.is-ask .zl-perm-dot, .zl-perm.is-ask .zl-perm-l { color: var(--zl-yellow, #f9e2af); }
+.zl-perm.is-auto .zl-perm-dot, .zl-perm.is-auto .zl-perm-l { color: var(--zl-t2, #c3c4d1); }
+.zl-perm.is-yolo .zl-perm-dot, .zl-perm.is-yolo .zl-perm-l { color: var(--zl-maroon, #eba0ac); }
 
-.perm-menu-item:hover{
-  background: var(--surface0);
-}
-}
-.perm-menu-item.on {
-  background: color-mix(in srgb, var(--surface0) 60%, transparent);
+.zl-perm:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: var(--focus-ring-offset, 2px);
 }
 
-.perm-menu-check {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  margin-top: 1px;
-  flex: none;
-  color: var(--subtext0);
-}
-.perm-menu-check svg { width: 13px; height: 13px; }
-
-.perm-menu-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-.perm-menu-label {
-  font-family: var(--mono);
-  font-weight: var(--weight-semibold);
-  font-size: var(--text-xs);
-  letter-spacing: 0.3px;
-}
-.perm-menu-label.perm-yolo { color: var(--maroon); }
-.perm-menu-label.perm-ask { color: var(--yellow); }
-.perm-menu-label.perm-auto { color: var(--blue); }
-.perm-menu-desc {
-  font-size: var(--text-xs);
-  color: var(--subtext0);
-}
+.mconv .zl-perm { min-height: 56px; }
