@@ -50,14 +50,27 @@
 
 /* Phone: the capsules float over the transcript, so it fades out under them.
    Production adds the iOS safe-area the catalogue's device frame never had,
-   and a short bottom fade so the dock is not a hard edge. */
+   and a short bottom fade so the dock is not a hard edge.
+
+   The fade STARTS AT THE TOP EDGE, not below the status bar. It used to hold
+   full transparency through the whole safe-area inset, which drew a clean
+   horizontal seam exactly where the clock begins: above it nothing, below it
+   the conversation, and the eye reads that as the screen being cut in two.
+   Letting the text climb into the status-bar band and dissolve there is what
+   makes the surface continuous -- the words nearest the clock are faint enough
+   not to compete with it, so the time stays readable without a border to
+   enforce it. The capsules keep their own inset (MobileChrome), so the row
+   itself never rides under the clock. */
 .mconv .zl-transcript {
-  padding: calc(74px + env(safe-area-inset-top, 0px)) 18px 24px;
+  /* Half the inset, not all of it: the text must REACH the status-bar band for
+     the fade above to have anything to dissolve. The capsules are what needs
+     clearance, and the 74px below already provides it. */
+  padding: calc(74px + env(safe-area-inset-top, 0px) * 0.5) 18px 24px;
   mask-image: linear-gradient(
     to bottom,
     transparent 0,
-    transparent env(safe-area-inset-top, 0px),
-    transparent calc(env(safe-area-inset-top, 0px) + 44px),
+    rgba(0, 0, 0, 0.32) calc(env(safe-area-inset-top, 0px) * 0.6),
+    rgba(0, 0, 0, 0.6) calc(env(safe-area-inset-top, 0px) + 12px),
     #000 calc(env(safe-area-inset-top, 0px) + 84px),
     #000 calc(100% - 28px),
     transparent 100%
@@ -65,8 +78,8 @@
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0,
-    transparent env(safe-area-inset-top, 0px),
-    transparent calc(env(safe-area-inset-top, 0px) + 44px),
+    rgba(0, 0, 0, 0.32) calc(env(safe-area-inset-top, 0px) * 0.6),
+    rgba(0, 0, 0, 0.6) calc(env(safe-area-inset-top, 0px) + 12px),
     #000 calc(env(safe-area-inset-top, 0px) + 84px),
     #000 calc(100% - 28px),
     transparent 100%

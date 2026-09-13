@@ -89,7 +89,11 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 14px 16px 8px;
+  /* The drawer is a full-height surface on a phone with a notch, so its head
+     owes the status bar the same clearance the conversation capsules take.
+     It carried the bottom inset and not the top one, which put "moa" and the
+     search field under the clock on any modern iPhone. */
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 8px;
 }
 
 .sdrawer-head h2 {
