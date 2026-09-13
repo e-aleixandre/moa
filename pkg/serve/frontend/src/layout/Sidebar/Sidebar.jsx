@@ -39,8 +39,8 @@ import "./Sidebar.css";
 //   4. foot — the inbox, the version and settings: the things about the APP
 
 const ORDERS = [
-  ["recent", "Recent"],
-  ["project", "By project"],
+  ["recent", "Recent", "Sort by recent"],
+  ["project", "By project", "Group by project"],
 ];
 
 const ATTENTION_RANK = { permission: 0, error: 1, unseen: 2 };
@@ -79,6 +79,27 @@ function GearIcon() {
           settings. */}
       <circle cx="8" cy="8" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5" />
       <path d="M8 1.3a6.7 6.7 0 0 1 2.05.32l.3 1.52a5.2 5.2 0 0 1 1.19.69l1.46-.5a6.7 6.7 0 0 1 1.27 2.2l-1.16 1.03a5.2 5.2 0 0 1 0 1.38l1.16 1.03a6.7 6.7 0 0 1-1.27 2.2l-1.46-.5a5.2 5.2 0 0 1-1.19.69l-.3 1.52a6.7 6.7 0 0 1-4.1 0l-.3-1.52a5.2 5.2 0 0 1-1.19-.69l-1.46.5a6.7 6.7 0 0 1-1.27-2.2l1.16-1.03a5.2 5.2 0 0 1 0-1.38L1.71 5.53a6.7 6.7 0 0 1 1.27-2.2l1.46.5a5.2 5.2 0 0 1 1.19-.69l.3-1.52A6.7 6.7 0 0 1 8 1.3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+    </svg>
+  );
+}
+
+/* The two ways the list can be arranged. A clock for time, stacked folders
+   for grouping -- the distinction has to survive at 14px with no label. */
+function ByRecentIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5" />
+      <path d="M8 4.7V8l2.2 1.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
+
+function ByProjectIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M1.9 5.1V3.4a.9.9 0 0 1 .9-.9h2.4l1.2 1.4h4.7a.9.9 0 0 1 .9.9v.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+      <rect x="1.9" y="6.2" width="12.2" height="7.3" rx="1" fill="none" stroke="currentColor" stroke-width="1.4" />
+      <path d="M4.6 9.1h6.8M4.6 11.2h4.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
     </svg>
   );
 }
@@ -291,19 +312,27 @@ export function Sidebar({
         </div>
       ) : (
         <div class="zl-list">
+          {/* How the list is ordered belongs to the list, so it stays here --
+              but as two icons, not two words. The full-width segmented control
+              spent a whole band of the sidebar on a choice made once and then
+              left alone for weeks, and the sidebar's width is worth more than
+              that. The labels live in the tooltip and the accessible name, so
+              nothing is lost but the space. */}
           <div class="zl-view" role="radiogroup" aria-label="Session order">
-            {ORDERS.map(([id, label]) => {
+            {ORDERS.map(([id, label, hint]) => {
               const on = (id === "project") === !!groupByProject;
               return (
                 <button
                   type="button"
                   role="radio"
                   aria-checked={on}
+                  aria-label={hint}
+                  title={label}
                   class={`zl-view-b${on ? " is-on" : ""}`}
                   onClick={() => onGroupByProject?.(id === "project")}
                   key={id}
                 >
-                  {label}
+                  {id === "project" ? <ByProjectIcon /> : <ByRecentIcon />}
                 </button>
               );
             })}

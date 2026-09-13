@@ -1,164 +1,220 @@
-/* Artifacts — drawer, list and reader. The conversation card lives in
-   Artifact.css (the catalogue's `.zl-art`). This sheet is the rest of the
-   collection: the shared list row, the drawer, the reader. */
+/* Artifacts — drawer, collection and reader.
+   The drawer uses the same floating-sheet ladder as the session dossier: a
+   sheet carries the collection, raised rows carry files, and controls answer
+   with the control step rather than a separate colour language. */
 
-/* ── Shared row: file line (mono) · title · description · share ──────────── */
-.af-row { display: flex; align-items: stretch; gap: var(--space-2); min-width: 0; }
+/* ── Shared artifact row ────────────────────────────────────────────────── */
+.af-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+}
 .af-row-open {
-  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;
-  padding: var(--space-3) 0 var(--space-3) var(--space-4);
-  border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; font-family: var(--font);
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 56px;
+  padding: 10px 6px 10px 12px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-t1);
+  font-family: var(--font);
+  text-align: left;
+  cursor: pointer;
 }
 .af-row-file {
-  display: flex; align-items: center; gap: var(--space-2); min-width: 0;
-  font: var(--text-sm)/1.5 var(--mono); color: var(--overlay1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--zl-t3);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
 }
-.af-row-file > svg { flex: none; color: var(--overlay0); }
+.af-row-file > svg { flex: none; color: var(--zl-t4); }
 .af-row-file > span:not(.af-row-trailing) { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.af-row-trailing { margin-left: auto; flex: none; font-size: var(--text-xs); color: var(--overlay0); }
-.af-row-title { font-size: var(--text-md); font-weight: var(--weight-medium); line-height: var(--leading-tight); color: var(--text); letter-spacing: var(--tracking-tight); }
-.af-row-sub { font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--subtext0); }
-.af-row-flag { font: var(--text-xs) var(--mono); color: var(--yellow); }
+.af-row-trailing { flex: none; margin-left: auto; color: var(--zl-t4); }
+.af-row-title { color: var(--zl-t1); font-size: var(--zl-fs-body); font-weight: 500; letter-spacing: -0.01em; line-height: 1.25; }
+.af-row-sub { color: var(--zl-t3); font-size: var(--zl-fs-meta); line-height: 1.4; }
+.af-row-flag { color: var(--zl-yellow); font-family: var(--mono); font-size: var(--zl-fs-meta); }
 .af-row > .af-icon-button { align-self: center; }
-.af-row > .af-share { margin-right: var(--space-1); }
+.af-row > .af-share { margin-right: 4px; }
 
-/* Conversation card: the same row, in the stream. */
+/* Legacy stream rows retain the collection's raised, rimmed treatment. */
 .af-card {
-  border: 1px solid var(--surface0); border-radius: var(--radius-md); overflow: hidden;
-  background: color-mix(in srgb, var(--mantle) 65%, transparent);
-  margin: var(--space-2) 0 var(--space-4); max-width: var(--content-narrow);
-  transition: border-color var(--duration) var(--ease);
+  max-width: var(--content-narrow);
+  margin: 8px 0 16px;
+  overflow: hidden;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  transition: background 120ms var(--zl-ease), box-shadow 120ms var(--zl-ease);
 }
 
-/* ── Buttons ─────────────────────────────────────────────────────────────── */
-.af-icon-button, .af-back {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none;
-  min-width: 36px; min-height: 36px; padding: 6px; border: 0; border-radius: var(--radius-sm);
-  background: transparent; color: var(--subtext0); font: var(--text-sm) var(--font); cursor: pointer;
-  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+/* ── Controls ───────────────────────────────────────────────────────────── */
+.af-icon-button,
+.af-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 6px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-t3);
+  font: inherit;
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+  transition: background 120ms var(--zl-ease), color 120ms var(--zl-ease);
 }
 .af-share.is-labelled { padding: 6px 10px; }
-@media (max-width: 768px) {
-  .af-card .af-icon-button { min-width: 44px; min-height: 44px; }
-}
 .af-share:disabled { opacity: .55; cursor: wait; }
 .af-icon-button.is-on,
-.zl-pane-tools [data-artifacts-trigger][aria-pressed="true"] { color: var(--mauve); background: color-mix(in srgb, var(--mauve) 12%, transparent); }
-.af-text-button { border: 0; padding: 6px 0; min-height: 32px; background: none; color: var(--peach); font: var(--text-sm) var(--font); cursor: pointer; white-space: nowrap; }
+.zl-pane-tools [data-artifacts-trigger][aria-pressed="true"] {
+  background: var(--zl-accent-dim);
+  color: var(--zl-accent);
+}
+.af-text-button {
+  min-height: 32px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--zl-accent);
+  font: inherit;
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+  white-space: nowrap;
+}
 
-/* ── Entries ─────────────────────────────────────────────────────────────── */
+/* ── Entries ────────────────────────────────────────────────────────────── */
 .zl-desk-head .zl-desk-act.af-entry { width: auto; min-width: 36px; gap: 5px; padding: 0 7px 0 6px; }
-.zl-desk-head .af-entry .af-count { font: var(--text-xs) var(--mono); line-height: 1; color: var(--overlay1); }
+.zl-desk-head .af-entry .af-count { color: var(--zl-t3); font-family: var(--mono); font-size: var(--zl-fs-meta); line-height: 1; }
 .zl-desk-head .af-entry.is-on .af-count { color: inherit; }
 
-/* ── Layer / panel ───────────────────────────────────────────────────────── */
+/* ── Layer / drawer ─────────────────────────────────────────────────────── */
 .af-layer { position: fixed; inset: 0; z-index: var(--z-sheet); pointer-events: none; }
-/* A modal drawer (mobile, or expanded on desktop) owns the top layer, above
-   the mobile title chip's own open state, so nothing floats over the reader. */
 .af-layer.is-modal { z-index: calc(var(--z-sheet) + 3); pointer-events: auto; }
-/* …but a Sheet opened FROM the drawer (the HTML resource inspector) is ON TOP
-   of it and must stay usable: raise only that sheet, and only while the drawer
-   is modal. The mobile title chip is not raised — it stays under the reader. */
 .artifacts-modal .sheet-overlay { z-index: calc(var(--z-sheet) + 4); }
-.af-backdrop { position: absolute; inset: 0; background: rgb(0 0 0 / .45); }
+.af-backdrop { position: absolute; inset: 0; background: rgb(8 8 16 / .55); }
 .af-drawer {
-  position: absolute; right: 0; top: 0; bottom: 0; pointer-events: auto;
-  display: flex; flex-direction: column; min-width: 0; width: min(600px, 100vw);
-  background: var(--base); border-left: 1px solid var(--surface0); box-shadow: -12px 0 40px rgb(0 0 0 / .18);
-  animation: af-enter 170ms ease-out; font-family: var(--font); color: var(--text);
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(600px, 100vw);
+  min-width: 0;
+  pointer-events: auto;
+  background: var(--zl-sheet);
+  box-shadow: inset 1px 0 0 var(--zl-line-2), -16px 0 48px rgb(0 0 0 / .45);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  letter-spacing: -0.005em;
+  animation: af-enter 180ms var(--zl-ease);
 }
 .af-drawer.is-expanded { width: min(1100px, 100vw); }
-.af-drawer.is-mobile { inset: 0; width: 100%; border: 0; box-shadow: none; animation: af-push 250ms ease-out; }
+.af-drawer.is-mobile {
+  inset: 0;
+  width: 100%;
+  box-shadow: none;
+  animation: af-push 260ms var(--zl-ease);
+}
 
-/* Reserve room only when the conversation stays readable beside the drawer.
-   Grid cells keep their dimensions; the drawer overlays them. */
 @media (min-width: 1280px) {
   .artifacts-open .conversation-main { margin-right: 600px; }
   .artifacts-open .zl-crumb-path { display: none; }
 }
 
-/* One header row: back · name · actions. Same geometry as .msa-head. */
+/* ── Header ─────────────────────────────────────────────────────────────── */
 .af-head {
-  flex: none; display: flex; align-items: center; gap: var(--space-2);
-  min-height: 48px; padding: 0 var(--space-2);
-  border-bottom: 1px solid var(--surface0);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  min-height: 56px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--zl-line);
 }
-.af-head-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); }
-.af-head-name { font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.af-head-file .af-head-name { font: var(--text-sm) var(--mono); color: var(--subtext1); }
-.af-head-file > svg { flex: none; color: var(--overlay1); }
-.af-head-count { font: var(--text-xs) var(--mono); color: var(--overlay1); }
-/* Whose collection this is: quiet, truncated, inside the same single row. It
-   yields its width before the title does, and a narrow phone drops it visually
-   (the dialog's accessible name still carries the origin). */
-.af-head-origin {
-  min-width: 0; flex: 0 1 auto; font-size: var(--text-xs); color: var(--overlay0);
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-}
-.af-head-origin::before { content: '·'; margin-right: var(--space-2); color: var(--surface2); }
+.af-head-title { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.af-head-name { overflow: hidden; color: var(--zl-t1); font-size: var(--zl-fs-title); font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; text-overflow: ellipsis; }
+.af-head-file .af-head-name { color: var(--zl-t2); font-family: var(--mono); font-size: var(--zl-fs-meta); font-weight: 400; letter-spacing: 0; }
+.af-head-file > svg { flex: none; color: var(--zl-t3); }
+.af-head-count { color: var(--zl-t4); font-family: var(--mono); font-size: var(--zl-fs-meta); font-variant-numeric: tabular-nums; }
+.af-head-origin { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--zl-t4); font-size: var(--zl-fs-meta); white-space: nowrap; text-overflow: ellipsis; }
+.af-head-origin::before { margin-right: 8px; color: var(--zl-line-2); content: '·'; }
 @media (max-width: 400px) { .af-drawer.is-mobile .af-head-origin { display: none; } }
-.af-head-actions { display: flex; gap: 2px; align-items: center; flex: none; }
-.af-drawer.is-mobile .af-head { min-height: 44px; padding-top: calc(var(--shell-top) + 6px); padding-bottom: 4px; border-bottom: 0; }
+.af-head-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.af-drawer.is-mobile .af-head { min-height: 52px; padding-top: calc(var(--shell-top) + 6px); padding-bottom: 4px; border-bottom: 1px solid var(--zl-line); }
 .af-drawer.is-mobile .af-icon-button,
 .af-drawer.is-mobile .af-back { min-width: 44px; min-height: 44px; }
 .af-drawer.is-mobile .af-back { margin-left: -4px; }
 .af-drawer.is-mobile .af-row-open { min-height: 44px; }
 
-/* ── List ────────────────────────────────────────────────────────────────── */
-.af-list-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-2) var(--space-4) var(--space-6); }
-/* Field (box/lg) draws the control; the drawer only places it. */
-.af-search { margin: var(--space-1) 0 var(--space-3); }
+/* ── Collection ─────────────────────────────────────────────────────────── */
+.af-list-content { flex: 1; min-height: 0; padding: 12px 16px 24px; overflow: auto; overscroll-behavior: contain; }
+.af-search { margin: 4px 0 12px; }
 .af-search .af-icon-button { min-width: 32px; min-height: 32px; padding: 0; }
-.af-list { padding: 0; margin: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
-.af-list li { border: 1px solid var(--surface0); border-radius: var(--radius-md); background: color-mix(in srgb, var(--mantle) 65%, transparent); transition: border-color var(--duration) var(--ease); }
-.af-empty { padding: var(--space-10) var(--space-3); text-align: center; color: var(--overlay1); }
-.af-empty > svg { margin: 0 auto var(--space-4); color: var(--surface2); }
-.af-empty h2 { font-size: var(--text-md); color: var(--subtext1); font-weight: var(--weight-medium); }
-.af-empty p { font-size: var(--text-sm); line-height: var(--leading-normal); margin: var(--space-2) auto var(--space-3); max-width: 260px; }
-.af-empty-actions { display: flex; align-items: center; justify-content: center; gap: var(--space-3); }
+.af-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.af-list li {
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  transition: background 120ms var(--zl-ease), box-shadow 120ms var(--zl-ease);
+}
+.af-empty { padding: 40px 12px; color: var(--zl-t3); text-align: center; }
+.af-empty > svg { margin: 0 auto 16px; color: var(--zl-t4); }
+.af-empty h2 { margin: 0; color: var(--zl-t2); font-size: var(--zl-fs-title); font-weight: 500; }
+.af-empty p { max-width: 260px; margin: 8px auto 12px; font-size: var(--zl-fs-meta); line-height: 1.5; }
+.af-empty-actions { display: flex; align-items: center; justify-content: center; gap: 12px; }
 
-/* ── Reader ──────────────────────────────────────────────────────────────── */
-.af-document-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; background: var(--base); }
-.af-document-frame { border: 0; width: 100%; height: 100%; flex: 1; min-height: 0; background: var(--base); }
-/* Images use the same in-element pinch/pan as the file viewer (usePinchZoom):
-   touch-action keeps the browser from page-zooming before the gesture is
-   handled, and the transform is written straight onto the img. */
-.af-image-wrap {
-  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
-  overflow: hidden; padding: var(--space-4);
-  touch-action: none; -webkit-user-select: none; user-select: none;
-}
-.af-image-wrap img {
-  max-width: 100%; max-height: 100%; object-fit: contain;
-  transform-origin: center center; will-change: transform; -webkit-touch-callout: none;
-}
+/* ── Reader ─────────────────────────────────────────────────────────────── */
+.af-document-body { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; background: var(--zl-canvas); }
+.af-document-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--zl-canvas); }
+.af-image-wrap { display: flex; align-items: center; justify-content: center; flex: 1; min-height: 0; padding: 16px; overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; }
+.af-image-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; transform-origin: center center; will-change: transform; -webkit-touch-callout: none; }
 .af-image-wrap.is-zoomed { cursor: grab; }
 .af-image-wrap.is-zoomed:active { cursor: grabbing; }
-.af-markdown-scroll { overflow: auto; flex: 1; min-height: 0; overscroll-behavior: contain; }
-.af-markdown { max-width: var(--content-block); margin: 0 auto; padding: var(--space-6) var(--space-6) var(--space-12); font-size: var(--text-base); }
-.af-markdown h1 { font-size: var(--text-2xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); line-height: var(--leading-tight); color: var(--text); margin: 0 0 var(--space-4); }
-.af-markdown h2 { font-size: var(--text-lg); font-weight: var(--weight-semibold); color: var(--text); margin: var(--space-6) 0 var(--space-3); }
-.af-markdown h3 { font-size: var(--text-md); font-weight: var(--weight-medium); color: var(--subtext1); margin: var(--space-5) 0 var(--space-2); }
-.af-markdown blockquote { border-left: 2px solid var(--mauve); margin: var(--space-4) 0; padding: var(--space-1) var(--space-4); color: var(--subtext1); }
+.af-markdown-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.af-markdown { max-width: var(--content-block); margin: 0 auto; padding: 24px 24px 48px; color: var(--zl-t2); font-size: var(--zl-fs-body); }
+.af-markdown h1 { margin: 0 0 16px; color: var(--zl-t1); font-size: var(--zl-fs-display); font-weight: 600; letter-spacing: -0.02em; line-height: 1.25; }
+.af-markdown h2 { margin: 24px 0 12px; color: var(--zl-t1); font-size: var(--zl-fs-title); font-weight: 600; }
+.af-markdown h3 { margin: 20px 0 8px; color: var(--zl-t2); font-size: var(--zl-fs-body); font-weight: 500; }
+.af-markdown blockquote { margin: 16px 0; padding: 4px 16px; border-left: 2px solid var(--zl-accent); color: var(--zl-t2); }
 .af-markdown blockquote p { margin: 0; }
-.af-markdown table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); margin: var(--space-3) 0 var(--space-5); }
-.af-markdown th, .af-markdown td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--surface0); color: var(--subtext1); vertical-align: top; }
-.af-markdown th { color: var(--text); font-weight: var(--weight-semibold); }
-.af-markdown hr { border: 0; border-top: 1px solid var(--surface0); margin: var(--space-6) 0; }
-.af-plain { margin: 0; padding: var(--space-5); font: var(--text-sm)/1.6 var(--mono); color: var(--subtext1); white-space: pre-wrap; word-break: break-word; }
-.af-drawer.is-mobile .af-markdown { padding: var(--space-4) var(--space-4) var(--space-10); }
-.af-drawer.is-mobile .af-markdown h1 { font-size: var(--text-xl); }
-.af-loading { display: flex; align-items: center; justify-content: center; gap: var(--space-2); flex: 1; color: var(--subtext0); font-size: var(--text-sm); }
+.af-markdown table { width: 100%; margin: 12px 0 20px; border-collapse: collapse; font-size: var(--zl-fs-meta); }
+.af-markdown th,
+.af-markdown td { padding: 8px 12px; border-bottom: 1px solid var(--zl-line); color: var(--zl-t2); text-align: left; vertical-align: top; }
+.af-markdown th { color: var(--zl-t1); font-weight: 600; }
+.af-markdown hr { margin: 24px 0; border: 0; border-top: 1px solid var(--zl-line); }
+.af-plain { margin: 0; padding: 20px; color: var(--zl-t2); font: var(--zl-fs-meta)/1.6 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.af-drawer.is-mobile .af-markdown { padding: 16px 16px 40px; }
+.af-loading { display: flex; align-items: center; justify-content: center; gap: 8px; flex: 1; color: var(--zl-t3); font-size: var(--zl-fs-meta); }
 
-/* ── Focus and hover ─────────────────────────────────────────────────────── */
-.af-row-open:focus-visible, .af-drawer button:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: -3px; }
+/* ── Interaction ────────────────────────────────────────────────────────── */
+.af-row-open:focus-visible,
+.af-drawer button:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -3px; }
 @media (hover: hover) {
-  .af-card:hover, .af-list li:hover { border-color: var(--surface1); }
-  .af-row-open:hover .af-row-title { color: var(--peach); }
-  .af-icon-button:hover, .af-back:hover { background: var(--surface0); color: var(--text); }
-  .af-text-button:hover { text-decoration: underline; }
+  .af-card:hover,
+  .af-list li:hover { background: var(--zl-control); box-shadow: var(--zl-rim-2); }
+  .af-row-open:hover .af-row-title { color: var(--zl-accent); }
+  .af-icon-button:hover,
+  .af-back:hover { background: var(--zl-hi); color: var(--zl-t1); }
+  .af-text-button:hover { color: var(--zl-t1); text-decoration: underline; }
 }
+.af-row-open:active { background: var(--zl-hi); }
 
-@keyframes af-enter { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
-@keyframes af-push { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@keyframes af-enter { from { opacity: 0; transform: translateX(12px); } }
+@keyframes af-push { from { opacity: 0; transform: translateX(16px); } }
 @media (prefers-reduced-motion: reduce) { .af-drawer { animation: none; } }

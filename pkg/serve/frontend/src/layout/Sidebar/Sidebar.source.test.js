@@ -37,6 +37,11 @@ test("New session is a labelled action the caller routes", () => {
 });
 
 test("the two orders are Recent and By project", () => {
-  expect(source).toContain('["recent", "Recent"]');
-  expect(source).toContain('["project", "By project"]');
+  // The labels stopped being rendered text when the control became two icons,
+  // but they did not stop existing: they are the tooltip and the accessible
+  // name now, which is the only way an icon-only radio is usable at all.
+  expect(source).toContain('["recent", "Recent"');
+  expect(source).toContain('["project", "By project"');
+  expect(source).toMatch(/title=\{label\}/);
+  expect(source).toMatch(/aria-label=\{hint\}/);
 });
