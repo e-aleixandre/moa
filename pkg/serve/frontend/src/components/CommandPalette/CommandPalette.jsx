@@ -478,7 +478,7 @@ export function CommandPalette({
             kind: "project",
             cwd: r.cwd,
             display: truncMiddle(r.cwd, homeDir, 44),
-            badge: r.isDefault ? "default" : (r.updated ? "recent" : null),
+            badge: r.isDefault ? "default" : null,
             when: relativeWhen(r.updated),
           });
         }
@@ -866,7 +866,6 @@ export function CommandPalette({
           <span class="dir-ic"><FolderOpen size={14} /></span>
           <span class="path"><Highlight text={it.display} query={query.toLowerCase().trim()} /></span>
           {it.badge === "default" && <span class="badge default">server cwd</span>}
-          {it.badge === "recent" && <span class="badge recent">recent</span>}
           {it.when && <span class="when">{it.when}</span>}
         </div>
       );
@@ -999,7 +998,7 @@ export function CommandPalette({
                   })}
                 </div>
               </div>
-              <div class="create-bar">
+              <div class="pal-foot create-bar">
                 <button type="button" class="btn-create" disabled={!createTarget || creating} onClick={() => doCreate()}>
                   {creating ? "Creating…" : `Create in ${basename(createTarget) || "…"}`}
                 </button>
@@ -1064,7 +1063,7 @@ export function CommandPalette({
         )}
 
         {step === "create" ? (
-          <div class="create-bar">
+          <div class="pal-foot create-bar">
             <span class="cancel"><kbd class="kbd">⌫</kbd> back on empty query</span>
             <button type="button" class="btn-create" disabled={!createTarget || creating} onClick={() => doCreate()}>
               {creating ? "Creating…" : `Create in ${basename(createTarget) || "…"}`}
@@ -1073,7 +1072,6 @@ export function CommandPalette({
           </div>
         ) : (
           <div class="pal-foot">
-            <span class="f"><kbd class="kbd">↑↓</kbd> navigate</span>
             <span class="f"><kbd class="kbd">⏎</kbd> {primaryHint}</span>
             {secondaryHint && <span class="f"><kbd class="kbd">{modLabel}⏎</kbd> {secondaryHint}</span>}
             {step === "model" && <span class="f"><kbd class="kbd">⌫</kbd> back</span>}

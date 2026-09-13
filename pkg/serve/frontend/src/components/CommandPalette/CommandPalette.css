@@ -1,18 +1,30 @@
-/* CommandPalette.css — co-located styles for the ⌘K palette.
+/* CommandPalette.css — the ⌘K palette, in the catalogue's grammar.
  *
- * Only Catppuccin Mocha tokens from tokens.css — no new tokens (spec §10).
- * Values (mantle/crust mix, surface1 border, shadow-lg + mauve glow, radius-lg,
- * peach selection bar) are copied from the mockup command-palette.html. Two
- * chassis: desktop centered overlay and a mobile bottom sheet, one component. */
+ * This sheet used to be the last floating surface written in the old token set
+ * (surface0 / overlay0 / peach / --radius-*), which is why it read as a
+ * different product next to the model picker or the composer's menu. It is now
+ * the same object those are: the sheet colour, a hairline rim, the 16px radius
+ * and the rise-and-settle they open with (`.zl-pop`, `.action-menu-list`).
+ *
+ * Two chassis, one component: a centred overlay with a pointer, a bottom sheet
+ * on a phone. What differs between them is reach, not language.
+ *
+ * Colour discipline, same as everywhere else:
+ *   · peach says "you wrote this" and appears nowhere in here;
+ *   · mauve (--zl-accent) is the accent — the search highlight, the create
+ *     button, the chosen model;
+ *   · green/yellow/red are state, so the only saturated marks in the list are
+ *     the state dot and a "needs you" line.
+ */
 
 /* ── veil / scrim ─────────────────────────────────────────────────────────── */
 .pal-veil {
   position: fixed;
   inset: 0;
   z-index: var(--z-overlay);
-  background: color-mix(in srgb, var(--crust) 60%, transparent);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
+  background: rgba(8, 8, 16, 0.58);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -27,113 +39,158 @@
 /* ── desktop palette shell ────────────────────────────────────────────────── */
 .palette {
   width: 92%;
-  max-width: 560px;
-  max-height: 440px;
-  background: var(--mantle);
-  border: 1px solid var(--surface1);
-  border-radius: 14px;
-  box-shadow: var(--shadow-lg);
+  max-width: 600px;
+  max-height: 460px;
+  background: var(--zl-sheet);
+  /* Rim and shadow rather than a border: the surface is lit from its own edge,
+     which is what keeps it reading as floating rather than drawn. */
+  box-shadow: var(--zl-rim-2), 0 24px 64px rgba(0, 0, 0, 0.5);
+  border-radius: var(--zl-r-lg);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  letter-spacing: -0.005em;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: palette-in 0.12s var(--ease);
+  animation: palette-in 180ms var(--zl-ease);
 }
 @keyframes palette-in {
-  from { opacity: 0; transform: translateY(-6px); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; transform: translateY(6px); }
 }
 
+/* ── head ─────────────────────────────────────────────────────────────────
+   One head for every step: the search glyph becomes a breadcrumb when there is
+   a step to go back to, and nothing else moves. The palette answering the same
+   way in both modes is the point — two heads made two screens. */
 .pal-input-row {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--surface0);
+  gap: 12px;
+  padding: 0 16px;
+  min-height: 56px;
+  box-shadow: inset 0 -1px 0 var(--zl-line);
   flex: none;
 }
-.pal-input-row > svg { color: var(--overlay0); flex: none; }
+.pal-input-row > svg { color: var(--zl-t4); flex: none; }
 .pal-input {
   flex: 1;
   background: transparent;
   border: none;
   outline: none;
-  color: var(--text);
+  color: var(--zl-t1);
   font-family: var(--font);
   font-size: var(--text-input); /* 16px — iOS anti-zoom lock */
+  letter-spacing: inherit;
   min-width: 0;
 }
-.pal-input::placeholder { color: var(--overlay0); }
+.pal-input::placeholder { color: var(--zl-t4); }
+
+/* Keycaps inside the palette: a quiet well, not a bordered box. ambient.css
+   restyles `.kbd` globally to the same picture; this is the rule that survives
+   when that temporary sheet goes. */
+.palette .kbd,
+.m-sheet .kbd {
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  font-weight: var(--weight-medium);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  padding: 1px 6px;
+  background: var(--zl-hi);
+  color: var(--zl-t3);
+}
 
 /* ── list ─────────────────────────────────────────────────────────────────── */
 .pal-list {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 6px 8px 8px;
   scrollbar-width: thin;
-  scrollbar-color: var(--surface1) transparent;
+  scrollbar-color: var(--zl-line-2) transparent;
 }
+/* Air between groups, none inside them — the sidebar's rhythm. */
 .pal-group {
-  font-family: var(--mono);
-  font-size: var(--text-nano);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 12px 4px;
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--overlay0);
-  padding: 10px 12px 4px;
+  color: var(--zl-t4);
   user-select: none;
 }
-.pal-group:first-child { padding-top: 6px; }
+.pal-list > .pal-group:first-child { margin-top: 0; }
 
 .pal-note {
-  padding: 12px 14px;
-  color: var(--overlay0);
-  font-size: var(--text-sm);
+  padding: 10px 12px;
+  color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
 }
-.pal-note.err { color: var(--red); }
+.pal-note.err { color: var(--zl-red); }
 
-/* ── row ──────────────────────────────────────────────────────────────────── */
+/* ── row ──────────────────────────────────────────────────────────────────
+   The selected row is a raised plate with a rim, the same way the current
+   session is marked in the sidebar: the cursor is a surface, not a tint, so it
+   survives next to a coloured state dot without competing with it. */
 .row {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 9px 12px;
-  min-height: 40px;
-  border-radius: var(--radius-md);
+  gap: 12px;
+  padding: 7px 12px;
+  min-height: 44px;
+  border-radius: var(--zl-r-md);
   cursor: pointer;
   position: relative;
-  transition: background 0.08s;
+  transition: background 120ms ease;
 }
 @media (hover: hover) {
-
-.row:hover { background: var(--surface0); }
+  .row:hover { background: var(--zl-hi); }
 }
-.row.sel { background: var(--surface0); }
+.row.sel {
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+}
 .row .name {
   flex: 3 1 auto;
-  font-size: var(--text-sm);
+  font-size: var(--zl-fs-body);
   font-weight: var(--weight-medium);
-  color: var(--text);
+  line-height: 20px;
+  color: var(--zl-t2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
 }
+.row.sel .name,
+.row.sel .act-name { color: var(--zl-t1); font-weight: 600; }
+
+/* The search highlight is the accent's job. It was peach, which is the word
+   this product reserves for what the user wrote. */
 .row .name .hl,
 .row .act-name .hl,
-.row .path .hl { color: var(--peach); font-weight: var(--weight-semibold); }
+.row .path .hl { color: var(--zl-accent); font-weight: 600; }
+
 .row .live {
-  font-size: var(--text-xs);
-  color: var(--overlay1);
+  font-size: var(--zl-fs-meta);
+  line-height: 16px;
+  color: var(--zl-t4);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
 }
-.row .live.y { color: var(--yellow); }
+/* A session asking for you is the one line in the list allowed to be loud. */
+.row .live.y { color: var(--zl-yellow); }
 
 .row .pal-sess {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   min-width: 0;
   flex: 1;
 }
@@ -141,23 +198,31 @@
   align-items: flex-start;
 }
 .row:has(.pal-sess) .state-dot {
-  margin-top: 5px;
+  margin-top: 7px;
 }
 .row:has(.pal-sess) .when {
-  margin-top: 3px;
+  margin-top: 4px;
 }
-.row .cwd { font-family: var(--mono); font-size: 10px; color: var(--overlay0); flex: none; }
+.row .cwd {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+  flex: none;
+}
+/* Set to the width of its longest form so the ages land on one column: ragged
+   numbers read as a wobble down the list. */
 .row .when {
   font-family: var(--mono);
-  font-size: 10px;
-  color: var(--surface2);
+  font-size: var(--zl-fs-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--zl-t4);
   flex: none;
-  width: 30px;
+  width: 3ch;
   text-align: right;
 }
 .row .enter { display: none; }
 
-.state-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.state-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 
 /* action rows */
 .row .act-ic {
@@ -168,27 +233,31 @@
   display: grid;
   place-items: center;
   background: transparent;
-  color: var(--overlay1);
+  color: var(--zl-t3);
+  transition: color 120ms ease;
 }
+/* The accent classes the rows still pass are deliberately inert: an icon does
+   not need a hue to say which verb it is, and colour in here is state. */
 .row .act-ic.mauve,
 .row .act-ic.blue,
-.row .act-ic.grey { background: transparent; color: var(--overlay1); }
+.row .act-ic.grey { background: transparent; color: var(--zl-t3); }
 .row.sel .act-ic,
 .row.sel .act-ic.mauve,
 .row.sel .act-ic.blue,
-.row.sel .act-ic.grey { color: var(--text); }
+.row.sel .act-ic.grey { color: var(--zl-t1); }
 .row .act-name {
   flex: 1;
-  font-size: 13.5px;
+  font-size: var(--zl-fs-body);
   font-weight: var(--weight-medium);
-  color: var(--text);
+  line-height: 20px;
+  color: var(--zl-t2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
 }
-.row .act-sub { font-size: var(--text-xs); color: var(--overlay0); flex: none; }
-.row .shortcut { display: flex; gap: 3px; flex: none; }
+.row .act-sub { font-size: var(--zl-fs-meta); color: var(--zl-t4); flex: none; }
+.row .shortcut { display: flex; gap: 4px; flex: none; }
 
 /* directory / project rows */
 .row .dir-ic {
@@ -199,55 +268,79 @@
   display: grid;
   place-items: center;
   background: transparent;
-  color: var(--overlay1);
+  color: var(--zl-t3);
+  transition: color 120ms ease;
 }
-.row .dir-ic.grey { background: transparent; color: var(--overlay1); }
-.row.sel .dir-ic { color: var(--text); }
+.row .dir-ic.grey { background: transparent; color: var(--zl-t3); }
+.row.sel .dir-ic { color: var(--zl-t1); }
 .row .path {
   font-family: var(--mono);
-  font-size: 12.5px;
-  color: var(--subtext1);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
 }
+.row.sel .path { color: var(--zl-t1); }
 
-/* badges */
+/* badges — identification, never decoration. Everything that is not a state
+   is drawn in the neutral ladder with a hairline. */
 .badge {
   font-family: var(--mono);
   font-size: var(--text-nano);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   flex: none;
-  border-radius: 5px;
-  padding: 1px 6px;
+  border-radius: var(--zl-r-sm);
+  padding: 0 5px;
   line-height: 15px;
+  color: var(--zl-t3);
+  box-shadow: var(--zl-rim);
 }
+/* The pane badge is the one identity mark in the list — which pane this
+   session is anchored to — and it takes the accent the sidebar's own pane
+   badge takes, not peach. */
 .badge.pane {
-  color: var(--peach);
-  border: 1px solid color-mix(in srgb, var(--peach) 40%, transparent);
-  background: var(--peach-dim);
+  color: var(--zl-accent);
+  background: var(--zl-accent-dim);
+  box-shadow: 0 0 0 1px var(--zl-accent-line);
 }
-.badge.archived { color: var(--overlay1); background: var(--surface0); text-transform: uppercase; }
-.badge.recent { color: var(--green); background: var(--green-dim); }
-.badge.default { color: var(--teal); background: color-mix(in srgb, var(--teal) 9%, transparent); }
+.row:not(.sel) .badge.pane {
+  color: var(--zl-t3);
+  background: transparent;
+  box-shadow: var(--zl-rim-2);
+}
+.badge.default { color: var(--zl-t3); }
+.badge.provider { color: var(--zl-t4); box-shadow: none; }
 
-/* ── footer ───────────────────────────────────────────────────────────────── */
+/* ── footer ───────────────────────────────────────────────────────────────
+   One footer chassis for every step. It used to spend a permanent strip on
+   three keycap hints, two of which ("↑↓ navigate", "⏎ open") are learned the
+   first time the palette is opened and then cost a band of the screen forever.
+   What is left is what actually changes: the verb ⏎ performs HERE (it is not
+   the same in the grid as in a conversation, and not the same for a share),
+   and how many results there are. */
 .pal-foot {
   flex: none;
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 8px 16px;
-  border-top: 1px solid var(--surface0);
-  background: color-mix(in srgb, var(--crust) 55%, transparent);
-  font-size: var(--text-xs);
-  color: var(--overlay0);
+  padding: 0 16px;
+  min-height: 40px;
+  box-shadow: inset 0 1px 0 var(--zl-line);
+  background: var(--zl-canvas);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
 }
-.pal-foot .f { display: flex; align-items: center; gap: 5px; }
+.pal-foot .f { display: flex; align-items: center; gap: 6px; }
 .pal-foot .spring { flex: 1; }
-.pal-foot .ctxhint { font-family: var(--mono); font-size: 10px; color: var(--surface2); }
+.pal-foot .ctxhint {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--zl-t4);
+}
 
 /* ── create step ──────────────────────────────────────────────────────────── */
 .crumb-chip {
@@ -255,31 +348,37 @@
   align-items: center;
   gap: 6px;
   flex: none;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--mauve);
-  background: var(--mauve-dim);
-  border-radius: 7px;
-  padding: 3px 9px;
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--zl-t2);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  border-radius: var(--zl-r-md);
+  padding: 5px 10px;
   cursor: pointer;
   border: none;
+  transition: background 120ms ease, color 120ms ease;
+}
+@media (hover: hover) {
+  .crumb-chip:hover { background: var(--zl-control); color: var(--zl-t1); }
 }
 .field-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 11px 18px;
-  border-bottom: 1px solid var(--surface0);
-  border-top: 1px solid var(--surface0);
+  padding: 8px 16px;
+  min-height: 44px;
+  box-shadow: inset 0 1px 0 var(--zl-line);
   flex: none;
 }
 .field-row .lbl {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--overlay0);
-  width: 44px;
+  color: var(--zl-t4);
   flex: none;
 }
 .model-chips { display: flex; gap: 6px; flex: 1; overflow-x: auto; }
@@ -289,19 +388,21 @@
   gap: 6px;
   flex: none;
   cursor: pointer;
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-full);
-  padding: 4px 12px;
-  font-size: var(--text-sm);
-  color: var(--subtext1);
+  border: 0;
+  box-shadow: var(--zl-rim);
+  border-radius: var(--zl-r-md);
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: var(--zl-fs-body);
+  color: var(--zl-t2);
   background: transparent;
   font-family: var(--font);
-  transition: all 0.12s;
+  transition: background 120ms ease, color 120ms ease;
 }
 .mchip.on {
-  border-color: color-mix(in srgb, var(--mauve) 60%, transparent);
-  background: var(--mauve-dim);
-  color: var(--lavender);
+  background: var(--zl-accent-dim);
+  box-shadow: 0 0 0 1px var(--zl-accent-line);
+  color: var(--zl-t1);
   font-weight: var(--weight-medium);
 }
 
@@ -310,9 +411,9 @@
  * chooser itself is a palette step (rows below), not a popover, so this row
  * only has to read well and stay out of the way. */
 .model-row .model-current {
-  font-size: 13.5px;
-  font-weight: var(--weight-semibold);
-  color: var(--text);
+  font-size: var(--zl-fs-body);
+  font-weight: 600;
+  color: var(--zl-t1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -320,8 +421,8 @@
 }
 .model-row .model-sub {
   font-family: var(--mono);
-  font-size: var(--text-micro);
-  color: var(--overlay1);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -334,28 +435,26 @@
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-full);
-  padding: 3px 10px;
+  border: 0;
+  box-shadow: var(--zl-rim);
+  border-radius: var(--zl-r-md);
+  padding: 5px 10px;
   font-family: var(--font);
-  font-size: var(--text-xs);
-  color: var(--subtext1);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
   background: transparent;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  transition: background 120ms ease, color 120ms ease;
 }
 @media (hover: hover) {
-
-.model-row .model-change:hover {
-  border-color: var(--surface2);
-  background: color-mix(in srgb, var(--surface0) 55%, transparent);
-  color: var(--text);
+  .model-row .model-change:hover {
+    background: var(--zl-hi);
+    color: var(--zl-t1);
+  }
 }
-}
-.model-row .model-change:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-.crumb-chip:focus-visible {
+.model-row .model-change:focus-visible,
+.crumb-chip:focus-visible,
+.mchip:focus-visible,
+.btn-create:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
@@ -364,97 +463,115 @@
  * Same row anatomy as every other palette row; only the accent dot, the
  * provider badge and the "in use" check are model-specific. */
 .row .model-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex: none;
   margin: 0 8px;
 }
-.badge.provider {
-  font-family: var(--mono);
-  color: var(--overlay1);
-  background: color-mix(in srgb, var(--surface0) 70%, transparent);
-}
-.row .model-check { flex: none; color: var(--green); }
+.row .model-check { flex: none; color: var(--zl-accent); }
+
+/* The create step's footer IS the footer: same band, same hairline, same
+   canvas tone, with the verb on the right instead of a hint. */
 .create-bar {
-  flex: none;
-  display: flex;
-  align-items: center;
   gap: 10px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--surface0);
-  background: color-mix(in srgb, var(--crust) 55%, transparent);
+  padding: 8px 12px 8px 16px;
+  min-height: 52px;
 }
-.create-bar .cancel { font-size: 12.5px; color: var(--overlay1); display: flex; align-items: center; gap: 6px; }
+.create-bar .cancel { display: flex; align-items: center; gap: 6px; color: var(--zl-t4); }
 .btn-create {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  background: var(--peach);
-  color: var(--crust);
+  background: var(--zl-accent);
+  color: var(--zl-accent-ink);
   font-family: var(--font);
-  font-size: 13px;
-  font-weight: var(--weight-semibold);
+  font-size: var(--zl-fs-body);
+  font-weight: 600;
   border: none;
-  border-radius: 9px;
-  padding: 8px 18px;
-  box-shadow: 0 0 18px var(--peach-med);
+  border-radius: var(--zl-r-md);
+  min-height: 36px;
+  padding: 0 16px;
+  transition: filter 120ms ease;
 }
-.btn-create:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
-.btn-create .kbd { background: rgba(0, 0, 0, 0.18); border-color: rgba(0, 0, 0, 0.25); color: var(--crust); }
+@media (hover: hover) {
+  .btn-create:not(:disabled):hover { filter: brightness(1.08); }
+}
+.btn-create:disabled { opacity: 0.45; cursor: default; }
+.palette .btn-create .kbd,
+.m-sheet .btn-create .kbd {
+  background: rgba(0, 0, 0, 0.16);
+  color: var(--zl-accent-ink);
+}
 
 /* ── mobile bottom sheet ──────────────────────────────────────────────────── */
 .m-sheet {
   width: 100%;
   height: 62%;
-  background: var(--mantle);
-  border-radius: 20px 20px 0 0;
-  border-top: 1px solid var(--surface1);
-  box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.5);
+  background: var(--zl-sheet);
+  border-radius: var(--zl-r-lg) var(--zl-r-lg) 0 0;
+  box-shadow: inset 0 1px 0 var(--zl-line-2), 0 -16px 48px rgba(0, 0, 0, 0.45);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  letter-spacing: -0.005em;
   display: flex;
   flex-direction: column;
-  animation: sheet-up 0.18s var(--ease);
+  animation: sheet-up 260ms var(--zl-ease);
 }
 @keyframes sheet-up {
-  from { transform: translateY(30px); opacity: 0.6; }
-  to { transform: none; opacity: 1; }
+  from { transform: translateY(100%); }
 }
 .m-sheet .grab {
-  width: 44px;
+  width: 36px;
   height: 4px;
   border-radius: 2px;
-  background: var(--surface1);
-  margin: 9px auto 2px;
+  background: var(--zl-line-2);
+  margin: 8px auto 2px;
   flex: none;
 }
+/* The phone's field is a recess in the sheet — canvas tone, hairline rim —
+   the same well the drawer's filter uses. */
 .m-input-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 8px 14px 10px;
+  margin: 10px 14px;
   flex: none;
-  background: var(--base);
-  border: 1px solid var(--surface0);
-  border-radius: 12px;
-  padding: 12px 14px;
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
+  border-radius: var(--zl-r-md);
+  min-height: 44px;
+  padding: 0 12px;
 }
-.m-input-row > svg { color: var(--overlay0); flex: none; }
-.m-list { flex: 1; overflow-y: auto; padding: 0 8px 20px; }
+.m-input-row:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line); }
+.m-input-row > svg { color: var(--zl-t4); flex: none; }
+.m-list { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 20px; }
 .m-row {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 12px;
+  gap: 12px;
+  padding: 8px 12px;
   min-height: 48px; /* ≥44px touch target */
-  border-radius: var(--radius-md);
+  border-radius: var(--zl-r-md);
 }
-.m-row .name { flex: 1; font-size: 14.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.m-row .act-name { flex: 1; font-size: 14.5px; font-weight: var(--weight-medium); color: var(--text); }
-.m-row .cwd { font-family: var(--mono); font-size: 10px; color: var(--overlay0); flex: none; }
-.m-row .when { font-family: var(--mono); font-size: 10px; color: var(--surface2); flex: none; }
-.m-row .path { font-family: var(--mono); font-size: 12.5px; color: var(--subtext1); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.m-row:active { background: var(--zl-hi); }
+.m-row .name {
+  flex: 1;
+  font-size: var(--zl-fs-title);
+  font-weight: var(--weight-medium);
+  color: var(--zl-t1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.m-row .act-name { flex: 1; font-size: var(--zl-fs-title); font-weight: var(--weight-medium); color: var(--zl-t1); }
+.m-row .cwd { font-family: var(--mono); font-size: var(--zl-fs-meta); color: var(--zl-t4); flex: none; }
+.m-row .when { font-family: var(--mono); font-size: var(--zl-fs-meta); font-variant-numeric: tabular-nums; color: var(--zl-t4); flex: none; }
+.m-row .path { font-family: var(--mono); font-size: var(--zl-fs-meta); color: var(--zl-t3); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
 /* ── share target: what is being placed ───────────────────────────────────
    A band above the input naming the shared item, because a list of sessions
@@ -465,45 +582,42 @@
   align-items: center;
   gap: 9px;
   flex: none;
-  padding: 11px 18px;
-  border-bottom: 1px solid var(--surface0);
-  background: var(--mauve-dim);
+  padding: 10px 16px;
+  box-shadow: inset 0 -1px 0 var(--zl-line);
+  background: var(--zl-accent-dim);
   min-width: 0;
 }
 .pal-share-ico {
   display: inline-flex;
   flex: none;
-  color: var(--mauve);
+  color: var(--zl-accent);
 }
 .pal-share-what {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: var(--text-sm);
+  font-size: var(--zl-fs-body);
   font-weight: var(--weight-medium);
-  color: var(--text);
+  color: var(--zl-t1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .pal-share-verb {
   flex: none;
-  font-family: var(--mono);
-  font-size: var(--text-nano);
-  letter-spacing: 0.06em;
-  color: var(--overlay0);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
 }
 
 /* On the phone the two lines stack: the verb does not fit beside a filename at
    390px, and truncating either would hide the one thing the band exists for. */
 .m-sheet .pal-share {
   flex-wrap: wrap;
-  border-bottom: 0;
+  box-shadow: none;
   padding: 4px 16px 6px;
   background: transparent;
 }
 .m-sheet .pal-share-verb {
   flex: 1 0 100%;
-  font-size: 11px;
 }
 
 /* ── reduced motion — no entrance animation (spec §9) ─────────────────────── */
