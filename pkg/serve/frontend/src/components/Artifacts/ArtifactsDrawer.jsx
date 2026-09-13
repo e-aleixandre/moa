@@ -12,6 +12,7 @@ import { currentArtifact, filterArtifacts, originLabel } from '../../data/artifa
 import { Field } from '../../primitives/index.js';
 import { ArtifactRow, KindIcon, ShareButton } from './ArtifactRow.jsx';
 import { ArtifactContent, ARTIFACT_ESCAPE } from './ArtifactContent.jsx';
+import { groupArtifactsByDay } from './artifact-groups.js';
 import './Artifacts.css';
 
 // The same focusable set the Sheet traps on, plus the reader's iframe: an HTML
@@ -337,13 +338,29 @@ function ArtifactListBody({ slice, items, filtered, onClearSearch }) {
       </div>
     );
   }
+  // Day headings give the pile a rhythm; a search result is already a
+  // selection, so it stays flat rather than scattering three hits over three
+  // headings.
+  const groups = filtered === items ? groupArtifactsByDay(items) : [{ label: '', items: filtered }];
   return (
-    <ul class="af-list">
-      {filtered.map((entry) => (
-        <li key={entry.id}>
-          <ArtifactRow artifact={entry} onOpen={(a) => openArtifactFromList(a.id)} />
-        </li>
+    <div class="af-groups">
+      {groups.map((group) => (
+        <section key={group.label || 'results'} class="af-group">
+          {group.label && (
+            <h3 class="af-group-head">
+              <span>{group.label}</span>
+              <span class="af-group-n">{group.items.length}</span>
+            </h3>
+          )}
+          <ul class="af-list">
+            {group.items.map((entry) => (
+              <li key={entry.id}>
+                <ArtifactRow artifact={entry} onOpen={(a) => openArtifactFromList(a.id)} />
+              </li>
+            ))}
+          </ul>
+        </section>
       ))}
-    </ul>
+    </div>
   );
 }

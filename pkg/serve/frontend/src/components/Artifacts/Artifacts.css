@@ -3,48 +3,111 @@
    sheet carries the collection, raised rows carry files, and controls answer
    with the control step rather than a separate colour language. */
 
-/* ── Shared artifact row ────────────────────────────────────────────────── */
+/* ── Shared artifact row ────────────────────────────────────────────────
+   The anatomy the session row taught: a fixed mark on the left (here the file
+   itself, not a glyph), a title that leads, data one step quieter under it,
+   and the action that is not "open" kept out of the reading line. Rows are
+   NOT cards: a card each was 83 rims and no rhythm. They are hairline-cut
+   rows on one plane per day, the dossier's `.zl-kv` grammar. */
 .af-row {
+  position: relative;
   display: flex;
   align-items: stretch;
-  gap: 4px;
   min-width: 0;
 }
 .af-row-open {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-height: 56px;
-  padding: 10px 6px 10px 12px;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 8px 12px 8px 8px;
   border: 0;
-  border-radius: var(--zl-r-md);
+  border-radius: 0;
   background: transparent;
   color: var(--zl-t1);
   font-family: var(--font);
   text-align: left;
   cursor: pointer;
+  transition: background 120ms var(--zl-ease);
+}
+/* The mark: a 56×44 plate. A screenshot fills it (cover, so a tall phone
+   capture still reads as that phone capture); anything else gets the type
+   glyph on the same plate, so the column never wobbles. */
+.af-thumb {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 44px;
+  overflow: hidden;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t3);
+}
+.af-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.af-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.af-row-title {
+  overflow: hidden;
+  color: var(--zl-t1);
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 20px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .af-row-file {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  color: var(--zl-t3);
+  color: var(--zl-t4);
   font-family: var(--mono);
   font-size: var(--zl-fs-meta);
-  line-height: 1.5;
+  line-height: 16px;
   font-variant-numeric: tabular-nums;
 }
-.af-row-file > svg { flex: none; color: var(--zl-t4); }
 .af-row-file > span:not(.af-row-trailing) { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .af-row-trailing { flex: none; margin-left: auto; color: var(--zl-t4); }
-.af-row-title { color: var(--zl-t1); font-size: var(--zl-fs-body); font-weight: 500; letter-spacing: -0.01em; line-height: 1.25; }
-.af-row-sub { color: var(--zl-t3); font-size: var(--zl-fs-meta); line-height: 1.4; }
-.af-row-flag { color: var(--zl-yellow); font-family: var(--mono); font-size: var(--zl-fs-meta); }
-.af-row > .af-icon-button { align-self: center; }
-.af-row > .af-share { margin-right: 4px; }
+/* Two lines of description at most: the list is scanned, and a row that
+   grows to a paragraph is a card again. The full text rides on the title
+   attribute for the rare one that is cut. */
+.af-row-sub {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--zl-t3);
+  font-size: var(--zl-fs-meta);
+  line-height: 16px;
+}
+.af-row-flag { color: var(--zl-yellow); font-family: var(--mono); font-size: var(--zl-fs-meta); line-height: 16px; }
+/* Share (and Inspect) live at the row's end and stay in the tree and
+   tabbable — only visually quiet until the row is pointed at or a key lands
+   on them. On touch there is no pointing, so they simply show. */
+.af-row-acts {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  transform: translateY(-50%);
+}
+@media (hover: hover) {
+  .af-row-acts .af-icon-button { opacity: 0; transition: opacity 120ms var(--zl-ease), background 120ms var(--zl-ease), color 120ms var(--zl-ease); }
+  .af-row:hover .af-row-acts .af-icon-button,
+  .af-row:focus-within .af-row-acts .af-icon-button { opacity: 1; }
+}
+.af-row-acts .af-icon-button:focus-visible { opacity: 1; }
+/* Share is always there, so its room is always reserved: a long description
+   must never run under it. An HTML row adds Inspect and takes a second slot. */
+.af-row .af-row-open { padding-right: 52px; }
+.af-row:has(.af-row-acts .af-icon-button + .af-icon-button) .af-row-open { padding-right: 90px; }
 
 /* Legacy stream rows retain the collection's raised, rimmed treatment. */
 .af-card {
@@ -148,7 +211,9 @@
   border-bottom: 1px solid var(--zl-line);
 }
 .af-head-title { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-.af-head-name { overflow: hidden; color: var(--zl-t1); font-size: var(--zl-fs-title); font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; text-overflow: ellipsis; }
+/* The word "Artifacts" never truncates; the origin after it is what gives way. */
+.af-head-name { flex: none; overflow: hidden; color: var(--zl-t1); font-size: var(--zl-fs-title); font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; text-overflow: ellipsis; }
+.af-head-file .af-head-name { flex: 0 1 auto; }
 .af-head-file .af-head-name { color: var(--zl-t2); font-family: var(--mono); font-size: var(--zl-fs-meta); font-weight: 400; letter-spacing: 0; }
 .af-head-file > svg { flex: none; color: var(--zl-t3); }
 .af-head-count { color: var(--zl-t4); font-family: var(--mono); font-size: var(--zl-fs-meta); font-variant-numeric: tabular-nums; }
@@ -160,19 +225,39 @@
 .af-drawer.is-mobile .af-icon-button,
 .af-drawer.is-mobile .af-back { min-width: 44px; min-height: 44px; }
 .af-drawer.is-mobile .af-back { margin-left: -4px; }
-.af-drawer.is-mobile .af-row-open { min-height: 44px; }
+.af-drawer.is-mobile .af-row-open { min-height: 64px; }
 
 /* ── Collection ─────────────────────────────────────────────────────────── */
-.af-list-content { flex: 1; min-height: 0; padding: 12px 16px 24px; overflow: auto; overscroll-behavior: contain; }
+.af-list-content { flex: 1; min-height: 0; padding: 16px 16px 32px; overflow: auto; overscroll-behavior: contain; }
 .af-search { margin: 4px 0 12px; }
 .af-search .af-icon-button { min-width: 32px; min-height: 32px; padding: 0; }
-.af-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.af-list li {
+/* Days, not a pile: the sidebar's group heading (uppercase meta, count in
+   mono), then one raised plane cut by hairlines. The rim belongs to the day,
+   not to each file. */
+.af-groups { display: flex; flex-direction: column; gap: 20px; }
+.af-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 0 4px 8px;
+  color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.af-group-n { color: var(--zl-t4); font-family: var(--mono); font-weight: 400; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.af-list {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
   border-radius: var(--zl-r-md);
   background: var(--zl-raised);
   box-shadow: var(--zl-rim);
-  transition: background 120ms var(--zl-ease), box-shadow 120ms var(--zl-ease);
+  list-style: none;
 }
+.af-list li + li { box-shadow: inset 0 1px 0 var(--zl-line); }
 .af-empty { padding: 40px 12px; color: var(--zl-t3); text-align: center; }
 .af-empty > svg { margin: 0 auto 16px; color: var(--zl-t4); }
 .af-empty h2 { margin: 0; color: var(--zl-t2); font-size: var(--zl-fs-title); font-weight: 500; }
@@ -206,9 +291,8 @@
 .af-row-open:focus-visible,
 .af-drawer button:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -3px; }
 @media (hover: hover) {
-  .af-card:hover,
-  .af-list li:hover { background: var(--zl-control); box-shadow: var(--zl-rim-2); }
-  .af-row-open:hover .af-row-title { color: var(--zl-accent); }
+  .af-card:hover { background: var(--zl-control); box-shadow: var(--zl-rim-2); }
+  .af-row-open:hover { background: var(--zl-hi); }
   .af-icon-button:hover,
   .af-back:hover { background: var(--zl-hi); color: var(--zl-t1); }
   .af-text-button:hover { color: var(--zl-t1); text-decoration: underline; }

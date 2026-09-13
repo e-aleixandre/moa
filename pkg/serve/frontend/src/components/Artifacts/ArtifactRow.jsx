@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { Check, FileCode2, FileImage, FileText, File as FileIcon, Info, Share2 } from 'lucide-preact';
 import { HtmlResourceInfo } from '../HtmlResourceInfo/HtmlResourceInfo.jsx';
 import { downloadFile } from '../../data/util/file-download.js';
-import { iconKindFor, isHTMLPreviewable } from '../../data/util/file-card.js';
+import { iconKindFor, isHTMLPreviewable, previewKind } from '../../data/util/file-card.js';
 import './Artifacts.css';
 
 const ICONS = { image: FileImage, text: FileText, file: FileIcon, archive: FileIcon };
@@ -72,9 +72,30 @@ function ResourceInfoButton({ artifact }) {
   );
 }
 
-// ArtifactRow — ONE row shape shared by the conversation card and the list:
-// the file line in mono (the ledger's voice), the title, and the optional
-// description. The whole row opens the artifact; sharing is a separate target.
+// Thumb — what the row shows of the file. A screenshot is most of what this
+// list holds, and a generic glyph says nothing about which one this is: the
+// image itself, at 56px, is the only mark that tells two captures apart.
+// Every other kind keeps the type glyph on a tinted plate of the same size, so
+// the column of marks lines up whatever the mix. The image loads lazily: 83
+// rows must not fire 83 requests on open. A failed load (a 410 after the
+// source moved) drops back to the glyph rather than a broken image.
+function Thumb({ artifact }) {
+  const [broken, setBroken] = useState(false);
+  const image = artifact.available && !broken && previewKind(artifact.name, artifact.mime) === 'image';
+  return (
+    <span class={`af-thumb${image ? ' is-image' : ''}`} aria-hidden="true">
+      {image
+        ? <img src={artifact.url} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setBroken(true)} />
+        : <KindIcon artifact={artifact} size={18} />}
+    </span>
+  );
+}
+
+// ArtifactRow — ONE row shape shared by the conversation card and the list.
+// The title leads: it is the name the agent gave the deliverable for you, so
+// it is what you scan for. The file name is data, in the ledger's mono voice,
+// one step down. The whole row opens the artifact; sharing is a separate
+// target that stays out of the way until the row is pointed at.
 export function ArtifactRow({ artifact, onOpen, trailing }) {
   return (
     <div class="af-row">
@@ -85,17 +106,21 @@ export function ArtifactRow({ artifact, onOpen, trailing }) {
         onClick={() => onOpen(artifact)}
         aria-label={`Open ${artifact.title}`}
       >
-        <span class="af-row-file">
-          <KindIcon artifact={artifact} />
-          <span>{artifact.name}</span>
-          {trailing && <span class="af-row-trailing">{trailing}</span>}
+        <Thumb artifact={artifact} />
+        <span class="af-row-main">
+          <span class="af-row-title">{artifact.title}</span>
+          <span class="af-row-file">
+            <span>{artifact.name}</span>
+            {trailing && <span class="af-row-trailing">{trailing}</span>}
+          </span>
+          {artifact.description && <span class="af-row-sub" title={artifact.description}>{artifact.description}</span>}
+          {!artifact.available && <span class="af-row-flag">Source unavailable</span>}
         </span>
-        <span class="af-row-title">{artifact.title}</span>
-        {artifact.description && <span class="af-row-sub">{artifact.description}</span>}
-        {!artifact.available && <span class="af-row-flag">Source unavailable</span>}
       </button>
-      <ResourceInfoButton artifact={artifact} />
-      <ShareButton artifact={artifact} />
+      <span class="af-row-acts">
+        <ResourceInfoButton artifact={artifact} />
+        <ShareButton artifact={artifact} />
+      </span>
     </div>
   );
 }
