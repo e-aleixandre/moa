@@ -57,8 +57,15 @@ jobs:
       - name: Generate the Xcode project
         working-directory: mobile
         run: |
-          npx cap add ios
+          # ML Kit requires iOS 15.5. Capacitor's CocoaPods template starts
+          # at 15.0 and `cap add` runs pod install before we can raise it.
+          # It nevertheless leaves the generated Podfile in place.
+          npx cap add ios --packagemanager cocoapods || test -f ios/App/Podfile
+          sed -i '' "s/platform :ios, '15.0'/platform :ios, '15.5'/" ios/App/Podfile
           npx cap sync ios
+          /usr/libexec/PlistBuddy -c \
+            'Add :NSCameraUsageDescription string "moa uses the camera to scan a pairing code."' \
+            ios/App/App/Info.plist
 
       # A keychain of its own, unlocked for this job only: the runner is
       # ephemeral, but a build should never be able to read or write the
