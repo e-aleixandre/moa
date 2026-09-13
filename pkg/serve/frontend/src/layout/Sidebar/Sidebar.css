@@ -191,14 +191,19 @@ button.zl-kbd:focus-visible {
 }
 .zl-view-b {
   flex: 1;
-  min-height: 30px;
+  min-height: 26px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--zl-t3);
-  /* Catalogue wrote `font: 500 12px/1 var(--zl-font)` with --zl-font undefined,
-     so the shorthand dropped and this inherited 14px/400 from `.zl`. Written
-     as that computed value, not as the 12px/500 the shorthand appears to ask. */
+  /* The catalogue asked for `font: 500 12px/1 var(--zl-font)`, but --zl-font
+     never existed, so the whole shorthand was dropped and this inherited
+     14px/400 -- a fifth larger than drawn, which is why the control looked
+     oversized for something touched once a week. Written out as the values
+     the shorthand was asking for. */
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
   cursor: pointer;
 }
 .zl-view-b.is-on {
@@ -432,6 +437,14 @@ button.zl-group.is-proj:focus-visible {
   font-weight: 600;
   line-height: 18px;
   text-align: center;
+}
+/* The app's own corner: what version is running, and where to change it.
+   Kept together so the foot reads as inbox on one side and the app on the
+   other, rather than two buttons with a fact standing between them. */
+.zl-side-app {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .zl-ver { color: var(--zl-t4); }
 a.zl-ver.is-update {

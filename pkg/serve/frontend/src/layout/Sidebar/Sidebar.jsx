@@ -73,8 +73,12 @@ function InboxIcon() {
 function GearIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5" />
-      <path d="M8 1.6v1.6M8 12.8v1.6M14.4 8h-1.6M3.2 8H1.6M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1M12.5 12.5l-1.1-1.1M4.6 4.6L3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      {/* Teeth, attached to the body. The previous drawing put eight straight
+          rays around a ring with a gap between, which is how every interface
+          in the world draws brightness -- it read as a sun, and it opened
+          settings. */}
+      <circle cx="8" cy="8" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5" />
+      <path d="M8 1.3a6.7 6.7 0 0 1 2.05.32l.3 1.52a5.2 5.2 0 0 1 1.19.69l1.46-.5a6.7 6.7 0 0 1 1.27 2.2l-1.16 1.03a5.2 5.2 0 0 1 0 1.38l1.16 1.03a6.7 6.7 0 0 1-1.27 2.2l-1.46-.5a5.2 5.2 0 0 1-1.19.69l-.3 1.52a6.7 6.7 0 0 1-4.1 0l-.3-1.52a5.2 5.2 0 0 1-1.19-.69l-1.46.5a6.7 6.7 0 0 1-1.27-2.2l1.16-1.03a5.2 5.2 0 0 1 0-1.38L1.71 5.53a6.7 6.7 0 0 1 1.27-2.2l1.46.5a5.2 5.2 0 0 1 1.19-.69l.3-1.52A6.7 6.7 0 0 1 8 1.3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
     </svg>
   );
 }
@@ -441,10 +445,17 @@ export function Sidebar({
             {inboxCount > 0 && <span class="zl-inbox-n zl-data">{inboxCount > 9 ? "9+" : inboxCount}</span>}
           </button>
         )}
-        <SidebarVersion version={version} />
-        <button type="button" class="zl-gear" aria-label="Settings" onClick={onSettings}>
-          <GearIcon />
-        </button>
+        {/* Version and settings are one group, and the foot used to read
+            action / fact / action -- with the version wedged between the two
+            buttons, belonging to neither. Both of these are about the app
+            rather than the session, so they sit together and the inbox keeps
+            the other end to itself. */}
+        <div class="zl-side-app">
+          <SidebarVersion version={version} />
+          <button type="button" class="zl-gear" aria-label="Settings" onClick={onSettings}>
+            <GearIcon />
+          </button>
+        </div>
       </div>
     </aside>
   );
