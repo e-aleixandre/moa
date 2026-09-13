@@ -180,25 +180,24 @@ button.zl-kbd:focus-visible {
    own head rather than in global settings or behind a "⋯": a hidden menu made
    a mode you cannot see you are in, and there are only two options. Sunken
    track, raised selection — the same grammar as the thinking stepper. */
-/* Two icons at the list's right edge, not a band across it. The control is
-   no longer a thing you read -- it is a thing you find when you go looking
-   for it, which matches how often the choice actually changes. */
+/* It rides in the head, at the end of the search field's row, because a
+   switch touched once a month should not cost a line of a 272px column.
+   Same height as the field it sits beside, so the head stays one band. */
 .zl-view {
+  flex: none;
   display: flex;
   gap: 2px;
-  margin: 0 0 6px auto;
   padding: 2px;
-  width: fit-content;
+  border-radius: var(--zl-r-md);
   background: var(--zl-canvas);
-  border: 1px solid var(--zl-line);
-  border-radius: 8px;
+  box-shadow: var(--zl-rim);
 }
 .zl-view-b {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 22px;
+  width: 28px;
+  height: 30px;
   border: 0;
   border-radius: 6px;
   background: transparent;

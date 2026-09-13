@@ -250,13 +250,6 @@ export function CommandPalette({
   useEffect(() => {
     if (!open) return;
     openerRef.current = document.activeElement;
-    // The create step doesn't exist on a phone any more (it lives in the
-    // SessionDrawer), so an open asking for it hands over instead.
-    if (isMobile && initialStep === "create" && !sharing) {
-      onClose();
-      openDrawer("new");
-      return;
-    }
     setStep(sharing ? "search" : initialStep);
     setQuery("");
     setSelectedIdx(0);
@@ -357,15 +350,15 @@ export function CommandPalette({
   }, [open, step, exploreDir]);
 
   // goToCreate — the ONE way into "new session" from the palette. On desktop
-  // that is the palette's own create step. On a phone it hands over to the
-  // SessionDrawer's "new" screen instead: the drawer is the single place a
-  // phone manages sessions, and opening a second create flow inside another
-  // chassis (with its own session list and its own back) was exactly the
-  // duplication this removes.
+  // that is the palette's own create step, on every width. The phone used to
+  // hand this over to a second screen inside the SessionDrawer -- a whole
+  // other chassis carrying its own copy of the project list, its own back
+  // button and, as it turned out, its own copy of the bugs: the double-create
+  // guard had to be fixed here and was never fixed there. One create flow,
+  // and on a phone it is already a bottom sheet.
   const goToCreate = useCallback(() => {
-    if (isMobile) { onClose(); openDrawer("new"); return; }
     setStep("create");
-  }, [isMobile, onClose]);
+  }, []);
 
   // ── Actions catalogue (context-aware). CORE set only; NICE-TO-HAVE presets
   // left as TODO (spec §3).

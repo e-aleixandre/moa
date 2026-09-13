@@ -1,4 +1,5 @@
 import { test, expect, mock } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { aggregateAttention, attentionTone, mobileTitleChipPresentation, newResultSessions, nextMobileTitleRipple } from './attention-model.js';
 import { sessionDisplayDotState } from '../../../data/util/format.js';
 
@@ -261,27 +262,31 @@ test('both densities mount the SAME sidebar, and only the frame differs', () => 
   expect(phoneSidebar.props.density).toBe('phone');
 });
 
-test('New session on a phone goes to the working-directory screen, not straight to a session', () => {
-  // The claim that was once made without opening the file, as a test: the
-  // phone's New session opens NewSessionView (choose where it runs) and does
-  // NOT call onCreate by itself.
-  const onCreate = () => { throw new Error('a session was created without a folder being chosen'); };
-  let step = 'list';
+test('New session on a phone asks where it runs, and never creates by itself', () => {
+  // The rule survives its move: New session must lead somewhere a folder gets
+  // chosen, never straight to a session in whatever directory happens to be
+  // current. What changed is WHERE that happens -- the drawer used to carry
+  // its own copy of that screen; it hands over to the palette now.
   const drawerTree = SessionDrawer({
-    open: true, step, onCreate, active: [], saved: [], projects: [{ cwd: '/repo' }],
+    open: true, active: [], saved: [],
+    onNewSession: () => {},
   });
   const sidebar = componentNode(drawerTree, 'Sidebar');
   expect(sidebar).toBeTruthy();
   expect(typeof sidebar.props.onNewSession).toBe('function');
 
-  // And the other way in — the palette and the empty state open the drawer on
-  // step "new", which lands on that same screen rather than on the list.
-  step = 'new';
-  const onNewTree = SessionDrawer({
-    open: true, step, onCreate, active: [], saved: [], projects: [{ cwd: '/repo' }],
-  });
-  expect(componentNode(onNewTree, 'NewSessionView')).toBeTruthy();
-  expect(componentNode(onNewTree, 'Sidebar')).toBeNull();
+  // The drawer no longer has a second screen to land on: whatever it is told,
+  // it shows the list, and creating leaves through the handoff.
+  expect(componentNode(drawerTree, 'NewSessionView')).toBeNull();
+
+  // And the screen hands over rather than creating: the palette owns the
+  // create flow, so nothing here may call createSession on its own.
+  const source = readFileSync(
+    new URL('./MobileConversationScreen.jsx', import.meta.url),
+    'utf8',
+  );
+  expect(source).toMatch(/openPalette\("create"\)/);
+  expect(source).not.toMatch(/createSession\(\{ cwd \}\)/);
 });
 
 test('the sidebar filter and the command palette are two different jobs', () => {

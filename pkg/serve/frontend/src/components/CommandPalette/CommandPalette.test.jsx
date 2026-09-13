@@ -1,4 +1,5 @@
 import { test, expect, mock } from "bun:test";
+import { readFileSync } from "node:fs";
 
 // The palette is exercised as a function component over a minimal hook
 // runtime: real useState/useEffect/useMemo semantics (so a keystroke really
@@ -239,11 +240,30 @@ test("the directory the create step was left on survives a trip to the model ste
   expect(created[0].cwd).toBe("/home/u/dev/other");
 });
 
-test("a phone never reaches the model step: it hands over to the drawer", async () => {
+test("a phone creates sessions here, without handing over to the drawer", async () => {
+  // The inversion of an older rule: the phone used to bounce this to a second
+  // create screen inside the SessionDrawer. One flow now, and on a phone the
+  // palette is already a bottom sheet, so nothing is lost by keeping it.
   const opened = [];
   mock.module("../../data/drawer.js", () => ({ openDrawer: (screen) => opened.push(screen) }));
-  await mount({ context: "mobile" });
+  await mount({ context: "mobile", initialStep: "create" });
 
-  expect(opened).toEqual(["new"]);
-  expect(byClass("model-row")).toHaveLength(0);
+  // The point is the absence of the handover: the create step stays here.
+  expect(opened).toEqual([]);
+  expect(byClass("create-bar").length).toBeGreaterThan(0);
+});
+
+// This guard used to be tested on the phone's own create screen, which no
+// longer exists: creating a session is the palette's job on every width now.
+// The bug it protects against is real and was once fixed here and NOT there,
+// which is the sort of thing a second copy of a screen buys you.
+test("the double-activation guard is synchronous, not reactive state", () => {
+  const source = readFileSync(
+    new URL("./CommandPalette.jsx", import.meta.url),
+    "utf8",
+  );
+  // A ref, checked and set before any await: two Enters in one cycle both see
+  // `creating === false`, so reactive state cannot stop the second one.
+  expect(source).toMatch(/inFlightRef = useRef\(false\)/);
+  expect(source).toMatch(/if \(inFlightRef\.current\) return/);
 });

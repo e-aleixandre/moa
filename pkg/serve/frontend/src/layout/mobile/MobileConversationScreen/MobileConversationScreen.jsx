@@ -6,7 +6,8 @@ import { projectStream, liveTrayAgents } from "../../../data/stream-model.js";
 import { focusedSessionId } from "../../../data/selectors.js";
 import { openSession, setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
-import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, createSession, rewindToMessage } from "../../../data/session-actions.js";
+import { openPalette } from "../../../data/palette.js";
+import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, rewindToMessage } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, openInbox, retryEvents, routeEvent, routeEventToNewSession } from "../../../data/events.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
@@ -165,7 +166,10 @@ function MobileConversationBody({ forceMobile = false }) {
     activate: setActiveSession,
     close: closeDrawer,
   });
-  const onNew = () => openDrawer("new");
+  // Creating a session is the palette's job on every width now. On a phone the
+  // palette IS a bottom sheet, so this is the same gesture it always was --
+  // it just no longer arrives at a second copy of the same screen.
+  const onNew = () => { closeDrawer(); openPalette("create"); };
 
   useEffect(() => { setRewindOpen(false); }, [activeId]);
   useEffect(() => { setSecretAliases(null); }, [activeId]);
@@ -380,17 +384,18 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   // leave animation has settled, so two overlays are never on screen at once.
   // Settings and the Inbox both take that route.
   const inboxPendingRef = useRef(false);
+  // Creating a session takes the same route: the palette is another overlay,
+  // and two sheets on screen at once is exactly what the handoff avoids.
+  const newPendingRef = useRef(false);
   const setDrawerOpen = (next) => (next ? openDrawer("list") : closeDrawer());
   const onSelectFromDrawer = (id) => selectMobileDrawerSession(store.get().sessions[id], {
     resume: resumeSession,
     activate: setActiveSession,
     close: closeDrawer,
   });
-  const onCreate = (cwd) => {
+  const onNewFromDrawer = () => {
+    newPendingRef.current = true;
     closeDrawer();
-    createSession({ cwd }).catch((e) =>
-      addToast({ title: "Could not create session", detail: String(e.message || e), type: "error" })
-    );
   };
   const onSettingsFromDrawer = () => {
     settingsPendingRef.current = true;
@@ -401,6 +406,11 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
     closeDrawer();
   };
   const onDrawerClosed = () => {
+    if (newPendingRef.current) {
+      newPendingRef.current = false;
+      openPalette("create");
+      return;
+    }
     if (inboxPendingRef.current) {
       inboxPendingRef.current = false;
       openInbox();
@@ -424,7 +434,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
           panelOpen={panel.open}
           alert={cacheAlert}
           onPanel={() => toggleSessionPanel(chrome.activeId, cacheAlert ? "usage" : "root")}
-          onNew={() => openDrawer("new")}
+          onNew={() => openPalette("create")}
           inboxCount={inboxCount}
         />
       )}
@@ -443,16 +453,14 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
       )}
       <SessionDrawer
         open={chrome.drawerOpen}
-        step={chrome.drawerStep}
         onClose={() => setDrawerOpen(false)}
         onClosed={onDrawerClosed}
         active={chrome.active}
         newResults={chrome.newResults}
         saved={chrome.saved}
         activeId={chrome.activeId}
-        projects={chrome.projects}
         onSelect={onSelectFromDrawer}
-        onCreate={onCreate}
+        onNewSession={onNewFromDrawer}
         onSettings={onSettingsFromDrawer}
         onInbox={onInboxFromDrawer}
         inboxCount={inboxCount}

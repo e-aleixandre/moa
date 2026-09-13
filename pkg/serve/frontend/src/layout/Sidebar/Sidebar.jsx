@@ -293,31 +293,11 @@ export function Sidebar({
             />
             {jumpCap}
           </label>
-        </div>
-      )}
-
-      {inboxOpen ? (
-        <div class="zl-list is-inbox">
-          <InboxView
-            cards={inbox}
-            health={inboxHealth}
-            onRetry={onRetryInbox}
-            onSend={onRouteEvent}
-            onNewSession={onNewSessionForEvent}
-            onIgnore={onDismissEvent}
-            onIgnoreSource={onDismissEventSource}
-            onOpenSession={onSelectSession}
-            onBack={onInbox}
-          />
-        </div>
-      ) : (
-        <div class="zl-list">
-          {/* How the list is ordered belongs to the list, so it stays here --
-              but as two icons, not two words. The full-width segmented control
-              spent a whole band of the sidebar on a choice made once and then
-              left alone for weeks, and the sidebar's width is worth more than
-              that. The labels live in the tooltip and the accessible name, so
-              nothing is lost but the space. */}
+          {/* Two icons at the end of the head, not a band across the list.
+              A control for the list's arrangement does not deserve a line of
+              its own -- the sidebar is narrow and every row of it is worth
+              more than a switch touched once a month. The labels survive as
+              the tooltip and the accessible name. */}
           <div class="zl-view" role="radiogroup" aria-label="Session order">
             {ORDERS.map(([id, label, hint]) => {
               const on = (id === "project") === !!groupByProject;
@@ -337,6 +317,25 @@ export function Sidebar({
               );
             })}
           </div>
+        </div>
+      )}
+
+      {inboxOpen ? (
+        <div class="zl-list is-inbox">
+          <InboxView
+            cards={inbox}
+            health={inboxHealth}
+            onRetry={onRetryInbox}
+            onSend={onRouteEvent}
+            onNewSession={onNewSessionForEvent}
+            onIgnore={onDismissEvent}
+            onIgnoreSource={onDismissEventSource}
+            onOpenSession={onSelectSession}
+            onBack={onInbox}
+          />
+        </div>
+      ) : (
+        <div class="zl-list">
 
           {!q && hitCount === 0 && (
             <button type="button" class="zl-empty-new" onClick={onNewSession}>
