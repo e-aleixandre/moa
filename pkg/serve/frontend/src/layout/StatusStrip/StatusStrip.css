@@ -32,7 +32,7 @@
   height: 36px;
   padding: 0 2px;
   margin-top: 4px;
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
   font-family: var(--font);
   letter-spacing: -0.005em;
   flex: none;
@@ -48,11 +48,11 @@
   height: 32px;
   padding: 0 8px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   background: transparent;
   color: inherit;
   font-family: inherit;
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   font-weight: 500;
   letter-spacing: inherit;
   white-space: nowrap;
@@ -60,68 +60,68 @@
 }
 button.zl-st { cursor: pointer; transition: background 120ms ease; }
 @media (hover: hover) {
-  button.zl-st:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t2, #c3c4d1); }
+  button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 }
 .zl-st-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .zl-st-ico { width: 14px; height: 14px; flex: none; }
 /* Data is mono; words are not. The catalogue's pairing, declared once here
    because production's reset gives the line its --font and nothing else. */
-.zl-status .zl-data { font-family: var(--mono); font-size: var(--zl-fs-meta, 12px); font-variant-numeric: tabular-nums; }
+.zl-status .zl-data { font-family: var(--mono); font-size: var(--zl-fs-meta); font-variant-numeric: tabular-nums; }
 
 /* tier 1: settings */
-.zl-st-model { color: var(--zl-t2, #c3c4d1); }
+.zl-st-model { color: var(--zl-t2); }
 /* Thinking meter: four bars (low..xhigh; production's fifth level, off, lights
    none), lit from the left in the accent. A setting, not a state. */
 .zl-think { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; flex: none; }
-.zl-think i { display: block; width: 3px; border-radius: 1px; background: var(--zl-accent, #cba6f7); font-style: normal; }
+.zl-think i { display: block; width: 3px; border-radius: 1px; background: var(--zl-accent); font-style: normal; }
 .zl-think i:nth-child(1) { height: 4px; }
 .zl-think i:nth-child(2) { height: 6px; }
 .zl-think i:nth-child(3) { height: 8px; }
 .zl-think i:nth-child(4) { height: 11px; }
-.zl-think i.is-off { background: var(--zl-line-2, rgba(255, 255, 255, 0.12)); }
+.zl-think i.is-off { background: var(--zl-line-2); }
 
 /* Permission mode is the one setting you must never misread, so it is the
    one setting in a state colour: yolo maroon (nothing will ask), ask
    yellow (it will stop for you), auto neutral. */
 .zl-st-perm { font-weight: 600; }
 .zl-st-perm::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
-.zl-st-perm.is-yolo { color: var(--zl-maroon, #eba0ac); }
-.zl-st-perm.is-ask { color: var(--zl-yellow, #f9e2af); }
-.zl-st-perm.is-auto { color: var(--zl-t2, #c3c4d1); }
-.zl-st-fast { color: var(--zl-t3, #9091a6); padding: 0 6px; gap: 3px; }
+.zl-st-perm.is-yolo { color: var(--zl-maroon); }
+.zl-st-perm.is-ask { color: var(--zl-yellow); }
+.zl-st-perm.is-auto { color: var(--zl-t2); }
+.zl-st-fast { color: var(--zl-t3); padding: 0 6px; gap: 3px; }
 
 /* tier 3: events. Neutral by default; an alarm takes its state colour. */
-.zl-st-ev { gap: 5px; padding: 0 7px; color: var(--zl-t3, #9091a6); }
-.zl-st-ev .zl-data { color: var(--zl-t2, #c3c4d1); }
-.zl-st-ev.is-alarm-red, .zl-st-ev.is-alarm-red .zl-data { color: var(--zl-red, #f38ba8); }
-.zl-st-ev.is-alarm-yellow, .zl-st-ev.is-alarm-yellow .zl-data { color: var(--zl-yellow, #f9e2af); }
+.zl-st-ev { gap: 5px; padding: 0 7px; color: var(--zl-t3); }
+.zl-st-ev .zl-data { color: var(--zl-t2); }
+.zl-st-ev.is-alarm-red, .zl-st-ev.is-alarm-red .zl-data { color: var(--zl-red); }
+.zl-st-ev.is-alarm-yellow, .zl-st-ev.is-alarm-yellow .zl-data { color: var(--zl-yellow); }
 
 /* tier 2: gauges. One button (ctx + spend: the door to Usage), one reading. */
 .zl-st-ctx { gap: 5px; padding: 0 8px 0 6px; }
-.zl-st-sep { width: 1px; height: 12px; margin: 0 3px; background: var(--zl-line-2, rgba(255, 255, 255, 0.12)); flex: none; }
+.zl-st-sep { width: 1px; height: 12px; margin: 0 3px; background: var(--zl-line-2); flex: none; }
 .zl-st-tok { gap: 3px; padding: 0 6px; }
-.zl-num { color: var(--zl-t2, #c3c4d1); }
-.zl-unit, .zl-arrow { color: var(--zl-t4, #66677c); }
+.zl-num { color: var(--zl-t2); }
+.zl-unit, .zl-arrow { color: var(--zl-t4); }
 .zl-st-tok .zl-num + .zl-arrow { margin-left: 5px; }
 /* The spend takes a severity colour from the plan window it is measured
    against, the way the ring takes one from how full the context is. */
-.zl-st-spend.spend-med { color: var(--zl-yellow, #f9e2af); }
-.zl-st-spend.spend-high { color: var(--zl-red, #f38ba8); }
+.zl-st-spend.spend-med { color: var(--zl-yellow); }
+.zl-st-spend.spend-high { color: var(--zl-red); }
 
 /* Context ring: accent while there is room, state colour as it fills. */
 .zl-ring { width: 14px; height: 14px; flex: none; }
-.zl-ring-track { fill: none; stroke: var(--zl-line-2, rgba(255, 255, 255, 0.12)); stroke-width: 2.4; }
+.zl-ring-track { fill: none; stroke: var(--zl-line-2); stroke-width: 2.4; }
 .zl-ring-arc {
   fill: none;
-  stroke: var(--zl-accent, #cba6f7);
+  stroke: var(--zl-accent);
   stroke-width: 2.4;
   stroke-linecap: round;
-  transition: stroke-dasharray 400ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  transition: stroke-dasharray 400ms var(--zl-ease);
 }
-.zl-ring.is-warm .zl-ring-arc { stroke: var(--zl-yellow, #f9e2af); }
-.zl-ring.is-hot .zl-ring-arc { stroke: var(--zl-red, #f38ba8); }
-.zl-ring.is-warm + .zl-num { color: var(--zl-yellow, #f9e2af); }
-.zl-ring.is-hot + .zl-num { color: var(--zl-red, #f38ba8); }
+.zl-ring.is-warm .zl-ring-arc { stroke: var(--zl-yellow); }
+.zl-ring.is-hot .zl-ring-arc { stroke: var(--zl-red); }
+.zl-ring.is-warm + .zl-num { color: var(--zl-yellow); }
+.zl-ring.is-hot + .zl-num { color: var(--zl-red); }
 
 /* ── Priority, declared once ──────────────────────────────────────────────
    Every item carries a priority class (data/util/status-strip-model.js
@@ -190,7 +190,7 @@ button.zl-st { cursor: pointer; transition: background 120ms ease; }
    to draw, and the hosts it has no popovers to anchor. */
 
 .zl-status :is(button, [tabindex]):focus-visible {
-  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
 }
 
@@ -207,13 +207,13 @@ button.zl-st:disabled { cursor: default; }
    IS the setting, and turning it t1 while the menu is open would hide the one
    thing you must never misread. */
 .zl-st.is-open {
-  background: var(--zl-control, #262633);
-  color: var(--zl-t1, #f4f4f7);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  background: var(--zl-control);
+  color: var(--zl-t1);
+  box-shadow: var(--zl-rim);
 }
-.zl-st-perm.is-open.is-yolo { color: var(--zl-maroon, #eba0ac); }
-.zl-st-perm.is-open.is-ask { color: var(--zl-yellow, #f9e2af); }
-.zl-st-perm.is-open.is-auto { color: var(--zl-t2, #c3c4d1); }
+.zl-st-perm.is-open.is-yolo { color: var(--zl-maroon); }
+.zl-st-perm.is-open.is-ask { color: var(--zl-yellow); }
+.zl-st-perm.is-open.is-auto { color: var(--zl-t2); }
 
 /* The anchor a popover is positioned against. It adds no box of its own. */
 .zl-st-anchor { position: relative; display: inline-flex; min-width: 0; }

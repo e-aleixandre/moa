@@ -52,12 +52,12 @@
   align-items: flex-end;
   gap: 6px;
   padding: 6px;
-  border-radius: var(--zl-r-lg, 16px);
-  background: var(--zl-raised, #1e1e29);
-  box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12));
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim-2);
   transition: box-shadow 160ms ease;
 }
-.zl-composer:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line, rgba(203, 166, 247, 0.45)); }
+.zl-composer:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line); }
 
 .zl-ta {
   flex: 1;
@@ -70,14 +70,14 @@
   outline: 0;
   resize: none;
   background: transparent;
-  color: var(--zl-t1, #f4f4f7);
+  color: var(--zl-t1);
   font-family: inherit;
-  font-size: var(--zl-fs-title, 16px); /* 16: iOS focus-zoom floor */
+  font-size: var(--zl-fs-title); /* 16: iOS focus-zoom floor */
   letter-spacing: inherit;
   line-height: 22px;
   overflow-y: auto;
 }
-.zl-ta::placeholder { color: var(--zl-t4, #66677c); }
+.zl-ta::placeholder { color: var(--zl-t4); }
 
 .zl-attach,
 .zl-send {
@@ -88,30 +88,30 @@
   width: 44px;
   height: 44px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   font-family: inherit;
   cursor: pointer;
-  transition: background 140ms ease, color 140ms ease, transform 140ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  transition: background 140ms ease, color 140ms ease, transform 140ms var(--zl-ease);
 }
 .zl-attach svg,
 .zl-send svg { width: 18px; height: 18px; }
-.zl-attach { background: transparent; color: var(--zl-t3, #9091a6); }
+.zl-attach { background: transparent; color: var(--zl-t3); }
 @media (hover: hover) {
-  .zl-attach:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+  .zl-attach:hover { background: var(--zl-hi); color: var(--zl-t1); }
 }
 
 /* Send: a quiet control until there is something to send, then the accent.
    Recording and transcribing keep their own faces: they are states of the
    microphone, not of the draft. */
 .zl-send {
-  background: var(--zl-control, #262633);
-  color: var(--zl-t4, #66677c);
+  background: var(--zl-control);
+  color: var(--zl-t4);
   cursor: default;
 }
 .zl-send:disabled { opacity: 1; }
 .zl-composer.is-armed .zl-send:not(.recording):not(.transcribing) {
-  background: var(--zl-accent, #cba6f7);
-  color: var(--zl-accent-ink, #1a1424);
+  background: var(--zl-accent);
+  color: var(--zl-accent-ink);
   cursor: pointer;
 }
 @media (hover: hover) {
@@ -121,7 +121,7 @@
 
 .zl-attach:focus-visible,
 .zl-send:focus-visible {
-  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
 }
 
@@ -130,10 +130,10 @@
    qualifier is here — same two classes, later sheet, used to win. */
 .zl-dock.is-pane,
 .zl-desk .zl-dock.is-pane { padding: 14px 12px 6px; }
-.zl-dock.is-pane .zl-composer { padding: 4px; border-radius: var(--zl-r-md, 10px); }
+.zl-dock.is-pane .zl-composer { padding: 4px; border-radius: var(--zl-r-md); }
 .zl-dock.is-pane .zl-ta { min-height: 40px; padding: 9px 6px; }
 .zl-dock.is-pane .zl-attach,
-.zl-dock.is-pane .zl-send { width: 40px; height: 40px; border-radius: var(--zl-r-sm, 6px); }
+.zl-dock.is-pane .zl-send { width: 40px; height: 40px; border-radius: var(--zl-r-sm); }
 
 /* ── What the prototype never had ───────────────────────────────────────── */
 
@@ -165,18 +165,18 @@
   overflow: hidden;
   background: transparent;
   border: none;
-  border-radius: var(--zl-r-sm, 6px);
-  color: var(--zl-t3, #9091a6);
-  font-size: var(--zl-fs-meta, 12px);
+  border-radius: var(--zl-r-sm);
+  color: var(--zl-t3);
+  font-size: var(--zl-fs-meta);
   cursor: pointer;
   text-align: left;
   min-width: 0;
 }
 @media (hover: hover) {
-  .zl-composer button.queue-note:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+  .zl-composer button.queue-note:hover { background: var(--zl-hi); }
 }
 .zl-composer button.queue-note:focus-visible {
-  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
 }
 .zl-composer .queue-note span {
@@ -188,7 +188,7 @@
    something you wrote: peach means "you wrote this" and belongs to the user
    message's edge. */
 .zl-composer .queue-note .chip {
-  color: var(--zl-t2, #c3c4d1);
+  color: var(--zl-t2);
   flex: none;
 }
 .zl-composer .queue-note span .lucide {
@@ -198,8 +198,8 @@
 
 .zl-composer .steer-hint {
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
-  color: var(--zl-t4, #66677c);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
   padding: 4px 8px;
   white-space: nowrap;
   overflow: hidden;
@@ -214,48 +214,48 @@
   flex: none;
   width: 44px;
   height: 44px;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   display: grid;
   place-items: center;
   background: transparent;
-  border: 1px solid color-mix(in srgb, var(--zl-red, #f38ba8) 40%, transparent);
-  color: var(--zl-red, #f38ba8);
+  border: 1px solid color-mix(in srgb, var(--zl-red) 40%, transparent);
+  color: var(--zl-red);
   cursor: pointer;
   transition: background 140ms ease;
 }
 @media (hover: hover) {
   .zl-composer .composer-stop-ghost:hover {
-    background: color-mix(in srgb, var(--zl-red, #f38ba8) 12%, transparent);
+    background: color-mix(in srgb, var(--zl-red) 12%, transparent);
   }
 }
 .zl-composer .composer-stop-ghost.is-armed {
-  background: color-mix(in srgb, var(--zl-red, #f38ba8) 22%, transparent);
-  border-color: var(--zl-red, #f38ba8);
+  background: color-mix(in srgb, var(--zl-red) 22%, transparent);
+  border-color: var(--zl-red);
 }
 .zl-composer .composer-stop-ghost:focus-visible {
-  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
 }
 .zl-dock.is-pane .composer-stop-ghost {
   width: 40px;
   height: 40px;
-  border-radius: var(--zl-r-sm, 6px);
+  border-radius: var(--zl-r-sm);
 }
 
 /* Desktop dictation sits next to Send as a secondary control, wearing the
    attach face: the primary action is the arrow. */
 .zl-mic.recording {
-  background: color-mix(in srgb, var(--zl-red, #f38ba8) 18%, transparent);
-  color: var(--zl-red, #f38ba8);
+  background: color-mix(in srgb, var(--zl-red) 18%, transparent);
+  color: var(--zl-red);
   animation: composer-mic-pulse 1.5s ease-in-out infinite;
 }
 @media (hover: hover) {
   .zl-mic.recording:hover {
-    background: color-mix(in srgb, var(--zl-red, #f38ba8) 26%, transparent);
-    color: var(--zl-red, #f38ba8);
+    background: color-mix(in srgb, var(--zl-red) 26%, transparent);
+    color: var(--zl-red);
   }
 }
-.zl-mic.transcribing { color: var(--zl-accent, #cba6f7); }
+.zl-mic.transcribing { color: var(--zl-accent); }
 @media (prefers-reduced-motion: reduce) {
   .zl-mic.recording { animation: none; }
 }
@@ -271,19 +271,19 @@
   cursor: pointer;
 }
 .zl-send.mic-mode {
-  background: var(--zl-control, #262633);
-  color: var(--zl-t3, #9091a6);
+  background: var(--zl-control);
+  color: var(--zl-t3);
   cursor: pointer;
 }
 @media (hover: hover) {
   .zl-send.mic-mode:hover {
-    background: var(--zl-hi, rgba(255, 255, 255, 0.04));
-    color: var(--zl-t1, #f4f4f7);
+    background: var(--zl-hi);
+    color: var(--zl-t1);
   }
 }
 .zl-send.recording {
-  background: var(--zl-red, #f38ba8);
-  color: var(--zl-accent-ink, #1a1424);
+  background: var(--zl-red);
+  color: var(--zl-accent-ink);
   animation: composer-mic-pulse 1.5s ease-in-out infinite;
   cursor: pointer;
 }
@@ -293,8 +293,8 @@
   50% { opacity: 0.6; }
 }
 .zl-send.transcribing {
-  background: var(--zl-control, #262633);
-  color: var(--zl-accent, #cba6f7);
+  background: var(--zl-control);
+  color: var(--zl-accent);
   box-shadow: none;
   cursor: default;
 }
@@ -311,12 +311,12 @@
   align-items: center;
   gap: 2px;
   padding: 8px 12px;
-  background: var(--zl-raised, #1e1e29);
-  color: var(--zl-t3, #9091a6);
+  background: var(--zl-raised);
+  color: var(--zl-t3);
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
-  box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12));
-  font-size: var(--zl-fs-meta, 12px);
+  border-radius: var(--zl-r-md);
+  box-shadow: var(--zl-rim-2);
+  font-size: var(--zl-fs-meta);
   white-space: nowrap;
   pointer-events: none;
   z-index: 20;
@@ -339,10 +339,10 @@
   left: 0;
   right: 0;
   margin-bottom: 8px;
-  background: var(--zl-raised, #1e1e29);
+  background: var(--zl-raised);
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
-  box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12)), 0 16px 48px rgba(0, 0, 0, 0.45);
+  border-radius: var(--zl-r-md);
+  box-shadow: var(--zl-rim-2), 0 16px 48px rgba(0, 0, 0, 0.45);
   max-height: min(440px, calc(100dvh - 180px - var(--shell-top)));
   overflow-x: hidden;
   overflow-y: auto;
@@ -350,7 +350,7 @@
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  scrollbar-color: var(--zl-line-2, rgba(255, 255, 255, 0.12)) transparent;
+  scrollbar-color: var(--zl-line-2) transparent;
   z-index: var(--z-overlay, 40);
 }
 .zl-composer .cmd-suggestion-item {
@@ -360,32 +360,32 @@
   padding: 8px 12px;
   min-height: 44px;
   cursor: pointer;
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
 }
 .zl-composer .cmd-suggestion-item.selected {
-  background: var(--zl-hi, rgba(255, 255, 255, 0.04));
+  background: var(--zl-hi);
 }
 @media (hover: hover) {
   .zl-composer .cmd-suggestion-item:hover {
-    background: var(--zl-hi, rgba(255, 255, 255, 0.04));
+    background: var(--zl-hi);
   }
 }
 .zl-composer .cmd-suggestion-name {
-  color: var(--zl-accent, #cba6f7);
+  color: var(--zl-accent);
   font-weight: 600;
   font-family: var(--mono);
   flex-shrink: 0;
 }
 .zl-composer .cmd-suggestion-args {
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   flex-shrink: 0;
 }
 .zl-composer .cmd-suggestion-desc {
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
   margin-left: auto;
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -402,18 +402,18 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--zl-control, #262633);
+  background: var(--zl-control);
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   padding: 4px 8px;
-  font-size: var(--zl-fs-meta, 12px);
-  color: var(--zl-t3, #9091a6);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
 }
 .zl-composer .attach-chip img {
   width: 40px;
   height: 40px;
   object-fit: cover;
-  border-radius: var(--zl-r-sm, 6px);
+  border-radius: var(--zl-r-sm);
 }
 .zl-composer .attach-chip-name {
   max-width: 220px;
@@ -421,11 +421,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.zl-composer .attach-chip-size { color: var(--zl-t4, #66677c); }
+.zl-composer .attach-chip-size { color: var(--zl-t4); }
 .zl-composer .attach-chip-remove {
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
   padding: 2px;
-  border-radius: var(--zl-r-sm, 6px);
+  border-radius: var(--zl-r-sm);
   display: flex;
   background: transparent;
   border: none;
@@ -433,8 +433,8 @@
 }
 @media (hover: hover) {
   .zl-composer .attach-chip-remove:hover {
-    color: var(--zl-red, #f38ba8);
-    background: var(--zl-hi, rgba(255, 255, 255, 0.04));
+    color: var(--zl-red);
+    background: var(--zl-hi);
   }
 }
 
@@ -443,7 +443,7 @@
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 500;
   /* Yellow is the warning colour. This was peach, which the prototype reserves
      for "you wrote this". */

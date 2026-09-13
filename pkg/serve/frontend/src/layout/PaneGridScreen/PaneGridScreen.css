@@ -3,5 +3,5 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: var(--zl-canvas, #101018);
+  background: var(--zl-canvas);
 }

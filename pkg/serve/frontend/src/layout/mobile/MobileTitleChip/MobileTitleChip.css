@@ -17,8 +17,8 @@
   width: 14px;
   height: 14px;
   flex: none;
-  color: var(--zl-t3, #9091a6);
-  transition: transform 160ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  color: var(--zl-t3);
+  transition: transform 160ms var(--zl-ease);
 }
 
 /* Inbox count — events waiting behind the drawer's Inbox door. Mauve (the
@@ -31,8 +31,8 @@
   flex: none;
   padding: 1px 6px 1px 5px;
   border-radius: 9999px;
-  background: var(--zl-accent, #cba6f7);
-  color: var(--zl-accent-ink, #1a1424);
+  background: var(--zl-accent);
+  color: var(--zl-accent-ink);
   font-family: var(--mono);
   font-size: 9px;
   font-weight: 600;
@@ -47,7 +47,7 @@
   height: 6px;
   flex: none;
   border-radius: 50%;
-  background: var(--zl-yellow, #f9e2af);
+  background: var(--zl-yellow);
 }
 
 /* Open — the chevron says the name is a door, and flips to point back at
@@ -55,7 +55,7 @@
    the panel is a bottom sheet, the chip is still the header, not an anchor
    hanging into a veil. */
 .zl-chip.is-open .zl-chev {
-  color: var(--zl-t2, #c3c4d1);
+  color: var(--zl-t2);
   transform: rotate(180deg);
 }
 

@@ -265,21 +265,21 @@
    kind of drift this migration exists to end. */
 .mconv-empty-new-primary {
   align-self: stretch;
-  background: var(--zl-accent-dim, rgba(203, 166, 247, 0.12));
-  box-shadow: 0 0 0 1px var(--zl-accent-med, rgba(203, 166, 247, 0.22));
+  background: var(--zl-accent-dim);
+  box-shadow: 0 0 0 1px var(--zl-accent-med);
   border: 0;
-  color: var(--zl-accent, #cba6f7);
+  color: var(--zl-accent);
   font-weight: var(--weight-semibold);
 }
 .mconv-empty-new-primary:active {
-  box-shadow: 0 0 0 1px var(--zl-accent-med, rgba(203, 166, 247, 0.22)),
-    0 0 16px color-mix(in srgb, var(--zl-accent, #cba6f7) 30%, transparent);
+  box-shadow: 0 0 0 1px var(--zl-accent-med),
+    0 0 16px color-mix(in srgb, var(--zl-accent) 30%, transparent);
 }
 @media (hover: hover) {
 
 .mconv-empty-new-primary:hover{
-  box-shadow: 0 0 0 1px var(--zl-accent-med, rgba(203, 166, 247, 0.22)),
-    0 0 16px color-mix(in srgb, var(--zl-accent, #cba6f7) 30%, transparent);
+  box-shadow: 0 0 0 1px var(--zl-accent-med),
+    0 0 16px color-mix(in srgb, var(--zl-accent) 30%, transparent);
 }
 }
 

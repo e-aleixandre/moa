@@ -40,15 +40,15 @@
   flex-direction: column;
   min-width: 208px;
   padding: 6px;
-  border-radius: var(--zl-r-lg, 16px);
-  background: var(--zl-sheet, #171720);
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-sheet);
   /* Rim and shadow rather than a border: the surface is lit from its own edge,
      which is what keeps it reading as floating rather than drawn. */
   box-shadow:
-    var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12)),
+    var(--zl-rim-2),
     0 16px 48px rgba(0, 0, 0, 0.45);
-  color: var(--zl-t1, #f4f4f7);
-  animation: action-menu-in 180ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  color: var(--zl-t1);
+  animation: action-menu-in 180ms var(--zl-ease);
   transform-origin: top left;
 }
 
@@ -75,49 +75,49 @@
   min-height: 44px;
   padding: 0 12px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   background: none;
-  color: var(--zl-t2, #c3c4d1);
+  color: var(--zl-t2);
   font: inherit;
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   text-align: left;
   cursor: pointer;
-  transition: background 120ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1)), color 120ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  transition: background 120ms var(--zl-ease), color 120ms var(--zl-ease);
 }
 
 /* The icons carry the row's weight, so they stay one step quieter than the
    label until the row is the one being used. */
 .action-menu-item svg {
   flex: none;
-  color: var(--zl-t3, #9091a6);
-  transition: color 120ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  color: var(--zl-t3);
+  transition: color 120ms var(--zl-ease);
 }
 
 .action-menu-item.is-active,
 .action-menu-item:focus-visible {
-  color: var(--zl-t1, #f4f4f7);
+  color: var(--zl-t1);
 }
 
 .action-menu-item:focus-visible {
-  background: var(--zl-hi, rgba(255, 255, 255, 0.04));
+  background: var(--zl-hi);
   outline: none;
 }
 
 .action-menu-item.is-active svg,
 .action-menu-item:focus-visible svg {
-  color: var(--zl-t1, #f4f4f7);
+  color: var(--zl-t1);
 }
 
 @media (hover: hover) {
-  .action-menu-trigger:hover { color: var(--zl-t1, #f4f4f7); }
+  .action-menu-trigger:hover { color: var(--zl-t1); }
   .action-menu-item:hover {
-    background: var(--zl-hi, rgba(255, 255, 255, 0.04));
-    color: var(--zl-t1, #f4f4f7);
+    background: var(--zl-hi);
+    color: var(--zl-t1);
   }
-  .action-menu-item:hover svg { color: var(--zl-t1, #f4f4f7); }
+  .action-menu-item:hover svg { color: var(--zl-t1); }
 }
 
 /* A finger lands and the row answers before the menu closes. */
 .action-menu-item:active {
-  background: var(--zl-control, #262633);
+  background: var(--zl-control);
 }

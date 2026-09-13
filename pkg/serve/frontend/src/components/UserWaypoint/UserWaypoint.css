@@ -20,9 +20,9 @@
   margin: 0 0 24px;
   padding: 2px 0 2px 14px;
   border-left: 3px solid var(--peach, #fab387);
-  font-size: var(--zl-fs-title, 16px);
+  font-size: var(--zl-fs-title);
   line-height: 1.6;
-  color: var(--zl-t1, #f4f4f7);
+  color: var(--zl-t1);
 }
 .zl-user-body { overflow-wrap: anywhere; }
 .zl-user-body p { margin: 0; }
@@ -32,11 +32,11 @@
   align-items: center;
   gap: 6px;
   margin-top: 4px;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
 }
 .zl-user .zl-data {
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 400;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
@@ -45,9 +45,9 @@
 /* Optional source label (steer, from parent). Ordinary messages have none. */
 .zl-user-label {
   margin-bottom: 4px;
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 600;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
 }
 
 .zl-user.is-parent { border-left-color: var(--waypoint-accent); }
@@ -55,18 +55,18 @@
 
 .zl-user-body code {
   padding: 1px 5px;
-  border-radius: var(--zl-r-sm, 6px);
-  background: var(--zl-raised, #1e1e29);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
   font-family: var(--mono);
   font-size: 0.875em;
-  color: var(--zl-t2, #c3c4d1);
+  color: var(--zl-t2);
 }
 
 .zl-transcript.is-dense .zl-user {
   margin-bottom: 16px;
   padding-left: 12px;
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   line-height: 1.55;
 }
 
@@ -237,9 +237,9 @@
 .wp-attachments {
   margin: 10px 0 0;
   border-top: 0;
-  border-radius: var(--zl-r-sm, 6px);
-  background: var(--zl-sheet, #171720);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
   overflow: hidden;
 }
 
@@ -249,10 +249,10 @@
   gap: var(--space-2);
   padding: 8px var(--space-4) 6px;
   font-family: var(--font);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   letter-spacing: 0;
   text-transform: none;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
 }
 
 .skirt-head .lucide {

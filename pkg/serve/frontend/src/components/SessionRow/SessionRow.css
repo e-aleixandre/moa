@@ -32,7 +32,7 @@
   min-height: 52px;
   padding: 7px 12px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   background: transparent;
   color: inherit;
   font-family: inherit;
@@ -42,21 +42,21 @@
   transition: background 120ms ease;
 }
 @media (hover: hover) {
-  .zl-row:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+  .zl-row:hover { background: var(--zl-hi); }
 }
 
 /* The current row is a raised plane on the sheet, with the title in full
    white. No bar, no accent: the only edge bar in the product means "you said
    this", and the accent is for actions, not for where you are. */
 .zl-row.is-current {
-  background: var(--zl-raised, #1e1e29);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
 }
 @media (hover: hover) {
-  .zl-row.is-current:hover { background: var(--zl-control, #262633); }
+  .zl-row.is-current:hover { background: var(--zl-control); }
 }
-.zl-row.is-current .zl-row-title { color: var(--zl-t1, #f4f4f7); font-weight: 600; }
-.zl-row.is-current .zl-row-when { color: var(--zl-t3, #9091a6); }
+.zl-row.is-current .zl-row-title { color: var(--zl-t1); font-weight: 600; }
+.zl-row.is-current .zl-row-when { color: var(--zl-t3); }
 
 /* Keyboard focus is the accent's first job. The prototype gets this from
    `.zl :is(button…):focus-visible` (zones-lab.css:78), which does not exist
@@ -77,12 +77,12 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   background: hsl(var(--h) 50% 60% / 0.16);
   box-shadow: 0 0 0 1px hsl(var(--h) 50% 65% / 0.18);
   color: hsl(var(--h) 65% 78%);
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 500;
   letter-spacing: 0;
 }
@@ -97,7 +97,7 @@
   min-width: 0;
   font-weight: 500;
   line-height: 20px;
-  color: var(--zl-t2, #c3c4d1);
+  color: var(--zl-t2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -108,12 +108,12 @@
 /* The timestamp is set to the width of its longest form and aligned left, so
    the dot beside it lands on the same x in every row. Ragged dots read as a
    wobble down the list: the eye follows the column, not the number. */
-.zl-row-when { color: var(--zl-t4, #66677c); min-width: 3ch; text-align: left; font-variant-numeric: tabular-nums; }
+.zl-row-when { color: var(--zl-t4); min-width: 3ch; text-align: left; font-variant-numeric: tabular-nums; }
 .zl-row-path,
 .zl-row-brief {
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   line-height: 16px;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -124,21 +124,21 @@
    (zones-lab.css:1668) — same declarations, one extra class of specificity. */
 .zl-row .zl-data {
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 400;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
 .zl-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
-.zl-dot.is-running { background: var(--zl-green, #a6e3a1); box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18); }
-.zl-dot.is-permission { background: var(--zl-yellow, #f9e2af); box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22); }
-.zl-dot.is-error { background: var(--zl-red, #f38ba8); box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.2); }
+.zl-dot.is-running { background: var(--zl-green); box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18); }
+.zl-dot.is-permission { background: var(--zl-yellow); box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22); }
+.zl-dot.is-error { background: var(--zl-red); box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.2); }
 /* Unseen keeps production's mauve: it is the colour this product has always
    used for work you have not read, and it separates cleanly from idle grey.
    The cost is that mauve now says two things -- accent and unseen -- so the
    accent has to stay off anything that could be mistaken for a state. */
-.zl-dot.is-unseen { background: var(--zl-accent, #cba6f7); box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.2); }
+.zl-dot.is-unseen { background: var(--zl-accent); box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.2); }
 .zl-dot.is-idle { display: none; }
 /* `saved` is production's sixth state and the prototype has no word for it: a
    parked session is not running and not asking, so it is drawn the way idle
@@ -152,14 +152,14 @@
    is the same four colours addressed by what the sentence says rather than by
    what the row is — an inbox candidate row has a brief and no state of its
    own. Values are the catalogue's, one for one. */
-.zl-row-brief.tone-neutral { color: var(--zl-t3, #9091a6); }
-.zl-row-brief.tone-yellow { color: var(--zl-yellow, #f9e2af); }
-.zl-row-brief.tone-red { color: var(--zl-red, #f38ba8); }
-.zl-row-brief.tone-mauve { color: var(--zl-accent, #cba6f7); }
+.zl-row-brief.tone-neutral { color: var(--zl-t3); }
+.zl-row-brief.tone-yellow { color: var(--zl-yellow); }
+.zl-row-brief.tone-red { color: var(--zl-red); }
+.zl-row-brief.tone-mauve { color: var(--zl-accent); }
 /* A caller with no tone to give keeps the old row-level tinting, so a surface
    that has not been given tones is not left with one grey for every reason. */
-.zl-row.needs-yellow .zl-row-brief:not([class*="tone-"]) { color: var(--zl-yellow, #f9e2af); }
-.zl-row.needs-red .zl-row-brief:not([class*="tone-"]) { color: var(--zl-red, #f38ba8); }
+.zl-row.needs-yellow .zl-row-brief:not([class*="tone-"]) { color: var(--zl-yellow); }
+.zl-row.needs-red .zl-row-brief:not([class*="tone-"]) { color: var(--zl-red); }
 
 /* ── What the prototype never drew ────────────────────────────────────────
    Everything below this line is production behaviour re-grafted onto the
@@ -170,7 +170,7 @@
    the sidebar hides it, because the reason line says the same thing better. */
 .zl-row-meta-line {
   line-height: 16px;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -180,19 +180,19 @@
 .zl-row-pane {
   font-family: var(--mono);
   font-size: var(--text-nano, 9px);
-  color: var(--zl-accent, #cba6f7);
+  color: var(--zl-accent);
   flex: none;
   margin-left: auto;
-  border: 1px solid color-mix(in srgb, var(--zl-accent, #cba6f7) 40%, transparent);
-  border-radius: var(--zl-r-sm, 6px);
+  border: 1px solid color-mix(in srgb, var(--zl-accent) 40%, transparent);
+  border-radius: var(--zl-r-sm);
   padding: 0 5px;
   line-height: 15px;
   letter-spacing: 0.05em;
-  background: color-mix(in srgb, var(--zl-accent, #cba6f7) 8%, transparent);
+  background: color-mix(in srgb, var(--zl-accent) 8%, transparent);
 }
 .zl-row:not(.is-current) .zl-row-pane {
-  color: var(--zl-t3, #9091a6);
-  border-color: var(--zl-line-2, rgba(255, 255, 255, 0.12));
+  color: var(--zl-t3);
+  border-color: var(--zl-line-2);
   background: transparent;
 }
 
@@ -204,20 +204,20 @@
 .zl-row-origin-event {
   display: inline-flex;
   align-items: center;
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
   flex: none;
 }
 .zl-row-origin {
   font-family: var(--mono);
   font-size: var(--text-nano, 9px);
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
   flex: none;
   max-width: 7em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border: 1px solid var(--zl-line-2, rgba(255, 255, 255, 0.12));
-  border-radius: var(--zl-r-sm, 6px);
+  border: 1px solid var(--zl-line-2);
+  border-radius: var(--zl-r-sm);
   padding: 0 5px;
   line-height: 15px;
   letter-spacing: 0.05em;
@@ -236,7 +236,7 @@
   background: none;
   border: none;
   padding: 0;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
   cursor: pointer;
   opacity: 0;
   transition: opacity var(--duration, 150ms) var(--ease, ease), color var(--duration, 150ms) var(--ease, ease);
@@ -244,5 +244,5 @@
 .zl-row-x:focus-visible { opacity: 1; }
 @media (hover: hover) {
   .zl-row-slot:hover .zl-row-x { opacity: 1; }
-  .zl-row-x:hover { color: var(--zl-red, #f38ba8); }
+  .zl-row-x:hover { color: var(--zl-red); }
 }

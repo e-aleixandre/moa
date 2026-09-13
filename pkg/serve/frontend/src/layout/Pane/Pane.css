@@ -36,20 +36,20 @@
   gap: 8px;
   height: 40px;
   padding: 0 8px 0 14px;
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
 }
-.zl-pane.is-focus .zl-pane-head { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+.zl-pane.is-focus .zl-pane-head { background: var(--zl-hi); }
 .zl-pane-head.is-drag { cursor: grab; }
 .zl-pane-head.is-drag:active { cursor: grabbing; }
 .zl-pane-grip {
   width: 12px;
   height: 12px;
   flex: none;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
   opacity: 0.55;
 }
 .zl-pane-head .zl-dot { display: block; }
-.zl-pane-head .zl-dot.is-idle { display: block; background: var(--zl-t4, #66677c); }
+.zl-pane-head .zl-dot.is-idle { display: block; background: var(--zl-t4); }
 
 .zl-pane-title {
   display: flex;
@@ -59,32 +59,32 @@
   height: 32px;
   padding: 0 8px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   background: transparent;
   color: inherit;
   font-family: inherit;
   letter-spacing: inherit;
   cursor: pointer;
 }
-.zl-pane-title:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+.zl-pane-title:hover { background: var(--zl-hi); }
 .zl-pane-title:focus-visible {
-  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
 }
 .zl-pane-t {
   min-width: 0;
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   font-weight: 600;
-  color: var(--zl-t2, #c3c4d1);
+  color: var(--zl-t2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.zl-pane.is-focus .zl-pane-t { color: var(--zl-t1, #f4f4f7); }
-.zl-pane-path { color: var(--zl-t4, #66677c); flex: none; }
+.zl-pane.is-focus .zl-pane-t { color: var(--zl-t1); }
+.zl-pane-path { color: var(--zl-t4); flex: none; }
 .zl-pane .zl-data {
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 400;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
@@ -100,10 +100,10 @@
 }
 .zl-pane-head .zl-kbd {
   padding: 2px 5px;
-  border-radius: var(--zl-r-sm, 6px);
-  background: var(--zl-raised, #1e1e29);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
-  color: var(--zl-t3, #9091a6);
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t3);
 }
 
 /* The two actions the catalogue drew, and the extras production grafts.
@@ -115,22 +115,22 @@
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   background: transparent;
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
   cursor: pointer;
 }
 .zl-pane-head .zl-desk-act svg { width: 15px; height: 15px; display: block; }
-.zl-pane-head .zl-desk-act:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+.zl-pane-head .zl-desk-act:hover { background: var(--zl-hi); color: var(--zl-t1); }
 .zl-pane-head .zl-desk-act:focus-visible {
-  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
 }
 .zl-pane-head .zl-desk-act.is-on {
-  color: var(--zl-accent, #cba6f7);
-  background: var(--zl-accent-dim, rgba(203, 166, 247, 0.12));
+  color: var(--zl-accent);
+  background: var(--zl-accent-dim);
 }
-.zl-pane-head .zl-desk-act.is-close:hover { color: var(--zl-red, #f38ba8); }
+.zl-pane-head .zl-desk-act.is-close:hover { color: var(--zl-red); }
 
 .zl-pane-body {
   flex: 1;
@@ -144,7 +144,7 @@
 /* ── What the prototype never had ───────────────────────────────────────── */
 
 .zl-pane.is-drag {
-  outline: 1px dashed var(--zl-accent-line, rgba(203, 166, 247, 0.45));
+  outline: 1px dashed var(--zl-accent-line);
   outline-offset: -1px;
 }
 
@@ -152,14 +152,14 @@
   flex: none;
   padding: 6px 14px;
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
-  color: var(--zl-t4, #66677c);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
   display: flex;
   gap: 12px;
   align-items: center;
 }
-.zl-pane-foot .pulse-b { color: var(--zl-accent, #cba6f7); }
-.zl-pane-foot .pulse-y { color: var(--zl-yellow, #f9e2af); display: inline-flex; align-items: center; gap: 4px; }
+.zl-pane-foot .pulse-b { color: var(--zl-accent); }
+.zl-pane-foot .pulse-y { color: var(--zl-yellow); display: inline-flex; align-items: center; gap: 4px; }
 .zl-pane-foot .spacer { margin-left: auto; }
 
 .zl-pane-blocking {
@@ -181,16 +181,16 @@
   gap: 10px;
   padding: 24px;
   text-align: center;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
 }
 .zl-pane-empty .lucide {
   width: 34px;
   height: 34px;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
   stroke-width: 1.25;
 }
-.zl-pane-empty-title { font-size: var(--zl-fs-body, 14px); color: var(--zl-t3, #9091a6); }
-.zl-pane-empty-hint { font-size: var(--zl-fs-meta, 12px); color: var(--zl-t4, #66677c); }
+.zl-pane-empty-title { font-size: var(--zl-fs-body); color: var(--zl-t3); }
+.zl-pane-empty-hint { font-size: var(--zl-fs-meta); color: var(--zl-t4); }
 
 /* Usage / MCP popovers above the pane status strip. A grid pane clips its
    children, so these sit just above the line inside the pane. */
@@ -201,10 +201,10 @@
   right: auto;
   bottom: calc(100% + 4px);
   z-index: var(--z-overlay, 40);
-  background: var(--zl-sheet, #171720);
+  background: var(--zl-sheet);
   border: 0;
-  border-radius: var(--zl-r-lg, 16px);
-  box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12)), 0 16px 48px rgba(0, 0, 0, 0.45);
+  border-radius: var(--zl-r-lg);
+  box-shadow: var(--zl-rim-2), 0 16px 48px rgba(0, 0, 0, 0.45);
   padding: 12px;
   max-width: min(360px, 90vw);
   max-height: min(70vh, 480px);
@@ -214,6 +214,6 @@
 
 /* Touch drag ghost (appended to <body> by useTouchDrag). */
 .touch-drag-ghost {
-  background: var(--zl-sheet, #171720);
-  box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12));
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim-2);
 }

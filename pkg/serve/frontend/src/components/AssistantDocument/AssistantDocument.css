@@ -26,9 +26,9 @@
 .zl-turn > h3,
 .zl-turn > ol,
 .zl-turn > ul {
-  font-size: var(--zl-fs-title, 16px);
+  font-size: var(--zl-fs-title);
   line-height: 1.6;
-  color: var(--zl-t1, #f4f4f7);
+  color: var(--zl-t1);
   overflow-wrap: anywhere;
   min-width: 0;
   max-width: 100%;
@@ -40,10 +40,10 @@
 .zl-prose h3,
 .zl-turn > h3 {
   margin: 1.4em 0 0.5em;
-  font-size: var(--zl-fs-title, 16px);
+  font-size: var(--zl-fs-title);
   font-weight: 600;
   letter-spacing: -0.01em;
-  color: var(--zl-t1, #f4f4f7);
+  color: var(--zl-t1);
 }
 .zl-prose > h3:first-child { margin-top: 0; }
 .zl-prose ol, .zl-prose ul,
@@ -52,27 +52,27 @@
 .zl-prose ul, .zl-turn > ul { list-style: disc outside; }
 .zl-prose li, .zl-turn li { margin: 0 0 0.35em; padding-left: 0.25em; }
 .zl-prose li::marker, .zl-turn li::marker {
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
   font-family: var(--mono);
   font-size: 0.875em;
 }
-.zl-prose em { font-style: italic; color: var(--zl-t2, #c3c4d1); }
-.zl-prose strong, .zl-turn strong { font-weight: 600; color: var(--zl-t1, #f4f4f7); }
+.zl-prose em { font-style: italic; color: var(--zl-t2); }
+.zl-prose strong, .zl-turn strong { font-weight: 600; color: var(--zl-t1); }
 /* Inline code is data: mono, one size down, a control-tone chip. */
 .zl-prose code,
 .zl-turn code {
   padding: 1px 5px;
-  border-radius: var(--zl-r-sm, 6px);
-  background: var(--zl-raised, #1e1e29);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
   font-family: var(--mono);
   font-size: 0.875em;
-  color: var(--zl-t2, #c3c4d1);
+  color: var(--zl-t2);
 }
 
 .zl-transcript.is-dense .zl-prose,
-.zl-transcript.is-dense .zl-turn > p { font-size: var(--zl-fs-body, 14px); line-height: 1.55; }
-.zl-transcript.is-dense .zl-prose h3 { font-size: var(--zl-fs-body, 14px); }
+.zl-transcript.is-dense .zl-turn > p { font-size: var(--zl-fs-body); line-height: 1.55; }
+.zl-transcript.is-dense .zl-prose h3 { font-size: var(--zl-fs-body); }
 .zl-transcript.is-dense .zl-turn { margin-bottom: 20px; }
 .zl-transcript.is-dense .zl-turn > * + * { margin-top: 12px; }
 
@@ -94,7 +94,7 @@
   margin-left: 2px;
   vertical-align: -0.12em;
   border-radius: 1px;
-  background: var(--zl-t2, #c3c4d1);
+  background: var(--zl-t2);
 }
 .zl-caret.is-idle { animation: zl-blink 1.1s steps(2, jump-none) infinite; }
 @keyframes zl-blink { 50% { opacity: 0; } }
@@ -135,35 +135,35 @@
   font-family: var(--font);
   letter-spacing: 0;
   text-transform: none;
-  color: var(--zl-t1, #f4f4f7);
+  color: var(--zl-t1);
   font-weight: 600;
 }
-.zl-prose h1 { font-size: var(--zl-fs-display, 20px); margin: 1.4em 0 0.5em; }
-.zl-prose h2 { font-size: var(--zl-fs-title, 16px); margin: 1.4em 0 0.5em; }
-.zl-prose h4 { font-size: var(--zl-fs-body, 14px); margin: 1.4em 0 0.5em; }
+.zl-prose h1 { font-size: var(--zl-fs-display); margin: 1.4em 0 0.5em; }
+.zl-prose h2 { font-size: var(--zl-fs-title); margin: 1.4em 0 0.5em; }
+.zl-prose h4 { font-size: var(--zl-fs-body); margin: 1.4em 0 0.5em; }
 .zl-prose > h1:first-child,
 .zl-prose > h2:first-child,
 .zl-prose > h4:first-child { margin-top: 0; }
 
-.zl-prose a { color: var(--zl-accent, #cba6f7); }
+.zl-prose a { color: var(--zl-accent); }
 .zl-prose blockquote {
   margin: 0 0 1em;
   padding-left: 12px;
-  border-left: 2px solid var(--zl-line-2, rgba(255, 255, 255, 0.12));
+  border-left: 2px solid var(--zl-line-2);
   background: transparent;
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
 }
 .zl-prose hr {
   border: 0;
-  border-top: 1px solid var(--zl-line, rgba(255, 255, 255, 0.07));
+  border-top: 1px solid var(--zl-line);
   margin: 1em 0;
 }
 
 .zl-prose .code-block {
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
-  background: var(--zl-canvas, #101018);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  border-radius: var(--zl-r-md);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
   overflow: hidden;
   max-width: 100%;
   margin: 8px 0 16px;
@@ -174,13 +174,13 @@
   gap: 8px;
   background: transparent;
   padding: 8px 14px;
-  border-bottom: 1px solid var(--zl-line, rgba(255, 255, 255, 0.07));
+  border-bottom: 1px solid var(--zl-line);
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
-  color: var(--zl-t4, #66677c);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
 }
 .zl-prose .code-block-lang {
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
   text-transform: lowercase;
   letter-spacing: 0;
 }
@@ -189,19 +189,19 @@
   display: inline-flex;
   align-items: center;
   cursor: pointer;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
   background: transparent;
   border: none;
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   padding: 0 4px;
-  border-radius: var(--zl-r-sm, 6px);
+  border-radius: var(--zl-r-sm);
 }
 @media (hover: hover) {
-  .zl-prose .code-block-copy:hover { color: var(--zl-t1, #f4f4f7); }
+  .zl-prose .code-block-copy:hover { color: var(--zl-t1); }
 }
 .zl-prose .code-block-copy:focus-visible {
-  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
 }
 .zl-prose .code-block pre {
@@ -215,7 +215,7 @@
   font-family: var(--mono);
   font-size: 13px;
   line-height: 1.55;
-  color: var(--zl-t2, #c3c4d1);
+  color: var(--zl-t2);
   padding: 0;
   background: transparent;
   box-shadow: none;
@@ -228,17 +228,17 @@
 }
 .zl-prose .md-table-wrap table {
   border-collapse: collapse;
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
 }
 .zl-prose .md-table-wrap th,
 .zl-prose .md-table-wrap td {
-  border: 1px solid var(--zl-line, rgba(255, 255, 255, 0.07));
+  border: 1px solid var(--zl-line);
   padding: 8px 12px;
   text-align: left;
 }
 .zl-prose .md-table-wrap th {
-  background: var(--zl-raised, #1e1e29);
-  color: var(--zl-t2, #c3c4d1);
+  background: var(--zl-raised);
+  color: var(--zl-t2);
   font-weight: 600;
 }
-.zl-prose .md-table-wrap td { color: var(--zl-t3, #9091a6); }
+.zl-prose .md-table-wrap td { color: var(--zl-t3); }

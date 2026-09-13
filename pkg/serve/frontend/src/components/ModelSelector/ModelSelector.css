@@ -27,17 +27,17 @@
   max-height: 560px;
   display: flex;
   flex-direction: column;
-  border-radius: var(--zl-r-lg, 16px);
-  background: var(--zl-sheet, #171720);
-  box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12)), 0 16px 48px rgba(0, 0, 0, 0.45);
-  color: var(--zl-t1, #f4f4f7);
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim-2), 0 16px 48px rgba(0, 0, 0, 0.45);
+  color: var(--zl-t1);
   font-family: var(--font);
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   font-weight: 400;
   letter-spacing: -0.005em;
   white-space: normal;
   text-align: left;
-  animation: zl-pop 180ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  animation: zl-pop 180ms var(--zl-ease);
   transform-origin: bottom left;
 }
 .zl-pop.is-fixed {
@@ -61,24 +61,24 @@
 .zl-pop .zl-side-title,
 .zl-sheet .zl-side-title {
   flex: none;
-  font-size: var(--zl-fs-display, 20px);
+  font-size: var(--zl-fs-display);
   font-weight: 600;
   letter-spacing: -0.02em;
 }
 .zl-pop .zl-side-title.is-eyebrow,
 .zl-sheet .zl-side-title.is-eyebrow {
   flex: 1;
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
 }
 .zl-pop .zl-side-title.is-page,
 .zl-sheet .zl-side-title.is-page {
   flex: 1;
   min-width: 0;
-  font-size: var(--zl-fs-title, 16px);
+  font-size: var(--zl-fs-title);
   font-weight: 600;
   letter-spacing: -0.01em;
   white-space: nowrap;
@@ -89,7 +89,7 @@
 .zl-sheet .zl-side-head.is-sub { padding-left: 12px; gap: 6px; }
 .zl-side-head.is-pop { padding: 14px 16px 4px; min-height: 48px; box-sizing: border-box; }
 .zl-side-head.is-pop.is-sub { padding: 8px 12px 4px 8px; min-height: 48px; }
-.zl-side-title.is-page .zl-group-n { font-size: var(--zl-fs-meta, 12px); }
+.zl-side-title.is-page .zl-group-n { font-size: var(--zl-fs-meta); }
 
 .zl-pop .zl-back,
 .zl-sheet .zl-back {
@@ -101,9 +101,9 @@
   height: 36px;
   padding: 0;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   background: transparent;
-  color: var(--zl-t2, #c3c4d1);
+  color: var(--zl-t2);
   cursor: pointer;
   appearance: none;
   font: inherit;
@@ -112,10 +112,10 @@
 .zl-sheet .zl-back svg { width: 16px; height: 16px; }
 @media (hover: hover) {
   .zl-pop .zl-back:hover,
-  .zl-sheet .zl-back:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+  .zl-sheet .zl-back:hover { background: var(--zl-hi); color: var(--zl-t1); }
 }
 
-.zl-pop .zl-pick { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; scrollbar-width: thin; scrollbar-color: var(--zl-line-2, rgba(255, 255, 255, 0.12)) transparent; }
+.zl-pop .zl-pick { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; scrollbar-width: thin; scrollbar-color: var(--zl-line-2) transparent; }
 
 /* Production phone paints this next to the sheet; the catalogue Phone already
    has `.zl-scrim` (drawers). Same picture, so a host without the lab frame
@@ -139,17 +139,17 @@
   flex-direction: column;
   max-height: 82%;
   padding-top: 6px;
-  border-radius: var(--zl-r-lg, 16px) var(--zl-r-lg, 16px) 0 0;
-  background: var(--zl-sheet, #171720);
-  box-shadow: inset 0 1px 0 var(--zl-line-2, rgba(255, 255, 255, 0.12)), 0 -16px 48px rgba(0, 0, 0, 0.45);
-  color: var(--zl-t1, #f4f4f7);
+  border-radius: var(--zl-r-lg) var(--zl-r-lg) 0 0;
+  background: var(--zl-sheet);
+  box-shadow: inset 0 1px 0 var(--zl-line-2), 0 -16px 48px rgba(0, 0, 0, 0.45);
+  color: var(--zl-t1);
   font-family: var(--font);
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   letter-spacing: -0.005em;
-  animation: zl-rise 260ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  animation: zl-rise 260ms var(--zl-ease);
 }
 @keyframes zl-rise { from { transform: translateY(100%); } }
-.zl-grab { display: block; width: 36px; height: 4px; margin: 0 auto; border-radius: 2px; background: var(--zl-line-2, rgba(255, 255, 255, 0.12)); }
+.zl-grab { display: block; width: 36px; height: 4px; margin: 0 auto; border-radius: 2px; background: var(--zl-line-2); }
 .zl-side-head.is-sheet { padding: 6px 12px 4px 20px; }
 .zl-side-head.is-sheet.is-sub { padding-left: 8px; }
 .zl-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 16px; }
@@ -163,17 +163,17 @@
   margin-left: auto;
   padding: 0;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
-  background: var(--zl-raised, #1e1e29);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
-  color: var(--zl-t2, #c3c4d1);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
   cursor: pointer;
   appearance: none;
   font: inherit;
 }
 .zl-sheet .zl-x svg { width: 16px; height: 16px; }
 @media (hover: hover) {
-  .zl-sheet .zl-x:hover { background: var(--zl-control, #262633); color: var(--zl-t1, #f4f4f7); }
+  .zl-sheet .zl-x:hover { background: var(--zl-control); color: var(--zl-t1); }
 }
 
 /* ── Picker content ──────────────────────────────────────────────────────── */
@@ -182,7 +182,7 @@
 .zl-sheet .zl-data,
 .zl-pick .zl-data {
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 400;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
@@ -193,13 +193,13 @@
   gap: 8px;
   margin-top: 12px;
   padding: 6px 4px 6px;
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
 }
-.zl-pick .zl-group-n { letter-spacing: 0; color: var(--zl-t4, #66677c); }
+.zl-pick .zl-group-n { letter-spacing: 0; color: var(--zl-t4); }
 
 .zl-pick-cur,
 .zl-pick-all {
@@ -210,12 +210,12 @@
   min-height: 48px;
   padding: 6px 10px 6px 12px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
-  background: var(--zl-raised, #1e1e29);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
-  color: var(--zl-t1, #f4f4f7);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t1);
   font-family: inherit;
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   letter-spacing: inherit;
   text-align: left;
   appearance: none;
@@ -225,12 +225,12 @@
    lift promising something to press. Only .zl-pick-all is still a button. */
 .zl-pick-all { cursor: pointer; }
 @media (hover: hover) {
-  .zl-pick-all:hover { background: var(--zl-control, #262633); }
-  .zl-pick-all:hover .zl-go { color: var(--zl-t2, #c3c4d1); }
+  .zl-pick-all:hover { background: var(--zl-control); }
+  .zl-pick-all:hover .zl-go { color: var(--zl-t2); }
 }
 .zl-pick-cur-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.zl-pick-cur-name { font-size: var(--zl-fs-title, 16px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.zl-pick-cur-sub { color: var(--zl-t4, #66677c); }
+.zl-pick-cur-name { font-size: var(--zl-fs-title); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zl-pick-cur-sub { color: var(--zl-t4); }
 .zl-pick-all { margin-top: 6px; min-height: 44px; font-weight: 500; }
 .zl-pick-all-t { flex: 1; }
 
@@ -238,7 +238,7 @@
   width: 12px;
   height: 12px;
   flex: none;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
 }
 
 /* Identity mark: same hue function as the project monogram, on a DOT rather
@@ -270,12 +270,12 @@
   min-height: 44px;
   padding: 6px 8px 6px 10px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   background: transparent;
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
-  color: var(--zl-t2, #c3c4d1);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
   font-family: inherit;
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
@@ -283,13 +283,13 @@
   transition: background 120ms ease;
 }
 @media (hover: hover) {
-  .zl-mchip:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+  .zl-mchip:hover { background: var(--zl-hi); color: var(--zl-t1); }
 }
-.zl-mchip.is-on { background: var(--zl-raised, #1e1e29); box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12)); color: var(--zl-t1, #f4f4f7); }
+.zl-mchip.is-on { background: var(--zl-raised); box-shadow: var(--zl-rim-2); color: var(--zl-t1); }
 .zl-mchip-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .zl-mchip-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.zl-mchip-sub { color: var(--zl-t4, #66677c); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.zl-mchip-check { flex: none; width: 12px; height: 12px; color: var(--zl-accent, #cba6f7); }
+.zl-mchip-sub { color: var(--zl-t4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zl-mchip-check { flex: none; width: 12px; height: 12px; color: var(--zl-accent); }
 
 /* Provider list. `.zl-kv` / `.zl-kv-row` live on SessionPanel; the picker
    repeats the flush list so it does not depend on the dossier being mounted. */
@@ -304,21 +304,21 @@
   padding: 8px 12px;
   border: 0;
   background: transparent;
-  color: var(--zl-t1, #f4f4f7);
+  color: var(--zl-t1);
   font-family: inherit;
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   letter-spacing: inherit;
   text-align: left;
 }
 .zl-pick .zl-kv-row.is-btn { cursor: pointer; transition: background 120ms ease; appearance: none; }
 .zl-pick .zl-kv.is-flush .zl-kv-row + .zl-kv-row { box-shadow: none; }
 @media (hover: hover) {
-  .zl-pick .zl-kv-row.is-btn:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
-  .zl-pick .zl-kv-row.is-btn:hover .zl-go { color: var(--zl-t2, #c3c4d1); }
+  .zl-pick .zl-kv-row.is-btn:hover { background: var(--zl-hi); }
+  .zl-pick .zl-kv-row.is-btn:hover .zl-go { color: var(--zl-t2); }
 }
-.zl-pick .zl-kv-k { flex: 1; min-width: 0; color: var(--zl-t3, #9091a6); font-weight: 500; white-space: nowrap; }
-.zl-pick .zl-kv-k.is-strong { color: var(--zl-t1, #f4f4f7); }
-.zl-pick .zl-kv-hint { flex: none; font-size: var(--zl-fs-meta, 12px); color: var(--zl-t4, #66677c); display: inline-flex; align-items: center; gap: 4px; }
+.zl-pick .zl-kv-k { flex: 1; min-width: 0; color: var(--zl-t3); font-weight: 500; white-space: nowrap; }
+.zl-pick .zl-kv-k.is-strong { color: var(--zl-t1); }
+.zl-pick .zl-kv-hint { flex: none; font-size: var(--zl-fs-meta); color: var(--zl-t4); display: inline-flex; align-items: center; gap: 4px; }
 .zl-pick .zl-mono {
   flex: none;
   display: inline-flex;
@@ -326,29 +326,29 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   background: hsl(var(--h) 50% 60% / 0.16);
   box-shadow: 0 0 0 1px hsl(var(--h) 50% 65% / 0.18);
   color: hsl(var(--h) 65% 78%);
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 500;
   letter-spacing: 0;
 }
-.zl-pick .zl-mono.is-sm { width: 26px; height: 26px; border-radius: var(--zl-r-sm, 6px); }
-.zl-prov { flex-wrap: nowrap; padding-left: 8px; border-radius: var(--zl-r-md, 10px); }
+.zl-pick .zl-mono.is-sm { width: 26px; height: 26px; border-radius: var(--zl-r-sm); }
+.zl-prov { flex-wrap: nowrap; padding-left: 8px; border-radius: var(--zl-r-md); }
 .zl-prov-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .zl-prov-txt .zl-kv-k { display: flex; align-items: center; gap: 6px; }
-.zl-prov-cur { width: 6px; height: 6px; border-radius: 50%; background: var(--zl-accent, #cba6f7); }
-.zl-prov-sub { font-size: var(--zl-fs-meta, 12px); color: var(--zl-t4, #66677c); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zl-prov-cur { width: 6px; height: 6px; border-radius: 50%; background: var(--zl-accent); }
+.zl-prov-sub { font-size: var(--zl-fs-meta); color: var(--zl-t4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .zl-seg {
   display: flex;
   gap: 2px;
   padding: 3px;
-  border-radius: var(--zl-r-md, 10px);
-  background: var(--zl-canvas, #101018);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  border-radius: var(--zl-r-md);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
 }
 .zl-seg-opt {
   flex: 1;
@@ -361,11 +361,11 @@
   min-height: 44px;
   padding: 4px 2px;
   border: 0;
-  border-radius: var(--zl-r-sm, 6px);
+  border-radius: var(--zl-r-sm);
   background: transparent;
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
   font-family: inherit;
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 500;
   letter-spacing: inherit;
   cursor: pointer;
@@ -373,23 +373,23 @@
   transition: background 120ms ease, color 120ms ease;
 }
 @media (hover: hover) {
-  .zl-seg-opt:hover { color: var(--zl-t1, #f4f4f7); }
+  .zl-seg-opt:hover { color: var(--zl-t1); }
 }
-.zl-seg-opt.is-on { background: var(--zl-control, #262633); box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07)); color: var(--zl-t1, #f4f4f7); }
+.zl-seg-opt.is-on { background: var(--zl-control); box-shadow: var(--zl-rim); color: var(--zl-t1); }
 .zl-seg-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; }
-.zl-seg-bars i { display: block; width: 3px; border-radius: 1px; background: var(--zl-line-2, rgba(255, 255, 255, 0.12)); }
+.zl-seg-bars i { display: block; width: 3px; border-radius: 1px; background: var(--zl-line-2); }
 .zl-seg-bars i:nth-child(1) { height: 4px; }
 .zl-seg-bars i:nth-child(2) { height: 6px; }
 .zl-seg-bars i:nth-child(3) { height: 8px; }
 .zl-seg-bars i:nth-child(4) { height: 11px; }
 .zl-seg-bars i.is-none { width: 8px; height: 2px; }
-.zl-seg-opt.is-on .zl-seg-bars i:not(.is-off) { background: var(--zl-accent, #cba6f7); }
-.zl-seg-opt.is-on .zl-seg-bars i.is-none { background: var(--zl-t3, #9091a6); }
+.zl-seg-opt.is-on .zl-seg-bars i:not(.is-off) { background: var(--zl-accent); }
+.zl-seg-opt.is-on .zl-seg-bars i.is-none { background: var(--zl-t3); }
 
-.zl-fast { display: flex; align-items: center; gap: 10px; min-height: 52px; margin-top: 10px; padding: 6px 12px; border-radius: var(--zl-r-md, 10px); background: var(--zl-raised, #1e1e29); box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07)); }
+.zl-fast { display: flex; align-items: center; gap: 10px; min-height: 52px; margin-top: 10px; padding: 6px 12px; border-radius: var(--zl-r-md); background: var(--zl-raised); box-shadow: var(--zl-rim); }
 .zl-fast-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .zl-fast-k { font-weight: 500; }
-.zl-fast-d { font-size: var(--zl-fs-meta, 12px); line-height: 1.4; color: var(--zl-t4, #66677c); }
+.zl-fast-d { font-size: var(--zl-fs-meta); line-height: 1.4; color: var(--zl-t4); }
 
 /* Switch: same picture as the panel's MCP page. Repeated here so the picker
    does not depend on that page being mounted. */
@@ -414,8 +414,8 @@
   height: 20px;
   padding: 2px;
   border-radius: 10px;
-  background: var(--zl-control, #262633);
-  box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12));
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim-2);
   transition: background 160ms ease;
 }
 .zl-pick .zl-switch-knob {
@@ -423,11 +423,11 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--zl-t3, #9091a6);
-  transition: transform 160ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1)), background 160ms ease;
+  background: var(--zl-t3);
+  transition: transform 160ms var(--zl-ease), background 160ms ease;
 }
-.zl-pick .zl-switch.is-on .zl-switch-track { background: var(--zl-accent, #cba6f7); box-shadow: none; }
-.zl-pick .zl-switch.is-on .zl-switch-knob { background: var(--zl-accent-ink, #1a1424); transform: translateX(16px); }
+.zl-pick .zl-switch.is-on .zl-switch-track { background: var(--zl-accent); box-shadow: none; }
+.zl-pick .zl-switch.is-on .zl-switch-knob { background: var(--zl-accent-ink); transform: translateX(16px); }
 
 /* Embedded (phone sheet, inbox step): the host is the scroller. */
 .model-selector--embedded {

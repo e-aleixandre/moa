@@ -31,11 +31,11 @@
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: var(--zl-sheet, #171720);
-  box-shadow: inset -1px 0 0 var(--zl-line, rgba(255, 255, 255, 0.07));
-  color: var(--zl-t1, #f4f4f7);
+  background: var(--zl-sheet);
+  box-shadow: inset -1px 0 0 var(--zl-line);
+  color: var(--zl-t1);
   font-family: var(--font);
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   letter-spacing: -0.005em;
 }
 .zl-desk-side .zl-side-body,
@@ -48,7 +48,7 @@
 
 .zl-side-body .zl-data {
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 400;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
@@ -73,7 +73,7 @@
 }
 .zl-side-body .zl-side-title {
   flex: none;
-  font-size: var(--zl-fs-display, 20px);
+  font-size: var(--zl-fs-display);
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -87,14 +87,14 @@
   gap: 8px;
   height: 36px;
   padding: 0 8px 0 10px;
-  border-radius: var(--zl-r-md, 10px);
-  background: var(--zl-canvas, #101018);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
-  color: var(--zl-t4, #66677c);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t4);
   transition: box-shadow 140ms ease, color 140ms ease;
 }
-.zl-search:hover { color: var(--zl-t3, #9091a6); box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12)); }
-.zl-search:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line, rgba(203, 166, 247, 0.45)); color: var(--zl-t2, #c3c4d1); }
+.zl-search:hover { color: var(--zl-t3); box-shadow: var(--zl-rim-2); }
+.zl-search:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line); color: var(--zl-t2); }
 .zl-search-ico { width: 15px; height: 15px; flex: none; }
 .zl-search-in {
   flex: 1;
@@ -103,18 +103,18 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--zl-t1, #f4f4f7);
+  color: var(--zl-t1);
   font-family: inherit;
-  font-size: var(--zl-fs-title, 16px); /* 16: iOS focus-zoom floor */
+  font-size: var(--zl-fs-title); /* 16: iOS focus-zoom floor */
   letter-spacing: inherit;
 }
-.zl-search-in::placeholder { color: var(--zl-t4, #66677c); }
+.zl-search-in::placeholder { color: var(--zl-t4); }
 .zl-kbd {
   padding: 2px 5px;
-  border-radius: var(--zl-r-sm, 6px);
-  background: var(--zl-raised, #1e1e29);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
-  color: var(--zl-t3, #9091a6);
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t3);
 }
 button.zl-kbd {
   flex: none;
@@ -124,7 +124,7 @@ button.zl-kbd {
   margin: 0;
   border: 0;
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 400;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
@@ -155,22 +155,22 @@ button.zl-kbd:focus-visible {
   gap: 8px;
   margin-top: 12px;
   padding: 8px 12px 4px;
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
 }
 .zl-list > .zl-group:first-child { margin-top: 0; }
-.zl-list .zl-group-n { letter-spacing: 0; color: var(--zl-t4, #66677c); }
+.zl-list .zl-group-n { letter-spacing: 0; color: var(--zl-t4); }
 
 /* The attention heading earns one mark and no more: the rows underneath
    already carry their own colour, and a coloured band on top of coloured rows
    is how a list stops being scannable. */
-.zl-list .zl-group.is-attn { color: var(--zl-t1, #f4f4f7); }
+.zl-list .zl-group.is-attn { color: var(--zl-t1); }
 .zl-list .zl-group.is-attn .zl-group-n {
-  color: var(--zl-canvas, #101018);
-  background: var(--zl-yellow, #f9e2af);
+  color: var(--zl-canvas);
+  background: var(--zl-yellow);
   border-radius: 999px;
   padding: 0 6px;
   font-weight: 600;
@@ -185,8 +185,8 @@ button.zl-kbd:focus-visible {
   gap: 2px;
   margin: 0 0 10px;
   padding: 2px;
-  background: var(--zl-canvas, #101018);
-  border: 1px solid var(--zl-line, rgba(255, 255, 255, 0.07));
+  background: var(--zl-canvas);
+  border: 1px solid var(--zl-line);
   border-radius: 8px;
 }
 .zl-view-b {
@@ -195,19 +195,19 @@ button.zl-kbd:focus-visible {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
   /* Catalogue wrote `font: 500 12px/1 var(--zl-font)` with --zl-font undefined,
      so the shorthand dropped and this inherited 14px/400 from `.zl`. Written
      as that computed value, not as the 12px/500 the shorthand appears to ask. */
   cursor: pointer;
 }
 .zl-view-b.is-on {
-  background: var(--zl-raised, #1e1e29);
-  color: var(--zl-t1, #f4f4f7);
+  background: var(--zl-raised);
+  color: var(--zl-t1);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
 }
 .zl-view-b:focus-visible {
-  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline: 2px solid var(--zl-accent);
   outline-offset: -2px;
 }
 .zl-side-body.is-phone .zl-view-b { min-height: 44px; font-size: 14px; }
@@ -231,7 +231,7 @@ button.zl-group.is-proj { cursor: pointer; }
 .zl-proj-path {
   flex: 1;
   min-width: 0;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -242,19 +242,19 @@ button.zl-group.is-proj { cursor: pointer; }
   flex: none;
   width: 14px;
   height: 14px;
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
   transform: rotate(0deg);
-  transition: transform 150ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  transition: transform 150ms var(--zl-ease);
 }
 .zl-proj.is-open .zl-proj-chev { transform: rotate(90deg); }
 button.zl-group.is-proj:focus-visible {
   outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
   outline-offset: var(--focus-ring-offset, 2px);
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
 }
 .zl-side-body.is-phone button.zl-group.is-proj { min-height: 44px; }
 @media (hover: hover) {
-  button.zl-group.is-proj:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+  button.zl-group.is-proj:hover { background: var(--zl-hi); }
 }
 
 .zl-show-all {
@@ -262,16 +262,16 @@ button.zl-group.is-proj:focus-visible {
   align-self: flex-start;
   padding: 0 8px;
   border: 0;
-  border-radius: var(--zl-r-sm, 6px);
+  border-radius: var(--zl-r-sm);
   background: none;
-  color: var(--zl-accent, #cba6f7);
+  color: var(--zl-accent);
   font: inherit;
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   cursor: pointer;
 }
 .zl-side-body.is-phone .zl-show-all { min-height: 44px; }
 @media (hover: hover) {
-  .zl-show-all:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+  .zl-show-all:hover { background: var(--zl-hi); color: var(--zl-t1); }
 }
 .zl-show-all:focus-visible {
   outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
@@ -285,9 +285,9 @@ button.zl-group.is-proj:focus-visible {
   padding: 8px 2px;
   border: 0;
   background: none;
-  color: var(--zl-accent, #cba6f7);
+  color: var(--zl-accent);
   font: inherit;
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   cursor: pointer;
 }
 .zl-empty-new::after { content: ""; position: absolute; inset: -8px; }
@@ -299,8 +299,8 @@ button.zl-group.is-proj:focus-visible {
 .zl-note {
   display: block;
   padding: 10px 12px;
-  font-size: var(--zl-fs-meta, 12px);
-  color: var(--zl-t4, #66677c);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
 }
 
 /* ── Rows ─────────────────────────────────────────────────────────────────
@@ -316,7 +316,7 @@ button.zl-group.is-proj:focus-visible {
 /* A row that asks keeps its title at full text: the reason line beside it
    carries the colour, so tinting the title too would say it twice. */
 .zl-side-body .zl-row.needs-yellow .zl-row-title,
-.zl-side-body .zl-row.needs-red .zl-row-title { color: var(--zl-t1, #f4f4f7); }
+.zl-side-body .zl-row.needs-red .zl-row-title { color: var(--zl-t1); }
 
 /* ── The ⋯ per row ────────────────────────────────────────────────────────
    With a pointer it appears on hover and the age steps aside for it, so the
@@ -350,8 +350,8 @@ button.zl-group.is-proj:focus-visible {
 }
 .zl-side-body .session-card-menu .icon-button {
   border: 0;
-  border-radius: var(--zl-r-sm, 6px);
-  color: var(--zl-t3, #9091a6);
+  border-radius: var(--zl-r-sm);
+  color: var(--zl-t3);
 }
 
 /* ── 3. New session ──────────────────────────────────────────────────────
@@ -369,18 +369,18 @@ button.zl-group.is-proj:focus-visible {
   margin: 4px 12px 8px;
   padding: 0 14px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
-  background: var(--zl-accent-dim, rgba(203, 166, 247, 0.12));
-  box-shadow: 0 0 0 1px var(--zl-accent-med, rgba(203, 166, 247, 0.22));
-  color: var(--zl-accent, #cba6f7);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-accent-dim);
+  box-shadow: 0 0 0 1px var(--zl-accent-med);
+  color: var(--zl-accent);
   font-family: inherit;
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   font-weight: 600;
   letter-spacing: inherit;
   cursor: pointer;
-  transition: background 120ms ease, transform 120ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  transition: background 120ms ease, transform 120ms var(--zl-ease);
 }
-.zl-side-new:hover { background: var(--zl-accent-med, rgba(203, 166, 247, 0.22)); }
+.zl-side-new:hover { background: var(--zl-accent-med); }
 .zl-side-new:active { transform: translateY(1px); }
 .zl-side-new svg { width: 16px; height: 16px; }
 .zl-side-new:focus-visible {
@@ -405,18 +405,18 @@ button.zl-group.is-proj:focus-visible {
   height: 40px;
   padding: 0 12px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   background: transparent;
-  color: var(--zl-t2, #c3c4d1);
+  color: var(--zl-t2);
   font-family: inherit;
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   font-weight: 500;
   letter-spacing: inherit;
   cursor: pointer;
 }
-.zl-inbox:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
-.zl-inbox.is-on { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
-.zl-inbox svg { width: 16px; height: 16px; color: var(--zl-t3, #9091a6); }
+.zl-inbox:hover { background: var(--zl-hi); }
+.zl-inbox.is-on { background: var(--zl-hi); color: var(--zl-t1); }
+.zl-inbox svg { width: 16px; height: 16px; color: var(--zl-t3); }
 .zl-inbox:focus-visible {
   outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
   outline-offset: var(--focus-ring-offset, 2px);
@@ -426,23 +426,23 @@ button.zl-group.is-proj:focus-visible {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: var(--zl-r-md, 10px);
-  background: var(--zl-yellow, #f9e2af);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-yellow);
   color: #1a1a28;
   font-weight: 600;
   line-height: 18px;
   text-align: center;
 }
-.zl-ver { color: var(--zl-t4, #66677c); }
+.zl-ver { color: var(--zl-t4); }
 a.zl-ver.is-update {
   padding: 2px 5px;
-  border-radius: var(--zl-r-sm, 6px);
-  color: var(--zl-yellow, #f9e2af);
-  background: color-mix(in srgb, var(--zl-yellow, #f9e2af) 14%, var(--zl-raised, #1e1e29));
+  border-radius: var(--zl-r-sm);
+  color: var(--zl-yellow);
+  background: color-mix(in srgb, var(--zl-yellow) 14%, var(--zl-raised));
   text-decoration: none;
 }
 @media (hover: hover) {
-  a.zl-ver.is-update:hover { background: color-mix(in srgb, var(--zl-yellow, #f9e2af) 22%, var(--zl-raised, #1e1e29)); }
+  a.zl-ver.is-update:hover { background: color-mix(in srgb, var(--zl-yellow) 22%, var(--zl-raised)); }
 }
 a.zl-ver.is-update:focus-visible {
   outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
@@ -460,13 +460,13 @@ a.zl-ver.is-update:focus-visible {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
   cursor: pointer;
 }
 .zl-gear svg { width: 16px; height: 16px; }
-.zl-gear:hover { background: var(--zl-control, #262633); color: var(--zl-t1, #f4f4f7); }
+.zl-gear:hover { background: var(--zl-control); color: var(--zl-t1); }
 .zl-gear:focus-visible {
-  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline: 2px solid var(--zl-accent);
   outline-offset: -2px;
 }
 

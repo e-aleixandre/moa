@@ -32,25 +32,25 @@
   height: 36px;
   padding: 0 10px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   background: transparent;
   color: inherit;
   font-family: inherit;
   letter-spacing: inherit;
   cursor: pointer;
 }
-.zl-crumb:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); }
+.zl-crumb:hover { background: var(--zl-hi); }
 .zl-crumb-title {
-  font-size: var(--zl-fs-title, 16px);
+  font-size: var(--zl-fs-title);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.zl-crumb-path { color: var(--zl-t4, #66677c); }
+.zl-crumb-path { color: var(--zl-t4); }
 .zl-desk-head .zl-data {
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 400;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
@@ -62,13 +62,13 @@
   width: 36px;
   height: 36px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
+  border-radius: var(--zl-r-md);
   background: transparent;
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
   cursor: pointer;
 }
 .zl-desk-act svg { width: 16px; height: 16px; display: block; }
-.zl-desk-act:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
+.zl-desk-act:hover { background: var(--zl-hi); color: var(--zl-t1); }
 
 /* ── What the prototype never had ───────────────────────────────────────── */
 
@@ -82,13 +82,13 @@
 
 .zl-crumb:focus-visible,
 .zl-desk-act:focus-visible {
-  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
 }
 
 .zl-desk-act.is-on {
-  color: var(--zl-accent, #cba6f7);
-  background: var(--zl-accent-dim, rgba(203, 166, 247, 0.12));
+  color: var(--zl-accent);
+  background: var(--zl-accent-dim);
 }
 
 /* The session's own alarm, beside its name. Yellow: the cache streak costs
@@ -105,5 +105,5 @@
   flex: none;
   align-self: center;
   border-radius: 50%;
-  background: var(--zl-yellow, #f9e2af);
+  background: var(--zl-yellow);
 }

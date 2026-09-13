@@ -63,7 +63,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--zl-t3, #9091a6);
+  color: var(--zl-t3);
   font-weight: 500;
 }
 .zl-live-txt {
@@ -72,14 +72,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.zl-live-el { flex: none; color: var(--zl-t4, #66677c); }
+.zl-live-el { flex: none; color: var(--zl-t4); }
 
 /* Data is mono: the elapsed counter, the tally's count, a command. Scoped
    to the bar rather than declared globally, so it cannot collide with the
    catalogue's own `.zl-data`. */
 .zl-live .zl-data {
   font-family: var(--mono);
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 400;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
@@ -98,15 +98,15 @@
 }
 .zl-live-dot.is-working,
 .zl-live-dot.is-thinking {
-  background: var(--zl-green, #a6e3a1);
+  background: var(--zl-green);
   box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18);
   animation: zl-breathe 1.6s ease-in-out infinite;
 }
 .zl-live-dot.is-waiting {
-  background: var(--zl-yellow, #f9e2af);
+  background: var(--zl-yellow);
   box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22);
 }
-.zl-live-now.is-waiting { color: var(--zl-t2, #c3c4d1); }
+.zl-live-now.is-waiting { color: var(--zl-t2); }
 @keyframes zl-breathe { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .zl-live-dot { animation: none; } }
 
@@ -122,8 +122,8 @@
   animation: zl-arrive 260ms ease-out both;
 }
 @keyframes zl-arrive { from { opacity: 0; } }
-.zl-live-who { color: var(--zl-t2, #c3c4d1); }
-.zl-live-now.is-bg .zl-live-txt.zl-data { font-size: var(--zl-fs-body, 14px); color: var(--zl-t3, #9091a6); }
+.zl-live-who { color: var(--zl-t2); }
+.zl-live-now.is-bg .zl-live-txt.zl-data { font-size: var(--zl-fs-body); color: var(--zl-t3); }
 
 /* Identity marks. A subagent is a 7px dot in its own hue, exactly the
    project monogram's palette, never green/yellow/red. A command is a mono
@@ -147,7 +147,7 @@
   border-radius: 50%;
   background: var(--zl-live-accent, hsl(var(--h, 210) 65% 72%));
 }
-.zl-live-id.is-bash { color: var(--zl-t3, #9091a6); font-weight: 500; line-height: 1; }
+.zl-live-id.is-bash { color: var(--zl-t3); font-weight: 500; line-height: 1; }
 
 /* The tally: the door to the panel. A control-tone chip with the identity
    marks, the count and a chevron pointing where the panel will open (up). */
@@ -159,19 +159,19 @@
   height: 28px;
   padding: 0 6px 0 8px;
   border: 0;
-  border-radius: var(--zl-r-md, 10px);
-  background: var(--zl-control, #262633);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
-  color: var(--zl-t2, #c3c4d1);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
   font-family: inherit;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
 @media (hover: hover) {
-  .zl-live-tally:hover { background: var(--zl-raised, #1e1e29); color: var(--zl-t1, #f4f4f7); box-shadow: var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12)); }
+  .zl-live-tally:hover { background: var(--zl-raised); color: var(--zl-t1); box-shadow: var(--zl-rim-2); }
 }
 .zl-live-tally:focus-visible {
-  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
 }
 .zl-live-dots { display: inline-flex; align-items: center; gap: 1px; }
@@ -184,15 +184,15 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--zl-t3, #9091a6);
+  background: var(--zl-t3);
 }
 .zl-live-n { color: inherit; }
 .zl-live-chev {
   width: 12px;
   height: 12px;
   flex: none;
-  color: var(--zl-t3, #9091a6);
-  transition: transform 160ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  color: var(--zl-t3);
+  transition: transform 160ms var(--zl-ease);
 }
 .zl-live-chev.is-up { transform: rotate(180deg); }
 
@@ -203,13 +203,13 @@
   max-height: 208px;
   margin: 0 0 4px;
   padding: 2px 4px 4px;
-  border-radius: var(--zl-r-md, 10px);
-  background: var(--zl-sheet, #171720);
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: var(--zl-line-2, rgba(255, 255, 255, 0.12)) transparent;
-  animation: zl-unfold 180ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  scrollbar-color: var(--zl-line-2) transparent;
+  animation: zl-unfold 180ms var(--zl-ease);
   transform-origin: bottom;
 }
 @keyframes zl-unfold { from { opacity: 0; transform: translateY(6px); } }
@@ -222,14 +222,14 @@
   gap: 8px;
   margin-top: 4px;
   padding: 6px 8px 2px;
-  font-size: var(--zl-fs-meta, 12px);
+  font-size: var(--zl-fs-meta);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--zl-t4, #66677c);
+  color: var(--zl-t4);
 }
 .zl-live-grp:first-child .zl-group { margin-top: 0; }
-.zl-live-panel .zl-group-n { letter-spacing: 0; color: var(--zl-t4, #66677c); }
+.zl-live-panel .zl-group-n { letter-spacing: 0; color: var(--zl-t4); }
 
 .zl-live-row {
   display: flex;
@@ -239,11 +239,11 @@
   min-height: 36px;
   padding: 4px 8px;
   border: 0;
-  border-radius: var(--zl-r-sm, 6px);
+  border-radius: var(--zl-r-sm);
   background: transparent;
-  color: var(--zl-t2, #c3c4d1);
+  color: var(--zl-t2);
   font-family: inherit;
-  font-size: var(--zl-fs-body, 14px);
+  font-size: var(--zl-fs-body);
   letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
@@ -251,12 +251,12 @@
 }
 div.zl-live-row { cursor: default; }
 .zl-live-row:focus-visible {
-  outline: 2px solid var(--zl-accent, #cba6f7);
+  outline: 2px solid var(--zl-accent);
   outline-offset: calc(-1 * 2px);
 }
 @media (hover: hover) {
-  button.zl-live-row:hover { background: var(--zl-hi, rgba(255, 255, 255, 0.04)); color: var(--zl-t1, #f4f4f7); }
-  button.zl-live-row:hover .zl-live-go { color: var(--zl-t2, #c3c4d1); }
+  button.zl-live-row:hover { background: var(--zl-hi); color: var(--zl-t1); }
+  button.zl-live-row:hover .zl-live-go { color: var(--zl-t2); }
 }
 .zl-live-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .zl-live-row-t {
@@ -265,16 +265,16 @@ div.zl-live-row { cursor: default; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.zl-live-row-t.zl-data { font-size: var(--zl-fs-body, 14px); font-weight: 400; }
-.zl-live-row-task { font-weight: 400; color: var(--zl-t3, #9091a6); }
+.zl-live-row-t.zl-data { font-size: var(--zl-fs-body); font-weight: 400; }
+.zl-live-row-task { font-weight: 400; color: var(--zl-t3); }
 .zl-live-row-d {
-  font-size: var(--zl-fs-meta, 12px);
-  color: var(--zl-t4, #66677c);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.zl-live-go { width: 12px; height: 12px; flex: none; color: var(--zl-t4, #66677c); }
+.zl-live-go { width: 12px; height: 12px; flex: none; color: var(--zl-t4); }
 
 /* Phone: the row and every panel row are 44 for the thumb; the tally is
    a full 44 hit too, with its visible chip inside.
@@ -316,13 +316,13 @@ div.zl-live-row { cursor: default; }
   content: "";
   position: absolute;
   inset: 4px 0;
-  border-radius: var(--zl-r-md, 10px);
-  background: var(--zl-hi, rgba(255, 255, 255, 0.04));
-  box-shadow: var(--zl-rim, 0 0 0 1px rgba(255, 255, 255, 0.07));
+  border-radius: var(--zl-r-md);
+  background: var(--zl-hi);
+  box-shadow: var(--zl-rim);
 }
 @media (hover: hover) {
   .zl-phone .zl-live-tally:hover::before,
-  .mconv .zl-live-tally:hover::before { background: var(--zl-raised, #1e1e29); }
+  .mconv .zl-live-tally:hover::before { background: var(--zl-raised); }
 }
 .zl-phone .zl-live-row,
 .mconv .zl-live-row { min-height: 44px; }
@@ -332,7 +332,7 @@ div.zl-live-row { cursor: default; }
 /* Dense (pane): 32px row, the panel's rows too, three of them before it
    scrolls. */
 .zl-live.is-dense .zl-live-bar { min-height: 32px; padding-left: 6px; gap: 6px; }
-.zl-live.is-dense .zl-live-now { font-size: var(--zl-fs-body, 14px); }
+.zl-live.is-dense .zl-live-now { font-size: var(--zl-fs-body); }
 .zl-live.is-dense .zl-live-tally { height: 26px; }
 .zl-live.is-dense .zl-live-row { min-height: 32px; }
 .zl-live.is-dense .zl-live-row-d { display: none; }

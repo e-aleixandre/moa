@@ -19,10 +19,10 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  box-shadow: inset 1px 0 0 var(--zl-line, rgba(255, 255, 255, 0.07));
+  box-shadow: inset 1px 0 0 var(--zl-line);
 }
 .zl-grid-col > .zl-pane { flex: 1; min-height: 0; }
-.zl-grid-col > .zl-pane + .zl-pane { box-shadow: inset 0 1px 0 var(--zl-line, rgba(255, 255, 255, 0.07)); }
+.zl-grid-col > .zl-pane + .zl-pane { box-shadow: inset 0 1px 0 var(--zl-line); }
 
 /* ── Split tree (production: the prototype never had a free-form tree) ── */
 
@@ -47,10 +47,10 @@
 .zl-grid-panes .split-pane > .split { flex: 1; }
 
 .zl-grid-panes .split-h > .split-pane + .resize-handle + .split-pane {
-  box-shadow: inset 1px 0 0 var(--zl-line, rgba(255, 255, 255, 0.07));
+  box-shadow: inset 1px 0 0 var(--zl-line);
 }
 .zl-grid-panes .split-v > .split-pane + .resize-handle + .split-pane {
-  box-shadow: inset 0 1px 0 var(--zl-line, rgba(255, 255, 255, 0.07));
+  box-shadow: inset 0 1px 0 var(--zl-line);
 }
 
 /* Resize handle — thin, with a wider invisible hit area. The hairline is the
@@ -75,10 +75,10 @@
 .zl-grid-panes .resize-h::before { top: 20%; bottom: 20%; left: 2px; right: 2px; }
 .zl-grid-panes .resize-v::before { left: 20%; right: 20%; top: 2px; bottom: 2px; }
 .zl-grid-panes .resize-handle.active::before {
-  background: color-mix(in srgb, var(--zl-accent, #cba6f7) 55%, transparent);
+  background: color-mix(in srgb, var(--zl-accent) 55%, transparent);
 }
 @media (hover: hover) {
   .zl-grid-panes .resize-handle:hover::before {
-    background: color-mix(in srgb, var(--zl-accent, #cba6f7) 55%, transparent);
+    background: color-mix(in srgb, var(--zl-accent) 55%, transparent);
   }
 }

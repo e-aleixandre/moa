@@ -79,7 +79,7 @@
      and its outer radius, and separates with a hairline instead. */
   .desktop-shell:has(.desktop-dossier.is-open) .zl-side-right {
     border-radius: 0;
-    box-shadow: inset 1px 0 0 var(--zl-line-2, rgba(255, 255, 255, 0.12));
+    box-shadow: inset 1px 0 0 var(--zl-line-2);
   }
   /* The artifacts drawer reserves 600px of the centre from 1280px up
      (Artifacts.css). With the dossier docked the centre has already given up

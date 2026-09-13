@@ -30,48 +30,10 @@
   letter-spacing: -0.005em;
 
   /* Tonal ladder. Regular steps, blue-violet leaning like the icon's ground. */
-  --zl-canvas: #101018;
-  --zl-sheet: #171720;
-  --zl-raised: #1e1e29;
-  --zl-control: #262633;
-  --zl-hi: rgba(255, 255, 255, 0.04);
-  --zl-line: rgba(255, 255, 255, 0.07);
-  --zl-line-2: rgba(255, 255, 255, 0.12);
-  --zl-rim: 0 0 0 1px var(--zl-line);
-  --zl-rim-2: 0 0 0 1px var(--zl-line-2);
-
-  /* Text. Not pure white: Linear ships #F7F8F8, Raycast #F4F4F6. */
-  --zl-t1: #f4f4f7;
-  --zl-t2: #c3c4d1;
-  --zl-t3: #9091a6;
-  --zl-t4: #66677c;
-
-  /* Accent: mauve. Already the product's focus ring and, per the visual
-     criterion, an identity colour alongside peach. It has one state job as
-     well -- unseen -- because that is what this product has always used for
-     work you have not read. Everywhere else it stays off state. */
-  --zl-accent: #cba6f7;
-  --zl-accent-ink: #1a1424;
-  --zl-accent-dim: rgba(203, 166, 247, 0.12);
-  --zl-accent-med: rgba(203, 166, 247, 0.22);
-  --zl-accent-line: rgba(203, 166, 247, 0.45);
-
-  /* State. Semantic, never decorative. */
-  --zl-green: #a6e3a1;
-  --zl-yellow: #f9e2af;
-  --zl-red: #f38ba8;
-  --zl-maroon: #eba0ac;
-
-  /* Type roles. */
-  --zl-fs-meta: 12px;
-  --zl-fs-body: 14px;
-  --zl-fs-title: 16px;
-  --zl-fs-display: 20px;
-
-  --zl-r-sm: 6px;
-  --zl-r-md: 10px;
-  --zl-r-lg: 16px;
-  --zl-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  /* The tokens this grammar is made of now live in tokens/tokens.css, under
+     :root, because production has no .zl ancestor to inherit them from and
+     was resolving every one of them through a repeated fallback instead.
+     They arrive here the same way they arrive everywhere else. */
 }
 
 /* Keyboard focus is the accent's first job. */
