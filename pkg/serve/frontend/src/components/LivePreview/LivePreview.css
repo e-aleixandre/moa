@@ -54,8 +54,8 @@
     border: 0;
   }
   .live-preview-sheet .sheet-body {
-    padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-2)
-      max(var(--space-2), env(safe-area-inset-bottom));
+    padding: max(var(--space-2), var(--shell-top)) var(--space-2)
+      max(var(--space-2), var(--shell-bottom));
   }
 }
 
@@ -416,7 +416,7 @@
   justify-content: center;
   min-width: 44px;
   height: 44px;
-  padding: 0 0 max(6px, env(safe-area-inset-bottom));
+  padding: 0 0 max(6px, var(--shell-bottom));
   border: 0;
   background: transparent;
   color: var(--text);
@@ -460,7 +460,7 @@
 .live-preview-composer {
   position: absolute;
   right: var(--space-2);
-  bottom: max(var(--space-2), env(safe-area-inset-bottom));
+  bottom: max(var(--space-2), var(--shell-bottom));
   left: var(--space-2);
   z-index: 5;
   padding: var(--space-2);
@@ -532,7 +532,7 @@
 /* Reserve independent lanes: activity cards never sit over either the closed
    handle or the open composer. */
 .live-preview-stage.has-composer-handle .lp-stream {
-  bottom: calc(max(var(--space-3), env(safe-area-inset-bottom)) + 44px);
+  bottom: calc(max(var(--space-3), var(--shell-bottom)) + 44px);
 }
 .live-preview-stage.has-composer .lp-stream {
   bottom: 184px;
@@ -1006,6 +1006,6 @@
      indicator. */
   .lp-stream {
     width: calc(100% - var(--space-3) * 2);
-    bottom: max(var(--space-3), env(safe-area-inset-bottom));
+    bottom: max(var(--space-3), var(--shell-bottom));
   }
 }

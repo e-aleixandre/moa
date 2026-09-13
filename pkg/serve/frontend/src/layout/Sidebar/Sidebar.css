@@ -63,6 +63,14 @@
   gap: 10px;
   padding: 16px 12px 8px 20px;
 }
+/* Inside the phone drawer the sidebar is a full-height surface starting at the
+   physical top of the screen (the installed PWA runs under the status bar), so
+   its head owes the clock the same clearance every other mobile surface takes.
+   Scoped to .sdrawer: on desktop there is no status bar to clear, and the
+   catalogue's 16px is the drawn value there. */
+.sdrawer .zl-side-body .zl-side-head {
+  padding-top: calc(16px + var(--shell-top));
+}
 .zl-side-body .zl-side-title {
   flex: none;
   font-size: var(--zl-fs-display, 20px);

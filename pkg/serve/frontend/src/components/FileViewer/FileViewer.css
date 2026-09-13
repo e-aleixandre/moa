@@ -21,7 +21,7 @@
   padding: 0;
 }
 .file-viewer-sheet.is-expanded .sheet-body {
-  padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
+  padding-bottom: max(var(--space-4), var(--shell-bottom));
 }
 
 /* On a phone the preview is the task: use the full screen from the start,
@@ -39,7 +39,7 @@
     border: 0;
   }
   .file-viewer-sheet .sheet-head {
-    padding: max(var(--space-3), env(safe-area-inset-top)) var(--space-4) 0;
+    padding: max(var(--space-3), var(--shell-top)) var(--space-4) 0;
   }
   .file-viewer-sheet .sheet-head h3 {
     font-size: var(--text-base);
@@ -48,7 +48,7 @@
     white-space: nowrap;
   }
   .file-viewer-sheet .sheet-body {
-    padding: 0 var(--space-3) max(var(--space-3), env(safe-area-inset-bottom));
+    padding: 0 var(--space-3) max(var(--space-3), var(--shell-bottom));
   }
 }
 .file-viewer-sheet .sheet-body {

@@ -5,10 +5,11 @@
 .mcomposer {
   flex: none;
   /* Bottom = the LARGER of the catalogue dock's 8px or the home-indicator
-     safe area, never their sum. env(safe-area-inset-bottom) varies by device
-     (0 with no home indicator, ~20-34px with one); max() lets the browser
-     pick. */
-  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+     inset, never their sum. --shell-bottom varies by device (0 with no home
+     indicator, ~20-34px with one); max() lets the browser pick. The composer
+     is a control, so it respects the inset at every level -- the transcript
+     behind it is what bleeds past. */
+  padding-bottom: max(8px, var(--shell-bottom));
 }
 
 /* StatusStrip compact is the line's face (shared with desktop). On the phone it

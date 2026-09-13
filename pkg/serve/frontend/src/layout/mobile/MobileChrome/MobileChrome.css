@@ -23,7 +23,9 @@
    the device frame never had. */
 .zl-chrome {
   position: absolute;
-  top: calc(14px + env(safe-area-inset-top, 0px));
+  /* Controls stay inside the safe area at every level: --shell-top is the
+     inset to respect, not the bleed a surface may cross. */
+  top: calc(14px + var(--shell-top));
   left: 12px;
   right: 12px;
   z-index: 4;

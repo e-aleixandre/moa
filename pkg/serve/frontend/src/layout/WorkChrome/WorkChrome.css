@@ -13,7 +13,7 @@
 }
 
 .wk-head.is-phone {
-  padding: calc(env(safe-area-inset-top, 0px) + 8px) var(--space-4) var(--space-3);
+  padding: calc(var(--shell-top) + 8px) var(--space-4) var(--space-3);
 }
 
 .wk-head-top {

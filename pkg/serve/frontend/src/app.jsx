@@ -25,6 +25,7 @@ import { refreshPushState } from "./data/push-client.js";
 import { installOpenSessionNavigation } from "./data/push-navigation.js";
 import { installShareNavigation, openShare, dismissShare } from "./data/share.js";
 import { shareIdFromLocation } from "./data/share-target.js";
+import { detectShell, applyShell } from "./data/shell.js";
 import {
   setMobile, autoFillTiles, autoSelectMobile, openSession, afterVisibilityChange,
 } from "./data/tile-actions.js";
@@ -360,5 +361,10 @@ function App() {
     </>
   );
 }
+
+// Which shell this is decided before the first paint: the level it grants is
+// read by CSS, and a class arriving later would show the base layout for a
+// frame and then move everything. It cannot change while running.
+applyShell(detectShell());
 
 render(<App />, document.getElementById("root"));

@@ -6,6 +6,9 @@ import { toggleSound } from "../../data/tile-actions.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { getPushState, subscribePushState, enablePush, disablePush } from "../../data/push-client.js";
 import { deriveModelSpecs } from "../../data/selectors.js";
+import {
+  detectShell, ownsScreen, SHELL_BROWSER, SHELL_PWA, SHELL_NATIVE,
+} from "../../data/shell.js";
 import { groupByProvider, specMatches } from "../ModelSelector/model-selector-model.js";
 import {
   TOKENS_PER_UNIT, clampToFloor, floorUnits, formatTokens, modeForCompactAt, parseUnits,
@@ -566,6 +569,140 @@ function SubagentModelsPage({ state }) {
   );
 }
 
+// What each shell is called in the one place the distinction is shown.
+const SHELL_LABEL = {
+  [SHELL_BROWSER]: "browser tab",
+  [SHELL_PWA]: "installed web app",
+  [SHELL_NATIVE]: "native app",
+};
+
+// ViewportPage — what rectangle iOS actually hands the page, read on the
+// device itself.
+//
+// Not a setting: a measuring tape. An installed PWA cannot be inspected
+// without a Mac and a cable, and the numbers that decide how this app must lay
+// itself out -- whether the window starts at the physical top of the screen,
+// and whether the strip below it belongs to us -- are only true on the device.
+// Everything else is guesswork against a simulator that reports no insets at
+// all.
+//
+// The comparison that matters is screen height vs window height: if they
+// differ by more than the browser chrome, the shell is keeping a band the page
+// can never paint into.
+function ViewportPage() {
+  const [m, setM] = useState(null);
+  // Off by default: it paints over the whole app.
+  const [bands, setBands] = useState(false);
+
+  useEffect(() => {
+    const read = () => {
+      const probe = document.createElement("div");
+      // env() only resolves in a style; read it back through a real element
+      // rather than trusting a constant.
+      probe.style.cssText = [
+        "position:fixed;visibility:hidden;pointer-events:none",
+        "top:env(safe-area-inset-top,0px)",
+        "bottom:env(safe-area-inset-bottom,0px)",
+        "left:env(safe-area-inset-left,0px)",
+        "right:env(safe-area-inset-right,0px)",
+      ].join(";");
+      document.body.appendChild(probe);
+      const cs = getComputedStyle(probe);
+      const px = (v) => Math.round(parseFloat(v) || 0);
+      const insets = {
+        top: px(cs.top), bottom: px(cs.bottom),
+        left: px(cs.left), right: px(cs.right),
+      };
+      probe.remove();
+      const vv = window.visualViewport;
+      setM({
+        screenH: window.screen?.height ?? null,
+        screenW: window.screen?.width ?? null,
+        innerH: window.innerHeight,
+        innerW: window.innerWidth,
+        visualH: vv ? Math.round(vv.height) : null,
+        // Which end the withheld band sits at: 0 means the window starts at
+        // the physical top and the band is below us.
+        offsetTop: vv ? Math.round(vv.offsetTop) : null,
+        clientH: document.documentElement.clientHeight,
+        dpr: window.devicePixelRatio,
+        standalone: window.navigator.standalone === true
+          || window.matchMedia("(display-mode: standalone)").matches,
+        insets,
+      });
+    };
+    read();
+    // Rotating or showing the keyboard changes every number here.
+    window.visualViewport?.addEventListener("resize", read);
+    window.addEventListener("resize", read);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", read);
+      window.removeEventListener("resize", read);
+    };
+  }, []);
+
+  if (!m) return null;
+  // The gap the shell is withholding: screen minus what we were given.
+  const gap = m.screenH != null ? m.screenH - m.innerH : null;
+  const rows = [
+    ["Shell", SHELL_LABEL[detectShell()] || "unknown"],
+    ["Owns the screen", ownsScreen(detectShell()) ? "yes" : "no"],
+    ["Installed app", m.standalone ? "yes" : "no (browser tab)"],
+    ["Screen", m.screenW != null ? `${m.screenW} x ${m.screenH}` : "unknown"],
+    ["Window", `${m.innerW} x ${m.innerH}`],
+    ["Visual viewport", m.visualH != null ? `${m.visualH}` : "unavailable"],
+    ["Viewport offset", m.offsetTop != null ? `${m.offsetTop}` : "unavailable"],
+    ["Document", `${m.clientH}`],
+    ["Unusable band", gap == null ? "unknown" : `${gap}`],
+    ["Safe area top", `${m.insets.top}`],
+    ["Safe area bottom", `${m.insets.bottom}`],
+    ["Pixel ratio", `${m.dpr}`],
+  ];
+
+  return (
+    <>
+      {/* The measurement no number can make: paint an unmistakable marker at
+          each end of the viewport, photograph the whole phone, and see where
+          they land physically. Top band behind the clock means the window
+          starts at y=0 and the missing band is below us. */}
+      {bands && (
+        <>
+          <div class="zl-probe-band is-top">TOP OF VIEWPORT</div>
+          <div class="zl-probe-band is-bottom">BOTTOM OF VIEWPORT</div>
+        </>
+      )}
+      <div class="zl-set-note">
+        Measured on this device, now. Rotate or open the keyboard and the
+        numbers update.
+      </div>
+      <div class="zl-set-sec">
+        {rows.map(([k, v]) => (
+          <div class="zl-set-row is-static" key={k}>
+            <span class="zl-set-l">{k}</span>
+            <span class="zl-set-v zl-data">{v}</span>
+          </div>
+        ))}
+      </div>
+      <div class="zl-set-sec">
+        <span class="zl-set-k">Experiments</span>
+        <Row
+          label="Mark viewport edges"
+          hint="Paints a band at each end. Screenshot the whole phone."
+        >
+          <Switch on={bands} onChange={setBands} label="Mark viewport edges" />
+        </Row>
+      </div>
+      <div class="zl-set-note">
+        {gap == null
+          ? "Screen size unavailable on this browser."
+          : gap <= 0
+            ? "The window covers the whole screen."
+            : `${gap}px of the screen is not part of the page. If that is close to the status bar height, the shell is reserving it and no CSS can reach it.`}
+      </div>
+    </>
+  );
+}
+
 // A model and whether the agent may delegate to it. The switch is the one this
 // sheet already uses: a permission you granted is a setting you chose, which
 // is exactly what .zl-sw means on every other row here. The old
@@ -717,6 +854,7 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
             {page === "compact-strategy" && <CompactStrategyPage state={strategy} onDone={() => setPage("root")} />}
             {page === "compact-model" && <CompactModelPage state={compactModel} onDone={() => setPage("root")} />}
             {page === "subagent-models" && <SubagentModelsPage state={subagents} />}
+            {page === "viewport" && <ViewportPage />}
           </div>
         ) : (
           <div class="zl-set-body">
@@ -777,6 +915,16 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
 
             <div class="zl-set-sec">
               <span class="zl-set-k">About</span>
+              {/* Diagnostics, not preferences, but this is the only door an
+                  installed app has: reading these numbers otherwise needs a
+                  Mac and a cable. */}
+              <Row
+                label="Screen geometry"
+                hint="What this device gives the app."
+                value=""
+                onOpen={() => setPage("viewport")}
+                pageLabel={SETTINGS_PAGES["viewport"]}
+              />
               <div class="zl-set-row is-static">
                 <span class="zl-set-l">Version</span>
                 <span class="zl-set-v">

@@ -29,7 +29,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  max-height: calc(100% - env(safe-area-inset-top) - 24px);
+  max-height: calc(100% - var(--shell-top) - 24px);
   z-index: var(--z-sheet);
   display: flex;
   flex-direction: column;
@@ -109,7 +109,7 @@
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding: 10px 18px calc(20px + env(safe-area-inset-bottom));
+  padding: 10px 18px calc(20px + var(--shell-bottom));
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,0 +1,47 @@
+/* The shell the app is running inside, and what it is allowed to do there.
+ *
+ * moa runs in three places with different powers, and the difference is not a
+ * matter of taste: iOS hands a browser tab, an installed PWA and a native
+ * container three different rectangles. Measured on an iPhone 17 Pro, an
+ * installed PWA gets a 402x812 window on a 402x874 screen -- the missing 62px
+ * are kept by WebKit and no CSS can paint them (WebKit 313800). A native
+ * container owns the whole 874.
+ *
+ * So there is one design, at two levels:
+ *
+ *   base       what every shell can do. Content stays inside the safe area.
+ *              Nothing is clipped, nothing hides behind the clock. This is
+ *              what a browser tab and a PWA get, and it must look finished --
+ *              not like a degraded version of something better.
+ *
+ *   edge       the app owns the whole screen: content runs under the status
+ *              bar and down to the physical bottom, fading rather than
+ *              stopping. Only granted where it is actually true.
+ *
+ * Components must not ask "am I in an app?". They read the variables below,
+ * which is why the rule lives here alone: one place decides, everything else
+ * follows. --shell-top/bottom are the insets to respect; --edge-bleed is how
+ * far a surface may bleed past them.
+ */
+
+:root {
+  /* Base: honour the insets the platform reports. env() already resolves to 0
+     where there is no notch, so this needs no device checks. */
+  --shell-top: env(safe-area-inset-top, 0px);
+  --shell-bottom: env(safe-area-inset-bottom, 0px);
+  --shell-left: env(safe-area-inset-left, 0px);
+  --shell-right: env(safe-area-inset-right, 0px);
+
+  /* How far the transcript may run past the safe area before it fades. Zero
+     at base level: the fade exists, but it has nothing to fade over. */
+  --edge-bleed-top: 0px;
+  --edge-bleed-bottom: 0px;
+}
+
+/* Granted by app.jsx, never assumed: the class is set only when the container
+   has confirmed it really owns the screen. A PWA that merely looks fullscreen
+   does not qualify -- that was the mistake that cost a day of measuring. */
+html.shell-edge {
+  --edge-bleed-top: var(--shell-top);
+  --edge-bleed-bottom: var(--shell-bottom);
+}

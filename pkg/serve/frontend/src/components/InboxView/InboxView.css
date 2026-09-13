@@ -389,7 +389,7 @@
 
 /* ── Phone sizing: everything the thumb reaches is 44 or more. ─────── */
 .zi-inbox.is-phone .zi-back, .zi-inbox.is-phone .zi-x { width: 44px; height: 44px; }
-.zi-inbox.is-phone .zi-head { min-height: 64px; padding-top: calc(env(safe-area-inset-top, 0px) + 14px); }
+.zi-inbox.is-phone .zi-head { min-height: 64px; padding-top: calc(var(--shell-top) + 14px); }
 .zi-inbox.is-phone .zi-head.is-sheet { min-height: 56px; padding-top: 4px; }
 .zi-inbox.is-phone .zi-btn { height: 44px; }
 .zi-inbox.is-phone .zi-dest { min-height: 56px; }

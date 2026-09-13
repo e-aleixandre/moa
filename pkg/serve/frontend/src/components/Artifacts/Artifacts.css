@@ -98,7 +98,7 @@
 .af-head-origin::before { content: '·'; margin-right: var(--space-2); color: var(--surface2); }
 @media (max-width: 400px) { .af-drawer.is-mobile .af-head-origin { display: none; } }
 .af-head-actions { display: flex; gap: 2px; align-items: center; flex: none; }
-.af-drawer.is-mobile .af-head { min-height: 44px; padding-top: calc(env(safe-area-inset-top, 0px) + 6px); padding-bottom: 4px; border-bottom: 0; }
+.af-drawer.is-mobile .af-head { min-height: 44px; padding-top: calc(var(--shell-top) + 6px); padding-bottom: 4px; border-bottom: 0; }
 .af-drawer.is-mobile .af-icon-button,
 .af-drawer.is-mobile .af-back { min-width: 44px; min-height: 44px; }
 .af-drawer.is-mobile .af-back { margin-left: -4px; }

@@ -62,25 +62,31 @@
    enforce it. The capsules keep their own inset (MobileChrome), so the row
    itself never rides under the clock. */
 .mconv .zl-transcript {
-  /* Half the inset, not all of it: the text must REACH the status-bar band for
-     the fade above to have anything to dissolve. The capsules are what needs
-     clearance, and the 74px below already provides it. */
-  padding: calc(74px + env(safe-area-inset-top, 0px) * 0.5) 18px 24px;
+  /* The bleed is what the shell granted (tokens/shell.css): where the app owns
+     the screen the text runs up into the status-bar band and dissolves there;
+     where it does not, the bleed is 0, the same gradient collapses to a plain
+     top fade, and nothing is ever hidden behind a clock the page cannot see
+     under. One rule, two levels -- not two layouts.
+
+     Half the bleed in the padding, not all of it: the text must REACH the band
+     for the fade to have anything to dissolve. The capsules are what needs
+     clearance, and the 74px already provides it. */
+  padding: calc(74px + var(--edge-bleed-top) * 0.5) 18px 24px;
   mask-image: linear-gradient(
     to bottom,
     transparent 0,
-    rgba(0, 0, 0, 0.32) calc(env(safe-area-inset-top, 0px) * 0.6),
-    rgba(0, 0, 0, 0.6) calc(env(safe-area-inset-top, 0px) + 12px),
-    #000 calc(env(safe-area-inset-top, 0px) + 84px),
+    rgba(0, 0, 0, 0.32) calc(var(--edge-bleed-top) * 0.6),
+    rgba(0, 0, 0, 0.6) calc(var(--edge-bleed-top) + 12px),
+    #000 calc(var(--edge-bleed-top) + 84px),
     #000 calc(100% - 28px),
     transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0,
-    rgba(0, 0, 0, 0.32) calc(env(safe-area-inset-top, 0px) * 0.6),
-    rgba(0, 0, 0, 0.6) calc(env(safe-area-inset-top, 0px) + 12px),
-    #000 calc(env(safe-area-inset-top, 0px) + 84px),
+    rgba(0, 0, 0, 0.32) calc(var(--edge-bleed-top) * 0.6),
+    rgba(0, 0, 0, 0.6) calc(var(--edge-bleed-top) + 12px),
+    #000 calc(var(--edge-bleed-top) + 84px),
     #000 calc(100% - 28px),
     transparent 100%
   );

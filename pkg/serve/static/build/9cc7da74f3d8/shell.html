@@ -11,16 +11,21 @@
        metas are kept only as a redundant opt-in for older iOS and other
        browsers — they do not affect the viewport, and they do NOT make WebKit
        remember a microphone grant (bug 280394 is still open: Home Screen web
-       apps have no persistent getUserMedia permission at all).
-
-       Still deliberately absent:
-       apple-mobile-web-app-status-bar-style=black-translucent — deprecated by
-       WebKit and the actual cause of the iOS 26 geometry bug that made the
-       standalone shell subtract the status-bar height twice, leaving a native
-       strip below the webview on an iPhone 17 Pro (viewport came back
-       402x812 = 402x(874-62)). theme-color colors the status bar instead.
-       See WebKit bugs 313800 / 300445. -->
+       apps have no persistent getUserMedia permission at all). -->
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <!-- There is deliberately no apple-mobile-web-app-status-bar-style here.
+
+       black-translucent is the only way to put a web view under the status
+       bar, and it does work -- but on iOS it also makes the standalone shell
+       hand the page a window shorter than the screen: 402x812 on a 402x874
+       iPhone 17 Pro, measured, with the missing 62px sitting below the page
+       where no CSS can reach them (WebKit 313800 / 300445). Either the
+       conversation runs behind the clock or the composer reaches the bottom
+       edge. Not both.
+
+       So an installed web app stays inside the safe area and looks finished
+       there. Running to both physical edges is what the native container is
+       for, and it is granted by tokens/shell.css -- see mobile/README.md. -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="moa">
   <title>moa</title>
@@ -28,10 +33,10 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/build/55330237fbcd/app.css">
+  <link rel="stylesheet" href="/build/9cc7da74f3d8/app.css">
 </head>
 <body>
   <div id="root"></div>
-  <script type="module" src="/build/55330237fbcd/app.js"></script>
+  <script type="module" src="/build/9cc7da74f3d8/app.js"></script>
 </body>
 </html>

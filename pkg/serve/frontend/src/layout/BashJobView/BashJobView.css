@@ -94,7 +94,7 @@
 }
 
 .bj-foot.is-phone {
-  padding: 0 var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-3));
+  padding: 0 var(--space-4) calc(var(--shell-bottom) + var(--space-3));
 }
 
 /* The disclosure's own top rule would double the log's border here. */

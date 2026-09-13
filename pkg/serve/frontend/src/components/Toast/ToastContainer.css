@@ -4,7 +4,7 @@
 
 .toast-stack {
   position: fixed;
-  top: calc(var(--space-4) + env(safe-area-inset-top));
+  top: calc(var(--space-4) + var(--shell-top));
   right: var(--space-4);
   z-index: var(--z-toast);
   display: flex;

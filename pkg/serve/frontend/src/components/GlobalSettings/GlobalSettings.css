@@ -525,3 +525,25 @@ button.zl-set-row[disabled] { cursor: default; }
   text-transform: uppercase;
 }
 .zl-set-empty { padding: 16px 2px; color: var(--zl-t4, #66677c); text-align: center; }
+
+/* zl-probe-band — the end of the viewport, made visible.
+   Fixed to each edge with no safe-area padding on purpose: the question is
+   where the viewport itself ends on the physical screen, so this must ignore
+   the insets the rest of the app respects. z-index clears the settings sheet;
+   a photograph of the whole phone is the reading. */
+.zl-probe-band {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 62px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 13px/1 var(--font-mono, monospace);
+  letter-spacing: 0.08em;
+  color: #000;
+  pointer-events: none;
+}
+.zl-probe-band.is-top { top: 0; background: #ff3b30; }
+.zl-probe-band.is-bottom { bottom: 0; background: #34c759; }

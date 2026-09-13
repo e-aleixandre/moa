@@ -109,7 +109,7 @@
 .sa-report-body.is-phone .sa-report-col {
   max-width: none;
   padding: var(--space-4) var(--space-4)
-    calc(env(safe-area-inset-bottom, 0px) + var(--space-6));
+    calc(var(--shell-bottom) + var(--space-6));
 }
 
 /* The outcome sentence. Not a banner and not a glyph: the head already carries

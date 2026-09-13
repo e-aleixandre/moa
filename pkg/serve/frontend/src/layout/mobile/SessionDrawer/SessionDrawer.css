@@ -48,7 +48,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--shell-bottom);
   background: var(--mantle);
   border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
   box-shadow: var(--shadow-lg);
@@ -93,7 +93,7 @@
      owes the status bar the same clearance the conversation capsules take.
      It carried the bottom inset and not the top one, which put "moa" and the
      search field under the clock on any modern iPhone. */
-  padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 8px;
+  padding: calc(14px + var(--shell-top)) 16px 8px;
 }
 
 .sdrawer-head h2 {
