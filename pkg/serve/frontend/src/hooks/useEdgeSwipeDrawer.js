@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { tap } from "../data/haptics.js";
 
 // The drawer is mounted only after an opening drag has crossed the intent
 // threshold. From then on its transform is written directly so moving a finger
@@ -31,6 +32,9 @@ export function useEdgeSwipeDrawer({ open, enabled, onOpen, onClose }) {
   const startRef = useRef(null);
   const openingRef = useRef(false);
   const activeRef = useRef(false);
+  // Which side of the commit threshold the finger was on at the last move, so
+  // the tick fires on the crossing and not on every frame past it.
+  const pastThresholdRef = useRef(false);
   const travelRef = useRef(0);
   const offsetRef = useRef(0);
   const settleTimerRef = useRef(null);
@@ -103,6 +107,9 @@ export function useEdgeSwipeDrawer({ open, enabled, onOpen, onClose }) {
     startRef.current = { x: touch.clientX, y: touch.clientY };
     openingRef.current = !openRef.current;
     activeRef.current = false;
+    // An opening gesture starts closed, a closing one starts past the
+    // threshold: either way the first crossing is the one worth feeling.
+    pastThresholdRef.current = !openingRef.current;
   }, []);
 
   const onTouchMove = useCallback((e) => {
@@ -131,6 +138,17 @@ export function useEdgeSwipeDrawer({ open, enabled, onOpen, onClose }) {
       : Math.min(0, Math.max(-panelWidth, dx));
     offsetRef.current = offset;
     paint(offset);
+
+    // The tick that tells the finger what releasing now would do, fired on the
+    // crossing rather than the position so that hovering around the threshold
+    // does not buzz. Only felt in the native container: iOS gives a web app no
+    // haptics at all (data/haptics.js).
+    const travelled = opening ? panelWidth + offset : -offset;
+    const past = travelled > panelWidth * OPEN_FRACTION;
+    if (past !== pastThresholdRef.current) {
+      pastThresholdRef.current = past;
+      tap("select");
+    }
   }, [onOpen, paint, width]);
 
   const finishGesture = useCallback((cancelled = false) => {

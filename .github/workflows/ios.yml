@@ -1,0 +1,175 @@
+name: iOS app
+
+# Builds the native container and uploads it to TestFlight.
+#
+# Deliberately manual: this is not part of CI. Every other job here proves the
+# repository is sound and costs nothing; this one signs with a real developer
+# identity, consumes macOS runner minutes (ten times the price of Linux), and
+# puts a build in front of a person. That should be a decision, not a
+# consequence of pushing a commit.
+#
+# The frontend is NOT bundled into the app: the container loads it from a
+# running moa (see mobile/README.md), so shipping interface changes does not
+# need this workflow at all. Run it when the container itself changes -- native
+# plugins, capabilities, icons, the bundle id.
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: "The moa this build talks to"
+        required: true
+        default: "https://dev.taild072ac.ts.net:7350"
+      notes:
+        description: "What testers should look at"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-app
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    name: Build & upload
+    # Xcode only exists on macOS runners. macos-15 carries Xcode 16, which is
+    # the minimum that can submit builds for iOS 18 and later.
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install container dependencies
+        working-directory: mobile
+        run: npm ci
+
+      # The URL is an input rather than a constant because a build for someone
+      # else's moa is the same app pointed elsewhere, and because a TestFlight
+      # build must never silently keep a developer tailnet address.
+      - name: Point the container at this moa
+        working-directory: mobile
+        env:
+          SERVER_URL: ${{ inputs.server_url }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = "capacitor.config.json";
+            const cfg = JSON.parse(fs.readFileSync(path, "utf8"));
+            cfg.server = { ...cfg.server, url: process.env.SERVER_URL };
+            fs.writeFileSync(path, JSON.stringify(cfg, null, 2) + "\n");
+          '
+          echo "Building against $SERVER_URL"
+
+      # ios/ is not committed -- a generated Xcode project is a merge conflict
+      # with a long fuse -- so it is created here, from the config above.
+      - name: Generate the Xcode project
+        working-directory: mobile
+        run: |
+          npx cap add ios
+          npx cap sync ios
+
+      # A keychain of its own, unlocked for this job only: the runner is
+      # ephemeral, but a build should never be able to read or write the
+      # default login keychain.
+      - name: Install the signing certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.IOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+        run: |
+          KEYCHAIN=$RUNNER_TEMP/signing.keychain-db
+          KEYCHAIN_PASSWORD=$(uuidgen)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 1800 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          echo -n "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -k "$KEYCHAIN" -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+
+          PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
+          mkdir -p "$PROFILES"
+          echo -n "$PROVISIONING_PROFILE" | base64 --decode \
+            > "$PROFILES/build.mobileprovision"
+
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Archive
+        working-directory: mobile/ios/App
+        run: |
+          xcodebuild archive \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -allowProvisioningUpdates \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="${{ secrets.IOS_TEAM_ID }}"
+
+      - name: Export the ipa
+        run: |
+          cat > "$RUNNER_TEMP/export.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${{ secrets.IOS_TEAM_ID }}</string>
+            <key>uploadSymbols</key><true/>
+            <key>destination</key><string>export</string>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" \
+            -allowProvisioningUpdates
+
+      # The API key is written to disk because altool reads it from there, and
+      # removed in the same step whatever happens: a private key outliving the
+      # job is the one thing this workflow must not leave behind.
+      - name: Upload to TestFlight
+        env:
+          API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          API_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+        run: |
+          KEYDIR=~/private_keys
+          mkdir -p "$KEYDIR"
+          trap 'rm -rf "$KEYDIR"' EXIT
+          echo -n "$API_KEY_P8" | base64 --decode \
+            > "$KEYDIR/AuthKey_$API_KEY_ID.p8"
+
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$RUNNER_TEMP/export/App.ipa" \
+            --apiKey "$API_KEY_ID" \
+            --apiIssuer "$API_ISSUER_ID"
+
+      - name: Keep the archive
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-archive
+          path: ${{ runner.temp }}/export/*.ipa
+          if-no-files-found: ignore
+          retention-days: 7
