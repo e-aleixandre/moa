@@ -98,15 +98,22 @@
 /* Opening upwards: the composer's trigger sits at the bottom of the screen, so
    the list grows towards the transcript instead of under the home indicator.
    The origin follows, or it would appear to fall out of the button. */
+/* Opening upwards the menu sits ON the composer rather than hovering above
+   it: it overlaps the bar it belongs to, and its bottom-left corner squares
+   off so the two surfaces share an edge instead of each rounding away from
+   the other. What used to be a floating slab near a button now reads as the
+   button's own surface, unfolded. */
 .action-menu-list--up {
   top: auto;
-  bottom: calc(100% + 8px);
+  bottom: -6px;
+  left: -6px;
+  border-bottom-left-radius: var(--zl-r-sm);
   transform-origin: bottom left;
   animation-name: action-menu-in-up;
 }
 
 @keyframes action-menu-in-up {
-  from { opacity: 0; transform: translateY(4px) scale(0.94); }
+  from { opacity: 0; transform: translateY(10px) scaleY(0.82) scaleX(0.9); }
 }
 
 .action-menu-item {

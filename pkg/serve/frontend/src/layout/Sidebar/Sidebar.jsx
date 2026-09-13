@@ -71,12 +71,12 @@ function InboxIcon() {
 function GearIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">
-      {/* Teeth, attached to the body. The previous drawing put eight straight
-          rays around a ring with a gap between, which is how every interface
-          in the world draws brightness -- it read as a sun, and it opened
-          settings. */}
+      {/* Eight teeth, generated rather than drawn by hand: the first attempt
+          chained arcs by eye and they did not meet at the bottom. These are
+          two radii and one angle stepped eight times, so every tooth is the
+          same tooth and the outline closes. */}
       <circle cx="8" cy="8" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5" />
-      <path d="M8 1.3a6.7 6.7 0 0 1 2.05.32l.3 1.52a5.2 5.2 0 0 1 1.19.69l1.46-.5a6.7 6.7 0 0 1 1.27 2.2l-1.16 1.03a5.2 5.2 0 0 1 0 1.38l1.16 1.03a6.7 6.7 0 0 1-1.27 2.2l-1.46-.5a5.2 5.2 0 0 1-1.19.69l-.3 1.52a6.7 6.7 0 0 1-4.1 0l-.3-1.52a5.2 5.2 0 0 1-1.19-.69l-1.46.5a6.7 6.7 0 0 1-1.27-2.2l1.16-1.03a5.2 5.2 0 0 1 0-1.38L1.71 5.53a6.7 6.7 0 0 1 1.27-2.2l1.46.5a5.2 5.2 0 0 1 1.19-.69l.3-1.52A6.7 6.7 0 0 1 8 1.3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+      <path d="M7.01 1.07 L8.99 1.07 L9.33 2.82 L10.72 3.40 L12.20 2.40 L13.60 3.80 L12.60 5.28 L13.18 6.67 L14.93 7.01 L14.93 8.99 L13.18 9.33 L12.60 10.72 L13.60 12.20 L12.20 13.60 L10.72 12.60 L9.33 13.18 L8.99 14.93 L7.01 14.93 L6.67 13.18 L5.28 12.60 L3.80 13.60 L2.40 12.20 L3.40 10.72 L2.82 9.33 L1.07 8.99 L1.07 7.01 L2.82 6.67 L3.40 5.28 L2.40 3.80 L3.80 2.40 L5.28 3.40 L6.67 2.82 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
     </svg>
   );
 }
