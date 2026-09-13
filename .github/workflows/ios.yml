@@ -92,6 +92,26 @@ jobs:
           /usr/libexec/PlistBuddy -c \
             'Add :NSCameraUsageDescription string "moa uses the camera to scan a pairing code."' \
             ios/App/App/Info.plist
+          # Dictation is the reason to want a microphone, and iOS will not ask
+          # for one without a sentence to show the person being asked.
+          /usr/libexec/PlistBuddy -c \
+            'Add :NSMicrophoneUsageDescription string "moa uses the microphone to dictate messages."' \
+            ios/App/App/Info.plist
+          # Recording survives the screen locking only if the app declares it:
+          # otherwise iOS suspends the web view mid-sentence and the audio
+          # already spoken is lost. This is the capability an installed web app
+          # cannot have at all.
+          /usr/libexec/PlistBuddy -c \
+            'Add :UIBackgroundModes array' ios/App/App/Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c \
+            'Add :UIBackgroundModes: string audio' ios/App/App/Info.plist
+
+      # The icon is generated from one 1024px source rather than committed as
+      # a catalogue of twenty crops: the crops are derived, and a derived file
+      # in git is a file that will disagree with its source one day.
+      - name: Generate the app icon
+        working-directory: mobile
+        run: npx @capacitor/assets generate --ios --iconBackgroundColor '#1e1e2e'
 
       # A keychain of its own, unlocked for this job only: the runner is
       # ephemeral, but a build should never be able to read or write the

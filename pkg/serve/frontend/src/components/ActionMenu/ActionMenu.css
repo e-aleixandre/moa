@@ -1,6 +1,14 @@
-/* ActionMenu — icon trigger + popup list. The wrapper is the positioning
-   anchor, so a menu placed "up" hangs off the trigger's top edge and never
-   depends on the height of the surface hosting it. */
+/* ActionMenu — the menu a control opens over the conversation.
+ *
+ * Migrated to the catalogue's floating-surface grammar, the same one the model
+ * picker's `.zl-pop` uses: the sheet colour, the hairline rim, the 16px radius
+ * and the rise-and-settle it opens with. A menu over the transcript and a
+ * picker over the transcript are the same kind of object, and there is no
+ * reason for the phone to learn two of them.
+ *
+ * What is deliberately NOT borrowed is the width: a picker is a list to read,
+ * this is a handful of verbs, so it takes the width of its longest one.
+ */
 
 .action-menu {
   position: relative;
@@ -25,54 +33,91 @@
 
 .action-menu-list {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 8px);
   left: 0;
   z-index: var(--z-overlay);
   display: flex;
   flex-direction: column;
-  min-width: 196px;
-  padding: var(--space-1);
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-md);
-  background: var(--surface0);
-  box-shadow: var(--shadow-lg);
+  min-width: 208px;
+  padding: 6px;
+  border-radius: var(--zl-r-lg, 16px);
+  background: var(--zl-sheet, #171720);
+  /* Rim and shadow rather than a border: the surface is lit from its own edge,
+     which is what keeps it reading as floating rather than drawn. */
+  box-shadow:
+    var(--zl-rim-2, 0 0 0 1px rgba(255, 255, 255, 0.12)),
+    0 16px 48px rgba(0, 0, 0, 0.45);
+  color: var(--zl-t1, #f4f4f7);
+  animation: action-menu-in 180ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+  transform-origin: top left;
+}
+
+/* Its own keyframes rather than the picker's `zl-pop`: identical shape, but a
+   menu must not stop animating because of which stylesheet loaded first. */
+@keyframes action-menu-in {
+  from { opacity: 0; transform: translateY(6px); }
 }
 
 /* Opening upwards: the composer's trigger sits at the bottom of the screen, so
-   the list grows towards the transcript instead of under the home indicator. */
+   the list grows towards the transcript instead of under the home indicator.
+   The origin follows, or it would appear to fall out of the button. */
 .action-menu-list--up {
   top: auto;
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + 8px);
+  transform-origin: bottom left;
 }
 
 .action-menu-item {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 10px;
   width: 100%;
   min-height: 44px;
-  padding: 0 10px;
+  padding: 0 12px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--zl-r-md, 10px);
   background: none;
-  color: var(--subtext0);
+  color: var(--zl-t2, #c3c4d1);
   font: inherit;
-  font-size: var(--text-sm);
+  font-size: var(--zl-fs-body, 14px);
   text-align: left;
   cursor: pointer;
+  transition: background 120ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1)), color 120ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
 }
 
-.action-menu-item.is-active {
-  color: var(--text);
+/* The icons carry the row's weight, so they stay one step quieter than the
+   label until the row is the one being used. */
+.action-menu-item svg {
+  flex: none;
+  color: var(--zl-t3, #9091a6);
+  transition: color 120ms var(--zl-ease, cubic-bezier(0.32, 0.72, 0, 1));
+}
+
+.action-menu-item.is-active,
+.action-menu-item:focus-visible {
+  color: var(--zl-t1, #f4f4f7);
 }
 
 .action-menu-item:focus-visible {
-  background: var(--surface1);
-  color: var(--text);
+  background: var(--zl-hi, rgba(255, 255, 255, 0.04));
   outline: none;
 }
 
+.action-menu-item.is-active svg,
+.action-menu-item:focus-visible svg {
+  color: var(--zl-t1, #f4f4f7);
+}
+
 @media (hover: hover) {
-  .action-menu-trigger:hover { color: var(--text); }
-  .action-menu-item:hover { background: var(--surface1); color: var(--text); }
+  .action-menu-trigger:hover { color: var(--zl-t1, #f4f4f7); }
+  .action-menu-item:hover {
+    background: var(--zl-hi, rgba(255, 255, 255, 0.04));
+    color: var(--zl-t1, #f4f4f7);
+  }
+  .action-menu-item:hover svg { color: var(--zl-t1, #f4f4f7); }
+}
+
+/* A finger lands and the row answers before the menu closes. */
+.action-menu-item:active {
+  background: var(--zl-control, #262633);
 }
