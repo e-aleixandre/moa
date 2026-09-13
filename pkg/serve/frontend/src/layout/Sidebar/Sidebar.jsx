@@ -5,13 +5,11 @@ import { SessionRow, Dot } from "../../components/SessionRow/SessionRow.jsx";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import {
   attentionKind,
-  filterProjectSections,
   groupProjectSessions,
   hiddenProjectSavedCount,
   partitionByAttention,
   previewSavedSessions,
   projectCollapsed,
-  sessionSearchMatch,
   visibleProjectSessions,
 } from "../../data/util/project-sessions.js";
 import { projectMonogram } from "../../data/util/format.js";
@@ -186,37 +184,31 @@ export function Sidebar({
 }) {
   const phone = density === "phone";
   const showJump = jump ?? !phone;
-  const [query, setQuery] = useState("");
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const [showAllSaved, setShowAllSaved] = useState(false);
   const hasMenu = !!(onCloseSession || onReopenSession || onDeleteSession);
 
-  // Session search is word-substring, not the palette's subsequence matcher:
-  // session titles are sentence-length and a few hundred rows turn ordinary
-  // words into noise (project-sessions.js:80).
-  const q = query.trim();
+  // Nothing filters this list any more -- the palette is where you look for a
+  // session -- so what is left is the roster as it stands.
   const { shownActive, shownSaved, hitCount, projectSections } = useMemo(() => {
     // The phone's selector lifts unread answers out of `active` into their own
     // `newResults` list (chrome.js:55). They go straight back in here: unread
     // IS one of the three ways a session waits for you, so it belongs in Needs
     // attention with the other two.
-    const hit = (s) => sessionSearchMatch(q, s);
     const allActive = [...newResults, ...active];
-    const activeHits = allActive.filter(hit);
-    const savedHits = saved.filter(hit);
     return {
-      shownActive: activeHits,
-      shownSaved: savedHits,
-      hitCount: activeHits.length + savedHits.length,
-      projectSections: filterProjectSections(groupProjectSessions([...allActive, ...saved]), query),
+      shownActive: allActive,
+      shownSaved: saved,
+      hitCount: allActive.length + saved.length,
+      projectSections: groupProjectSessions([...allActive, ...saved]),
     };
-  }, [q, query, newResults, active, saved]);
+  }, [newResults, active, saved]);
 
   /* Saved sessions are deliberately not offered to the attention split: a saved
      session is parked on purpose, so it belongs under Saved even if it ended
      badly. */
   const { needs: needsAttention, rest: restActive } = partitionByAttention(shownActive);
-  const savedPreview = previewSavedSessions(shownSaved, { expanded: showAllSaved, searching: !!q });
+  const savedPreview = previewSavedSessions(shownSaved, { expanded: showAllSaved, searching: false });
   // The catalogue draws ⌘K. The binding still accepts both modifiers
   // (formatShortcut is how the palette NAMES the same shortcut); the keycap
   // is the accepted drawing, not a platform translation of it.
@@ -270,29 +262,26 @@ export function Sidebar({
       {!inboxOpen && (
         <div class="zl-side-head">
           <span class="zl-side-title">moa</span>
-          {/* Search is a recess cut into the sheet: present at rest, so it reads
-              as an object you can reach for, but sunken so it never competes
-              with the raised things (the current row, New session).
+          {/* One search, not two. This used to be a field that FILTERED this
+              list, sitting beside a keycap that opened the palette — two ways
+              to look for a session in a 272px column, and the weaker one held
+              the better seat. The palette finds sessions, goes to projects and
+              runs actions; filtering only ever shortened what was already in
+              front of you, and still left you pointing at a row.
 
-              The keycap is a BUTTON, not an ornament: this field FILTERS the list
-              and ⌘K JUMPS to a session from anywhere, so the two do not get in
-              each other's way. Only where there is a keyboard. */}
-          <label class="zl-search">
-            <SearchIcon />
-            <input
-              class="zl-search-in"
-              type="text"
-              placeholder="Search"
-              aria-label="Search sessions"
-              autocomplete="off"
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck={false}
-              value={query}
-              onInput={(e) => setQuery(e.target.value)}
-            />
-            {jumpCap}
-          </label>
+              So the head keeps the door and not the field. */}
+          {onSearch ? (
+            <button type="button" class="zl-search is-door" onClick={onSearch} aria-label={`Search ${formatShortcut("K", { mod: true })}`}>
+              <SearchIcon />
+              <span class="zl-search-txt">Search</span>
+              {jumpCap}
+            </button>
+          ) : (
+            <span class="zl-search is-door is-inert">
+              <SearchIcon />
+              <span class="zl-search-txt">Search</span>
+            </span>
+          )}
           {/* Two icons at the end of the head, not a band across the list.
               A control for the list's arrangement does not deserve a line of
               its own -- the sidebar is narrow and every row of it is worth
@@ -337,21 +326,18 @@ export function Sidebar({
       ) : (
         <div class="zl-list">
 
-          {!q && hitCount === 0 && (
+          {hitCount === 0 && (
             <button type="button" class="zl-empty-new" onClick={onNewSession}>
               + New session
             </button>
           )}
-          {q && hitCount === 0 && (
-            <span class="zl-note">No session matches “{query}”</span>
-          )}
 
           {groupByProject ? projectSections.map((section) => {
             const canToggle = typeof onToggleProject === "function";
-            const collapsed = canToggle ? projectCollapsed(section, collapsedProjects, !!q) : false;
+            const collapsed = canToggle ? projectCollapsed(section, collapsedProjects, false) : false;
             const expanded = expandedProjects.has(section.key);
-            const shownSessions = visibleProjectSessions(section, expanded, !!q);
-            const hiddenSaved = hiddenProjectSavedCount(section, expanded, !!q);
+            const shownSessions = visibleProjectSessions(section, expanded, false);
+            const hiddenSaved = hiddenProjectSavedCount(section, expanded, false);
             const mono = projectMonogram(section.key);
             const worst = sectionWorst(section);
             const name = mono?.name || section.label;

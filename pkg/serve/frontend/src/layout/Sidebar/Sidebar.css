@@ -96,19 +96,28 @@
 .zl-search:hover { color: var(--zl-t3); box-shadow: var(--zl-rim-2); }
 .zl-search:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line); color: var(--zl-t2); }
 .zl-search-ico { width: 15px; height: 15px; flex: none; }
-.zl-search-in {
+/* The door to the palette, where a filter field used to be. Same recess, so
+   the head keeps its shape: a thing you reach for, sunken enough never to
+   compete with the raised things below it. */
+.zl-search.is-door {
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.zl-search.is-inert { cursor: default; }
+.zl-search-txt {
   flex: 1;
   min-width: 0;
-  height: 36px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--zl-t1);
-  font-family: inherit;
-  font-size: var(--zl-fs-title); /* 16: iOS focus-zoom floor */
-  letter-spacing: inherit;
+  font-size: var(--zl-fs-body);
+  color: var(--zl-t4);
+  transition: color 140ms ease;
 }
-.zl-search-in::placeholder { color: var(--zl-t4); }
+.zl-search.is-door:hover .zl-search-txt { color: var(--zl-t3); }
+.zl-search.is-door:focus-visible {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: -2px;
+}
 .zl-kbd {
   padding: 2px 5px;
   border-radius: var(--zl-r-sm);
@@ -487,5 +496,5 @@ a.zl-ver.is-update:focus-visible {
 .zl-side-body.is-phone .zl-side-new { height: 48px; margin: 4px 12px 10px; }
 .zl-side-body.is-phone .zl-inbox { height: 44px; }
 .zl-side-body.is-phone .zl-search,
-.zl-side-body.is-phone .zl-search-in { height: 44px; }
+.zl-side-body.is-phone .zl-search { height: 44px; }
 .zl-side-body.is-phone .zl-gear { width: 44px; height: 44px; }

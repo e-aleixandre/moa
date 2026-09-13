@@ -289,10 +289,10 @@ test('New session on a phone asks where it runs, and never creates by itself', (
   expect(source).not.toMatch(/createSession\(\{ cwd \}\)/);
 });
 
-test('the sidebar filter and the command palette are two different jobs', () => {
-  // The owner's decision: the field in the head FILTERS this list, ⌘K JUMPS.
-  // On the desktop both exist; on a phone there is no keycap, because there is
-  // no keyboard — but the filter is there in both.
+test('the head opens the palette, and only a keyboard gets a keycap', () => {
+  // The filter field is gone: one search, and it is the palette's. What the
+  // densities still differ on is the keycap — there is no ⌘K to press on a
+  // phone, so drawing one would be a lie about what is available.
   const desktop = Sidebar({ active: [], saved: [], onSearch: () => {} });
   const phone = Sidebar({ density: 'phone', active: [], saved: [], onSearch: () => {} });
   const find = (node, pred) => {
@@ -307,9 +307,17 @@ test('the sidebar filter and the command palette are two different jobs', () => 
     if (pred(node)) return node;
     return find(node.props?.children, pred);
   };
-  const search = (tree) => find(tree, (n) => n.type === 'input' && n.props?.['aria-label'] === 'Search sessions');
-  expect(search(desktop)).toBeTruthy();
-  expect(search(phone)).toBeTruthy();
+  // No filter input survives in either density.
+  const field = (tree) => find(tree, (n) => n.type === 'input');
+  expect(field(desktop)).toBeNull();
+  expect(field(phone)).toBeNull();
+
+  // The door is a button wired to onSearch, in both.
+  const door = (tree) => find(tree, (n) => typeof n.props?.class === 'string' && n.props.class.includes('is-door'));
+  expect(door(desktop)).toBeTruthy();
+  expect(door(desktop).type).toBe('button');
+  expect(door(phone)).toBeTruthy();
+
   const jump = (tree) => find(tree, (n) => n.props?.class === 'zl-kbd zl-data');
   expect(jump(desktop)).toBeTruthy();
   expect(jump(desktop).type).toBe('button');

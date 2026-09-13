@@ -14,12 +14,13 @@ const source = readFileSync(
   "utf8",
 );
 
-test("the field filters this list; ⌘K is a separate jump", () => {
-  // Two jobs, two controls. Wiring the input to onSearch would make typing
-  // open the palette and leave the list unfiltered.
-  expect(source).toMatch(/onInput=\{.*setQuery/);
+test("the head holds a door to the palette, not a filter of its own", () => {
+  // The inversion of an older rule: this used to be a field that filtered the
+  // list, beside a keycap that opened the palette. One search now, and it is
+  // the one that can also reach projects and actions.
   expect(source).toMatch(/onClick=\{onSearch\}/);
-  expect(source).toContain('aria-label="Search sessions"');
+  expect(source).not.toMatch(/setQuery/);
+  expect(source).not.toContain('aria-label="Search sessions"');
 });
 
 test("the phone has no keycap: there is no keyboard", () => {
@@ -29,8 +30,8 @@ test("the phone has no keycap: there is no keyboard", () => {
 });
 
 test("New session is a labelled action the caller routes", () => {
-  // The button does not pick the destination. Desktop opens the palette;
-  // the phone opens NewSessionView inside the drawer. Both pass onNewSession.
+  // The button does not pick the destination: the caller routes it. Both
+  // densities open the palette's create step now.
   expect(source).toContain("New session");
   expect(source).toMatch(/class="zl-side-new"[^>]*onClick=\{onNewSession\}/);
   expect(source).not.toContain("openPalette");
