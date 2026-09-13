@@ -978,19 +978,21 @@ export function CommandPalette({
           </div>
           {step === "create" && (
             <>
-              <div class="field-row">
+              {/* The model you will use, and a way to change it -- the same
+                  row the desktop shows. It used to be every model in a
+                  horizontal scroller: a filmstrip you had to drag through,
+                  which reads as a list of twenty today and would read as a
+                  list of four hundred the day a provider ships four hundred.
+                  A choice this size belongs in the model step, which already
+                  exists, has search, and groups by provider. */}
+              <button type="button" class="field-row model-row is-tap" onClick={goToModel}>
                 <span class="lbl">Model</span>
-                <div class="model-chips">
-                  {models.map((m) => {
-                    const spec = modelSpec(m);
-                    return (
-                      <button type="button" key={spec} class={`mchip${spec === model ? " on" : ""}`} onClick={() => setModel(spec)}>
-                        {m.name || m.id}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+                <span class="model-current" style={currentModelSpec ? { color: `var(--${currentModelSpec.accent})` } : undefined}>
+                  {currentModelLabel}
+                </span>
+                {currentModelSpec?.sub && <span class="model-sub">{currentModelSpec.sub}</span>}
+                <span class="model-change">Change</span>
+              </button>
               <div class="pal-foot create-bar">
                 <button type="button" class="btn-create" disabled={!createTarget || creating} onClick={() => doCreate()}>
                   {creating ? "Creating…" : `Create in ${basename(createTarget) || "…"}`}

@@ -381,35 +381,23 @@
   color: var(--zl-t4);
   flex: none;
 }
-.model-chips { display: flex; gap: 6px; flex: 1; overflow-x: auto; }
-.mchip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  cursor: pointer;
-  border: 0;
-  box-shadow: var(--zl-rim);
-  border-radius: var(--zl-r-md);
-  min-height: 44px;
-  padding: 0 14px;
-  font-size: var(--zl-fs-body);
-  color: var(--zl-t2);
-  background: transparent;
-  font-family: var(--font);
-  transition: background 120ms ease, color 120ms ease;
-}
-.mchip.on {
-  background: var(--zl-accent-dim);
-  box-shadow: 0 0 0 1px var(--zl-accent-line);
-  color: var(--zl-t1);
-  font-weight: var(--weight-medium);
-}
-
-/* ── create step · model row (desktop) ────────────────────────────────────
+/* ── create step · model row ────────────────────────────────────────
  * One line: the model the create will use + the way to change it. The
  * chooser itself is a palette step (rows below), not a popover, so this row
  * only has to read well and stay out of the way. */
+/* On a phone the whole row is the target: the row IS the way to the model
+   step, and a 44px strip is easier to hit than the word at its end. */
+.model-row.is-tap {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.model-row.is-tap:active { background: var(--zl-hi); }
+.model-row.is-tap .model-change { margin-left: auto; }
+
 .model-row .model-current {
   font-size: var(--zl-fs-body);
   font-weight: 600;
@@ -453,7 +441,6 @@
 }
 .model-row .model-change:focus-visible,
 .crumb-chip:focus-visible,
-.mchip:focus-visible,
 .btn-create:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
