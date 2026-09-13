@@ -1,8 +1,81 @@
 <!doctype html>
-<!-- Capacitor requires a webDir to exist even when the container loads a
-     remote server. Nothing here is ever shown: server.url wins. It is the
-     fallback if that server cannot be reached. -->
+<html lang="en">
+<head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>moa</title>
-<body style="margin:0;background:#11111b;color:#a6adc8;font:15px/1.5 system-ui;display:grid;place-items:center;height:100vh">
-<p>Cannot reach moa.</p>
+<!--
+  The app before it knows which moa it belongs to.
+
+  A downloaded app cannot have the address compiled in: it is the same client
+  as the web one, with no server of its own. So it starts here, and everything
+  it needs arrives in the pairing envelope the web frontend already generates
+  -- the origin and a one-time payload, because the browser that made it was
+  already talking to the right server.
+
+  Once bound, this page is never seen again: the container is sent to the real
+  frontend, and that is the whole app.
+-->
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    padding:
+      calc(env(safe-area-inset-top, 0px) + 32px) 24px
+      calc(env(safe-area-inset-bottom, 0px) + 24px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 20px;
+    background: #11111b;
+    color: #cdd6f4;
+    font: 15px/1.5 -apple-system, system-ui, sans-serif;
+  }
+  h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  p { margin: 0; color: #a6adc8; }
+  .steps { margin: 0; padding-left: 20px; color: #a6adc8; }
+  .steps li + li { margin-top: 6px; }
+  button, input {
+    /* 16px minimum: anything smaller makes iOS zoom the moment it takes focus. */
+    font: 16px/1.4 -apple-system, system-ui, sans-serif;
+    border-radius: 12px;
+    padding: 14px 16px;
+    width: 100%;
+  }
+  button { border: 0; background: #cba6f7; color: #11111b; font-weight: 600; }
+  button:disabled { opacity: 0.5; }
+  button.quiet { background: #313244; color: #cdd6f4; font-weight: 500; }
+  input { border: 1px solid #45475a; background: #181825; color: #cdd6f4; }
+  .manual { display: none; flex-direction: column; gap: 12px; }
+  .manual.on { display: flex; }
+  .error { color: #f38ba8; min-height: 1.5em; }
+</style>
+</head>
+<body>
+  <div>
+    <h1>Pair this app</h1>
+    <p>It needs to know which moa it belongs to.</p>
+  </div>
+
+  <ol class="steps">
+    <li>Open moa in a browser on your computer.</li>
+    <li>Create a pairing code in Settings.</li>
+    <li>Scan it here.</li>
+  </ol>
+
+  <button id="scan" type="button">Scan the code</button>
+  <button id="toggle" type="button" class="quiet">Enter it by hand</button>
+
+  <div class="manual" id="manual">
+    <input id="text" type="text" autocapitalize="off" autocorrect="off"
+           spellcheck="false" placeholder="Paste the pairing details">
+    <button id="submit" type="button">Pair</button>
+  </div>
+
+  <p class="error" id="error" role="alert"></p>
+
+  <script type="module" src="./boot.js"></script>
+</body>
+</html>

@@ -1,4 +1,7 @@
-const PULSE_PAIRING_PREFIX = 'moa-pulse-pair-v1:';
+// The envelope a device scans: server origin + the one-time pairing payload.
+// Distinct from the payload itself ("moa-pair-v1:", device_auth.go), which is
+// what travels INSIDE it and carries no address.
+const PAIRING_PREFIX = 'moa-link-v1:';
 
 function base64URL(bytes) {
   let binary = '';
@@ -29,5 +32,5 @@ export function encodePulsePairingEnvelope(serverURL, pairingPayload) {
     throw new TypeError('server URL and pairing payload must be strings');
   }
   const json = JSON.stringify({ server_url: serverURL, pairing_payload: pairingPayload });
-  return PULSE_PAIRING_PREFIX + base64URL(new TextEncoder().encode(json));
+  return PAIRING_PREFIX + base64URL(new TextEncoder().encode(json));
 }

@@ -8,18 +8,17 @@ name: iOS app
 # puts a build in front of a person. That should be a decision, not a
 # consequence of pushing a commit.
 #
-# The frontend is NOT bundled into the app: the container loads it from a
-# running moa (see mobile/README.md), so shipping interface changes does not
-# need this workflow at all. Run it when the container itself changes -- native
-# plugins, capabilities, icons, the bundle id.
+# The frontend is NOT bundled into the app: the container loads it from the
+# moa it was paired with (see mobile/README.md), so shipping interface changes
+# does not need this workflow at all. Run it when the container itself changes
+# -- native plugins, capabilities, icons, the bundle id.
+#
+# The build carries no server address: which moa it talks to is decided on the
+# device, by pairing.
 
 on:
   workflow_dispatch:
     inputs:
-      server_url:
-        description: "The moa this build talks to"
-        required: true
-        default: "https://dev.taild072ac.ts.net:7350"
       notes:
         description: "What testers should look at"
         required: false
@@ -53,25 +52,8 @@ jobs:
         working-directory: mobile
         run: npm ci
 
-      # The URL is an input rather than a constant because a build for someone
-      # else's moa is the same app pointed elsewhere, and because a TestFlight
-      # build must never silently keep a developer tailnet address.
-      - name: Point the container at this moa
-        working-directory: mobile
-        env:
-          SERVER_URL: ${{ inputs.server_url }}
-        run: |
-          node -e '
-            const fs = require("fs");
-            const path = "capacitor.config.json";
-            const cfg = JSON.parse(fs.readFileSync(path, "utf8"));
-            cfg.server = { ...cfg.server, url: process.env.SERVER_URL };
-            fs.writeFileSync(path, JSON.stringify(cfg, null, 2) + "\n");
-          '
-          echo "Building against $SERVER_URL"
-
       # ios/ is not committed -- a generated Xcode project is a merge conflict
-      # with a long fuse -- so it is created here, from the config above.
+      # with a long fuse -- so it is created here, from the config in the repo.
       - name: Generate the Xcode project
         working-directory: mobile
         run: |

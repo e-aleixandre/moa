@@ -3,7 +3,6 @@
   "appName": "moa",
   "webDir": "www",
   "server": {
-    "url": "https://dev.taild072ac.ts.net:7350",
     "cleartext": false
   },
   "ios": {

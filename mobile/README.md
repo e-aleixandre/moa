@@ -29,14 +29,18 @@ running in (`src/data/shell.js`) and CSS grants one of two levels
 A web app does **not** get `edge`, however convincingly it reports being
 standalone. That is enforced by a test, not by convention.
 
-## Loading from the server
+## Which moa it talks to
 
-`capacitor.config.json` points `server.url` at a running moa. The container is
-a window onto it, so changing the frontend does not mean rebuilding the app:
-rebuild the bundle, restart moa, pull to refresh.
+The app has no address compiled in. It is the same client as the web one with
+no server of its own, so it starts unbound and asks to be paired: open moa in a
+browser, create a pairing code, scan it. The code carries the origin and a
+one-time payload -- the browser that made it was already talking to the right
+server -- and the app keeps a device credential of its own from then on.
 
-The consequence is that the container needs to know *which* moa. Until device
-pairing is wired up, that URL is set here by hand.
+A code can also be typed by hand, because a camera is not always an option.
+
+It loads the interface from that moa rather than bundling it, so a new version
+of moa does **not** need a new build of the app.
 
 ## Building it
 
