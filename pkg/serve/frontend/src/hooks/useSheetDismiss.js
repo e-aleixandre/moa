@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from "preact/hooks";
+import { MOTION, prefersReducedMotion } from "./motion.js";
 
 // useSheetDismiss — a real swipe-down gesture that DISMISSES (closes) the mobile
 // SessionDrawer (MOBILE-DRAWER-SPEC §1.4). The grab handle and the sheet head
@@ -21,21 +22,14 @@ const HORIZONTAL_SLOP = 10; // px of horizontal travel (or upward) that abandons
 const CLOSE_FRACTION = 0.4; // fraction of sheet travel past which release closes
 const FLICK_VELOCITY = 0.5; // px/ms downward flick that closes regardless of travel
 
-// Settle timings/curves — mirror SessionDrawer.css so the imperative settle
-// matches the CSS enter/leave transitions.
-const OPEN_MS = 260;
-const OPEN_EASE = "cubic-bezier(0.2, 0.7, 0.2, 1)";
-const CLOSE_MS = 220;
-const CLOSE_EASE = "cubic-bezier(0.4, 0, 1, 1)";
-const VEIL_MS = 160;
-
-function prefersReducedMotion() {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
+// Settle timings/curves come from the motion language (hooks/motion.js), the
+// same numbers MobileSheet.css and SessionDrawer.css transition with, so a
+// released finger settles exactly like a tap would have.
+const OPEN_MS = MOTION.base;
+const OPEN_EASE = MOTION.ease;
+const CLOSE_MS = MOTION.exitBase;
+const CLOSE_EASE = MOTION.easeExit;
+const VEIL_MS = MOTION.exitBase;
 
 export function useSheetDismiss({ onClose }) {
   const sheetRef = useRef(null);

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { MOTION, prefersReducedMotion } from "../../../hooks/motion.js";
 import { useSheetDismiss } from "../../../hooks/useSheetDismiss.js";
 import "./MobileSheet.css";
 
@@ -41,10 +42,7 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, bare = fals
   // next frame so the .is-open transition runs; on close drop `entered` and
   // unmount after the leave duration. Reduced motion snaps both ways.
   useEffect(() => {
-    const reduce =
-      typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduce = prefersReducedMotion();
     if (open) {
       wasOpenRef.current = true;
       clearTimeout(closeTimerRef.current);
@@ -72,7 +70,7 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, bare = fals
         closeTimerRef.current = setTimeout(() => {
           setVisible(false);
           fireClosed();
-        }, 260);
+        }, MOTION.exitBase);
       }
     }
     return undefined;

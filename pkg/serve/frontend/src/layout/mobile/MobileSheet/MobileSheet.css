@@ -14,11 +14,12 @@
   background: rgba(17, 17, 27, 0.5);
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--duration) var(--ease);
+  transition: opacity var(--motion-exit-base) var(--motion-ease-exit);
 }
 .msheet-scrim.is-open {
   opacity: 1;
   pointer-events: auto;
+  transition: opacity var(--motion-base) var(--motion-ease);
 }
 .msheet-scrim.is-drag {
   transition: none;
@@ -41,10 +42,12 @@
   box-shadow: 0 -24px 60px rgba(0, 0, 0, 0.5);
   transform: translateY(130%);
   will-change: transform;
-  transition: transform 0.26s var(--ease);
+  /* A large surface: --motion-base in, --motion-exit-base out (tokens.css). */
+  transition: transform var(--motion-exit-base) var(--motion-ease-exit);
 }
 .msheet.is-open {
   transform: translateY(0);
+  transition: transform var(--motion-base) var(--motion-ease);
 }
 .msheet.is-drag {
   transition: none;

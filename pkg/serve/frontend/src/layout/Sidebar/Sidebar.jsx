@@ -1,4 +1,5 @@
 import { useMemo, useState } from "preact/hooks";
+import { useFlip } from "../../hooks/useFlip.js";
 import { InboxView } from "../../components/InboxView/InboxView.jsx";
 import { SessionCardMenu } from "../../components/SessionCardMenu/SessionCardMenu.jsx";
 import { SessionRow, Dot } from "../../components/SessionRow/SessionRow.jsx";
@@ -213,8 +214,20 @@ export function Sidebar({
   // (formatShortcut is how the palette NAMES the same shortcut); the keycap
   // is the accepted drawing, not a platform translation of it.
 
+  // The order of the rows as rendered: a session that answers moves from
+  // Active to Needs attention, a saved one rises to the top of Saved. useFlip
+  // carries each row from its old slot to the new one instead of redrawing
+  // it there (motion language, rule 4). Keyed by ids only, as one string: a
+  // title or a timestamp changing must not re-measure a list that did not
+  // move, and the partitions above are fresh arrays every render.
+  const order = (groupByProject
+    ? projectSections.flatMap((section) => section.sessions.map((s) => s.id))
+    : [...needsAttention, ...restActive, ...savedPreview.visible].map((s) => s.id)
+  ).join("\n");
+  const listRef = useFlip([order, inboxOpen, collapsedProjects, expandedProjects, showAllSaved]);
+
   const row = (s, hidePath = false) => (
-    <div class={`zl-session${hasMenu ? " is-menu" : ""}`} key={s.id}>
+    <div class={`zl-session${hasMenu ? " is-menu" : ""}`} key={s.id} data-flip={s.id}>
       <SessionRow
         title={s.title}
         state={s.state || (s.saved ? "saved" : "idle")}
@@ -324,7 +337,7 @@ export function Sidebar({
           />
         </div>
       ) : (
-        <div class="zl-list">
+        <div class="zl-list" ref={listRef}>
 
           {hitCount === 0 && (
             <button type="button" class="zl-empty-new" onClick={onNewSession}>

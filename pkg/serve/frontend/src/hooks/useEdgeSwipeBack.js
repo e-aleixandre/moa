@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from "preact/hooks";
+import { MOTION, prefersReducedMotion } from "./motion.js";
 
 // useEdgeSwipeBack — the iOS "back" gesture for a full-screen push: a touch that
 // starts within EDGE_ZONE of the left edge and travels right drags the screen
@@ -21,16 +22,9 @@ const VERTICAL_SLOP = 12; // px of vertical travel that abandons the gesture
 const BACK_FRACTION = 0.35; // fraction of the width past which release goes back
 const FLICK_VELOCITY = 0.4; // px/ms rightward flick that goes back regardless
 
-const SETTLE_MS = 220;
-const SETTLE_EASE = "cubic-bezier(0.2, 0.7, 0.2, 1)";
-
-function prefersReducedMotion() {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
+// A screen going back is a large surface leaving (motion language, rule 2).
+const SETTLE_MS = MOTION.exitBase;
+const SETTLE_EASE = MOTION.ease;
 
 export function useEdgeSwipeBack({ onBack }) {
   const screenRef = useRef(null);

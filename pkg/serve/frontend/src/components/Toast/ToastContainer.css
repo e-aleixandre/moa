@@ -15,12 +15,22 @@
 
 .toast-stack .toast {
   pointer-events: auto;
-  animation: toast-in var(--duration) var(--ease);
+  /* A small surface (tokens.css, Motion rule 3): it drops in by --motion-rise
+     from where it came, the top edge, and lifts back out the same way, faster.
+     ToastContainer keeps a dismissed toast mounted for --motion-exit-fast so
+     the exit is seen; the ones below it are carried up by useFlip. */
+  animation: toast-in var(--motion-fast) var(--motion-ease);
+}
+.toast-stack .toast.is-leaving {
+  animation: toast-out var(--motion-exit-fast) var(--motion-ease-exit) forwards;
+  pointer-events: none;
 }
 
 @keyframes toast-in {
-  from { opacity: 0; transform: translateY(-8px) scale(0.96); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(calc(var(--motion-rise) * -1)) scale(0.96); }
+}
+@keyframes toast-out {
+  to { opacity: 0; transform: translateY(calc(var(--motion-rise) * -1)) scale(0.96); }
 }
 
 @media (max-width: 768px) {

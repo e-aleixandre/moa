@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from "preact/hooks";
+import { usePresenceList } from "../../hooks/usePresence.js";
+import { useFlip } from "../../hooks/useFlip.js";
 import { getToasts, subscribeToasts, removeToast } from "../../data/notifications.js";
 import { openSession } from "../../data/tile-actions.js";
 import { Toast, ToastTitle, ToastMessage } from "./Toast.jsx";
@@ -23,6 +25,10 @@ const TONE = {
 export function ToastContainer() {
   const [toasts, setToasts] = useState(getToasts());
   useEffect(() => subscribeToasts(setToasts), []);
+  // A dismissed toast leaves the way it came (motion language, rule 2), and
+  // the ones below it close the gap by moving rather than jumping (rule 4).
+  const shown = usePresenceList(toasts, (t) => t.id);
+  const stackRef = useFlip([shown.map((s) => `${s.item.id}${s.leaving ? "-" : ""}`).join("\n")]);
 
   const handleClick = useCallback((toast) => {
     if (toast.sessionId) openSession(toast.sessionId);
@@ -30,13 +36,16 @@ export function ToastContainer() {
     removeToast(toast.id);
   }, []);
 
-  if (toasts.length === 0) return null;
+  if (shown.length === 0) return null;
 
   return (
-    <div class="toast-stack">
-      {toasts.map((t) => (
+    <div class="toast-stack" ref={stackRef}>
+      {shown.map(({ item: t, leaving }) => (
         <Toast
           key={t.id}
+          data-flip={t.id}
+          class={leaving ? "is-leaving" : undefined}
+          aria-hidden={leaving || undefined}
           tone={TONE[t.type] || "info"}
           action={t.action ? {
             ...t.action,

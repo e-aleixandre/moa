@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "preact/hooks";
+import { usePresence } from "../../hooks/usePresence.js";
 import "./ActionMenu.css";
 
 // ActionMenu — a small icon trigger that unfurls a list of actions. It carries
@@ -24,6 +25,9 @@ export function ActionMenu({
   disabled = false,
 }) {
   const rootRef = useRef(null);
+  // The list stays mounted through its exit so it can leave the way it came
+  // (motion language, rule 2) instead of vanishing on the frame `open` drops.
+  const { mounted, leaving } = usePresence(open);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -65,8 +69,13 @@ export function ActionMenu({
       >
         <TriggerIcon size={triggerSize} aria-hidden="true" />
       </button>
-      {open && (
-        <div class={`action-menu-list${placement === "up" ? " action-menu-list--up" : ""}`} role="menu" aria-label={label}>
+      {mounted && (
+        <div
+          class={`action-menu-list${placement === "up" ? " action-menu-list--up" : ""}${leaving ? " is-leaving" : ""}`}
+          role="menu"
+          aria-label={label}
+          aria-hidden={leaving || undefined}
+        >
           {actions.map((action) => {
             const Icon = action.icon;
             return (

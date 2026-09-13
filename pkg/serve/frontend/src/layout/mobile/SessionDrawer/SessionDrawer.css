@@ -30,11 +30,14 @@
      a 300px sheet is that you can see there is a conversation behind it. */
   background: color-mix(in srgb, var(--crust) 55%, transparent);
   opacity: 0;
-  transition: opacity 200ms var(--ease);
+  /* Leaving is faster than arriving (tokens.css, Motion rule 2): the veil
+     lifts on the exit tempo, then the .is-open rule takes over for entry. */
+  transition: opacity var(--motion-exit-base) var(--motion-ease-exit);
   overscroll-behavior: contain;
 }
 .sdrawer-veil.is-open {
   opacity: 1;
+  transition: opacity var(--motion-base) var(--motion-ease);
 }
 
 .sdrawer {
@@ -54,10 +57,11 @@
   box-shadow: var(--shadow-lg);
   transform: translateX(-100%);
   will-change: transform;
-  transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  transition: transform var(--motion-exit-base) var(--motion-ease-exit);
 }
 .sdrawer.is-open {
   transform: translateX(0);
+  transition: transform var(--motion-base) var(--motion-ease);
 }
 /* The panel takes focus on open so the dialog is announced, but it is not an
    interactive target — a ring around the whole sheet would just read as an

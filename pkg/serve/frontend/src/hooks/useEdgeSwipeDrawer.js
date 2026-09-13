@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { tap } from "../data/haptics.js";
+import { MOTION, prefersReducedMotion } from "./motion.js";
 
 // The drawer is mounted only after an opening drag has crossed the intent
 // threshold. From then on its transform is written directly so moving a finger
@@ -8,16 +9,8 @@ const EDGE_ZONE = 24;
 const BEGIN_THRESHOLD = 12;
 const VERTICAL_SLOP = 12;
 const OPEN_FRACTION = 0.35;
-const SETTLE_MS = 260;
-const SETTLE_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
-
-function prefersReducedMotion() {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
+const SETTLE_MS = MOTION.base;
+const SETTLE_EASE = MOTION.ease;
 
 // useEdgeSwipeDrawer — the phone conversation's sessions drawer gesture.
 // Unlike pushed work screens, this only opts in at the conversation root.

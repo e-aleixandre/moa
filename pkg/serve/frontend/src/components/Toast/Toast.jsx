@@ -18,11 +18,11 @@ const TONE_CLASS = {
 // Toast — notification with a semantic-colored left border. `children` is
 // the body (free-form title + message, the consumer decides the markup);
 // optional `action` adds an action link like "Review →".
-export function Toast({ tone = "info", children, action, onDismiss, ...rest }) {
+export function Toast({ tone = "info", children, action, onDismiss, class: className, ...rest }) {
   const Icon = ICONS[tone] || Info;
   const cls = TONE_CLASS[tone] || "info";
   return (
-    <div class={`toast ${cls}`} role="status" {...rest}>
+    <div class={`toast ${cls}${className ? ` ${className}` : ""}`} role="status" {...rest}>
       <span class="ic" aria-hidden="true">
         <Icon size={15} />
       </span>

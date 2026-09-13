@@ -50,9 +50,11 @@
   --radius-lg:   14px;
   --radius-full: 9999px;
 
-  /* Transitions */
-  --ease:        cubic-bezier(0.4, 0, 0.2, 1);
-  --duration:    150ms;
+  /* Transitions -- legacy names. They now resolve to the motion language
+     below, so the ~40 rules still written against them move with the same
+     rules as everything else instead of on their own 150ms Material curve. */
+  --ease:        var(--motion-ease);
+  --duration:    var(--motion-hover);
 
   /* ---------------------------------------------------------------- */
   /* Extended scale                                                    */
@@ -147,6 +149,93 @@
   --content-wide:   860px;
   --content-page:  1180px;
 
+  /* ---------------------------------------------------------------- */
+  /* Motion                                                            */
+  /* ---------------------------------------------------------------- */
+  /* The motion language. Six rules, not a catalogue; a surface that needs a
+     seventh is asking the wrong question. Before this block the codebase had
+     ~40 distinct duration/curve pairs (a sweep: 120/140/150/160/180/200/220/
+     250/260/300/400ms over five curves), each one chosen per file. Nothing
+     was wrong with any of them alone; together they are why the product
+     felt patched rather than polished -- the eye learns a tempo, and every
+     surface taught it a different one.
+
+     The rules:
+
+     1. ONE CURVE for anything that moves through space -- appears, slides,
+        reorders. It is the settle curve iOS uses for its sheets: fast out of
+        the gate, then a long soft landing. The landing is what reads as
+        "expensive": the object arrives, it does not stop. Material's
+        symmetric 0.4/0/0.2/1 (the old --ease) brakes too evenly and reads
+        as mechanical next to it.
+
+     2. LEAVING IS FASTER THAN ARRIVING, and accelerates out. Arrival is
+        information (something new to look at); departure is confirmation
+        (you already know what you asked for). ~75% of the enter time, on an
+        ease-in, so the surface gets out of the way instead of lingering.
+
+     3. DURATION FOLLOWS DISTANCE. A hover tint or a pressed state: 120ms --
+        long enough to be a transition, short enough that the control feels
+        immediate. A small surface -- popover, menu, toast, palette: 180ms.
+        A large surface that crosses the screen -- drawer, sheet, panel:
+        260ms. Nothing user-triggered exceeds 260; anything longer makes
+        the user wait for the UI. --motion-slow is for data revealing itself
+        (a meter filling), where the wait IS the message.
+
+     4. A LIST REORDERS BY MOVING ITS ROWS, not by redrawing them. FLIP
+        (hooks/useFlip.js): measure, let the DOM reorder, measure again,
+        animate the difference on transform only. Same curve and duration as
+        a large surface, because a row travelling the height of a list IS a
+        large move. Rows that enter fade+rise by --motion-rise; rows that
+        leave are not animated (keeping them mounted costs more than the
+        effect is worth in a list of hundreds).
+
+     5. A CONTROL ACKNOWLEDGES A TOUCH, ONCE. Pressed: translateY(1px) or
+        scale(0.92) on the glyph, at --motion-hover. A choice between two
+        states may use THE ONE SPRING (--motion-ease-spring) -- the
+        segmented pill that overshoots and settles -- because a spring says
+        "answered". It is reserved: a spring on everything is a toy.
+
+     6. WHAT IS NOT ANIMATED. Typing and its echo (the caret, the textarea
+        growing, suggestions filtering): input feedback must be instant or
+        the tool feels laggy. Streaming content (tokens, ledger rows, the
+        transcript's own growth). Live numbers (timers, token counts, cost).
+        Scroll position, except the one settle after a swipe. Layout size
+        (width/height) of anything holding text -- it re-wraps every line
+        it holds on every frame. And everything, under
+        prefers-reduced-motion: reduce.
+
+     Surfaces animate transform and opacity only. Background/colour may
+     transition at --motion-hover; nothing else.
+
+     hooks/motion.js mirrors the numbers for the code that has to wait for
+     a transition to finish (presence, swipe settles). tokens/motion.test.js
+     keeps the two in step. */
+  --motion-ease:        cubic-bezier(0.32, 0.72, 0, 1);
+  --motion-ease-exit:   cubic-bezier(0.4, 0, 1, 1);
+  --motion-ease-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
+
+  --motion-hover: 120ms;
+  --motion-fast:  180ms;
+  --motion-base:  260ms;
+  --motion-slow:  400ms;
+
+  /* Exits, per rule 2. Tokens rather than calc() at each site, so the ratio
+     is one decision. */
+  --motion-exit-fast: 140ms;
+  --motion-exit-base: 200ms;
+
+  /* Distances. A small surface lifts by --motion-rise as it appears (it comes
+     out of the control that opened it, not from nowhere); a page pushed
+     inside a panel slides in by --motion-push. Both are small on purpose:
+     the eye should see a direction, not a journey. */
+  --motion-rise: 6px;
+  --motion-push: 12px;
+
+  /* Rows inside an arriving surface follow it at this interval. Enough to
+     read as one movement settling, not a list assembling itself. */
+  --motion-stagger: 30ms;
+
   /* Semantic tempos — for live animations (breathing, shimmer) */
   --breath-running:   1800ms;
   --breath-attention: 1100ms;
@@ -216,5 +305,23 @@
   --zl-r-sm: 6px;
   --zl-r-md: 10px;
   --zl-r-lg: 16px;
-  --zl-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  /* The catalogue's easing is the product's easing now (see Motion above).
+     Kept as a name because 17 stylesheets say it; it is not a second curve. */
+  --zl-ease: var(--motion-ease);
+}
+
+/* Rule 6, last clause. Every transition and animation in the product ends
+   here, in one place, rather than in the 56 per-file @media blocks that each
+   remembered (or forgot) to list their own selectors. The live marks --
+   breathing dots, spinners, shimmer -- are covered too: a user who asked for
+   less motion did not carve out an exception for a loading indicator.
+   `0.01ms` and not `none`: a transition that does not exist never fires
+   transitionend, and the presence hooks wait for that event. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

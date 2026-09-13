@@ -30,7 +30,7 @@
    brightens while the surface is out, so the two read as one object rather
    than a panel that happened to appear nearby. */
 .action-menu-trigger svg {
-  transition: transform 220ms var(--zl-ease), color 140ms var(--zl-ease);
+  transition: transform var(--motion-fast) var(--motion-ease), color var(--motion-hover) var(--motion-ease);
 }
 .action-menu-trigger.is-open svg {
   transform: rotate(45deg);
@@ -63,36 +63,41 @@
     var(--zl-rim-2),
     0 16px 48px rgba(0, 0, 0, 0.45);
   color: var(--zl-t1);
-  animation: action-menu-in 220ms var(--zl-ease);
+  /* A small surface (tokens.css, Motion rule 3): --motion-fast in, and it
+     GROWS from the corner nearest the button instead of sliding in from
+     nowhere -- the menu belongs to the control that opened it, and the eye
+     should be able to see that it came out of it. */
+  animation: action-menu-in var(--motion-fast) var(--motion-ease);
   transform-origin: top left;
 }
-
-/* Its own keyframes rather than the picker's `zl-pop`: identical shape, but a
-   menu must not stop animating because of which stylesheet loaded first.
-   It GROWS from the corner nearest the button instead of sliding in from
-   nowhere: the menu belongs to the control that opened it, and the eye
-   should be able to see that it came out of it. */
 @keyframes action-menu-in {
-  from { opacity: 0; transform: translateY(-4px) scale(0.94); }
+  from { opacity: 0; transform: translateY(calc(var(--motion-rise) * -1)) scale(0.96); }
+}
+
+/* Leaving (rule 2): the same shape played back, faster and accelerating, on
+   the exit curve. The host keeps the node mounted for --motion-exit-fast
+   (hooks/usePresence.js) so this can be seen at all. */
+.action-menu-list.is-leaving {
+  animation: action-menu-out var(--motion-exit-fast) var(--motion-ease-exit) forwards;
+  pointer-events: none;
+}
+@keyframes action-menu-out {
+  to { opacity: 0; transform: translateY(calc(var(--motion-rise) * -1)) scale(0.96); }
 }
 
 /* The rows arrive just behind the surface, close enough to read as one
    movement rather than a list assembling itself. */
 .action-menu-item {
-  animation: action-menu-row-in 200ms var(--zl-ease) backwards;
+  animation: action-menu-row-in var(--motion-fast) var(--motion-ease) backwards;
 }
-.action-menu-item:nth-child(1) { animation-delay: 40ms; }
-.action-menu-item:nth-child(2) { animation-delay: 70ms; }
-.action-menu-item:nth-child(3) { animation-delay: 100ms; }
-.action-menu-item:nth-child(n+4) { animation-delay: 120ms; }
+.action-menu-item:nth-child(1) { animation-delay: var(--motion-stagger); }
+.action-menu-item:nth-child(2) { animation-delay: calc(var(--motion-stagger) * 2); }
+.action-menu-item:nth-child(3) { animation-delay: calc(var(--motion-stagger) * 3); }
+.action-menu-item:nth-child(n+4) { animation-delay: calc(var(--motion-stagger) * 4); }
+.action-menu-list.is-leaving .action-menu-item { animation: none; }
 
 @keyframes action-menu-row-in {
   from { opacity: 0; transform: translateY(-3px); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .action-menu-list,
-  .action-menu-item { animation: none; }
 }
 
 /* Opening upwards: the composer's trigger sits at the bottom of the screen, so
@@ -111,9 +116,13 @@
   transform-origin: bottom left;
   animation-name: action-menu-in-up;
 }
+.action-menu-list--up.is-leaving { animation-name: action-menu-out-up; }
 
 @keyframes action-menu-in-up {
-  from { opacity: 0; transform: translateY(10px) scaleY(0.82) scaleX(0.9); }
+  from { opacity: 0; transform: translateY(var(--motion-rise)) scaleY(0.88) scaleX(0.94); }
+}
+@keyframes action-menu-out-up {
+  to { opacity: 0; transform: translateY(var(--motion-rise)) scaleY(0.88) scaleX(0.94); }
 }
 
 .action-menu-item {
@@ -131,7 +140,7 @@
   font-size: var(--zl-fs-body);
   text-align: left;
   cursor: pointer;
-  transition: background 120ms var(--zl-ease), color 120ms var(--zl-ease);
+  transition: background var(--motion-hover) var(--motion-ease), color var(--motion-hover) var(--motion-ease);
 }
 
 /* The icons carry the row's weight, so they stay one step quieter than the
@@ -139,7 +148,7 @@
 .action-menu-item svg {
   flex: none;
   color: var(--zl-t3);
-  transition: color 120ms var(--zl-ease);
+  transition: color var(--motion-hover) var(--motion-ease);
 }
 
 .action-menu-item.is-active,

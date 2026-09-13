@@ -6,6 +6,8 @@ import {
 } from "lucide-preact";
 import { store } from "../../data/store.js";
 import { useStore } from "../../hooks/useStore.js";
+import { usePresence } from "../../hooks/usePresence.js";
+import { MOTION } from "../../hooks/motion.js";
 import { api } from "../../data/api.js";
 import { closePalette } from "../../data/palette.js";
 import { openDrawer } from "../../data/drawer.js";
@@ -205,7 +207,15 @@ export function CommandPalette({
   initialStep = "search",
   share = null,
 }) {
-  const live = useStore((s) => (open ? s : null));
+  // Mounted through the exit so the veil can lift and the sheet can settle
+  // back down (motion language, rule 2). The phone sheet is a large surface
+  // and takes the longer exit; the desktop palette is a small one.
+  const isMobile = context === "mobile";
+  const presence = usePresence(open, isMobile ? MOTION.exitBase : MOTION.exitFast);
+  const leaving = presence.leaving ? " is-leaving" : "";
+  // Subscribed while MOUNTED, not while open: the rows must stay on the sheet
+  // as it leaves, or the list empties one frame before the surface goes.
+  const live = useStore((s) => (presence.mounted ? s : null));
   const state = live || PALETTE_CLOSED;
   const sharing = !!share;
 
@@ -243,7 +253,6 @@ export function CommandPalette({
   const createQueryRef = useRef("");
   const homeDir = caps.homeDir || "";
   const serverCwd = caps.workspaceRoot || "";
-  const isMobile = context === "mobile";
 
   // On open: remember the opener (to restore focus on close), reset transient
   // state, fetch caps, and focus the input next frame (spec §6/§9).
@@ -757,7 +766,7 @@ export function CommandPalette({
     }
   }, [step, query, selectable, selectedIdx, onClose, goToModel, goToDir, activateSelected, goBack, goToCreate, sharing]);
 
-  if (!open) return null;
+  if (!presence.mounted) return null;
 
   const activeDescId = selectable.length ? `pal-opt-${selectedIdx}` : undefined;
   const placeholder = sharing
@@ -945,9 +954,9 @@ export function CommandPalette({
   // the "create" step before closing (see onKeyDown above).
   if (isMobile) {
     return (
-      <div class="pal-veil pal-veil-mobile" onClick={onVeil}>
+      <div class={`pal-veil pal-veil-mobile${leaving}`} onClick={onVeil}>
         <div
-          class="m-sheet"
+          class={`m-sheet${leaving}`}
           role="dialog"
           aria-modal="true"
           aria-label={sharing ? "Put the shared item in a conversation" : "Command palette"}
@@ -1007,9 +1016,9 @@ export function CommandPalette({
 
   // ── Desktop chassis (centered overlay) ──────────────────────────────────────
   return (
-    <div class="pal-veil" onClick={onVeil}>
+    <div class={`pal-veil${leaving}`} onClick={onVeil}>
       <div
-        class="palette"
+        class={`palette${leaving}`}
         role="dialog"
         aria-modal="true"
         aria-label={sharing ? "Put the shared item in a conversation" : "Command palette"}

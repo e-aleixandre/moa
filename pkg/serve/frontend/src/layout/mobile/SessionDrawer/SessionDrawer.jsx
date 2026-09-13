@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import { MOTION, prefersReducedMotion } from "../../../hooks/motion.js";
 import { Sidebar } from "../../Sidebar/Sidebar.jsx";
 import "./SessionDrawer.css";
 
@@ -76,10 +77,7 @@ export function SessionDrawer({
   // `entered` (the sheet slides back out through the left edge) and unmount
   // after the close duration. Reduced motion snaps both ways.
   useEffect(() => {
-    const reduce =
-      typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduce = prefersReducedMotion();
     if (open) {
       wasOpenRef.current = true;
       clearTimeout(closeTimerRef.current);
@@ -107,7 +105,7 @@ export function SessionDrawer({
         closeTimerRef.current = setTimeout(() => {
           setVisible(false);
           fireClosed();
-        }, 260);
+        }, MOTION.exitBase);
       }
     }
     return undefined;

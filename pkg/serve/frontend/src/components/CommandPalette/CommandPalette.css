@@ -29,7 +29,19 @@
   justify-content: center;
   align-items: flex-start;
   padding-top: 12vh;
+  /* The veil fades with its surface: in on the surface's tempo, out faster
+     (tokens.css, Motion rules 1-2). The sheet's own rule below lengthens
+     both for the phone. */
+  animation: pal-veil-in var(--motion-fast) var(--motion-ease);
 }
+.pal-veil.is-leaving {
+  animation: pal-veil-out var(--motion-exit-fast) var(--motion-ease-exit) forwards;
+  pointer-events: none;
+}
+.pal-veil-mobile { animation-duration: var(--motion-base); }
+.pal-veil-mobile.is-leaving { animation-duration: var(--motion-exit-base); }
+@keyframes pal-veil-in { from { opacity: 0; } }
+@keyframes pal-veil-out { to { opacity: 0; } }
 .pal-veil-mobile {
   z-index: var(--z-sheet);
   padding-top: 0;
@@ -53,10 +65,18 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: palette-in 180ms var(--zl-ease);
+  /* A small surface: it lifts by --motion-rise as it appears and drops back
+     the same way, faster, when it goes. */
+  animation: palette-in var(--motion-fast) var(--motion-ease);
+}
+.palette.is-leaving {
+  animation: palette-out var(--motion-exit-fast) var(--motion-ease-exit) forwards;
 }
 @keyframes palette-in {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(var(--motion-rise)) scale(0.98); }
+}
+@keyframes palette-out {
+  to { opacity: 0; transform: translateY(var(--motion-rise)) scale(0.98); }
 }
 
 /* ── head ─────────────────────────────────────────────────────────────────
@@ -146,7 +166,7 @@
   border-radius: var(--zl-r-md);
   cursor: pointer;
   position: relative;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) var(--motion-ease);
 }
 @media (hover: hover) {
   .row:hover { background: var(--zl-hi); }
@@ -506,10 +526,17 @@
   letter-spacing: -0.005em;
   display: flex;
   flex-direction: column;
-  animation: sheet-up 260ms var(--zl-ease);
+  /* A large surface: the full --motion-base up, --motion-exit-base down. */
+  animation: sheet-up var(--motion-base) var(--motion-ease);
+}
+.m-sheet.is-leaving {
+  animation: sheet-down var(--motion-exit-base) var(--motion-ease-exit) forwards;
 }
 @keyframes sheet-up {
   from { transform: translateY(100%); }
+}
+@keyframes sheet-down {
+  to { transform: translateY(100%); }
 }
 .m-sheet .grab {
   width: 36px;
@@ -607,7 +634,5 @@
   flex: 1 0 100%;
 }
 
-/* ── reduced motion — no entrance animation (spec §9) ─────────────────────── */
-@media (prefers-reduced-motion: reduce) {
-  .palette, .m-sheet { animation: none; }
-}
+/* Reduced motion is handled once, in tokens.css: every animation here
+   collapses to 0.01ms there, and usePresence unmounts at once. */
