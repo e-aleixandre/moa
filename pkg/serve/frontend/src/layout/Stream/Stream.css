@@ -62,16 +62,19 @@
    enforce it. The capsules keep their own inset (MobileChrome), so the row
    itself never rides under the clock. */
 .mconv .zl-transcript {
-  /* The bleed is what the shell granted (tokens/shell.css): where the app owns
-     the screen the text runs up into the status-bar band and dissolves there;
-     where it does not, the bleed is 0, the same gradient collapses to a plain
-     top fade, and nothing is ever hidden behind a clock the page cannot see
-     under. One rule, two levels -- not two layouts.
+  /* Where the app owns the screen (tokens/shell.css) the text climbs into the
+     status-bar band and dissolves there. Where it does not, the bleed is 0 and
+     the same gradient collapses to a plain top fade.
 
-     Half the bleed in the padding, not all of it: the text must REACH the band
-     for the fade to have anything to dissolve. The capsules are what needs
-     clearance, and the 74px already provides it. */
-  padding: calc(74px + var(--edge-bleed-top) * 0.5) 18px 24px;
+     The 74px of clearance the capsules need is measured from the SAFE AREA,
+     not from the viewport edge, or an installed web app -- whose viewport does
+     start at the physical top -- puts the first line under the clock.
+
+     At edge level the half-bleed is then subtracted back, so the text climbs
+     into the band instead of clearing it: 62+74-31 = 105 on the measured
+     iPhone, the same place it sat when the effect was approved, while an
+     installed web app gets 62+74 = 136 and stays clear. */
+  padding: calc(var(--shell-top) + 74px - var(--edge-bleed-top) * 0.5) 18px 24px;
   mask-image: linear-gradient(
     to bottom,
     transparent 0,
