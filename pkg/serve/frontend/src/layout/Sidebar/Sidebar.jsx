@@ -287,7 +287,7 @@ export function Sidebar({
               its own -- the sidebar is narrow and every row of it is worth
               more than a switch touched once a month. The labels survive as
               the tooltip and the accessible name. */}
-          <div class="zl-view" role="radiogroup" aria-label="Session order">
+          <div class={`zl-view${groupByProject ? " is-project" : ""}`} role="radiogroup" aria-label="Session order">
             {ORDERS.map(([id, label, hint]) => {
               const on = (id === "project") === !!groupByProject;
               return (

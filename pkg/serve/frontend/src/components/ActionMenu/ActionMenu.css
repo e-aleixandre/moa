@@ -26,6 +26,21 @@
   cursor: pointer;
 }
 
+/* The button acknowledges the menu it opened: the glyph turns a little and
+   brightens while the surface is out, so the two read as one object rather
+   than a panel that happened to appear nearby. */
+.action-menu-trigger svg {
+  transition: transform 220ms var(--zl-ease), color 140ms var(--zl-ease);
+}
+.action-menu-trigger.is-open svg {
+  transform: rotate(45deg);
+  color: var(--zl-t1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-menu-trigger svg { transition: none; }
+}
+
 .action-menu-trigger:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
@@ -48,14 +63,36 @@
     var(--zl-rim-2),
     0 16px 48px rgba(0, 0, 0, 0.45);
   color: var(--zl-t1);
-  animation: action-menu-in 180ms var(--zl-ease);
+  animation: action-menu-in 220ms var(--zl-ease);
   transform-origin: top left;
 }
 
 /* Its own keyframes rather than the picker's `zl-pop`: identical shape, but a
-   menu must not stop animating because of which stylesheet loaded first. */
+   menu must not stop animating because of which stylesheet loaded first.
+   It GROWS from the corner nearest the button instead of sliding in from
+   nowhere: the menu belongs to the control that opened it, and the eye
+   should be able to see that it came out of it. */
 @keyframes action-menu-in {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(-4px) scale(0.94); }
+}
+
+/* The rows arrive just behind the surface, close enough to read as one
+   movement rather than a list assembling itself. */
+.action-menu-item {
+  animation: action-menu-row-in 200ms var(--zl-ease) backwards;
+}
+.action-menu-item:nth-child(1) { animation-delay: 40ms; }
+.action-menu-item:nth-child(2) { animation-delay: 70ms; }
+.action-menu-item:nth-child(3) { animation-delay: 100ms; }
+.action-menu-item:nth-child(n+4) { animation-delay: 120ms; }
+
+@keyframes action-menu-row-in {
+  from { opacity: 0; transform: translateY(-3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-menu-list,
+  .action-menu-item { animation: none; }
 }
 
 /* Opening upwards: the composer's trigger sits at the bottom of the screen, so
@@ -65,6 +102,11 @@
   top: auto;
   bottom: calc(100% + 8px);
   transform-origin: bottom left;
+  animation-name: action-menu-in-up;
+}
+
+@keyframes action-menu-in-up {
+  from { opacity: 0; transform: translateY(4px) scale(0.94); }
 }
 
 .action-menu-item {

@@ -193,9 +193,9 @@ button.zl-kbd:focus-visible {
    switch touched once a month should not cost a line of a 272px column.
    Same height as the field it sits beside, so the head stays one band. */
 .zl-view {
+  position: relative;
   flex: none;
   display: flex;
-  gap: 2px;
   padding: 2px;
   border-radius: var(--zl-r-md);
   background: var(--zl-canvas);
@@ -208,23 +208,45 @@ button.zl-kbd:focus-visible {
   width: 28px;
   height: 30px;
   border: 0;
-  border-radius: 6px;
+  /* The inner radius is the outer one minus the padding, or the corners are
+     two different curves sharing an edge and the eye reads the gap. */
+  border-radius: calc(var(--zl-r-md) - 2px);
   background: transparent;
   color: var(--zl-t3);
   cursor: pointer;
   transition: color 120ms var(--zl-ease), background 120ms var(--zl-ease);
 }
-.zl-view-b svg { width: 14px; height: 14px; }
-.zl-view-b.is-on {
+.zl-view-b svg { width: 14px; height: 14px; position: relative; }
+
+/* The selection is one pill that TRAVELS between the two, rather than a
+   background that blinks out of one and into the other. Same pixels at rest;
+   the difference is that the eye is carried across instead of asked to find
+   the new one. */
+.zl-view::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 28px;
+  height: 30px;
+  border-radius: calc(var(--zl-r-md) - 2px);
   background: var(--zl-raised);
-  color: var(--zl-t1);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  transition: transform 260ms var(--zl-ease);
 }
+.zl-view.is-project::before { transform: translateX(28px); }
+.zl-view-b.is-on { color: var(--zl-t1); }
 .zl-view-b:focus-visible {
   outline: 2px solid var(--zl-accent);
   outline-offset: -2px;
 }
 .zl-side-body.is-phone .zl-view-b { width: 44px; height: 40px; }
+.zl-side-body.is-phone .zl-view::before { width: 44px; height: 40px; }
+.zl-side-body.is-phone .zl-view.is-project::before { transform: translateX(44px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .zl-view::before { transition: none; }
+}
 
 /* Project heading: the monogram identifies, the path locates, the count sizes.
    Same row grammar as a session, one step quieter. */
