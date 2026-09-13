@@ -1,0 +1,25 @@
+{
+  "appId": "dev.moa.app",
+  "appName": "moa",
+  "webDir": "www",
+  "server": {
+    "url": "https://dev.taild072ac.ts.net:7350",
+    "cleartext": false
+  },
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#11111b",
+    "limitsNavigationsToAppBoundDomains": false,
+    "scrollEnabled": false
+  },
+  "android": {
+    "backgroundColor": "#11111b"
+  },
+  "plugins": {
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "DARK",
+      "backgroundColor": "#00000000"
+    }
+  }
+}
