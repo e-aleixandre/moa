@@ -17,11 +17,13 @@ function permissionCommand(perm) {
   return formatArgs(args);
 }
 
-// Where the command runs: the explicit `cwd` argument when the agent gave
+// Where a bash command runs: the explicit `cwd` argument when the agent gave
 // one, else the session's directory. The persistent shell can have `cd`-ed
 // elsewhere since; the server does not report that, so the session's
-// directory is the best the card can honestly say.
+// directory is the best the card can honestly say. Only bash has a working
+// directory; for any other tool the line would be noise.
 function permissionCwd(perm, session) {
+  if (perm?.tool_name && perm.tool_name !== "bash") return "";
   const args = perm?.args;
   const explicit = args && typeof args === "object" && !Array.isArray(args) && typeof args.cwd === "string"
     ? args.cwd : "";
