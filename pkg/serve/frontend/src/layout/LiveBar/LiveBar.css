@@ -90,14 +90,19 @@
     opacity var(--motion-fast) var(--motion-ease);
 }
 /* The leaving copy floats over the arriving one so the bar keeps its height
-   while the two cross. */
-.live-sentence-line.is-exit {
+   while the two cross. `is-leaving` only takes it out of the flow: it stays
+   exactly where it was, fully visible. `is-exit` -- added one frame later --
+   is what it animates TO. Collapsing these two into one class is what made
+   the old phrase disappear instead of leave. */
+.live-sentence-line.is-leaving {
   position: absolute;
   inset: 0;
+  pointer-events: none;
+}
+.live-sentence-line.is-exit {
   transform: translateY(calc(var(--motion-rise) * -1));
   filter: blur(2px);
   opacity: 0;
-  pointer-events: none;
 }
 /* One frame with no transition, so the incoming line starts from below
    instead of sliding out of wherever the last one ended. */

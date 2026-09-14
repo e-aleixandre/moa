@@ -21,10 +21,18 @@ import { MOTION, prefersReducedMotion } from "../../hooks/motion.js";
 export function LiveSentence({ text, shimmer = false, class: cls = "" }) {
   const [shown, setShown] = useState(text);
   const [leaving, setLeaving] = useState(null);
-  // `entering` suppresses the transition for one frame so the incoming line
-  // starts below its place instead of transitioning into position from
-  // wherever the previous one happened to be.
+  // One flag per line, and BOTH are needed for the same reason: a line must
+  // spend one frame in its starting state before it is given its end state,
+  // or there is no change for the browser to interpolate.
+  //
+  // `entering` holds the incoming line below its place. `exiting` holds the
+  // outgoing one where it already is -- and its absence is why the swap read
+  // as half an animation: .is-exit was applied on the very first frame, but
+  // .is-exit IS the finished state (risen, blurred, transparent), so the old
+  // phrase was never at opacity 1 for even one frame. It did not leave; it
+  // was simply gone, while the new phrase faded in over the gap it left.
   const [entering, setEntering] = useState(false);
+  const [exiting, setExiting] = useState(false);
   const timers = useRef([]);
 
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
@@ -36,12 +44,16 @@ export function LiveSentence({ text, shimmer = false, class: cls = "" }) {
     setLeaving(shown);
     setShown(text);
     setEntering(true);
+    setExiting(false);
 
-    // Release the incoming line on the next frame: the class has to land in
-    // the DOM with `transition: none` first, or the browser coalesces both
-    // states and animates nothing.
-    const raf = requestAnimationFrame(() => setEntering(false));
-    const done = setTimeout(() => setLeaving(null), MOTION.fast + SWAP_GAP);
+    // Release both lines on the next frame, once the starting classes have
+    // actually landed in the DOM. Doing it in the same frame lets the browser
+    // coalesce the two states and animate nothing.
+    const raf = requestAnimationFrame(() => {
+      setEntering(false);
+      setExiting(true);
+    });
+    const done = setTimeout(() => { setLeaving(null); setExiting(false); }, MOTION.fast + SWAP_GAP);
     timers.current.push(done);
     return () => { cancelAnimationFrame(raf); clearTimeout(done); };
   }, [text, shown]);
@@ -49,7 +61,13 @@ export function LiveSentence({ text, shimmer = false, class: cls = "" }) {
   return (
     <span class={`live-sentence${cls ? ` ${cls}` : ""}`}>
       {leaving !== null && (
-        <span class="live-sentence-line is-exit" aria-hidden="true" data-text={leaving}>{leaving}</span>
+        <span
+          class={`live-sentence-line is-leaving${exiting ? " is-exit" : ""}`}
+          aria-hidden="true"
+          data-text={leaving}
+        >
+          {leaving}
+        </span>
       )}
       <span
         class={`live-sentence-line${entering ? " is-enter" : ""}${shimmer ? " is-shimmer" : ""}`}
