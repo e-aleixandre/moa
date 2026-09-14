@@ -121,22 +121,24 @@
 .live-sentence-line.is-shimmer::before {
   content: attr(data-text);
   position: absolute;
-  inset: 0;
+  inset: 0 auto 0 0;
   pointer-events: none;
-  /* The highlight is a narrow band, and its width is not what these stops say:
-     they are read against a background 4x the element, so a 40%-60% band -- the
-     shape this had -- lit 80% of the text at once and read as the whole phrase
-     pulsing rather than a sweep crossing it. 47%-53% of 400% is ~24% of the
-     text: short enough to travel through it. */
+  /* The band travels across the BOX, and the box is the flex line -- 562px on a
+     desktop where the words are 139px of it. Sized against the box, the sweep
+     spent three quarters of every cycle over empty space, which is why this
+     read as nothing happening at all.
+     `fit-content` makes the pseudo-element as wide as its own text, so the
+     sweep happens over the glyphs and nowhere else. */
+  width: fit-content;
   background-image: linear-gradient(
     90deg,
     transparent 0%,
-    transparent 47%,
+    transparent 40%,
     var(--zl-t1) 50%,
-    transparent 53%,
+    transparent 60%,
     transparent 100%
   );
-  background-size: 400% 100%;
+  background-size: 300% 100%;
   background-repeat: no-repeat;
   -webkit-background-clip: text;
   background-clip: text;
