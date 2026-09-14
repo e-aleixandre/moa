@@ -752,6 +752,39 @@ export async function cancelRun(id) {
   return api('POST', `/api/sessions/${id}/cancel-and-recall`);
 }
 
+// stopRun aborts the run AND puts the queue back where the owner can edit it.
+// Queue ownership belongs to the server: a steer can cross the delivery
+// boundary just before the abort lands, so only the ids the server reports as
+// discarded are restored, or the owner would resend an already-delivered
+// message and see both "You steered" and "You" in the transcript.
+//
+// The restored text travels through `composerDrops`, the same handoff a share
+// uses: the caller is the live bar, which has no path to the composer's
+// textarea, and the composer may be re-mounted by the time the abort answers.
+// Queued images cannot be pulled back (only their count was ever tracked
+// client-side), so they are reported instead.
+export async function stopRun(id) {
+  const steers = store.get().sessions[id]?.pendingSteers;
+  const result = await cancelRun(id);
+  const discarded = new Set(result?.discarded_steer_ids || []);
+  const restored = (steers || []).filter((s) => discarded.has(s.id));
+  if (restored.length === 0) return result;
+  const text = restored.map((s) => s.text).join('\n');
+  setState((state) => ({
+    composerDrops: { ...state.composerDrops, [id]: { id: `stop-${Date.now()}`, text, files: [], focus: true } },
+  }));
+  const dropped = restored.reduce((n, s) => n + (s.images || 0), 0);
+  if (dropped > 0) {
+    addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'attention' });
+  }
+  const current = store.get().sessions[id];
+  if (current?.pendingSteers) {
+    const kept = current.pendingSteers.filter((s) => !discarded.has(s.id));
+    updateSession(id, { pendingSteers: kept.length > 0 ? kept : null });
+  }
+  return result;
+}
+
 // cancelSteers drops every steer message still queued (not yet delivered) on
 // the server. Called when the user pulls queued messages back into the input to
 // edit them, so the agent doesn't also deliver the originals (double-delivery).

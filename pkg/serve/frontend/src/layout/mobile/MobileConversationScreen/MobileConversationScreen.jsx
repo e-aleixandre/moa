@@ -7,7 +7,7 @@ import { focusedSessionId } from "../../../data/selectors.js";
 import { openSession, setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
 import { openPalette } from "../../../data/palette.js";
-import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, rewindToMessage } from "../../../data/session-actions.js";
+import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, rewindToMessage, stopRun } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, openInbox, retryEvents, routeEvent, routeEventToNewSession } from "../../../data/events.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
@@ -282,6 +282,7 @@ function MobileConversationBody({ forceMobile = false }) {
             onOpen={(id, kind) => (kind === "bash"
               ? openBashJob(session.id, id)
               : openPersistedSubagent(session.id, id))}
+            onStop={() => stopRun(session.id).catch(() => {})}
             forceCompact={kbdOpen}
           />
         </MobileComposer>

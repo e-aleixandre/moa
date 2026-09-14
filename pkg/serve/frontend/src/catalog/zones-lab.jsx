@@ -564,6 +564,9 @@ function LiveZone({ fg, bg = [], open, onToggle, dense, t0 }) {
       dense={dense}
       nowMs={now}
       onOpen={() => {}}
+      // Production always has a run to stop, so the lab does too: without it
+      // the scenes would photograph a bar the product never shows.
+      onStop={() => {}}
     />
   );
 }

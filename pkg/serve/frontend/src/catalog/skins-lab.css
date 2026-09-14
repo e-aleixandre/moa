@@ -337,12 +337,6 @@
 @media (hover: hover) {
   .sk-ambient .zl-send:hover { transform: none; background: #fff; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 }
-/* Stop stays red — it is the destructive state, not decoration */
-.sk-ambient .composer-stop-ghost {
-  border: 0;
-  background: color-mix(in srgb, var(--red) 12%, transparent);
-  border-radius: var(--amb-r-ctl);
-}
 .sk-ambient .steer-hint { font-family: var(--font); color: var(--amb-text-4); }
 .sk-ambient .status-strip {
   font-family: var(--font);
@@ -384,7 +378,6 @@
 }
 .sk-ambient.sk-phone .zl-composer:focus-within { background: rgba(255, 255, 255, 0.09); }
 .sk-ambient.sk-phone .zl-send { border-radius: 16px; }
-.sk-ambient.sk-phone .composer-stop-ghost { border-radius: 14px; }
 .sk-ambient.sk-phone .zl-attach { border-radius: 16px; }
 
 /* the chip: glass pill over the transcript */

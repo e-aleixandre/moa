@@ -122,8 +122,6 @@ export function MobileSubagentView({ session, jobId, onBack, onDraggingChange })
           session={session}
           jobId={jobId}
           onBack={onBack}
-          onCancel={onCancel}
-          confirmCancel={confirmCancel}
         />
       )}
     </div>
@@ -135,7 +133,7 @@ export function MobileSubagentView({ session, jobId, onBack, onDraggingChange })
 // desktop, in the phone's own materials — the transcript is MobileStream (the
 // phone's scroller and density) and the composer sits in the `.mcomposer`
 // pill, so steering a child feels like typing in the parent.
-function MobileSubagentLive({ view, session, jobId, onBack, onCancel, confirmCancel }) {
+function MobileSubagentLive({ view, session, jobId, onBack }) {
   return (
     <>
       <MobileStream
@@ -159,13 +157,7 @@ function MobileSubagentLive({ view, session, jobId, onBack, onCancel, confirmCan
           sessionId={session.id}
           session={session}
           compact
-          steer={{
-            jobId,
-            name: view.name,
-            onRebound: onBack,
-            onStop: onCancel,
-            stopArmed: confirmCancel,
-          }}
+          steer={{ jobId, name: view.name, onRebound: onBack }}
         />
       </div>
     </>

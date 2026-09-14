@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { Square } from "lucide-preact";
 import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
 import { LiveSentence } from "./LiveSentence.jsx";
 import "./LiveBar.css";
@@ -38,6 +39,16 @@ import "./LiveBar.css";
 // presence PUSHES the transcript up instead of overlaying the composer; it is
 // absent in repose (returns null); and while the run is parked on you it goes
 // amber WITHOUT motion — animating something that is not moving would lie.
+//
+// STOP lives here, not in the composer. This row is the one that says the
+// agent is working, so "stop it" is its verb; the composer holds what the
+// owner is about to say. It used to sit in the composer next to the mic,
+// where two red squares side by side meant opposite things. `onStop` is
+// passed only by hosts that have a run to stop; the button exists only while
+// the FOREGROUND sentence is the agent's own -- a parked run (waiting on you)
+// or a background-only bar has nothing to stop from here. Two steps, like the
+// subagent head's Stop: the first tap asks, the second stops, and it disarms
+// on its own.
 
 // foregroundLine decides WHAT the foreground says: the phrase, whether the run
 // is parked on the user, and the elapsed counter (empty unless the agent is
@@ -120,6 +131,7 @@ export function LiveBar({
   open: openProp,
   onToggle,
   onOpen,
+  onStop,
   dense = false,
   forceCompact = false,
 }) {
@@ -162,7 +174,21 @@ export function LiveBar({
   const spot = useSpotlight(list.length, !fgActive);
   const model = liveBarModel(session, list, nowMs, spot);
 
+  const [stopArmed, setStopArmed] = useState(false);
+  useEffect(() => {
+    if (!stopArmed) return undefined;
+    const t = setTimeout(() => setStopArmed(false), 2000);
+    return () => clearTimeout(t);
+  }, [stopArmed]);
+
   if (!model) return null;
+
+  const canStop = !!onStop && model.sentence.kind === "foreground" && !model.sentence.waiting;
+  const stop = () => {
+    if (!stopArmed) { setStopArmed(true); return; }
+    setStopArmed(false);
+    onStop();
+  };
 
   // While the keyboard normally keeps the panel shut, an explicit tap is still
   // an unambiguous request to inspect the live work. This also provides a safe
@@ -246,6 +272,19 @@ export function LiveBar({
             </span>
             <span class="zl-live-n zl-data">{tally.count}</span>
             <ChevIcon up={!openPanel} />
+          </button>
+        )}
+
+        {canStop && (
+          <button
+            type="button"
+            class={`zl-live-stop${stopArmed ? " is-armed" : ""}`}
+            onClick={stop}
+            aria-label={stopArmed ? "Confirm stop" : "Stop the run"}
+            title={stopArmed ? "Tap again to stop the run" : "Stop — ends the run (Esc in the composer)"}
+          >
+            <Square size={11} fill="currentColor" aria-hidden="true" />
+            <span>{stopArmed ? "sure?" : "Stop"}</span>
           </button>
         )}
       </div>

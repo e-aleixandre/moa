@@ -10,7 +10,7 @@ let apiResponse = [];
 
 const { store, setState, updateSession } = await import('./store.js');
 const { syncConnections } = await import('./api.js');
-const { createSession, deleteSession, loadSessions, loadUsage, openPersistedSubagent, openBashJob, sendMessage, startPolling, stopPolling } = await import('./session-actions.js');
+const { createSession, deleteSession, loadSessions, loadUsage, openPersistedSubagent, openBashJob, sendMessage, startPolling, stopPolling, stopRun } = await import('./session-actions.js');
 const { getToasts, removeToast } = await import('./notifications.js');
 const { adoptAttentionNamespace, handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
 
@@ -1344,4 +1344,37 @@ test('openPersistedSubagent keeps a known title when an older server omits it', 
   await openPersistedSubagent('s1', 'job-1');
 
   expect(store.get().sessions.s1.subagents['job-1'].title).toBe('Review Promised Delivery Work');
+});
+
+// ── Stop from the live bar ─────────────────────────────────────────────────
+// Stop moved out of the composer, so the recall of the queue it used to do in
+// place now travels through composerDrops: the bar has no path to the
+// textarea. Only the steers the server confirms it discarded come back — a
+// steer that crossed the delivery boundary just before the abort must not be
+// resent.
+
+test('stopRun restores only the discarded steers, as a focused composer drop', async () => {
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({ discarded_steer_ids: ['q2'] }), { status: 200 }));
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [
+    { id: 'q1', text: 'already delivered' },
+    { id: 'q2', text: 'still queued', images: 1 },
+  ] } } });
+
+  await stopRun('s1');
+
+  const drop = store.get().composerDrops.s1;
+  expect(drop).toMatchObject({ text: 'still queued', focus: true });
+  expect(store.get().sessions.s1.pendingSteers).toEqual([{ id: 'q1', text: 'already delivered' }]);
+  expect(getToasts().some((t) => t.title === 'Queued images dropped')).toBe(true);
+});
+
+test('stopRun with nothing discarded leaves the composer alone', async () => {
+  setState({ composerDrops: {} });
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: 'q1', text: 'delivered' }] } } });
+
+  await stopRun('s1');
+
+  expect(store.get().composerDrops.s1).toBeUndefined();
+  expect(store.get().sessions.s1.pendingSteers).toEqual([{ id: 'q1', text: 'delivered' }]);
 });

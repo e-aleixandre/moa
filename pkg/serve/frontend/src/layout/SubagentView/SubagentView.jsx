@@ -113,7 +113,7 @@ export function SubagentView({ session, jobId, onBack }) {
 
       {view.terminal
         ? <SubagentReport view={view} session={session} />
-        : <SubagentLive view={view} session={session} jobId={jobId} onBack={onBack} onCancel={onCancel} confirmCancel={confirmCancel} />}
+        : <SubagentLive view={view} session={session} jobId={jobId} onBack={onBack} />}
     </div>
   );
 }
@@ -182,7 +182,7 @@ export function SubagentActions({ view, phone = false, onPromote, onStop, confir
 // SubagentLive — direct. The record is the body and opens at its live end; the
 // now-line and the steer composer are the foot. This is the functional reason
 // the fork deserves a whole screen.
-function SubagentLive({ view, session, jobId, onBack, onCancel, confirmCancel }) {
+function SubagentLive({ view, session, jobId, onBack }) {
   return (
     <>
       <div class="sa-body">
@@ -208,13 +208,7 @@ function SubagentLive({ view, session, jobId, onBack, onCancel, confirmCancel })
         key={`steer-${jobId}`}
         sessionId={session.id}
         session={session}
-        steer={{
-          jobId,
-          name: view.name,
-          onRebound: onBack,
-          onStop: onCancel,
-          stopArmed: confirmCancel,
-        }}
+        steer={{ jobId, name: view.name, onRebound: onBack }}
       />
     </>
   );

@@ -168,3 +168,23 @@ test('the counter is anchored to the end of the sentence slot in both rows', () 
   // Anchored by flex, not by a width the counter has to fit.
   expect(rule('\\.zl-live-el(?![-\\w])')).not.toMatch(/(?:min-)?width:/);
 });
+
+// ── Stop lives here, once ──────────────────────────────────────────────────
+// Stop moved from the composer to this row. Two guards on the source: the bar
+// is the ONLY place that draws the run's Stop square, and the composer draws
+// no square at all -- neither for Stop nor for a live mic, which is what put
+// two identical red squares with opposite meanings side by side.
+const composerJsx = readFileSync(new URL('../Composer/Composer.jsx', import.meta.url), 'utf8');
+const liveJsx = readFileSync(new URL('./LiveBar.jsx', import.meta.url), 'utf8');
+
+test('the composer draws no Square: Stop is the live bar\'s, and a live mic is a mic', () => {
+  expect(composerJsx).not.toMatch(/\bSquare\b/);
+  expect(composerJsx).not.toContain('composer-stop-ghost');
+  expect(liveJsx).toMatch(/class=\{`zl-live-stop/);
+  expect(liveJsx).toMatch(/<Square /);
+});
+
+test('the bar offers Stop only for the agent\'s own foreground sentence', () => {
+  // Waiting on the user, or a background-only bar, has no run to stop from here.
+  expect(liveJsx).toMatch(/canStop = !!onStop && model\.sentence\.kind === "foreground" && !model\.sentence\.waiting/);
+});

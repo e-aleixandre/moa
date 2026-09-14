@@ -1,12 +1,12 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Paperclip, Square, X, Mic, Loader2, ChevronUp, Image as ImageIcon } from "lucide-preact";
+import { Paperclip, X, Mic, Loader2, ChevronUp, Image as ImageIcon } from "lucide-preact";
 import { Chip } from "../../primitives/index.js";
 import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import { useStore } from "../../hooks/useStore.js";
 import {
-  sendMessage, cancelRun, cancelSteers, execCommand, execShell, newSteerId,
+  sendMessage, stopRun, cancelSteers, execCommand, execShell, newSteerId,
   steerSubagent,
 } from "../../data/session-actions.js";
 import { store, updateSession } from "../../data/store.js";
@@ -42,18 +42,24 @@ import "./Composer.css";
 // component now, which is what makes one definition rather than two.
 //
 // What is NOT the catalogue's is everything the prototype never had, grafted
-// on top: send / queue / slash / @-mention / attachments / stop / dictation /
-// the draft that survives a reload / the anti-double-send barrier. The mic
-// sits next to the arrow as a secondary control; on the phone the send button
-// IS the mic. Send is never peach — peach is the message the text becomes
-// after this button.
+// on top: send / queue / slash / @-mention / attachments / dictation / the
+// draft that survives a reload / the anti-double-send barrier. The mic sits
+// next to the arrow as a secondary control; on the phone the send button IS
+// the mic. Send is never peach — peach is the message the text becomes after
+// this button.
+//
+// Stop is NOT here. This slab holds what the owner is about to say; stopping
+// the agent is a verb of the row above it, the LiveBar, which is the one that
+// says the agent is working. Esc still stops from the keyboard (below). The
+// two used to share this row and, with the mic recording, put two red squares
+// side by side that meant opposite things (stop the AGENT / stop MY mic).
 //
 // Subagent steering: when `steer` is set ({ jobId, name, onRebound }) the
 // composer becomes a STEER box for a live subagent. It stays visually IDENTICAL
 // to the normal composer — the subagent view's header identifies who you're
-// writing to. Enter routes the text through steerSubagent instead of
-// sendMessage, and there is no queue/slash/shell semantics (those belong to
-// the parent run).
+// writing to, and its Stop lives there too. Enter routes the text through
+// steerSubagent instead of sendMessage, and there is no queue/slash/shell
+// semantics (those belong to the parent run).
 //
 // `plusActions` turns the `+` into a menu instead of a direct file picker: the
 // surface that hosts the composer contributes the extra entries that belong
@@ -119,8 +125,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   const sessionState = session?.state;
   const pendingSteers = session?.pendingSteers;
   // In steer mode the box targets a subagent, not the parent run — so it
-  // must never enter the parent's "busy" affordances (Stop button, Esc-aborts,
-  // queue note). It always shows a Send button that fires a steer.
+  // must never enter the parent's "busy" affordances (Esc-aborts, queue note).
+  // It always shows a Send button that fires a steer.
   const busy = sessionState === "running" && !steer;
   const [hasText, setHasText] = useState(false);
   // Safari may emit pointercancel instead of the click that completes a touch
@@ -456,6 +462,12 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         setHasText(!!el.value.trim());
         saveDraft(sessionId, el.value);
         autoResize();
+        // A recalled queue (Stop) puts the owner back in the box to edit it;
+        // a share does not steal focus, the owner is still choosing.
+        if (drop.focus) {
+          el.focus();
+          el.selectionStart = el.selectionEnd = el.value.length;
+        }
       }
     }
     if (drop.files?.length) addFiles(drop.files);
@@ -835,44 +847,15 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   }, [canVoice, toggleFromShortcut]);
 
   // --- Stop / abort ---
-  // On abort, queue ownership belongs to the server: it atomically reports
-  // which steers it discarded, so the client can restore only messages that
-  // were not already delivered in the stop-vs-tool-return race.
-  const handleStop = useCallback(async () => {
+  // Esc is the keyboard's Stop. The work (abort, restore only the steers the
+  // server confirms it discarded) is stopRun's, shared with the LiveBar's
+  // button; the restored text comes back through the composerDrops handoff
+  // below, the same way a share lands, so both entry points fill the box the
+  // same way.
+  const handleStop = useCallback(() => {
     if (!sessionId) return;
-    const sess = store.get().sessions[sessionId];
-    const steers = sess?.pendingSteers;
-    try {
-      const result = await cancelRun(sessionId);
-      // Stop is authoritative: a steer can cross the delivery boundary just
-      // before the abort reaches the server. Restore only the IDs the server
-      // confirms it discarded, or the user would resend an already-delivered
-      // message and see both "You steered" and "You" in the transcript.
-      const discarded = new Set(result?.discarded_steer_ids || []);
-      const restored = (steers || []).filter((steer) => discarded.has(steer.id));
-      if (restored.length === 0) return;
-      const el = textareaRef.current;
-      if (el) {
-        writeComposer(el, combineQueueText(el.value, restored));
-        setHasText(!!el.value.trim());
-        autoResize();
-        el.focus();
-        el.selectionStart = el.selectionEnd = el.value.length;
-        saveDraft(sessionId, el.value); // persist the dumped queue (no input event)
-      }
-      const dropped = droppedImageCount(restored);
-      if (dropped > 0) {
-        addToast({ sessionId, title: "Queued images dropped", detail: `${dropped} attached image${dropped > 1 ? "s were" : " was"} not restored — re-attach if still needed.`, type: "attention" });
-      }
-      const current = store.get().sessions[sessionId];
-      if (current?.pendingSteers) {
-        const kept = current.pendingSteers.filter((steer) => !discarded.has(steer.id));
-        updateSession(sessionId, { pendingSteers: kept.length > 0 ? kept : null });
-      }
-    } catch (e) {
-      console.error("Cancel failed:", e);
-    }
-  }, [sessionId, autoResize]);
+    stopRun(sessionId).catch((e) => console.error("Cancel failed:", e));
+  }, [sessionId]);
 
   // Returns the row the cursor is on (0-indexed) / total rows — ported from
   // InputBar to gate ↑/↓ history recall to the first/last line.
@@ -1204,28 +1187,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       {busy && hasText && !summary && (
         <span class="steer-hint" aria-hidden="true">⏎ steers — won't interrupt</span>
       )}
-      {(busy || (steer && steer.onStop)) && (
-        /* Stop joins Send as a secondary (ghost) action. Send keeps its
-           identity in every state so "you can always talk to it" reads at a
-           glance; on mobile this ghost is also the only Stop (no Esc).
-
-           In steer mode it stops the SUBAGENT, not the parent run. */
-        <button
-          type="button"
-          class={`composer-stop-ghost${steer && steer.stopArmed ? " is-armed" : ""}`}
-          aria-label={steer && steer.onStop ? `Stop ${steer.name}` : "Stop the run (Esc)"}
-          title={
-            steer && steer.onStop
-              ? steer.stopArmed
-                ? "Tap again to stop this subagent"
-                : `Stop — cancels ${steer.name}`
-              : "Stop — ends the run (Esc)"
-          }
-          onClick={steer && steer.onStop ? steer.onStop : handleStop}
-        >
-          <Square size={13} />
-        </button>
-      )}
       {canVoice && !voiceButtonMode && (
         /* The desktop's own dictation control, kept next to Send as a
            secondary action. It drives the same voice machine as the phone
@@ -1246,9 +1207,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           disabled={transcribing || contentSendPending}
           onClick={toggleFromShortcut}
         >
-          {transcribing ? <Loader2 size={15} class="spin" />
-            : recording ? <Square size={13} />
-              : <Mic size={15} />}
+          {/* Recording keeps the mic glyph: a live microphone is a state of
+              MY input, not a stop control, and a square here read as the
+              same thing as the agent's Stop. The ring says "live". */}
+          {transcribing ? <Loader2 size={15} class="spin" /> : <Mic size={15} />}
         </button>
       )}
       {(() => {
@@ -1263,7 +1225,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
 
         let icon = <SendIcon />;
         if (contentSendPending || (voiceOwnsButton && transcribing)) icon = <Loader2 size={16} class="spin" />;
-        else if (voiceOwnsButton && recording && voiceLocked) icon = <Square size={14} />;
         else if (voiceOwnsButton && recording) icon = <Mic size={16} />;
         else if (micMode) icon = <Mic size={16} />;
 

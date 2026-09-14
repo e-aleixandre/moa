@@ -28,7 +28,7 @@ import { fmtCost } from "../../data/util/usage-pills.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { addToast } from "../../data/notifications.js";
-import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast } from "../../data/session-actions.js";
+import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast, stopRun } from "../../data/session-actions.js";
 import { toggleSessionPanel, sessionPanelView } from "../../data/session-panel.js";
 import { cacheAlertLabel } from "../../data/cache-usage.js";
 import { setPopoverOpenFromClick } from "../../data/popover-click.js";
@@ -316,6 +316,7 @@ export function ConversationScreen() {
                 onOpen={(id, kind) => (kind === "bash"
                   ? openBashJob(session.id, id)
                   : openPersistedSubagent(session.id, id))}
+                onStop={() => stopRun(session.id).catch(() => {})}
               />
               <Composer key={session.id} sessionId={session.id} session={session} onSecret={setSecretAliases} />
               <div class="status-strip-anchor">

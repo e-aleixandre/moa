@@ -292,6 +292,47 @@
   background: var(--zl-t3);
 }
 .zl-live-n { color: inherit; }
+
+/* Stop: the subagent head's control (WorkChrome `.wk-stop`), drawn in the
+   bar's own ladder so it sits beside the tally: a word with a small filled
+   square, neutral, red only once it is asking. It is the LAST thing in the
+   row -- the sentence flows, the counter anchors to the sentence's end, the
+   tally and Stop hold the right edge. */
+.zl-live-stop {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-family: inherit;
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
+}
+.zl-live-stop svg { color: var(--zl-t3); }
+@media (hover: hover) {
+  .zl-live-stop:hover { background: var(--zl-raised); color: var(--zl-t1); box-shadow: var(--zl-rim-2); }
+}
+.zl-live-stop:focus-visible {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
+}
+.zl-live-stop.is-armed,
+.zl-live-stop.is-armed svg {
+  color: var(--zl-red);
+}
+.zl-live-stop.is-armed {
+  background: color-mix(in srgb, var(--zl-red) 16%, var(--zl-control));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-red) 45%, transparent);
+}
 .zl-live-chev {
   width: 12px;
   height: 12px;
@@ -414,6 +455,32 @@ div.zl-live-row { cursor: default; }
   min-width: 44px;
   justify-content: center;
 }
+/* Stop on the phone: the same 44px hit with the same inset chip. */
+.zl-phone .zl-live-stop,
+.mconv .zl-live-stop {
+  position: relative;
+  height: 44px;
+  padding: 0 12px 0 10px;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--zl-fs-body);
+}
+.zl-phone .zl-live-stop > *,
+.mconv .zl-live-stop > * { position: relative; }
+.zl-phone .zl-live-stop::before,
+.mconv .zl-live-stop::before {
+  content: "";
+  position: absolute;
+  inset: 4px 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-hi);
+  box-shadow: var(--zl-rim);
+}
+.zl-phone .zl-live-stop.is-armed::before,
+.mconv .zl-live-stop.is-armed::before {
+  background: color-mix(in srgb, var(--zl-red) 16%, var(--zl-control));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-red) 45%, transparent);
+}
 .zl-phone .zl-live-tally > *,
 .mconv .zl-live-tally > * { position: relative; }
 .zl-phone .zl-live-tally::before,
@@ -439,6 +506,7 @@ div.zl-live-row { cursor: default; }
 .zl-live.is-dense .zl-live-bar { min-height: 32px; padding-left: 6px; gap: 6px; }
 .zl-live.is-dense .zl-live-now { font-size: var(--zl-fs-body); }
 .zl-live.is-dense .zl-live-tally { height: 26px; }
+.zl-live.is-dense .zl-live-stop { height: 26px; }
 .zl-live.is-dense .zl-live-row { min-height: 32px; }
 .zl-live.is-dense .zl-live-row-d { display: none; }
 .zl-live.is-dense .zl-live-panel { max-height: 160px; }
