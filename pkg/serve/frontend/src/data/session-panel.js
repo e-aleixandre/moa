@@ -16,7 +16,10 @@ import { fmtTokens } from './util/format.js';
 
 // The second level. A row on the root pushes one of these INSIDE the panel;
 // "back" returns to the root. No modal ever opens over the panel.
-export const PANEL_PAGES = { usage: 'Usage', mcp: 'MCP', artifacts: 'Artifacts' };
+// Artifacts is deliberately absent: its row opens the drawer, which is the
+// one list of files in the product. It was a page here once, with its own
+// shape and its own reader, and two lists of the same thing is one too many.
+export const PANEL_PAGES = { usage: 'Usage', mcp: 'MCP' };
 
 export { SESSION_PANEL_CLOSED };
 

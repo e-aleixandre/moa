@@ -103,16 +103,13 @@
 /* Opening upwards: the composer's trigger sits at the bottom of the screen, so
    the list grows towards the transcript instead of under the home indicator.
    The origin follows, or it would appear to fall out of the button. */
-/* Opening upwards the menu sits ON the composer rather than hovering above
-   it: it overlaps the bar it belongs to, and its bottom-left corner squares
-   off so the two surfaces share an edge instead of each rounding away from
-   the other. What used to be a floating slab near a button now reads as the
-   button's own surface, unfolded. */
+/* Opening upwards the menu clears its trigger. I had it overlapping the
+   composer to make the two read as one object, and it covered the very
+   button you had just pressed -- you lost sight of what you were acting on.
+   Sharing an edge is not worth hiding the control. */
 .action-menu-list--up {
   top: auto;
-  bottom: -6px;
-  left: -6px;
-  border-bottom-left-radius: var(--zl-r-sm);
+  bottom: calc(100% + 8px);
   transform-origin: bottom left;
   animation-name: action-menu-in-up;
 }

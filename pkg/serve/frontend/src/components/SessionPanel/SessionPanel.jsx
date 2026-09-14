@@ -82,85 +82,6 @@ function fmtSize(n) {
   return `${(v / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function artifactKind(artifact) {
-  const name = String(artifact?.name || "");
-  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
-  return ext || (artifact?.mime || "").split("/").pop() || "file";
-}
-
-function artifactWhen(artifact) {
-  const raw = artifact?.createdAt || artifact?.updatedAt;
-  if (!raw) return "";
-  const d = new Date(raw);
-  if (!Number.isFinite(d.getTime())) return "";
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
-}
-
-function ArtifactsPage({ sessionId, items: fixtureItems, inline }) {
-  const slice = useStore(artifactsSlice);
-  const mine = slice.ownerSessionId === sessionId;
-  const fetched = mine ? slice.items : [];
-  const items = fixtureItems || fetched;
-
-  useEffect(() => {
-    if (fixtureItems || !sessionId) return;
-    if (mine && slice.status === "ready") return;
-    listArtifactsInPanel(sessionId);
-  }, [sessionId]);
-
-  const open = (artifact) => {
-    if (inline || !sessionId) return;
-    openArtifactsList(sessionId);
-    void artifact;
-  };
-
-  if (!fixtureItems && mine && slice.status === "loading" && items.length === 0) {
-    return <p class="zl-page-sum">Loading…</p>;
-  }
-  if (items.length === 0) {
-    return <p class="zl-page-sum">No files in this conversation yet. Ask the agent to send you one.</p>;
-  }
-  return (
-    <div class="zl-page">
-      <p class="zl-page-sum">
-        <span class="zl-data">{items.length}</span>
-        {items.length === 1 ? " file" : " files"} this session. Open one to view it in the conversation.
-      </p>
-      <div class="zl-kv">
-        {items.map((a) => {
-          const kind = artifactKind(a);
-          const size = a.sizeLabel || fmtSize(a.size);
-          const when = a.when || artifactWhen(a);
-          const meta = [kind, size, when].filter(Boolean).join(" · ");
-          return (
-            <button
-              type="button"
-              class="zl-kv-row is-btn zl-artrow"
-              key={a.id || a.name}
-              onClick={() => open(a)}
-              aria-label={`Open ${a.name}`}
-            >
-              <span class="zl-artrow-ico" aria-hidden="true">
-                <svg viewBox="0 0 20 24">
-                  <path d="M2.75 1h8.5L17.25 7v15.25a.75.75 0 0 1-.75.75h-13a.75.75 0 0 1-.75-.75V1.75A.75.75 0 0 1 2.75 1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
-                  <path d="M11.25 1v5.25a.75.75 0 0 0 .75.75h5.25" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
-                </svg>
-              </span>
-              <span class="zl-artrow-main">
-                <span class="zl-artrow-name">{a.name}</span>
-                {meta && <span class="zl-artrow-meta zl-data">{meta}</span>}
-              </span>
-              <GoIcon />
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function LifecycleActions({ session, inline }) {
   const saved = session.state === "saved";
   const confirm = useRef(null);
@@ -304,9 +225,6 @@ export function SessionPanel({
           {page === "mcp" && (
             <McpPage sessionId={session.id} mcpTick={session.mcpTick} servers={mcpServers} inline={inline} />
           )}
-          {page === "artifacts" && (
-            <ArtifactsPage sessionId={session.id} items={artifacts} inline={inline} />
-          )}
         </div>
       ) : (
         <>
@@ -334,7 +252,7 @@ export function SessionPanel({
               {mcp && (
                 <PanelRow id="mcp" title="MCP" verdict={mcp.text} warn={mcp.warn} onOpen={goPage} />
               )}
-              <ArtifactsRow sessionId={session.id} items={artifacts} onOpen={goPage} />
+              <ArtifactsRow sessionId={session.id} items={artifacts} />
             </div>
           </div>
           <LifecycleActions session={session} inline={inline} />
@@ -344,11 +262,24 @@ export function SessionPanel({
   );
 }
 
-function ArtifactsRow({ sessionId, items, onOpen }) {
+// The dossier's Artifacts row is a door to the drawer, not to a second list.
+// There was a page here that listed the same files in a different shape, and
+// picking one of them opened the drawer on its list anyway -- your choice was
+// thrown away. One list, the designed one, reached from everywhere.
+//
+// The row still loads the collection to say how many files there are, with
+// the claim view:'panel', which opens nothing. Without it the row said "none
+// yet" for a session with 88 files, because nobody asked until you entered.
+function ArtifactsRow({ sessionId, items }) {
   const slice = useStore(artifactsSlice);
   const mine = slice.ownerSessionId === sessionId;
   const count = items ? items.length : (mine ? slice.items.length : 0);
   const status = items ? "ready" : (mine ? slice.status : "idle");
+  useEffect(() => {
+    if (items || !sessionId) return;
+    if (mine && slice.status !== "idle") return;
+    listArtifactsInPanel(sessionId);
+  }, [sessionId]);
   const verdict = artifactsVerdict(count, status);
   return (
     <PanelRow
@@ -356,7 +287,7 @@ function ArtifactsRow({ sessionId, items, onOpen }) {
       title="Artifacts"
       verdict={verdict.text}
       warn={verdict.warn}
-      onOpen={onOpen}
+      onOpen={() => { if (sessionId) openArtifactsList(sessionId); }}
     />
   );
 }
