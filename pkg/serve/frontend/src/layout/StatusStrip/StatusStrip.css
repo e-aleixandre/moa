@@ -83,8 +83,11 @@ button.zl-st { cursor: pointer; transition: background var(--motion-hover) ease;
 /* Permission mode is the one setting you must never misread, so it is the
    one setting in a state colour: yolo maroon (nothing will ask), ask
    yellow (it will stop for you), auto neutral. */
+/* No dot before the mode: the word is already painted in the mode's colour, so
+   a dot in `currentColor` beside it says the same thing twice -- and a coloured
+   circle is the session-state vocabulary (idle, running, permission, error),
+   which this is not. */
 .zl-st-perm { font-weight: 600; }
-.zl-st-perm::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
 .zl-st-perm.is-yolo { color: var(--zl-maroon); }
 .zl-st-perm.is-ask { color: var(--zl-yellow); }
 .zl-st-perm.is-auto { color: var(--zl-t2); }

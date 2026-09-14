@@ -255,26 +255,6 @@
   color: var(--zl-t4);
 }
 
-/* Identity mark: same hue function as the project monogram, on a DOT rather
-   than on the words. LiveBar owns the unscoped `.zl-live-id`; the picker
-   repeats the picture so a gallery that mounts this without the bar still
-   paints the mark. */
-.zl-pick .zl-live-id {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 12px;
-}
-.zl-pick .zl-live-id.is-agent::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: hsl(var(--h, 210) 65% 72%);
-}
-
 .zl-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .zl-mchip {
   display: flex;

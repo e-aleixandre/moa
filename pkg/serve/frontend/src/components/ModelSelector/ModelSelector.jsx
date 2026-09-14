@@ -66,15 +66,10 @@ function Switch({ on, onChange, label, disabled }) {
   );
 }
 
-function ModelMark({ name }) {
-  return <span class="zl-live-id is-agent" style={`--h:${hueFor(name)}`} aria-hidden="true" />;
-}
-
 function ModelChip({ model, on, onPick }) {
   const name = model.codename || model.name;
   return (
     <button type="button" class={`zl-mchip${on ? " is-on" : ""}`} onClick={() => onPick(model.id)} aria-pressed={on}>
-      <ModelMark name={name} />
       <span class="zl-mchip-txt">
         <span class="zl-mchip-name">{name}</span>
         {model.sub && <span class="zl-mchip-sub zl-data">{model.sub}</span>}
@@ -276,7 +271,6 @@ export function ModelSelector({
               provider one row further down. */}
           {!modelOnly && (currentName || sessionModel) && (
             <div class="zl-pick-cur">
-              <ModelMark name={currentName} />
               <span class="zl-pick-cur-txt">
                 <span class="zl-pick-cur-name">{currentName}</span>
                 <span class="zl-pick-cur-sub zl-data">{currentSub}</span>
