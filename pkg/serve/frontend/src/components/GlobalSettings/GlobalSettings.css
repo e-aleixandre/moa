@@ -301,12 +301,6 @@ button.zl-set-row[disabled] { cursor: default; }
   line-height: 1.5;
   color: var(--zl-t3);
 }
-.zl-set-sum .zl-set-num {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--zl-t2);
-}
-
 /* An option on a page: the same two-line shape as a row, with the mark of
    which one is current on the right. The prototype's permission picker
    (.zl-perm) is this shape; these are its rules for a list that has no state
