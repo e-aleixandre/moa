@@ -131,7 +131,7 @@
 }
 
 .zl-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
-.zl-dot.is-running { background: var(--zl-green); box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18); }
+.zl-dot.is-running { background: var(--blue); box-shadow: 0 0 0 3px rgba(137, 180, 250, 0.18); }
 .zl-dot.is-permission { background: var(--zl-yellow); box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22); }
 .zl-dot.is-error { background: var(--zl-red); box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.2); }
 /* Unseen keeps production's mauve: it is the colour this product has always

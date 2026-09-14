@@ -181,11 +181,13 @@
   height: 7px;
   border-radius: 50%;
 }
+/* Blue is running, green is idle. That is the product's vocabulary, set by
+   the StateDot primitive, and this bar is not entitled to its own. */
 .zl-live-dot.is-working,
 .zl-live-dot.is-thinking {
-  background: var(--zl-green);
-  box-shadow: 0 0 0 3px rgba(166, 227, 161, 0.18);
-  animation: zl-breathe 1.6s ease-in-out infinite;
+  background: var(--blue);
+  box-shadow: 0 0 0 3px rgba(137, 180, 250, 0.18);
+  animation: zl-breathe var(--breath-running) ease-in-out infinite;
 }
 .zl-live-dot.is-waiting {
   background: var(--zl-yellow);
