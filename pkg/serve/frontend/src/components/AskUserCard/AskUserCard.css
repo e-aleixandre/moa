@@ -1,37 +1,62 @@
+/* AskUserCard — the agent's question, waiting on you.
+
+   The shape is the approval card the owner chose (aicss, 14-sep): a glyph
+   in a tinted square beside "moa asks", the question, then the options as
+   tall bordered rows with a letter in a well on the left, and the free
+   answer as the LAST row with its field and mic inside it. Dressed in the
+   product's tokens: yellow is "waiting on you", so it stays on the rim and
+   the glyph; the chosen row is the raised step with full-strength text and
+   a check, which is how "selected" is drawn everywhere in this direction
+   (green means running here, and the run is stopped). */
+
 .ask {
   width: 100%;
   max-width: 560px;
-  border: 1px solid color-mix(in srgb, var(--zl-yellow) 40%, var(--zl-line));
+  padding: 14px 16px 16px;
+  border-radius: var(--zl-r-lg);
   background: var(--zl-raised);
-  border-radius: 14px;
-  overflow: hidden;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-yellow) 40%, transparent);
+  font-family: var(--font);
+  color: var(--zl-t2);
 }
+.ask:focus { outline: none; }
 
-.ask .ask-q {
-  padding: 16px 20px 12px;
-}
-
-.ask .ask-q .who {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--zl-yellow);
-  margin-bottom: 8px;
+.ask .ask-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  min-height: 28px;
 }
-
-.ask .ask-q p {
-  font-size: 15px;
+.ask .ask-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: var(--zl-r-sm);
+  background: color-mix(in srgb, var(--zl-yellow) 14%, transparent);
+  color: var(--zl-yellow);
+}
+.ask .who {
+  font-size: var(--zl-fs-title);
+  font-weight: 500;
+  letter-spacing: -0.005em;
   color: var(--zl-t1);
 }
 
+.ask .ask-q {
+  margin: 12px 0 0;
+  font-size: var(--zl-fs-title);
+  line-height: 1.5;
+  color: var(--zl-t1);
+}
+
+/* Options: tall bordered rows, one under the other, the letter in a well. */
 .ask .ask-opts {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--zl-line);
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .ask .ask-opt {
@@ -39,128 +64,131 @@
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 12px 20px;
+  min-height: 48px;
+  padding: 10px 12px;
+  margin: 0;
   cursor: pointer;
-  border: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--zl-line) 60%, transparent);
-  transition: background var(--motion-hover) var(--motion-ease);
+  border: 0;
+  border-radius: var(--zl-r-md);
+  box-shadow: var(--zl-rim-2);
+  background: transparent;
+  transition: background var(--motion-hover) var(--motion-ease),
+    box-shadow var(--motion-hover) var(--motion-ease);
   font-family: inherit;
-  font-size: var(--zl-fs-body);
+  font-size: var(--zl-fs-title);
+  line-height: 1.4;
   color: var(--zl-t2);
-  background: none;
   text-align: left;
 }
-
-.ask .ask-opt:last-child {
-  border-bottom: 0;
-}
+.ask .ask-opt-label { flex: 1 1 auto; min-width: 0; }
 
 .ask .ask-opt.chosen {
-  background: color-mix(in srgb, var(--zl-green) 12%, transparent);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim-2);
   color: var(--zl-t1);
-}
-
-.ask .ask-opt.chosen .k {
-  color: var(--zl-green);
-  border-color: color-mix(in srgb, var(--zl-green) 50%, transparent);
 }
 
 .ask .ask-opt-check {
   display: inline-flex;
   width: 15px;
   height: 15px;
-  margin-left: auto;
   align-items: center;
   justify-content: center;
-  color: var(--zl-green);
+  color: var(--zl-t1);
   flex: none;
 }
-
-.ask .ask-opt .rec + .ask-opt-check {
-  margin-left: 8px;
-}
 @media (hover: hover) {
-
-
-.ask .ask-opt:not(.chosen):hover {
-  background: color-mix(in srgb, var(--zl-yellow) 6%, transparent);
-  color: var(--zl-t1);
-}
+  .ask button.ask-opt:not(.chosen):hover {
+    background: var(--zl-hi);
+    color: var(--zl-t1);
+  }
+  .ask button.ask-opt:not(.chosen):hover .k {
+    background: color-mix(in srgb, var(--zl-yellow) 18%, transparent);
+    color: var(--zl-yellow);
+  }
 }
 
 .ask .ask-opt:focus-visible {
   outline: 2px solid var(--zl-accent);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
+/* The letter: a well, not a bordered box, and the shortcut it names. */
 .ask .ask-opt .k {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--zl-t4);
-  border: 1px solid var(--zl-line-2);
-  border-radius: var(--zl-r-sm);
-  width: 18px;
-  height: 18px;
   display: grid;
   place-items: center;
+  width: 24px;
+  height: 24px;
   flex: none;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-hi);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  color: var(--zl-t4);
+  transition: background var(--motion-hover) var(--motion-ease),
+    color var(--motion-hover) var(--motion-ease);
 }
-@media (hover: hover) {
-
-
-.ask .ask-opt:not(.chosen):hover .k {
+.ask .ask-opt.chosen .k {
+  background: color-mix(in srgb, var(--zl-yellow) 18%, transparent);
   color: var(--zl-yellow);
-  border-color: color-mix(in srgb, var(--zl-yellow) 50%, transparent);
-}
 }
 
 .ask .ask-opt .rec {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--zl-accent);
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  flex: none;
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--zl-t4);
 }
 
+/* The free row: the last option, its field inside, the mic at the end.
+   Not a button, so it keeps the row's chrome but not its cursor; the field
+   is chromeless because the row IS its chrome. The row borrows the state
+   colour while the field is focused. */
 .ask .ask-free {
-  display: flex;
-  gap: 8px;
-  padding: 12px 20px;
-  border-top: 1px solid var(--zl-line);
+  cursor: text;
+  padding-right: 6px;
 }
-
-/* Field (box/md) draws the control. Two things stay: it takes the free width,
-   and it borrows the card's yellow while focused — this card is a question
-   waiting on you, and yellow is what that state looks like everywhere else. */
+.ask .ask-free:focus-within {
+  box-shadow: 0 0 0 1px var(--zl-yellow);
+}
+.ask .ask-free:focus-within .k {
+  background: color-mix(in srgb, var(--zl-yellow) 18%, transparent);
+  color: var(--zl-yellow);
+}
 .ask .ask-free-field {
-  flex: 1;
-  background: var(--zl-canvas);
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
-
-.ask .ask-free-field:focus-within {
-  border-color: var(--zl-yellow);
-}
+.ask .ask-free-field:focus-within { outline: none; }
+.ask .ask-free-field .field-input { color: var(--zl-t1); }
+.ask .ask-free-field .field-input::placeholder { color: var(--zl-t4); }
 
 .ask .ask-free-submit {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 16px;
-  border-radius: var(--zl-r-md);
-  border: none;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: var(--zl-r-sm);
+  border: 0;
   background: var(--zl-accent);
   color: var(--zl-accent-ink);
   cursor: pointer;
-  transition: box-shadow var(--motion-hover) var(--motion-ease);
+  transition: background var(--motion-hover) var(--motion-ease);
 }
 @media (hover: hover) {
-
-
-.ask .ask-free-submit:hover {
-  box-shadow: 0 0 16px color-mix(in srgb, var(--zl-accent) 40%, transparent);
+  .ask .ask-free-submit:hover {
+    background: color-mix(in srgb, var(--zl-accent) 88%, white);
+  }
 }
-}
-
 .ask .ask-free-submit:focus-visible {
   outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
@@ -186,35 +214,31 @@
 }
 
 /* Empty field: the button is a mic, not a send — quieter, since there is
-   nothing to send yet. */
+   nothing to send yet, but never invisible: it is the thing the owner asked
+   for. */
 .ask .ask-free-submit.mic-mode {
   background: var(--zl-control);
-  color: var(--zl-t3);
+  color: var(--zl-t2);
 }
 @media (hover: hover) {
-
-.ask .ask-free-submit.mic-mode:hover {
-  background: var(--zl-control);
-  color: var(--zl-t1);
-  box-shadow: none;
-}
+  .ask .ask-free-submit.mic-mode:hover {
+    background: color-mix(in srgb, var(--zl-control) 70%, var(--zl-t4));
+    color: var(--zl-t1);
+  }
 }
 
+/* Recording is the one live state on this card; red is what it looks like. */
 .ask .ask-free-submit.recording {
-  background: linear-gradient(135deg, var(--zl-red), color-mix(in srgb, var(--zl-red) 55%, var(--zl-canvas)));
+  background: var(--zl-red);
   color: var(--zl-canvas);
   animation: ask-mic-pulse 1.5s ease-in-out infinite;
 }
 @media (hover: hover) {
-
-.ask .ask-free-submit.recording:hover {
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--zl-red) 35%, transparent);
-}
+  .ask .ask-free-submit.recording:hover { background: var(--zl-red); }
 }
 /* Locked (hands-free): solid and still, showing a stop square. */
 .ask .ask-free-submit.recording.locked {
   animation: none;
-  background: var(--zl-red);
 }
 
 @keyframes ask-mic-pulse {
@@ -223,9 +247,8 @@
 }
 
 .ask .ask-free-submit.transcribing {
-  background: var(--zl-control);
-  color: var(--zl-accent);
-  box-shadow: none;
+  background: var(--zl-hi);
+  color: var(--zl-t3);
 }
 .ask .ask-free-submit .spin {
   animation: ask-spin 1.2s linear infinite;
@@ -246,12 +269,12 @@
   align-items: center;
   gap: 2px;
   padding: 8px 12px;
-  background: var(--zl-control);
-  color: var(--zl-t2);
-  border: 1px solid var(--zl-line-2);
+  border: 0;
   border-radius: var(--zl-r-md);
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--zl-canvas) 60%, transparent);
-  font-size: 11px;
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim-2), 0 6px 20px rgba(0, 0, 0, 0.45);
+  color: var(--zl-t2);
+  font-size: var(--zl-fs-meta);
   white-space: nowrap;
   pointer-events: none;
   z-index: 20;
@@ -262,8 +285,10 @@
   50% { transform: translateY(-3px); opacity: 1; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ask .ask-free-submit.recording { animation: none; }
-  .ask .ask-free-submit .spin { animation: none; }
-  .ask .ask-voice-lock-hint { animation: none; }
+/* Phone: the mic clears the thumb. Scoped to the mobile host, like the
+   permission card's 44px floor. */
+.mconv .ask .ask-free-submit {
+  width: 44px;
+  height: 44px;
 }
+.mconv .ask .ask-free { padding-right: 4px; }

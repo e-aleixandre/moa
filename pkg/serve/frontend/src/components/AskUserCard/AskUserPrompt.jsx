@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
+import { ChevronUp, ChevronDown } from "lucide-preact";
 import { AskUserCard } from "./AskUserCard.jsx";
 import { resolveAskUser } from "../../data/session-actions.js";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
@@ -15,9 +16,9 @@ import "./AskUserPrompt.css";
 // this component only wires that machine to the visual card + resolveAskUser,
 // porting the old SPA's AskUserCard.jsx (pkg/serve/frontend/src/components/
 // AskUserCard.jsx) semantics: per-question answers that never bleed into each
-// other, back/next + clickable dots, Submit jumps to the first unanswered
-// question, Skip fills the blanks with '(skipped)', and picking an option
-// auto-advances to the next question.
+// other, a counter with up/down steppers, Continue/Submit jumps to the first
+// unanswered question, Skip fills the blanks with '(skipped)', and picking an
+// option auto-advances to the next question.
 export function AskUserPrompt({ session }) {
   const ask = session.pendingAsk;
   const questions = ask?.questions || [];
@@ -201,13 +202,24 @@ export function AskUserPrompt({ session }) {
 
   const canSubmit = allAnswered(answers);
 
+  const last = current === questions.length - 1;
+  // Continue is the primary: on an earlier question it steps forward, on the
+  // last one it submits (jumping back to whatever is still blank).
+  const handleContinue = () => (last ? handleSubmit() : goTo(current + 1));
+  const continueLabel = last ? (canSubmit ? "Submit" : "Submit — jump to unanswered") : "Continue";
+  // The ⏎ drawn on Continue is a real key: Enter with focus on the card (a
+  // click inside gives it focus) but not in the field or on a button, which
+  // answer Enter themselves. Focus is never pulled from the composer.
+  const onKeyDown = (e) => {
+    if (e.key !== "Enter") return;
+    const tag = e.target?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON" || e.target?.isContentEditable) return;
+    e.preventDefault();
+    handleContinue();
+  };
+
   return (
-    <div class="ask-user-prompt" ref={rootRef}>
-      {questions.length > 1 && (
-        <div class="ask-user-prompt-head">
-          Question {current + 1} of {questions.length}
-        </div>
-      )}
+    <div class="ask-user-prompt" ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown}>
       <AskUserCard
         question={q.question}
         options={options}
@@ -221,43 +233,47 @@ export function AskUserPrompt({ session }) {
       {voiceError && (
         <div class="ask-user-prompt-voice-error" role="alert">{voiceError}</div>
       )}
-      {questions.length > 1 && (
-        <div class="ask-user-prompt-nav">
-          <button type="button" disabled={current === 0} onClick={() => goTo(current - 1)}>
-            ← Back
-          </button>
-          <div class="ask-user-prompt-dots">
-            {questions.map((_, i) => (
-              <button
-                type="button"
-                key={i}
-                class={`ask-user-prompt-dot${i === current ? " active" : ""}${answers[i] ? " answered" : ""}`}
-                aria-label={`Question ${i + 1}${answers[i] ? " (answered)" : ""}`}
-                aria-current={i === current ? "true" : undefined}
-                onClick={() => goTo(i)}
-              />
-            ))}
+      <div class="ask-user-prompt-foot">
+        {questions.length > 1 && (
+          <div class="ask-user-prompt-nav" aria-label="Questions">
+            <button
+              type="button"
+              class="ask-user-prompt-step"
+              aria-label="Previous question"
+              disabled={current === 0}
+              onClick={() => goTo(current - 1)}
+            >
+              <ChevronUp size={15} />
+            </button>
+            <span class="ask-user-prompt-count zl-data" aria-live="polite">
+              {current + 1}/{questions.length}
+            </span>
+            <button
+              type="button"
+              class="ask-user-prompt-step"
+              aria-label="Next question"
+              disabled={last}
+              onClick={() => goTo(current + 1)}
+            >
+              <ChevronDown size={15} />
+            </button>
           </div>
-          {current < questions.length - 1 ? (
-            <button type="button" onClick={() => goTo(current + 1)}>Next →</button>
-          ) : (
-            <span class="ask-user-prompt-nav-spacer" />
-          )}
+        )}
+        <div class="ask-user-prompt-actions">
+          <button
+            type="button"
+            class="ask-user-prompt-skip"
+            onPointerDown={(e) => { skipPointerDown.current = e.pointerId ?? true; }}
+            onPointerCancel={() => { skipPointerDown.current = null; }}
+            onClick={handleSkip}
+          >
+            Skip
+          </button>
+          <button type="button" class="ask-user-prompt-submit" onClick={handleContinue}>
+            {continueLabel}
+            <kbd class="ask-user-prompt-key" aria-hidden="true">⏎</kbd>
+          </button>
         </div>
-      )}
-      <div class="ask-user-prompt-actions">
-        <button type="button" class="ask-user-prompt-submit" onClick={handleSubmit}>
-          {canSubmit ? "Submit" : "Submit — jump to unanswered"}
-        </button>
-        <button
-          type="button"
-          class="ask-user-prompt-skip"
-          onPointerDown={(e) => { skipPointerDown.current = e.pointerId ?? true; }}
-          onPointerCancel={() => { skipPointerDown.current = null; }}
-          onClick={handleSkip}
-        >
-          Skip
-        </button>
       </div>
     </div>
   );

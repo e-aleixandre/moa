@@ -281,6 +281,7 @@ function AskUserCardDemo() {
         ]}
         onPick={() => {}}
         onSubmitFree={() => {}}
+        voice={{ supported: true, handlers: {}, recording: false, transcribing: false, locked: false, showSlideHint: false }}
       />
     </div>
   );

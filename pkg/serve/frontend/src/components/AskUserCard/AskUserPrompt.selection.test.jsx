@@ -107,7 +107,7 @@ test("an option still auto-advances and is restored after Back", () => {
   tree = render(ask);
   expect(card(tree).props.question).toBe("Second?");
 
-  descendants(tree).find((node) => node.props?.children === "← Back").props.onClick();
+  descendants(tree).find((node) => node.props?.["aria-label"] === "Previous question").props.onClick();
   tree = render(ask);
   expect(card(tree).props.question).toBe("First?");
   expect(card(tree).props.currentAnswer).toBe("Yes");

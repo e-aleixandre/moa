@@ -1,90 +1,66 @@
+/* AskUserPrompt — the card plus the row under it: counter and steppers on
+   the left, Skip (ghost) and Continue (solid, with ⏎) on the right. */
 .ask-user-prompt {
   width: 100%;
   max-width: 560px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+}
+.ask-user-prompt:focus { outline: none; }
+.ask-user-prompt:focus-visible .ask-user-prompt-submit {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
 }
 
-.ask-user-prompt-head {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--zl-t3);
+.ask-user-prompt-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 2px;
 }
 
 .ask-user-prompt-nav {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 4px;
+  gap: 2px;
+  margin-right: auto;
 }
-
-.ask-user-prompt-nav button {
-  background: none;
-  border: none;
-  color: var(--zl-t3);
-  font-family: inherit;
-  font-size: var(--zl-fs-meta);
-  cursor: pointer;
-  padding: 4px 8px;
-}
-@media (hover: hover) {
-
-
-.ask-user-prompt-nav button:hover:not(:disabled) {
-  color: var(--zl-t1);
-}
-}
-
-.ask-user-prompt-nav button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.ask-user-prompt-dots {
-  display: flex;
-  gap: 8px;
-  margin: 0 auto;
-}
-
-.ask-user-prompt-dot {
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
+.ask-user-prompt-step {
   display: inline-grid;
   place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t3);
+  cursor: pointer;
+  transition: background var(--motion-hover) var(--motion-ease);
 }
-
-.ask-user-prompt-dot::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--zl-control);
+@media (hover: hover) {
+  .ask-user-prompt-step:hover:not(:disabled) {
+    background: var(--zl-hi);
+    color: var(--zl-t1);
+  }
 }
-
-.ask-user-prompt-dot.answered::before {
-  background: var(--zl-yellow);
+.ask-user-prompt-step:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
-
-.ask-user-prompt-dot.active::before {
-  outline: 2px solid var(--zl-t3);
-  outline-offset: 2px;
-}
-
-.ask-user-prompt-dot:focus-visible {
+.ask-user-prompt-step:focus-visible {
   outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
-  border-radius: var(--zl-r-sm);
 }
-
-.ask-user-prompt-nav-spacer {
-  min-width: 1px;
+.ask-user-prompt-count {
+  min-width: 32px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--zl-t3);
 }
 
 .ask-user-prompt-actions {
@@ -97,66 +73,85 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
   border-radius: var(--zl-r-md);
-  font-family: inherit;
-  font-size: var(--zl-fs-meta);
-  cursor: pointer;
-  transition: background var(--motion-hover) var(--motion-ease), border-color var(--motion-hover) var(--motion-ease);
-}
-
-.ask-user-prompt-submit {
-  border: none;
-  background: var(--zl-green);
-  color: var(--zl-canvas);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
   font-weight: 500;
+  cursor: pointer;
+  transition: background var(--motion-hover) var(--motion-ease);
 }
-@media (hover: hover) {
-
-
-.ask-user-prompt-submit:hover:not(:disabled) {
-  box-shadow: 0 0 16px color-mix(in srgb, var(--zl-green) 40%, transparent);
+.ask-user-prompt-submit {
+  background: var(--zl-accent);
+  color: var(--zl-accent-ink);
+  font-weight: 600;
 }
-}
-
-.ask-user-prompt-submit:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .ask-user-prompt-skip {
-  border: 1px solid var(--zl-line-2);
-  background: transparent;
-  color: var(--zl-t2);
+  background: var(--zl-control);
+  color: var(--zl-t1);
 }
 @media (hover: hover) {
-
-
-.ask-user-prompt-skip:hover {
-  border-color: var(--zl-red);
-  color: var(--zl-red);
+  .ask-user-prompt-submit:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--zl-accent) 88%, white);
+  }
+  .ask-user-prompt-skip:hover {
+    background: color-mix(in srgb, var(--zl-control) 70%, var(--zl-t4));
+  }
 }
+.ask-user-prompt-submit:focus-visible,
+.ask-user-prompt-skip:focus-visible {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
+}
+.ask-user-prompt-key {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--zl-accent-ink) 14%, transparent);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  line-height: 1;
 }
 
+/* Answered: a note, not a green banner. The card is gone, the run moved on. */
 .ask-user-resolved {
   width: 100%;
   max-width: 560px;
-  padding: 12px 20px;
-  border-radius: 14px;
-  border: 1px solid var(--zl-line);
-  background: var(--zl-raised);
-  color: var(--zl-green);
-  font-size: var(--zl-fs-meta);
+  padding: 12px 16px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  color: var(--zl-t3);
 }
 
 /* A failed recording (mic denied, no device, transcription error) reports here
    rather than through a toast: the question is what the user is looking at. */
 .ask-user-prompt-voice-error {
-  margin-top: 8px;
   padding: 8px 12px;
-  border: 1px solid color-mix(in srgb, var(--zl-red) 40%, var(--zl-line));
+  border-left: 2px solid var(--zl-red);
   border-radius: var(--zl-r-sm);
   background: color-mix(in srgb, var(--zl-red) 8%, transparent);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
   color: var(--zl-red);
-  font-size: 11px;
 }
+
+/* Phone: the two decisions clear the thumb. Scoped to the mobile host
+   (.mconv), like the permission card, so the catalogue's scenes stay the
+   size they were drawn. */
+.mconv .ask-user-prompt-submit,
+.mconv .ask-user-prompt-skip {
+  height: 44px;
+  flex: 1 1 auto;
+  justify-content: center;
+}
+.mconv .ask-user-prompt-actions { flex: 1 1 auto; }
+.mconv .ask-user-prompt-step { width: 44px; height: 44px; }

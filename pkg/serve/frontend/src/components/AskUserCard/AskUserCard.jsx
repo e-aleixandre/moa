@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "preact/hooks";
-import { Users, ArrowUp, Check, Mic, Square, Loader2, ChevronUp } from "lucide-preact";
+import { MessageCircleQuestionMark, ArrowUp, Check, Mic, Square, Loader2, ChevronUp } from "lucide-preact";
 import { Field } from "../../primitives/index.js";
 import "./AskUserCard.css";
 
@@ -9,17 +9,25 @@ const isTextEntryTarget = (el) => {
   return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
 };
 
-// AskUserCard — agent question with numbered options (keyboard-first,
-// 1/2/3) + free text. `options`: [{ label, recommended? }]. The free-text field
-// is uncontrolled by default (keeps its own state — used by the gallery), but
-// becomes controlled when `onFreeChange` is passed: then every keystroke is
-// reported up so a stateful container (AskUserPrompt) can persist the answer
-// per question and restore it when navigating back.
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+// AskUserCard — the agent's question, in the shape the owner picked (the
+// aicss approval card, 14-sep): a glyph-and-title head, the question, then
+// the options as tall bordered rows with a letter in a well on the left,
+// and the free answer as the LAST row rather than a field under the list.
+// Letters are real shortcuts: the card is focusable (a click anywhere in it
+// gives it focus) and A..Z with focus in it, outside the text field, picks
+// that option. `options`: [{ label, recommended? }].
+//
+// The free-text field is uncontrolled by default (keeps its own state — used
+// by the gallery), but becomes controlled when `onFreeChange` is passed:
+// then every keystroke is reported up so a stateful container (AskUserPrompt)
+// can persist the answer per question and restore it when navigating back.
 //
 // `voice` is the optional push-to-talk wiring from useVoiceGesture (handlers +
-// recording/transcribing/locked/showSlideHint). Passing it turns the submit
-// button into the same hold-to-talk control the composer uses; omitting it
-// leaves a plain submit, which is what the gallery renders.
+// recording/transcribing/locked/showSlideHint). Passing it puts the mic
+// inside the free row — the same hold-to-talk control the composer uses;
+// omitting it leaves a plain send, which is what the gallery renders.
 export function AskUserCard({
   question,
   options = [],
@@ -29,7 +37,7 @@ export function AskUserCard({
   freeValue,
   onFreeChange,
   voice = null,
-  placeholder = "Or answer in your own words…",
+  placeholder = "Something else…",
   ...rest
 }) {
   const controlled = onFreeChange != null;
@@ -37,6 +45,9 @@ export function AskUserCard({
   const free = controlled ? (freeValue || "") : freeInternal;
   const setFree = controlled ? onFreeChange : setFreeInternal;
   const rootRef = useRef(null);
+  const freeLetter = LETTERS[options.length] || "";
+  // The free row is "chosen" when the answer is text that is not an option.
+  const freeChosen = !!free.trim() && !options.some((o) => o.label === currentAnswer);
 
   const submitFree = (event) => {
     event.preventDefault();
@@ -49,23 +60,32 @@ export function AskUserCard({
   const onKeyDown = useCallback(
     (event) => {
       if (isTextEntryTarget(event.target)) return;
-      const num = Number(event.key);
-      if (!Number.isInteger(num) || num < 1 || num > options.length) return;
-      const idx = num - 1;
-      event.preventDefault();
-      onPick?.(options[idx], idx);
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const key = event.key;
+      if (typeof key !== "string" || key.length !== 1) return;
+      const idx = LETTERS.indexOf(key.toUpperCase());
+      if (idx === -1) return;
+      if (idx < options.length) {
+        event.preventDefault();
+        onPick?.(options[idx], idx);
+      } else if (idx === options.length) {
+        // The free row's own letter: jump into its field.
+        event.preventDefault();
+        rootRef.current?.querySelector(".ask-free-field .field-input")?.focus();
+      }
     },
     [options, onPick]
   );
 
   return (
-    <div class="ask" ref={rootRef} onKeyDown={onKeyDown} {...rest}>
-      <div class="ask-q">
-        <div class="who">
-          <Users size={13} aria-hidden="true" /> moa asks
-        </div>
-        <p>{question}</p>
+    <div class="ask" ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown} {...rest}>
+      <div class="ask-head">
+        <span class="ask-glyph" aria-hidden="true">
+          <MessageCircleQuestionMark size={15} />
+        </span>
+        <span class="who">moa asks</span>
       </div>
+      <p class="ask-q">{question}</p>
       <div class="ask-opts">
         {options.map((opt, i) => {
           const chosen = opt.label === currentAnswer;
@@ -75,10 +95,11 @@ export function AskUserCard({
               type="button"
               class={`ask-opt${chosen ? " chosen" : ""}`}
               aria-pressed={chosen}
+              aria-keyshortcuts={LETTERS[i]}
               onClick={() => onPick?.(opt, i)}
             >
-              <span class="k" aria-hidden="true">{i + 1}</span>
-              {opt.label}
+              <span class="k" aria-hidden="true">{LETTERS[i]}</span>
+              <span class="ask-opt-label">{opt.label}</span>
               {opt.recommended && <span class="rec">RECOMMENDED</span>}
               <span class="ask-opt-check" aria-hidden="true">
                 {chosen && <Check size={15} />}
@@ -86,24 +107,27 @@ export function AskUserCard({
             </button>
           );
         })}
+        <form class={`ask-opt ask-free${freeChosen ? " chosen" : ""}`} onSubmit={submitFree}>
+          <span class="k" aria-hidden="true">{freeLetter}</span>
+          <Field
+            variant="box"
+            size="md"
+            class="ask-free-field"
+            type="text"
+            placeholder={voice?.supported ? `${placeholder} or hold the mic to talk` : placeholder}
+            aria-label="Answer in your own words"
+            aria-keyshortcuts={freeLetter}
+            autocomplete="off"
+            value={free}
+            onInput={(e) => setFree(e.currentTarget.value)}
+          />
+          {voice?.supported ? renderVoiceSubmit(voice, free) : (
+            <button type="submit" class="ask-free-submit" aria-label="Send answer">
+              <ArrowUp size={15} />
+            </button>
+          )}
+        </form>
       </div>
-      <form class="ask-free" onSubmit={submitFree}>
-        <Field
-          variant="box"
-          size="md"
-          class="ask-free-field"
-          type="text"
-          placeholder={voice?.supported ? "Answer in your own words, or hold to talk…" : placeholder}
-          aria-label="Answer in your own words"
-          value={free}
-          onInput={(e) => setFree(e.currentTarget.value)}
-        />
-        {voice?.supported ? renderVoiceSubmit(voice, free) : (
-          <button type="submit" class="ask-free-submit" aria-label="Send answer">
-            <ArrowUp size={15} />
-          </button>
-        )}
-      </form>
     </div>
   );
 }
