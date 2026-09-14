@@ -13,7 +13,9 @@
 //   height   viewport height. Only has to be large enough; the capture is
 //            clipped to `target`, not to the viewport.
 //   target   CSS selector of what is actually captured. Default: the device
-//            frame of the host.
+//            frame of the host. The artifacts scenes override it: the drawer
+//            portals to document.body, so framing the host would photograph
+//            the page it is NOT on.
 //   piece    the migration unit this scene belongs to (--piece filters on it).
 //
 // The matrix is deliberately not the full product of density × live × surface
@@ -34,6 +36,7 @@ export const SCENES = [
   { name: "phone-mcp", host: "phone", live: "working", surface: "mcp", piece: "session-panel" },
   { name: "phone-model-sheet", host: "phone", live: "working", surface: "model", piece: "pickers" },
   { name: "phone-perm-sheet", host: "phone", live: "working", surface: "perm", piece: "pickers" },
+  { name: "phone-artifacts", host: "phone", live: "working", surface: "artifacts", target: ".artifacts-modal", piece: "artifacts" },
   { name: "phone-settings", host: "phone", live: "working", surface: "settings", piece: "global-settings" },
   { name: "phone-settings-page", host: "phone", live: "working", surface: "settings-page", piece: "global-settings" },
 
@@ -47,6 +50,7 @@ export const SCENES = [
   { name: "desktop-mcp", host: "desktop", live: "working", surface: "mcp", width: 1500, piece: "session-panel" },
   { name: "desktop-model-popover", host: "desktop", live: "working", surface: "model", width: 1500, piece: "pickers" },
   { name: "desktop-perm-popover", host: "desktop", live: "working", surface: "perm", width: 1500, piece: "pickers" },
+  { name: "desktop-artifacts", host: "desktop", live: "working", surface: "artifacts", width: 1500, target: ".af-drawer", piece: "artifacts" },
   { name: "desktop-settings", host: "desktop", live: "working", surface: "settings", width: 1500, piece: "global-settings" },
   { name: "desktop-settings-page", host: "desktop", live: "working", surface: "settings-page", width: 1500, piece: "global-settings" },
 

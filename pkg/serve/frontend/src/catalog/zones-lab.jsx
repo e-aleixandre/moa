@@ -55,6 +55,8 @@ import { projectMonogram } from "../data/util/format.js";
    Artifact. */
 import { ActivityLedger as ProductionLedger, LedgerDiff } from "../components/ActivityLedger/ActivityLedger.jsx";
 import { Artifact } from "../components/Artifacts/Artifact.jsx";
+import { ArtifactsDrawer } from "../components/Artifacts/ArtifactsDrawer.jsx";
+import { setState } from "../data/store.js";
 /* Same move, the phone header: markup and CSS live in layout/mobile/MobileChrome
    now, and the prototype draws the shipped one. See the adapter in `Phone`. */
 import { MobileChrome } from "../layout/mobile/MobileChrome/MobileChrome.jsx";
@@ -913,6 +915,45 @@ function useSettingsSurface(forced) {
   return { open, page, setPage, show: () => setOpen(true), close: () => { setOpen(false); setPage("root"); } };
 }
 
+/* Artifacts is not a prop-driven component: the drawer reads the global store,
+   because in the product it is mounted once and the conversation it shows is
+   whichever one asked for it. So the lab seeds the store rather than faking a
+   drawer, and what the harness photographs is the real thing in its real
+   state. */
+const LAB_ARTIFACTS = [
+  { id: "a1", available: true, name: "fart-after-desktop.png", mime: "image/png", size: 184320, title: "Después · escritorio", description: "El plano elevado con los separadores finos, y las acciones reservadas a la derecha.", createdAt: "2026-09-09T18:12:00Z" },
+  { id: "a2", available: true, name: "fart-before-desktop.png", mime: "image/png", size: 176128, title: "Antes · escritorio (referencia)", description: "Ochenta y tres tarjetas idénticas, sin una sola miniatura.", createdAt: "2026-09-09T18:04:00Z" },
+  { id: "a3", available: true, name: "attach-race-report.md", mime: "text/markdown", size: 4300, title: "Informe de la carrera en adjuntos", description: "Dos sesiones reclamando el mismo blob; el índice sobrevive al borrado.", createdAt: "2026-09-09T09:28:00Z" },
+  { id: "a4", available: true, name: "race-test.log", mime: "text/plain", size: 1126, title: "", description: "", createdAt: "2026-09-08T09:33:00Z" },
+  { id: "a5", available: true, name: "coverage.html", mime: "text/html", size: 38912, title: "Cobertura tras el arreglo", description: "", createdAt: "2026-09-08T09:34:00Z" },
+];
+
+function useArtifactsSurface(forced, phone = false) {
+  useEffect(() => {
+    // The drawer asks the store whether it is on a phone; in the product that
+    // is set by the real viewport, and the lab has to say so itself or the
+    // phone scene would photograph the desktop drawer.
+    if (forced === "artifacts" && phone) setState({ isMobile: true });
+    if (forced === "artifacts") {
+      // The drawer names its origin from the session roster, so the lab has to
+      // put its conversation there or the header reads "Untitled".
+      setState((st) => ({ sessions: { ...(st.sessions || {}), lab: { id: "lab", title: "Buscar un bug bounty" } } }));
+      setState({ artifacts: {
+        ownerSessionId: "lab", view: "list", fileId: null, from: "chat",
+        expanded: false, seed: null, status: "ready", error: null,
+        items: LAB_ARTIFACTS, token: 1,
+      } });
+    } else {
+      // The drawer names its origin from the session roster, so the lab has to
+      // put its conversation there or the header reads "Untitled".
+      setState((st) => ({ sessions: { ...(st.sessions || {}), lab: { id: "lab", title: "Buscar un bug bounty" } } }));
+      setState({ artifacts: { ownerSessionId: null, view: null, fileId: null, from: "chat", expanded: false, seed: null, status: "idle", error: null, items: [], token: 0 } });
+    }
+    return () => { if (phone) setState({ isMobile: false }); };
+  }, [forced, phone]);
+  return forced === "artifacts";
+}
+
 /* The session panel's page, owned by the host: the ring on the line opens
    the panel straight on Usage; closing resets to the root. `forced` is the
    lab's preset (a page name, or "panel" for the root). */
@@ -933,6 +974,7 @@ function usePanel(forced, setOpen) {
 function Phone({ label, live: preset, surface }) {
   const [view, setView] = useState("recent");
   const settings = useSettingsSurface(surface);
+  const artifactsOpen = useArtifactsSurface(surface, true);
   const host = useRef(null);
   const d = useEdgeDrawers(host);
   const panel = usePanel(surface, d.setRight);
@@ -1014,6 +1056,7 @@ function Phone({ label, live: preset, surface }) {
           onPage={panel.setPage}
           style={d.rightX != null ? `transform:translateX(${d.rightX}px);transition:none` : undefined}
         />
+        {artifactsOpen && <ArtifactsDrawer />}
       </div>
       <p class="zl-hint">
         Swipe in from the left edge for the other sessions, from the right edge
@@ -1033,6 +1076,7 @@ function Phone({ label, live: preset, surface }) {
 function Desktop({ label, live: preset, surface }) {
   const [view, setView] = useState("recent");
   const settings = useSettingsSurface(surface);
+  const artifactsOpen = useArtifactsSurface(surface);
   const [open, setOpen] = useState(false);
   const panel = usePanel(surface, setOpen);
   const set = useSettings(FULL_STATUS, surface);
@@ -1072,6 +1116,7 @@ function Desktop({ label, live: preset, surface }) {
           </div>
           {open && <div class="zl-scrim" onClick={panel.close} />}
           <SessionPanel open={open} onClose={panel.close} page={panel.page} onPage={panel.setPage} />
+          {artifactsOpen && <ArtifactsDrawer />}
         </div>
       </div>
       <p class="zl-hint">
@@ -1256,6 +1301,7 @@ const SURFACES = [
   { id: "model", label: "Model picker", note: "What the model tap opens: a popover above its button on desktop and in a pane, a bottom sheet on the phone. Current model, pinned, the door to all providers (pushed inside with back), thinking, fast." },
   { id: "perm", label: "Permissions", note: "What the permission tap opens: three rows in the line's own colours, one line each of what it does. Pick one and it closes." },
   { id: "settings", label: "Settings", note: "What the gear opens: the GLOBAL settings, so it belongs to no edge — centred on the desktop, a bottom sheet on the phone. Rows, not a form: name and one line of explanation on the left, the value on the right. A choice between several opens a second page inside the same panel." },
+  { id: "artifacts", label: "Artifacts", note: "The one list of files in the product, reached from the composer's menu, the head entry, and the dossier's row. Grouped by day in server order, real thumbnails, title first and the filename underneath it. Replaces the panel page that used to list the same files in a different shape." },
   { id: "settings-page", label: "Settings · a page", note: "The second level: a row whose value is a choice pushes a page in place, with back + title in the head. Same idiom as the panel's dossiers and the model picker's providers." },
 ];
 function LiveSwitch({ value, onChange }) {
