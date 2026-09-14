@@ -96,7 +96,7 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--zl-green);
+  background: var(--blue);
   animation: zl-lg-breathe 1.6s ease-in-out infinite;
 }
 @keyframes zl-lg-breathe { 50% { opacity: 0.35; } }
@@ -110,7 +110,7 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
   right: 0;
   bottom: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--zl-green) 40%, var(--zl-green) 60%, transparent);
+  background: linear-gradient(90deg, transparent, var(--blue) 40%, var(--blue) 60%, transparent);
   transform: translateX(-100%);
   animation: zl-lg-sweep 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   opacity: 0.7;

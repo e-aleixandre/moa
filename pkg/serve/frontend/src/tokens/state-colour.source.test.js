@@ -27,6 +27,8 @@ test('no hand-rolled dot paints a running session green', () => {
     ['layout/LiveBar/LiveBar.css', /\.zl-live-dot\.is-working[\s\S]*?\}/],
     ['components/SessionRow/SessionRow.css', /\.zl-dot\.is-running[^}]*\}/],
     ['components/InboxView/InboxView.css', /\.zi-dot\.is-running[^}]*\}/],
+    ['components/ActivityLedger/ActivityLedger.css', /\.zl-lg-mark\.is-live::before[^}]*\}/],
+    ['components/ActivityLedger/ActivityLedger.css', /\.zl-lg-row\.is-live::after[^}]*\}/],
   ];
 
   for (const [file, re] of dots) {
