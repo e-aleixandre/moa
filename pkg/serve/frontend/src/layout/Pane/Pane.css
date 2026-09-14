@@ -210,8 +210,6 @@
   max-height: min(70vh, 480px);
   overflow: auto;
 }
-.zl-pane .status-strip-mcp-popover { left: auto; right: 8px; }
-
 /* Touch drag ghost (appended to <body> by useTouchDrag). */
 .touch-drag-ghost {
   background: var(--zl-sheet);

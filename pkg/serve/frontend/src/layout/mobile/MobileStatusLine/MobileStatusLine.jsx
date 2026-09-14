@@ -9,26 +9,24 @@ import { useStore } from "../../../hooks/useStore.js";
 import { usePresence } from "../../../hooks/usePresence.js";
 import { MOTION } from "../../../hooks/motion.js";
 import { configureSession, setSessionFast } from "../../../data/session-actions.js";
-import { toggleSessionPanel } from "../../../data/session-panel.js";
+import { sessionPanelView, toggleSessionPanel } from "../../../data/session-panel.js";
 import { addToast } from "../../../data/notifications.js";
 import { modelCodename, shortModel } from "../../../data/util/format.js";
-import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { StatusStrip } from "../../StatusStrip/StatusStrip.jsx";
-import { McpPanel } from "../../../components/McpPanel/McpPanel.jsx";
 
 // MobileStatusLine — the phone's host for the status line. The line's FACE is
 // StatusStrip, the same component as desktop and grid; what lives here is what
 // each of its doors OPENS at this density.
 //
-// Every door on the line opens over the line, as a bottom sheet (MobileSheet)
-// — never the centered generic <Sheet> modal. They are the phone's form of the
-// desktop's popovers, and they hold the settings for the NEXT turn:
+// Model and permission open over the line as bottom sheets — never the
+// centered generic <Sheet> modal. They hold settings for the NEXT turn:
 //
 //   • model — "Model": the real ModelSelector, hosted in the catalogue sheet.
 //   • permission — the glanceable safety colour AND the door. ONE tap reveals
 //     the complete ask/auto/yolo choice, from PermissionControl's own rows, so
 //     the two densities cannot drift apart.
-//   • mcp — the per-session server health, from the shared McpPanel.
+// MCP is a session fact instead, so its chip opens the dossier's MCP page,
+// the same surface as desktop.
 //
 // The gauges are the exception, and the only door here that does NOT open over
 // the line: the ring opens the session PANEL on its Usage page, the same
@@ -45,16 +43,15 @@ import { McpPanel } from "../../../components/McpPanel/McpPanel.jsx";
 export function MobileStatusLine({ session, usage }) {
   const [sessionOpen, setSessionOpen] = useState(false);
   const [permsOpen, setPermsOpen] = useState(false);
-  const [mcpOpen, setMcpOpen] = useState(false);
   const sessionPresence = usePresence(sessionOpen, MOTION.exitBase);
   const permsPresence = usePresence(permsOpen, MOTION.exitBase);
   const catalog = useStore(modelCatalog);
 
   const sessionId = session ? session.id : null;
+  const panel = useStore((state) => sessionPanelView(state, sessionId));
   useEffect(() => {
     setSessionOpen(false);
     setPermsOpen(false);
-    setMcpOpen(false);
   }, [sessionId]);
 
   // Opening the sheet is a natural moment to retry a catalog that never
@@ -101,8 +98,8 @@ export function MobileStatusLine({ session, usage }) {
       session={session}
       usage={usage}
       onOpenUsage={hasSession ? () => toggleSessionPanel(session.id, "usage") : undefined}
-      onOpenMcp={hasSession ? () => setMcpOpen(true) : undefined}
-      mcpOpen={mcpOpen}
+      onOpenMcp={hasSession ? () => toggleSessionPanel(session.id, "mcp") : undefined}
+      mcpOpen={panel.open && panel.page === "mcp"}
       onPerm={hasSession ? () => setPermsOpen(true) : undefined}
       permOpen={permsOpen}
       showTokens
@@ -177,15 +174,6 @@ export function MobileStatusLine({ session, usage }) {
         </PickerSheet>
       )}
 
-      {hasSession && session.mcp && session.mcp.total > 0 && (
-        <MobileSheet
-          open={mcpOpen}
-          onClose={() => setMcpOpen(false)}
-          title="MCP servers"
-        >
-          <McpPanel sessionId={session.id} mcpTick={session.mcpTick} variant="sheet" />
-        </MobileSheet>
-      )}
     </StatusStrip>
   );
 }

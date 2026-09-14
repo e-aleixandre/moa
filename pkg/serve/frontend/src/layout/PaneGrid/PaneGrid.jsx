@@ -11,7 +11,6 @@ import {
 } from "../../components/index.js";
 import { PickerPopover } from "../../components/ModelSelector/ModelSelector.jsx";
 import { usePermissionMenu } from "../../components/PermissionControl/PermissionControl.jsx";
-import { McpPanel } from "../../components/McpPanel/McpPanel.jsx";
 import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
@@ -35,6 +34,7 @@ import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
 import { addToast } from "../../data/notifications.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { setPopoverOpenFromClick } from "../../data/popover-click.js";
+import { openSessionPanel } from "../../data/session-panel.js";
 import { positionModelPopover } from "./model-popover-position.js";
 import "./PaneGrid.css";
 
@@ -213,7 +213,6 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   // clicks look broken (TOC-3). Popovers are local to this pane so multi-pane
   // grids don't share one global open state.
   const [usageOpen, setUsageOpen] = useState(false);
-  const [mcpOpen, setMcpOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const catalog = useStore(modelCatalog);
   const stripAnchorRef = useRef(null);
@@ -233,7 +232,6 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
 
   useEffect(() => {
     setUsageOpen(false);
-    setMcpOpen(false);
     setModelOpen(false);
     permMenu.close();
   }, [node.sessionId]);
@@ -280,20 +278,18 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   }, [modelOpen, placeModelPopover]);
 
   useEffect(() => {
-    if (!usageOpen && !mcpOpen && !modelOpen) return undefined;
+    if (!usageOpen && !modelOpen) return undefined;
     const onDocDown = (e) => {
       const t = e.target;
       if (stripAnchorRef.current?.contains(t)) return;
       if (modelAnchorRef.current?.contains(t)) return;
       if (modelPopoverRef.current?.contains(t)) return;
       setUsageOpen(false);
-      setMcpOpen(false);
       setModelOpen(false);
     };
     const onKeyDown = (e) => {
       if (e.key === "Escape") {
         setUsageOpen(false);
-        setMcpOpen(false);
         setModelOpen(false);
       }
     };
@@ -303,7 +299,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
       document.removeEventListener("mousedown", onDocDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [usageOpen, mcpOpen, modelOpen]);
+  }, [usageOpen, modelOpen]);
 
   const commonProps = {
     paneRef,
@@ -451,16 +447,16 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
             session={session}
             usage={usage}
             onOpenUsage={(event) => {
-              setMcpOpen(false);
               setModelOpen(false);
               setPopoverOpenFromClick(setUsageOpen, event);
             }}
-            onOpenMcp={(event) => {
+            onOpenMcp={() => {
               setUsageOpen(false);
               setModelOpen(false);
-              setPopoverOpenFromClick(setMcpOpen, event);
+              navigate(null, { session: session.id });
+              openSessionPanel(session.id, "mcp");
             }}
-            mcpOpen={mcpOpen}
+            mcpOpen={false}
             onPerm={permMenu.toggle}
             permOpen={permMenu.open}
             permAnchorRef={permMenu.anchorRef}
@@ -476,7 +472,6 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
             })}
             onModel={(event) => {
               setUsageOpen(false);
-              setMcpOpen(false);
               setPopoverOpenFromClick(setModelOpen, event);
             }}
             modelOpen={modelOpen}
@@ -491,11 +486,6 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
                 ctxPercent={session.contextPercent}
                 costUSD={session.costUSD}
               />
-            </div>
-          )}
-          {mcpOpen && (
-            <div class="status-strip-usage-popover status-strip-mcp-popover">
-              <McpPanel sessionId={session.id} mcpTick={session.mcpTick} />
             </div>
           )}
         </div>
