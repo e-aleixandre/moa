@@ -156,12 +156,25 @@
   .live-sentence-line.is-shimmer::before { display: none; }
 }
 
-.zl-live-txt {
+/* The sentence takes the room and the counter is pushed to the END of that
+   room, in the foreground row and in the background spotlight alike. The
+   counter used to sit wherever the words ended, and the words change on
+   their own -- so the one thing in the row that is read at a glance was the
+   one thing that kept moving. No fixed width on the counter: a width sized
+   for "14m 07s" wastes 30px against "12s" on a 390 row where the sentence
+   already has ~170px, and the right edge is the anchor the eye uses, which
+   flex gives for free. Growing, it eats into the sentence, never into the
+   tally. */
+.zl-live-now > .zl-live-txt,
+.zl-live-spot > .zl-live-txt {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.zl-live-now > .zl-live-el,
+.zl-live-spot > .zl-live-el { margin-left: auto; }
 .zl-live-el { flex: none; color: var(--zl-t4); }
 
 /* Data is mono: the elapsed counter, the tally's count, a command. Scoped

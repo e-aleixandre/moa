@@ -144,3 +144,27 @@ test('the bar carries the catalogue classes, not a translation of them', () => {
   expect(src).not.toContain('"lb-now"');
   expect(src).not.toContain('"lb-tally"');
 });
+
+// ── The counter's place ────────────────────────────────────────────────────
+// The elapsed counter is the sentence's next sibling in both rows, and the
+// sentence used to size to its words: every change of verb moved the counter.
+// The rule that anchors it is CSS, so the guard reads the sheet: the sentence
+// must be the flexible item and the counter must be pushed to the end of the
+// slot, in the foreground row AND in the background spotlight, with no fixed
+// width on the counter (a width sized for "14m 07s" wastes 30px against "12s"
+// on a 390 row).
+const liveCss = readFileSync(new URL('./LiveBar.css', import.meta.url), 'utf8');
+
+function rule(selectorPattern) {
+  const m = liveCss.match(new RegExp(`${selectorPattern}[^{]*\\{([^}]*)\\}`));
+  return m ? m[1] : '';
+}
+
+test('the counter is anchored to the end of the sentence slot in both rows', () => {
+  for (const row of ['zl-live-now', 'zl-live-spot']) {
+    expect(rule(`\\.${row} > \\.zl-live-txt`)).toMatch(/flex:\s*1 1 auto/);
+    expect(rule(`\\.${row} > \\.zl-live-el`)).toMatch(/margin-left:\s*auto/);
+  }
+  // Anchored by flex, not by a width the counter has to fit.
+  expect(rule('\\.zl-live-el(?![-\\w])')).not.toMatch(/(?:min-)?width:/);
+});
