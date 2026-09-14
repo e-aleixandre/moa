@@ -291,7 +291,7 @@
   text-align: left;
   cursor: pointer;
   appearance: none;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 .zl-prow:hover { background: var(--zl-control); }
 .zl-prow:hover .zl-go { color: var(--zl-t2); }
@@ -320,7 +320,7 @@
   height: 12px;
   flex: none;
   color: var(--zl-t4);
-  transition: transform 140ms var(--zl-ease), color 120ms ease;
+  transition: transform 140ms var(--zl-ease), color var(--motion-hover) ease;
 }
 .zl-go.is-open { transform: rotate(90deg); color: var(--zl-t2); }
 
@@ -344,7 +344,7 @@
   text-align: left;
   cursor: pointer;
   appearance: none;
-  transition: background 120ms ease, transform 120ms var(--zl-ease);
+  transition: background var(--motion-hover) ease, transform var(--motion-hover) var(--zl-ease);
 }
 .zl-act:hover { background: var(--zl-control); }
 .zl-act:active { transform: translateY(1px); }
@@ -403,7 +403,7 @@
 }
 .zl-kv-row + .zl-kv-row,
 .zl-kv > * + * { box-shadow: inset 0 1px 0 var(--zl-line); }
-.zl-kv-row.is-btn { cursor: pointer; transition: background 120ms ease; appearance: none; }
+.zl-kv-row.is-btn { cursor: pointer; transition: background var(--motion-hover) ease; appearance: none; }
 .zl-kv-row.is-btn:hover { background: var(--zl-hi); }
 .zl-kv-row.is-btn:hover .zl-go { color: var(--zl-t2); }
 .zl-kv-k { flex: 1; min-width: 0; color: var(--zl-t3); font-weight: 500; white-space: nowrap; }

@@ -24,6 +24,7 @@ import { navigate } from "../../data/router.js";
 import { allTileIds } from "../../data/tileTree.js";
 import { getTileCount, updateSession } from "../../data/store.js";
 import { useStore } from "../../hooks/useStore.js";
+import { usePresence } from "../../hooks/usePresence.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { openPersistedSubagent, openBashJob, configureSession, setSessionFast } from "../../data/session-actions.js";
 import { matchSelectedModel } from "../../data/selectors.js";
@@ -353,7 +354,8 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
 
   const specs = catalog.entries || [];
   const selectedModel = matchSelectedModel(specs, session.model);
-  const modelPopover = modelOpen && typeof document !== "undefined" && document.body && createPortal(
+  const modelPopoverPresence = usePresence(modelOpen);
+  const modelPopover = modelPopoverPresence.mounted && typeof document !== "undefined" && document.body && createPortal(
     <PickerPopover
       kind="model"
       class="is-fixed"
@@ -365,6 +367,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
         visibility: modelPopoverPosition ? undefined : "hidden",
       }}
       onClose={() => setModelOpen(false)}
+      leaving={modelPopoverPresence.leaving}
     >
       {(v) => (
         <ModelSelector

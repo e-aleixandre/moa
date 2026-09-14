@@ -254,7 +254,7 @@
   place-items: center;
   background: transparent;
   color: var(--zl-t3);
-  transition: color 120ms ease;
+  transition: color var(--motion-hover) ease;
 }
 /* The accent classes the rows still pass are deliberately inert: an icon does
    not need a hue to say which verb it is, and colour in here is state. */
@@ -289,7 +289,7 @@
   place-items: center;
   background: transparent;
   color: var(--zl-t3);
-  transition: color 120ms ease;
+  transition: color var(--motion-hover) ease;
 }
 .row .dir-ic.grey { background: transparent; color: var(--zl-t3); }
 .row.sel .dir-ic { color: var(--zl-t1); }
@@ -379,7 +379,7 @@
   padding: 5px 10px;
   cursor: pointer;
   border: none;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
 }
 @media (hover: hover) {
   .crumb-chip:hover { background: var(--zl-control); color: var(--zl-t1); }
@@ -451,7 +451,7 @@
   font-size: var(--zl-fs-meta);
   color: var(--zl-t3);
   background: transparent;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
 }
 @media (hover: hover) {
   .model-row .model-change:hover {
@@ -501,7 +501,7 @@
   border-radius: var(--zl-r-md);
   min-height: 36px;
   padding: 0 16px;
-  transition: filter 120ms ease;
+  transition: filter var(--motion-hover) ease;
 }
 @media (hover: hover) {
   .btn-create:not(:disabled):hover { filter: brightness(1.08); }

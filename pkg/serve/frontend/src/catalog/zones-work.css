@@ -107,7 +107,7 @@
   letter-spacing: inherit;
   text-align: left;
 }
-button.zw-head, button.zw-row { cursor: pointer; transition: background 120ms ease; }
+button.zw-head, button.zw-row { cursor: pointer; transition: background var(--motion-hover) ease; }
 button.zw-head:hover, button.zw-row:hover { background: var(--zl-hi); color: var(--zl-t2); }
 .zw-row + .zw-row,
 .zw-head + .zw-row,
@@ -158,7 +158,7 @@ button.zw-head:hover, button.zw-row:hover { background: var(--zl-hi); color: var
 .zw-row.is-live .zw-tool { color: var(--zl-t1); }
 .zw-row.is-live .zw-out { color: var(--zl-t3); }
 
-.zw-chev { flex: none; width: 12px; height: 12px; color: var(--zl-t4); transition: transform 160ms var(--zl-ease), color 120ms ease; }
+.zw-chev { flex: none; width: 12px; height: 12px; color: var(--zl-t4); transition: transform 160ms var(--zl-ease), color var(--motion-hover) ease; }
 .zw-chev svg { width: 100%; height: 100%; display: block; }
 button.zw-row:hover .zw-chev { color: var(--zl-t2); }
 .zw-row.is-open { color: var(--zl-t2); background: var(--zl-hi); }
@@ -258,7 +258,7 @@ button.zw-row:hover .zw-chev { color: var(--zl-t2); }
   font-weight: 500;
   letter-spacing: inherit;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
 }
 .zw-linkbtn svg { width: 12px; height: 12px; }
 .zw-linkbtn:hover { background: var(--zl-control); color: var(--zl-t1); }
@@ -297,7 +297,7 @@ button.zw-row:hover .zw-chev { color: var(--zl-t2); }
   letter-spacing: inherit;
   text-align: left;
 }
-button.zw-file { cursor: pointer; transition: background 120ms ease; }
+button.zw-file { cursor: pointer; transition: background var(--motion-hover) ease; }
 button.zw-file:hover { background: var(--zl-control); }
 button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
 .zw-file.is-err { background: transparent; box-shadow: 0 0 0 1px rgba(243, 139, 168, 0.28); }
@@ -356,7 +356,7 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
   font-weight: 500;
   letter-spacing: inherit;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
 }
 .zw-home.is-phone { min-height: 44px; padding: 0 12px 0 6px; }
 .zw-home svg { flex: none; width: 16px; height: 16px; display: block; }
@@ -417,7 +417,7 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
   letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 .zw-hd-title.is-copy.is-phone { min-height: 44px; }
 .zw-hd-title.is-copy:hover { background: var(--zl-raised); }
@@ -475,7 +475,7 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
   font-weight: 500;
   letter-spacing: inherit;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease, box-shadow var(--motion-hover) ease;
 }
 .zw-stop.is-phone { height: 44px; padding: 0 14px; font-size: var(--zl-fs-body); }
 .zw-stop:hover { background: var(--zl-control); color: var(--zl-t1); }
@@ -548,7 +548,7 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
   font-weight: 500;
   letter-spacing: inherit;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 .zw-ask-b.is-phone { min-height: 44px; padding: 0 16px; }
 .zw-ask-b:hover { background: var(--zl-raised); }
@@ -625,7 +625,7 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
   letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
-  transition: color 120ms ease;
+  transition: color var(--motion-hover) ease;
 }
 .zw-disc-b:hover { color: var(--zl-t1); }
 .zw-disc-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -658,7 +658,7 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
   letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
 }
 .zw-id.is-phone { min-height: 44px; }
 .zw-id:hover { background: var(--zl-raised); color: var(--zl-t1); }
@@ -695,7 +695,7 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
   font-weight: 500;
   letter-spacing: inherit;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 .zw-btn.is-phone { min-height: 44px; padding: 0 16px; }
 /* In a head, next to Stop, a button matches Stop's height rather than the
@@ -764,7 +764,7 @@ button.zw-file:hover .zw-file-act { color: var(--zl-t1); }
   background: var(--zl-control);
   color: var(--zl-t4);
   cursor: not-allowed;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
 }
 .zw-send svg { width: 18px; height: 18px; display: block; }
 .zw-composer.is-armed .zw-send { background: var(--zl-accent); color: var(--zl-accent-ink); cursor: pointer; }

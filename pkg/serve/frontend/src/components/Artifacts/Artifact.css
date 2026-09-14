@@ -29,7 +29,7 @@
   letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease, transform 120ms var(--zl-ease);
+  transition: background var(--motion-hover) ease, transform var(--motion-hover) var(--zl-ease);
 }
 @media (hover: hover) {
   .zl-art:hover { background: var(--zl-control); }

@@ -17,6 +17,7 @@ import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { updateSession } from "../../data/store.js";
 import { useStore } from "../../hooks/useStore.js";
+import { usePresence } from "../../hooks/usePresence.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { focusedSession, focusedSessionId, matchSelectedModel } from "../../data/selectors.js";
 import { catalogThinkingPosition, ensureModelCatalog, modelCatalog } from "../../data/model-catalog.js";
@@ -65,6 +66,7 @@ export function ConversationScreen() {
   const modelAnchorRef = useRef(null);
   const modelPopoverRef = useRef(null);
   const [modelPopoverPosition, setModelPopoverPosition] = useState(null);
+  const modelPopoverPresence = usePresence(modelOpen);
   useEffect(() => {
     if (modelOpen) ensureModelCatalog();
   }, [modelOpen]);
@@ -212,7 +214,7 @@ export function ConversationScreen() {
       if (returnView === "grid") navigate("grid");
     };
 
-    const modelPopover = modelOpen && typeof document !== "undefined" && document.body && createPortal(
+    const modelPopover = modelPopoverPresence.mounted && typeof document !== "undefined" && document.body && createPortal(
       <PickerPopover
         kind="model"
         class="is-fixed"
@@ -224,6 +226,7 @@ export function ConversationScreen() {
           visibility: modelPopoverPosition ? undefined : "hidden",
         }}
         onClose={() => setModelOpen(false)}
+        leaving={modelPopoverPresence.leaving}
       >
         {(v) => (
           <ModelSelector

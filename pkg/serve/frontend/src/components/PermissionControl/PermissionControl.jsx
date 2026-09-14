@@ -3,6 +3,7 @@ import { createPortal } from "preact/compat";
 import { registerOverlay } from "../../data/overlays.js";
 import { PickerPopover } from "../ModelSelector/ModelSelector.jsx";
 import { positionModelPopover } from "../../layout/PaneGrid/model-popover-position.js";
+import { usePresence } from "../../hooks/usePresence.js";
 import "./PermissionControl.css";
 
 // PermissionControl — the permission mode's MENU. Markup is the catalogue's
@@ -75,6 +76,7 @@ export function usePermissionMenu({ mode = "yolo", disabled = false, onChange } 
   const [menuPos, setMenuPos] = useState(null);
   const anchorRef = useRef(null);
   const menuRef = useRef(null);
+  const menuPresence = usePresence(open);
 
   const placeMenu = () => {
     const chip = anchorRef.current?.querySelector("button") || anchorRef.current;
@@ -136,7 +138,7 @@ export function usePermissionMenu({ mode = "yolo", disabled = false, onChange } 
     setOpen(false);
   };
 
-  const menu = open && typeof document !== "undefined" && document.body
+  const menu = menuPresence.mounted && typeof document !== "undefined" && document.body
     ? createPortal(
         <PickerPopover
           kind="perm"
@@ -149,6 +151,7 @@ export function usePermissionMenu({ mode = "yolo", disabled = false, onChange } 
             zIndex: "var(--z-overlay, 40)",
           }}
           onClose={() => setOpen(false)}
+          leaving={menuPresence.leaving}
         >
           <PermissionOptions mode={mode} onPick={pick} />
         </PickerPopover>,

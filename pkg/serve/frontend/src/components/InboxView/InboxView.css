@@ -136,7 +136,7 @@
   letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 .zi-row + .zi-row { margin-top: 2px; }
 .zi-row:hover { background: var(--zl-hi); }
@@ -240,7 +240,7 @@
   font-weight: 500;
   letter-spacing: inherit;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 .zi-btn:hover { background: var(--zl-raised); box-shadow: var(--zl-rim-2); }
 .zi-btn:disabled { cursor: default; color: var(--zl-t4); }
@@ -317,7 +317,7 @@
   letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 .zi-dest + .zi-dest, .zi-dest + .zi-dest-pair, .zi-quiet + .zi-dest-pair, .zi-dest-pair + .zi-dest { box-shadow: inset 0 1px 0 var(--zl-line); }
 .zi-dest:hover { background: var(--zl-control); }

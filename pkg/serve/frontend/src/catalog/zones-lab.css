@@ -326,7 +326,7 @@
   font-weight: 500;
   letter-spacing: inherit;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
 }
 .zl-lab-opt:hover { color: var(--zl-t1); }
 .zl-lab-opt.is-on { background: var(--zl-control); color: var(--zl-t1); box-shadow: var(--zl-rim); }

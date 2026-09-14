@@ -326,7 +326,7 @@ button.zl-set-row[disabled] { cursor: default; }
   letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 .zl-set-opt + .zl-set-opt { margin-top: 2px; }
 .zl-set-opt:hover { background: var(--zl-hi); }
@@ -451,7 +451,7 @@ button.zl-set-row[disabled] { cursor: default; }
   letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 .zl-set-prov-row:hover { background: var(--zl-hi); }
 .zl-set-prov-row:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -2px; }

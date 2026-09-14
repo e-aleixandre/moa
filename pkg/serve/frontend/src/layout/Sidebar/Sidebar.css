@@ -447,7 +447,7 @@ button.zl-group.is-proj:focus-visible {
   font-weight: 600;
   letter-spacing: inherit;
   cursor: pointer;
-  transition: background 120ms ease, transform 120ms var(--zl-ease);
+  transition: background var(--motion-hover) ease, transform var(--motion-hover) var(--zl-ease);
 }
 .zl-side-new:hover { background: var(--zl-accent-med); }
 .zl-side-new:active { transform: translateY(1px); }

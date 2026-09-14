@@ -2,6 +2,8 @@ import { createPortal } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { ArrowLeft, Layers, Loader2, Maximize2, Minimize2, Search, X } from 'lucide-preact';
 import { useStore } from '../../hooks/useStore.js';
+import { usePresence } from '../../hooks/usePresence.js';
+import { MOTION } from '../../hooks/motion.js';
 import { isTopLayer, pushLayer } from '../../data/overlay-layers.js';
 import { registerOverlay } from '../../data/overlays.js';
 import {
@@ -62,6 +64,7 @@ export function ArtifactsDrawer() {
   // collection loaded under its own token without this drawer sliding over it.
   // Only 'list' and 'reader' are surfaces this component renders.
   const open = slice.view === 'list' || slice.view === 'reader';
+  const presence = usePresence(open, isMobile ? MOTION.exitBase : MOTION.exitFast);
   const list = slice.view === 'list';
   const fromList = slice.view === 'reader' && slice.from === 'list';
   const modal = isMobile || slice.expanded;
@@ -198,7 +201,7 @@ export function ArtifactsDrawer() {
     };
   }, [open, modal]);
 
-  if (!open || typeof document === 'undefined') return null;
+  if (!presence.mounted || typeof document === 'undefined') return null;
 
   const items = slice.items;
   const filtered = filterArtifacts(items, query);
@@ -208,7 +211,7 @@ export function ArtifactsDrawer() {
     <aside
       ref={panel}
       tabIndex={modal ? -1 : undefined}
-      class={`af-drawer af-drawer-${slice.view}${isMobile ? ' is-mobile' : ''}${slice.expanded ? ' is-expanded' : ''}`}
+      class={`af-drawer af-drawer-${slice.view}${isMobile ? ' is-mobile' : ''}${slice.expanded ? ' is-expanded' : ''}${presence.leaving ? ' is-leaving' : ''}`}
       role={modal ? 'dialog' : 'region'}
       aria-modal={modal || undefined}
       aria-label={originLabel(origin, list ? 'Artifacts' : artifact?.title || 'Artifact')}
@@ -305,8 +308,8 @@ export function ArtifactsDrawer() {
   );
 
   return createPortal(
-    <div class={`af-layer${modal ? ' is-modal' : ''}`}>
-      {modal && <div class="af-backdrop" onClick={closeArtifacts} aria-hidden="true" />}
+    <div class={`af-layer${modal ? ' is-modal' : ''}${presence.leaving ? ' is-leaving' : ''}`}>
+      {modal && <div class={`af-backdrop${presence.leaving ? ' is-leaving' : ''}`} onClick={closeArtifacts} aria-hidden="true" />}
       {panelNode}
     </div>,
     document.body,

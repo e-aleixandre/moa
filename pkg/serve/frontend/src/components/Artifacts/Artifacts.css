@@ -30,7 +30,7 @@
   font-family: var(--font);
   text-align: left;
   cursor: pointer;
-  transition: background 120ms var(--zl-ease);
+  transition: background var(--motion-hover) var(--zl-ease);
 }
 /* The mark: a 56×44 plate. A screenshot fills it (cover, so a tall phone
    capture still reads as that phone capture); anything else gets the type
@@ -99,7 +99,7 @@
   transform: translateY(-50%);
 }
 @media (hover: hover) {
-  .af-row-acts .af-icon-button { opacity: 0; transition: opacity 120ms var(--zl-ease), background 120ms var(--zl-ease), color 120ms var(--zl-ease); }
+  .af-row-acts .af-icon-button { opacity: 0; transition: opacity var(--motion-hover) var(--zl-ease), background var(--motion-hover) var(--zl-ease), color var(--motion-hover) var(--zl-ease); }
   .af-row:hover .af-row-acts .af-icon-button,
   .af-row:focus-within .af-row-acts .af-icon-button { opacity: 1; }
 }
@@ -117,7 +117,7 @@
   border-radius: var(--zl-r-md);
   background: var(--zl-raised);
   box-shadow: var(--zl-rim);
-  transition: background 120ms var(--zl-ease), box-shadow 120ms var(--zl-ease);
+  transition: background var(--motion-hover) var(--zl-ease), box-shadow var(--motion-hover) var(--zl-ease);
 }
 
 /* ── Controls ───────────────────────────────────────────────────────────── */
@@ -138,7 +138,7 @@
   font: inherit;
   font-size: var(--zl-fs-meta);
   cursor: pointer;
-  transition: background 120ms var(--zl-ease), color 120ms var(--zl-ease);
+  transition: background var(--motion-hover) var(--zl-ease), color var(--motion-hover) var(--zl-ease);
 }
 .af-share.is-labelled { padding: 6px 10px; }
 .af-share:disabled { opacity: .55; cursor: wait; }
@@ -168,7 +168,8 @@
 .af-layer { position: fixed; inset: 0; z-index: var(--z-sheet); pointer-events: none; }
 .af-layer.is-modal { z-index: calc(var(--z-sheet) + 3); pointer-events: auto; }
 .artifacts-modal .sheet-overlay { z-index: calc(var(--z-sheet) + 4); }
-.af-backdrop { position: absolute; inset: 0; background: rgb(8 8 16 / .55); }
+.af-backdrop { position: absolute; inset: 0; background: rgb(8 8 16 / .55); animation: af-backdrop-in var(--motion-fast) var(--motion-ease); }
+.af-backdrop.is-leaving { animation: af-backdrop-out var(--motion-exit-base) var(--motion-ease-exit) forwards; }
 .af-drawer {
   position: absolute;
   top: 0;
@@ -185,15 +186,17 @@
   font-family: var(--font);
   font-size: var(--zl-fs-body);
   letter-spacing: -0.005em;
-  animation: af-enter 180ms var(--zl-ease);
+  animation: af-enter var(--motion-fast) var(--motion-ease);
 }
 .af-drawer.is-expanded { width: min(1100px, 100vw); }
 .af-drawer.is-mobile {
   inset: 0;
   width: 100%;
   box-shadow: none;
-  animation: af-push 260ms var(--zl-ease);
+  animation: af-push var(--motion-base) var(--motion-ease);
 }
+.af-drawer.is-leaving { animation: af-exit var(--motion-exit-fast) var(--motion-ease-exit) forwards; pointer-events: none; }
+.af-drawer.is-mobile.is-leaving { animation-name: af-push-out; animation-duration: var(--motion-exit-base); }
 
 @media (min-width: 1280px) {
   .artifacts-open .conversation-main { margin-right: 600px; }
@@ -299,6 +302,10 @@
 }
 .af-row-open:active { background: var(--zl-hi); }
 
-@keyframes af-enter { from { opacity: 0; transform: translateX(12px); } }
-@keyframes af-push { from { opacity: 0; transform: translateX(16px); } }
-@media (prefers-reduced-motion: reduce) { .af-drawer { animation: none; } }
+@keyframes af-enter { from { opacity: 0; transform: translateX(var(--motion-push)); } }
+@keyframes af-push { from { opacity: 0; transform: translateX(var(--motion-push)); } }
+@keyframes af-exit { to { opacity: 0; transform: translateX(var(--motion-push)); } }
+@keyframes af-push-out { to { opacity: 0; transform: translateX(var(--motion-push)); } }
+@keyframes af-backdrop-in { from { opacity: 0; } }
+@keyframes af-backdrop-out { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .af-drawer, .af-backdrop { animation: none; } }

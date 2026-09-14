@@ -42,7 +42,7 @@
 .zl-lg-head + .zl-lg-row,
 .zl-lg-detail + .zl-lg-row,
 .zl-lg-log + .zl-lg-row { box-shadow: inset 0 1px 0 var(--zl-line); }
-button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background 120ms ease; }
+button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background var(--motion-hover) ease; }
 @media (hover: hover) {
   button.zl-lg-row:hover, button.zl-lg-head:hover { background: var(--zl-hi); }
   button.zl-lg-row:hover .zl-lg-chev { color: var(--zl-t2); }

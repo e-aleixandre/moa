@@ -58,7 +58,7 @@
   white-space: nowrap;
   min-width: 0;
 }
-button.zl-st { cursor: pointer; transition: background 120ms ease; }
+button.zl-st { cursor: pointer; transition: background var(--motion-hover) ease; }
 @media (hover: hover) {
   button.zl-st:hover { background: var(--zl-hi); color: var(--zl-t2); }
 }

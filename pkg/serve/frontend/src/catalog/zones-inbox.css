@@ -67,7 +67,7 @@
   font-weight: 500;
   letter-spacing: inherit;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
 }
 .zi-lab-opt:hover { color: var(--zi-t1); }
 .zi-lab-opt.is-on { background: var(--zi-control); color: var(--zi-t1); box-shadow: var(--zi-rim); }

@@ -37,7 +37,7 @@
   letter-spacing: -0.005em;
   white-space: normal;
   text-align: left;
-  animation: zl-pop 180ms var(--zl-ease);
+  animation: zl-pop var(--motion-fast) var(--motion-ease);
   transform-origin: bottom left;
 }
 .zl-pop.is-fixed {
@@ -47,8 +47,13 @@
   z-index: var(--z-overlay, 40);
   transform-origin: top left;
 }
-@keyframes zl-pop { from { opacity: 0; transform: translateY(6px); } }
-@media (prefers-reduced-motion: reduce) { .zl-pop, .zl-sheet { animation: none; } }
+@keyframes zl-pop { from { opacity: 0; transform: translateY(var(--motion-rise)); } }
+.zl-pop.is-leaving {
+  animation: zl-pop-out var(--motion-exit-fast) var(--motion-ease-exit) forwards;
+  pointer-events: none;
+}
+@keyframes zl-pop-out { to { opacity: 0; transform: translateY(var(--motion-rise)); } }
+@media (prefers-reduced-motion: reduce) { .zl-pop, .zl-sheet, .zl-scrim.is-sheet { animation: none; } }
 
 .zl-pop .zl-side-head,
 .zl-sheet .zl-side-head {
@@ -146,9 +151,18 @@
   font-family: var(--font);
   font-size: var(--zl-fs-body);
   letter-spacing: -0.005em;
-  animation: zl-rise 260ms var(--zl-ease);
+  animation: zl-rise var(--motion-base) var(--motion-ease);
 }
 @keyframes zl-rise { from { transform: translateY(100%); } }
+.zl-sheet.is-leaving {
+  animation: zl-sheet-out var(--motion-exit-base) var(--motion-ease-exit) forwards;
+  pointer-events: none;
+}
+@keyframes zl-sheet-out { to { opacity: 0; transform: translateY(100%); } }
+.zl-scrim.is-sheet { animation: zl-scrim-in var(--motion-fast) var(--motion-ease); }
+.zl-scrim.is-sheet.is-leaving { animation: zl-scrim-out var(--motion-exit-base) var(--motion-ease-exit) forwards; pointer-events: none; }
+@keyframes zl-scrim-in { from { opacity: 0; } }
+@keyframes zl-scrim-out { to { opacity: 0; } }
 .zl-grab { display: block; width: 36px; height: 4px; margin: 0 auto; border-radius: 2px; background: var(--zl-line-2); }
 .zl-side-head.is-sheet { padding: 6px 12px 4px 20px; }
 .zl-side-head.is-sheet.is-sub { padding-left: 8px; }
@@ -219,7 +233,7 @@
   letter-spacing: inherit;
   text-align: left;
   appearance: none;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 /* The current model is a statement, not a target: no pointer, and no hover
    lift promising something to press. Only .zl-pick-all is still a button. */
@@ -280,7 +294,7 @@
   text-align: left;
   cursor: pointer;
   appearance: none;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 @media (hover: hover) {
   .zl-mchip:hover { background: var(--zl-hi); color: var(--zl-t1); }
@@ -310,7 +324,7 @@
   letter-spacing: inherit;
   text-align: left;
 }
-.zl-pick .zl-kv-row.is-btn { cursor: pointer; transition: background 120ms ease; appearance: none; }
+.zl-pick .zl-kv-row.is-btn { cursor: pointer; transition: background var(--motion-hover) ease; appearance: none; }
 .zl-pick .zl-kv.is-flush .zl-kv-row + .zl-kv-row { box-shadow: none; }
 @media (hover: hover) {
   .zl-pick .zl-kv-row.is-btn:hover { background: var(--zl-hi); }
@@ -370,7 +384,7 @@
   letter-spacing: inherit;
   cursor: pointer;
   appearance: none;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
 }
 @media (hover: hover) {
   .zl-seg-opt:hover { color: var(--zl-t1); }

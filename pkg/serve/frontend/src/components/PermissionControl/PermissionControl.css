@@ -33,7 +33,7 @@
   text-align: left;
   cursor: pointer;
   appearance: none;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 .zl-perm + .zl-perm { margin-top: 2px; }
 @media (hover: hover) {

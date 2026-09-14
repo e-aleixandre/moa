@@ -6,6 +6,8 @@ import { fmtCost } from "../../../data/util/usage-pills.js";
 import { matchSelectedModel, modelAccent } from "../../../data/selectors.js";
 import { catalogThinkingPosition, ensureModelCatalog, modelCatalog } from "../../../data/model-catalog.js";
 import { useStore } from "../../../hooks/useStore.js";
+import { usePresence } from "../../../hooks/usePresence.js";
+import { MOTION } from "../../../hooks/motion.js";
 import { configureSession, setSessionFast } from "../../../data/session-actions.js";
 import { toggleSessionPanel } from "../../../data/session-panel.js";
 import { addToast } from "../../../data/notifications.js";
@@ -44,6 +46,8 @@ export function MobileStatusLine({ session, usage }) {
   const [sessionOpen, setSessionOpen] = useState(false);
   const [permsOpen, setPermsOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
+  const sessionPresence = usePresence(sessionOpen, MOTION.exitBase);
+  const permsPresence = usePresence(permsOpen, MOTION.exitBase);
   const catalog = useStore(modelCatalog);
 
   const sessionId = session ? session.id : null;
@@ -113,13 +117,14 @@ export function MobileStatusLine({ session, usage }) {
       onModel={hasSession ? () => setSessionOpen(true) : undefined}
       modelOpen={sessionOpen}
     >
-      {hasSession && sessionOpen && (
+      {hasSession && sessionPresence.mounted && (
         <PickerSheet
           kind="model"
           models={specs}
           includeScrim
           dismissible
           onClose={() => setSessionOpen(false)}
+          leaving={sessionPresence.leaving}
         >
           {(v) => (
             <ModelSelector
@@ -156,12 +161,13 @@ export function MobileStatusLine({ session, usage }) {
         </PickerSheet>
       )}
 
-      {hasSession && permsOpen && (
+      {hasSession && permsPresence.mounted && (
         <PickerSheet
           kind="perm"
           includeScrim
           dismissible
           onClose={() => setPermsOpen(false)}
+          leaving={permsPresence.leaving}
         >
           <PermissionOptions
             mode={permMode}

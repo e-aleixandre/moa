@@ -358,6 +358,7 @@ export function PickerPopover({
   class: extraClass,
   style,
   popoverRef,
+  leaving = false,
 }) {
   const v = usePickView(kind, models);
   useEffect(() => {
@@ -368,7 +369,7 @@ export function PickerPopover({
   }, [onClose]);
   return (
     <div
-      class={`zl-pop${extraClass ? ` ${extraClass}` : ""}`}
+      class={`zl-pop${extraClass ? ` ${extraClass}` : ""}${leaving ? " is-leaving" : ""}`}
       role="dialog"
       aria-label={PICK_TITLES[kind] || kind}
       style={style}
@@ -392,6 +393,7 @@ export function PickerSheet({
   onClose,
   includeScrim = false,
   dismissible = false,
+  leaving = false,
   children,
 }) {
   const v = usePickView(kind, models);
@@ -406,13 +408,13 @@ export function PickerSheet({
     <>
       {includeScrim && (
         <div
-          class="zl-scrim is-sheet"
+          class={`zl-scrim is-sheet${leaving ? " is-leaving" : ""}`}
           ref={dismissible ? dismiss.veilRef : undefined}
           onClick={onClose}
         />
       )}
       <div
-        class="zl-sheet"
+        class={`zl-sheet${leaving ? " is-leaving" : ""}`}
         role="dialog"
         aria-label={PICK_TITLES[kind] || kind}
         ref={dismissible ? dismiss.sheetRef : undefined}

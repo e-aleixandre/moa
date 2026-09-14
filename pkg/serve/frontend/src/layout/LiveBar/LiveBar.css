@@ -165,7 +165,7 @@
   color: var(--zl-t2);
   font-family: inherit;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
 }
 @media (hover: hover) {
   .zl-live-tally:hover { background: var(--zl-raised); color: var(--zl-t1); box-shadow: var(--zl-rim-2); }
@@ -247,7 +247,7 @@
   letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background var(--motion-hover) ease;
 }
 div.zl-live-row { cursor: default; }
 .zl-live-row:focus-visible {
