@@ -3,38 +3,38 @@
   max-width: 560px;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 8px;
 }
 
 .ask-user-prompt-head {
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-wide);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--overlay1);
+  color: var(--zl-t3);
 }
 
 .ask-user-prompt-nav {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: 0 var(--space-1);
+  gap: 12px;
+  padding: 0 4px;
 }
 
 .ask-user-prompt-nav button {
   background: none;
   border: none;
-  color: var(--overlay1);
-  font-family: var(--font);
-  font-size: var(--text-sm);
+  color: var(--zl-t3);
+  font-family: inherit;
+  font-size: var(--zl-fs-meta);
   cursor: pointer;
-  padding: var(--space-1) var(--space-2);
+  padding: 4px 8px;
 }
 @media (hover: hover) {
 
 
 .ask-user-prompt-nav button:hover:not(:disabled) {
-  color: var(--text);
+  color: var(--zl-t1);
 }
 }
 
@@ -45,7 +45,7 @@
 
 .ask-user-prompt-dots {
   display: flex;
-  gap: var(--space-2);
+  gap: 8px;
   margin: 0 auto;
 }
 
@@ -65,22 +65,22 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--surface1);
+  background: var(--zl-control);
 }
 
 .ask-user-prompt-dot.answered::before {
-  background: var(--yellow);
+  background: var(--zl-yellow);
 }
 
 .ask-user-prompt-dot.active::before {
-  outline: 2px solid var(--overlay1);
+  outline: 2px solid var(--zl-t3);
   outline-offset: 2px;
 }
 
 .ask-user-prompt-dot:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-sm);
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
+  border-radius: var(--zl-r-sm);
 }
 
 .ask-user-prompt-nav-spacer {
@@ -89,33 +89,33 @@
 
 .ask-user-prompt-actions {
   display: flex;
-  gap: var(--space-2);
+  gap: 8px;
 }
 
 .ask-user-prompt-submit,
 .ask-user-prompt-skip {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
-  font-family: var(--font);
-  font-size: var(--text-sm);
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: var(--zl-r-md);
+  font-family: inherit;
+  font-size: var(--zl-fs-meta);
   cursor: pointer;
-  transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  transition: background var(--motion-hover) var(--motion-ease), border-color var(--motion-hover) var(--motion-ease);
 }
 
 .ask-user-prompt-submit {
   border: none;
-  background: var(--green);
-  color: var(--crust);
-  font-weight: var(--weight-medium);
+  background: var(--zl-green);
+  color: var(--zl-canvas);
+  font-weight: 500;
 }
 @media (hover: hover) {
 
 
 .ask-user-prompt-submit:hover:not(:disabled) {
-  box-shadow: 0 0 16px color-mix(in srgb, var(--green) 40%, transparent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--zl-green) 40%, transparent);
 }
 }
 
@@ -125,38 +125,38 @@
 }
 
 .ask-user-prompt-skip {
-  border: 1px solid var(--surface1);
+  border: 1px solid var(--zl-line-2);
   background: transparent;
-  color: var(--subtext1);
+  color: var(--zl-t2);
 }
 @media (hover: hover) {
 
 
 .ask-user-prompt-skip:hover {
-  border-color: var(--red);
-  color: var(--red);
+  border-color: var(--zl-red);
+  color: var(--zl-red);
 }
 }
 
 .ask-user-resolved {
   width: 100%;
   max-width: 560px;
-  padding: var(--space-3) var(--space-5);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--surface0);
-  background: var(--mantle);
-  color: var(--green);
-  font-size: var(--text-sm);
+  padding: 12px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--zl-line);
+  background: var(--zl-raised);
+  color: var(--zl-green);
+  font-size: var(--zl-fs-meta);
 }
 
 /* A failed recording (mic denied, no device, transcription error) reports here
    rather than through a toast: the question is what the user is looking at. */
 .ask-user-prompt-voice-error {
-  margin-top: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--surface0));
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--red) 8%, transparent);
-  color: var(--red);
-  font-size: var(--text-xs);
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--zl-red) 40%, var(--zl-line));
+  border-radius: var(--zl-r-sm);
+  background: color-mix(in srgb, var(--zl-red) 8%, transparent);
+  color: var(--zl-red);
+  font-size: 11px;
 }
