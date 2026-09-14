@@ -543,10 +543,24 @@ export function CommandPalette({
     if (selectedIdx >= selectable.length) setSelectedIdx(Math.max(0, selectable.length - 1));
   }, [selectable.length, selectedIdx]);
 
-  // Scroll the selected row into view.
+  // Scroll the selected row into view, and move the highlight to it.
+  //
+  // The highlight is ONE element that travels (the sidebar's segmented control
+  // does the same thing, Sidebar.css:235). Painting .sel on each row instead
+  // means the cursor blinks off one row and on at the next, which at the speed
+  // people hold the arrow key reads as flicker rather than movement.
   useEffect(() => {
     const el = listRef.current?.querySelector(`[data-sel="${selectedIdx}"]`);
     if (el) el.scrollIntoView({ block: "nearest" });
+
+    const list = listRef.current;
+    if (!list) return;
+    if (!el) { list.style.setProperty("--pal-cursor-opacity", "0"); return; }
+    // offsetTop is relative to the list because .pal-list is positioned; a
+    // rect would be viewport-relative and wrong the moment the list scrolls.
+    list.style.setProperty("--pal-cursor-y", `${el.offsetTop}px`);
+    list.style.setProperty("--pal-cursor-h", `${el.offsetHeight}px`);
+    list.style.setProperty("--pal-cursor-opacity", "1");
   }, [selectedIdx, items]);
 
   // createTarget — the cwd the create bar will use: the selected project row's
