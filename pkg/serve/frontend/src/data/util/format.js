@@ -295,11 +295,64 @@ function tailLiveUnifiedDiff(text) {
   return `${marker}${text}`;
 }
 
+/* The ledger shows one line per tool call, and for bash that line is almost
+   never the command you ran: it is the scaffolding in front of it. Real rows
+   from this repo read
+
+     bash  cd /home/ealeixandre/dev/moa/design-visual/pkg/serve/…   2 lines
+     bash  cd /home/ealeixandre/dev/moa/design-visual && go buil…   3 lines
+
+   -- two different commands, indistinguishable, because the prefix they share
+   is what survived the cut and the verb never appeared.
+
+   So drop the lead-in rather than the tail. A `cd` and an environment
+   assignment before `&&` or `;` are preparation, not the act; the ledger
+   already reports where things run. What is left is trimmed from the end as
+   before, because a long command's own tail is genuinely less informative
+   than its head.
+
+   The whole command is still one hover away (title=fullLabel) and in the
+   expanded detail, so nothing is hidden -- it is only not the summary. */
 function shortenCmd(cmd) {
   if (!cmd) return '';
-  // Trim and take first line if multiline
   const first = cmd.trim().split('\n')[0];
-  return first.length > 100 ? first.substring(0, 100) + '…' : first;
+  const act = commandAct(first);
+  return act.length > 100 ? act.substring(0, 100) + '…' : act;
+}
+
+// commandAct — strip leading `cd …` and `VAR=…` segments, keeping the first
+// part that actually does something. Conservative on purpose: if stripping
+// would leave nothing it returns the original, because a command that is only
+// a `cd` is its own act.
+//
+// Splitting has to respect quotes. The first version used a plain regex and
+// turned `grep -rn "a && b" src/` into `grep -rn "a` -- a summary that is not
+// just shortened but wrong, and wrong in a way that looks like a real command.
+function commandAct(cmd) {
+  const parts = [];
+  let buf = '';
+  let quote = '';
+  for (let i = 0; i < cmd.length; i += 1) {
+    const c = cmd[i];
+    if (quote) {
+      buf += c;
+      if (c === quote && cmd[i - 1] !== '\\') quote = '';
+      continue;
+    }
+    if (c === '"' || c === "'") { quote = c; buf += c; continue; }
+    if (c === ';' || (c === '&' && cmd[i + 1] === '&')) {
+      parts.push(buf);
+      buf = '';
+      if (c === '&') i += 1;
+      continue;
+    }
+    buf += c;
+  }
+  parts.push(buf);
+
+  const isPrep = (s) => /^cd\s/.test(s) || /^(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*=/.test(s);
+  const act = parts.map((s) => s.trim()).find((s) => s && !isPrep(s));
+  return act || cmd;
 }
 
 function tryParse(s) {

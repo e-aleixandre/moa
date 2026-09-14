@@ -1,6 +1,6 @@
 // format.test.js — run with `bun test`
 import { test, expect } from 'bun:test';
-import { formatDiff, toolPreview, sessionDotState, sessionDisplayDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens, contextWindowLabel, sessionTitle, copyToClipboard, projectMonogram } from './format.js';
+import { formatDiff, toolPath, toolPreview, sessionDotState, sessionDisplayDotState, isRecentSession, RECENT_DAYS, mobileModelLabel, modelCodename, fmtTokens, contextWindowLabel, sessionTitle, copyToClipboard, projectMonogram } from './format.js';
 
 test('copyToClipboard falls back to execCommand when Clipboard.writeText is unavailable', async () => {
   const nav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -292,4 +292,31 @@ test('no monogram hue lands on peach, whatever the project is called', () => {
     const { hue } = projectMonogram(`/home/me/dev/${name}`);
     expect(Math.abs(hue - PEACH_HUE)).toBeGreaterThanOrEqual(15);
   }
+});
+
+/* The bash row of the ledger used to show the scaffolding instead of the
+   command: two different calls both read "cd /home/…/design-visual && go buil…"
+   because the shared prefix is what fitted and the verb never appeared. */
+test('a bash row shows the command, not the cd that preceded it', () => {
+  const path = (command) => toolPath('bash', { command });
+
+  expect(path('cd /a/b/c && node esbuild.mjs --prune')).toBe('node esbuild.mjs --prune');
+  expect(path('export PATH="$HOME/.bun/bin:$PATH"; cd /a && bun test')).toBe('bun test');
+
+  // Nothing to strip: unchanged.
+  expect(path('ls /tmp')).toBe('ls /tmp');
+  expect(path('git log --oneline -1')).toBe('git log --oneline -1');
+
+  // A command that is ONLY preparation is its own act -- stripping it would
+  // leave the row blank.
+  expect(path('cd /home/ealeixandre/dev/moa')).toBe('cd /home/ealeixandre/dev/moa');
+});
+
+test('splitting the command respects quotes', () => {
+  const path = (command) => toolPath('bash', { command });
+  // A regex split turned this into `grep -rn "a` -- not merely shortened but
+  // wrong, and wrong in a way that reads like a real command.
+  expect(path('grep -rn "a && b" src/')).toBe('grep -rn "a && b" src/');
+  expect(path('git commit -m "fix; really"')).toBe('git commit -m "fix; really"');
+  expect(path("awk '{print $1; print $2}' f")).toBe("awk '{print $1; print $2}' f");
 });
