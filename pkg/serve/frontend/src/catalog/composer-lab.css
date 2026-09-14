@@ -1,0 +1,149 @@
+/* composer-lab — CATALOG-ONLY. Lab chrome (`.cl-*`) plus the three
+   alternatives' extra controls. Everything the composer and the live bar
+   already draw comes from Composer.css / LiveBar.css untouched; only what an
+   alternative ADDS is styled here, with the shared tokens, so a chosen one can
+   be lifted into the product as-is. */
+
+/* ── lab chrome ─────────────────────────────────────────────────────────── */
+.cl { margin: 0 auto; padding: var(--space-8) var(--space-6) var(--space-12); }
+.cl-head h1 { font-size: var(--text-2xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.cl-head h1 em { font-style: normal; color: var(--peach); }
+.cl-head p { color: var(--overlay1); margin-top: var(--space-2); max-width: 88ch; font-size: var(--text-md); }
+
+.cl-variant { margin-top: var(--space-12); }
+.cl-variant-head h2 { font-size: var(--text-xl); font-weight: var(--weight-semibold); }
+.cl-variant-head p { color: var(--overlay1); font-size: var(--text-sm); margin-top: var(--space-1); max-width: 96ch; }
+
+.cl-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  /* One row per density, always: the four states are read left to right and
+     a wrap would put the deciding column under the first. */
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+.cl-strip[data-density="mobile"] { margin-top: var(--space-3); }
+
+/* A frame is the bottom of a screen: canvas tone, the dock in its margins.
+   Desktop is the conversation column's own width (the dock's max-width is
+   --content-block); the phone is the real 390. */
+.cl-frame {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim-2);
+  padding-top: 26px;
+}
+.cl-desk { width: 560px; }
+.cl-desk .zl-dock { padding: 18px 22px 12px; }
+.cl-phone { width: 390px; }
+.cl-phone .zl-dock { padding: 18px 12px 12px; }
+.cl-phone .zl-live-bar { min-height: 44px; }
+.cl-state-label {
+  position: absolute;
+  top: 8px;
+  left: 14px;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+
+/* The mockup's textarea is read-only, so a caret does not show; the field
+   still has to look focusable and keep the 16px floor Composer.css sets. */
+.cl .zl-ta { cursor: text; }
+
+/* ── A: Stop in the live bar ─────────────────────────────────────────────
+   The same control the subagent head already uses (WorkChrome `.wk-stop`):
+   a word with a small filled square, neutral, red only once it is asking.
+   Drawn in the bar's own tonal ladder so it sits beside the tally. 28px in
+   the desktop row (the tally's height); 44px on the phone. */
+.cl-live-stop {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-family: inherit;
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  cursor: pointer;
+}
+.cl-live-stop svg { color: var(--zl-t3); }
+@media (hover: hover) {
+  .cl-live-stop:hover { background: var(--zl-raised); color: var(--zl-t1); box-shadow: var(--zl-rim-2); }
+}
+.cl-live-stop.is-armed {
+  color: var(--zl-red);
+  background: color-mix(in srgb, var(--zl-red) 16%, var(--zl-control));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-red) 45%, transparent);
+}
+.cl-live-stop.is-phone {
+  height: 44px;
+  padding: 0 12px 0 10px;
+  font-size: var(--zl-fs-body);
+}
+
+/* ── B: Stop as a word inside the slab, beside the + ──────────────────── */
+.cl-stop-word {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 12px 0 10px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-control);
+  color: var(--zl-t2);
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  cursor: pointer;
+}
+.cl-stop-word svg { color: var(--zl-t3); }
+@media (hover: hover) {
+  .cl-stop-word:hover { background: var(--zl-hi); color: var(--zl-t1); }
+}
+
+/* ── A, B, C: the recording face without the square ────────────────────
+   A live microphone is a state of MY input, not an alarm: the mic glyph
+   stays, a ring breathes around it, and the colour is the accent, not red.
+   Red keeps meaning error / destructive. On the phone the send button wears
+   the same face while locked. */
+.zl-mic.cl-rec,
+.zl-send.cl-rec {
+  position: relative;
+  background: var(--zl-accent-med);
+  color: var(--zl-accent);
+  cursor: pointer;
+}
+.zl-mic.cl-rec::after,
+.zl-send.cl-rec::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  border: 2px solid var(--zl-accent-line);
+  animation: cl-ring 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes cl-ring {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(1.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zl-mic.cl-rec::after,
+  .zl-send.cl-rec::after { animation: none; }
+}
