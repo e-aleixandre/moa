@@ -234,7 +234,7 @@
 
   /* Rows inside an arriving surface follow it at this interval. Enough to
      read as one movement settling, not a list assembling itself. */
-  --motion-stagger: 30ms;
+  --motion-stagger: 45ms;
 
   /* Semantic tempos — for live animations (breathing, shimmer) */
   --breath-running:   1800ms;

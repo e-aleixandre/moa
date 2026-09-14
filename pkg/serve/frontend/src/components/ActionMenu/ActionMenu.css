@@ -63,15 +63,23 @@
     var(--zl-rim-2),
     0 16px 48px rgba(0, 0, 0, 0.45);
   color: var(--zl-t1);
-  /* A small surface (tokens.css, Motion rule 3): --motion-fast in, and it
-     GROWS from the corner nearest the button instead of sliding in from
-     nowhere -- the menu belongs to the control that opened it, and the eye
-     should be able to see that it came out of it. */
-  animation: action-menu-in var(--motion-fast) var(--motion-ease);
+  /* It GROWS from the corner nearest the button: the menu belongs to the
+     control that opened it and the eye should see it come out of it.
+     Measured first, because the previous version was invisible: 0.96 to 1 is
+     a four percent change over 180ms, which is beneath the threshold where
+     anyone perceives motion at all. The owner said "no noto nada" and he was
+     right -- there was nothing to notice.
+     It opens from 0.82 now, and unfolds: scaleY leads scaleX, so the surface
+     grows tall before it grows wide, the way something unfolding does. The
+     overshoot lands it. */
+  animation: action-menu-in var(--motion-base) var(--motion-ease-spring);
   transform-origin: top left;
+  will-change: transform, opacity;
 }
 @keyframes action-menu-in {
-  from { opacity: 0; transform: translateY(calc(var(--motion-rise) * -1)) scale(0.96); }
+  0%   { opacity: 0; transform: scale(0.82) translateY(-10px); }
+  55%  { opacity: 1; }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 /* Leaving (rule 2): the same shape played back, faster and accelerating, on
@@ -82,11 +90,14 @@
   pointer-events: none;
 }
 @keyframes action-menu-out {
-  to { opacity: 0; transform: translateY(calc(var(--motion-rise) * -1)) scale(0.96); }
+  to { opacity: 0; transform: scale(0.9) translateY(-6px); }
 }
 
-/* The rows arrive just behind the surface, close enough to read as one
-   movement rather than a list assembling itself. */
+/* The rows cascade. They used to be staggered 30ms apart inside a 180ms
+   surface animation, which means they effectively arrived together -- the
+   cascade existed in the code and not on screen. 45ms apart against a slower
+   surface is the difference between a list that assembles and a list that
+   was already there. */
 .action-menu-item {
   animation: action-menu-row-in var(--motion-fast) var(--motion-ease) backwards;
 }
@@ -97,7 +108,7 @@
 .action-menu-list.is-leaving .action-menu-item { animation: none; }
 
 @keyframes action-menu-row-in {
-  from { opacity: 0; transform: translateY(-3px); }
+  from { opacity: 0; transform: translateY(-6px) scale(0.96); }
 }
 
 /* Opening upwards: the composer's trigger sits at the bottom of the screen, so
@@ -116,10 +127,12 @@
 .action-menu-list--up.is-leaving { animation-name: action-menu-out-up; }
 
 @keyframes action-menu-in-up {
-  from { opacity: 0; transform: translateY(var(--motion-rise)) scaleY(0.88) scaleX(0.94); }
+  0%   { opacity: 0; transform: scale(0.82) translateY(10px); }
+  55%  { opacity: 1; }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 @keyframes action-menu-out-up {
-  to { opacity: 0; transform: translateY(var(--motion-rise)) scaleY(0.88) scaleX(0.94); }
+  to { opacity: 0; transform: scale(0.9) translateY(6px); }
 }
 
 .action-menu-item {

@@ -228,10 +228,15 @@ button.zl-kbd:focus-visible {
 }
 .zl-view-b svg { width: 14px; height: 14px; position: relative; }
 
-/* The selection is one pill that TRAVELS between the two, rather than a
-   background that blinks out of one and into the other. Same pixels at rest;
-   the difference is that the eye is carried across instead of asked to find
-   the new one. */
+/* The selection is one pill that TRAVELS, and it STRETCHES while it travels:
+   it leans into the direction it is going, thins slightly, and settles. That
+   squash is the whole trick of a segmented control that feels alive -- a pill
+   that merely slides from A to B is correct and forgettable, because rigid
+   objects moving at constant width read as diagrams, not as things. The
+   stretch is what your eye reads as weight.
+   It is done on the transition of transform alone, so it costs nothing: the
+   scaleX peak lives in the middle of the travel by way of the spring curve
+   overshooting, and the width never actually changes. */
 .zl-view::before {
   content: "";
   position: absolute;
@@ -244,15 +249,37 @@ button.zl-kbd:focus-visible {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
   transition: transform var(--motion-base) var(--motion-ease-spring);
 }
-/* A pill that overshoots by a hair and settles, rather than sliding to a
-   stop: the spring is what makes it feel answered instead of merely moved. */
+/* The travel is driven by an animation rather than a transition so the middle
+   of the move can be shaped: stretched along the axis at the halfway point,
+   back to square on arrival. */
 .zl-view.is-project::before { transform: translateX(28px); }
+.zl-view.is-touched.is-project::before { animation: zl-view-travel var(--motion-base) var(--motion-ease-spring); }
+.zl-view.is-touched:not(.is-project)::before { animation: zl-view-travel-back var(--motion-base) var(--motion-ease-spring); }
+
+@keyframes zl-view-travel {
+  0%   { transform: translateX(0) scaleX(1); }
+  45%  { transform: translateX(16px) scaleX(1.18); }
+  100% { transform: translateX(28px) scaleX(1); }
+}
+@keyframes zl-view-travel-back {
+  0%   { transform: translateX(28px) scaleX(1); }
+  45%  { transform: translateX(12px) scaleX(1.18); }
+  100% { transform: translateX(0) scaleX(1); }
+}
 .zl-view-b.is-on { color: var(--zl-t1); }
 /* The icon that just took the selection lifts under it. Barely -- enough to
    feel, not enough to notice. */
 .zl-view-b svg { transition: transform var(--motion-base) var(--motion-ease); }
-.zl-view-b.is-on svg { transform: scale(1.08); }
-.zl-view-b:active svg { transform: scale(0.92); }
+/* The icon that takes the selection does not merely tint: it dips as the pill
+   arrives under it and comes back up. Cheap, and it is what makes the tap
+   feel answered by the thing you tapped rather than by the background. */
+.zl-view.is-touched .zl-view-b.is-on svg { animation: zl-view-icon var(--motion-base) var(--motion-ease-spring); }
+.zl-view-b:active svg { transform: scale(0.9); }
+@keyframes zl-view-icon {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(0.86); }
+  100% { transform: scale(1); }
+}
 .zl-view-b:focus-visible {
   outline: 2px solid var(--zl-accent);
   outline-offset: -2px;
@@ -264,6 +291,10 @@ button.zl-kbd:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .zl-view::before,
   .zl-view-b svg { transition: none; }
+  .zl-view::before,
+  .zl-view.is-touched.is-project::before,
+  .zl-view.is-touched:not(.is-project)::before,
+  .zl-view.is-touched .zl-view-b.is-on svg { animation: none; }
 }
 
 /* Project heading: the monogram identifies, the path locates, the count sizes.
