@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { PermissionCard } from "./PermissionCard.jsx";
 import { resolvePermission, addPermissionRule } from "../../data/session-actions.js";
-import { formatArgs } from "../../data/util/format.js";
+import { formatArgs, shortPath } from "../../data/util/format.js";
 import { Field } from "../../primitives/index.js";
 
-// The card prints the command in the sentence. A bash permission carries
-// `command` plus bookkeeping (cwd, timeout, async). Unwrap the command so
-// the user reads the exact string that will run; the leftover fields become
-// scope chips so they stay visible. Any other shape still goes through
-// formatArgs, unabridged.
+// The card prints the command alone in its own block, with where it will
+// run above it. A bash permission carries `command` plus bookkeeping (cwd,
+// timeout, async). Unwrap the command so the user reads the exact string
+// that will run; timeout/async become scope chips so they stay visible.
+// Any other shape still goes through formatArgs, unabridged.
 function permissionCommand(perm) {
   const args = perm?.args;
   if (args && typeof args === "object" && !Array.isArray(args) && typeof args.command === "string") {
@@ -17,11 +17,22 @@ function permissionCommand(perm) {
   return formatArgs(args);
 }
 
+// Where the command runs: the explicit `cwd` argument when the agent gave
+// one, else the session's directory. The persistent shell can have `cd`-ed
+// elsewhere since; the server does not report that, so the session's
+// directory is the best the card can honestly say.
+function permissionCwd(perm, session) {
+  const args = perm?.args;
+  const explicit = args && typeof args === "object" && !Array.isArray(args) && typeof args.cwd === "string"
+    ? args.cwd : "";
+  const cwd = explicit || session?.cwd || "";
+  return cwd ? shortPath(cwd, 80) : "";
+}
+
 function permissionScope(perm) {
   const args = perm?.args;
   if (!args || typeof args !== "object" || Array.isArray(args) || typeof args.command !== "string") return [];
   const chips = [];
-  if (args.cwd) chips.push(`cwd ${args.cwd}`);
   if (args.timeout) chips.push(`timeout ${args.timeout}`);
   if (args.async) chips.push("async");
   return chips;
@@ -110,12 +121,14 @@ export function PermissionPrompt({ session }) {
     }
   };
 
-  const title = perm.tool_name ? `moa wants to run ${perm.tool_name}` : "moa wants to run";
+  const bash = !perm.tool_name || perm.tool_name === "bash";
+  const title = bash ? undefined : `moa wants to run ${perm.tool_name}`;
 
   return (
     <PermissionCard
       title={title}
       command={permissionCommand(perm)}
+      cwd={permissionCwd(perm, session)}
       scope={permissionScope(perm)}
       alwaysLabel={permissionMode === "ask" ? perm.allow_pattern || undefined : undefined}
       disabled={busy}

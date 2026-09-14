@@ -40,10 +40,12 @@ test("always is a third action, not a relabel of allow, and destructive ops do n
 });
 
 test("the command is the evidence, never clipped", () => {
-  // The sentence is `Run <code>…</code>?`. Ellipsis or line-clamp on that
-  // code would let you approve a command other than the one you saw.
-  expect(source).toMatch(/Run <code class="zl-data">/);
+  // The command sits alone in its own block (`.zl-ask-cmd-text`), with the
+  // working directory above it. Ellipsis or line-clamp on that block would
+  // let you approve a command other than the one you saw.
+  expect(source).toMatch(/<code class="zl-ask-cmd-text zl-data">/);
   expect(source).toContain("CommandLine");
+  expect(source).toMatch(/cwd && <div class="zl-ask-cwd zl-data">\{cwd\}<\/div>/);
   expect(css).not.toMatch(/text-overflow:\s*ellipsis/);
   expect(css).not.toMatch(/-webkit-line-clamp/);
   expect(css).toMatch(/overflow-wrap:\s*anywhere/);

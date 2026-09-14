@@ -246,9 +246,9 @@ function PermissionCardDemo() {
   return (
     <div class="molecule-col">
       <PermissionCard
-        title="moa wants to run"
         command="go test -race ./... && go vet ./..."
-        scope={["cwd ~/dev/moa/main", "tool bash", "timeout 300s"]}
+        cwd="~/dev/moa/main"
+        scope={["timeout 300s"]}
         alwaysLabel="go test"
         timer="waiting 0:07"
         onAllow={() => {}}
@@ -257,10 +257,10 @@ function PermissionCardDemo() {
       />
       <PermissionCard
         variant="destructive"
-        title="Destructive command — read carefully"
         command="git reset --hard origin/main && rm -rf ./dist"
+        cwd="~/dev/moa/main"
         dangerTokens={["git reset --hard", "rm -rf"]}
-        scope={[{ label: "deletes files", warn: true }, "cwd ~/dev/moa/main"]}
+        scope={[{ label: "deletes files", warn: true }]}
         timer="waiting 0:31"
         onAllow={() => {}}
         onDeny={() => {}}

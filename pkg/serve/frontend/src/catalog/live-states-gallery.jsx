@@ -215,7 +215,7 @@ function GridAliveSection() {
             }
           >
             <p>Build green, unit staged.</p>
-            <PermissionCard title="moa wants to run" command="systemctl --user restart pulse-api" />
+            <PermissionCard command="systemctl --user restart pulse-api" cwd="~/dev/moa/pulse-api" />
           </Pane>
         </div>
       </div>

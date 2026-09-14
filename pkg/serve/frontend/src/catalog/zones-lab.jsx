@@ -582,7 +582,7 @@ function useLive(preset, forceCompact) {
    only an adapter: the lab's fixture command mapped onto the shipped props.
    Allow/Deny with no Always, because that is what the prototype drew. */
 const ASK_CARD = (
-  <PermissionCard command="git push origin fix/attach-race" />
+  <PermissionCard command="git push origin fix/attach-race" cwd="~/dev/moa/main" />
 );
 
 function Transcript({ dense, streaming = true, short, tail }) {

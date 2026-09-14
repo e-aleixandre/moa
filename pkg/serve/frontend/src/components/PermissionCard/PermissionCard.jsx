@@ -1,3 +1,4 @@
+import { Terminal } from "lucide-preact";
 import "./PermissionCard.css";
 
 // buildCommandFragments — locates every occurrence of dangerTokens in
@@ -63,19 +64,32 @@ function scopeWarn(chip) {
   return typeof chip === "object" && chip.warn;
 }
 
-// PermissionCard — the blocking "run this?" card. Markup and CSS are the
-// catalogue's (catalog/zones-lab.jsx ASK_CARD, zones-lab.css `.zl-ask*`),
-// MOVED here rather than imitated. Raised, yellow-rimmed, the command in
-// the sentence, Allow then Deny. The catalogue imports this component now.
+const isTextEntryTarget = (el) => {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+};
+
+// PermissionCard — the blocking "run this?" card, in the approval-card
+// shape the owner picked: a glyph-and-title head, the command alone in its
+// own sunken block with the working directory above it, and the decision
+// at the bottom right as one solid and one ghost button. The command used
+// to sit inline in a sentence ("Run `…`?") with the cwd lost among the
+// scope chips; a command you are about to approve deserves its own line,
+// and where it will run is the first thing to check.
 //
-// What is NOT the catalogue's is the production behavior plugged on top:
-// Always, Add rule, + feedback, the error line, a destructive variant,
-// danger tokens inside the command, and the optional scope/timer. The
-// prototype had Allow/Deny; production still has to let you mean those
-// extra things without changing what Allow and Deny do.
+// The ⏎ on the primary is a real key, not a painted one: with focus on the
+// card (it is focusable, and a click inside gives it focus) Enter fires
+// onAllow. Focus is never taken from the composer: an Enter meant to send a
+// message must not approve a command.
+//
+// Production behaviour on top of the shape: Always, Add rule, + feedback,
+// the error line, a destructive variant, danger tokens inside the command,
+// and the optional scope/timer.
 export function PermissionCard({
-  title: _title,
+  title,
   command,
+  cwd,
   dangerTokens,
   scope = [],
   variant = "normal",
@@ -95,16 +109,36 @@ export function PermissionCard({
 }) {
   const destructive = variant === "destructive";
   const allowLabel = destructive ? "Allow anyway" : alwaysLabel ? "Allow once" : "Allow";
+  const heading = title || (destructive ? "This command deletes things" : "Run this command?");
+
+  const onKeyDown = (event) => {
+    if (event.key !== "Enter" || disabled) return;
+    const el = event.target;
+    // A focused button already answers Enter natively; a text field owns it.
+    if (isTextEntryTarget(el) || el?.tagName === "BUTTON") return;
+    event.preventDefault();
+    onAllow?.();
+  };
+
   return (
     <div
       class={`zl-ask${destructive ? " is-danger" : ""}`}
       role="group"
       aria-label="Permission requested"
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
       {...rest}
     >
-      <div class="zl-ask-t">
-        Run <code class="zl-data"><CommandLine command={command} dangerTokens={dangerTokens} /></code>?
+      <div class="zl-ask-head">
+        <span class="zl-ask-glyph" aria-hidden="true">
+          <Terminal size={15} />
+        </span>
+        <span class="zl-ask-t">{heading}</span>
         {timer && <span class="zl-ask-timer zl-data">{timer}</span>}
+      </div>
+      <div class="zl-ask-cmd">
+        {cwd && <div class="zl-ask-cwd zl-data">{cwd}</div>}
+        <code class="zl-ask-cmd-text zl-data"><CommandLine command={command} dangerTokens={dangerTokens} /></code>
       </div>
       {scope.length > 0 && (
         <div class="zl-ask-scope">
@@ -120,6 +154,36 @@ export function PermissionCard({
       )}
       {error && <div class="zl-ask-error">{error}</div>}
       <div class="zl-ask-acts">
+        {(onRuleToggle || onFeedbackToggle) && (
+          <div class="zl-ask-aux">
+            {onRuleToggle && (
+              <button
+                type="button"
+                class="zl-ask-btn is-quiet"
+                disabled={disabled}
+                aria-pressed={ruleActive}
+                onClick={onRuleToggle}
+              >
+                Add rule
+              </button>
+            )}
+            {onFeedbackToggle && (
+              <button
+                type="button"
+                class="zl-ask-btn is-quiet"
+                disabled={disabled}
+                aria-pressed={feedbackActive}
+                onClick={onFeedbackToggle}
+              >
+                + feedback
+              </button>
+            )}
+          </div>
+        )}
+        {/* Allow first, then Always, then Deny: the order the tests fix and
+            the one a keyboard reaches first. The reference puts the solid
+            button last; the product keeps its own order and only moves the
+            group to the right. */}
         <button
           type="button"
           class={`zl-ask-btn is-primary${destructive ? " is-danger" : ""}`}
@@ -127,6 +191,7 @@ export function PermissionCard({
           onClick={onAllow}
         >
           {allowLabel}
+          <kbd class="zl-ask-key" aria-hidden="true">⏎</kbd>
         </button>
         {!destructive && alwaysLabel && (
           <button type="button" class="zl-ask-btn" disabled={disabled} onClick={onAlways}>
@@ -136,28 +201,6 @@ export function PermissionCard({
         <button type="button" class="zl-ask-btn" disabled={disabled} onClick={onDeny}>
           Deny
         </button>
-        {onRuleToggle && (
-          <button
-            type="button"
-            class="zl-ask-btn"
-            disabled={disabled}
-            aria-pressed={ruleActive}
-            onClick={onRuleToggle}
-          >
-            Add rule
-          </button>
-        )}
-        {onFeedbackToggle && (
-          <button
-            type="button"
-            class="zl-ask-btn"
-            disabled={disabled}
-            aria-pressed={feedbackActive}
-            onClick={onFeedbackToggle}
-          >
-            + feedback
-          </button>
-        )}
       </div>
       {children}
     </div>

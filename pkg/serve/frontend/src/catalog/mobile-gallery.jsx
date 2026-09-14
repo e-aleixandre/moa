@@ -304,8 +304,8 @@ export function MobileConversationSpecimen() {
         </AssistantDocument>
 
         <PermissionCard
-          title="Allow this command?"
           command="go test -race ./... && go vet ./..."
+          cwd="~/dev/moa/main"
           timer="0:07"
           alwaysLabel="always allow go test"
           onAllow={noop}
