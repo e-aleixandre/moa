@@ -75,23 +75,23 @@ export const VARIANTS = [
 
 // The live bar the three densities put above the composer while the agent
 // works. `stop` adds alternative A's control at the end of the row.
-function Live({ stop, phone }) {
+function Live({ stop, phone, text = "Running the test suite after the resume() fix…", elapsed = "1m 12s", tally = true, dense = false }) {
   return (
-    <div class="zl-live">
+    <div class={`zl-live${dense ? " is-dense" : ""}`}>
       <div class="zl-live-bar">
         <div class="zl-live-now" role="status">
           <span class="zl-live-dot is-working" aria-hidden="true" />
-          <span class="zl-live-txt">Running the test suite after the resume() fix…</span>
-          <span class="zl-live-el zl-data">1m 12s</span>
+          <span class="zl-live-txt">{text}</span>
+          <span class="zl-live-el zl-data">{elapsed}</span>
         </div>
-        <button type="button" class="zl-live-tally" aria-label="2 in the background">
+        {tally && <button type="button" class="zl-live-tally" aria-label="2 in the background">
           <span class="zl-live-dots" aria-hidden="true">
             <span class="zl-live-id is-agent" style="--zl-live-accent: var(--sky)" />
             <span class="zl-live-id is-bash zl-data">$</span>
           </span>
           <span class="zl-live-n zl-data">2</span>
           <Chev />
-        </button>
+        </button>}
         {stop && (
           <button type="button" class={`cl-live-stop${phone ? " is-phone" : ""}`} aria-label="Stop the run">
             <Square size={11} fill="currentColor" aria-hidden="true" />
@@ -219,6 +219,58 @@ function VariantRow({ variant }) {
   );
 }
 
+// ── The counter's place ───────────────────────────────────────────────────
+// Today the elapsed counter is the sentence's next sibling, and the sentence
+// sizes to its words: every change of verb moves the one thing in the row that
+// is read at a glance. The study stacks the same row with phrases of very
+// different lengths, before and after, so the drift (or its absence) is seen
+// down a column rather than argued.
+const PHRASES = [
+  { text: "Thinking…", elapsed: "12s" },
+  { text: "Reading src/layout/LiveBar/LiveBar.css…", elapsed: "1m 12s" },
+  { text: "Running the test suite after the resume() fix, then the fidelity harness…", elapsed: "14m 07s" },
+];
+
+export const TIME_VARIANTS = [
+  { id: "before", label: "Antes", note: "El contador va pegado al final de la frase: cambia el verbo, se mueve el tiempo." },
+  { id: "after", label: "Después · anclado a la derecha de la frase", note: "La frase ocupa el hueco y se recorta; el contador queda contra el tally (o el Stop, o el borde) y no se mueve aunque cambie el verbo. Al crecer (12s → 1m 12s → 14m 07s) crece hacia la izquierda, comiéndole a la frase, no a los controles." },
+  { id: "left", label: "Alternativa · tras el punto", note: "El contador delante de la frase, pegado al punto de estado. Quieto también, pero cuando cambia de formato (12s → 1m 12s) desplaza el arranque de la frase, y se lee como marca de tiempo, no como duración." },
+];
+
+function TimeFrame({ variant, phone, stop = true, tally = true, dense = false, label }) {
+  return (
+    <div class={`cl-frame ${phone ? "cl-phone" : "cl-desk"} cl-time-${variant}`}>
+      <div class="cl-state-label">{label}</div>
+      <div class="zl-dock cl-stack">
+        {PHRASES.map((p) => <Live key={p.text} stop={stop} phone={phone} text={p.text} elapsed={p.elapsed} tally={tally} dense={dense} />)}
+      </div>
+    </div>
+  );
+}
+
+function TimeRow({ variant }) {
+  return (
+    <section class="cl-variant" id={`time-${variant.id}`} data-variant={variant.id}>
+      <header class="cl-variant-head">
+        <h2>{variant.label}</h2>
+        <p>{variant.note}</p>
+      </header>
+      <div class="cl-strip" data-density="desktop">
+        <TimeFrame variant={variant.id} phone={false} label="Escritorio · tally + Stop (A)" />
+        <TimeFrame variant={variant.id} phone={false} stop={false} tally={false} label="Escritorio · sólo primer plano" />
+      </div>
+      <div class="cl-strip" data-density="mobile">
+        <TimeFrame variant={variant.id} phone label="Móvil 390 · tally + Stop (A)" />
+        <TimeFrame variant={variant.id} phone stop={false} label="Móvil 390 · sólo tally" />
+        <TimeFrame variant={variant.id} phone stop={false} tally={false} label="Móvil 390 · sólo primer plano" />
+      </div>
+      <div class="cl-strip" data-density="dense">
+        <TimeFrame variant={variant.id} phone={false} dense label="Pane denso (32px) · tally + Stop (A)" />
+      </div>
+    </section>
+  );
+}
+
 export function ComposerLab() {
   return (
     <div class="cl">
@@ -231,6 +283,15 @@ export function ComposerLab() {
         </p>
       </header>
       {VARIANTS.map((v) => <VariantRow key={v.id} variant={v} />)}
+
+      <header class="cl-head cl-head-2" id="time">
+        <h1>live bar · <em>el sitio del tiempo</em></h1>
+        <p>
+          Tres frases de longitud muy distinta, apiladas, con el mismo contador en cada fila.
+          Mira la columna del tiempo: antes baila con el verbo; después está quieto.
+        </p>
+      </header>
+      {TIME_VARIANTS.map((v) => <TimeRow key={v.id} variant={v} />)}
     </div>
   );
 }

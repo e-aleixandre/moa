@@ -147,3 +147,29 @@
   .zl-mic.cl-rec::after,
   .zl-send.cl-rec::after { animation: none; }
 }
+
+/* ── The counter's place ────────────────────────────────────────────────── */
+.cl-head-2 { margin-top: var(--space-12); padding-top: var(--space-8); border-top: 1px solid var(--surface0); }
+.cl-stack { display: flex; flex-direction: column; gap: 2px; }
+.cl-stack .zl-live { margin: 0; }
+.cl-strip[data-density="dense"] .cl-desk { width: 420px; }
+.cl-strip[data-density="dense"] .zl-dock { padding: 14px 12px 10px; }
+
+/* Before: the shipped rules, untouched. The sentence is an inline-block that
+   sizes to its words, so the counter lands wherever they end. */
+
+/* After: the sentence is the flexible item and the counter is pushed to the
+   end of the sentence slot. The row's right side (tally, Stop) does not move
+   either: the counter grows LEFTWARDS into the sentence's room. No fixed
+   width on the counter -- a width for "14m 07s" wastes 30px against "12s"
+   on a 390 row where the sentence already has ~170px, and the right edge is
+   the anchor the eye uses, which flex gives for free. */
+.cl-time-after .zl-live-now > .zl-live-txt,
+.cl-time-after .zl-live-spot > .zl-live-txt { flex: 1 1 auto; }
+.cl-time-after .zl-live-now > .zl-live-el,
+.cl-time-after .zl-live-spot > .zl-live-el { margin-left: auto; }
+
+/* Alternative: the counter right after the state dot, before the words. */
+.cl-time-left .zl-live-now > .zl-live-el,
+.cl-time-left .zl-live-spot > .zl-live-el { order: -1; }
+.cl-time-left .zl-live-now > .zl-live-dot { order: -2; }
