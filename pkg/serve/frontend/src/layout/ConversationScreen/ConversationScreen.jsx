@@ -67,6 +67,11 @@ export function ConversationScreen() {
   const modelPopoverRef = useRef(null);
   const [modelPopoverPosition, setModelPopoverPosition] = useState(null);
   const modelPopoverPresence = usePresence(modelOpen);
+  // Forget where it was only once it is gone, so the next open measures fresh
+  // rather than flashing at the last anchor's coordinates.
+  useEffect(() => {
+    if (!modelPopoverPresence.mounted) setModelPopoverPosition(null);
+  }, [modelPopoverPresence.mounted]);
   useEffect(() => {
     if (modelOpen) ensureModelCatalog();
   }, [modelOpen]);
@@ -100,7 +105,11 @@ export function ConversationScreen() {
 
   useLayoutEffect(() => {
     if (!modelOpen) {
-      setModelPopoverPosition(null);
+      // The position is deliberately NOT cleared here. Clearing it on close
+      // set visibility:hidden on the very frame the exit began, so the
+      // popover played its leave animation invisibly -- usePresence kept the
+      // node alive for 140ms and nobody ever saw it. It is dropped when the
+      // surface actually unmounts, below.
       return undefined;
     }
     placeModelPopover();

@@ -259,7 +259,8 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
 
   useLayoutEffect(() => {
     if (!modelOpen) {
-      setModelPopoverPosition(null);
+      // Not cleared here: see ConversationScreen. Dropping the position on
+      // close hides the popover on the first frame of its exit.
       return undefined;
     }
     placeModelPopover();
@@ -355,6 +356,9 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   const specs = catalog.entries || [];
   const selectedModel = matchSelectedModel(specs, session.model);
   const modelPopoverPresence = usePresence(modelOpen);
+  useEffect(() => {
+    if (!modelPopoverPresence.mounted) setModelPopoverPosition(null);
+  }, [modelPopoverPresence.mounted]);
   const modelPopover = modelPopoverPresence.mounted && typeof document !== "undefined" && document.body && createPortal(
     <PickerPopover
       kind="model"
