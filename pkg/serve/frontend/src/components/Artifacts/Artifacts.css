@@ -148,6 +148,9 @@
   white-space: nowrap;
 }
 
+/* ── Entries ────────────────────────────────────────────────────────────── */
+.zl-desk-head .zl-desk-act.af-entry { width: auto; min-width: 36px; gap: 5px; padding: 0 7px 0 6px; }
+
 /* ── Layer / drawer ─────────────────────────────────────────────────────── */
 .af-layer { position: fixed; inset: 0; z-index: var(--z-sheet); pointer-events: none; }
 .af-layer.is-modal { z-index: calc(var(--z-sheet) + 3); pointer-events: auto; }
