@@ -28,7 +28,9 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 32px;
+  /* 36, not the catalogue's 32: at 14px a 32px row reads as a footnote next
+     to 16px prose, and the phone already sat at 36. One number, every host. */
+  min-height: 36px;
   padding: 0 10px 0 10px;
   border: 0;
   background: transparent;
@@ -276,14 +278,11 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
 }
 .zl-lg-log-affordance .zl-lg-chev { width: 12px; height: 12px; }
 
-/* Phone: inert rows stay dense; anything you tap is 44. The lab frame is
-   `.zl-phone`; production's conversation is `.mconv`. Same numbers. */
-.zl-phone .zl-lg-row, .zl-phone .zl-lg-head,
-.mconv .zl-lg-row, .mconv .zl-lg-head { min-height: 36px; }
+/* Phone: inert rows keep the 36 above; anything you tap is 44. The lab frame
+   is `.zl-phone`; production's conversation is `.mconv`. Same numbers. */
 .zl-phone button.zl-lg-row, .zl-phone button.zl-lg-head,
 .mconv button.zl-lg-row, .mconv button.zl-lg-head { min-height: 44px; }
 @media (max-width: 767px) {
-  .zl-lg-row, .zl-lg-head { min-height: 36px; }
   button.zl-lg-row, button.zl-lg-head, button.zl-lg-log { min-height: 44px; }
   .zl-ledger.is-dense .zl-lg-row, .zl-ledger.is-dense .zl-lg-head { min-height: 36px; }
   .zl-ledger.is-dense button.zl-lg-row, .zl-ledger.is-dense button.zl-lg-head { min-height: 44px; }
