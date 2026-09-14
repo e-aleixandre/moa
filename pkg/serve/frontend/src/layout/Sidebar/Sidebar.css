@@ -259,64 +259,76 @@ button.zl-kbd:focus-visible {
    pair of keyframes, not across the whole animation, so an ease-out curve
    brings the pill almost to a stop at each intermediate keyframe. Sparse
    keyframes plus a strong ease equals a stutter, by construction.
-   So these keyframes are a damped spring sampled every 5% (zeta 0.68,
-   omega 8.6), played LINEAR. Twenty-one steps is dense enough that linear
-   interpolation between them is invisible, and the motion is then exactly
-   the spring and nothing else. The stretch follows velocity -- it peaks
-   where the pill is fastest and is square at both ends -- because that is
-   what stretching is: a thing deforming as it accelerates. */
+   So these keyframes are a damped spring sampled every 5% and played LINEAR.
+   Twenty-one steps is dense enough that linear interpolation between them is
+   invisible, and the motion is then exactly the spring and nothing else.
+
+   Two further things were still making it snag in the middle, both geometric
+   rather than temporal:
+
+   The stretch grew the pill from its CENTRE, so its leading edge shot 1.5px
+   past the destination and then pulled back while the trailing edge was
+   still arriving. That looks exactly like sticking. transform-origin now
+   sits on the trailing edge -- the front never overruns, only the tail lags,
+   which is how a moving thing actually deforms.
+
+   And the oscillation ate half the animation: the pill reached its target at
+   40% and spent the remaining 60% settling by hundredths of a pixel. Nobody
+   sees that settle, they just see a control that has not finished. Damping
+   is near-critical now (zeta 0.9) and the curve is cut where the spring is
+   done, so every frame of --motion-fast is travel. */
 .zl-view.is-project::before { transform: translateX(28px); }
-.zl-view.is-touched.is-project::before { animation: zl-view-travel var(--motion-base) linear; }
-.zl-view.is-touched:not(.is-project)::before { animation: zl-view-travel-back var(--motion-base) linear; }
+.zl-view.is-touched.is-project::before { animation: zl-view-travel var(--motion-fast) linear; }
+.zl-view.is-touched:not(.is-project)::before { animation: zl-view-travel-back var(--motion-fast) linear; }
 
 /* The stretch peaks EARLY (35%), not at the midpoint: things stretch as they
    accelerate away and are already recovering by the time they arrive. The
    overshoot is two pixels past the target, which is the whole spring. */
 @keyframes zl-view-travel {
-  0% { transform: translateX(0.00px) scaleX(1.000); }
-  5% { transform: translateX(2.12px) scaleX(1.115); }
-  10% { transform: translateX(6.87px) scaleX(1.165); }
-  15% { transform: translateX(12.43px) scaleX(1.170); }
-  20% { transform: translateX(17.67px) scaleX(1.149); }
-  25% { transform: translateX(22.02px) scaleX(1.117); }
-  30% { transform: translateX(25.26px) scaleX(1.083); }
-  35% { transform: translateX(27.45px) scaleX(1.053); }
-  40% { transform: translateX(28.74px) scaleX(1.029); }
-  45% { transform: translateX(29.36px) scaleX(1.011); }
-  50% { transform: translateX(29.52px) scaleX(1.000); }
-  55% { transform: translateX(29.40px) scaleX(1.000); }
-  60% { transform: translateX(29.14px) scaleX(1.000); }
-  65% { transform: translateX(28.83px) scaleX(1.000); }
-  70% { transform: translateX(28.55px) scaleX(1.000); }
-  75% { transform: translateX(28.32px) scaleX(1.000); }
-  80% { transform: translateX(28.14px) scaleX(1.000); }
-  85% { transform: translateX(28.03px) scaleX(1.000); }
-  90% { transform: translateX(27.96px) scaleX(1.000); }
-  95% { transform: translateX(27.93px) scaleX(1.000); }
-  100% { transform: translateX(28.00px) scaleX(1.000); }
+  0% { transform: translateX(0.00px) scaleX(1.000); transform-origin: 0px center; }
+  5% { transform: translateX(1.45px) scaleX(1.101); transform-origin: 0px center; }
+  10% { transform: translateX(4.68px) scaleX(1.149); transform-origin: 0px center; }
+  15% { transform: translateX(8.56px) scaleX(1.160); transform-origin: 0px center; }
+  20% { transform: translateX(12.41px) scaleX(1.151); transform-origin: 0px center; }
+  25% { transform: translateX(15.88px) scaleX(1.132); transform-origin: 0px center; }
+  30% { transform: translateX(18.84px) scaleX(1.110); transform-origin: 0px center; }
+  35% { transform: translateX(21.25px) scaleX(1.088); transform-origin: 0px center; }
+  40% { transform: translateX(23.14px) scaleX(1.068); transform-origin: 0px center; }
+  45% { transform: translateX(24.59px) scaleX(1.052); transform-origin: 0px center; }
+  50% { transform: translateX(25.67px) scaleX(1.038); transform-origin: 0px center; }
+  55% { transform: translateX(26.45px) scaleX(1.027); transform-origin: 0px center; }
+  60% { transform: translateX(27.01px) scaleX(1.019); transform-origin: 0px center; }
+  65% { transform: translateX(27.40px) scaleX(1.013); transform-origin: 0px center; }
+  70% { transform: translateX(27.65px) scaleX(1.009); transform-origin: 0px center; }
+  75% { transform: translateX(27.82px) scaleX(1.006); transform-origin: 0px center; }
+  80% { transform: translateX(27.93px) scaleX(1.003); transform-origin: 0px center; }
+  85% { transform: translateX(27.99px) scaleX(1.002); transform-origin: 0px center; }
+  90% { transform: translateX(28.02px) scaleX(1.001); transform-origin: 0px center; }
+  95% { transform: translateX(28.04px) scaleX(1.000); transform-origin: 0px center; }
+  100% { transform: translateX(28.00px) scaleX(1.000); transform-origin: 0px center; }
 }
 @keyframes zl-view-travel-back {
-  0% { transform: translateX(28.00px) scaleX(1.000); }
-  5% { transform: translateX(25.88px) scaleX(1.115); }
-  10% { transform: translateX(21.13px) scaleX(1.165); }
-  15% { transform: translateX(15.57px) scaleX(1.170); }
-  20% { transform: translateX(10.33px) scaleX(1.149); }
-  25% { transform: translateX(5.98px) scaleX(1.117); }
-  30% { transform: translateX(2.74px) scaleX(1.083); }
-  35% { transform: translateX(0.55px) scaleX(1.053); }
-  40% { transform: translateX(-0.74px) scaleX(1.029); }
-  45% { transform: translateX(-1.36px) scaleX(1.011); }
-  50% { transform: translateX(-1.52px) scaleX(1.000); }
-  55% { transform: translateX(-1.40px) scaleX(1.000); }
-  60% { transform: translateX(-1.14px) scaleX(1.000); }
-  65% { transform: translateX(-0.83px) scaleX(1.000); }
-  70% { transform: translateX(-0.55px) scaleX(1.000); }
-  75% { transform: translateX(-0.32px) scaleX(1.000); }
-  80% { transform: translateX(-0.14px) scaleX(1.000); }
-  85% { transform: translateX(-0.03px) scaleX(1.000); }
-  90% { transform: translateX(0.04px) scaleX(1.000); }
-  95% { transform: translateX(0.07px) scaleX(1.000); }
-  100% { transform: translateX(0.00px) scaleX(1.000); }
+  0% { transform: translateX(28.00px) scaleX(1.000); transform-origin: 28.0px center; }
+  5% { transform: translateX(26.55px) scaleX(1.101); transform-origin: 28.0px center; }
+  10% { transform: translateX(23.32px) scaleX(1.149); transform-origin: 28.0px center; }
+  15% { transform: translateX(19.44px) scaleX(1.160); transform-origin: 28.0px center; }
+  20% { transform: translateX(15.59px) scaleX(1.151); transform-origin: 28.0px center; }
+  25% { transform: translateX(12.12px) scaleX(1.132); transform-origin: 28.0px center; }
+  30% { transform: translateX(9.16px) scaleX(1.110); transform-origin: 28.0px center; }
+  35% { transform: translateX(6.75px) scaleX(1.088); transform-origin: 28.0px center; }
+  40% { transform: translateX(4.86px) scaleX(1.068); transform-origin: 28.0px center; }
+  45% { transform: translateX(3.41px) scaleX(1.052); transform-origin: 28.0px center; }
+  50% { transform: translateX(2.33px) scaleX(1.038); transform-origin: 28.0px center; }
+  55% { transform: translateX(1.55px) scaleX(1.027); transform-origin: 28.0px center; }
+  60% { transform: translateX(0.99px) scaleX(1.019); transform-origin: 28.0px center; }
+  65% { transform: translateX(0.60px) scaleX(1.013); transform-origin: 28.0px center; }
+  70% { transform: translateX(0.35px) scaleX(1.009); transform-origin: 28.0px center; }
+  75% { transform: translateX(0.18px) scaleX(1.006); transform-origin: 28.0px center; }
+  80% { transform: translateX(0.07px) scaleX(1.003); transform-origin: 28.0px center; }
+  85% { transform: translateX(0.01px) scaleX(1.002); transform-origin: 28.0px center; }
+  90% { transform: translateX(-0.02px) scaleX(1.001); transform-origin: 28.0px center; }
+  95% { transform: translateX(-0.04px) scaleX(1.000); transform-origin: 28.0px center; }
+  100% { transform: translateX(0.00px) scaleX(1.000); transform-origin: 28.0px center; }
 }
 .zl-view-b.is-on { color: var(--zl-t1); }
 /* The icon that takes the selection dips as the pill arrives under it and
