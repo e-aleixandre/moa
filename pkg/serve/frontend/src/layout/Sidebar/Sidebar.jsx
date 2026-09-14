@@ -18,7 +18,7 @@ import "./Sidebar.css";
 
 // Sidebar — the other sessions. Markup and CSS are the catalogue's
 // (catalog/zones-lab.jsx `Sidebar` / `SessionList` / `Monogram`, zones-lab.css
-// the `.zl-side-head` / `.zl-list` / `.zl-side-new` / `.zl-side-foot` block),
+// the `.zl-side-head` / `.zl-list` / `.zl-side-add` / `.zl-side-foot` block),
 // MOVED here rather than imitated: the classes travelled with the rules, so
 // the column IS the accepted design instead of a translation of it. The
 // catalogue imports this component now, which is what makes one definition
@@ -300,6 +300,17 @@ export function Sidebar({
               its own -- the sidebar is narrow and every row of it is worth
               more than a switch touched once a month. The labels survive as
               the tooltip and the accessible name. */}
+          {/* New is a "+" in the head rather than a filled bar across the
+              bottom. Starting a session is frequent but it is not the reason
+              the sidebar exists -- the list is -- and a full-width accent
+              button spent a whole row, plus the eye's first stop, on an action
+              the palette also offers. As an icon it sits with the other things
+              you DO here, and the list gets the room back. */}
+          {!inboxOpen && (
+            <button type="button" class="zl-side-add" onClick={onNewSession} title="New session" aria-label="New session">
+              <PlusIcon />
+            </button>
+          )}
           <div class={`zl-view${groupByProject ? " is-project" : ""}`} role="radiogroup" aria-label="Session order">
             {ORDERS.map(([id, label, hint]) => {
               const on = (id === "project") === !!groupByProject;
@@ -441,15 +452,6 @@ export function Sidebar({
         </div>
       )}
 
-      {/* New anchors the bottom, where the thumb is. It is the one action, so
-          it gets the width — and the word, which a 28px "+" in the head never
-          had room for. Hidden while the inbox has the list: filing is not
-          starting a session. */}
-      {!inboxOpen && (
-        <button type="button" class="zl-side-new" onClick={onNewSession}>
-          <PlusIcon />New session
-        </button>
-      )}
 
       {/* The foot is about the APP, not about a session: the inbox, the build,
           and the global settings. Same place both densities kept settings. */}

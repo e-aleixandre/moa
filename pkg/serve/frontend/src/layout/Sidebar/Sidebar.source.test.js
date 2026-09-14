@@ -29,11 +29,15 @@ test("the phone has no keycap: there is no keyboard", () => {
   expect(source).toMatch(/showJump = jump \?\? !phone/);
 });
 
-test("New session is a labelled action the caller routes", () => {
+test("New session is an action the caller routes, and keeps its name", () => {
   // The button does not pick the destination: the caller routes it. Both
   // densities open the palette's create step now.
-  expect(source).toContain("New session");
-  expect(source).toMatch(/class="zl-side-new"[^>]*onClick=\{onNewSession\}/);
+  //
+  // It is an icon in the head rather than a bar at the foot, so the name is
+  // asserted where an icon-only control must carry it -- the accessible name
+  // and the tooltip -- not as rendered text.
+  expect(source).toMatch(/class="zl-side-add"[^>]*onClick=\{onNewSession\}/);
+  expect(source).toMatch(/class="zl-side-add"[^>]*aria-label="New session"/);
   expect(source).not.toContain("openPalette");
 });
 

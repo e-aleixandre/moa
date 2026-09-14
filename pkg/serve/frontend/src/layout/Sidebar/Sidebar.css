@@ -2,7 +2,7 @@
 
    This sheet is the catalogue's, MOVED (catalog/zones-lab.jsx `Sidebar` /
    `SessionList`, zones-lab.css the `.zl-side-head` / `.zl-search*` / `.zl-list`
-   / `.zl-group*` / `.zl-view*` / `.zl-side-new` / `.zl-side-foot` / `.zl-inbox*`
+   / `.zl-group*` / `.zl-view*` / `.zl-side-add` / `.zl-side-foot` / `.zl-inbox*`
    / `.zl-ver` / `.zl-gear` / `.zl-proj*` block), not translated. The class
    names came with the rules on purpose: a rule that is copied is a rule that
    can drift, and the drift is what this migration exists to end. The catalogue
@@ -428,31 +428,37 @@ button.zl-group.is-proj:focus-visible {
    column was. It is the one action, so it gets the width — and the word. The
    accent is contained: the list is the point of the sidebar, so this reads as
    available, not as a beacon. */
-.zl-side-new {
+/* New: an icon in the head, not a filled bar across the bottom.
+
+   It used to be a full-width accent button anchored at the foot. That spends
+   a whole row of a 272px column, and the strongest colour in the sidebar, on
+   an action the palette also offers -- while the list it sits above is the
+   reason anyone opened the sidebar at all.
+
+   As an icon it keeps the accent (it is still the one thing here that
+   CREATES) but at the weight of its neighbours, and the word survives as the
+   tooltip and the accessible name. */
+.zl-side-add {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 40px;
-  margin: 4px 12px 8px;
-  padding: 0 14px;
+  width: 36px;
+  height: 36px;
   border: 0;
   border-radius: var(--zl-r-md);
-  background: var(--zl-accent-dim);
-  box-shadow: 0 0 0 1px var(--zl-accent-med);
-  color: var(--zl-accent);
-  font-family: inherit;
-  font-size: var(--zl-fs-body);
-  font-weight: 600;
-  letter-spacing: inherit;
+  background: transparent;
+  color: var(--zl-t3);
   cursor: pointer;
-  transition: background var(--motion-hover) ease, transform var(--motion-hover) var(--zl-ease);
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
 }
-.zl-side-new:hover { background: var(--zl-accent-med); }
-.zl-side-new:active { transform: translateY(1px); }
-.zl-side-new svg { width: 16px; height: 16px; }
-.zl-side-new:focus-visible {
+.zl-side-add svg { width: 18px; height: 18px; }
+/* A hair of air before the order control: "+" DOES something to the list and
+   the pair beside it only rearranges it. Touching implies one group. */
+.zl-side-add { margin-right: 2px; }
+.zl-side-add:hover { background: var(--zl-accent-dim); color: var(--zl-accent); }
+.zl-side-add:active { background: var(--zl-accent-med); }
+.zl-side-add:focus-visible {
   outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
   outline-offset: var(--focus-ring-offset, 2px);
 }
@@ -548,7 +554,7 @@ a.zl-ver.is-update:focus-visible {
 }
 
 /* ── Phone sizing: every control that gets a thumb is at least 44px. ──── */
-.zl-side-body.is-phone .zl-side-new { height: 48px; margin: 4px 12px 10px; }
+.zl-side-body.is-phone .zl-side-add { width: 44px; height: 44px; }
 .zl-side-body.is-phone .zl-inbox { height: 44px; }
 /* On the phone the door is an ICON, not a wide recessed box. At desktop width
    the box reads as a door because the ⌘K keycap sits in it; the phone has no
