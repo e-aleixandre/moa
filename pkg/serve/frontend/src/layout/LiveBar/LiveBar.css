@@ -123,12 +123,17 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
+  /* The highlight is a narrow band, and its width is not what these stops say:
+     they are read against a background 4x the element, so a 40%-60% band -- the
+     shape this had -- lit 80% of the text at once and read as the whole phrase
+     pulsing rather than a sweep crossing it. 47%-53% of 400% is ~24% of the
+     text: short enough to travel through it. */
   background-image: linear-gradient(
     90deg,
     transparent 0%,
-    transparent 40%,
+    transparent 47%,
     var(--zl-t1) 50%,
-    transparent 60%,
+    transparent 53%,
     transparent 100%
   );
   background-size: 400% 100%;
