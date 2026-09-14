@@ -66,25 +66,84 @@
   color: var(--zl-t3);
   font-weight: 500;
 }
-/* The phrase swaps rather than cuts. It rises a little and resolves through a
-   short blur -- the words look like they are coming into focus, which is what
-   a status that has just changed is doing.
+/* The sentence shimmers while it holds and crosses when it changes. Both are
+   in LiveSentence.jsx, which owns the two copies this styles.
 
-   Only the FOREGROUND sentence gets this. The background one is keyed by agent
-   and already moves when the agent changes; animating both would make a bar
-   that is never still. */
-.zl-live-txt.is-swap {
-  animation: zl-live-swap var(--motion-fast) var(--motion-ease);
+   The first version animated only the ARRIVING text, and the owner reported
+   seeing no animation at all -- correctly. The outgoing words were removed on
+   the same frame, so there was nothing leaving; a fade-in over an empty gap
+   is not a transition, it is an appearance. Both halves move now. */
+.live-sentence {
+  position: relative;
+  display: inline-block;
+  min-width: 0;
 }
-@keyframes zl-live-swap {
-  from {
-    opacity: 0;
-    transform: translateY(var(--motion-rise));
-    filter: blur(3px);
-  }
+.live-sentence-line {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    filter var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease);
 }
+/* The leaving copy floats over the arriving one so the bar keeps its height
+   while the two cross. */
+.live-sentence-line.is-exit {
+  position: absolute;
+  inset: 0;
+  transform: translateY(calc(var(--motion-rise) * -1));
+  filter: blur(2px);
+  opacity: 0;
+  pointer-events: none;
+}
+/* One frame with no transition, so the incoming line starts from below
+   instead of sliding out of wherever the last one ended. */
+.live-sentence-line.is-enter {
+  transition: none;
+  transform: translateY(var(--motion-rise));
+  filter: blur(2px);
+  opacity: 0;
+}
+
+/* The shimmer sweeps the GLYPHS, not a box: a second copy of the same text
+   clipped to a moving highlight. It says "still running" the way the elapsed
+   counter says it in numbers, and it is only mounted while something actually
+   runs -- a shimmer on "Waiting for you" would be claiming work that is not
+   happening. */
+.live-sentence-line.is-shimmer::before {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 40%,
+    var(--zl-t1) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-size: 400% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  /* The product already had a shimmer tempo; a status line is a slow one, so
+     it runs at twice that rather than introducing a second number. */
+  animation: zl-live-shimmer calc(var(--shimmer) * 2) linear infinite;
+}
+@keyframes zl-live-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .zl-live-txt.is-swap { animation: none; }
+  .live-sentence-line { transition: none; }
+  .live-sentence-line.is-shimmer::before { display: none; }
 }
 
 .zl-live-txt {
