@@ -1060,7 +1060,7 @@ export function CommandPalette({
             value={query}
             onInput={(e) => onInput(e.target.value)}
           />
-          <kbd class="kbd">esc</kbd>
+          <kbd class="pal-esc">esc</kbd>
         </div>
 
         <div class="pal-list" id="pal-listbox" role="listbox" aria-label="Results" ref={listRef}>

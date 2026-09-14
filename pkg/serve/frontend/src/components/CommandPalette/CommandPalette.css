@@ -22,9 +22,13 @@
   position: fixed;
   inset: 0;
   z-index: var(--z-overlay);
-  background: rgba(8, 8, 16, 0.58);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  /* The page behind goes out of focus, not just dark: 4px left every line
+     legible and the transcript kept competing with the list. 14px is where
+     the words dissolve into shapes and only the dialog is sharp. Lighter
+     dim than before because the blur now does the separating. */
+  background: rgba(8, 8, 16, 0.5);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -105,6 +109,22 @@
   min-width: 0;
 }
 .pal-input::placeholder { color: var(--zl-t4); }
+/* The way out, drawn as the key inside the field: a small cap at the right
+   edge, so the palette explains how to close without a help line. */
+.palette .pal-esc {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: var(--zl-r-sm);
+  box-shadow: var(--zl-rim-2);
+  background: var(--zl-hi);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--zl-t4);
+}
 
 /* Keycaps inside the palette: a quiet well, not a bordered box. ambient.css
    restyles `.kbd` globally to the same picture; this is the rule that survives
