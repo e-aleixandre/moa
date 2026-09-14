@@ -39,6 +39,13 @@
 
 @media (prefers-reduced-motion: reduce) {
   .action-menu-trigger svg { transition: none; }
+  /* The morph animates width and height, so switching it off cannot just be
+     `animation: none` on the way out: the panel would keep the 44px box the
+     keyframes start from and clip its own rows. It opens and closes at full
+     size here, instantly. */
+  .action-menu-list,
+  .action-menu-list.is-leaving { animation: none; overflow: visible; }
+  .action-menu-item { animation: none; }
 }
 
 .action-menu-trigger:focus-visible {
@@ -72,25 +79,60 @@
      It opens from 0.82 now, and unfolds: scaleY leads scaleX, so the surface
      grows tall before it grows wide, the way something unfolding does. The
      overshoot lands it. */
-  animation: action-menu-in var(--motion-base) var(--motion-ease-spring);
+  /* MORPH: the surface comes OUT of the button rather than appearing beside
+     it. The panel starts at the trigger's own size (44px, composer.css:143)
+     with the trigger's round radius, and grows to its real size and a panel
+     radius -- so the eye follows one object changing shape instead of two
+     objects trading places.
+
+     Width and height animate, which is layout work, and the rule says justify
+     it: this is one small surface, opened by a deliberate tap, never during
+     streaming and never in a list. The alternative -- a scale() -- stretches
+     the rows and the radius with it, which is the artificial look the owner
+     kept objecting to.
+
+     `overflow: hidden` is what makes it a morph rather than a reveal: the
+     contents are clipped by the growing box, so they appear to be inside
+     something opening. */
+  overflow: hidden;
+  animation: action-menu-morph-in var(--motion-base) var(--motion-ease-spring);
   transform-origin: top left;
-  will-change: transform, opacity;
+  will-change: width, height, border-radius;
 }
-@keyframes action-menu-in {
-  0%   { opacity: 0; transform: scale(0.82) translateY(-10px); }
-  55%  { opacity: 1; }
-  100% { opacity: 1; transform: scale(1) translateY(0); }
+@keyframes action-menu-morph-in {
+  0% {
+    width: 44px;
+    height: 44px;
+    border-radius: 22px;
+    opacity: 0.6;
+  }
+  100% {
+    width: var(--action-menu-w);
+    height: var(--action-menu-h);
+    border-radius: var(--zl-r-lg);
+    opacity: 1;
+  }
 }
 
-/* Leaving (rule 2): the same shape played back, faster and accelerating, on
-   the exit curve. The host keeps the node mounted for --motion-exit-fast
-   (hooks/usePresence.js) so this can be seen at all. */
+/* Leaving: back into the button. Faster and on the exit curve -- a thing
+   being put away does not need the spring that brought it out. */
 .action-menu-list.is-leaving {
-  animation: action-menu-out var(--motion-exit-fast) var(--motion-ease-exit) forwards;
+  animation: action-menu-morph-out var(--motion-exit-base) var(--motion-ease-exit) forwards;
   pointer-events: none;
 }
-@keyframes action-menu-out {
-  to { opacity: 0; transform: scale(0.9) translateY(-6px); }
+@keyframes action-menu-morph-out {
+  from {
+    width: var(--action-menu-w);
+    height: var(--action-menu-h);
+    border-radius: var(--zl-r-lg);
+    opacity: 1;
+  }
+  to {
+    width: 44px;
+    height: 44px;
+    border-radius: 22px;
+    opacity: 0;
+  }
 }
 
 /* The rows cascade. They used to be staggered 30ms apart inside a 180ms
@@ -122,17 +164,6 @@
   top: auto;
   bottom: calc(100% + 8px);
   transform-origin: bottom left;
-  animation-name: action-menu-in-up;
-}
-.action-menu-list--up.is-leaving { animation-name: action-menu-out-up; }
-
-@keyframes action-menu-in-up {
-  0%   { opacity: 0; transform: scale(0.82) translateY(10px); }
-  55%  { opacity: 1; }
-  100% { opacity: 1; transform: scale(1) translateY(0); }
-}
-@keyframes action-menu-out-up {
-  to { opacity: 0; transform: scale(0.9) translateY(6px); }
 }
 
 .action-menu-item {

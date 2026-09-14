@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { MOTION } from "../../hooks/motion.js";
 import { usePresence } from "../../hooks/usePresence.js";
 import "./ActionMenu.css";
 
@@ -25,9 +26,13 @@ export function ActionMenu({
   disabled = false,
 }) {
   const rootRef = useRef(null);
+  const listRef = useRef(null);
   // The list stays mounted through its exit so it can leave the way it came
   // (motion language, rule 2) instead of vanishing on the frame `open` drops.
-  const { mounted, leaving } = usePresence(open);
+  // exitBase, not the default exitFast: the morph collapses the panel back
+  // into the button over --motion-exit-base, and a host that unmounts at
+  // 140ms cuts it off half-closed. One number, in both places.
+  const { mounted, leaving } = usePresence(open, MOTION.exitBase);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -52,6 +57,27 @@ export function ActionMenu({
 
   // The trigger and its items never take focus from the textarea: on the phone
   // that would dismiss the keyboard and reflow the whole screen under the menu.
+  // The morph grows the panel from the trigger's size to its own, and CSS
+  // cannot animate to `auto`. So the size is measured once, on the frame it
+  // mounts, and handed to the animation as two custom properties.
+  //
+  // useLayoutEffect, not useEffect: this has to land before the browser
+  // paints, or the first frame is the panel at full size and the morph plays
+  // from a shape the eye already saw.
+  useLayoutEffect(() => {
+    const node = listRef.current;
+    if (!node || !mounted || leaving) return;
+    // Measure with the animation suppressed. The first attempt read the node
+    // while the morph was already running and got 44px back -- the height of
+    // its own opening frame -- so the panel grew to the size of the button and
+    // then snapped to full height when the animation ended.
+    node.style.animation = "none";
+    const { width, height } = node.getBoundingClientRect();
+    node.style.setProperty("--action-menu-w", `${Math.round(width)}px`);
+    node.style.setProperty("--action-menu-h", `${Math.round(height)}px`);
+    node.style.animation = "";
+  }, [mounted, leaving, actions]);
+
   const keepFocus = (event) => event.preventDefault();
 
   return (
@@ -71,6 +97,7 @@ export function ActionMenu({
       </button>
       {mounted && (
         <div
+          ref={listRef}
           class={`action-menu-list${placement === "up" ? " action-menu-list--up" : ""}${leaving ? " is-leaving" : ""}`}
           role="menu"
           aria-label={label}
