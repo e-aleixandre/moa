@@ -187,7 +187,6 @@ export function Sidebar({
   const showJump = jump ?? !phone;
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const [showAllSaved, setShowAllSaved] = useState(false);
-  const [viewTouched, setViewTouched] = useState(false);
   const hasMenu = !!(onCloseSession || onReopenSession || onDeleteSession);
 
   // Nothing filters this list any more -- the palette is where you look for a
@@ -301,14 +300,7 @@ export function Sidebar({
               its own -- the sidebar is narrow and every row of it is worth
               more than a switch touched once a month. The labels survive as
               the tooltip and the accessible name. */}
-          {/* is-touched gates the travel animation: without it the pill would
-              play its move on first paint, animating to a state the user never
-              chose. The switch is only alive once it has been used. */}
-          <div
-            class={`zl-view${groupByProject ? " is-project" : ""}${viewTouched ? " is-touched" : ""}`}
-            role="radiogroup"
-            aria-label="Session order"
-          >
+          <div class={`zl-view${groupByProject ? " is-project" : ""}`} role="radiogroup" aria-label="Session order">
             {ORDERS.map(([id, label, hint]) => {
               const on = (id === "project") === !!groupByProject;
               return (
@@ -319,7 +311,7 @@ export function Sidebar({
                   aria-label={hint}
                   title={label}
                   class={`zl-view-b${on ? " is-on" : ""}`}
-                  onClick={() => { setViewTouched(true); onGroupByProject?.(id === "project"); }}
+                  onClick={() => onGroupByProject?.(id === "project")}
                   key={id}
                 >
                   {id === "project" ? <ByProjectIcon /> : <ByRecentIcon />}
