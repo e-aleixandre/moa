@@ -55,7 +55,7 @@
   border-radius: var(--zl-r-lg);
   background: var(--zl-raised);
   box-shadow: var(--zl-rim-2);
-  transition: box-shadow 160ms ease;
+  transition: box-shadow var(--motion-exit-base) var(--motion-ease);
 }
 .zl-composer:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line); }
 
@@ -91,7 +91,7 @@
   border-radius: var(--zl-r-md);
   font-family: inherit;
   cursor: pointer;
-  transition: background 140ms ease, color 140ms ease, transform 140ms var(--zl-ease);
+  transition: background var(--motion-exit-fast) var(--motion-ease), color var(--motion-exit-fast) var(--motion-ease), transform var(--motion-exit-fast) var(--motion-ease);
 }
 .zl-attach svg,
 .zl-send svg { width: 18px; height: 18px; }
@@ -221,7 +221,7 @@
   border: 1px solid color-mix(in srgb, var(--zl-red) 40%, transparent);
   color: var(--zl-red);
   cursor: pointer;
-  transition: background 140ms ease;
+  transition: background var(--motion-exit-fast) var(--motion-ease);
 }
 @media (hover: hover) {
   .zl-composer .composer-stop-ghost:hover {

@@ -55,7 +55,7 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
   flex: none;
   margin-left: 2px;
   color: var(--zl-t4);
-  transition: transform 160ms var(--zl-ease), color 140ms ease;
+  transition: transform var(--motion-exit-base) var(--motion-ease), color var(--motion-exit-fast) var(--motion-ease);
 }
 .zl-lg-chev.is-open { transform: rotate(90deg); }
 .zl-lg-head-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -189,9 +189,9 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
   opacity: 0;
   box-shadow: none;
   animation: none;
-  transition: max-height 180ms var(--zl-ease),
-    opacity 180ms var(--zl-ease),
-    padding 180ms var(--zl-ease);
+  transition: max-height var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease),
+    padding var(--motion-fast) var(--motion-ease);
   pointer-events: none;
   overflow: hidden;
 }

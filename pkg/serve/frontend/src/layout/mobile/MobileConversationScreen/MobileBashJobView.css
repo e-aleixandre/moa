@@ -15,11 +15,11 @@
   display: flex;
   flex-direction: column;
   background: var(--base);
-  animation: mbj-push-in 250ms ease-out;
+  animation: mbj-push-in var(--motion-fast) var(--motion-ease);
 }
 
 @keyframes mbj-push-in {
-  from { transform: translateX(16px); opacity: 0; }
+  from { transform: translateX(var(--motion-push)); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
 

@@ -10,13 +10,13 @@
   flex-direction: column;
   min-height: 0;
   background: var(--zl-sheet);
-  animation: minbox-push-in 250ms ease-out;
+  animation: minbox-push-in var(--motion-fast) var(--motion-ease);
 }
 
 .minbox .zi-inbox { flex: 1; min-height: 0; }
 
 @keyframes minbox-push-in {
-  from { transform: translateX(16px); opacity: 0; }
+  from { transform: translateX(var(--motion-push)); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
 

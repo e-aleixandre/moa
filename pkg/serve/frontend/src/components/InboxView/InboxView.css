@@ -99,7 +99,7 @@
   scrollbar-width: thin;
   scrollbar-color: var(--zl-line-2) transparent;
 }
-.zi-body.is-sub { animation: zi-push 200ms var(--zl-ease); }
+.zi-body.is-sub { animation: zi-push var(--motion-fast) var(--motion-ease); }
 @keyframes zi-push { from { opacity: 0; transform: translateX(12px); } }
 .zi-list { padding: 0 8px 16px; }
 .zi-group {
@@ -366,7 +366,7 @@
 .zi-seg-opt.is-on { background: var(--zl-control); color: var(--zl-t1); box-shadow: var(--zl-rim); }
 
 /* ── Phone sheet ─────────────────────────────────────────────────────── */
-.zi-scrim { position: absolute; inset: 0; z-index: 5; background: rgba(8, 8, 16, 0.55); animation: zi-fade 200ms ease; }
+.zi-scrim { position: absolute; inset: 0; z-index: 5; background: rgba(8, 8, 16, 0.55); animation: zi-fade var(--motion-fast) var(--motion-ease); }
 @keyframes zi-fade { from { opacity: 0; } }
 .zi-sheet {
   position: absolute;
@@ -381,7 +381,7 @@
   border-radius: var(--zl-r-lg) var(--zl-r-lg) 0 0;
   background: var(--zl-sheet);
   box-shadow: inset 0 1px 0 var(--zl-line-2), 0 -16px 48px rgba(0, 0, 0, 0.45);
-  animation: zi-rise 260ms var(--zl-ease);
+  animation: zi-rise var(--motion-base) var(--motion-ease);
 }
 @keyframes zi-rise { from { transform: translateY(100%); } }
 .zi-grab { display: block; width: 36px; height: 4px; margin: 0 auto; border-radius: 2px; background: var(--zl-line-2); }

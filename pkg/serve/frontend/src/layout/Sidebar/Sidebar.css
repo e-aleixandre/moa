@@ -91,7 +91,7 @@
   background: var(--zl-canvas);
   box-shadow: var(--zl-rim);
   color: var(--zl-t4);
-  transition: box-shadow 140ms ease, color 140ms ease;
+  transition: box-shadow var(--motion-exit-fast) var(--motion-ease), color var(--motion-exit-fast) var(--motion-ease);
 }
 .zl-search:hover { color: var(--zl-t3); box-shadow: var(--zl-rim-2); }
 .zl-search:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line); color: var(--zl-t2); }
@@ -111,7 +111,7 @@
   min-width: 0;
   font-size: var(--zl-fs-body);
   color: var(--zl-t4);
-  transition: color 140ms ease;
+  transition: color var(--motion-exit-fast) var(--motion-ease);
 }
 .zl-search.is-door:hover .zl-search-txt { color: var(--zl-t3); }
 .zl-search.is-door:focus-visible {
@@ -313,7 +313,7 @@ button.zl-group.is-proj { cursor: pointer; }
   height: 14px;
   color: var(--zl-t3);
   transform: rotate(0deg);
-  transition: transform 150ms var(--zl-ease);
+  transition: transform var(--motion-exit-base) var(--motion-ease);
 }
 .zl-proj.is-open .zl-proj-chev { transform: rotate(90deg); }
 button.zl-group.is-proj:focus-visible {
@@ -395,7 +395,7 @@ button.zl-group.is-proj:focus-visible {
 .zl-side-body:not(.is-phone) .session-card-menu {
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--duration, 150ms) var(--ease, cubic-bezier(0.4, 0, 0.2, 1));
+  transition: opacity var(--motion-exit-base) var(--motion-ease);
 }
 .zl-side-body:not(.is-phone) .zl-session.is-menu:focus-within .session-card-menu {
   opacity: 1;

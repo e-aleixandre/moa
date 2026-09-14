@@ -24,11 +24,11 @@
   /* The same --base the parent conversation sits on: a branch is the same
      surface one level in, not a different one. */
   background: var(--base);
-  animation: msa-push-in 250ms ease-out;
+  animation: msa-push-in var(--motion-fast) var(--motion-ease);
 }
 
 @keyframes msa-push-in {
-  from { transform: translateX(16px); opacity: 0; }
+  from { transform: translateX(var(--motion-push)); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
 
