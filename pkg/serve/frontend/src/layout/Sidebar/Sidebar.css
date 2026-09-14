@@ -79,14 +79,17 @@
 }
 
 /* Search is a recess in the sheet: canvas tone, hairline rim. */
+/* A 36px square, the same seat the "+" takes: the head is 272px and already
+   spends it on a wordmark, a new-session button and a two-way view switch.
+   A door that stretches (flex:1) only steals from them and still cannot fit
+   its own label -- see the measurement in Sidebar.jsx. */
 .zl-search {
-  flex: 1;
-  min-width: 0;
-  display: flex;
+  flex: none;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  width: 36px;
   height: 36px;
-  padding: 0 8px 0 10px;
   border-radius: var(--zl-r-md);
   background: var(--zl-canvas);
   box-shadow: var(--zl-rim);
@@ -106,43 +109,20 @@
   cursor: pointer;
 }
 .zl-search.is-inert { cursor: default; }
-.zl-search-txt {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--zl-fs-body);
-  color: var(--zl-t4);
-  transition: color var(--motion-exit-fast) var(--motion-ease);
-}
-.zl-search.is-door:hover .zl-search-txt { color: var(--zl-t3); }
+.zl-search.is-door:hover { color: var(--zl-t2); }
 .zl-search.is-door:focus-visible {
   outline: 2px solid var(--zl-accent);
   outline-offset: -2px;
 }
+/* Still worn by Pane's tile number. The button variant went with the search
+   door's keycap: the door is an icon now and carries its shortcut in the
+   tooltip, so nothing renders a clickable keycap any more. */
 .zl-kbd {
   padding: 2px 5px;
   border-radius: var(--zl-r-sm);
   background: var(--zl-raised);
   box-shadow: var(--zl-rim);
   color: var(--zl-t3);
-}
-button.zl-kbd {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  border: 0;
-  font-family: var(--mono);
-  font-size: var(--zl-fs-meta);
-  font-weight: 400;
-  letter-spacing: 0;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  appearance: none;
-}
-button.zl-kbd:focus-visible {
-  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
-  outline-offset: var(--focus-ring-offset, 2px);
 }
 
 /* ── 2. List ──────────────────────────────────────────────────────────── */
@@ -561,14 +541,12 @@ a.zl-ver.is-update:focus-visible {
    field with the word "Search" in it -- which is exactly the filter input we
    removed, drawn again. It sits beside the order control now: same size, same
    shape, three icons in a row. */
+/* The phone gets the 44px touch floor; the door is already an icon in both
+   densities. */
 .zl-side-body.is-phone .zl-search {
-  flex: none;
   width: 44px;
   height: 44px;
-  justify-content: center;
-  padding: 0;
 }
-.zl-side-body.is-phone .zl-search-txt { display: none; }
 /* With the door narrowed, nothing in the phone head grows any more, so the
    title would sit against three controls with a gap after them. The title
    takes the slack instead and the controls stay together on the right. */

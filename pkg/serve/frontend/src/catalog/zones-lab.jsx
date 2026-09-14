@@ -134,7 +134,6 @@ function Sidebar({ onPick, desktop, density, onSettings, view, onView }) {
   return (
     <ProductionSidebar
       density={density || (desktop ? "desktop" : "phone")}
-      jump={!!desktop}
       onSearch={() => {}}
       version={{ current: "v0.37.2" }}
       active={SIDEBAR_ACTIVE}

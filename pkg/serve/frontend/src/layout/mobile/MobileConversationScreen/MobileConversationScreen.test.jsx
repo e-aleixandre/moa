@@ -318,9 +318,12 @@ test('the head opens the palette, and only a keyboard gets a keycap', () => {
   expect(door(desktop).type).toBe('button');
   expect(door(phone)).toBeTruthy();
 
+  // And it carries no keycap in either density. It used to wear ⌘K on
+  // desktop, but the head is 272px: the box was handed 73px while wanting
+  // 119, so the cap overlapped its own label and the head read "S⌘Kch".
+  // The door is a 36px icon now and the shortcut lives in its tooltip.
   const jump = (tree) => find(tree, (n) => n.props?.class === 'zl-kbd zl-data');
-  expect(jump(desktop)).toBeTruthy();
-  expect(jump(desktop).type).toBe('button');
+  expect(jump(desktop)).toBeNull();
   expect(jump(phone)).toBeNull();
 });
 

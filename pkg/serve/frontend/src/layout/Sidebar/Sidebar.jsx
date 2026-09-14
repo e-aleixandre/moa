@@ -178,13 +178,8 @@ export function Sidebar({
   onNewSessionForEvent,
   onDismissEvent,
   onDismissEventSource,
-  // Catalogue scenes at 300px are the drawer WIDTH with pointer sizing; the
-  // phone's 44px floor is a density, not a width. `jump` defaults to "there
-  // is a keyboard" (!phone) so production does not have to pass it.
-  jump,
 }) {
   const phone = density === "phone";
-  const showJump = jump ?? !phone;
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const [showAllSaved, setShowAllSaved] = useState(false);
   const hasMenu = !!(onCloseSession || onReopenSession || onDeleteSession);
@@ -256,22 +251,6 @@ export function Sidebar({
     </div>
   );
 
-  const jumpCap = showJump && (
-    onSearch ? (
-      <button
-        type="button"
-        class="zl-kbd zl-data"
-        onClick={onSearch}
-        aria-label={`Jump to session ${formatShortcut("K", { mod: true })}`}
-        title={`Jump to session ${formatShortcut("K", { mod: true })}`}
-      >
-        ⌘K
-      </button>
-    ) : (
-      <kbd class="zl-kbd zl-data">⌘K</kbd>
-    )
-  );
-
   return (
     <aside class={`zl-side-body${phone ? " is-phone" : ""}`}>
       {!inboxOpen && (
@@ -284,17 +263,26 @@ export function Sidebar({
               runs actions; filtering only ever shortened what was already in
               front of you, and still left you pointing at a row.
 
-              So the head keeps the door and not the field. */}
+              So the head keeps the door and not the field. The door is an icon
+              and not a labelled box, because the label never fitted: measured
+              in the head, a box wanting 10+16+8+45("Search")+8+24(⌘K)+8 = 119px
+              was handed 73, so the keycap sat on top of the word and the head
+              read "S⌘Kch". Dropping the cap still needs 87. The shortcut and
+              the name live in the tooltip and the accessible name, where they
+              cost no width at all. */}
           {onSearch ? (
-            <button type="button" class="zl-search is-door" onClick={onSearch} aria-label={`Search ${formatShortcut("K", { mod: true })}`}>
+            <button
+              type="button"
+              class="zl-search is-door"
+              onClick={onSearch}
+              aria-label={`Search ${formatShortcut("K", { mod: true })}`}
+              title={`Search ${formatShortcut("K", { mod: true })}`}
+            >
               <SearchIcon />
-              <span class="zl-search-txt">Search</span>
-              {jumpCap}
             </button>
           ) : (
-            <span class="zl-search is-door is-inert">
+            <span class="zl-search is-door is-inert" title="Search">
               <SearchIcon />
-              <span class="zl-search-txt">Search</span>
             </span>
           )}
           {/* Two icons at the end of the head, not a band across the list.

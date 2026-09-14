@@ -23,10 +23,18 @@ test("the head holds a door to the palette, not a filter of its own", () => {
   expect(source).not.toContain('aria-label="Search sessions"');
 });
 
-test("the phone has no keycap: there is no keyboard", () => {
-  // Invert: if the kbd is drawn without the phone/jump guard, this fails
-  // because the jump is no longer behind `jump ?? !phone`.
-  expect(source).toMatch(/showJump = jump \?\? !phone/);
+test("the search door is an icon, and says so where an icon must", () => {
+  // The door used to be a labelled box with a ⌘K cap inside it. In a 272px
+  // head that box was handed 73px while wanting 119, so the cap overlapped
+  // the word and the head read "S⌘Kch". There is no keycap to guard by
+  // density any more -- the door is a square in both -- so the name and the
+  // shortcut have to live where an icon-only control can carry them.
+  expect(source).toMatch(/class="zl-search is-door"[\s\S]{0,200}aria-label=\{`Search /);
+  expect(source).toMatch(/class="zl-search is-door"[\s\S]{0,200}title=\{`Search /);
+
+  // No label inside the door, and no keycap anywhere in the sidebar.
+  expect(source).not.toContain('zl-search-txt');
+  expect(source).not.toContain('zl-kbd');
 });
 
 test("New session is an action the caller routes, and keeps its name", () => {
