@@ -126,11 +126,18 @@ function projectHue(name) {
   return HUES[h % HUES.length];
 }
 
-function Sidebar({ onPick, desktop, density = "desktop", onSettings, view, onView }) {
+// `density` follows `desktop` rather than defaulting to it: the phone scenes
+// asked for the 300px frame and then drew desktop density inside it, which is
+// how a full-width search box survived on the phone through 33 green scenes.
+// onSearch is passed because the product passes it on both densities now; the
+// door is a door everywhere, and a scene that renders the inert branch is not
+// photographing the product.
+function Sidebar({ onPick, desktop, density, onSettings, view, onView }) {
   return (
     <ProductionSidebar
-      density={density}
+      density={density || (desktop ? "desktop" : "phone")}
       jump={!!desktop}
+      onSearch={() => {}}
       version={{ current: "v0.37.2" }}
       active={SIDEBAR_ACTIVE}
       saved={SIDEBAR_SAVED}

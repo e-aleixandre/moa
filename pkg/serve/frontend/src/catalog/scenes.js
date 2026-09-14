@@ -60,7 +60,12 @@ export const SCENES = [
 
   // ── The list on its own. It is migration step 1 (METODO §4), and on the
   //    phone it only exists behind a swipe, so it gets its own host rather
-  //    than being read out of the desktop column. ────────────────────────────
+  //    than being read out of the desktop column.
+  //    The first two are PHONE density and the third is desktop: the head
+  //    differs between them (icon door vs door with a ⌘K keycap, 44px touch
+  //    targets vs 36px), and for a while these scenes asked for the phone
+  //    frame while drawing desktop density inside it -- so a full-width
+  //    search box survived on the phone through 33 green scenes. ────────────
   { name: "sidebar-recent", host: "sidebar", view: "recent", piece: "session-list" },
   { name: "sidebar-project", host: "sidebar", view: "project", piece: "session-list" },
   { name: "sidebar-desktop", host: "sidebar", view: "recent", desktop: true, piece: "session-list" },
