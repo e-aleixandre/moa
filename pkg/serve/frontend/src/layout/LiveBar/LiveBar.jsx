@@ -204,7 +204,12 @@ export function LiveBar({
         {sentence.kind === "foreground" ? (
           <div class={`zl-live-now${waiting ? " is-waiting" : ""}`} role="status" aria-live="polite">
             <span class={`zl-live-dot is-${sentence.phase || "working"}`} aria-hidden="true" />
-            <span class="zl-live-txt">{sentence.text}</span>
+            {/* Keyed by the phrase itself: Preact replaces the node when the
+                words change, which is what lets CSS play an enter animation on
+                the new one. The status line used to cut from "Thinking" to
+                "Running go test" with no transition at all -- the one place in
+                the product the eye returns to most while it works. */}
+            <span class="zl-live-txt is-swap" key={sentence.text}>{sentence.text}</span>
             {!!sentence.elapsed && <span class="zl-live-el zl-data">{sentence.elapsed}</span>}
           </div>
         ) : (

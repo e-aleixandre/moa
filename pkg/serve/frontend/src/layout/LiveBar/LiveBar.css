@@ -66,6 +66,27 @@
   color: var(--zl-t3);
   font-weight: 500;
 }
+/* The phrase swaps rather than cuts. It rises a little and resolves through a
+   short blur -- the words look like they are coming into focus, which is what
+   a status that has just changed is doing.
+
+   Only the FOREGROUND sentence gets this. The background one is keyed by agent
+   and already moves when the agent changes; animating both would make a bar
+   that is never still. */
+.zl-live-txt.is-swap {
+  animation: zl-live-swap var(--motion-fast) var(--motion-ease);
+}
+@keyframes zl-live-swap {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-rise));
+    filter: blur(3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zl-live-txt.is-swap { animation: none; }
+}
+
 .zl-live-txt {
   min-width: 0;
   overflow: hidden;
