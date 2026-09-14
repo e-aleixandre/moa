@@ -281,13 +281,13 @@
   -webkit-tap-highlight-color: transparent;
   cursor: pointer;
 }
-.zl-send.mic-mode {
+.zl-send.mic-mode:not(.recording) {
   background: var(--zl-control);
   color: var(--zl-t3);
   cursor: pointer;
 }
 @media (hover: hover) {
-  .zl-send.mic-mode:hover {
+  .zl-send.mic-mode:not(.recording):hover {
     background: var(--zl-hi);
     color: var(--zl-t1);
   }
