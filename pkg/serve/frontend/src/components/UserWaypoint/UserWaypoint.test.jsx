@@ -1,5 +1,7 @@
 import { expect, mock, test } from "bun:test";
 
+const css = await Bun.file(new URL("./UserWaypoint.css", import.meta.url)).text();
+
 // These tests call UserWaypoint as a plain function, outside any render, and
 // it uses useState. That worked only because another test file's global
 // mock.module("preact/hooks") leaked into this one -- bun's module mocks are
@@ -79,6 +81,13 @@ function imageNode(node) {
 function renderRow(attachment, sessionId, onOpenImage) {
   return AttachmentRow({ attachment, sessionId, onOpenImage });
 }
+
+test("user message text preserves authored line breaks", () => {
+  // ConversationStream gives each waypoint one raw-text paragraph. Keeping
+  // whitespace here lets that paragraph retain its intentional newlines
+  // without turning each line into a separate paragraph and its margin.
+  expect(css).toMatch(/\.zl-user-body\s*\{[^}]*white-space:\s*pre-wrap\s*;/s);
+});
 
 test("an image attachment with data renders a data URL thumbnail", () => {
   let opened = null;

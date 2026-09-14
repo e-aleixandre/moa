@@ -53,6 +53,16 @@
   margin-inline: auto;
 }
 
+/* A desktop subagent mounts its record in `.sa-body`, outside the conversation
+   host. Its work log is still prose in the same branch, so it keeps the
+   conversation measure; panes and the phone retain their own intentional
+   widths. */
+.subagent-view .zl-transcript { padding: 10px 22px 24px; }
+.subagent-view .zl-transcript:not(.is-dense) > * {
+  max-width: var(--content-block);
+  margin-inline: auto;
+}
+
 /* Grid pane: tighter padding, no measure cap — the pane is the cap. */
 .zl-pane .zl-transcript { padding: 8px 16px 16px; }
 

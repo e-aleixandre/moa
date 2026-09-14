@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
 const view = readFileSync(new URL("./SubagentView.jsx", import.meta.url), "utf8");
+const composerCss = readFileSync(new URL("../Composer/Composer.css", import.meta.url), "utf8");
+const streamCss = readFileSync(new URL("../Stream/Stream.css", import.meta.url), "utf8");
 
 // These assertions read the SOURCE rather than a render, which is a weak kind
 // of test: it cannot see what the screen does, only what the file says. They
@@ -43,4 +45,11 @@ test("finished and cancelled are neutral, never green", () => {
   expect(view).toMatch(/outcome === "cancelled".*tone="neutral"/s);
   expect(view).toMatch(/word="Completed"/);
   expect(view).not.toMatch(/tone="(ok|success|done|green)"/);
+});
+
+test("desktop subagent live content shares the conversation measure", () => {
+  // The branch bypasses ConversationScreen's dock, so this remains explicit:
+  // deleting either rule makes its composer or record stretch across desktop.
+  expect(composerCss).toMatch(/\.subagent-view > \.zl-live,\s*\.subagent-view > \.zl-composer\s*\{[^}]*max-width:\s*var\(--content-block\)[^}]*margin-inline:\s*auto/s);
+  expect(streamCss).toMatch(/\.subagent-view \.zl-transcript:not\(\.is-dense\) > \*\s*\{[^}]*max-width:\s*var\(--content-block\)[^}]*margin-inline:\s*auto/s);
 });

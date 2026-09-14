@@ -54,6 +54,17 @@
   margin-inline: auto;
 }
 
+/* A desktop subagent is a branch of the same conversation, but its live bar
+   and steer field are mounted directly in the view instead of in a dock. Keep
+   them on the shared reading axis without changing the deliberately fluid
+   grid-pane or mobile hosts. */
+.subagent-view > .zl-live,
+.subagent-view > .zl-composer {
+  width: calc(100% - 44px);
+  max-width: var(--content-block);
+  margin-inline: auto;
+}
+
 /* ── The slab ────────────────────────────────────────────────────────────
    The composer is the one raised plane on the canvas. Focus is the accent
    on its rim: the object does not change shape, it is chosen. */

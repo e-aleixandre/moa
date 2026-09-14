@@ -24,7 +24,10 @@
   line-height: 1.6;
   color: var(--zl-t1);
 }
-.zl-user-body { overflow-wrap: anywhere; }
+.zl-user-body {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 .zl-user-body p { margin: 0; }
 .zl-user-body p + p { margin-top: 8px; }
 .zl-user-when {
