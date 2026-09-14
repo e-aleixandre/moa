@@ -34,6 +34,7 @@ import { fmtCost } from "../../data/util/usage-pills.js";
 import { useTouchDrag, registerDropTarget } from "../../hooks/useTouchDrag.js";
 import { addToast } from "../../data/notifications.js";
 import { registerOverlay } from "../../data/overlays.js";
+import { setPopoverOpenFromClick } from "../../data/popover-click.js";
 import { positionModelPopover } from "./model-popover-position.js";
 import "./PaneGrid.css";
 
@@ -449,15 +450,15 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
             spend={fmtCost(session.costUSD)}
             session={session}
             usage={usage}
-            onOpenUsage={() => {
+            onOpenUsage={(event) => {
               setMcpOpen(false);
               setModelOpen(false);
-              setUsageOpen((v) => !v);
+              setPopoverOpenFromClick(setUsageOpen, event);
             }}
-            onOpenMcp={() => {
+            onOpenMcp={(event) => {
               setUsageOpen(false);
               setModelOpen(false);
-              setMcpOpen((v) => !v);
+              setPopoverOpenFromClick(setMcpOpen, event);
             }}
             mcpOpen={mcpOpen}
             onPerm={permMenu.toggle}
@@ -473,10 +474,10 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
               provider: session.provider,
               thinking,
             })}
-            onModel={() => {
+            onModel={(event) => {
               setUsageOpen(false);
               setMcpOpen(false);
-              setModelOpen((v) => !v);
+              setPopoverOpenFromClick(setModelOpen, event);
             }}
             modelOpen={modelOpen}
             modelPopover={modelPopover}

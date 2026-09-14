@@ -4,6 +4,7 @@ import { registerOverlay } from "../../data/overlays.js";
 import { PickerPopover } from "../ModelSelector/ModelSelector.jsx";
 import { positionModelPopover } from "../../layout/PaneGrid/model-popover-position.js";
 import { usePresence } from "../../hooks/usePresence.js";
+import { setPopoverOpenFromClick } from "../../data/popover-click.js";
 import "./PermissionControl.css";
 
 // PermissionControl — the permission mode's MENU. Markup is the catalogue's
@@ -164,6 +165,6 @@ export function usePermissionMenu({ mode = "yolo", disabled = false, onChange } 
     anchorRef,
     menu,
     close: () => setOpen(false),
-    toggle: () => setOpen((v) => !v),
+    toggle: (event) => setPopoverOpenFromClick(setOpen, event),
   };
 }

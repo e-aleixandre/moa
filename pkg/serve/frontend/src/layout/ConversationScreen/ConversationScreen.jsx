@@ -32,6 +32,7 @@ import { addToast } from "../../data/notifications.js";
 import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast } from "../../data/session-actions.js";
 import { toggleSessionPanel, sessionPanelView } from "../../data/session-panel.js";
 import { cacheAlertLabel } from "../../data/cache-usage.js";
+import { setPopoverOpenFromClick } from "../../data/popover-click.js";
 import { positionModelPopover } from "../PaneGrid/model-popover-position.js";
 import "./ConversationScreen.css";
 
@@ -355,7 +356,10 @@ export function ConversationScreen() {
                   session={session}
                   usage={usage}
                   onOpenUsage={() => toggleSessionPanel(session.id, "usage")}
-                  onOpenMcp={() => { setModelOpen(false); setMcpOpen((v) => !v); }}
+                  onOpenMcp={(event) => {
+                    setModelOpen(false);
+                    setPopoverOpenFromClick(setMcpOpen, event);
+                  }}
                   mcpOpen={mcpOpen}
                   onPerm={permMenu.toggle}
                   permOpen={permMenu.open}
@@ -370,7 +374,7 @@ export function ConversationScreen() {
                     provider: session.provider,
                     thinking,
                   })}
-                  onModel={() => setModelOpen((v) => !v)}
+                  onModel={(event) => setPopoverOpenFromClick(setModelOpen, event)}
                   modelOpen={modelOpen}
                   modelPopover={modelPopover}
                   modelAnchorRef={modelAnchorRef}
