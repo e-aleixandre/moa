@@ -247,37 +247,87 @@ button.zl-kbd:focus-visible {
   border-radius: calc(var(--zl-r-md) - 2px);
   background: var(--zl-raised);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
-  transition: transform var(--motion-base) var(--motion-ease-spring);
 }
-/* The travel is driven by an animation rather than a transition so the middle
-   of the move can be shaped: stretched along the axis at the halfway point,
-   back to square on arrival. */
+/* The travel is an animation, and ONLY an animation. It used to be both: a
+   transition on transform AND a keyframe animation on transform, each with a
+   spring curve, fighting over the same property. Measured, the pill sat at
+   15.9px, 16.8px, 16.0px across three consecutive frames -- stalled for 60ms
+   in the middle of a 260ms move, and briefly going backwards. That hitch is
+   what the owner felt, and he was right that it was not performance.
+   One owner, and the curve lives in the VALUES, not in the timing function.
+   That is the second half of the lurch: CSS applies the easing between every
+   pair of keyframes, not across the whole animation, so an ease-out curve
+   brings the pill almost to a stop at each intermediate keyframe. Sparse
+   keyframes plus a strong ease equals a stutter, by construction.
+   So these keyframes are a damped spring sampled every 5% (zeta 0.68,
+   omega 8.6), played LINEAR. Twenty-one steps is dense enough that linear
+   interpolation between them is invisible, and the motion is then exactly
+   the spring and nothing else. The stretch follows velocity -- it peaks
+   where the pill is fastest and is square at both ends -- because that is
+   what stretching is: a thing deforming as it accelerates. */
 .zl-view.is-project::before { transform: translateX(28px); }
-.zl-view.is-touched.is-project::before { animation: zl-view-travel var(--motion-base) var(--motion-ease-spring); }
-.zl-view.is-touched:not(.is-project)::before { animation: zl-view-travel-back var(--motion-base) var(--motion-ease-spring); }
+.zl-view.is-touched.is-project::before { animation: zl-view-travel var(--motion-base) linear; }
+.zl-view.is-touched:not(.is-project)::before { animation: zl-view-travel-back var(--motion-base) linear; }
 
+/* The stretch peaks EARLY (35%), not at the midpoint: things stretch as they
+   accelerate away and are already recovering by the time they arrive. The
+   overshoot is two pixels past the target, which is the whole spring. */
 @keyframes zl-view-travel {
-  0%   { transform: translateX(0) scaleX(1); }
-  45%  { transform: translateX(16px) scaleX(1.18); }
-  100% { transform: translateX(28px) scaleX(1); }
+  0% { transform: translateX(0.00px) scaleX(1.000); }
+  5% { transform: translateX(2.12px) scaleX(1.115); }
+  10% { transform: translateX(6.87px) scaleX(1.165); }
+  15% { transform: translateX(12.43px) scaleX(1.170); }
+  20% { transform: translateX(17.67px) scaleX(1.149); }
+  25% { transform: translateX(22.02px) scaleX(1.117); }
+  30% { transform: translateX(25.26px) scaleX(1.083); }
+  35% { transform: translateX(27.45px) scaleX(1.053); }
+  40% { transform: translateX(28.74px) scaleX(1.029); }
+  45% { transform: translateX(29.36px) scaleX(1.011); }
+  50% { transform: translateX(29.52px) scaleX(1.000); }
+  55% { transform: translateX(29.40px) scaleX(1.000); }
+  60% { transform: translateX(29.14px) scaleX(1.000); }
+  65% { transform: translateX(28.83px) scaleX(1.000); }
+  70% { transform: translateX(28.55px) scaleX(1.000); }
+  75% { transform: translateX(28.32px) scaleX(1.000); }
+  80% { transform: translateX(28.14px) scaleX(1.000); }
+  85% { transform: translateX(28.03px) scaleX(1.000); }
+  90% { transform: translateX(27.96px) scaleX(1.000); }
+  95% { transform: translateX(27.93px) scaleX(1.000); }
+  100% { transform: translateX(28.00px) scaleX(1.000); }
 }
 @keyframes zl-view-travel-back {
-  0%   { transform: translateX(28px) scaleX(1); }
-  45%  { transform: translateX(12px) scaleX(1.18); }
-  100% { transform: translateX(0) scaleX(1); }
+  0% { transform: translateX(28.00px) scaleX(1.000); }
+  5% { transform: translateX(25.88px) scaleX(1.115); }
+  10% { transform: translateX(21.13px) scaleX(1.165); }
+  15% { transform: translateX(15.57px) scaleX(1.170); }
+  20% { transform: translateX(10.33px) scaleX(1.149); }
+  25% { transform: translateX(5.98px) scaleX(1.117); }
+  30% { transform: translateX(2.74px) scaleX(1.083); }
+  35% { transform: translateX(0.55px) scaleX(1.053); }
+  40% { transform: translateX(-0.74px) scaleX(1.029); }
+  45% { transform: translateX(-1.36px) scaleX(1.011); }
+  50% { transform: translateX(-1.52px) scaleX(1.000); }
+  55% { transform: translateX(-1.40px) scaleX(1.000); }
+  60% { transform: translateX(-1.14px) scaleX(1.000); }
+  65% { transform: translateX(-0.83px) scaleX(1.000); }
+  70% { transform: translateX(-0.55px) scaleX(1.000); }
+  75% { transform: translateX(-0.32px) scaleX(1.000); }
+  80% { transform: translateX(-0.14px) scaleX(1.000); }
+  85% { transform: translateX(-0.03px) scaleX(1.000); }
+  90% { transform: translateX(0.04px) scaleX(1.000); }
+  95% { transform: translateX(0.07px) scaleX(1.000); }
+  100% { transform: translateX(0.00px) scaleX(1.000); }
 }
 .zl-view-b.is-on { color: var(--zl-t1); }
-/* The icon that just took the selection lifts under it. Barely -- enough to
-   feel, not enough to notice. */
-.zl-view-b svg { transition: transform var(--motion-base) var(--motion-ease); }
-/* The icon that takes the selection does not merely tint: it dips as the pill
-   arrives under it and comes back up. Cheap, and it is what makes the tap
-   feel answered by the thing you tapped rather than by the background. */
-.zl-view.is-touched .zl-view-b.is-on svg { animation: zl-view-icon var(--motion-base) var(--motion-ease-spring); }
+/* The icon that takes the selection dips as the pill arrives under it and
+   comes back up: the tap is answered by the thing you tapped, not by the
+   background. No transition on transform here either -- same reason as the
+   pill, the animation owns the property alone. */
+.zl-view.is-touched .zl-view-b.is-on svg { animation: zl-view-icon var(--motion-fast) var(--motion-ease); }
 .zl-view-b:active svg { transform: scale(0.9); }
 @keyframes zl-view-icon {
   0%   { transform: scale(1); }
-  40%  { transform: scale(0.86); }
+  40%  { transform: scale(0.88); }
   100% { transform: scale(1); }
 }
 .zl-view-b:focus-visible {
