@@ -9,10 +9,6 @@
    hosts it live in ModelSelector.css (`.zl-pop` / `.zl-sheet`), the same
    hosts the model picker uses.
 
-   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
-   ?view=zones they resolve from `.zl`; everywhere else the fallback IS the
-   catalogue's own value.
-
    What is added below the catalogue's block is only the focus ring and the
    disabled state the prototype never had. */
 
@@ -50,8 +46,8 @@
 .zl-perm.is-yolo .zl-perm-dot, .zl-perm.is-yolo .zl-perm-l { color: var(--zl-maroon); }
 
 .zl-perm:focus-visible {
-  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
-  outline-offset: var(--focus-ring-offset, 2px);
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .mconv .zl-perm { min-height: 56px; }

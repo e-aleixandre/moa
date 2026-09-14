@@ -149,7 +149,7 @@ export function usePermissionMenu({ mode = "yolo", disabled = false, onChange } 
             left: menuPos?.left,
             top: menuPos?.top,
             visibility: menuPos ? undefined : "hidden",
-            zIndex: "var(--z-overlay, 40)",
+            zIndex: "var(--z-overlay)",
           }}
           onClose={() => setOpen(false)}
           leaving={menuPresence.leaving}

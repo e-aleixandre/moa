@@ -7,10 +7,6 @@
    imports the component now, so these are the only tool-ledger rules in the
    product.
 
-   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
-   ?view=zones they resolve from `.zl` (zones-lab.css); everywhere else the
-   fallback IS the catalogue's own value.
-
    What is added below the catalogue's block is only what the prototype never
    had: the live output window, the command panel, the dwell-fold motion, the
    focus ring (the lab gets it from `.zl :is(button…)`), and the phone's 44px
@@ -179,7 +175,7 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
 .zl-lg-row:focus-visible,
 .zl-lg-head:focus-visible,
 .zl-lg-log:focus-visible {
-  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: -2px;
 }
 

@@ -91,7 +91,7 @@ function Thumb({ artifact }) {
   );
 }
 
-// ArtifactRow — ONE row shape shared by the conversation card and the list.
+// ArtifactRow — the row shape used by the drawer list.
 // The title leads: it is the name the agent gave the deliverable for you, so
 // it is what you scan for. The file name is data, in the ledger's mono voice,
 // one step down. The whole row opens the artifact; sharing is a separate

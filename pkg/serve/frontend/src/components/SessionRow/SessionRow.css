@@ -6,12 +6,6 @@
    what this migration exists to end. The catalogue imports the component now,
    so these are the only session-row rules in the product.
 
-   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
-   ?view=zones they resolve from `.zl` (zones-lab.css:22); everywhere else the
-   fallback IS the catalogue's own value, so production gets the accepted
-   colour rather than a near-miss re-derived from another token set. That is
-   the substitution: one set of numbers, in one place.
-
    What is added below the catalogue's block is only what the prototype never
    had: the focus ring, the close button, the origin and pane badges, and the
    tone classes that let the reason line be coloured by what it says. */
@@ -63,8 +57,8 @@
    whose colour is the same mauve. */
 .zl-row:focus-visible,
 .zl-row-x:focus-visible {
-  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
-  outline-offset: var(--focus-ring-offset, 2px);
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .zl-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -168,7 +162,7 @@
 /* pane — which grid pane the session is anchored to (P1/P2…). */
 .zl-row-pane {
   font-family: var(--mono);
-  font-size: var(--text-nano, 9px);
+  font-size: var(--text-nano);
   color: var(--zl-accent);
   flex: none;
   margin-left: auto;
@@ -198,7 +192,7 @@
 }
 .zl-row-origin {
   font-family: var(--mono);
-  font-size: var(--text-nano, 9px);
+  font-size: var(--text-nano);
   color: var(--zl-t3);
   flex: none;
   max-width: 7em;
@@ -228,7 +222,7 @@
   color: var(--zl-t4);
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--duration, 150ms) var(--ease, ease), color var(--duration, 150ms) var(--ease, ease);
+  transition: opacity var(--duration) var(--ease), color var(--duration) var(--ease);
 }
 .zl-row-x:focus-visible { opacity: 1; }
 @media (hover: hover) {

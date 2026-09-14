@@ -7,10 +7,6 @@
    imports the component now, so these are the only transcript-prose rules
    in the product.
 
-   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
-   ?view=zones they resolve from `.zl` (zones-lab.css); everywhere else the
-   fallback IS the catalogue's own value.
-
    What is added below the catalogue's block is only what the prototype never
    had: fenced code, GFM tables, the rest of the heading scale, links,
    quotations, rules, and the live-markdown mask. The burst-span fade (`.zl-new`)
