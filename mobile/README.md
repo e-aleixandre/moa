@@ -47,11 +47,31 @@ of moa does **not** need a new build of the app.
 Requires a Mac with Xcode. From this directory:
 
     npm install
+    npx cap add ios          # first time only, creates ios/
+    npm run assets           # icons and splash -- NOT done by cap sync
     npx cap sync ios
     npx cap open ios
 
 Then select your device in Xcode and press Run. With a paid developer account
 the build lasts a year; with a free one, seven days.
+
+`npm run assets` is its own step on purpose, and skipping it is why the first
+build wore Capacitor's default icon: `cap sync` copies web assets and native
+plugins and does nothing about `resources/`. Run it again after any `cap add
+ios`, which recreates the asset catalogue empty.
+
+`resources/` holds the sources it reads, under the names the generator looks
+for -- it ignores anything else:
+
+    icon-only.png        1024x1024  what iOS shows
+    icon-background.png  1024x1024  Android adaptive, back layer
+    icon-foreground.png  1024x1024  Android adaptive, front layer, inset
+                                    because the system crops a circle out of it
+    splash.png           2732x2732
+    splash-dark.png      2732x2732
+
+`icon.png` is the original artwork the rest are derived from. It is kept
+because it is the source, not because anything reads it.
 
 ## What is not committed
 

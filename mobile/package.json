@@ -5,6 +5,7 @@
   "description": "Native container around the moa frontend. Not part of the moa binary.",
   "scripts": {
     "sync": "cap sync",
+    "assets": "capacitor-assets generate --ios --android",
     "ios": "cap open ios",
     "add:ios": "cap add ios"
   },
@@ -17,6 +18,10 @@
     "@capacitor/status-bar": "^8.0.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.0.0"
+    "@capacitor/cli": "^8.0.0",
+    "@capacitor/assets": "^3.0.5"
+  },
+  "allowScripts": {
+    "sharp@0.32.6": true
   }
 }
