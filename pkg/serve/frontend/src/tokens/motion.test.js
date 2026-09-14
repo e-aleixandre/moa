@@ -50,14 +50,14 @@ test("reduced motion is honoured once, globally", () => {
 // for stable goldens and means it does not watch the motion language at all.
 // Nothing else did either, so this does.
 //
-// It cannot simply ban hard-coded durations: there are still 101 of them in
-// surfaces nobody has migrated yet, and a test that fails 101 times is a test
+// It cannot simply ban hard-coded durations: there are still 79 of them in
+// surfaces nobody has migrated yet, and a test that fails 79 times is a test
 // everyone learns to ignore. So it freezes the count. Migrating a surface
 // lowers the number; inventing a new duration in a new file raises it and
 // this fails. The debt can shrink and cannot grow.
 //
 // When you migrate a file, lower BUDGET. It is meant to reach zero.
-const BUDGET = 101;
+const BUDGET = 79;
 
 function cssFiles(dir, out = []) {
   for (const name of readdirSync(dir)) {

@@ -67,7 +67,7 @@ function ResourceInfoButton({ artifact }) {
       >
         <Info size={16} />
       </button>
-      {open && <HtmlResourceInfo name={artifact.name} url={artifact.url} onClose={() => setOpen(false)} />}
+      <HtmlResourceInfo open={open} name={artifact.name} url={artifact.url} onClose={() => setOpen(false)} />
     </>
   );
 }

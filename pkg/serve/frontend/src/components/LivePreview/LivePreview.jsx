@@ -113,6 +113,9 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const [view, setViewState] = useState(IDENTITY);
   const [notes, setNotes] = useState([]);
   const [reading, setReading] = useState(null);
+  // Keeps the message being read while the sheet plays its exit.
+  const lastReading = useRef(null);
+  if (reading) lastReading.current = reading;
   const iframeRef = useRef(null);
   const inspectorReadyRef = useRef(true);
   const bridgeFallbackRef = useRef(null);
@@ -789,21 +792,21 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
         )}
       </div>
 
-      {reading && (
-        <Sheet open onClose={() => setReading(null)} title="Message" class="lp-msg-sheet">
-          <AssistantDocument html={renderMarkdown(reading)} />
+      {/* Rendered unconditionally so the sheet can animate out; the text it is
+          showing is held for the length of the exit, or it leaves blank. */}
+      <Sheet open={!!reading} onClose={() => setReading(null)} title="Message" class="lp-msg-sheet">
+          <AssistantDocument html={renderMarkdown(reading || lastReading.current || "")} />
           <div class="lp-msg-actions">
             <Button variant="solid" size="sm" onClick={onClose}>
               Go to chat
             </Button>
           </div>
         </Sheet>
-      )}
     </>
   );
   return inline
     ? <section class="live-preview-inline" aria-label="Live preview">{preview}</section>
-    : <Sheet open onClose={onClose} ariaLabel="Live preview" class="live-preview-sheet">{preview}</Sheet>;
+    : <Sheet open={open} onClose={onClose} ariaLabel="Live preview" class="live-preview-sheet">{preview}</Sheet>;
 }
 
 function useTouchPreviewInput() {

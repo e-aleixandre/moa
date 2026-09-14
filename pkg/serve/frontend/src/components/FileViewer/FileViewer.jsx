@@ -14,7 +14,7 @@ import './FileViewer.css';
 // fresh (never trusts the possibly-stale size from send_file) and caps the
 // read at MAX_PREVIEW_SIZE so a large or rewritten-in-place file never blows
 // up memory on mobile.
-export function FileViewer({ name, mime, url, size, onClose }) {
+export function FileViewer({ open = true, name, mime, url, size, onClose }) {
   const [state, setState] = useState({ kind: 'loading' });
   const [downloading, setDownloading] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -89,7 +89,7 @@ export function FileViewer({ name, mime, url, size, onClose }) {
 
   return (
     <Sheet
-      open
+      open={open}
       onClose={onClose}
       title={name}
       ariaLabel={`Preview ${name}`}

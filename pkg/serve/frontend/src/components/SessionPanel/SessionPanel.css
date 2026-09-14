@@ -41,7 +41,11 @@
   transform: translateX(100%);
   border-radius: var(--zl-r-lg) 0 0 var(--zl-r-lg);
   box-shadow: inset 1px 0 0 var(--zl-line-2), -16px 0 48px rgba(0, 0, 0, 0.45);
-  transition: transform 260ms var(--zl-ease);
+  /* The dossier is a large surface, so it takes --motion-base to arrive
+     (rule 3). It has no exit of its own: the panel slides back out on the
+     same transition, which is the one case where one property and one owner
+     already gives both directions. */
+  transition: transform var(--motion-base) var(--motion-ease);
   will-change: transform;
 }
 .zl-side-right.is-open {
@@ -106,7 +110,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  animation: zl-push 200ms var(--zl-ease);
+  animation: zl-push var(--motion-fast) var(--motion-ease);
 }
 
 .zl-side-right .zl-x {
@@ -169,9 +173,11 @@
 }
 .zl-panel-body.is-sub {
   padding: 4px 12px 16px;
-  animation: zl-push 200ms var(--zl-ease);
+  animation: zl-push var(--motion-fast) var(--motion-ease);
 }
-@keyframes zl-push { from { opacity: 0; transform: translateX(12px); } }
+/* A page pushed INSIDE a panel travels --motion-push, not --motion-rise: it
+   is arriving from the side it came from, not surfacing. */
+@keyframes zl-push { from { opacity: 0; transform: translateX(var(--motion-push)); } }
 @media (prefers-reduced-motion: reduce) {
   .zl-panel-body.is-sub,
   .zl-side-right .zl-side-title.is-page { animation: none; }
@@ -199,7 +205,7 @@
   font-family: inherit;
   font-size: var(--zl-fs-title); /* 16: iOS focus-zoom floor */
   letter-spacing: inherit;
-  transition: box-shadow 140ms ease;
+  transition: box-shadow var(--motion-exit-fast) var(--motion-ease);
 }
 .zl-input:focus { box-shadow: 0 0 0 1px var(--zl-accent-line); }
 /* A read-only value is not a recess: it sits flush, in data type. */
@@ -479,7 +485,7 @@
   height: 100%;
   border-radius: 2px;
   background: var(--zl-accent);
-  transition: width 400ms var(--zl-ease);
+  transition: width var(--motion-slow) var(--motion-ease);
 }
 .zl-meter.is-warm .zl-meter-fill { background: var(--zl-yellow); }
 .zl-meter.is-hot .zl-meter-fill { background: var(--zl-red); }
@@ -563,7 +569,7 @@
   border-radius: 10px;
   background: var(--zl-control);
   box-shadow: var(--zl-rim-2);
-  transition: background 160ms ease;
+  transition: background var(--motion-exit-base) var(--motion-ease);
 }
 .zl-switch-knob {
   display: block;
@@ -571,7 +577,7 @@
   height: 16px;
   border-radius: 50%;
   background: var(--zl-t3);
-  transition: transform 160ms var(--zl-ease), background 160ms ease;
+  transition: transform var(--motion-exit-base) var(--motion-ease), background var(--motion-exit-base) var(--motion-ease);
 }
 .zl-switch.is-on .zl-switch-track { background: var(--zl-accent); box-shadow: none; }
 .zl-switch.is-on .zl-switch-knob { background: var(--zl-accent-ink); transform: translateX(16px); }

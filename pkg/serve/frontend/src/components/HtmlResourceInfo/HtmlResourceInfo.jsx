@@ -15,7 +15,7 @@ const labels = { script: 'Scripts', style: 'Styles', font: 'Fonts', image: 'Imag
 // only tells the user what to expect, it never fetches the resources itself.
 // Closing (Escape, backdrop, X) belongs to the Sheet this component renders
 // into (components/Sheet/Sheet.jsx).
-export function HtmlResourceInfo({ name, url, onClose }) {
+export function HtmlResourceInfo({ open = true, name, url, onClose }) {
   const [state, setState] = useState({ kind: 'loading' });
 
   useEffect(() => {
@@ -32,7 +32,7 @@ export function HtmlResourceInfo({ name, url, onClose }) {
   }, [url]);
 
   return (
-    <Sheet open onClose={onClose} title="External resources" ariaLabel={`External resources in ${name}`} class="html-resource-sheet">
+    <Sheet open={open} onClose={onClose} title="External resources" ariaLabel={`External resources in ${name}`} class="html-resource-sheet">
       <p class="html-resource-name" title={name}>{name}</p>
       <p class="html-resource-notice">
         Informational only. Opening the preview loads detected HTTPS resources automatically. The preview

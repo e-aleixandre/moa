@@ -57,12 +57,10 @@ export function FileCard({ file }) {
         busy={busy}
         extra={extra}
       />
-      {previewOpen && (
-        <FileViewer name={name} mime={mime} url={url} size={size} onClose={() => setPreviewOpen(false)} />
-      )}
-      {resourceInfoOpen && (
-        <HtmlResourceInfo name={name} url={url} onClose={() => setResourceInfoOpen(false)} />
-      )}
+      {/* Both rendered unconditionally with `open`: a conditional mount pulls
+          the sheet before it can animate out. */}
+      <FileViewer open={previewOpen} name={name} mime={mime} url={url} size={size} onClose={() => setPreviewOpen(false)} />
+      <HtmlResourceInfo open={resourceInfoOpen} name={name} url={url} onClose={() => setResourceInfoOpen(false)} />
     </>
   );
 }

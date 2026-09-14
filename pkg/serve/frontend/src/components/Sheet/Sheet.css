@@ -7,7 +7,14 @@
   justify-content: center;
   z-index: var(--z-sheet);
   padding: var(--space-6);
+  animation: sheet-veil-in var(--motion-fast) var(--motion-ease);
 }
+.sheet-overlay.is-leaving {
+  animation: sheet-veil-out var(--motion-exit-base) var(--motion-ease-exit) forwards;
+  pointer-events: none;
+}
+@keyframes sheet-veil-in { from { opacity: 0; } }
+@keyframes sheet-veil-out { to { opacity: 0; } }
 
 .sheet {
   width: 100%;
@@ -18,6 +25,26 @@
   border: 1px solid var(--surface1);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
+  /* A modal is a large surface that arrives in the middle of the screen, so
+     it has the room to earn the spring (rule 3) -- unlike a 28px slide, where
+     an overshoot reads as a correction. */
+  animation: sheet-in var(--motion-base) var(--motion-ease-spring);
+}
+.sheet.is-leaving {
+  animation: sheet-out var(--motion-exit-base) var(--motion-ease-exit) forwards;
+}
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(var(--motion-push)) scale(0.97); }
+}
+@keyframes sheet-out {
+  to { opacity: 0; transform: translateY(var(--motion-rise)) scale(0.98); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-overlay,
+  .sheet-overlay.is-leaving,
+  .sheet,
+  .sheet.is-leaving { animation: none; }
 }
 
 .sheet:focus-visible {

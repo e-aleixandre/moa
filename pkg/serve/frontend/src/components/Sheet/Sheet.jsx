@@ -3,6 +3,8 @@ import { createPortal } from "preact/compat";
 import { X } from "lucide-preact";
 import { IconButton } from "../../primitives/index.js";
 import { pushLayer } from "../../data/overlay-layers.js";
+import { usePresence } from "../../hooks/usePresence.js";
+import { MOTION } from "../../hooks/motion.js";
 import "./Sheet.css";
 
 const FOCUSABLE_SELECTOR =
@@ -32,6 +34,10 @@ export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabel
   const popLayerRef = useRef(null);
   const idRef = useRef(null);
   const label = ariaLabel ?? ariaLabelAttr ?? title;
+  // The generic Sheet had no motion at all: rewind, the secrets dialog and the
+  // file lightbox simply appeared and vanished. It is the least frequent of
+  // the overlays and the most jarring when it happens.
+  const presence = usePresence(open, MOTION.exitBase);
   if (idRef.current === null) idRef.current = `sheet-${++sheetIdCounter}`;
 
   // Register/unregister as the top layer whenever `open` toggles. Cleanup
@@ -102,16 +108,16 @@ export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabel
     };
   }, [open]);
 
-  if (!open) return null;
+  if (!presence.mounted) return null;
 
   const onOverlayClick = (e) => {
     if (e.target === e.currentTarget) requestClose();
   };
 
   const overlay = (
-    <div class="sheet-overlay" onClick={onOverlayClick}>
+    <div class={`sheet-overlay${presence.leaving ? " is-leaving" : ""}`} onClick={onOverlayClick}>
       <div
-        class={`sheet${className ? ` ${className}` : ""}`}
+        class={`sheet${className ? ` ${className}` : ""}${presence.leaving ? " is-leaving" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={label}

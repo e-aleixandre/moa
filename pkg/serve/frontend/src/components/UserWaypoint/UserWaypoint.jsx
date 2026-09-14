@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import { Rewind as RewindIcon } from "lucide-preact";
 import { sanitizeHtml } from "../../util/sanitize.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
@@ -17,13 +17,21 @@ import "./UserWaypoint.css";
 // on top: rewind, attachments, the live-preview reference, a parent-session
 // accent, and the confirmation sheet. Ordinary messages show none of that.
 
+// The lightbox keeps the attachment it is closing. Sheet animates its own
+// exit, but it can only do that while it is still rendered: mounting it
+// conditionally on `openAttachment` and passing a hard `open` meant the
+// parent tore the whole thing out on the frame of the close, and the exit
+// never ran. So `open` is the real state here, and the last attachment is
+// held just long enough for the sheet to leave with something to show.
 function ImageLightbox({ attachment, sessionId, onClose }) {
-  const src = attachmentImageSrc(attachment, sessionId);
+  const shown = useRef(attachment);
+  if (attachment) shown.current = attachment;
+  const src = attachmentImageSrc(shown.current, sessionId);
   if (!src) return null;
-  const label = attachmentLabel(attachment, "Image");
+  const label = attachmentLabel(shown.current, "Image");
 
   return (
-    <Sheet open onClose={onClose} title={label} ariaLabel={`Preview ${label}`} class="wp-image-lightbox">
+    <Sheet open={!!attachment} onClose={onClose} title={label} ariaLabel={`Preview ${label}`} class="wp-image-lightbox">
       <div class="wp-image-lightbox-body">
         <img src={src} alt={label} />
       </div>
@@ -41,9 +49,9 @@ function ImageLightbox({ attachment, sessionId, onClose }) {
 // mark can only target YOUR messages, while the timeline also lists assistant
 // turns and shows which points already have branches. On mobile that link is
 // the only way back to it, since the status line no longer carries Rewind.
-function RewindConfirm({ preview, onConfirm, onOpenTimeline, onClose }) {
+function RewindConfirm({ open, preview, onConfirm, onOpenTimeline, onClose }) {
   return (
-    <Sheet open onClose={onClose} title="Rewind here?" ariaLabel="Confirm rewind">
+    <Sheet open={open} onClose={onClose} title="Rewind here?" ariaLabel="Confirm rewind">
       <div class="wp-rewind-confirm">
         <p class="wp-rewind-lead">The conversation goes back to this message:</p>
         <blockquote class="wp-rewind-quote">{preview}</blockquote>
@@ -139,11 +147,11 @@ export function UserWaypoint({
         )}
         <WaypointAttachments attachments={attachments} sessionId={sessionId} onOpenImage={setOpenAttachment} />
       </div>
-      {openAttachment && (
-        <ImageLightbox attachment={openAttachment} sessionId={sessionId} onClose={() => setOpenAttachment(null)} />
-      )}
-      {confirmRewind && (
-        <RewindConfirm
+      <ImageLightbox attachment={openAttachment} sessionId={sessionId} onClose={() => setOpenAttachment(null)} />
+      {/* Rendered unconditionally, `open` carrying the state: see ImageLightbox.
+          A conditional mount removes the sheet before it can leave. */}
+      <RewindConfirm
+          open={confirmRewind}
           preview={rewindPreview}
           onConfirm={() => {
             setConfirmRewind(false);
@@ -152,7 +160,6 @@ export function UserWaypoint({
           onOpenTimeline={onOpenTimeline}
           onClose={() => setConfirmRewind(false)}
         />
-      )}
     </>
   );
 }
