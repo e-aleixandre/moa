@@ -12,8 +12,8 @@
 
    What is added below the catalogue's block is only what the prototype never
    had: the frame that anchors "new messages", the iOS safe-area on the phone,
-   the desktop and pane hosts, and stick-to-bottom. The catalogue's 68ch
-   measure travelled with the rules — the text is narrow, the sheet is not. */
+   the desktop and pane hosts, and stick-to-bottom. The desktop column is
+   --content-block, centred — the text is narrow, the sheet is not. */
 
 .zl-transcript-frame {
   position: relative;
@@ -36,11 +36,22 @@
 .zl-transcript.is-dense { padding: 12px 16px 16px; }
 
 /* Desktop conversation column: the catalogue's `.zl-desk .zl-transcript`.
-   The column is wide; the text is not. 68ch of 16px Outfit is ~640px. */
+   The sheet is the whole zone; the column inside it is --content-block,
+   CENTRED, and the dock takes the same width (Composer.css) so the input
+   ends where the words end.
+
+   This was `max-width: 68ch` with no margin, which went wrong twice. `ch`
+   resolved against the transcript's 14px rather than the prose's 16px, so the
+   column came out 612px; and with no margin-inline it sat against the left
+   edge with everything the window had to spare piled on the right -- 1036px
+   of it at 1920 -- under a composer that ran the full width. */
 .zl-desk .zl-transcript,
 .conversation-main .zl-transcript { padding: 10px 22px 24px; }
 .zl-desk .zl-transcript:not(.is-dense) > *,
-.conversation-main .zl-transcript:not(.is-dense) > * { max-width: 68ch; }
+.conversation-main .zl-transcript:not(.is-dense) > * {
+  max-width: var(--content-block);
+  margin-inline: auto;
+}
 
 /* Grid pane: tighter padding, no measure cap — the pane is the cap. */
 .zl-pane .zl-transcript { padding: 8px 16px 16px; }

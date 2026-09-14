@@ -70,19 +70,27 @@
   gap: var(--space-3);
 }
 
-/* conversation-blocking — fixed strip between the Stream and the AgentTray/
-   Composer for untrusted MCP banners and pending permissions. */
+/* conversation-blocking — fixed strip between the Stream and the dock for
+   untrusted MCP banners and pending permissions. Its cards take the
+   conversation column, so a permission card lines up with the composer it
+   is blocking. */
 .conversation-main .conversation-blocking {
   flex: none;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-8) 0;
+  padding: var(--space-3) 22px 0;
+}
+.conversation-main .conversation-blocking > * {
+  width: 100%;
+  max-width: var(--content-block);
+  margin-inline: auto;
 }
 
-/* status-strip-anchor — positions the Usage panel popover relative to the
-   StatusStrip. The strip centers its content in a 844px column with auto
-   margins; the anchor is a relative wrapper so the popover opens above the cost. */
+/* status-strip-anchor — the relative wrapper the status-line popovers open
+   from. It is a dock child, so it IS the conversation column: the popover's
+   edges are the column's edges, with no arithmetic about where the column
+   sits in the zone. */
 .conversation-main .status-strip-anchor {
   position: relative;
   flex: none;
@@ -90,7 +98,7 @@
 
 .conversation-main .status-strip-usage-popover {
   position: absolute;
-  left: max(var(--space-4), calc(50% - 422px + var(--space-2)));
+  left: var(--space-2);
   right: auto;
   bottom: calc(100% - var(--space-2));
   z-index: var(--z-overlay);
@@ -102,7 +110,7 @@
 }
 .conversation-main .status-strip-mcp-popover {
   left: auto;
-  right: max(var(--space-4), calc(50% - 422px + var(--space-2)));
+  right: var(--space-2);
 }
 
 /* A short desktop conversation column clips its descendants. The model

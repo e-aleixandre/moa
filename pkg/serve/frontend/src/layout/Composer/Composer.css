@@ -35,11 +35,23 @@
   background: linear-gradient(to bottom, transparent, rgba(16, 16, 24, 0.8) 32%);
 }
 
-/* Desktop conversation column: the catalogue's `.zl-desk .zl-dock`. */
+/* Desktop conversation column: the catalogue's `.zl-desk .zl-dock`. The dock
+   is the full-width band with the fade; what stands on it -- live bar,
+   composer, status line -- takes the transcript's column (Stream.css), so the
+   field you type into is exactly as wide as the words it becomes. */
+.zl-desk .zl-dock { padding: 18px 22px 10px; }
 .conversation-main .zl-dock {
   display: flex;
   flex-direction: column;
   padding: 18px 22px 10px;
+}
+/* `:not(.is-pane)`: the lab's grid frame is `.zl-desk.zl-grid`, and a pane's
+   dock is the pane's width already. */
+.zl-desk .zl-dock:not(.is-pane) > *,
+.conversation-main .zl-dock > * {
+  width: 100%;
+  max-width: var(--content-block);
+  margin-inline: auto;
 }
 
 /* ── The slab ────────────────────────────────────────────────────────────

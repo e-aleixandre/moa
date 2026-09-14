@@ -234,13 +234,10 @@
    defined here. They now live in layout/ChatHead, class names and all, and
    this file no longer has a copy of them: the prototype imports the shipped
    head (zones-lab.jsx) and the rules arrive with it. */
-.zl-desk .zl-transcript { padding: 10px 22px 24px; }
-/* Desktop measure: the column is wide; the text is not. 68ch of 16px Outfit
-   is ~640px, a comfortable long-read line. Ledger and artifact follow the
-   same measure so the turn is one column, not prose narrower than its
-   objects. */
-.zl-desk .zl-transcript:not(.is-dense) > * { max-width: 68ch; }
-.zl-desk .zl-dock { padding: 18px 22px 10px; }
+/* The desk's transcript padding and column measure, and the dock's padding,
+   live in layout/Stream/Stream.css and layout/Composer/Composer.css with the
+   `.zl-desk` selector on them: the copy that used to sit here is the drift
+   this migration exists to end. */
 .zl-desk .zl-side-right { width: 340px; }
 
 /* ── Grid host (not product) ───────────────────────────────────────────────
