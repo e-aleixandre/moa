@@ -75,20 +75,16 @@ test("a brief with no tone renders unclassed", () => {
   expect(textOf(findByClass(tree, "zl-row-brief"))).toBe("Running checks");
 });
 
-// The monogram is the project's identity: the hue travels as a custom property
-// so one class can paint any project without a rule per folder.
-//
-// This file walks the returned vnode tree WITHOUT rendering it, and the row
-// hands the square to a <Monogram> child, so its text and style live one
-// component call away where findByClass cannot reach. The assertion is on what
-// this component is actually responsible for: the data it hands over, and
-// handing over nothing when there is no project to name.
-test("the monogram paints from the hue the caller derived, and is absent without one", () => {
-  const tree = SessionRow({ title: "x", state: "idle", mono: { text: "mo", hue: 210 } });
-  const json = JSON.stringify(tree);
-  expect(json).toContain('"text":"mo"');
-  expect(json).toContain('"hue":210');
-  expect(JSON.stringify(SessionRow({ title: "x", state: "idle" }))).not.toContain('"mono"');
+// A working row's second line is its brief, not its path, so nothing on it
+// said which project the session belongs to. The name rides at the end of that
+// line and reaches the accessible name too, since the path it stands in for
+// was never read out either.
+test("a row with a brief names its project at the end of that line, and in its name", () => {
+  const tree = SessionRow({ title: "x", state: "running", brief: "Running · 4m", briefTone: "neutral", project: "moa" });
+  expect(textOf(findByClass(tree, "zl-row-proj zl-data"))).toBe("moa");
+  expect(findByClass(tree, "zl-row").props["aria-label"]).toBe("x, in moa");
+  // Without a project there is no empty slot at the end of the line.
+  expect(findByClass(SessionRow({ title: "x", state: "running", brief: "Running" }), "zl-row-proj zl-data")).toBeNull();
 });
 
 // State and age share the trailing slot so the dot lands on the same x in every

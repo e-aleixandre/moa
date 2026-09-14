@@ -464,28 +464,16 @@ export function shortPath(cwd, maxLen = 42) {
   return '…' + p.slice(-(maxLen - 1));
 }
 
-/* ── The project monogram ──────────────────────────────────────────────────
-   Every reference in this space puts an icon on each row; a chat client has
-   no icon per conversation, but it does have a folder — and the folder is
-   what you actually navigate by, so it earns the slot.
-
-   Derived entirely from the cwd the row already showed as a path. The hue
-   comes from a stable hash of the project name, so the same repo is the same
-   colour on every screen and across reloads. None of the hues is peach: that
-   one means "you wrote this" and may not be spent on decoration. State is a
-   separate datum and stays in the dot. */
-const MONOGRAM_HUES = [210, 265, 170, 320, 40, 190];
-
-/* Worktree checkouts put the BRANCH in the last segment: ~/dev/moa/main and
-   ~/dev/moa/design-visual are both the "moa" project, and a monogram taken
-   from the last segment would read "ma" and "de" -- two different squares for
-   one project, and neither of them its name. When the last segment looks like
-   a branch checkout of its parent, the parent is the project.
+/* ── The project's name ───────────────────────────────────────────────────
+   Worktree checkouts put the BRANCH in the last segment: ~/dev/moa/main is
+   the "moa" project, and a name taken from the last segment would say
+   "main" -- not the project. When the last segment looks like a branch
+   checkout of its parent, the parent is the project.
    The list is deliberately short and literal: guessing harder would mislabel
    real projects that happen to be called "main". */
 const WORKTREE_SEGMENTS = new Set(['main', 'master', 'trunk', 'default']);
 
-function monogramName(cwd) {
+export function projectName(cwd) {
   const p = projectKey(cwd);
   const segs = p.split('/').filter(Boolean);
   if (!segs.length) return '';
@@ -494,14 +482,6 @@ function monogramName(cwd) {
     return segs[segs.length - 2];
   }
   return last;
-}
-
-export function projectMonogram(cwd) {
-  const name = monogramName(cwd);
-  if (!name) return null;
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return { text: name.slice(0, 2).toLowerCase(), hue: MONOGRAM_HUES[h % MONOGRAM_HUES.length], name };
 }
 
 /** Collapse the server's home prefix to "~". Unlike shortPath this needs the

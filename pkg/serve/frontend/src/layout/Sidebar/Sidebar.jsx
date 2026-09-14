@@ -13,7 +13,7 @@ import {
   projectCollapsed,
   visibleProjectSessions,
 } from "../../data/util/project-sessions.js";
-import { projectMonogram } from "../../data/util/format.js";
+import { projectName } from "../../data/util/format.js";
 import "./Sidebar.css";
 
 // Sidebar — the other sessions. Markup and CSS are the catalogue's
@@ -146,7 +146,7 @@ export function Sidebar({
   density = "desktop",
   version = null,
   // The roster. ONE row shape for both densities (sessions.js / chrome.js both
-  // emit it): id, title, state, when, brief, briefTone, mono, path, cwd.
+  // emit it): id, title, state, when, brief, briefTone, path, cwd.
   active = [],
   saved = [],
   newResults = [],
@@ -226,7 +226,7 @@ export function Sidebar({
   ).join("\n");
   const listRef = useFlip([order, inboxOpen, collapsedProjects, expandedProjects, showAllSaved]);
 
-  const row = (s, hidePath = false) => (
+  const row = (s, underProject = false) => (
     <div class={`zl-session${hasMenu ? " is-menu" : ""}`} key={s.id} data-flip={s.id}>
       <SessionRow
         title={s.title}
@@ -236,8 +236,10 @@ export function Sidebar({
         when={s.when || s.meta}
         brief={s.brief}
         briefTone={s.briefTone}
-        mono={s.mono || projectMonogram(s.cwd)}
         path={s.brief ? undefined : s.path}
+        /* A row with a brief has no path, so it names its project at the end
+           of that line -- unless the heading above already did. */
+        project={s.brief && !underProject ? projectName(s.cwd) || undefined : undefined}
         pane={s.pane}
         origin={s.origin}
         onClick={() => onSelectSession?.(s.id)}
@@ -362,9 +364,11 @@ export function Sidebar({
             const expanded = expandedProjects.has(section.key);
             const shownSessions = visibleProjectSessions(section, expanded, false);
             const hiddenSaved = hiddenProjectSavedCount(section, expanded, false);
-            const mono = projectMonogram(section.key);
             const worst = sectionWorst(section);
-            const name = mono?.name || section.label;
+            // The heading says the project's name, not its last two segments:
+            // "moa" over ~/dev/moa/main, when the path beside it already has
+            // the branch.
+            const name = projectName(section.key) || section.label;
             const label = section.attention === "permission"
               ? `${section.label}, ${section.openCount} open, ${section.attentionCount} needs permission`
               : section.attention === "error"
@@ -373,11 +377,6 @@ export function Sidebar({
             const heading = (
               <>
                 {canToggle && <ChevronIcon />}
-                {mono && (
-                  <span class="zl-mono" style={`--h:${mono.hue}`} aria-hidden="true">
-                    {mono.text}
-                  </span>
-                )}
                 <span>{name}</span>
                 {worst && <Dot state={worst} />}
                 <span class="zl-proj-path zl-data">{section.path}</span>

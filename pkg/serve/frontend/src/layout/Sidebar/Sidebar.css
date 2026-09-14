@@ -281,7 +281,7 @@ button.zl-kbd:focus-visible {
   .zl-view::before { transition: none; }
 }
 
-/* Project heading: the monogram identifies, the path locates, the count sizes.
+/* Project heading: the name identifies, the path locates, the count sizes.
    Same row grammar as a session, one step quieter. */
 .zl-list .zl-group.is-proj {
   display: flex;
@@ -296,7 +296,6 @@ button.zl-kbd:focus-visible {
   cursor: default;
 }
 button.zl-group.is-proj { cursor: pointer; }
-.zl-list .zl-group.is-proj .zl-mono { width: 20px; height: 20px; font-size: 10px; border-radius: 6px; }
 .zl-proj-path {
   flex: 1;
   min-width: 0;

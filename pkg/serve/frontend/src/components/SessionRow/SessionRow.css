@@ -27,7 +27,6 @@
 .zl-row {
   display: flex;
   align-items: center;
-  gap: 12px;
   width: 100%;
   min-height: 52px;
   padding: 7px 12px;
@@ -68,25 +67,6 @@
   outline-offset: var(--focus-ring-offset, 2px);
 }
 
-/* The monogram is the project's identity: hue derived from its name, always
-   the same for the same repo, never overridden by state. */
-.zl-mono {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--zl-r-md);
-  background: hsl(var(--h) 50% 60% / 0.16);
-  box-shadow: 0 0 0 1px hsl(var(--h) 50% 65% / 0.18);
-  color: hsl(var(--h) 65% 78%);
-  font-family: var(--mono);
-  font-size: var(--zl-fs-meta);
-  font-weight: 500;
-  letter-spacing: 0;
-}
-
 .zl-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .zl-row-l1 { display: flex; align-items: baseline; gap: 8px; }
 /* Row titles sit at body size: at 16 they truncated one word earlier in a
@@ -110,7 +90,8 @@
    wobble down the list: the eye follows the column, not the number. */
 .zl-row-when { color: var(--zl-t4); min-width: 3ch; text-align: left; font-variant-numeric: tabular-nums; }
 .zl-row-path,
-.zl-row-brief {
+.zl-row-brief,
+.zl-row-proj {
   font-size: var(--zl-fs-meta);
   line-height: 16px;
   color: var(--zl-t4);
@@ -118,8 +99,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A working row's second line is its brief, so the path is not there to say
+   which project this is. The name goes where the path would have ended: at
+   the end of the line, under the age, in the path's voice. It yields to the
+   brief, never the other way round: "Needs your answer" is why the row is
+   here, the project is where. In the by-project view the caller omits it. */
+.zl-row-l2 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.zl-row-brief { flex: 1; min-width: 0; }
+.zl-row-proj { flex: none; max-width: 45%; }
 
-/* Data is mono: ages, paths, the monogram. Scoped to the row rather than
+/* Data is mono: ages and paths. Scoped to the row rather than
    declared globally, so it cannot collide with the catalogue's own `.zl-data`
    (zones-lab.css:1668) — same declarations, one extra class of specificity. */
 .zl-row .zl-data {

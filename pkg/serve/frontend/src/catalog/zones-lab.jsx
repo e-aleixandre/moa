@@ -48,7 +48,6 @@ import { PermissionOptions } from "../components/PermissionControl/PermissionCon
    the prototype draws the shipped one. See the adapter at `Sidebar`. */
 import { Sidebar as ProductionSidebar } from "../layout/Sidebar/Sidebar.jsx";
 import { PermissionCard } from "../components/PermissionCard/PermissionCard.jsx";
-import { projectMonogram } from "../data/util/format.js";
 /* Same move, the tool ledger: markup and CSS live in ActivityLedger now, and
    the prototype draws the shipped one. See the adapter at `Ledger`. Diffs
    that open inside a row use LedgerDiff; the artifact card is the shipped
@@ -111,14 +110,13 @@ const SIDEBAR_ROWS = SESSIONS.map((s, i) => ({
   briefTone: s.tone || "",
   path: s.brief ? "" : s.path,
   cwd: s.path,
-  mono: projectMonogram(s.path) || { text: s.project.slice(0, 2), hue: 210 },
   saved: s.state === "idle",
 }));
 const SIDEBAR_ACTIVE = SIDEBAR_ROWS.filter((s) => !s.saved);
 const SIDEBAR_SAVED = SIDEBAR_ROWS.filter((s) => s.saved);
 
 /* Identity hues, used by the live-zone fixtures (a name is always the same
-   colour). The sidebar's monograms now come from production's projectMonogram. */
+   colour). */
 const HUES = [210, 265, 170, 320, 40, 190];
 function projectHue(name) {
   let h = 0;

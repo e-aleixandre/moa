@@ -40,28 +40,22 @@ const STATE_LABEL_SUFFIX = {
 //   briefTone — which state that line is about ("yellow" | "red" | "mauve" |
 //           "neutral"), so the reason is coloured by what it says rather than
 //           by a class on the whole row
-//   mono  — the project monogram {text, hue} for the leading square
 //   path  — the session's working directory, the last and quietest line
+//   project — the project's name, for a row whose second line is a brief and
+//           so has no path: it sits at the end of that line, under the age.
+//           A row that shows its path does not need it twice.
 //   origin — who started the session when it wasn't you ("automation", or the
 //           label the caller passed). Omitted for ordinary user sessions.
 const isEventOrigin = (origin) => typeof origin === "string" && origin.startsWith("event:");
 
-// Monogram — the project's identity, as two letters on a tinted square. The
-// caller passes the already-derived {text, hue} (data/util/format.js
-// projectMonogram) rather than a cwd, so the row stays a pure presentation
-// piece and the hash lives with the other project helpers.
-//
-// The catalogue's own words: "Identity and state are two data: the monogram
-// says WHICH project, the dot says WHAT it is doing. Folding state into the
-// monogram made the same repo change colour from row to row, which defeats the
-// point of a monogram." (zones-lab.jsx:39-41)
-function Monogram({ mono }) {
-  return (
-    <span class="zl-mono" style={`--h:${mono.hue}`} aria-hidden="true">
-      {mono.text}
-    </span>
-  );
-}
+// There is no leading project square. The row used to open with a two-letter
+// monogram on a tinted tile, measured against the owner's real list: 25
+// projects on 6 hues and 2 letters gave 3 colliding marks (`de` was both dev
+// and design-visual, in the same hue), so the tile could not be trusted to
+// name a project. Where the row prints the path it was redundant; where it
+// does not (a working session says what it is doing) it was wrong often
+// enough not to be relied on. It cost 44px of a 272px column, which the
+// title has back.
 
 // Dot — the state mark. The catalogue's own span with a state class, not the
 // StateDot primitive: the halo, the size and the "idle is not drawn" rule are
@@ -85,7 +79,7 @@ export function SessionRow({
   origin,
   brief,
   briefTone,
-  mono,
+  project,
   path,
   onClick,
   onClose,
@@ -107,7 +101,7 @@ export function SessionRow({
     onClose?.(event);
   };
 
-  const hitLabel = `${title}${origin ? `, started by ${origin}` : ""}${pane ? `, pane ${pane}` : ""}${isUnseenResult ? ", new result" : STATE_LABEL_SUFFIX[state] ?? ""}`;
+  const hitLabel = `${title}${project ? `, in ${project}` : ""}${origin ? `, started by ${origin}` : ""}${pane ? `, pane ${pane}` : ""}${isUnseenResult ? ", new result" : STATE_LABEL_SUFFIX[state] ?? ""}`;
 
   return (
     <span class={`zl-row-slot${onClose ? " has-close" : ""}`} {...rest}>
@@ -122,7 +116,6 @@ export function SessionRow({
         aria-current={active ? "true" : undefined}
         aria-label={hitLabel}
       >
-        {mono && <Monogram mono={mono} />}
         <span class="zl-row-main">
           <span class="zl-row-l1">
             <span class="zl-row-title" aria-hidden="true">{title}</span>
@@ -145,7 +138,12 @@ export function SessionRow({
           {meta && <span class="zl-row-meta-line zl-data" aria-hidden="true">{meta}</span>}
           {/* Active sessions say what they are doing; saved ones say where they
               live. Two lines is the budget, so the more useful datum wins. */}
-          {brief && <span class={`zl-row-brief${briefTone ? ` tone-${briefTone}` : ""}`} aria-hidden="true">{brief}</span>}
+          {brief && (
+            <span class="zl-row-l2">
+              <span class={`zl-row-brief${briefTone ? ` tone-${briefTone}` : ""}`} aria-hidden="true">{brief}</span>
+              {project && <span class="zl-row-proj zl-data" aria-hidden="true">{project}</span>}
+            </span>
+          )}
           {path && <span class="zl-row-path zl-data" aria-hidden="true">{path}</span>}
         </span>
       </button>
