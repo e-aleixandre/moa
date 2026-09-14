@@ -387,6 +387,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   // Creating a session takes the same route: the palette is another overlay,
   // and two sheets on screen at once is exactly what the handoff avoids.
   const newPendingRef = useRef(false);
+  const searchPendingRef = useRef(false);
   const setDrawerOpen = (next) => (next ? openDrawer("list") : closeDrawer());
   const onSelectFromDrawer = (id) => selectMobileDrawerSession(store.get().sessions[id], {
     resume: resumeSession,
@@ -395,6 +396,14 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   });
   const onNewFromDrawer = () => {
     newPendingRef.current = true;
+    closeDrawer();
+  };
+  // Search is the same handoff as New session: the drawer closes and the
+  // palette takes over as a bottom sheet. Without this the sidebar's search
+  // door rendered inert on the phone -- a control that looks like a control
+  // and does nothing, which is worse than the filter field it replaced.
+  const onSearchFromDrawer = () => {
+    searchPendingRef.current = true;
     closeDrawer();
   };
   const onSettingsFromDrawer = () => {
@@ -409,6 +418,11 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
     if (newPendingRef.current) {
       newPendingRef.current = false;
       openPalette("create");
+      return;
+    }
+    if (searchPendingRef.current) {
+      searchPendingRef.current = false;
+      openPalette("search");
       return;
     }
     if (inboxPendingRef.current) {
@@ -461,6 +475,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
         activeId={chrome.activeId}
         onSelect={onSelectFromDrawer}
         onNewSession={onNewFromDrawer}
+        onSearch={onSearchFromDrawer}
         onSettings={onSettingsFromDrawer}
         onInbox={onInboxFromDrawer}
         inboxCount={inboxCount}

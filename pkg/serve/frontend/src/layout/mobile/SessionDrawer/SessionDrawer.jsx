@@ -46,6 +46,7 @@ export function SessionDrawer({
   activeId,
   onSelect,
   onNewSession,
+  onSearch,
   onSettings,
   onInbox,
   inboxCount = 0,
@@ -200,6 +201,7 @@ export function SessionDrawer({
                — a second copy of the project list and the create bar, with its
                own bugs to fix twice. */
             onNewSession={onNewSession}
+            onSearch={onSearch}
             onSettings={onSettings}
             onCloseSession={onCloseSession}
             onReopenSession={onReopenSession}

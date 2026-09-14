@@ -550,6 +550,22 @@ a.zl-ver.is-update:focus-visible {
 /* ── Phone sizing: every control that gets a thumb is at least 44px. ──── */
 .zl-side-body.is-phone .zl-side-new { height: 48px; margin: 4px 12px 10px; }
 .zl-side-body.is-phone .zl-inbox { height: 44px; }
-.zl-side-body.is-phone .zl-search,
-.zl-side-body.is-phone .zl-search { height: 44px; }
+/* On the phone the door is an ICON, not a wide recessed box. At desktop width
+   the box reads as a door because the ⌘K keycap sits in it; the phone has no
+   keyboard, so the keycap is gone and what is left is a full-width sunken
+   field with the word "Search" in it -- which is exactly the filter input we
+   removed, drawn again. It sits beside the order control now: same size, same
+   shape, three icons in a row. */
+.zl-side-body.is-phone .zl-search {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  justify-content: center;
+  padding: 0;
+}
+.zl-side-body.is-phone .zl-search-txt { display: none; }
+/* With the door narrowed, nothing in the phone head grows any more, so the
+   title would sit against three controls with a gap after them. The title
+   takes the slack instead and the controls stay together on the right. */
+.zl-side-body.is-phone .zl-side-title { flex: 1; min-width: 0; }
 .zl-side-body.is-phone .zl-gear { width: 44px; height: 44px; }
