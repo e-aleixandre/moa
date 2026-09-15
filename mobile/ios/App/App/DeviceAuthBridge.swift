@@ -86,7 +86,7 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         configuration.timeoutIntervalForRequest = 15
         configuration.timeoutIntervalForResource = 20
-        return URLSession(configuration: configuration, delegate: sessionDelegate, delegateQueue: nil)
+        return URLSession(configuration: configuration, delegate: self.sessionDelegate, delegateQueue: nil)
     }()
 
     init(credentialStore: DeviceCredentialStore = DeviceCredentialStore()) {
@@ -108,17 +108,18 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
                 respond(id: id, error: .notAuthorized)
                 return
             }
-            Task {
+            Task { [weak self] in
+                guard let self else { return }
                 do {
-                    let origin = try validatedOrigin(options["origin"] as? String)
-                    try await claim(
+                    let origin = try self.validatedOrigin(options["origin"] as? String)
+                    try await self.claim(
                         origin: origin,
                         payload: options["payload"] as? String,
                         deviceLabel: options["deviceLabel"] as? String
                     )
-                    respond(id: id, value: [:])
+                    self.respond(id: id, value: [:])
                 } catch {
-                    respond(id: id, error: bridgeError(error))
+                    self.respond(id: id, error: self.bridgeError(error))
                 }
             }
         case "authorize":
@@ -126,13 +127,14 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
                 respond(id: id, error: .notAuthorized)
                 return
             }
-            Task {
+            Task { [weak self] in
+                guard let self else { return }
                 do {
-                    let origin = try validatedOrigin(options["origin"] as? String)
-                    try await authorize(origin: origin)
-                    respond(id: id, value: [:])
+                    let origin = try self.validatedOrigin(options["origin"] as? String)
+                    try await self.authorize(origin: origin)
+                    self.respond(id: id, value: [:])
                 } catch {
-                    respond(id: id, error: bridgeError(error))
+                    self.respond(id: id, error: self.bridgeError(error))
                 }
             }
         case "reauthorize":
@@ -140,13 +142,14 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
                 respond(id: id, error: .notAuthorized)
                 return
             }
-            Task {
+            Task { [weak self] in
+                guard let self else { return }
                 do {
                     guard let bound = NativeServerBinding.origin else { throw AuthBridgeError.notPaired }
-                    try await authorize(origin: try validatedOrigin(bound))
-                    respond(id: id, value: [:])
+                    try await self.authorize(origin: try self.validatedOrigin(bound))
+                    self.respond(id: id, value: [:])
                 } catch {
-                    respond(id: id, error: bridgeError(error))
+                    self.respond(id: id, error: self.bridgeError(error))
                 }
             }
         case "reset":
@@ -154,12 +157,13 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
                 respond(id: id, error: .notAuthorized)
                 return
             }
-            Task {
+            Task { [weak self] in
+                guard let self else { return }
                 do {
-                    try await reset()
-                    respond(id: id, value: [:])
+                    try await self.reset()
+                    self.respond(id: id, value: [:])
                 } catch {
-                    respond(id: id, error: bridgeError(error))
+                    self.respond(id: id, error: self.bridgeError(error))
                 }
             }
         default:

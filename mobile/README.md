@@ -198,9 +198,11 @@ cannot be completed by the repository's Linux checks. Pairing codes are limited
 to five per hour, so create one only after the app is installed and the server
 is ready; do not create codes speculatively.
 
-1. Delete the app to start with an empty Keychain item and WebKit store. Create
-   one pairing code, scan it, and verify the server frontend loads. Terminate
-   and reopen the app; it must return to that frontend without another code.
+1. Start from an app identity that has never paired, or revoke the existing test
+   device and reopen the app until it returns to the pairing screen. Deleting an
+   iOS app is not a reliable Keychain reset. Create one pairing code, scan it,
+   and verify the server frontend loads. Terminate and reopen the app; it must
+   return to that frontend without another code.
 2. In Safari's Web Inspector, inspect the app page. `localStorage` must contain
    only the `moa-server` origin, never a value beginning with a device id or
    `moa-pair-v1`. Requests and the session WebSocket should carry the
