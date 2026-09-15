@@ -1,0 +1,280 @@
+/* u6-lab — CATALOG ONLY. The turn foot: one horizontal line at the end of a
+   turn, carrying the hour and the copy.
+
+   What is load-bearing, and why it is not the u5 rail:
+
+     · NOTHING on `.u6-turn` reserves horizontal space. No `padding-right`,
+       no `padding-left`, no margin, no lane. The prose measure is exactly the
+       column's width — the rail's 44px are gone from every turn, which is the
+       whole point of this round.
+     · The foot is IN FLOW under the turn, so it costs height, not width. It
+       is sized to be the cheapest line that can still be hit by a thumb: 20px
+       of ink and 4px of separation = 24px per turn, with the 44px touch
+       target delivered by a transparent halo that overflows the line instead
+       of inflating it.
+
+   Tokens only, no inline fallbacks. */
+
+/* ── lab chrome ─────────────────────────────────────────────────────────── */
+.u6 { margin: 0 auto; padding: var(--space-8) var(--space-6) var(--space-12); }
+.u6-head h1 { font-size: var(--text-2xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.u6-head h1 em { font-style: normal; color: var(--zl-accent); }
+.u6-head p { color: var(--overlay1); margin-top: var(--space-2); max-width: 92ch; font-size: var(--text-md); }
+.u6-head code, .u6-dir-head code { font-family: var(--mono); font-size: 0.9em; color: var(--zl-t2); }
+.u6-dir-head strong { color: var(--zl-t2); font-weight: var(--weight-semibold); }
+
+.u6-dir { margin-top: var(--space-12); }
+.u6-dir-head h2 { font-size: var(--text-xl); font-weight: var(--weight-semibold); }
+.u6-dir-head p { color: var(--overlay1); font-size: var(--text-sm); margin-top: var(--space-1); max-width: 104ch; }
+
+.u6-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  margin-top: var(--space-4);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+
+.u6-frame {
+  flex: none;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim-2);
+  font-family: var(--font);
+  color: var(--zl-t1);
+  overflow: hidden;
+}
+.u6-desk { width: var(--content-block); padding: 24px 22px 12px; }
+.u6-phone { width: 390px; padding: 20px 18px 12px; }
+
+/* the clipboard cases, lab chrome */
+.u6-cases { display: grid; gap: var(--space-3); margin-top: var(--space-4); max-width: 104ch; }
+.u6-case { padding: 10px 12px; border-radius: var(--zl-r-md); background: var(--zl-raised); box-shadow: var(--zl-rim); }
+.u6-case-h { display: block; font-size: var(--zl-fs-meta); color: var(--zl-accent); letter-spacing: 0.02em; }
+.u6-case-t {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  line-height: 1.55;
+  color: var(--zl-t3);
+}
+
+/* ── the column ─────────────────────────────────────────────────────────── */
+/* No margin and no padding on the turn: the measure is the column's, whole. */
+.u6-col { position: relative; }
+.u6-col .zl-turn { margin: 0 0 28px; }
+
+/* ── the cell — accepted in u5, unchanged ───────────────────────────────── */
+.u6-cell {
+  position: relative;
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  align-items: start;
+  margin: 0 0 16px;
+}
+.u6-phone .u6-cell { grid-template-columns: 44px 1fr; }
+
+.u6-gutter {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding-top: 10px;
+  align-self: stretch;
+}
+.u6-clock { display: flex; flex-direction: column; align-items: flex-start; }
+.u6-hhmm {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: var(--zl-t4);
+  white-space: nowrap;
+}
+.u6-day {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: 0.06em;
+  color: var(--surface2);
+  white-space: nowrap;
+}
+
+.u6-body {
+  position: relative;
+  padding: 10px 14px;
+  padding-right: 44px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  font-size: var(--zl-fs-title);
+  line-height: 1.6;
+  color: var(--zl-t1);
+}
+.u6-cell.is-steer .u6-body { background: var(--zl-sheet); box-shadow: var(--zl-rim), inset 2px 0 0 var(--zl-line-2); }
+.u6-cell.is-steer .u6-hhmm { color: var(--zl-t3); }
+.u6-cell.is-parent .u6-body { box-shadow: var(--zl-rim), inset 2px 0 0 var(--zl-accent-line); }
+.u6-src {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  letter-spacing: 0.04em;
+  color: var(--zl-accent);
+}
+
+.u6-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.u6-text p { margin: 0; }
+.u6-text p + p { margin-top: 6px; }
+.u6-text code {
+  padding: 1px 5px;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
+  font-family: var(--mono);
+  font-size: 0.875em;
+  color: var(--zl-t2);
+}
+.u6-col .wp-attachments { margin-top: 10px; }
+
+/* ── the action ─────────────────────────────────────────────────────────── */
+/* 20px of ink. The halo below turns it into 44px of target without adding a
+   single pixel to the line's height, because the halo overflows it. */
+.u6-act {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--zl-t4);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color var(--motion-hover) var(--motion-ease), background var(--motion-hover) var(--motion-ease);
+}
+.u6-act::before { content: ""; position: absolute; inset: -12px; }
+.u6-act .lucide { width: 14px; height: 14px; flex: none; }
+.u6-act:active { color: var(--zl-t1); background: var(--zl-hi); }
+@media (hover: hover) { .u6-act:hover { color: var(--zl-t1); background: var(--zl-hi); } }
+.u6-act:focus-visible { color: var(--zl-t1); outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
+.u6-act.is-done { color: var(--zl-green); }
+
+/* the cell's rail — rewind alone, unchanged from u5 */
+.u6-rail { position: absolute; top: 6px; right: 4px; display: flex; }
+.u6-rail .u6-act { width: 28px; height: 28px; color: var(--surface1); }
+.u6-rail .u6-act::before { inset: -8px; }
+@media (hover: hover) {
+  .u6-cell:hover .u6-rail .u6-act { color: var(--zl-t4); }
+  .u6-cell:hover .u6-rail .u6-act:hover { color: var(--zl-t1); background: var(--zl-hi); }
+}
+.u6-cell:focus-within .u6-rail .u6-act { color: var(--zl-t4); }
+@media (hover: none) { .u6-rail .u6-act { color: var(--zl-t4); } }
+.u6-phone .u6-rail .u6-act { color: var(--zl-t4); }
+
+/* ── THE FOOT ───────────────────────────────────────────────────────────── */
+/* One line. No background, no border, no padding block: what it costs is its
+   own 20px plus 4px of air = 24px per turn, and nothing else. It is the same
+   box in the three treatments; only the distribution and the ink change. */
+.u6-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 20px;
+  margin-top: 6px;
+}
+/* The block above the foot gives up its trailing margin. Without this the
+   foot is charged twice: a closing paragraph's 16px bottom margin used to
+   COLLAPSE into the turn's own 28px gap and cost nothing, and interposing the
+   foot turns that free margin into real height. Zeroing it means the foot
+   pays only for itself — measured at 26px/turn instead of 33.6. */
+.u6-turn > :nth-last-child(2) { margin-bottom: 0; }
+.u6-foot-time {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  color: var(--surface1);
+  white-space: nowrap;
+  transition: color var(--motion-hover) var(--motion-ease);
+}
+.u6-foot-acts { display: flex; align-items: center; gap: 8px; }
+.u6-foot .u6-act { color: var(--surface1); }
+
+/* Both groups lift together when the turn is under the pointer or holds
+   focus — the line is one object, not two. */
+@media (hover: hover) {
+  .u6-turn:hover .u6-foot-time { color: var(--zl-t4); }
+  .u6-turn:hover .u6-foot .u6-act { color: var(--zl-t4); }
+}
+.u6-turn:focus-within .u6-foot-time { color: var(--zl-t4); }
+.u6-turn:focus-within .u6-foot .u6-act { color: var(--zl-t4); }
+/* A coarse pointer never gets the lift, so it starts one step brighter. */
+@media (hover: none) {
+  .u6-foot-time { color: var(--zl-t4); }
+  .u6-foot .u6-act { color: var(--zl-t4); }
+}
+.u6-phone .u6-foot-time { color: var(--zl-t4); }
+.u6-phone .u6-foot .u6-act { color: var(--zl-t4); }
+
+/* 1 · Balanza — hour at the left edge of the measure, actions at the right,
+   the whole measure between them. */
+.u6-f-balance .u6-foot-acts { margin-left: auto; }
+
+/* 2 · Racimo — everything in one small cluster on the left. The hour keeps a
+   slightly wider gap than the actions keep between themselves, so the line
+   reads as `hour · tools` and not as three equal things. */
+.u6-f-cluster .u6-foot { gap: 12px; }
+
+/* 3 · Revelado — the line is there, with its height already taken, and gets
+   ink only under pointer or focus. Nothing moves when it lights up. On a
+   coarse pointer there is no hover, so it degrades to treatment 1: always
+   present and dim.
+   The hiding is scoped to `.u6-desk`, NOT to `@media (hover: hover)` alone:
+   a 390px frame in this catalogue is a phone drawn inside a desktop page, so
+   the media query is true there and would hide the foot in exactly the
+   context that has no way to reveal it. Scoping by frame makes the phone
+   column show what a thumb would really get. */
+.u6-f-reveal .u6-foot-acts { margin-left: auto; }
+@media (hover: hover) {
+  .u6-desk .u6-f-reveal .u6-foot-time,
+  .u6-desk .u6-f-reveal .u6-foot .u6-act { color: transparent; }
+  .u6-desk .u6-f-reveal:hover .u6-foot-time { color: var(--zl-t4); }
+  .u6-desk .u6-f-reveal:hover .u6-foot .u6-act { color: var(--zl-t4); }
+  .u6-desk .u6-f-reveal:hover .u6-foot .u6-act:hover { color: var(--zl-t1); background: var(--zl-hi); }
+}
+.u6-f-reveal:focus-within .u6-foot-time,
+.u6-f-reveal:focus-within .u6-foot .u6-act { color: var(--zl-t4); }
+
+/* ── the growth slot ────────────────────────────────────────────────────── */
+/* Drawn as an example, not as a decision: dashed, inert, labelled. */
+.u6-slot { display: inline-flex; align-items: center; gap: 5px; }
+.u6-slot-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 0 1px var(--zl-line-2);
+  color: var(--surface2);
+}
+.u6-slot-btn .lucide { width: 12px; height: 12px; }
+.u6-slot-tag {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: 0.06em;
+  color: var(--surface1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u6-act, .u6-foot-time { transition: none; }
+}
