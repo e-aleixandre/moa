@@ -1,0 +1,94 @@
+/* TurnFoot — the assistant turn's closing line (catalogue u6, variant Racimo).
+
+   What it costs is the whole point, so it is measured rather than eyeballed:
+   20px of ink plus 6px of air = 26px, and the block above gives up its
+   trailing margin so the foot is not charged twice. Without that the closing
+   paragraph's bottom margin -- which used to COLLAPSE into the turn's own gap
+   and cost nothing -- becomes real height, and the foot costs 33.6px instead
+   of ~28.
+
+   No background, no border, no padding block: a line, not a bar. Nothing here
+   reserves horizontal space on the turn, so the prose keeps the full measure.
+
+   The 44px touch target comes from a transparent halo that OVERFLOWS the line
+   rather than inflating it (hit-tested in the mockup at 45px). */
+
+.zl-foot {
+  display: flex;
+  align-items: center;
+  /* Racimo: the hour and the actions in one cluster, the hour keeping a wider
+     gap than the actions keep between themselves, so the line reads as
+     `hour · tools` rather than as three equal things. */
+  gap: 12px;
+  height: 20px;
+  margin-top: 6px;
+}
+
+/* The closing block gives up its trailing margin to the foot: see above. */
+.zl-turn > :nth-last-child(2) { margin-bottom: 0; }
+
+.zl-foot-time {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  color: var(--surface1);
+  white-space: nowrap;
+  transition: color var(--motion-hover) var(--motion-ease);
+}
+.zl-foot .zl-data {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-weight: 400;
+}
+
+.zl-foot-acts { display: flex; align-items: center; gap: 8px; }
+
+.zl-foot-act {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--surface1);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color var(--motion-hover) var(--motion-ease), background var(--motion-hover) var(--motion-ease);
+}
+/* 20px of ink, 44px of target: the halo overflows the line instead of
+   growing it, so the turn pays no extra height for being touchable. */
+.zl-foot-act::before { content: ""; position: absolute; inset: -12px; }
+.zl-foot-act .lucide { width: 14px; height: 14px; flex: none; }
+.zl-foot-act:active { color: var(--zl-t1); background: var(--zl-hi); }
+.zl-foot-act.is-done { color: var(--zl-green); }
+.zl-foot-act:focus-visible {
+  color: var(--zl-t1);
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Both groups lift together under the pointer or on focus: the line is one
+   object, not two. */
+@media (hover: hover) {
+  .zl-turn:hover .zl-foot-time,
+  .zl-turn:hover .zl-foot-act { color: var(--zl-t4); }
+  .zl-foot-act:hover { color: var(--zl-t1); background: var(--zl-hi); }
+}
+.zl-turn:focus-within .zl-foot-time,
+.zl-turn:focus-within .zl-foot-act { color: var(--zl-t4); }
+
+/* A coarse pointer never gets the lift, so it starts one step brighter. */
+@media (hover: none) {
+  .zl-foot-time,
+  .zl-foot-act { color: var(--zl-t4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zl-foot-time,
+  .zl-foot-act { transition: none; }
+}

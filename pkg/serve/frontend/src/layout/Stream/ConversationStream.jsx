@@ -12,7 +12,9 @@ import {
   historyHydrationTailVisible,
 } from "../../components/index.js";
 import { Prose } from "../../components/AssistantDocument/AssistantDocument.jsx";
+import { TurnFoot } from "../../components/AssistantDocument/TurnFoot.jsx";
 import { SecretBatchCard } from "../../components/SecretBatchCard/SecretBatchCard.jsx";
+import { turnFinalResponse } from "../../data/stream-model.js";
 import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { parsePreviewReference } from "../../data/util/preview-reference.js";
 import { renderMarkdown, renderMarkdownWithCaret } from "../../data/util/markdown.js";
@@ -138,6 +140,13 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
       return (
         <AssistantDocument streaming={block.kind === "streaming" && block.textLive === true && !proseHasCaret}>
           {docChildren(block.blocks, onOpenSubagent, visibleDone, sessionId)}
+          {/* The foot marks the END of a turn, so a turn still running has
+              none: there is no final response yet and no hour to stamp on it.
+              It lands under the last line rather than inside it, so nothing
+              shifts on the frame it appears. */}
+          {block.kind === "document" && (
+            <TurnFoot time={block.time} text={turnFinalResponse(block.blocks)} />
+          )}
         </AssistantDocument>
       );
     default:

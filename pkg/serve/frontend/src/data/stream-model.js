@@ -45,7 +45,10 @@
 //   { kind:'document', blocks:[...] }        // a FINISHED assistant turn
 //   { kind:'streaming', blocks:[...] }       // the LIVE assistant turn
 //       One assistant turn = everything the assistant produced between one user
-//       message (or the start) and the next user message. `blocks` is the
+//       message (or the start) and the next user message. A `document` also
+//       carries `time`: the latest timestamp in the turn, i.e. when it ENDED,
+//       which is what the turn foot stamps. A `streaming` turn has not ended,
+//       so it has no foot and needs no time. `blocks` is the
 //       assistant's prose and activity INTERLEAVED IN ORDER. A turn is
 //       `streaming` when there is live output at the
 //       tail: session.streamingText, session.thinkingText, a trailing
@@ -153,6 +156,44 @@ export function isStableBlockID(id) {
   return !!id && !unstableBlockIDs.has(id);
 }
 
+// turnFinalResponse — what the turn foot's copy puts on the clipboard.
+//
+// The rule the owner set: "solo el último de sus mensajes, lo que sería la
+// response final, no todo". A turn is prose, tool rows, more prose, maybe a
+// fence. What is copied is the LAST RUN OF WORDS: the prose that comes after
+// the last tool row. Everything before it is the work of getting there, and
+// the work already has its own rows with their own detail.
+//
+// A turn that ends in a tool row has no closing prose, so its last run of
+// words is the prose ABOVE that row -- the last thing actually said. That
+// keeps the rule defined everywhere instead of leaving some turns with a foot
+// that copies nothing.
+//
+// Only 'prose' carries words. A ledger, a delegation, a diff and a file card
+// are activity, and the fence inside a prose run comes along with it because
+// it is part of what was said -- the fence's own `copy` button is a different
+// unit with a narrower scope (the code alone), which is why both exist.
+export function turnFinalResponse(blocks) {
+  const list = Array.isArray(blocks) ? blocks : [];
+  let lastActivity = -1;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] && list[i].type !== 'prose') lastActivity = i;
+  }
+  const after = list.slice(lastActivity + 1).filter((b) => b && b.type === 'prose');
+  // Ends in activity: fall back to the prose immediately above it.
+  const run = after.length > 0
+    ? after
+    : (() => {
+      const before = [];
+      for (let i = lastActivity - 1; i >= 0; i--) {
+        if (!list[i] || list[i].type !== 'prose') break;
+        before.unshift(list[i]);
+      }
+      return before;
+    })();
+  return run.map((b) => b.text || '').filter(Boolean).join('\n\n');
+}
+
 export function projectStream(session) {
   if (!session) return [];
   const messages = Array.isArray(session.messages) ? session.messages : [];
@@ -212,6 +253,13 @@ export function projectStream(session) {
       currentDoc = { kind: 'document', id: blockID('doc', msg, index), message: msg, blocks: [] };
       blocks.push(currentDoc);
       currentLedger = null;
+    }
+    // The turn's clock is the latest thing that happened in it, so the foot
+    // stamps when the turn ENDED rather than when it began. Measured on a live
+    // session: every assistant message carries `timestamp`, so this is the
+    // server's time and never the client's.
+    if (msg && Number.isFinite(msg.timestamp) && msg.timestamp > 0) {
+      currentDoc.time = Math.max(currentDoc.time || 0, msg.timestamp);
     }
     return currentDoc;
   }
