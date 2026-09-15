@@ -4,7 +4,7 @@ import pw from "/home/ealeixandre/dev/moa/design-visual/tmp/redesign/fidelity/ve
 const { chromium } = pw;
 
 const PORT = process.env.PORT || 7311;
-const ids = (process.env.IDS || "a,b,c,d,e,f").split(",");
+const ids = (process.env.IDS || "a,a2,b,c").split(",");
 const dens = process.env.DENS || "desktop";
 const phone = dens === "phone";
 
@@ -16,7 +16,14 @@ const page = await browser.newPage({
 for (const id of ids) {
   const url = `http://127.0.0.1:${PORT}/?view=lp&t=${id}${phone ? "&dens=phone" : ""}`;
   await page.goto(url, { waitUntil: "networkidle" });
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(1200);
+  // The catalog fires an arrival toast 700ms after load (useCatalogBootstrap).
+  // It floats over the panel's right end — exactly where Inspect and close
+  // live — so it is removed before the frame is shot.
+  await page.evaluate(() => {
+    document.querySelectorAll("[class*='toast']").forEach((n) => n.remove());
+  });
+
   const el = await page.$(`[data-t="${id}"]`);
   if (!el) { console.log(`MISS ${id}`); continue; }
   const out = `/tmp/lp-${id}-${phone ? "movil" : "desktop"}.png`;

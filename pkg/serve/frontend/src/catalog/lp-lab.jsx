@@ -1,25 +1,32 @@
 import {
   ArrowLeft, MoreVertical, MousePointerClick, X, Smartphone, Tablet, Monitor, Scan,
-  CornerDownLeft, Plus, Globe, Check, Pencil,
+  CornerDownLeft, Plus, Globe, History, RotateCw,
 } from "lucide-preact";
 import { Segmented } from "../components/Segmented/Segmented.jsx";
-import { Field, Button } from "../primitives/index.js";
+import { Field, StateDot } from "../primitives/index.js";
 import "../components/LivePreview/LivePreview.css";
 import "./lp-lab.css";
 
-// lp-lab — CATALOG ONLY. Six treatments of the Live Preview first screen, for a
-// discard round. Nothing here is imported by production: the panel chrome below
-// is a static replica of `.live-preview-bar` (same classes, same stylesheet) so
-// each treatment is judged NEXT TO the toolbar it has to live under, which is
-// exactly the contrast the owner named.
+// lp-lab — CATALOG ONLY. Three directions for the Live Preview EMPTY STATE: the
+// screen that shows before there is anything to preview. Nothing here is
+// imported by production; the toolbar below is a static replica of
+// `.live-preview-bar` (same classes, same stylesheet, same Segmented) because
+// what is judged is the WHOLE panel, not a cropped form.
 //
-// The premise each one breaks is written on its own card in the lab chrome.
+// What the screen is today, measured: a title, an input glued to a peach
+// button, a hint that repeats the title in other words, "Write to Moa" hanging
+// at the bottom with nothing to point at, and the four widths plus Inspect lit
+// over an empty stage.
+//
+// Peach is deliberately absent from all three. It came free with the user-cell
+// redesign and stays free; the one dominant action here is mauve, which is
+// already what "selected" means in this very toolbar.
 
 const WIDTHS = [
-  { value: "390", label: "390", icon: Smartphone, size: 14 },
-  { value: "768", label: "768", icon: Tablet, size: 17 },
-  { value: "1280", label: "1280", icon: Monitor, size: 18 },
-  { value: "fit", label: "Fit", icon: Scan, size: 16 },
+  { value: "390", label: "390", icon: Smartphone, size: 14, ariaLabel: "Phone · 390px" },
+  { value: "768", label: "768", icon: Tablet, size: 17, ariaLabel: "Tablet · 768px" },
+  { value: "1280", label: "1280", icon: Monitor, size: 18, ariaLabel: "Desktop · 1280px" },
+  { value: "fit", label: "Fit", icon: Scan, size: 16, ariaLabel: "Fit to pane" },
 ];
 
 function renderWidth(opt) {
@@ -32,11 +39,13 @@ function renderWidth(opt) {
   );
 }
 
-// The real toolbar, frozen. Not interactive: this round is about what the empty
-// stage does, and a live segmented control would only invite fiddling with it.
-function PreviewBar() {
+// The real toolbar. `dim` is each direction's answer to the question the owner
+// asked: what do controls that cannot do anything look like? They keep their
+// place — the bar must not re-flow the instant an app loads — and stop
+// inviting the press. `width` is which preset reads as selected.
+function PreviewBar({ dim, width = "fit" }) {
   return (
-    <div class="live-preview-bar">
+    <div class={`live-preview-bar${dim ? " lp-bar-dim" : ""}`}>
       <div class="live-preview-menu">
         <button type="button" class="live-preview-action" aria-label="Preview options">
           <MoreVertical size={15} />
@@ -48,13 +57,14 @@ function PreviewBar() {
       <Segmented
         className="live-preview-widths"
         options={WIDTHS}
-        value="fit"
+        value={dim ? null : width}
         onChange={() => {}}
+        disabled={dim}
         renderOption={renderWidth}
         aria-label="Viewport width"
       />
       <div class="live-preview-bar-end">
-        <button type="button" class="live-preview-action is-on" aria-label="Inspect">
+        <button type="button" class="live-preview-action" disabled={dim} aria-label="Inspect">
           <MousePointerClick size={16} />
           <span class="live-preview-action-label">Inspect</span>
         </button>
@@ -66,276 +76,240 @@ function PreviewBar() {
   );
 }
 
-// The panel: toolbar + stage, at the size production measured (1204x930 desktop,
-// 390 wide on the phone). `data-t` is what the capture script frames.
-function Panel({ id, title, premise, phone, children, barSlot }) {
+// The single dominant action of the screen. Not `variant-accent`: that one is
+// the peach gradient.
+function Go({ children, wide }) {
+  return <button type="button" class={`lp-go${wide ? " is-wide" : ""}`}>{children}</button>;
+}
+
+function Panel({ id, phone, bar, barSlot, children }) {
   return (
-    <figure class={`lp-fig${phone ? " is-phone" : ""}`}>
-      <figcaption class="lp-cap">
-        <span class="lp-cap-id">{id}</span>
-        <span class="lp-cap-title">{title}</span>
-        <span class="lp-cap-premise">{premise}</span>
-      </figcaption>
-      <div class="lp-frame" data-t={id}>
-        <div class="live-preview-inline lp-panel">
-          <PreviewBar />
-          {barSlot}
-          <div class="live-preview-stage lp-stage">{children}</div>
-        </div>
+    <div class={`lp-frame${phone ? " is-phone" : ""}`} data-t={id}>
+      <div class="live-preview-inline lp-panel">
+        {bar}
+        {barSlot}
+        <div class="live-preview-stage lp-stage">{children}</div>
       </div>
-    </figure>
+    </div>
   );
 }
 
-/* ───────────────────────────────────────────────────────────────────────────
-   A — PROMPT. There is no card and no title. The stage is moa's own canvas and
-   the only thing on it is one mono line that reads as a command prompt: a caret
-   glyph, the URL as the text you are typing, and the return key as the verb.
-   The hint is gone because the placeholder already IS the instruction.
-   ─────────────────────────────────────────────────────────────────────────── */
-function TreatmentA() {
+/* ── A · Tarjeta ────────────────────────────────────────────────────────────
+   Premise broken: that this is a form. It is a CARD on moa's own surface, in
+   the vocabulary the user cell just settled — slab, gutter, quiet actions. One
+   sentence that instructs, one that says what you get, field and button with a
+   gutter between them, and the common ports as things you can PRESS instead of
+   a placeholder you cannot. Second visit is a different card: the last address
+   is a row, typing drops below it.
+   The bar goes quiet: with no app, no preset can do anything. */
+
+const PORTS = [
+  { port: "5173", what: "Vite" },
+  { port: "3000", what: "Next" },
+  { port: "8080", what: "" },
+];
+
+function DirA({ phone, again }) {
   return (
     <div class="lpa">
-      <div class="lpa-aurora" aria-hidden="true" />
-      <div class="lpa-line">
-        <span class="lpa-caret" aria-hidden="true">▸</span>
-        <Field
-          variant="box"
-          size="lg"
-          mono
-          class="lpa-field"
-          placeholder="localhost:5173"
-          value="localhost:5173"
-          aria-label="Preview URL"
-        />
-        <span class="lpa-enter" aria-hidden="true"><CornerDownLeft size={15} /></span>
+      <div class="lpa-card">
+        {again ? (
+          <>
+            <h2 class="lpa-title">Open your app</h2>
+            <button type="button" class="lpa-last">
+              <StateDot state="running" />
+              <span class="lpa-last-url">http://localhost:5173</span>
+              <span class="lpa-last-when">12m ago</span>
+              <span class="lpa-last-go" aria-hidden="true"><RotateCw size={14} /></span>
+            </button>
+            <div class="lpa-or"><span>or</span></div>
+            <div class="lpa-row">
+              <Field
+                variant="box" size="lg" mono class="lpa-field"
+                type="url" placeholder="http://localhost:3000" aria-label="Preview URL"
+              />
+              <Go>Load</Go>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 class="lpa-title">Paste the address of your running app</h2>
+            <p class="lpa-lede">
+              It opens here, beside the conversation, and reloads itself while Moa edits.
+            </p>
+            <div class="lpa-row">
+              <Field
+                variant="box" size="lg" mono class="lpa-field"
+                type="url" placeholder="http://localhost:5173" aria-label="Preview URL"
+              />
+              <Go>Load</Go>
+            </div>
+            <div class="lpa-ports">
+              {PORTS.map((p) => (
+                <button type="button" class="lpa-port" key={p.port}>
+                  <span class="lpa-port-n">:{p.port}</span>
+                  {p.what && <span class="lpa-port-w">{p.what}</span>}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
-      <p class="lpa-foot">
-        <span class="lpa-foot-mono">~/dev/moa/design-visual</span>
-        <span class="lpa-foot-sep" aria-hidden="true">·</span>
-        moa will reach it from this machine
-      </p>
     </div>
   );
 }
 
-/* ───────────────────────────────────────────────────────────────────────────
-   B — CANDIDATOS. Moa proposes instead of asking blind. HYPOTHESIS, not fact:
-   deriving these from the session cwd (a package.json script, a vite.config)
-   has to be validated before it is built — nothing here scans ports.
-   ─────────────────────────────────────────────────────────────────────────── */
-const CANDIDATES = [
-  { port: "5173", name: "Vite", note: "vite.config.js", live: true },
-  { port: "3000", name: "Next", note: "package.json · dev", live: false },
-  { port: "7300", name: "Catalog", note: "npm run catalog", live: true },
-];
+/* ── B · Escenario ──────────────────────────────────────────────────────────
+   Premise broken: that the empty state is a screen of its own. It is the STAGE,
+   already at the width it will preview at, with the address where an address
+   belongs — docked to the chrome of the frame that will hold the app. Nothing
+   floats in the middle of a void, and the framing is visible before anything
+   loads. The presets stay LIVE: they resize the frame in front of you, which is
+   the only thing on this screen that can be tried before there is an app.
+   Inspect does not: it needs a document, so it alone goes quiet. */
 
-function TreatmentB() {
+function DirBDock() {
+  return (
+    <div class="lpb-dock">
+      <Globe size={15} class="lpb-dock-icon" aria-hidden="true" />
+      <Field
+        variant="box" size="md" mono class="lpb-dock-field"
+        type="url" placeholder="localhost:5173" aria-label="Preview URL"
+      />
+      <span class="lpb-dock-enter"><CornerDownLeft size={13} aria-hidden="true" /> Enter</span>
+    </div>
+  );
+}
+
+function DirB({ phone }) {
   return (
     <div class="lpb">
-      <div class="lpb-card">
-        <p class="lpb-head">
-          <span class="lpb-head-dir">~/dev/moa/design-visual</span>
-        </p>
-        <ul class="lpb-list">
-          {CANDIDATES.map((c, i) => (
-            <li key={c.port}>
-              <button type="button" class={`lpb-row${i === 0 ? " is-on" : ""}`}>
-                <span class="lpb-port">:{c.port}</span>
-                <span class="lpb-name">{c.name}</span>
-                <span class="lpb-note">{c.note}</span>
-                {c.live && <span class="lpb-live" aria-label="responding" />}
-                {i === 0 && <Check size={15} class="lpb-check" aria-hidden="true" />}
-              </button>
-            </li>
-          ))}
-          <li>
-            <button type="button" class="lpb-row is-other">
-              <Plus size={15} aria-hidden="true" />
-              <span class="lpb-name">Another address…</span>
-            </button>
-          </li>
-        </ul>
-      </div>
-      <p class="lpb-foot">Proposed from this session’s folder. Nothing was scanned.</p>
-    </div>
-  );
-}
-
-/* ───────────────────────────────────────────────────────────────────────────
-   C — ESTADO DEL PANEL. Not a screen: the panel with no document loaded. The
-   URL docks as a second toolbar row — attached to the chrome, not floating in
-   the middle — and the stage shows the empty device at the chosen width, so the
-   390/768/1280 segment already means something before anything loads.
-   ─────────────────────────────────────────────────────────────────────────── */
-function TreatmentCBar() {
-  return (
-    <div class="lpc-dock">
-      <Globe size={15} class="lpc-dock-icon" aria-hidden="true" />
-      <Field
-        variant="box"
-        size="md"
-        mono
-        class="lpc-dock-field"
-        placeholder="localhost:5173"
-        value="localhost:5173"
-        aria-label="Preview URL"
-      />
-      <Button variant="accent" size="md">Load</Button>
-    </div>
-  );
-}
-
-function TreatmentC() {
-  return (
-    <div class="lpc">
-      <div class="lpc-ghost">
-        <span class="lpc-ghost-w">1280 × 800</span>
+      <div class={`lpb-ghost${phone ? " is-phone" : ""}`}>
+        <span class="lpb-ghost-w">{phone ? "390 × 780" : "1280 × 800"}</span>
+        <p class="lpb-ghost-say">Your app opens in this frame</p>
+        <p class="lpb-ghost-sub">Type the address your dev server printed and press Enter.</p>
       </div>
     </div>
   );
 }
 
-/* ───────────────────────────────────────────────────────────────────────────
-   D — SECUENCIA. The two questions are one card with two lines: the app's URL,
-   and how this browser reaches moa. The second arrives already answered and
-   stays folded to its remembered value, so first run is one screen and not two.
-   ─────────────────────────────────────────────────────────────────────────── */
-function TreatmentD() {
-  return (
-    <div class="lpd">
-      <div class="lpd-card">
-        <div class="lpd-step">
-          <span class="lpd-num" aria-hidden="true">1</span>
-          <div class="lpd-body">
-            <Field
-              variant="box"
-              size="lg"
-              mono
-              class="lpd-field"
-              placeholder="localhost:5173"
-              value="localhost:5173"
-              aria-label="Preview URL"
-            />
-            <p class="lpd-say">the app you are building</p>
-          </div>
-        </div>
-        <div class="lpd-rule" aria-hidden="true" />
-        <div class="lpd-step is-done">
-          <span class="lpd-num" aria-hidden="true"><Check size={13} /></span>
-          <div class="lpd-body">
-            <p class="lpd-known">
-              <span class="lpd-known-value">moa-dev.tail9c2.ts.net:7492</span>
-              <button type="button" class="lpd-edit"><Pencil size={13} aria-hidden="true" /> Change</button>
-            </p>
-            <p class="lpd-say">how this browser reaches moa · remembered</p>
-          </div>
-        </div>
-        <Button variant="accent" size="lg" className="lpd-go">Open preview</Button>
-      </div>
-    </div>
-  );
-}
+/* ── C · Candidatos ─────────────────────────────────────────────────────────
+   Premise broken: that typing is the act. Moa runs on the machine the dev
+   server runs on, so it can offer what is already listening; typing becomes the
+   last row, not the entrance. The shape is a list — what moa uses for every
+   other "pick one of these".
+   HYPOTHESIS, not fact: enumerating local listeners (or deriving them from the
+   session's folder) is backend work that has to be validated before it is
+   built. The mock shows where it would lead, and says so on the screen.
+   The bar goes quiet, same as A. */
 
-/* ───────────────────────────────────────────────────────────────────────────
-   E — LEDGER. Second use is the common use. The panel opens on what this repo
-   was previewing, as the product's own mono ledger: last used, and the failure
-   that is already known about lives on its row instead of as a red box over the
-   frame. Typing anywhere filters, and an unmatched string becomes a new entry.
-   ─────────────────────────────────────────────────────────────────────────── */
-const HISTORY = [
-  { url: "localhost:5173", age: "12m", state: "ok" },
-  { url: "localhost:3000", age: "2d", state: "err", note: "refused" },
-  { url: "moa-dev.tail9c2.ts.net:8443", age: "6d", state: "ok" },
+const FOUND = [
+  { url: "localhost:5173", what: "vite · this folder", live: true },
+  { url: "localhost:8080", what: "caddy", live: true },
 ];
 
-function TreatmentE() {
+function DirC({ phone }) {
   return (
-    <div class="lpe">
-      <div class="lpe-search">
-        <Field
-          variant="inset"
-          size="lg"
-          mono
-          class="lpe-field"
-          placeholder="Type a URL, or pick one"
-          value=""
-          aria-label="Preview URL"
-        />
-      </div>
-      <ul class="lpe-list">
-        {HISTORY.map((h, i) => (
-          <li key={h.url}>
-            <button type="button" class={`lpe-row${i === 0 ? " is-first" : ""}`}>
-              <span class={`lpe-dot is-${h.state}`} aria-hidden="true" />
-              <span class="lpe-url">{h.url}</span>
-              {h.note && <span class="lpe-note">{h.note}</span>}
-              <span class="lpe-age">{h.age}</span>
-            </button>
-          </li>
+    <div class="lpc">
+      <div class="lpc-card">
+        <h2 class="lpc-title">Choose what to preview</h2>
+        <span class="lpc-group">Listening on this machine</span>
+        {FOUND.map((f) => (
+          <button type="button" class="lpc-row" key={f.url}>
+            <StateDot state="running" />
+            <span class="lpc-url">{f.url}</span>
+            <span class="lpc-what">{f.what}</span>
+            <span class="lpc-go">Open</span>
+          </button>
         ))}
-      </ul>
+        <span class="lpc-group">Used here before</span>
+        <button type="button" class="lpc-row is-quiet">
+          <History size={14} aria-hidden="true" />
+          <span class="lpc-url">localhost:3000</span>
+          <span class="lpc-what">2d ago</span>
+          <span class="lpc-go">Open</span>
+        </button>
+        <button type="button" class="lpc-row is-quiet">
+          <Plus size={14} aria-hidden="true" />
+          <span class="lpc-url is-plain">Another address…</span>
+        </button>
+      </div>
+      <p class="lpc-foot">Not listed? Start the dev server and it appears here.</p>
     </div>
   );
 }
 
-/* ───────────────────────────────────────────────────────────────────────────
-   F — MELOCOTÓN / DISPLAY. The URL is not in a box: it is the largest thing on
-   the stage, typed as content on a peach-lit canvas. Peach came free when the
-   user message was redesigned, and this is the one place it can mean "you are
-   the one saying this" again. The error, when it comes, is the same line in red.
-   ─────────────────────────────────────────────────────────────────────────── */
-function TreatmentF() {
-  return (
-    <div class="lpf">
-      <div class="lpf-glow" aria-hidden="true" />
-      <div class="lpf-type">
-        <span class="lpf-scheme" aria-hidden="true">http://</span>
-        <Field
-          variant="box"
-          size="lg"
-          mono
-          class="lpf-field"
-          placeholder="localhost:5173"
-          value="localhost:5173"
-          aria-label="Preview URL"
-        />
-        <span class="lpf-rule" aria-hidden="true" />
-      </div>
-      <div class="lpf-row">
-        <button type="button" class="lpf-chip">:3000</button>
-        <button type="button" class="lpf-chip">:8080</button>
-        <button type="button" class="lpf-chip">:4321</button>
-        <span class="lpf-enter"><CornerDownLeft size={14} aria-hidden="true" /> to open</span>
-      </div>
-    </div>
-  );
-}
-
-const TREATMENTS = [
-  { id: "a", title: "Prompt", premise: "no card, no title — the line IS the instruction", node: <TreatmentA /> },
-  { id: "b", title: "Candidatos", premise: "moa proposes; the user confirms (hypothesis: derived from cwd)", node: <TreatmentB /> },
-  { id: "c", title: "Estado del panel", premise: "not a screen — the panel with no document", node: <TreatmentC />, bar: <TreatmentCBar /> },
-  { id: "d", title: "Secuencia", premise: "the two questions are one card, the second already answered", node: <TreatmentD /> },
-  { id: "e", title: "Ledger", premise: "second use is the common use; errors live on the row", node: <TreatmentE /> },
-  { id: "f", title: "Melocotón", premise: "the URL is content, not a form control", node: <TreatmentF /> },
+const DIRECTIONS = [
+  {
+    id: "a",
+    title: "A · Tarjeta",
+    premise: "no es un formulario flotando: es una losa con el vocabulario de la celda de usuario",
+    render: (phone) => (
+      <Panel id="a" phone={phone} bar={<PreviewBar dim />}>
+        <DirA phone={phone} />
+      </Panel>
+    ),
+  },
+  {
+    id: "a2",
+    title: "A · ya usado",
+    premise: "la misma losa con historial: abrir lo de siempre es un toque, teclear sigue debajo",
+    render: (phone) => (
+      <Panel id="a2" phone={phone} bar={<PreviewBar dim />}>
+        <DirA phone={phone} again />
+      </Panel>
+    ),
+  },
+  {
+    id: "b",
+    title: "B · Escenario",
+    premise: "no es una pantalla aparte: es el escenario, ya a su tamaño, con la dirección en el cromo",
+    render: (phone) => (
+      <Panel id="b" phone={phone} bar={<PreviewBar width={phone ? "390" : "1280"} />} barSlot={<DirBDock />}>
+        <DirB phone={phone} />
+      </Panel>
+    ),
+  },
+  {
+    id: "c",
+    title: "C · Candidatos",
+    premise: "teclear no es el acto: moa ofrece lo que ya está escuchando (hipótesis de backend)",
+    render: (phone) => (
+      <Panel id="c" phone={phone} bar={<PreviewBar dim />}>
+        <DirC phone={phone} />
+      </Panel>
+    ),
+  },
 ];
 
 export function LPLab() {
   const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
   const phone = params.get("dens") === "phone";
   const only = params.get("t");
-  const list = only ? TREATMENTS.filter((t) => t.id === only) : TREATMENTS;
+  const list = only ? DIRECTIONS.filter((d) => d.id === only) : DIRECTIONS;
+  const bare = !!only;
   return (
-    <div class={`lp-lab${phone ? " is-phone" : ""}`}>
-      <header class="lp-lab-head">
-        <h1>Live Preview · empty state</h1>
-        <p>Six treatments, each under the real toolbar. Discard round.</p>
-      </header>
-      {list.map((t) => (
-        <Panel key={t.id} id={t.id} title={t.title} premise={t.premise} phone={phone} barSlot={t.bar}>
-          {t.node}
-        </Panel>
+    <div class={`lp-lab${phone ? " is-phone" : ""}${bare ? " is-bare" : ""}`}>
+      {!bare && (
+        <header class="lp-lab-head">
+          <h1>live preview · <em>el estado inicial</em></h1>
+          <p>
+            Tres direcciones para la pantalla que se ve <em>antes</em> de que haya app. Cada una responde
+            también qué hace la barra de presets cuando no hay nada que previsualizar. Sin melocotón: el
+            color sigue libre.
+          </p>
+        </header>
+      )}
+      {list.map((d) => (
+        <figure class={`lp-fig${phone ? " is-phone" : ""}`} key={d.id}>
+          {!bare && (
+            <figcaption class="lp-cap">
+              <span class="lp-cap-title">{d.title}</span>
+              <span class="lp-cap-premise">{d.premise}</span>
+            </figcaption>
+          )}
+          {d.render(phone)}
+        </figure>
       ))}
     </div>
   );
