@@ -1,0 +1,144 @@
+/* user-lab — CATALOG-ONLY. Lab chrome (`.ul-*`) plus the three alternatives'
+   overrides on top of UserWaypoint.css. Everything the shipped message draws
+   comes from the production sheet untouched; only what an alternative CHANGES
+   is written here, with the shared tokens, so the chosen one can be lifted
+   into UserWaypoint.css as-is. */
+
+/* ── lab chrome ─────────────────────────────────────────────────────────── */
+.ul { margin: 0 auto; padding: var(--space-8) var(--space-6) var(--space-12); }
+.ul-head h1 { font-size: var(--text-2xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.ul-head h1 em { font-style: normal; color: var(--peach); }
+.ul-head p { color: var(--overlay1); margin-top: var(--space-2); max-width: 88ch; font-size: var(--text-md); }
+
+.ul-variant { margin-top: var(--space-12); }
+.ul-variant-head h2 { font-size: var(--text-xl); font-weight: var(--weight-semibold); }
+.ul-variant-head p { color: var(--overlay1); font-size: var(--text-sm); margin-top: var(--space-1); max-width: 96ch; }
+
+.ul-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  margin-top: var(--space-4);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+
+/* A frame is a slice of the conversation column: canvas tone, the transcript's
+   own padding. Desktop is --content-block plus the transcript's 22px sides;
+   the phone is the real 390 with its 18px. */
+.ul-frame {
+  flex: none;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim-2);
+  font-family: var(--font);
+  color: var(--zl-t1);
+}
+.ul-desk { width: calc(var(--content-block) + 44px); padding: 24px 22px 8px; }
+.ul-phone { width: 390px; padding: 20px 18px 8px; }
+
+/* ── A · the quote ──────────────────────────────────────────────────────
+   The mark rides the last line of the text instead of a row of its own. */
+.ul-a .zl-user {
+  padding-left: 12px;
+  border-left-width: 2px;
+  border-left-color: color-mix(in srgb, var(--peach) 60%, transparent);
+  font-size: var(--zl-fs-body);
+  line-height: 1.6;
+  color: var(--zl-t2);
+}
+.ul-desk.ul-frame .ul-a .zl-user { font-size: 15px; }
+.ul-a .zl-user.is-parent { border-left-color: var(--waypoint-accent); }
+.ul-a .zl-user-body p { display: inline-block; max-width: 100%; }
+.ul-a .zl-user-body p + p { display: block; }
+.ul-a .zl-user-body p:has(.wp-rewind) { display: block; }
+.ul-a .zl-user .wp-rewind {
+  display: inline-flex;
+  vertical-align: -3px;
+  margin: -6px 0 -6px 8px;
+  color: var(--zl-t4);
+  opacity: 0.8;
+}
+@media (hover: hover) {
+  .ul-a .zl-user .wp-rewind:hover:not(:disabled) { color: var(--peach); }
+}
+.ul-a .zl-user .wp-rewind:focus-visible { color: var(--peach); }
+/* A skirt keeps its distance from the last line, mark included. */
+.ul-a .wp-attachments { margin-top: 10px; }
+
+/* ── B · the margin mark ────────────────────────────────────────────────
+   EventBlock's shape: glyph in the gutter, text indented past it. The dot
+   IS the rewind mark: one glyph on the first line that says "you" at rest
+   and "back to here" on hover. Nothing below the text, so a one-liner is
+   one line tall. */
+.ul-b .zl-user {
+  padding: 2px 0 2px 22px;
+  border-left: 0;
+}
+.ul-b .zl-user-when {
+  position: absolute;
+  left: -9px;
+  top: 0;
+  margin: 0;
+}
+.ul-b .zl-user:has(.zl-user-label) .zl-user-when { top: 20px; }
+.ul-b .zl-user .wp-rewind {
+  margin: 0;
+  opacity: 1;
+  color: var(--peach);
+}
+.ul-b .zl-user.is-parent .wp-rewind { color: var(--waypoint-accent); }
+.ul-b .zl-user .wp-rewind svg { display: none; }
+.ul-b .zl-user .wp-rewind::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+}
+@media (hover: hover) {
+  .ul-b .zl-user .wp-rewind:hover:not(:disabled) svg { display: block; }
+  .ul-b .zl-user .wp-rewind:hover:not(:disabled)::after { display: none; }
+}
+
+/* ── C · the block ──────────────────────────────────────────────────────
+   The raised plane the composer uses: what you typed keeps the surface it
+   was typed on. Fits the text; the mark sits in its own corner. */
+.ul-c .zl-user {
+  width: fit-content;
+  max-width: 100%;
+  padding: 9px 40px 9px 14px;
+  border-left: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+}
+.ul-c .zl-user.is-parent { box-shadow: 0 0 0 1px color-mix(in srgb, var(--waypoint-accent) 45%, transparent); }
+.ul-c .zl-user.has-skirt { width: 100%; padding-bottom: 0; }
+.ul-c .zl-user-when {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  margin: 0;
+}
+.ul-c .zl-user .wp-rewind { margin: 0; color: var(--zl-t4); }
+@media (hover: hover) {
+  .ul-c .zl-user .wp-rewind:hover:not(:disabled) { color: var(--peach); }
+}
+.ul-c .zl-user .wp-rewind:focus-visible { color: var(--peach); }
+/* The skirt is the block's foot again: flush, corners closed by the block. */
+.ul-c .wp-attachments {
+  margin: 10px -40px 0 -14px;
+  border-radius: 0 0 var(--zl-r-md) var(--zl-r-md);
+  box-shadow: none;
+  border-top: 1px solid var(--zl-line);
+}
+.ul-c .zl-user-body code { background: var(--zl-control); }
+
+/* Phone: every rewind mark is a 44px target, drawn at 26. */
+.ul-phone .wp-rewind::before {
+  content: "";
+  position: absolute;
+  inset: -9px;
+}
+.ul-phone .wp-rewind { position: relative; }
