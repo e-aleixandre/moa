@@ -1,0 +1,430 @@
+/* devices-lab — CATALOG ONLY. Lab chrome (`.dl-*`) plus each direction's own
+   rules on top of the shipped settings sheet (GlobalSettings.css). Everything
+   the sheet draws — head, body, section key, summary prose, type — comes from
+   the production sheet untouched; only what a direction ADDS is written here,
+   in the canonical tokens, so the chosen one can be lifted as-is. */
+
+/* ── lab chrome ─────────────────────────────────────────────────────────── */
+.dl { padding: var(--space-8) var(--space-6) var(--space-12); }
+.dl-head { max-width: 88ch; margin: 0 auto var(--space-10); }
+.dl-head h1 { font-size: var(--text-2xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.dl-head h1 em { font-style: normal; color: var(--zl-accent); }
+.dl-head p { margin-top: var(--space-2); max-width: 86ch; color: var(--zl-t3); font-size: var(--text-md); line-height: var(--leading-normal); }
+
+.dl-dir { max-width: 1180px; margin: 0 auto var(--space-12); }
+.dl-dir-head h2 { font-size: var(--text-xl); font-weight: var(--weight-semibold); }
+.dl-dir-head p { margin-top: var(--space-1); max-width: 96ch; color: var(--zl-t3); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.dl-strip { display: flex; align-items: flex-start; gap: var(--space-6); margin-top: var(--space-4); flex-wrap: wrap; }
+
+/* A frame is the sheet's containing block: `.zl-set` is absolutely positioned
+   (GlobalSettings.css) and needs a positioned, clipping ancestor, exactly as
+   the device frame gives it in zones-lab. Desktop is the real 420px panel in a
+   860-wide stage; the phone is the real 390. */
+.dl-frame {
+  position: relative;
+  flex: none;
+  width: 560px;
+  height: 560px;
+  overflow: hidden;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim-2);
+}
+.dl-frame.is-phone { width: 390px; height: 660px; }
+/* The mockup shows the page, so the sheet is as tall as the frame allows
+   rather than shrink-wrapped around four rows. */
+.dl-set { max-height: calc(100% - 48px); }
+.dl-frame.is-phone .dl-set { max-height: 88%; }
+
+/* The empty state. Shared by the three directions on purpose: whichever list
+   wins, the screen with nothing in it says the same thing in the same voice. */
+.dl-empty { padding: var(--space-8) var(--space-4) var(--space-6); text-align: center; }
+.dl-empty-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: var(--space-4);
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-accent-dim);
+  box-shadow: 0 0 0 1px var(--zl-accent-line);
+  color: var(--zl-accent);
+}
+.dl-empty-t { color: var(--zl-t1); font-size: var(--zl-fs-title); font-weight: var(--weight-semibold); }
+.dl-empty-d {
+  margin: var(--space-2) auto 0;
+  max-width: 34ch;
+  color: var(--zl-t3);
+  font-size: var(--zl-fs-body);
+  line-height: var(--leading-normal);
+}
+.dl-empty-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-touch);
+  margin-top: var(--space-5);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-accent-med);
+  box-shadow: 0 0 0 1px var(--zl-accent-line);
+  color: var(--zl-accent);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: background var(--motion-hover) ease;
+}
+.dl-empty-go:hover { background: var(--zl-accent-glow, rgba(203, 166, 247, 0.3)); }
+
+/* The "pair another" foot, shared shape across the three: a quiet door, not a
+   primary action — the list is the page, and pairing already has a home in the
+   command palette. */
+.dl-a-pair, .dl-b-pair, .dl-c-pair {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--control-touch);
+  margin-top: var(--space-4);
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  cursor: pointer;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
+}
+.dl-a-pair:hover, .dl-b-pair:hover, .dl-c-pair:hover { background: var(--zl-hi); color: var(--zl-t1); }
+
+/* ── A · Roster ─────────────────────────────────────────────────────────
+   The sheet's row, with a mark on the left and an action on the right. Sized
+   off the sheet's own row (min-height 44 / 48 on the phone). */
+.dl-a-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-2) 0;
+  border-radius: var(--zl-r-md);
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.dl-a-row + .dl-a-row { box-shadow: inset 0 1px 0 var(--zl-line); }
+.dl-a-row.is-gone { opacity: 0.55; }
+.dl-a-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+}
+.dl-a-row.is-gone .dl-a-mark { color: var(--zl-t4); }
+.dl-a-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dl-a-n {
+  color: var(--zl-t1);
+  font-size: var(--zl-fs-body);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dl-a-d { color: var(--zl-t4); font-size: var(--zl-fs-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-a-left { color: var(--zl-t4); }
+.dl-a-left.is-soon { color: var(--zl-yellow); }
+.dl-a-past {
+  flex: none;
+  color: var(--zl-t4);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+}
+.dl-a-act {
+  flex: none;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t3);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease, box-shadow var(--motion-hover) ease;
+}
+.dl-a-act:hover { background: var(--red-dim); box-shadow: 0 0 0 1px rgba(243, 139, 168, 0.4); color: var(--zl-red); }
+.dl-a-confirm {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  animation: dl-arm var(--motion-fast) var(--motion-ease);
+}
+@keyframes dl-arm { from { opacity: 0; transform: translateX(var(--motion-push)); } }
+.dl-a-cancel, .dl-a-go {
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+}
+.dl-a-cancel { background: transparent; box-shadow: var(--zl-rim); color: var(--zl-t2); }
+.dl-a-go { background: var(--red-dim); box-shadow: 0 0 0 1px rgba(243, 139, 168, 0.45); color: var(--zl-red); font-weight: var(--weight-medium); }
+.dl-a-go:hover { background: rgba(243, 139, 168, 0.22); }
+.dl-a-row.is-armed { background: var(--red-dim); padding-inline: var(--space-2); }
+/* Armed, the row gives its right side to the two answers: the text column
+   yields instead of wrapping into a second line that would push every row
+   below it down. Confirming must move nothing but this row. */
+.dl-a-row.is-armed .dl-a-txt { flex: 0 1 auto; }
+/* The remaining-days suffix goes with it. Half a reading ("9 days l…") is
+   worse than no reading: the question on screen is now Cancel or Revoke. */
+.dl-a-row.is-armed .dl-a-left { display: none; }
+
+.dl-frame.is-phone .dl-a-row { min-height: 60px; }
+.dl-frame.is-phone .dl-a-act, .dl-frame.is-phone .dl-a-cancel, .dl-frame.is-phone .dl-a-go { min-height: var(--control-lg); }
+
+/* ── B · Credentials ────────────────────────────────────────────────────
+   An object on the canvas: raised tone, hairline rim, the shape the ledger
+   and the composer already use. */
+.dl-b-card {
+  padding: var(--space-3);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  transition: box-shadow var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
+}
+.dl-b-card + .dl-b-card { margin-top: var(--space-2); }
+.dl-b-card.is-gone { opacity: 0.5; background: transparent; }
+.dl-b-card.is-armed { box-shadow: 0 0 0 1px rgba(243, 139, 168, 0.45); }
+.dl-b-head { display: flex; align-items: center; gap: var(--space-3); }
+.dl-b-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--zl-r-sm);
+  background: var(--green-dim);
+  box-shadow: 0 0 0 1px rgba(166, 227, 161, 0.28);
+  color: var(--zl-green);
+}
+.dl-b-mark.is-soon { background: var(--yellow-dim); box-shadow: 0 0 0 1px rgba(249, 226, 175, 0.28); color: var(--zl-yellow); }
+.dl-b-mark.is-gone { background: var(--zl-control); box-shadow: var(--zl-rim); color: var(--zl-t4); }
+.dl-b-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dl-b-n {
+  color: var(--zl-t1);
+  font-size: var(--zl-fs-body);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dl-b-d { color: var(--zl-t4); font-size: var(--zl-fs-meta); }
+.dl-b-pill {
+  flex: none;
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-full);
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+.dl-b-pill.is-ok { background: var(--green-dim); color: var(--zl-green); }
+.dl-b-pill.is-soon { background: var(--yellow-dim); color: var(--zl-yellow); }
+.dl-b-pill.is-gone { background: var(--zl-control); color: var(--zl-t4); }
+
+/* The meter: how much of THIS credential's own window is spent. Fills from the
+   left, so what is left is what is dark. */
+.dl-b-life { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); }
+.dl-b-meter {
+  flex: 1;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--zl-control);
+  overflow: hidden;
+}
+.dl-b-meter i {
+  display: block;
+  height: 100%;
+  width: calc(var(--spent) * 100%);
+  border-radius: inherit;
+  background: var(--zl-green);
+  transform-origin: left;
+  animation: dl-meter var(--motion-slow) var(--motion-ease);
+}
+.dl-b-meter.is-soon i { background: var(--zl-yellow); }
+@keyframes dl-meter { from { transform: scaleX(0); } }
+.dl-b-left { flex: none; color: var(--zl-t4); font-family: var(--mono); font-size: var(--zl-fs-meta); }
+.dl-b-left.is-soon { color: var(--zl-yellow); }
+
+.dl-b-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: var(--control-sm);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  box-shadow: inset 0 1px 0 var(--zl-line);
+}
+.dl-b-note { color: var(--zl-t4); font-size: var(--zl-fs-meta); }
+.dl-b-ask { color: var(--zl-red); font-size: var(--zl-fs-meta); animation: dl-arm var(--motion-fast) var(--motion-ease); }
+.dl-b-acts { display: inline-flex; gap: var(--space-2); animation: dl-arm var(--motion-fast) var(--motion-ease); }
+.dl-b-act, .dl-b-cancel, .dl-b-go {
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
+}
+.dl-b-act { background: transparent; color: var(--zl-t3); padding-inline: 0; }
+.dl-b-act:hover { color: var(--zl-red); }
+.dl-b-cancel { background: transparent; box-shadow: var(--zl-rim); color: var(--zl-t2); }
+.dl-b-go { background: var(--red-dim); box-shadow: 0 0 0 1px rgba(243, 139, 168, 0.45); color: var(--zl-red); font-weight: var(--weight-medium); }
+.dl-b-go:hover { background: rgba(243, 139, 168, 0.22); }
+.dl-frame.is-phone .dl-b-act, .dl-frame.is-phone .dl-b-cancel, .dl-frame.is-phone .dl-b-go { min-height: var(--control-lg); }
+
+/* ── C · Ledger ─────────────────────────────────────────────────────────
+   Dense rows with a state spine, and the destructive action hidden UNDER the
+   row: arming slides the face aside rather than swapping controls in place. */
+.dl-c-tally {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 2px var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+}
+.dl-c-row {
+  position: relative;
+  border-radius: var(--zl-r-sm);
+  overflow: hidden;
+}
+.dl-c-row + .dl-c-row { margin-top: 1px; }
+.dl-c-under {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  background: var(--red-dim);
+  /* Hidden until armed, and not merely covered: a control the face slides off
+     would otherwise be tabbable and clickable through the gap at the row's
+     end, which is the opposite of putting it underneath. */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.dl-c-row.is-armed .dl-c-under { opacity: 1; pointer-events: auto; }
+.dl-c-under-ask {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--zl-t2);
+  font-size: var(--zl-fs-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dl-c-under-ask b { color: var(--zl-t1); font-weight: var(--weight-medium); }
+.dl-c-face {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 52px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  background: var(--zl-sheet);
+  transition: transform var(--motion-base) var(--motion-ease);
+}
+/* Armed, the face leaves ENTIRELY and the row becomes its own question. A
+   partial slide would uncover the buttons while hiding the name they act on,
+   which is a confirmation that does not say what it confirms. */
+.dl-c-row.is-armed .dl-c-face { transform: translateX(-100%); }
+.dl-c-row.is-gone .dl-c-face { opacity: 0.5; }
+.dl-c-spine {
+  position: absolute;
+  left: 0;
+  top: var(--space-2);
+  bottom: var(--space-2);
+  width: 2px;
+  border-radius: var(--radius-full);
+}
+.dl-c-spine.is-ok { background: var(--zl-green); }
+.dl-c-spine.is-soon { background: var(--zl-yellow); }
+.dl-c-spine.is-gone { background: var(--zl-control); }
+.dl-c-glyph { flex: none; display: inline-flex; color: var(--zl-t3); }
+.dl-c-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.dl-c-n {
+  color: var(--zl-t1);
+  font-size: var(--zl-fs-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dl-c-d { color: var(--zl-t4); font-family: var(--mono); font-size: var(--text-micro); }
+.dl-c-left {
+  flex: none;
+  color: var(--zl-t3);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-variant-numeric: tabular-nums;
+}
+.dl-c-left.is-soon { color: var(--zl-yellow); }
+.dl-c-left.is-gone { color: var(--zl-t4); }
+.dl-c-act {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t4);
+  cursor: pointer;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
+}
+.dl-c-act:hover { background: var(--red-dim); color: var(--zl-red); }
+.dl-c-cancel, .dl-c-go {
+  flex: none;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+}
+.dl-c-cancel { background: var(--zl-control); color: var(--zl-t2); }
+.dl-c-go { background: var(--zl-red); color: var(--crust); font-weight: var(--weight-semibold); }
+.dl-frame.is-phone .dl-c-face { min-height: 58px; }
+.dl-frame.is-phone .dl-c-act { width: var(--control-touch); height: var(--control-touch); }
+.dl-frame.is-phone .dl-c-cancel, .dl-frame.is-phone .dl-c-go { min-height: var(--control-lg); }
+
+/* Rule 6: a user who asked for less motion did not carve out an exception for
+   a meter or a sliding row. tokens.css states this globally too; it is
+   repeated here because the lab sheet is judged on its own. */
+@media (prefers-reduced-motion: reduce) {
+  .dl-a-confirm, .dl-b-ask, .dl-b-acts, .dl-b-meter i { animation: none; }
+  .dl-c-face, .dl-a-row, .dl-b-card { transition: none; }
+}
