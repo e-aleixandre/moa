@@ -84,8 +84,11 @@ private final class ShareInboxMessageHandler: NSObject, WKScriptMessageHandler {
                 respond(id: id, value: [:])
             case "peek":
                 try requireBoundServer(message.frameInfo.securityOrigin)
-                let share = try nextShare()
-                respond(id: id, value: ["share": share ?? NSNull()])
+                // `??` needs both sides to be the same type, and a share is a
+                // dictionary while the empty case has to reach JSON as null.
+                // Widening to Any is what lets one expression carry both.
+                let share: Any = try nextShare() ?? NSNull()
+                respond(id: id, value: ["share": share])
             case "acknowledge":
                 try requireBoundServer(message.frameInfo.securityOrigin)
                 guard let shareID = options["id"] as? String else { throw SharedInboxError.corrupt }
