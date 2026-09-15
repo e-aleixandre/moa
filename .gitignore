@@ -16,7 +16,6 @@ pkg/serve/frontend-next/node_modules/
 # Local implementation plans and working notes
 tmp/
 
-# Native container: generated projects and deps. See mobile/README.md.
+# Native container: deps and generated Android project. See mobile/README.md.
 mobile/node_modules/
-mobile/ios/
 mobile/android/
