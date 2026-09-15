@@ -4,7 +4,10 @@
 // window is sent there and the real frontend takes over -- including the next
 // launch, which never sees this screen again.
 
-import { parsePairing, storedServer, rememberServer } from "./pairing.js";
+import {
+  parsePairing, storedServer, rememberServer, forgetServer,
+} from "./pairing.js";
+import { claimDevice, authorizeDevice } from "./native-auth.js";
 
 const $ = (id) => document.getElementById(id);
 const error = $("error");
@@ -22,6 +25,11 @@ async function bindNativeServer(origin) {
   if (typeof inbox?.bindServer === "function") await inbox.bindServer(origin);
 }
 
+async function clearNativeServer() {
+  const inbox = globalThis.MoaShareInbox;
+  if (typeof inbox?.clearServer === "function") await inbox.clearServer();
+}
+
 async function showPendingShare() {
   const inbox = globalThis.MoaShareInbox;
   if (typeof inbox?.status !== "function") return;
@@ -33,24 +41,12 @@ async function showPendingShare() {
   }
 }
 
-// claim — turn a one-time payload into a credential this device keeps.
-// The route is deliberately unauthenticated: the short-lived secret in the
-// envelope is the authority (see pkg/serve/route_auth.go).
+// The one-time claim and durable credential stay in native code. The local
+// page receives only success or a classified error and persists only the
+// non-secret server origin.
 async function claim(origin, payload) {
-  const [, pairingID, pairingSecret] = payload.split(":");
-  if (!pairingID || !pairingSecret) throw new Error("malformed");
-
-  const response = await fetch(`${origin}/api/pulse/pairings/claim`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Moa-Request": "1" },
-    body: JSON.stringify({
-      pairing_id: pairingID,
-      pairing_secret: pairingSecret,
-      device_label: deviceLabel(),
-    }),
-  });
-  if (!response.ok) throw new Error(await response.text());
-  return response.json();
+  await claimDevice(origin, payload, deviceLabel());
+  rememberServer(origin);
 }
 
 // A label the owner can recognise in the device list, so revoking the right
@@ -70,30 +66,37 @@ async function pair(text) {
   fail("");
   try {
     await claim(parsed.origin, parsed.payload);
-  } catch {
-    // A pairing code is short-lived and single-use, which is the likeliest
-    // reason to be here -- worth saying, rather than "something went wrong".
-    fail("Could not pair. The code may have expired; create a new one.");
+  } catch (claimError) {
+    if (claimError?.code === "keychain") {
+      fail("Could not secure this device. Check its passcode settings and try again.");
+    } else if (claimError?.code === "unavailable") {
+      fail("Could not reach this moa. Check the connection and try again.");
+    } else {
+      // A pairing code is short-lived and single-use, which is the likeliest
+      // reason to be here -- worth saying, rather than "something went wrong".
+      fail("Could not pair. The code may have expired; create a new one.");
+    }
     return;
   }
   try {
+    await authorizeDevice(parsed.origin);
     await bindNativeServer(parsed.origin);
-  } catch {
-    fail("Could not finish setting up this app. Try pairing again.");
+  } catch (setupError) {
+    if (setupError?.code === "not_paired") {
+      forgetServer();
+      fail("Pairing did not finish. Create one new code and try again.");
+    } else {
+      // The claim already succeeded and is safely in Keychain. Do not tell the
+      // owner to spend another rate-limited code for a transient setup failure.
+      fail("Paired, but could not open this moa. Check the connection and reopen the app.");
+    }
     return;
   }
 
-  rememberServer(parsed.origin);
   location.replace(parsed.origin);
 }
 
-// Already bound: go straight through, without showing the pairing screen.
-const known = storedServer();
-if (known) {
-  bindNativeServer(known).then(() => location.replace(known)).catch(() => {
-    fail("Could not open the paired moa. Reinstall the app and pair it again.");
-  });
-} else {
+function installPairingControls() {
   showPendingShare();
   $("toggle").addEventListener("click", () => {
     $("manual").classList.add("on");
@@ -127,4 +130,26 @@ if (known) {
       $("manual").classList.add("on");
     }
   });
+}
+
+// Already bound: renew a short browser session from Keychain before loading
+// the remote page. A revoked credential returns to a usable pairing screen;
+// a network failure preserves it for the next launch.
+const known = storedServer();
+if (known) {
+  authorizeDevice(known)
+    .then(() => bindNativeServer(known))
+    .then(() => location.replace(known))
+    .catch(async (authError) => {
+      if (authError?.code === "not_paired") {
+        forgetServer();
+        try { await clearNativeServer(); } catch { /* already unbound is fine */ }
+        fail("This device is no longer paired. Create a new code to pair it again.");
+        installPairingControls();
+        return;
+      }
+      fail("Could not reach your paired moa. Check the connection and reopen the app.");
+    });
+} else {
+  installPairingControls();
 }

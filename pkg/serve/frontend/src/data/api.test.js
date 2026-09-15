@@ -140,3 +140,26 @@ test('an answered rejection carries its HTTP status, a dead request carries none
     globalThis.fetch = originalFetch;
   }
 });
+
+test('a native 401 renews the browser session instead of reconnecting forever', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalBridge = globalThis.MoaNativeAuth;
+  const originalLocation = globalThis.location;
+  let renewals = 0;
+  let reloads = 0;
+  globalThis.fetch = () => Promise.resolve(new Response('unauthorized', { status: 401 }));
+  globalThis.MoaNativeAuth = { reauthorize: async () => { renewals += 1; } };
+  globalThis.location = { reload: () => { reloads += 1; } };
+  try {
+    await expect(api('GET', '/api/sessions')).rejects.toThrow('401: unauthorized');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(renewals).toBe(1);
+    expect(reloads).toBe(1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalBridge === undefined) delete globalThis.MoaNativeAuth;
+    else globalThis.MoaNativeAuth = originalBridge;
+    if (originalLocation === undefined) delete globalThis.location;
+    else globalThis.location = originalLocation;
+  }
+});

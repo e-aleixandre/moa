@@ -28,6 +28,7 @@ import {
   beginHistoryHydration, canAppendHistoryDelta, confirmHistoryHydrationInit,
   finishHistoryHydration, lastDurableHistoryAnchor,
 } from './history-hydration.js';
+import { recoverNativeAuthorization } from './native-auth.js';
 
 export const REQUEST_HEADERS = Object.freeze({ 'Content-Type': 'application/json', 'X-Moa-Request': '1' });
 export const DEFAULT_API_TIMEOUT_MS = 15000;
@@ -62,6 +63,7 @@ export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_
     const r = await fetch(path, opts);
     if (timedOut) throw new Error('request aborted');
     if (!r.ok) {
+      if (r.status === 401) void recoverNativeAuthorization();
       // Carry the HTTP status on the error: a caller can then tell a REJECTION
       // the server actually answered (409 busy, 503 queue full) from a request
       // that never got an answer (aborted fetch, network failure), which proves
