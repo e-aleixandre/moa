@@ -1,7 +1,7 @@
 import { useRef, useState } from "preact/hooks";
 import { Rewind as RewindIcon } from "lucide-preact";
 import { sanitizeHtml } from "../../util/sanitize.js";
-import { clockHHMM } from "../../data/util/clock.js";
+import { clockHHMM, clockDayLabel } from "../../data/util/clock.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { WaypointAttachments, attachmentImageSrc, attachmentLabel } from "./WaypointAttachments.jsx";
 import { PreviewReference } from "./PreviewReference.jsx";
@@ -117,8 +117,13 @@ export function UserWaypoint({
   // parent-session messages still name their source, because that is not "you".
   const showLabel = label && label !== "You";
   // `time` arrives as the server's epoch seconds, not as text. A pre-formatted
-  // string (the catalogue's fixtures, "10:12") passes through untouched.
-  const hhmm = typeof time === "string" && !/^\d+$/.test(time) ? time : clockHHMM(time);
+  // string (the catalogue's fixtures, "10:12") passes through untouched, and
+  // then carries no day of its own.
+  const preformatted = typeof time === "string" && !/^\d+$/.test(time);
+  const hhmm = preformatted ? time : clockHHMM(time);
+  // Only a message from another day says which: the column must not widen, so
+  // the label rides ABOVE the hour rather than beside it.
+  const day = preformatted ? "" : clockDayLabel(time);
 
   return (
     <>
@@ -127,15 +132,31 @@ export function UserWaypoint({
         style={accent ? { "--waypoint-accent": `var(--${accent})` } : undefined}
         {...rest}
       >
-        {showLabel && <div class="zl-user-label">{label}</div>}
-        <div class="zl-user-body">
-          {reference && <PreviewReference reference={reference} />}
-          {html != null ? <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} /> : children}
+        {/* The gutter. It holds the hour and nothing else; it is also what
+            indents the cell, so it exists even when there is no time to put
+            in it, or the slab would jump left on a message without one. */}
+        <div class="zl-user-gutter">
+          {hhmm && (
+            <span class="zl-user-clock">
+              {day && <span class="zl-user-day">{day}</span>}
+              <time class="zl-user-hhmm zl-data">{hhmm}</time>
+            </span>
+          )}
         </div>
-        {(hhmm || onRewind) && (
-          <span class="zl-user-when zl-data">
-            {hhmm && <time>{hhmm}</time>}
-            {onRewind && (
+        <div class="zl-user-cell">
+          {showLabel && <div class="zl-user-label">{label}</div>}
+          <div class="zl-user-body">
+            {reference && <PreviewReference reference={reference} />}
+            {html != null ? <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} /> : children}
+          </div>
+          <WaypointAttachments attachments={attachments} sessionId={sessionId} onOpenImage={setOpenAttachment} />
+          {/* Rewind belongs to the CELL, pinned to its right edge. It used to
+              ride a full-measure row under the text, which put it 311px from
+              the end of a short message on the desktop and overlapped the
+              text by 27px on the phone -- both measured. Anchored to the slab
+              it is a few px from its own words at every width. */}
+          {onRewind && (
+            <span class="zl-user-rail">
               <button
                 type="button"
                 class="wp-rewind"
@@ -146,10 +167,9 @@ export function UserWaypoint({
               >
                 <RewindIcon size={12} aria-hidden="true" />
               </button>
-            )}
-          </span>
-        )}
-        <WaypointAttachments attachments={attachments} sessionId={sessionId} onOpenImage={setOpenAttachment} />
+            </span>
+          )}
+        </div>
       </div>
       <ImageLightbox attachment={openAttachment} sessionId={sessionId} onClose={() => setOpenAttachment(null)} />
       {/* Rendered unconditionally, `open` carrying the state: see ImageLightbox.

@@ -1,15 +1,28 @@
 /* UserWaypoint — the user's message.
 
-   This sheet is the catalogue's, MOVED (catalog/zones-lab.jsx `UserMessage`,
-   zones-lab.css `.zl-user` / `.zl-user-body` / `.zl-user-when`), not translated.
-   Peach is the left edge and ONLY the left edge: the one place in the product
-   it is allowed. There is no card and no "YOU" header — the bar is the speaker.
-   The catalogue imports this component now, so these are the only user-message
-   rules in the product.
+   A CELL, indented against a gutter that carries the hour. The peach 3px edge
+   is gone, and so is peach from this component: the message is identified by
+   having a surface of its own where the assistant's turn has none, which is a
+   difference of shape rather than of colour. That frees peach from the
+   transcript's vocabulary entirely.
 
-   The `--zl-*` custom properties are the catalogue's tonal ladder. Inside
-   ?view=zones they resolve from `.zl` (zones-lab.css); everywhere else the
-   fallback IS the catalogue's own value.
+   The gutter holds the send time in mono `tabular-nums`, so 09:14 and 11:08
+   occupy the same box and the column never breathes. A message from another
+   day wears its day in micro ABOVE the hour, never beside it, for the same
+   reason. 64px on the desktop; 44px on the phone, which is what `09:14` in
+   12px mono (36px) needs plus room.
+
+   Rewind is pinned to the CELL's right edge rather than to the 680px measure.
+   On the old full-measure row it sat 311px from the end of a short message on
+   the desktop and overlapped the text by 27px on the phone -- both measured.
+   There is no copy here: copying is the assistant's foot, and a control that
+   repeats beside everything you ever typed earns its place or leaves.
+
+   Every `--zl-*` and every token below resolves from tokens/tokens.css, which
+   is the single source. (An earlier comment here claimed they only resolve
+   under `.zl` and that the inline fallback was the catalogue's value; that
+   stopped being true when they were centralized, and the fallbacks it
+   justified are gone.)
 
    What is added below the catalogue's block is only what the prototype never
    had: rewind, attachments, the live-preview reference, a parent-session
@@ -17,26 +30,56 @@
 
 .zl-user {
   position: relative;
-  margin: 0 0 24px;
-  padding: 2px 0 2px 14px;
-  border-left: 3px solid var(--peach, #fab387);
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  align-items: start;
+  margin: 0 0 16px;
   font-size: var(--zl-fs-title);
   line-height: 1.6;
   color: var(--zl-t1);
 }
+
+.zl-user-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding-top: 10px;
+  align-self: stretch;
+}
+.zl-user-clock { display: flex; flex-direction: column; align-items: flex-start; }
+.zl-user-hhmm {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: var(--zl-t4);
+  white-space: nowrap;
+}
+.zl-user-day {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: 0.06em;
+  color: var(--surface2);
+  white-space: nowrap;
+}
+
+/* The cell. Its right padding is the rewind's lane, so the mark never lands
+   on top of the last word of a message that fills the line. */
+.zl-user-cell {
+  position: relative;
+  min-width: 0;
+  padding: 10px 14px;
+  padding-right: 44px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+}
+
 .zl-user-body {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 .zl-user-body p { margin: 0; }
 .zl-user-body p + p { margin-top: 8px; }
-.zl-user-when {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-  color: var(--zl-t4);
-}
 .zl-user .zl-data {
   font-family: var(--mono);
   font-size: var(--zl-fs-meta);
@@ -53,85 +96,109 @@
   color: var(--zl-t4);
 }
 
-.zl-user.is-parent { border-left-color: var(--waypoint-accent); }
+/* A task from the parent session keeps its accent, now as an inset edge on
+   the cell rather than a border on the whole block. */
+.zl-user.is-parent .zl-user-cell {
+  box-shadow: var(--zl-rim), inset 2px 0 0 var(--waypoint-accent);
+}
 .zl-user.is-parent .zl-user-label { color: var(--waypoint-accent); }
 
 .zl-user-body code {
   padding: 1px 5px;
   border-radius: var(--zl-r-sm);
-  background: var(--zl-raised);
+  background: var(--zl-canvas);
   box-shadow: var(--zl-rim);
   font-family: var(--mono);
   font-size: 0.875em;
   color: var(--zl-t2);
 }
 
+/* The phone's gutter: 44px, which holds `09:14` in 12px mono (36px) with room
+   and gives the cell the other 8 back. */
+@media (max-width: 640px) {
+  .zl-user { grid-template-columns: 44px 1fr; }
+}
+.mconv .zl-user { grid-template-columns: 44px 1fr; }
+
 .zl-transcript.is-dense .zl-user {
-  margin-bottom: 16px;
-  padding-left: 12px;
+  margin-bottom: 12px;
+  grid-template-columns: 44px 1fr;
   font-size: var(--zl-fs-body);
   line-height: 1.55;
 }
+.zl-transcript.is-dense .zl-user-cell { padding: 8px 12px; padding-right: 40px; }
 
 /* the rewind mark — every user message is a branch point, so this sits on every
-   one of them and must be quiet enough to disappear while reading. It rides the
-   timestamp row (not over the text, not a floating overlay) and rests at 45%
-   opacity: legible as a mark, not loud enough to compete with the message. */
+   one of them and must be quiet enough to disappear while reading. It rests at
+   the cell's top-right corner, inside the lane the cell's padding reserves. */
+.zl-user-rail {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  display: flex;
+}
 .zl-user .wp-rewind {
-  margin-left: auto;
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* 26px, not 44: it repeats down the whole transcript, and a full tap target on
-     every message would put a row of buttons beside every thing you wrote. */
-  width: 26px;
-  height: 26px;
-  margin-top: -5px;
-  margin-bottom: -5px;
+  /* 28px of ink. The halo below makes the target 44px without widening the
+     cell's lane: it overflows the button instead of inflating it. */
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
   border-radius: var(--radius-full);
   background: none;
-  color: var(--peach, #fab387);
-  opacity: 0.45;
+  color: var(--surface1);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: opacity var(--duration) var(--ease), background var(--duration) var(--ease);
+  transition: color var(--duration) var(--ease), background var(--duration) var(--ease);
+}
+.zl-user .wp-rewind::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
 }
 .zl-user .wp-rewind:active:not(:disabled) {
-  opacity: 1;
-  background: color-mix(in srgb, var(--peach, #fab387) 14%, transparent);
+  color: var(--zl-t1);
+  background: var(--zl-hi);
 }
 @media (hover: hover) {
+  .zl-user:hover .wp-rewind:not(:disabled) { color: var(--zl-t4); }
   .zl-user .wp-rewind:hover:not(:disabled) {
-    opacity: 1;
-    background: color-mix(in srgb, var(--peach, #fab387) 14%, transparent);
+    color: var(--zl-t1);
+    background: var(--zl-hi);
   }
 }
+/* A coarse pointer never gets the hover lift, so the mark starts legible. */
+@media (hover: none) {
+  .zl-user .wp-rewind { color: var(--zl-t4); }
+}
+.zl-user:focus-within .wp-rewind:not(:disabled) { color: var(--zl-t4); }
 
 .zl-user .wp-rewind:disabled {
-  opacity: 0.18;
+  opacity: 0.35;
   cursor: default;
 }
 
 .zl-user .wp-rewind:focus-visible {
-  opacity: 1;
+  color: var(--zl-t1);
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
 
-/* the preview reference — "anclado al lomo": a short peach dash comes out of
-   the message's own spine and ties the reference to it. Same color as the
-   spine, so it reads as one thing: what you pointed at, one disambiguator and
-   the page. The full selector is one tap away, never competing with the text. */
+/* the preview reference — "anclado al lomo": a short dash comes out of the
+   cell's own left edge and ties the reference to the message. The bleed is
+   exactly the cell's 14px left padding, so the dash starts on that edge. The
+   full selector is one tap away, never competing with the text. */
 .ref-spine {
   position: relative;
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 0 var(--space-2);
-  /* pulls left into the 14px padding so the dash starts at the peach spine */
+  /* pulls left into the cell's 14px padding so the dash starts at its edge */
   width: calc(100% + 14px);
   margin: 2px 0 var(--space-2) -14px;
   padding: 2px 0 2px 14px;
@@ -233,10 +300,8 @@
   font-size: inherit;
 }
 
-/* the attachments skirt — there is no card left to be the foot of, so it is a
-   plain list hanging off the same peach bar. */
-.zl-user.has-skirt { padding-bottom: 2px; }
-
+/* the attachments skirt — a list inside the cell, below the words. The cell
+   keeps its padding, so the skirt no longer has to close any corners. */
 .wp-attachments {
   margin: 10px 0 0;
   border-top: 0;

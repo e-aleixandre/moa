@@ -89,6 +89,28 @@ test("user message text preserves authored line breaks", () => {
   expect(css).toMatch(/\.zl-user-body\s*\{[^}]*white-space:\s*pre-wrap\s*;/s);
 });
 
+test("the hour reaches the DOM as an hour, never as an epoch", () => {
+  // The bug this component shipped with: the projection handed it
+  // `msg.timestamp` (epoch seconds) and the old markup printed `time`
+  // verbatim, so a fix that only renamed the field would have painted
+  // 1789423841 on screen.
+  const waypoint = UserWaypoint({ time: 1789423841, children: <p>hi</p> });
+  const text = textContent(waypoint);
+  expect(text).not.toContain("1789423841");
+  expect(text).toMatch(/\d{1,2}:\d{2}/);
+});
+
+test("a message with no time renders no hour and no placeholder", () => {
+  const waypoint = UserWaypoint({ children: <p>hi</p> });
+  expect(byClass(waypoint, "zl-user-clock")).toBeUndefined();
+  expect(textContent(waypoint)).toBe("hi");
+});
+
+test("the gutter is always present, so a message without an hour is not un-indented", () => {
+  const waypoint = UserWaypoint({ children: <p>hi</p> });
+  expect(byClass(waypoint, "zl-user-gutter")).toBeDefined();
+});
+
 test("an image attachment with data renders a data URL thumbnail", () => {
   let opened = null;
   const attachment = { type: "image", data: "aGVsbG8=", mime_type: "image/png", filename: "proof.png" };
@@ -251,7 +273,7 @@ test("a parent task uses the parent label and subagent accent", () => {
   expect(textContent(waypoint)).not.toContain("You");
 });
 
-test("an ordinary user message is the peach edge, not a You label", () => {
+test("an ordinary user message is a bare cell, not a You label", () => {
   const waypoint = UserWaypoint({ time: "09:12", children: <p>Steer the child.</p> });
   const card = descendants(waypoint).find((node) =>
     String(node.props?.class || "").split(/\s+/).includes("zl-user")
