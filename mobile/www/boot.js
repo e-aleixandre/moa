@@ -13,6 +13,26 @@ function fail(message) {
   error.textContent = message;
 }
 
+// The share inbox lives outside the web view in an App Group. Its bridge is
+// injected by the iOS container into both this local page and the remote moa
+// page. Binding the server here keeps arbitrary pages loaded in the web view
+// from reading files that were shared with moa.
+async function bindNativeServer(origin) {
+  const inbox = globalThis.MoaShareInbox;
+  if (typeof inbox?.bindServer === "function") await inbox.bindServer(origin);
+}
+
+async function showPendingShare() {
+  const inbox = globalThis.MoaShareInbox;
+  if (typeof inbox?.status !== "function") return;
+  try {
+    const result = await inbox.status();
+    $("pending-share").classList.toggle("on", Number(result?.pending) > 0);
+  } catch {
+    // Pairing remains usable when the native inbox is unavailable.
+  }
+}
+
 // claim — turn a one-time payload into a credential this device keeps.
 // The route is deliberately unauthenticated: the short-lived secret in the
 // envelope is the authority (see pkg/serve/route_auth.go).
@@ -56,6 +76,12 @@ async function pair(text) {
     fail("Could not pair. The code may have expired; create a new one.");
     return;
   }
+  try {
+    await bindNativeServer(parsed.origin);
+  } catch {
+    fail("Could not finish setting up this app. Try pairing again.");
+    return;
+  }
 
   rememberServer(parsed.origin);
   location.replace(parsed.origin);
@@ -64,8 +90,11 @@ async function pair(text) {
 // Already bound: go straight through, without showing the pairing screen.
 const known = storedServer();
 if (known) {
-  location.replace(known);
+  bindNativeServer(known).then(() => location.replace(known)).catch(() => {
+    fail("Could not open the paired moa. Reinstall the app and pair it again.");
+  });
 } else {
+  showPendingShare();
   $("toggle").addEventListener("click", () => {
     $("manual").classList.add("on");
     $("text").focus();

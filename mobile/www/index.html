@@ -51,6 +51,15 @@
   .manual { display: none; flex-direction: column; gap: 12px; }
   .manual.on { display: flex; }
   .error { color: #f38ba8; min-height: 1.5em; }
+  .pending-share {
+    display: none;
+    padding: 12px 14px;
+    border: 1px solid #45475a;
+    border-radius: 12px;
+    background: #181825;
+    color: #cdd6f4;
+  }
+  .pending-share.on { display: block; }
 </style>
 </head>
 <body>
@@ -64,6 +73,10 @@
     <li>Create a pairing code in Settings.</li>
     <li>Scan it here.</li>
   </ol>
+
+  <p class="pending-share" id="pending-share" role="status">
+    Your shared item is saved. Pair moa to choose a conversation.
+  </p>
 
   <button id="scan" type="button">Scan the code</button>
   <button id="toggle" type="button" class="quiet">Enter it by hand</button>
