@@ -51,6 +51,8 @@ const WIDTHS = [
   { value: "fit", label: "Fit", icon: Scan, size: 16, ariaLabel: "Fit to pane", title: "Fit to pane" },
 ];
 
+const INSPECTOR_READY_GRACE_MS = 10_000;
+
 function renderWidth(opt) {
   const Icon = opt.icon;
   return (
@@ -569,11 +571,15 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     setBridgeLost(false);
     clearBridgeFallback();
     // A normal injected document answers moa-ready immediately after this
-    // load. Wait before treating it as external/blank so short loads never
-    // flash a terminal recovery action.
+    // load. Cold-start compilation happens before iframe load, so this is a
+    // post-load grace period rather than an app-start timeout. Ten seconds
+    // tolerates a busy local runtime without leaving a genuinely uninspectable
+    // page unexplained for too long. The iframe load event exposes no response
+    // headers; probing the proxy with fetch would duplicate a potentially
+    // stateful navigation, so absence of the bridge still has to be inferred.
     bridgeFallbackRef.current = setTimeout(() => {
       if (!inspectorReadyRef.current) setBridgeLost(true);
-    }, 3000);
+    }, INSPECTOR_READY_GRACE_MS);
     if (inspect) postInspect(true);
     // A new document: Back goes back to disabled AND the epoch moves, so a
     // report still in flight from the document being replaced cannot re-enable
@@ -662,7 +668,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
       </div>
       {showRecovery && !showSetup && (
         <PreviewRecoveryNotice
-          message="This page is no longer connected to Moa."
+          message="Moa’s inspector didn’t start on this page."
           onReturn={returnToApp}
         />
       )}
