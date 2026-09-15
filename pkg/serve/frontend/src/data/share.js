@@ -27,10 +27,42 @@ import {
 // that window to ?share=<id> — and the second arrival must not re-open a
 // picker, nor report "nothing shared" for a payload the first one consumed.
 const handled = new Set();
+const releases = new Map();
 
 export function __resetSharesForTests() {
   handled.clear();
+  releases.clear();
   setState({ share: SHARE_CLOSED, composerDrops: {} });
+}
+
+// presentIncomingShare is the common edge after either platform has retained
+// the bytes. Web shares live in Cache Storage; native iOS shares live in an App
+// Group. Keeping that storage detail out of the picker means both paths ask the
+// same product question and land in the same composer.
+export function presentIncomingShare(share, { release } = {}) {
+  const id = typeof share?.id === 'string' ? share.id : '';
+  const files = Array.isArray(share?.files) ? share.files : [];
+  if (!id || handled.has(id) || (files.length === 0 && !shareComposerText(share))) return false;
+  handled.add(id);
+  if (typeof release === 'function') releases.set(id, release);
+  setState({
+    share: {
+      id,
+      status: 'ready',
+      title: typeof share.title === 'string' ? share.title : '',
+      text: typeof share.text === 'string' ? share.text : '',
+      url: typeof share.url === 'string' ? share.url : '',
+      files,
+    },
+  });
+  return true;
+}
+
+function releaseIncomingShare(id) {
+  const release = releases.get(id);
+  releases.delete(id);
+  if (release) Promise.resolve().then(release).catch(() => {});
+  else discardShare(id);
 }
 
 // openShare takes ownership of a retained share and opens the picker on it.
@@ -61,16 +93,10 @@ export async function openShare(shareId, { read = readShare } = {}) {
     });
     return true;
   }
-  setState({
-    share: {
-      id: shareId,
-      status: 'ready',
-      title: share.title,
-      text: share.text,
-      url: share.url,
-      files: share.files,
-    },
-  });
+  // openShare already claimed this id before the asynchronous read, so use the
+  // common presenter without asking it to claim the id a second time.
+  releases.set(shareId, () => discardShare(shareId));
+  setState({ share: { ...share, id: shareId, status: 'ready' } });
   return true;
 }
 
@@ -103,7 +129,7 @@ export async function chooseShareSession(sessionId, { resume = resumeSession, se
   }));
   // Consumed: the payload now lives in the composer's own state, so the cache
   // copy is dead weight (and it can be a 32 MB video).
-  discardShare(share.id);
+  releaseIncomingShare(share.id);
   return true;
 }
 
@@ -115,7 +141,7 @@ export function dismissShare() {
   const share = store.get().share;
   if (share.status === 'idle') return;
   setState({ share: SHARE_CLOSED });
-  if (share.id) discardShare(share.id);
+  if (share.id) releaseIncomingShare(share.id);
 }
 
 // consumeComposerDrop is called by the composer that has just taken a drop, so

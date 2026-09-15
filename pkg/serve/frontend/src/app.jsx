@@ -24,6 +24,7 @@ import { addToast } from "./data/notifications.js";
 import { refreshPushState } from "./data/push-client.js";
 import { installOpenSessionNavigation } from "./data/push-navigation.js";
 import { installShareNavigation, openShare, dismissShare } from "./data/share.js";
+import { installNativeShareNavigation } from "./data/native-share.js";
 import { shareIdFromLocation } from "./data/share-target.js";
 import { detectShell, applyShell } from "./data/shell.js";
 import {
@@ -68,6 +69,7 @@ function useBootstrap() {
   // ?share=<id> for a cold start. Both paths land in openShare, which takes
   // each id only once.
   useEffect(() => installShareNavigation(), []);
+  useEffect(() => installNativeShareNavigation(), []);
 
   // Mobile breakpoint → setMobile. The App below decides whether the current
   // view owns document scrolling: galleries need native document scroll while
