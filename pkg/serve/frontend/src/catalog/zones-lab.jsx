@@ -917,6 +917,7 @@ function useSettingsSurface(forced) {
   useEffect(() => {
     if (forced === "settings") { setOpen(true); setPage("root"); }
     else if (forced === "settings-page") { setOpen(true); setPage("compact-strategy"); }
+    else if (forced === "settings-devices") { setOpen(true); setPage("devices"); }
     else { setOpen(false); setPage("root"); }
   }, [forced]);
   return { open, page, setPage, show: () => setOpen(true), close: () => { setOpen(false); setPage("root"); } };
@@ -1310,6 +1311,7 @@ const SURFACES = [
   { id: "settings", label: "Settings", note: "What the gear opens: the GLOBAL settings, so it belongs to no edge — centred on the desktop, a bottom sheet on the phone. Rows, not a form: name and one line of explanation on the left, the value on the right. A choice between several opens a second page inside the same panel." },
   { id: "artifacts", label: "Artifacts", note: "The one list of files in the product, reached from the composer's menu, the head entry, and the dossier's row. Grouped by day in server order, real thumbnails, title first and the filename underneath it. Replaces the panel page that used to list the same files in a different shape." },
   { id: "settings-page", label: "Settings · a page", note: "The second level: a row whose value is a choice pushes a page in place, with back + title in the head. Same idiom as the panel's dossiers and the model picker's providers." },
+  { id: "settings-devices", label: "Settings · Devices", note: "Access › Devices: the apps holding a credential for this moa. One row each in the sheet's own grammar, yellow on a credential inside the last fortnight of its life, and revoking arms in place rather than opening anything. Add ?devices=empty or ?devices=forbidden to the URL for the other two states." },
 ];
 function LiveSwitch({ value, onChange }) {
   const cur = LIVE_STATES.find((s) => s.id === value);

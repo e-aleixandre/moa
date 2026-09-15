@@ -56,6 +56,46 @@ export const CATALOG_USAGE = {
   seven_day: { utilization: 61, resets_at: new Date(Date.now() + 4 * 86400000).toISOString() },
 };
 
+// The paired devices behind Settings › Access › Devices. The dates are
+// derived from the clock so the lab shows the four states the page really
+// has: a phone in daily use, an iPad inside the last fortnight of its
+// credential (the yellow one), a machine paired but never used, and a revoked
+// record. Only the fields devicePublic sends (pkg/serve/device_auth.go:146).
+export const CATALOG_DEVICES = (() => {
+  const day = 86400000;
+  const now = Date.now();
+  return [
+    {
+      id: "b7Kq2mXpR4tLwN8vZcJ3Hf1s",
+      label: "moa app (iPhone)",
+      issued_at: new Date(now - 31 * day).toISOString(),
+      expires_at: new Date(now + 149 * day).toISOString(),
+      last_used_at: new Date(now - 4 * 60000).toISOString(),
+    },
+    {
+      id: "Q9wE4rT6yU8iO0pA2sD5fG7h",
+      label: "moa app (iPad)",
+      issued_at: new Date(now - 171 * day).toISOString(),
+      expires_at: new Date(now + 9 * day).toISOString(),
+      last_used_at: new Date(now - 6 * 3600000).toISOString(),
+    },
+    {
+      id: "Z1xC3vB5nM7kL9jH0gF2dS4a",
+      label: "estudio (Linux)",
+      issued_at: new Date(now - 12 * day).toISOString(),
+      expires_at: new Date(now + 168 * day).toISOString(),
+    },
+    {
+      id: "P6oI8uY0tR2eW4qA6sD8fG0h",
+      label: "moa app (iPhone)",
+      issued_at: new Date(now - 210 * day).toISOString(),
+      expires_at: new Date(now - 30 * day).toISOString(),
+      last_used_at: new Date(now - 45 * day).toISOString(),
+      revoked_at: new Date(now - 40 * day).toISOString(),
+    },
+  ];
+})();
+
 const FS_ENTRIES = {
   "/home/ealeixandre": ["dev", "src"],
   "/home/ealeixandre/dev": ["moa", "pulse"],
@@ -79,6 +119,14 @@ function queryOf(path) {
   } catch {
     return new URLSearchParams();
   }
+}
+
+// Which device list the lab serves, from the page URL: `?devices=empty` or
+// `?devices=forbidden`. Read from location rather than passed in because the
+// request comes from inside the settings sheet, which has no lab props.
+function catalogDevicesMode() {
+  if (typeof location === "undefined") return null;
+  return new URLSearchParams(location.search).get("devices");
 }
 
 function modelName(spec) {
@@ -148,6 +196,15 @@ export function catalogResponse(method, path, body = null, sessions = CATALOG_SE
   if (m === "PATCH" && p === "/api/compact-model") return { compact_model: body?.compact_model || "session", choices: COMPACT_MODEL_CHOICES };
   if (m === "GET" && p === "/api/subagent-models") return { allowed_models: [] };
   if (m === "PATCH" && p === "/api/subagent-models") return { allowed_models: body?.allowed_models || [] };
+  // The paired devices, so Settings › Access › Devices is a real screen in the
+  // lab. `?devices=empty` is the nothing-paired state and `?devices=forbidden`
+  // the 403 a paired phone really gets (route_auth.go: pairing administration
+  // is owner-only), which is a state of this page and has to be lookable-at.
+  if (m === "GET" && p === "/api/pulse/devices") {
+    const mode = catalogDevicesMode();
+    if (mode === "forbidden") return { __status: 403, error: "paired devices cannot administer pairing" };
+    return { devices: mode === "empty" ? [] : CATALOG_DEVICES };
+  }
   if (m === "GET" && p === "/api/sessions") return rosterOf(sessions);
   if (m === "GET" && p === "/api/fs/complete") {
     const dir = (queryOf(path).get("path") || "").replace(/\/+$/, "") || "/";
@@ -395,6 +452,16 @@ export function installCatalogBackend({ getSessions } = {}) {
     const payload = catalogResponse(method, url, parsed, sessionsOf());
     if (payload === undefined) return orig(input, init);
     if (payload === null) return new Response(null, { status: 204 });
+    // A fixture may ask for a REFUSAL rather than a body: the devices list is
+    // 403 for a paired device by policy, and a lab that can only answer 200
+    // cannot show that state at all.
+    if (payload && typeof payload === "object" && payload.__status) {
+      const { __status: status, ...rest } = payload;
+      return new Response(JSON.stringify(rest), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     return new Response(JSON.stringify(payload), {
       status: 200,
       headers: { "Content-Type": "application/json" },
