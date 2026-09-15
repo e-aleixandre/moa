@@ -1,0 +1,464 @@
+/* lp2-lab — CATALOG ONLY. The Live Preview panel with its chrome redesigned.
+   Tokens only, no inline fallbacks. Nothing here is imported by production.
+
+   Peach is absent on purpose. Mauve is the accent; blue/green/yellow/red keep
+   their state meanings. Every editable field is the Field primitive, so the
+   16px floor that stops iOS zooming is inherited and never re-declared. */
+
+.lp2-lab {
+  min-height: 100vh;
+  padding: var(--space-8) var(--space-6) var(--space-12);
+  background: var(--zl-canvas);
+  color: var(--zl-t1);
+  font-family: var(--font);
+}
+.lp2-lab.is-bare { min-height: 0; padding: var(--space-4); }
+.lp2-lab-head { max-width: 780px; margin: 0 auto var(--space-8); text-align: center; }
+.lp2-lab-head h1 { margin: 0 0 var(--space-2); font-size: var(--zl-fs-display); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.lp2-lab-head h1 em { font-style: normal; color: var(--zl-accent); }
+.lp2-lab-head p { margin: 0; color: var(--zl-t3); font-size: var(--zl-fs-body); line-height: var(--leading-normal); }
+
+.lp2-fig { margin: 0 0 var(--space-12); }
+.lp2-lab.is-bare .lp2-fig { margin: 0; }
+
+/* ── The panel as ONE object ──────────────────────────────────────────────
+   Today: the panel is padded, and the stage draws its own rounded rim inside
+   that padding — a border inside a border, two radii, and a band of moa-
+   coloured nothing between the tool's edge and the app's edge.
+
+   Here: one rim, one radius, no inner padding. The rail sits flush on the
+   panel's own surface and the stage fills everything under it, clipped by the
+   panel's corners. What separates the tool from the conversation beside it is
+   the rim plus a real shadow — the panel is ABOVE the page, not a box drawn
+   on it. */
+.lp2-frame {
+  position: relative;
+  width: 1204px;
+  height: 860px;
+  margin: 0 auto;
+}
+.lp2-frame.is-phone { width: 390px; height: 780px; }
+
+.lp2-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim-2), 0 24px 60px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+/* The live edge belongs to the PANEL, not to a rectangle inside it: when a
+   tool is in flight the whole instrument breathes. Same colours and same
+   tempo as production's stage edge. */
+.lp2-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--zl-line-2);
+}
+.lp2-panel.is-working::after {
+  box-shadow: inset 0 0 0 2px var(--blue);
+  animation: lp2-breathe 2s ease-in-out infinite;
+}
+@keyframes lp2-breathe {
+  0%, 100% { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--blue) 40%, transparent); }
+  50% { box-shadow: inset 0 0 0 2px var(--blue), inset 0 0 18px -6px var(--blue); }
+}
+
+/* ── The rail ─────────────────────────────────────────────────────────────
+   40px, not 62. The height that was there paid for 36px controls inside 12px
+   of panel padding plus an 8px gap to the stage; with the padding gone the
+   rail is just the row, and 22px come back to the app.
+
+   No background of its own and no border box around any control: the rail is
+   a hairline under a row of glyphs. Anything that is a BOX in this rail is a
+   box on purpose — the address, and the selected width. */
+.lp2-rail {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 40px;
+  padding: 0 var(--space-2) 0 var(--space-2);
+  border-bottom: 1px solid var(--zl-line);
+}
+.lp2-zone { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
+/* WHAT IS LOADED takes the free width; HOW IT IS SHOWN is intrinsic. */
+.lp2-zone-what { flex: 1 1 auto; }
+.lp2-zone-how { flex: none; gap: var(--space-2); }
+
+/* A divider plus a real gap: close is not one more of the controls that change
+   the preview, it is the one that ends it. */
+.lp2-div {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 var(--space-1);
+  background: var(--zl-line-2);
+}
+
+/* Every icon control in the rail is the same atom: no border, no background
+   until it is touched. 32px of ink with a 44px hit area on touch (below). */
+.lp2-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t3);
+  cursor: pointer;
+  transition: background var(--motion-hover) var(--motion-ease),
+    color var(--motion-hover) var(--motion-ease);
+}
+@media (hover: hover) {
+  .lp2-icon:hover:not(:disabled) { background: var(--zl-hi); color: var(--zl-t1); }
+}
+.lp2-icon:disabled { color: var(--zl-t4); opacity: 0.5; cursor: not-allowed; }
+.lp2-icon:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+/* Inspect is a MODE over someone else's content, so on it is filled, not
+   outlined: a mode has to be legible at a glance from across the screen. */
+.lp2-icon.is-on {
+  background: var(--zl-accent);
+  color: var(--zl-accent-ink);
+}
+@media (hover: hover) {
+  .lp2-icon.is-on:hover { background: var(--zl-accent); color: var(--zl-accent-ink); }
+}
+
+/* The address is the panel's title AND its menu. Everything the ⋮ used to hide
+   (change URL, reload, copy) is a thing you do to this line, so it opens from
+   the line. That is what removes the ⋮ from the bar. */
+.lp2-addr {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 30px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t1);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-body);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-hover) var(--motion-ease);
+}
+@media (hover: hover) {
+  .lp2-addr:hover { background: var(--zl-hi); }
+}
+.lp2-addr:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.lp2-addr-url { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp2-addr-chev { flex: none; color: var(--zl-t4); }
+/* Nothing loaded: the line says so in the UI's own voice, not in mono, because
+   it is not an address yet. */
+.lp2-addr.is-empty { color: var(--zl-t4); font-family: var(--font); font-size: var(--zl-fs-meta); }
+
+/* ── The widths ───────────────────────────────────────────────────────────
+   Four sunken cells, each with an icon AND a number, made the least-used
+   control the loudest object in the bar. Here they are four bare glyphs of
+   growing size — the device each one is — and only the ACTIVE one spells its
+   number out. Nothing is selected while there is no app: the group greys and
+   stops answering, but keeps its place so the rail does not jump when the app
+   arrives. */
+.lp2-widths { display: flex; align-items: center; gap: 2px; }
+.lp2-w {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 30px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t4);
+  cursor: pointer;
+  transition: background var(--motion-hover) var(--motion-ease),
+    color var(--motion-hover) var(--motion-ease);
+}
+@media (hover: hover) {
+  .lp2-w:hover:not(:disabled) { color: var(--zl-t1); background: var(--zl-hi); }
+}
+.lp2-w.is-on { background: var(--zl-accent-dim); color: var(--zl-accent); }
+.lp2-w-n { font-family: var(--mono); font-size: var(--zl-fs-meta); }
+.lp2-w:disabled { cursor: not-allowed; }
+.lp2-widths.is-quiet { opacity: 0.4; pointer-events: none; }
+.lp2-w:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ── The stage ────────────────────────────────────────────────────────────
+   Flush: no inset rim, no radius of its own, no gutter of moa colour between
+   the tool and the app. Empty it is moa's own surface; loaded it is the app's
+   paper, edge to edge, clipped only by the panel's corners. */
+.lp2-stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--zl-sheet);
+}
+.lp2-stage.has-app { background: #fff; }
+
+/* ── Card A, approved, in the new panel ───────────────────────────────────── */
+.lp2-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+}
+.lp2-card {
+  width: min(560px, 100%);
+  padding: var(--space-6);
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim-2);
+}
+.lp2-title { margin: 0; font-size: var(--zl-fs-title); font-weight: var(--weight-semibold); color: var(--zl-t1); }
+.lp2-lede { margin: var(--space-2) 0 0; color: var(--zl-t3); font-size: var(--zl-fs-body); line-height: var(--leading-normal); }
+.lp2-row { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-5); }
+.lp2-field { flex: 1 1 auto; min-width: 0; }
+.lp2-go {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-touch);
+  padding: 0 var(--space-5);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--zl-accent);
+  color: var(--zl-accent-ink);
+  font-family: var(--font);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+.lp2-ports { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-4); }
+.lp2-port {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--zl-control);
+  color: var(--zl-t2);
+  cursor: pointer;
+}
+.lp2-port-n { font-family: var(--mono); font-size: var(--zl-fs-meta); }
+.lp2-port-w { color: var(--zl-t4); font-size: var(--zl-fs-meta); }
+.lp2-last {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-touch);
+  margin-top: var(--space-4);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--zl-accent-dim);
+  box-shadow: inset 0 0 0 1px var(--zl-accent-line);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+.lp2-last-url { font-family: var(--mono); font-size: var(--text-input); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp2-last-when { margin-left: auto; color: var(--zl-t4); font-size: var(--zl-fs-meta); }
+.lp2-last-go { display: inline-flex; color: var(--zl-accent); flex: none; }
+.lp2-or { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-4); color: var(--zl-t4); font-size: var(--zl-fs-meta); }
+.lp2-or::before, .lp2-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--zl-line); }
+.lp2-or + .lp2-row { margin-top: var(--space-3); }
+
+/* ── The fake app ─────────────────────────────────────────────────────────
+   Deliberately NOT moa: light paper, another typeface, another accent. The
+   loaded shot exists to prove the chrome survives somebody else's design, and
+   a dark mock in moa's own palette would have proved nothing. */
+.fa {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #fbfbfd;
+  color: #1c1c28;
+  font-family: system-ui, sans-serif;
+}
+.fa-top {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  height: 58px;
+  padding: 0 32px;
+  border-bottom: 1px solid #e8e8ef;
+  background: #fff;
+}
+.fa-logo { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; color: #2f4bd8; }
+.fa-nav { display: flex; gap: 22px; font-size: 14px; color: #55556a; }
+.fa-cta {
+  margin-left: auto;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: #2f4bd8;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.fa-hero { padding: 56px 32px 40px; text-align: center; }
+.fa-hero h1 { margin: 0; font-size: 40px; line-height: 1.12; letter-spacing: -0.03em; }
+.fa-hero p { margin: 14px 0 0; color: #5b5b70; font-size: 16px; }
+.fa-btn {
+  display: inline-block;
+  margin-top: 22px;
+  padding: 12px 24px;
+  border-radius: 10px;
+  background: #1c1c28;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+.fa-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  padding: 8px 32px 32px;
+}
+.fa-card { padding: 20px; border: 1px solid #e8e8ef; border-radius: 12px; background: #fff; }
+.fa-card-ic { display: block; width: 26px; height: 26px; border-radius: 7px; background: #dfe4ff; }
+.fa-card h3 { margin: 14px 0 6px; font-size: 15px; }
+.fa-card p { margin: 0; color: #6a6a80; font-size: 13px; line-height: 1.5; }
+.fa.is-phone .fa-top { gap: 12px; height: 52px; padding: 0 16px; }
+.fa.is-phone .fa-nav { display: none; }
+.fa.is-phone .fa-hero { padding: 32px 18px 24px; }
+.fa.is-phone .fa-hero h1 { font-size: 27px; }
+.fa.is-phone .fa-grid { grid-template-columns: 1fr; padding: 8px 18px 24px; }
+
+/* ── Proposal 2 · Muelle ──────────────────────────────────────────────────
+   No bar at all. Loaded, the app owns the panel edge to edge and every control
+   lives in one floating dock at the BOTTOM: where the thumb already is, where
+   "Write to Moa" already was, and clear of the header of whatever site is
+   being previewed — which is exactly what a top bar always sits on top of. */
+.lp2-panel.is-bare { background: var(--zl-sheet); }
+
+.lp2-dock {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-4);
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: calc(100% - var(--space-6));
+  padding: var(--space-1);
+  border-radius: var(--radius-full);
+  /* Legible over ANY app: moa's own surface, blurred, with a shadow that
+     separates it from whatever colour is underneath. Same atom as the stream
+     cards that already float over the preview. */
+  background: color-mix(in srgb, var(--zl-raised) 88%, transparent);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--zl-rim-2), 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.lp2-dock .lp2-icon { border-radius: var(--radius-full); }
+.lp2-dock-addr {
+  flex: 0 1 auto;
+  max-width: 280px;
+  border-radius: var(--radius-full);
+  color: var(--zl-t2);
+  font-size: var(--zl-fs-meta);
+}
+.lp2-dock .lp2-div { height: 16px; }
+.lp2-dock-write {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--zl-accent);
+  color: var(--zl-accent-ink);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+/* Empty, the dock has nothing to float over, so it is not drawn. Close is the
+   only thing the panel needs before it holds anything, and one glyph does not
+   justify a bar. */
+.lp2-ghost-close {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--zl-control);
+  color: var(--zl-t3);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .lp2-ghost-close:hover { color: var(--zl-t1); background: var(--zl-hi); }
+}
+/* 390: the dock spans the width and sits above the home indicator; the widths
+   stay out of it for the same reason they leave the rail. */
+.lp2-dock.is-phone {
+  left: var(--space-2);
+  right: var(--space-2);
+  bottom: var(--space-3);
+  transform: none;
+  max-width: none;
+  justify-content: space-between;
+}
+.lp2-dock.is-phone .lp2-icon { width: var(--control-touch); height: var(--control-touch); }
+.lp2-dock.is-phone .lp2-dock-write { width: var(--control-touch); height: var(--control-touch); justify-content: center; padding: 0; }
+.lp2-dock.is-phone .lp2-dock-addr { flex: 1 1 auto; min-width: 0; height: var(--control-touch); }
+.lp2-fig.is-phone .lp2-ghost-close { width: var(--control-touch); height: var(--control-touch); }
+
+/* ── Phone, 390 ───────────────────────────────────────────────────────────
+   The preview IS the screen here, so the rail gets the 44px row a thumb needs
+   and carries only what a thumb uses: where you are, the mode that makes a
+   preview worth having on a phone, and the way out. The four widths move into
+   the address menu — rendering 1280 inside 390 is a thumbnail, not a viewport,
+   and four extra targets in a 390 row is how the current bar ends up with
+   34px squares. */
+.lp2-rail.is-phone {
+  height: var(--control-xl);
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+}
+.lp2-rail.is-phone .lp2-icon { width: var(--control-touch); height: var(--control-touch); }
+.lp2-rail.is-phone .lp2-addr { flex: 1 1 auto; height: var(--control-touch); font-size: var(--zl-fs-body); }
+.lp2-fig.is-phone .lp2-empty { padding: var(--space-4); }
+.lp2-fig.is-phone .lp2-card { padding: var(--space-4); }
+.lp2-fig.is-phone .lp2-row { flex-direction: column; align-items: stretch; gap: var(--space-2); }
+.lp2-fig.is-phone .lp2-row .lp2-go { width: 100%; }
+.lp2-fig.is-phone .lp2-last { padding: 0 var(--space-3); gap: var(--space-2); }
+.lp2-fig.is-phone .lp2-last-when { display: none; }
