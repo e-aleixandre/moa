@@ -1,4 +1,5 @@
 import Capacitor
+import Foundation
 import WebKit
 
 final class MoaBridgeViewController: CAPBridgeViewController {
@@ -143,7 +144,8 @@ private final class ShareInboxMessageHandler: NSObject, WKScriptMessageHandler {
         let defaultPort = (origin.protocol == "https" && origin.port == 443)
             || (origin.protocol == "http" && origin.port == 80)
         let port = origin.port > 0 && !defaultPort ? ":\(origin.port)" : ""
-        return "\(origin.protocol)://\(origin.host)\(port)"
+        let host = origin.host.contains(":") ? "[\(origin.host)]" : origin.host
+        return "\(origin.protocol)://\(host)\(port)"
     }
 
     private func respond(id: String, value: Any) {

@@ -148,7 +148,12 @@ final class SharedInboxTransaction {
         guard files.count < SharedInbox.maximumFiles else {
             throw SharedInboxError.tooManyFiles
         }
-        let values = try source.resourceValues(forKeys: [.fileSizeKey, .nameKey])
+        let values = try source.resourceValues(forKeys: [
+            .fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey, .nameKey
+        ])
+        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+            throw SharedInboxError.corrupt
+        }
         let attributes = try FileManager.default.attributesOfItem(atPath: source.path)
         guard let size = values.fileSize ?? (attributes[.size] as? NSNumber)?.intValue else {
             throw SharedInboxError.corrupt
