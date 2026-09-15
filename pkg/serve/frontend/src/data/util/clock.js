@@ -41,11 +41,19 @@ export function clockMs(value) {
   return null;
 }
 
-// clockHHMM is the hour of day, in the locale's own 2-digit form.
+// clockHHMM is the hour of day, in 24-hour form.
+//
+// `hour12: false` is forced rather than left to the locale, and that is a
+// requirement of the design, not a preference: the gutter's promise is that
+// 09:14 and 11:08 occupy the same box, which is why it is mono with
+// tabular-nums and why 44px was measured as enough on the phone. A 12-hour
+// locale breaks all three -- measured in the browser, "10:18 PM" renders 56px
+// against a narrower "9:14 AM", so the column breathes on every message and
+// overflows the gutter it was sized for.
 export function clockHHMM(value) {
   const ms = clockMs(value);
   if (ms === null) return '';
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 const DAY_MS = 86400000;
@@ -58,15 +66,21 @@ function startOfDay(ms) {
 
 // clockDayLabel names the day a message belongs to, but ONLY when that day is
 // not today: a transcript is read in the present, so "today" is the assumption
-// and saying it on every message would be noise. Yesterday and older get a
-// micro label that rides above the hour without widening its column.
+// and saying it on every message would be noise.
+//
+// The label rides ABOVE the hour in a 44px gutter, so it has to FIT one, and
+// no English word for yesterday does: "Yesterday" measured 68.7px in the
+// gutter's own micro mono, 25px outside a phone gutter and past the 64px
+// desktop one too. So every past day -- yesterday included -- wears the short
+// date instead ("Mar 3", 38.2px), which fits, needs no translation, and keeps
+// one shape for the whole column rather than a word for one day and a date
+// for the rest.
 export function clockDayLabel(value, now = Date.now()) {
   const ms = clockMs(value);
   if (ms === null) return '';
   const day = startOfDay(ms);
   const today = startOfDay(now);
   if (day >= today) return '';
-  if (day === today - DAY_MS) return 'yesterday';
   const date = new Date(ms);
   const sameYear = date.getFullYear() === new Date(now).getFullYear();
   return date.toLocaleDateString([], sameYear
