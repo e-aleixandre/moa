@@ -1,0 +1,405 @@
+/* lp-lab — CATALOG ONLY. Six treatments of the Live Preview empty state.
+   Tokens only, no inline fallbacks. Nothing here is imported by production. */
+
+.lp-lab {
+  min-height: 100vh;
+  padding: var(--space-8) var(--space-6) var(--space-12);
+  background: var(--zl-canvas);
+  color: var(--zl-t1);
+  font-family: var(--font);
+}
+.lp-lab-head { max-width: 720px; margin: 0 auto var(--space-8); text-align: center; }
+.lp-lab-head h1 { margin: 0 0 var(--space-2); font-size: var(--zl-fs-display); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.lp-lab-head p { margin: 0; color: var(--zl-t3); font-size: var(--zl-fs-body); }
+
+.lp-fig { margin: 0 0 var(--space-12); }
+.lp-cap {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  max-width: 1204px;
+  margin: 0 auto var(--space-3);
+}
+.lp-cap-id {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  text-transform: uppercase;
+  color: var(--zl-accent);
+}
+.lp-cap-title { font-size: var(--zl-fs-title); font-weight: var(--weight-semibold); }
+.lp-cap-premise { color: var(--zl-t4); font-size: var(--zl-fs-meta); }
+
+/* The panel at the size production measured. `.live-preview-inline` is absolute
+   in the product (it fills the pane); here it is given an explicit box. */
+.lp-frame {
+  position: relative;
+  width: 1204px;
+  height: 930px;
+  margin: 0 auto;
+  border-radius: var(--zl-r-lg);
+  overflow: hidden;
+  box-shadow: var(--zl-rim-2), 0 30px 70px rgba(0, 0, 0, 0.5);
+}
+.lp-fig.is-phone .lp-frame { width: 390px; height: 780px; }
+.lp-fig.is-phone .lp-cap { max-width: 390px; }
+.lp-panel.live-preview-inline {
+  position: absolute;
+  inset: 0;
+  background: var(--zl-canvas);
+}
+/* The empty stage is NOT white. White is the app's paper; with no app there is
+   no paper, so the stage is moa's own canvas until a document arrives. */
+.lp-stage.live-preview-stage {
+  background: var(--zl-sheet);
+  border-radius: var(--zl-r-md);
+}
+
+/* ── A · Prompt ──────────────────────────────────────────────────────────── */
+.lpa {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-8);
+  overflow: hidden;
+}
+.lpa-aurora {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background:
+    radial-gradient(52% 40% at 50% 46%, rgba(203, 166, 247, 0.16), transparent 72%),
+    radial-gradient(70% 50% at 50% 104%, rgba(137, 180, 250, 0.10), transparent 70%);
+}
+.lpa-line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: min(560px, 100%);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim-2);
+}
+.lpa-caret { color: var(--zl-accent); font-size: var(--zl-fs-body); }
+.lpa-field { flex: 1 1 auto; }
+.lpa-field.field-box { border: 0; background: transparent; }
+.lpa-field .field-input { padding-left: 0; padding-right: 0; color: var(--zl-t1); }
+.lpa-enter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-accent-dim);
+  color: var(--zl-accent);
+}
+.lpa-foot {
+  position: relative;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
+}
+.lpa-foot-mono { font-family: var(--mono); color: var(--zl-t3); }
+.lpa-foot-sep { color: var(--zl-t4); }
+
+/* ── B · Candidatos ──────────────────────────────────────────────────────── */
+.lpb {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-8);
+}
+.lpb-card {
+  width: min(520px, 100%);
+  padding: var(--space-3);
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim-2);
+}
+.lpb-head { margin: 0 0 var(--space-2); padding: 0 var(--space-2); }
+.lpb-head-dir { font-family: var(--mono); font-size: var(--zl-fs-meta); color: var(--zl-t4); }
+.lpb-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.lpb-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-touch);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t2);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  text-align: left;
+  cursor: pointer;
+}
+.lpb-row:hover { background: var(--zl-hi); }
+.lpb-row.is-on { background: var(--zl-accent-dim); color: var(--zl-t1); box-shadow: inset 0 0 0 1px var(--zl-accent-line); }
+.lpb-port { font-family: var(--mono); font-size: var(--zl-fs-body); color: var(--zl-t1); min-width: 56px; }
+.lpb-row.is-on .lpb-port { color: var(--zl-accent); }
+.lpb-name { font-weight: var(--weight-medium); }
+.lpb-note { font-family: var(--mono); font-size: var(--zl-fs-meta); color: var(--zl-t4); margin-left: auto; }
+.lpb-live {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--zl-green);
+  flex: none;
+}
+.lpb-check { color: var(--zl-accent); flex: none; }
+.lpb-row.is-other { color: var(--zl-t3); }
+.lpb-foot { margin: 0; color: var(--zl-t4); font-size: var(--zl-fs-meta); }
+
+/* ── C · Estado del panel ────────────────────────────────────────────────── */
+/* The URL docks to the chrome as a second toolbar row: it is part of the panel,
+   not an island on the stage. */
+.lpc-dock {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+}
+.lpc-dock-icon { color: var(--zl-t4); flex: none; }
+.lpc-dock-field { flex: 1 1 auto; }
+.lpc-dock-field.field-box { border: 0; background: transparent; }
+.lpc {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+}
+/* The empty device at the chosen width: the width segment already means
+   something before a document exists. */
+.lpc-ghost {
+  position: relative;
+  width: min(1280px, 100%);
+  height: 100%;
+  border-radius: var(--zl-r-md);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.018) 0 10px,
+      transparent 10px 20px
+    );
+  box-shadow: inset 0 0 0 1px var(--zl-line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lpc-ghost-w {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  letter-spacing: var(--tracking-wide);
+  color: var(--zl-t4);
+}
+
+/* ── D · Secuencia ───────────────────────────────────────────────────────── */
+.lpd {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+}
+.lpd-card {
+  width: min(540px, 100%);
+  padding: var(--space-5);
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.lpd-step { display: flex; gap: var(--space-3); align-items: flex-start; }
+.lpd-num {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 9px;
+  border-radius: var(--radius-full);
+  background: var(--zl-accent-med);
+  color: var(--zl-accent);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+}
+.lpd-step.is-done .lpd-num { background: transparent; box-shadow: var(--zl-rim-2); color: var(--zl-green); margin-top: 2px; }
+.lpd-body { flex: 1 1 auto; min-width: 0; }
+.lpd-field { width: 100%; }
+.lpd-say { margin: var(--space-2) 0 0; color: var(--zl-t4); font-size: var(--zl-fs-meta); }
+.lpd-known { margin: 0; display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.lpd-known-value { font-family: var(--mono); font-size: var(--zl-fs-body); color: var(--zl-t2); }
+.lpd-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control-sm);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t3);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+}
+.lpd-edit:hover { background: var(--zl-hi); color: var(--zl-t1); }
+.lpd-rule { height: 1px; background: var(--zl-line); margin: var(--space-1) 0; }
+.lpd-go { width: 100%; }
+
+/* ── E · Ledger ──────────────────────────────────────────────────────────── */
+.lpe {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-8);
+}
+.lpe-search { width: min(560px, 100%); }
+.lpe-field { width: 100%; }
+.lpe-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+}
+.lpe-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-touch);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t2);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-body);
+  text-align: left;
+  cursor: pointer;
+}
+.lpe-row:hover { background: var(--zl-hi); color: var(--zl-t1); }
+.lpe-row.is-first { color: var(--zl-t1); }
+.lpe-dot { width: 6px; height: 6px; border-radius: var(--radius-full); flex: none; }
+.lpe-dot.is-ok { background: var(--zl-green); }
+.lpe-dot.is-err { background: var(--zl-red); }
+.lpe-url { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lpe-note { color: var(--zl-red); font-size: var(--zl-fs-meta); }
+.lpe-age { margin-left: auto; color: var(--zl-t4); font-size: var(--zl-fs-meta); }
+
+/* ── F · Melocotón ───────────────────────────────────────────────────────── */
+.lpf {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-5);
+  padding: var(--space-8);
+  overflow: hidden;
+}
+.lpf-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(58% 44% at 50% 44%, var(--peach-dim), transparent 72%),
+    radial-gradient(40% 30% at 50% 44%, var(--peach-dim), transparent 70%);
+}
+.lpf-type {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: min(680px, 100%);
+}
+.lpf-scheme { font-family: var(--mono); font-size: var(--text-xl); color: var(--zl-t4); }
+.lpf-field { flex: 1 1 auto; }
+.lpf-field.field-box { border: 0; background: transparent; }
+.lpf-field .field-input {
+  padding: 0;
+  font-size: var(--text-2xl);
+  color: var(--peach);
+  caret-color: var(--peach);
+}
+.lpf-field .field-input::placeholder { color: var(--zl-t4); }
+.lpf-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -10px;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, var(--peach-glow), var(--peach-dim));
+}
+.lpf-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: min(680px, 100%);
+}
+.lpf-chip {
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--zl-control);
+  color: var(--zl-t3);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+}
+.lpf-chip:hover { color: var(--zl-t1); background: var(--zl-hi); }
+.lpf-enter {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
+}
+
+/* ── Phone, 390 ──────────────────────────────────────────────────────────── */
+.lp-lab.is-phone { padding: var(--space-6) var(--space-3) var(--space-10); }
+.lp-fig.is-phone .lpa,
+.lp-fig.is-phone .lpb,
+.lp-fig.is-phone .lpd,
+.lp-fig.is-phone .lpe,
+.lp-fig.is-phone .lpf { padding: var(--space-4); }
+.lp-fig.is-phone .lpf-field .field-input { font-size: var(--text-xl); }
+.lp-fig.is-phone .lpf-scheme { font-size: var(--zl-fs-title); }
+.lp-fig.is-phone .live-preview-action-label { display: none; }
