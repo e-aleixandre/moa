@@ -1,0 +1,374 @@
+/* u3-lab — CATALOG ONLY. Six treatments of the user's message, fast round.
+   Lab chrome (`.u3-*`), then one block per direction (`.u3a-*` … `.u3f-*`).
+   Prose and ledger are the shipped components untouched; only the message is
+   new. Tokens only, no inline fallbacks, so a chosen direction lifts into
+   UserWaypoint.css as it stands. */
+
+/* ── lab chrome ─────────────────────────────────────────────────────────── */
+.u3 { margin: 0 auto; padding: var(--space-8) var(--space-6) var(--space-12); }
+.u3-head h1 { font-size: var(--text-2xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.u3-head h1 em { font-style: normal; color: var(--zl-accent); }
+.u3-head p { color: var(--overlay1); margin-top: var(--space-2); max-width: 92ch; font-size: var(--text-md); }
+.u3-head code { font-family: var(--mono); font-size: 0.9em; color: var(--zl-t2); }
+
+.u3-dir { margin-top: var(--space-12); }
+.u3-dir-head h2 { font-size: var(--text-xl); font-weight: var(--weight-semibold); }
+.u3-dir-head p { color: var(--overlay1); font-size: var(--text-sm); margin-top: var(--space-1); max-width: 104ch; }
+
+.u3-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  margin-top: var(--space-4);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+
+.u3-frame {
+  flex: none;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim-2);
+  font-family: var(--font);
+  color: var(--zl-t1);
+  overflow: hidden;
+}
+.u3-desk { width: calc(var(--content-block) + 44px); padding: 24px 22px 12px; }
+.u3-desk.is-wide { width: calc(var(--content-block) + 260px); padding: 24px 22px 12px; }
+.u3-phone { width: 390px; padding: 20px 18px 12px; }
+
+/* The user's text: the user's own line breaks survive (pre-wrap is what
+   production relies on; here each break is a <p>). */
+.u3-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.u3-text p { margin: 0; }
+.u3-text p + p { margin-top: 6px; }
+.u3-text code {
+  padding: 1px 5px;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  font-family: var(--mono);
+  font-size: 0.875em;
+  color: var(--zl-t2);
+}
+
+/* The rewind mark, shared. 28px visual, 44px touch from a transparent halo. */
+.u3-mark {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--zl-t4);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color var(--motion-hover) var(--motion-ease), background var(--motion-hover) var(--motion-ease);
+}
+.u3-mark::before { content: ""; position: absolute; inset: -8px; }
+.u3-mark .lucide { width: 14px; height: 14px; }
+.u3-mark:active { color: var(--zl-t1); background: var(--zl-hi); }
+@media (hover: hover) { .u3-mark:hover { color: var(--zl-t1); background: var(--zl-hi); } }
+.u3-mark:focus-visible { color: var(--zl-t1); outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
+
+.u3-col .wp-attachments { margin-top: 10px; }
+
+/* ── A · Celda ───────────────────────────────────────────────────────────
+   Notebook input cell. The gutter carries the label and the rewind, so the
+   control is at a fixed distance from the text whatever its length. moa's
+   output hangs off the same gutter, unlabelled. */
+.u3-a .zl-turn { margin: 0 0 28px 64px; }
+.u3-phone .u3-a .zl-turn { margin-left: 44px; }
+.u3a-cell {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  align-items: start;
+  margin: 0 0 16px;
+}
+.u3-phone .u3a-cell { grid-template-columns: 44px 1fr; }
+.u3a-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding-top: 10px;
+}
+.u3a-label {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.u3-phone .u3a-label { font-size: var(--text-micro); }
+.u3a-gutter .u3-mark { margin-left: -6px; }
+.u3a-body {
+  padding: 10px 14px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  font-size: var(--zl-fs-title);
+  line-height: 1.6;
+  color: var(--zl-t1);
+}
+.u3a-cell.is-steer .u3a-body { background: var(--zl-sheet); box-shadow: var(--zl-rim), inset 2px 0 0 var(--zl-line-2); }
+.u3a-cell.is-steer .u3a-label { color: var(--zl-t3); }
+.u3a-cell.is-parent .u3a-body { box-shadow: var(--zl-rim), inset 2px 0 0 var(--zl-accent-line); }
+.u3a-src {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  letter-spacing: 0.04em;
+  color: var(--zl-accent);
+}
+
+/* ── B · Margen ──────────────────────────────────────────────────────────
+   The prose keeps the column; the message steps out of it into the left
+   margin, set small, bright and right-aligned against the column edge. The
+   page never breaks: the reading flow is continuous. */
+.u3-b { position: relative; }
+/* The aside floats into the left padding: it takes no vertical space in the
+   column, so the document reads as one continuous flow with notes beside it. */
+.u3-desk.is-wide .u3-b { padding-left: 236px; }
+.u3-desk.is-wide .u3-b .zl-turn { margin: 0 0 26px; max-width: var(--content-block); }
+.u3b-note { position: relative; }
+.u3-desk.is-wide .u3b-margin {
+  float: left;
+  clear: left;
+  width: 212px;
+  margin: 2px 0 8px -236px;
+  text-align: right;
+  font-size: var(--text-base);
+  line-height: 1.45;
+  font-weight: var(--weight-medium);
+  color: var(--zl-t1);
+}
+.u3b-tag {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-weight: var(--weight-normal);
+  letter-spacing: 0.04em;
+  color: var(--zl-t4);
+}
+.u3b-note.is-parent .u3b-tag { color: var(--zl-accent); }
+.u3-desk.is-wide .u3b-mark { margin: 2px -6px 0 0; }
+.u3-desk.is-wide .u3b-skirt { max-width: var(--content-block); }
+.u3-desk.is-wide .u3b-skirt .wp-attachments { margin-bottom: 18px; }
+
+/* phone: no margin to speak of, so the note goes flush left under a short
+   rule — same idea (an aside beside the document), one dimension less. */
+.u3-phone .u3b-margin {
+  position: relative;
+  display: block;
+  margin: 18px 0 10px;
+  padding-left: 12px;
+  font-size: var(--zl-fs-body);
+  line-height: 1.5;
+  font-weight: var(--weight-medium);
+  color: var(--zl-t1);
+}
+.u3-phone .u3b-margin::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--zl-line-2);
+}
+.u3-phone .u3b-note.is-parent .u3b-margin::before { background: var(--zl-accent-line); }
+.u3-phone .u3b-mark { margin-left: -6px; }
+.u3-phone .u3-b .zl-turn { margin: 0 0 22px; }
+
+/* ── C · Prompt ──────────────────────────────────────────────────────────
+   The message as a typed command: mono, a caret, the clock in the gutter.
+   moa's prose stays proportional, so the two authors never look alike. */
+.u3-c .zl-turn { margin: 0 0 26px 62px; }
+.u3-phone .u3-c .zl-turn { margin-left: 0; }
+.u3c-cmd {
+  display: grid;
+  grid-template-columns: 46px 16px 1fr 28px;
+  align-items: start;
+  column-gap: 0;
+  margin: 0 0 14px;
+  padding: 6px 0;
+}
+.u3-phone .u3c-cmd { grid-template-columns: 40px 14px 1fr 28px; }
+.u3c-clock {
+  padding-top: 2px;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+  font-variant-numeric: tabular-nums;
+}
+.u3c-caret {
+  padding-top: 1px;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-body);
+  color: var(--zl-t3);
+}
+.u3c-body {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--text-code);
+  line-height: 1.7;
+  letter-spacing: 0.005em;
+  color: var(--zl-t1);
+}
+.u3c-body .u3-text code { background: none; box-shadow: none; padding: 0; color: var(--zl-accent); font-size: 1em; }
+.u3c-cmd.is-steer .u3c-caret { color: var(--zl-yellow); }
+.u3c-cmd.is-steer .u3c-body { color: var(--zl-t2); }
+.u3c-cmd.is-parent .u3c-caret { color: var(--zl-accent); }
+.u3c-cmd .u3-mark { margin-top: -2px; }
+.u3-phone .u3c-body { font-size: var(--text-code); }
+
+/* ── D · Papel ───────────────────────────────────────────────────────────
+   A sheet slid into the stream: inverted, full bleed to the frame edge,
+   dark ink on light. Costs no colour; peach is freed. */
+.u3-d .zl-turn { margin: 0 0 26px; }
+.u3d-paper {
+  margin: 0 -22px 22px;
+  padding: 16px 22px 10px;
+  background: var(--rosewater);
+  color: var(--crust);
+}
+.u3-phone .u3d-paper { margin: 0 -18px 20px; padding: 14px 18px 8px; }
+.u3d-paper.is-steer { background: var(--flamingo); }
+.u3d-paper.is-parent { box-shadow: inset 3px 0 0 var(--mauve); }
+.u3d-inner {
+  font-size: var(--zl-fs-title);
+  font-weight: var(--weight-medium);
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+}
+.u3-phone .u3d-inner { font-size: var(--zl-fs-body); }
+.u3d-inner .u3-text code { background: rgba(17, 17, 27, 0.08); box-shadow: none; color: var(--crust); }
+.u3d-edge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.u3d-tag {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  letter-spacing: 0.04em;
+  color: var(--surface1);
+}
+.u3d-clock {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--surface1);
+  font-variant-numeric: tabular-nums;
+}
+.u3d-edge .u3-mark { color: var(--surface1); }
+.u3d-edge .u3-mark:active { color: var(--crust); background: rgba(17, 17, 27, 0.08); }
+@media (hover: hover) { .u3d-edge .u3-mark:hover { color: var(--crust); background: rgba(17, 17, 27, 0.08); } }
+.u3d-paper .wp-attachments { margin-top: 10px; }
+
+/* ── E · Deriva ──────────────────────────────────────────────────────────
+   Recency is the treatment. The live message is large and bright with air;
+   older ones step down in size and light until they are a trace. No control
+   to press, nothing hidden. */
+.u3-e .zl-turn { margin: 0 0 24px; }
+.u3e-msg { margin: 0 0 14px; }
+.u3e-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.u3e-age {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  letter-spacing: 0.04em;
+  color: var(--zl-t4);
+  font-variant-numeric: tabular-nums;
+}
+.u3e-ico { width: 13px; height: 13px; color: var(--zl-t4); }
+.u3e-meta .u3-mark { margin-left: -4px; }
+.u3e-msg .u3-text { font-weight: var(--weight-medium); }
+
+.u3e-d0 { margin: 22px 0 18px; }
+.u3e-d0 .u3-text { font-size: var(--zl-fs-display); line-height: 1.4; letter-spacing: -0.015em; color: var(--zl-t1); }
+.u3-phone .u3e-d0 .u3-text { font-size: var(--text-lg); }
+.u3e-d1 .u3-text { font-size: var(--zl-fs-title); line-height: 1.55; color: var(--zl-t2); }
+.u3e-d2 .u3-text { font-size: var(--zl-fs-body); line-height: 1.5; color: var(--zl-t3); }
+.u3e-d3 .u3-text,
+.u3e-d4 .u3-text { font-size: var(--zl-fs-body); line-height: 1.45; color: var(--zl-t4); }
+.u3e-d3 .u3e-age,
+.u3e-d4 .u3e-age { color: var(--surface2); }
+.u3e-msg.is-parent .u3e-age { color: var(--zl-accent); }
+
+/* ── F · Hunk ────────────────────────────────────────────────────────────
+   The message as a unified-diff hunk applied to the conversation: the @@
+   line carries the range and the rewind, the text sits on an added-line
+   wash behind a "+" gutter. moa's work is the resulting file, unmarked. */
+.u3-f .zl-turn { margin: 0 0 26px; }
+.u3f-hunk { margin: 0 0 16px; }
+.u3f-at {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.u3f-range {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  letter-spacing: 0.03em;
+  color: var(--zl-t3);
+  white-space: nowrap;
+}
+.u3f-note {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  letter-spacing: 0.03em;
+  color: var(--zl-t4);
+  white-space: nowrap;
+}
+.u3f-hunk.is-parent .u3f-note { color: var(--zl-accent); }
+.u3f-rule { flex: 1; height: 1px; background: var(--zl-line); }
+.u3f-lines {
+  border-radius: var(--zl-r-sm);
+  background: var(--green-dim);
+  box-shadow: inset 2px 0 0 var(--zl-green);
+  padding: 6px 0;
+  overflow: hidden;
+}
+.u3f-hunk.is-steer .u3f-lines { background: var(--yellow-dim); box-shadow: inset 2px 0 0 var(--zl-yellow); }
+.u3f-line {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  align-items: baseline;
+  padding: 0 10px 0 0;
+}
+.u3f-plus {
+  font-family: var(--mono);
+  font-size: var(--text-code);
+  text-align: center;
+  color: var(--zl-green);
+}
+.u3f-hunk.is-steer .u3f-plus { color: var(--zl-yellow); }
+.u3f-txt {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--zl-fs-title);
+  line-height: 1.6;
+  color: var(--zl-t1);
+}
+.u3-phone .u3f-txt { font-size: var(--zl-fs-body); }
+.u3f-txt code {
+  padding: 1px 5px;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-raised);
+  font-family: var(--mono);
+  font-size: 0.875em;
+  color: var(--zl-t2);
+}
+.u3f-lines .wp-attachments { margin: 8px 10px 2px 26px; }
