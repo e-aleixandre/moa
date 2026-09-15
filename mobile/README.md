@@ -42,6 +42,33 @@ A code can also be typed by hand, because a camera is not always an option.
 It loads the interface from that moa rather than bundling it, so a new version
 of moa does **not** need a new build of the app.
 
+### Pairing transport and credential boundary
+
+The pairing claim is made by the iOS container with an ephemeral `URLSession`,
+not by the local WebView page. This is deliberate. A narrow CORS policy for
+`capacitor://localhost` could make the original JavaScript claim work, but it
+would still expose the durable credential to page JavaScript and grant a
+browser origin permission to read an unauthenticated secret-bearing response.
+The native request needs neither a preflight nor a CORS grant; the server
+rejects browser-originated claims instead. Redirects are also disabled so the
+one-time secret cannot follow a server redirect.
+
+After a successful claim, iOS stores the server origin, credential and expiry
+as a generic-password Keychain item with
+`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`. The credential is never put in
+a URL, `localStorage`, `UserDefaults`, the App Group, or a log. It is sent only
+by native `URLSession`, over HTTPS, to exchange for a 24-hour browser session.
+
+That session is a separate random, signed value in a `Secure`, `HttpOnly`,
+`SameSite=Strict`, host-only cookie. WebKit therefore attaches it to both REST
+requests and WebSocket upgrades without exposing either secret to JavaScript
+or putting one in a WebSocket URL/subprotocol. The server checks the device's
+durable revocation and expiry state whenever it accepts the cookie. Existing
+device WebSockets retain the same server-side lease and are closed immediately
+on revocation. If the short browser session expires, the remote frontend asks
+the native bridge to renew it from Keychain; if the device itself was revoked,
+the bridge clears its binding and returns to the pairing screen.
+
 ## Building it
 
 Requires a Mac with Xcode. From this directory:
@@ -164,13 +191,34 @@ share providers):
    it, and confirm a call to `MoaShareInbox.peek()` is rejected. This checks
    that shared files are not exposed to arbitrary pages.
 
-Pairing itself currently has the separately known CORS/credential defects in
-`www/boot.js` and the server claim route. Share-in does not attempt to fix them:
-it retains content independently of pairing, but a fresh install cannot
-complete the end-to-end destination-picker check until that work lands. An
-already paired installation is expected to work after the native origin is
-recorded on its next local boot; there has not yet been a distributed iOS build,
-so this is not a migration path for an existing release.
+### Native pairing checks
+
+These checks require a physical device and a real server certificate. They
+cannot be completed by the repository's Linux checks. Pairing codes are limited
+to five per hour, so create one only after the app is installed and the server
+is ready; do not create codes speculatively.
+
+1. Delete the app to start with an empty Keychain item and WebKit store. Create
+   one pairing code, scan it, and verify the server frontend loads. Terminate
+   and reopen the app; it must return to that frontend without another code.
+2. In Safari's Web Inspector, inspect the app page. `localStorage` must contain
+   only the `moa-server` origin, never a value beginning with a device id or
+   `moa-pair-v1`. Requests and the session WebSocket should carry the
+   `__Host-moa_device` cookie automatically; page JavaScript must not be able to
+   read it through `document.cookie`.
+3. Revoke this device from moa's device list while a conversation is open. The
+   live socket must close, the app must return to **Pair this app**, and it must
+   stay there rather than reconnecting. Create one new code only when ready and
+   verify re-pairing succeeds.
+4. Turn networking off before reopening an already paired app. It must preserve
+   the Keychain credential and show a connection error, not silently forget the
+   device or consume a new pairing code. Restore networking and reopen it.
+5. Repeat the fresh-install pending-share check above. The saved item must
+   remain in the App Group across pairing and reach the destination picker once
+   the authenticated frontend loads.
+
+There has not yet been a distributed iOS build, so no migration of an existing
+release is required.
 
 ## Why the iOS project is committed
 

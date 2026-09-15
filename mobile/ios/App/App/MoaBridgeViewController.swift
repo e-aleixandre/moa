@@ -4,6 +4,7 @@ import WebKit
 
 final class MoaBridgeViewController: CAPBridgeViewController {
     private let shareInboxHandler = ShareInboxMessageHandler()
+    private let deviceAuthHandler = DeviceAuthMessageHandler()
 
     override func webView(with frame: CGRect, configuration: WKWebViewConfiguration) -> WKWebView {
         configuration.userContentController.addUserScript(WKUserScript(
@@ -11,12 +12,19 @@ final class MoaBridgeViewController: CAPBridgeViewController {
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         ))
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: DeviceAuthMessageHandler.javaScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
         configuration.userContentController.add(shareInboxHandler, name: ShareInboxMessageHandler.name)
+        configuration.userContentController.add(deviceAuthHandler, name: DeviceAuthMessageHandler.name)
         return super.webView(with: frame, configuration: configuration)
     }
 
     override func capacitorDidLoad() {
         shareInboxHandler.webView = webView
+        deviceAuthHandler.webView = webView
     }
 }
 
@@ -35,6 +43,7 @@ private final class ShareInboxMessageHandler: NSObject, WKScriptMessageHandler {
       window.MoaShareInbox = {
         status: () => call("status"),
         bindServer: (origin) => call("bindServer", { origin }),
+        clearServer: () => call("clearServer"),
         peek: () => call("peek"),
         acknowledge: (id) => call("acknowledge", { id }),
         __receive(message) {
@@ -48,7 +57,6 @@ private final class ShareInboxMessageHandler: NSObject, WKScriptMessageHandler {
     })();
     """#
 
-    private static let serverOriginKey = "MoaShareServerOrigin"
     weak var webView: WKWebView?
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -68,7 +76,11 @@ private final class ShareInboxMessageHandler: NSObject, WKScriptMessageHandler {
             case "bindServer":
                 guard isLocal(message.frameInfo.securityOrigin) else { throw BridgeError.notAuthorized }
                 let origin = try validatedOrigin(options["origin"] as? String)
-                UserDefaults.standard.set(origin, forKey: Self.serverOriginKey)
+                NativeServerBinding.bind(origin)
+                respond(id: id, value: [:])
+            case "clearServer":
+                guard isLocal(message.frameInfo.securityOrigin) else { throw BridgeError.notAuthorized }
+                NativeServerBinding.clear()
                 respond(id: id, value: [:])
             case "peek":
                 try requireBoundServer(message.frameInfo.securityOrigin)
@@ -116,10 +128,7 @@ private final class ShareInboxMessageHandler: NSObject, WKScriptMessageHandler {
     }
 
     private func requireBoundServer(_ securityOrigin: WKSecurityOrigin) throws {
-        guard
-            let expected = UserDefaults.standard.string(forKey: Self.serverOriginKey),
-            expected == originString(securityOrigin)
-        else { throw BridgeError.notAuthorized }
+        guard NativeServerBinding.matches(securityOrigin) else { throw BridgeError.notAuthorized }
     }
 
     private func validatedOrigin(_ raw: String?) throws -> String {
@@ -138,14 +147,6 @@ private final class ShareInboxMessageHandler: NSObject, WKScriptMessageHandler {
 
     private func isLocal(_ origin: WKSecurityOrigin) -> Bool {
         origin.protocol == "capacitor" && origin.host == "localhost"
-    }
-
-    private func originString(_ origin: WKSecurityOrigin) -> String {
-        let defaultPort = (origin.protocol == "https" && origin.port == 443)
-            || (origin.protocol == "http" && origin.port == 80)
-        let port = origin.port > 0 && !defaultPort ? ":\(origin.port)" : ""
-        let host = origin.host.contains(":") ? "[\(origin.host)]" : origin.host
-        return "\(origin.protocol)://\(host)\(port)"
     }
 
     private func respond(id: String, value: Any) {

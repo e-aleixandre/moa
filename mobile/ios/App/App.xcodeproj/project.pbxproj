@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		A00000000000000000000001 /* SharedInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* SharedInbox.swift */; };
 		A00000000000000000000003 /* MoaBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* MoaBridgeViewController.swift */; };
+		A00000000000000000000009 /* DeviceAuthBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000009 /* DeviceAuthBridge.swift */; };
+		A0000000000000000000000A /* DeviceCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000A /* DeviceCredentialStore.swift */; };
 		A00000000000000000000004 /* SharedInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* SharedInbox.swift */; };
 		A00000000000000000000005 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* ShareViewController.swift */; };
 		A00000000000000000000006 /* ShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -50,6 +52,8 @@
 /* Begin PBXFileReference section */
 		A10000000000000000000001 /* SharedInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedInbox.swift; sourceTree = "<group>"; };
 		A10000000000000000000003 /* MoaBridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoaBridgeViewController.swift; sourceTree = "<group>"; };
+		A10000000000000000000009 /* DeviceAuthBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAuthBridge.swift; sourceTree = "<group>"; };
+		A1000000000000000000000A /* DeviceCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCredentialStore.swift; sourceTree = "<group>"; };
 		A10000000000000000000004 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000005 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		A10000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -112,6 +116,8 @@
 			children = (
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				A10000000000000000000003 /* MoaBridgeViewController.swift */,
+				A10000000000000000000009 /* DeviceAuthBridge.swift */,
+				A1000000000000000000000A /* DeviceCredentialStore.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
@@ -258,6 +264,8 @@
 			files = (
 				A00000000000000000000001 /* SharedInbox.swift in Sources */,
 				A00000000000000000000003 /* MoaBridgeViewController.swift in Sources */,
+				A00000000000000000000009 /* DeviceAuthBridge.swift in Sources */,
+				A0000000000000000000000A /* DeviceCredentialStore.swift in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 			);
