@@ -185,7 +185,7 @@ const TURN_LIVE = {
 };
 
 const CONVERSATION = [
-  { user: { kind: "short", lines: ["Put fast on the desktop status strip, after yolo."], at: "23:52", day: "14 Sept" } },
+  { user: { kind: "short", lines: ["Put fast on the desktop status strip, after yolo."], at: "23:52" } },
   { moa: TURN_A },
   { moa: TURN_A2 },
   { user: { kind: "long", lines: LONG, at: "09:14" } },
@@ -258,7 +258,7 @@ function RewindAction() {
 }
 
 // ── the cell — settled, not touched ──────────────────────────────────────
-// The clock in the gutter (44px on the phone), mono tabular-nums, the short date
+// The clock in the gutter (44px on the phone), mono tabular-nums
 // riding above the time, the rewind on the slab's right edge, and nothing
 // else. Copy left this cell in u5 and does not come back.
 function Cell({ msg }) {

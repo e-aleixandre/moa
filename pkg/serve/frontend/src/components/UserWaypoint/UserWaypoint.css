@@ -7,10 +7,12 @@
    transcript's vocabulary entirely.
 
    The gutter holds the send time in mono `tabular-nums`, so 09:14 and 11:08
-   occupy the same box and the column never breathes. A message from another
-   day wears its day in micro ABOVE the hour, never beside it, for the same
-   reason. 64px on the desktop; 44px on the phone, which is what `09:14` in
-   12px mono (36px) needs plus room.
+   occupy the same box and the column never breathes. It holds the hour and
+   NOTHING else: a date line above it read as cramped in 44px, and a transcript
+   is read inside one conversation, where the day rarely changes -- so the full
+   date is revealed on demand, as the hour's title and accessible name, and the
+   hour is focusable so a keyboard can reach it. 64px on the desktop; 44px on
+   the phone, which is what `09:14` in 12px mono (36px) needs plus room.
 
    Rewind is pinned to the CELL's right edge rather than to the 680px measure.
    On the old full-measure row it sat 311px from the end of a short message on
@@ -47,19 +49,25 @@
   padding-top: 10px;
   align-self: stretch;
 }
-.zl-user-clock { display: flex; flex-direction: column; align-items: flex-start; }
 .zl-user-hhmm {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
   color: var(--zl-t4);
   white-space: nowrap;
+  /* The hour carries the full date as its title, so it is focusable: a
+     tooltip nobody can reach with a keyboard is not a tooltip. */
+  cursor: default;
+  border-radius: var(--radius-sm);
+  transition: color var(--duration) var(--ease);
 }
-.zl-user-day {
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  letter-spacing: 0.06em;
-  color: var(--surface2);
-  white-space: nowrap;
+.zl-user-hhmm:hover,
+.zl-user-hhmm:focus-visible { color: var(--zl-t2); }
+.zl-user-hhmm:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .zl-user-hhmm { transition: none; }
 }
 
 /* The cell. Its right padding is the rewind's lane, so the mark never lands

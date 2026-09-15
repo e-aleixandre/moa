@@ -1,7 +1,7 @@
 import { useRef, useState } from "preact/hooks";
 import { Rewind as RewindIcon } from "lucide-preact";
 import { sanitizeHtml } from "../../util/sanitize.js";
-import { clockHHMM, clockDayLabel } from "../../data/util/clock.js";
+import { clockHHMM, clockFull } from "../../data/util/clock.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { WaypointAttachments, attachmentImageSrc, attachmentLabel } from "./WaypointAttachments.jsx";
 import { PreviewReference } from "./PreviewReference.jsx";
@@ -121,9 +121,11 @@ export function UserWaypoint({
   // then carries no day of its own.
   const preformatted = typeof time === "string" && !/^\d+$/.test(time);
   const hhmm = preformatted ? time : clockHHMM(time);
-  // Only a message from another day says which: the column must not widen, so
-  // the label rides ABOVE the hour rather than beside it.
-  const day = preformatted ? "" : clockDayLabel(time);
+  // The gutter shows the hour and nothing else. A date line above it read as
+  // cramped in 44px, and a transcript is read inside one conversation, where
+  // the day rarely changes -- so the date is revealed on demand instead, by
+  // hovering or tapping the hour, and is the accessible name either way.
+  const full = preformatted ? "" : clockFull(time);
 
   return (
     <>
@@ -137,10 +139,9 @@ export function UserWaypoint({
             in it, or the slab would jump left on a message without one. */}
         <div class="zl-user-gutter">
           {hhmm && (
-            <span class="zl-user-clock">
-              {day && <span class="zl-user-day">{day}</span>}
-              <time class="zl-user-hhmm zl-data">{hhmm}</time>
-            </span>
+            <time class="zl-user-hhmm zl-data" title={full || undefined} aria-label={full || undefined} tabIndex={full ? 0 : undefined}>
+              {hhmm}
+            </time>
           )}
         </div>
         <div class="zl-user-cell">

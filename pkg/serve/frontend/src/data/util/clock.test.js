@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { clockMs, clockHHMM, clockDayLabel } from './clock.js';
+import { clockMs, clockHHMM, clockDayLabel, clockFull } from './clock.js';
 
 // The two real transports, measured on a live session rather than assumed:
 // the WebSocket sends core.Message with `timestamp` in epoch SECONDS, and the
@@ -54,10 +54,27 @@ test('today carries no day label — a transcript is read in the present', () =>
 test('yesterday wears the short date, which is what the gutter can hold', () => {
   const now = new Date(2026, 8, 15, 12, 0, 0).getTime();
   const yesterday = new Date(2026, 8, 14, 23, 52, 0).getTime();
-  // Not the word: "Yesterday" measured 68.7px in a 44px gutter, and the UI is
-  // in English, so a shorter Spanish label is not an option either.
+  // clockDayLabel is no longer what the waypoint gutter draws -- the gutter
+  // shows the hour alone and reveals the date on demand -- but the helper is
+  // still exported, so its contract stays pinned for any caller in flow.
   expect(clockDayLabel(yesterday, now))
     .toBe(new Date(yesterday).toLocaleDateString([], { day: 'numeric', month: 'short' }));
+});
+
+// clockFull is what the gutter reveals on hover, tap or focus. It is the only
+// place the date survives, so an absent time must yield "" and never a tooltip
+// reading "Invalid Date".
+test('the full moment names the day and the year, for a tooltip', () => {
+  const at = new Date(2026, 8, 15, 9, 14, 0);
+  const out = clockFull(Math.floor(at.getTime() / 1000));
+  expect(out).toContain('2026');
+  expect(out).toContain('09:14');
+});
+
+test('no usable time means no tooltip, not an invalid date', () => {
+  expect(clockFull(undefined)).toBe('');
+  expect(clockFull(0)).toBe('');
+  expect(clockFull('0001-01-01T00:00:00Z')).toBe('');
 });
 
 test('older than yesterday falls back to a short date', () => {

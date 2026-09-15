@@ -68,13 +68,10 @@ function startOfDay(ms) {
 // not today: a transcript is read in the present, so "today" is the assumption
 // and saying it on every message would be noise.
 //
-// The label rides ABOVE the hour in a 44px gutter, so it has to FIT one, and
-// no English word for yesterday does: "Yesterday" measured 68.7px in the
-// gutter's own micro mono, 25px outside a phone gutter and past the 64px
-// desktop one too. So every past day -- yesterday included -- wears the short
-// date instead ("Mar 3", 38.2px), which fits, needs no translation, and keeps
-// one shape for the whole column rather than a word for one day and a date
-// for the rest.
+// NOTE: the waypoint gutter no longer draws this. A second mono line under a
+// 44px gutter read as cramped, and the owner asked for the hour alone with the
+// date on demand -- see clockFull, which is what the gutter reveals on hover
+// or tap. This stays for callers that have room for a day label in flow.
 export function clockDayLabel(value, now = Date.now()) {
   const ms = clockMs(value);
   if (ms === null) return '';
@@ -86,4 +83,22 @@ export function clockDayLabel(value, now = Date.now()) {
   return date.toLocaleDateString([], sameYear
     ? { day: 'numeric', month: 'short' }
     : { day: 'numeric', month: 'short', year: '2-digit' });
+}
+
+// clockFull is the whole moment in words, for a tooltip or an aria-label: the
+// gutter shows only the hour, so this is where the date lives when someone
+// asks for it. Not abbreviated -- it is read once, deliberately, and has the
+// whole width of a tooltip, so none of the gutter's constraints apply.
+export function clockFull(value) {
+  const ms = clockMs(value);
+  if (ms === null) return '';
+  return new Date(ms).toLocaleString([], {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
 }

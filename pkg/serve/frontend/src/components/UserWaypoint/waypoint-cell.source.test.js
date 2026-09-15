@@ -46,20 +46,30 @@ test("the user's message carries no copy control", () => {
 });
 
 // ── the gutter keeps one width whatever the hour says ─────────────────────
-// `09:14` and `11:08` must occupy the same box, and a message from another
-// day must not widen the column: the day rides above the hour, never beside.
+// `09:14` and `11:08` must occupy the same box, and nothing else may share
+// the gutter: the date is revealed on demand, not stacked above the hour.
 
 test("the hour is mono and tabular, so every hour is the same width", () => {
   expect(css).toMatch(/\.zl-user-hhmm\s*\{[^}]*font-variant-numeric:\s*tabular-nums\s*;/s);
   expect(css).toMatch(/\.zl-user\s+\.zl-data\s*\{[^}]*font-family:\s*var\(--mono\)\s*;/s);
 });
 
-test("the day label stacks above the hour rather than beside it", () => {
-  expect(css).toMatch(/\.zl-user-clock\s*\{[^}]*flex-direction:\s*column\s*;/s);
-  const day = jsx.indexOf('class="zl-user-day"');
-  const hour = jsx.indexOf('class="zl-user-hhmm zl-data"');
-  expect(day).toBeGreaterThan(-1);
-  expect(day).toBeLessThan(hour);
+test("the gutter draws the hour and nothing else", () => {
+  // A second mono line under a 44px gutter read as cramped, so the date left
+  // the gutter entirely. Both the element and its rule must be gone, or it
+  // comes back the next time someone has a date to show.
+  expect(jsx).not.toContain('zl-user-day');
+  expect(css).not.toContain('.zl-user-day');
+  expect(jsx).toContain('class="zl-user-hhmm zl-data"');
+});
+
+test("the full date is reachable by pointer AND by keyboard", () => {
+  // A title attribute alone is a mouse-only affordance; the hour is focusable
+  // and carries the same string as its accessible name.
+  expect(jsx).toMatch(/title=\{full \|\| undefined\}/);
+  expect(jsx).toMatch(/aria-label=\{full \|\| undefined\}/);
+  expect(jsx).toMatch(/tabIndex=\{full \? 0 : undefined\}/);
+  expect(css).toMatch(/\.zl-user-hhmm:focus-visible\s*\{[^}]*outline:/s);
 });
 
 test("the gutter is 64px on the desktop and 44px on the phone", () => {
