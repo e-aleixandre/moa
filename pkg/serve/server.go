@@ -208,6 +208,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	// independent of device pairing.
 	mux.HandleFunc("POST /api/pulse/pairings", handlePulsePairing(devices))
 	mux.HandleFunc("POST /api/pulse/pairings/claim", handlePulsePairingClaim(devices))
+	mux.HandleFunc("POST /api/pulse/device-session", handlePulseDeviceSession(devices))
 	mux.HandleFunc("GET /api/pulse/devices", handlePulseDevices(devices))
 	mux.HandleFunc("POST /api/pulse/devices/{id}/revoke", handlePulseDeviceRevoke(devices))
 	mux.HandleFunc("POST /api/pulse/realtime/client-secret", handleRealtimeClientSecret(devices, o.realtimeKey, o.realtimeHTTP))
@@ -253,7 +254,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 func pulseNoStoreMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim":
+		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim", "/api/pulse/device-session":
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)

@@ -14,6 +14,7 @@ const (
 	routeOwnerSurface routeAccess = iota
 	routeOwnerAdmin
 	routePairingClaim
+	routeDeviceSession
 )
 
 // routeAuthorizationMiddleware is kept separate from authentication so route
@@ -39,6 +40,11 @@ func routeAuthorizationMiddleware(next http.Handler) http.Handler {
 				http.Error(w, "paired devices cannot claim pairings", http.StatusForbidden)
 				return
 			}
+		case routeDeviceSession:
+			if !authenticated || identity.Kind != "device" {
+				http.Error(w, "paired device authentication required", http.StatusForbidden)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -50,6 +56,8 @@ func serveRouteAccess(r *http.Request) routeAccess {
 	switch {
 	case r.Method == http.MethodPost && r.URL.Path == "/api/pulse/pairings/claim":
 		return routePairingClaim
+	case r.Method == http.MethodPost && r.URL.Path == "/api/pulse/device-session":
+		return routeDeviceSession
 	case r.URL.Path == "/api/pulse/pairings" && r.Method == http.MethodPost:
 		return routeOwnerAdmin
 	case r.URL.Path == "/api/pulse/devices" && r.Method == http.MethodGet:

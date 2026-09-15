@@ -74,6 +74,13 @@ func handlePulsePairingClaim(store *deviceStore) http.HandlerFunc {
 			rejectInsecureDeviceTransport(w)
 			return
 		}
+		// Native clients do not send Origin. Refuse browser-originated claims
+		// rather than adding a CORS grant to an endpoint that returns a durable
+		// credential. The one-time pairing secret remains the actual authority.
+		if r.Header.Get("Origin") != "" {
+			http.Error(w, "browser pairing claims are not allowed", http.StatusForbidden)
+			return
+		}
 		var body struct {
 			PairingID     string `json:"pairing_id"`
 			PairingSecret string `json:"pairing_secret"`
@@ -108,6 +115,48 @@ func handlePulsePairingClaim(store *deviceStore) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusCreated, credential)
+	}
+}
+
+func handlePulseDeviceSession(store *deviceStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := requirePulseDeviceStore(w, r, store)
+		if !ok {
+			return
+		}
+		if identity.Kind != "device" {
+			http.Error(w, "paired device authentication required", http.StatusForbidden)
+			return
+		}
+		var body struct{}
+		if !decodePulseJSONBody(w, r, &body) {
+			return
+		}
+		session, expiresAt, err := store.createBrowserSession(identity)
+		if errors.Is(err, errInvalidDeviceCredential) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if errors.Is(err, errDeviceStoreUnavailable) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "device pairing temporarily unavailable"})
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unable to create device session"})
+			return
+		}
+		maxAge := max(1, int(time.Until(expiresAt).Seconds()))
+		http.SetCookie(w, &http.Cookie{
+			Name:     deviceSessionCookieName,
+			Value:    session,
+			Path:     "/",
+			Expires:  expiresAt,
+			MaxAge:   maxAge,
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
+		})
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

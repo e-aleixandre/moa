@@ -68,6 +68,146 @@ func pairedDevice(t *testing.T, handler http.Handler, owner *http.Cookie, label 
 	return device
 }
 
+func deviceBrowserSession(t *testing.T, handler http.Handler, credential string) *http.Cookie {
+	t.Helper()
+	rec := pairingRequest(handler, http.MethodPost, "/api/pulse/device-session", `{}`, nil, credential)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("create device browser session = %d: %s", rec.Code, rec.Body.String())
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("device browser session cookies = %#v", cookies)
+	}
+	return cookies[0]
+}
+
+func TestNativePairingBootstrapDoesNotGrantBrowserCORS(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	handler := NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(filepath.Join(t.TempDir(), "devices.json")))
+	owner := &http.Cookie{Name: authCookieName, Value: "owner"}
+
+	pairRec := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings", `{}`, owner, "")
+	if pairRec.Code != http.StatusCreated {
+		t.Fatalf("pairing = %d: %s", pairRec.Code, pairRec.Body.String())
+	}
+	var pairing pairingResult
+	if err := json.NewDecoder(pairRec.Body).Decode(&pairing); err != nil {
+		t.Fatal(err)
+	}
+	claimBody := `{"pairing_id":"` + pairing.PairingID + `","pairing_secret":"` + pairingPayloadSecret(t, pairing) + `","device_label":"native phone"}`
+
+	for _, origin := range []string{"capacitor://localhost", "https://attacker.example"} {
+		preflight := httptest.NewRequest(http.MethodOptions, "/api/pulse/pairings/claim", nil)
+		preflight.Host = "localhost"
+		preflight.RemoteAddr = "127.0.0.1:12345"
+		preflight.Header.Set("Origin", origin)
+		preflight.Header.Set("Access-Control-Request-Method", http.MethodPost)
+		preflight.Header.Set("Access-Control-Request-Headers", "content-type,x-moa-request")
+		preflightRec := httptest.NewRecorder()
+		handler.ServeHTTP(preflightRec, preflight)
+		if preflightRec.Code < 400 {
+			t.Fatalf("preflight from %q = %d, want rejection", origin, preflightRec.Code)
+		}
+		if got := preflightRec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+			t.Fatalf("preflight from %q granted CORS to %q", origin, got)
+		}
+
+		claim := httptest.NewRequest(http.MethodPost, "/api/pulse/pairings/claim", strings.NewReader(claimBody))
+		claim.Host = "localhost"
+		claim.RemoteAddr = "127.0.0.1:12345"
+		claim.Header.Set("Content-Type", "application/json")
+		claim.Header.Set("X-Moa-Request", "1")
+		claim.Header.Set("Origin", origin)
+		claimRec := httptest.NewRecorder()
+		handler.ServeHTTP(claimRec, claim)
+		if claimRec.Code != http.StatusForbidden {
+			t.Fatalf("browser claim from %q = %d: %s", origin, claimRec.Code, claimRec.Body.String())
+		}
+		if got := claimRec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+			t.Fatalf("claim from %q granted CORS to %q", origin, got)
+		}
+	}
+
+	// The rejected browser attempts do not consume the one-time secret. The
+	// native URLSession request has no Origin and can still claim it once.
+	if nativeClaim := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings/claim", claimBody, nil, ""); nativeClaim.Code != http.StatusCreated {
+		t.Fatalf("native claim = %d: %s", nativeClaim.Code, nativeClaim.Body.String())
+	}
+}
+
+func TestDeviceBrowserSessionAuthenticatesRESTAndWebSocketUntilRevocation(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
+	mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
+	sess, err := mgr.CreateSession(CreateOpts{Title: "native session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "devices.json")
+	handler := NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(path))
+	owner := &http.Cookie{Name: authCookieName, Value: "owner"}
+	device := pairedDevice(t, handler, owner, "native phone")
+
+	if rec := pairingRequest(handler, http.MethodPost, "/api/pulse/device-session", `{}`, owner, ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("owner device-session exchange = %d, want 403", rec.Code)
+	}
+	cookie := deviceBrowserSession(t, handler, device.Credential)
+	if cookie.Name != deviceSessionCookieName || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/" || cookie.MaxAge <= 0 {
+		t.Fatalf("device browser cookie is not narrowly scoped: %#v", cookie)
+	}
+	if strings.Contains(cookie.Value, device.Credential) || strings.Contains(cookie.Value, strings.TrimPrefix(device.Credential, device.DeviceID+".")) {
+		t.Fatal("browser session contains the durable device credential")
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(contents), cookie.Value) || strings.Contains(string(contents), device.Credential) {
+		t.Fatal("browser session or raw device credential was persisted")
+	}
+
+	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", cookie, ""); got.Code != http.StatusOK {
+		t.Fatalf("device browser REST auth = %d: %s", got.Code, got.Body.String())
+	}
+	tampered := *cookie
+	tampered.Value += "x"
+	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", &tampered, ""); got.Code != http.StatusUnauthorized {
+		t.Fatalf("tampered browser session = %d, want 401", got.Code)
+	}
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, server.URL+"/api/sessions/"+sess.ID+"/ws", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Cookie": []string{cookie.String()}},
+	})
+	if err != nil {
+		t.Fatalf("device browser WebSocket auth: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
+	var event Event
+	if err := wsjson.Read(ctx, conn, &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != "init" {
+		t.Fatalf("device browser WebSocket event = %q", event.Type)
+	}
+
+	revoke := pairingRequest(handler, http.MethodPost, "/api/pulse/devices/"+device.DeviceID+"/revoke", `{}`, owner, "")
+	if revoke.Code != http.StatusNoContent {
+		t.Fatalf("revoke = %d: %s", revoke.Code, revoke.Body.String())
+	}
+	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", cookie, ""); got.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked browser session = %d, want 401", got.Code)
+	}
+	expectDeviceWSClose(t, conn, "browser-session websocket revoke")
+}
+
 func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 	if !deviceStoreLockSupported() {
 		t.Skip("device auth fails closed where advisory process locks are unavailable")

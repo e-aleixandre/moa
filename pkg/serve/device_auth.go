@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +34,8 @@ const (
 	deviceLabelLimit          = 80
 	deviceAuditLimit          = 512
 	deviceClaimSourceLimit    = 1024
+	deviceSessionTTL          = 24 * time.Hour
+	deviceSessionCookieName   = "__Host-moa_device"
 )
 
 type authIdentity struct {
@@ -510,6 +513,94 @@ func (s *deviceStore) authenticate(credential string) (authIdentity, error) {
 	return authIdentity{}, errInvalidDeviceCredential
 }
 
+// createBrowserSession exchanges a Keychain-held device credential for a
+// short-lived, HttpOnly browser session. The session contains no device
+// credential and is rechecked against the durable device record on every use,
+// so revocation remains immediate.
+func (s *deviceStore) createBrowserSession(identity authIdentity) (string, time.Time, error) {
+	if identity.Kind != "device" || !validDeviceID(identity.DeviceID) {
+		return "", time.Time{}, errInvalidDeviceCredential
+	}
+	nonce, err := newDeviceSecret()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	nonceText := base64.RawURLEncoding.EncodeToString(nonce)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.unavailable {
+		return "", time.Time{}, errDeviceStoreUnavailable
+	}
+	now := s.now().UTC()
+	for _, device := range s.state.Devices {
+		if device.ID != identity.DeviceID {
+			continue
+		}
+		if device.RevokedAt != nil || !device.ExpiresAt.After(now) {
+			return "", time.Time{}, errInvalidDeviceCredential
+		}
+		expiresAt := now.Add(deviceSessionTTL)
+		if device.ExpiresAt.Before(expiresAt) {
+			expiresAt = device.ExpiresAt
+		}
+		expiresText := strconv.FormatInt(expiresAt.Unix(), 10)
+		proof := expiresText + "." + nonceText
+		signature := s.verifier("browser-session", device.ID, proof)
+		return "v1." + device.ID + "." + proof + "." + signature, expiresAt, nil
+	}
+	return "", time.Time{}, errInvalidDeviceCredential
+}
+
+func (s *deviceStore) authenticateBrowserSession(session string) (authIdentity, error) {
+	parts := strings.Split(session, ".")
+	if len(parts) != 5 || parts[0] != "v1" || !validDeviceID(parts[1]) || len(parts[3]) != 43 || len(parts[4]) != 43 {
+		return authIdentity{}, errInvalidDeviceCredential
+	}
+	expiresUnix, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || expiresUnix <= 0 {
+		return authIdentity{}, errInvalidDeviceCredential
+	}
+	if _, err := base64.RawURLEncoding.DecodeString(parts[3]); err != nil {
+		return authIdentity{}, errInvalidDeviceCredential
+	}
+
+	s.mu.Lock()
+	if s.closed || s.unavailable {
+		s.mu.Unlock()
+		return authIdentity{}, errDeviceStoreUnavailable
+	}
+	now := s.now().UTC()
+	sessionExpiresAt := time.Unix(expiresUnix, 0).UTC()
+	deviceID := parts[1]
+	expected := s.verifier("browser-session", deviceID, parts[2]+"."+parts[3])
+	if !sessionExpiresAt.After(now) || !hmac.Equal([]byte(parts[4]), []byte(expected)) {
+		s.mu.Unlock()
+		return authIdentity{}, errInvalidDeviceCredential
+	}
+	for i := range s.state.Devices {
+		device := &s.state.Devices[i]
+		if device.ID != deviceID {
+			continue
+		}
+		if device.RevokedAt != nil || !device.ExpiresAt.After(now) || sessionExpiresAt.After(device.ExpiresAt) {
+			s.mu.Unlock()
+			return authIdentity{}, errInvalidDeviceCredential
+		}
+		if device.LastUsedAt == nil || now.Sub(*device.LastUsedAt) >= time.Minute {
+			device.LastUsedAt = &now
+			if err := s.saveLocked(); err != nil {
+				s.mu.Unlock()
+				return authIdentity{}, err
+			}
+		}
+		s.mu.Unlock()
+		return authIdentity{Kind: "device", DeviceID: deviceID, ExpiresAt: device.ExpiresAt}, nil
+	}
+	s.mu.Unlock()
+	return authIdentity{}, errInvalidDeviceCredential
+}
+
 func (s *deviceStore) list() []devicePublic {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -852,6 +943,18 @@ func isDeviceClaimRequest(r *http.Request) bool {
 	return r.Method == http.MethodPost && r.URL.Path == "/api/pulse/pairings/claim"
 }
 
+func deviceSessionIdentity(r *http.Request, devices *deviceStore) (authIdentity, bool) {
+	if devices == nil {
+		return authIdentity{}, false
+	}
+	cookie, err := r.Cookie(deviceSessionCookieName)
+	if err != nil {
+		return authIdentity{}, false
+	}
+	identity, err := devices.authenticateBrowserSession(cookie.Value)
+	return identity, err == nil
+}
+
 // deviceClaimSource derives the limiter key only from the directly connected
 // peer. Serve intentionally does not trust X-Forwarded-For or similar headers:
 // deployments using a proxy must make the proxy the trusted TCP peer.
@@ -901,6 +1004,18 @@ func authMiddleware(token string, secureCookie bool, devices *deviceStore, next 
 				return
 			}
 		}
+		if _, err := r.Cookie(deviceSessionCookieName); err == nil {
+			if !deviceTransportAllowed(r) {
+				rejectInsecureDeviceTransport(w)
+				return
+			}
+			if identity, ok := deviceSessionIdentity(r, devices); ok {
+				next.ServeHTTP(w, withDeviceStore(withAuthIdentity(r, identity), devices))
+				return
+			}
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		if devices != nil && isDeviceClaimRequest(r) {
 			if !deviceTransportAllowed(r) {
 				rejectInsecureDeviceTransport(w)
@@ -930,6 +1045,23 @@ func networkOwnerMiddleware(devices *deviceStore, next http.Handler) http.Handle
 			}
 			identity, err := devices.authenticate(credential)
 			if err != nil {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, withAuthIdentity(r, identity))
+			return
+		}
+		if _, err := r.Cookie(deviceSessionCookieName); err == nil {
+			if devices == nil {
+				http.Error(w, "device authentication unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if !deviceTransportAllowed(r) {
+				rejectInsecureDeviceTransport(w)
+				return
+			}
+			identity, ok := deviceSessionIdentity(r, devices)
+			if !ok {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
