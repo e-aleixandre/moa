@@ -156,7 +156,7 @@ func TestDeviceBrowserSessionAuthenticatesRESTAndWebSocketUntilRevocation(t *tes
 		t.Fatalf("owner device-session exchange = %d, want 403", rec.Code)
 	}
 	cookie := deviceBrowserSession(t, handler, device.Credential)
-	if cookie.Name != deviceSessionCookieName || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/" || cookie.MaxAge <= 0 {
+	if cookie.Name != deviceSessionCookieName || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/" || cookie.Domain != "" || cookie.MaxAge <= 0 {
 		t.Fatalf("device browser cookie is not narrowly scoped: %#v", cookie)
 	}
 	if strings.Contains(cookie.Value, device.Credential) || strings.Contains(cookie.Value, strings.TrimPrefix(device.Credential, device.DeviceID+".")) {
@@ -206,6 +206,61 @@ func TestDeviceBrowserSessionAuthenticatesRESTAndWebSocketUntilRevocation(t *tes
 		t.Fatalf("revoked browser session = %d, want 401", got.Code)
 	}
 	expectDeviceWSClose(t, conn, "browser-session websocket revoke")
+}
+
+func TestDeviceBrowserSessionExpiresBeforeDurableCredential(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
+	store, err := openDeviceStore(filepath.Join(t.TempDir(), "devices.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close() //nolint:errcheck
+	now := time.Date(2026, time.September, 10, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	pairing, err := store.createPairing("token", deviceCredentialTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := store.claim("127.0.0.1", pairing.PairingID, pairingPayloadSecret(t, pairing), "native phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := store.authenticate(credential.Credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, sessionExpiresAt, err := store.createBrowserSession(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	browserIdentity, err := store.authenticateBrowserSession(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !browserIdentity.ExpiresAt.Equal(sessionExpiresAt) || !sessionExpiresAt.Equal(now.Add(deviceSessionTTL)) {
+		t.Fatalf("browser session expiry = %v / identity %v", sessionExpiresAt, browserIdentity.ExpiresAt)
+	}
+	leaseClosed := make(chan struct{})
+	browserIdentity.ExpiresAt = now.Add(25 * time.Millisecond)
+	lease, err := store.registerWebSocketLease(browserIdentity, func(string) { close(leaseClosed) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-leaseClosed:
+	case <-time.After(time.Second):
+		t.Fatal("browser-session WebSocket lease outlived its session")
+	}
+	lease.release()
+	store.now = func() time.Time { return now.Add(deviceSessionTTL + time.Second) }
+	if _, err := store.authenticateBrowserSession(session); !errors.Is(err, errInvalidDeviceCredential) {
+		t.Fatalf("expired browser session error = %v", err)
+	}
+	if _, err := store.authenticate(credential.Credential); err != nil {
+		t.Fatalf("durable credential expired with browser session: %v", err)
+	}
 }
 
 func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {

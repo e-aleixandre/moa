@@ -595,7 +595,7 @@ func (s *deviceStore) authenticateBrowserSession(session string) (authIdentity, 
 			}
 		}
 		s.mu.Unlock()
-		return authIdentity{Kind: "device", DeviceID: deviceID, ExpiresAt: device.ExpiresAt}, nil
+		return authIdentity{Kind: "device", DeviceID: deviceID, ExpiresAt: sessionExpiresAt}, nil
 	}
 	s.mu.Unlock()
 	return authIdentity{}, errInvalidDeviceCredential
@@ -754,7 +754,11 @@ func (s *deviceStore) registerWebSocketLease(identity authIdentity, closeFn func
 			s.leases[device.ID] = make(map[*deviceLease]struct{})
 		}
 		s.leases[device.ID][lease] = struct{}{}
-		delay := device.ExpiresAt.Sub(now)
+		leaseExpiresAt := device.ExpiresAt
+		if !identity.ExpiresAt.IsZero() && identity.ExpiresAt.Before(leaseExpiresAt) {
+			leaseExpiresAt = identity.ExpiresAt
+		}
+		delay := leaseExpiresAt.Sub(now)
 		lease.setTimer(time.AfterFunc(delay, func() { lease.shutdown("device credential expired") }))
 		return lease, nil
 	}
