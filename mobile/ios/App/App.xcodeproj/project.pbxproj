@@ -305,8 +305,8 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
-				MOA_APP_GROUP_IDENTIFIER = group.YOUR_REVERSED_DOMAIN.moa;
-				MOA_SHARE_EXTENSION_BUNDLE_IDENTIFIER = com.example.moa.ShareExtension;
+				MOA_APP_GROUP_IDENTIFIER = group.com.ealeixandre.moa;
+				MOA_SHARE_EXTENSION_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app.ShareExtension;
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -364,8 +364,8 @@
 		504EC3151FED79650016851F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				MOA_APP_GROUP_IDENTIFIER = group.YOUR_REVERSED_DOMAIN.moa;
-				MOA_SHARE_EXTENSION_BUNDLE_IDENTIFIER = com.example.moa.ShareExtension;
+				MOA_APP_GROUP_IDENTIFIER = group.com.ealeixandre.moa;
+				MOA_SHARE_EXTENSION_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app.ShareExtension;
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;

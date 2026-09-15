@@ -144,19 +144,24 @@ the extension.
 
 In Xcode, configure these values before building:
 
-1. Select the blue **App** project, then the **App project** (not a target) and
-   open **Build Settings**. Switch the filter to **All** and **Combined**.
-2. Set `MOA_APP_GROUP_IDENTIFIER` for Debug and Release to an App Group you own,
-   such as `group.YOUR_REVERSED_DOMAIN.moa`. Use the same value everywhere.
-3. Set `MOA_SHARE_EXTENSION_BUNDLE_IDENTIFIER` for Debug and Release to a
-   unique bundle id you own, normally the app id plus `.ShareExtension`.
-4. Select the **App** target, open **Signing & Capabilities**, choose your Team,
-   leave automatic signing enabled, add **App Groups**, create/select the group
-   from step 2, and make sure it is checked.
-5. Select the **ShareExtension** target and repeat step 4 with the same Team and
-   the same checked App Group. Xcode must produce a separate provisioning
-   profile for this target's bundle id.
-6. Select the **App** scheme and a physical iPhone, then press **Run**. The app
+1. The two build settings below are **already committed** with this project's
+   real identifiers, so there is nothing to type:
+   - `MOA_APP_GROUP_IDENTIFIER` = `group.com.ealeixandre.moa`
+   - `MOA_SHARE_EXTENSION_BUNDLE_IDENTIFIER` = `com.ealeixandre.moa.app.ShareExtension`
+
+   To read them: select the blue **App** project, then the **App project** (not
+   a target), open **Build Settings**, and switch the filter to **All** and
+   **Combined**. A fork that is not this account's has to replace both.
+2. Select the **App** target, open **Signing & Capabilities**, choose your Team,
+   add **App Groups**, and check `group.com.ealeixandre.moa`.
+3. Select the **ShareExtension** target and repeat step 2 with the same Team and
+   the **same** checked App Group. This target signs under its own bundle id, so
+   it gets its own provisioning profile.
+
+   The group must be **identical** in both targets. If they differ, the
+   extension writes the share into a container the app never reads, and nothing
+   fails loudly: the share is simply never delivered.
+4. Select the **App** scheme and a physical iPhone, then press **Run**. The app
    target already embeds `ShareExtension.appex`; do not create or embed another
    extension by hand.
 
