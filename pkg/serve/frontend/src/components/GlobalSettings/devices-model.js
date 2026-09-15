@@ -71,6 +71,65 @@ export function countActive(devices, now = Date.now()) {
   return (devices || []).filter((device) => deviceState(device, now) === ACTIVE).length;
 }
 
+// devicesValue — what the "Devices" row in Access shows on its right, in the
+// same grammar as every other row's reading: the answer, not the setting's
+// name. `null` means "not read yet" and the row draws its loading state, the
+// one the other rows already use. A request that FAILED says nothing rather
+// than "0 devices", which would be a lie the owner could act on.
+export function devicesValue(devices, loaded, failed = false, now = Date.now()) {
+  if (!loaded) return null;
+  if (failed) return "—";
+  const active = countActive(devices, now);
+  if (active === 0) return "None";
+  return active === 1 ? "1 device" : `${active} devices`;
+}
+
+// markRevoked — the list as it is the instant the owner confirms, before the
+// server has answered. Revoking is the one thing on this screen that must feel
+// immediate, and the record it produces is fully known here: the server sets
+// revoked_at and changes nothing else (device_auth.go, deviceStore.revoke).
+//
+// Order is PRESERVED on purpose: re-sorting would drop the row to the bottom
+// of the list under the owner's finger and shift everything below it. The row
+// changes in place; the next load puts it where it belongs.
+export function markRevoked(devices, id, at = Date.now()) {
+  return (devices || []).map((device) =>
+    device.id === id && !device.revoked_at
+      ? { ...device, revoked_at: new Date(at).toISOString() }
+      : device);
+}
+
+// loadFailure — what to SAY when the list could not be read. Three answers,
+// because the owner can act on three different things.
+//
+// 403 is the one that matters and it is not a fault: administering pairings is
+// reserved to the owner's own token (route_auth.go, routeOwnerAdmin), so a
+// paired phone asking for this list is refused BY DESIGN. The screen says that
+// plainly instead of drawing an error — nothing is broken, this device simply
+// is not where the question is answered.
+export function loadFailure(error) {
+  const status = error?.status;
+  if (status === 403) {
+    return {
+      kind: "forbidden",
+      title: "Not available on a paired device",
+      detail: "Open moa with the server's token to manage pairings.",
+    };
+  }
+  if (status === 503) {
+    return {
+      kind: "unavailable",
+      title: "Pairing is unavailable",
+      detail: "The server has no device store right now.",
+    };
+  }
+  return {
+    kind: "error",
+    title: "Could not read the device list",
+    detail: "Check the connection and try again.",
+  };
+}
+
 // relAge — how long ago, in the short form the session list already uses
 // (layout/Sidebar/sessions.js). Restated rather than imported because that one
 // is private to the row's second line; the shape is the product's convention.

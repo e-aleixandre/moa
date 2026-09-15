@@ -514,3 +514,214 @@ button.zl-set-row[disabled] { cursor: default; }
   text-transform: uppercase;
 }
 .zl-set-empty { padding: 16px 2px; color: var(--zl-t4); text-align: center; }
+
+/* ── The devices page ─────────────────────────────────────────────────────
+   Direction A, "Roster", lifted from the catalogue round the owner chose
+   (catalog/devices-lab.css, `.dl-a*`). It is the direction that adds no new
+   vocabulary: a device is this sheet's own row — mark, name, one line of what
+   it is, its reading on the right — sized off `.zl-set-row`'s 44/48 floor, so
+   the section sits beside Context and Subagents without announcing itself. */
+.zl-set-dev {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-2) 0;
+  border-radius: var(--zl-r-md);
+  /* The row is never removed when it is revoked: it changes state in place
+     (markRevoked keeps its position), so what the eye follows is this fade
+     and nothing below it moves. `background` and `padding` carry the arming. */
+  transition:
+    opacity var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease),
+    padding var(--motion-fast) var(--motion-ease);
+}
+.zl-set-dev + .zl-set-dev { box-shadow: inset 0 1px 0 var(--zl-line); }
+.zl-set-dev.is-gone { opacity: 0.55; }
+.zl-set-dev-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+.zl-set-dev.is-gone .zl-set-dev-mark { color: var(--zl-t4); }
+.zl-set-dev-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.zl-set-dev-n {
+  color: var(--zl-t1);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.zl-set-dev-d {
+  color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Yellow is the one state colour on this page: a credential inside the last
+   fortnight of its life will stop working on its own, and re-pairing on
+   purpose beats being locked out on a Tuesday. Red is spent on the ACTION. */
+.zl-set-dev-left { color: var(--zl-t4); }
+.zl-set-dev-left.is-soon { color: var(--zl-yellow); }
+.zl-set-dev-past {
+  flex: none;
+  color: var(--zl-t4);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+}
+.zl-set-dev-act {
+  flex: none;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t3);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+  transition:
+    background var(--motion-hover) ease,
+    color var(--motion-hover) ease,
+    box-shadow var(--motion-hover) ease;
+}
+@media (hover: hover) {
+  .zl-set-dev-act:hover {
+    background: var(--red-dim);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-red) 40%, transparent);
+    color: var(--zl-red);
+  }
+}
+.zl-set-dev-ask {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  animation: zl-set-arm var(--motion-fast) var(--motion-ease);
+}
+@keyframes zl-set-arm { from { opacity: 0; transform: translateX(var(--motion-push)); } }
+.zl-set-dev-cancel,
+.zl-set-dev-go {
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+}
+.zl-set-dev-cancel { background: transparent; box-shadow: var(--zl-rim); color: var(--zl-t2); }
+.zl-set-dev-go {
+  background: var(--red-dim);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-red) 45%, transparent);
+  color: var(--zl-red);
+  font-weight: var(--weight-medium);
+}
+@media (hover: hover) {
+  .zl-set-dev-cancel:hover { background: var(--zl-hi); color: var(--zl-t1); }
+  .zl-set-dev-go:hover { background: color-mix(in srgb, var(--zl-red) 22%, transparent); }
+}
+.zl-set-dev-go[disabled] { cursor: default; opacity: .6; }
+.zl-set-dev-act:focus-visible,
+.zl-set-dev-cancel:focus-visible,
+.zl-set-dev-go:focus-visible,
+.zl-set-dev-pair:focus-visible {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
+}
+.zl-set-dev.is-armed { background: var(--red-dim); padding-inline: var(--space-2); }
+/* Armed, the row gives its right side to the two answers: the text column
+   yields rather than wrapping onto a second line, which would push every row
+   below it down. Confirming must move nothing but this row. */
+.zl-set-dev.is-armed .zl-set-dev-txt { flex: 0 1 auto; }
+/* The remaining-days suffix goes with it: half a reading ("9 days l…") is
+   worse than none, and the question on screen is now Cancel or Revoke. */
+.zl-set-dev.is-armed .zl-set-dev-left { display: none; }
+
+/* The door to pairing, at the foot: a quiet way out of this page, not its
+   primary action — the list is the page. It opens the QR panel, which is the
+   one place pairing happens (data/pulse-pairing-panel.js). */
+.zl-set-dev-pair {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--control-touch);
+  margin-top: var(--space-4);
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  cursor: pointer;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
+}
+.zl-set-dev-pair.is-primary {
+  margin-top: var(--space-5);
+  background: var(--zl-accent-med);
+  box-shadow: 0 0 0 1px var(--zl-accent-line);
+  color: var(--zl-accent);
+  font-weight: var(--weight-medium);
+}
+@media (hover: hover) {
+  .zl-set-dev-pair:hover { background: var(--zl-hi); color: var(--zl-t1); }
+  .zl-set-dev-pair.is-primary:hover {
+    background: color-mix(in srgb, var(--zl-accent) 30%, transparent);
+    color: var(--zl-accent);
+  }
+}
+
+/* Nothing paired, or nothing readable. Both are a centred note rather than a
+   hole, and neither is dressed as a fault: a refusal this policy INTENDS —
+   a paired phone may not administer pairings (route_auth.go) — is a fact to
+   state, so it wears the neutral mark and no red. */
+.zl-set-dev-note { padding: var(--space-8) var(--space-4) var(--space-4); text-align: center; }
+.zl-set-dev-note-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: var(--space-4);
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t3);
+}
+.zl-set-dev-note-mark.is-accent {
+  background: var(--zl-accent-dim);
+  box-shadow: 0 0 0 1px var(--zl-accent-line);
+  color: var(--zl-accent);
+}
+.zl-set-dev-note-t { color: var(--zl-t1); font-size: var(--zl-fs-title); font-weight: var(--weight-semibold); }
+.zl-set-dev-note-d {
+  margin: var(--space-2) auto 0;
+  max-width: 34ch;
+  color: var(--zl-t3);
+  line-height: var(--leading-normal);
+}
+
+/* The phone's touch floor, as the sheet states it for its own controls. */
+.zl-set.is-phone .zl-set-dev { min-height: 60px; }
+.zl-set.is-phone .zl-set-dev-act,
+.zl-set.is-phone .zl-set-dev-cancel,
+.zl-set.is-phone .zl-set-dev-go { min-height: var(--control-lg); padding-inline: var(--space-3); }
+
+@media (prefers-reduced-motion: reduce) {
+  .zl-set-dev, .zl-set-dev-mark, .zl-set-dev-act, .zl-set-dev-cancel,
+  .zl-set-dev-go, .zl-set-dev-pair { transition: none; }
+  .zl-set-dev-ask { animation: none; }
+}

@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { createPortal } from "preact/compat";
+import {
+  Laptop, MonitorSmartphone, QrCode, Smartphone, Tablet,
+} from "lucide-preact";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
 import { toggleSound } from "../../data/tile-actions.js";
 import { registerOverlay } from "../../data/overlays.js";
+import { openPulsePairing } from "../../data/pulse-pairing-panel.js";
 import { getPushState, subscribePushState, enablePush, disablePush } from "../../data/push-client.js";
 import { deriveModelSpecs } from "../../data/selectors.js";
 import { groupByProvider, specMatches } from "../ModelSelector/model-selector-model.js";
@@ -16,6 +20,10 @@ import {
 import {
   allowedCount, createAllowedModelsWriter, nextAllowedModels, scopeForAllowed,
 } from "./subagent-models-model.js";
+import {
+  ACTIVE, REVOKED, deviceKind, deviceLine, deviceState, devicesValue, expiringSoon,
+  loadFailure, markRevoked, sortDevices, untilLabel,
+} from "./devices-model.js";
 import {
   SETTINGS_PAGES, STRATEGY_OPTIONS, compactAtValue, providerHue, strategyValue, subagentValue,
 } from "./settings-rows.js";
@@ -296,6 +304,67 @@ function useSubagentModels() {
   };
 
   return { models, allowed, loaded, toggle, setScope, scope: scopeForAllowed(allowed) };
+}
+
+// The paired devices. Unlike every other setting here this one is a LIST the
+// server owns, so the hook holds three things instead of a value: the records,
+// whether they have been read, and why they could not be if they were not.
+//
+// The read is deliberately allowed to fail without a toast. GET
+// /api/pulse/devices is owner-only (route_auth.go, routeOwnerAdmin), so a
+// paired phone opening this page is refused BY DESIGN — a 403 here is not an
+// incident and must not be announced as one. The page says what it means and
+// stays quiet; see loadFailure.
+function useDevices(active) {
+  const [devices, setDevices] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [failure, setFailure] = useState(null);
+  // In flight, by id: the row it belongs to is already drawn revoked, so this
+  // only guards against a second press on the same device.
+  const [revoking, setRevoking] = useState([]);
+
+  // Read on the first open of the sheet and not before: the list is only ever
+  // looked at on this page, and a request per sheet-open is a request the
+  // other four settings do not make either until they are needed.
+  useEffect(() => {
+    if (!active) return undefined;
+    let live = true;
+    api("GET", "/api/pulse/devices")
+      .then((payload) => {
+        if (!live) return;
+        setDevices(payload?.devices || []);
+        setFailure(null);
+        setLoaded(true);
+      })
+      .catch((error) => {
+        if (!live) return;
+        setFailure(loadFailure(error));
+        setLoaded(true);
+      });
+    return () => { live = false; };
+  }, [active]);
+
+  // Optimistic, because the record the server produces is fully known here: it
+  // stamps revoked_at and changes nothing else. On failure the previous list
+  // is restored and the toast says so — the row silently staying active would
+  // leave the owner believing he had closed a door that is still open.
+  const revoke = (device) => {
+    const previous = devices;
+    setDevices((list) => markRevoked(list, device.id));
+    setRevoking((ids) => [...ids, device.id]);
+    return api("POST", `/api/pulse/devices/${encodeURIComponent(device.id)}/revoke`, {})
+      .catch((error) => {
+        setDevices(previous);
+        addToast({
+          title: `Could not revoke ${device.label}`,
+          detail: String(error.message || error),
+          type: "error",
+        });
+      })
+      .finally(() => setRevoking((ids) => ids.filter((id) => id !== device.id)));
+  };
+
+  return { devices, loaded, failure, revoking, revoke };
 }
 
 // ── The pages ──────────────────────────────────────────────────────────────
@@ -591,6 +660,139 @@ function ModelToggle({ model, allowed, locked, onToggle, showProvider }) {
   );
 }
 
+// ── The devices page ───────────────────────────────────────────────────────
+// Direction A, "Roster" (catalog/devices-lab.jsx, the round the owner chose).
+// A device is a ROW in this sheet's own grammar — mark, name, one line of what
+// it is, its action on the right — so the section costs the sheet no new
+// vocabulary. Revoking arms in place: the row's right side becomes Cancel /
+// Revoke, the two-press idiom the dossier's Delete already uses. Nothing
+// floats over the sheet.
+//
+// Every reading comes from a field /api/pulse/devices really returns. There is
+// no "this is the device in your hand" flag on the wire, so no row claims one.
+
+const DEVICE_GLYPH = {
+  phone: Smartphone,
+  tablet: Tablet,
+  computer: Laptop,
+  unknown: MonitorSmartphone,
+};
+
+function DeviceGlyph({ label, size = 15 }) {
+  const Icon = DEVICE_GLYPH[deviceKind(label)];
+  return <Icon size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+function DeviceRow({ device, armed, busy, onArm, onDisarm, onRevoke }) {
+  const state = deviceState(device);
+  const gone = state !== ACTIVE;
+  const soon = expiringSoon(device);
+  return (
+    <div class={`zl-set-dev${gone ? " is-gone" : ""}${armed ? " is-armed" : ""}`}>
+      <span class="zl-set-dev-mark" aria-hidden="true">
+        <DeviceGlyph label={device.label} />
+      </span>
+      <span class="zl-set-dev-txt">
+        <span class="zl-set-dev-n">{device.label}</span>
+        <span class="zl-set-dev-d">
+          {deviceLine(device)}
+          {!gone && (
+            <span class={`zl-set-dev-left${soon ? " is-soon" : ""}`}>
+              {" · "}{untilLabel(device.expires_at)} left
+            </span>
+          )}
+        </span>
+      </span>
+      {gone ? (
+        <span class="zl-set-dev-past">{state === REVOKED ? "Revoked" : "Expired"}</span>
+      ) : armed ? (
+        // The two answers, named. An armed row is a question, so both ways out
+        // of it are on screen and the destructive one is the only red thing.
+        <span class="zl-set-dev-ask" role="group" aria-label={`Revoke ${device.label}?`}>
+          <button type="button" class="zl-set-dev-cancel" onClick={onDisarm}>Cancel</button>
+          <button type="button" class="zl-set-dev-go" disabled={busy} onClick={onRevoke}>Revoke</button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          class="zl-set-dev-act"
+          onClick={onArm}
+          aria-label={`Revoke ${device.label}`}
+        >
+          Revoke
+        </button>
+      )}
+    </div>
+  );
+}
+
+function DevicesPage({ state, onClose }) {
+  const { devices, loaded, failure, revoking, revoke } = state;
+  const [armed, setArmed] = useState(null);
+  const list = sortDevices(devices);
+
+  if (loaded && failure) {
+    // Honest and quiet. A refusal the policy INTENDS is not an error, so it
+    // wears no red and no alarm: it says where the question is answered.
+    return (
+      <div class="zl-set-dev-note" role="status">
+        <span class="zl-set-dev-note-mark" aria-hidden="true">
+          <MonitorSmartphone size={20} strokeWidth={1.6} />
+        </span>
+        <p class="zl-set-dev-note-t">{failure.title}</p>
+        <p class="zl-set-dev-note-d">{failure.detail}</p>
+      </div>
+    );
+  }
+
+  if (loaded && list.length === 0) {
+    return (
+      <div class="zl-set-dev-note">
+        <span class="zl-set-dev-note-mark is-accent" aria-hidden="true">
+          <Smartphone size={20} strokeWidth={1.6} />
+        </span>
+        <p class="zl-set-dev-note-t">No device is paired</p>
+        <p class="zl-set-dev-note-d">Pair the moa app to reach this server without the token.</p>
+        <button
+          type="button"
+          class="zl-set-dev-pair is-primary"
+          onClick={() => { onClose?.(); openPulsePairing(); }}
+        >
+          <QrCode size={14} strokeWidth={1.8} aria-hidden="true" /> Pair a device…
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <p class="zl-set-sum">Apps that can open this moa without the server's token.</p>
+      <div role="group" aria-label="Paired devices" aria-busy={!loaded}>
+        {list.map((device) => (
+          <DeviceRow
+            key={device.id}
+            device={device}
+            armed={armed === device.id}
+            busy={revoking.includes(device.id)}
+            onArm={() => setArmed(device.id)}
+            onDisarm={() => setArmed(null)}
+            onRevoke={() => { setArmed(null); revoke(device); }}
+          />
+        ))}
+      </div>
+      {loaded && (
+        <button
+          type="button"
+          class="zl-set-dev-pair"
+          onClick={() => { onClose?.(); openPulsePairing(); }}
+        >
+          <QrCode size={14} strokeWidth={1.8} aria-hidden="true" /> Pair a device…
+        </button>
+      )}
+    </>
+  );
+}
+
 // ── The sheet ──────────────────────────────────────────────────────────────
 
 export function GlobalSettings({ soundEnabled, version = null, phone = false, open = true, onClose, initialPage = "root", inline = false }) {
@@ -605,6 +807,7 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
   const strategy = useCompactStrategy();
   const compactModel = useCompactModel();
   const subagents = useSubagentModels();
+  const devices = useDevices(open);
 
   const [push, setPush] = useState(getPushState());
   useEffect(() => subscribePushState(setPush), []);
@@ -717,6 +920,7 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
             {page === "compact-strategy" && <CompactStrategyPage state={strategy} onDone={() => setPage("root")} />}
             {page === "compact-model" && <CompactModelPage state={compactModel} onDone={() => setPage("root")} />}
             {page === "subagent-models" && <SubagentModelsPage state={subagents} />}
+            {page === "devices" && <DevicesPage state={devices} onClose={onClose} />}
           </div>
         ) : (
           <div class="zl-set-body">
@@ -772,6 +976,23 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
                 loading={!subagents.loaded}
                 onOpen={() => setPage("subagent-models")}
                 pageLabel={SETTINGS_PAGES["subagent-models"]}
+              />
+            </div>
+
+            {/* Access sits after Subagents and before About: the three
+                sections above it are what moa DOES with a conversation, and
+                this one is about the machine itself — who may reach it. That
+                puts it next to About, which is the other row about this
+                installation rather than about the work. */}
+            <div class="zl-set-sec">
+              <span class="zl-set-k">Access</span>
+              <Row
+                label="Devices"
+                hint="Apps paired with this server."
+                value={devicesValue(devices.devices, devices.loaded, !!devices.failure)}
+                loading={!devices.loaded}
+                onOpen={() => setPage("devices")}
+                pageLabel={SETTINGS_PAGES.devices}
               />
             </div>
 

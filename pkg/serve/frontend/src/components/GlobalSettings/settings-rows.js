@@ -22,6 +22,7 @@ export const SETTINGS_PAGES = {
   "compact-strategy": "Before compacting",
   "compact-model": "Summarize with",
   "subagent-models": "Subagent models",
+  devices: "Devices",
 };
 
 // providerHue — the catalogue's identity hue (zones-lab.jsx:46), so a provider

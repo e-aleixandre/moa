@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   ACTIVE, EXPIRED, REVOKED,
-  countActive, deviceLine, deviceState, expiringSoon, lifeFraction, relAge,
+  countActive, deviceLine, deviceState, devicesValue, expiringSoon, lifeFraction, loadFailure,
+  markRevoked, relAge,
   deviceKind, sortDevices, untilLabel,
 } from "./devices-model.js";
 
@@ -146,5 +147,80 @@ describe("deviceKind", () => {
     expect(deviceKind("kitchen radio")).toBe("unknown");
     expect(deviceKind("")).toBe("unknown");
     expect(deviceKind(undefined)).toBe("unknown");
+  });
+});
+
+describe("devicesValue", () => {
+  test("the row reads the count of what still has access, singular when it is one", () => {
+    const one = [device()];
+    const three = [device({ id: "a" }), device({ id: "b" }), device({ id: "c" })];
+    expect(devicesValue(one, true, false, NOW)).toBe("1 device");
+    expect(devicesValue(three, true, false, NOW)).toBe("3 devices");
+  });
+
+  test("nothing paired says None rather than a zero", () => {
+    expect(devicesValue([], true, false, NOW)).toBe("None");
+  });
+
+  test("a revoked credential is not counted, because it is not access", () => {
+    const list = [device({ id: "live" }), device({ id: "gone", revoked_at: new Date(NOW - DAY).toISOString() })];
+    expect(devicesValue(list, true, false, NOW)).toBe("1 device");
+  });
+
+  test("not read yet is null, so the row uses the sheet's own loading state", () => {
+    expect(devicesValue([], false, false, NOW)).toBe(null);
+  });
+
+  test("a failed read says nothing rather than 'None', which would be a lie", () => {
+    expect(devicesValue([], true, true, NOW)).toBe("—");
+  });
+});
+
+describe("markRevoked", () => {
+  test("stamps the one device and leaves the list's order alone", () => {
+    const list = [device({ id: "a" }), device({ id: "b" }), device({ id: "c" })];
+    const next = markRevoked(list, "b", NOW);
+    expect(next.map((d) => d.id)).toEqual(["a", "b", "c"]);
+    expect(deviceState(next[1], NOW)).toBe(REVOKED);
+    expect(deviceState(next[0], NOW)).toBe(ACTIVE);
+  });
+
+  test("never mutates the list it was given, which is also the current render's", () => {
+    const list = [device({ id: "a" })];
+    markRevoked(list, "a", NOW);
+    expect(list[0].revoked_at).toBeUndefined();
+  });
+
+  test("a device already revoked keeps the time it was revoked at", () => {
+    const at = new Date(NOW - 5 * DAY).toISOString();
+    const list = [device({ id: "a", revoked_at: at })];
+    expect(markRevoked(list, "a", NOW)[0].revoked_at).toBe(at);
+  });
+
+  test("an id that is not in the list changes nothing", () => {
+    const list = [device({ id: "a" })];
+    expect(markRevoked(list, "missing", NOW)[0].revoked_at).toBeUndefined();
+  });
+});
+
+describe("loadFailure", () => {
+  // The 403 is policy, not breakage: GET /api/pulse/devices is owner-only
+  // (route_auth.go, routeOwnerAdmin; pulse_pairing_test.go:378 pins it), so a
+  // paired phone is refused by design and the page must not cry error.
+  test("a 403 says where the question is answered instead of reporting a fault", () => {
+    const failure = loadFailure({ status: 403 });
+    expect(failure.kind).toBe("forbidden");
+    expect(failure.title).not.toMatch(/error|fail/i);
+    expect(failure.detail).toMatch(/token/i);
+  });
+
+  test("a 503 names the server's own unavailability", () => {
+    expect(loadFailure({ status: 503 }).kind).toBe("unavailable");
+  });
+
+  test("anything else, including no status at all, is the plain error", () => {
+    expect(loadFailure({ status: 500 }).kind).toBe("error");
+    expect(loadFailure(new Error("network")).kind).toBe("error");
+    expect(loadFailure(undefined).kind).toBe("error");
   });
 });
