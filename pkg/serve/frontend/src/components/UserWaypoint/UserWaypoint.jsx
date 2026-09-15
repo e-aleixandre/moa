@@ -1,6 +1,7 @@
 import { useRef, useState } from "preact/hooks";
 import { Rewind as RewindIcon } from "lucide-preact";
 import { sanitizeHtml } from "../../util/sanitize.js";
+import { clockHHMM } from "../../data/util/clock.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { WaypointAttachments, attachmentImageSrc, attachmentLabel } from "./WaypointAttachments.jsx";
 import { PreviewReference } from "./PreviewReference.jsx";
@@ -115,6 +116,9 @@ export function UserWaypoint({
   // Ordinary messages have no label: the peach edge is the identity. Steer and
   // parent-session messages still name their source, because that is not "you".
   const showLabel = label && label !== "You";
+  // `time` arrives as the server's epoch seconds, not as text. A pre-formatted
+  // string (the catalogue's fixtures, "10:12") passes through untouched.
+  const hhmm = typeof time === "string" && !/^\d+$/.test(time) ? time : clockHHMM(time);
 
   return (
     <>
@@ -128,9 +132,9 @@ export function UserWaypoint({
           {reference && <PreviewReference reference={reference} />}
           {html != null ? <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} /> : children}
         </div>
-        {(time || onRewind) && (
+        {(hhmm || onRewind) && (
           <span class="zl-user-when zl-data">
-            {time && <time>{time}</time>}
+            {hhmm && <time>{hhmm}</time>}
             {onRewind && (
               <button
                 type="button"

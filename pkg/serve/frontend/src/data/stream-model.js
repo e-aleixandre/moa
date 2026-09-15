@@ -31,7 +31,9 @@
 //
 //   { kind:'waypoint', time, text, msgId?, attachments? }
 //       A user turn. `text` is the joined text of the user message. `time` is
-//       the message ts when present (else undefined — we never invent one).
+//       the message's `timestamp` when present (else undefined — we never
+//       invent one). It is epoch SECONDS, the shape core.Message travels in;
+//       data/util/clock.js is what turns it into an hour.
 //       `attachments` is the list of non-text content items (images/files),
 //       passed through untouched so a photo message renders as an attachment
 //       instead of breaking. `msgId` is the server's message id, which is also
@@ -113,7 +115,10 @@
 //     entries also linger in the map).
 //   • Edit diff = sibling block after the ledger (full width), only for real
 //     unified diffs; never a fallback that renders empty.
-//   • No reliable per-message ts → we DO NOT emit `tick` date separators.
+//   • Per-message `timestamp` IS reliable (epoch seconds, set by the server on
+//     append), but date separators are still not emitted: the turn foot and the
+//     waypoint gutter carry the time where it is read, and a `tick` row between
+//     turns would be a third place saying the same thing.
 
 import {
   truncateText,
@@ -404,7 +409,12 @@ export function projectStream(session) {
         kind: 'waypoint',
         id: blockID('wp', msg, i),
         msgId,
-        time: msg.ts,
+        // `timestamp`, not `ts`: the server sends core.Message, whose field is
+        // `timestamp` (pkg/core/message.go:164). `ts` is the SESSION LOG's name
+        // for it (pkg/session/entry.go:25) and never leaves the server, so this
+        // read was always undefined and the hour never painted — measured on a
+        // live session: 4 user messages, 4 time rows, 0 hours.
+        time: msg.timestamp,
         text: joinText(msg.content),
       };
       if (attachments.length > 0) wp.attachments = attachments;

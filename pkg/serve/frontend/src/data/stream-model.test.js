@@ -1117,8 +1117,20 @@ test('user message with an image attachment does not break and is preserved', ()
 });
 
 test('user message time is carried through when present', () => {
-  const blocks = projectStream(session([user('hi', { ts: 1234 })]));
+  // `timestamp` is the field the server actually sends (core.Message); `ts` is
+  // the session log's private name for it and never reaches a client.
+  const blocks = projectStream(session([user('hi', { timestamp: 1234 })]));
   expect(blocks[0].time).toBe(1234);
+});
+
+test('a user message with no timestamp gets no time, never a substitute', () => {
+  const blocks = projectStream(session([user('hi')]));
+  expect(blocks[0].time).toBeUndefined();
+});
+
+test('the session log field name `ts` is not read: it never leaves the server', () => {
+  const blocks = projectStream(session([user('hi', { ts: 1234 })]));
+  expect(blocks[0].time).toBeUndefined();
 });
 
 test('output blocks are plain serializable objects (no functions)', () => {
