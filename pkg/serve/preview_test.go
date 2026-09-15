@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
 	"io"
 	"net"
 	"net/http"
@@ -113,19 +112,100 @@ func TestPreviewCompressionAndInjectionIdempotence(t *testing.T) {
 	}
 }
 
-func TestPreviewLargeBodyPassesThroughIntact(t *testing.T) {
-	body := bytes.Repeat([]byte("0123456789abcdef"), previewMaxBody/16+1)
+func TestPreviewLargeHTMLStreamsWithInspectorAndRewritesTail(t *testing.T) {
+	const largeSize = 9 << 20
+	var upURL string
+	body := []byte("<!doctype html><html><head></head><body>")
+	body = append(body, bytes.Repeat([]byte("x"), largeSize-len(body))...)
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		_, _ = w.Write(body)
+		w.Header().Set("ETag", `"upstream"`)
+		_, _ = w.Write(append(append([]byte(nil), body...), []byte(upURL+"/late</body></html>")...))
 	}))
 	defer up.Close()
+	upURL = up.URL
 	p := newPreviewFor(t, up.URL)
 	w := httptest.NewRecorder()
 	p.Handler().ServeHTTP(w, httptest.NewRequest("GET", "http://x/", nil))
-	if len(w.Body.Bytes()) != len(body) || sha256.Sum256(w.Body.Bytes()) != sha256.Sum256(body) {
-		t.Fatalf("large body was truncated or altered: got=%d want=%d", w.Body.Len(), len(body))
+	got := w.Body.String()
+	if strings.Count(got, "/__moa/inspector.js") != 1 {
+		t.Fatalf("large HTML inspector count = %d", strings.Count(got, "/__moa/inspector.js"))
 	}
+	if strings.Contains(got, upURL+"/late") || !strings.Contains(got, p.publicURL+"/late") {
+		t.Fatal("origin near the end of large HTML was not rewritten")
+	}
+	if strings.Count(got, strings.Repeat("x", 1024)) != (largeSize-len("<!doctype html><html><head></head><body>"))/1024 {
+		t.Fatal("large HTML payload was truncated")
+	}
+	if w.Header().Get("ETag") != "" || w.Header().Get("Content-Length") != "" {
+		t.Fatalf("stale entity headers survived: %v", w.Header())
+	}
+}
+
+func TestPreviewStreamingRewriteHandlesReadBoundaries(t *testing.T) {
+	p := NewPreviewProxy("https://preview.test", 1, 2)
+	t.Cleanup(p.Close)
+	targetURL, _ := url.Parse("http://localhost:4323")
+	target := &previewTarget{url: targetURL}
+	input := "a http://localhost:4323/ok http://localhost:4323.example/no http://localhost:4323"
+	reader := p.rewriteReader(&oneByteReader{r: strings.NewReader(input)}, target)
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := p.rewrite(input, target)
+	if string(got) != want {
+		t.Fatalf("streamed rewrite = %q, want %q", got, want)
+	}
+}
+
+type oneByteReader struct{ r io.Reader }
+
+func (r *oneByteReader) Read(p []byte) (int, error) { return r.r.Read(p[:1]) }
+
+func TestPreviewStreamsOtherTextualBodiesWithoutInjection(t *testing.T) {
+	for _, contentType := range []string{"text/css", "application/javascript", "application/json"} {
+		t.Run(contentType, func(t *testing.T) {
+			p := NewPreviewProxy("https://preview.test", 1, 2)
+			t.Cleanup(p.Close)
+			targetURL, _ := url.Parse("http://localhost:4323")
+			target := &previewTarget{url: targetURL}
+			source := &closeTrackingBody{Reader: strings.NewReader(`{"url":"http://localhost:4323/late"}`)}
+			resp := &http.Response{
+				StatusCode:    http.StatusOK,
+				Header:        http.Header{"Content-Type": []string{contentType}, "Content-Length": []string{"42"}, "ETag": []string{`"old"`}},
+				Body:          source,
+				ContentLength: 42,
+				Request:       &http.Request{Method: http.MethodGet},
+			}
+			if err := p.rewriteResponse(resp, target); err != nil {
+				t.Fatal(err)
+			}
+			got, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := resp.Body.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != `{"url":"https://preview.test/late"}` || strings.Contains(string(got), "inspector.js") {
+				t.Fatalf("body = %q", got)
+			}
+			if !source.closed || resp.ContentLength != -1 || resp.Header.Get("Content-Length") != "" || resp.Header.Get("ETag") != "" {
+				t.Fatalf("stream metadata/close mismatch: closed=%v length=%d headers=%v", source.closed, resp.ContentLength, resp.Header)
+			}
+		})
+	}
+}
+
+type closeTrackingBody struct {
+	io.Reader
+	closed bool
+}
+
+func (b *closeTrackingBody) Close() error {
+	b.closed = true
+	return nil
 }
 
 func TestPreviewAllowlistPinsDNSAndBlocksBypasses(t *testing.T) {

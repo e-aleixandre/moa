@@ -25,7 +25,7 @@ import (
 //go:embed frontend/src/components/LivePreview/inspector.js
 var previewInspector []byte
 
-const previewMaxBody = 8 << 20
+const previewHTMLPrefix = 64 << 10
 const previewAuthCookie = "moa_preview_auth"
 
 type previewTarget struct {
@@ -523,26 +523,110 @@ func (p *PreviewProxy) rewriteResponse(resp *http.Response, target *previewTarge
 	if !textual {
 		return nil
 	}
-	prefix, err := io.ReadAll(io.LimitReader(resp.Body, previewMaxBody+1))
-	if err != nil {
-		return err
-	}
-	if len(prefix) > previewMaxBody {
-		resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(prefix), resp.Body))
-		return nil
-	}
-	_ = resp.Body.Close()
-	body := []byte(p.rewrite(string(prefix), target))
+
+	// URL rewriting still matters in large HTML: inline scripts and serialized
+	// state near the end can contain the upstream origin. Stream every textual
+	// body through bounded origin replacers rather than preserving the old 8 MiB
+	// all-or-nothing buffer. HTML alone needs a small prefix to place the
+	// inspector and remove meta CSP declarations. If a malformed document has no
+	// <head> in that prefix, injecting at byte zero is safer than making document
+	// size disable inspection. Memory is bounded by this prefix plus a small
+	// lookahead buffer per configured origin, never by the response size.
+	body := io.Reader(resp.Body)
 	if strings.HasPrefix(ct, "text/html") {
-		body = metaCSP.ReplaceAll(body, nil)
-		body = injectInspector(body, target.parentOrigin)
+		prefix, err := io.ReadAll(io.LimitReader(resp.Body, previewHTMLPrefix))
+		if err != nil {
+			_ = resp.Body.Close()
+			return err
+		}
+		prefix = metaCSP.ReplaceAll(prefix, nil)
+		prefix = injectInspector(prefix, target.parentOrigin)
+		body = io.MultiReader(bytes.NewReader(prefix), resp.Body)
 	}
-	resp.Body = io.NopCloser(bytes.NewReader(body))
-	resp.ContentLength = int64(len(body))
+	resp.Body = &readerReadCloser{Reader: p.rewriteReader(body, target), Closer: resp.Body}
+	resp.ContentLength = -1
 	for _, h := range []string{"Content-Length", "ETag", "Content-MD5", "Digest", "Content-Range", "Accept-Ranges"} {
 		resp.Header.Del(h)
 	}
 	return nil
+}
+
+type readerReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
+// originReplaceReader applies one replaceOrigin pass without retaining the
+// response. It holds only a read-sized output and an origin-sized suffix when
+// a match or its continuation byte straddles two reads.
+type originReplaceReader struct {
+	r           io.Reader
+	origin      []byte
+	replacement []byte
+	input       []byte
+	output      []byte
+	terminalErr error
+	scratch     [4096]byte
+}
+
+func (r *originReplaceReader) Read(dst []byte) (int, error) {
+	if len(dst) == 0 {
+		return 0, nil
+	}
+	for {
+		if len(r.output) > 0 {
+			n := copy(dst, r.output)
+			r.output = r.output[n:]
+			return n, nil
+		}
+		if r.terminalErr != nil && len(r.input) == 0 {
+			return 0, r.terminalErr
+		}
+		if r.terminalErr == nil {
+			n, err := r.r.Read(r.scratch[:])
+			if n > 0 {
+				r.input = append(r.input, r.scratch[:n]...)
+			}
+			if err != nil {
+				r.terminalErr = err
+			}
+			if n == 0 && err == nil {
+				return 0, nil
+			}
+		}
+		r.process(r.terminalErr != nil)
+	}
+}
+
+func (r *originReplaceReader) process(final bool) {
+	out := make([]byte, 0, len(r.input))
+	i := 0
+	for i < len(r.input) {
+		remaining := r.input[i:]
+		if len(remaining) < len(r.origin) {
+			if !final && bytes.HasPrefix(r.origin, remaining) {
+				break
+			}
+			out = append(out, remaining[0])
+			i++
+			continue
+		}
+		if bytes.HasPrefix(remaining, r.origin) {
+			if len(remaining) == len(r.origin) && !final {
+				break
+			}
+			end := len(r.origin)
+			if len(remaining) == end || !isOriginContinuation(remaining[end]) {
+				out = append(out, r.replacement...)
+				i += end
+				continue
+			}
+		}
+		out = append(out, remaining[0])
+		i++
+	}
+	r.input = r.input[i:]
+	r.output = out
 }
 func rewriteHeaderValues(h http.Header, name string, rewrite func(string) string) {
 	values := h.Values(name)
@@ -571,15 +655,23 @@ func (p *PreviewProxy) validateRedirect(location string, target *previewTarget) 
 	return errors.New("preview redirect left the validated target")
 }
 func (p *PreviewProxy) rewrite(s string, target *previewTarget) string {
+	for _, origin := range rewriteOrigins(target) {
+		s = replaceOrigin(s, origin, p.publicURL)
+	}
+	return s
+}
+func (p *PreviewProxy) rewriteReader(r io.Reader, target *previewTarget) io.Reader {
+	for _, origin := range rewriteOrigins(target) {
+		r = &originReplaceReader{r: r, origin: []byte(origin), replacement: []byte(p.publicURL)}
+	}
+	return r
+}
+func rewriteOrigins(target *previewTarget) []string {
 	origins := []string{target.url.Scheme + "://" + target.url.Host}
 	if target.url.Port() != "" {
 		origins = append(origins, "http://localhost:"+target.url.Port(), "http://127.0.0.1:"+target.url.Port(), "http://[::1]:"+target.url.Port())
 	}
-	origins = append(origins, target.aliases...)
-	for _, origin := range origins {
-		s = replaceOrigin(s, origin, p.publicURL)
-	}
-	return s
+	return append(origins, target.aliases...)
 }
 func replaceOrigin(s, origin, replacement string) string {
 	var b strings.Builder
