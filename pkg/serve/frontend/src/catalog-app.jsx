@@ -24,6 +24,7 @@ import { Scene } from "./catalog/scene.jsx";
 import { InboxLab } from "./catalog/zones-inbox.jsx";
 import { WorkLab } from "./catalog/zones-work.jsx";
 import { UserLab } from "./catalog/user-lab.jsx";
+import { U2Lab } from "./catalog/u2-lab.jsx";
 import { seedCatalogStore } from "./catalog/specimen.js";
 import { installCatalogBackend } from "./catalog/catalog-backend.js";
 import { announceArrivals } from "./data/events.js"; // wake-on-event
@@ -50,6 +51,7 @@ const LINKS = [
   { key: "inbox", label: "Inbox", href: "?view=inbox" },
   { key: "work", label: "Work", href: "?view=work" },
   { key: "user", label: "User", href: "?view=user" },
+  { key: "u2", label: "User 2", href: "?view=u2" },
 ];
 
 // wake-on-event: the two inbox seed sets are a URL away from each other, so
@@ -185,6 +187,7 @@ function CatalogApp() {
   else if (view === "inbox") body = <InboxLab />;
   else if (view === "work") body = <WorkLab />;
   else if (view === "user") body = <UserLab />;
+  else if (view === "u2") body = <U2Lab />;
   else if (view === "mobile") {
     body = (
       <PhoneLab>

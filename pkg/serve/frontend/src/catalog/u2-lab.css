@@ -1,0 +1,301 @@
+/* u2-lab — CATALOG-ONLY. Three directions for the user's message, from
+   scratch. Lab chrome (`.u2-*`), then one block per direction (`.u2a-*`,
+   `.u2b-*`, `.u2c-*`). The prose and the ledger are the shipped components
+   untouched; only the user's message is new. Shared tokens throughout so a
+   chosen direction lifts into UserWaypoint.css as-is. */
+
+/* ── lab chrome ─────────────────────────────────────────────────────────── */
+.u2 { margin: 0 auto; padding: var(--space-8) var(--space-6) var(--space-12); }
+.u2-head h1 { font-size: var(--text-2xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.u2-head h1 em { font-style: normal; color: var(--zl-accent); }
+.u2-head p { color: var(--overlay1); margin-top: var(--space-2); max-width: 88ch; font-size: var(--text-md); }
+
+.u2-dir { margin-top: var(--space-12); }
+.u2-dir-head h2 { font-size: var(--text-xl); font-weight: var(--weight-semibold); }
+.u2-dir-head p { color: var(--overlay1); font-size: var(--text-sm); margin-top: var(--space-1); max-width: 100ch; }
+
+.u2-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  margin-top: var(--space-4);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+
+/* A frame is a slice of the conversation column: canvas tone and the
+   transcript's own side padding. Desktop = --content-block + 22px sides;
+   phone = 390 with its 18px. */
+.u2-frame {
+  flex: none;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim-2);
+  font-family: var(--font);
+  color: var(--zl-t1);
+  overflow: hidden;
+}
+.u2-desk { width: calc(var(--content-block) + 44px); padding: 24px 22px 8px; }
+.u2-phone { width: 390px; padding: 20px 18px 8px; }
+.u2-frame .u2-scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--zl-line-2) transparent; }
+.u2-desk .u2-scroll { margin: -24px -22px -8px; padding: 24px 22px 8px; }
+.u2-phone .u2-scroll { margin: -20px -18px -8px; padding: 20px 18px 8px; }
+
+/* The user's text: the same measure as prose, the user's own line breaks
+   kept (pre-wrap is what production relies on; here each break is a <p>). */
+.u2-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.u2-text p { margin: 0; }
+.u2-text p + p { margin-top: 6px; }
+.u2-text code {
+  padding: 1px 5px;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  font-family: var(--mono);
+  font-size: 0.875em;
+  color: var(--zl-t2);
+}
+
+/* The rewind mark, shared. 28px visual, quiet at rest; the 44px touch
+   target comes from a transparent halo, not from a 44px glyph on every
+   message. */
+.u2-mark {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--zl-t4);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color var(--motion-hover) var(--motion-ease), background var(--motion-hover) var(--motion-ease);
+}
+.u2-mark::before { content: ""; position: absolute; inset: -8px; }
+.u2-mark .lucide { width: 14px; height: 14px; }
+.u2-mark:active { color: var(--zl-t1); background: var(--zl-hi); }
+@media (hover: hover) {
+  .u2-mark:hover { color: var(--zl-t1); background: var(--zl-hi); }
+}
+.u2-mark:focus-visible { color: var(--zl-t1); outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
+
+/* The skirt keeps its own shape; here it hangs from text, not from a bar. */
+.u2-col .wp-attachments { margin-top: 10px; }
+
+/* ── A · Encabezado ─────────────────────────────────────────────────────
+   The message is the heading of a section of the page. A rule cuts the
+   canvas; the mark sits on the rule at the left, and the message number at
+   the right. The first line is set as a title (semibold, one step up); the
+   rest, if any, as body under it. Everything moa does then sits below the
+   heading at the ordinary prose measure. */
+.u2-a .zl-turn { margin-bottom: 40px; }
+.u2a-head { margin: 0 0 20px; }
+.u2a-head + .zl-turn { margin-top: 0; }
+.u2a-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px -6px;
+}
+.u2a-rule hr {
+  flex: 1;
+  height: 1px;
+  margin: 0;
+  border: 0;
+  background: var(--zl-line-2);
+}
+.u2a-n { font-size: var(--zl-fs-meta); color: var(--zl-t4); font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+.u2a-from {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  letter-spacing: 0.04em;
+  color: var(--zl-t3);
+}
+.u2a-head.is-parent .u2a-rule hr { background: var(--zl-accent-line); }
+.u2a-head.is-parent .u2a-from { color: var(--zl-accent); }
+.u2a-title {
+  font-size: var(--zl-fs-display);
+  font-weight: var(--weight-semibold);
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  color: var(--zl-t1);
+}
+.u2a-body {
+  margin-top: 10px;
+  font-size: var(--zl-fs-title);
+  line-height: 1.6;
+  color: var(--zl-t2);
+}
+.u2-phone .u2a-title { font-size: var(--text-lg); }
+
+/* the aside: a steer sent while moa was working. No rule, no number, it
+   does not open a section; it is you leaning in. Indented one step, the
+   corner glyph says "into the current work". */
+.u2a-aside {
+  display: grid;
+  grid-template-columns: 16px auto 1fr auto;
+  align-items: baseline;
+  column-gap: 8px;
+  margin: -12px 0 24px;
+  padding: 0 0 0 4px;
+  font-size: var(--zl-fs-title);
+  line-height: 1.6;
+  color: var(--zl-t1);
+}
+.u2a-aside > .lucide { width: 14px; height: 14px; align-self: center; color: var(--zl-t4); }
+.u2a-aside-tag { font-family: var(--mono); font-size: var(--zl-fs-meta); letter-spacing: 0.04em; color: var(--zl-t3); }
+.u2a-aside .u2-mark { align-self: center; margin: -4px 0; }
+
+/* ── B · Índice ──────────────────────────────────────────────────────────
+   One row per message of yours, sticky to the top of the scroller for as
+   long as its section is on screen. The row is a control surface: number,
+   first line (one line, ellipsis), "+n" if the message has more, rewind.
+   The current message keeps its body under the row; past ones fold to the
+   row and open on tap. Rows sit on the sheet tone so they read as chrome
+   over the canvas when stuck. */
+.u2-b .u2b-sec { position: relative; }
+/* the canvas tone under the stuck row, so the section scrolling out never
+   peeks between the row and its rounded corners */
+.u2b-row::before { content: ""; position: absolute; inset: -24px 0 -1px; z-index: -1; background: var(--zl-canvas); }
+.u2b-row {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0 0 12px;
+  padding: 0 4px 0 12px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+  font-size: var(--zl-fs-title);
+  line-height: 1.4;
+  color: var(--zl-t1);
+}
+.u2b-n { flex: none; font-size: var(--zl-fs-meta); color: var(--zl-t4); font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+.u2b-first { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--weight-medium); }
+.u2b-steer-ico { flex: none; width: 14px; height: 14px; color: var(--zl-t4); }
+.u2b-tag { flex: none; font-family: var(--mono); font-size: var(--zl-fs-meta); letter-spacing: 0.04em; color: var(--zl-accent); }
+.u2b-sec.is-parent .u2b-row { box-shadow: var(--zl-rim), inset 2px 0 0 var(--zl-accent); }
+.u2b-more {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+  cursor: pointer;
+}
+.u2b-more .lucide { width: 12px; height: 12px; }
+.u2b-body {
+  margin: 0 0 16px;
+  padding: 0 12px;
+  font-size: var(--zl-fs-title);
+  line-height: 1.6;
+  color: var(--zl-t1);
+}
+.u2b-sec .wp-attachments { margin: 0 12px 16px; }
+.u2b-work { padding: 0 12px; }
+.u2-b .zl-turn { margin-bottom: 28px; }
+.u2b-sec:last-child .zl-turn:last-child { margin-bottom: 0; }
+
+/* ── C · Hilo ────────────────────────────────────────────────────────────
+   The message is plain text on the canvas: no bar, no box, no colour. What
+   marks it is what hangs from it — a thread line down the left of moa's
+   work, starting at a knot under the message's first letter. The knot is
+   the rewind. A steer is a branch: it joins the thread from the side. */
+.u2c-sec { margin: 0 0 36px; }
+.u2c-root {
+  font-size: var(--zl-fs-title);
+  font-weight: var(--weight-medium);
+  line-height: 1.6;
+  color: var(--zl-t1);
+}
+.u2c-from {
+  display: block;
+  margin-bottom: 2px;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-weight: var(--weight-normal);
+  letter-spacing: 0.04em;
+  color: var(--zl-accent);
+}
+.u2c-thread {
+  position: relative;
+  margin-top: 8px;
+  padding: 14px 0 0 20px;
+}
+/* the thread: from the knot down to the last block of work */
+.u2c-thread::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 14px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--zl-line-2);
+}
+.u2c-sec.is-parent .u2c-thread::before,
+.u2c-root.is-parent + .u2c-thread::before { background: var(--zl-accent-line); }
+.u2c-knot {
+  position: absolute;
+  left: -10px;
+  top: -6px;
+  width: 28px;
+  height: 28px;
+  background: var(--zl-canvas);
+  color: var(--zl-t3);
+}
+.u2c-knot .lucide { width: 12px; height: 12px; }
+.u2-c .zl-turn { margin-bottom: 24px; }
+.u2c-thread > .zl-turn:last-child { margin-bottom: 0; }
+
+/* the branch: a steer arrives from the side and joins the thread */
+.u2c-branch {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  column-gap: 8px;
+  margin: 0 0 20px;
+  padding-left: 14px;
+  font-size: var(--zl-fs-title);
+  font-weight: var(--weight-medium);
+  line-height: 1.6;
+  color: var(--zl-t1);
+}
+.u2c-branch::before {
+  content: "";
+  position: absolute;
+  left: -17px;
+  top: 0.8em;
+  width: 24px;
+  height: 1px;
+  background: var(--zl-line-2);
+}
+.u2c-branch::after {
+  content: "";
+  position: absolute;
+  left: -20px;
+  top: calc(0.8em - 3px);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--zl-t3);
+}
+.u2c-branch-tag { font-family: var(--mono); font-size: var(--zl-fs-meta); font-weight: var(--weight-normal); letter-spacing: 0.04em; color: var(--zl-t3); }
+.u2c-branch-mark { align-self: center; margin: -6px 0; }
