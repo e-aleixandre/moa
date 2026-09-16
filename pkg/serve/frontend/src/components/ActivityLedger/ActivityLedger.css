@@ -287,6 +287,98 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
 }
 .zl-lg-row:not(.is-folding) { max-height: 48px; }
 
+/* ── Movement ────────────────────────────────────────────────────────────
+   Four moments, one vocabulary, all of it the language in tokens.css. No new
+   curve, no new duration, no bounce. The rule each obeys is named.
+
+   1 · A ROW ARRIVES. The same gesture a list row already uses when it joins a
+   list on screen (`.zl-list .is-flip-enter`, Sidebar.css): fade plus a rise
+   of --motion-rise at --motion-fast on the one curve. Identical numbers on
+   purpose — a tool call landing in the transcript IS a row joining a list,
+   and teaching the eye a second tempo for the same event is exactly the drift
+   the motion language exists to stop.
+
+   What is NOT here is the guard that matters most: WHICH rows get this class.
+   arrivals.js hands it only to rows that actually just arrived, never on the
+   first render of a ledger (hydration) and never to a burst of more than four
+   (expanding the fold). Twelve calls landing back to back is four staggered
+   arrivals at most and then plain rows — the stagger tops out at 3 slots, so
+   no row waits more than 135ms to start. */
+.zl-lg-row.is-arriving {
+  animation: zl-lg-arrive var(--motion-fast) var(--motion-ease) both;
+  animation-delay: var(--zl-lg-delay, 0ms);
+}
+@keyframes zl-lg-arrive {
+  from { opacity: 0; transform: translateY(var(--motion-rise)); }
+}
+
+/* 2 · THE GROUP ABSORBS IT. When a row folds away its count goes up, and the
+   number says so on the same beat: it brightens and settles back. A number
+   is data, so it may not move (rule 6) — the change is in weight, not
+   position, which is the one channel a counter can use without wobbling the
+   text beside it. */
+.zl-lg-head .zl-data.is-absorbing {
+  animation: zl-lg-absorb 240ms var(--motion-ease) both;
+}
+@keyframes zl-lg-absorb {
+  0% { color: var(--zl-t1); transform: scale(1.12); }
+  100% { color: inherit; transform: scale(1); }
+}
+
+/* 3 · THE BODY OPENS OUT OF ITS ROW. It is clipped to nothing and grows to
+   its own height, so it visibly comes from the row that was tapped instead of
+   appearing beside it. `grid-template-rows: 0fr → 1fr` is what animates "to
+   whatever height this content is" without measuring it in JavaScript and
+   without transitioning `height` on a text box (rule 6: a re-wrap per frame).
+   The technique needs exactly ONE grid child, which is why the panel wraps
+   its contents in `.zl-lg-detail-in`; that child carries `min-height: 0` so
+   the track may actually clip it. The panel's own padding is animated with
+   it, or the collapsed panel would leave a 20px band behind.
+
+   Leaving is --motion-exit-fast on the exit curve (rule 2), and it is the one
+   state that must clip: an open panel keeps `overflow: visible` so a long
+   line still scrolls in its own `pre`. */
+.zl-lg-detail.is-opening {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: zl-lg-open var(--motion-fast) var(--motion-ease) backwards;
+}
+.zl-lg-detail.is-leaving {
+  animation: zl-lg-close var(--motion-exit-fast) var(--motion-ease-exit) forwards;
+  overflow: hidden;
+  pointer-events: none;
+}
+.zl-lg-detail-in { min-height: 0; min-width: 0; }
+@keyframes zl-lg-open {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+}
+@keyframes zl-lg-close {
+  to {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+
+/* 4 · A DELTA LANDS. Streaming content is not animated (rule 6) — a live log
+   redrawing every arriving line would be unreadable, and the cursor at the end
+   of the last line already marks where text is entering. What is added is one
+   steady edge: the live window carries the same blue baseline the live ROW
+   carries, on its lower rim, so the window reads as the open end of the row
+   above it rather than as a second, unrelated panel. No colour that is not
+   already the running colour, and nothing that moves per delta. */
+.zl-lg-row.is-live ~ .zl-lg-log {
+  box-shadow: inset 0 1px 0 var(--zl-line),
+    inset 0 -1.5px 0 color-mix(in srgb, var(--blue) 30%, transparent);
+}
+
 .zl-lg-detail .doc-mono {
   display: block;
   padding: 0;
@@ -400,4 +492,24 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
   .zl-lg-mark.is-live::after { animation: none; opacity: 0.45; transform: scale(1); }
   .zl-lg-row.is-folding { transition: none; }
   .zl-lg-chev { transition: none; }
+
+  /* The four moments, stopped — and every one of them still SAYS what it
+     said, because none of them was carrying information on its own:
+
+     · a row arrives already present, with its whole line of text;
+     · the counter shows its new number without brightening to announce it;
+     · the body opens at full height, unclipped and unfaded, so `is-opening`
+       must drop the grid it animates or a track left at 0fr would hide the
+       output entirely — the reason this block names the property rather than
+       relying on the global `animation-duration: 0.01ms`;
+     · the live window keeps its blue rim, which was never animated.
+
+     `is-leaving` never renders here: usePresence unmounts at once under
+     reduced motion, so there is no exit to suppress. */
+  .zl-lg-row.is-arriving,
+  .zl-lg-head .zl-data.is-absorbing { animation: none; }
+  .zl-lg-detail.is-opening {
+    display: block;
+    animation: none;
+  }
 }

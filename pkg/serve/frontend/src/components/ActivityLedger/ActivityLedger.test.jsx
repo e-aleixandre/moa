@@ -98,12 +98,12 @@ test("a live bash row with NO output at all can still be opened to read the comm
   const collapsedRow = rowByClass(collapsed, "zl-lg-row is-live");
   expect(collapsedRow.type).toBe("button");
   expect(collapsedRow.props["aria-expanded"]).toBe(false);
-  expect(collapsed.some((node) => node.props?.class === "zl-lg-detail")).toBe(false);
+  expect(rowByClass(collapsed, "zl-lg-detail")).toBeUndefined();
 
   stateValue = true;
   const opened = render([row]);
   expect(rowByClass(opened, "zl-lg-row is-live").props["aria-expanded"]).toBe(true);
-  const detail = opened.find((node) => node.props?.class === "zl-lg-detail");
+  const detail = rowByClass(opened, "zl-lg-detail");
   expect(detail).toBeDefined();
   expect(textContent(detail)).toContain(LONG);
 });

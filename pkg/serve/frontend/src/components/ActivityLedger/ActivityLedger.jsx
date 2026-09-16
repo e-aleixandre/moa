@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { formatElapsed } from "../../data/util/activity.js";
 import { useElapsed } from "../../data/util/use-elapsed.js";
+import { usePresence } from "../../hooks/usePresence.js";
+import { MOTION, prefersReducedMotion } from "../../hooks/motion.js";
+import { useArrivals } from "./arrivals.js";
 import { useTailWindow } from "./tail-dwell.js";
 import "./ActivityLedger.css";
 
@@ -139,8 +142,9 @@ function StatusMark({ status, live }) {
   );
 }
 
-function DoneRow({ row }) {
+function DoneRow({ row, arrive }) {
   const [open, setOpen] = useState(false);
+  const { mounted, leaving } = usePresence(open, MOTION.exitFast);
   const { text, detail: argDetail } = argParts(row.arg);
   const dim = argDetail || row.dim;
   const detail = detailNode(row.detail);
@@ -151,7 +155,8 @@ function DoneRow({ row }) {
     <>
       <Tag
         type={hasDetail ? "button" : undefined}
-        class={`zl-lg-row${open ? " is-open" : ""}${row._folding ? " is-folding" : ""}`}
+        class={`zl-lg-row${open ? " is-open" : ""}${row._folding ? " is-folding" : ""}${arrive != null ? " is-arriving" : ""}`}
+        style={arrive ? `--zl-lg-delay: calc(${arrive} * var(--motion-stagger))` : undefined}
         onClick={hasDetail ? () => setOpen((v) => !v) : undefined}
         aria-expanded={hasDetail ? open : undefined}
       >
@@ -169,7 +174,11 @@ function DoneRow({ row }) {
         {hasDetail && <Chevron open={open} />}
         <span class="sr-only">{SR[row.status] || SR.ok}</span>
       </Tag>
-      {hasDetail && open && <div class="zl-lg-detail">{detail}</div>}
+      {hasDetail && mounted && (
+        <div class={`zl-lg-detail is-opening${leaving ? " is-leaving" : ""}`}>
+          <div class="zl-lg-detail-in">{detail}</div>
+        </div>
+      )}
     </>
   );
 }
@@ -220,18 +229,20 @@ function LiveWindow({ lines, start = 0, diff = false, expanded, onToggle }) {
   );
 }
 
-function LiveCommand({ command }) {
+function LiveCommand({ command, leaving }) {
   return (
-    <div class="zl-lg-detail">
-      <div class="doc-mono zl-lg-cmd">
-        <span class="zl-lg-prompt" aria-hidden="true">$ </span>
-        {command}
+    <div class={`zl-lg-detail is-opening${leaving ? " is-leaving" : ""}`}>
+      <div class="zl-lg-detail-in">
+        <div class="doc-mono zl-lg-cmd">
+          <span class="zl-lg-prompt" aria-hidden="true">$ </span>
+          {command}
+        </div>
       </div>
     </div>
   );
 }
 
-function LiveRow({ row }) {
+function LiveRow({ row, arrive }) {
   const [expanded, setExpanded] = useState(false);
   const elapsedMs = useElapsed(row.startedAt);
   const elapsed = row.elapsed || (elapsedMs >= 3000 ? formatElapsed(elapsedMs) : null);
@@ -248,12 +259,15 @@ function LiveRow({ row }) {
     : null;
   const displayedWindow = expanded && fullWindow ? fullWindow : liveWindow;
   const expandable = !!row.command;
+  const commandOpen = expandable && expanded;
+  const command = usePresence(commandOpen, MOTION.exitFast);
   const Tag = expandable ? "button" : "div";
   return (
     <>
       <Tag
         type={expandable ? "button" : undefined}
-        class={`zl-lg-row is-live${expanded && expandable ? " is-open" : ""}`}
+        class={`zl-lg-row is-live${expanded && expandable ? " is-open" : ""}${arrive != null ? " is-arriving" : ""}`}
+        style={arrive ? `--zl-lg-delay: calc(${arrive} * var(--motion-stagger))` : undefined}
         role={expandable ? undefined : "status"}
         aria-live={expandable ? undefined : "off"}
         onClick={expandable ? () => setExpanded((value) => !value) : undefined}
@@ -270,7 +284,9 @@ function LiveRow({ row }) {
         {expandable && <Chevron open={expanded} />}
         <span class="sr-only">{SR.live}</span>
       </Tag>
-      {expandable && expanded && <LiveCommand command={row.command} />}
+      {expandable && command.mounted && (
+        <LiveCommand command={row.command} leaving={command.leaving} />
+      )}
       {displayedWindow && (
         <LiveWindow
           {...displayedWindow}
@@ -308,7 +324,7 @@ function countedSummary(rows) {
   return `${total} action${total === 1 ? "" : "s"} · ${summarizeRows(rows)}`;
 }
 
-function FoldHeader({ expanded, earlier = [], failed, summary, onToggle }) {
+function FoldHeader({ expanded, earlier = [], failed, summary, absorbed, onToggle }) {
   return (
     <button type="button" class="zl-lg-head" onClick={onToggle} aria-expanded={expanded}>
       <Chevron open={expanded} />
@@ -323,7 +339,7 @@ function FoldHeader({ expanded, earlier = [], failed, summary, onToggle }) {
             // there. Same function, moved to the state that hides them; the
             // fold itself is untouched.
             <>
-              <span class="zl-data">{earlier.length}</span> earlier
+              <span class={`zl-data${absorbed ? " is-absorbing" : ""}`}>{earlier.length}</span> earlier
               {earlier.length > 0 && <> · {summarizeRows(earlier)}</>}
             </>
           )}
@@ -333,6 +349,31 @@ function FoldHeader({ expanded, earlier = [], failed, summary, onToggle }) {
       )}
     </button>
   );
+}
+
+// useCounterBump — true for one beat after `value` changes, so a number that
+// has just grown can acknowledge it. Returns false when `value` is null (the
+// counter is not on screen) and under reduced motion, where the number itself
+// is the whole message and does not need a second one.
+const BUMP_MS = 240;
+
+function useCounterBump(value) {
+  const previous = useRef(value);
+  const [, force] = useState(0);
+  const until = useRef(0);
+
+  const changed = previous.current !== value && previous.current != null && value != null;
+  previous.current = value;
+  if (changed && !prefersReducedMotion()) until.current = Date.now() + BUMP_MS;
+
+  const on = Date.now() < until.current;
+  useEffect(() => {
+    if (!on) return undefined;
+    const t = setTimeout(() => force((n) => n + 1), Math.max(0, until.current - Date.now()));
+    return () => clearTimeout(t);
+  }, [on]);
+
+  return on;
 }
 
 function rowKey(row, i) {
@@ -367,6 +408,17 @@ export function ActivityLedger({
   const earlier = folded ? doneRows.filter((r) => !targetIds.has(r.id)) : [];
   const failed = rows.filter((r) => r.status === "err").length;
 
+  // Which rows are allowed to move, computed over everything rendered (the
+  // tail window plus the live row) so the hook sees one stable id list and a
+  // row does not "arrive" twice by crossing between the two lists.
+  const slotOf = useArrivals(visible.concat(liveRow ? [liveRow] : []));
+
+  // The header ABSORBING a row is its own moment: the count on it changes at
+  // the instant a row leaves the window and starts folding, so the two read as
+  // one movement — this row went into that number. `earlier.length` is what
+  // the header says, so it is what marks it.
+  const absorbed = useCounterBump(folded ? earlier.length : null);
+
   if (rows.length === 0) {
     return (
       <div class={`zl-ledger${dense ? " is-dense" : ""}${className ? ` ${className}` : ""}`.trim()} {...rest}>
@@ -382,6 +434,7 @@ export function ActivityLedger({
           expanded={false}
           earlier={earlier}
           failed={failed}
+          absorbed={absorbed}
           onToggle={() => setExpanded(true)}
         />
       )}
@@ -394,9 +447,9 @@ export function ActivityLedger({
         />
       )}
       {visible.map((row, i) => (
-        <DoneRow key={rowKey(row, i)} row={row} />
+        <DoneRow key={rowKey(row, i)} row={row} arrive={slotOf(row.id)} />
       ))}
-      {liveRow && <LiveRow key={rowKey(liveRow, doneRows.length)} row={liveRow} />}
+      {liveRow && <LiveRow key={rowKey(liveRow, doneRows.length)} row={liveRow} arrive={slotOf(liveRow.id)} />}
     </div>
   );
 }
