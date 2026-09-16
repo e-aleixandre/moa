@@ -163,7 +163,7 @@
   justify-content: center;
   gap: var(--space-2);
 }
-.file-viewer-error { color: var(--peach); }
+.file-viewer-error { color: var(--red); }
 .file-viewer-download-button {
   align-self: center;
   margin: 0 auto auto;

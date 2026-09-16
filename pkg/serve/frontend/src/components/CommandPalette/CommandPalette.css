@@ -589,10 +589,6 @@
   to { transform: translateY(100%); }
 }
 .m-sheet .grab {
-  width: 36px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--zl-line-2);
   margin: 8px auto 2px;
   flex: none;
 }

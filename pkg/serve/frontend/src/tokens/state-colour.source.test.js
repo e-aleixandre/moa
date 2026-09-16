@@ -29,6 +29,7 @@ test('no hand-rolled dot paints a running session green', () => {
     ['components/InboxView/InboxView.css', /\.zi-dot\.is-running[^}]*\}/],
     ['components/ActivityLedger/ActivityLedger.css', /\.zl-lg-mark\.is-live::before[^}]*\}/],
     ['components/ActivityLedger/ActivityLedger.css', /\.zl-lg-row\.is-live::after[^}]*\}/],
+    ['layout/WorkChrome/WorkChrome.css', /\.wk-state\.is-running[^}]*\}/],
   ];
 
   for (const [file, re] of dots) {

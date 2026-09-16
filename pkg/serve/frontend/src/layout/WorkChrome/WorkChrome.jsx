@@ -75,7 +75,7 @@ export function WorkHead({ phone, parent, onBack, title, titleMono, titleScroll,
 // StateWord — the state, and the ONE number allowed to travel with it.
 // Terminal states carry no dot: a finished run has no pulse, and a green tick
 // on "Completed" would spend the running colour on something that has stopped.
-// Green breathes; amber, when a backend ever emits it, does not move at all.
+// Blue breathes; amber, when a backend ever emits it, does not move at all.
 export function StateWord({ tone, word, time }) {
   const dot = tone === "running" || tone === "waiting";
   return (

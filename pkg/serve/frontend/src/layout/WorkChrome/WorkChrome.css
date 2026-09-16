@@ -85,7 +85,7 @@
   white-space: nowrap;
 }
 
-.wk-state.is-running { color: var(--green); }
+.wk-state.is-running { color: var(--blue); }
 .wk-state.is-waiting { color: var(--yellow); }
 .wk-state.is-neutral { color: var(--subtext0); }
 .wk-state.is-failed { color: var(--red); }
@@ -98,7 +98,7 @@
   background: currentColor;
 }
 
-.wk-dot.is-running { animation: wk-breathe 1.8s ease-in-out infinite; }
+.wk-dot.is-running { animation: wk-breathe var(--breath-running) ease-in-out infinite; }
 /* Waiting does NOT animate: something parked on you is not making progress,
    and movement would say it is. */
 .wk-dot.is-waiting { animation: none; }

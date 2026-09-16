@@ -30,7 +30,7 @@
   gap: 3px;
   flex: none;
   padding: 1px 6px 1px 5px;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   background: var(--zl-accent);
   color: var(--zl-accent-ink);
   font-family: var(--mono);

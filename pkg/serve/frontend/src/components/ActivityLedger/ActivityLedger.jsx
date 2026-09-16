@@ -73,19 +73,20 @@ function detailNode(detail) {
 }
 
 const SR = { ok: "completed", err: "failed", warn: "rejected", live: "running" };
+const STATUS_MARK_STROKE_WIDTH = "1.7";
 
 function StatusMark({ status, live }) {
   const kind = live ? "live" : status === "err" ? "err" : status === "warn" ? "warn" : "ok";
   return (
     <span class={`zl-lg-mark is-${kind}`} aria-hidden="true">
       {kind === "ok" && (
-        <svg viewBox="0 0 12 12"><path d="M2.5 6.5l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        <svg viewBox="0 0 12 12" stroke-width={STATUS_MARK_STROKE_WIDTH}><path d="M2.5 6.5l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" /></svg>
       )}
       {kind === "err" && (
-        <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>
+        <svg viewBox="0 0 12 12" stroke-width={STATUS_MARK_STROKE_WIDTH}><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-linecap="round" /></svg>
       )}
       {kind === "warn" && (
-        <svg viewBox="0 0 12 12"><path d="M6 2.5v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /><circle cx="6" cy="9" r="0.9" fill="currentColor" /></svg>
+        <svg viewBox="0 0 12 12" stroke-width={STATUS_MARK_STROKE_WIDTH}><path d="M6 2.5v4" stroke="currentColor" stroke-linecap="round" /><circle cx="6" cy="9" r="0.9" fill="currentColor" /></svg>
       )}
     </span>
   );

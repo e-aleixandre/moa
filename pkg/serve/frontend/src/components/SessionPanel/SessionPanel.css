@@ -508,12 +508,12 @@
 .zl-limit:disabled { opacity: 0.45; cursor: default; }
 .zl-limit::-webkit-slider-runnable-track {
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: linear-gradient(to right, var(--zl-green) 0 var(--fill), var(--zl-line-2) var(--fill) 100%);
 }
 .zl-limit::-moz-range-track {
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: linear-gradient(to right, var(--zl-green) 0 var(--fill), var(--zl-line-2) var(--fill) 100%);
 }
 .zl-limit::-webkit-slider-thumb {
@@ -523,20 +523,20 @@
   height: 18px;
   margin-top: -7px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--zl-green);
 }
 .zl-limit::-moz-range-thumb {
   width: 18px;
   height: 18px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--zl-green);
 }
 .zl-limit:focus-visible {
   outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
 }
 
 /* Switch: 36×20 track, accent when on. The button around it is the hit

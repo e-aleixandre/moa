@@ -170,7 +170,7 @@
 .zl-list .zl-group.is-attn .zl-group-n {
   color: var(--zl-canvas);
   background: var(--zl-yellow);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   padding: 0 6px;
   font-weight: 600;
 }

@@ -48,6 +48,12 @@
   border: none;
   display: inline-flex;
   align-items: center;
+  position: relative;
+}
+.toast .x::after {
+  content: "";
+  position: absolute;
+  inset: -15.5px -10.5px;
 }
 @media (hover: hover) {
 

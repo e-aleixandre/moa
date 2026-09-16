@@ -141,7 +141,7 @@
   flex: none;
   width: 40px;
   height: 24px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--zl-control);
   border: 1px solid var(--zl-line);
   cursor: pointer;

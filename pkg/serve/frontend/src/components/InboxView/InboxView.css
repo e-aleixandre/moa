@@ -76,7 +76,7 @@
   min-width: 20px;
   height: 20px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--zl-yellow);
   color: var(--zl-canvas);
   font-weight: 600;
@@ -379,7 +379,7 @@
   animation: zi-rise var(--motion-base) var(--motion-ease);
 }
 @keyframes zi-rise { from { transform: translateY(100%); } }
-.zi-grab { display: block; width: 36px; height: 4px; margin: 0 auto; border-radius: 2px; background: var(--zl-line-2); }
+.zi-grab { display: block; margin: 0 auto; }
 .zi-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 4px 8px; }
 
 /* ── Phone sizing: everything the thumb reaches is 44 or more. ─────── */

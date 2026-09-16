@@ -1,6 +1,15 @@
 @import "./tokens/reset.css";
 @import "./tokens/shell.css";
 @import "./tokens/tokens.css";
+
+/* Shared geometry for the identical grab handles in mobile sheets. */
+.zl-grab, .zi-grab, .m-sheet .grab {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--zl-line-2);
+}
+
 /* Ambient is NOT imported here. This file is pulled in by app.jsx before the
    layout and component modules, so anything imported from it lands near the
    top of the bundle -- where a same-weight ambient rule loses to a component
