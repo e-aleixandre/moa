@@ -18,7 +18,6 @@ import { LiveStatesGallery } from "./catalog/live-states-gallery.jsx";
 import { MobileGallery } from "./catalog/mobile-gallery.jsx";
 import { SubagentGallery } from "./catalog/subagent-gallery.jsx";
 import { DesktopLab, PhoneLab } from "./catalog/desktop-lab.jsx";
-import { SkinsLab } from "./catalog/skins-lab.jsx";
 import { ZonesLab, ZonesPhone, LIVE_STATES } from "./catalog/zones-lab.jsx";
 import { Scene } from "./catalog/scene.jsx";
 import { InboxLab } from "./catalog/zones-inbox.jsx";
@@ -48,7 +47,6 @@ const LINKS = [
   { key: "live", label: "Live", href: "?view=live" },
   { key: "subagent", label: "Subagent", href: "?view=subagent" },
   { key: "pieces", label: "Mobile pieces", href: "?view=pieces" },
-  { key: "skins", label: "Ambient", href: "?view=skins" },
   { key: "zones", label: "Zones", href: "?view=zones" },
   { key: "phone", label: "Phone", href: "?view=phone" },
   { key: "inbox", label: "Inbox", href: "?view=inbox" },
@@ -182,7 +180,6 @@ function CatalogApp() {
   else if (view === "live") body = <LiveStatesGallery />;
   else if (view === "subagent") body = <SubagentGallery />;
   else if (view === "pieces") body = <MobileGallery />;
-  else if (view === "skins") body = <SkinsLab />;
   else if (view === "zones") body = <ZonesLab />;
   // ?view=phone is the prototype's phone ALONE, filling the window. ?view=zones
   // shows every density at once on a scrollable page, which is right for

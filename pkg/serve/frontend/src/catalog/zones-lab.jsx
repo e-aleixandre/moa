@@ -1335,10 +1335,6 @@ function LiveSwitch({ value, onChange }) {
 }
 
 export function ZonesLab() {
-  useEffect(() => {
-    document.documentElement.setAttribute("data-ambient", "on");
-    return () => document.documentElement.removeAttribute("data-ambient");
-  }, []);
   const [liveId, setLiveId] = useState(() => new URLSearchParams(location.search).get("live") || "working");
   const live = LIVE_STATES.find((s) => s.id === liveId) || LIVE_STATES[1];
   const [surface, setSurface] = useState(() => new URLSearchParams(location.search).get("surface") || "none");

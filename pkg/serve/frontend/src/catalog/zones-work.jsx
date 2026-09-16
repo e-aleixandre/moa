@@ -1017,10 +1017,6 @@ function Section({ id, n, title, children, blurb }) {
 }
 
 export function WorkLab() {
-  useEffect(() => {
-    document.documentElement.setAttribute("data-ambient", "on");
-    return () => document.documentElement.removeAttribute("data-ambient");
-  }, []);
   const [sa, setSa] = useState(() => new URLSearchParams(location.search).get("sa") || "running");
   const [bash, setBash] = useState(() => new URLSearchParams(location.search).get("bash") || "running");
   const goBash = () => {

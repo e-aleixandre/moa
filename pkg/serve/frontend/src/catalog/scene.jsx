@@ -72,16 +72,9 @@ export function Scene() {
   const name = params.get("name");
   const scene = sceneByName(name);
 
-  // ?view=zones sets data-ambient itself (zones-lab.jsx:2014). A scene is the
-  // same CSS, so it needs the same attribute, or every ambient rule is inert
-  // and the capture is of a different product.
   useEffect(() => {
-    document.documentElement.setAttribute("data-ambient", "on");
     document.documentElement.classList.add("fx-scene-root");
-    return () => {
-      document.documentElement.removeAttribute("data-ambient");
-      document.documentElement.classList.remove("fx-scene-root");
-    };
+    return () => document.documentElement.classList.remove("fx-scene-root");
   }, []);
 
   if (!scene) return <Missing name={name} />;
