@@ -28,6 +28,7 @@ import { U2Lab } from "./catalog/u2-lab.jsx";
 import { U6Lab } from "./catalog/u6-lab.jsx";
 import { LPLab } from "./catalog/lp-lab.jsx";
 import { LP2Lab } from "./catalog/lp2-lab.jsx";
+import { C2Lab } from "./catalog/c2-lab.jsx";
 import { seedCatalogStore } from "./catalog/specimen.js";
 import { installCatalogBackend } from "./catalog/catalog-backend.js";
 import { announceArrivals } from "./data/events.js"; // wake-on-event
@@ -58,6 +59,7 @@ const LINKS = [
   { key: "u6", label: "User 6", href: "?view=u6" },
   { key: "lp", label: "Live Preview", href: "?view=lp" },
   { key: "lp2", label: "Live Preview 2", href: "?view=lp2" },
+  { key: "c2", label: "Composer 2 rows", href: "?view=c2" },
 ];
 
 // wake-on-event: the two inbox seed sets are a URL away from each other, so
@@ -197,6 +199,7 @@ function CatalogApp() {
   else if (view === "u6") body = <U6Lab />;
   else if (view === "lp") body = <LPLab />;
   else if (view === "lp2") body = <LP2Lab />;
+  else if (view === "c2") body = <C2Lab />;
   else if (view === "mobile") {
     body = (
       <PhoneLab>
@@ -236,8 +239,15 @@ function CatalogApp() {
 // to the chain above because everything CatalogApp mounts around `body` would
 // land in the capture — the nav, the palette, and the arrival toast that
 // useCatalogBootstrap fires 700ms after load, which is both chrome and a race.
-if (typeof location !== "undefined" && new URLSearchParams(location.search).get("view") === "scene") {
+const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
+if (params.get("view") === "scene") {
   render(<Scene />, document.getElementById("root"));
+  // ?view=c2&dir=… is one composer filling the window, for the same reason the
+  // scene route exists: the nav, the palette and the arrival toast that
+  // useCatalogBootstrap fires 700ms after load would all land in the shot, and
+  // the toast lands exactly where the composer is being judged.
+} else if (params.get("view") === "c2" && params.get("dir")) {
+  render(<C2Lab />, document.getElementById("root"));
 } else {
   render(<CatalogApp />, document.getElementById("root"));
 }
