@@ -33,12 +33,12 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  background: var(--mantle);
+  background: var(--zl-sheet);
   padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--surface0);
+  border-bottom: 1px solid var(--zl-line);
   font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--overlay1);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
 }
 
 .code .code-head .lang {
@@ -81,17 +81,35 @@
 }
 
 .code pre {
-  background: var(--crust);
+  background: var(--zl-canvas);
   padding: var(--space-4);
   margin: 0;
   overflow-x: auto;
 }
 
+/* A code BODY is a block, not an inline chip.
+
+   `.zl-turn code` (AssistantDocument) paints every <code> inside a turn as a
+   raised inline chip -- right for `foo()` inside a sentence, wrong for this
+   element, which is the whole body of a block and is `display: inline` by
+   default. An inline box wraps its background around the TEXT, so a 148-line
+   read drew one grey rectangle per line, each ending where its line ended:
+   the zigzag right edge. The ledger's opened body is a `.zl-turn`
+   descendant, so it inherited that chip.
+
+   The body declares what it is instead of relying on specificity: a block
+   with no surface of its own -- the `pre` (or the host panel, when flush) is
+   the only thing that paints. */
 .code pre code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
   font-family: var(--mono);
-  font-size: var(--text-code);
+  font-size: var(--zl-fs-meta);
   line-height: var(--leading-relaxed);
-  color: var(--text);
+  color: var(--zl-t1);
 }
 
 /* highlight.js theme — mapped to Mocha tokens, following the mockup's
