@@ -28,7 +28,7 @@ import { U6Lab } from "./catalog/u6-lab.jsx";
 import { LPLab } from "./catalog/lp-lab.jsx";
 import { LP2Lab } from "./catalog/lp2-lab.jsx";
 import { HomeLab } from "./catalog/home-lab.jsx";
-import { ToolsLab, ToolsPhone } from "./catalog/tools-lab.jsx";
+import { ToolsLab, ToolsPhone, LedgerIcons } from "./catalog/tools-lab.jsx";
 import { seedCatalogStore } from "./catalog/specimen.js";
 import { installCatalogBackend } from "./catalog/catalog-backend.js";
 import { announceArrivals } from "./data/events.js"; // wake-on-event
@@ -207,6 +207,7 @@ function CatalogApp() {
   // full-window phone with real scroll, which is how the owner reads them.
   else if (view === "tools") body = <ToolsLab />;
   else if (view === "toolsphone") body = <ToolsPhone />;
+  else if (view === "ledgericons") body = <LedgerIcons />;
   else if (view === "mobile") {
     body = (
       <PhoneLab>

@@ -176,3 +176,7 @@
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: -2px;
 }
+
+/* ?view=ledgericons — the glyph table. A phone-width column on the catalogue
+   canvas, so every icon is measured at the size it actually ships at. */
+.tools-icons { width: 390px; padding: 12px; background: var(--zl-canvas); }

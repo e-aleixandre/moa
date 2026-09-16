@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { MobileStream } from "../layout/mobile/MobileConversationScreen/MobileStream.jsx";
 import { Stream } from "../layout/Stream/Stream.jsx";
 import { MobileChrome } from "../layout/mobile/MobileChrome/MobileChrome.jsx";
+import { ActivityLedger } from "../components/ActivityLedger/ActivityLedger.jsx";
 import { projectStream } from "../data/stream-model.js";
 import { CONVERSATIONS } from "./tool-conversations.js";
 import "../layout/mobile/MobileConversationScreen/MobileConversationScreen.css";
@@ -159,7 +160,35 @@ export function ToolsLab() {
   );
 }
 
+/* ?view=ledgericons — CATALOG ONLY. The twenty tool glyphs at real size, one
+   per row, for the icon review. It MOUNTS `ActivityLedger` with one row per
+   tool rather than drawing an icon grid: a glyph is judged where it is read,
+   at 14px beside a 14px name on a 390px phone, not blown up in a specimen
+   sheet. Same reason the rest of this lab mounts the shipped transcript. */
+const ICON_TOOLS = [
+  "read", "ls", "grep", "find", "moa_docs", "memory",
+  "edit", "multiedit", "write", "apply_patch", "checkpoint", "verify", "tasks",
+  "bash", "fetch_content", "web_search", "subagent", "ask_user", "load_skill",
+  "mcp__linear__create_issue",
+];
+
+export function LedgerIcons() {
+  const rows = ICON_TOOLS.map((tool, i) => ({
+    id: `i${i}`,
+    tool,
+    arg: { text: "" },
+    out: "",
+    status: "ok",
+  }));
+  return (
+    <div class="tools-icons" data-led-icons>
+      <ActivityLedger rows={rows} folded={false} />
+    </div>
+  );
+}
+
 /* ?view=toolsphone — ONE phone, filling the window, with its own real scroll.
+
    The reading page above is right for comparing three conversations and wrong
    for actually reading one on a phone: the owner asked to be able to scroll
    it on the device, so here the frame comes off and `.mconv` is the screen. */

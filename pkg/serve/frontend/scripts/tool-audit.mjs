@@ -21,7 +21,7 @@ for (const conv of ["reading", "editing", "failing"]) {
     let clicked = false;
     for (const h of heads) {
       const t = await h.innerText();
-      if (/earlier action/.test(t)) { await h.click(); clicked = true; await page.waitForTimeout(120); }
+      if (/\bearlier\b/.test(t)) { await h.click(); clicked = true; await page.waitForTimeout(120); }
     }
     if (!clicked) break;
   }
