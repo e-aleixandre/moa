@@ -245,8 +245,9 @@ test('the closed mobile screen mounts its settings surface and an opened drawer 
   let sidebarTree;
   expect(() => { sidebarTree = sidebar.type(sidebar.props); }).not.toThrow();
   const cardMenu = componentNode(sidebarTree, 'SessionCardMenu');
-  expect(() => cardMenu.type(cardMenu.props)).not.toThrow();
-  expect(layoutEffects).toBeGreaterThanOrEqual(1);
+  let menuTree;
+  expect(() => { menuTree = cardMenu.type(cardMenu.props); }).not.toThrow();
+  expect(componentNode(menuTree, 'ActionMenu')).toBeTruthy();
 });
 
 test('both densities mount the SAME sidebar, and only the frame differs', () => {

@@ -166,6 +166,16 @@
   transform-origin: bottom left;
 }
 
+.action-menu-list--end {
+  right: 0;
+  left: auto;
+  transform-origin: top right;
+}
+
+.action-menu-list--up.action-menu-list--end {
+  transform-origin: bottom right;
+}
+
 .action-menu-item {
   display: flex;
   align-items: center;
@@ -205,6 +215,11 @@
 .action-menu-item.is-active svg,
 .action-menu-item:focus-visible svg {
   color: var(--zl-t1);
+}
+
+.action-menu-item.is-danger,
+.action-menu-item.is-danger svg {
+  color: var(--red);
 }
 
 @media (hover: hover) {

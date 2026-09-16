@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { MOTION } from "../../hooks/motion.js";
+import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
 import { usePresence } from "../../hooks/usePresence.js";
 import "./ActionMenu.css";
 
@@ -11,9 +12,9 @@ import "./ActionMenu.css";
 // The open state is owned by the caller so the surface hosting the menu can
 // close it on its own terms (a send, a session change) without reaching inside.
 //
-// An action is { id, icon, label, onClick, active? }. `placement="up"` opens the
-// list above the trigger, which is what the composer needs: its `+` sits at the
-// bottom of the screen with the keyboard under it.
+// An action is { id, icon?, label, onClick, active?, closeOnClick? }. `placement="up"`
+// opens the list above the trigger, which is what the composer needs: its `+`
+// sits at the bottom of the screen with the keyboard under it.
 export function ActionMenu({
   actions,
   open,
@@ -23,40 +24,40 @@ export function ActionMenu({
   triggerClass = "",
   triggerSize = 15,
   placement = "down",
+  align = "start",
+  scrollContainerSelector,
   disabled = false,
 }) {
   const rootRef = useRef(null);
   const listRef = useRef(null);
+  const triggerRef = useRef(null);
+  const [dropUp, setDropUp] = useState(false);
   // The list stays mounted through its exit so it can leave the way it came
   // (motion language, rule 2) instead of vanishing on the frame `open` drops.
   // exitBase, not the default exitFast: the morph collapses the panel back
   // into the button over --motion-exit-base, and a host that unmounts at
   // 140ms cuts it off half-closed. One number, in both places.
   const { mounted, leaving } = usePresence(open, MOTION.exitBase);
+  const { onMenuKeyDown } = useMenuKeyboard(open, onOpenChange, triggerRef, listRef);
 
   useEffect(() => {
     if (!open) return undefined;
     const close = (event) => {
       if (!rootRef.current?.contains(event.target)) onOpenChange(false);
     };
-    const onKey = (event) => {
-      if (event.key === "Escape") onOpenChange(false);
-    };
     document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", onKey);
     };
   }, [open, onOpenChange]);
 
   const run = (action) => {
-    onOpenChange(false);
+    if (action.closeOnClick !== false) onOpenChange(false);
     action.onClick();
   };
 
-  // The trigger and its items never take focus from the textarea: on the phone
-  // that would dismiss the keyboard and reflow the whole screen under the menu.
+  // Pointer interactions never take focus from the textarea: on the phone that
+  // would dismiss the keyboard and reflow the whole screen under the menu.
   // The morph grows the panel from the trigger's size to its own, and CSS
   // cannot animate to `auto`. So the size is measured once, on the frame it
   // mounts, and handed to the animation as two custom properties.
@@ -76,7 +77,17 @@ export function ActionMenu({
     node.style.setProperty("--action-menu-w", `${Math.round(width)}px`);
     node.style.setProperty("--action-menu-h", `${Math.round(height)}px`);
     node.style.animation = "";
-  }, [mounted, leaving, actions]);
+    if (placement === "auto") {
+      const scroller = scrollContainerSelector && rootRef.current?.closest(scrollContainerSelector);
+      const bottom = scroller ? scroller.getBoundingClientRect().bottom : window.innerHeight;
+      const shouldDropUp = height + 8 > bottom - triggerRef.current?.getBoundingClientRect().bottom;
+      if (shouldDropUp !== dropUp) setDropUp(shouldDropUp);
+    }
+  }, [mounted, leaving, actions, dropUp, placement, scrollContainerSelector]);
+
+  useEffect(() => {
+    if (!open) setDropUp(false);
+  }, [open]);
 
   const keepFocus = (event) => event.preventDefault();
 
@@ -84,6 +95,7 @@ export function ActionMenu({
     <div class="action-menu" ref={rootRef}>
       <button
         type="button"
+        ref={triggerRef}
         class={`action-menu-trigger${triggerClass ? ` ${triggerClass}` : ""}${open ? " is-open" : ""}`}
         aria-label={label}
         title={label}
@@ -98,10 +110,11 @@ export function ActionMenu({
       {mounted && (
         <div
           ref={listRef}
-          class={`action-menu-list${placement === "up" ? " action-menu-list--up" : ""}${leaving ? " is-leaving" : ""}`}
+          class={`action-menu-list${(placement === "up" || (placement === "auto" && dropUp)) ? " action-menu-list--up" : ""}${align === "end" ? " action-menu-list--end" : ""}${leaving ? " is-leaving" : ""}`}
           role="menu"
           aria-label={label}
           aria-hidden={leaving || undefined}
+          onKeyDown={onMenuKeyDown}
         >
           {actions.map((action) => {
             const Icon = action.icon;
@@ -110,12 +123,12 @@ export function ActionMenu({
                 key={action.id}
                 type="button"
                 role="menuitem"
-                class={`action-menu-item${action.active ? " is-active" : ""}`}
+                class={`action-menu-item${action.active ? " is-active" : ""}${action.danger ? " is-danger" : ""}`}
                 aria-pressed={action.active || undefined}
                 onMouseDown={keepFocus}
                 onClick={() => run(action)}
               >
-                <Icon size={16} aria-hidden="true" />
+                {Icon && <Icon size={16} aria-hidden="true" />}
                 <span>{action.label}</span>
               </button>
             );
