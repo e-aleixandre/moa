@@ -134,17 +134,10 @@
   font-size: var(--text-xs);
 }
 
-.pairing-manual label {
-  display: block;
-  margin-top: var(--space-2);
-  color: var(--overlay0);
-  font-size: var(--text-xs);
-}
-
 .pairing-manual code {
   display: block;
   max-height: 84px;
-  margin-top: 3px;
+  margin-top: var(--space-2);
   overflow: auto;
   overflow-wrap: anywhere;
   white-space: pre-wrap;

@@ -8,6 +8,7 @@ import {
   parsePairing, storedServer, rememberServer, forgetServer,
 } from "./pairing.js";
 import { claimDevice, authorizeDevice } from "./native-auth.js";
+import { scanPairingCode } from "./barcode-scanner.js";
 
 const $ = (id) => document.getElementById(id);
 const error = $("error");
@@ -71,10 +72,10 @@ async function pair(text) {
       fail("Could not secure this device. Check its passcode settings and try again.");
     } else if (claimError?.code === "unavailable") {
       fail("Could not reach this moa. Check the connection and try again.");
+    } else if (claimError?.code === "invalid") {
+      fail("That does not look like a moa pairing code.");
     } else {
-      // A pairing code is short-lived and single-use, which is the likeliest
-      // reason to be here -- worth saying, rather than "something went wrong".
-      fail("Could not pair. The code may have expired; create a new one.");
+      fail("This pairing code has expired or was already used. Create a new one.");
     }
     return;
   }
@@ -109,22 +110,19 @@ function installPairingControls() {
   });
 
   $("scan").addEventListener("click", async () => {
-    const scanner = globalThis.Capacitor?.Plugins?.BarcodeScanner;
-    if (!scanner) {
-      fail("No camera here. Enter the code by hand.");
-      $("manual").classList.add("on");
-      return;
-    }
     try {
-      const granted = await scanner.requestPermissions?.();
-      if (granted && granted.camera === "denied") {
+      const result = await scanPairingCode();
+      if (result.status === "scanned") {
+        await pair(result.value);
+      } else if (result.status === "denied") {
         fail("moa needs the camera to scan. Enter the code by hand instead.");
         $("manual").classList.add("on");
-        return;
+      } else if (result.status === "unavailable" || result.status === "unsupported") {
+        fail("Camera scanning is not available on this device. Enter the code by hand.");
+        $("manual").classList.add("on");
+      } else {
+        fail("No QR code was found. Try scanning again or enter the code by hand.");
       }
-      const result = await scanner.scan({ formats: ["QR_CODE"] });
-      const value = result?.barcodes?.[0]?.rawValue;
-      if (value) await pair(value);
     } catch {
       fail("Could not scan. Enter the code by hand instead.");
       $("manual").classList.add("on");

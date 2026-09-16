@@ -26,6 +26,8 @@
 	<true/>
 	<key>MoaAppGroup</key>
 	<string>$(MOA_APP_GROUP_IDENTIFIER)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan a moa pairing code.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

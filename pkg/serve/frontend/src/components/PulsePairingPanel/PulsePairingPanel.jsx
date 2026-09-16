@@ -22,6 +22,7 @@ function expiryLabel(seconds) {
 // this owns the QR/expiry/manual logic. Reached from the ⌘K "Pair Pulse…" action.
 export function PulsePairingPanel({ open, onClose }) {
   const [pairing, setPairing] = useState(null);
+  const [pairingCode, setPairingCode] = useState("");
   const [qrSVG, setQrSVG] = useState("");
   const [remaining, setRemaining] = useState(0);
   const [manualOpen, setManualOpen] = useState(false);
@@ -32,6 +33,7 @@ export function PulsePairingPanel({ open, onClose }) {
   const clearPairing = useCallback(() => {
     generation.current += 1;
     setPairing(null);
+    setPairingCode("");
     setQrSVG("");
     setRemaining(0);
     setManualOpen(false);
@@ -67,6 +69,7 @@ export function PulsePairingPanel({ open, onClose }) {
     setCreating(true);
     setError("");
     setPairing(null);
+    setPairingCode("");
     setQrSVG("");
     setManualOpen(false);
     try {
@@ -79,6 +82,7 @@ export function PulsePairingPanel({ open, onClose }) {
       });
       if (generation.current !== request) return;
       setPairing(result);
+      setPairingCode(envelope);
       setQrSVG(svg);
       setRemaining(secondsUntil(result.expires_at));
     } catch (err) {
@@ -89,11 +93,11 @@ export function PulsePairingPanel({ open, onClose }) {
   };
 
   const copyManual = async () => {
-    if (!pairing) return;
+    if (!pairingCode) return;
     try {
-      await navigator.clipboard.writeText(`${location.origin}\n${pairing.payload}`);
+      await navigator.clipboard.writeText(pairingCode);
     } catch {
-      setError("Could not copy the manual pairing details.");
+      setError("Could not copy the pairing code.");
     }
   };
 
@@ -123,11 +127,10 @@ export function PulsePairingPanel({ open, onClose }) {
             </button>
             {manualOpen && (
               <div class="pairing-manual">
-                <p>Enter these temporary details in Pulse:</p>
-                <label>Server URL<code>{location.origin}</code></label>
-                <label>Pairing payload<code>{pairing.payload}</code></label>
+                <p>Copy this code, then paste it into moa on your phone.</p>
+                <code>{pairingCode}</code>
                 <button type="button" class="pairing-copy-button" onClick={copyManual}>
-                  <Copy size={15} /> Copy temporary details
+                  <Copy size={15} /> Copy pairing code
                 </button>
               </div>
             )}

@@ -37,7 +37,8 @@ browser, create a pairing code, scan it. The code carries the origin and a
 one-time payload -- the browser that made it was already talking to the right
 server -- and the app keeps a device credential of its own from then on.
 
-A code can also be typed by hand, because a camera is not always an option.
+The same code can also be pasted by hand, because a camera is not always an
+option.
 
 It loads the interface from that moa rather than bundling it, so a new version
 of moa does **not** need a new build of the app.
@@ -71,7 +72,9 @@ the bridge clears its binding and returns to the pairing screen.
 
 ## Building it
 
-Requires a Mac with Xcode. From this directory:
+Requires a Mac with Xcode and CocoaPods. The barcode scanner package does not
+support Swift Package Manager, so this project deliberately uses the committed
+`Podfile`. From this directory:
 
     npm install
     npm run assets           # icons and splash -- NOT done by cap sync
@@ -169,9 +172,9 @@ If Xcode writes account-specific values into `project.pbxproj` or either
 entitlements file while configuring signing, keep those changes local. Do not
 commit certificates, provisioning profiles, team ids, or real App Group ids.
 
-`npx cap sync ios` may rewrite `ios/App/CapApp-SPM/Package.swift` and the ignored
-copy of `www/`; it must leave the `ShareExtension` target, both entitlements and
-the embed phase intact. Review that explicitly after a Capacitor major upgrade.
+`npx cap sync ios` may rewrite the ignored copy of `www/` and update CocoaPods;
+it must leave the `ShareExtension` target, both entitlements and the embed phase
+intact. Review that explicitly after a Capacitor major upgrade.
 
 ### Device checks
 

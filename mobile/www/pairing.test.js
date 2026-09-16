@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
-  decodeEnvelope, readManual, parsePairing,
+  decodeEnvelope, parsePairing,
   storedServer, rememberServer, forgetServer,
 } from "./pairing.js";
 
@@ -52,35 +53,40 @@ describe("decodeEnvelope", () => {
     expect(decodeEnvelope(envelope("https://moa.example", ""))).toBeNull();
     expect(decodeEnvelope(envelope("", PAYLOAD))).toBeNull();
   });
-});
 
-describe("readManual", () => {
-  it("reads the two lines the pairing panel copies", () => {
-    expect(readManual(`https://moa.example\n${PAYLOAD}`))
+  it("tolerates whitespace around and inside a pasted code", () => {
+    const code = envelope("https://moa.example", PAYLOAD);
+    const wrapped = `${code.slice(0, 9)} \n ${code.slice(9, 24)} \n ${code.slice(24, 48)} ${code.slice(48)}`;
+    expect(decodeEnvelope(`  ${wrapped}  \n`))
       .toEqual({ origin: "https://moa.example", payload: PAYLOAD });
   });
 
-  it("tolerates stray whitespace and blank lines", () => {
-    expect(readManual(`  https://moa.example  \n\n  ${PAYLOAD}  \n`))
-      .toEqual({ origin: "https://moa.example", payload: PAYLOAD });
+  it("tolerates straight or smart quotes added around a pasted code", () => {
+    const code = envelope("https://moa.example", PAYLOAD);
+    expect(decodeEnvelope(`"${code}"`)).toEqual({ origin: "https://moa.example", payload: PAYLOAD });
+    expect(decodeEnvelope(`“${code}”`)).toEqual({ origin: "https://moa.example", payload: PAYLOAD });
   });
 
-  it("holds the same https rule as the scanned form", () => {
-    expect(readManual(`http://moa.example\n${PAYLOAD}`)).toBeNull();
-  });
-
-  it("refuses a single line", () => {
-    expect(readManual("https://moa.example")).toBeNull();
+  it("refuses an envelope whose inner payload is not a moa pairing payload", () => {
+    expect(decodeEnvelope(envelope("https://moa.example", "not-a-pairing-payload"))).toBeNull();
   });
 });
 
 describe("parsePairing", () => {
-  it("accepts either shape without being told which", () => {
-    expect(parsePairing(envelope("https://moa.example", PAYLOAD)).origin)
-      .toBe("https://moa.example");
-    expect(parsePairing(`https://moa.example\n${PAYLOAD}`).origin)
-      .toBe("https://moa.example");
+  it("accepts the single-line code and removes the old two-line format", () => {
+    expect(parsePairing(envelope("https://moa.example", PAYLOAD)))
+      .toEqual({ origin: "https://moa.example", payload: PAYLOAD });
+    expect(parsePairing(`https://moa.example\n${PAYLOAD}`)).toBeNull();
     expect(parsePairing("nonsense")).toBeNull();
+  });
+
+  it("keeps the HTML field and parser on the same single-line contract", () => {
+    const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+    const field = html.match(/<input\s+id="text"[^>]*>/)?.[0];
+    expect(field).toBeDefined();
+    expect(field).toContain('type="text"');
+    expect(field).not.toContain("multiple");
+    expect(parsePairing(envelope("https://moa.example", PAYLOAD))).not.toBeNull();
   });
 });
 
