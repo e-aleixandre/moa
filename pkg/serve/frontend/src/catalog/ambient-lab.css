@@ -1,0 +1,291 @@
+/* ambient-lab.css — CATALOG ONLY. Three answers to "depth + light" on the
+   phone's conversation screen, scoped under `.amb[data-t]`.
+
+   What this sheet may touch: the light layer, the veil `.mconv` paints, and
+   how the three surfaces (capsules, user cell, composer) separate from the
+   canvas. What it must not touch: ledger rows, code blocks, and any rule in
+   shell.css or the two conversation screens. `data-t="current"` sets nothing
+   at all, so production's own aurora and veil show through as the reference.
+
+   Every colour below is a token from tokens/tokens.css or one of the four
+   aurora hues shell.css already uses (lavender, mauve, blue, teal). No
+   `var(--zl-*, fallback)`: the ladder is declared on :root.
+
+   None of the three treatments uses `filter: blur()`. A radial gradient is
+   already smooth; the blur in production hides banding on a 22px kernel that
+   costs a raster pass, and on the treatment that moves (C) it would have to be
+   re-rasterised every frame. The gradients here are simply drawn larger than
+   the screen, so their falloff leaves the viewport before it can be seen as an
+   edge -- which is the whole complaint: "you can see where it ends". */
+
+/* ── Host ──────────────────────────────────────────────────────────────── */
+
+.amb {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  font-family: var(--font);
+  color: var(--zl-t1);
+}
+
+/* The stage is the phone. It takes whatever the bar leaves; with ?bare=1 the
+   bar is gone and the stage is the full 390x780. */
+.amb-stage {
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.amb-screen.mconv { height: 100%; }
+
+/* The light layer sits under the screen; the screen is a stacking context so
+   its own header (z 4) and dock keep the order production gave them. */
+.amb-light {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.amb-screen.mconv { z-index: 1; }
+
+/* ── current — the reference ──────────────────────────────────────────────
+   Transparent stage: body::before (aurora) and body::after (band veil) from
+   shell.css paint through, and `.mconv` keeps its 0.78 veil and its two
+   pools. Nothing is overridden. */
+.amb[data-t="current"] .amb-stage { background: transparent; }
+
+/* ── shared by A, B, C ────────────────────────────────────────────────────
+   The stage owns the canvas and hides production's aurora under it. The
+   `.mconv::before` pools go too: each treatment defines the whole light. */
+.amb:not([data-t="current"]) .amb-stage { background: var(--zl-canvas); }
+.amb:not([data-t="current"]) .amb-screen.mconv::before { content: none; }
+
+/* ── A · Baño ─────────────────────────────────────────────────────────────
+   Light from behind, still. The stain is cured by geometry, not by dose: four
+   washes whose centres sit OUTSIDE the viewport and whose falloff runs past
+   the far edge, so what is on screen is always the inside of a gradient and
+   never its rim. Hues are neighbours (lavender → mauve → blue) so no two
+   pools meet in a visible seam; teal is a whisper in one corner.
+
+   The veil stays uniform but drops from 0.78 to 0.40: with no rim to hide,
+   the light no longer needs to be almost entirely covered to look clean.
+   Peak effective alpha on canvas: 0.20 × 0.60 = 0.12, in the top-left corner
+   under the capsules.
+
+   Depth by TONE, but the tone is TRANSLUCENT: the user cell and the capsules
+   are white at 4.5 / 10 % over whatever is behind them, so each is always one
+   step lighter than its own surroundings -- in the lit corner as much as in
+   the dark band. An opaque --zl-raised does the
+   opposite where the light is: measured, the cell at rgb(30,30,41) sat inside
+   a corner at rgb(41,43,60) and read as a hole. Ledger and code keep their
+   opaque sheet/canvas (not this lab's to touch). */
+.amb[data-t="a"] .amb-light {
+  background:
+    radial-gradient(150% 90% at 8% -12%, rgba(180, 190, 254, 0.42), rgba(180, 190, 254, 0.22) 32%, rgba(180, 190, 254, 0.07) 58%, transparent 80%),
+    radial-gradient(140% 80% at 112% 28%, rgba(203, 166, 247, 0.32), rgba(203, 166, 247, 0.16) 32%, rgba(203, 166, 247, 0.05) 58%, transparent 80%),
+    radial-gradient(160% 80% at 42% 116%, rgba(137, 180, 250, 0.34), rgba(137, 180, 250, 0.16) 32%, rgba(137, 180, 250, 0.05) 58%, transparent 80%),
+    radial-gradient(120% 70% at -12% 96%, rgba(148, 226, 213, 0.18), rgba(148, 226, 213, 0.08) 35%, transparent 75%);
+}
+.amb[data-t="a"] .amb-screen.mconv { background: rgba(16, 16, 24, 0.40); }
+
+.amb[data-t="a"] .zl-user-cell {
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: var(--zl-rim);
+}
+/* The composer keeps its opaque slab: it stands on the dock's own fade, where
+   the backdrop is canvas anyway, and a translucent slab only cost the
+   placeholder contrast (measured 2.98 → 2.49). */
+.amb[data-t="a"] .zl-cap { background: rgba(255, 255, 255, 0.10); }
+
+/* ── B · Horizonte ────────────────────────────────────────────────────────
+   No veil. The light is not wallpaper behind the words: it gathers at the two
+   horizons -- above the capsules and below the composer -- and the reading
+   band between them is plain canvas. There is nothing behind the text to
+   cover, so nothing is covered.
+
+   Depth by EDGE, not tone: every surface gains a 1px highlight along its top
+   edge, the side that faces the upper horizon, and the composer throws a
+   soft cool glow onto the canvas below it, the side that faces the lower
+   one. The surfaces read as lit objects rather than as lighter rectangles.
+   The user cell is translucent white so that where it does meet the upper
+   glow (a first message) it is still a step lighter than its surroundings.
+
+   The lower horizon is mostly behind the dock (whose 0.8 fade is kept, so the
+   status line stays readable); what rises past the composer is ≤ 0.06 and is
+   what lights the empty tail of a short conversation. */
+.amb[data-t="b"] .amb-light {
+  background:
+    radial-gradient(130% 42% at 50% -18%, rgba(203, 166, 247, 0.36), rgba(203, 166, 247, 0.16) 35%, rgba(203, 166, 247, 0.04) 62%, transparent 80%),
+    radial-gradient(80% 30% at 6% -6%, rgba(180, 190, 254, 0.38), rgba(180, 190, 254, 0.14) 40%, transparent 78%),
+    linear-gradient(to bottom, rgba(180, 190, 254, 0.14) 0%, rgba(180, 190, 254, 0.04) 10%, transparent 18%),
+    radial-gradient(120% 50% at 62% 120%, rgba(137, 180, 250, 0.40), rgba(137, 180, 250, 0.18) 35%, rgba(137, 180, 250, 0.05) 62%, transparent 80%),
+    linear-gradient(to top, rgba(137, 180, 250, 0.16) 0%, rgba(148, 226, 213, 0.06) 16%, transparent 40%);
+}
+.amb[data-t="b"] .amb-screen.mconv { background: transparent; }
+/* The dock's 0.8 fade would bury the lower horizon under a sheet of canvas.
+   With no veil above there is no seam to hide, so the dock goes transparent
+   and the composer slab and status line sit directly on the lit canvas. */
+.amb[data-t="b"] .zl-dock { background: transparent; }
+
+.amb[data-t="b"] .zl-cap {
+  background: rgba(30, 30, 41, 0.66);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), var(--zl-rim);
+}
+.amb[data-t="b"] .zl-user-cell {
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), var(--zl-rim);
+}
+.amb[data-t="b"] .zl-composer {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    var(--zl-rim-2),
+    0 0 56px rgba(137, 180, 250, 0.14);
+}
+.amb[data-t="b"] .zl-composer:focus-within {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 0 0 1px var(--zl-accent-line),
+    0 0 56px rgba(137, 180, 250, 0.14);
+}
+
+/* ── C · Deriva ───────────────────────────────────────────────────────────
+   Light that moves, very slowly, behind a graduated veil. Two soft discs
+   drift on `transform` alone -- 90s and 110s, alternate -- so the layer is
+   rasterised once and moved on the compositor. Radial-gradient discs need no
+   blur to be soft.
+
+   The veil is a vertical gradient rather than a sheet: 0.62 across the
+   reading band (12%-62% of the screen), opening to 0.30 at the top, where
+   only the capsules and a masked first line live, and to 0.25 at the bottom,
+   where a short conversation leaves the canvas empty and the dock's own fade
+   takes over. Peak effective alpha inside the reading band: 0.34 × 0.38 ≈
+   0.13 when the upper disc is at the low end of its path.
+
+   Depth by SHADOW: the light comes from behind the page, so objects on it
+   cast one. The user cell and the composer get real drop shadows, the
+   capsules a deeper blur -- paper objects over lit paper. */
+.amb[data-t="c"] .amb-light {
+  background: radial-gradient(120% 70% at 50% 112%, rgba(148, 226, 213, 0.12), rgba(148, 226, 213, 0.04) 40%, transparent 72%);
+}
+/* The tempo lives in one property. No motion token exists for a drift of
+   this order (the scale in tokens.css tops out at exit transitions), and this
+   sheet is catalog-only; if C ships, the tempo becomes a token there. */
+.amb[data-t="c"] { --amb-drift-time: 90s; --amb-drift-time-2: 110s; }
+.amb-drift {
+  position: absolute;
+  width: 560px;
+  height: 560px;
+  border-radius: 50%;
+  will-change: transform;
+}
+.amb-drift-1 {
+  left: -200px;
+  top: -230px;
+  background: radial-gradient(circle at 50% 50%, rgba(180, 190, 254, 0.52), rgba(196, 176, 250, 0.26) 34%, rgba(203, 166, 247, 0.08) 58%, transparent 72%);
+  animation: amb-drift-1 var(--amb-drift-time) ease-in-out infinite alternate;
+}
+.amb-drift-2 {
+  right: -200px;
+  bottom: -40px;
+  background: radial-gradient(circle at 50% 50%, rgba(137, 180, 250, 0.46), rgba(140, 200, 235, 0.20) 38%, rgba(148, 226, 213, 0.06) 60%, transparent 72%);
+  animation: amb-drift-2 var(--amb-drift-time-2) ease-in-out infinite alternate;
+}
+@keyframes amb-drift-1 {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(70px, 100px, 0); }
+}
+@keyframes amb-drift-2 {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(-90px, -90px, 0) scale(1.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .amb-drift { animation: none; }
+}
+.amb[data-t="c"] .amb-screen.mconv {
+  background: linear-gradient(
+    to bottom,
+    rgba(16, 16, 24, 0.30) 0%,
+    rgba(16, 16, 24, 0.62) 12%,
+    rgba(16, 16, 24, 0.62) 62%,
+    rgba(16, 16, 24, 0.25) 100%
+  );
+}
+
+.amb[data-t="c"] .zl-user-cell {
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: var(--zl-rim), 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+.amb[data-t="c"] .zl-composer {
+  box-shadow: var(--zl-rim-2), 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+.amb[data-t="c"] .zl-composer:focus-within {
+  box-shadow: 0 0 0 1px var(--zl-accent-line), 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+.amb[data-t="c"] .zl-cap {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--zl-rim), 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+/* ── The bar ──────────────────────────────────────────────────────────────
+   The lab's own control: which treatment, which conversation. Below the
+   stage, never over it, so the dock under review is never covered. Hidden
+   with ?bare=1 for the capture script. */
+.amb-bar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) max(var(--space-2), var(--shell-bottom));
+  background: var(--zl-sheet);
+  box-shadow: inset 0 1px 0 var(--zl-line);
+}
+.amb.is-bare .amb-bar { display: none; }
+
+.amb-cap {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  line-height: 1.5;
+  color: var(--zl-t3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.amb-cap b { color: var(--zl-t2); font-weight: 500; }
+
+.amb-row {
+  display: flex;
+  gap: var(--space-2);
+}
+.amb-seg {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-full);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+}
+.amb-seg-conv { margin-left: auto; }
+
+.amb-seg button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--zl-t3);
+  font-family: var(--font);
+  /* 16px: this bar is tapped on a phone. */
+  font-size: var(--zl-fs-title);
+  cursor: pointer;
+}
+.amb-seg button.is-on { background: var(--zl-accent); color: var(--zl-accent-ink); }
+.amb-seg button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
