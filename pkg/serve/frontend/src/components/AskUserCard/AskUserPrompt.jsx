@@ -59,7 +59,6 @@ export function AskUserPrompt({ session }) {
   currentRef.current = current;
   const questionsRef = useRef(questions);
   questionsRef.current = questions;
-  const submitFreeRef = useRef(null);
   // Scopes the keyboard shortcut to this card (see the effect below).
   const rootRef = useRef(null);
   // The ask batch a recording belongs to. A transcription resolves
@@ -86,7 +85,6 @@ export function AskUserPrompt({ session }) {
   const voice = useVoiceGesture({
     onTranscript: insertDictation,
     onError: setVoiceError,
-    onSend: () => submitFreeRef.current?.(),
   });
 
   // Stamp each recording with the batch that started it, and clear a stale
@@ -161,13 +159,6 @@ export function AskUserPrompt({ session }) {
   const submitFree = () => {
     if (current < questions.length - 1) goTo(current + 1);
     else handleSubmit();
-  };
-  // A tap on the record/send button routes here through the gesture reducer.
-  // With nothing typed the button reads as a mic, so an accidental short tap
-  // must do nothing rather than skip the question.
-  submitFreeRef.current = () => {
-    if (!(answers[current] || "").trim()) return;
-    submitFree();
   };
 
   const resolve = async (finalAnswers) => {

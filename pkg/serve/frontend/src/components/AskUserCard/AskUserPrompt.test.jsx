@@ -27,8 +27,8 @@ mock.module("../../data/session-actions.js", () => ({
 
 mock.module("../../hooks/useVoiceGesture.js", () => ({
   useVoiceGesture: () => ({
-    handlers: {}, recording: false, transcribing: false, locked: false,
-    showSlideHint: false, supported: true, toggleFromShortcut() {},
+    handlers: {}, recording: false, transcribing: false,
+    supported: true, toggleFromShortcut() {}, cancel() {},
   }),
 }));
 

@@ -46,8 +46,8 @@ mock.module("../../hooks/useVoiceGesture.js", () => ({
   useVoiceGesture: (options) => {
     voiceOptions = options;
     return ({
-    handlers: {}, recording: false, transcribing: false, locked: false,
-    showSlideHint: false, supported: false, toggleFromShortcut() {},
+    handlers: {}, recording: false, transcribing: false,
+    supported: false, toggleFromShortcut() {}, cancel() {},
     });
   },
 }));

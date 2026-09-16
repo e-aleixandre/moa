@@ -25,7 +25,7 @@ mock.module("../../data/session-actions.js", () => ({
   resolveAskUser: async (...args) => { resolved.push(args); },
 }));
 mock.module("../../hooks/useVoiceGesture.js", () => ({
-  useVoiceGesture: () => ({ handlers: {}, recording: false, transcribing: false, locked: false, showSlideHint: false, supported: false }),
+  useVoiceGesture: () => ({ handlers: {}, recording: false, transcribing: false, supported: false, cancel() {} }),
 }));
 mock.module("../../hooks/useCanTranscribe.js", () => ({ useCanTranscribe: () => false }));
 

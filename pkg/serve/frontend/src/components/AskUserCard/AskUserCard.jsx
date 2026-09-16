@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "preact/hooks";
-import { MessageCircleQuestionMark, ArrowUp, Check, Mic, Square, Loader2, ChevronUp } from "lucide-preact";
+import { MessageCircleQuestionMark, ArrowUp, Check, Mic, Loader2 } from "lucide-preact";
 import { Field } from "../../primitives/index.js";
 import "./AskUserCard.css";
 
@@ -24,10 +24,10 @@ const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 // then every keystroke is reported up so a stateful container (AskUserPrompt)
 // can persist the answer per question and restore it when navigating back.
 //
-// `voice` is the optional push-to-talk wiring from useVoiceGesture (handlers +
-// recording/transcribing/locked/showSlideHint). Passing it puts the mic
-// inside the free row — the same hold-to-talk control the composer uses;
-// omitting it leaves a plain send, which is what the gallery renders.
+// `voice` is the optional tap-to-talk wiring from useVoiceGesture (handlers +
+// recording/transcribing). Passing it puts the mic inside the free row — the
+// same tap-to-record control the composer uses; omitting it leaves a plain
+// send, which is what the gallery renders.
 export function AskUserCard({
   question,
   options = [],
@@ -114,7 +114,7 @@ export function AskUserCard({
             size="md"
             class="ask-free-field"
             type="text"
-            placeholder={voice?.supported ? `${placeholder} or hold the mic to talk` : placeholder}
+            placeholder={voice?.supported ? `${placeholder} or tap the mic to talk` : placeholder}
             aria-label="Answer in your own words"
             aria-keyshortcuts={freeLetter}
             autocomplete="off"
@@ -132,48 +132,46 @@ export function AskUserCard({
   );
 }
 
-// renderVoiceSubmit — the submit button doubling as push-to-talk, mirroring the
-// composer's send button: tap submits, hold records, sliding up locks it
-// hands-free. Keeping one control (instead of adding a second mic button) means
-// the card gains dictation without growing a new thing to aim at on a phone.
+// renderVoiceSubmit — the submit button doubling as the mic, mirroring the
+// composer's send button: with an empty field it is the mic (tap to record,
+// tap again to stop), and the moment there is an answer to send it is the
+// submit arrow again. Keeping one control (instead of adding a second mic
+// button) means the card gains dictation without growing a new thing to aim at
+// on a phone, and because the two faces never overlap a tap is never ambiguous.
 function renderVoiceSubmit(voice, free) {
-  const { recording, transcribing, locked, showSlideHint, handlers } = voice;
+  const { recording, transcribing, handlers } = voice;
   const micMode = !free.trim();
+  // While the mic is live or transcribing it keeps the button, even if a
+  // partial transcript has already made the field non-empty: showing Send
+  // there would hide a running recording and leave no way to stop it.
+  const voiceOwnsButton = micMode || recording || transcribing;
 
   let icon = <ArrowUp size={15} />;
   if (transcribing) icon = <Loader2 size={15} class="spin" />;
-  else if (recording && locked) icon = <Square size={13} />;
-  else if (recording || micMode) icon = <Mic size={15} />;
+  else if (voiceOwnsButton) icon = <Mic size={15} />;
 
   const title = transcribing ? "Transcribing…"
-    : recording ? (locked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
-    : micMode ? "Hold to talk · tap to send"
-    : "Send answer · hold to talk";
+    : recording ? "Tap to stop & transcribe"
+    : voiceOwnsButton ? "Tap to talk"
+    : "Send answer";
 
   const cls = [
     "ask-free-submit",
-    "gesture",
+    voiceOwnsButton ? "gesture" : "",
     recording ? "recording" : "",
-    locked ? "locked" : "",
     transcribing ? "transcribing" : "",
-    micMode ? "mic-mode" : "",
+    voiceOwnsButton && !recording && !transcribing ? "mic-mode" : "",
   ].filter(Boolean).join(" ");
 
   return (
     <div class="ask-free-send-wrap">
-      {showSlideHint && (
-        <div class="ask-voice-lock-hint">
-          <ChevronUp size={13} />
-          <span>Slide up to lock</span>
-        </div>
-      )}
       <button
-        type="button"
+        type={voiceOwnsButton ? "button" : "submit"}
         class={cls}
-        aria-label={micMode ? "Record answer" : "Send answer"}
+        aria-label={voiceOwnsButton ? (recording ? "Stop recording" : "Record answer") : "Send answer"}
         title={title}
         disabled={transcribing}
-        {...handlers}
+        {...(voiceOwnsButton ? handlers : {})}
       >
         {icon}
       </button>

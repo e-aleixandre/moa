@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Paperclip, X, Mic, Loader2, ChevronUp, Image as ImageIcon } from "lucide-preact";
+import { Paperclip, X, Mic, Loader2, Image as ImageIcon } from "lucide-preact";
 import { Chip } from "../../primitives/index.js";
 import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
@@ -44,9 +44,10 @@ import "./Composer.css";
 // What is NOT the catalogue's is everything the prototype never had, grafted
 // on top: send / queue / slash / @-mention / attachments / dictation / the
 // draft that survives a reload / the anti-double-send barrier. The mic sits
-// next to the arrow as a secondary control; on the phone the send button IS
-// the mic. Send is never peach — peach is the message the text becomes after
-// this button.
+// next to the arrow as a secondary control; on the phone the button is the mic
+// while the field is empty and Send as soon as there is something to send, so
+// a tap never has two possible meanings. Send is never peach — peach is the
+// message the text becomes after this button.
 //
 // Stop is NOT here. This slab holds what the owner is about to say; stopping
 // the agent is a verb of the row above it, the LiveBar, which is the one that
@@ -806,13 +807,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   }, []);
 
   const {
-    handlers: voiceHandlers, recording, transcribing, locked: voiceLocked,
-    showSlideHint, supported: voiceSupported, toggleFromShortcut,
+    handlers: voiceHandlers, recording, transcribing,
+    supported: voiceSupported, toggleFromShortcut, cancel: cancelVoice,
   } = useVoiceGesture({
     onTranscript: insertAtCursor,
     onError: onVoiceError,
-    onSend: () => dispatchContentSendActivation(sendButtonEvent.keyActivate()),
-    sendOnPointerCancel: hasText || attachments.length > 0,
   });
 
   // Voice is usable only when the backend can transcribe AND the browser has a
@@ -932,6 +931,17 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       }
     }
 
+    // Esc discards a live recording. This is the cancel route the slide-away
+    // gesture used to provide: the mic stops and the audio is thrown away, so
+    // nothing you decided not to say reaches the field. It is checked before
+    // the agent-stop below because while YOUR mic is live it is the nearer
+    // thing to back out of.
+    if (e.key === "Escape" && recording) {
+      e.preventDefault();
+      cancelVoice();
+      return;
+    }
+
     // Esc aborts the running agent.
     if (e.key === "Escape" && busy) {
       e.preventDefault();
@@ -996,7 +1006,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   }, [
     sessionId, busy, fileSuggestions, fileCursor, cmdSuggestions, cmdCursor,
     handleDequeueSteers, handleStop, dispatchContentSendActivation, acceptFileMention, acceptSuggestion,
-    cursorRow, totalRows, autoResize, updateSuggestions,
+    cursorRow, totalRows, autoResize, updateSuggestions, recording, cancelVoice,
   ]);
 
   const handleInput = useCallback((e) => {
@@ -1201,11 +1211,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           aria-label={transcribing ? "Transcribing" : recording ? "Stop recording" : "Dictate"}
           title={
             transcribing ? "Transcribing…"
-              : recording ? "Click to stop & transcribe"
+              : recording ? "Click to stop & transcribe · Esc discards"
                 : `Dictate (${formatShortcut(".", { mod: true })})`
           }
           disabled={transcribing || contentSendPending}
-          onClick={toggleFromShortcut}
+          {...voiceHandlers}
         >
           {/* Recording keeps the mic glyph: a live microphone is a state of
               MY input, not a stop control, and a square here read as the
@@ -1214,36 +1224,42 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         </button>
       )}
       {(() => {
-        // A shortcut recording can begin while there is text or an
-        // attachment. On the phone it must take over the button until it is
-        // stopped: showing Send there would make a live mic invisible and
-        // let a tap submit the unrelated text instead of stopping the
-        // recording. On the desktop the mic has its own button, which is
-        // where a live recording shows.
-        const voiceOwnsButton = voiceButtonMode || (compact && (recording || transcribing));
+        // Who the button is, right now.
+        //
+        // A tap now means "toggle the mic", so the button must never be Send
+        // and mic at the same time — one tap cannot mean two things. It is the
+        // mic only while there is nothing to send (empty field, no attachment)
+        // or while a recording it started is still running; the moment there is
+        // a draft it is Send again, and a transcript that lands in the field
+        // turns it back into Send on its own. That is also how the typed
+        // message still goes out: with text in the box this is the ordinary
+        // send button, with its ordinary handlers.
+        //
+        // On the desktop the mic has its own button beside the arrow, so the
+        // takeover applies to the phone (or to a shortcut recording in a
+        // compact frame, which must stay visible until it is stopped).
         const micMode = voiceButtonMode && !hasText && attachments.length === 0;
+        const voiceOwnsButton = micMode
+          || ((voiceButtonMode || compact) && (recording || transcribing));
 
         let icon = <SendIcon />;
         if (contentSendPending || (voiceOwnsButton && transcribing)) icon = <Loader2 size={16} class="spin" />;
-        else if (voiceOwnsButton && recording) icon = <Mic size={16} />;
-        else if (micMode) icon = <Mic size={16} />;
+        else if (voiceOwnsButton) icon = <Mic size={16} />;
 
         const cls = [
           "zl-send",
           voiceOwnsButton ? "gesture" : "",
           voiceOwnsButton && recording ? "recording" : "",
-          voiceOwnsButton && voiceLocked ? "locked" : "",
           voiceOwnsButton && transcribing ? "transcribing" : "",
-          micMode ? "mic-mode" : "",
+          micMode && !recording && !transcribing ? "mic-mode" : "",
         ].filter(Boolean).join(" ");
 
         const sendTitle = busy ? "Send — steers the agent, doesn't stop it" : "Send";
         const title = contentSendPending ? "Sending…"
           : !voiceOwnsButton ? sendTitle
           : transcribing ? "Transcribing…"
-          : recording ? (voiceLocked ? "Tap to stop & transcribe" : "Release to transcribe · slide up to lock")
-          : canVoice ? `Hold to talk · tap to send (${formatShortcut(".", { mod: true })} for mic)`
-          : sendTitle;
+          : recording ? "Tap to stop & transcribe · Esc discards"
+          : `Tap to record (${formatShortcut(".", { mod: true })})`;
 
         const gestureProps = voiceOwnsButton
           ? voiceHandlers
@@ -1259,18 +1275,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           : !voiceOwnsButton ? (busy ? "Send steer" : "Send")
           : transcribing ? "Transcribing"
           : recording ? "Stop recording"
-          : micMode ? "Record"
-          : busy ? "Send steer"
-          : "Send";
+          : "Record";
 
         return (
           <div class="zl-send-wrap">
-            {showSlideHint && (
-              <div class="voice-lock-hint">
-                <ChevronUp size={14} />
-                <span>Slide up to lock</span>
-              </div>
-            )}
             <button
               type="button"
               class={cls}
