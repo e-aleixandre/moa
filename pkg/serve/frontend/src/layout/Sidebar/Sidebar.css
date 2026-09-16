@@ -444,13 +444,30 @@ button.zl-group.is-proj:focus-visible {
 
 /* ── 4. Foot: the things about the APP ───────────────────────────────────
    The inbox, the build and the global settings. Deliberately not the session
-   panel's business: these outlive every session. */
+   panel's business: these outlive every session.
+
+   The foot sits on the list's columns, not on its own. The column has two:
+   boxes start at 8px (`.zl-list` padding) and text and glyphs start at 20px
+   (8 + the 12px a row or a group label pads by). The foot used to pad
+   `0 20px 12px 8px` — 20 on the right, 8 on the left — which is the left
+   gutter measured from the wrong edge, so nothing in it landed on either
+   column.
+
+   `space-between` then made it depend on the contents: it only reads as
+   "inbox one side, app the other" while there are two children. The inbox
+   door is conditional (it appears once something has arrived, Sidebar.jsx),
+   and with one child space-between is flex-start — so on a machine with no
+   inbox the version and the gear flew to the left gutter, 12px short of the
+   text column, and the foot's height dropped with them. That is the
+   misalignment: not a nudge, a different layout for the same foot.
+
+   So: the same 8px box gutter as the list on both sides, and the app corner
+   pinned right by its own margin rather than by having a neighbour. */
 .zl-side-foot {
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 20px 12px 8px;
+  padding: 0 8px 12px;
 }
 .zl-inbox {
   display: inline-flex;
@@ -489,11 +506,14 @@ button.zl-group.is-proj:focus-visible {
 }
 /* The app's own corner: what version is running, and where to change it.
    Kept together so the foot reads as inbox on one side and the app on the
-   other, rather than two buttons with a fact standing between them. */
+   other, rather than two buttons with a fact standing between them.
+   `margin-left: auto` rather than the foot's `space-between`, so the corner
+   stays a corner on the machines where the inbox door never appears. */
 .zl-side-app {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-left: auto;
 }
 .zl-ver { color: var(--zl-t4); }
 a.zl-ver.is-update {
@@ -511,13 +531,18 @@ a.zl-ver.is-update:focus-visible {
   outline-offset: var(--focus-ring-offset, 2px);
 }
 
-/* The gear sits with the version: both are about the app, not the session. */
+/* The gear sits with the version: both are about the app, not the session.
+   40px, not 32: the inbox opposite it is a 40px box whose 12px padding puts
+   its glyph on the list's 20px text column. At 32 the gear's box could sit on
+   the 8px box column or its glyph on the 20px text column, but not both — it
+   landed at 16 and the foot's two ends disagreed by 4px. At 40 it is the
+   inbox's mirror: box on 8, glyph on 20, same inner padding. */
 .zl-gear {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   flex: none;
   border: 0;
   border-radius: 8px;
