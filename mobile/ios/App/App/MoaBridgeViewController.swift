@@ -1,10 +1,13 @@
 import Capacitor
 import Foundation
+import Network
+import UIKit
 import WebKit
 
 final class MoaBridgeViewController: CAPBridgeViewController {
     private let shareInboxHandler = ShareInboxMessageHandler()
     private let deviceAuthHandler = DeviceAuthMessageHandler()
+    private var serverRecovery: PairedServerRecoveryController?
 
     override func webView(with frame: CGRect, configuration: WKWebViewConfiguration) -> WKWebView {
         configuration.userContentController.addUserScript(WKUserScript(
@@ -26,6 +29,232 @@ final class MoaBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(PairedServerNavigationPlugin())
         shareInboxHandler.webView = webView
         deviceAuthHandler.webView = webView
+        if let webView, let capacitorDelegate = webView.navigationDelegate {
+            let recovery = PairedServerRecoveryController(webView: webView, forwardingTo: capacitorDelegate)
+            serverRecovery = recovery
+            webView.navigationDelegate = recovery
+        }
+    }
+}
+
+// Capacitor owns WKWebView's navigation delegate. This proxy adds recovery for
+// transport failures while forwarding every other callback to Capacitor, so
+// its navigation policy, bridge reset and auth handling stay intact. Capacitor
+// remains the separate WKUIDelegate, including for media capture permission.
+private final class PairedServerRecoveryController: NSObject, WKNavigationDelegate {
+    private static let retryDelays: [TimeInterval] = [1, 2, 4, 8, 15]
+    private static let retryableTransportErrors: Set<Int> = [
+        NSURLErrorTimedOut,
+        NSURLErrorCannotFindHost,
+        NSURLErrorCannotConnectToHost,
+        NSURLErrorNetworkConnectionLost,
+        NSURLErrorDNSLookupFailed,
+        NSURLErrorNotConnectedToInternet,
+        NSURLErrorInternationalRoamingOff,
+        NSURLErrorCallIsActive,
+        NSURLErrorDataNotAllowed
+    ]
+
+    private weak var webView: WKWebView?
+    private weak var capacitorDelegate: WKNavigationDelegate?
+    private let pathMonitor = NWPathMonitor()
+    private let pathQueue = DispatchQueue(label: "com.ealeixandre.moa.server-reachability")
+    private let banner = UIView()
+    private var pathStatus: NWPath.Status
+    private var retryURL: URL?
+    private var retryIndex = 0
+    private var retryWorkItem: DispatchWorkItem?
+
+    init(webView: WKWebView, forwardingTo capacitorDelegate: WKNavigationDelegate) {
+        self.webView = webView
+        self.capacitorDelegate = capacitorDelegate
+        self.pathStatus = pathMonitor.currentPath.status
+        super.init()
+        installBanner(in: webView)
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async {
+                self?.pathDidChange(to: path.status)
+            }
+        }
+        pathMonitor.start(queue: pathQueue)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        retryWorkItem?.cancel()
+        pathMonitor.cancel()
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func responds(to aSelector: Selector!) -> Bool {
+        super.responds(to: aSelector) || capacitorDelegate?.responds(to: aSelector) == true
+    }
+
+    override func forwardingTarget(for aSelector: Selector!) -> Any? {
+        if capacitorDelegate?.responds(to: aSelector) == true {
+            return capacitorDelegate
+        }
+        return super.forwardingTarget(for: aSelector)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        capacitorDelegate?.webView?(webView, didFinish: navigation)
+        guard let url = webView.url else { return }
+        if NativeServerBinding.matches(url) {
+            stopRetrying()
+        } else if let retryURL, !NativeServerBinding.matches(retryURL) {
+            stopRetrying()
+        }
+        updateBanner()
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        capacitorDelegate?.webView?(webView, didFail: navigation, withError: error)
+        recoverIfNeeded(from: error)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        capacitorDelegate?.webView?(webView, didFailProvisionalNavigation: navigation, withError: error)
+        recoverIfNeeded(from: error)
+    }
+
+    private func recoverIfNeeded(from error: Error) {
+        let error = error as NSError
+        guard
+            error.domain == NSURLErrorDomain,
+            Self.retryableTransportErrors.contains(error.code),
+            let url = failedURL(from: error) ?? webView?.url,
+            NativeServerBinding.matches(url)
+        else { return }
+
+        if retryURL != url {
+            retryURL = url
+            retryIndex = 0
+        }
+        updateBanner()
+        scheduleRetry()
+    }
+
+    private func failedURL(from error: NSError) -> URL? {
+        if let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL {
+            return url
+        }
+        if let value = error.userInfo[NSURLErrorFailingURLStringErrorKey] as? String {
+            return URL(string: value)
+        }
+        return nil
+    }
+
+    private func scheduleRetry() {
+        guard retryWorkItem == nil, retryURL != nil, pathStatus == .satisfied else { return }
+        let delay = Self.retryDelays[min(retryIndex, Self.retryDelays.count - 1)]
+        retryIndex = min(retryIndex + 1, Self.retryDelays.count - 1)
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.retryWorkItem = nil
+            self.retryNow()
+        }
+        retryWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func retryNow() {
+        guard
+            pathStatus == .satisfied,
+            let webView,
+            !webView.isLoading,
+            let retryURL,
+            NativeServerBinding.matches(retryURL)
+        else {
+            if let retryURL, !NativeServerBinding.matches(retryURL) {
+                stopRetrying()
+            }
+            return
+        }
+        var request = URLRequest(
+            url: retryURL,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 10
+        )
+        request.httpMethod = "GET"
+        webView.load(request)
+    }
+
+    private func stopRetrying() {
+        retryWorkItem?.cancel()
+        retryWorkItem = nil
+        retryURL = nil
+        retryIndex = 0
+    }
+
+    private func pathDidChange(to status: NWPath.Status) {
+        pathStatus = status
+        // A path change alone does not reload a still-live page: the frontend
+        // reconnects its sockets on `online`, and reloading here would discard
+        // an unsent composer draft. Reachability only accelerates a navigation
+        // that has already failed at the transport layer.
+        if status == .satisfied, retryURL != nil {
+            retryWorkItem?.cancel()
+            retryWorkItem = nil
+            retryNow()
+        } else if status != .satisfied {
+            retryWorkItem?.cancel()
+            retryWorkItem = nil
+        }
+        updateBanner()
+    }
+
+    @objc private func applicationDidBecomeActive() {
+        guard retryURL != nil, pathStatus == .satisfied else {
+            updateBanner()
+            return
+        }
+        retryWorkItem?.cancel()
+        retryWorkItem = nil
+        retryNow()
+    }
+
+    private func installBanner(in webView: WKWebView) {
+        banner.translatesAutoresizingMaskIntoConstraints = false
+        banner.backgroundColor = UIColor(red: 49 / 255, green: 50 / 255, blue: 68 / 255, alpha: 0.94)
+        banner.layer.cornerRadius = 14
+        banner.isHidden = true
+        banner.isUserInteractionEnabled = false
+
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.text = "Reconnecting…"
+        label.textColor = UIColor(red: 205 / 255, green: 214 / 255, blue: 244 / 255, alpha: 1)
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        banner.addSubview(label)
+        webView.addSubview(banner)
+
+        NSLayoutConstraint.activate([
+            banner.topAnchor.constraint(equalTo: webView.safeAreaLayoutGuide.topAnchor, constant: 8),
+            banner.centerXAnchor.constraint(equalTo: webView.centerXAnchor),
+            label.topAnchor.constraint(equalTo: banner.topAnchor, constant: 5),
+            label.bottomAnchor.constraint(equalTo: banner.bottomAnchor, constant: -5),
+            label.leadingAnchor.constraint(equalTo: banner.leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(equalTo: banner.trailingAnchor, constant: -12)
+        ])
+    }
+
+    private func updateBanner() {
+        let pairedPageIsOffline = pathStatus != .satisfied
+            && webView?.url.map(NativeServerBinding.matches) == true
+        banner.isHidden = retryURL == nil && !pairedPageIsOffline
+        if !banner.isHidden, let webView {
+            webView.bringSubviewToFront(banner)
+        }
     }
 }
 
