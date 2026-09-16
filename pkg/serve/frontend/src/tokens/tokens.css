@@ -296,6 +296,18 @@
   --zl-red: #f38ba8;
   --zl-maroon: #eba0ac;
 
+  /* Peach: the owner's own colour. It marks what YOU said (the user message's
+     edge) and, now, what you are saying right now — a live microphone. It is
+     free for that job because the user message stopped spending it, and it is
+     the right one: capturing your voice is the same identity as a message you
+     wrote, in its active tense. Deliberately NOT the accent (that is Send,
+     which peach must never be mistaken for) and not red (error, destruction).
+     `-ink` is the dark text that sits on a solid peach fill. */
+  --zl-peach: #fab387;
+  --zl-peach-ink: #241a11;
+  --zl-peach-line: rgba(250, 179, 135, 0.45);
+  --zl-peach-glow: rgba(250, 179, 135, 0.28);
+
   /* Type roles. */
   --zl-fs-meta: 12px;
   --zl-fs-body: 14px;

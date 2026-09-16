@@ -57,7 +57,7 @@ test("reduced motion is honoured once, globally", () => {
 // this fails. The debt can shrink and cannot grow.
 //
 // When you migrate a file, lower BUDGET. It is meant to reach zero.
-const BUDGET = 57;
+const BUDGET = 56;
 
 function cssFiles(dir, out = []) {
   for (const name of readdirSync(dir)) {

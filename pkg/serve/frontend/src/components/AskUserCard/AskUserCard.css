@@ -227,23 +227,34 @@
   }
 }
 
-/* Recording is the one live state on this card; red is what it looks like. */
+/* Recording is the one live state on this card, and it wears the composer's
+   recording face: solid peach, fully round, with a halo breathing outward.
+   Peach is the owner's colour — what you said, and now what you are saying —
+   and it cannot be confused with the submit arrow beside it. Red went back to
+   meaning error here, which is what it means everywhere else in the product. */
 .ask .ask-free-submit.recording {
-  background: var(--zl-red);
-  color: var(--zl-canvas);
-  animation: ask-mic-pulse 1.5s ease-in-out infinite;
+  background: var(--zl-peach);
+  color: var(--zl-peach-ink);
+  border-radius: var(--radius-full);
+  animation: ask-mic-breathe 1.6s ease-in-out infinite;
 }
 @media (hover: hover) {
-  .ask .ask-free-submit.recording:hover { background: var(--zl-red); }
-}
-/* Locked (hands-free): solid and still, showing a stop square. */
-.ask .ask-free-submit.recording.locked {
-  animation: none;
+  .ask .ask-free-submit.recording:hover {
+    background: var(--zl-peach);
+    color: var(--zl-peach-ink);
+  }
 }
 
-@keyframes ask-mic-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+@keyframes ask-mic-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 var(--zl-peach-glow); }
+  50% { box-shadow: 0 0 0 6px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The halo the breathing would have drawn, held still. */
+  .ask .ask-free-submit.recording {
+    animation: none;
+    box-shadow: 0 0 0 4px var(--zl-peach-glow);
+  }
 }
 
 .ask .ask-free-submit.transcribing {
@@ -255,34 +266,6 @@
 }
 @keyframes ask-spin {
   to { transform: rotate(360deg); }
-}
-
-.ask .ask-voice-lock-hint {
-  position: absolute;
-  /* Anchored to the button's right edge rather than centred on it: the card's
-     button sits close to the viewport edge on a phone, where a centred hint
-     would overflow. */
-  right: 0;
-  bottom: calc(100% + 8px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 8px 12px;
-  border: 0;
-  border-radius: var(--zl-r-md);
-  background: var(--zl-control);
-  box-shadow: var(--zl-rim-2), 0 6px 20px rgba(0, 0, 0, 0.45);
-  color: var(--zl-t2);
-  font-size: var(--zl-fs-meta);
-  white-space: nowrap;
-  pointer-events: none;
-  z-index: 20;
-  animation: ask-hint-bob 1.2s ease-in-out infinite;
-}
-@keyframes ask-hint-bob {
-  0%, 100% { transform: translateY(0); opacity: 0.9; }
-  50% { transform: translateY(-3px); opacity: 1; }
 }
 
 /* Phone: the mic clears the thumb. Scoped to the mobile host, like the

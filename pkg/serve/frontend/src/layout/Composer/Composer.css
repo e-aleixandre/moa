@@ -233,48 +233,83 @@
 /* Desktop dictation sits next to Send as a secondary control, wearing the
    attach face: the primary action is the arrow.
 
-   Recording is the accent with a breathing ring, not red and not a square. A
-   live microphone is a state of MY input; red is the product's word for
-   error and for a destructive control, and the square was the same glyph as
-   the agent's Stop. */
+   RECORDING IS THE LOUDEST STATE THIS BUTTON HAS, and it has to be: the owner
+   could not tell a live mic from an armed Send across a room, because both
+   were mauve and only a thin ring separated them. Four things change at once
+   now, so the answer is legible at a glance and without a pointer (a phone has
+   no hover to disambiguate anything):
+
+     colour  a SOLID peach fill with dark ink, against Send's solid mauve.
+             Peach is the owner's identity colour — what you said, and now what
+             you are saying. Red stays what it has always been here, error and
+             destruction, and the square stays the agent's Stop; that reasoning
+             was right and is untouched.
+     shape   the square-ish 10px radius goes fully round. A circle is not a
+             send button, so the silhouette alone already answers the question.
+     size    the glyph grows and the button lifts, so it reads as engaged
+             rather than merely tinted.
+     motion  a halo breathes OUTWARD from the fill — light around the button,
+             not a hairline on it — which is what says "live" rather than
+             "selected".
+
+   Reduced motion keeps the fill, the circle and the halo; only the breathing
+   stops. The state is carried by colour and shape, so nothing is lost. */
 .zl-mic.recording,
 .zl-send.recording {
   position: relative;
-  background: var(--zl-accent-med);
-  color: var(--zl-accent);
+  background: var(--zl-peach);
+  color: var(--zl-peach-ink);
+  border-radius: var(--radius-full);
   cursor: pointer;
+  animation: composer-mic-breathe 1.6s ease-in-out infinite;
+}
+.zl-mic.recording svg,
+.zl-send.recording svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 2.4;
 }
 .zl-mic.recording::after,
 .zl-send.recording::after {
   content: "";
   position: absolute;
-  inset: -3px;
-  border-radius: inherit;
-  border: 2px solid var(--zl-accent-line);
-  animation: composer-mic-ring 1.5s ease-in-out infinite;
+  inset: -4px;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--zl-peach-line);
+  animation: composer-mic-ring 1.6s ease-in-out infinite;
   pointer-events: none;
 }
 @media (hover: hover) {
-  .zl-mic.recording:hover {
-    background: var(--zl-accent-med);
-    color: var(--zl-accent);
+  .zl-mic.recording:hover,
+  .zl-send.recording:hover {
+    background: var(--zl-peach);
+    color: var(--zl-peach-ink);
   }
 }
 .zl-mic.transcribing { color: var(--zl-accent); }
 @keyframes composer-mic-ring {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(1.08); }
+  0%, 100% { opacity: 0.9; transform: scale(1); }
+  50% { opacity: 0; transform: scale(1.35); }
+}
+@keyframes composer-mic-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 var(--zl-peach-glow); }
+  50% { box-shadow: 0 0 0 7px transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .zl-mic.recording,
+  .zl-send.recording {
+    animation: none;
+    /* The halo the breathing would have drawn, held still. */
+    box-shadow: 0 0 0 4px var(--zl-peach-glow);
+  }
   .zl-mic.recording::after,
   .zl-send.recording::after { animation: none; }
 }
 
-/* Phone: voice owns the send button. While it records it wears the same
-   face as the desktop mic above; the armed mauve fill is the SEND face, and
-   the ring is what tells them apart. */
+/* Phone: voice owns the button while the field is empty. Recording wears the
+   face above — solid peach, round, haloed — and Send is solid mauve and
+   square-cornered, so the two cannot be read for one another. */
 .zl-send.gesture {
-  touch-action: none;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -292,8 +327,6 @@
     color: var(--zl-t1);
   }
 }
-/* Locked (hands-free) holds the ring still: nothing is being held. */
-.zl-send.recording.locked::after { animation: none; }
 .zl-send.transcribing {
   background: var(--zl-control);
   color: var(--zl-accent);
@@ -303,34 +336,8 @@
 .zl-send .spin { animation: composer-spin 1.2s linear infinite; }
 @keyframes composer-spin { to { transform: rotate(360deg); } }
 
-.zl-composer .voice-lock-hint {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 8px 12px;
-  background: var(--zl-raised);
-  color: var(--zl-t3);
-  border: 0;
-  border-radius: var(--zl-r-md);
-  box-shadow: var(--zl-rim-2);
-  font-size: var(--zl-fs-meta);
-  white-space: nowrap;
-  pointer-events: none;
-  z-index: 20;
-  animation: composer-hint-bob 1.2s ease-in-out infinite;
-}
-@keyframes composer-hint-bob {
-  0%, 100% { transform: translateX(-50%) translateY(0); opacity: 0.9; }
-  50% { transform: translateX(-50%) translateY(-3px); opacity: 1; }
-}
 @media (prefers-reduced-motion: reduce) {
   .zl-send .spin { animation: none; }
-  .zl-composer .voice-lock-hint { animation: none; }
 }
 
 /* Slash command / @-mention suggestion popup. Anchored above the slab. */
