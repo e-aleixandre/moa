@@ -10,3 +10,15 @@
   padding: 1px var(--space-2);
   line-height: 1.4;
 }
+
+/* Keycaps: a bordered box in mono is the most terminal-looking thing on a
+   control. Same well, sans, no outline. The desktop head's own chrome moved
+   with ChatHead (catalogue classes); this is the leftover keycap restyle. */
+.kbd {
+  font-family: var(--font);
+  font-weight: var(--weight-medium);
+  background: var(--zl-hi);
+  border: 0;
+  border-radius: 6px;
+  color: var(--zl-t3);
+}

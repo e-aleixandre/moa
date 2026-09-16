@@ -9,8 +9,3 @@
   border-radius: 2px;
   background: var(--zl-line-2);
 }
-
-/* Ambient is NOT imported here. This file is pulled in by app.jsx before the
-   layout and component modules, so anything imported from it lands near the
-   top of the bundle -- where a same-weight ambient rule loses to a component
-   rule on order alone. app.jsx imports it last instead. */

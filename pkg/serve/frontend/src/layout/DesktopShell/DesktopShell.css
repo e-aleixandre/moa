@@ -60,8 +60,7 @@
 /* ── The third zone, docked ───────────────────────────────────────────────
    Only while it is OPEN: a closed dossier that still held 340px would be a
    permanent gutter of nothing. :has is the gate, so the shell knows without
-   the shell subscribing to the panel's state — and with Ambient off the node
-   is never rendered, so this cannot match and the shell stays two columns. */
+   subscribing to the panel's state. */
 @media (min-width: 1456px) {
   .desktop-shell:has(.desktop-dossier.is-open) {
     grid-template-columns: var(--spine-width) minmax(0, 1fr) var(--dossier-width);
@@ -86,4 +85,8 @@
      340, and reserving again would leave a transcript nobody can read — so at
      these widths the reader overlays, exactly as it does on a narrow one. */
   .desktop-shell:has(.desktop-dossier.is-open) .conversation-main { margin-right: 0; }
+}
+
+.desktop-shell {
+  background: transparent;
 }

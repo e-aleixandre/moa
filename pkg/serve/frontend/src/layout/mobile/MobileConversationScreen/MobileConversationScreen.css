@@ -313,3 +313,8 @@
     transition: none;
   }
 }
+
+/* Keep the aurora around the reading zone, never directly behind its text. */
+.mconv {
+  background: rgba(16, 16, 24, 0.78);
+}

@@ -10,8 +10,6 @@ import { navigate } from "./data/router.js";
 import { isPulsePairingOpen, subscribePulsePairing, closePulsePairing } from "./data/pulse-pairing-panel.js";
 import { hasBlockingOverlay, registerOverlay } from "./data/overlays.js";
 import { globalPaletteContext, isDesktopGridShortcut, shouldLockMobileDocument } from "./data/app-layout.js";
-/* Ambient comes last so its visual rules override component sheets. */
-import "./tokens/ambient.css";
 import {
   loadSessions, startPolling, stopPolling,
   startUsagePolling, stopUsagePolling,

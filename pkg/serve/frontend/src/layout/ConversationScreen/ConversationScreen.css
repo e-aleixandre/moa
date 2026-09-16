@@ -110,3 +110,8 @@
 }
 /* A short desktop conversation column clips its descendants. The model
    picker is therefore portalled to body (PickerPopover.is-fixed). */
+
+/* Keep the aurora around the reading zone, never directly behind its text. */
+.conversation-main {
+  background: rgba(16, 16, 24, 0.78);
+}

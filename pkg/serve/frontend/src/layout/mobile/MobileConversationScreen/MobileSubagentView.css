@@ -12,8 +12,8 @@
  * longer exist -- the phone mounts the same head and the same report the
  * desktop does, so the rules that made them differ are gone rather than kept.
  *
- * These classes are STRUCTURAL: the redesign moved and removed elements, so
- * they apply with the Ambient switch off too.
+ * These classes are STRUCTURAL: the redesign moved and removed elements, not
+ * just their paint.
  */
 .msa {
   position: absolute;

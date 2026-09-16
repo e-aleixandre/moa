@@ -126,9 +126,7 @@
   color: var(--zl-t4);
 }
 
-/* Keycaps inside the palette: a quiet well, not a bordered box. ambient.css
-   restyles `.kbd` globally to the same picture; this is the rule that survives
-   when that temporary sheet goes. */
+/* Keycaps inside the palette: a quiet well, not a bordered box. */
 .palette .kbd,
 .m-sheet .kbd {
   font-family: var(--font);

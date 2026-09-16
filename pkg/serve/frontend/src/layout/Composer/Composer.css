@@ -27,8 +27,7 @@
 
    THE RAMP IS 32% of the dock, as the catalogue drew it. A percentage is a
    fraction of the dock's own height, so a live bar stretches the fade rather
-   than covering it. That is the catalogue's curve; the 40px translation was
-   an Ambient override of this sheet, and it is gone with the rest. */
+   than covering it. That is the catalogue's curve. */
 .zl-dock {
   flex: none;
   padding: 18px 12px 8px;

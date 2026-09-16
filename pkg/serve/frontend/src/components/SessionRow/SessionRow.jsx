@@ -60,7 +60,7 @@ const isEventOrigin = (origin) => typeof origin === "string" && origin.startsWit
 // Dot — the state mark. The catalogue's own span with a state class, not the
 // StateDot primitive: the halo, the size and the "idle is not drawn" rule are
 // all in .zl-dot, and StateDot writes its size as an inline style no sheet can
-// win against — which is how the 9px Ambient asked for never applied.
+// override.
 //
 // The catalogue names the "needs you" state `needs`; production calls it
 // `permission`. The class is production's, so one vocabulary reaches the CSS.

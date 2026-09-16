@@ -45,3 +45,94 @@ html.shell-edge {
   --edge-bleed-top: var(--shell-top);
   --edge-bleed-bottom: var(--shell-bottom);
 }
+
+/* ── The aurora ─────────────────────────────────────────────────────────────
+   Soft blobs on the page background, behind everything. No peach: the first
+   blob sits top-left, which is exactly where the user waypoint lives, so peach
+   there would be using the identity colour as wallpaper behind the one element
+   it belongs to. Lavender holds that corner instead.
+
+   Painted on a fixed pseudo-element rather than on a real node so it costs no
+   DOM and cannot end up in a scroll container. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  /* z-index 0 with the app's own stacking above it: at -1 it would fall behind
+     body's background and never be seen. */
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.45;
+  background:
+    radial-gradient(60% 55% at 12% 18%, rgba(180, 190, 254, 0.52), transparent 68%),
+    radial-gradient(55% 60% at 88% 12%, rgba(203, 166, 247, 0.60), transparent 68%),
+    radial-gradient(70% 55% at 62% 92%, rgba(137, 180, 250, 0.58), transparent 70%),
+    radial-gradient(45% 45% at 10% 88%, rgba(148, 226, 213, 0.42), transparent 70%);
+  filter: blur(22px) saturate(1.2);
+}
+
+/* Motion is opt-out: a slowly drifting background is pleasant until you are
+   reading a stack trace on it. */
+@media (prefers-reduced-motion: reduce) {
+  body::before { animation: none; }
+}
+
+/* The dose was chosen on a 1400px desktop, where the blobs have room to be
+   seen at their centres. A 430px phone shows mostly their faded edges, and
+   0.45 x 0.52 leaves an effective alpha of 0.23 -- against #12121f that is
+   rgb(56,58,83) at the very strongest point, and the drawer covers even that.
+   The phone gets a stronger dose and tighter blobs so the colour reaches the
+   pixel, without touching the desktop where the current dose was approved. */
+@media (max-width: 768px) {
+  /* No dose override any more. Raising it to 0.85 was compensating for a bug,
+     not for the screen: the aurora was invisible because #root painted an
+     opaque sheet over it, and the fix for that landed in the same session.
+     Once the canvas was actually visible the extra dose was just loud, so the
+     phone runs the same 0.45 as the desktop. What a narrow screen genuinely
+     needs is different GEOMETRY, not more colour -- see the blobs below. */
+  /* Blobs pulled INWARD and made taller. Pushed to the corners, as they are on
+     a wide desktop, none of them reaches the middle of a 430px screen -- which
+     is exactly where the text is, and therefore the only place the colour is
+     ever seen behind reading. Measured: at 50%/45% of the viewport every blob
+     was more than its own radius away. */
+  body::before {
+    background:
+      radial-gradient(96% 44% at 22% 14%, rgba(180, 190, 254, 0.52), transparent 72%),
+      radial-gradient(104% 42% at 84% 30%, rgba(203, 166, 247, 0.56), transparent 72%),
+      radial-gradient(112% 46% at 30% 62%, rgba(137, 180, 250, 0.50), transparent 74%),
+      radial-gradient(100% 42% at 82% 90%, rgba(148, 226, 213, 0.42), transparent 74%);
+  }
+
+  /* The reading band is calmed further. The colour belongs at the edges of the
+     screen, where nothing is being read: a vertical veil of the canvas colour
+     keeps the middle quiet without flattening the corners, so the aurora still
+     frames the text instead of competing with it. */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      transparent 0,
+      color-mix(in srgb, var(--zl-canvas) 30%, transparent) 30%,
+      color-mix(in srgb, var(--zl-canvas) 30%, transparent) 70%,
+      transparent 100%
+    );
+  }
+}
+
+/* The page owns the aurora; app roots remain transparent above it. */
+#root,
+html.mobile-locked body,
+html.mobile-locked #root {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+body,
+html.mobile-locked body {
+  background: var(--zl-canvas);
+  z-index: auto;
+}

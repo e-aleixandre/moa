@@ -1,9 +1,6 @@
 /* WorkChrome — the frame shared by the two open-work screens (a delegated
-   subagent, a background command). Base skin here in the product's existing
-   tokens; the Ambient skin re-dresses the same class names in ambient.css.
-
-   These classes are STRUCTURAL: they exist with the switch off too, because
-   the redesign moved and removed elements rather than only repainting them. */
+   subagent, a background command). Structure and Studio skin live together
+   here so the component has one visual source of truth. */
 
 /* ── head ───────────────────────────────────────────────────────────────── */
 .wk-head {
@@ -433,4 +430,134 @@
 
 @media (max-width: 767px) {
   .wk-rd { grid-template-columns: 1fr; }
+}
+
+/* ── The open-work screens ─────────────────────────────────────────────────
+   The two screens you go INTO: a delegated errand (SubagentView) and a
+   background command (BashJobView). They share WorkChrome, so they are dressed
+   once, here.
+
+   The tonal ladder does the separating, as everywhere in this direction: the
+   head sits on the canvas with a hairline under it, the controls are the
+   control step, and the two things that are literal -- a command, its output --
+   are wells cut into the page. Words in the sans, data in the mono; the state
+   colours are untouched, because they are the only saturated marks these
+   screens are allowed. */
+
+/* the head */
+.wk-head { border-bottom-color: var(--zl-line); }
+.wk-home {
+  border-radius: var(--zl-r-md);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--zl-t3);
+}
+@media (hover: hover) {
+  .wk-home:hover { background: var(--zl-hi); color: var(--zl-t1); }
+}
+
+/* The errand is prose and reads as the page's own heading; the command is a
+   literal and keeps the mono at reading size. */
+.wk-title {
+  font-family: var(--font);
+  font-size: 20px;
+  font-weight: var(--weight-semibold);
+  color: var(--zl-t1);
+}
+.wk-title.is-mono {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: var(--weight-normal);
+  color: var(--zl-t1);
+}
+.wk-title.is-copy { border-radius: var(--zl-r-md); }
+.wk-title.is-copy svg { color: var(--zl-t4); }
+@media (hover: hover) {
+  .wk-title.is-copy:hover { background: var(--zl-hi); }
+  .wk-title.is-copy:hover svg { color: var(--zl-t2); }
+}
+.wk-sub {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--zl-t4);
+}
+.wk-sub .wk-data { font-family: var(--mono); }
+
+/* The state word keeps its colour and its breath; only the elapsed figure
+   beside it moves onto the tonal scale. */
+.wk-state {
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+}
+.wk-state.is-neutral { color: var(--zl-t3); }
+.wk-state-t { color: var(--zl-t4); }
+
+/* Controls go achromatic on the control step, like every other control here.
+   The stop button only becomes red once it is ASKING -- an armed question is
+   worth the colour, an idle one is not. */
+.wk-btn,
+.wk-stop {
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-control);
+  box-shadow: inset 0 0 0 1px var(--zl-line);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--zl-t2);
+}
+@media (hover: hover) {
+  .wk-btn:hover,
+  .wk-stop:hover { background: var(--zl-raised); color: var(--zl-t1); }
+}
+.wk-stop.is-armed {
+  background: color-mix(in srgb, var(--red) 16%, var(--zl-control));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 45%, transparent);
+  color: var(--red);
+}
+.wk-stopping {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--zl-t4);
+}
+
+/* the disclosure and the audit under it */
+.wk-disc { border-top-color: var(--zl-line); }
+.wk-disc-b {
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+  color: var(--zl-t3);
+}
+@media (hover: hover) {
+  .wk-disc-b:hover { color: var(--zl-t1); }
+}
+.wk-chev { color: var(--zl-t4); }
+.wk-disc-n {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--zl-t4);
+}
+.wk-rd dt {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--zl-t4);
+}
+.wk-rd dd {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--zl-t2);
+}
+/* An identifier is pressable (it copies), so it looks pressable. */
+.wk-id {
+  border-radius: var(--zl-r-md);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--zl-t2);
+}
+.wk-id-k { color: var(--zl-t4); }
+.wk-id-v { font-family: var(--mono); }
+.wk-id svg { color: var(--zl-t4); }
+@media (hover: hover) {
+  .wk-id:hover { background: var(--zl-hi); color: var(--zl-t1); }
 }

@@ -117,3 +117,52 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* The hydration tail: the same skeleton, plus a line saying which of the two
+   things is happening. Blue is not a state in this system -- catching up is
+   work in progress (green), and a refresh that failed and is retrying is
+   waiting on something (yellow), not an error. */
+.history-hydration-rule {
+  font-family: var(--font);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--zl-t4);
+}
+.history-hydration-rule::after {
+  background: var(--zl-line);
+}
+.history-hydration .spinner {
+  border-color: color-mix(in srgb, var(--green) 30%, transparent);
+  border-top-color: var(--green);
+}
+.history-hydration--stale,
+.history-hydration--stale .history-hydration-rule,
+.history-hydration--empty.history-hydration--stale {
+  color: var(--yellow);
+}
+.history-hydration--stale .history-hydration-rule::after {
+  background: linear-gradient(to right, color-mix(in srgb, var(--yellow) 35%, transparent), transparent);
+}
+.history-hydration-stale-copy {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--zl-t3);
+}
+.button.history-hydration-retry { color: var(--zl-t2); }
+/* The placeholder for a message you sent keeps the peach bar, because that is
+   exactly the shape it is standing in for: the waypoint is a peach edge on the
+   bare page, and its skeleton must not be a card. */
+.history-hydration-skeleton-user {
+  border-left: 3px solid var(--peach);
+  border-radius: 0;
+  background: transparent;
+  padding: 2px 0 2px 14px;
+}
+/* The placeholder for a ledger is the ledger's own surface. */
+.history-hydration-skeleton-tool {
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: inset 0 0 0 1px var(--zl-line);
+}

@@ -121,3 +121,25 @@
     transition: none;
   }
 }
+
+/* ── MCP sheet (still MobileSheet, not the catalogue picker) ────────────── */
+.msheet {
+  background: var(--zl-sheet);
+  border-top: 0;
+  border-radius: var(--zl-r-xl) var(--zl-r-xl) 0 0;
+  box-shadow: inset 0 1px 0 var(--zl-line-2), 0 -16px 48px rgba(0, 0, 0, 0.45);
+  color: var(--zl-t1);
+}
+.msheet-scrim { background: rgba(6, 6, 12, 0.55); }
+.msheet-grab-bar { background: var(--zl-line-2); }
+.msheet-title {
+  font-size: 20px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+  color: var(--zl-t1);
+}
+.msheet-scope {
+  font-family: var(--font);
+  letter-spacing: 0.08em;
+  color: var(--zl-t4);
+}

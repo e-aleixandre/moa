@@ -51,3 +51,18 @@
 .ask-detail-answer.missing {
   color: var(--zl-t4);
 }
+
+/* The same answer, read back in a finished ledger row. It is a record, so it
+   is all one voice; the mono stays (these are the literal strings that were
+   sent) and only the chosen option and a typed answer are marked. Peach is
+   NOT available for "you wrote this here": it belongs to the message bar. */
+.ask-detail-text { color: var(--zl-t2); }
+.ask-detail-question + .ask-detail-question {
+  border-top-color: var(--zl-line);
+}
+.ask-detail-option { color: var(--zl-t4); }
+.ask-detail-option.chosen { color: var(--zl-t2); }
+.ask-detail-answer { color: var(--zl-t3); }
+.ask-detail-answer.custom { color: var(--zl-t2); }
+.ask-detail-answer.skipped,
+.ask-detail-answer.missing { color: var(--zl-t4); }

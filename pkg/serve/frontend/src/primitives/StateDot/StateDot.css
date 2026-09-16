@@ -50,3 +50,19 @@
     animation: none;
   }
 }
+
+/* The state dot is the only saturated mark left, so it gets a little more
+   presence rather than less. These halos are the reason the controls can
+   afford to be grey. (The dot's SIZE is not set here: StateDot writes it as an
+   inline style, which no stylesheet rule can win against — the 9px that used
+   to sit here never applied.)
+
+   The session row no longer uses this primitive: it carries the catalogue's
+   own .zl-dot, halo included. The pane head now uses that same .zl-dot.
+   These rules are for the remaining StateDot homes — the chips, the ledger. */
+.state-dot.idle { box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
+.state-dot.running { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent); }
+.state-dot.permission { box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 26%, transparent); }
+.state-dot.error { box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 24%, transparent); }
+.state-dot.unseen { box-shadow: 0 0 0 3px color-mix(in srgb, var(--mauve) 24%, transparent); }
+.state-dot.saved { box-shadow: none; opacity: 0.7; }

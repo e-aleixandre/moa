@@ -182,3 +182,56 @@
 @media (prefers-reduced-motion: reduce) {
   .evb-chev { transition: none; }
 }
+
+/* ── An event that arrived on its own ──────────────────────────────────────
+   The base design is already right and this sheet does not argue with it: an
+   event is a margin note, aligned rather than coloured, with the glyph hanging
+   in the gutter. All that changes is the palette and the type split, so it
+   speaks the same language as the rest of the transcript.
+
+   The title is the assistant's prose weight; the provenance line stops being
+   uppercase mono-with-tracking (which shouted louder than the thing it labels)
+   except for the SOURCE, which is a literal server name and stays data. */
+.evb .evb-head { color: var(--zl-t3); }
+.evb .evb-glyph { color: var(--zl-t4); }
+.evb .evb-meta {
+  font-family: var(--font);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--zl-t4);
+}
+.evb .evb-meta .evb-source {
+  font-family: var(--mono);
+  color: var(--zl-t3);
+}
+.evb .evb-title {
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--zl-t1);
+}
+.evb .evb-chev { color: var(--zl-t4); }
+/* The payload is the ledger's well, like every other raw text this
+   conversation received. */
+.evb-body {
+  border-radius: var(--zl-r-sm);
+  background: rgba(0, 0, 0, 0.30);
+  box-shadow: inset 0 0 0 1px var(--zl-line);
+}
+.evb-more {
+  border-top-color: var(--zl-line);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--zl-t4);
+}
+@media (hover: hover) {
+  .evb-more:hover { color: var(--zl-t2); }
+}
+/* The inbox's collapsed one-liner: the payload seen from the tray. */
+.evb-payload-toggle {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--zl-t3);
+}
+.evb-payload .evb-chev { color: var(--zl-t4); }

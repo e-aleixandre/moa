@@ -75,3 +75,36 @@
     opacity: 0.7;
   }
 }
+
+/* ── What is about to arrive ───────────────────────────────────────────────
+   The skeleton is the FIRST thing seen in every answer and in every session
+   that opens without a cache, so it is the one block whose cost is paid on
+   every interaction. The base skin sweeps a 220%-wide gradient across each
+   bar, which repaints the bar on every frame; here the bars are flat and only
+   their OPACITY moves, which the compositor can do without touching paint.
+   Staggering the three lines is what makes it read as text arriving rather
+   than as a loading widget.
+
+   Tone: the raised step. A placeholder stands where words will be, so it has
+   to be visible against the canvas without pretending to be a surface. */
+.skel-block .skel-line {
+  height: 12px;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-raised);
+  background-size: auto;
+  animation: skel-breathe 1.6s ease-in-out infinite;
+}
+.skel-block .skel-line:nth-child(2) { animation-delay: 0.18s; }
+.skel-block .skel-line:nth-child(3) { animation-delay: 0.36s; }
+@keyframes skel-breathe {
+  50% { opacity: 0.42; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skel-block .skel-line {
+    animation: none;
+    background: var(--zl-raised);
+  }
+}
+/* The typing dots are a live mark, and every live mark in this direction is
+   green. Mauve is the accent and its one state is "unread". */
+.typing-dots i { background: var(--green); }

@@ -315,3 +315,53 @@
     transition: none;
   }
 }
+
+/* ── Mobile: the sheet and its veil ─────────────────────────────────────────
+   The veil does NOT blur, at any dose. Blurring it turned the composer's send
+   button into a bright smear under the open drawer, and what sits behind is a
+   live transcript: anything legible through the veil also moves while you read
+   the list. Dimming is calmer and one less full-viewport backdrop-filter.
+
+   0.55 and not the 0.90 the old dropdown needed: that number existed because a
+   390px panel left uncovered bands of transcript above and below it. A 300px
+   sheet leaves a whole COLUMN of conversation showing on purpose — that is how
+   you know there is something behind it — so the veil dims rather than hides. */
+.sdrawer-veil {
+  background: rgba(6, 6, 12, 0.55);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.sdrawer {
+  background: rgba(20, 20, 34, 0.93);
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  border: 0;
+  /* Only the trailing corners: the sheet is flush with the left edge it came
+     out of. 24px against the app's 18px — the radius family is one of the few
+     things that reads as a different design at a glance on a phone. */
+  border-radius: 0 var(--zl-r-xl) var(--zl-r-xl) 0;
+  box-shadow: inset -1px 0 0 var(--zl-line-2), 16px 0 48px rgba(0, 0, 0, 0.55);
+}
+.sdrawer-foot {
+  border-color: transparent;
+}
+/* The create screen's head reads as a title rather than a toolbar label. */
+.sdrawer-head h2 {
+  font-size: 20px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+.sdrawer-group {
+  font-family: var(--font);
+  color: var(--zl-t4);
+}
+.sdrawer-search.field-inset {
+  background: rgba(0, 0, 0, 0.30);
+  border-color: transparent;
+}
+.sdrawer-back,
+.sdnew-dir {
+  border: 0;
+  border-radius: var(--zl-r-md);
+  color: var(--zl-t3);
+}
