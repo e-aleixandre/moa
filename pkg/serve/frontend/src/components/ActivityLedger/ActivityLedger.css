@@ -309,7 +309,18 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
   margin-bottom: 8px;
   background: var(--zl-line);
 }
-.zl-lg-detail .code.flush { margin: 8px -10px -10px -32px; }
+.zl-lg-detail .code.flush {
+  /* Full bleed: the body reaches the panel's own edges so a long line scrolls
+     into them instead of stopping at an inset margin. Its padding then puts
+     the TEXT back on the panel's text column — the path above it starts at
+     32px from the panel edge, and the code used to start at 16, two left
+     edges inside one panel for no reason. Bleed is the surface; the column is
+     the text. */
+  margin: 8px -10px -10px -32px;
+}
+.zl-lg-detail .code.flush:not(.diff) pre { padding: 0 10px 10px 32px; }
+.zl-ledger.is-dense .zl-lg-detail .code.flush { margin-left: -24px; }
+.zl-ledger.is-dense .zl-lg-detail .code.flush:not(.diff) pre { padding-left: 24px; }
 .zl-lg-detail .code.flush:not(.diff) pre code { color: var(--zl-t3); }
 
 .zl-lg-log {
