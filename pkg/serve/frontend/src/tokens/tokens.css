@@ -2,19 +2,19 @@
 
 :root {
   /* Surfaces (warm blue-purple darks) */
-  --crust:       #11111b;
-  --mantle:      #181825;
-  --base:        #1e1e2e;
+  --crust:       var(--zl-canvas);
+  --mantle:      var(--zl-sheet);
+  --base:        var(--zl-canvas);
   --surface0:    #313244;
   --surface1:    #45475a;
   --surface2:    #585b70;
 
   /* Text */
-  --overlay0:    #6c7086;
-  --overlay1:    #7f849c;
-  --subtext0:    #a6adc8;
-  --subtext1:    #bac2de;
-  --text:        #cdd6f4;
+  --overlay0:    var(--zl-t4);
+  --overlay1:    var(--zl-t3);
+  --subtext0:    var(--zl-t3);
+  --subtext1:    var(--zl-t2);
+  --text:        var(--zl-t1);
 
   /* Accents */
   --peach:       #fab387;
@@ -47,7 +47,7 @@
   --sidebar-w:   252px;
   --radius-sm:   6px;
   --radius-md:   10px;
-  --radius-lg:   14px;
+  --radius-lg:   var(--zl-r-lg);
   --radius-full: 9999px;
 
   /* Transitions -- legacy names. They now resolve to the motion language
@@ -74,13 +74,13 @@
   /* Typography — sizes */
   /* --text-nano/-micro: micro-sizes for mono labels/badges (version, pane
      badge, tick separators, tray timestamps). Below --text-xs. */
-  --text-nano:   9px;
-  --text-micro:  10.5px;
+  --text-nano:   var(--zl-fs-micro);
+  --text-micro:  var(--zl-fs-micro);
   --text-xs:     11px;
   --text-sm:     12px;
   --text-base:   14px;
-  --text-md:     15px;
-  --text-lg:     17px;
+  --text-md:     var(--zl-fs-body);
+  --text-lg:     var(--zl-fs-title);
   --text-xl:     20px;
   --text-2xl:    26px;
 
@@ -106,7 +106,7 @@
   /* Editable fields: never below 16px. iOS Safari auto-zooms when focusing an
      input/textarea/select with font-size < 16px, which is very annoying in the
      PWA. This token is the floor for every input field. */
-  --text-input:  16px;
+  --text-input:  var(--zl-fs-title);
 
   /* Typography — weights */
   --weight-normal:   400;
@@ -309,6 +309,7 @@
   --zl-peach-glow: rgba(250, 179, 135, 0.28);
 
   /* Type roles. */
+  --zl-fs-micro: 11px;
   --zl-fs-meta: 12px;
   --zl-fs-body: 14px;
   --zl-fs-title: 16px;
@@ -317,6 +318,7 @@
   --zl-r-sm: 6px;
   --zl-r-md: 10px;
   --zl-r-lg: 16px;
+  --zl-r-xl: 24px;
   /* The catalogue's easing is the product's easing now (see Motion above).
      Kept as a name because 17 stylesheets say it; it is not a second curve. */
   --zl-ease: var(--motion-ease);
