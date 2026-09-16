@@ -28,6 +28,7 @@ import { U6Lab } from "./catalog/u6-lab.jsx";
 import { LPLab } from "./catalog/lp-lab.jsx";
 import { LP2Lab } from "./catalog/lp2-lab.jsx";
 import { HomeLab } from "./catalog/home-lab.jsx";
+import { ToolsLab, ToolsPhone } from "./catalog/tools-lab.jsx";
 import { seedCatalogStore } from "./catalog/specimen.js";
 import { installCatalogBackend } from "./catalog/catalog-backend.js";
 import { announceArrivals } from "./data/events.js"; // wake-on-event
@@ -58,6 +59,8 @@ const LINKS = [
   { key: "lp", label: "Live Preview", href: "?view=lp" },
   { key: "lp2", label: "Live Preview 2", href: "?view=lp2" },
   { key: "home", label: "Home (3 ways)", href: "?view=home" },
+  { key: "tools", label: "Tool calls", href: "?view=tools" },
+  { key: "toolsphone", label: "Tool calls (phone)", href: "?view=toolsphone" },
 ];
 
 // wake-on-event: the two inbox seed sets are a URL away from each other, so
@@ -199,6 +202,11 @@ function CatalogApp() {
   // The phone's first screen, three directions. Catalog-only: production's
   // MobileConversationScreen, Sidebar and palette are untouched.
   else if (view === "home") body = <HomeLab />;
+  // Tool calls in their real context: the shipped transcript, fed by the
+  // shipped projectStream. ?view=toolsphone is the same conversations on one
+  // full-window phone with real scroll, which is how the owner reads them.
+  else if (view === "tools") body = <ToolsLab />;
+  else if (view === "toolsphone") body = <ToolsPhone />;
   else if (view === "mobile") {
     body = (
       <PhoneLab>

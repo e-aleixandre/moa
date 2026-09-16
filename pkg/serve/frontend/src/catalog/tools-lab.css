@@ -1,0 +1,178 @@
+/* tools-lab.css — CATALOG ONLY. Scaffolding for the tool-call review, and
+   nothing else.
+
+   The hard rule of this lab: NOT ONE RULE HERE TOUCHES A LEDGER ROW. No
+   `.zl-lg-*`, no `.zl-ledger`, no `.zl-diff`, no status colour, no icon size.
+   The whole point is to judge the SHIPPED rows; a sheet that restyled them
+   would be judging this file instead. What is below is the reading page (its
+   column, its headings, its captions), the 390x780 frame, the desktop host,
+   and the conversation picker on the standalone phone.
+
+   Every value is a token from tokens/tokens.css. No `var(--zl-*, fallback)`:
+   the ladder is declared on :root, so a fallback would be a second copy of a
+   value that already has one home. */
+
+/* ── Reading page ──────────────────────────────────────────────────────── */
+
+.tools-lab {
+  padding: var(--space-6) var(--space-4) var(--space-12);
+  background: var(--zl-canvas);
+  color: var(--zl-t1);
+  font-family: var(--font);
+}
+
+.tools-intro,
+.tools-conv > h2,
+.tools-conv-note {
+  max-width: 78ch;
+  margin-inline: auto;
+}
+
+.tools-intro h1 {
+  font-size: var(--zl-fs-display);
+  margin: 0 0 var(--space-3);
+  letter-spacing: -0.02em;
+}
+
+.tools-intro p {
+  color: var(--zl-t2);
+  line-height: 1.6;
+  margin: 0 0 var(--space-3);
+}
+
+.tools-note { color: var(--zl-t3); font-size: var(--zl-fs-body); }
+.tools-note a { color: var(--zl-accent); }
+.tools-intro code { font-family: var(--mono); font-size: var(--zl-fs-meta); color: var(--zl-t2); }
+
+.tools-conv { margin-top: var(--space-10); }
+
+.tools-conv > h2 {
+  font-size: var(--zl-fs-title);
+  margin: 0 0 var(--space-2);
+  letter-spacing: -0.01em;
+}
+
+.tools-conv-note {
+  color: var(--zl-t3);
+  font-size: var(--zl-fs-body);
+  line-height: 1.6;
+  margin: 0 0 var(--space-5);
+}
+
+/* The two phones of one conversation sit side by side so the head and the
+   tail of the same session can be compared without scrolling the page. */
+.tools-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  justify-content: center;
+  margin-bottom: var(--space-8);
+}
+
+.tools-figure { margin: 0; flex: none; }
+.tools-figure.is-desk { margin-inline: auto; max-width: 860px; }
+
+.tools-cap {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: center;
+  margin-top: var(--space-3);
+  color: var(--zl-t3);
+  font-size: var(--zl-fs-meta);
+}
+.tools-cap b { color: var(--zl-t2); font-weight: 500; }
+
+/* ── The phone ─────────────────────────────────────────────────────────── */
+
+/* A real 390x780, never a scaled screenshot: the ledger's truncation and its
+   44px tap targets are decided in CSS pixels, so a scaled frame would lie
+   about exactly the thing being reviewed. */
+.tools-frame {
+  position: relative;
+  isolation: isolate;
+  width: 390px;
+  height: 780px;
+  overflow: hidden;
+  border-radius: var(--zl-r-lg);
+  box-shadow: var(--zl-rim-2), 0 30px 70px rgba(0, 0, 0, 0.5);
+}
+
+/* Production `.mconv` is a 100dvh column; inside the frame it fills the frame.
+   The only other adaptation is the top padding: the lab has no notch, so the
+   stream does not need the iOS safe-area room the real screen reserves. Both
+   are the same two adjustments hydration-lab makes, for the same reason. */
+.tools-screen.mconv { height: 100%; }
+.tools-screen .zl-transcript { padding-top: 58px; }
+
+/* ── The desktop host ──────────────────────────────────────────────────── */
+
+/* `.conversation-main` is production's own desktop transcript host (its
+   padding and centred --content-block column live in Stream.css). The class is
+   borrowed rather than re-declared so the desktop column here is the shipped
+   measure, not a lab approximation. */
+.tools-desk {
+  height: 700px;
+  display: flex;
+  border-radius: var(--zl-r-lg);
+  background: var(--base);
+  box-shadow: var(--zl-rim-2);
+  overflow: hidden;
+}
+.tools-desk > * { flex: 1; min-width: 0; }
+
+/* ── Capture mode ──────────────────────────────────────────────────────── */
+
+.tools-lab.is-shots {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+.tools-lab.is-shots .tools-cap { display: none; }
+.tools-lab.is-shots .tools-row { gap: 0; margin: 0; justify-content: flex-start; }
+.tools-lab.is-shots .tools-frame { border-radius: 0; box-shadow: none; }
+
+/* ── The standalone phone (?view=toolsphone) ───────────────────────────── */
+
+/* Here `.mconv` IS the screen: no frame, no radius, no fixed size, so the
+   owner can scroll it on the actual device. Nothing else changes — same
+   components, same CSS as the framed one above. The transcript gets bottom
+   room so the lab's own picker never covers the last rows — which is the
+   state most worth reading, since the live row lives there. */
+.tools-alone { height: 100dvh; }
+.tools-alone .zl-transcript { padding-bottom: 76px; }
+
+.tools-pick {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-3);
+  transform: translateX(-50%);
+  z-index: var(--z-sticky);
+  display: flex;
+  gap: var(--space-1);
+  max-width: calc(100% - var(--space-6));
+  padding: var(--space-1);
+  border-radius: var(--radius-full);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim-2);
+}
+
+.tools-pick button {
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--zl-t3);
+  font-family: var(--font);
+  /* 16px: below it iOS zooms on focus, and this bar is tapped on a phone. */
+  font-size: var(--zl-fs-title);
+  cursor: pointer;
+}
+.tools-pick button.is-on { background: var(--zl-accent); color: var(--zl-accent-ink); }
+.tools-pick button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
