@@ -13,6 +13,7 @@ export function skillForkLaunchRow(data) {
   return {
     _type: 'tool_start',
     _msg_id: data.msg_id || undefined,
+    ...(data.timestamp ? { timestamp: data.timestamp } : {}),
     tool_call_id: 'subagent-' + jobId,
     subagentJobId: jobId,
     tool_name: 'subagent',

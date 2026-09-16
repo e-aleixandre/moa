@@ -303,8 +303,11 @@ func TestSendItems_AnnouncesAfterAppend(t *testing.T) {
 	items := []core.SteerItem{{ID: "s1", Text: "primero"}, {ID: "s2", Text: "segundo"}}
 	var inHistory []string
 	announced := false
-	msgs, msgIDs, err := ag.SendItems(context.Background(), items, []string{"m-1", "m-2"}, func() {
+	msgs, msgIDs, err := ag.SendItems(context.Background(), items, []string{"m-1", "m-2"}, func(appended []core.AgentMessage) {
 		announced = true
+		if len(appended) != 2 || appended[0].Timestamp == 0 || appended[1].Timestamp == 0 {
+			t.Fatalf("announced messages = %+v, want two timestamped messages", appended)
+		}
 		// Read history exactly as a reconnecting client's snapshot would.
 		for _, m := range ag.Messages() {
 			if m.Role == "user" {

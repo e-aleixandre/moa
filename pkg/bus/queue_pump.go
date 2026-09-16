@@ -192,17 +192,22 @@ func launchQueuedSteers(sctx *SessionContext, items []core.SteerItem) {
 	for i := range items {
 		msgIDs[i] = core.NewMsgID()
 	}
-	announce := func() {
+	announce := func(messages []core.AgentMessage) {
 		gen := sctx.RunGenAtomic.Load()
 		for i, it := range items {
 			if it.Internal {
 				continue // internal steers have suppressed delivery events
+			}
+			var timestamp int64
+			if i < len(messages) {
+				timestamp = messages[i].Timestamp
 			}
 			sctx.Bus.Publish(Steered{
 				SessionID: sctx.SessionID,
 				RunGen:    gen,
 				ID:        it.ID,
 				MsgID:     msgIDs[i],
+				Timestamp: timestamp,
 				Text:      it.Text,
 			})
 		}

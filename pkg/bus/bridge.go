@@ -38,7 +38,7 @@ type AgentController interface {
 	PushSteersFront(items []core.SteerItem)
 	PeekQueueHead() (core.SteerItem, bool)
 	PopQueueBarrier(id string) bool
-	SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string, announce func()) ([]core.AgentMessage, []string, error)
+	SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string, announce func([]core.AgentMessage)) ([]core.AgentMessage, []string, error)
 	SetModel(provider core.Provider, model core.Model) error
 	SetThinkingLevel(level string) error
 	SetSystemPrompt(prompt string) error
@@ -1157,7 +1157,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		return events
 
 	case core.AgentEventSteer:
-		ev := Steered{SessionID: sid, RunGen: gen, ID: e.SteerID, MsgID: e.MsgID, Text: e.Text}
+		ev := Steered{SessionID: sid, RunGen: gen, ID: e.SteerID, MsgID: e.MsgID, Timestamp: e.Message.Timestamp, Text: e.Text}
 		ev.Custom = projectLiveCustom(e.Message.Custom)
 		// A steer always carries its plain text, but one with attachments was
 		// injected as content blocks: publish them too so clients render the
@@ -1169,7 +1169,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		return []any{ev}
 
 	case core.AgentEventUserMessage:
-		ev := UserMessageAppended{SessionID: sid, RunGen: gen, MsgID: e.MsgID, Text: e.Text}
+		ev := UserMessageAppended{SessionID: sid, RunGen: gen, MsgID: e.MsgID, Timestamp: e.Message.Timestamp, Text: e.Text}
 		ev.Custom = projectLiveCustom(e.Message.Custom)
 		// A structured send carries its blocks; a plain-text prompt travels in
 		// Text alone, so clients render exactly one shape per message.

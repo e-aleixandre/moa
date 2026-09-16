@@ -188,6 +188,7 @@ type Steered struct {
 	RunGen    uint64
 	ID        string
 	MsgID     string
+	Timestamp int64
 	Text      string
 	Content   []core.Content
 	Custom    map[string]any
@@ -290,6 +291,7 @@ type UserMessageAppended struct {
 	SessionID string
 	RunGen    uint64
 	MsgID     string
+	Timestamp int64
 	Text      string
 	Content   []core.Content
 	Custom    map[string]any

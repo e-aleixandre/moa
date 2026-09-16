@@ -199,7 +199,7 @@ func wsEventFromBus(event any) (Event, bool) {
 			outputTok = e.Message.Usage.Output
 		}
 		return Event{Type: "message_end", Data: MessageEndData{
-			Text: truncateHistoryString(e.FullText), MsgID: e.Message.MsgID,
+			Text: truncateHistoryString(e.FullText), MsgID: e.Message.MsgID, Timestamp: e.Message.Timestamp,
 			InputTokens: inputTok, OutputTokens: outputTok,
 		}}, true
 	case bus.ToolCallStreaming:
@@ -289,7 +289,7 @@ func wsEventFromBus(event any) (Event, bool) {
 			Command: e.Command, Messages: messages, HistoryTruncated: truncated,
 		}}, true
 	case bus.Steered:
-		data := SteerData{ID: e.ID, MsgID: e.MsgID, Text: truncateHistoryString(e.Text), Custom: projectWSMessageCustom(e.Custom)}
+		data := SteerData{ID: e.ID, MsgID: e.MsgID, Timestamp: e.Timestamp, Text: truncateHistoryString(e.Text), Custom: projectWSMessageCustom(e.Custom)}
 		if len(e.Content) > 0 {
 			// Same history projection as UserMessageAppended, so an attached
 			// image travels bounded (inline payloads stripped to references)
@@ -299,7 +299,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		}
 		return Event{Type: "steer", Data: data}, true
 	case bus.UserMessageAppended:
-		data := UserMessageData{MsgID: e.MsgID, Text: truncateHistoryString(e.Text), Custom: projectWSMessageCustom(e.Custom)}
+		data := UserMessageData{MsgID: e.MsgID, Timestamp: e.Timestamp, Text: truncateHistoryString(e.Text), Custom: projectWSMessageCustom(e.Custom)}
 		if len(e.Content) > 0 {
 			// Reuse the history projection so inline attachment payloads and
 			// oversized text are bounded exactly as on reconnect.

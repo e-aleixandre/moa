@@ -365,7 +365,7 @@ function routeEvent(sessionId, evt) {
       handleWsMessageStart(sessionId);
       break;
     case 'message_end':
-      handleWsMessageEnd(sessionId, evt.data.text, evt.data.msg_id);
+      handleWsMessageEnd(sessionId, evt.data.text, evt.data.msg_id, evt.data.timestamp);
       break;
     case 'run_tokens':
       handleWsRunTokens(sessionId, evt.data);

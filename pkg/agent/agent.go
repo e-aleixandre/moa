@@ -732,11 +732,13 @@ func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content
 // The returned MsgIDs are the effective ones in item order. Barrier items are
 // commands, never messages, and are skipped defensively.
 //
-// announce, when non-nil, is invoked once the items are genuinely in history and
-// before the run's own events — the same guarantee SendWithMsgID gives a direct
-// prompt, so an announcement can never race a concurrent history snapshot (a
-// reconnect between the two would lose the steer until a reload).
-func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string, announce func()) ([]core.AgentMessage, []string, error) {
+// announce, when non-nil, receives the messages just appended and is invoked
+// once they are genuinely in history and before the run's own events — the same
+// guarantee SendWithMsgID gives a direct prompt, so an announcement can never
+// race a concurrent history snapshot (a reconnect between the two would lose
+// the steer until a reload). The appended messages let transports reuse the
+// durable server timestamps rather than minting another clock value.
+func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string, announce func([]core.AgentMessage)) ([]core.AgentMessage, []string, error) {
 	// Take ownership of each item's Content so a caller mutating its slices
 	// after the call can't race the provider reading a.state.Messages.
 	type owned struct {
@@ -755,6 +757,7 @@ func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []
 		list = append(list, owned{item: ownItem(it), msgID: mid})
 	}
 	outIDs := make([]string, len(list))
+	appendedMessages := make([]core.AgentMessage, 0, len(list))
 	appended := false
 	msgs, err := a.executeAnnounced(ctx, func() {
 		if a.state.Model.ID == "" {
@@ -770,6 +773,7 @@ func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []
 			}
 			outIDs[i] = um.MsgID
 			a.state.Messages = append(a.state.Messages, um)
+			appendedMessages = append(appendedMessages, um)
 		}
 		// Settle the inflight ledger AFTER the append (never before: the bytes
 		// must stay counted until they are visible in history). Under a.mu here,
@@ -778,7 +782,7 @@ func (a *Agent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []
 		appended = true
 	}, func() {
 		if announce != nil {
-			announce()
+			announce(appendedMessages)
 		}
 	})
 	// If execute() bailed before prepare ran (e.g. a run was already in flight),

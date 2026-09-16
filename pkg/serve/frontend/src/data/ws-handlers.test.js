@@ -2,7 +2,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentTitle, handleWsSubagentEvent, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolUpdate, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved, handleWsCompactionEnd, handleWsConfigChange } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentTitle, handleWsSubagentEvent, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsMessageEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolUpdate, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved, handleWsCompactionEnd, handleWsConfigChange } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
 import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
@@ -794,10 +794,11 @@ test('handleWsSteer dedups the injected user message by MsgID', async () => {
 
   // The reconnect snapshot already contained the message; the Steered event
   // (seq > cut) must not add it a second time, but must still clear the chip.
-  handleWsSteer('s1', { id: 'z', msg_id: 'm1', text: 'already here' });
+  handleWsSteer('s1', { id: 'z', msg_id: 'm1', timestamp: 1789000006, text: 'already here' });
 
   const sess = store.get().sessions.s1;
   expect(sess.messages).toHaveLength(1);
+  expect(sess.messages[0].timestamp).toBe(1789000006);
   expect(sess.pendingSteers).toBeNull();
 });
 
@@ -809,10 +810,11 @@ test('handleWsSteer keeps the content blocks of a queued send with attachments',
     { type: 'image', attachment_id: 'a1', mime_type: 'image/png' },
     { type: 'text', text: 'mira esto' },
   ];
-  handleWsSteer('s1', { id: 'q1', msg_id: 'm9', text: 'mira esto', content });
+  handleWsSteer('s1', { id: 'q1', msg_id: 'm9', timestamp: 1789000007, text: 'mira esto', content });
 
   const sess = store.get().sessions.s1;
   expect(sess.messages).toHaveLength(1);
+  expect(sess.messages[0].timestamp).toBe(1789000007);
   expect(sess.messages[0].content).toEqual(content);
   expect(sess.messages[0]._steer_id).toBe('q1');
   expect(sess.pendingSteers).toBeNull();
@@ -822,13 +824,23 @@ test('handleWsUserMessage appends a prompt sent from another client', async () =
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
 
-  handleWsUserMessage('s1', { msg_id: 'm1', text: 'dictado desde el móvil' });
+  handleWsUserMessage('s1', { msg_id: 'm1', timestamp: 1789000008, text: 'dictado desde el móvil' });
 
   const messages = store.get().sessions.s1.messages;
   expect(messages).toHaveLength(1);
   expect(messages[0].role).toBe('user');
   expect(messages[0]._msg_id).toBe('m1');
+  expect(messages[0].timestamp).toBe(1789000008);
   expect(messages[0].content).toEqual([{ type: 'text', text: 'dictado desde el móvil' }]);
+});
+
+test('handleWsMessageEnd keeps the server timestamp on a live assistant turn', () => {
+  seedSession('s1');
+  handleWsMessageEnd('s1', 'terminado', 'a1', 1789000010);
+
+  const message = store.get().sessions.s1.messages[0];
+  expect(message).toMatchObject({ role: 'assistant', _msg_id: 'a1', timestamp: 1789000010 });
+  expect(projectStream(store.get().sessions.s1)[0].time).toBe(1789000010);
 });
 
 test('secret batch delivery uses trusted metadata and never renders the backend note text', async () => {
@@ -862,9 +874,10 @@ test('handleWsUserMessage dedups against the optimistic echo by MsgID', async ()
     { role: 'user', _msg_id: 'm1', content: [{ type: 'text', text: 'ya pintado' }] },
   ] } } });
 
-  handleWsUserMessage('s1', { msg_id: 'm1', text: 'ya pintado' });
+  handleWsUserMessage('s1', { msg_id: 'm1', timestamp: 1789000009, text: 'ya pintado' });
 
   expect(store.get().sessions.s1.messages).toHaveLength(1);
+  expect(store.get().sessions.s1.messages[0].timestamp).toBe(1789000009);
 });
 
 test('handleWsUserMessage keeps the content blocks of a send with attachments', async () => {

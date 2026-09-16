@@ -185,9 +185,10 @@ func (f *fakeAgent) PopQueueBarrier(id string) bool {
 // (as the real agent does) before invoking announce, letting pump tests assert
 // both which steers started a fresh run and that the announcement can never be
 // observed ahead of the append.
-func (f *fakeAgent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string, announce func()) ([]core.AgentMessage, []string, error) {
+func (f *fakeAgent) SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string, announce func([]core.AgentMessage)) ([]core.AgentMessage, []string, error) {
 	f.mu.Lock()
 	ids := make([]string, len(items))
+	appended := make([]core.AgentMessage, 0, len(items))
 	for i, it := range items {
 		if i < len(msgIDs) && msgIDs[i] != "" {
 			ids[i] = msgIDs[i]
@@ -198,10 +199,11 @@ func (f *fakeAgent) SendItems(ctx context.Context, items []core.SteerItem, msgID
 		m := core.WrapMessage(core.NewUserMessage(it.Text))
 		m.MsgID = ids[i]
 		f.messages = append(f.messages, m)
+		appended = append(appended, m)
 	}
 	f.mu.Unlock()
 	if announce != nil {
-		announce()
+		announce(appended)
 	}
 	return nil, ids, nil
 }

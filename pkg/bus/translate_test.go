@@ -99,13 +99,13 @@ func TestTranslateAgentEvent_ParityWithBridge(t *testing.T) {
 			name: "steer_with_attachment",
 			in: core.AgentEvent{
 				Type: core.AgentEventSteer, SteerID: "st2", MsgID: "m2", Text: "mira esto",
-				Message: core.WrapMessage(core.NewUserMessageWithContent([]core.Content{
+				Message: core.AgentMessage{Message: core.Message{Role: "user", Timestamp: 1_789_000_004, Content: []core.Content{
 					{Type: "image", Data: "aW1n", MimeType: "image/png"},
 					{Type: "text", Text: "mira esto"},
-				})),
+				}}},
 			},
 			want: []any{Steered{
-				SessionID: sid, RunGen: gen, ID: "st2", MsgID: "m2", Text: "mira esto",
+				SessionID: sid, RunGen: gen, ID: "st2", MsgID: "m2", Timestamp: 1_789_000_004, Text: "mira esto",
 				Content: []core.Content{
 					{Type: "image", Data: "aW1n", MimeType: "image/png"},
 					{Type: "text", Text: "mira esto"},
@@ -117,9 +117,9 @@ func TestTranslateAgentEvent_ParityWithBridge(t *testing.T) {
 			name: "steer_text_only",
 			in: core.AgentEvent{
 				Type: core.AgentEventSteer, SteerID: "st3", Text: "plain",
-				Message: core.WrapMessage(core.NewUserMessage("plain")),
+				Message: core.AgentMessage{Message: core.Message{Role: "user", Timestamp: 1_789_000_005, Content: []core.Content{core.TextContent("plain")}}},
 			},
-			want: []any{Steered{SessionID: sid, RunGen: gen, ID: "st3", Text: "plain"}},
+			want: []any{Steered{SessionID: sid, RunGen: gen, ID: "st3", Timestamp: 1_789_000_005, Text: "plain"}},
 		},
 	}
 

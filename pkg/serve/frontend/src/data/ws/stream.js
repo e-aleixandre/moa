@@ -116,7 +116,21 @@ export function handleWsThinkingDelta(id, delta) {
   scheduleFlush();
 }
 
-export function handleWsMessageEnd(id, fullText, msgId = '') {
+function stampMaterializedAssistant(messages, timestamp) {
+  if (!timestamp) return messages;
+  let next = messages;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const row = messages[i];
+    if (row?.role === 'user' || row?._type === 'system') break;
+    if (row?.timestamp) break;
+    if (row?.role !== 'assistant' && !(row?._type === 'tool_start' && row.status === 'generating')) continue;
+    if (next === messages) next = [...messages];
+    next[i] = { ...row, timestamp };
+  }
+  return next;
+}
+
+export function handleWsMessageEnd(id, fullText, msgId = '', timestamp) {
   const pendingText = wsState.pendingTextDeltas[id] || '';
   delete wsState.pendingTextDeltas[id];
   delete wsState.pendingThinkingDeltas[id];
@@ -127,6 +141,10 @@ export function handleWsMessageEnd(id, fullText, msgId = '') {
   }
 
   if (msgId && sess.messages.some(m => m._msg_id === msgId)) {
+    if (timestamp) {
+      const messages = sess.messages.map(m => m._msg_id === msgId && !m.timestamp ? { ...m, timestamp } : m);
+      if (messages.some((m, i) => m !== sess.messages[i])) updateSession(id, { messages });
+    }
     delete wsState.materializedTextDuringMessage[id];
     updateSession(id, { streamingText: null, thinkingText: null });
     return;
@@ -153,9 +171,16 @@ export function handleWsMessageEnd(id, fullText, msgId = '') {
     streamingText: null,
     thinkingText: null,
   };
+  const timestampedMessages = stampMaterializedAssistant(sess.messages, timestamp);
+  if (timestampedMessages !== sess.messages) patch.messages = timestampedMessages;
   if (assistantText) {
-    const msg = { role: 'assistant', _msg_id: msgId || undefined, content: [{ type: 'text', text: assistantText }] };
-    patch.messages = [...sess.messages, msg];
+    const msg = {
+      role: 'assistant',
+      _msg_id: msgId || undefined,
+      ...(timestamp ? { timestamp } : {}),
+      content: [{ type: 'text', text: assistantText }],
+    };
+    patch.messages = [...timestampedMessages, msg];
   }
 
   delete wsState.materializedTextDuringMessage[id];
@@ -217,10 +242,21 @@ export function handleWsUserMessage(id, data) {
 	const sess = store.get().sessions[id];
 	if (!sess || !data) return;
 	const messages = sess.messages || [];
-	if (data.msg_id && messages.some(m => m._msg_id === data.msg_id)) return;
+	if (data.msg_id && messages.some(m => m._msg_id === data.msg_id)) {
+    if (data.timestamp) {
+      const enriched = messages.map(m => m._msg_id === data.msg_id && !m.timestamp ? { ...m, timestamp: data.timestamp } : m);
+      if (enriched.some((m, i) => m !== messages[i])) updateSession(id, { messages: enriched });
+    }
+    return;
+  }
   const secretBatch = secretBatchFromMessage(data);
   if (secretBatch) {
-    updateSession(id, { messages: [...messages, { _type: 'secret_batch', _msg_id: data.msg_id || undefined, aliases: secretBatch }] });
+    updateSession(id, { messages: [...messages, {
+      _type: 'secret_batch',
+      _msg_id: data.msg_id || undefined,
+      ...(data.timestamp ? { timestamp: data.timestamp } : {}),
+      aliases: secretBatch,
+    }] });
     return;
   }
   const content = Array.isArray(data.content) && data.content.length > 0
@@ -237,6 +273,7 @@ export function handleWsUserMessage(id, data) {
     updateSession(id, { messages: [...messages, {
       _type: 'system',
       _msg_id: data.msg_id || undefined,
+      ...(data.timestamp ? { timestamp: data.timestamp } : {}),
       text: '⚠ Context filling up — asked the agent to save unsaved work',
     }] });
     return;
@@ -247,7 +284,13 @@ export function handleWsUserMessage(id, data) {
     updateSession(id, { messages: [...messages, forkRow] });
     return;
   }
-	const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, content, custom: data.custom };
+	const userMsg = {
+    role: 'user',
+    _msg_id: data.msg_id || undefined,
+    ...(data.timestamp ? { timestamp: data.timestamp } : {}),
+    content,
+    custom: data.custom,
+  };
 	updateSession(id, { messages: [...messages, userMsg] });
 }
 
@@ -267,12 +310,21 @@ export function handleWsSteer(id, data) {
   // Dedup the injected user message by MsgID: a non-atomic reconnect snapshot
   // may already contain it (the agent appended it to state before the cut),
   // and this Steered event (seq > cut) would otherwise add it a second time.
-	const already = data.msg_id && messages.some(m => m._msg_id === data.msg_id);
+	const existingIndex = data.msg_id ? messages.findIndex(m => m._msg_id === data.msg_id) : -1;
+	const already = existingIndex >= 0;
   const patch = { pendingSteers: steers.length > 0 ? steers : null };
+  if (already && data.timestamp && !messages[existingIndex].timestamp) {
+    patch.messages = messages.map((m, i) => i === existingIndex ? { ...m, timestamp: data.timestamp } : m);
+  }
   if (!already) {
     const secretBatch = secretBatchFromMessage(data);
     if (secretBatch) {
-      patch.messages = [...messages, { _type: 'secret_batch', _msg_id: data.msg_id || undefined, aliases: secretBatch }];
+      patch.messages = [...messages, {
+        _type: 'secret_batch',
+        _msg_id: data.msg_id || undefined,
+        ...(data.timestamp ? { timestamp: data.timestamp } : {}),
+        aliases: secretBatch,
+      }];
       updateSession(id, patch);
       return;
     }
@@ -291,7 +343,14 @@ export function handleWsSteer(id, data) {
       return;
     }
     if (!isStructuredSubagentNotification(sess, data.text || '')) {
-		const userMsg = { role: 'user', _msg_id: data.msg_id || undefined, _steer_id: data.id || undefined, content, custom: data.custom };
+		const userMsg = {
+      role: 'user',
+      _msg_id: data.msg_id || undefined,
+      _steer_id: data.id || undefined,
+      ...(data.timestamp ? { timestamp: data.timestamp } : {}),
+      content,
+      custom: data.custom,
+    };
 		patch.messages = [...messages, userMsg];
     }
   }

@@ -75,6 +75,17 @@ test('messageEnd derives tail from fullText when text was materialized', () => {
   expect(texts).toEqual(['Doing work. ', 'Done.']);
 });
 
+test('messageEnd timestamps materialized prose and a tool-only tail from the server', () => {
+  const t = freshTarget();
+  const b = newBuffers();
+  reduceTextDelta(t, b, 'Working');
+  reduceToolCallStart(t, b, { tool_call_id: 'tc1', tool_name: 'read' });
+  reduceMessageEnd(t, b, 'Working', 'a1', 1789000014);
+
+  expect(t.messages[0].timestamp).toBe(1789000014);
+  expect(t.messages[1].timestamp).toBe(1789000014);
+});
+
 test('messageEnd handles fullText starting with the literal "true"', () => {
   // Regression: materializedText must be a string, not a boolean, so
   // startsWith/slice work when the text starts with "true".
@@ -134,9 +145,10 @@ test('run_end marks generating tools as errored', () => {
 test('a nested steer appears in the subagent transcript', () => {
   const t = freshTarget();
   const b = newBuffers();
-  applyNestedEvent(t, b, { type: 'steer', data: { id: 's1', msg_id: 'm1', text: 'look at the image' } });
+  applyNestedEvent(t, b, { type: 'steer', data: { id: 's1', msg_id: 'm1', timestamp: 1789000011, text: 'look at the image' } });
   expect(t.messages).toHaveLength(1);
   expect(t.messages[0].role).toBe('user');
+  expect(t.messages[0].timestamp).toBe(1789000011);
   expect(t.messages[0].content[0].text).toBe('look at the image');
 });
 
@@ -161,13 +173,13 @@ test('a nested user_message shows the delegated task ahead of the child activity
   const b = newBuffers();
   applyNestedEvent(t, b, {
     type: 'user_message',
-    data: { msg_id: 'p1', text: 'Investiga el bug', custom: { source: 'subagent_parent' } },
+    data: { msg_id: 'p1', timestamp: 1789000012, text: 'Investiga el bug', custom: { source: 'subagent_parent' } },
   });
   applyNestedEvent(t, b, { type: 'message_end', data: { msg_id: 'a1', text: 'Empiezo' } });
 
   expect(t.messages).toHaveLength(2);
   expect(t.messages[0]).toMatchObject({
-    role: 'user', _msg_id: 'p1', custom: { source: 'subagent_parent' },
+    role: 'user', _msg_id: 'p1', timestamp: 1789000012, custom: { source: 'subagent_parent' },
   });
   expect(t.messages[0].content[0].text).toBe('Investiga el bug');
   expect(t.messages[1].role).toBe('assistant');
@@ -185,6 +197,19 @@ test('a nested user_message is deduplicated by msg_id, not by text', () => {
   expect(t.messages).toHaveLength(2);
 });
 
+test('nested live dedup enriches an undated snapshot row without overwriting a known time', () => {
+  const t = freshTarget();
+  const b = newBuffers();
+  t.messages = [{ role: 'user', _msg_id: 'p1', content: [{ type: 'text', text: 'Hola' }] }];
+
+  applyNestedEvent(t, b, { type: 'user_message', data: { msg_id: 'p1', timestamp: 1789000013, text: 'Hola' } });
+  expect(t.messages).toHaveLength(1);
+  expect(t.messages[0].timestamp).toBe(1789000013);
+
+  applyNestedEvent(t, b, { type: 'user_message', data: { msg_id: 'p1', timestamp: 1789000099, text: 'Hola' } });
+  expect(t.messages[0].timestamp).toBe(1789000013);
+});
+
 test('a nested user_message carries structured content when it has one', () => {
   const t = freshTarget();
   const b = newBuffers();
@@ -193,6 +218,7 @@ test('a nested user_message carries structured content when it has one', () => {
     data: { msg_id: 'p1', content: [{ type: 'text', text: 'mira' }, { type: 'image_ref', id: 'img1' }] },
   });
   expect(t.messages[0].content).toHaveLength(2);
+  expect(t.messages[0].timestamp).toBeUndefined();
 });
 
 test('ensureTarget tolerates null/partial input', () => {

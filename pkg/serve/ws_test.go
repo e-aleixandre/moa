@@ -282,7 +282,7 @@ func TestWsEventFromBus_MessageEnded_InputIncludesCache(t *testing.T) {
 	// nearly the whole prompt — the count would read far too low.
 	ev, ok := wsEventFromBus(bus.MessageEnded{
 		Message: core.AgentMessage{Message: core.Message{
-			MsgID: "m1",
+			MsgID: "m1", Timestamp: 1_789_000_001,
 			Usage: &core.Usage{Input: 500, CacheRead: 12000, CacheWrite: 1500, Output: 320},
 		}},
 	})
@@ -298,6 +298,9 @@ func TestWsEventFromBus_MessageEnded_InputIncludesCache(t *testing.T) {
 	}
 	if data.OutputTokens != 320 {
 		t.Fatalf("OutputTokens = %d, want 320", data.OutputTokens)
+	}
+	if data.Timestamp != 1_789_000_001 {
+		t.Fatalf("Timestamp = %d, want message timestamp", data.Timestamp)
 	}
 }
 
@@ -384,7 +387,7 @@ func TestWsEventFromBus_CommandDequeued(t *testing.T) {
 
 func TestWsEventFromBus_UserMessageAppended(t *testing.T) {
 	ev, ok := wsEventFromBus(bus.UserMessageAppended{
-		SessionID: "s1", MsgID: "m1", Text: "hola",
+		SessionID: "s1", MsgID: "m1", Timestamp: 1_789_000_002, Text: "hola",
 		Custom: map[string]any{"source": "secret_batch", "secret_aliases": []string{"db"}},
 	})
 	if !ok || ev.Type != "user_message" {
@@ -394,11 +397,18 @@ func TestWsEventFromBus_UserMessageAppended(t *testing.T) {
 	if !ok {
 		t.Fatalf("Data type = %T, want UserMessageData", ev.Data)
 	}
-	if data.MsgID != "m1" || data.Text != "hola" || len(data.Content) != 0 {
+	if data.MsgID != "m1" || data.Timestamp != 1_789_000_002 || data.Text != "hola" || len(data.Content) != 0 {
 		t.Fatalf("Data = %+v, want text-only message m1", data)
 	}
 	if data.Custom["source"] != "secret_batch" {
 		t.Fatalf("Custom = %#v", data.Custom)
+	}
+	encoded, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"timestamp":1789000002`) {
+		t.Fatalf("serialized event has no epoch timestamp: %s", encoded)
 	}
 }
 
@@ -452,7 +462,7 @@ func TestWsEventFromBus_Steered_DropsInlineAttachment(t *testing.T) {
 	// renders live with its thumbnail, but the inline payload must be bounded
 	// by the same history projection as a normal user message.
 	ev, ok := wsEventFromBus(bus.Steered{
-		SessionID: "s1", ID: "st1", MsgID: "m3", Text: "mira esto",
+		SessionID: "s1", ID: "st1", MsgID: "m3", Timestamp: 1_789_000_003, Text: "mira esto",
 		Content: []core.Content{
 			core.ImageContent(strings.Repeat("a", historyContentMaxBytes+1), "image/png"),
 			core.TextContent("mira esto"),
@@ -465,7 +475,7 @@ func TestWsEventFromBus_Steered_DropsInlineAttachment(t *testing.T) {
 	if !ok {
 		t.Fatalf("Data type = %T, want SteerData", ev.Data)
 	}
-	if data.ID != "st1" || data.MsgID != "m3" || data.Text != "mira esto" {
+	if data.ID != "st1" || data.MsgID != "m3" || data.Timestamp != 1_789_000_003 || data.Text != "mira esto" {
 		t.Fatalf("Data = %+v", data)
 	}
 	if len(data.Content) != 2 {
@@ -476,6 +486,13 @@ func TestWsEventFromBus_Steered_DropsInlineAttachment(t *testing.T) {
 	}
 	if data.Content[1].Text != "mira esto" {
 		t.Fatalf("text block = %q, want %q", data.Content[1].Text, "mira esto")
+	}
+	encoded, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"timestamp":1789000003`) {
+		t.Fatalf("serialized event has no epoch timestamp: %s", encoded)
 	}
 }
 

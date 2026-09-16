@@ -190,6 +190,7 @@ type DeltaData struct {
 type MessageEndData struct {
 	Text         string `json:"text"`
 	MsgID        string `json:"msg_id,omitempty"`
+	Timestamp    int64  `json:"timestamp,omitempty"`
 	InputTokens  int    `json:"input_tokens,omitempty"`
 	OutputTokens int    `json:"output_tokens,omitempty"`
 }
@@ -324,11 +325,12 @@ func pctOf(frac float64) int {
 // the thumbnails live instead of only after a reload; a text-only steer travels
 // in Text alone.
 type SteerData struct {
-	ID      string         `json:"id,omitempty"`
-	MsgID   string         `json:"msg_id,omitempty"`
-	Text    string         `json:"text"`
-	Content []core.Content `json:"content,omitempty"`
-	Custom  map[string]any `json:"custom,omitempty"`
+	ID        string         `json:"id,omitempty"`
+	MsgID     string         `json:"msg_id,omitempty"`
+	Timestamp int64          `json:"timestamp,omitempty"`
+	Text      string         `json:"text"`
+	Content   []core.Content `json:"content,omitempty"`
+	Custom    map[string]any `json:"custom,omitempty"`
 }
 
 // UserMessageData is sent when a user prompt starts a new run, so every
@@ -337,10 +339,11 @@ type SteerData struct {
 // text); Text carries a plain-text prompt. Clients dedup by MsgID against their
 // own optimistic echo and against the reconnect snapshot.
 type UserMessageData struct {
-	MsgID   string         `json:"msg_id,omitempty"`
-	Text    string         `json:"text,omitempty"`
-	Content []core.Content `json:"content,omitempty"`
-	Custom  map[string]any `json:"custom,omitempty"`
+	MsgID     string         `json:"msg_id,omitempty"`
+	Timestamp int64          `json:"timestamp,omitempty"`
+	Text      string         `json:"text,omitempty"`
+	Content   []core.Content `json:"content,omitempty"`
+	Custom    map[string]any `json:"custom,omitempty"`
 }
 
 // CommandQueuedData is sent when a slash command is enqueued as a barrier in the
