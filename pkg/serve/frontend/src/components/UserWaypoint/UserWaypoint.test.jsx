@@ -255,11 +255,11 @@ test("a text-only waypoint has no attachments strip", () => {
   expect(WaypointAttachments({ attachments: [] })).toBeNull();
 });
 
-test("a parent task uses the parent label and subagent accent", () => {
+test("a parent task is an ordinary cell carrying a marked label", () => {
   const waypoint = UserWaypoint({
     tone: "parent",
     accent: "teal",
-    label: "↳ FROM PARENT",
+    label: "From the parent agent",
     children: <p>Review this change.</p>,
   });
   const card = descendants(waypoint).find((node) =>
@@ -268,9 +268,20 @@ test("a parent task uses the parent label and subagent accent", () => {
   );
 
   expect(card).toBeDefined();
+  // The accent still travels with it — the mark is painted from this variable
+  // (UserWaypoint.css `.is-parent .zl-user-label::before`), so losing it would
+  // lose the mark, not just a colour.
   expect(card.props.style).toEqual({ "--waypoint-accent": "var(--teal)" });
-  expect(textContent(waypoint)).toContain("↳ FROM PARENT");
+  expect(textContent(waypoint)).toContain("From the parent agent");
   expect(textContent(waypoint)).not.toContain("You");
+});
+
+// The cell itself must stay an ordinary user message: the whole difference is
+// the label's mark. An edge down the cell made the one message on the screen
+// that is NOT the user's the only one wearing a rule.
+test("a parent task wears no edge of its own", () => {
+  expect(css).not.toMatch(/\.zl-user\.is-parent \.zl-user-cell/);
+  expect(css).toMatch(/\.zl-user\.is-parent \.zl-user-label::before/);
 });
 
 test("an ordinary user message is a bare cell, not a You label", () => {

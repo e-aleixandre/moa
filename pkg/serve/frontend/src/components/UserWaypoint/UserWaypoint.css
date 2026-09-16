@@ -104,12 +104,27 @@
   color: var(--zl-t4);
 }
 
-/* A task from the parent session keeps its accent, now as an inset edge on
-   the cell rather than a border on the whole block. */
-.zl-user.is-parent .zl-user-cell {
-  box-shadow: var(--zl-rim), inset 2px 0 0 var(--waypoint-accent);
+/* A task from the parent agent is an ORDINARY message with a mark on it. It
+   used to carry an accent edge down the cell as well, which made the one
+   message on the screen that is not yours the only one wearing a rule — the
+   opposite of what the edge was for. The cell is now identical to any user
+   message, and the whole difference is the label's dot: it names the source
+   in the accent that identifies this subagent everywhere else, and it is a
+   mark rather than a band. */
+.zl-user.is-parent .zl-user-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
 }
-.zl-user.is-parent .zl-user-label { color: var(--waypoint-accent); }
+.zl-user.is-parent .zl-user-label::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--waypoint-accent);
+}
 
 .zl-user-body code {
   padding: 1px 5px;

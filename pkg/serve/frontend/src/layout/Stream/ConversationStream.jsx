@@ -117,7 +117,7 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
       return (
         <UserWaypoint
           time={block.time}
-          label={block.fromParent ? "↳ FROM PARENT" : block.steer ? "You — steer" : undefined}
+          label={block.fromParent ? "From the parent agent" : block.steer ? "You — steer" : undefined}
           tone={block.fromParent ? "parent" : undefined}
           accent={block.fromParent ? waypointAccent : undefined}
           attachments={block.attachments}
