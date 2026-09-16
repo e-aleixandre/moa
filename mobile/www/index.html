@@ -33,6 +33,21 @@
     color: #cdd6f4;
     font: 15px/1.5 -apple-system, system-ui, sans-serif;
   }
+  .screen { width: 100%; display: flex; flex-direction: column; gap: 20px; }
+  .screen[hidden] { display: none; }
+  .startup { align-items: center; text-align: center; }
+  .startup-mark {
+    width: 52px;
+    height: 52px;
+    display: grid;
+    place-items: center;
+    border-radius: 16px;
+    background: #cba6f7;
+    color: #11111b;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+  }
   h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
   p { margin: 0; color: #a6adc8; }
   .steps { margin: 0; padding-left: 20px; color: #a6adc8; }
@@ -63,31 +78,41 @@
 </style>
 </head>
 <body>
-  <div>
-    <h1>Pair this app</h1>
-    <p>It needs to know which moa it belongs to.</p>
-  </div>
+  <main class="screen" id="pairing" hidden>
+    <div>
+      <h1>Pair this app</h1>
+      <p>It needs to know which moa it belongs to.</p>
+    </div>
 
-  <ol class="steps">
-    <li>Open moa in a browser on your computer.</li>
-    <li>Create a pairing code in Settings.</li>
-    <li>Scan it here.</li>
-  </ol>
+    <ol class="steps">
+      <li>Open moa in a browser on your computer.</li>
+      <li>Create a pairing code in Settings.</li>
+      <li>Scan it here.</li>
+    </ol>
 
-  <p class="pending-share" id="pending-share" role="status">
-    Your shared item is saved. Pair moa to choose a conversation.
-  </p>
+    <p class="pending-share" id="pending-share" role="status">
+      Your shared item is saved. Pair moa to choose a conversation.
+    </p>
 
-  <button id="scan" type="button">Scan the code</button>
-  <button id="toggle" type="button" class="quiet">Enter it by hand</button>
+    <button id="scan" type="button">Scan the code</button>
+    <button id="toggle" type="button" class="quiet">Enter it by hand</button>
 
-  <div class="manual" id="manual">
-    <input id="text" type="text" autocapitalize="off" autocorrect="off"
-           spellcheck="false" placeholder="Paste the moa pairing code">
-    <button id="submit" type="button">Pair</button>
-  </div>
+    <div class="manual" id="manual">
+      <input id="text" type="text" autocapitalize="off" autocorrect="off"
+             spellcheck="false" placeholder="Paste the moa pairing code">
+      <button id="submit" type="button">Pair</button>
+    </div>
 
-  <p class="error" id="error" role="alert"></p>
+    <p class="error" id="error" role="alert"></p>
+  </main>
+
+  <main class="screen startup" id="startup" hidden>
+    <div class="startup-mark" aria-hidden="true">m</div>
+    <div>
+      <h1 id="startup-title">Opening moa</h1>
+      <p id="startup-status" role="status">Connecting to your moa…</p>
+    </div>
+  </main>
 
   <script type="module" src="./boot.js"></script>
 </body>

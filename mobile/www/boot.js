@@ -9,12 +9,27 @@ import {
 } from "./pairing.js";
 import { claimDevice, authorizeDevice } from "./native-auth.js";
 import { scanPairingCode } from "./barcode-scanner.js";
+import { startApp } from "./startup.js";
 
 const $ = (id) => document.getElementById(id);
 const error = $("error");
 
 function fail(message) {
   error.textContent = message;
+}
+
+function showOpening() {
+  $("pairing").hidden = true;
+  $("startup-title").textContent = "Opening moa";
+  $("startup-status").textContent = "Connecting to your moa…";
+  $("startup").hidden = false;
+}
+
+function showConnectionError(message) {
+  $("pairing").hidden = true;
+  $("startup-title").textContent = "Could not open moa";
+  $("startup-status").textContent = message;
+  $("startup").hidden = false;
 }
 
 // The share inbox lives outside the web view in an App Group. Its bridge is
@@ -130,24 +145,24 @@ function installPairingControls() {
   });
 }
 
+function showPairing(message = "") {
+  $("startup").hidden = true;
+  $("pairing").hidden = false;
+  fail(message);
+  installPairingControls();
+}
+
 // Already bound: renew a short browser session from Keychain before loading
 // the remote page. A revoked credential returns to a usable pairing screen;
 // a network failure preserves it for the next launch.
 const known = storedServer();
-if (known) {
-  authorizeDevice(known)
-    .then(() => bindNativeServer(known))
-    .then(() => location.replace(known))
-    .catch(async (authError) => {
-      if (authError?.code === "not_paired") {
-        forgetServer();
-        try { await clearNativeServer(); } catch { /* already unbound is fine */ }
-        fail("This device is no longer paired. Create a new code to pair it again.");
-        installPairingControls();
-        return;
-      }
-      fail("Could not reach your paired moa. Check the connection and reopen the app.");
-    });
-} else {
-  installPairingControls();
-}
+startApp(known, {
+  authorizeDevice,
+  bindNativeServer,
+  clearNativeServer,
+  forgetServer,
+  navigate: (origin) => location.replace(origin),
+  showPairing,
+  showOpening,
+  showConnectionError,
+});
