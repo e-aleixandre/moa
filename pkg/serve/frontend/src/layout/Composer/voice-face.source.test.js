@@ -5,6 +5,12 @@
 // visual bug, but it is testable as a source fact: the two faces must not share
 // their fill. This guards the distinction so a later tidy-up cannot quietly
 // collapse them back together.
+//
+// The mic and Send now sit SIDE BY SIDE on the composer's control row instead
+// of taking turns on one button, so the distinction matters more, not less:
+// the two faces are on screen at the same time. The assertions moved from
+// `.zl-send.recording` (the phone's old takeover face, gone) to `.zl-mic`,
+// which is the only button that records.
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 
@@ -19,7 +25,7 @@ function rule(name) {
 }
 
 test("recording is peach and send is the accent — never the same fill", () => {
-  const recording = rule(".zl-send.recording {");
+  const recording = rule(".zl-mic.recording {");
   const armedSend = rule(".zl-composer.is-armed .zl-send:not(.recording):not(.transcribing) {");
 
   expect(recording).toMatch(/background:\s*var\(--zl-peach\)/);
@@ -32,19 +38,19 @@ test("recording is peach and send is the accent — never the same fill", () => 
 test("recording also differs in SHAPE, so it reads without relying on colour", () => {
   // A phone has no hover and a glance has no time to compare two hues. The
   // circle is the part of the answer that survives both.
-  expect(rule(".zl-send.recording {")).toMatch(/border-radius:\s*var\(--radius-full\)/);
+  expect(rule(".zl-mic.recording {")).toMatch(/border-radius:\s*var\(--radius-full\)/);
   expect(rule(".zl-send {")).toMatch(/border-radius:\s*var\(--zl-r-md\)/);
 });
 
 test("red stays reserved: a live mic is not an error and not a destructive act", () => {
   // The reasoning the previous pass wrote down and got right; only the
   // ambiguity it left behind was wrong.
-  expect(rule(".zl-send.recording {")).not.toMatch(/--zl-red/);
+  expect(rule(".zl-mic.recording {")).not.toMatch(/--zl-red/);
 });
 
 test("the recording motion is disabled under reduced motion, and the state is not", () => {
   const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
-  expect(reduced).toMatch(/\.zl-send\.recording/);
+  expect(reduced).toMatch(/\.zl-mic\.recording/);
   // The halo is kept as a still box-shadow, so nothing that carries meaning
   // depends on the animation running.
   expect(reduced).toMatch(/box-shadow:\s*0 0 0 4px var\(--zl-peach-glow\)/);

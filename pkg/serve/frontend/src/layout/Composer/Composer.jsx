@@ -24,8 +24,7 @@ import { classifyCommand, POLICY_QUEUE, POLICY_REJECT } from "../../data/util/co
 import { processFile } from "../../data/util/attachments.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import {
-  SEND_BUTTON_INITIAL, sendButtonEvent, usesVoiceSendButton,
-  reduceContentSendActivation,
+  SEND_BUTTON_INITIAL, sendButtonEvent, reduceContentSendActivation,
 } from "../../data/composer-send-button.js";
 import {
   compositionEnded, compositionInputDiscarded, compositionStarted,
@@ -43,11 +42,16 @@ import "./Composer.css";
 //
 // What is NOT the catalogue's is everything the prototype never had, grafted
 // on top: send / queue / slash / @-mention / attachments / dictation / the
-// draft that survives a reload / the anti-double-send barrier. The mic sits
-// next to the arrow as a secondary control; on the phone the button is the mic
-// while the field is empty and Send as soon as there is something to send, so
-// a tap never has two possible meanings. Send is never peach — peach is the
-// message the text becomes after this button.
+// draft that survives a reload / the anti-double-send barrier.
+//
+// TWO ROWS. The text takes a row of its own and the controls live under it,
+// always, in both densities. The pill used to have room for exactly one
+// control at its end, so on the phone that button was the mic OR Send — and
+// with tap-to-record, the moment there was a draft the mic was gone.
+// Dictating, fixing a word and dictating some more is the natural way to use
+// it, so the mic and Send each have a permanent seat now and a tap always
+// means one thing. Send is never peach — peach is the message the text
+// becomes after this button.
 //
 // Stop is NOT here. This slab holds what the owner is about to say; stopping
 // the agent is a verb of the row above it, the LiveBar, which is the one that
@@ -818,15 +822,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // MediaRecorder + mic (needs a secure context). Steer mode never records — it
   // targets a subagent, not the parent run.
   const canVoice = canTranscribe && voiceSupported && !steer;
-  // Who owns the send button.
-  //
-  // Phone (compact): voice owns it whenever it is usable — a short press sends,
-  // a hold records even over an existing draft, and transcripts are inserted at
-  // the caret. There is room for exactly one control at the end of that pill.
-  //
-  // Desktop: the arrow is the primary action and always sends; dictation is a
-  // separate secondary button beside it. Same voice machine either way.
-  const voiceButtonMode = usesVoiceSendButton({ canVoice, compact });
 
   // ⌘. (Mac) / Alt+. (elsewhere) toggles push-to-talk for the FOCUSED composer.
   // Ctrl is deliberately excluded (project rule: ⌘ on Mac / Alt elsewhere,
@@ -1137,26 +1132,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           ))}
         </div>
       )}
-      {plusActions.length > 0 ? (
-        <ActionMenu
-          open={plusMenuOpen}
-          onOpenChange={setPlusMenuOpen}
-          icon={AttachIcon}
-          label="More"
-          triggerClass="zl-attach"
-          triggerSize={18}
-          placement="up"
-          disabled={contentSendPending}
-          actions={[
-            { id: "attach", icon: Paperclip, label: "Attach files", onClick: handleAttachClick },
-            ...plusActions,
-          ]}
-        />
-      ) : (
-        <button type="button" class="zl-attach" title="Attach files" aria-label="Attach" onClick={handleAttachClick} disabled={contentSendPending}>
-          <AttachIcon />
-        </button>
-      )}
       <textarea
         ref={textareaRef}
         rows={1}
@@ -1197,101 +1172,79 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       {busy && hasText && !summary && (
         <span class="steer-hint" aria-hidden="true">⏎ steers — won't interrupt</span>
       )}
-      {canVoice && !voiceButtonMode && (
-        /* The desktop's own dictation control, kept next to Send as a
-           secondary action. It drives the same voice machine as the phone
-           through its pointer-free toggle: click to start dictating, click
-           again to stop and transcribe (⌘./Alt+. does the same).
-           Hold-to-talk is deliberately NOT wired here — that gesture ends a
-           short press with a SEND, which is right for a button that IS Send
-           on a phone and wrong for a mic sitting next to its own arrow. */
+      <div class="zl-controls">
+        {plusActions.length > 0 ? (
+          <ActionMenu
+            open={plusMenuOpen}
+            onOpenChange={setPlusMenuOpen}
+            icon={AttachIcon}
+            label="More"
+            triggerClass="zl-attach"
+            triggerSize={18}
+            placement="up"
+            disabled={contentSendPending}
+            actions={[
+              { id: "attach", icon: Paperclip, label: "Attach files", onClick: handleAttachClick },
+              ...plusActions,
+            ]}
+          />
+        ) : (
+          <button type="button" class="zl-attach" title="Attach files" aria-label="Attach" onClick={handleAttachClick} disabled={contentSendPending}>
+            <AttachIcon />
+          </button>
+        )}
+        <span class="zl-controls-spring" />
+        {canVoice && (
+          /* Dictation, with a permanent seat of its own in both densities.
+             It drives the voice machine through its pointer-free toggle: tap
+             to start dictating, tap again to stop and transcribe (⌘./Alt+.
+             does the same), and the transcript lands at the caret.
+
+             It used to take the send button over on the phone, because the
+             pill had room for exactly one control at its end. That made the
+             mic disappear the moment there was a draft — so dictating,
+             fixing a word and dictating some more, the natural way to use
+             it, was impossible. The second row is what buys both a seat. */
+          <button
+            type="button"
+            class={`zl-attach zl-mic${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
+            aria-label={transcribing ? "Transcribing" : recording ? "Stop recording" : "Dictate"}
+            title={
+              transcribing ? "Transcribing…"
+                : recording ? "Tap to stop & transcribe · Esc discards"
+                  : `Dictate (${formatShortcut(".", { mod: true })})`
+            }
+            disabled={transcribing || contentSendPending}
+            {...voiceHandlers}
+          >
+            {/* Recording keeps the mic glyph: a live microphone is a state of
+                MY input, not a stop control, and a square here read as the
+                same thing as the agent's Stop. The ring says "live". */}
+            {transcribing ? <Loader2 size={15} class="spin" /> : <Mic size={15} />}
+          </button>
+        )}
+        {/* Send is always Send now. It no longer has to ask whose turn it is:
+            the mic is a button beside it, so one tap has exactly one meaning
+            in every state and density. */}
         <button
           type="button"
-          class={`zl-attach zl-mic${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
-          aria-label={transcribing ? "Transcribing" : recording ? "Stop recording" : "Dictate"}
+          class="zl-send"
+          aria-label={contentSendPending ? "Sending" : busy ? "Send steer" : "Send"}
           title={
-            transcribing ? "Transcribing…"
-              : recording ? "Click to stop & transcribe · Esc discards"
-                : `Dictate (${formatShortcut(".", { mod: true })})`
+            contentSendPending ? "Sending…"
+              : busy ? "Send — steers the agent, doesn't stop it"
+                : "Send"
           }
-          disabled={transcribing || contentSendPending}
-          {...voiceHandlers}
+          disabled={!armed}
+          onPointerDown={handleContentSendPointerDown}
+          onPointerUp={handleContentSendPointerUp}
+          onPointerCancel={handleContentSendPointerCancel}
+          onClick={handleContentSendClick}
+          onKeyDown={handleContentSendKeyDown}
         >
-          {/* Recording keeps the mic glyph: a live microphone is a state of
-              MY input, not a stop control, and a square here read as the
-              same thing as the agent's Stop. The ring says "live". */}
-          {transcribing ? <Loader2 size={15} class="spin" /> : <Mic size={15} />}
+          {contentSendPending ? <Loader2 size={16} class="spin" /> : <SendIcon />}
         </button>
-      )}
-      {(() => {
-        // Who the button is, right now.
-        //
-        // A tap now means "toggle the mic", so the button must never be Send
-        // and mic at the same time — one tap cannot mean two things. It is the
-        // mic only while there is nothing to send (empty field, no attachment)
-        // or while a recording it started is still running; the moment there is
-        // a draft it is Send again, and a transcript that lands in the field
-        // turns it back into Send on its own. That is also how the typed
-        // message still goes out: with text in the box this is the ordinary
-        // send button, with its ordinary handlers.
-        //
-        // On the desktop the mic has its own button beside the arrow, so the
-        // takeover applies to the phone (or to a shortcut recording in a
-        // compact frame, which must stay visible until it is stopped).
-        const micMode = voiceButtonMode && !hasText && attachments.length === 0;
-        const voiceOwnsButton = micMode
-          || ((voiceButtonMode || compact) && (recording || transcribing));
-
-        let icon = <SendIcon />;
-        if (contentSendPending || (voiceOwnsButton && transcribing)) icon = <Loader2 size={16} class="spin" />;
-        else if (voiceOwnsButton) icon = <Mic size={16} />;
-
-        const cls = [
-          "zl-send",
-          voiceOwnsButton ? "gesture" : "",
-          voiceOwnsButton && recording ? "recording" : "",
-          voiceOwnsButton && transcribing ? "transcribing" : "",
-          micMode && !recording && !transcribing ? "mic-mode" : "",
-        ].filter(Boolean).join(" ");
-
-        const sendTitle = busy ? "Send — steers the agent, doesn't stop it" : "Send";
-        const title = contentSendPending ? "Sending…"
-          : !voiceOwnsButton ? sendTitle
-          : transcribing ? "Transcribing…"
-          : recording ? "Tap to stop & transcribe · Esc discards"
-          : `Tap to record (${formatShortcut(".", { mod: true })})`;
-
-        const gestureProps = voiceOwnsButton
-          ? voiceHandlers
-          : {
-            onPointerDown: handleContentSendPointerDown,
-            onPointerUp: handleContentSendPointerUp,
-            onPointerCancel: handleContentSendPointerCancel,
-            onClick: handleContentSendClick,
-            onKeyDown: handleContentSendKeyDown,
-          };
-
-        const sendLabel = contentSendPending ? "Sending"
-          : !voiceOwnsButton ? (busy ? "Send steer" : "Send")
-          : transcribing ? "Transcribing"
-          : recording ? "Stop recording"
-          : "Record";
-
-        return (
-          <div class="zl-send-wrap">
-            <button
-              type="button"
-              class={cls}
-              aria-label={sendLabel}
-              title={title}
-              disabled={(voiceOwnsButton && transcribing) || (!voiceOwnsButton && !armed)}
-              {...gestureProps}
-            >
-              {icon}
-            </button>
-          </div>
-        );
-      })()}
+      </div>
     </div>
   );
 }

@@ -67,7 +67,12 @@
 
 /* ── The slab ────────────────────────────────────────────────────────────
    The composer is the one raised plane on the canvas. Focus is the accent
-   on its rim: the object does not change shape, it is chosen. */
+   on its rim: the object does not change shape, it is chosen.
+
+   TWO ROWS, always: the field on top, the controls under it. It stays a wrap
+   flex because the full-width children (cache warning, attachment strip,
+   queue note, steer hint) already order themselves inside it; the control row
+   is the same trick, ordered last. */
 .zl-composer {
   position: relative;
   display: flex;
@@ -83,7 +88,8 @@
 .zl-composer:focus-within { box-shadow: 0 0 0 1px var(--zl-accent-line); }
 
 .zl-ta {
-  flex: 1;
+  flex: 1 0 100%;
+  order: 1;
   min-width: 0;
   min-height: 44px;
   max-height: 132px;
@@ -101,6 +107,26 @@
   overflow-y: auto;
 }
 .zl-ta::placeholder { color: var(--zl-t4); }
+
+/* The control row. It FLOATS: no fill of its own and no divider, so it reads
+   as the same plane as the field rather than as a panel bolted under it.
+   `+` at the left, the mic and Send at the right — two separate buttons with
+   two separate meanings, which is the whole point of the second row. */
+.zl-controls {
+  flex: 1 0 100%;
+  order: 6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 2px;
+}
+/* 6px and not less: a live mic draws its halo at `inset: -4px` below, and any
+   tighter would push that ring into Send — the halo is what says "live". */
+.zl-controls-spring { flex: 1 1 auto; }
+/* And the mic gets a little more than that from Send specifically, because the
+   two are adjacent: at exactly 6px the resting ring kisses Send's corner. */
+.zl-controls .zl-mic { margin-right: 4px; }
 
 .zl-attach,
 .zl-send {
@@ -157,6 +183,7 @@
 .zl-dock.is-pane .zl-ta { min-height: 40px; padding: 9px 6px; }
 .zl-dock.is-pane .zl-attach,
 .zl-dock.is-pane .zl-send { width: 40px; height: 40px; border-radius: var(--zl-r-sm); }
+.zl-dock.is-pane .zl-controls { min-height: 40px; }
 
 /* ── What the prototype never had ───────────────────────────────────────── */
 
@@ -164,12 +191,6 @@
    not inflate the flex row; the trigger inside wears `.zl-attach`. */
 .zl-composer .action-menu { flex: none; }
 .zl-composer .action-menu-trigger.zl-attach { width: 44px; height: 44px; }
-
-.zl-send-wrap {
-  position: relative;
-  flex: none;
-  display: contents;
-}
 
 .zl-composer .cache-warn,
 .zl-composer .attach-preview-strip,
@@ -230,8 +251,8 @@
   min-width: 0;
 }
 
-/* Desktop dictation sits next to Send as a secondary control, wearing the
-   attach face: the primary action is the arrow.
+/* Dictation sits next to Send on the control row as a secondary control,
+   wearing the attach face: the primary action is the arrow.
 
    RECORDING IS THE LOUDEST STATE THIS BUTTON HAS, and it has to be: the owner
    could not tell a live mic from an armed Send across a room, because both
@@ -254,23 +275,25 @@
 
    Reduced motion keeps the fill, the circle and the halo; only the breathing
    stops. The state is carried by colour and shape, so nothing is lost. */
-.zl-mic.recording,
-.zl-send.recording {
+.zl-mic.recording {
   position: relative;
+  /* Above Send, which follows it in the row: the ring's outward pulse reaches
+     past the gap between them, and the later sibling's fill would paint over
+     the part that crosses. Measured at 390px: the ring peaks 7px inside Send.
+     The halo is the thing that says "live", so it wins the overlap. */
+  z-index: 1;
   background: var(--zl-peach);
   color: var(--zl-peach-ink);
   border-radius: var(--radius-full);
   cursor: pointer;
   animation: composer-mic-breathe 1.6s ease-in-out infinite;
 }
-.zl-mic.recording svg,
-.zl-send.recording svg {
+.zl-mic.recording svg {
   width: 20px;
   height: 20px;
   stroke-width: 2.4;
 }
-.zl-mic.recording::after,
-.zl-send.recording::after {
+.zl-mic.recording::after {
   content: "";
   position: absolute;
   inset: -4px;
@@ -280,8 +303,7 @@
   pointer-events: none;
 }
 @media (hover: hover) {
-  .zl-mic.recording:hover,
-  .zl-send.recording:hover {
+  .zl-mic.recording:hover {
     background: var(--zl-peach);
     color: var(--zl-peach-ink);
   }
@@ -296,43 +318,17 @@
   50% { box-shadow: 0 0 0 7px transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .zl-mic.recording,
-  .zl-send.recording {
+  .zl-mic.recording {
     animation: none;
     /* The halo the breathing would have drawn, held still. */
     box-shadow: 0 0 0 4px var(--zl-peach-glow);
   }
-  .zl-mic.recording::after,
-  .zl-send.recording::after { animation: none; }
+  .zl-mic.recording::after { animation: none; }
 }
 
-/* Phone: voice owns the button while the field is empty. Recording wears the
-   face above — solid peach, round, haloed — and Send is solid mauve and
-   square-cornered, so the two cannot be read for one another. */
-.zl-send.gesture {
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-  -webkit-tap-highlight-color: transparent;
-  cursor: pointer;
-}
-.zl-send.mic-mode:not(.recording) {
-  background: var(--zl-control);
-  color: var(--zl-t3);
-  cursor: pointer;
-}
-@media (hover: hover) {
-  .zl-send.mic-mode:not(.recording):hover {
-    background: var(--zl-hi);
-    color: var(--zl-t1);
-  }
-}
-.zl-send.transcribing {
-  background: var(--zl-control);
-  color: var(--zl-accent);
-  box-shadow: none;
-  cursor: default;
-}
+/* Send is always Send now, so the mic-mode / gesture / recording faces it
+   used to borrow on the phone are gone with the takeover that needed them.
+   Only its own pending spinner is left. */
 .zl-send .spin { animation: composer-spin 1.2s linear infinite; }
 @keyframes composer-spin { to { transform: rotate(360deg); } }
 

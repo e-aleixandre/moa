@@ -465,6 +465,34 @@ test("the slab is the catalogue's: zl-composer, zl-ta, zl-attach, zl-send — an
   expect(send.props.class).not.toMatch(/peach/);
 });
 
+// The bug this shape exists to fix: the pill had room for one control at its
+// end, so on the phone that button was the mic OR Send, and a draft made
+// dictation unreachable. Both now sit on a control row of their own, in every
+// density — so `+`, mic and Send are siblings there and Send is never the mic.
+test("the controls live on their own row, and Send is always Send", () => {
+  refs.length = 0;
+  const tree = Composer({ sessionId: "s1", session: { state: "idle" } });
+  const row = descendants(tree).find((node) => node.props?.class === "zl-controls");
+  expect(row).toBeDefined();
+  const inRow = descendants(row);
+  const plus = inRow.find((node) => node.props?.class === "zl-attach");
+  const send = inRow.find((node) => String(node.props?.class || "").split(/\s+/).includes("zl-send"));
+  expect(plus).toBeDefined();
+  expect(send).toBeDefined();
+  // No takeover left: the send button carries none of the faces the phone's
+  // mic-or-send button used to borrow, and its label never says "Record".
+  expect(send.props.class).toBe("zl-send");
+  expect(send.props["aria-label"]).toBe("Send");
+});
+
+// The mic is conditioned on voice being usable and on nothing else. A density
+// check here would be the old takeover coming back through the side door.
+test("the mic button is offered whenever voice works, in both densities", async () => {
+  const source = await Bun.file(new URL("./Composer.jsx", import.meta.url)).text();
+  expect(source).toMatch(/\{canVoice && \(/);
+  expect(source).not.toMatch(/voiceButtonMode|usesVoiceSendButton|micMode|voiceOwnsButton/);
+});
+
 test("plusActions turn + into a menu whose first entry is still Attach files", () => {
   refs.length = 0;
   let previewed = 0;

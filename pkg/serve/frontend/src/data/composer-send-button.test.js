@@ -1,7 +1,6 @@
 import { test, expect } from "bun:test";
 import {
-  SEND_BUTTON_INITIAL, sendButtonEvent, usesVoiceSendButton,
-  reduceContentSendActivation,
+  SEND_BUTTON_INITIAL, sendButtonEvent, reduceContentSendActivation,
 } from "./composer-send-button.js";
 
 function drive(events, start = SEND_BUTTON_INITIAL) {
@@ -19,18 +18,6 @@ const down = (id) => sendButtonEvent.pointerDown(id);
 const up = (id) => sendButtonEvent.pointerUp(id);
 const cancel = (id) => sendButtonEvent.pointerCancel(id);
 const click = () => sendButtonEvent.click();
-
-// The phone has room for exactly one 44px control at the end of the pill, so
-// the mic takes it and hold-to-talk is the gesture. The desktop bar has room
-// for two, so the arrow keeps the primary action and the mic sits beside it —
-// what the catalogue draws and what every other desktop chat app does. Holding
-// a mouse button down to dictate is a worse gesture than clicking, too.
-test("voice takes over the send button only where there is room for one control", () => {
-  expect(usesVoiceSendButton({ canVoice: true, compact: true })).toBe(true);
-  expect(usesVoiceSendButton({ canVoice: true, compact: false })).toBe(false);
-  expect(usesVoiceSendButton({ canVoice: false, compact: true })).toBe(false);
-  expect(usesVoiceSendButton({ canVoice: false, compact: false })).toBe(false);
-});
 
 test("a pointercancel fallback is tied to its pointer and latches its terminal activation", () => {
   const { state, actions } = drive([down(7), cancel(7)]);
