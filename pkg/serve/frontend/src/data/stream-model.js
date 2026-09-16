@@ -124,7 +124,6 @@
 //     turns would be a third place saying the same thing.
 
 import {
-  truncateText,
   toolInputLine,
   toolPath,
   toolPreview,
@@ -784,6 +783,13 @@ function mapStatus(status) {
   return 'ok'; // done, running, generating
 }
 
+// PATH_ARG_TOOLS are the tools whose argument is a filesystem path. A path's
+// distinguishing part is its END — the file name — so these rows ellipsise
+// from the head instead of the tail, and `.../MobileStream.jsx` survives where
+// `pkg/serve/frontend/src/lay…` said nothing. Everything else (commands,
+// patterns, URLs, queries) reads left to right and keeps the normal tail cut.
+const PATH_ARG_TOOLS = new Set(['read', 'write', 'edit', 'multiedit', 'ls', 'send_file']);
+
 // toLedgerRow builds one ActivityLedger row prop object from a tool_start message. This
 // is also the path terminated subagent/bash cards take (they arrive as
 // tool_start rows in messages), so a subagent/bash card produces a normal,
@@ -804,6 +810,9 @@ function toLedgerRow(msg) {
     status,
     id: msg.tool_call_id,
   };
+  const echo = deriveEcho(msg);
+  if (echo) row.echo = echo;
+  if (PATH_ARG_TOOLS.has(name.toLowerCase())) row.argTail = true;
   if (msg.detailUrl) row.detailUrl = msg.detailUrl;
   const inputLine = toolInputLine(name, msg.args);
   if (inputLine) row.inputLine = inputLine;
@@ -905,17 +914,53 @@ function toolToken(name) {
   return (name || 'tool').toLowerCase();
 }
 
-// deriveOut produces the short right-aligned summary shown on a ledger row.
+// deriveOut produces the right-hand MEASURE of a ledger row: how much output
+// the call produced, and nothing else. It used to return either a measure
+// ("232 lines") or the raw result text, in the same slot with the same style,
+// so the slot said two incompatible things and nothing told them apart — and
+// an unbounded sentence in that cell is what ate the row's own tool name.
+// The text half now lives in `deriveEcho`, which is a different field with a
+// different rendering, so the mixing is gone where it started rather than
+// being papered over in CSS.
+//
+// A failed call has no measure: counting the lines of a failure says nothing,
+// and the slot is better spent on the reason, which the echo carries.
 function deriveOut(msg) {
-  if (msg.status === 'error') return 'error';
-  if (msg.status === 'rejected') return 'rejected';
+  if (msg.status === 'error' || msg.status === 'rejected') return '';
   if (msg.status === 'running' || msg.status === 'generating') return '';
   const result = msg.result;
   if (!result) return '';
   const lines = String(result).split('\n');
-  if (lines.length > 1) return `${lines.length} lines`;
-  return truncateText(lines[0], 40);
+  // A single-line result is not a magnitude: "1 line" is noise next to the
+  // line itself, which the echo shows.
+  return lines.length > 1 ? `${lines.length} lines` : '';
 }
+
+// deriveEcho is the row's one-line ANSWER: the result of a call that produced
+// a single line, or — when the call failed or was rejected — the first line of
+// the failure, which is the only part of it worth reading at a glance.
+//
+// Errors stop being a special case here. They used to write the word `error`
+// beside a mark that already said so; now they echo their result like every
+// other row and the status colours it. That is the whole fix: one branch
+// removed, and the space it wasted spent on why it failed.
+function deriveEcho(msg) {
+  if (msg.status === 'running' || msg.status === 'generating') return '';
+  const result = msg.result;
+  if (!result) return '';
+  const text = String(result);
+  const failed = msg.status === 'error' || msg.status === 'rejected';
+  // A multi-line success already reports its size and opens its full body; it
+  // has no single answer to quote, so quoting its first line would be a lie
+  // about how much there is.
+  if (!failed && text.includes('\n')) return '';
+  const first = text.split('\n').find((line) => line.trim()) || '';
+  // The visible width is bounded by the cell, which ellipsises; this cap only
+  // keeps a runaway single-line result out of the projection.
+  return first.trim().slice(0, ECHO_MAX_CHARS);
+}
+
+const ECHO_MAX_CHARS = 120;
 
 // isUnifiedDiff decides whether a diff string is a REAL unified diff that
 // belongs in a completed diff sibling — i.e. it has a `@@` hunk header or the

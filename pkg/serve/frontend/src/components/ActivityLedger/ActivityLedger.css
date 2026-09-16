@@ -61,8 +61,20 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
 
 .zl-tool-ico { width: 14px; height: 14px; flex: none; color: var(--zl-t4); }
 .zl-lg-txt {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  /* The floor that makes defect #1 impossible rather than unlikely, and it is
+     the name's own width rather than a number someone guessed. This cell used
+     to be `min-width: 0` against a `flex: none` summary, so a long result took
+     the whole row and rendered the tool name at literally 0px.
+
+     `auto` resolves to this flex container's min-content size, which is its
+     items' minimums: `.zl-lg-tool` is `flex: none`, so it contributes its full
+     width, while `.zl-lg-arg` declares `min-width: 0` and contributes nothing.
+     The sum is exactly "the whole name, and as much argument as is left" — so
+     a row can lose its argument to a long echo but can never lose what it was
+     that ran, and the rule holds for a name of any length without a magic
+     number to outgrow. */
+  min-width: auto;
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -71,9 +83,54 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
 }
 .zl-lg-tool { flex: none; font-weight: 500; color: var(--zl-t2); }
 .zl-lg-arg { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--zl-t3); }
+/* A path's name is at its END, so the cut moves to the head: the row keeps
+   `…/MobileStream.jsx`, which identifies the file, instead of the prefix every
+   sibling row shares. `direction: rtl` is what moves the ellipsis to the front;
+   the characters themselves are all LTR or neutral, so they stay in order, and
+   the row's own `direction: ltr` is restored for everything else in the cell. */
+.zl-lg-arg.is-tail { direction: rtl; text-align: left; }
 .zl-lg-dim { flex: none; color: var(--zl-t4); }
+
+/* The two right-hand cells, which used to be one.
+
+   `out` is a MEASURE ("232 lines") — a short, bounded, tabular thing, so it
+   keeps `flex: none` and always shows whole.
+
+   `echo` is TEXT — a one-line result, or why a call failed. Text in a fixed
+   cell is what ate the tool name: `.zl-lg-out { flex: none }` meant an
+   unbounded sentence pushed `.zl-lg-txt` to zero and the row stopped saying
+   what had been run. So the echo shrinks FIRST and never below the point where
+   the name is safe: the name and its argument keep priority, and a long
+   failure line ellipsises rather than winning the row. */
 .zl-lg-out { flex: none; color: var(--zl-t4); }
-.zl-lg-out.is-err { color: var(--zl-red); }
+.zl-lg-echo {
+  flex: 0 1 auto;
+  /* An echo has a floor too, for the same reason the name does: `acti…` is not
+     a shorter "activating", it is noise wearing its place. Below this the cell
+     is worth less than the argument it is competing with, so the argument —
+     which keeps its tooltip and its opened body — gives way instead. */
+  min-width: 7em;
+  /* On a SUCCESSFUL row the echo is still the lesser half: the body is one tap
+     away and the argument is what the eye scans, so it yields first and never
+     takes more than its share of the row. */
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--zl-t4);
+}
+/* On a FAILED or REJECTED row the echo is the reason, which is the one thing
+   worth reading on it — more than the tail of the argument, which the opened
+   row and the tooltip still carry. So it stops yielding first and takes what
+   is left after the name floor, which is what stops the trade from ever
+   costing the row its identity. */
+.zl-lg-echo.is-err,
+.zl-lg-echo.is-warn { max-width: none; flex-shrink: 4; }
+.zl-lg-echo.is-err { color: var(--zl-red); }
+.zl-lg-echo.is-warn { color: var(--zl-yellow); }
+/* A failed row's argument gives way before its reason does. */
+.zl-lg-row:has(.zl-lg-echo.is-err) .zl-lg-txt,
+.zl-lg-row:has(.zl-lg-echo.is-warn) .zl-lg-txt { flex-shrink: 8; }
 
 .zl-lg-mark {
   flex: none;
@@ -87,6 +144,13 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
 .zl-lg-mark.is-ok { color: var(--zl-green); }
 .zl-lg-mark.is-err { color: var(--zl-red); }
 .zl-lg-mark.is-warn { color: var(--zl-yellow); }
+/* The live mark. A dot that only pulses reads as decoration next to the solid
+   ✓/✗/! of its neighbours, which are all glyphs: the eye sorts it as ornament
+   and then has to re-read the row to learn it is the one still running. So it
+   keeps the dot — the colour is the state and the palette is not up for
+   negotiation — and puts a ring around it that sweeps once per cycle. A ring
+   closing is an unmistakably temporal shape, the same 1.6s breath, no new
+   colour and no extra weight. */
 .zl-lg-mark.is-live::before {
   content: "";
   width: 7px;
@@ -95,21 +159,49 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
   background: var(--blue);
   animation: zl-lg-breathe 1.6s ease-in-out infinite;
 }
+.zl-lg-mark.is-live::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--blue);
+  animation: zl-lg-ring 1.6s ease-out infinite;
+}
+.zl-lg-mark.is-live { position: relative; }
 @keyframes zl-lg-breathe { 50% { opacity: 0.35; } }
+@keyframes zl-lg-ring {
+  0% { transform: scale(0.5); opacity: 0.55; }
+  70%, 100% { transform: scale(1); opacity: 0; }
+}
 
 .zl-lg-row.is-live { position: relative; color: var(--zl-t2); }
 .zl-lg-row.is-live .zl-lg-tool { color: var(--zl-t1); }
+/* The live row's underline. A 1px gradient at 0.7 opacity is the first thing a
+   phone loses outdoors: at high brightness the mid-greys wash together and the
+   row stops looking different from its neighbours at all. Two changes, no new
+   colour: a steady blue baseline so the row is marked even when the moving
+   part is invisible, and a brighter, fully opaque sweep travelling over it. */
+.zl-lg-row.is-live::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.5px;
+  background: var(--blue);
+  opacity: 0.3;
+}
 .zl-lg-row.is-live::after {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 1px;
+  height: 1.5px;
   background: linear-gradient(90deg, transparent, var(--blue) 40%, var(--blue) 60%, transparent);
   transform: translateX(-100%);
   animation: zl-lg-sweep 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  opacity: 0.7;
 }
 @keyframes zl-lg-sweep { to { transform: translateX(100%); } }
 
@@ -288,6 +380,13 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
   .zl-lg-mark.is-live::before,
   .zl-lg-row.is-live::after,
   .zl-lg-cursor::after { animation: none; }
+  /* With the sweep stopped, the moving gradient would sit frozen off-screen
+     and the row would lose its live underline entirely, so the steady
+     baseline becomes the whole signal — at the opacity the sweep would have
+     reached. The ring is pure motion, so it simply goes. */
+  .zl-lg-row.is-live::after { display: none; }
+  .zl-lg-row.is-live::before { opacity: 0.55; }
+  .zl-lg-mark.is-live::after { animation: none; opacity: 0.45; transform: scale(1); }
   .zl-lg-row.is-folding { transition: none; }
   .zl-lg-chev { transition: none; }
 }

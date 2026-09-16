@@ -227,8 +227,43 @@ test('an answered ask_user row retains its raw Q&A data without a generic body',
 
   expect(row.askUser).toEqual({ questions, result: 'Yes' });
   expect(row.arg.text).toBe('Use TypeScript?');
-  expect(row.out).toBe('Yes');
+  // The answer is an ECHO, not a measure: `out` counts output, `echo` quotes a
+  // one-line result. They used to be the same slot, which is what let a long
+  // result push the row's own tool name to 0px.
+  expect(row.echo).toBe('Yes');
+  expect(row.out).toBe('');
   expect(row.body).toBeUndefined();
+});
+
+test('the right-hand slot separates a measure from an echo', () => {
+  const [multi, single, failed, rejected] = projectStream(session([
+    tool('t1', 'read', { path: 'a.go' }, 'done', 'one\ntwo\nthree'),
+    tool('t2', 'bash', { command: 'git rev-parse HEAD' }, 'done', '2de38dd'),
+    tool('t3', 'read', { path: '/etc/x.conf' }, 'error', 'open /etc/x.conf: no such file or directory'),
+    tool('t4', 'bash', { command: 'rm -rf /' }, 'rejected', 'Rejected by the user'),
+  ]))[0].blocks[0].rows;
+
+  // Many lines: a magnitude, and nothing to quote.
+  expect(multi.out).toBe('3 lines');
+  expect(multi.echo).toBeUndefined();
+  // One line: the line itself, and no "1 line" noise beside it.
+  expect(single.out).toBe('');
+  expect(single.echo).toBe('2de38dd');
+  // A failure spends the slot on WHY, never on the word `error` beside a mark
+  // that already says so.
+  expect(failed.out).toBe('');
+  expect(failed.echo).toBe('open /etc/x.conf: no such file or directory');
+  expect(rejected.echo).toBe('Rejected by the user');
+  expect([failed.echo, rejected.echo]).not.toContain('error');
+});
+
+test('rows whose argument is a path are marked so the ellipsis keeps the file name', () => {
+  const rows = projectStream(session([
+    tool('t1', 'read', { path: 'pkg/serve/ws.go' }),
+    tool('t2', 'bash', { command: 'go test ./...' }),
+  ]))[0].blocks[0].rows;
+  expect(rows[0].argTail).toBe(true);
+  expect(rows[1].argTail).toBeUndefined();
 });
 
 test('grep input lines include path and options, defaulting the path to the current directory', () => {

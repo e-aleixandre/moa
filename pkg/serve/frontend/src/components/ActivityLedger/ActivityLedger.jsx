@@ -111,12 +111,13 @@ function DoneRow({ row }) {
         <ToolIcon tool={row.tool} />
         <span class="zl-lg-txt" title={fullLabel(row, text)}>
           <span class="zl-lg-tool">{row.tool}</span>
-          <span class="zl-lg-arg zl-data">{text}</span>
+          <span class={`zl-lg-arg zl-data${row.argTail ? " is-tail" : ""}`}>{text}</span>
           {dim && <span class="zl-lg-dim"> · {dim}</span>}
         </span>
-        {row.out && (
-          <span class={`zl-lg-out zl-data${row.status === "err" ? " is-err" : ""}`}>{row.out}</span>
+        {row.echo && (
+          <span class={`zl-lg-echo zl-data is-${row.status || "ok"}`} title={row.echo}>{row.echo}</span>
         )}
+        {row.out && <span class="zl-lg-out zl-data">{row.out}</span>}
         <StatusMark status={row.status} />
         {hasDetail && <Chevron open={open} />}
         <span class="sr-only">{SR[row.status] || SR.ok}</span>
@@ -214,7 +215,7 @@ function LiveRow({ row }) {
         <ToolIcon tool={row.tool} />
         <span class="zl-lg-txt" title={fullLabel(row, text)}>
           <span class="zl-lg-tool">{row.tool}</span>
-          <span class="zl-lg-arg zl-data">{text}</span>
+          <span class={`zl-lg-arg zl-data${row.argTail ? " is-tail" : ""}`}>{text}</span>
           {dim && <span class="zl-lg-dim"> · {dim}</span>}
         </span>
         {elapsed && <span class="zl-lg-out zl-data">{elapsed}</span>}
@@ -249,19 +250,36 @@ function summarizeRows(rows) {
     if (!(k in counts)) { counts[k] = 0; order.push(k); }
     counts[k]++;
   }
-  const parts = order.map((k) => `${counts[k]} ${pluralizeTool(k, counts[k])}`);
-  const total = rows.length;
-  return `${total} action${total === 1 ? "" : "s"} · ${parts.join(" · ")}`;
+  return order.map((k) => `${counts[k]} ${pluralizeTool(k, counts[k])}`).join(" · ");
 }
 
-function FoldHeader({ expanded, earlierCount, failed, summary, onToggle }) {
+// countedSummary is summarizeRows with its total in front, which is what the
+// EXPANDED header says. Folded, the total is already the row's first word, so
+// repeating it there would say the number twice.
+function countedSummary(rows) {
+  const total = rows.length;
+  return `${total} action${total === 1 ? "" : "s"} · ${summarizeRows(rows)}`;
+}
+
+function FoldHeader({ expanded, earlier = [], failed, summary, onToggle }) {
   return (
     <button type="button" class="zl-lg-head" onClick={onToggle} aria-expanded={expanded}>
       <Chevron open={expanded} />
       <span class="zl-lg-head-t">
         {expanded
           ? summary
-          : <><span class="zl-data">{earlierCount}</span> earlier action{earlierCount === 1 ? "" : "s"}</>}
+          : (
+            // Folded, the header used to say "11 earlier actions" and nothing
+            // else: a number that tells you work happened and refuses to say
+            // what. The composition was already being computed for the
+            // EXPANDED header, where it is least needed — you can see the rows
+            // there. Same function, moved to the state that hides them; the
+            // fold itself is untouched.
+            <>
+              <span class="zl-data">{earlier.length}</span> earlier
+              {earlier.length > 0 && <> · {summarizeRows(earlier)}</>}
+            </>
+          )}
       </span>
       {failed > 0 && (
         <span class="zl-lg-head-fail"><span class="zl-data">{failed}</span> failed</span>
@@ -315,7 +333,7 @@ export function ActivityLedger({
       {folded && earlier.length > 0 && (
         <FoldHeader
           expanded={false}
-          earlierCount={earlier.length}
+          earlier={earlier}
           failed={failed}
           onToggle={() => setExpanded(true)}
         />
@@ -323,7 +341,7 @@ export function ActivityLedger({
       {expanded && foldable && (
         <FoldHeader
           expanded
-          summary={summarizeRows(doneRows.concat(liveRow ? [liveRow] : []))}
+          summary={countedSummary(doneRows.concat(liveRow ? [liveRow] : []))}
           failed={failed}
           onToggle={() => setExpanded(false)}
         />
