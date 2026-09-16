@@ -6,17 +6,14 @@ import {
 
 describe("native barcode scanner contract", () => {
   it("registers the exact plugin name exported by the installed package", () => {
-    const packageEntry = readFileSync(new URL(
-      "../node_modules/@capacitor-mlkit/barcode-scanning/dist/esm/index.js",
-      import.meta.url,
-    ), "utf8");
-    const podfile = readFileSync(new URL("../ios/App/Podfile", import.meta.url), "utf8");
-    const project = readFileSync(new URL(
-      "../ios/App/App.xcodeproj/project.pbxproj",
-      import.meta.url,
-    ), "utf8");
-    const boot = readFileSync(new URL("./boot.js", import.meta.url), "utf8");
-    const infoPlist = readFileSync(new URL("../ios/App/App/Info.plist", import.meta.url), "utf8");
+    const packageEntry = readFileSync(
+      "node_modules/@capacitor-mlkit/barcode-scanning/dist/esm/index.js",
+      "utf8",
+    );
+    const podfile = readFileSync("ios/App/Podfile", "utf8");
+    const project = readFileSync("ios/App/App.xcodeproj/project.pbxproj", "utf8");
+    const boot = readFileSync("www/boot.js", "utf8");
+    const infoPlist = readFileSync("ios/App/App/Info.plist", "utf8");
     const packagePluginName = packageEntry.match(/registerPlugin\((['"])([^'"]+)\1/)?.[2];
 
     expect(packagePluginName).toBe(BARCODE_SCANNER_PLUGIN);

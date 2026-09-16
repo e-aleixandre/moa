@@ -25,7 +25,7 @@ describe("native device authentication", () => {
   });
 
   it("keeps the durable credential in a device-only Keychain item", () => {
-    const source = readFileSync(new URL("../ios/App/App/DeviceCredentialStore.swift", import.meta.url), "utf8");
+    const source = readFileSync("ios/App/App/DeviceCredentialStore.swift", "utf8");
     expect(source).toContain("SecItemAdd");
     expect(source).toContain("SecItemCopyMatching");
     expect(source).toContain("kSecAttrAccessibleWhenUnlockedThisDeviceOnly");
@@ -33,9 +33,29 @@ describe("native device authentication", () => {
   });
 
   it("uses an ephemeral native session and refuses redirects", () => {
-    const source = readFileSync(new URL("../ios/App/App/DeviceAuthBridge.swift", import.meta.url), "utf8");
+    const source = readFileSync("ios/App/App/DeviceAuthBridge.swift", "utf8");
+    const controller = readFileSync("ios/App/App/MoaBridgeViewController.swift", "utf8");
+    const config = JSON.parse(readFileSync("capacitor.config.json", "utf8"));
+    const capacitorPolicy = readFileSync(
+      "node_modules/@capacitor/ios/Capacitor/Capacitor/WebViewDelegationHandler.swift",
+      "utf8",
+    );
     expect(source).toContain("URLSessionConfiguration.ephemeral");
     expect(source).toContain("completionHandler(nil)");
     expect(source).toContain('request.setValue("Moa-Device \\(stored.credential)", forHTTPHeaderField: "Authorization")');
+
+    // The paired origin cannot be put in Capacitor's build-time, host-only
+    // allowNavigation list. Its plugin hook runs before Capacitor's Safari
+    // fallback: false admits only the exact runtime origin, while nil leaves
+    // every other top-level URL to the fallback unchanged.
+    expect(config.server.allowNavigation).toBeUndefined();
+    expect(controller).toContain("registerPluginInstance(PairedServerNavigationPlugin())");
+    expect(controller).toContain("NativeServerBinding.matches(url)");
+    expect(controller).toContain("return NSNumber(value: false)");
+    expect(source).toContain('components.scheme?.lowercased() == "https"');
+    expect(source).toContain("bound.host?.lowercased() == url.host?.lowercased()");
+    expect(source).toContain("effectivePort(bound) == effectivePort(url)");
+    expect(capacitorPolicy.indexOf("plugin.shouldOverrideLoad(navigationAction)"))
+      .toBeLessThan(capacitorPolicy.indexOf("UIApplication.shared.open(navURL"));
   });
 });

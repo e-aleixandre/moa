@@ -32,12 +32,35 @@ enum NativeServerBinding {
         origin == originString(securityOrigin)
     }
 
+    static func matches(_ url: URL) -> Bool {
+        guard
+            let rawOrigin = origin,
+            let components = URLComponents(string: rawOrigin),
+            components.scheme?.lowercased() == "https",
+            components.host != nil,
+            components.user == nil,
+            components.password == nil,
+            components.path.isEmpty || components.path == "/",
+            components.query == nil,
+            components.fragment == nil,
+            let bound = components.url,
+            url.scheme?.lowercased() == "https",
+            bound.host?.lowercased() == url.host?.lowercased()
+        else { return false }
+        return effectivePort(bound) == effectivePort(url)
+    }
+
     static func originString(_ origin: WKSecurityOrigin) -> String {
         let defaultPort = (origin.protocol == "https" && origin.port == 443)
             || (origin.protocol == "http" && origin.port == 80)
         let port = origin.port > 0 && !defaultPort ? ":\(origin.port)" : ""
         let host = origin.host.contains(":") ? "[\(origin.host)]" : origin.host
         return "\(origin.protocol)://\(host)\(port)"
+    }
+
+    private static func effectivePort(_ url: URL) -> Int? {
+        if let port = url.port { return port }
+        return url.scheme?.lowercased() == "https" ? 443 : nil
     }
 }
 

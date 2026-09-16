@@ -23,8 +23,28 @@ final class MoaBridgeViewController: CAPBridgeViewController {
     }
 
     override func capacitorDidLoad() {
+        bridge?.registerPluginInstance(PairedServerNavigationPlugin())
         shareInboxHandler.webView = webView
         deviceAuthHandler.webView = webView
+    }
+}
+
+// Capacitor's static allowNavigation list is host-only and the server is not
+// known when this app is built. A plugin policy runs before Capacitor opens an
+// outside URL in Safari, so it can admit the one full HTTPS origin paired at
+// runtime without admitting another port, scheme, or host. Returning nil for
+// everything else preserves Capacitor's normal external-link handling.
+final class PairedServerNavigationPlugin: CAPInstancePlugin, CAPBridgedPlugin {
+    let identifier = "MoaPairedServerNavigation"
+    let jsName = "MoaPairedServerNavigation"
+    let pluginMethods: [CAPPluginMethod] = []
+
+    override func shouldOverrideLoad(_ navigationAction: WKNavigationAction) -> NSNumber? {
+        guard
+            let url = navigationAction.request.url,
+            NativeServerBinding.matches(url)
+        else { return nil }
+        return NSNumber(value: false)
     }
 }
 
