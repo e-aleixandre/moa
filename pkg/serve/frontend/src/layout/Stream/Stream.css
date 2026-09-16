@@ -114,6 +114,34 @@
     #000 calc(100% - 28px),
     transparent 100%
   );
+
+  /* The half-bleed above is a SCROLLING effect: it spends half the status-bar
+     inset so a long history climbs into the band and dissolves there. A
+     conversation that does not scroll has nothing to climb -- its first
+     message simply sits 31px too high, under the capsules, which is where the
+     owner found it with a single message on screen.
+
+     So the bleed is given back exactly when it buys nothing. Not by measuring
+     heights in JS -- that desynchronises the moment the text grows -- but by
+     making the clearance a flex item that is ALLOWED to shrink: the column
+     below is `flex: none`, this spacer is the only thing with give, and the
+     browser takes the overflow out of it before it lets the scroller scroll.
+
+     That is also why the threshold cannot jump. The spacer does not switch
+     between two values; it is squeezed continuously from its full height down
+     to 0 as the content grows into it, so the message that crosses over slides
+     the transcript up by exactly as much as it needs and no more. The same
+     arithmetic absorbs the keyboard: when the viewport shrinks under `100dvh`,
+     what was slack becomes scroll, gradually. */
+  display: flex;
+  flex-direction: column;
+}
+.mconv .zl-transcript > * { flex: none; }
+.mconv .zl-transcript::before {
+  content: "";
+  flex: 0 1 auto;
+  min-height: 0;
+  height: calc(var(--edge-bleed-top) * 0.5);
 }
 
 /* A subagent screen already has a head: no capsule padding, no mask. */
@@ -122,6 +150,9 @@
   -webkit-mask-image: none;
   mask-image: none;
 }
+/* ...and therefore nothing to clear: the spacer belongs to the floating
+   capsules, which this screen does not have. */
+.msa .zl-transcript::before { content: none; }
 
 /* System line: a note about the conversation rather than part of it. */
 .zl-sys {
