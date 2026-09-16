@@ -11,6 +11,7 @@ import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resume
 import { addToast } from "../../../data/notifications.js";
 import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, openInbox, retryEvents, routeEvent, routeEventToNewSession } from "../../../data/events.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
+import { SessionRow } from "../../../components/SessionRow/SessionRow.jsx";
 import { LivePreview } from "../../../components/LivePreview/LivePreview.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileChrome } from "../MobileChrome/MobileChrome.jsx";
@@ -198,42 +199,52 @@ function MobileConversationBody({ forceMobile = false }) {
         </div>
       );
     } else {
+      // A session is drawn HERE the way it is drawn in the drawer: the same
+      // SessionRow the Sidebar mounts, with the same props (state, age, path).
+      // This screen used to carry its own card for the same object — two
+      // drawings of a session one tap apart — which is exactly the drift the
+      // migration exists to end. Nothing is passed that the sidebar does not
+      // pass, so the `~` a home-directory session shows is the one the list
+      // shows too.
+      //
+      // The rows replaced the labels above them: "N saved" is in the button
+      // that opens the full list, and "Recent" headed the only list on the
+      // screen. A group heading separates lists; there is one.
       body = (
         <div class="mconv-empty">
           <p class="mconv-empty-title">No open sessions</p>
-          <p class="mconv-empty-sub">{savedCount} saved · pick up where you left off</p>
           {recents.length > 0 && (
-            <>
-              <p class="mconv-empty-label">Recent</p>
-              <div class="mconv-empty-recents">
-                {recents.map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    class="mconv-empty-recent"
-                    aria-label={`${r.title} — saved, ${r.when}`}
-                    onClick={() => onSelectFromDrawer(r.id)}
-                  >
-                    <span class="mconv-empty-recent-top">
-                      <span class="mconv-empty-recent-title">{r.title}</span>
-                      <span class="mconv-empty-recent-when">{r.when}</span>
-                    </span>
-                    <span class="mconv-empty-recent-path">{r.path}</span>
-                  </button>
-                ))}
-              </div>
-            </>
+            <div class="mconv-empty-recents">
+              {recents.map((r) => (
+                <SessionRow
+                  key={r.id}
+                  title={r.title}
+                  state="saved"
+                  when={r.when}
+                  path={r.path}
+                  onClick={() => onSelectFromDrawer(r.id)}
+                />
+              ))}
+            </div>
           )}
           <div class="mconv-empty-actions">
+            {/* One dominant action, and it is the same New session button the
+                first-run screen draws. Browsing is the quiet one: the rows
+                above already are the sessions, so the door to the full list
+                does not need to compete with starting work. */}
+            <button
+              type="button"
+              class="mconv-empty-new mconv-empty-new-primary"
+              onClick={onNew}
+            >
+              <Plus size={15} aria-hidden="true" /> New session
+            </button>
             <button
               type="button"
               class="mconv-empty-browse"
               onClick={() => openDrawer("list")}
             >
               All sessions · {activeCount + savedCount}
-            </button>
-            <button type="button" class="mconv-empty-new" onClick={onNew}>
-              <Plus size={15} aria-hidden="true" /> New session
             </button>
           </div>
         </div>
