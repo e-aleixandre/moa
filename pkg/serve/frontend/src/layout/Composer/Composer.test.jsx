@@ -142,6 +142,43 @@ test("successive voice transcripts append at the caret without replacing the dra
   expect(textarea.selectionEnd).toBe("already first second".length);
 });
 
+// Dictation used to be switched off in steer mode, on the grounds that a steer
+// "targets a subagent, not the parent run" — which describes the rule instead
+// of justifying it. The thing that could have justified it is the only thing
+// worth defending: a transcript must land in the composer that asked for it.
+// Each Composer holds its own voice gesture and writes its OWN textarea, so
+// dictating into a subagent's steer box cannot spill into the parent's.
+test("a steer composer's transcript lands in its own box, never in the parent's", () => {
+  refs.length = 0;
+  Composer({ sessionId: "s1", session: { state: "running" } });
+  const parentVoice = voiceOptions;
+  const parentTextarea = {
+    value: "parent draft", selectionStart: 12, selectionEnd: 12,
+    focus() {}, dispatchEvent() {},
+  };
+  refs[0].current = parentTextarea;
+  const afterParent = refs.length;
+
+  Composer({
+    sessionId: "s1",
+    session: { state: "running" },
+    steer: { jobId: "sa-1", name: "child" },
+  });
+  const steerVoice = voiceOptions;
+  const steerTextarea = {
+    value: "", selectionStart: 0, selectionEnd: 0,
+    focus() {}, dispatchEvent() {},
+  };
+  refs[afterParent].current = steerTextarea;
+
+  // Two mounts, two gestures: the steer box did not inherit the parent's.
+  expect(steerVoice).not.toBe(parentVoice);
+
+  steerVoice.onTranscript("stop and report");
+  expect(steerTextarea.value).toBe("stop and report");
+  expect(parentTextarea.value).toBe("parent draft");
+});
+
 // A steer the server refused must not look like it was sent: the composer keeps
 // the text so the user can resend it, instead of silently emptying the box on
 // any HTTP 200. This is the case that made a lost message indistinguishable

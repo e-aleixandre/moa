@@ -819,9 +819,13 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   });
 
   // Voice is usable only when the backend can transcribe AND the browser has a
-  // MediaRecorder + mic (needs a secure context). Steer mode never records — it
-  // targets a subagent, not the parent run.
-  const canVoice = canTranscribe && voiceSupported && !steer;
+  // MediaRecorder + mic (needs a secure context). Nothing else gates it: a
+  // steer is typed in this same box, by the same thumb, and often while
+  // walking — the one situation dictation exists for. The transcript lands in
+  // the composer that asked for it (insertAtCursor writes THIS instance's
+  // textarea, and useVoiceGesture holds one recorder per composer), so a
+  // subagent's steer box cannot spill into the parent's.
+  const canVoice = canTranscribe && voiceSupported;
 
   // ⌘. (Mac) / Alt+. (elsewhere) toggles push-to-talk for the FOCUSED composer.
   // Ctrl is deliberately excluded (project rule: ⌘ on Mac / Alt elsewhere,
