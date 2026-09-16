@@ -28,7 +28,6 @@ import { U2Lab } from "./catalog/u2-lab.jsx";
 import { U6Lab } from "./catalog/u6-lab.jsx";
 import { LPLab } from "./catalog/lp-lab.jsx";
 import { LP2Lab } from "./catalog/lp2-lab.jsx";
-import { SubLab } from "./catalog/sub-lab.jsx";
 import { seedCatalogStore } from "./catalog/specimen.js";
 import { installCatalogBackend } from "./catalog/catalog-backend.js";
 import { announceArrivals } from "./data/events.js"; // wake-on-event
@@ -59,7 +58,6 @@ const LINKS = [
   { key: "u6", label: "User 6", href: "?view=u6" },
   { key: "lp", label: "Live Preview", href: "?view=lp" },
   { key: "lp2", label: "Live Preview 2", href: "?view=lp2" },
-  { key: "sub", label: "Subagente terminado", href: "?view=sub" },
 ];
 
 // wake-on-event: the two inbox seed sets are a URL away from each other, so
@@ -199,7 +197,6 @@ function CatalogApp() {
   else if (view === "u6") body = <U6Lab />;
   else if (view === "lp") body = <LPLab />;
   else if (view === "lp2") body = <LP2Lab />;
-  else if (view === "sub") body = <SubLab />;
   else if (view === "mobile") {
     body = (
       <PhoneLab>
