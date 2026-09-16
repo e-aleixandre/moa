@@ -14,8 +14,22 @@ import "./WorkChrome.css";
 // different state vocabulary than the desktop.
 
 // WorkHead — one region, one hairline, and the title is THE WORK: the errand
-// for a subagent, the command for a process. The agent/model line is what
-// truncates first; the title never does.
+// for a subagent, the command for a process.
+//
+// It has TWO shapes, and which one a screen gets is decided by what its title
+// is. `inlineTitle` puts the title ON the row with the way back and the state,
+// so the whole head is ONE row: that is the errand's shape, because an errand
+// is a phrase and a phrase ellipses without stopping being itself. The owner
+// on his phone: "es como que hay dos cabeceras, cuando yo no veo que hiciera
+// falta dos cabeceras. En una cabría todo." In that shape the way back is the
+// chevron alone — 390px has no 22 characters to spend on it once the title
+// shares the row — and there is no sub-line, because a second line IS the
+// second head.
+//
+// The stacked shape stays for a console, whose title is a command: verbatim,
+// mono, possibly several lines, and the one thing on that screen you take
+// away. That cannot ride a row and must not be summarised, so the head that
+// carries it keeps its own line and its sub-line.
 //
 // `copyLabel` makes the title itself the copy target, which is what a command
 // needs — it is the one thing on the screen you take away verbatim, and a 14px
@@ -26,7 +40,7 @@ import "./WorkChrome.css";
 // command is the identity of a console, so past a few lines it gets its own
 // scroll instead of the three-line clamp an errand uses. It is still bounded —
 // a here-doc cannot be allowed to push the output off the screen.
-export function WorkHead({ phone, parent, onBack, title, titleMono, titleScroll, copyLabel, sub, state, actions }) {
+export function WorkHead({ phone, parent, onBack, title, inlineTitle, titleMono, titleScroll, copyLabel, sub, state, actions }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return undefined;
@@ -35,12 +49,14 @@ export function WorkHead({ phone, parent, onBack, title, titleMono, titleScroll,
   }, [copied]);
   const cls = `wk-title${titleMono ? " is-mono" : ""}${titleScroll ? " is-scroll" : ""}`;
   return (
-    <header class={`wk-head${phone ? " is-phone" : ""}`}>
+    <header class={`wk-head${phone ? " is-phone" : ""}${inlineTitle ? " is-one-row" : ""}`}>
       <div class="wk-head-top">
         {/* ONE door out, and it says where it leads. Desktop prints the
             parent's own name; the phone prints "Parent", because 390px cannot
             spend 22 characters on the way back without shortening the title.
-            Both carry the same full accessible name. */}
+            With the title on this row neither density has room for a word, so
+            the chevron goes alone and the accessible name carries the rest —
+            it is the same full name in all three cases. */}
         <button
           type="button"
           class={`wk-home${phone ? " is-phone" : ""}`}
@@ -48,13 +64,14 @@ export function WorkHead({ phone, parent, onBack, title, titleMono, titleScroll,
           aria-label={`Back to ${parent}`}
         >
           <ChevronLeft size={16} aria-hidden="true" />
-          <span class="wk-home-t">{phone ? "Parent" : parent}</span>
+          {!inlineTitle && <span class="wk-home-t">{phone ? "Parent" : parent}</span>}
         </button>
+        {inlineTitle && <h2 class="wk-title-inline">{title}</h2>}
         {state}
         <span class="wk-sp" />
         {actions}
       </div>
-      {copyLabel ? (
+      {!inlineTitle && (copyLabel ? (
         <button
           type="button"
           class={`${cls} is-copy${phone ? " is-phone" : ""}`}
@@ -66,8 +83,8 @@ export function WorkHead({ phone, parent, onBack, title, titleMono, titleScroll,
         </button>
       ) : (
         <h2 class={cls}>{title}</h2>
-      )}
-      {sub && <p class="wk-sub">{sub}</p>}
+      ))}
+      {!inlineTitle && sub && <p class="wk-sub">{sub}</p>}
     </header>
   );
 }
@@ -165,12 +182,21 @@ export function RunDetails({ phone, rows = [], ids = [] }) {
           ))}
         </dl>
       )}
-      {ids.length > 0 && (
-        <div class="wk-ids">
-          {ids.map(([k, v]) => <IdRow key={k} label={k} value={v} phone={phone} />)}
-        </div>
-      )}
+      <RunIds ids={ids} phone={phone} />
     </Disclosure>
+  );
+}
+
+// RunIds — the identifiers on their own, for a screen that prints its figures
+// somewhere else and only needs the two strings you copy into a terminal.
+// Exported so a subagent's foot and a console's audit table cannot end up with
+// two different ways to copy a job id.
+export function RunIds({ ids = [], phone }) {
+  if (ids.length === 0) return null;
+  return (
+    <div class="wk-ids">
+      {ids.map(([k, v]) => <IdRow key={k} label={k} value={v} phone={phone} />)}
+    </div>
   );
 }
 

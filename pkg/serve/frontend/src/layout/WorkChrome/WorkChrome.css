@@ -16,6 +16,11 @@
   padding: calc(var(--shell-top) + 8px) var(--space-4) var(--space-3);
 }
 
+/* ONE row: the errand shares the row with the way back and the state, so the
+   head stops being two stacked bands. Nothing below the row survives, so the
+   block's bottom padding goes with them. */
+.wk-head.is-one-row { padding-bottom: var(--space-3); }
+
 .wk-head-top {
   display: flex;
   align-items: center;
@@ -25,7 +30,33 @@
 
 .wk-head.is-phone .wk-head-top { min-height: var(--control-touch); }
 
+/* The row must not wrap: a head that wraps is the second head coming back.
+   The title is the only elastic thing on it and it ellipses; every control is
+   flex:none and keeps its full target. */
+.wk-head.is-one-row .wk-head-top { flex-wrap: nowrap; }
+
 .wk-sp { flex: 1; min-width: 0; }
+
+/* The errand ON the row. It is what gives and what ellipses -- a state word
+   that wrapped would break the row it closes. */
+.wk-title-inline {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wk-head.is-phone .wk-title-inline { font-size: var(--text-base); }
+
+/* With the title on the row the spring has nothing left to push, so the
+   controls sit right after the state rather than at the far edge. */
+.wk-head.is-one-row .wk-sp { flex: none; }
 
 /* the door home */
 .wk-home {
