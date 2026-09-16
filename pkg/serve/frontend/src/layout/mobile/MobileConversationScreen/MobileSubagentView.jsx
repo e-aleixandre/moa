@@ -3,7 +3,7 @@ import { Composer } from "../../Composer/Composer.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { WorkHead } from "../../WorkChrome/WorkChrome.jsx";
 import {
-  SubagentReport, SubHead, SubState, SubagentActions,
+  SubagentReport, SubIdent, SubState, SubagentActions, SubagentLiveBar,
 } from "../../SubagentView/SubagentView.jsx";
 import { subagentView } from "../../../data/subagent-view-model.js";
 import { sessionTitle } from "../../../data/util/format.js";
@@ -31,21 +31,24 @@ import "./MobileSubagentView.css";
 //
 // What the previous version did wrong, and what changed with it:
 //   - the title was the CODENAME ("subagent · changelog") in a chat-style
-//     header bar. The title is the ERRAND now; the agent that ran it is
-//     provenance and rides the sub-line, exactly as on the desktop.
+//     header bar. The title is the ERRAND now, and it rides the head's single
+//     row; the agent that ran it is provenance and travels with the run's
+//     other figures, exactly as on the desktop.
 //   - the RESULT of a finished run sat in a banner below the whole
 //     transcript, so the one thing you opened the screen for was the last
-//     thing you reached. A finished run now IS the report, at the top, with
-//     the record folded under it and the audit at the foot.
+//     thing you reached. Then it became a report at the top with the record
+//     folded under it, and the record — the thing the owner actually came to
+//     read — was two taps away. It is the page now, and the figures are a
+//     foot.
 //   - completed was green. Green means running in this system; completed and
 //     cancelled are neutral.
 //   - a permanent StatusStrip carried the child's context ring, spend, model
 //     and effort under the composer — audit, on the screen you steer from,
-//     none of it answerable there. The figures live in Run details, where the
-//     desktop keeps them; nothing was lost, it moved.
+//     none of it answerable there. The figures live in the report's foot,
+//     where the desktop keeps them; nothing was lost, it moved.
 //   - the run-mode chip and the "Subagent details" sheet were the phone's own
 //     vocabulary for things the shared chrome says once: promote is a verb in
-//     the head's actions, the rest is Run details.
+//     the head, the rest is the foot.
 //
 // Reuses the pure subagentView() projection; rebounds to the parent when the
 // subagent was pruned.
@@ -101,17 +104,9 @@ export function MobileSubagentView({ session, jobId, onBack, onDraggingChange })
         parent={sessionTitle(session)}
         onBack={onBack}
         title={view.name}
-        sub={<SubHead view={view} />}
+        inlineTitle
         state={<SubState view={view} />}
-        actions={
-          <SubagentActions
-            view={view}
-            phone
-            onPromote={onPromote}
-            onStop={onCancel}
-            confirmCancel={confirmCancel}
-          />
-        }
+        actions={<SubagentActions view={view} phone onPromote={onPromote} />}
       />
 
       {view.terminal ? (
@@ -122,6 +117,8 @@ export function MobileSubagentView({ session, jobId, onBack, onDraggingChange })
           session={session}
           jobId={jobId}
           onBack={onBack}
+          onStop={onCancel}
+          confirmCancel={confirmCancel}
         />
       )}
     </div>
@@ -129,11 +126,12 @@ export function MobileSubagentView({ session, jobId, onBack, onDraggingChange })
 }
 
 // MobileSubagentLive — a running errand, on a phone: the record is the body,
-// the now-line and the steer composer are the foot. Same anatomy as the
+// the live bar and the steer composer are the foot. Same anatomy as the
 // desktop, in the phone's own materials — the transcript is MobileStream (the
 // phone's scroller and density) and the composer sits in the `.mcomposer`
-// pill, so steering a child feels like typing in the parent.
-function MobileSubagentLive({ view, session, jobId, onBack }) {
+// pill, so steering a child feels like typing in the parent. Stop rides the
+// live bar, exactly where the parent conversation keeps it.
+function MobileSubagentLive({ view, session, jobId, onBack, onStop, confirmCancel }) {
   return (
     <>
       <MobileStream
@@ -143,15 +141,7 @@ function MobileSubagentLive({ view, session, jobId, onBack }) {
       />
 
       <div class="mcomposer zl-dock msa-foot">
-        <div class="zl-live">
-          <div class="zl-live-bar">
-            <div class="zl-live-now" role="status" aria-live="polite">
-              <span class="zl-live-dot is-working" aria-hidden="true" />
-              <span class="zl-live-txt">{view.action || "working"}</span>
-              {!!view.elapsed && <span class="zl-live-el zl-data">{view.elapsed}</span>}
-            </div>
-          </div>
-        </div>
+        <SubagentLiveBar view={view} onStop={onStop} confirmCancel={confirmCancel} />
         <Composer
           key={`steer-${jobId}`}
           sessionId={session.id}

@@ -45,10 +45,13 @@
   box-shadow: -8px 0 24px rgb(0 0 0 / 0.35);
 }
 
-/* The head's actions can be two controls (promote + stop) on a screen whose
-   whole width is 390px, so the row wraps rather than squeezing the state word
-   or pushing a target off the edge. */
-.msa .wk-head-top { flex-wrap: wrap; row-gap: var(--space-2); }
+/* The head is ONE row and must stay one: the way back is a chevron, the
+   errand ellipses, the state word and the promote verb are flex:none. It used
+   to wrap here -- 390px could not hold a way back, a state word and TWO
+   controls -- which is exactly the "two headers" the owner saw. Stop left for
+   the live bar, so there is room, and the rule that made room by wrapping is
+   gone rather than kept as a safety net: a wrap here is a bug, not a
+   fallback. */
 
 /* The record, on the phone's own scroller. MobileStream is shared with the
    conversation, where it clears a floating title chip and the iOS status bar

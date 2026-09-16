@@ -1,12 +1,15 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
+import { Square } from "lucide-preact";
 import { Stream } from "../Stream/Stream.jsx";
 import { Composer } from "../Composer/Composer.jsx";
-import { WorkHead, StateWord, StopButton, CopyAction, Disclosure, RunDetails } from "../WorkChrome/WorkChrome.jsx";
+import { WorkHead, StateWord, CopyAction, RunIds } from "../WorkChrome/WorkChrome.jsx";
+import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import "../WorkChrome/WorkChrome.css";
 import "../LiveBar/LiveBar.css";
 import { subagentView, canPromote } from "../../data/subagent-view-model.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
 import { fmtTokens, sessionTitle } from "../../data/util/format.js";
+import { turnFinalResponse } from "../../data/stream-model.js";
 import { useStore } from "../../hooks/useStore.js";
 import { cancelSubagent, promoteSubagent } from "../../data/session-actions.js";
 import { updateSession } from "../../data/store.js";
@@ -15,26 +18,28 @@ import "./SubagentView.css";
 
 // SubagentView — a DELEGATED ERRAND, not a conversation with a header.
 //
-// While it lives, the screen follows the errand; when it ends, the screen IS
-// its report. The internal conversation is the record of how it got there, not
-// the identity of the screen. That fixes the hierarchy, and the hierarchy
-// fixes the layout:
+// The screen is the errand's RECORD, in both its states. While it lives, the
+// record is followed at its live end and you can steer it; when it ends, the
+// same record is there, whole, and the run's figures become a foot. What
+// changes between the two is the foot, not the page.
 //
-//   1  the errand       what you asked for. It is the title.
-//   2  state or result  what it is doing, or what it concluded.
-//   3  work log         the messages and tools that prove it.
-//   4  run details      model, tokens, cost, ids.
+// The anatomy, top to bottom, is the same in both:
 //
-// What the previous version did wrong: model / started / turns / tokens /
-// spend rode a permanent strip above the transcript, answering none of the
-// questions you arrive with, and the RESULT of a finished run sat in a banner
-// at the very bottom, under the whole record. Both are audit, and audit moved
-// to Run details at the foot; the result moved to the top.
+//   1  the head       ONE row: the way back, the errand, its state, and the
+//                     one thing you can still do to it (send it to the
+//                     background). It used to stack a second row with the
+//                     title and the model under the first, which on a phone
+//                     read as two headers for one screen.
+//   2  the record     the conversation, at full width, never folded.
+//   3  the foot       live: what it is doing, who is doing it, and Stop.
+//                     Ended: model, mode, duration, tokens, cost, and Copy.
 //
-// Running and terminal are the same object on the same route, so they share
-// the head. They do NOT share the composition: a live errand opens at its live
-// end and offers a steer composer; a finished one opens at the top with the
-// report and folds the record away.
+// What earlier versions did wrong, and what each fix cost. A permanent strip
+// of model/started/turns/tokens/spend above the transcript answered none of
+// the questions you arrive with; it became "Run details", folded at the foot,
+// which is where audit belongs — but folded is also where a record you came to
+// read must never be, and the whole conversation went in with it. The fold is
+// gone now: the figures are a bar, the record is the page.
 //
 // Props: { session, jobId, onBack }. onBack clears viewingSubagent.
 
@@ -106,38 +111,34 @@ export function SubagentView({ session, jobId, onBack }) {
         parent={sessionTitle(session)}
         onBack={onBack}
         title={view.name}
-        sub={<SubHead view={view} />}
+        inlineTitle
         state={<SubState view={view} />}
-        actions={<SubagentActions view={view} onPromote={onPromote} onStop={onCancel} confirmCancel={confirmCancel} />}
+        actions={<SubagentActions view={view} onPromote={onPromote} />}
       />
 
       {view.terminal
         ? <SubagentReport view={view} session={session} />
-        : <SubagentLive view={view} session={session} jobId={jobId} onBack={onBack} />}
+        : <SubagentLive view={view} session={session} jobId={jobId} onBack={onBack} onStop={onCancel} confirmCancel={confirmCancel} />}
     </div>
   );
 }
 
-// SubHead — who ran the errand, as the line that truncates FIRST. The agent
-// and its effort are provenance, not the subject: they answer "who did this",
-// which you ask after you know what it was.
+// SubIdent — who ran the errand: the identity dot and the model that carried
+// it. Provenance, so it never rides the head — the head is the errand, its
+// state and what you can still do to it, on ONE row. This travels with the
+// run's other figures instead: on the live line while it runs, in the report's
+// foot once it has ended, which is the same band in both states.
 //
-// Exported because the phone push (MobileSubagentView) mounts the same head:
-// two surfaces reading the same errand must not describe it with two
-// different sub-lines.
-export function SubHead({ view }) {
+// Exported because the phone push mounts the same bands: two surfaces reading
+// the same errand must not name its agent in two different ways.
+export function SubIdent({ view }) {
   const bits = [view.model, view.thinking && view.thinking !== "off" ? view.thinking : null].filter(Boolean);
   if (bits.length === 0) return null;
   return (
-    <>
+    <span class="sa-ident">
       <span class="sa-ident-dot" style={{ background: `var(--${view.accent})` }} aria-hidden="true" />
-      {bits.map((b, i) => (
-        <>
-          {i > 0 && <span class="wk-sub-sep" aria-hidden="true">·</span>}
-          <span key={b}>{b}</span>
-        </>
-      ))}
-    </>
+      {bits.join(" · ")}
+    </span>
   );
 }
 
@@ -156,33 +157,66 @@ export function SubState({ view }) {
   return <StateWord tone="neutral" word="Completed" />;
 }
 
-// SubagentActions — what you can still DO to a running errand: send it to the
-// background, or stop it. Terminal runs get nothing, because there is nothing
-// left to act on. Shared with the phone so the two surfaces cannot end up
-// offering different verbs for the same state; `phone` only grows the targets.
+// SubagentActions — what you can still DO to a running errand from the head:
+// send it to the background. Terminal runs get nothing, because there is
+// nothing left to act on. Shared with the phone so the two surfaces cannot end
+// up offering different verbs for the same state; `phone` only grows the
+// target.
 //
-// The two buttons are ONE group, and that is structural rather than cosmetic:
-// on a 390px head the row has to wrap, and a bare fragment let "Stop" break
-// away from "to background" and land alone on the next line, reading as a
-// second, unrelated control.
-export function SubagentActions({ view, phone = false, onPromote, onStop, confirmCancel }) {
-  if (view.terminal) return null;
+// STOP IS NOT HERE ANY MORE. It sat in this group, and with a way back, a
+// state word and two controls on one row, 390px had to wrap — which is what
+// made the head read as two heads. It moved to the live bar above the
+// composer, which is where the parent conversation has kept it since the
+// composer gave it up (LiveBar.jsx): the row that says the agent is working
+// is the row that offers to stop it. Same two-step confirmation, same 44px.
+export function SubagentActions({ view, phone = false, onPromote }) {
+  if (view.terminal || !canPromote(view)) return null;
   return (
-    <span class="sa-acts">
-      {canPromote(view) && (
-        <button type="button" class={`sa-promote${phone ? " is-phone" : ""}`} onClick={onPromote}>
-          to background
-        </button>
-      )}
-      <StopButton phone={phone} armed={confirmCancel} onStop={onStop} />
-    </span>
+    <button type="button" class={`sa-promote${phone ? " is-phone" : ""}`} onClick={onPromote}>
+      to background
+    </button>
+  );
+}
+
+// SubagentLiveBar — the band between the record and the steer composer, on
+// both surfaces. It carries what the head stopped carrying (which agent is
+// running this) beside what it always carried (what it is doing, for how
+// long), and it ends in Stop.
+//
+// It is `.zl-live` verbatim, the parent conversation's own bar, so stopping a
+// child is the same gesture in the same place as stopping the parent.
+export function SubagentLiveBar({ view, onStop, confirmCancel }) {
+  if (!view.action && !view.elapsed && !onStop) return null;
+  return (
+    <div class="zl-live">
+      <div class="zl-live-bar">
+        <div class="zl-live-now" role="status" aria-live="polite">
+          <span class="zl-live-dot is-working" aria-hidden="true" />
+          <span class="zl-live-txt">{view.action || "working"}</span>
+          <SubIdent view={view} />
+          {!!view.elapsed && <span class="zl-live-el zl-data">{view.elapsed}</span>}
+        </div>
+        {onStop && (
+          <button
+            type="button"
+            class={`zl-live-stop${confirmCancel ? " is-armed" : ""}`}
+            onClick={onStop}
+            aria-label={confirmCancel ? "Confirm stop" : "Stop"}
+            title={confirmCancel ? "Tap again to stop this subagent" : "Stop this subagent"}
+          >
+            <Square size={11} fill="currentColor" aria-hidden="true" />
+            <span>{confirmCancel ? "sure?" : "Stop"}</span>
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
 // SubagentLive — direct. The record is the body and opens at its live end; the
-// now-line and the steer composer are the foot. This is the functional reason
+// live bar and the steer composer are the foot. This is the functional reason
 // the fork deserves a whole screen.
-function SubagentLive({ view, session, jobId, onBack }) {
+function SubagentLive({ view, session, jobId, onBack, onStop, confirmCancel }) {
   return (
     <>
       <div class="sa-body">
@@ -193,17 +227,7 @@ function SubagentLive({ view, session, jobId, onBack }) {
         />
       </div>
 
-      {(view.action || view.elapsed) && (
-        <div class="zl-live">
-          <div class="zl-live-bar">
-            <div class="zl-live-now" role="status" aria-live="polite">
-              <span class="zl-live-dot is-working" aria-hidden="true" />
-              <span class="zl-live-txt">{view.action || "working"}</span>
-              {!!view.elapsed && <span class="zl-live-el zl-data">{view.elapsed}</span>}
-            </div>
-          </div>
-        </div>
-      )}
+      <SubagentLiveBar view={view} onStop={onStop} confirmCancel={confirmCancel} />
       <Composer
         key={`steer-${jobId}`}
         sessionId={session.id}
@@ -214,96 +238,143 @@ function SubagentLive({ view, session, jobId, onBack }) {
   );
 }
 
-// SubagentReport — a finished run is not a banner stapled under a transcript.
-// The outcome sentence and the result ARE the page and get the top of it; the
-// record folds below; the audit closes it. Nothing is pinned to the bottom,
-// because the report wins that space.
+// SubagentReport — a finished run, direction A: the RECORD is the page, whole
+// and unfolded, and the report is a foot.
+//
+// What this replaces, and why. The record used to live inside two closed
+// disclosures ("Work log", "Run details"), so the conversation you opened the
+// screen to read was two taps away and, once opened, indented inside a fold.
+// The owner, after using it on his phone: "esa forma de ver la conversación
+// como con desplegables no me gusta. No sé qué ganamos con esa vista."
+// Nothing, was the answer.
+//
+// The figures did NOT lose their place — "es verdad que viene bien ese
+// informe". They moved to a foot that is always on screen, so model, mode,
+// duration, tokens and cost are answerable at any scroll position, which the
+// disclosure could not do even while open.
+//
+// The record is the SAME Stream the live run mounts, with its own scroller, so
+// a finished errand reads exactly like the conversation it was. That also
+// settles where a report opens: at the end, like every transcript in this
+// product, which puts the conclusion on screen on arrival instead of at the
+// bottom of a long scroll. The record is above it, one swipe up, in the order
+// it happened.
 export function SubagentReport({ view, session, phone = false }) {
-  const bodyRef = useRef(null);
-  // Same route, opposite anchor: a report opens at the TOP. Without this the
-  // shared scroller keeps the live end it was following when the run ended.
-  useLayoutEffect(() => {
-    if (bodyRef.current) bodyRef.current.scrollTop = 0;
-  }, [view.jobId, view.outcome]);
+  return (
+    <>
+      <Stream
+        session={{ id: `${session?.id}:${view.jobId}`, messages: [] }}
+        blocks={view.blocks}
+        waypointAccent={view.accent}
+        dense={phone}
+        visibleDone={phone ? 1 : undefined}
+        tail={<ReportOutcome view={view} />}
+      />
+      <SubagentFoot view={view} session={session} phone={phone} />
+    </>
+  );
+}
 
-  const usage = view.usage;
-  const details = [];
-  if (view.model) details.push(["Model", view.thinking && view.thinking !== "off" ? `${view.model} · ${view.thinking}` : view.model]);
-  details.push(["Mode", view.async ? "background" : "sync"]);
-  if (view.elapsed) details.push(["Duration", view.elapsed]);
-  if (usage && (usage.inputTokens || usage.outputTokens)) {
-    details.push(["Tokens", `↑${fmtTokens(usage.inputTokens || 0)} ↓${fmtTokens(usage.outputTokens || 0)}`]);
+// ReportOutcome — the run's conclusion, appended to the record ONLY when the
+// record does not already end with it.
+//
+// A child's answer normally is the last assistant turn, and then printing it
+// again under the transcript would be the old bottom banner returning. But the
+// view model also accepts a `result` the backend reported outside the
+// transcript (subagent-view-model.js resultText), and a failure is often a
+// tool's error rather than anything the child said. Those have nowhere else to
+// appear, so they close the record here — verbatim, never summarised.
+function ReportOutcome({ view }) {
+  if (view.outcome === "completed") {
+    if (!view.result || recordEndsWith(view.blocks, view.result)) return null;
+    return <div class="sa-outcome"><div class="sa-result">{view.result}</div></div>;
   }
-  if (usage && usage.costUSD > 0) details.push(["Cost", fmtCost(usage.costUSD)]);
-  if (Number.isInteger(view.actionCount)) details.push(["Actions", String(view.actionCount)]);
+  if (view.outcome === "failed" && view.error) {
+    return <div class="sa-outcome"><pre class="sa-error">{view.error}</pre></div>;
+  }
+  if (view.outcome === "cancelled") {
+    return (
+      <div class="sa-outcome">
+        <p class="sa-cancelled">
+          {view.lastProgress
+            ? <>Last progress: it had run <span class="sa-data">{view.lastProgress}</span>. It reached no conclusion.</>
+            : <>It was stopped before it recorded any work.</>}
+        </p>
+      </div>
+    );
+  }
+  return null;
+}
+
+// recordEndsWith — does the child's own transcript already close with this
+// text? Compared against the last turn's final response, which is the same
+// string the turn's own copy button puts on the clipboard.
+function recordEndsWith(blocks, text) {
+  const want = String(text || "").trim();
+  if (!want) return true;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b.kind !== "document" && b.kind !== "streaming") continue;
+    return String(turnFinalResponse(b.blocks) || "").trim() === want;
+  }
+  return false;
+}
+
+// SubagentFoot — the report, compacted to the figures that answer "what did
+// this cost me", on a bar the record scrolls under. It is furniture at the
+// bottom edge, in the same place the parent conversation keeps its own live
+// bar, and it never scrolls away.
+//
+// The two IDENTIFIERS are not on it and could not be: a job id is 20 mono
+// characters that would push the cost off a 390px screen, and it is the one
+// datum here you never read — you copy it, once, into a terminal. So the
+// figures themselves are the door: a tap opens the identifiers. They are one
+// gesture away rather than gone, which is the trade this direction accepted.
+function SubagentFoot({ view, session, phone }) {
+  const [openIds, setOpenIds] = useState(false);
+  const usage = view.usage;
+
+  const marks = [];
+  if (view.model) {
+    marks.push({ k: view.thinking && view.thinking !== "off" ? `${view.model} · ${view.thinking}` : view.model });
+  }
+  marks.push({ k: view.async ? "background" : "sync" });
+  if (view.elapsed) marks.push({ k: view.elapsed, mono: true });
+  if (usage && (usage.inputTokens || usage.outputTokens)) {
+    marks.push({ k: `↑${fmtTokens(usage.inputTokens || 0)} ↓${fmtTokens(usage.outputTokens || 0)}`, mono: true });
+  }
+  if (usage && usage.costUSD > 0) marks.push({ k: fmtCost(usage.costUSD), mono: true });
 
   const ids = [["Job ID", view.jobId]];
   if (session?.id) ids.push(["Parent session", session.id]);
 
+  const copy = view.outcome === "failed"
+    ? { text: view.error || "", label: "Copy error" }
+    : { text: view.result || "", label: "Copy result" };
+
   return (
-    <div class={`sa-report-body${phone ? " is-phone" : ""}`} ref={bodyRef}>
-      <div class="sa-report-col">
-        <ReportHeadline view={view} />
-
-        {view.outcome === "completed" && view.result && (
-          <>
-            <div class="sa-result">{view.result}</div>
-            <div class="sa-report-acts">
-              <CopyAction phone={phone} text={view.result} label="Copy result" />
-            </div>
-          </>
-        )}
-
-        {/* The error VERBATIM, and it is the result — not a summary of it,
-            not the first four lines with the rest thrown away. A failure you
-            cannot paste is a failure you cannot report. */}
-        {view.outcome === "failed" && view.error && (
-          <>
-            <pre class="sa-error">{view.error}</pre>
-            <div class="sa-report-acts">
-              <CopyAction phone={phone} text={view.error} label="Copy error" />
-            </div>
-          </>
-        )}
-
-        {view.outcome === "cancelled" && (
-          <p class="sa-cancelled">
-            {view.lastProgress
-              ? <>Last progress: it had run <span class="sa-data">{view.lastProgress}</span>. It reached no conclusion.</>
-              : <>It was stopped before it recorded any work.</>}
-          </p>
-        )}
-
-        <Disclosure
-          label="Work log"
-          count={Number.isInteger(view.actionCount) && view.actionCount > 0
-            ? `${view.actionCount} ${view.actionCount === 1 ? "action" : "actions"}`
-            : undefined}
-        >
-          <div class="sa-log">
-            <Stream
-              session={{ id: `${session?.id}:${view.jobId}`, messages: [] }}
-              blocks={view.blocks}
-              waypointAccent={view.accent}
-            />
-          </div>
-        </Disclosure>
-
-        <RunDetails phone={phone} rows={details} ids={ids} />
-      </div>
+    <div class={`sa-foot${phone ? " is-phone" : ""}`}>
+      <button
+        type="button"
+        class={`sa-marks${phone ? " is-phone" : ""}`}
+        onClick={() => setOpenIds(true)}
+        aria-label="Run identifiers"
+      >
+        {marks.map((m) => (
+          <span class={`sa-mark${m.mono ? " zl-data" : ""}`} key={m.k}>{m.k}</span>
+        ))}
+      </button>
+      {copy.text && <CopyAction phone={phone} text={copy.text} label={copy.label} />}
+      <Sheet
+        open={openIds}
+        onClose={() => setOpenIds(false)}
+        title="This run"
+        ariaLabel="Run identifiers"
+      >
+        <RunIds ids={ids} phone={phone} />
+      </Sheet>
     </div>
   );
-}
-
-// The headline sentence. The head above already carries the persistent state,
-// so this does not repeat it with a glyph 100px lower: one state, one
-// persistent place, one contextual expression.
-function ReportHeadline({ view }) {
-  const word = view.outcome === "failed" ? "Failed" : view.outcome === "cancelled" ? "Cancelled" : "Completed";
-  const sentence = view.elapsed
-    ? `${word} ${view.outcome === "completed" ? "in" : "after"} ${view.elapsed}`
-    : word;
-  return <h3 class={`sa-headline is-${view.outcome}`}>{sentence}</h3>;
 }
 
 // openSubagentSibling is the one place that switches which fork is on screen.

@@ -1,8 +1,10 @@
-/* SubagentView — a delegated errand, and when it ends, its report.
+/* SubagentView — a delegated errand, and when it ends, its record.
  *
- * The head, the state word, the disclosures and the audit table are shared
- * with the bash console and live in WorkChrome.css. What is left here is what
- * only an errand has: the report column, its result, and the live body.
+ * The head, the state word and the audit table are shared with the bash
+ * console and live in WorkChrome.css; the live bar and the composer are the
+ * conversation's own (LiveBar.css, Composer.css). What is left here is what
+ * only an errand has: its identity mark, its outcome block, and the foot that
+ * carries the run's figures.
  *
  * SCOPE, and why most of this file is NOT scoped: the report is mounted by
  * two hosts -- the desktop `.subagent-view` and the phone push `.msa`
@@ -12,10 +14,11 @@
  * addressed by its own `sa-` class, and the phone adds `.is-phone` where a
  * finger or 390px needs different numbers.
  *
- * The previous version of this sheet described a different screen -- crumb,
- * sibling rail, permanent stat strip, outcome banner pinned at the bottom --
- * and 31 of its 33 rules had no element left to style. They are not kept
- * "just in case": dead CSS is a trap for whoever greps this file next.
+ * Rules are deleted rather than kept when their element goes. This sheet once
+ * described a crumb, a sibling rail, a permanent stat strip and a pinned
+ * outcome banner, and 31 of its 33 rules had nothing left to style; the
+ * report's own measured column went the same way when the record became the
+ * page. Dead CSS is a trap for whoever greps this file next.
  */
 .subagent-view {
   display: flex;
@@ -35,8 +38,17 @@
   .subagent-view { animation: none; }
 }
 
-/* The identity dot in the head's sub-line: which agent ran this. Provenance,
-   so it sits next to the model name rather than next to the errand. */
+/* The identity dot beside the model name: which agent ran this. Provenance,
+   so it travels with the run's figures -- the live bar while it runs, the
+   report's foot once it has ended -- and never with the errand in the head. */
+.sa-ident {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--zl-t4);
+}
+
 .sa-ident-dot {
   width: 6px;
   height: 6px;
@@ -44,7 +56,33 @@
   flex: none;
 }
 
+/* Stop on the live bar of a subagent keeps the bar's own control size; the
+   phone's 44px floor comes from LiveBar.css, which addresses `.mconv` -- the
+   push is `.msa`, outside it, so the floor is repeated for this host. */
+.msa .zl-live-stop {
+  position: relative;
+  height: 44px;
+  padding: 0 12px 0 10px;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--zl-fs-body);
+}
+.msa .zl-live-stop > * { position: relative; }
+.msa .zl-live-stop::before {
+  content: "";
+  position: absolute;
+  inset: 4px 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-hi);
+  box-shadow: var(--zl-rim);
+}
+.msa .zl-live-stop.is-armed::before {
+  background: color-mix(in srgb, var(--zl-red) 16%, var(--zl-control));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-red) 45%, transparent);
+}
+
 .sa-promote {
+  flex: none;
   font: inherit;
   font-size: var(--text-xs);
   color: var(--subtext0);
@@ -55,17 +93,6 @@
   cursor: pointer;
 }
 .sa-promote:hover { color: var(--text); }
-
-/* The two live verbs travel together. On a phone the head's row wraps (390px
-   cannot hold a way back, a state word and two controls), and without this
-   the stop broke away from the promote and landed alone on a second line,
-   reading as an unrelated control rather than the pair it is. */
-.sa-acts {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex: none;
-}
 
 /* On a phone it is a thumb target like every other control in the head, and
    the padding is real padding: a transparent halo does not answer
@@ -85,41 +112,15 @@
 }
 
 /* ── report ─────────────────────────────────────────────────────────────── */
-/* A finished errand opens at the top, and the column is measured for reading
-   rather than stretched to the pane: a one-line result across 1000px is a
-   worse answer than the same line across 70 characters. */
-.sa-report-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
+/* A finished errand IS its record: the transcript takes the whole body, at
+   full width, with nothing folded. The scroller is Stream's own, so the
+   measure, the padding and the stick-to-bottom are the conversation's. The
+   column this report used to measure for itself is gone with the fold. */
 
-.sa-report-col {
-  max-width: 76ch;
-  margin: 0 auto;
-  padding: var(--space-6) var(--space-6) var(--space-8);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-/* A phone has no measure to protect (the screen IS narrower than the column),
-   so the padding matches the rest of the phone's chrome and the foot clears
-   the home indicator. */
-.sa-report-body.is-phone .sa-report-col {
-  max-width: none;
-  padding: var(--space-4) var(--space-4)
-    calc(var(--shell-bottom) + var(--space-6));
-}
-
-/* The outcome sentence. Not a banner and not a glyph: the head already carries
-   the persistent state, this is the one contextual expression of it. */
-.sa-headline {
-  margin: 0;
-  font-size: var(--text-lg);
-  font-weight: 600;
-  color: var(--text);
-}
+/* The outcome that closes the record, when the record does not already end
+   with it (SubagentView.jsx ReportOutcome). It is a block of the transcript,
+   not a banner, so it takes the transcript's own spacing. */
+.sa-outcome { margin-top: var(--space-4); }
 
 /* The result is the reason the screen exists, so it reads as prose and gets
    the space to do it. */
@@ -163,26 +164,69 @@
   color: var(--text);
 }
 
-.sa-report-acts {
+/* ── the foot ───────────────────────────────────────────────────────────── */
+/* The report, as furniture at the bottom edge: the five figures the run cost,
+   and Copy. It sits on the sheet rather than the canvas so the record reads as
+   scrolling UNDER a surface instead of ending in one more row of itself. It is
+   the same slot the live bar occupies while the run is alive, so the screen
+   does not rearrange when the errand finishes -- only the foot changes. */
+.sa-foot {
+  flex: none;
   display: flex;
-  gap: var(--space-2);
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--surface0);
+  background: var(--mantle);
 }
 
-/* The work log inside its disclosure: indented so the record reads as evidence
-   under the report rather than as a second page. */
-.sa-log {
-  border-left: 1px solid var(--surface0);
-  padding-left: var(--space-4);
+/* The phone clears the home indicator, and the figures get room to wrap onto
+   a second line rather than scrolling sideways: a number you have to discover
+   by swiping is a number you do not have. */
+.sa-foot.is-phone {
+  padding: var(--space-2) var(--space-4) calc(var(--shell-bottom) + var(--space-2));
 }
 
-/* The record inside the fold is the shared Stream, whose column is measured
-   and padded for a 780px pane. Inside a 390px report that padding is 64px of
-   the width spent on nothing, and the evidence is what gets squeezed. */
-.sa-report-body.is-phone .sa-log {
-  padding-left: var(--space-3);
+/* The figures are also the DOOR to the identifiers (job id, parent session),
+   which do not fit on this bar and are the one datum here you copy rather than
+   read. It is a button, so it looks and behaves like one target, and on a
+   phone it is a full 44px of it. */
+.sa-marks {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  margin-left: calc(var(--space-2) * -1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.sa-report-body.is-phone .sa-log .zl-transcript {
-  max-width: none;
-  padding: 0;
+.sa-marks.is-phone { min-height: var(--control-touch); }
+
+@media (hover: hover) {
+  .sa-marks:hover { background: var(--surface0); }
+}
+
+.sa-marks:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.sa-mark {
+  font-size: var(--text-sm);
+  color: var(--overlay1);
+  white-space: nowrap;
+}
+
+.sa-mark.zl-data {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--subtext0);
 }
