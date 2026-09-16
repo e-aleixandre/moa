@@ -57,13 +57,15 @@ describe("tap in the container", () => {
     const vibrated = [];
     stubNavigator((p) => vibrated.push(p));
     withBridge({
+      selectionStart: () => calls.push("start"),
       selectionChanged: () => calls.push("selection"),
+      selectionEnd: () => calls.push("end"),
       impact: (o) => calls.push(`impact:${o.style}`),
       notification: (o) => calls.push(`notify:${o.type}`),
     });
 
     expect(tap("select")).toBe(true);
-    expect(calls).toEqual(["selection"]);
+    expect(calls).toEqual(["start", "selection", "end"]);
     // The web pattern must not also fire: two engines answering one intent is
     // a double tick on Android.
     expect(vibrated).toEqual([]);
@@ -73,7 +75,9 @@ describe("tap in the container", () => {
     const calls = [];
     stubNavigator(null);
     withBridge({
+      selectionStart: () => calls.push("start"),
       selectionChanged: () => calls.push("selection"),
+      selectionEnd: () => calls.push("end"),
       impact: (o) => calls.push(`impact:${o.style}`),
       notification: (o) => calls.push(`notify:${o.type}`),
     });
@@ -83,10 +87,29 @@ describe("tap in the container", () => {
     expect(calls).toEqual(["impact:MEDIUM", "notify:SUCCESS"]);
   });
 
+  it("starts the native selection generator before asking it to tick", () => {
+    let started = false;
+    let felt = false;
+    stubNavigator(null);
+    withBridge({
+      selectionStart: () => { started = true; },
+      selectionChanged: () => { if (started) felt = true; },
+      selectionEnd: () => { started = false; },
+    });
+
+    expect(tap("select")).toBe(true);
+    expect(felt).toBe(true);
+    expect(started).toBe(false);
+  });
+
   it("falls back to the web when the bridge throws", () => {
     const vibrated = [];
     stubNavigator((p) => vibrated.push(p));
-    withBridge({ selectionChanged: () => { throw new Error("no bridge"); } });
+    withBridge({
+      selectionStart: () => {},
+      selectionChanged: () => { throw new Error("no bridge"); },
+      selectionEnd: () => {},
+    });
     expect(tap("select")).toBe(true);
     expect(vibrated).toEqual([12]);
   });

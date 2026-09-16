@@ -49,10 +49,13 @@ export function tap(kind = "select") {
       } else if (kind === "impact") {
         native.impact({ style: NATIVE_STYLE.medium });
       } else {
-        // selectionChanged is the one iOS reserves for a value crossing a
-        // detent: lighter than an impact, and the right feel for a drawer
-        // passing the point where releasing would open it.
+        // Capacitor's iOS plugin only creates its UISelectionFeedbackGenerator
+        // in selectionStart; selectionChanged by itself resolves successfully
+        // but deliberately does nothing. A discrete detent still needs the
+        // complete lifecycle, even though it has only one change.
+        native.selectionStart();
         native.selectionChanged();
+        native.selectionEnd();
       }
       return true;
     } catch {
