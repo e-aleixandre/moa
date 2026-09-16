@@ -1,0 +1,509 @@
+/* home-lab.css — CATALOG ONLY. Three directions for the phone's first screen.
+
+   Two kinds of rules live here:
+
+   1. `.home-*` — the lab's own page chrome (the reading column, the frames,
+      the contact-sheet table). Scaffolding, never shipped.
+
+   2. `.home-a/.home-b/.home-c` and their children — the directions themselves.
+      Direction A adds nothing but a host repaint over the SHIPPED Sidebar, the
+      same technique title-attention-lab.css uses over MobileChrome. B and C
+      are lab-local markup mounting the shipped SessionRow.
+
+   Every value is a token from tokens/tokens.css. No `var(--zl-*, fallback)`:
+   the ladder is declared on :root now, so a fallback would be a second copy of
+   a value that already has one home. */
+
+/* ── Page chrome ───────────────────────────────────────────────────────── */
+
+.home-lab {
+  padding: var(--space-6) var(--space-4) var(--space-12);
+  background: var(--zl-canvas);
+  color: var(--zl-t1);
+  font-family: var(--font);
+}
+
+.home-intro,
+.home-sheet > h2,
+.home-sheet-sub,
+.home-dir > h2,
+.home-dir-one,
+.home-dir-principle,
+.home-desk {
+  max-width: 78ch;
+  margin-inline: auto;
+}
+
+/* The lab's own h1. `--zl-fs-hero` (26px) is PROPOSED in §3.3 and does not
+   exist in tokens.css yet, so the page title takes the display step rather
+   than inventing the token here: adding it is Fase 1's job, not a mock-up's. */
+.home-intro h1 { font-size: var(--zl-fs-display); margin: 0 0 var(--space-3); letter-spacing: -0.02em; }
+.home-intro p { color: var(--zl-t2); line-height: 1.6; margin: 0 0 var(--space-3); }
+.home-intro-note { color: var(--zl-t3); font-size: var(--zl-fs-body); }
+.home-intro code, .home-desk-note code { font-family: var(--mono); font-size: var(--zl-fs-meta); color: var(--zl-t2); }
+
+.home-sheet, .home-dir, .home-desk { margin-top: var(--space-10); }
+.home-sheet > h2, .home-dir > h2, .home-desk > h2 {
+  font-size: var(--zl-fs-display);
+  margin: 0 0 var(--space-2);
+  letter-spacing: -0.01em;
+}
+.home-sheet-sub { color: var(--zl-t3); font-size: var(--zl-fs-body); margin: var(--space-4) 0 var(--space-3); }
+.home-dir-one { color: var(--zl-t2); margin: 0 0 var(--space-2); }
+.home-dir-principle { color: var(--zl-t3); font-size: var(--zl-fs-body); line-height: 1.6; margin: 0 0 var(--space-4); }
+.home-dir-principle b { color: var(--zl-t2); }
+.home-desk p { color: var(--zl-t2); line-height: 1.6; }
+.home-desk-note { color: var(--zl-t3); font-size: var(--zl-fs-body); }
+.home-desk-note b { color: var(--zl-t2); }
+
+.home-dir-cols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  max-width: 78ch;
+  margin: 0 auto var(--space-5);
+}
+.home-dir-cols > div { flex: 1 1 24ch; min-width: 0; }
+.home-dir-cols h3 {
+  font-size: var(--zl-fs-meta);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--zl-t4);
+  margin: 0 0 var(--space-2);
+}
+.home-dir-cols ul, .home-table ul { margin: 0; padding-left: var(--space-4); }
+.home-dir-cols li, .home-table li { color: var(--zl-t2); font-size: var(--zl-fs-body); line-height: 1.55; margin-bottom: var(--space-2); }
+
+/* The strip scrolls sideways: three 390px phones never fit a phone. */
+.home-strip {
+  display: flex;
+  gap: var(--space-4);
+  overflow-x: auto;
+  padding: var(--space-2) 0 var(--space-4);
+  align-items: flex-start;
+  scroll-snap-type: x mandatory;
+}
+.home-fig { flex: none; margin: 0; scroll-snap-align: center; }
+.home-slot { flex: none; overflow: hidden; }
+.home-frame {
+  width: 390px;
+  height: 780px;
+  transform-origin: top left;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--zl-canvas);
+  border-radius: var(--zl-r-xl);
+  box-shadow: var(--zl-rim-2);
+}
+/* A window, not a handset: the phone's 24px corner is the device's, and a
+   desktop screen does not have one. */
+.home-frame.is-desk {
+  width: 1280px;
+  height: 800px;
+  border-radius: var(--zl-r-md);
+}
+
+/* ── Desktop frame ─────────────────────────────────────────────────────── */
+.hd-shell { display: flex; height: 100%; background: var(--zl-canvas); }
+/* 272px is --spine-width, the docked column production already gives it. */
+.hd-spine { flex: none; width: 272px; min-width: 0; display: flex; }
+.hd-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+}
+.hd-pane-inner { width: 100%; max-width: var(--content-narrow); }
+.hd-pane-blank { margin: 0; color: var(--zl-t4); font-size: var(--zl-fs-title); }
+.home-cap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-1) 0;
+}
+.home-cap b { font-size: var(--zl-fs-body); color: var(--zl-t2); font-weight: 600; }
+.home-cap span { font-size: var(--zl-fs-meta); color: var(--zl-t4); line-height: 1.45; }
+
+.home-table {
+  width: 100%;
+  max-width: 78ch;
+  margin: var(--space-6) auto 0;
+  border-collapse: collapse;
+  text-align: left;
+}
+.home-table th {
+  font-size: var(--zl-fs-meta);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--zl-t4);
+  font-weight: 600;
+  padding: 0 var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--zl-line);
+}
+.home-table td {
+  vertical-align: top;
+  padding: var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--zl-line);
+}
+.home-table td > b { display: block; color: var(--zl-t1); margin-bottom: var(--space-2); }
+.home-table-one { display: block; color: var(--zl-t2); font-size: var(--zl-fs-body); margin-bottom: var(--space-2); }
+.home-table-principle { display: block; color: var(--zl-t4); font-size: var(--zl-fs-meta); line-height: 1.5; }
+
+/* ?shots=1 — the capture grid: every frame 1:1, nothing else. */
+.home-lab.is-shots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+/* Data is mono everywhere in the lab, as it is in a row. */
+.home-lab .hl-data {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/* ══ A · The list is the screen ══════════════════════════════════════════
+   The whole direction is: mount the shipped Sidebar with nothing around it.
+   The only rules are the host's — the Sidebar paints itself as a sheet with a
+   seam on its right because it normally lives in a 272px column or a 340px
+   drawer. Here it IS the screen, so the sheet becomes the canvas and the seam
+   goes. Same repaint the drawer already does (.sdrawer .zl-side-body). */
+.home-a { height: 100%; display: flex; }
+.home-a .zl-side-body {
+  flex: 1;
+  background: var(--zl-canvas);
+  box-shadow: none;
+}
+/* The phone's status-bar clearance the drawer gives it (Sidebar.css keys that
+   on .sdrawer); as the screen itself it owes the clock the same. */
+.home-a .zl-side-head { padding-top: calc(16px + var(--shell-top)); }
+
+/* ══ B · One dominant, rows not cards ═══════════════════════════════════ */
+
+.home-b {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--zl-canvas);
+}
+
+.hb-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: calc(var(--space-5) + var(--shell-top)) var(--space-3) var(--space-3) var(--space-5);
+}
+/* One word, big — Linear's Inbox (§1.2). Display step, not a heading scale of
+   its own: the ladder has six sizes and this is the one for a screen title. */
+.hb-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--zl-fs-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--zl-t1);
+}
+.hb-count { flex: none; color: var(--zl-t4); }
+.hb-ico {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-t3);
+  cursor: pointer;
+  transition: background var(--motion-hover) var(--motion-ease), color var(--motion-hover) var(--motion-ease);
+}
+.hb-ico:active { background: var(--zl-hi); color: var(--zl-t1); }
+@media (hover: hover) { .hb-ico:hover { background: var(--zl-hi); color: var(--zl-t1); } }
+.hb-ico:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -2px; }
+
+.hb-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--space-2) var(--space-4);
+}
+
+/* Section labels at the meta step. 10.5px is one of the two sizes the ladder
+   deletes (§3.3), and it is exactly what "RECENT" wears today (§4.1(e)). */
+.hb-label {
+  margin: var(--space-3) 0 var(--space-1);
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--zl-t4);
+}
+.hb-body > .hb-label:first-child { margin-top: 0; }
+
+.hb-blank {
+  margin: var(--space-4) var(--space-3);
+  color: var(--zl-t3);
+  font-size: var(--zl-fs-title);
+  line-height: 1.5;
+}
+
+/* The secondary is text in the accent, never a second box (P3). Same idiom as
+   the Spine's own `.zl-show-all`, at the phone's 44px floor. */
+.hb-more {
+  display: block;
+  min-height: 44px;
+  margin: var(--space-2) 0 0;
+  padding: 0 var(--space-3);
+  border: 0;
+  background: none;
+  color: var(--zl-accent);
+  font: inherit;
+  font-size: var(--zl-fs-body);
+  text-align: left;
+  cursor: pointer;
+}
+.hb-more:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -2px; border-radius: var(--zl-r-md); }
+
+.hb-bar {
+  flex: none;
+  padding: var(--space-3) var(--space-4) calc(var(--space-4) + var(--shell-bottom));
+  background: var(--zl-canvas);
+  box-shadow: 0 -1px 0 var(--zl-line);
+}
+/* The one box. Mauve solid on accent ink — §3.3's proposal for the primary,
+   the peach→mauve gradient retired. 48px is the `lg` size Fase 3 names. */
+.hb-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-accent);
+  color: var(--zl-accent-ink);
+  font: inherit;
+  font-size: var(--zl-fs-title);
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter var(--motion-hover) var(--motion-ease);
+}
+.hb-primary:active { filter: brightness(0.92); }
+.hb-primary:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+/* ══ C · Does it need you? ═══════════════════════════════════════════════ */
+
+.home-c {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--zl-canvas);
+}
+
+.hc-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: calc(var(--space-5) + var(--shell-top)) var(--space-3) var(--space-2) var(--space-5);
+}
+.hc-word {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--zl-fs-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--zl-t1);
+}
+.hc-ico {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-t3);
+  cursor: pointer;
+}
+.hc-ico:active { background: var(--zl-hi); color: var(--zl-t1); }
+@media (hover: hover) { .hc-ico:hover { background: var(--zl-hi); color: var(--zl-t1); } }
+.hc-ico:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -2px; }
+
+.hc-answer { flex: none; padding: var(--space-2) var(--space-4) var(--space-3); }
+
+/* The single elevated object (Raycast, §1.3). Raised plane + hairline rim +
+   one state-coloured edge. It is BRIGHTER than the canvas, which is the whole
+   point of §4.1(c): today's recent card is darker than the canvas AND bordered,
+   so it claims to be sunken and raised at once. */
+.hc-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-4);
+  border: 0;
+  border-left: 2px solid var(--hc-tone);
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim), var(--shadow-lg);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-hover) var(--motion-ease);
+}
+.hc-card.tone-yellow { --hc-tone: var(--zl-yellow); }
+.hc-card.tone-red { --hc-tone: var(--zl-red); }
+.hc-card.tone-mauve { --hc-tone: var(--zl-accent); }
+.hc-card:active { background: var(--zl-control); }
+@media (hover: hover) { .hc-card:hover { background: var(--zl-control); } }
+.hc-card:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+.hc-card-top { display: flex; align-items: center; gap: var(--space-2); }
+/* The reason, in the colour of what it says — the row's own tone contract
+   (SessionRow.css `.zl-row-brief.tone-*`), one step louder because this is
+   the headline of the screen rather than a row's second line. */
+.hc-card-kind {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hc-tone);
+}
+.hc-card-age { flex: none; color: var(--zl-t4); }
+.hc-card-title {
+  font-size: var(--zl-fs-title);
+  font-weight: 600;
+  color: var(--zl-t1);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The blocked command. A row has no space for it and this is the one datum
+   that decides whether you open now or later. Mono, micro step: data (P5). */
+.hc-card-detail {
+  color: var(--zl-t3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-card-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: var(--space-2);
+  color: var(--zl-accent);
+  font-size: var(--zl-fs-body);
+  font-weight: 600;
+}
+
+/* Two waiting is a list, not a stack of cards: the second one is a link into
+   the list, so elevation still means one thing. */
+.hc-more {
+  display: block;
+  min-height: 44px;
+  width: 100%;
+  margin-top: var(--space-1);
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--zl-accent);
+  font: inherit;
+  font-size: var(--zl-fs-body);
+  text-align: left;
+  cursor: pointer;
+}
+.hc-more.is-list { margin-top: var(--space-2); padding: 0 var(--space-3); }
+.hc-more:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -2px; border-radius: var(--zl-r-md); }
+
+/* Nothing waiting: ONE LINE, not a screen. §4.1's complaint about a whole
+   screen spent saying there is nothing, answered directly. Green is the
+   product's word for inactive/ok. */
+.hc-quiet {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-5) var(--space-3);
+  color: var(--zl-t3);
+  font-size: var(--zl-fs-body);
+}
+.hc-quiet-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--zl-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--zl-green) 18%, transparent);
+}
+
+.hc-rest {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--space-2) calc(var(--space-4) + var(--shell-bottom));
+}
+.hc-label {
+  margin: var(--space-3) 0 var(--space-1);
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--zl-t4);
+}
+.hc-rest > .hc-label:first-child { margin-top: 0; }
+
+/* First run has no list to rise into, so the create verb takes the slot the
+   card would have had: still one object, still at the top of the body. */
+.hc-first {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: calc(100% - var(--space-4));
+  min-height: 48px;
+  margin: var(--space-2);
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-accent);
+  color: var(--zl-accent-ink);
+  font: inherit;
+  font-size: var(--zl-fs-title);
+  font-weight: 600;
+  cursor: pointer;
+}
+.hc-first:active { filter: brightness(0.92); }
+.hc-first:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+/* The card arrives; it does not pulse. A waiting session is not more urgent
+   the longer you look at it, and rule 6 of the motion language keeps live
+   marks off anything that is not actually live. One entrance, 260ms (a large
+   surface), on the product's one curve. */
+@keyframes home-card-in {
+  from { opacity: 0; transform: translateY(var(--motion-rise)); }
+  to { opacity: 1; transform: none; }
+}
+.hc-card { animation: home-card-in var(--motion-base) var(--motion-ease) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hc-card { animation: none; }
+}
