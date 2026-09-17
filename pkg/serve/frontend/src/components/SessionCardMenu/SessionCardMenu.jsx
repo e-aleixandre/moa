@@ -1,4 +1,4 @@
-import { MoreHorizontal } from "lucide-preact";
+import { Archive, ArchiveRestore, Copy, MoreHorizontal, Trash2 } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { ActionMenu } from "../ActionMenu/ActionMenu.jsx";
 import { copyToClipboard } from "../../data/util/format.js";
@@ -25,12 +25,12 @@ export function SessionCardMenu({
 
   const actions = [
     session.saved
-      ? { id: "reopen", label: "Reopen session", onClick: () => onReopen?.(session.id) }
-      : { id: "close", label: "Close session", onClick: () => onClose?.(session.id) },
-    { id: "copy", label: "Copy session ID", onClick: () => copyToClipboard(session.id) },
+      ? { id: "reopen", icon: ArchiveRestore, label: "Reopen session", onClick: () => onReopen?.(session.id) }
+      : { id: "close", icon: Archive, label: "Close session", onClick: () => onClose?.(session.id) },
+    { id: "copy", icon: Copy, label: "Copy session ID", onClick: () => copyToClipboard(session.id) },
     confirmingDelete
-      ? { id: "delete", label: "Delete — this cannot be undone", danger: true, onClick: () => onDelete?.(session.id) }
-      : { id: "delete", label: "Delete…", danger: true, closeOnClick: false, onClick: () => setConfirmingDelete(true) },
+      ? { id: "delete", icon: Trash2, label: "Delete — this cannot be undone", danger: true, onClick: () => onDelete?.(session.id) }
+      : { id: "delete", icon: Trash2, label: "Delete…", danger: true, closeOnClick: false, onClick: () => setConfirmingDelete(true) },
   ];
 
   return (
