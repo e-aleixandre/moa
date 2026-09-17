@@ -29,7 +29,6 @@ import { LPLab } from "./catalog/lp-lab.jsx";
 import { LP2Lab } from "./catalog/lp2-lab.jsx";
 import { HomeLab } from "./catalog/home-lab.jsx";
 import { ToolsLab, ToolsPhone, LedgerIcons } from "./catalog/tools-lab.jsx";
-import { HeadLab, HeadPhone } from "./catalog/head-lab.jsx";
 import { seedCatalogStore } from "./catalog/specimen.js";
 import { installCatalogBackend } from "./catalog/catalog-backend.js";
 import { announceArrivals } from "./data/events.js"; // wake-on-event
@@ -62,8 +61,6 @@ const LINKS = [
   { key: "home", label: "Home (3 ways)", href: "?view=home" },
   { key: "tools", label: "Tool calls", href: "?view=tools" },
   { key: "toolsphone", label: "Tool calls (phone)", href: "?view=toolsphone" },
-  { key: "head", label: "Floating header", href: "?view=head" },
-  { key: "headphone", label: "Floating header (phone)", href: "?view=headphone" },
 ];
 
 // wake-on-event: the two inbox seed sets are a URL away from each other, so
@@ -210,12 +207,6 @@ function CatalogApp() {
   // full-window phone with real scroll, which is how the owner reads them.
   else if (view === "tools") body = <ToolsLab />;
   else if (view === "toolsphone") body = <ToolsPhone />;
-  // The phone's floating header, five ways. The axis is tone / elevation /
-  // edge light / type weight — NOT blur, which is held at production's 12px
-  // in every variant including the reference. ?view=headphone is the same
-  // five on one full-window phone, switchable in place without a reload.
-  else if (view === "head") body = <HeadLab />;
-  else if (view === "headphone") body = <HeadPhone />;
   else if (view === "ledgericons") body = <LedgerIcons />;
   else if (view === "mobile") {
     body = (
