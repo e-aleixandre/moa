@@ -54,7 +54,16 @@
   padding: 0 14px;
   border: 0;
   border-radius: var(--zl-r-lg);
-  background: rgba(30, 30, 41, 0.82);
+  /* Measured against the dense transcript, the previous fill was only 1.01:1
+     from the pixels behind it: effectively the same paint. Float above the
+     transcript by tone, not a border or added shadow. At 92% this is a real
+     tonal rung (~1.25:1) while the remaining transparency keeps the capsule
+     from reading as a toolbar bolted to the screen. */
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--zl-t1) 6%, var(--zl-control)) 92%,
+    transparent
+  );
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   box-shadow: var(--zl-rim);
