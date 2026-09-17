@@ -83,7 +83,13 @@ export function ActionMenu({
       const shouldDropUp = height + 8 > bottom - triggerRef.current?.getBoundingClientRect().bottom;
       if (shouldDropUp !== dropUp) setDropUp(shouldDropUp);
     }
-  }, [mounted, leaving, actions, dropUp, placement, scrollContainerSelector]);
+  // The opening geometry belongs to this mount, not to the menu's contents.
+  // In particular, Delete's confirmation replaces an action while the menu
+  // remains open; measuring it again would remove and restore `animation`,
+  // replaying a morph that has no trigger interaction to explain it. Content
+  // therefore takes its natural size after opening. Auto placement is also
+  // chosen on open, so a longer label cannot move an already-visible panel.
+  }, [mounted, leaving, placement, scrollContainerSelector, dropUp]);
 
   useEffect(() => {
     if (!open) setDropUp(false);
