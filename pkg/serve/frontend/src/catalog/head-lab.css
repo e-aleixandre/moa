@@ -1,0 +1,296 @@
+/* head-lab.css — CATALOG ONLY. Five treatments for the phone's floating
+   header, plus the page that compares them.
+
+   The hard rule of this sheet, the same one tools-lab.css obeys: NOT ONE RULE
+   HERE RESTYLES THE TRANSCRIPT. No ledger row, no waypoint, no prose, no
+   gutter. The conversation underneath has to be production's exactly, because
+   the whole question is how the header sits ON it. What is styled below is
+   the capsules (from outside, via `.hp-v--*` wrappers on an ancestor) and the
+   lab's own page furniture.
+
+   Why the variants are wrapper classes rather than edits to MobileChrome.css:
+   production must stay untouched, and a wrapper lets all five exist at once so
+   the owner can flick between them on the phone without a reload.
+
+   Every value is a token from tokens/tokens.css. No `var(--zl-*, fallback)`:
+   the ladder is declared on :root, so a fallback would be a second copy of a
+   value that already has one home. The two `color-mix` calls are the same
+   idiom Sidebar.css and LiveBar.css already use to derive a shade from a
+   token instead of hard-coding a hex.
+
+   Blur is 12px in every variant INCLUDING the reference. The owner ruled out
+   the transparency axis, and holding blur constant is what makes the five
+   comparable: whatever differs between them is tone, elevation, edge light or
+   type — never how much of the text below is smeared. That also means none of
+   these variants costs more to composite than production does today: same
+   filter, same layer count, same painted area. */
+
+/* ── V1 · Rung — the tonal step ───────────────────────────────────────────
+   The main path, and the one the system already asks for. SISTEMA-VISUAL
+   §3.3: what floats over the transcript is separated by TONE, not by
+   transparency. Today the capsule resolves to #1b1b26 over the #101018
+   canvas, 1.11:1 — the same paint. Here it climbs to a genuine rung:
+   --zl-control lifted 6% toward --zl-t1, which lands at 1.45:1.
+
+   Kept at 92% rather than opaque on purpose. Fully solid reads as a toolbar
+   bolted to the top of the screen and kills the sense of floating; 92% keeps
+   a trace of the canvas moving under it while being unmistakably a different
+   material. Nothing else is added — no shadow, no border. If tone alone is
+   enough, this is the cheapest and most systemic answer. */
+.hp-v--rung .zl-cap {
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--zl-t1) 6%, var(--zl-control)) 92%,
+    transparent
+  );
+}
+
+/* ── V2 · Lift — elevation only ───────────────────────────────────────────
+   Today's tone, to the digit. The only change is that the capsule finally
+   CASTS: --shadow-lg, which is the token SISTEMA-VISUAL reserves for things
+   that float over the transcript (mobile sheet, palette, toast, popover). The
+   header is in that list by behaviour and was never in it by paint.
+
+   The rim stays production's hairline; the shadow is doing the separating. On
+   a dark canvas a drop shadow is a subtle instrument — it darkens an already
+   dark surface — so this is the variant most likely to read as "barely
+   different" on a bright screen, which is exactly what the comparison is for. */
+.hp-v--lift .zl-cap {
+  box-shadow: var(--zl-rim), var(--shadow-lg);
+}
+
+/* ── V3 · Edge light — light from above ───────────────────────────────────
+   Today's tone kept too. What is added is a 1px inset highlight along the TOP
+   edge only, with a soft drop below it: the reading a raised surface gives
+   when the light is above it.
+
+   This is deliberately NOT a border, and the geometry is what makes that
+   true: `inset 0 1px 0` paints one hairline across the top and nothing down
+   the sides or along the bottom, so the capsule is lit, not outlined. --zl-hi
+   is the token for exactly this (a 4% white wash); --zl-line-2 would have
+   been the border-ish 12% and is not used here.
+
+   The trade is that on a 16px radius the highlight has to travel around the
+   top corners to look right, and at the corner it is geometrically
+   indistinguishable from the start of a border. It is the variant closest to
+   the thing the owner said he did not want. */
+.hp-v--edge .zl-cap {
+  box-shadow:
+    inset 0 1px 0 var(--zl-line-2),
+    var(--zl-rim),
+    var(--shadow-md);
+}
+
+/* ── V4 · Presence — my proposal ──────────────────────────────────────────
+   Tone, light and type together, each at a smaller dose than the variant that
+   isolates it.
+
+   The reasoning: Rung, Lift and Edge each fix one property and have to push
+   it hard enough to carry the whole job alone. Three small moves that agree
+   with each other read as more solid than one large move, and none of them
+   has to be loud enough to become the thing you notice.
+
+   - Tone: --zl-control at 90%, a smaller step than Rung (1.34:1 vs 1.45:1).
+   - Light: the top edge highlight, at --zl-hi rather than --zl-line-2, so it
+     is half the strength of V3 and cannot be mistaken for an outline.
+   - Elevation: --shadow-md, not --shadow-lg. Enough to sit above; not enough
+     to look like a dialog.
+   - Type: the part no other variant touches. The title is 16px/500 today and
+     the prose it floats over is 16px/400 — practically the same text, so the
+     header competes with the conversation instead of labelling it. At 14px/600
+     with tighter tracking it reads as a CONTROL's label. Smaller and heavier,
+     not bigger: making it bigger would have it compete harder, which is the
+     opposite of the goal.
+
+   Measured, because the first guess was wrong: dropping 16px/500 to 14px/600
+   makes the same title 274px wide instead of 321px, so a long session name
+   truncates LATER, not earlier — roughly four more characters clear the
+   ellipsis at 390px. The weight buys the presence and the size buys the room.
+   The `+`/burger glyphs are untouched, so the row's geometry does not move. */
+.hp-v--presence .zl-cap {
+  background: color-mix(in srgb, var(--zl-control) 90%, transparent);
+  box-shadow:
+    inset 0 1px 0 var(--zl-hi),
+    var(--zl-rim),
+    var(--shadow-md);
+}
+
+/* The title's own weight. Scoped to the chip's name so the burger and the `+`
+   keep production's metrics — this is about the title competing with prose,
+   not about the icons. */
+.hp-v--presence .zl-chip-name {
+  font-size: var(--zl-fs-body);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ── The reading page ──────────────────────────────────────────────────── */
+
+.head-lab {
+  padding: var(--space-6) var(--space-4) var(--space-12);
+  background: var(--zl-canvas);
+  color: var(--zl-t1);
+  font-family: var(--font);
+}
+
+.head-intro {
+  max-width: 78ch;
+  margin-inline: auto;
+}
+
+.head-intro h1 {
+  font-size: var(--zl-fs-display);
+  margin: 0 0 var(--space-3);
+  letter-spacing: -0.02em;
+}
+
+.head-intro p {
+  color: var(--zl-t2);
+  line-height: 1.6;
+  margin: 0 0 var(--space-3);
+}
+
+.head-intro b { color: var(--zl-t1); font-weight: 600; }
+.head-note { color: var(--zl-t3); font-size: var(--zl-fs-body); }
+.head-note a { color: var(--zl-accent); }
+.head-intro code { font-family: var(--mono); font-size: var(--zl-fs-meta); color: var(--zl-t2); }
+
+/* The five in one row, so the tonal step between them is judged by comparison
+   and not by memory. Tone differences this small are invisible sequentially. */
+.head-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  justify-content: center;
+  margin-top: var(--space-8);
+}
+
+.head-figure { margin: 0; flex: none; }
+
+.head-cap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  color: var(--zl-t3);
+  font-size: var(--zl-fs-meta);
+}
+.head-cap b { color: var(--zl-t1); font-weight: 600; font-size: var(--zl-fs-body); }
+.head-cap-meta em { color: var(--zl-t2); font-style: normal; font-family: var(--mono); }
+
+/* A real 390x780 in CSS pixels, never a scaled screenshot. The differences
+   under review are single-digit luminance steps; a scaled frame resamples
+   exactly the thing being judged. */
+.head-frame {
+  position: relative;
+  isolation: isolate;
+  width: 390px;
+  height: 780px;
+  overflow: hidden;
+  border-radius: var(--zl-r-lg);
+  box-shadow: var(--zl-rim-2), 0 30px 70px rgba(0, 0, 0, 0.5);
+}
+
+/* Production `.mconv` is a 100dvh column; inside the frame it fills the frame.
+   The same single adaptation tools-lab and hydration-lab already make. */
+.head-screen.mconv { height: 100%; }
+
+.head-legend {
+  max-width: 78ch;
+  margin: var(--space-10) auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.head-legend-item h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--zl-fs-title);
+  font-weight: 600;
+}
+.head-legend-item h3 span {
+  margin-left: var(--space-2);
+  color: var(--zl-t3);
+  font-size: var(--zl-fs-meta);
+  font-weight: 400;
+}
+.head-legend-item p {
+  margin: 0;
+  color: var(--zl-t2);
+  font-size: var(--zl-fs-body);
+  line-height: 1.6;
+}
+
+/* ── Capture mode ─────────────────────────────────────────────────────── */
+
+.head-lab.is-shots { padding: 0; }
+.head-lab.is-shots .head-row { gap: 0; margin: 0; justify-content: flex-start; }
+.head-lab.is-shots .head-cap { display: none; }
+.head-lab.is-shots .head-frame { border-radius: 0; box-shadow: none; }
+
+/* ── The standalone phone (?view=headphone) ───────────────────────────────
+   Here `.mconv` IS the screen: no frame, no radius, no fixed size, so the
+   owner scrolls it on the actual device. This is the route that answers the
+   question — a header is judged against text MOVING under it, not against a
+   still. */
+
+.head-alone { height: 100dvh; }
+/* Room at the bottom for the lab's own switcher and readout, so neither ever
+   covers the transcript being judged. */
+.head-alone .zl-transcript { padding-bottom: 128px; }
+
+/* The measured numbers for whichever variant is up, on the device itself: the
+   owner should not have to trust a caption written on another page. */
+.head-readout {
+  position: absolute;
+  left: 50%;
+  bottom: 76px;
+  transform: translateX(-50%);
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.head-readout b { color: var(--zl-t1); font-size: var(--zl-fs-meta); font-weight: 600; }
+.head-readout span { color: var(--zl-t3); font-family: var(--mono); font-size: var(--zl-fs-micro); }
+
+.head-pick {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-3);
+  transform: translateX(-50%);
+  z-index: var(--z-sticky);
+  display: flex;
+  gap: var(--space-1);
+  max-width: calc(100% - var(--space-4));
+  padding: var(--space-1);
+  border-radius: var(--radius-full);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim-2);
+}
+
+.head-pick button {
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--zl-t3);
+  font-family: var(--font);
+  /* 16px: below it iOS zooms on focus, and this bar is tapped on a phone. */
+  font-size: var(--zl-fs-title);
+  cursor: pointer;
+}
+.head-pick button.is-on { background: var(--zl-accent); color: var(--zl-accent-ink); }
+.head-pick button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
