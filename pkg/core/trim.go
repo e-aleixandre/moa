@@ -194,6 +194,12 @@ func trimEligible(m AgentMessage) bool {
 		if m.IsError {
 			return false
 		}
+		// A human answered this one. "Re-run the tool if you need it" would
+		// mean asking the user the same question again, and their reply is the
+		// one thing in a transcript that no amount of re-running reproduces.
+		if m.ToolName == "ask_user" {
+			return false
+		}
 	case m.Role == "user" && subagentNotificationJobID(m) != "":
 		// An async subagent's completion reaches the parent as a user message,
 		// not as a tool result. It is the same thing semantically — a delegated

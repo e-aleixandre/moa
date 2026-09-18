@@ -329,3 +329,54 @@ func TestTrimMinGainFloor(t *testing.T) {
 		t.Fatalf("TrimMinGain = %d, want the %d floor", got, minWarnBandTokens)
 	}
 }
+
+// A human typed this answer. Re-running the tool means asking them the same
+// question again, which is the one thing in a transcript that cannot be
+// reproduced from the worktree — so ask_user is never elided, however large.
+func TestPlanTrimNeverElidesAskUser(t *testing.T) {
+	ask := WrapMessage(NewToolResultMessage("call-ask", "ask_user",
+		[]Content{TextContent(bigText("the user's considered answer\n", 8000))}, false))
+	ask.MsgID = "ask"
+	msgs := []AgentMessage{
+		userMsg("u1", "go"),
+		assistantWithCall("a1", "ask"),
+		ask,
+		assistantWithCall("a2", "r2"),
+		toolResult("r2", "recent", false),
+	}
+
+	plan, ok := PlanTrim(msgs, 10, "")
+	if ok && messageText(plan.Messages[2]) != messageText(msgs[2]) {
+		t.Fatal("an ask_user answer was elided; it cannot be re-run")
+	}
+}
+
+// A trimmed subagent_status has to keep pointing at the job it described. The
+// tool tags its result with the job id precisely so the placeholder can carry
+// it: without it the model is told to re-run a tool whose only argument has
+// just been elided along with the output.
+func TestTrimPlaceholderKeepsSubagentJobIDFromAStatusResult(t *testing.T) {
+	status := WrapMessage(NewToolResultMessage("call-s", "subagent_status",
+		[]Content{TextContent(bigText("status line\n", 8000))}, false))
+	status.MsgID = "s"
+	status.Custom = map[string]any{"subagent_job_id": "sa-abc123"}
+	msgs := []AgentMessage{
+		userMsg("u1", "go"),
+		assistantWithCall("a1", "s"),
+		status,
+		assistantWithCall("a2", "r2"),
+		toolResult("r2", "recent", false),
+	}
+
+	plan, ok := PlanTrim(msgs, 10, "")
+	if !ok {
+		t.Fatal("expected a trim")
+	}
+	got := messageText(plan.Messages[2])
+	if got == messageText(msgs[2]) {
+		t.Fatal("the status output was not elided")
+	}
+	if !strings.Contains(got, "sa-abc123") || !strings.Contains(got, "subagent_status") {
+		t.Fatalf("placeholder lost the way back to the job: %q", got)
+	}
+}

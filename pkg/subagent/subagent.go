@@ -517,8 +517,12 @@ func newSubagentStatus(jobs *jobStore, cfg Config) core.Tool {
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			jobs.cleanup(jobTTL)
 			jobID, _ := params["job_id"].(string)
+			// Tagged with the job so a trimmed status still points at the job it
+			// described: the placeholder reads the tag to keep the ID reachable,
+			// and without it the model is told to re-run a tool whose argument it
+			// can no longer see.
 			if snap, ok := jobs.snapshot(jobID); ok {
-				return core.TextResult(formatStatus(snap)), nil
+				return taggedWithJob(core.TextResult(formatStatus(snap)), jobID), nil
 			}
 			// Live memory is not the whole truth: jobs expire after jobTTL and
 			// a synchronous child is dropped as soon as it delivers, so a job
@@ -526,7 +530,7 @@ func newSubagentStatus(jobs *jobStore, cfg Config) core.Tool {
 			// conversation resumed hours later — is routinely absent here while
 			// its transcript is still on disk.
 			if text, ok := persistedStatus(cfg, jobID); ok {
-				return core.TextResult(text), nil
+				return taggedWithJob(core.TextResult(text), jobID), nil
 			}
 			return core.ErrorResult("unknown job ID: " + jobID), nil
 		},
@@ -613,14 +617,17 @@ func newSubagentWait(jobs *jobStore) core.Tool {
 				return core.ErrorResult("subagent_wait cancelled"), nil
 			}
 			if snap.Status == statusRunning || snap.Status == statusCancelling {
-				return core.TextResult(formatStatus(snap) + "\n\n(still running after timeout; call subagent_wait again to keep waiting, or subagent_cancel to stop it)"), nil
+				return taggedWithJob(core.TextResult(formatStatus(snap)+"\n\n(still running after timeout; call subagent_wait again to keep waiting, or subagent_cancel to stop it)"), jobID), nil
 			}
 			if !delivered {
 				// The async completion notification already delivered this
 				// subagent's full result to the conversation; don't repeat it.
-				return core.TextResult(fmt.Sprintf("Subagent %s already finished (status: %s); its result was delivered above.", snap.ID, snap.Status)), nil
+				// "Above" may since have been elided by a trim, so the job tag has
+				// to travel with this too: it is what lets the placeholder send the
+				// model to subagent_status rather than to a result that is gone.
+				return taggedWithJob(core.TextResult(fmt.Sprintf("Subagent %s already finished (status: %s); its result was delivered above.", snap.ID, snap.Status)), jobID), nil
 			}
-			return core.TextResult(formatStatus(snap)), nil
+			return taggedWithJob(core.TextResult(formatStatus(snap)), jobID), nil
 		},
 	}
 }

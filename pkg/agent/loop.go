@@ -97,7 +97,11 @@ type loopConfig struct {
 	emitter  *Emitter
 	state    *AgentState
 	stateMu  *sync.Mutex // guards writes to *state (shared with Agent.mu)
-	model    core.Model
+	// pendingTrimPrediction is the context size a just-applied trim predicted,
+	// held until the next response reports what the provider actually counted.
+	// Per-run and not persisted: it exists to be logged once and dropped.
+	pendingTrimPrediction int
+	model                 core.Model
 	// compactSummarizer optionally supplies the model that writes compaction
 	// summaries, instead of the session's own (see Config.CompactSummarizer).
 	// nil = summarize with the session's model.
@@ -551,6 +555,22 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				wrapped.Custom = make(map[string]any)
 			}
 			wrapped.Custom["compaction_epoch"] = cfg.state.CompactionEpoch
+		}
+		// Close the loop on the last trim: AcceptTrim decided on a chars/4
+		// estimate, and this is the first request whose real input size the
+		// provider reports back. Logging the pair is what turns the minimum
+		// gain from a guess into something tunable — and the only way to see
+		// an estimator bias that would have us accept a trim that did not
+		// actually fit.
+		if cfg.pendingTrimPrediction > 0 && wrapped.Usage != nil {
+			if real := wrapped.Usage.Input + wrapped.Usage.CacheRead + wrapped.Usage.CacheWrite; real > 0 {
+				slog.Info("context trim outcome",
+					"predicted_after", cfg.pendingTrimPrediction,
+					"provider_input", real,
+					"ratio", float64(real)/float64(cfg.pendingTrimPrediction),
+				)
+			}
+			cfg.pendingTrimPrediction = 0
 		}
 		cfg.appendState(wrapped)
 		// MessageEnd is a state-observable boundary: reconnect snapshots that
