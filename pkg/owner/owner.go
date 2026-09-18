@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -70,6 +71,12 @@ type Store struct {
 	configDir string
 }
 
+// createMu serializes Create across the process. owner.json is created with
+// O_EXCL (the cross-process guard), but the entity is only half of the work:
+// the caller also attaches a conversation, and two concurrent creations racing
+// there would leave one of them owning a session nothing points at.
+var createMu sync.Mutex
+
 // NewStore builds a Store over a moa config root (~/.config/moa).
 func NewStore(configDir string) *Store { return &Store{configDir: configDir} }
 
@@ -101,6 +108,8 @@ func (s *Store) ownerPath(key string) string {
 // book with a PROJECT.md template. root is canonicalized so the stored path is
 // the one CodebaseKey was computed from.
 func (s *Store) Create(root, name, model, thinking string, answerAsks bool) (Owner, error) {
+	createMu.Lock()
+	defer createMu.Unlock()
 	if strings.TrimSpace(name) == "" {
 		return Owner{}, errors.New("owner name is required")
 	}
@@ -113,11 +122,6 @@ func (s *Store) Create(root, name, model, thinking string, answerAsks bool) (Own
 		return Owner{}, fmt.Errorf("owner root: %s is not a directory", canonical)
 	}
 	key := core.CodebaseKey(canonical)
-	if _, found, err := s.FindByCodebase(key); err != nil {
-		return Owner{}, err
-	} else if found {
-		return Owner{}, ErrExists
-	}
 	own := Owner{
 		ID:          newOwnerID(),
 		Name:        strings.TrimSpace(name),
@@ -128,13 +132,41 @@ func (s *Store) Create(root, name, model, thinking string, answerAsks bool) (Own
 		AnswerAsks:  answerAsks,
 		Created:     time.Now().UTC(),
 	}
-	if err := s.Save(own); err != nil {
+	// Create exclusively rather than check-then-write: the check and the write
+	// are what makes "one owner per codebase" true, and only the filesystem can
+	// make them one step across processes.
+	if err := s.createExclusive(own); err != nil {
 		return Owner{}, err
 	}
 	if err := s.seedBook(own); err != nil {
 		return Owner{}, err
 	}
 	return own, nil
+}
+
+// createExclusive writes owner.json only if it does not exist yet, reporting
+// ErrExists otherwise.
+func (s *Store) createExclusive(own Owner) error {
+	data, err := json.MarshalIndent(own, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := s.ownerPath(own.CodebaseKey)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create codebase dir: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return ErrExists
+	}
+	if err != nil {
+		return fmt.Errorf("create owner %s: %w", own.CodebaseKey, err)
+	}
+	defer f.Close()
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("write owner %s: %w", own.CodebaseKey, err)
+	}
+	return f.Sync()
 }
 
 // Save writes owner.json atomically.

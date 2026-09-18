@@ -188,3 +188,49 @@ func utf8Valid(s string) bool {
 	}
 	return true
 }
+
+// Two concurrent creations for the same codebase: exactly one wins, and the
+// loser sees ErrExists rather than overwriting the owner that already exists.
+func TestConcurrentCreateYieldsOneOwner(t *testing.T) {
+	cfg := t.TempDir()
+	root := t.TempDir()
+	store := NewStore(cfg)
+
+	start := make(chan struct{})
+	type result struct {
+		own Owner
+		err error
+	}
+	results := make(chan result, 2)
+	for _, name := range []string{"First", "Second"} {
+		go func() {
+			<-start
+			own, err := store.Create(root, name, "opus", "low", true)
+			results <- result{own, err}
+		}()
+	}
+	close(start)
+
+	var created, exists int
+	for range 2 {
+		res := <-results
+		switch {
+		case res.err == nil:
+			created++
+		case res.err == ErrExists:
+			exists++
+		default:
+			t.Fatalf("unexpected Create error: %v", res.err)
+		}
+	}
+	if created != 1 || exists != 1 {
+		t.Fatalf("created = %d, ErrExists = %d, want 1 and 1", created, exists)
+	}
+	owners, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(owners) != 1 {
+		t.Fatalf("owners on disk = %d, want 1", len(owners))
+	}
+}
