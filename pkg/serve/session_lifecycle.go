@@ -107,6 +107,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		bopts = &buildOpts{}
 	}
 	bopts.artifactStore = session.NewArtifactStore(store.Dir(), id)
+	bopts.ownerSession = persisted.Kind() == session.KindOwner
 	sess, err := m.buildManagedSession(id, opts.Title, opts.Model, cwd, bopts)
 	if err != nil {
 		return nil, err
@@ -170,6 +171,11 @@ type buildOpts struct {
 	// configured ones (see CreateOpts.extraMCPServers). On resume they are
 	// rebuilt from the persisted metadata.
 	extraMCPServers map[string]core.MCPServer
+
+	// ownerSession builds this session as a project owner's own conversation
+	// (its role prompt, and later its write access to the book). Derived from
+	// the persisted kind, so a resume rebuilds the same agent the create did.
+	ownerSession bool
 }
 
 // buildManagedSession creates an in-memory managed session with full runtime.
@@ -245,6 +251,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		ExtraMCPServers:   extraMCPServers,
 		Ctx:               sessionCtx,
 		EnableAskUser:     true,
+		OwnerSession:      opts != nil && opts.ownerSession,
 		Fast:              initialFast,
 		BeforeWrite:       cpStore.Capture,
 		AttachmentScope:   attachScope,
@@ -1098,6 +1105,7 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 		initialMetadata:        saved.Metadata,
 		titleSource:            saved.TitleSource,
 		artifactStore:          session.NewArtifactStore(store.Dir(), saved.ID),
+		ownerSession:           saved.Kind() == session.KindOwner,
 		// Per-run MCP servers are session-scoped: they only exist in this
 		// session's metadata, so a resume has to bring them back or the agent
 		// silently loses the tools the automation caller attached. A name the

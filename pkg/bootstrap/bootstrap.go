@@ -25,6 +25,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/memory"
 	"github.com/e-aleixandre/moa/pkg/moadocs"
+	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/permission"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 	"github.com/e-aleixandre/moa/pkg/skill"
@@ -101,6 +102,12 @@ type SessionConfig struct {
 
 	// Feature toggles. All default to true.
 	EnableAskUser bool // Register ask_user tool. Default: true.
+
+	// OwnerSession marks this build as a project owner's own conversation, so
+	// it gets the owner role prompt and the writable half of the book. Every
+	// other session of the same codebase is a child: it reads the book, and is
+	// told so in its prompt, but never writes it.
+	OwnerSession bool
 
 	// BeforeWrite is called before write/edit tools modify a file.
 	// Used by the checkpoint system to capture pre-edit state.
@@ -493,6 +500,24 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// builder and by subagents, so a reload reaches every consumer at once.
 	promptSources := agentcontext.NewSources(cfg.CWD, memStore, agentsMD, skillsIndex, memoryIndex)
 
+	// 8b. Project owner. The owner of a codebase is resolved from the same key
+	// memory is scoped by, so every worktree of the repository reads the same
+	// book without anything being linked by hand. A codebase with no owner adds
+	// nothing to the prompt.
+	projectOwner, ownerStore := loadProjectOwner(cfg.CWD)
+	ownerRole := ""
+	if projectOwner.ID != "" && ownerStore != nil {
+		if cfg.OwnerSession {
+			ownerRole = owner.RolePrompt(projectOwner.Name)
+		}
+		// Read through the store on every build and reload: the owner edits the
+		// book from its own turns, so a value captured here would go stale in
+		// exactly the session that changed it.
+		promptSources.WithOwnerBook(func() string {
+			return owner.BookSection(projectOwner.Name, ownerStore.ProjectIndex(projectOwner.CodebaseKey))
+		})
+	}
+
 	// 9. Ask user bridge.
 	var askBridge *askuser.Bridge
 	if cfg.EnableAskUser {
@@ -629,6 +654,8 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			HasVerify:   hasVerify,
 			MemoryIndex: memoryIndex,
 			SkillsIndex: skillsIndex,
+			OwnerRole:   ownerRole,
+			OwnerBook:   promptSources.OwnerBook(),
 		})
 	}
 	sess.Sources = promptSources
@@ -792,4 +819,24 @@ func tailLines(s string, n int) (string, bool) {
 		return s, false
 	}
 	return strings.Join(lines[len(lines)-n:], "\n"), true
+}
+
+// loadProjectOwner resolves the owner of the codebase containing cwd. A store
+// that cannot be opened, or a codebase with no owner, yields a zero Owner: the
+// feature is opt-in per project and its absence must never fail a build.
+func loadProjectOwner(cwd string) (owner.Owner, *owner.Store) {
+	store, err := owner.Default()
+	if err != nil {
+		slog.Warn("owners unavailable", "error", err)
+		return owner.Owner{}, nil
+	}
+	own, found, err := store.FindByDir(cwd)
+	if err != nil {
+		slog.Warn("owners: cannot read the owner of this codebase", "cwd", cwd, "error", err)
+		return owner.Owner{}, store
+	}
+	if !found {
+		return owner.Owner{}, store
+	}
+	return own, store
 }
