@@ -22,6 +22,12 @@ var ErrSessionBusy = errors.New("session is busy")
 // already in progress for the session.
 var ErrVerifyRunning = errors.New("verify already running")
 
+// ErrNotIdle is returned by SendPrompt{IdleOnly:true} when the session cannot
+// take a prompt as a fresh run: a run is in flight, the queue rail is not
+// empty, or background work could still start one. The prompt is rejected, not
+// queued.
+var ErrNotIdle = errors.New("session is not idle")
+
 // ---------------------------------------------------------------------------
 // Agent interaction
 // ---------------------------------------------------------------------------
@@ -53,6 +59,13 @@ type SendPrompt struct {
 	// AcceptedSteerID is written per accepted prompt, so a caller learns the
 	// effective action ("send" vs "steer") from which one came back non-empty.
 	AcceptedSteerID *string
+	// IdleOnly starts a run or fails: the prompt is never converted into a
+	// steer. It exists for producers whose text only makes sense as a turn of
+	// its own — the project owner's reports, spliced into the middle of the
+	// owner's reasoning, would be worse than arriving late. The decision is
+	// taken under the same lock that converts prompts into steers and that
+	// starts runs, so "idle" cannot go stale between the check and the run.
+	IdleOnly bool
 }
 
 // SendPromptWithContent starts an agent run with structured content (e.g. images).
