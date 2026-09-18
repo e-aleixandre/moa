@@ -795,6 +795,70 @@ func TestConvertAssistantContent_ThinkingWithSignature(t *testing.T) {
 	}
 }
 
+// A foreign block is dropped on provenance alone, before the signature/text
+// branches: replaying another provider's signature to Anthropic is a 400, and
+// under display:"omitted" it carries no readable text worth salvaging either.
+func TestConvertAssistantContent_ForeignEmptyThinkingDropped(t *testing.T) {
+	blocks := []core.Content{
+		{Type: "thinking", Thinking: "", ThinkingSignature: `{"type":"reasoning","encrypted_content":"ENC"}`},
+		core.TextContent("response"),
+	}
+
+	result := convertAssistantContent(blocks, false, true)
+
+	if len(result) != 1 {
+		t.Fatalf("expected the foreign thinking block dropped, got %d blocks", len(result))
+	}
+	if got := result[0].(map[string]any)["type"]; got != "text" {
+		t.Errorf("expected the text block to survive, got %v", got)
+	}
+}
+
+// A signature is bound to everything sent before it from Fable 5.1 on, and
+// compaction rewrites that prefix. Without block_binding the API rejects the
+// whole request instead of dropping the stale blocks.
+func TestBuildRequestBody_BlockBindingOnBindingModels(t *testing.T) {
+	cases := []struct {
+		model string
+		want  bool
+	}{
+		{"claude-fable-5-1", true},
+		{"claude-fable-5", false},
+		{"claude-opus-5", false},
+		{"claude-sonnet-4-5", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			maxTokens := 4096
+			body, err := buildRequestBody(core.Request{
+				Model:    core.Model{ID: tc.model},
+				Messages: []core.Message{core.NewUserMessage("hi")},
+				Options:  core.StreamOptions{ThinkingLevel: "high", MaxTokens: &maxTokens},
+			}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var parsed struct {
+				Thinking struct {
+					BlockBinding *struct {
+						PrefixMismatchBehavior string `json:"prefix_mismatch_behavior"`
+					} `json:"block_binding"`
+				} `json:"thinking"`
+			}
+			if err := json.Unmarshal(body, &parsed); err != nil {
+				t.Fatal(err)
+			}
+			got := parsed.Thinking.BlockBinding != nil
+			if got != tc.want {
+				t.Fatalf("block_binding present = %v, want %v for %s", got, tc.want, tc.model)
+			}
+			if got && parsed.Thinking.BlockBinding.PrefixMismatchBehavior != "drop_block" {
+				t.Errorf("behavior = %q, want drop_block", parsed.Thinking.BlockBinding.PrefixMismatchBehavior)
+			}
+		})
+	}
+}
+
 func TestForeignThinkingDetectsProviderMismatch(t *testing.T) {
 	cases := []struct {
 		name string
@@ -872,8 +936,39 @@ func TestConvertMessages_DropsForeignThinkingSignatures(t *testing.T) {
 	}
 }
 
+// Under display:"omitted" — the default on current models — the thinking text
+// comes back empty and the signature carries the whole reasoning, which the
+// server decrypts to rebuild it. Such a block must still be replayed: skipping
+// it on the empty text drops the turn's reasoning on every request, including
+// within a tool-use turn where the API requires it back.
+func TestConvertAssistantContent_EmptyThinkingWithSignatureReplayed(t *testing.T) {
+	blocks := []core.Content{
+		{Type: "thinking", Thinking: "", ThinkingSignature: "encrypted-reasoning"},
+		core.ToolCallContent("call_1", "read", map[string]any{"path": "/x"}),
+	}
+
+	result := convertAssistantContent(blocks, false, false)
+
+	if len(result) != 2 {
+		t.Fatalf("expected thinking + tool_use, got %d blocks", len(result))
+	}
+	first := result[0].(map[string]any)
+	if first["type"] != "thinking" {
+		t.Fatalf("expected type=thinking, got %v", first["type"])
+	}
+	if first["signature"] != "encrypted-reasoning" {
+		t.Errorf("signature: got %v, want the block replayed verbatim", first["signature"])
+	}
+	if first["thinking"] != "" {
+		t.Errorf("thinking: got %v, want the empty text preserved", first["thinking"])
+	}
+	if second := result[1].(map[string]any); second["type"] != "tool_use" {
+		t.Errorf("expected the tool_use to follow its thinking block, got %v", second["type"])
+	}
+}
+
 func TestConvertAssistantContent_EmptyThinkingSkipped(t *testing.T) {
-	// Empty thinking blocks should be skipped entirely
+	// Empty thinking and no signature: nothing to replay, skipped entirely.
 	blocks := []core.Content{
 		{Type: "thinking", Thinking: "  "},
 		core.TextContent("response"),

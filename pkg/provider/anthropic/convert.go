@@ -71,9 +71,25 @@ type anthropicRequest struct {
 }
 
 type thinkingConfig struct {
-	Type         string `json:"type"`
-	BudgetTokens int    `json:"budget_tokens,omitempty"`
+	Type         string        `json:"type"`
+	BudgetTokens int           `json:"budget_tokens,omitempty"`
+	BlockBinding *blockBinding `json:"block_binding,omitempty"`
 }
+
+// blockBinding tells the API what to do with a thinking block whose prefix no
+// longer matches. From Claude Fable 5.1 a signature is bound to the system
+// prompt, the tool list and every message above it, and the default is to
+// reject the whole request. Compaction rewrites exactly that prefix: it
+// replaces old turns with a summary and keeps recent turns verbatim, so their
+// signatures stop matching. Asking the API to drop those blocks degrades the
+// turn (the model loses that reasoning) instead of failing it outright.
+type blockBinding struct {
+	PrefixMismatchBehavior string `json:"prefix_mismatch_behavior"`
+}
+
+// thinkingBindingBeta gates both block_binding and the input_transformations
+// array that reports what was dropped.
+const thinkingBindingBeta = "thinking-binding-controls-2026-08-01"
 
 type outputConfig struct {
 	Effort string `json:"effort,omitempty"`
@@ -145,6 +161,13 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 		} else if t.BudgetTokens > maxBudget {
 			t.BudgetTokens = maxBudget
 		}
+	}
+
+	// Ask the API to drop thinking blocks whose prefix no longer matches
+	// rather than reject the request. Only meaningful once a thinking config
+	// survived the branches above: with no config there are no blocks to bind.
+	if ar.Thinking != nil && bindsThinkingPrefix(req.Model.ID) {
+		ar.Thinking.BlockBinding = &blockBinding{PrefixMismatchBehavior: "drop_block"}
 	}
 
 	// Prompt caching — add cache_control breakpoints.
@@ -438,17 +461,26 @@ func convertAssistantContent(blocks []core.Content, isOAuth bool, dropThinking b
 					"type": "redacted_thinking",
 					"data": b.ThinkingSignature,
 				})
-			} else if strings.TrimSpace(b.Thinking) == "" {
-				// Empty thinking block — skip entirely
-				continue
 			} else if b.ThinkingSignature == "" {
-				// Thinking without signature (e.g. aborted stream) —
-				// emit as plain text to avoid API rejection.
+				// No signature to replay. An aborted stream leaves partial
+				// thinking text behind (Anthropic sends the signature last),
+				// which is emitted as plain text to keep the reasoning in
+				// context without tripping "thinking.signature: Field
+				// required". With no text either there is nothing to send.
+				if strings.TrimSpace(b.Thinking) == "" {
+					continue
+				}
 				result = append(result, map[string]any{
 					"type": "text",
 					"text": b.Thinking,
 				})
 			} else {
+				// A signature replays even when the thinking text is empty:
+				// under display:"omitted" (the default on current models) the
+				// server carries the whole reasoning in the signature and
+				// reconstructs it, and dropping the block would silently lose
+				// the turn's reasoning — which the API requires back verbatim
+				// within a tool-use turn.
 				result = append(result, map[string]any{
 					"type":      "thinking",
 					"thinking":  b.Thinking,
@@ -524,6 +556,15 @@ func supportsAdaptiveThinking(modelID string) bool {
 		strings.Contains(id, "opus-4-8") ||
 		strings.Contains(id, "opus-4.8") ||
 		strings.Contains(id, "sonnet-5")
+}
+
+// bindsThinkingPrefix reports whether the model validates a thinking block's
+// signature against everything sent before it. Claude Fable 5.1 is the first
+// to do so; Mythos 5.1 does not, and older models reject the block_binding
+// field outright, so the check stays narrow rather than "5.1 and up".
+func bindsThinkingPrefix(modelID string) bool {
+	id := strings.ToLower(modelID)
+	return strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1")
 }
 
 // resolveEffort maps our thinking levels to Anthropic adaptive effort.

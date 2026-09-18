@@ -90,6 +90,9 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		if oauthMode {
 			r.Header.Set("Authorization", "Bearer "+apiKey)
 			betas := "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
+			if bindsThinkingPrefix(req.Model.ID) {
+				betas += "," + thinkingBindingBeta
+			}
 			if fastMode {
 				betas += "," + fastModeBeta
 			}
@@ -98,8 +101,15 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 			r.Header.Set("x-app", "cli")
 		} else {
 			r.Header.Set("X-API-Key", apiKey)
+			var betas []string
+			if bindsThinkingPrefix(req.Model.ID) {
+				betas = append(betas, thinkingBindingBeta)
+			}
 			if fastMode {
-				r.Header.Set("anthropic-beta", fastModeBeta)
+				betas = append(betas, fastModeBeta)
+			}
+			if len(betas) > 0 {
+				r.Header.Set("anthropic-beta", strings.Join(betas, ","))
 			}
 		}
 		return r, nil
