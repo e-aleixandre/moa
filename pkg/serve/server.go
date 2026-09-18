@@ -132,6 +132,10 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/attention", handleAttention(manager))
 	mux.HandleFunc("GET /api/sessions", withGzip(handleListSessions(manager)))
+	mux.HandleFunc("GET /api/owners", handleListOwners(manager))
+	mux.HandleFunc("POST /api/owners", handleCreateOwner(manager))
+	mux.HandleFunc("GET /api/owners/{id}", handleGetOwner(manager))
+	mux.HandleFunc("DELETE /api/owners/{id}", handleDeleteOwner(manager))
 	mux.HandleFunc("POST /api/sessions", handleCreateSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}", handleGetSession(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/messages", withGzip(handleConversationMessages(manager)))
@@ -398,8 +402,11 @@ func handleListModels() http.HandlerFunc {
 }
 
 func handleListSessions(mgr *Manager) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, mgr.List())
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Owner conversations are hidden by default: they are not work waiting
+		// for the user. ?include=owners is for the client that shows them.
+		opts := ListOptions{IncludeOwners: r.URL.Query().Get("include") == "owners"}
+		writeJSON(w, http.StatusOK, mgr.ListWith(opts))
 	}
 }
 
@@ -440,6 +447,10 @@ func handleDeleteSession(mgr *Manager) http.HandlerFunc {
 		err := mgr.Delete(r.PathValue("id"))
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, ErrOwnerSession) {
+			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
 		if err != nil {

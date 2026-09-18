@@ -95,6 +95,7 @@ var knownModels = map[string]Model{
 	"gpt-daybreak-blue-latest": {
 		ID: "gpt-daybreak-blue-latest", Provider: "openai", API: "openai-chat",
 		Name: "Daybreak Blue", MaxInput: 1_050_000, MaxOutput: 128_000,
+		AliasOf: "gpt-5.6-sol",
 		Pricing: &Pricing{
 			Input: 5, Output: 30, CacheRead: 0.5, CacheWrite: 6.25,
 			Tiers: []PricingTier{

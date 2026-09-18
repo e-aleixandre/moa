@@ -1417,6 +1417,28 @@ test('an ordinary user message is still a waypoint', () => {
   expect(block.kind).toBe('waypoint');
 });
 
+// ── project owners: reports ──────────────────────────────────────────────────
+// A batch of reports arrives the same way an event does, and for the same
+// reason must not read as something the owner typed.
+test('a batch of reports is projected as an event block, not a waypoint', () => {
+  const [block] = projectStream(session([user('Reports from 2 sessions of your project:', {
+    _msg_id: 'rep-msg-1',
+    custom: { source: 'report', batch: 'rep_abc', count: 2 },
+  })]));
+  expect(block).toMatchObject({
+    kind: 'event', id: 'report-rep-msg-1-0',
+    source: 'reports', title: '2 sessions', autorun: true,
+  });
+});
+
+test('a single report carries no count in its title', () => {
+  const [block] = projectStream(session([user('Report from a session of your project:', {
+    _msg_id: 'rep-msg-2',
+    custom: { source: 'report', batch: 'rep_def', count: 1 },
+  })]));
+  expect(block).toMatchObject({ kind: 'event', source: 'reports', title: '' });
+});
+
 test('an event block keeps a stable id across a history prepend, so its body stays collapsed', () => {
   const first = projectStream(session([event('{}')]));
   const later = projectStream(session([user('earlier'), assistant('ok'), event('{}')]));

@@ -80,6 +80,13 @@ type Model struct {
 	MaxInput  int      `json:"max_input"`
 	MaxOutput int      `json:"max_output"`
 	Pricing   *Pricing `json:"pricing,omitempty"`
+	// AliasOf names the model this alias currently resolves to, when the
+	// provider answers under that other id. Responses record the effective
+	// id, so without this an alias's own history looks like a different
+	// model's on replay and its encrypted reasoning is discarded every turn.
+	// Empty for ordinary models, whose responses come back under the
+	// requested id.
+	AliasOf string `json:"alias_of,omitempty"`
 }
 
 // DefaultMaxOutputTokens bounds a single model response when the caller has

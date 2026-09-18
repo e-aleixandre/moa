@@ -22,6 +22,12 @@ type Sources struct {
 	agentsMD    string
 	skillsIndex string
 	memoryIndex string
+	// ownerBook renders the project-book section of the prompt, and is nil when
+	// the codebase has no owner. It is a loader rather than a captured string
+	// because the book is edited while sessions are open — by the owner itself,
+	// on its own turns — so a reload has to re-read it like AGENTS.md.
+	ownerBook     func() string
+	ownerBookText string
 }
 
 // NewSources captures what a session was built with. cwd and memStore are kept
@@ -34,6 +40,30 @@ func NewSources(cwd string, memStore *memory.Store, agentsMD, skillsIndex, memor
 		skillsIndex: skillsIndex,
 		memoryIndex: memoryIndex,
 	}
+}
+
+// WithOwnerBook attaches the project-book loader and reads it once. A nil
+// loader leaves the session without a book section, which is the state of
+// every codebase that has no owner.
+func (s *Sources) WithOwnerBook(load func() string) *Sources {
+	if s == nil || load == nil {
+		return s
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ownerBook = load
+	s.ownerBookText = load()
+	return s
+}
+
+// OwnerBook returns the current project-book section ("" when there is none).
+func (s *Sources) OwnerBook() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ownerBookText
 }
 
 // Snapshot returns the current values as one consistent set.
@@ -74,11 +104,18 @@ func (s *Sources) Reload() (changed []Changed, revert func()) {
 	if s.memStore != nil {
 		memoryIndex = s.memStore.FormatIndex(s.memStore.List())
 	}
+	s.mu.RLock()
+	loadBook := s.ownerBook
+	s.mu.RUnlock()
+	ownerBook := ""
+	if loadBook != nil {
+		ownerBook = loadBook()
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	prev := struct{ agentsMD, skillsIndex, memoryIndex string }{s.agentsMD, s.skillsIndex, s.memoryIndex}
+	prev := struct{ agentsMD, skillsIndex, memoryIndex, ownerBook string }{s.agentsMD, s.skillsIndex, s.memoryIndex, s.ownerBookText}
 	if agentsMD != s.agentsMD {
 		changed = append(changed, Changed{Label: "AGENTS.md", Content: agentsMD})
 		s.agentsMD = agentsMD
@@ -91,9 +128,14 @@ func (s *Sources) Reload() (changed []Changed, revert func()) {
 		changed = append(changed, Changed{Label: "Memory index", Content: memoryIndex})
 		s.memoryIndex = memoryIndex
 	}
+	if loadBook != nil && ownerBook != s.ownerBookText {
+		changed = append(changed, Changed{Label: "Project book", Content: ownerBook})
+		s.ownerBookText = ownerBook
+	}
 	return changed, func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.agentsMD, s.skillsIndex, s.memoryIndex = prev.agentsMD, prev.skillsIndex, prev.memoryIndex
+		s.ownerBookText = prev.ownerBook
 	}
 }

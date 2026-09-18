@@ -205,29 +205,74 @@ func convertMessageForDialect(msg core.Message, dialect Dialect, msgIndex int) [
 		return convertAssistantMessageForDialect(msg, dialect.Provider, dialect.Model, msgIndex)
 
 	case "tool_result":
-		text := extractTextParts(msg.Content)
 		item := map[string]any{
 			"type":    "function_call_output",
 			"call_id": msg.ToolCallID,
 		}
-		if dialect.SupportsExplicitCacheBreakpoints {
-			// Array form is what lets a tool result carry a breakpoint; the
-			// string form used without the flag is still accepted by the API.
-			item["output"] = []map[string]any{
-				{
-					"type":                    "input_text",
-					"text":                    text,
-					"prompt_cache_breakpoint": explicitCacheBreakpoint(),
-				},
-			}
-		} else {
-			item["output"] = text
-		}
+		item["output"] = convertToolResultOutput(msg.Content, dialect)
 		return []map[string]any{item}
 
 	default:
 		return nil
 	}
+}
+
+// convertToolResultOutput builds the function_call_output payload. A tool
+// result that carries images (a read of a screenshot, an MCP tool returning a
+// picture) must reach the model as input_image parts: joining only the text
+// blocks is what made those images invisible, with no error anywhere.
+//
+// The array form with an input_image was verified live against all three
+// transports that share this codec — OpenAI (/codex/responses), xAI and Meta —
+// by returning an image-only tool result and having the model read a code
+// printed in it. So there is no per-dialect gate here, exactly as user-message
+// images have none.
+//
+// Text-only results keep their exact previous shape — a plain string, or a
+// single input_text part when explicit breakpoints are on — so cached prefixes
+// recorded before this change still match byte for byte.
+func convertToolResultOutput(blocks []core.Content, dialect Dialect) any {
+	if !hasImage(blocks) {
+		text := extractTextParts(blocks)
+		if !dialect.SupportsExplicitCacheBreakpoints {
+			return text
+		}
+		// Array form is what lets a tool result carry a breakpoint; the
+		// string form used without the flag is still accepted by the API.
+		return []map[string]any{
+			{
+				"type":                    "input_text",
+				"text":                    text,
+				"prompt_cache_breakpoint": explicitCacheBreakpoint(),
+			},
+		}
+	}
+
+	parts := make([]map[string]any, 0, len(blocks))
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			if b.Text == "" {
+				continue
+			}
+			parts = append(parts, map[string]any{"type": "input_text", "text": b.Text})
+		case "image":
+			parts = append(parts, imagePart(b))
+		}
+	}
+	if dialect.SupportsExplicitCacheBreakpoints {
+		markLastInputTextBreakpoint(parts)
+	}
+	return parts
+}
+
+func hasImage(blocks []core.Content) bool {
+	for _, b := range blocks {
+		if b.Type == "image" {
+			return true
+		}
+	}
+	return false
 }
 
 // convertAssistantMessage converts an assistant message to Responses API items.
@@ -253,7 +298,10 @@ func convertAssistantMessageForDialect(msg core.Message, provider, modelID strin
 	// Responses messages written before model provenance was added still carry
 	// their provider. Preserve that known-provider legacy metadata, while
 	// continuing to reject unknown-provider and explicitly cross-model state.
-	sameOrigin := msg.Provider != "" && modelID != "" && msg.Provider == provider && (msg.Model == "" || msg.Model == modelID)
+	// An alias is answered under its target's id, so its own turns are
+	// recorded as the target's; SameResponseOrigin accepts those instead of
+	// discarding the session's whole reasoning history on every replay.
+	sameOrigin := msg.Provider != "" && modelID != "" && msg.Provider == provider && (msg.Model == "" || core.SameResponseOrigin(modelID, msg.Model))
 	foreignModel := !sameOrigin
 
 	var items []map[string]any
@@ -340,15 +388,7 @@ func convertUserContent(blocks []core.Content, supportsDocuments bool) []map[str
 				"text": b.Text,
 			})
 		case "image":
-			// The recorded media type can disagree with the bytes (e.g. a GIF
-			// read from a .png). Declare what the bytes actually are: history
-			// is portable across providers, and a data URL that lies about its
-			// type is what Anthropic rejects outright.
-			parts = append(parts, map[string]any{
-				"type":      "input_image",
-				"detail":    "auto",
-				"image_url": "data:" + core.CorrectImageMime(b.Data, b.MimeType) + ";base64," + b.Data,
-			})
+			parts = append(parts, imagePart(b))
 		case "document":
 			if !supportsDocuments {
 				// Provider (e.g. codex OAuth) can't accept native documents.
@@ -373,6 +413,20 @@ func convertUserContent(blocks []core.Content, supportsDocuments bool) []map[str
 		}
 	}
 	return parts
+}
+
+// imagePart renders an image block as a Responses input_image part.
+//
+// The recorded media type can disagree with the bytes (e.g. a GIF read from a
+// .png). Declare what the bytes actually are: history is portable across
+// providers, and a data URL that lies about its type is what Anthropic rejects
+// outright.
+func imagePart(b core.Content) map[string]any {
+	return map[string]any{
+		"type":      "input_image",
+		"detail":    "auto",
+		"image_url": "data:" + core.CorrectImageMime(b.Data, b.MimeType) + ";base64," + b.Data,
+	}
 }
 
 func extractTextParts(blocks []core.Content) string {

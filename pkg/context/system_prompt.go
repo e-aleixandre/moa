@@ -40,6 +40,11 @@ type SystemPromptOptions struct {
 	HasVerify   bool            // .moa/verify.json was loaded
 	MemoryIndex string          // pre-formatted memory index (one line per fact)
 	SkillsIndex string          // pre-formatted skills index
+	// OwnerRole is the project owner's own role prompt, set only for an owner's
+	// conversation. OwnerBook is the owner's book index, injected into every
+	// session of a codebase that has one.
+	OwnerRole string
+	OwnerBook string
 	// Now, if non-zero, is the clock used for the date line. Zero means time.Now.
 	// Callers that rebuild the prompt (MCP tool-set changes) should pin this so
 	// a later rebuild does not restamp the date and miss the GPT-5.6 cache.
@@ -242,6 +247,17 @@ Never commit, push, amend or rewrite history unless the user explicitly asks. Wh
 	if opts.SkillsIndex != "" {
 		sb.WriteString(opts.SkillsIndex)
 		sb.WriteString("\n\n")
+	}
+
+	// Project owner. The role comes first: it says what this agent is, and the
+	// book that follows is the material it works from.
+	if opts.OwnerRole != "" {
+		sb.WriteString(opts.OwnerRole)
+		sb.WriteString("\n\n")
+	}
+	if opts.OwnerBook != "" {
+		sb.WriteString(opts.OwnerBook)
+		sb.WriteString("\n")
 	}
 
 	// Current date and working directory. Date only — a clock here would

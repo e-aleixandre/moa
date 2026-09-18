@@ -14,6 +14,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/autotitle"
+	"github.com/e-aleixandre/moa/pkg/book"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -54,6 +55,9 @@ var excludedTools = map[string]bool{
 	"subagent_steer":  true,
 	"memory":          true,
 	"ask_user":        true,
+	// Directing the project's other sessions is the owner's own job; a child
+	// only ever sees the slice of context its task carried.
+	"sessions": true,
 }
 
 type readOnlyFilesKey struct{}
@@ -1227,6 +1231,14 @@ func buildChildRegistry(parent *core.Registry, params map[string]any, readOnlyFi
 	readTool := allowed["read"]
 	if len(files) > 0 && readTool.Name != "" {
 		allowed["read"] = snapshotReadTool(readTool, files)
+	}
+	// A child of the project owner reads the book but never writes it: the
+	// book is the owner's own record, and a child only ever sees the slice of
+	// context its task carried.
+	if bookTool, ok := allowed[book.ToolName]; ok {
+		if readOnly, downgraded := book.ReadOnlyVariant(bookTool); downgraded {
+			allowed[book.ToolName] = readOnly
+		}
 	}
 
 	reg := core.NewRegistry()

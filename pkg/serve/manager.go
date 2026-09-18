@@ -55,6 +55,9 @@ type ManagedSession struct {
 	// Origin is who created the session ("user" for a human, or a caller-chosen
 	// label for automation). Mirrors session.Session metadata.
 	Origin string `json:"origin"`
+	// Kind classifies a session that is not an ordinary conversation
+	// (session.KindOwner). Empty for every user session.
+	Kind string `json:"kind,omitempty"`
 	// automationCreated is true only for sessions the Automation API created
 	// itself (see automationCreatedMeta). Unlike Origin, which is a free-form
 	// label any creator may pass, it is what authorizes the automation token to
@@ -277,6 +280,7 @@ type SessionInfo struct {
 	Created            time.Time `json:"created"`
 	Updated            time.Time `json:"updated"`
 	Origin             string    `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
+	Kind               string    `json:"kind,omitempty"`   // session.KindOwner for an owner conversation; empty otherwise
 	Error              string    `json:"error,omitempty"`
 	Unseen             bool      `json:"unseen"`
 	UnseenSeq          uint64    `json:"unseen_seq,omitempty"`
@@ -437,6 +441,7 @@ func (s *ManagedSession) info() SessionInfo {
 		Created:        s.Created,
 		Updated:        s.Updated,
 		Origin:         nonUserOrigin(s.Origin),
+		Kind:           s.Kind,
 		Error:          stateErr,
 		UntrustedMCP:   s.infra.UntrustedMCP,
 		MCP:            mcpSummary,
@@ -651,6 +656,9 @@ type Manager struct {
 	// attention normalizes cross-session blocking state for future voice and
 	// digest clients. It owns no session state and is stopped on Shutdown.
 	attention *attention.Service
+	// reports batches the run outcomes of a project's sessions and delivers
+	// them to its owner. nil when owners are unavailable (no config dir).
+	reports   *reportCoordinator
 	versionMu sync.RWMutex
 	version   release.Result
 
@@ -884,6 +892,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		}()
 	}
 	m.attention.Start()
+	// The coordinator reads its outbox at startup, so it must exist before any
+	// session is resumed and starts reporting.
+	m.reports = newReportCoordinator(ctx, m)
 	if m.scheduler != nil {
 		m.scheduler.Start(m)
 	}
@@ -1169,8 +1180,22 @@ func (m *Manager) releaseAttachmentIDs(sessionID string, attachmentIDs []string)
 	}
 }
 
-// List returns info for all sessions, sorted by updated time descending.
+// ListOptions selects which sessions a listing includes.
+type ListOptions struct {
+	// IncludeOwners adds the owner conversations, which every other caller
+	// wants out of the way: an owner is not work waiting for the user, and
+	// showing it among the sessions would also make it a routing candidate.
+	IncludeOwners bool
+}
+
+// List returns info for all ordinary sessions, sorted by updated time
+// descending. Owner conversations are excluded; see ListWith.
 func (m *Manager) List() []SessionInfo {
+	return m.ListWith(ListOptions{})
+}
+
+// ListWith is List with explicit options.
+func (m *Manager) ListWith(opts ListOptions) []SessionInfo {
 	m.mu.RLock()
 	active := make(map[string]*ManagedSession, len(m.sessions))
 	for id, s := range m.sessions {
@@ -1183,6 +1208,9 @@ func (m *Manager) List() []SessionInfo {
 	for _, s := range active {
 		if s == nil {
 			continue // nil placeholder during ResumeSession
+		}
+		if s.Kind == session.KindOwner && !opts.IncludeOwners {
+			continue
 		}
 		info := s.info()
 		info.Unseen, info.UnseenSeq, info.AttentionNamespace = m.attentionState(s)
@@ -1199,6 +1227,10 @@ func (m *Manager) List() []SessionInfo {
 		model, _ := sum.Metadata["model"].(string)
 		cwd, _ := sum.Metadata["cwd"].(string)
 		origin, _ := sum.Metadata[session.MetaOrigin].(string)
+		kind, _ := sum.Metadata[session.MetaKind].(string)
+		if kind == session.KindOwner && !opts.IncludeOwners {
+			continue
+		}
 		list = append(list, SessionInfo{
 			ID:             sum.ID,
 			Title:          sum.Title,
@@ -1206,6 +1238,7 @@ func (m *Manager) List() []SessionInfo {
 			Model:          model,
 			CWD:            cwd,
 			Origin:         nonUserOrigin(origin),
+			Kind:           kind,
 			Created:        sum.Created,
 			Updated:        sum.Updated,
 			Unseen:         m.isUnseen(sum.ID),

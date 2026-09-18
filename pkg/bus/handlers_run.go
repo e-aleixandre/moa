@@ -139,6 +139,20 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 	b.OnCommand(func(cmd SendPrompt) error {
 		sctx.abortMu.Lock()
 		defer sctx.abortMu.Unlock()
+		// IdleOnly is decided here, under the same lock that converts prompts
+		// into steers and that the pump takes before starting a queued run: a
+		// caller checking idleness from outside could only observe a snapshot
+		// that a concurrent send invalidates before its own Execute lands.
+		if cmd.IdleOnly {
+			if sctx.Agent.QueueLen() > 0 || sctx.hasBackgroundWork() {
+				return ErrNotIdle
+			}
+			if sctx.State != nil {
+				if state := sctx.State.Current(); state == StateRunning || state == StatePermission {
+					return ErrNotIdle
+				}
+			}
+		}
 		// Strict-order gate (INV-2): a genuine user prompt must not start a run
 		// while the queue rail holds pending items — it would jump ahead of a
 		// queued barrier/steer. Convert it into a steer at the tail of the queue

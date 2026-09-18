@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"sync/atomic"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -98,28 +97,14 @@ type callbackTarget struct {
 // in their metadata — every ordinary user session — get no subscription at all,
 // so nothing is ever delivered for them.
 //
-// The trigger policy mirrors the shape of subscribePush (same bus, same
-// subscription list, unsubscribed by Delete before the runtime closes), but not
-// its human-attention gating: subscribePush suppresses a notification when a
-// browser is watching or the run was short, which are properties of a human
-// looking at a screen. A machine caller is never watching, so a callback fires
-// regardless of duration and connected clients.
-//
-//   - RunEnded with Err == nil → "done", but only once the session is fully
-//     quiescent (no background subagent/bash work that could still push another
-//     run), so we don't report completion in the middle of an autonomous chain.
-//   - RunEnded with Err != nil → "failed", immediately: the run is over.
-//   - PermissionRequested / AskUserRequested → "needs_input", carrying the
-//     pending interaction, at most once per run (a run can ask many times; the
-//     caller only needs to learn that somebody has to answer). A later RunEnded
-//     still delivers done/failed.
-//
-// All four triggers are handled by ONE SubscribeAll subscriber: it sees events
-// in publication order on a single goroutine, which is what makes the
-// once-per-run guard exact. Separate typed subscriptions would each run on
-// their own goroutine, so a late RunStarted could clear the guard after a
-// needs_input was already delivered (double fire), or a stale blocking event
-// from the previous run could fire against the new run's reset guard.
+// The triggers live in subscribeRunOutcomes, which this shares with the project
+// owner's reports; the callback is only its HTTP sink. The policy mirrors the
+// shape of subscribePush (same bus, same subscription list, unsubscribed by
+// Delete before the runtime closes), but not its human-attention gating:
+// subscribePush suppresses a notification when a browser is watching or the run
+// was short, which are properties of a human looking at a screen. A machine
+// caller is never watching, so a callback fires regardless of duration and
+// connected clients.
 //
 // Delivery is best-effort and always happens on its own goroutine: it never
 // blocks the bus, the run, or shutdown.
@@ -137,51 +122,9 @@ func (m *Manager) subscribeAutomationCallback(sess *ManagedSession, meta map[str
 	secret, _ := meta[session.MetaCallbackSecret].(string)
 	cb := callbackTarget{url: url, secret: secret}
 
-	// lastRunGen records the most recent run we saw end, so a "done" waiter that
-	// was still waiting for quiescence when a newer run started drops out: the
-	// newer run delivers its own callback.
-	var lastRunGen atomic.Uint64
-	// needsInputSent is cleared at the start of every run, so a run that asks
-	// five times still produces one needs_input callback. Only ever touched from
-	// the single subscriber goroutine below, in publication order.
-	var needsInputSent bool
-
-	b := sess.runtime.Bus
-	needsInput := func(pending *CallbackPending) {
-		if needsInputSent {
-			return
-		}
-		needsInputSent = true
-		go deliverAutomationCallback(sess, cb, callbackStatusNeedsInput, "", "", pending)
-	}
-
-	sess.pushUnsubs = append(sess.pushUnsubs, b.SubscribeAll(func(event any) {
-		switch e := event.(type) {
-		case bus.RunStarted:
-			needsInputSent = false
-		case bus.PermissionRequested:
-			needsInput(permissionPending(e))
-		case bus.AskUserRequested:
-			needsInput(askPending(e))
-		case bus.RunEnded:
-			lastRunGen.Store(e.RunGen)
-			if e.Err != nil {
-				go deliverAutomationCallback(sess, cb, callbackStatusFailed, e.Err.Error(), e.FinalText, nil)
-				return
-			}
-			go func() {
-				// WaitQuiescent drains the bus, so it must not run on a
-				// subscriber goroutine (it would wait on itself).
-				if !sess.runtime.WaitQuiescent(sess.infra.sessionCtx) {
-					return // session is going away; nothing useful to report
-				}
-				if lastRunGen.Load() != e.RunGen {
-					return // superseded by a newer run, which reports for itself
-				}
-				deliverAutomationCallback(sess, cb, callbackStatusDone, "", e.FinalText, nil)
-			}()
-		}
-	}))
+	subscribeRunOutcomes(sess, func(out runOutcome) {
+		deliverAutomationCallback(sess, cb, out.Status, out.Err, out.FinalText, out.Pending)
+	})
 }
 
 // deliverAutomationCallback builds the payload and POSTs it with retries. It is

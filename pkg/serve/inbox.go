@@ -200,6 +200,8 @@ func writeEventError(w http.ResponseWriter, err error) {
 		http.Error(w, "not found", http.StatusNotFound)
 	case errors.Is(err, events.ErrSettled):
 		http.Error(w, "event already routed or dismissed", http.StatusConflict)
+	case errors.Is(err, ErrOwnerSession):
+		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, ErrEventsUnavailable):
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 	case errors.Is(err, ErrInvalidCWD), errors.Is(err, ErrInvalidModel), errors.Is(err, ErrInvalidThinking):
@@ -438,6 +440,12 @@ func (m *Manager) RouteEvent(id, sessionID string, createNew bool, model, thinki
 			}
 		}
 		return routed, routeErr
+	}
+	// An owner is not a destination for events: it is excluded from the routing
+	// candidates, and a session_id typed by hand must not be a way around that.
+	// The check happens before MarkRouting so the event stays in the inbox.
+	if m.isOwnerSession(sessionID) {
+		return events.Event{}, ErrOwnerSession
 	}
 	return m.routeEventTo(ev, sessionID, true)
 }

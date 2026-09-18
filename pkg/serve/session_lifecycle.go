@@ -107,11 +107,13 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		bopts = &buildOpts{}
 	}
 	bopts.artifactStore = session.NewArtifactStore(store.Dir(), id)
+	bopts.ownerSession = persisted.Kind() == session.KindOwner
 	sess, err := m.buildManagedSession(id, opts.Title, opts.Model, cwd, bopts)
 	if err != nil {
 		return nil, err
 	}
 	sess.Origin = persisted.Origin()
+	sess.Kind = persisted.Kind()
 	sess.automationCreated = automationCreatedMeta(opts.extraMeta)
 	// Wire the outbound completion callback before the session is reachable, so
 	// the very first run cannot end before the subscription exists. A no-op
@@ -169,6 +171,11 @@ type buildOpts struct {
 	// configured ones (see CreateOpts.extraMCPServers). On resume they are
 	// rebuilt from the persisted metadata.
 	extraMCPServers map[string]core.MCPServer
+
+	// ownerSession builds this session as a project owner's own conversation
+	// (its role prompt, and later its write access to the book). Derived from
+	// the persisted kind, so a resume rebuilds the same agent the create did.
+	ownerSession bool
 }
 
 // buildManagedSession creates an in-memory managed session with full runtime.
@@ -244,6 +251,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		ExtraMCPServers:   extraMCPServers,
 		Ctx:               sessionCtx,
 		EnableAskUser:     true,
+		OwnerSession:      opts != nil && opts.ownerSession,
 		Fast:              initialFast,
 		BeforeWrite:       cpStore.Capture,
 		AttachmentScope:   attachScope,
@@ -433,6 +441,15 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	}
 	core.RegisterOrLog(bs.ToolReg, newSendFileTool(tool.ToolConfig{WorkspaceRoot: bs.CWD, PathPolicy: bs.PathPolicy}, id, artifactStore))
 
+	// The owner's handle on the sessions of its project. It is built here, not
+	// in bootstrap, because it needs the live Manager (same reason as
+	// send_file needing the session's stores), and only for the owner's own
+	// conversation: a child directing its siblings has no owner's view to do
+	// it from.
+	if opts != nil && opts.ownerSession {
+		core.RegisterOrLog(bs.ToolReg, newSessionsTool(m, core.CodebaseKey(bs.CWD)))
+	}
+
 	// Build RuntimeConfig from bootstrap session + serve-specific fields.
 	rcfg := bs.RuntimeConfig()
 	rcfg.SessionID = id
@@ -589,6 +606,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	if opts != nil {
 		m.subscribeAutomationCallback(sess, opts.initialMetadata)
 	}
+	// Project owners: children report their outcomes here, and the owner's own
+	// outcomes are what release a batch that was waiting for it to be free.
+	m.subscribeOwnerReports(sess, opts != nil && opts.ownerSession)
 
 	return sess, nil
 }
@@ -662,6 +682,11 @@ var (
 	ErrNoMCP                   = errors.New("session has no MCP servers")
 	ErrInvalidAttentionCursor  = errors.New("invalid attention cursor")
 	ErrStaleAttentionNamespace = errors.New("stale attention namespace")
+	// ErrOwnerSession refuses an operation on an owner's conversation through
+	// the ordinary session API. An owner is deleted as an owner (which also
+	// removes its session), so deleting just the conversation would leave an
+	// owner.json pointing at nothing.
+	ErrOwnerSession = errors.New("this session belongs to a project owner")
 )
 
 // Delete aborts any running agent, closes resources, and removes the session.
@@ -673,7 +698,27 @@ var (
 func (m *Manager) Delete(id string) error {
 	m.automationMu.Lock()
 	defer m.automationMu.Unlock()
+	if m.isOwnerSession(id) {
+		return ErrOwnerSession
+	}
 	return m.deleteSession(id)
+}
+
+// isOwnerSession reports whether a session is an owner conversation, live or
+// saved. A session that cannot be read at all answers false: the delete path
+// below reports the real error instead of a misleading refusal.
+func (m *Manager) isOwnerSession(id string) bool {
+	if sess, ok := m.Get(id); ok {
+		return sess.Kind == session.KindOwner
+	}
+	for _, sum := range m.cachedSavedSessions() {
+		if sum.ID != id {
+			continue
+		}
+		kind, _ := sum.Metadata[session.MetaKind].(string)
+		return kind == session.KindOwner
+	}
+	return false
 }
 
 // deleteSession is Delete's body. Callers must hold automationMu.
@@ -1072,6 +1117,7 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 		initialMetadata:        saved.Metadata,
 		titleSource:            saved.TitleSource,
 		artifactStore:          session.NewArtifactStore(store.Dir(), saved.ID),
+		ownerSession:           saved.Kind() == session.KindOwner,
 		// Per-run MCP servers are session-scoped: they only exist in this
 		// session's metadata, so a resume has to bring them back or the agent
 		// silently loses the tools the automation caller attached. A name the
@@ -1085,6 +1131,7 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 		return nil, fmt.Errorf("resume: %w", err)
 	}
 	sess.Origin = saved.Origin()
+	sess.Kind = saved.Kind()
 	sess.automationCreated = automationCreatedMeta(saved.Metadata)
 	// 3. Restore permission mode and the context limit.
 	if savedPermMode != "" {
@@ -1154,6 +1201,10 @@ func (m *Manager) Shutdown() {
 	if m.scheduler != nil {
 		m.scheduler.Close()
 	}
+	// Stop the reports actor before the sessions are flushed: its timers would
+	// otherwise keep firing deliveries into sessions that are being closed.
+	// Close persists whatever was still batched, so the next process delivers it.
+	m.reports.Close()
 	m.mu.RLock()
 	sessions := make([]*ManagedSession, 0, len(m.sessions))
 	for _, s := range m.sessions {
