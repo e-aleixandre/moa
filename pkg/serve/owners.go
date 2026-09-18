@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 
+	"github.com/e-aleixandre/moa/pkg/book"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/session"
@@ -157,6 +159,8 @@ func (m *Manager) CreateOwner(opts CreateOwnerOpts) (OwnerInfo, error) {
 	if err := store.Save(own); err != nil {
 		return OwnerInfo{}, err
 	}
+	// Every session of this codebase now has an owner to name.
+	m.invalidateOwnerRefs()
 	return m.ownerInfo(own), nil
 }
 
@@ -186,6 +190,7 @@ func (m *Manager) DeleteOwner(id string) error {
 	if err := store.Delete(own.CodebaseKey); err != nil {
 		return err
 	}
+	m.invalidateOwnerRefs()
 	if own.SessionID == "" {
 		return nil
 	}
@@ -224,6 +229,106 @@ func (m *Manager) liveChildrenOfRoot(root string) []string {
 		}
 	}
 	return ids
+}
+
+/* ── Who a session's owner is ──────────────────────────────────────────────
+
+   There is deliberately no GET /api/owners/{id}/children. The roster already
+   answers it: SessionInfo carries owner_id (manager.go), so a client that holds
+   /api/sessions can select an owner's children and group them with the very
+   projection it already uses for the session list. A second, server-side
+   grouping would be a second answer to the same question taken at a different
+   instant — the dossier and the sidebar disagreeing about which session is
+   waiting is exactly the bug one projection prevents.
+
+   The one thing a client cannot compute is the mapping itself: it needs
+   core.CodebaseKey, which resolves git worktrees through an exec. That is what
+   owner_id is, and it is resolved where the session's book and its reporting
+   were resolved, so the three cannot disagree. See docs/owners.md. */
+
+// codebaseKeyOf is CodebaseKey over a canonicalized path, the way every other
+// owner lookup resolves one.
+func codebaseKeyOf(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	canonical, err := core.CanonicalizePath(dir)
+	if err != nil {
+		canonical = dir
+	}
+	return core.CodebaseKey(canonical)
+}
+
+/* ── The book over HTTP ────────────────────────────────────────────────────
+
+   Reading and writing go through pkg/book, which owns the one path guard that
+   refuses to leave the book directory (absolute paths, "..", symlinks out).
+   Duplicating that check here would be a second implementation of the only
+   thing standing between a book path and the config directory that holds
+   credentials. */
+
+// OwnerBook is the answer of GET /api/owners/{id}/book.
+type OwnerBook struct {
+	OwnerID string       `json:"owner_id"`
+	Files   []book.Entry `json:"files"`
+}
+
+// ErrBookReadOnly refuses a write to any file but the index. PROJECT.md is the
+// only file injected into a child's prompt, so it is the one whose wording the
+// user may need to fix; the rest is the owner's own record.
+var ErrBookReadOnly = errors.New("only " + owner.ProjectFile + " is editable here; the rest of the book is the owner's own record")
+
+// ownerBookDir resolves the book directory of an owner by ID.
+func (m *Manager) ownerBookDir(id string) (owner.Owner, string, error) {
+	store, err := m.ownerStore()
+	if err != nil {
+		return owner.Owner{}, "", err
+	}
+	own, found, err := store.FindByID(id)
+	if err != nil {
+		return owner.Owner{}, "", err
+	}
+	if !found {
+		return owner.Owner{}, "", owner.ErrNotFound
+	}
+	return own, store.BookDir(own.CodebaseKey), nil
+}
+
+// OwnerBookFiles lists the owner's book.
+func (m *Manager) OwnerBookFiles(id string) (OwnerBook, error) {
+	own, dir, err := m.ownerBookDir(id)
+	if err != nil {
+		return OwnerBook{}, err
+	}
+	files, err := book.Files(dir)
+	if err != nil {
+		return OwnerBook{}, err
+	}
+	if files == nil {
+		files = []book.Entry{}
+	}
+	return OwnerBook{OwnerID: own.ID, Files: files}, nil
+}
+
+// OwnerBookFile returns one file's content.
+func (m *Manager) OwnerBookFile(id, path string) ([]byte, error) {
+	_, dir, err := m.ownerBookDir(id)
+	if err != nil {
+		return nil, err
+	}
+	return book.ReadFile(dir, path)
+}
+
+// SaveOwnerBookFile replaces PROJECT.md, and only PROJECT.md.
+func (m *Manager) SaveOwnerBookFile(id, path, content string) error {
+	if path != owner.ProjectFile {
+		return ErrBookReadOnly
+	}
+	_, dir, err := m.ownerBookDir(id)
+	if err != nil {
+		return err
+	}
+	return book.WriteFile(dir, path, []byte(content))
 }
 
 // openSessionsHint is the message the user acts on: what to do, not what went
@@ -302,5 +407,82 @@ func handleDeleteOwner(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleOwnerBook(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		listing, err := mgr.OwnerBookFiles(r.PathValue("id"))
+		if errors.Is(err, owner.ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, listing)
+	}
+}
+
+// bookFileBody is the shape of both the read answer and the write request. The
+// path travels in the body of a write as well as in the URL so a truncated or
+// rewritten path cannot silently retarget the save.
+type bookFileBody struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	// Editable tells the client which files it may offer a Save for, rather
+	// than making it hard-code the rule the server enforces.
+	Editable bool `json:"editable"`
+}
+
+func handleGetOwnerBookFile(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := r.PathValue("path")
+		data, err := mgr.OwnerBookFile(r.PathValue("id"), path)
+		switch {
+		case errors.Is(err, owner.ErrNotFound), errors.Is(err, os.ErrNotExist):
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		case err != nil:
+			// A refused path is the caller's mistake, not a server failure: the
+			// guard in pkg/book rejects anything that would leave the book.
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, bookFileBody{
+			Path:     path,
+			Content:  string(data),
+			Editable: path == owner.ProjectFile,
+		})
+	}
+}
+
+func handlePutOwnerBookFile(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		limitBody(w, r, maxJSONBodySize)
+		var body bookFileBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		path := r.PathValue("path")
+		if body.Path != "" && body.Path != path {
+			http.Error(w, "the body's path does not match the URL", http.StatusBadRequest)
+			return
+		}
+		err := mgr.SaveOwnerBookFile(r.PathValue("id"), path, body.Content)
+		switch {
+		case errors.Is(err, owner.ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		case errors.Is(err, ErrBookReadOnly):
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, bookFileBody{Path: path, Content: body.Content, Editable: true})
 	}
 }

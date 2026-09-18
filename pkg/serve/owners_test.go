@@ -3,6 +3,8 @@ package serve
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -204,5 +206,108 @@ func TestRouteEventRefusesAnOwnerSession(t *testing.T) {
 	after, ok := mgr.events.Get(ev.ID)
 	if !ok || after.State != events.StateNew {
 		t.Fatalf("the refused event left the inbox: %+v", after)
+	}
+}
+
+/* ── The surface's three reads: children, book, and the owner of a session ── */
+
+func TestSessionInfoNamesItsOwnerAndTheOwnerNamesNoOne(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: root, Name: "Winerim"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := mgr.CreateSession(CreateOpts{CWD: root, Title: "imports"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir(), Title: "ownerless"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sess := range mgr.ListWith(ListOptions{IncludeOwners: true}) {
+		switch sess.Title {
+		case "imports":
+			if sess.OwnerID != info.ID || sess.OwnerName != "Winerim" {
+				t.Fatalf("a child of the project reports owner %q/%q, want %q/Winerim", sess.OwnerID, sess.OwnerName, info.ID)
+			}
+		case "ownerless":
+			if sess.OwnerID != "" {
+				t.Fatalf("a session outside the project claims owner %q", sess.OwnerID)
+			}
+		case "Winerim":
+			if sess.OwnerID != "" {
+				t.Fatalf("the owner conversation claims to be its own child: %q", sess.OwnerID)
+			}
+		}
+	}
+
+	// Deleting the owner must stop every session naming it, memo or not. The
+	// child is closed first: an owner cannot be removed under a live session.
+	if err := mgr.CloseSession(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.DeleteOwner(info.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, sess := range mgr.List() {
+		if sess.OwnerID != "" {
+			t.Fatalf("%s still names a deleted owner: %q", sess.Title, sess.OwnerID)
+		}
+	}
+}
+
+func TestOwnerBookIsListedReadAndOnlyTheIndexIsWritable(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Winerim"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := owner.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisions := filepath.Join(store.BookDir(info.CodebaseKey), "decisions")
+	if err := os.MkdirAll(decisions, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(decisions, "2026-08-vale.md"), []byte("closed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	listing, err := mgr.OwnerBookFiles(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listing.Files) != 2 {
+		t.Fatalf("book = %+v, want the seeded index and the decision", listing.Files)
+	}
+
+	index, err := mgr.OwnerBookFile(info.ID, owner.ProjectFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(index), "# Project") {
+		t.Fatalf("PROJECT.md = %q, want the seeded template", index)
+	}
+
+	if err := mgr.SaveOwnerBookFile(info.ID, owner.ProjectFile, "# Winerim\n\nimports.\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.ProjectIndex(info.CodebaseKey); got != "# Winerim\n\nimports.\n" {
+		t.Fatalf("PROJECT.md after save = %q", got)
+	}
+
+	// Everything else is the owner's own record.
+	if err := mgr.SaveOwnerBookFile(info.ID, "decisions/2026-08-vale.md", "rewritten"); !errors.Is(err, ErrBookReadOnly) {
+		t.Fatalf("writing a decision file = %v, want ErrBookReadOnly", err)
+	}
+	if _, err := mgr.OwnerBookFile(info.ID, "../owner.json"); err == nil {
+		t.Fatal("a read escaped the book directory")
 	}
 }

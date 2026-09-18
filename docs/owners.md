@@ -55,20 +55,56 @@ owner unloaded from memory is resumed to receive it.
 ## API
 
 ```
-GET    /api/owners            list
-POST   /api/owners            {root, name, model?, thinking?}
-GET    /api/owners/{id}       owner and its session state
-DELETE /api/owners/{id}       remove owner and its conversation; the book stays
+GET    /api/owners                    list
+POST   /api/owners                    {root, name, model?, thinking?}
+GET    /api/owners/{id}               owner and its session state
+DELETE /api/owners/{id}               remove owner and its conversation; the book stays
+GET    /api/owners/{id}/book          the book's files, with sizes
+GET    /api/owners/{id}/book/{path}   one file's content, and whether it is editable
+PUT    /api/owners/{id}/book/{path}   replace it — PROJECT.md only, 403 otherwise
 ```
+
+There is deliberately **no** `children` endpoint. Every session carries
+`owner_id` / `owner_name` in `GET /api/sessions`, resolved where its book and
+its reporting were resolved, so a client that holds the roster already knows
+an owner's children and groups them with the projection it uses for the
+session list. A second, server-side grouping would answer the same question
+from a snapshot taken at a different instant, and the dossier and the sidebar
+would disagree about which session is waiting.
+
+An owner's conversation stays out of `GET /api/sessions` unless
+`?include=owners`; the web client asks for them and filters them out of the
+lists of sessions instead, because a conversation you can open has to be in
+the roster to be streamed.
 
 Creating or deleting an owner answers `409` while sessions of that codebase
 are open: children resolve their owner when they are built, so close or
 finish them first. Open the owner's conversation with `/?session=<session_id>`.
 
+## The interface
+
+Owners are the **third mode of the sidebar**, beside Recent and By project:
+a way of looking at your work, chosen and kept, on the desktop and inside the
+phone's drawer. The list shows each owner, its folder, how many of its
+sessions are live and how many are waiting on you, and — for now — the
+children that have stopped, at most three, under their owner (the triage
+variant; `OWNER_TRIAGE` in `layout/Sidebar/Sidebar.jsx` is the whole switch).
+
+Choosing an owner opens its conversation. Its dossier takes the same zone a
+session's does, with two tabs: **Overview**, its children grouped as Waiting on
+you / Finished, unread / Working / Idle, each row opening that session; and
+**Book**, the files on disk with `PROJECT.md` raised out of the list because it
+is the one file a child is given. `PROJECT.md` is editable there; the rest is
+read-only, because it is the owner's own record and a half-edited decision file
+is worse than none.
+
+A child session wears an `Owner · <name>` chip in its header, which opens the
+owner. It is provenance, not a state: no dot and no colour.
+
 ## Limits of this first version
 
-- No dedicated UI: the owner is a hidden session you open by id, and the book
-  is edited on disk.
+- Only `PROJECT.md` is editable from the interface; the rest of the book is
+  edited on disk.
 - A live session sees a changed `PROJECT.md` only after `/reload`; new sessions
   always see the current one.
 - Reports carry the session's final message, not the session brief.

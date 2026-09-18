@@ -199,3 +199,91 @@ func TestReadTruncatesAHugeFile(t *testing.T) {
 		t.Fatal("truncated read does not say so")
 	}
 }
+
+// The HTTP surface reads and writes through the same guard the tool uses.
+// These cover what the tool's own tests cannot: sizes in the listing, no
+// prompt-sized truncation on a read, and a traversal refused on a write.
+
+func TestFilesListsTheBookWithSizes(t *testing.T) {
+	dir := newBook(t)
+	files, err := Files(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 3 {
+		t.Fatalf("Files = %d entries, want 3: %+v", len(files), files)
+	}
+	// Sorted by path, so the index is not first — the UI raises it, the store
+	// does not reorder the book for it.
+	want := []string{"PROJECT.md", "decisions/2026-08-vale.md", "people.md"}
+	for i, entry := range files {
+		if entry.Path != want[i] {
+			t.Fatalf("Files[%d].Path = %q, want %q", i, entry.Path, want[i])
+		}
+		if entry.Bytes == 0 {
+			t.Fatalf("%s reported 0 bytes", entry.Path)
+		}
+	}
+}
+
+func TestFilesOnAMissingBookIsEmptyNotAnError(t *testing.T) {
+	files, err := Files(filepath.Join(t.TempDir(), "never-seeded"))
+	if err != nil {
+		t.Fatalf("Files on a missing book = %v, want no error", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("Files on a missing book = %+v", files)
+	}
+}
+
+func TestReadFileReturnsTheWholeFile(t *testing.T) {
+	dir := t.TempDir()
+	// Past the tool's 64KB prompt cap: a person opening a file wants the file.
+	big := strings.Repeat("a", maxFileBytes+512)
+	if err := os.WriteFile(filepath.Join(dir, "PROJECT.md"), []byte(big), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ReadFile(dir, "PROJECT.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != len(big) {
+		t.Fatalf("ReadFile returned %d bytes, want %d (it truncated)", len(data), len(big))
+	}
+}
+
+func TestReadAndWriteRefuseLeavingTheBook(t *testing.T) {
+	dir := newBook(t)
+	outside := filepath.Join(filepath.Dir(dir), "credentials.json")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"../credentials.json", "/etc/passwd"} {
+		if _, err := ReadFile(dir, path); err == nil {
+			t.Fatalf("ReadFile(%q) was allowed out of the book", path)
+		}
+		if err := WriteFile(dir, path, []byte("x")); err == nil {
+			t.Fatalf("WriteFile(%q) was allowed out of the book", path)
+		}
+	}
+	if data, _ := os.ReadFile(outside); string(data) != "secret" {
+		t.Fatal("a refused write still changed a file outside the book")
+	}
+}
+
+func TestWriteFileReplacesAndRefusesOversize(t *testing.T) {
+	dir := newBook(t)
+	if err := WriteFile(dir, "PROJECT.md", []byte("# New index\n")); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ReadFile(dir, "PROJECT.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "# New index\n" {
+		t.Fatalf("PROJECT.md = %q after write", data)
+	}
+	if err := WriteFile(dir, "PROJECT.md", make([]byte, maxWriteBytes+1)); err != ErrTooLarge {
+		t.Fatalf("oversize write = %v, want ErrTooLarge", err)
+	}
+}

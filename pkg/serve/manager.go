@@ -281,6 +281,15 @@ type SessionInfo struct {
 	Updated            time.Time `json:"updated"`
 	Origin             string    `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
 	Kind               string    `json:"kind,omitempty"`   // session.KindOwner for an owner conversation; empty otherwise
+	// OwnerID / OwnerName name the project owner this session reports to, when
+	// its codebase has one. Additive and per-session because that is what the
+	// chip in a child's header asks: "does THIS conversation belong to a
+	// project with an owner, and which". A client cannot derive it — the
+	// answer needs core.CodebaseKey, which resolves git worktrees through an
+	// exec — and it is resolved at the same moment the session's book and its
+	// reporting were, so the three cannot disagree.
+	OwnerID   string `json:"owner_id,omitempty"`
+	OwnerName string `json:"owner_name,omitempty"`
 	Error              string    `json:"error,omitempty"`
 	Unseen             bool      `json:"unseen"`
 	UnseenSeq          uint64    `json:"unseen_seq,omitempty"`
@@ -471,6 +480,66 @@ func (s *ManagedSession) info() SessionInfo {
 	return info
 }
 
+/* ── Which owner a session belongs to ─────────────────────────────────────
+
+   The roster is polled, and resolving a codebase key shells out to git, so the
+   answer is memoized per working directory. The memo is dropped whenever an
+   owner is created or deleted — the only two events that can change it — so a
+   session never wears a chip pointing at an owner that no longer exists.
+
+   A directory with no owner is cached too: "no owner" is the common answer and
+   is exactly the one whose exec we most want to pay only once. */
+
+// ownerRef is what a session says about its owner in the API.
+type ownerRef struct {
+	id   string
+	name string
+}
+
+func (m *Manager) ownerRefFor(cwd string) ownerRef {
+	if cwd == "" {
+		return ownerRef{}
+	}
+	m.ownerRefMu.Lock()
+	if ref, ok := m.ownerRefs[cwd]; ok {
+		m.ownerRefMu.Unlock()
+		return ref
+	}
+	m.ownerRefMu.Unlock()
+
+	ref := ownerRef{}
+	if store, err := m.ownerStore(); err == nil {
+		if own, found, err := store.FindByCodebase(codebaseKeyOf(cwd)); err == nil && found {
+			ref = ownerRef{id: own.ID, name: own.Name}
+		}
+	}
+	m.ownerRefMu.Lock()
+	if m.ownerRefs == nil {
+		m.ownerRefs = map[string]ownerRef{}
+	}
+	m.ownerRefs[cwd] = ref
+	m.ownerRefMu.Unlock()
+	return ref
+}
+
+// invalidateOwnerRefs drops the memo after an owner is created or deleted.
+func (m *Manager) invalidateOwnerRefs() {
+	m.ownerRefMu.Lock()
+	m.ownerRefs = nil
+	m.ownerRefMu.Unlock()
+}
+
+// withOwnerRef stamps the owner of an ordinary session onto its info. An owner
+// conversation is left alone: it is not its own child.
+func (m *Manager) withOwnerRef(info SessionInfo) SessionInfo {
+	if info.Kind == session.KindOwner {
+		return info
+	}
+	ref := m.ownerRefFor(info.CWD)
+	info.OwnerID, info.OwnerName = ref.id, ref.name
+	return info
+}
+
 // nonUserOrigin normalizes an origin for the API: a plain user session carries
 // no origin field, so clients only ever see a value worth showing.
 func nonUserOrigin(origin string) string {
@@ -483,7 +552,7 @@ func nonUserOrigin(origin string) string {
 // sessionInfo uses attention as the single owner of live activity, avoiding a
 // second, potentially divergent event tracker in ManagedSession.
 func (m *Manager) sessionInfo(s *ManagedSession) SessionInfo {
-	info := s.info()
+	info := m.withOwnerRef(s.info())
 	info.Unseen, info.UnseenSeq, info.AttentionNamespace = m.attentionState(s)
 	if m.attention == nil {
 		return info
@@ -659,8 +728,12 @@ type Manager struct {
 	// reports batches the run outcomes of a project's sessions and delivers
 	// them to its owner. nil when owners are unavailable (no config dir).
 	reports   *reportCoordinator
-	versionMu sync.RWMutex
-	version   release.Result
+	// ownerRefs memoizes which owner a working directory reports to, keyed by
+	// cwd. Dropped whole whenever an owner is created or deleted.
+	ownerRefMu sync.Mutex
+	ownerRefs  map[string]ownerRef
+	versionMu  sync.RWMutex
+	version    release.Result
 
 	// configMutationMu serializes global and project configuration mutations
 	// across the process: the core persistence helpers atomically replace a file,
@@ -1215,7 +1288,7 @@ func (m *Manager) ListWith(opts ListOptions) []SessionInfo {
 		info := s.info()
 		info.Unseen, info.UnseenSeq, info.AttentionNamespace = m.attentionState(s)
 		info.Activity = activity[s.ID]
-		list = append(list, info)
+		list = append(list, m.withOwnerRef(info))
 	}
 
 	// Merge saved sessions from all project directories (cached).
@@ -1231,7 +1304,7 @@ func (m *Manager) ListWith(opts ListOptions) []SessionInfo {
 		if kind == session.KindOwner && !opts.IncludeOwners {
 			continue
 		}
-		list = append(list, SessionInfo{
+		list = append(list, m.withOwnerRef(SessionInfo{
 			ID:             sum.ID,
 			Title:          sum.Title,
 			State:          StateSaved,
@@ -1243,7 +1316,7 @@ func (m *Manager) ListWith(opts ListOptions) []SessionInfo {
 			Updated:        sum.Updated,
 			Unseen:         m.isUnseen(sum.ID),
 			ServerInstance: m.serverInstance,
-		})
+		}))
 	}
 
 	sort.Slice(list, func(i, j int) bool {

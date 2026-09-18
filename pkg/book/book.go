@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -204,6 +205,87 @@ func canonicalWithinDir(dir, path string) (string, error) {
 		trailing = append(trailing, filepath.Base(probe))
 		probe = parent
 	}
+}
+
+// Entry is one file of the book as an API caller sees it: the path the book
+// speaks (relative, slash-separated) and how big it is, so a list can be drawn
+// without reading every file.
+type Entry struct {
+	Path     string    `json:"path"`
+	Bytes    int64     `json:"bytes"`
+	Modified time.Time `json:"modified"`
+}
+
+// Files lists the book for a reader that is not the model: same walk the tool's
+// "list" action does, with the sizes a UI needs and no truncation notice in the
+// middle of the data. A missing book directory is an empty book, not an error:
+// an owner whose book was never seeded still has a book page to open.
+func Files(dir string) ([]Entry, error) {
+	var out []Entry
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // unreadable corner of the book: skip it, don't fail the call
+		}
+		if d.IsDir() || !d.Type().IsRegular() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return nil
+		}
+		out = append(out, Entry{
+			Path:     filepath.ToSlash(rel),
+			Bytes:    info.Size(),
+			Modified: info.ModTime().UTC(),
+		})
+		return nil
+	})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	if len(out) > maxListEntries {
+		out = out[:maxListEntries]
+	}
+	return out, nil
+}
+
+// ErrTooLarge reports a write past maxWriteBytes.
+var ErrTooLarge = fmt.Errorf("the file is larger than %dKB; split it across book files", maxWriteBytes/1024)
+
+// ReadFile returns one book file verbatim, refusing anything that would leave
+// the book (resolve is the single guard, shared with the tool). The tool's
+// 64KB truncation is deliberately NOT applied: it exists to protect a prompt,
+// and a person opening a file wants the file.
+func ReadFile(dir, rel string) ([]byte, error) {
+	full, err := resolve(dir, rel)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(full)
+}
+
+// WriteFile replaces one book file, through the same path guard and the same
+// atomic write the tool uses.
+func WriteFile(dir, rel string, content []byte) error {
+	if len(content) > maxWriteBytes {
+		return ErrTooLarge
+	}
+	full, err := resolve(dir, rel)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+		return err
+	}
+	return writeFileAtomic(full, content, 0o600)
 }
 
 func list(dir string) (core.Result, error) {
