@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/owner"
 )
@@ -145,10 +146,14 @@ func TestReportsWaitForABusyOwnerInsteadOfSteeringIt(t *testing.T) {
 	mgr.reports.add(info.CodebaseKey, owner.Report{
 		ID: "sess-a:1:failed", SessionID: "sess-a", Status: callbackStatusFailed, FinalText: "build broke",
 	})
-	// The batch must not be steered into the running owner.
+	// The batch must neither reach the running owner nor sit on its queue rail
+	// waiting to be spliced into the run it is holding.
 	time.Sleep(200 * time.Millisecond)
 	if got := ownerReportText(ownerSess); len(got) != 0 {
 		t.Fatalf("reports reached a busy owner: %v", got)
+	}
+	if ql, _ := bus.QueryTyped[bus.GetQueueLen, int](ownerSess.runtime.Bus, bus.GetQueueLen{}); ql != 0 {
+		t.Fatalf("the batch was queued as a steer on a busy owner: queue length %d", ql)
 	}
 	close(release)
 
@@ -242,5 +247,90 @@ func TestAcceptedReportsArePersistedBeforeDelivery(t *testing.T) {
 	})
 	if _, err := os.Stat(filepath.Join(store.CodebaseDir(info.CodebaseKey), "reports.json")); err != nil {
 		t.Fatalf("the outbox file is missing: %v", err)
+	}
+}
+
+// A child that is closed and resumed starts a fresh runtime, and with it a run
+// generation that starts again at zero. Its next outcome must still be a new
+// report: an identity derived from the generation would make the second one
+// look like a duplicate of the first and drop it.
+func TestAResumedChildStillReportsItsNextRun(t *testing.T) {
+	shortReportWindow(t, 50*time.Millisecond)
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+
+	child, err := mgr.CreateSession(CreateOpts{CWD: root, Title: "the child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(child.ID, "first", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	waitForOwnerReports(t, ownerSess, 1)
+
+	if err := mgr.CloseSession(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.ResumeSession(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(child.ID, "second", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	pollUntil(t, 10*time.Second, "the second run being reported", func() bool {
+		return reportedOutcomes(ownerSess) >= 2
+	})
+}
+
+// reportedOutcomes counts the outcomes the owner has read, across batches.
+func reportedOutcomes(sess *ManagedSession) int {
+	n := 0
+	for _, text := range ownerReportText(sess) {
+		n += strings.Count(text, "status: ")
+	}
+	return n
+}
+
+// Shutdown must stop the coordinator for good: a batch that was waiting keeps
+// its place on disk, and nothing retries afterwards.
+func TestShutdownStopsTheReportCoordinator(t *testing.T) {
+	shortReportWindow(t, 30*time.Millisecond)
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+	info, _ := ownerWithSession(t, mgr, root, "Winerim")
+	store, err := mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An owner with no conversation: every delivery attempt fails, so the batch
+	// stays pending and the timer keeps re-arming.
+	own, _, err := store.FindByCodebase(info.CodebaseKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own.SessionID = ""
+	if err := store.Save(own); err != nil {
+		t.Fatal(err)
+	}
+	mgr.reports.add(info.CodebaseKey, doneReport("rep_a", "sess-a", "waiting"))
+	pollUntil(t, 5*time.Second, "delivery being retried", func() bool {
+		return reportDeliveryAttempts.Load() > 0
+	})
+
+	// Shutdown is what must stop it, not a direct Close: this asserts the wiring.
+	mgr.Shutdown()
+	attempts := reportDeliveryAttempts.Load()
+	time.Sleep(200 * time.Millisecond) // several windows
+	if got := reportDeliveryAttempts.Load(); got != attempts {
+		t.Fatalf("the coordinator kept retrying after Close: %d → %d", attempts, got)
+	}
+	pending, err := store.LoadReports(info.CodebaseKey)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("the pending batch was not left in the outbox: %v %v", pending, err)
 	}
 }

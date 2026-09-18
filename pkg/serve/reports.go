@@ -6,12 +6,15 @@ package serve
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -33,6 +36,10 @@ var reportBatchWindow = 60 * time.Second
 // message is not in history the instant Execute returns.
 var reportConfirmTimeout = 10 * time.Second
 
+// reportDeliveryAttempts counts delivery attempts across the process. It exists
+// so shutdown can be asserted to be a full stop: after Close nothing may retry.
+var reportDeliveryAttempts atomic.Uint64
+
 // maxReportFinalTextBytes caps the tail of a child's final message carried in a
 // report. The owner reads the full session through the `sessions` tool when the
 // tail is not enough.
@@ -50,6 +57,12 @@ type reportCoordinator struct {
 	// window is captured at construction rather than read per batch: a test
 	// that shortens it must not race the coordinators other tests left running.
 	window time.Duration
+	// quit stops the loop on Close; closed once, guarded by closeOnce. done is
+	// closed by the loop when it has drained the mailbox and persisted what was
+	// pending, so Shutdown can wait for that to have happened.
+	quit      chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // reportCommand is the actor's mailbox message: a new report, or a nudge to try
@@ -64,6 +77,9 @@ type reportCommand struct {
 type reportBatch struct {
 	pending []owner.Report
 	timer   *time.Timer
+	// outboxFailed remembers that the last write of this batch failed, so the
+	// warning is logged once rather than per report while the disk is broken.
+	outboxFailed bool
 }
 
 // newReportCoordinator starts the actor. Reports are disabled (nil) when the
@@ -80,6 +96,8 @@ func newReportCoordinator(ctx context.Context, m *Manager) *reportCoordinator {
 		mail:   make(chan reportCommand, 64),
 		ctx:    ctx,
 		window: reportBatchWindow,
+		quit:   make(chan struct{}),
+		done:   make(chan struct{}),
 	}
 	go c.loop()
 	return c
@@ -94,6 +112,7 @@ func (c *reportCoordinator) post(cmd reportCommand) {
 	select {
 	case c.mail <- cmd:
 	case <-c.ctx.Done():
+	case <-c.quit:
 	}
 }
 
@@ -111,6 +130,10 @@ func (c *reportCoordinator) loop() {
 	for {
 		select {
 		case <-c.ctx.Done():
+			c.drain(batches)
+			return
+		case <-c.quit:
+			c.drain(batches)
 			return
 		case cmd := <-c.mail:
 			batch := batches[cmd.key]
@@ -123,6 +146,54 @@ func (c *reportCoordinator) loop() {
 				continue
 			}
 			c.flush(cmd.key, batch)
+		}
+	}
+}
+
+// Close stops the coordinator: timers are stopped so nothing retries after the
+// manager is gone, the mailbox is drained so a report accepted moments before
+// shutdown is not lost, and everything still pending is written to the outbox
+// for the next process to deliver.
+//
+// It is idempotent and safe to call after the root context was cancelled: the
+// loop closes done exactly once, whichever of the two paths wins.
+func (c *reportCoordinator) Close() {
+	if c == nil {
+		return
+	}
+	c.closeOnce.Do(func() { close(c.quit) })
+	<-c.done
+}
+
+// drain is the loop's exit path: it persists what is pending rather than
+// attempting a last delivery, because the sessions it would deliver into are
+// being flushed and closed at this very moment.
+func (c *reportCoordinator) drain(batches map[string]*reportBatch) {
+	defer close(c.done)
+	for {
+		select {
+		case cmd := <-c.mail:
+			if cmd.report == nil {
+				continue // a nudge has nowhere to deliver to any more
+			}
+			batch := batches[cmd.key]
+			if batch == nil {
+				batch = &reportBatch{}
+				batches[cmd.key] = batch
+			}
+			c.queue(cmd.key, batch, *cmd.report)
+		default:
+			for key, batch := range batches {
+				c.disarm(batch)
+				if len(batch.pending) == 0 {
+					continue
+				}
+				if err := c.store.SaveReports(key, batch.pending); err != nil {
+					slog.Warn("owner reports: pending batch lost at shutdown",
+						"codebase", key, "error", err)
+				}
+			}
+			return
 		}
 	}
 }
@@ -160,18 +231,9 @@ func (c *reportCoordinator) recover(batches map[string]*reportBatch) {
 // leaves a report that will be redelivered rather than one that was promised
 // and then forgotten.
 func (c *reportCoordinator) accept(key string, batch *reportBatch, rep owner.Report) {
-	for _, existing := range batch.pending {
-		if existing.ID == rep.ID {
-			return // same run, same outcome: already queued
-		}
-	}
-	next := append(append([]owner.Report(nil), batch.pending...), rep)
-	if err := c.store.SaveReports(key, next); err != nil {
-		slog.Warn("owner reports: could not persist the outbox; dropping the report",
-			"codebase", key, "session", rep.SessionID, "error", err)
+	if !c.queue(key, batch, rep) {
 		return
 	}
-	batch.pending = next
 	// A session that failed or is stuck waiting for an answer is not worth
 	// batching: it is exactly what the owner has to act on now.
 	if rep.Status == callbackStatusDone {
@@ -179,6 +241,31 @@ func (c *reportCoordinator) accept(key string, batch *reportBatch, rep owner.Rep
 		return
 	}
 	c.flush(key, batch)
+}
+
+// queue adds a report to the batch and tries to persist the outbox, returning
+// whether the report is new. A failed write does NOT drop the report: it stays
+// in memory (and is retried on the next accept, flush or shutdown), because the
+// disk being full is exactly when losing the owner's picture of the project is
+// least acceptable. The warning is logged once per batch so a broken disk does
+// not flood the log with one line per outcome.
+func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Report) bool {
+	for _, existing := range batch.pending {
+		if existing.ID == rep.ID {
+			return false // the same outcome, re-delivered: already queued
+		}
+	}
+	batch.pending = append(batch.pending, rep)
+	if err := c.store.SaveReports(key, batch.pending); err != nil {
+		if !batch.outboxFailed {
+			batch.outboxFailed = true
+			slog.Warn("owner reports: could not persist the outbox; keeping the reports in memory",
+				"codebase", key, "session", rep.SessionID, "error", err)
+		}
+		return true
+	}
+	batch.outboxFailed = false
+	return true
 }
 
 func (c *reportCoordinator) arm(key string, batch *reportBatch) {
@@ -204,6 +291,7 @@ func (c *reportCoordinator) flush(key string, batch *reportBatch) {
 	if len(batch.pending) == 0 {
 		return
 	}
+	reportDeliveryAttempts.Add(1)
 	err := c.deliver(key, batch.pending)
 	if err != nil {
 		slog.Debug("owner reports: batch waiting", "codebase", key, "error", err)
@@ -238,15 +326,11 @@ func (c *reportCoordinator) deliver(key string, pending []owner.Report) error {
 // reports into the middle of whatever it was reasoning about. An owner that is
 // working keeps its batch until it is quiescent.
 //
-// The bus offers no atomic "start a run only if idle" primitive: SendPrompt
-// itself converts into a steer when the queue rail is not empty, and
-// DoIfQuiescent cannot execute a command (its callback must not re-enter the
-// state machine). So the check is: quiescent (state idle + no background work,
-// taken under the state lock) and an empty queue, then Execute. If a concurrent
-// send wins the remaining window the prompt is queued as a steer; that is
-// reported as an error and the batch is retained, which is the conservative
-// side of the trade — the owner may read those reports twice, but never loses
-// them and is never steered on purpose.
+// bus.SendPrompt{IdleOnly} is what makes that exact: the bus decides idleness
+// under the same lock in which it would otherwise convert the prompt into a
+// steer, so there is no window for a concurrent send to turn this batch into
+// one. bus.ErrNotIdle means the owner is working; the batch is retained and
+// tried again when the owner's own run ends.
 func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) error {
 	sess, ok := m.Get(own.SessionID)
 	if !ok {
@@ -270,24 +354,16 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 		if sess.closing.Load() {
 			return ErrNotFound
 		}
-		ql, _ := bus.QueryTyped[bus.GetQueueLen, int](sess.runtime.Bus, bus.GetQueueLen{})
-		if ql > 0 {
-			return ErrBusy
-		}
-		if !sess.runtime.DoIfQuiescent(func() {}) {
-			return ErrBusy
-		}
-		steerID := ""
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{
-			SessionID:       sess.ID,
-			Text:            text,
-			Custom:          custom,
-			AcceptedSteerID: &steerID,
+			SessionID: sess.ID,
+			Text:      text,
+			Custom:    custom,
+			IdleOnly:  true,
 		}); err != nil {
+			if errors.Is(err, bus.ErrNotIdle) {
+				return fmt.Errorf("%w: %v", ErrBusy, err)
+			}
 			return err
-		}
-		if steerID != "" {
-			return fmt.Errorf("%w: the batch was queued behind a concurrent send", ErrBusy)
 		}
 		sess.sendGeneration.Add(1)
 		return nil
@@ -372,7 +448,7 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 // a question needs the question, not a label saying one exists.
 func reportFrom(sess *ManagedSession, out runOutcome) owner.Report {
 	rep := owner.Report{
-		ID:        reportID(sess.ID, out),
+		ID:        newReportID(),
 		SessionID: sess.ID,
 		Title:     sess.title(),
 		CWD:       sess.CWD,
@@ -403,10 +479,21 @@ func reportFrom(sess *ManagedSession, out runOutcome) owner.Report {
 	return rep
 }
 
-// reportID identifies one outcome of one run, so the same event queued twice
-// (a retried delivery, a recovered outbox) is recognized as one report.
-func reportID(sessionID string, out runOutcome) string {
-	return fmt.Sprintf("%s:%d:%s", sessionID, out.RunGen, out.Status)
+// newReportID mints the identity of one outcome, at the moment the outcome is
+// observed. It is random rather than derived from the session and the run
+// generation: RunGen restarts at 0 with every runtime, so a session that is
+// closed and resumed would produce the same derived ID for a genuinely new
+// outcome and the second report would be silently dropped as a duplicate.
+//
+// Dedup by this ID therefore protects against the same report object being
+// handed to the coordinator twice (a retry, a recovered outbox), which is the
+// only duplication that exists once the ID travels with the report.
+func newReportID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("rep_%d", time.Now().UnixNano())
+	}
+	return "rep_" + hex.EncodeToString(b)
 }
 
 // reportBatchID identifies the delivered message, so the transcript can be
