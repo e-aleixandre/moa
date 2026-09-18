@@ -20,6 +20,7 @@ import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SessionPanel } from "../../../components/index.js";
 import { OwnerDossier } from "../../../components/Owners/OwnerDossier.jsx";
+import { NewOwnerDialog } from "../../../components/Owners/NewOwnerDialog.jsx";
 import { OwnerChipEntry } from "../../../components/Owners/OwnerChipEntry.jsx";
 import { sessionPanelView, closeSessionPanel, toggleSessionPanel } from "../../../data/session-panel.js";
 import { cacheAlertLabel } from "../../../data/cache-usage.js";
@@ -410,6 +411,10 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   // and two sheets on screen at once is exactly what the handoff avoids.
   const newPendingRef = useRef(false);
   const searchPendingRef = useRef(false);
+  // New owner is the same handoff: the drawer closes, then its bottom sheet
+  // rises. Two sheets on screen at once is exactly what this avoids.
+  const [newOwnerOpen, setNewOwnerOpen] = useState(false);
+  const newOwnerPendingRef = useRef(false);
   const setDrawerOpen = (next) => (next ? openDrawer("list") : closeDrawer());
   const onSelectFromDrawer = (id) => selectMobileDrawerSession(store.get().sessions[id], {
     resume: resumeSession,
@@ -436,6 +441,10 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
     inboxPendingRef.current = true;
     closeDrawer();
   };
+  const onNewOwnerFromDrawer = () => {
+    newOwnerPendingRef.current = true;
+    closeDrawer();
+  };
   const onDrawerClosed = () => {
     if (newPendingRef.current) {
       newPendingRef.current = false;
@@ -450,6 +459,11 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
     if (inboxPendingRef.current) {
       inboxPendingRef.current = false;
       openInbox();
+      return;
+    }
+    if (newOwnerPendingRef.current) {
+      newOwnerPendingRef.current = false;
+      setNewOwnerOpen(true);
       return;
     }
     if (!settingsPendingRef.current) return;
@@ -524,12 +538,18 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
         /* Choosing an owner closes the drawer onto its conversation, exactly
            as choosing a session does. */
         onOpenOwner={(own) => { if (openOwnerConversation(own)) closeDrawer(); }}
-        onCreateOwner={async (spec) => { await createOwner(spec); closeDrawer(); }}
+        onNewOwner={onNewOwnerFromDrawer}
         drawerCollapsed={chrome.drawerCollapsed}
         onToggleProject={setDrawerProjectCollapsed}
         collapsedSections={chrome.collapsedSections}
         onToggleSection={setSectionCollapsed}
         panelRef={drawerPanelRef}
+      />
+      <NewOwnerDialog
+        phone
+        open={newOwnerOpen}
+        onClose={() => setNewOwnerOpen(false)}
+        onCreate={(spec) => createOwner(spec)}
       />
       {/* The settings sheet is its own surface in both densities: `phone`
           swaps the centred panel for a bottom sheet, which is the one thing

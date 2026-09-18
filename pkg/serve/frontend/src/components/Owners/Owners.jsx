@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { SessionRow } from "../SessionRow/SessionRow.jsx";
-import { Segmented } from "../Segmented/Segmented.jsx";
 import { Field } from "../../primitives/Field/Field.jsx";
 import { Button } from "../../primitives/Button/Button.jsx";
-import { deriveModelSpecs } from "../../data/selectors.js";
 import { defaultModelSpec } from "../CommandPalette/command-palette-model.js";
+import {
+  ModelSelector, PickerPopover, PickerSheet, thinkingButtonsFor,
+} from "../ModelSelector/ModelSelector.jsx";
+import { thinkingPositionFor } from "../../data/selectors.js";
+import { ensureModelCatalog, modelCatalog } from "../../data/model-catalog.js";
+import { useStore } from "../../hooks/useStore.js";
 import { modelCodename } from "../../data/util/format.js";
 import { api } from "../../data/api.js";
 import { bookTree, childrenSummary, groupChildren, ownerState } from "../../data/owners-model.js";
@@ -139,30 +143,29 @@ function useDirEntries(dir) {
   return { entries, loading };
 }
 
+// useOwnerModels answers two things the model row needs: the catalogue of
+// models, and WHICH ONE a new session would use. The catalogue comes from the
+// app's shared slice (data/model-catalog.js) rather than a fetch of its own —
+// the same entries the composer's selector is drawing, so the two surfaces
+// cannot disagree about what exists. `defaultModel` is the SERVER's default
+// (`/api/capabilities`), resolved through the palette's own `defaultModelSpec`,
+// which is what makes "the default" here mean the same thing as "the default"
+// in New session rather than a second opinion about it.
 function useOwnerModels() {
-  const [models, setModels] = useState([]);
-  const [fallback, setFallback] = useState("");
+  const catalog = useStore(modelCatalog);
+  const [defaultModel, setDefaultModel] = useState("");
+  useEffect(() => { ensureModelCatalog(); }, []);
+  const models = catalog.entries || [];
   useEffect(() => {
+    if (!models.length) return undefined;
     let live = true;
-    Promise.all([
-      api("GET", "/api/capabilities").catch(() => ({})),
-      api("GET", "/api/models").catch(() => []),
-    ]).then(([caps, list]) => {
-      if (!live) return;
-      const specs = deriveModelSpecs(list);
-      setModels(specs);
-      setFallback(defaultModelSpec(caps, specs));
-    });
+    api("GET", "/api/capabilities")
+      .catch(() => ({}))
+      .then((caps) => { if (live) setDefaultModel(defaultModelSpec(caps, models)); });
     return () => { live = false; };
-  }, []);
-  return { models, fallback };
+  }, [models.length]);
+  return { models, defaultModel };
 }
-
-const THINKING = [
-  { value: "low", label: "low" },
-  { value: "medium", label: "medium" },
-  { value: "high", label: "high" },
-];
 
 // createFailure turns the server's refusal into the sentence that says WHAT TO
 // DO. The two it answers are the two the API actually returns (409 for an
@@ -248,7 +251,7 @@ export function OwnerIdentityPicker({ name, shape, color, onShape, onColor }) {
 
 const basename = (p) => String(p || "").replace(/\/+$/, "").split("/").filter(Boolean).pop() || "";
 
-export function NewOwner({ defaultDir = "", onCreate, phone = false }) {
+export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated }) {
   const [dir, setDir] = useState(defaultDir);
   // What the server said, in the form, beside the button that caused it. A
   // create fails for two reasons the user can act on — the codebase already
@@ -260,13 +263,24 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false }) {
   const [name, setName] = useState("");
   const [touchedName, setTouchedName] = useState(false);
   const { entries, loading } = useDirEntries(dir);
-  const { models, fallback } = useOwnerModels();
-  // The backend's own defaults for an owner, and the reason is worth showing:
-  // it judges rather than codes, so it runs the strongest model at the
-  // cheapest thinking (pkg/serve/owners.go:15-21).
-  const [model, setModel] = useState("");
+  const { models, defaultModel } = useOwnerModels();
+  /* The model, and where it is chosen. This used to be a list of every model
+     stacked in the form plus a Segmented for thinking — a second model picker
+     with its own idea of what a model row looks like, of which one is pinned,
+     of whether "low" means the same thing on every provider. It is now ONE
+     ROW that states the current model and opens the product's own
+     ModelSelector: the popover on the desktop, the sheet on a phone, thinking
+     chosen inside it exactly as it is from the composer.
+
+     `null` means "not chosen", and what is drawn then is the same default a
+     NEW SESSION would take (`/api/capabilities`), because that is the promise
+     the row makes by showing a value before you touch it. Thinking starts at
+     "low" on purpose: an owner judges rather than codes, which is the
+     backend's own default (pkg/serve/owners.go:19-22). */
+  const [model, setModel] = useState(null);
   const [thinking, setThinking] = useState("low");
-  const chosenModel = model || models.find((m) => m.alias === "opus")?.id || fallback;
+  const chosenModel = model || defaultModel;
+  const modelSpec = models.find((m) => m.id === chosenModel || m.name === chosenModel);
 
   // The name follows the folder until you type one. A project's owner is
   // almost always called after the project, and making that the default is
@@ -301,6 +315,50 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false }) {
     setDir(parent || "/");
     setFilter("");
   };
+
+  /* ── Hosting the ModelSelector ──────────────────────────────────────────
+     The picker mounts INSIDE this form's own surface rather than being
+     portalled to <body>. The surface is already a positioned container with
+     its own z-index (the modal on the desktop, MobileSheet on a phone), so
+     the two hosts land where they should without a second placement system:
+     `PickerPopover` right above the row it belongs to, `PickerSheet` at the
+     foot of the sheet. This is how the Composer hosts it inside a pane. */
+  const [modelOpen, setModelOpen] = useState(false);
+  useEffect(() => { if (modelOpen) ensureModelCatalog(); }, [modelOpen]);
+
+  const thinkingOptions = thinkingButtonsFor(modelSpec, modelSpec?.provider);
+  const thinkingValue = thinkingPositionFor(thinking, modelSpec, modelSpec?.provider);
+  const thinkingLabel = thinkingOptions.find((t) => t.value === thinkingValue)?.label || thinkingValue;
+
+  // The selector itself, once, for both hosts. The choice it writes is local
+  // state — the owner does not exist yet — which is the only thing that
+  // differs from the status line's copy. `fastSupported={false}` because
+  // create has no fast flag to send: the switch says so rather than lying.
+  const selector = (v) => (
+    <ModelSelector
+      models={models}
+      selected={chosenModel}
+      thinking={thinking}
+      embedded
+      sessionProvider={modelSpec?.provider}
+      view={v.view}
+      setView={v.setView}
+      onSelect={(spec) => { setModel(spec); setModelOpen(false); }}
+      onThinkingChange={setThinking}
+      fastSupported={false}
+    />
+  );
+  const picker = modelOpen && (phone ? (
+    <PickerSheet kind="model" models={models} includeScrim onClose={() => setModelOpen(false)}>
+      {selector}
+    </PickerSheet>
+  ) : (
+    <div class="ow-model-anchor">
+      <PickerPopover kind="model" models={models} onClose={() => setModelOpen(false)}>
+        {selector}
+      </PickerPopover>
+    </div>
+  ));
 
   return (
     <div class="ow-form">
@@ -365,35 +423,38 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false }) {
 
       <div class="ow-field">
         <span class="ow-label">Model</span>
-        <div class="ow-picks" role="radiogroup" aria-label="Model">
-          {models.map((m) => {
-            const on = m.id === chosenModel;
-            return (
-              <button
-                type="button"
-                role="radio"
-                aria-checked={on}
-                class={`ow-pick${on ? " is-on" : ""}`}
-                key={m.id}
-                onClick={() => setModel(m.id)}
-              >
-                <span class="ow-mono is-sm" style={`--h:${hueOf(m.codename)}`} aria-hidden="true">{String(m.codename).slice(0, 2)}</span>
-                <span class="ow-pick-t">{m.codename || modelCodename(m.id)}</span>
-                {m.sub && <span class="ow-pick-s ow-data">{m.sub}</span>}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div class="ow-field">
-        <span class="ow-label">Thinking</span>
-        <Segmented options={THINKING} value={thinking} onChange={setThinking} className="ow-seg" />
+        {/* One row, and it is a DOOR. What it states is what the owner will
+            run; pressing it opens the product's own ModelSelector, where
+            thinking lives too. The reading is the selector's own: codename,
+            then provider · context, then the thinking position — so the row
+            and the surface it opens cannot describe the same choice in two
+            vocabularies. */}
+        <button
+          type="button"
+          class="ow-modelrow"
+          aria-haspopup="dialog"
+          aria-expanded={modelOpen}
+          onClick={() => setModelOpen(!modelOpen)}
+        >
+          <span class="ow-mono is-sm" style={`--h:${hueOf(modelSpec?.codename || chosenModel)}`} aria-hidden="true">
+            {String(modelSpec?.codename || modelCodename(chosenModel) || "?").slice(0, 2)}
+          </span>
+          <span class="ow-modelrow-txt">
+            <span class="ow-modelrow-name">
+              {modelSpec?.codename || modelCodename(chosenModel) || (models.length ? "Choose a model" : "Loading models…")}
+            </span>
+            <span class="ow-modelrow-sub ow-data">
+              {modelSpec ? `${modelSpec.provider} · ${modelSpec.sub} · thinking ${thinkingLabel}` : `thinking ${thinkingLabel}`}
+            </span>
+          </span>
+          <GoIcon />
+        </button>
         <span class="ow-hint">
           An owner reads reports and keeps a book rather than writing code, so it
-          defaults to the strongest model at the cheapest thinking.
+          starts on the default model at the cheapest thinking.
         </span>
       </div>
+      {picker}
 
       <div class="ow-form-foot">
         {failure && (
@@ -422,30 +483,10 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false }) {
           {busy ? "Creating…" : "Create owner"}
         </Button>
         <p class="ow-hint">
-          Creates the book and its conversation. The project's open sessions must
-          be closed first — whether a session has an owner is resolved when it is
-          built.
+          Close the project's open sessions first: they cannot adopt an owner while running.
         </p>
       </div>
       {phone && <div class="ow-form-pad" aria-hidden="true" />}
-    </div>
-  );
-}
-
-/* ── New owner, as a page of the column ───────────────────────────────── */
-
-// NewOwnerPage is the form pushed INSIDE the sidebar, exactly as New session
-// is: it keeps a head with a back that returns to the list, and the column's
-// own foot stays where it is. The list itself is no longer a surface — the
-// owners are rows of the sidebar's OWNERS section (components/Owners/
-// OwnerRow.jsx), so there is nothing else here to draw.
-export function NewOwnerPage({ defaultDir = "", onCreate, onBack, phone = false }) {
-  return (
-    <div class={`ow-owners${phone ? " is-phone" : ""}`}>
-      <Head title="New owner" onBack={onBack} backLabel="Back to the sessions" />
-      <div class="ow-body is-sub">
-        <NewOwner defaultDir={defaultDir} phone={phone} onCreate={onCreate} />
-      </div>
     </div>
   );
 }

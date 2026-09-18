@@ -17,7 +17,6 @@ import {
 import { projectName } from "../../data/util/format.js";
 import { ownerOfProject, worstOwnerState } from "../../data/owners-model.js";
 import { OwnerRow, SectionHead } from "../../components/Owners/OwnerRow.jsx";
-import { NewOwnerPage } from "../../components/Owners/Owners.jsx";
 import "./Sidebar.css";
 
 // Sidebar — the other sessions. Markup and CSS are the catalogue's
@@ -200,17 +199,14 @@ export function Sidebar({
   owners = [],
   activeOwnerId = null,
   onOpenOwner,
-  onCreateOwner,
-  ownerDefaultDir = "",
+  // Creating an owner is no longer a page of this column: the shells own the
+  // modal (desktop) / bottom sheet (phone) and this is just its door.
+  onNewOwner,
 }) {
   const phone = density === "phone";
   const groupByProject = mode === "project";
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const [showAllSaved, setShowAllSaved] = useState(false);
-  // New owner is a page pushed INSIDE the column, exactly as New session is,
-  // so it keeps a head with a back that returns to the list. It is local
-  // state: it is a place you are looking, not a preference.
-  const [newOwner, setNewOwner] = useState(false);
   const hasMenu = !!(onCloseSession || onReopenSession || onDeleteSession);
 
   // Nothing filters this list any more -- the palette is where you look for a
@@ -361,19 +357,7 @@ export function Sidebar({
         </div>
       )}
 
-      {newOwner && !inboxOpen ? (
-        <div class="zl-list is-newowner">
-          <NewOwnerPage
-            defaultDir={ownerDefaultDir}
-            phone={phone}
-            onBack={() => setNewOwner(false)}
-            /* The page leaves only once the owner exists: a form that closes
-               on a failed request loses both the failure and everything that
-               was typed. */
-            onCreate={async (spec) => { await onCreateOwner?.(spec); setNewOwner(false); }}
-          />
-        </div>
-      ) : inboxOpen ? (
+      {inboxOpen ? (
         <div class="zl-list is-inbox">
           <InboxView
             cards={inbox}
@@ -470,7 +454,7 @@ export function Sidebar({
               {/* OWNERS first, above everything. They are what the sessions
                   below belong TO, and they are two or three rows: a section
                   that never grows can afford the top of the column. */}
-              {onCreateOwner && (
+              {onNewOwner && (
                 <>
                   <SectionHead
                     label="Owners"
@@ -499,7 +483,7 @@ export function Sidebar({
                           One standing agent per project: it keeps the project's book and reads what its sessions report.
                         </p>
                       )}
-                      <button type="button" class="ow-newowner" onClick={() => setNewOwner(true)}>
+                      <button type="button" class="ow-newowner" onClick={onNewOwner}>
                         <PlusIcon />
                         New owner
                       </button>

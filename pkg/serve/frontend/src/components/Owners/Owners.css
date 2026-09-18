@@ -407,20 +407,79 @@
 .ow-form .ow-seg { background: var(--zl-canvas); border-color: var(--zl-line); }
 .ow-form .ow-seg .segmented-item { min-height: 40px; font-size: var(--zl-fs-body); font-family: var(--font); letter-spacing: inherit; }
 
+/* ── The model row and the picker it opens ─────────────────────────────── */
+
+/* One row, and it is a DOOR: the model the owner will run, and the way to
+   change it. It replaced a stacked list of every model plus a Segmented for
+   thinking — a second model picker with its own vocabulary. What it opens is
+   the product's own ModelSelector. */
+.ow-modelrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .ow-modelrow:hover { background: var(--zl-control); }
+}
+.ow-modelrow-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ow-modelrow-name { color: var(--zl-t1); font-weight: 600; }
+.ow-modelrow-sub {
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ow-modelrow .ow-go { flex: none; color: var(--zl-t4); }
+
+/* The popover is hosted INSIDE this form rather than portalled: the generic
+   Sheet reaches `preact/compat`, and a module that does cannot be loaded
+   beside the palette's hook-runtime tests. So it escapes the dialog's own
+   scrolling body the other way — `position: fixed`, centred on the same
+   viewport the modal is centred on. It is the picker's own surface
+   (`.zl-pop`), just placed by CSS instead of by a measuring effect. */
+.ow-model-anchor { position: relative; height: 0; }
+.ow-model-anchor .zl-pop {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  z-index: calc(var(--z-sheet) + 1);
+  max-height: min(70vh, 560px);
+  transform-origin: center;
+}
+
+/* On a phone the picker is the sheet, at the foot of the MobileSheet holding
+   the form. Both are absolute, so the form's own surface is their container. */
+.ow-form .zl-sheet { max-height: 70vh; }
+.ow-form .zl-mchip,
+.ow-form .zl-seg-opt,
+.ow-form .zl-pick-cur,
+.ow-form .zl-pick-all,
+.ow-form .zl-pick .zl-kv-row.is-btn { min-height: 44px; }
+
 .ow-form-foot {
-  /* Pinned to the bottom of the scrolling surface. Measured in the lab: the
-     form is five sections tall in a 272px column, so a foot that scrolled put
-     the only action of the screen below the fold in BOTH densities — you had
-     to scroll past the model list to learn there was a button at all. */
-  position: sticky;
-  bottom: 0;
+  /* The dialog and the bottom sheet both scroll, so the action sits at the
+     end of the form like every other form in the product: pinning it hid the
+     name and model fields under it on a phone. */
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 4px -12px -20px;
-  padding: 12px;
-  background: var(--zl-sheet);
-  box-shadow: 0 -1px 0 var(--zl-line), 0 -14px 22px -14px rgba(0, 0, 0, 0.7);
+  margin-top: 8px;
 }
 .ow-form-foot .ow-cta { width: 100%; }
 .ow-form-pad { height: 24px; }
@@ -663,3 +722,22 @@
   font-variant-numeric: tabular-nums;
 }
 .ow-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ── New owner, as a dialog ────────────────────────────────────────────── */
+
+/* Desktop: the product's centred modal. The width is the form's, not the
+   Sheet's default 600 — six fields and a swatch grid read as a column, and a
+   600px form makes every label a long way from the control it names. The body
+   scrolls so the sticky foot keeps Create owner on screen. */
+.sheet.ow-dialog { max-width: 420px; }
+.sheet.ow-dialog .sheet-body { padding: 0; max-height: min(74vh, 720px); overflow-y: auto; }
+.sheet.ow-dialog .ow-form { padding: 12px 16px 20px; }
+
+/* Phone: the bottom sheet's body already scrolls, so the form only has to sit
+   in it at the touch floor. The picker's sheet rises inside this same surface,
+   which is why it is not portalled anywhere. */
+.msheet .ow-form { padding: 4px 14px 16px; }
+.msheet .ow-form .ow-up { width: 44px; height: 44px; }
+.msheet .ow-form .ow-entry { min-height: 48px; }
+.msheet .ow-form .ow-modelrow { min-height: 56px; }
+.msheet .ow-form .ow-swatch { min-width: 44px; min-height: 44px; }

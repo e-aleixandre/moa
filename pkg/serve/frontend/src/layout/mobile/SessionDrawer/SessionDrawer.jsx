@@ -66,7 +66,7 @@ export function SessionDrawer({
   owners = [],
   activeOwnerId = null,
   onOpenOwner,
-  onCreateOwner,
+  onNewOwner,
   panelRef: externalPanelRef,
 }) {
   const panelRef = useRef(null);
@@ -219,7 +219,7 @@ export function SessionDrawer({
             owners={owners}
             activeOwnerId={activeOwnerId}
             onOpenOwner={onOpenOwner}
-            onCreateOwner={onCreateOwner}
+            onNewOwner={onNewOwner}
             collapsedProjects={drawerCollapsed}
             onToggleProject={onToggleProject}
             collapsedSections={collapsedSections}

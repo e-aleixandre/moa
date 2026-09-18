@@ -76,6 +76,26 @@ func TestResolvedAvatarFallsBackForAnOwnerWithoutOne(t *testing.T) {
 	}
 }
 
+// `sand` left the palette because it was the amber-ish tile and amber is the
+// "waiting on you" dot. An owner that chose it keeps its SHAPE and gets the
+// nearest surviving colour, rather than being sent back to the hash and coming
+// out as a different face entirely.
+func TestResolvedAvatarMigratesARetiredColour(t *testing.T) {
+	own := Owner{CodebaseKey: "winerim", Avatar: Avatar{Shape: "hexagon", Color: "sand"}}
+	got := own.ResolvedAvatar()
+	if got != (Avatar{Shape: "hexagon", Color: "sage"}) {
+		t.Fatalf("resolved avatar = %+v, want hexagon/sage", got)
+	}
+	if !got.Valid() {
+		t.Fatalf("migrated avatar %+v is not in the closed lists", got)
+	}
+	// A colour that never existed is not a rename: that one does fall back.
+	unknown := Owner{CodebaseKey: "winerim", Avatar: Avatar{Shape: "hexagon", Color: "crimson"}}
+	if got := unknown.ResolvedAvatar(); got != DefaultAvatar("winerim") {
+		t.Fatalf("unknown colour resolved to %+v, want the deterministic default", got)
+	}
+}
+
 // The default is a pure function of the codebase key, which is what makes the
 // Go and the JS implementations agree without either one asking the other.
 // These values are the ones src/components/Owners/OwnerAvatar.jsx computes.

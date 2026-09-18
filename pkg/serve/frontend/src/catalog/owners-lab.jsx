@@ -17,7 +17,8 @@ import {
   OwnerAvatar, AVATAR_COLORS, AVATAR_SHAPES, AVATAR_EYE_STATES, defaultAvatar,
 } from "../components/Owners/OwnerAvatar.jsx";
 import { OwnerRow } from "../components/Owners/OwnerRow.jsx";
-import { OwnerChip, OwnerIdentityPicker } from "../components/Owners/Owners.jsx";
+import { OwnerChip } from "../components/Owners/Owners.jsx";
+import { NewOwnerDialog } from "../components/Owners/NewOwnerDialog.jsx";
 import { OwnersSidebar, useAvatarChoice } from "./owners-sidebar.jsx";
 import {
   CHILD_SESSION, MOA_OWNER, OWNERS, PROMOTED, SAVED, SESSIONS, STATE_ROWS, WINERIM,
@@ -116,7 +117,7 @@ const PRESETS = [
     mode: "recent",
     owners: OWNERS,
     page: "new",
-    note: "A page pushed inside the column, as New session is. What is new is the top of it: the face, then the two rows that change it. Six shapes and eight colours, every swatch 44px in both densities, the selection a ring rather than a fill — a filled swatch changes the colour you are trying to judge. The default is already correct before you touch anything.",
+    note: "PRODUCTION's own dialog: a centred modal on the desktop, a bottom sheet on a phone — no longer a page that takes over the column. Above, the face and the two rows that change it: six shapes and eight colours, every swatch 44px in both densities, the selection a ring rather than a fill. Below the name, the model is ONE ROW that opens the product's ModelSelector, thinking included. Both densities are drawn at once here, so the modal and the sheet overlap.",
   },
   {
     id: "gallery",
@@ -128,43 +129,28 @@ const PRESETS = [
   },
 ];
 
-/* ── New owner, in the column ─────────────────────────────────────────────
-   Only enough of the form to place the identity picker honestly: the picker
-   is the new thing, and it has to be judged above fields of the size that will
-   actually sit under it. Folder and name are the shipped Field primitive at
-   its 16px floor. */
-function NewOwnerPage({ phone = false }) {
-  const [dir, setDir] = useState("/home/ealeixandre/dev/winerim-web/main");
-  const [name, setName] = useState("Winerim Web");
-  const choice = useAvatarChoice(defaultAvatar("winerim-web"));
+/* ── New owner ────────────────────────────────────────────────────────────
+   The lab draws PRODUCTION's dialog now, not a mock of it: `NewOwnerDialog`
+   is the centred modal on the desktop and the bottom sheet on a phone, with
+   the real form inside — identity picker, folder explorer, name, and the model
+   row that opens the product's own ModelSelector. The lab's own cut-down copy
+   is gone: it existed when the form was a page of the column, and a second
+   drawing of a shipped surface is exactly the drift the method forbids
+   (tmp/redesign/fidelity/METODO.md).
+
+   The fetches inside it are answered by the catalogue backend
+   (catalog/catalog-backend.js: /api/models, /api/capabilities,
+   /api/fs/complete), so what is photographed is the real thing with fixture
+   data, and Create is the real request against that stub. */
+function NewOwnerSurface({ phone = false }) {
   return (
-    <div class="zl-list ow-newpage">
-      <div class="ow-newhead">
-        <button type="button" class="ow-newback" aria-label="Back to the sessions" onClick={noop}>
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-        </button>
-        <span class="ow-newtitle">New owner</span>
-      </div>
-      <div class="ow-newbody">
-        <OwnerIdentityPicker
-          name={name}
-          shape={choice.shape}
-          color={choice.color}
-          onShape={choice.setShape}
-          onColor={choice.setColor}
-        />
-        <label class="ow-newfield">
-          <span class="ow-idp-label">Project folder</span>
-          <Field variant="box" size="lg" mono value={dir} onInput={(e) => setDir(e.currentTarget.value)} aria-label="Project folder" spellcheck={false} />
-        </label>
-        <label class="ow-newfield">
-          <span class="ow-idp-label">Name</span>
-          <Field variant="box" size="lg" value={name} onInput={(e) => setName(e.currentTarget.value)} aria-label="Owner name" />
-        </label>
-        <Button variant="accent" size="lg" className="ow-newcta" onClick={noop}>Create owner</Button>
-      </div>
-      {phone && <div class="ow-newpad" aria-hidden="true" />}
-    </div>
+    <NewOwnerDialog
+      open
+      phone={phone}
+      defaultDir="/home/ealeixandre/dev/winerim-web"
+      onCreate={async () => {}}
+      onClose={noop}
+    />
   );
 }
 
@@ -258,10 +244,12 @@ function Desktop({ preset, state }) {
       <div class="owl-density-label">Desktop · 1180 × 780</div>
       <div class="owl-desk">
         <div class="owl-desk-side">
-          <OwnersSidebar density="desktop" {...sidebarProps(preset, state)}>
-            {page === "new" ? <NewOwnerPage /> : null}
-          </OwnersSidebar>
+          <OwnersSidebar density="desktop" {...sidebarProps(preset, state)} />
         </div>
+        {/* The modal PORTALS to <body>, as it does in the app, so it centres on
+            the window rather than inside this frame. That is the surface being
+            judged: a centred modal is centred on the screen. */}
+        {page === "new" ? <NewOwnerSurface /> : null}
         <div class="owl-desk-main">
           {page === "gallery" ? (
             <div class="owl-gal-pane"><Gallery /></div>
@@ -315,11 +303,10 @@ function Phone({ preset, state }) {
           </div>
           <div class="sdrawer-veil is-open">
             <div class="sdrawer is-open" role="dialog" aria-modal="true" aria-label="Sessions">
-              <OwnersSidebar density="phone" {...sidebarProps(preset, state)}>
-                {page === "new" ? <NewOwnerPage phone /> : null}
-              </OwnersSidebar>
+              <OwnersSidebar density="phone" {...sidebarProps(preset, state)} />
             </div>
           </div>
+          {page === "new" ? <NewOwnerSurface phone /> : null}
         </div>
       </div>
     </div>

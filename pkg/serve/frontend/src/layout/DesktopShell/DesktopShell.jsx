@@ -2,6 +2,7 @@ import { useState } from "preact/hooks";
 import { Sidebar } from "../Sidebar/Sidebar.jsx";
 import { DesktopDossier } from "./DesktopDossier.jsx";
 import { GlobalSettings } from "../../components/index.js";
+import { NewOwnerDialog } from "../../components/Owners/NewOwnerDialog.jsx";
 import { useStore } from "../../hooks/useStore.js";
 import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
@@ -27,6 +28,10 @@ import "./DesktopShell.css";
 export function DesktopShell({ version, children }) {
   const chrome = useStore(selectDesktopChrome);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
+  // New owner is a centred modal here, not a page of the sidebar: the column
+  // is where you look for your work, and a form that takes it over hides the
+  // list it was launched from.
+  const [newOwnerOpen, setNewOwnerOpen] = useState(false);
 
   return (
     <div class="desktop-shell">
@@ -54,7 +59,7 @@ export function DesktopShell({ version, children }) {
         owners={chrome.owners}
         activeOwnerId={chrome.activeOwnerId}
         onOpenOwner={(own) => openOwnerConversation(own)}
-        onCreateOwner={(spec) => createOwner(spec)}
+        onNewOwner={() => setNewOwnerOpen(true)}
         collapsedProjects={chrome.drawerCollapsed}
         onToggleProject={setDrawerProjectCollapsed}
         collapsedSections={chrome.collapsedSections}
@@ -69,6 +74,11 @@ export function DesktopShell({ version, children }) {
       />
       {children}
       <DesktopDossier />
+      <NewOwnerDialog
+        open={newOwnerOpen}
+        onClose={() => setNewOwnerOpen(false)}
+        onCreate={(spec) => createOwner(spec)}
+      />
       {/* The settings sheet draws its own surface now: it is the catalogue's
           centred panel, with its own head, scrim and pushed pages, so wrapping
           it in the generic Sheet would give it a second head and a second

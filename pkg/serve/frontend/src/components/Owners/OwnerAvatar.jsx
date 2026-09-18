@@ -26,22 +26,45 @@
 
 export const AVATAR_SHAPES = ["circle", "squircle", "blob", "hexagon", "drop", "pill"];
 
-// The identity palette, derived from tokens.css and then MUTED. `--peach`,
-// `--mauve`, `--sky`, `--teal`, `--lavender`, `--flamingo` are the source
-// hues; each is pulled down in saturation so that no avatar can be mistaken
-// for a state dot sitting 8px away from it. `sage` and `rose` are deliberately
-// far from `--green` #a6e3a1 and `--red` #f38ba8: both are desaturated to the
-// point where they read as a tile colour rather than as an alarm.
+// The identity palette. EIGHT HUES SPREAD ROUND THE WHEEL, not eight tints of
+// the theme: the first attempt derived them from `--peach` / `--mauve` /
+// `--sky` / `--teal` / `--lavender` / `--flamingo` and muted each one, which
+// put six of the eight inside a 90° arc and left `mauve`/`lilac` 0.011 apart
+// in OKLab once mixed into the fill. On a phone that is one colour, and the
+// owner said so after using it.
+//
+// So they are computed rather than picked: one lightness and one chroma
+// (oklch L 0.80, C 0.115, clamped to sRGB) at eight hues, chosen to maximise
+// the smallest distance between any two of them AFTER the mix with
+// `--zl-raised`, while staying clear of the state dots. Measured on the fill
+// actually drawn, the closest pair went from dE 0.011 to dE 0.031 — the same
+// separation the product already has between two dots you never confuse.
+//
+// What "clear of the state dots" means (CRITERIO §1): no hue within 28° of
+// amber #f9e2af (waiting on you), 18° of red #f38ba8 (error) or 18° of green
+// #a6e3a1. Blue and mauve are not vetoed — `azure` and `lilac` do live near
+// them — because those two dots are "running" and "unread" rather than alarms,
+// and a 7px dot beside a 32px mark with eyes is not read as the same object.
+// `sand` is GONE for this reason: it was the amber-ish tile, and amber is the
+// one colour the owner named as unusable.
+//
+// The IDS are unchanged apart from sand→azure, so no owner.json is rewritten;
+// a stored `sand` is migrated in pkg/owner/avatar.go and below.
 export const AVATAR_COLORS = [
-  { id: "peach", hex: "#e0aa87", from: "--peach" },
-  { id: "mauve", hex: "#b7a0dc", from: "--mauve" },
-  { id: "sage", hex: "#9db895", from: "--green, muted" },
-  { id: "sky", hex: "#8bc3d2", from: "--sky" },
-  { id: "sand", hex: "#cfba91", from: "--yellow, muted" },
-  { id: "rose", hex: "#d5a3ad", from: "--flamingo" },
-  { id: "mint", hex: "#92c6b8", from: "--teal" },
-  { id: "lilac", hex: "#a6b0e0", from: "--lavender" },
+  { id: "peach", hex: "#f6aa73", oklch: "0.80 0.115 56" },
+  { id: "mauve", hex: "#d8a8f3", oklch: "0.80 0.115 313" },
+  { id: "sage", hex: "#aeca76", oklch: "0.80 0.115 124" },
+  { id: "sky", hex: "#4dd3de", oklch: "0.80 0.115 203" },
+  { id: "azure", hex: "#6ec9fe", oklch: "0.80 0.115 236" },
+  { id: "rose", hex: "#f39fcf", oklch: "0.80 0.115 345" },
+  { id: "mint", hex: "#71d5a8", oklch: "0.80 0.115 163" },
+  { id: "lilac", hex: "#b2b5ff", oklch: "0.80 0.109 282" },
 ];
+
+// RENAMED_COLORS is pkg/owner/avatar.go's `renamedAvatarColors`: an id that
+// left the list maps onto the surviving colour nearest the hue that owner
+// already had, so its face changes as little as the change allows.
+const RENAMED_COLORS = { sand: "sage" };
 
 const COLOR_BY_ID = new Map(AVATAR_COLORS.map((c) => [c.id, c]));
 
@@ -169,7 +192,10 @@ export function defaultAvatar(codebaseKey) {
 export function ownerAvatar(owner) {
   const fallback = defaultAvatar(owner?.codebase_key || owner?.name);
   const shape = AVATAR_SHAPES.includes(owner?.avatar?.shape) ? owner.avatar.shape : fallback.shape;
-  const color = COLOR_BY_ID.has(owner?.avatar?.color) ? owner.avatar.color : fallback.color;
+  const stored = owner?.avatar?.color;
+  const color = COLOR_BY_ID.has(stored)
+    ? stored
+    : (RENAMED_COLORS[stored] || fallback.color);
   return { shape, color };
 }
 
