@@ -1,22 +1,18 @@
 /* UserWaypoint — the user's message.
 
-   A CELL, indented against a gutter that carries the hour. The peach 3px edge
-   is gone, and so is peach from this component: the message is identified by
+   A CELL with its hour beneath it. The peach 3px edge is gone, and so is peach
+   from this component: the message is identified by
    having a surface of its own where the assistant's turn has none, which is a
    difference of shape rather than of colour. That frees peach from the
    transcript's vocabulary entirely.
 
-   The gutter holds the send time in mono `tabular-nums`, so 09:14 and 11:08
-   occupy the same box and the column never breathes. It holds the hour and
-   NOTHING else: a date line above it read as cramped in 44px, and a transcript
-   is read inside one conversation, where the day rarely changes -- so the full
-   date is revealed on demand, as the hour's title and accessible name, and the
-   hour is focusable so a keyboard can reach it. 64px on the desktop; 44px on
-   the phone, which is what `09:14` in 12px mono (36px) needs plus room.
+   The hour lives in a 20px foot with 6px of air below the slab, sharing the
+   assistant turn's grammar rather than a side gutter. It is mono
+   `tabular-nums`, so 09:14 and 11:08 occupy the same box. The full date is
+   revealed on demand, as the hour's title and accessible name, and the hour is
+   focusable so a keyboard can reach it.
 
-   Rewind is pinned to the CELL's right edge rather than to the 680px measure.
-   On the old full-measure row it sat 311px from the end of a short message on
-   the desktop and overlapped the text by 27px on the phone -- both measured.
+   Rewind belongs to that foot, a fixed short distance from its timestamp.
    There is no copy here: copying is the assistant's foot, and a control that
    repeats beside everything you ever typed earns its place or leaves.
 
@@ -33,7 +29,7 @@
 .zl-user {
   position: relative;
   display: grid;
-  grid-template-columns: 64px 1fr;
+  grid-template-columns: 1fr;
   align-items: start;
   margin: 0 0 16px;
   font-size: var(--zl-fs-title);
@@ -41,13 +37,14 @@
   color: var(--zl-t1);
 }
 
-.zl-user-gutter {
+.zl-user-foot {
+  --zl-user-foot-x: 14px;
+  grid-row: 2;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding-top: 10px;
-  align-self: stretch;
+  align-items: center;
+  height: 20px;
+  margin-top: 6px;
+  padding-left: var(--zl-user-foot-x);
 }
 .zl-user-hhmm {
   font-variant-numeric: tabular-nums;
@@ -70,13 +67,11 @@
   .zl-user-hhmm { transition: none; }
 }
 
-/* The cell. Its right padding is the rewind's lane, so the mark never lands
-   on top of the last word of a message that fills the line. */
 .zl-user-cell {
+  grid-row: 1;
   position: relative;
   min-width: 0;
   padding: 10px 14px;
-  padding-right: 44px;
   border-radius: var(--zl-r-md);
   background: var(--zl-raised);
   box-shadow: var(--zl-rim);
@@ -136,39 +131,35 @@
   color: var(--zl-t2);
 }
 
-/* The phone's gutter: 44px, which holds `09:14` in 12px mono (36px) with room
-   and gives the cell the other 8 back. */
-@media (max-width: 640px) {
-  .zl-user { grid-template-columns: 44px 1fr; }
-}
-.mconv .zl-user { grid-template-columns: 44px 1fr; }
-
 .zl-transcript.is-dense .zl-user {
   margin-bottom: 12px;
-  grid-template-columns: 44px 1fr;
   font-size: var(--zl-fs-body);
   line-height: 1.55;
 }
-.zl-transcript.is-dense .zl-user-cell { padding: 8px 12px; padding-right: 40px; }
+.zl-transcript.is-dense .zl-user-cell { padding: 8px 12px; }
+.zl-transcript.is-dense .zl-user-foot { --zl-user-foot-x: 12px; }
 
-/* the rewind mark — every user message is a branch point, so this sits on every
-   one of them and must be quiet enough to disappear while reading. It rests at
-   the cell's top-right corner, inside the lane the cell's padding reserves. */
+/* The rewind shares the foot with the hour. `tabular-nums` keeps the 46px
+   offset stable for every timestamp, so it stays close to its own message. */
 .zl-user-rail {
   position: absolute;
-  top: 6px;
-  right: 4px;
+  top: auto;
+  right: auto;
+  bottom: 0;
+  left: calc(var(--zl-user-foot-x) + 46px);
   display: flex;
+  height: 20px;
+  align-items: center;
 }
 .zl-user .wp-rewind {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* 28px of ink. The halo below makes the target 44px without widening the
-     cell's lane: it overflows the button instead of inflating it. */
-  width: 28px;
-  height: 28px;
+  /* 20px of ink. The halo below makes the target 44px without widening the
+     foot: it overflows the button instead of inflating it. */
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: 0;
   border-radius: var(--radius-full);
@@ -181,7 +172,7 @@
 .zl-user .wp-rewind::before {
   content: "";
   position: absolute;
-  inset: -8px;
+  inset: -12px;
 }
 .zl-user .wp-rewind:active:not(:disabled) {
   color: var(--zl-t1);
@@ -210,6 +201,7 @@
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
+.zl-user .wp-rewind .lucide { width: 14px; height: 14px; }
 
 /* the preview reference — "anclado al lomo": a short dash comes out of the
    cell's own left edge and ties the reference to the message. The bleed is

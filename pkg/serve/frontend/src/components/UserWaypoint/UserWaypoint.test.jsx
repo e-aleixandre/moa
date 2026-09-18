@@ -106,9 +106,10 @@ test("a message with no time renders no hour and no placeholder", () => {
   expect(textContent(waypoint)).toBe("hi");
 });
 
-test("the gutter is always present, so a message without an hour is not un-indented", () => {
+test("the foot is always present, so a message without an hour keeps its rhythm", () => {
   const waypoint = UserWaypoint({ children: <p>hi</p> });
-  expect(byClass(waypoint, "zl-user-gutter")).toBeDefined();
+  expect(byClass(waypoint, "zl-user-foot")).toBeDefined();
+  expect(byClass(waypoint, "zl-user-gutter")).toBeUndefined();
 });
 
 test("an image attachment with data renders a data URL thumbnail", () => {

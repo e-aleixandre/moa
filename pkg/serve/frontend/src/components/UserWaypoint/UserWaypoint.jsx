@@ -121,10 +121,10 @@ export function UserWaypoint({
   // then carries no day of its own.
   const preformatted = typeof time === "string" && !/^\d+$/.test(time);
   const hhmm = preformatted ? time : clockHHMM(time);
-  // The gutter shows the hour and nothing else. A date line above it read as
-  // cramped in 44px, and a transcript is read inside one conversation, where
-  // the day rarely changes -- so the date is revealed on demand instead, by
-  // hovering or tapping the hour, and is the accessible name either way.
+  // The foot shows the hour and nothing else. A transcript is read inside one
+  // conversation, where the day rarely changes -- so the date is revealed on
+  // demand instead, by hovering or tapping the hour, and is the accessible
+  // name either way.
   const full = preformatted ? "" : clockFull(time);
 
   return (
@@ -134,16 +134,6 @@ export function UserWaypoint({
         style={accent ? { "--waypoint-accent": `var(--${accent})` } : undefined}
         {...rest}
       >
-        {/* The gutter. It holds the hour and nothing else; it is also what
-            indents the cell, so it exists even when there is no time to put
-            in it, or the slab would jump left on a message without one. */}
-        <div class="zl-user-gutter">
-          {hhmm && (
-            <time class="zl-user-hhmm zl-data" title={full || undefined} aria-label={full || undefined} tabIndex={full ? 0 : undefined}>
-              {hhmm}
-            </time>
-          )}
-        </div>
         <div class="zl-user-cell">
           {showLabel && <div class="zl-user-label">{label}</div>}
           <div class="zl-user-body">
@@ -151,11 +141,13 @@ export function UserWaypoint({
             {html != null ? <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} /> : children}
           </div>
           <WaypointAttachments attachments={attachments} sessionId={sessionId} onOpenImage={setOpenAttachment} />
-          {/* Rewind belongs to the CELL, pinned to its right edge. It used to
-              ride a full-measure row under the text, which put it 311px from
-              the end of a short message on the desktop and overlapped the
-              text by 27px on the phone -- both measured. Anchored to the slab
-              it is a few px from its own words at every width. */}
+        </div>
+        <div class="zl-user-foot">
+          {hhmm && (
+            <time class="zl-user-hhmm zl-data" title={full || undefined} aria-label={full || undefined} tabIndex={full ? 0 : undefined}>
+              {hhmm}
+            </time>
+          )}
           {onRewind && (
             <span class="zl-user-rail">
               <button

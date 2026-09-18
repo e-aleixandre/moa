@@ -7,26 +7,23 @@ const jsx = await Bun.file(new URL("./UserWaypoint.jsx", import.meta.url)).text(
 // one is mechanical -- a reviewer cannot reliably catch a regression by
 // reading a diff -- and each was a real defect before, not a hypothetical.
 
-// ── rewind is anchored to the cell, not to the measure ────────────────────
+// ── rewind is anchored to the foot, not to the measure ────────────────────
 // Measured on the old full-measure row: 311px from the end of a short message
-// on the desktop, and a 27px OVERLAP with the text on the phone. Anchoring it
-// inside the cell is what fixes both, so the anchor is what is asserted.
+// on the desktop, and a 27px OVERLAP with the text on the phone. Sharing the
+// timestamp's foot keeps it a fixed short distance from its own message.
 
-test("rewind is positioned inside the cell, not on a full-measure row", () => {
-  // The rail is absolutely positioned, which only means anything if its
-  // containing block is the cell -- so the cell must establish one.
-  expect(css).toMatch(/\.zl-user-cell\s*\{[^}]*position:\s*relative\s*;/s);
+test("rewind is positioned on the timestamp foot, not on a full-measure row", () => {
   expect(css).toMatch(/\.zl-user-rail\s*\{[^}]*position:\s*absolute\s*;/s);
-  expect(css).toMatch(/\.zl-user-rail\s*\{[^}]*right:/s);
+  expect(css).toMatch(/\.zl-user-rail\s*\{[^}]*left:\s*calc\(var\(--zl-user-foot-x\)\s*\+\s*46px\)/s);
 });
 
-test("the rewind button lives inside the cell element in the markup", () => {
+test("the rewind button lives beside the hour in the foot markup", () => {
   const cell = jsx.indexOf('class="zl-user-cell"');
+  const foot = jsx.indexOf('class="zl-user-foot"');
   const rail = jsx.indexOf('class="zl-user-rail"');
-  const rewind = jsx.indexOf('class="wp-rewind"');
   expect(cell).toBeGreaterThan(-1);
-  expect(rail).toBeGreaterThan(cell);
-  expect(rewind).toBeGreaterThan(rail);
+  expect(foot).toBeGreaterThan(cell);
+  expect(rail).toBeGreaterThan(foot);
 });
 
 test("the old full-measure timestamp row is gone, not left empty", () => {
@@ -45,18 +42,18 @@ test("the user's message carries no copy control", () => {
   expect(css).not.toMatch(/\.zl-user[^{]*\bcopy\b/i);
 });
 
-// ── the gutter keeps one width whatever the hour says ─────────────────────
+// ── the foot keeps one width whatever the hour says ───────────────────────
 // `09:14` and `11:08` must occupy the same box, and nothing else may share
-// the gutter: the date is revealed on demand, not stacked above the hour.
+// the foot: the date is revealed on demand, not stacked above the hour.
 
 test("the hour is mono and tabular, so every hour is the same width", () => {
   expect(css).toMatch(/\.zl-user-hhmm\s*\{[^}]*font-variant-numeric:\s*tabular-nums\s*;/s);
   expect(css).toMatch(/\.zl-user\s+\.zl-data\s*\{[^}]*font-family:\s*var\(--mono\)\s*;/s);
 });
 
-test("the gutter draws the hour and nothing else", () => {
-  // A second mono line under a 44px gutter read as cramped, so the date left
-  // the gutter entirely. Both the element and its rule must be gone, or it
+test("the foot draws the hour and nothing else", () => {
+  // A second mono line in the foot would be cramped, so the date stays out of
+  // it entirely. Both the element and its rule must be gone, or it
   // comes back the next time someone has a date to show.
   expect(jsx).not.toContain('zl-user-day');
   expect(css).not.toContain('.zl-user-day');
@@ -72,9 +69,9 @@ test("the full date is reachable by pointer AND by keyboard", () => {
   expect(css).toMatch(/\.zl-user-hhmm:focus-visible\s*\{[^}]*outline:/s);
 });
 
-test("the gutter is 64px on the desktop and 44px on the phone", () => {
-  expect(css).toMatch(/\.zl-user\s*\{[^}]*grid-template-columns:\s*64px\s+1fr\s*;/s);
-  expect(css).toMatch(/\.mconv\s+\.zl-user\s*\{[^}]*grid-template-columns:\s*44px\s+1fr\s*;/s);
+test("the foot shares the assistant's 20px line after 6px of air", () => {
+  expect(css).toMatch(/\.zl-user-foot\s*\{[^}]*height:\s*20px\s*;[^}]*margin-top:\s*6px\s*;/s);
+  expect(css).toMatch(/\.zl-user-foot\s*\{[^}]*padding-left:\s*var\(--zl-user-foot-x\)\s*;/s);
 });
 
 // ── the tokens rule: one source, no inline fallbacks ──────────────────────
@@ -87,7 +84,7 @@ test("no token is referenced with an inline fallback", () => {
 });
 
 test("peach is no longer part of the user message's own chrome", () => {
-  // The cell, the gutter, the hour and the rewind: none of them wear it.
+  // The cell, the foot, the hour and the rewind: none of them wear it.
   const ownChrome = css.slice(0, css.indexOf("/* the preview reference"));
   expect(ownChrome).not.toMatch(/var\(--peach\)/);
 });
