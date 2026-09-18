@@ -274,26 +274,34 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			}
 			b := s.runtime.Bus
 
+			// The same metadata whichever rail the notification takes. It is
+			// what identifies this user message as a subagent report: the UI
+			// renders it as one, and a context trim needs the job ID to leave
+			// the model a way back to the full result. The steer rail dropped
+			// it, so a notification that arrived mid-run was indistinguishable
+			// from something the user typed.
+			notificationCustom := map[string]any{
+				"source":          "subagent",
+				"subagent_job_id": jobID,
+				"subagent_task":   task,
+				"subagent_status": status,
+				"subagent_result": resultTail,
+			}
+
 			state := s.runtime.State.Current()
 			// StatePermission still belongs to the foreground run; starting a
 			// notification run there would race the agent blocked on ask_user.
 			if state == bus.StateRunning || state == bus.StatePermission {
 				subagentTexts.Store(agentText, struct{}{})
-				_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Internal: true})
+				_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Custom: notificationCustom, Internal: true})
 			} else {
 				err := b.Execute(bus.SendPrompt{
-					Text: agentText,
-					Custom: map[string]any{
-						"source":          "subagent",
-						"subagent_job_id": jobID,
-						"subagent_task":   task,
-						"subagent_status": status,
-						"subagent_result": resultTail,
-					},
+					Text:   agentText,
+					Custom: notificationCustom,
 				})
 				if err != nil {
 					subagentTexts.Store(agentText, struct{}{})
-					_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Internal: true})
+					_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Custom: notificationCustom, Internal: true})
 				}
 			}
 		},
