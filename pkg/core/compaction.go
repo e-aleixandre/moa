@@ -13,6 +13,12 @@ type CompactionSettings struct {
 	// merging them would freeze today's global value into every session, so a
 	// later change to the global setting would never reach them.
 	DefaultCompactAt int `json:"default_compact_at,omitempty"`
+	// TrimDisabled turns off the deterministic tool-result elision that runs
+	// before compaction. Phrased as a negative so the zero value keeps it on:
+	// settings are built explicitly in many places (tests, subagents, the CLI),
+	// and a positive TrimEnabled would have silently disabled the feature in
+	// every one of them that was written before it existed.
+	TrimDisabled bool `json:"trim_disabled,omitempty"`
 }
 
 // DefaultCompactionSettings provides sensible defaults.
@@ -136,6 +142,53 @@ const compactionWarnRatio = 0.85
 // 5.4k, so the context jumped from under the band to over the threshold and the
 // agent was never warned. Below this size the band is widened instead.
 const minWarnBandTokens = 20_000
+
+// trimMinGainRatio is the fraction of the effective threshold a trim has to
+// win to be worth doing. A trim costs one full prefix-cache rewrite (~T
+// tokens) and, on providers that sign reasoning, the loss of thinking blocks
+// after the watermark. That cost is proportional to T, so the threshold that
+// justifies paying it has to be proportional too — and large enough that the
+// context cannot cross the threshold again after a handful of turns, which
+// would pay the cost repeatedly for almost no room.
+const trimMinGainRatio = 0.20
+
+// TrimMinGain is the smallest saving that justifies a trim for these settings.
+// It reuses minWarnBandTokens as a floor, the same "below this a band is not
+// worth acting on" precedent the warning band uses.
+func TrimMinGain(contextWindow int, settings CompactionSettings) int {
+	effective := contextWindow - settings.ReserveTokens
+	if effective <= 0 {
+		return 0
+	}
+	gain := int(float64(effective) * trimMinGainRatio)
+	if gain < minWarnBandTokens {
+		gain = minWarnBandTokens
+	}
+	return gain
+}
+
+// AcceptTrim reports whether a planned trim should be applied instead of
+// compacting.
+//
+// Winning minGain is not enough on its own. The threshold check only says the
+// context is ABOVE T, not by how much: a single huge result can take it far
+// past T in one step, and a trim that wins minGain from there can still leave
+// the request over the threshold — sent, because the loop evaluates compaction
+// once per iteration and then proceeds. Requiring the projected size to land
+// at least minGain BELOW T is what makes the low-water mark real, and with it
+// the guarantee that at least minGain of new tokens must arrive before the
+// next event.
+func AcceptTrim(estimateBefore, tokensRemoved, contextWindow int, settings CompactionSettings) bool {
+	effective := contextWindow - settings.ReserveTokens
+	if effective <= 0 {
+		return false
+	}
+	minGain := TrimMinGain(contextWindow, settings)
+	if tokensRemoved < minGain {
+		return false
+	}
+	return estimateBefore-tokensRemoved <= effective-minGain
+}
 
 // ShouldWarnBeforeCompact reports whether the agent is close enough to the
 // compaction threshold to be told about it, and how many tokens remain.
