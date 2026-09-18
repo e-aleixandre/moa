@@ -14,7 +14,7 @@ const jsx = await Bun.file(new URL("./UserWaypoint.jsx", import.meta.url)).text(
 
 test("rewind is positioned on the timestamp foot, not on a full-measure row", () => {
   expect(css).toMatch(/\.zl-user-rail\s*\{[^}]*position:\s*absolute\s*;/s);
-  expect(css).toMatch(/\.zl-user-rail\s*\{[^}]*left:\s*calc\(var\(--zl-user-foot-x\)\s*\+\s*46px\)/s);
+  expect(css).toMatch(/\.zl-user-rail\s*\{[^}]*left:\s*46px\s*;/s);
 });
 
 test("the rewind button lives beside the hour in the foot markup", () => {
@@ -71,7 +71,8 @@ test("the full date is reachable by pointer AND by keyboard", () => {
 
 test("the foot shares the assistant's 20px line after 6px of air", () => {
   expect(css).toMatch(/\.zl-user-foot\s*\{[^}]*height:\s*20px\s*;[^}]*margin-top:\s*6px\s*;/s);
-  expect(css).toMatch(/\.zl-user-foot\s*\{[^}]*padding-left:\s*var\(--zl-user-foot-x\)\s*;/s);
+  expect(css).toMatch(/\.zl-user-foot\s*\{[^}]*grid-row:\s*2\s*;/s);
+  expect(css).not.toMatch(/\.zl-user-foot\s*\{[^}]*padding-left:/s);
 });
 
 // ── the tokens rule: one source, no inline fallbacks ──────────────────────
