@@ -398,6 +398,22 @@ export function projectStream(session) {
         });
         continue;
       }
+      // A batch of reports from the sessions of a project reaches its owner as
+      // a user-role message for the same reason an event does. It renders as
+      // an event block: something arrived, the owner did not say it.
+      if (msg.custom?.source === 'report') {
+        const count = Number(msg.custom.count) || 0;
+        blocks.push({
+          kind: 'event',
+          id: blockID('report', msg, i),
+          source: 'reports',
+          title: count > 1 ? `${count} sessions` : '',
+          body: joinText(msg.content),
+          time: msg.timestamp,
+          autorun: true,
+        });
+        continue;
+      }
       const attachments = attachmentsOf(msg.content);
       const msgId = msg.msg_id || msg._msg_id || '';
       const wp = {

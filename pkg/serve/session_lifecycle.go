@@ -606,6 +606,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	if opts != nil {
 		m.subscribeAutomationCallback(sess, opts.initialMetadata)
 	}
+	// Project owners: children report their outcomes here, and the owner's own
+	// outcomes are what release a batch that was waiting for it to be free.
+	m.subscribeOwnerReports(sess, opts != nil && opts.ownerSession)
 
 	return sess, nil
 }

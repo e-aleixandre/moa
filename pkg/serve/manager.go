@@ -656,6 +656,9 @@ type Manager struct {
 	// attention normalizes cross-session blocking state for future voice and
 	// digest clients. It owns no session state and is stopped on Shutdown.
 	attention *attention.Service
+	// reports batches the run outcomes of a project's sessions and delivers
+	// them to its owner. nil when owners are unavailable (no config dir).
+	reports   *reportCoordinator
 	versionMu sync.RWMutex
 	version   release.Result
 
@@ -889,6 +892,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		}()
 	}
 	m.attention.Start()
+	// The coordinator reads its outbox at startup, so it must exist before any
+	// session is resumed and starts reporting.
+	m.reports = newReportCoordinator(ctx, m)
 	if m.scheduler != nil {
 		m.scheduler.Start(m)
 	}
