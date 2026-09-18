@@ -281,6 +281,12 @@ function appendCompactionMarker(id, rawMarker) {
   updateSession(id, { messages: [...sess.messages, marker] });
 }
 
+// A trim produces the same kind of durable marker as a compaction, so it takes
+// the same path: normalized once, deduped by the MsgID a reload finds again.
+export function handleWsContextTrim(id, data) {
+  appendCompactionMarker(id, data?.marker);
+}
+
 
 export function handleWsGoalChange(id, data) {
   const sess = store.get().sessions[id];

@@ -405,6 +405,18 @@ func wsEventFromBus(event any) (Event, bool) {
 			data.Marker = &marker
 		}
 		return Event{Type: "compaction_end", Data: data}, true
+	case bus.ContextTrimmed:
+		// Only the marker crosses. The event's Originals field is the
+		// untrimmed conversation the syncer needs on the server side, and has
+		// no business on the wire. The marker carries the MsgID the reloaded
+		// transcript uses for the same line, so a live client and a reload
+		// agree on one identity for it.
+		data := ContextTrimmedData{}
+		if e.Marker != nil {
+			marker, _ := sanitizeHistoryMessage(*e.Marker)
+			data.Marker = &marker
+		}
+		return Event{Type: "context_trim", Data: data}, true
 	default:
 		return Event{}, false
 	}
@@ -415,6 +427,17 @@ func wsEventFromBus(event any) (Event, bool) {
 // plus the keys only reconnect history carries: bus events project live user
 // and steer messages, this one also projects tool results.
 func projectWSMessageCustom(custom map[string]any) map[string]any {
+	// The trim marker is a session_event like the compaction one, but carries
+	// only counters: the elided content itself never crosses.
+	if marker, _ := custom["type"].(string); marker == "trim_marker" {
+		projected := map[string]any{"type": marker}
+		for _, key := range []string{"results", "tokens_removed"} {
+			if n, ok := custom[key].(int); ok {
+				projected[key] = n
+			}
+		}
+		return projected
+	}
 	if marker, _ := custom["type"].(string); marker == "compaction_marker" {
 		projected := map[string]any{"type": marker}
 		if summary, ok := custom["summary"].(string); ok {

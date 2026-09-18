@@ -96,6 +96,18 @@ export function normalizeHistory(raw, liveSubagents = []) {
       // Rendered as a system line, matching the live goal event styling.
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
       result.push({ _type: 'system', _msg_id: msg.msg_id, text });
+    } else if (msg.role === 'session_event' && msg.custom?.type === 'trim_marker') {
+      // A trim elides old tool outputs from the model's context but leaves the
+      // transcript intact, so this is only a thin marker: the outputs above it
+      // are still here to read, they just stopped being sent to the model.
+      // The wording is built server-side and travels in the content, so live
+      // and reloaded rows cannot drift apart.
+      result.push({
+        _type: 'system',
+        _msg_id: msg.msg_id,
+        timestamp: msg.timestamp,
+        text: (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join(''),
+      });
     } else if (msg.role === 'session_event' && msg.custom?.type === 'compaction_marker') {
       // Compaction entries are durable tree events, rather than conversational
       // messages. Preserve their complete payload as a first-class normalized

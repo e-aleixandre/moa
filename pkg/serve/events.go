@@ -398,6 +398,13 @@ type CompactionEndData struct {
 	Marker *core.AgentMessage `json:"marker,omitempty"`
 }
 
+// ContextTrimmedData carries the durable display marker TreeSyncer records as
+// the trim entry. Same shape as a compaction's: the line a client draws live
+// has to be the one it finds again on reload, under the same MsgID.
+type ContextTrimmedData struct {
+	Marker *core.AgentMessage `json:"marker,omitempty"`
+}
+
 // ConfigChangeData is sent when model/thinking/permissions/path scope change.
 type ConfigChangeData struct {
 	Model          string `json:"model,omitempty"`

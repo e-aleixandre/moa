@@ -47,3 +47,27 @@ describe('the compaction marker', () => {
     expect(block.timestamp).toBe(1788359520);
   });
 });
+
+// A trim leaves the transcript intact — the outputs it elided are still there
+// to read — so it renders as the same thin system line as the fill-up notice,
+// never as a compaction card that would suggest the history was replaced.
+describe('the trim marker', () => {
+  it('renders as a system line carrying the server wording', () => {
+    const rows = normalizeHistory([
+      {
+        role: 'session_event',
+        msg_id: 't-1',
+        timestamp: 1788359600,
+        custom: { type: 'trim_marker', results: 42, tokens_removed: 180000 },
+        content: [{ type: 'text', text: '✂ Older tool outputs removed from model context (42 results, ~180K tokens)' }],
+      },
+    ]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]._type).toBe('system');
+    expect(rows[0]._msg_id).toBe('t-1');
+    expect(rows[0].timestamp).toBe(1788359600);
+    expect(rows[0].text).toContain('42 results');
+    expect(projectStream({ messages: rows, subagents: {} }).some(b => b.kind === 'compaction')).toBe(false);
+  });
+});
