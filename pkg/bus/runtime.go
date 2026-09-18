@@ -154,6 +154,9 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		if err := cfg.Agent.LoadState(msgs, epoch); err != nil {
 			return nil, fmt.Errorf("bus: LoadState from tree: %w", err)
 		}
+		if err := restoreTrimWatermark(cfg.Agent, tree); err != nil {
+			return nil, err
+		}
 	} else if cfg.InitialMessages != nil {
 		if err := cfg.Agent.LoadState(cfg.InitialMessages, cfg.InitialCompactionEpoch); err != nil {
 			return nil, fmt.Errorf("bus: LoadState: %w", err)
@@ -407,4 +410,23 @@ func (r *SessionRuntime) RefreshBaseSystemPrompt(base string) error {
 		return r.sctx.Agent.SetSystemPrompt(base)
 	}
 	return rebuildSystemPrompt(r.sctx)
+}
+
+// restoreTrimWatermark tells the agent how far context trimming already reached
+// on the tree's current branch. It travels beside the messages rather than
+// inside them because it is a property of the BRANCH: without it, a reloaded or
+// re-branched session would plan its next trim from scratch and re-elide a
+// region already elided, possibly under rules that changed since.
+//
+// Optional by design: an AgentController that does not trim (a test double,
+// another embedder) simply does not implement it.
+func restoreTrimWatermark(agent AgentController, tree *session.Tree) error {
+	setter, ok := agent.(interface{ SetTrimWatermark(string) error })
+	if !ok || tree == nil {
+		return nil
+	}
+	if err := setter.SetTrimWatermark(tree.TrimWatermark()); err != nil {
+		return fmt.Errorf("bus: restore trim watermark: %w", err)
+	}
+	return nil
 }

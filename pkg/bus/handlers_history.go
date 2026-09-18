@@ -466,6 +466,12 @@ func registerTreeHandlers(sctx *SessionContext) {
 		if err := sctx.Agent.LoadState(msgs, epoch); err != nil {
 			return fmt.Errorf("branch: load state: %w", err)
 		}
+		// Branching before a trim restores the full outputs, so the watermark
+		// has to come from the NEW branch: keeping the old one would leave the
+		// agent believing it had already elided messages that are whole again.
+		if err := restoreTrimWatermark(sctx.Agent, sctx.Tree); err != nil {
+			return err
+		}
 		sctx.Bus.Publish(CommandExecuted{
 			SessionID: sctx.SessionID,
 			Command:   "branch",

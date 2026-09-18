@@ -57,6 +57,12 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 			}
 			ts.handleCompaction(e)
 			b.Publish(TreeSynced{SessionID: sctx.SessionID})
+		case ContextTrimmed:
+			if e.Payload == nil {
+				return
+			}
+			ts.handleTrim(e)
+			b.Publish(TreeSynced{SessionID: sctx.SessionID})
 		case CommandExecuted:
 			switch e.Command {
 			case "clear":
@@ -294,4 +300,53 @@ func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 	if e.Payload.SummaryMsgID != "" {
 		ts.synced[e.Payload.SummaryMsgID] = struct{}{}
 	}
+}
+
+// handleTrim records a context trim in the tree.
+//
+// Unlike handleCompaction, it cannot assume the messages it concerns are
+// already in the tree. Ordinary messages only sync at RunEnded, and a run has
+// many assistant→tools turns before that, so a result elided mid-run exists
+// nowhere but the agent's state — which the trim just replaced with
+// placeholders. Reading the agent here (what syncMessages does) would therefore
+// persist the placeholder and lose the original for good.
+//
+// The event carries the pre-trim view for exactly this reason: the originals go
+// in FIRST, then the marker. That order is what keeps the transcript showing
+// what actually happened while the model's context holds the elision.
+func (ts *TreeSyncer) handleTrim(e ContextTrimmed) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	for i, msg := range e.Originals {
+		id := messageSyncID(msg, i)
+		if _, ok := ts.synced[id]; ok {
+			continue
+		}
+		if isHiddenInternalPrompt(msg) {
+			ts.synced[id] = struct{}{}
+			continue
+		}
+		ts.tree.Append(session.Entry{
+			Type:    session.EntryMessage,
+			Message: msg,
+		})
+		ts.synced[id] = struct{}{}
+	}
+
+	marker := core.AgentMessage{}
+	if e.Marker != nil {
+		marker = session.DeepCopyMessage(*e.Marker)
+	}
+	ts.tree.Append(session.Entry{
+		Type:    session.EntryTrim,
+		Message: marker,
+		Trim: session.TrimData{
+			WatermarkEntryID:  e.Payload.WatermarkMsgID,
+			ProjectionVersion: e.Payload.Version,
+			TokensBefore:      e.Payload.TokensBefore,
+			TokensRemoved:     e.Payload.TokensBefore - e.Payload.TokensAfter,
+			Results:           e.Payload.Results,
+		},
+	})
 }

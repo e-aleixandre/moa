@@ -1192,6 +1192,15 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 			CostIncludedInRun: true,
 		}}
 
+	case core.AgentEventContextTrimmed:
+		return []any{ContextTrimmed{
+			SessionID: sid,
+			RunGen:    gen,
+			Payload:   e.Trim,
+			Marker:    NewTrimMarker(e.Trim),
+			Originals: e.TrimOriginals,
+		}}
+
 	case core.AgentEventFastUnavailable:
 		fast := false
 		return []any{ConfigChanged{SessionID: sid, Fast: &fast}}

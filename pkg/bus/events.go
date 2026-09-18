@@ -174,6 +174,26 @@ type CompactionEnded struct {
 	CostIncludedInRun bool // true when this payload's usage is already included in RunEnded.Cost
 }
 
+// ContextTrimmed is published when old tool results were elided from the
+// model's context instead of compacting.
+type ContextTrimmed struct {
+	SessionID string
+	RunGen    uint64
+	Payload   *core.TrimPayload
+	// Marker is the display projection TreeSyncer persists as the trim entry,
+	// so its MsgID is also the durable entry ID — the same arrangement
+	// compaction uses, which is what lets a live client and a reload agree on
+	// one identity for the line.
+	Marker *core.AgentMessage
+	// Originals is the conversation as it stood BEFORE the trim. It exists so
+	// the syncer can persist the untrimmed messages of the current run before
+	// appending the marker: a run has several turns before RunEnded, so the
+	// only copy of a result elided mid-run may be this one. Deliberately not
+	// projected onto the WebSocket — a frame carrying the whole conversation on
+	// every trim is not an API.
+	Originals []core.AgentMessage
+}
+
 // ---------------------------------------------------------------------------
 // Steering
 // ---------------------------------------------------------------------------
