@@ -104,7 +104,9 @@ function listSig(list) {
 
 function ownersSig(list) {
   return (list || []).map((o) => [
-    o.id, o.name, o.session_state || "", (o.children || []).map((c) => c.id + c.state + (c.unseen ? 1 : 0)).join(","),
+    o.id, o.name, o.session_state || "", o.unseen ? 1 : 0, o.ownReason || "",
+    o.avatar?.shape || "", o.avatar?.color || "",
+    (o.children || []).map((c) => c.id + c.state + (c.unseen ? 1 : 0)).join(","),
   ].join("\0")).join("\n");
 }
 
@@ -128,6 +130,7 @@ function mobileChromeEqual(a, b) {
     && a.activeCount === b.activeCount
     && a.savedCount === b.savedCount
     && a.drawerCollapsed === b.drawerCollapsed
+    && a.collapsedSections === b.collapsedSections
     && attentionSig(a.attention) === attentionSig(b.attention)
     && a.inboxOpen === b.inboxOpen // wake-on-event
     && inboxSig(a.inbox) === inboxSig(b.inbox) // wake-on-event
@@ -160,6 +163,8 @@ export function selectMobileChrome(state, forceMobile = false) {
     ownersHealth: ownersHealth(state),
     activeOwnerId: activeOwnerIdOf(state),
     drawerCollapsed: state.drawerCollapsed,
+    // The Recent list's own accordion, beside the folder one.
+    collapsedSections: state.collapsedSections,
     soundEnabled: !!state.soundEnabled,
     inbox: inboxCards(state.sessions, state.events), // wake-on-event
     inboxHealth: inboxHealth(state), // wake-on-event

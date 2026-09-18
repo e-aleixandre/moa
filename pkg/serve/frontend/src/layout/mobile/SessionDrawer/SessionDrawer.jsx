@@ -59,15 +59,14 @@ export function SessionDrawer({
   onMode,
   drawerCollapsed = {},
   onToggleProject,
-  // Owners mode. The drawer mounts the same <Sidebar/> as the desktop, so the
-  // third list arrives here with the same control and the same rows.
+  collapsedSections = {},
+  onToggleSection,
+  // The owners. The drawer mounts the same <Sidebar/> as the desktop, so the
+  // OWNERS section arrives here with the same rows and the same accordion.
   owners = [],
-  ownersHealth,
   activeOwnerId = null,
   onOpenOwner,
-  onOpenOwnerChild,
   onCreateOwner,
-  onRetryOwners,
   panelRef: externalPanelRef,
 }) {
   const panelRef = useRef(null);
@@ -218,14 +217,13 @@ export function SessionDrawer({
             mode={mode}
             onMode={onMode}
             owners={owners}
-            ownersHealth={ownersHealth}
             activeOwnerId={activeOwnerId}
             onOpenOwner={onOpenOwner}
-            onOpenOwnerChild={onOpenOwnerChild}
             onCreateOwner={onCreateOwner}
-            onRetryOwners={onRetryOwners}
             collapsedProjects={drawerCollapsed}
             onToggleProject={onToggleProject}
+            collapsedSections={collapsedSections}
+            onToggleSection={onToggleSection}
             inboxCount={inboxCount}
             inboxVisible={inboxVisible}
             onInbox={onInbox}

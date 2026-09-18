@@ -311,3 +311,61 @@ func TestOwnerBookIsListedReadAndOnlyTheIndexIsWritable(t *testing.T) {
 		t.Fatal("a read escaped the book directory")
 	}
 }
+
+// The avatar travels through the API: accepted on create, stored, and answered
+// by both the list and the single-owner read. An owner that has none is
+// answered with its deterministic default rather than an empty field, so a
+// client never has to guess at a face the server could have computed.
+func TestOwnerAvatarRoundTripsThroughTheAPI(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+
+	chosen := owner.Avatar{Shape: "hexagon", Color: "lilac"}
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Winerim", Avatar: chosen})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Avatar != chosen {
+		t.Fatalf("created avatar = %+v, want %+v", info.Avatar, chosen)
+	}
+	got, err := mgr.GetOwner(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Avatar != chosen {
+		t.Fatalf("GET avatar = %+v, want %+v", got.Avatar, chosen)
+	}
+	list, err := mgr.ListOwners()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Avatar != chosen {
+		t.Fatalf("listed avatar = %+v", list)
+	}
+}
+
+func TestCreateOwnerDefaultsAndValidatesTheAvatar(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+
+	root := t.TempDir()
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: root, Name: "Winerim"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Avatar.Valid() {
+		t.Fatalf("an owner created without an avatar got %+v", info.Avatar)
+	}
+	if info.Avatar != owner.DefaultAvatar(info.CodebaseKey) {
+		t.Fatalf("default avatar = %+v, want the codebase default", info.Avatar)
+	}
+
+	_, err = mgr.CreateOwner(CreateOwnerOpts{
+		Root:   t.TempDir(),
+		Name:   "Bad",
+		Avatar: owner.Avatar{Shape: "star", Color: "lilac"},
+	})
+	if !errors.Is(err, ErrInvalidAvatar) {
+		t.Fatalf("create with a bad avatar = %v, want ErrInvalidAvatar", err)
+	}
+}

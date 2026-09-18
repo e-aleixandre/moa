@@ -5,8 +5,8 @@ import { useStore } from "../../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../../data/stream-model.js";
 import { focusedSessionId } from "../../../data/selectors.js";
 import { openSession, setActiveSession } from "../../../data/tile-actions.js";
-import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setSidebarMode } from "../../../data/drawer.js";
-import { createOwner, openOwnerConversation, retryOwners } from "../../../data/owners.js";
+import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setSectionCollapsed, setSidebarMode } from "../../../data/drawer.js";
+import { createOwner, openOwnerConversation } from "../../../data/owners.js";
 import { openPalette } from "../../../data/palette.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, rewindToMessage, stopRun } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
@@ -520,16 +520,15 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
         mode={chrome.sidebarMode}
         onMode={setSidebarMode}
         owners={chrome.owners}
-        ownersHealth={chrome.ownersHealth}
         activeOwnerId={chrome.activeOwnerId}
         /* Choosing an owner closes the drawer onto its conversation, exactly
            as choosing a session does. */
         onOpenOwner={(own) => { if (openOwnerConversation(own)) closeDrawer(); }}
-        onOpenOwnerChild={(child) => { openSession(child.id); closeDrawer(); }}
         onCreateOwner={async (spec) => { await createOwner(spec); closeDrawer(); }}
-        onRetryOwners={() => { retryOwners().catch(() => {}); }}
         drawerCollapsed={chrome.drawerCollapsed}
         onToggleProject={setDrawerProjectCollapsed}
+        collapsedSections={chrome.collapsedSections}
+        onToggleSection={setSectionCollapsed}
         panelRef={drawerPanelRef}
       />
       {/* The settings sheet is its own surface in both densities: `phone`

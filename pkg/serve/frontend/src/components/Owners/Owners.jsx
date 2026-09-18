@@ -5,9 +5,14 @@ import { Field } from "../../primitives/Field/Field.jsx";
 import { Button } from "../../primitives/Button/Button.jsx";
 import { deriveModelSpecs } from "../../data/selectors.js";
 import { defaultModelSpec } from "../CommandPalette/command-palette-model.js";
-import { modelCodename, shortPath } from "../../data/util/format.js";
+import { modelCodename } from "../../data/util/format.js";
 import { api } from "../../data/api.js";
-import { bookTree, childrenSummary, groupChildren, ownerRowState, waitingChildren } from "../../data/owners-model.js";
+import { bookTree, childrenSummary, groupChildren, ownerState } from "../../data/owners-model.js";
+import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatar, OwnerAvatarFor, defaultAvatar } from "./OwnerAvatar.jsx";
+import "./OwnerAvatar.css";
+// The identity picker's sheet lives beside the owner row it is choosing a face
+// for, so the swatch grid and the row cannot drift apart.
+import "./OwnerRow.css";
 // The chassis of the dossier: the owner's panel IS the session dossier's
 // drawer with different contents, so it takes that sheet rather than a copy.
 import "../SessionPanel/SessionPanel.css";
@@ -50,13 +55,6 @@ function BackIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">
       <path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
-  );
-}
-function PlusIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
     </svg>
   );
 }
@@ -109,109 +107,7 @@ function Group({ label, n, attn }) {
   );
 }
 
-// Monogram — an owner is a named thing, and the list is scanned by NAME (one
-// owner per project, so the project never disambiguates it). Two letters of
-// the name on a hued tile, the same mark the inbox gives its sources.
-function OwnerMark({ name }) {
-  return (
-    <span class="ow-mono" style={`--h:${hueOf(name)}`} aria-hidden="true">{String(name).slice(0, 2)}</span>
-  );
-}
-
 /* ── The list ─────────────────────────────────────────────────────────── */
-
-// The owner row. `active` is the same treatment a current session row gets
-// (SessionRow.css `.zl-row.is-current`): a raised plane and a heavier title,
-// never a left bar — that gesture means "you said this" (CRITERIO §1).
-function OwnerListRow({ owner, onOpen, active = false, triage = false, onOpenChild }) {
-  const summary = childrenSummary(owner.children || []);
-  const state = ownerRowState(owner);
-  const path = shortPath(owner.root, 40);
-  const label = `${owner.name}, in ${path}. ${summary.text}.`;
-  const waiting = triage ? waitingChildren(owner) : [];
-  return (
-    <div class={`ow-row-slot${active ? " is-current" : ""}`}>
-      <button
-        type="button"
-        class={`ow-row${active ? " is-current" : ""}`}
-        onClick={() => onOpen?.(owner)}
-        aria-current={active ? "true" : undefined}
-        aria-label={label}
-      >
-        <OwnerMark name={owner.name} />
-        <span class="ow-row-main">
-          <span class="ow-row-l1">
-            <span class="ow-row-name">{owner.name}</span>
-            <span class="ow-row-meta">
-              <span class={`ow-dot is-${state}`} aria-hidden="true" />
-            </span>
-          </span>
-          <span class="ow-row-path ow-data">{path}</span>
-          <span class={`ow-row-brief tone-${summary.tone}`}>{summary.text}</span>
-        </span>
-      </button>
-      {/* VARIANT (triage): the children that have STOPPED, at most three,
-          indented under their owner. Only what is waiting — a running child
-          here would be the session list printed twice. */}
-      {waiting.length > 0 && (
-        <div class="ow-row-kids">
-          {waiting.map((child) => (
-            <ChildRow child={child} onOpen={onOpenChild} key={child.id} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function OwnersLoading() {
-  return (
-    <div class="ow-list" aria-busy="true">
-      <span class="ow-sr-only">Loading owners</span>
-      {[0, 1].map((i) => (
-        <div class="ow-ghost" aria-hidden="true" key={i}>
-          <span class="ow-ghost-mono" />
-          <span class="ow-ghost-main">
-            <span class="ow-ghost-bar" style="width:42%" />
-            <span class="ow-ghost-bar is-t" style="width:64%" />
-            <span class="ow-ghost-bar" style="width:34%" />
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function OwnersError({ detail, retrying, onRetry }) {
-  return (
-    <div class="ow-state is-error" role="alert">
-      <span class="ow-state-t"><span class="ow-dot is-error" aria-hidden="true" />Can't read the owners</span>
-      {detail && <span class="ow-state-d ow-data">{detail}</span>}
-      <span class="ow-state-p">The owners and their books are on disk; nothing was lost. Try again, or check that moa is up.</span>
-      {onRetry && (
-        <button type="button" class="ow-btn" onClick={onRetry} disabled={retrying}>
-          {retrying ? "Retrying…" : "Retry"}
-        </button>
-      )}
-    </div>
-  );
-}
-
-// The empty state says what an owner IS in one sentence and offers the one
-// action. It is the only screen where the accent is spent on "New owner":
-// with no list to look at, creating one IS the dominant action (CRITERIO §2).
-function OwnersEmpty({ onNew }) {
-  return (
-    <div class="ow-state is-empty">
-      <span class="ow-state-t">No project has an owner yet.</span>
-      <span class="ow-state-p">
-        An owner is one standing agent per project: it keeps the project's book,
-        starts the sessions that work on it and reads what they report back.
-      </span>
-      <Button variant="accent" size="lg" className="ow-cta" onClick={onNew}>New owner</Button>
-    </div>
-  );
-}
 
 /* ── New owner ────────────────────────────────────────────────────────── */
 
@@ -293,6 +189,63 @@ export function createFailure(error) {
   return { title: "The owner was not created.", detail: text.replace(/^\d{3}:\s*/, "").trim() || "Try again, or check that moa is up." };
 }
 
+/* ── The identity picker ──────────────────────────────────────────────────
+   The one new thing in the form: the face, above the two rows that change it.
+   Preview first and large, because what you are choosing is what you will see
+   in the list for months; the rows under it are swatches at the touch floor
+   (44px), not a dropdown — six shapes and eight colours are fewer decisions
+   than a menu costs to open.
+
+   The eyes in the preview are the idle ones. The picker is not a place to
+   show states: it is where you choose the half of the mark that never
+   changes. */
+export function OwnerIdentityPicker({ name, shape, color, onShape, onColor }) {
+  return (
+    <div class="ow-idp">
+      <div class="ow-idp-preview">
+        <OwnerAvatar shape={shape} color={color} state="idle" size={64} />
+        <span class="ow-idp-name">{name || "New owner"}</span>
+      </div>
+      <div class="ow-idp-field">
+        <span class="ow-idp-label">Shape</span>
+        <div class="ow-idp-row is-shapes" role="radiogroup" aria-label="Avatar shape">
+          {AVATAR_SHAPES.map((s) => (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={s === shape}
+              aria-label={s}
+              class={`ow-swatch${s === shape ? " is-on" : ""}`}
+              key={s}
+              onClick={() => onShape(s)}
+            >
+              <OwnerAvatar shape={s} color={color} state="idle" size={32} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div class="ow-idp-field">
+        <span class="ow-idp-label">Colour</span>
+        <div class="ow-idp-row is-colours" role="radiogroup" aria-label="Avatar colour">
+          {AVATAR_COLORS.map((c) => (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={c.id === color}
+              aria-label={c.id}
+              class={`ow-swatch is-colour${c.id === color ? " is-on" : ""}`}
+              key={c.id}
+              onClick={() => onColor(c.id)}
+            >
+              <span class="ow-swatch-c" style={`--ow-av-c:${c.hex}`} aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const basename = (p) => String(p || "").replace(/\/+$/, "").split("/").filter(Boolean).pop() || "";
 
 export function NewOwner({ defaultDir = "", onCreate, phone = false }) {
@@ -321,6 +274,18 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false }) {
   const suggested = basename(dir);
   const effectiveName = touchedName ? name : suggested;
 
+  /* The face. It already looks like itself before anything is pressed: the
+     default is the codebase's own deterministic mark, the one the server
+     would compute if the field were omitted (pkg/owner/avatar.go). It follows
+     the folder until you choose a shape or a colour — browsing to another
+     project and keeping the previous project's face would be a mark that says
+     the wrong thing. `codebase_key` is not known in the browser, so the
+     folder's basename stands in for it; the server stores what is sent, so
+     what you see here is what the owner keeps. */
+  const fallbackAvatar = defaultAvatar(basename(dir));
+  const [chosenAvatar, setChosenAvatar] = useState(null);
+  const avatar = chosenAvatar || fallbackAvatar;
+
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
     const list = q ? entries.filter((e) => e.toLowerCase().startsWith(q)) : entries;
@@ -339,6 +304,13 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false }) {
 
   return (
     <div class="ow-form">
+      <OwnerIdentityPicker
+        name={effectiveName}
+        shape={avatar.shape}
+        color={avatar.color}
+        onShape={(shape) => setChosenAvatar({ ...avatar, shape })}
+        onColor={(color) => setChosenAvatar({ ...avatar, color })}
+      />
       <label class="ow-field">
         <span class="ow-label">Project folder</span>
         <Field
@@ -439,7 +411,7 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false }) {
             setBusy(true);
             setFailure(null);
             try {
-              await onCreate?.({ root: dir, name: effectiveName, model: chosenModel, thinking });
+              await onCreate?.({ root: dir, name: effectiveName, model: chosenModel, thinking, avatar });
             } catch (error) {
               setFailure(createFailure(error));
             } finally {
@@ -460,87 +432,20 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false }) {
   );
 }
 
-/* ── OwnersView ───────────────────────────────────────────────────────── */
+/* ── New owner, as a page of the column ───────────────────────────────── */
 
-// The BODY of the sidebar's Owners mode. It is not a surface any more: the
-// column's head (wordmark, search, +, the three-way mode control) and foot
-// (inbox, version, settings) belong to the Sidebar and are identical in all
-// three modes, so nothing here draws a head, a title or a way back. You leave
-// Owners the way you entered it — by choosing another mode.
-//
-// New owner is the exception: a page pushed INSIDE the column, exactly as New
-// session is, so it keeps a head with a back that returns to the list.
-export function OwnersView({
-  owners = [],
-  health,
-  onRetry,
-  onOpen,
-  onOpenChild,
-  onCreate,
-  activeId = null,
-  triage = false,
-  variant = "column",
-  defaultPage = "list",
-  defaultDir = "",
-}) {
-  const [page, setPage] = useState(defaultPage);
-  const status = health?.status || "ready";
-  const phone = variant === "sheet";
-  const creating = page === "new";
-
-  if (creating) {
-    return (
-      <div class={`ow-owners${phone ? " is-phone" : ""}`}>
-        <Head title="New owner" onBack={() => setPage("list")} backLabel="Back to owners" />
-        <div class="ow-body is-sub">
-          <NewOwner
-            defaultDir={defaultDir}
-            phone={phone}
-            /* The page leaves only once the owner exists: a form that closes
-               on a failed request loses both the failure and everything that
-               was typed. */
-            onCreate={async (spec) => { await onCreate?.(spec); setPage("list"); }}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  let body;
-  if (status === "loading") {
-    body = <OwnersLoading />;
-  } else if (status === "error") {
-    body = <OwnersError detail={health?.error} retrying={health?.retrying} onRetry={onRetry} />;
-  } else if (owners.length === 0) {
-    body = <OwnersEmpty onNew={() => setPage("new")} />;
-  } else {
-    body = (
-      <div class="ow-list">
-        {owners.map((owner) => (
-          <OwnerListRow
-            owner={owner}
-            onOpen={onOpen}
-            onOpenChild={onOpenChild}
-            active={owner.id === activeId}
-            triage={triage}
-            key={owner.id}
-          />
-        ))}
-        {/* A quiet row at the end of the list, not an accent bar across the
-            foot: with owners on screen the LIST is what the mode is for, and
-            one owner per project means this is pressed once a project
-            (CRITERIO §2). The foot below belongs to the app, not to this. */}
-        <button type="button" class="ow-new" onClick={() => setPage("new")}>
-          <PlusIcon />
-          New owner
-        </button>
-      </div>
-    );
-  }
-
+// NewOwnerPage is the form pushed INSIDE the sidebar, exactly as New session
+// is: it keeps a head with a back that returns to the list, and the column's
+// own foot stays where it is. The list itself is no longer a surface — the
+// owners are rows of the sidebar's OWNERS section (components/Owners/
+// OwnerRow.jsx), so there is nothing else here to draw.
+export function NewOwnerPage({ defaultDir = "", onCreate, onBack, phone = false }) {
   return (
-    <div class={`ow-owners is-mode${phone ? " is-phone" : ""}`}>
-      <div class="ow-body">{body}</div>
+    <div class={`ow-owners${phone ? " is-phone" : ""}`}>
+      <Head title="New owner" onBack={onBack} backLabel="Back to the sessions" />
+      <div class="ow-body is-sub">
+        <NewOwner defaultDir={defaultDir} phone={phone} onCreate={onCreate} />
+      </div>
     </div>
   );
 }
@@ -749,7 +654,13 @@ export function OwnerPanel({
             <span class="ow-panel-title">{file.label}</span>
           </>
         ) : (
-          <span class="ow-panel-eyebrow">This owner</span>
+          <>
+            {/* The owner's own face in the head of its dossier: the same mark
+                the row and the chip carry, so the panel is visibly about the
+                thing you pressed rather than a generic "this owner" pane. */}
+            <OwnerAvatarFor owner={owner} state={ownerState(owner)} size={24} />
+            <span class="ow-panel-eyebrow">{owner.name}</span>
+          </>
         )}
         {onClose && (
           <button type="button" class="ow-x" onClick={onClose} aria-label="Close">
@@ -795,11 +706,15 @@ export function OwnerPanel({
 /* ── The chip in a child ─────────────────────────────────────────────── */
 
 // OwnerChip — in a child session, the one thing that says this conversation
-// belongs to a project that has an owner, and the door to it. Deliberately
-// small and neutral: it is provenance, not a state, so it takes no identity
-// colour and no dot (CRITERIO §1). On the desktop it needs no change to
-// production — ChatHead already renders `headExtra` beside its actions.
-export function OwnerChip({ name, onClick, compact = false }) {
+// belongs to a project that has an owner, and the door to it. It carries the
+// owner's avatar at 20px rather than a word: the same mark as the list, so the
+// chip points at something you have seen rather than naming it. It stays
+// provenance and not state in the sense that matters — no dot, no count
+// (CRITERIO §1) — but its eyes are the owner's, which is useful precisely
+// where you are when the owner cannot reach you. On the desktop it needs no
+// change to production: ChatHead already renders `headExtra` beside its
+// actions.
+export function OwnerChip({ name, owner = null, state = "idle", onClick, compact = false }) {
   return (
     <button
       type="button"
@@ -808,6 +723,11 @@ export function OwnerChip({ name, onClick, compact = false }) {
       aria-label={`Owner: ${name}. Open its conversation`}
       title={`Owner: ${name}`}
     >
+      {/* The avatar needs the owner, which the chip only has once the roster
+          has loaded. Until then the chip still says the true thing it was
+          given — the name — rather than drawing a face for a project it has
+          not identified yet. */}
+      {owner && <OwnerAvatarFor owner={owner} state={state} size={20} />}
       <span class="ow-chip-k">Owner</span>
       <span class="ow-chip-sep" aria-hidden="true">·</span>
       <span class="ow-chip-v">{name}</span>

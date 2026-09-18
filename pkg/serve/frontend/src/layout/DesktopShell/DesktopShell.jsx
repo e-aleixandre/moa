@@ -5,8 +5,8 @@ import { GlobalSettings } from "../../components/index.js";
 import { useStore } from "../../hooks/useStore.js";
 import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
-import { setDrawerProjectCollapsed, setSidebarMode } from "../../data/drawer.js";
-import { createOwner, openOwnerConversation, retryOwners } from "../../data/owners.js";
+import { setDrawerProjectCollapsed, setSectionCollapsed, setSidebarMode } from "../../data/drawer.js";
+import { createOwner, openOwnerConversation } from "../../data/owners.js";
 import { closeSession, deleteSession, resumeSession } from "../../data/session-actions.js";
 import { dismissEvent, dismissSource, retryEvents, routeEvent, routeEventToNewSession, toggleInbox } from "../../data/events.js"; // wake-on-event
 import { selectDesktopChrome } from "../Sidebar/sessions.js";
@@ -52,14 +52,13 @@ export function DesktopShell({ version, children }) {
         mode={chrome.sidebarMode}
         onMode={setSidebarMode}
         owners={chrome.owners}
-        ownersHealth={chrome.ownersHealth}
         activeOwnerId={chrome.activeOwnerId}
         onOpenOwner={(own) => openOwnerConversation(own)}
-        onOpenOwnerChild={(child) => openSession(child.id)}
         onCreateOwner={(spec) => createOwner(spec)}
-        onRetryOwners={() => { retryOwners().catch(() => {}); }}
         collapsedProjects={chrome.drawerCollapsed}
         onToggleProject={setDrawerProjectCollapsed}
+        collapsedSections={chrome.collapsedSections}
+        onToggleSection={setSectionCollapsed}
         onSelectSession={(id) => openSession(id)}
         onNewSession={() => openPalette("create")}
         onSearch={() => openPalette("search")}

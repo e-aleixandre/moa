@@ -80,6 +80,95 @@ export function ownerRowState(owner) {
   return "idle";
 }
 
+/* ── What an owner's row says ─────────────────────────────────────────────
+
+   Four things an owner can be, and they are NOT the four a session can be:
+     idle    — standing by. The only number that matters is how many of its
+               children are live.
+     working — it is doing something of its own (reading reports, writing the
+               book). Blue, the product's running colour.
+     asks    — its own conversation stopped on a question or an error. Amber.
+     unread  — it wrote something nobody has read. Mauve, which is what mauve
+               already means here (SessionRow.css `.zl-dot.is-unseen`).
+
+   Children that have stopped are a SEPARATE clause on the same line, always
+   amber, because they are about different conversations: an owner can be idle
+   while two of its sessions are blocked, and merging the two into one badge
+   loses which one you have to go and unblock. */
+
+// `saved` is last and is NOT an alarm: a parked owner asks for nothing, the
+// same thing the saved session dot says by not being drawn.
+export const OWNER_URGENCY = { asks: 0, unread: 1, working: 2, idle: 3, saved: 4 };
+
+// The dot vocabulary is the session list's, so one column never speaks two
+// languages about the same colour.
+const OWNER_DOT = { asks: "permission", unread: "unseen", working: "running", idle: "idle", saved: "saved" };
+
+// ownerState narrows the owner's conversation to the four words its row uses.
+// `unseen` travels on the owner row (see ownerRows below): the owner's own
+// session is hidden from GET /api/sessions, so it is only known once that
+// conversation has been loaded — absent, the row simply does not claim it.
+export function ownerState(owner) {
+  const state = ownerRowState(owner);
+  if (state === "permission" || state === "error") return "asks";
+  if (state === "saved") return "saved";
+  if (owner?.unseen) return "unread";
+  if (state === "running") return "working";
+  return "idle";
+}
+
+export function ownerDotState(owner) {
+  return OWNER_DOT[ownerState(owner)];
+}
+
+// ownerLine — the second line of an owner row, as PIECES rather than a string:
+// the state clause takes the state's colour and the waiting clause is always
+// amber, so a working owner with two blocked children reads as one blue fact
+// and one amber fact instead of one line in a compromise colour.
+export function ownerLine(owner) {
+  const state = ownerState(owner);
+  const summary = childrenSummary(owner?.children || []);
+  // The owner's own reason, when its conversation is in the store: "Needs your
+  // answer" rather than a bare "Asks you", so the row can be decided from.
+  const own = owner?.ownReason || "";
+  const lead =
+    state === "asks" ? { tone: "yellow", text: own || "Asks you" }
+      : state === "working" ? { tone: "blue", text: own || "Working…" }
+        : state === "unread" ? { tone: "mauve", text: own || "Wrote to you · not read yet" }
+          // A parked owner says so rather than counting sessions it is no
+          // longer watching: "6 live" under shut eyes is two claims at once.
+          : state === "saved" ? { tone: "neutral", text: "Saved" }
+            : { tone: "neutral", text: `${summary.live} live` };
+  return { lead, tail: summary.waiting > 0 ? `${summary.waiting} waiting on you` : "" };
+}
+
+// worstOwnerState — what a COLLAPSED Owners heading shows beside its count.
+// The most urgent of what it is hiding, and nothing else: a collapsed section
+// has one line to say "there is something in here", and a second mark would
+// make it a summary of the list you asked not to see.
+export function worstOwnerState(owners = []) {
+  let worst = null;
+  for (const owner of owners) {
+    const state = ownerState(owner);
+    const waiting = childrenSummary(owner.children || []).waiting > 0;
+    const urgent = waiting && OWNER_URGENCY[state] > OWNER_URGENCY.asks ? "asks" : state;
+    if (!worst || OWNER_URGENCY[urgent] < OWNER_URGENCY[worst]) worst = urgent;
+  }
+  return worst && worst !== "idle" ? OWNER_DOT[worst] : null;
+}
+
+// ownerOfProject finds the owner responsible for a project section's key. The
+// key is a directory and the owner's root is a directory of the same codebase
+// — a worktree of it, in the general case — so one contains the other.
+export function ownerOfProject(owners = [], key = "") {
+  if (!key) return null;
+  return owners.find((o) => {
+    const root = o?.root || "";
+    if (!root) return false;
+    return root === key || root.startsWith(`${key}/`) || key.startsWith(`${root}/`);
+  }) || null;
+}
+
 // ownersWaiting — how many owners want something from you, for the door's
 // badge. An owner wants you when its own conversation asked, or when one of
 // its children has stopped: both land on the same person.
@@ -163,15 +252,39 @@ function relAge(updated, now) {
 
 // ownerRows joins the owners with their children. Sorted by name, which is how
 // the list is scanned: one owner per project, so the name identifies it.
+//
+// The owner's OWN conversation is picked out of the same roster when it is
+// there: it is hidden from GET /api/sessions and only loaded once you open it
+// (data/owners.js loadOwnerSessions), so `unseen` and the reason line are
+// attached when known and simply absent otherwise. The row never invents them.
 export function ownerRows(owners = [], sessions = {}, now = Date.now()) {
   const byOwner = new Map();
+  const ownSessions = new Map();
   for (const sess of Object.values(sessions || {})) {
-    if (!sess?.ownerId || (sess.kind || "") === "owner") continue;
+    if ((sess?.kind || "") === "owner") {
+      if (sess.id) ownSessions.set(sess.id, sess);
+      continue;
+    }
+    if (!sess?.ownerId) continue;
     if (!byOwner.has(sess.ownerId)) byOwner.set(sess.ownerId, []);
     byOwner.get(sess.ownerId).push(ownerChildRow(sess, now));
   }
   for (const list of byOwner.values()) list.sort((a, b) => b.updated - a.updated);
-  return owners.map((own) => ({ ...own, children: byOwner.get(own.id) || [] }));
+  return owners.map((own) => {
+    const mine = own.session_id ? ownSessions.get(own.session_id) : null;
+    // The reason of the owner's OWN conversation, read with the kind stripped:
+    // attentionKind refuses an owner on purpose — that is what keeps it out of
+    // Needs attention — but the sentence it produces is exactly what this row
+    // paints instead. Same projection as a session row, one place, so the two
+    // can never describe the same stopped conversation differently.
+    const reason = mine ? sessionRowReason({ ...mine, kind: "" }, now) : null;
+    return {
+      ...own,
+      children: byOwner.get(own.id) || [],
+      unseen: !!mine?.unseen,
+      ownReason: reason?.text || "",
+    };
+  });
 }
 
 // ownerOfSession finds the owner row a session belongs to, for the chip.

@@ -2,18 +2,31 @@ import { projectKey, projectLabel, shortPath } from "./format.js";
 
 export const PROJECT_SAVED_PREVIEW_LIMIT = 5;
 
-// The three ways the sidebar arranges what it shows. Recent and By project are
-// two orderings of the sessions; Owners is the third list — the standing agent
-// of each project (docs/owners.md). A mode is chosen and kept, which is why it
-// is persisted, and it lives here rather than in a controller so the store can
-// validate a restored value without importing the module that reads it back.
-export const SIDEBAR_MODES = ["recent", "project", "owners"];
+// The two ways the sidebar arranges what it shows: by recency, or grouped by
+// folder. The segmented says ORDER, and nothing else — the project owners are
+// a SECTION of the list (docs/owners.md), not a third ordering of it. A mode
+// is chosen and kept, which is why it is persisted, and it lives here rather
+// than in a controller so the store can validate a restored value without
+// importing the module that reads it back.
+export const SIDEBAR_MODES = ["recent", "project"];
+
+// The sections of the Recent list that can be folded away. Needs attention is
+// deliberately absent: it is a PROMOTION rather than a list you keep — empty
+// when nothing is wrong — and a collapsed alarm is an alarm you have chosen
+// not to hear.
+export const COLLAPSIBLE_SECTIONS = ["owners", "active", "saved"];
+
+// sectionCollapsed reads the persisted accordion, defaulting to open. Same
+// shape as projectCollapsed so the column has one collapsing gesture.
+export function sectionCollapsed(key, collapsedSections = {}) {
+  return collapsedSections?.[key] === true;
+}
 
 // isOrdinarySession excludes a project owner's conversation from the lists of
 // SESSIONS. The roster holds it — it is opened, streamed and read like any
 // other session — but it is not work waiting for you, and an owner listed
-// among the sessions it is responsible for would be one of its own rows. It is
-// reached from the sidebar's Owners mode instead (docs/owners.md).
+// among the sessions it is responsible for would be one of its own rows. It
+// has a row of its own in the OWNERS section instead (docs/owners.md).
 export function isOrdinarySession(session) {
   return (session?.kind || "") !== "owner";
 }
@@ -50,13 +63,23 @@ export function projectSectionOrder(a, b) {
 
 // groupProjectSessions is deliberately presentation-agnostic: callers can pass
 // server sessions or their own row projections as long as cwd/state/updated exist.
-export function groupProjectSessions(sessions) {
+export function groupProjectSessions(sessions, owners = []) {
   const groups = new Map();
   for (const session of sessions) {
     const key = projectKey(session.cwd);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(session);
   }
+  // A project with an owner but no session still has a group: the owner is
+  // its first row, and without the group it would be nowhere in this order.
+  for (const owner of owners) {
+    const root = owner?.root;
+    if (!root) continue;
+    const key = projectKey(root);
+    const covered = [...groups.keys()].some((k) => k === key || k.startsWith(`${key}/`) || key.startsWith(`${k}/`));
+    if (!covered) groups.set(key, []);
+  }
+  const ownerKeys = new Set(owners.map((o) => o?.root && projectKey(o.root)).filter(Boolean));
   return [...groups.entries()].map(([key, groupSessions]) => {
     const openCount = groupSessions.filter((s) => !isSaved(s)).length;
     const savedCount = groupSessions.length - openCount;
@@ -72,13 +95,14 @@ export function groupProjectSessions(sessions) {
       savedCount,
       attention: hasPermission ? "permission" : hasError ? "error" : null,
       attentionCount: hasPermission || hasError ? attentionCount : 0,
-      updated: Math.max(...groupSessions.map(updated)),
+      updated: groupSessions.length ? Math.max(...groupSessions.map(updated)) : 0,
+      hasOwner: [...ownerKeys].some((k) => k === key || k.startsWith(`${key}/`) || key.startsWith(`${k}/`)),
     };
   }).sort(projectSectionOrder);
 }
 
 export function defaultProjectCollapsed(section) {
-  return section.openCount === 0;
+  return section.openCount === 0 && !section.hasOwner;
 }
 
 export function projectCollapsed(section, drawerCollapsed, searching) {
@@ -176,6 +200,15 @@ const ATTENTION_RANK = { permission: 0, error: 1, unseen: 2 };
 
 export function attentionKind(session) {
   if (!session) return null;
+  /* An owner never rises into Needs attention. A session leaves Active for the
+     promotion and comes back once it is answered, which works because a
+     session is a piece of work that ends; an owner is STANDING, and a
+     permanent row that moves between sections is a row you have to find again
+     every time its state changes. Its state is painted on its own row instead.
+     The roster filter (isOrdinarySession) already keeps owners out of these
+     lists — this is the same rule stated where the split is made, so a caller
+     that hands over a raw roster cannot promote one. */
+  if ((session.kind || "") === "owner") return null;
   if (session.state === 'permission' || session.pendingPerm || session.pendingAsk) return 'permission';
   if (session.state === 'error') return 'error';
   if (session.unseen && !isSaved(session)) return 'unseen';

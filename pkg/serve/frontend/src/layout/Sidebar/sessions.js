@@ -133,7 +133,9 @@ function spineListSig(list) {
 
 function ownersSig(list) {
   return (list || []).map((o) => [
-    o.id, o.name, o.session_state || "", (o.children || []).map((c) => c.id + c.state + (c.unseen ? 1 : 0)).join(","),
+    o.id, o.name, o.session_state || "", o.unseen ? 1 : 0, o.ownReason || "",
+    o.avatar?.shape || "", o.avatar?.color || "",
+    (o.children || []).map((c) => c.id + c.state + (c.unseen ? 1 : 0)).join(","),
   ].join("\0")).join("\n");
 }
 
@@ -147,6 +149,7 @@ function desktopChromeEqual(a, b) {
     && ownersSig(a.owners) === ownersSig(b.owners)
     && a.groupByProject === b.groupByProject
     && a.drawerCollapsed === b.drawerCollapsed
+    && a.collapsedSections === b.collapsedSections
     && a.soundEnabled === b.soundEnabled
     && a.inboxOpen === b.inboxOpen // wake-on-event
     && a.inboxPending === b.inboxPending // wake-on-event
@@ -191,6 +194,8 @@ export function selectDesktopChrome(state) {
     // collapsing a folder on the phone and finding it open on the desktop was
     // the same list disagreeing with itself.
     drawerCollapsed: state.drawerCollapsed,
+    // The Recent list's own accordion, beside the folder one.
+    collapsedSections: state.collapsedSections,
     soundEnabled: !!state.soundEnabled,
   };
   const prev = selectDesktopChrome._prev;

@@ -1,4 +1,3 @@
-import { UserRound } from "lucide-preact";
 import { useMemo, useState } from "preact/hooks";
 import { useFlip } from "../../hooks/useFlip.js";
 import { InboxView } from "../../components/InboxView/InboxView.jsx";
@@ -12,10 +11,13 @@ import {
   partitionByAttention,
   previewSavedSessions,
   projectCollapsed,
+  sectionCollapsed,
   visibleProjectSessions,
 } from "../../data/util/project-sessions.js";
 import { projectName } from "../../data/util/format.js";
-import { OwnersView } from "../../components/Owners/Owners.jsx";
+import { ownerOfProject, worstOwnerState } from "../../data/owners-model.js";
+import { OwnerRow, SectionHead } from "../../components/Owners/OwnerRow.jsx";
+import { NewOwnerPage } from "../../components/Owners/Owners.jsx";
 import "./Sidebar.css";
 
 // Sidebar — the other sessions. Markup and CSS are the catalogue's
@@ -39,25 +41,16 @@ import "./Sidebar.css";
 //   3. new  — one labelled action, at the bottom, where the thumb is
 //   4. foot — the inbox, the version and settings: the things about the APP
 
-// The three lists the column can show. Recent and By project are two
-// orderings of the SESSIONS; Owners is the third list — the standing agent of
-// each project (docs/owners.md). A mode is chosen and kept, not somewhere you
-// go: that is why Owners is here and not a door beside the Inbox in the foot,
-// and why nothing else in the column changes with it.
+// The two ORDERS the sessions can take. The segmented says how the list is
+// SORTED, and nothing else: the project owners are a SECTION of that list
+// (docs/owners.md), because an owner is not an ordering of your sessions and
+// making it the third stop here asked one control to answer two questions.
 const ORDERS = [
   ["recent", "Recent", "Sort by recent", ByRecentIcon],
   ["project", "By project", "Group by project", ByProjectIcon],
-  ["owners", "Owners", "Show the project owners", OwnersIcon],
 ];
 
 const ATTENTION_RANK = { permission: 0, error: 1, unseen: 2 };
-
-// OWNER_TRIAGE — whether an owner row also lists the children that have
-// STOPPED, at most three. It buys triage without opening a dossier, and it
-// costs the list its evenness by printing rows that also live in the other two
-// modes. The owner has not decided; it is on by default and this constant is
-// the whole switch, so turning it off is one word.
-export const OWNER_TRIAGE = true;
 
 function PlusIcon() {
   return (
@@ -118,13 +111,6 @@ function ByProjectIcon() {
   );
 }
 
-// The Owners glyph, from the icon library the project already depends on
-// (lucide-preact). Same 16px box and weight as its two hand-drawn siblings, so
-// the three survive as a set at 14px with no labels.
-function OwnersIcon() {
-  return <UserRound size={16} aria-hidden="true" />;
-}
-
 function ChevronIcon() {
   return (
     <svg class="zl-proj-chev" viewBox="0 0 16 16" aria-hidden="true">
@@ -181,13 +167,18 @@ export function Sidebar({
   onCloseSession,
   onReopenSession,
   onDeleteSession,
-  // mode — which of the three lists this column shows: "recent", "project" or
-  // "owners". groupByProject is derived from it and kept as a prop because the
-  // grouping code and the persisted preference both still speak it.
+  // mode — how this column's sessions are ORDERED: "recent" or "project".
+  // groupByProject is derived from it and kept as a prop because the grouping
+  // code and the persisted preference both still speak it.
   mode = "recent",
   onMode,
   collapsedProjects = {},
   onToggleProject,
+  // The Recent list's own accordion: Owners, Active and Saved fold away and
+  // the choice is persisted, exactly as the folder one is. Needs attention is
+  // not in it — it is a promotion, not a list you keep.
+  collapsedSections = {},
+  onToggleSection,
   // wake-on-event: on the desktop the inbox is the sidebar's OTHER list and
   // takes over the same slot, so an event arriving never pushes the sessions
   // down. On the phone it is a handoff: the caller closes this and opens the
@@ -203,24 +194,23 @@ export function Sidebar({
   onNewSessionForEvent,
   onDismissEvent,
   onDismissEventSource,
-  // Owners mode: the rows, the health of the last read, and the three actions
-  // the list offers. The column supplies the head and the foot in every mode,
-  // so OwnersView contributes only the body.
+  // The owners. They are a SECTION of this list rather than a mode of the
+  // column: above everything in Recent, and the first row of their group in By
+  // project. The column supplies the head and the foot either way.
   owners = [],
-  ownersHealth,
   activeOwnerId = null,
-  ownerTriage = OWNER_TRIAGE,
   onOpenOwner,
-  onOpenOwnerChild,
   onCreateOwner,
-  onRetryOwners,
   ownerDefaultDir = "",
 }) {
   const phone = density === "phone";
   const groupByProject = mode === "project";
-  const ownersMode = mode === "owners";
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const [showAllSaved, setShowAllSaved] = useState(false);
+  // New owner is a page pushed INSIDE the column, exactly as New session is,
+  // so it keeps a head with a back that returns to the list. It is local
+  // state: it is a place you are looking, not a preference.
+  const [newOwner, setNewOwner] = useState(false);
   const hasMenu = !!(onCloseSession || onReopenSession || onDeleteSession);
 
   // Nothing filters this list any more -- the palette is where you look for a
@@ -235,15 +225,22 @@ export function Sidebar({
       shownActive: allActive,
       shownSaved: saved,
       hitCount: allActive.length + saved.length,
-      projectSections: groupProjectSessions([...allActive, ...saved]),
+      projectSections: groupProjectSessions([...allActive, ...saved], owners),
     };
-  }, [newResults, active, saved]);
+  }, [newResults, active, saved, owners]);
 
   /* Saved sessions are deliberately not offered to the attention split: a saved
      session is parked on purpose, so it belongs under Saved even if it ended
      badly. */
   const { needs: needsAttention, rest: restActive } = partitionByAttention(shownActive);
   const savedPreview = previewSavedSessions(shownSaved, { expanded: showAllSaved, searching: false });
+  // The section accordion, and what a folded OWNERS heading shows beside its
+  // count: the most urgent thing it is hiding, and nothing else.
+  const sectionOpen = (key) => !sectionCollapsed(key, collapsedSections);
+  const ownersDot = worstOwnerState(owners);
+  const ownersOpen = sectionOpen("owners");
+  const activeOpen = sectionOpen("active");
+  const savedOpen = sectionOpen("saved");
   // The catalogue draws ⌘K. The binding still accepts both modifiers
   // (formatShortcut is how the palette NAMES the same shortcut); the keycap
   // is the accepted drawing, not a platform translation of it.
@@ -256,9 +253,14 @@ export function Sidebar({
   // move, and the partitions above are fresh arrays every render.
   const order = (groupByProject
     ? projectSections.flatMap((section) => section.sessions.map((s) => s.id))
-    : [...needsAttention, ...restActive, ...savedPreview.visible].map((s) => s.id)
+    : [
+      ...(ownersOpen ? owners.map((o) => `owner:${o.id}`) : []),
+      ...needsAttention.map((s) => s.id),
+      ...(activeOpen ? restActive.map((s) => s.id) : []),
+      ...(savedOpen ? savedPreview.visible.map((s) => s.id) : []),
+    ]
   ).join("\n");
-  const listRef = useFlip([order, inboxOpen, collapsedProjects, expandedProjects, showAllSaved]);
+  const listRef = useFlip([order, inboxOpen, collapsedProjects, collapsedSections, expandedProjects, showAllSaved]);
 
   const row = (s, underProject = false) => (
     <div class={`zl-session${hasMenu ? " is-menu" : ""}`} key={s.id} data-flip={s.id}>
@@ -359,19 +361,16 @@ export function Sidebar({
         </div>
       )}
 
-      {ownersMode && !inboxOpen ? (
-        <div class="zl-list is-owners">
-          <OwnersView
-            owners={owners}
-            health={ownersHealth}
-            variant={phone ? "sheet" : "column"}
-            activeId={activeOwnerId}
-            triage={ownerTriage}
+      {newOwner && !inboxOpen ? (
+        <div class="zl-list is-newowner">
+          <NewOwnerPage
             defaultDir={ownerDefaultDir}
-            onOpen={onOpenOwner}
-            onOpenChild={onOpenOwnerChild}
-            onCreate={onCreateOwner}
-            onRetry={onRetryOwners}
+            phone={phone}
+            onBack={() => setNewOwner(false)}
+            /* The page leaves only once the owner exists: a form that closes
+               on a failed request loses both the failure and everything that
+               was typed. */
+            onCreate={async (spec) => { await onCreateOwner?.(spec); setNewOwner(false); }}
           />
         </div>
       ) : inboxOpen ? (
@@ -404,6 +403,7 @@ export function Sidebar({
             const shownSessions = visibleProjectSessions(section, expanded, false);
             const hiddenSaved = hiddenProjectSavedCount(section, expanded, false);
             const worst = sectionWorst(section);
+            const sectionOwner = ownerOfProject(owners, section.key);
             // The heading says the project's name, not its last two segments:
             // "moa" over ~/dev/moa/main, when the path beside it already has
             // the branch.
@@ -439,6 +439,18 @@ export function Sidebar({
                 )}
                 {!collapsed && (
                   <>
+                    {/* The owner is the first row of its group. Not a section
+                        of its own here: it belongs to this project, and the
+                        heading has just named it. A project with no owner is
+                        exactly what it is today. */}
+                    {sectionOwner && (
+                      <OwnerRow
+                        owner={sectionOwner}
+                        project
+                        active={sectionOwner.id === activeOwnerId}
+                        onOpen={onOpenOwner}
+                      />
+                    )}
                     {shownSessions.map((s) => row(s, true))}
                     {hiddenSaved > 0 && (
                       <button
@@ -455,30 +467,77 @@ export function Sidebar({
             );
           }) : (
             <>
-              {/* Needs attention comes first, and belongs to this view only:
+              {/* OWNERS first, above everything. They are what the sessions
+                  below belong TO, and they are two or three rows: a section
+                  that never grows can afford the top of the column. */}
+              {onCreateOwner && (
+                <>
+                  <SectionHead
+                    label="Owners"
+                    n={owners.length}
+                    open={ownersOpen}
+                    dot={ownersDot}
+                    onToggle={() => onToggleSection?.("owners", ownersOpen)}
+                  />
+                  {ownersOpen && (
+                    <>
+                      {owners.map((owner) => (
+                        <div class="zl-session" key={`owner:${owner.id}`} data-flip={`owner:${owner.id}`}>
+                          <OwnerRow
+                            owner={owner}
+                            active={owner.id === activeOwnerId}
+                            onOpen={onOpenOwner}
+                          />
+                        </div>
+                      ))}
+                      {/* Empty, the section says what an owner IS in one line
+                          and offers the action — inside the section, above a
+                          list of real sessions. It does not take half the
+                          column to explain a feature nobody asked for yet. */}
+                      {owners.length === 0 && (
+                        <p class="ow-sec-empty">
+                          One standing agent per project: it keeps the project's book and reads what its sessions report.
+                        </p>
+                      )}
+                      <button type="button" class="ow-newowner" onClick={() => setNewOwner(true)}>
+                        <PlusIcon />
+                        New owner
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+              {/* Needs attention comes second, and belongs to this view only:
                   grouped by folder, a session listed here AND inside its folder
                   is the same row printed twice, so there the alarm rides on the
                   folder heading instead. */}
               {needsAttention.length > 0 && (
                 <>
-                  <div class="zl-group is-attn">
-                    <span>Needs attention</span>
-                    <span class="zl-group-n zl-data">{needsAttention.length}</span>
-                  </div>
+                  <SectionHead label="Needs attention" n={needsAttention.length} attn />
                   {needsAttention.map((s) => row(s))}
                 </>
               )}
               {restActive.length > 0 && (
                 <>
-                  <div class="zl-group"><span>Active</span><span class="zl-group-n zl-data">{restActive.length}</span></div>
-                  {restActive.map((s) => row(s))}
+                  <SectionHead
+                    label="Active"
+                    n={restActive.length}
+                    open={activeOpen}
+                    onToggle={() => onToggleSection?.("active", activeOpen)}
+                  />
+                  {activeOpen && restActive.map((s) => row(s))}
                 </>
               )}
               {shownSaved.length > 0 && (
                 <>
-                  <div class="zl-group"><span>Saved</span><span class="zl-group-n zl-data">{shownSaved.length}</span></div>
-                  {savedPreview.visible.map((s) => row(s))}
-                  {savedPreview.hidden > 0 && (
+                  <SectionHead
+                    label="Saved"
+                    n={shownSaved.length}
+                    open={savedOpen}
+                    onToggle={() => onToggleSection?.("saved", savedOpen)}
+                  />
+                  {savedOpen && savedPreview.visible.map((s) => row(s))}
+                  {savedOpen && savedPreview.hidden > 0 && (
                     <button type="button" class="zl-show-all" onClick={() => setShowAllSaved(true)}>
                       Show all {shownSaved.length} saved
                     </button>

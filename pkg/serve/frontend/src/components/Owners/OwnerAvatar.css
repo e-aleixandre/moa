@@ -1,0 +1,37 @@
+/* OwnerAvatar — the sheet of the owner's identity mark. It uses only the
+   product's `--zl-*` ladder and every class is prefixed `ow-av`.
+
+   The fill is ONE colour variable set by the component (`--ow-av-c`), used at
+   three strengths: a soft plane, a rim one step stronger, and the eyes at full
+   strength. That is what keeps an avatar readable at 20px without it becoming
+   a bright blob competing with the state dot 8px away from it. */
+
+.ow-av {
+  flex: none;
+  display: block;
+  overflow: visible;
+}
+
+.ow-av .ow-av-body {
+  fill: color-mix(in srgb, var(--ow-av-c) 22%, var(--zl-raised));
+  stroke: color-mix(in srgb, var(--ow-av-c) 55%, transparent);
+  stroke-width: 1.2;
+}
+
+/* The eyes are the only part at full identity strength, which is deliberate:
+   they are what you look at, and they are also what changes. */
+.ow-av .ow-av-eyes ellipse { fill: color-mix(in srgb, var(--ow-av-c) 92%, var(--zl-t1)); }
+.ow-av .ow-av-eyes path { stroke: color-mix(in srgb, var(--ow-av-c) 92%, var(--zl-t1)); fill: none; }
+
+/* At 20px the outline's 1.2 stroke is a third of an eye, so it is thinned
+   rather than scaled: a chip-sized avatar must read as the same mark, not as
+   the same drawing shrunk. */
+.ow-av.is-20 .ow-av-body { stroke-width: 1.6; }
+
+/* A saved owner is parked on purpose, so its mark steps back the way the
+   saved dot does by not being drawn — one step of opacity, not a grey. */
+.ow-av.is-saved { opacity: 0.66; }
+
+/* Nothing here animates. An avatar that blinks in a column you look at for
+   hours is a permanent interruption (CRITERIO §5), so there is no keyframe to
+   reduce under prefers-reduced-motion — the state change is a re-render. */

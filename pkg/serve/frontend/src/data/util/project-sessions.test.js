@@ -145,3 +145,16 @@ test("a saved list that already fits is not capped, and asking for all reveals t
   // Searching must reach the whole roster: a hidden match reads as data loss.
   expect(previewSavedSessions(many, { searching: true }).visible).toHaveLength(60);
 });
+
+test("An owner whose project has no session still gets a group, open by default", () => {
+  const sessions = [session("a", "/work/a", "idle", 5)];
+  const owners = [{ id: "o1", root: "/work/b" }, { id: "o2", root: "/work/a" }];
+  const sections = groupProjectSessions(sessions, owners);
+  const keys = sections.map((s) => s.key);
+  expect(keys).toContain("/work/b");
+  const empty = sections.find((s) => s.key === "/work/b");
+  expect(empty.sessions).toEqual([]);
+  expect(empty.hasOwner).toBe(true);
+  expect(defaultProjectCollapsed(empty)).toBe(false);
+  expect(sections.filter((s) => s.key === "/work/a")).toHaveLength(1);
+});

@@ -1,0 +1,246 @@
+/* Owners in the sidebar — the owner row and the collapsible section heading.
+
+   It adds nothing to the `zl-*` classes it borrows, every new class is `ow-`,
+   and every value comes from the product's token ladder.
+
+   The rule this sheet is built on: an owner row must be recognisably NOT a
+   session row, while keeping the column's rhythm. It gets the avatar, a
+   heavier name, a quiet `owner` tag and no age; it keeps the 52px floor, the
+   12px gutter and the two-line grammar. */
+
+/* ── The owner row ─────────────────────────────────────────────────────── */
+
+.zl-row.ow-orow {
+  align-items: center;
+  gap: 10px;
+  min-height: 60px;
+  padding: 8px 12px;
+}
+.ow-orow-main { flex: 1; min-width: 0; }
+/* Three lines in the OWNERS section, so the state clause never has to share
+   its width with the address. The row can afford it: there are two or three
+   owners and they sit above a list that is thirty. */
+.ow-orow-path { color: var(--zl-t4); }
+/* The third line holds what is waiting and the address, in that order: the
+   number that stops work first, the address pushed to the far end where it is
+   the quietest thing on the row. */
+.ow-orow-l3 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ow-orow-l3 .ow-orow-wait { flex: none; font-size: var(--zl-fs-meta); line-height: 16px; }
+.ow-orow-l3 .ow-orow-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The address is pushed to the far end ONLY when something shares the line
+   with it. Alone, a right-aligned path floats away from the row it belongs to
+   and reads as a stray. */
+.ow-orow-l3 .ow-orow-wait + .ow-orow-path { text-align: right; }
+
+/* The name is the title of the row and it is heavier than a session's: one
+   owner per project, so the name identifies it and nothing else has to. */
+.ow-orow-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--zl-fs-body);
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--zl-t1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The word "owner", once, quietly. It is what stops the row being read as a
+   session with an odd icon — and it is a noun, not a state, so it takes the
+   data typography rather than a colour. */
+.ow-orow-kind {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--zl-hi);
+  color: var(--zl-t4);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ow-orow-brief { flex: 1; min-width: 0; }
+/* Blue is the running colour the session dot already uses. The reason line
+   had no blue tone because a session says "Running · …" in grey; an owner's
+   own activity is the one line where the colour is the point. */
+.zl-row-brief.tone-blue { color: var(--blue); }
+.ow-orow-sep { color: var(--zl-t4); }
+/* "N waiting on you" is ALWAYS amber, whatever the lead clause is: it is the
+   one number on this row that stops work until you act, and a working owner
+   with two blocked children must not report it in blue. */
+.ow-orow-wait { color: var(--zl-yellow); }
+
+.zl-row.ow-orow.is-current { background: var(--zl-raised); box-shadow: var(--zl-rim); }
+@media (hover: hover) {
+  .zl-row.ow-orow.is-current:hover { background: var(--zl-control); }
+}
+
+/* Inside a project group the owner row is the first one, and it is separated
+   from the sessions below by a hairline rather than by space: space would
+   have made it look like it belonged to the heading rather than to the group. */
+.zl-proj .zl-row-slot:has(.ow-orow) { margin-bottom: 4px; }
+.zl-proj .ow-orow { box-shadow: inset 0 -1px 0 var(--zl-line); border-radius: var(--zl-r-md) var(--zl-r-md) 0 0; }
+.zl-proj .ow-orow.is-current { box-shadow: var(--zl-rim); border-radius: var(--zl-r-md); }
+
+/* ── Collapsible section heading ───────────────────────────────────────── */
+
+/* Identical mechanics and identical typography to a project group heading
+   (Sidebar.css `.zl-group.is-proj`), which is the point: one collapsing
+   gesture in the column, not two that look alike. */
+button.zl-group.ow-sec {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: none;
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--zl-t4);
+  cursor: pointer;
+}
+button.zl-group.ow-sec > span:first-of-type { flex: 1; min-width: 0; }
+/* The count NEVER disappears: a collapsed section whose number went with it
+   would have to be opened to learn whether opening it was worth it. */
+button.zl-group.ow-sec .zl-group-n { flex: none; }
+button.zl-group.ow-sec .zl-proj-chev { transform: rotate(0deg); }
+button.zl-group.ow-sec.is-open .zl-proj-chev { transform: rotate(90deg); }
+button.zl-group.ow-sec:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: 2px;
+  border-radius: var(--zl-r-md);
+}
+.zl-side-body.is-phone button.zl-group.ow-sec { min-height: 44px; }
+@media (hover: hover) {
+  button.zl-group.ow-sec:hover { background: var(--zl-hi); color: var(--zl-t3); }
+}
+/* The collapsed section's dot sits between the label and the count, where a
+   project heading puts its own. Same mark, same place, same meaning. */
+button.zl-group.ow-sec .zl-dot { flex: none; }
+
+/* ── The end of the OWNERS section ─────────────────────────────────────── */
+
+/* "+ New owner" is a quiet row at the end of its section, not an accent bar:
+   one owner per project means this is pressed once a project, and the list
+   above it is what the column is for (CRITERIO §2). */
+.ow-newowner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: none;
+  color: var(--zl-t3);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  text-align: left;
+  cursor: pointer;
+}
+.ow-newowner svg { width: 16px; height: 16px; flex: none; }
+.zl-side-body.is-phone .ow-newowner { min-height: 48px; }
+@media (hover: hover) {
+  .ow-newowner:hover { background: var(--zl-hi); color: var(--zl-t1); }
+}
+.ow-newowner:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: -2px;
+}
+
+/* The empty state of the section: ONE sentence and the action, inside the
+   section. It is not the half-column illustration the Owners mode used to
+   draw — there is a list of sessions below it, and an empty section that took
+   the viewport would be pushing real work off the screen to explain a feature
+   nobody has asked for yet. */
+.ow-sec-empty {
+  padding: 2px 12px 6px;
+  color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
+  line-height: 17px;
+}
+
+/* ── New owner: the identity picker ────────────────────────────────────── */
+
+.ow-idp { display: flex; flex-direction: column; gap: 16px; }
+.ow-idp-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 12px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+}
+.ow-idp-name {
+  font-size: var(--zl-fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--zl-t1);
+}
+.ow-idp-field { display: flex; flex-direction: column; gap: 6px; }
+.ow-idp-label {
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--zl-t4);
+}
+/* A grid rather than a wrapping strip, and a different column count per row
+   on purpose: six shapes divide into 3 × 2 and eight colours into 4 × 2, so
+   each field is a full rectangle. Left to wrap freely in a 272px column they
+   came out 5+1 and 5+3 — two ragged tails that read as an accident.
+   Horizontal scrolling was never an option: it hides half the palette behind
+   a gesture nobody knows is there. */
+.ow-idp-row { display: grid; gap: 4px; justify-items: center; }
+.ow-idp-row.is-shapes { grid-template-columns: repeat(3, minmax(44px, 1fr)); }
+.ow-idp-row.is-colours { grid-template-columns: repeat(4, minmax(44px, 1fr)); }
+
+/* 44px is the touch floor (CRITERIO §5) and it is the floor in BOTH densities
+   here: the picker is touched once per owner, so there is nothing to gain by
+   making it tighter on the desktop. */
+.ow-swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* A fixed 44px cell, centred in its grid column: stretched to the column's
+     full width, the selection ring became a wide capsule around a small mark
+     and read as a pressed button rather than as "this one". */
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px transparent;
+  cursor: pointer;
+  transition: background var(--motion-hover) ease, box-shadow var(--motion-hover) ease;
+}
+@media (hover: hover) {
+  .ow-swatch:hover { background: var(--zl-hi); }
+}
+/* The selection is a RING, not a fill: a filled swatch would change the
+   colour you are trying to judge. */
+.ow-swatch.is-on {
+  background: var(--zl-raised);
+  box-shadow: inset 0 0 0 2px var(--zl-accent);
+}
+.ow-swatch:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: 2px;
+}
+.ow-swatch-c {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ow-av-c) 78%, var(--zl-raised));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ow-av-c) 55%, transparent);
+}
+

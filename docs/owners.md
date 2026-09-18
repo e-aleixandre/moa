@@ -56,7 +56,7 @@ owner unloaded from memory is resumed to receive it.
 
 ```
 GET    /api/owners                    list
-POST   /api/owners                    {root, name, model?, thinking?}
+POST   /api/owners                    {root, name, model?, thinking?, avatar?}
 GET    /api/owners/{id}               owner and its session state
 DELETE /api/owners/{id}               remove owner and its conversation; the book stays
 GET    /api/owners/{id}/book          the book's files, with sizes
@@ -83,12 +83,43 @@ finish them first. Open the owner's conversation with `/?session=<session_id>`.
 
 ## The interface
 
-Owners are the **third mode of the sidebar**, beside Recent and By project:
-a way of looking at your work, chosen and kept, on the desktop and inside the
-phone's drawer. The list shows each owner, its folder, how many of its
-sessions are live and how many are waiting on you, and — for now — the
-children that have stopped, at most three, under their owner (the triage
-variant; `OWNER_TRIAGE` in `layout/Sidebar/Sidebar.jsx` is the whole switch).
+Owners are a **section of the sidebar's list**, not a mode of it. The segmented
+says how the sessions are ORDERED — Recent or By project — and an owner is not
+an ordering of your sessions, so it never became a third stop there.
+
+In **Recent** the column reads Owners · Needs attention · Active · Saved.
+Owners, Active and Saved fold away with the project group's own mechanics
+(chevron, count kept on the folded heading) and the choice is persisted beside
+the folder accordion. Needs attention does not fold: it is a promotion, empty
+when nothing is wrong, and a collapsed alarm is an alarm you have chosen not to
+hear. A folded Owners heading gains one mark — the most urgent thing it is
+hiding, and nothing more.
+
+In **By project** the owner is the first row of its group, under the heading
+that has just named the project, with an `owner` tag. There is no Owners
+section there: a row printed in a section and again inside its folder is the
+same row twice.
+
+An owner's row says its own state and its children's as two clauses, because
+they are two different conversations: the lead is the owner (amber asking, blue
+working, mauve unread, grey idle) and `N waiting on you` is always amber,
+because it is the number that stops work. An owner **never** rises into Needs
+attention: it is standing, and a permanent row that moves between sections is a
+row you have to find again every time it changes
+(`attentionKind` in `data/util/project-sessions.js`).
+
+Each owner carries an **avatar**: a shape × a colour, 48 combinations, chosen
+in New owner and stored as `avatar:{shape,color}` in `owner.json`. The field is
+additive — an owner without one gets a deterministic default derived from its
+`codebase_key`, computed identically in `pkg/owner/avatar.go` and
+`components/Owners/OwnerAvatar.jsx`, so old owners need no migration. Neither
+axis ever carries state: the palette has no amber, red or green in it, because
+those are the product's state dots. What moves with state is the eyes, and only
+the eyes — idle looks at you, working holds a glance aside, asks raises a brow,
+saved shuts them. Nothing animates.
+
+`+ New owner` sits at the end of the section, and the form is a page pushed
+inside the column exactly as New session is.
 
 Choosing an owner opens its conversation. Its dossier takes the same zone a
 session's does, with two tabs: **Overview**, its children grouped as Waiting on
@@ -98,8 +129,10 @@ is the one file a child is given. `PROJECT.md` is editable there; the rest is
 read-only, because it is the owner's own record and a half-edited decision file
 is worse than none.
 
-A child session wears an `Owner · <name>` chip in its header, which opens the
-owner. It is provenance, not a state: no dot and no colour.
+A child session wears an `Owner · <name>` chip in its header, carrying the
+owner's avatar at 20px, which opens the owner. It is provenance rather than a
+state — no dot and no count — though its eyes are the owner's, which is useful
+precisely where you are when the owner cannot reach you.
 
 ## Limits of this first version
 

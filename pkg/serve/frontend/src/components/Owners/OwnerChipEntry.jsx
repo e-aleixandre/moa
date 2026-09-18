@@ -1,6 +1,6 @@
 import { useStore } from "../../hooks/useStore.js";
 import { OwnerChip } from "./Owners.jsx";
-import { ownerOfSession } from "../../data/owners-model.js";
+import { ownerOfSession, ownerState } from "../../data/owners-model.js";
 import { openOwnerConversation, ownersSlice } from "../../data/owners.js";
 
 // OwnerChipEntry — the chip a CHILD session wears, and the door to its owner.
@@ -22,6 +22,8 @@ export function OwnerChipEntry({ session, compact = false }) {
   return (
     <OwnerChip
       name={name}
+      owner={owner}
+      state={owner ? ownerState(owner) : "idle"}
       compact={compact}
       onClick={() => { if (owner) openOwnerConversation(owner); }}
     />

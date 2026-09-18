@@ -62,8 +62,12 @@ type Owner struct {
 	Thinking    string `json:"thinking,omitempty"`
 	// AnswerAsks allows the owner to resolve a child's ask_user. Permissions
 	// are never delegated: only questions.
-	AnswerAsks bool      `json:"answer_asks"`
-	Created    time.Time `json:"created"`
+	AnswerAsks bool `json:"answer_asks"`
+	// Avatar is the identity mark (see avatar.go). Additive and optional: an
+	// owner without one resolves to DefaultAvatar(CodebaseKey), so an owner.json
+	// written before avatars existed needs no migration.
+	Avatar  Avatar    `json:"avatar,omitzero"`
+	Created time.Time `json:"created"`
 }
 
 // Store reads and writes owners under a config directory.
@@ -107,7 +111,11 @@ func (s *Store) ownerPath(key string) string {
 // Create writes a new owner for the codebase containing root and seeds its
 // book with a PROJECT.md template. root is canonicalized so the stored path is
 // the one CodebaseKey was computed from.
-func (s *Store) Create(root, name, model, thinking string, answerAsks bool) (Owner, error) {
+//
+// avatar is the chosen identity mark. A zero one takes the deterministic
+// default of the codebase; a non-zero one that is not in the closed lists is
+// refused rather than stored, so nothing on disk can be undrawable.
+func (s *Store) Create(root, name, model, thinking string, answerAsks bool, avatar Avatar) (Owner, error) {
 	createMu.Lock()
 	defer createMu.Unlock()
 	if strings.TrimSpace(name) == "" {
@@ -122,6 +130,11 @@ func (s *Store) Create(root, name, model, thinking string, answerAsks bool) (Own
 		return Owner{}, fmt.Errorf("owner root: %s is not a directory", canonical)
 	}
 	key := core.CodebaseKey(canonical)
+	if avatar.IsZero() {
+		avatar = DefaultAvatar(key)
+	} else if !avatar.Valid() {
+		return Owner{}, fmt.Errorf("owner avatar: shape must be one of %v and colour one of %v", AvatarShapes, AvatarColors)
+	}
 	own := Owner{
 		ID:          newOwnerID(),
 		Name:        strings.TrimSpace(name),
@@ -130,6 +143,7 @@ func (s *Store) Create(root, name, model, thinking string, answerAsks bool) (Own
 		Model:       model,
 		Thinking:    thinking,
 		AnswerAsks:  answerAsks,
+		Avatar:      avatar,
 		Created:     time.Now().UTC(),
 	}
 	// Create exclusively rather than check-then-write: the check and the write

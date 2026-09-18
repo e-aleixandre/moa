@@ -29,6 +29,10 @@ const (
 // no longer belongs to, in one direction or the other.
 var ErrProjectSessionsOpen = errors.New("this project has open sessions")
 
+// ErrInvalidAvatar refuses an identity mark outside the closed lists, so
+// nothing on disk can be a face no client knows how to draw.
+var ErrInvalidAvatar = errors.New("invalid owner avatar")
+
 // ownerStore resolves the on-disk owner store. It is resolved per call rather
 // than cached on the Manager so the config directory is read the same way
 // memory reads it, from the environment in force now.
@@ -79,6 +83,11 @@ func (m *Manager) GetOwner(id string) (OwnerInfo, error) {
 }
 
 func (m *Manager) ownerInfo(own owner.Owner) OwnerInfo {
+	// The avatar is always answered, never left for the client to guess: an
+	// owner created before avatars existed has none on disk, and two clients
+	// computing their own default would only agree as long as both implement
+	// the same hash.
+	own.Avatar = own.ResolvedAvatar()
 	info := OwnerInfo{Owner: own}
 	if own.SessionID == "" {
 		return info
@@ -97,6 +106,9 @@ type CreateOwnerOpts struct {
 	Name     string `json:"name"`
 	Model    string `json:"model"`
 	Thinking string `json:"thinking"`
+	// Avatar is the identity mark chosen in New owner. Optional: omitted, the
+	// owner takes the deterministic default of its codebase.
+	Avatar owner.Avatar `json:"avatar,omitzero"`
 }
 
 // CreateOwner creates the entity, its book and its conversation.
@@ -123,6 +135,11 @@ func (m *Manager) CreateOwner(opts CreateOwnerOpts) (OwnerInfo, error) {
 	if !core.IsValidThinkingLevel(thinking) {
 		return OwnerInfo{}, fmt.Errorf("%w: %q (choose: %s)", ErrInvalidThinking, thinking, core.ThinkingLevelOptions())
 	}
+	// The avatar is checked here rather than only in the store so a bad one is
+	// a 400 about the form the user is looking at, not a 500.
+	if !opts.Avatar.IsZero() && !opts.Avatar.Valid() {
+		return OwnerInfo{}, fmt.Errorf("%w: shape must be one of %v and colour one of %v", ErrInvalidAvatar, owner.AvatarShapes, owner.AvatarColors)
+	}
 	// A session built before the owner existed resolved its book, its tools and
 	// its report subscription without one, and nothing re-resolves them while it
 	// is live. Rather than leave those sessions in a state neither the owner nor
@@ -130,7 +147,7 @@ func (m *Manager) CreateOwner(opts CreateOwnerOpts) (OwnerInfo, error) {
 	if live := m.liveChildrenOfRoot(opts.Root); len(live) > 0 {
 		return OwnerInfo{}, fmt.Errorf("%w: %s", ErrProjectSessionsOpen, openSessionsHint(len(live), "before creating its owner"))
 	}
-	own, err := store.Create(opts.Root, opts.Name, model, thinking, true)
+	own, err := store.Create(opts.Root, opts.Name, model, thinking, true, opts.Avatar)
 	if err != nil {
 		return OwnerInfo{}, err
 	}
@@ -365,7 +382,7 @@ func handleCreateOwner(mgr *Manager) http.HandlerFunc {
 		case errors.Is(err, owner.ErrExists), errors.Is(err, ErrProjectSessionsOpen):
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
-		case errors.Is(err, ErrInvalidModel), errors.Is(err, ErrInvalidThinking), errors.Is(err, ErrInvalidCWD):
+		case errors.Is(err, ErrInvalidModel), errors.Is(err, ErrInvalidThinking), errors.Is(err, ErrInvalidCWD), errors.Is(err, ErrInvalidAvatar):
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		case err != nil:

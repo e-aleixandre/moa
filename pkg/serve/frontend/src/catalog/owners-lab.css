@@ -1,7 +1,8 @@
-/* The owners lab. The product markup and CSS are owners-pieces.jsx /
-   owners.css (classes `ow-*`); this sheet is only the laboratory: the page,
-   the density frames, the switcher and the notes. Same shape as
-   zones-inbox.css, so the two labs read alike. */
+/* The owners lab (iteration 3). The candidate product markup and CSS are
+   owners-sidebar.{jsx,css} and owners-avatar.{jsx,css} (classes `ow-*`, ready
+   to move to src/components); this sheet is only the laboratory: the page, the
+   density frames, the switcher, the New owner page's own frame, the gallery
+   and the notes. Same shape as zones-inbox.css, so the two labs read alike. */
 
 .owl {
   position: relative;
@@ -63,28 +64,6 @@
 .owl-mconv.mconv { height: 100%; }
 .owl-mconv .zl-transcript { padding-top: 58px; }
 
-/* The phone's dossier: MobileSheet's geometry (bottom-anchored, scrim over the
-   whole surface, 88% ceiling), drawn statically here because the lab has no
-   gesture to open it and an animation would photograph mid-flight. */
-.owl-scrim { position: absolute; inset: 0; z-index: 8; background: rgba(17, 17, 27, 0.5); }
-.owl-msheet {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 9;
-  display: flex;
-  flex-direction: column;
-  max-height: 88%;
-  padding-top: 6px;
-  border-radius: var(--zl-r-lg) var(--zl-r-lg) 0 0;
-  background: var(--zl-sheet);
-  box-shadow: inset 0 1px 0 var(--zl-line-2), 0 -16px 48px rgba(0, 0, 0, 0.45);
-  overflow: hidden;
-}
-.owl-msheet .ow-panel { flex: 1; min-height: 0; background: transparent; }
-.owl-grab { display: block; width: 36px; height: 4px; margin: 4px auto 2px; border-radius: 2px; background: var(--zl-line-2); }
-
 /* The chip's row in a child, under the capsules. */
 .owl-chip-row {
   position: absolute;
@@ -92,33 +71,6 @@
   left: 12px;
   z-index: 4;
 }
-
-/* ── The sidebar chrome the lab draws ──────────────────────────────────────
-
-   The column in these frames is production's own: `zl-side-body`, with the
-   head, foot and list rules of layout/Sidebar/Sidebar.css. What the lab adds
-   is only what production does not have yet — the third stop of the mode
-   control — plus the scaffolding that lets production's <Sidebar/> supply the
-   LIST without also supplying a second head and a second foot. */
-
-.owl-chrome { display: flex; flex-direction: column; min-height: 0; flex: 1; background: transparent; box-shadow: none; }
-.owl-chrome .ow-owners { flex: 1; min-height: 0; }
-
-/* The embedded production sidebar contributes its list and nothing else: the
-   head and the foot around it are the ones this lab is drawing. */
-.owl-embed { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.owl-embed .zl-side-body { flex: 1; min-height: 0; background: transparent; box-shadow: none; }
-.owl-embed .zl-side-head,
-.owl-embed .zl-side-foot { display: none; }
-
-/* Three stops instead of two. Production's pill travels 28px per step on the
-   desktop and 44 on the phone (Sidebar.css `.zl-view::before`); the third
-   option only needs the third offset. */
-.owl-view.is-recent::before { transform: translateX(0); }
-.owl-view.is-project::before { transform: translateX(28px); }
-.owl-view.is-owners::before { transform: translateX(56px); }
-.zl-side-body.is-phone .owl-view.is-project::before { transform: translateX(44px); }
-.zl-side-body.is-phone .owl-view.is-owners::before { transform: translateX(88px); }
 
 /* ── The phone's drawer ────────────────────────────────────────────────────
    The shipped chassis (SessionDrawer.css `.sdrawer-veil` / `.sdrawer`), drawn
@@ -144,49 +96,6 @@
 .owl-desk-stream { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .owl-desk-stream .zl-transcript { padding-top: 12px; }
 
-/* The third zone, docked — the geometry DesktopShell gives the dossier at
-   >=1456px (DesktopShell.css: --dossier-width). */
-.owl-desk-dossier {
-  width: 340px;
-  flex: none;
-  min-height: 0;
-  box-shadow: inset 1px 0 0 var(--zl-line-2);
-}
-
-/* ── The variant ───────────────────────────────────────────────────────── */
-
-.owl-variant { max-width: 720px; margin: 56px auto 0; }
-.owl-variant-frame {
-  width: 340px;
-  height: 300px;
-  border-radius: var(--zl-r-lg);
-  background: var(--zl-sheet);
-  box-shadow: var(--zl-rim-2), 0 20px 50px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-}
-.owl-prows { display: flex; flex-direction: column; margin: 8px 4px 0; border-radius: var(--zl-r-md); background: var(--zl-raised); box-shadow: var(--zl-rim); overflow: hidden; }
-.owl-prow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 52px;
-  padding: 0 12px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-family: inherit;
-  font-size: var(--zl-fs-body);
-  letter-spacing: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.owl-prow + .owl-prow { box-shadow: inset 0 1px 0 var(--zl-line); }
-.owl-prow-t { flex: none; font-weight: 500; color: var(--zl-t1); }
-.owl-prow-v { flex: 1; min-width: 0; text-align: right; color: var(--zl-t4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.owl-prow-v.tone-yellow { color: var(--zl-yellow); }
-.owl-prow-v.tone-mauve { color: var(--zl-accent); }
-
 /* ── Notes ─────────────────────────────────────────────────────────────── */
 
 .owl-notes { max-width: 760px; margin: 56px auto 0; }
@@ -210,3 +119,79 @@
 .owl.is-shots .owl-stage { gap: 0; margin: 0; justify-content: flex-start; align-items: flex-start; }
 .owl.is-shots .owl-density-label, .owl.is-shots .owl-hint { display: none; }
 .owl.is-shots .owl-phone, .owl.is-shots .owl-desk { border-radius: 0; box-shadow: none; }
+/* 300px, which is the width the encargo asks the section to survive. Worth
+   knowing before this moves: the shipped drawer is `min(340px, 100% - 48px)`
+   (SessionDrawer.css:50), so these frames are 40px NARROWER than production's
+   phone. Anything that fits here fits there. */
+.owl-phone .sdrawer { width: 300px; }
+
+/* ── New owner, as a page inside the column ───────────────────────────────
+   The page's own head is the lab's only because production has no such page
+   yet; it is the shape New session already has (a head exists because a page
+   is something you leave). */
+.ow-newpage { display: flex; flex-direction: column; padding: 4px 8px 8px; }
+.ow-newhead { display: flex; align-items: center; gap: 6px; padding: 4px 0 10px; }
+.ow-newback {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-t2);
+  cursor: pointer;
+}
+.ow-newback svg { width: 16px; height: 16px; }
+.ow-newback:hover { background: var(--zl-hi); color: var(--zl-t1); }
+.zl-side-body.is-phone .ow-newback { width: 44px; height: 44px; }
+.ow-newtitle { font-size: var(--zl-fs-title); font-weight: 600; letter-spacing: -0.01em; color: var(--zl-t1); }
+.ow-newbody { display: flex; flex-direction: column; gap: 16px; padding: 0 4px 12px; }
+.ow-newfield { display: flex; flex-direction: column; gap: 6px; }
+.ow-newcta { width: 100%; }
+.ow-newpad { height: 24px; }
+
+/* ── The avatar gallery ───────────────────────────────────────────────── */
+
+.owl-gal-pane { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px 32px; background: var(--base); }
+.owl-gal-pane.is-phone { height: 100%; padding: 16px 12px 28px; }
+.ow-gal { display: flex; flex-direction: column; gap: 28px; }
+.ow-gal-sec { display: flex; flex-direction: column; gap: 12px; }
+.ow-gal-h { margin: 0; font-size: var(--zl-fs-body); font-weight: 600; color: var(--zl-t2); letter-spacing: -0.005em; }
+.ow-gal-grid { display: flex; flex-direction: column; gap: 8px; }
+.ow-gal-line { display: flex; align-items: center; gap: 10px; }
+.ow-gal-line.is-key { margin-top: 2px; }
+.ow-gal-k {
+  flex: none;
+  width: 72px;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-micro);
+  color: var(--zl-t4);
+}
+/* The key sits under the column it names, so its box is the avatar's width.
+   It is allowed to overflow rather than truncate: at 32px "working" became
+   "worki…", which is a label that needs a legend of its own. */
+.ow-gal-cname {
+  flex: none;
+  width: 32px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--zl-t4);
+  text-align: center;
+  overflow: visible;
+  white-space: nowrap;
+}
+.owl-gal-pane.is-phone .ow-gal-k { width: 52px; }
+.owl-gal-pane.is-phone .ow-gal-line { gap: 6px; }
+.owl-gal-pane.is-phone .ow-gal-cname { width: 28px; }
+
+.ow-gal-rows { display: flex; flex-direction: column; gap: 6px; }
+.ow-gal-row { display: flex; align-items: center; gap: 16px; }
+/* The rows are photographed in a 272px box, which is the width they live in:
+   a state row judged at full pane width is a row nobody will ever see. */
+.ow-gal-rowbox { flex: none; width: 272px; border-radius: var(--zl-r-md); background: var(--zl-sheet); box-shadow: var(--zl-rim); }
+.ow-gal-note { flex: 1; margin: 0; font-size: var(--zl-fs-meta); line-height: 1.5; color: var(--zl-t4); }
+.owl-gal-pane.is-phone .ow-gal-row { flex-direction: column; align-items: stretch; gap: 4px; }
+.owl-gal-pane.is-phone .ow-gal-rowbox { width: 100%; }

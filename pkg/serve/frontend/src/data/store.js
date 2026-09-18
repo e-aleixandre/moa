@@ -3,7 +3,7 @@
 import {
   initIds, allTileIds, allSessionIds, tileCount,
 } from './tileTree.js';
-import { pruneDrawerCollapsed, isOrdinarySession, SIDEBAR_MODES } from './util/project-sessions.js';
+import { pruneDrawerCollapsed, isOrdinarySession, COLLAPSIBLE_SECTIONS, SIDEBAR_MODES } from './util/project-sessions.js';
 import { ARTIFACTS_CLOSED } from './artifacts-model.js';
 
 const STORAGE_KEY = 'moa-next-ui-state';
@@ -66,6 +66,10 @@ function loadPersistedState() {
         drawerCollapsed: value.drawerCollapsed && typeof value.drawerCollapsed === 'object' && !Array.isArray(value.drawerCollapsed)
           ? Object.fromEntries(Object.entries(value.drawerCollapsed).filter(([, collapsed]) => typeof collapsed === 'boolean'))
           : undefined,
+        collapsedSections: value.collapsedSections && typeof value.collapsedSections === 'object' && !Array.isArray(value.collapsedSections)
+          ? Object.fromEntries(Object.entries(value.collapsedSections)
+            .filter(([key, collapsed]) => COLLAPSIBLE_SECTIONS.includes(key) && typeof collapsed === 'boolean'))
+          : undefined,
       };
     }
   } catch (_) { /* ignore */ }
@@ -81,6 +85,7 @@ function persistState(s) {
       groupByProject: s.groupByProject,
       sidebarMode: s.sidebarMode,
       drawerCollapsed: s.drawerCollapsed,
+      collapsedSections: s.collapsedSections,
     }));
   } catch (_) { /* ignore */ }
 }
@@ -125,13 +130,18 @@ let state = {
   // groupByProject before the UI settled on "folder"; the key is persisted, so
   // renaming it would silently drop the preference of anyone who set it.
   groupByProject: persisted.groupByProject || false,
-  // sidebarMode — which of the three lists the sidebar shows: 'recent',
-  // 'project' or 'owners'. It is a way of LOOKING at your work, so it is
-  // chosen and kept, and it is persisted beside groupByProject rather than
-  // replacing it: the boolean is what the rest of the list code reads, and
-  // dropping it would silently reset the preference of anyone who set it.
+  // sidebarMode — which ORDER the sidebar's sessions take: 'recent' or
+  // 'project'. It is a way of LOOKING at your work, so it is chosen and kept,
+  // and it is persisted beside groupByProject rather than replacing it: the
+  // boolean is what the rest of the list code reads, and dropping it would
+  // silently reset the preference of anyone who set it.
   sidebarMode: persisted.sidebarMode || (persisted.groupByProject ? 'project' : 'recent'),
   drawerCollapsed: persisted.drawerCollapsed || {},
+  // collapsedSections — the Recent list's own accordion (Owners, Active,
+  // Saved), persisted beside the folder one for the same reason: folding a
+  // section on the phone and finding it open on the desktop is the same list
+  // disagreeing with itself.
+  collapsedSections: persisted.collapsedSections || {},
 
   isMobile: false,
 
@@ -242,7 +252,8 @@ export function setState(patch) {
     state.soundEnabled !== previous.soundEnabled ||
     state.groupByProject !== previous.groupByProject ||
     state.sidebarMode !== previous.sidebarMode ||
-    state.drawerCollapsed !== previous.drawerCollapsed
+    state.drawerCollapsed !== previous.drawerCollapsed ||
+    state.collapsedSections !== previous.collapsedSections
   ) {
     persistState(state);
   }

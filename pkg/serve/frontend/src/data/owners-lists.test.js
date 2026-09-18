@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { isOrdinarySession, ordinarySessions, SIDEBAR_MODES } from "./util/project-sessions.js";
+import {
+  attentionKind, isOrdinarySession, ordinarySessions, partitionByAttention, SIDEBAR_MODES,
+} from "./util/project-sessions.js";
 import { spineSessions } from "../layout/Sidebar/sessions.js";
 import { drawerSessions } from "../layout/mobile/MobileConversationScreen/chrome.js";
 import { aggregateAttention } from "../layout/mobile/MobileConversationScreen/attention-model.js";
@@ -34,6 +36,24 @@ test("an owner never contributes to the phone's attention badge", () => {
   expect(aggregateAttention({ c: child }, null).urgent).toBe(1);
 });
 
-test("the sidebar has exactly three modes, and Owners is one of them", () => {
-  expect(SIDEBAR_MODES).toEqual(["recent", "project", "owners"]);
+test("the segmented has exactly two positions: they are ORDERS, not lists", () => {
+  // Owners is a SECTION of the Recent list, not a third ordering of the
+  // sessions. A third stop here would be the control answering two questions.
+  expect(SIDEBAR_MODES).toEqual(["recent", "project"]);
+});
+
+test("an owner never rises into Needs attention", () => {
+  // Its state is painted on its own row instead: an owner is standing, and a
+  // permanent row that moves between sections is one you have to find again.
+  const asking = { ...owner, state: "permission" };
+  const erroring = { ...owner, id: "o2", state: "error" };
+  const unread = { ...owner, id: "o3", state: "idle", unseen: true };
+  expect(attentionKind(asking)).toBe(null);
+  expect(attentionKind(erroring)).toBe(null);
+  expect(attentionKind(unread)).toBe(null);
+  expect(attentionKind(child)).toBe("permission");
+
+  const split = partitionByAttention([asking, erroring, unread, child]);
+  expect(split.needs.map((s) => s.id)).toEqual(["c"]);
+  expect(split.rest.map((s) => s.id)).toEqual(["o", "o2", "o3"]);
 });

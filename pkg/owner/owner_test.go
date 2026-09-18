@@ -15,7 +15,7 @@ func TestCreateWritesOwnerAndSeedsBook(t *testing.T) {
 	root := t.TempDir()
 	store := NewStore(cfg)
 
-	own, err := store.Create(root, "Winerim", "opus", "low", true)
+	own, err := store.Create(root, "Winerim", "opus", "low", true, Avatar{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,10 +44,10 @@ func TestCreateWritesOwnerAndSeedsBook(t *testing.T) {
 func TestCreateRefusesSecondOwnerForSameCodebase(t *testing.T) {
 	store := NewStore(t.TempDir())
 	root := t.TempDir()
-	if _, err := store.Create(root, "First", "", "", true); err != nil {
+	if _, err := store.Create(root, "First", "", "", true, Avatar{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Create(root, "Second", "", "", true); err != ErrExists {
+	if _, err := store.Create(root, "Second", "", "", true, Avatar{}); err != ErrExists {
 		t.Fatalf("second create error = %v, want ErrExists", err)
 	}
 }
@@ -64,7 +64,7 @@ func TestCreateKeepsAnExistingBook(t *testing.T) {
 	if err := os.WriteFile(existing, []byte("# kept"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Create(root, "Winerim", "", "", true); err != nil {
+	if _, err := store.Create(root, "Winerim", "", "", true, Avatar{}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(existing)
@@ -79,7 +79,7 @@ func TestCreateKeepsAnExistingBook(t *testing.T) {
 func TestFindByDirAndByID(t *testing.T) {
 	store := NewStore(t.TempDir())
 	root := t.TempDir()
-	own, err := store.Create(root, "Winerim", "", "", true)
+	own, err := store.Create(root, "Winerim", "", "", true, Avatar{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestFindByCodebaseReportsCorruptFile(t *testing.T) {
 func TestDeleteKeepsTheBook(t *testing.T) {
 	store := NewStore(t.TempDir())
 	root := t.TempDir()
-	own, err := store.Create(root, "Winerim", "", "", true)
+	own, err := store.Create(root, "Winerim", "", "", true, Avatar{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestListSortsByName(t *testing.T) {
 	cfg := t.TempDir()
 	store := NewStore(cfg)
 	for _, name := range []string{"Zeta", "Alpha"} {
-		if _, err := store.Create(t.TempDir(), name, "", "", true); err != nil {
+		if _, err := store.Create(t.TempDir(), name, "", "", true, Avatar{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -153,7 +153,7 @@ func TestListSortsByName(t *testing.T) {
 func TestProjectIndexIsBounded(t *testing.T) {
 	store := NewStore(t.TempDir())
 	root := t.TempDir()
-	own, err := store.Create(root, "Winerim", "", "", true)
+	own, err := store.Create(root, "Winerim", "", "", true, Avatar{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestConcurrentCreateYieldsOneOwner(t *testing.T) {
 	for _, name := range []string{"First", "Second"} {
 		go func() {
 			<-start
-			own, err := store.Create(root, name, "opus", "low", true)
+			own, err := store.Create(root, name, "opus", "low", true, Avatar{})
 			results <- result{own, err}
 		}()
 	}

@@ -12,7 +12,7 @@
 // never poke the raw field names.
 
 import { setState } from './store.js';
-import { SIDEBAR_MODES } from './util/project-sessions.js';
+import { COLLAPSIBLE_SECTIONS, SIDEBAR_MODES } from './util/project-sessions.js';
 
 // openDrawer opens the drawer on a given screen: 'list' (the sessions) or
 // 'new' (choose a project and create).
@@ -43,16 +43,26 @@ export function setGroupByProject(on) {
   setSidebarMode(on ? 'project' : 'recent');
 }
 
-// setSidebarMode picks which of the three lists the column shows: the sessions
-// by recency, the sessions by folder, or the project owners. Persisted by the
-// store — a way of LOOKING at your work is chosen and kept.
+// setSidebarMode picks the ORDER the column's sessions take: by recency or by
+// folder. Persisted by the store — a way of LOOKING at your work is chosen and
+// kept.
 //
 // groupByProject is written alongside it and kept: the grouping code reads it,
 // and the key is persisted, so dropping it would silently reset the preference
-// of anyone who set it before Owners existed.
+// of anyone who set it before this one existed.
 export function setSidebarMode(mode) {
   const next = SIDEBAR_MODES.includes(mode) ? mode : 'recent';
   setState({ sidebarMode: next, groupByProject: next === 'project' });
+}
+
+// setSectionCollapsed folds a section of the Recent list (Owners, Active,
+// Saved) away. Same shape as the folder accordion, and persisted beside it:
+// one collapsing gesture in the column, one preference behind it.
+export function setSectionCollapsed(key, collapsed) {
+  if (!COLLAPSIBLE_SECTIONS.includes(key)) return;
+  setState((state) => ({
+    collapsedSections: { ...state.collapsedSections, [key]: !!collapsed },
+  }));
 }
 
 export function setDrawerProjectCollapsed(key, collapsed) {
