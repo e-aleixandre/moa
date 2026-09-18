@@ -441,6 +441,15 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	}
 	core.RegisterOrLog(bs.ToolReg, newSendFileTool(tool.ToolConfig{WorkspaceRoot: bs.CWD, PathPolicy: bs.PathPolicy}, id, artifactStore))
 
+	// The owner's handle on the sessions of its project. It is built here, not
+	// in bootstrap, because it needs the live Manager (same reason as
+	// send_file needing the session's stores), and only for the owner's own
+	// conversation: a child directing its siblings has no owner's view to do
+	// it from.
+	if opts != nil && opts.ownerSession {
+		core.RegisterOrLog(bs.ToolReg, newSessionsTool(m, core.CodebaseKey(bs.CWD)))
+	}
+
 	// Build RuntimeConfig from bootstrap session + serve-specific fields.
 	rcfg := bs.RuntimeConfig()
 	rcfg.SessionID = id

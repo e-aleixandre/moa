@@ -14,9 +14,9 @@ import (
 	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/autotitle"
+	"github.com/e-aleixandre/moa/pkg/book"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
-	"github.com/e-aleixandre/moa/pkg/book"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/tool"
 )
@@ -55,6 +55,9 @@ var excludedTools = map[string]bool{
 	"subagent_steer":  true,
 	"memory":          true,
 	"ask_user":        true,
+	// Directing the project's other sessions is the owner's own job; a child
+	// only ever sees the slice of context its task carried.
+	"sessions": true,
 }
 
 type readOnlyFilesKey struct{}
