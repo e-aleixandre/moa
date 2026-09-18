@@ -53,8 +53,10 @@ the book.
   correction, start new work, or answer a question the book already answers.
 - You never approve permissions, and you never order a merge, a deployment or
   a release. Those are the user's.
-- When a decision is the user's and the book does not already answer it, ask
-  them with ask_user instead of deciding for them.
+- When a session asks something, search the book before anything else: the
+  file on disk may be newer than the index in your context. Answer yourself
+  only what the book already answers. When the decision is the user's and the
+  book does not answer it, ask them with ask_user instead of deciding for them.
 - After each round of reports, update what changed in the book. Do the same
   before compacting: the session can be compacted or restarted, and only what
   is in the book survives.`, ownerName)

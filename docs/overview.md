@@ -18,6 +18,7 @@ Moa is a coding agent runtime in Go. One core, two interfaces: web UI and headle
 - **Voice input**: in the web UI
 - **[Live Preview](./serve.md#live-preview)**: watch the web app the agent is building inside the conversation, at a chosen viewport width, and tap an element to tell the agent what should change about it
 - **[Wake on event](./automation.md#event-hooks)**: give an external system (CI, error tracker, mail watcher) its own webhook URL and let what it sends reach a session, or wait in an inbox for you to place it
+- **[Project owners](./owners.md)**: a standing agent per codebase that keeps the project's book, starts and directs its sessions, receives their reports and answers what the book already answers
 - **AGENTS.md**: project instructions discovered automatically from working directory; `/reload` re-reads them in an open session
 - **Multi-provider**: Anthropic, OpenAI, xAI Grok and Meta (Muse Spark), with model aliases for quick switching, per-model [thinking levels](./cli.md#thinking-levels) and an optional [fast mode](./cli.md#fast-mode)
 
