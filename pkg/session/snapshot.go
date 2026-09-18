@@ -85,8 +85,8 @@ func FormatTranscript(entries []Entry) string {
 			// subagent as evidence has to say so, or it reads as if the parent
 			// still had all of it in context.
 			writeHeading(&b, e, "trim")
-			b.WriteString(fmt.Sprintf("Older tool outputs were removed from the parent's model context here (%d results, ~%d tokens). The outputs above remain in this file.\n",
-				e.Trim.Results, e.Trim.TokensRemoved))
+			fmt.Fprintf(&b, "Older tool outputs were removed from the parent's model context here (%d results, ~%d tokens). The outputs above remain in this file.\n",
+				e.Trim.Results, e.Trim.TokensRemoved)
 		case EntryConfig:
 			writeHeading(&b, e, "config")
 			if e.Config.Model != "" {

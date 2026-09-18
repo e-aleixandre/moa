@@ -63,7 +63,6 @@ func TestBuildContext_TrimIsReplayedOnRebuild(t *testing.T) {
 // synthetic error result.
 func TestBuildContext_TrimKeepsToolCallsAnswered(t *testing.T) {
 	big := strings.Repeat("output line\n", 400)
-	entries := []Entry{}
 	tree := NewTree()
 	tree.Append(userEntry("go"))
 	tree.Append(assistantToolCallEntry("call-1"))
