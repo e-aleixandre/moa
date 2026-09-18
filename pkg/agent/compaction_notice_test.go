@@ -14,7 +14,7 @@ import (
 // real API.
 func TestCompactionNotice_TellsTheAgentWhatToDo(t *testing.T) {
 	text := ""
-	for _, c := range compactionNotice(45000).Content {
+	for _, c := range compactionNotice(45000, 0).Content {
 		text += c.Text
 	}
 
@@ -34,7 +34,7 @@ func TestCompactionNotice_TellsTheAgentWhatToDo(t *testing.T) {
 // The notice is moa speaking, not the user. Marking it is what lets the UI and
 // the transcript tell them apart.
 func TestCompactionNotice_IsMarkedInternal(t *testing.T) {
-	msg := compactionNotice(1000)
+	msg := compactionNotice(1000, 0)
 	if msg.Custom["source"] != "compaction_notice" {
 		t.Errorf("source = %v, want compaction_notice", msg.Custom["source"])
 	}

@@ -13,6 +13,7 @@ type EntryType string
 const (
 	EntryMessage    EntryType = "message"
 	EntryCompaction EntryType = "compaction"
+	EntryTrim       EntryType = "trim"
 	EntryConfig     EntryType = "config"
 	EntryLabel      EntryType = "label"
 )
@@ -28,6 +29,7 @@ type Entry struct {
 	// Type-specific data (only one populated per entry):
 	Message    core.AgentMessage `json:"message,omitempty"`
 	Compaction CompactionData    `json:"compaction,omitempty"`
+	Trim       TrimData          `json:"trim,omitempty"`
 	Config     ConfigChangeData  `json:"config,omitempty"`
 	Label      string            `json:"label,omitempty"`
 }
@@ -40,6 +42,27 @@ type CompactionData struct {
 	ReadFiles        []string `json:"read_files,omitempty"`
 	ModifiedFiles    []string `json:"modified_files,omitempty"`
 }
+
+// TrimData records a context trim: every eligible tool result between the
+// previous trim's watermark and this one was replaced by a placeholder in the
+// model's context. The originals stay in the tree — this entry is a projection
+// rule, not a deletion.
+//
+// WatermarkEntryID and ProjectionVersion are the only reconstructive state.
+// The version pins the elision rules that produced this region, so a later
+// change to the placeholder format cannot rewrite it and break the byte
+// identity the provider's prefix cache depends on. The counters are telemetry
+// for the UI and the logs; they reconstruct nothing.
+type TrimData struct {
+	WatermarkEntryID  string `json:"watermark_entry_id"`
+	ProjectionVersion int    `json:"projection_version"`
+	TokensBefore      int    `json:"tokens_before,omitempty"`
+	TokensRemoved     int    `json:"tokens_removed,omitempty"`
+	Results           int    `json:"results,omitempty"`
+}
+
+// IsEmpty returns true if the TrimData has no watermark (zero value).
+func (t TrimData) IsEmpty() bool { return t.WatermarkEntryID == "" }
 
 // ConfigChangeData records a configuration change (model, thinking, etc.).
 type ConfigChangeData struct {

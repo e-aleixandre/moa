@@ -1191,11 +1191,26 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 		// so compaction runs with the same defaults as the main session — and
 		// with the threshold inherited from it, read at spawn time so a child
 		// launched after the parent moved its limit uses the current value.
-		Compaction: core.CompactionWithDefault(resolveChildCompactAt(cfg)),
+		//
+		// Trimming, on the other hand, is off for children in v1: a child
+		// persists only its projected messages in a sidecar, with no tree and
+		// no entries, so it has nowhere to record a watermark. It would elide,
+		// and a resumed child would hand the model a different conversation
+		// with no record of why. The parent still trims the reports its
+		// children send back to it.
+		Compaction: childCompactionSettings(resolveChildCompactAt(cfg)),
 		// Children summarize with the same model as the main session: the
 		// setting is global, and a child's compaction is a summary too.
 		CompactSummarizer: cfg.CompactSummarizer,
 	})
+}
+
+// childCompactionSettings are the session defaults with context trimming
+// disabled (see newChildAgent).
+func childCompactionSettings(compactAt int) *core.CompactionSettings {
+	settings := core.CompactionWithDefault(compactAt)
+	settings.TrimDisabled = true
+	return settings
 }
 
 // resolveChildCompactAt reads the threshold a child should inherit. It is

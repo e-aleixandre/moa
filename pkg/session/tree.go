@@ -332,28 +332,67 @@ func (t *Tree) BuildContext() ([]core.AgentMessage, int) {
 	return entriesToContext(path)
 }
 
+// TrimWatermark returns the MsgID up to which the current path has already
+// been trimmed, or "" when no trim applies. The agent carries it so the next
+// trim can only move forward: without it, a restored session would plan from
+// scratch and re-elide a region already elided under possibly different rules.
+func (t *Tree) TrimWatermark() string {
+	t.mu.RLock()
+	var path []Entry
+	if t.leafID != "" {
+		path = t.pathToLocked(t.leafID)
+	}
+	t.mu.RUnlock()
+
+	watermark := ""
+	for _, e := range path {
+		if e.Type == EntryTrim && e.Trim.WatermarkEntryID != "" {
+			watermark = e.Trim.WatermarkEntryID
+		}
+	}
+	return watermark
+}
+
 // entriesToContext implements the BuildContext algorithm over an already
 // resolved root→leaf path. Extracted so validBranchTargetLocked can compute
 // the exact context a candidate branch target would produce (including
 // compaction handling) without mutating the tree.
+//
+// Trims are replayed last, chronologically, over whatever the compaction logic
+// emitted. Applying them to the retained suffix too is deliberate: a
+// compaction keeps its suffix as it stood in memory, placeholders included, so
+// a rebuild that restored those originals would hand the provider a context it
+// has never seen — different bytes, cold cache, different behaviour.
 func entriesToContext(path []Entry) ([]core.AgentMessage, int) {
 	if len(path) == 0 {
 		return nil, 0
 	}
 
-	// Find the last compaction entry and count total compactions (= epoch)
+	// Find the last compaction entry and count context-editing entries. The
+	// epoch counts trims as well as compactions: the agent bumps the same
+	// counter for both (a trim invalidates the anchored usage exactly as a
+	// compaction does), so a reload that counted only compactions would stamp
+	// assistants with an epoch no restored message matches.
 	var lastCompaction *Entry
+	var trims []core.TrimSpan
 	epoch := 0
 	for i := range path {
-		if path[i].Type == EntryCompaction {
+		switch path[i].Type {
+		case EntryCompaction:
 			lastCompaction = &path[i]
+			epoch++
+		case EntryTrim:
+			trims = append(trims, core.TrimSpan{
+				WatermarkMsgID: path[i].Trim.WatermarkEntryID,
+				Version:        path[i].Trim.ProjectionVersion,
+			})
 			epoch++
 		}
 	}
 
 	if lastCompaction == nil {
 		// No compaction: emit all message entries
-		return collectMessages(path), 0
+		return core.ApplyTrims(collectMessages(path), trims), epoch
 	}
 
 	// With compaction: summary + messages from firstKeptEntryID onward
@@ -378,7 +417,7 @@ func entriesToContext(path []Entry) ([]core.AgentMessage, int) {
 		}
 	}
 
-	return msgs, epoch
+	return core.ApplyTrims(msgs, trims), epoch
 }
 
 // AllMessages returns ALL messages along the current path (for display).
@@ -443,9 +482,30 @@ func displayMessages(entries []Entry) []core.AgentMessage {
 				},
 				Custom: map[string]any{"type": "compaction_marker", "summary": e.Compaction.Summary, "tokens_before": e.Compaction.TokensBefore, "read_files": append([]string(nil), e.Compaction.ReadFiles...), "modified_files": append([]string(nil), e.Compaction.ModifiedFiles...)},
 			})
+		case EntryTrim:
+			// The transcript keeps the original outputs: the reader can still
+			// inspect what happened, and the marker is what makes explicit
+			// that the model no longer sees them.
+			msgs = append(msgs, core.AgentMessage{
+				Message: core.Message{
+					Role:      "session_event",
+					MsgID:     e.ID,
+					Content:   []core.Content{core.TextContent(trimMarkerText(e.Trim))},
+					Timestamp: e.Timestamp.Unix(),
+				},
+				Custom: map[string]any{"type": "trim_marker", "results": e.Trim.Results, "tokens_removed": e.Trim.TokensRemoved},
+			})
 		}
 	}
 	return msgs
+}
+
+// trimMarkerText is the one line the transcript shows where a trim happened.
+// Shared by the tree's display projection and the live event, so the marker a
+// client paints mid-run reads identically to the one it gets after a reload.
+func trimMarkerText(d TrimData) string {
+	return fmt.Sprintf("✂ Older tool outputs removed from model context (%d results, ~%dK tokens)",
+		d.Results, d.TokensRemoved/1000)
 }
 
 // isLLMRole returns true if the role should be included in LLM context.

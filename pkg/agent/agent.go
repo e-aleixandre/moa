@@ -900,6 +900,20 @@ func (a *Agent) LoadState(msgs []core.AgentMessage, compactionEpoch int) error {
 	return nil
 }
 
+// SetTrimWatermark restores where context trimming has already reached on this
+// branch. Called right after LoadState by whoever owns the session tree, which
+// is the only place that knows it. A trim never moves this backwards, so a
+// restored session cannot re-elide a region under rules that changed since.
+func (a *Agent) SetTrimWatermark(msgID string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return fmt.Errorf("cannot set trim watermark while agent is running")
+	}
+	a.state.TrimWatermarkMsgID = msgID
+	return nil
+}
+
 // AppendMessage appends a non-LLM message to the current conversation state.
 // Used to persist timeline events before the next user turn.
 func (a *Agent) AppendMessage(msg core.AgentMessage) error {

@@ -19,7 +19,14 @@ type AgentEvent struct {
 	Rejected       bool               // tool_execution_end (true only for permission denial)
 	Messages       []AgentMessage     // agent_end (full conversation)
 	Compaction     *CompactionPayload // compaction_end
-	Error          error              // agent_error, compaction_end (non-fatal)
+	Trim           *TrimPayload       // context_trimmed
+	// TrimOriginals carries the conversation as it stood BEFORE a trim, so the
+	// session tree can persist the untrimmed originals of the current run
+	// before the trim marker is appended. Internal plumbing, never payload: it
+	// must not be serialized onto the wire, where it would turn every trim into
+	// a frame carrying the whole conversation.
+	TrimOriginals []AgentMessage // context_trimmed
+	Error         error          // agent_error, compaction_end (non-fatal)
 }
 
 // Agent event type constants.
@@ -47,6 +54,10 @@ const (
 
 	AgentEventCompactionStart = "compaction_start"
 	AgentEventCompactionEnd   = "compaction_end"
+	// AgentEventContextTrimmed reports that old tool results were replaced by
+	// placeholders in the model's context INSTEAD of compacting. No summarizer
+	// call, no information destroyed: the tree keeps the originals.
+	AgentEventContextTrimmed = "context_trimmed"
 	// AgentEventFastUnavailable reports that a provider fell back from a
 	// rejected premium-speed request and disabled it for the session.
 	AgentEventFastUnavailable = "fast_unavailable"

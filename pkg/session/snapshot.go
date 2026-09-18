@@ -79,6 +79,14 @@ func FormatTranscript(entries []Entry) string {
 			if !strings.HasSuffix(e.Compaction.Summary, "\n") {
 				b.WriteByte('\n')
 			}
+		case EntryTrim:
+			// The outputs above are still in this file, but the parent model
+			// stopped seeing them at this point. A snapshot handed to a
+			// subagent as evidence has to say so, or it reads as if the parent
+			// still had all of it in context.
+			writeHeading(&b, e, "trim")
+			b.WriteString(fmt.Sprintf("Older tool outputs were removed from the parent's model context here (%d results, ~%d tokens). The outputs above remain in this file.\n",
+				e.Trim.Results, e.Trim.TokensRemoved))
 		case EntryConfig:
 			writeHeading(&b, e, "config")
 			if e.Config.Model != "" {

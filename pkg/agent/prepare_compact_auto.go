@@ -90,18 +90,38 @@ func strategyIsPrepare(cfg *loopConfig) bool {
 }
 
 // alreadyWarned reports whether the conversation already carries a compaction
-// notice since the last compaction.
+// notice for the CURRENT context epoch.
 //
 // The state that matters is the transcript, not the run: every user message
 // starts a new run, so a per-run flag warned again on each of them while the
 // context stayed in the band — which is what happened in production, twice in a
 // row with the user's message in between. A compaction clears the history the
 // notice lived in, so the next fill warns again on its own.
-func alreadyWarned(msgs []core.AgentMessage) bool {
+//
+// A trim clears nothing, though: the notice survives it. Comparing the epoch is
+// what makes the next fill warn again, instead of the agent walking into a
+// compaction it was never told about. A notice written before epochs were
+// stamped reads as epoch 0, which is where it was emitted.
+func alreadyWarned(msgs []core.AgentMessage, epoch int) bool {
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Custom != nil && msgs[i].Custom["source"] == "compaction_notice" {
+		if msgs[i].Custom == nil || msgs[i].Custom["source"] != "compaction_notice" {
+			continue
+		}
+		if noticeEpoch(msgs[i].Custom) == epoch {
 			return true
 		}
 	}
 	return false
+}
+
+// noticeEpoch reads the epoch stamped on a notice, accepting both int and
+// float64 because Custom round-trips through JSON when a session is persisted.
+func noticeEpoch(custom map[string]any) int {
+	switch v := custom["epoch"].(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	}
+	return 0
 }

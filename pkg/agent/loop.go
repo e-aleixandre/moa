@@ -269,12 +269,12 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// The notice states what to do, not just the number: told only how
 			// many tokens remained, the model carried on as if nothing had
 			// changed in every measured run.
-			if strategyAllowsNotice(cfg) && !alreadyWarned(cfg.state.Messages) {
+			if strategyAllowsNotice(cfg) && !alreadyWarned(cfg.state.Messages, cfg.state.CompactionEpoch) {
 				if warn, remaining := core.ShouldWarnBeforeCompact(estimate.Tokens, window, *compactionSettings); warn {
 					// appendState, not a bare append: it takes stateMu and
 					// assigns the MsgID the tree needs to sync this message
 					// under a stable identity.
-					notice := compactionNotice(remaining)
+					notice := compactionNotice(remaining, cfg.state.CompactionEpoch)
 					notice.EnsureMsgID()
 					cfg.appendState(notice)
 					// Announce it: without an event the notice only shows up on
@@ -289,6 +289,15 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			}
 
 			if core.ShouldCompact(estimate.Tokens, window, *compactionSettings) {
+				// Trim before summarizing. Eliding an old tool result costs
+				// nothing but a re-run if the model wants it back, while a
+				// summary is irreversible — so the cheap, reversible edit gets
+				// the first attempt, and compaction only runs when it cannot
+				// buy enough room.
+				if trimmed := tryTrim(cfg, compactionSettings, estimate.Tokens, window); trimmed {
+					continue
+				}
+
 				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventCompactionStart})
 
 				// Give the agent a turn to write down what only exists in this
@@ -1398,14 +1407,24 @@ func strategyAllowsNotice(cfg *loopConfig) bool {
 // It rides as a user-role message with an internal marker: providers only
 // accept user and assistant roles mid-conversation, and the marker is what
 // lets the UI and the transcript tell it apart from something the user typed.
-func compactionNotice(remaining int) core.AgentMessage {
+//
+// The epoch it was emitted in is stamped on it because the notice has to be
+// answered once per context edit, and a trim is an edit: after one, the old
+// notice is still in history, and matching on its mere presence would let the
+// eventual compaction arrive with no warning at all.
+//
+// The wording names both outcomes on purpose. Crossing the threshold now ends
+// in a trim or a summary, and the message is asking the agent to spend a turn
+// persisting work — a promise of a summary that does not come would be paying
+// for that turn under a false premise.
+func compactionNotice(remaining, epoch int) core.AgentMessage {
 	text := fmt.Sprintf(
-		"<system-reminder>\nContext is close to the compaction threshold: about %s tokens remain before this conversation is automatically summarized. Everything not written down will be replaced by that summary.\n\n"+
+		"<system-reminder>\nContext is close to the compaction threshold: about %s tokens remain before this conversation is automatically trimmed or summarized. Older tool output may be elided, and anything not written down can be replaced by a summary.\n\n"+
 			"If you are holding findings, decisions or partial results that only exist in this conversation, persist them now — a file, memory, or the task list — before continuing. If there is nothing worth keeping, carry on without comment.\n</system-reminder>",
 		humanizeTokens(remaining),
 	)
 	msg := core.WrapMessage(core.NewUserMessage(text))
-	msg.Custom = map[string]any{"source": "compaction_notice", "internal": true}
+	msg.Custom = map[string]any{"source": "compaction_notice", "internal": true, "epoch": epoch}
 	return msg
 }
 

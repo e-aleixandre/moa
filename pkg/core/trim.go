@@ -135,32 +135,44 @@ func ApplyTrims(msgs []AgentMessage, spans []TrimSpan) []AgentMessage {
 	return out
 }
 
-// applyTrimSpan is the single implementation of the elision, shared by the live
-// decision (PlanTrim) and the reconstruction from the tree (ApplyTrims). Two
-// implementations would drift, and a restored context that differs from the one
-// already sent rewrites the provider's prefix cache for the whole session.
+// applyTrimSpan elides one interval. Both entry points into the elision — the
+// live decision (PlanTrim) and the reconstruction from the session tree
+// (ApplyTrims) — go through it, because a restored context that differs from
+// the one already sent rewrites the provider's prefix cache for the whole
+// session.
 func applyTrimSpan(msgs []AgentMessage, start, end, version int) (removed, count int) {
 	for i := start; i < end && i < len(msgs); i++ {
-		m := msgs[i]
-		if !trimEligible(m) {
-			continue
-		}
-		before := EstimateTokens(m.Message)
-		placeholder := trimPlaceholder(m, version)
-		if placeholder == "" {
-			continue
-		}
-		trimmed := m
-		trimmed.Content = []Content{TextContent(placeholder)}
-		after := EstimateTokens(trimmed.Message)
-		if after >= before {
+		trimmed, saved, ok := trimMessage(msgs[i], version)
+		if !ok {
 			continue
 		}
 		msgs[i] = trimmed
-		removed += before - after
+		removed += saved
 		count++
 	}
 	return removed, count
+}
+
+// trimMessage replaces one message's content with its placeholder. Returns
+// ok=false when the message is not eligible or the placeholder would not
+// actually be smaller. Applying it twice is a no-op: a placeholder is far
+// below the size threshold.
+func trimMessage(m AgentMessage, version int) (AgentMessage, int, bool) {
+	if !trimEligible(m) {
+		return m, 0, false
+	}
+	placeholder := trimPlaceholder(m, version)
+	if placeholder == "" {
+		return m, 0, false
+	}
+	before := EstimateTokens(m.Message)
+	trimmed := m
+	trimmed.Content = []Content{TextContent(placeholder)}
+	after := EstimateTokens(trimmed.Message)
+	if after >= before {
+		return m, 0, false
+	}
+	return trimmed, before - after, true
 }
 
 // trimEligible reports whether a message's content can be replaced by a
