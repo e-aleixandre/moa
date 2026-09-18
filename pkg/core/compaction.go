@@ -38,6 +38,16 @@ func CompactionWithDefault(globalCompactAt int) *CompactionSettings {
 	return &settings
 }
 
+// CompactionFromConfig is CompactionWithDefault plus the trim switch, so the
+// one setting that can turn off a feature on the critical path of every
+// session is read in the same place as the threshold it guards — and can be
+// flipped by editing the config rather than by rebuilding the binary.
+func CompactionFromConfig(globalCompactAt int, trimDisabled bool) *CompactionSettings {
+	settings := CompactionWithDefault(globalCompactAt)
+	settings.TrimDisabled = trimDisabled
+	return settings
+}
+
 // ResolveCompactAt picks the threshold to apply when the session value and the
 // global default come from different places — the parent agent and the config
 // file, as when spawning a subagent. Session value wins, then the global one,

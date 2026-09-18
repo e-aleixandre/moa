@@ -696,7 +696,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		// afterwards via SetCompactAt, and the agent keeps the two apart, which is
 		// what lets a session's own choice win here without erasing the global
 		// value for the sessions that never made one.
-		Compaction: core.CompactionWithDefault(core.GetCompactAt(moaCfg)),
+		Compaction: core.CompactionFromConfig(core.GetCompactAt(moaCfg), core.GetTrimDisabled(moaCfg)),
 		// Global too: which model writes the summaries. Read through the
 		// resolver on every compaction rather than captured here, so changing
 		// the setting takes effect without restarting live sessions.

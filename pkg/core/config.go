@@ -111,6 +111,7 @@ type MoaConfig struct {
 	CompactAt              int                  `json:"compact_at,omitempty"`                    // Default soft compaction threshold in tokens for sessions with none of their own. 0 = compact at the model window.
 	CompactModel           string               `json:"compact_model,omitempty"`                 // Model that writes compaction summaries. Empty/"session" = the session's own model. See GetCompactModel.
 	CompactStrategy        string               `json:"compact_strategy,omitempty"`              // What happens before an automatic compaction: "plain", "notify" (default) or "prepare". See GetCompactStrategy.
+	TrimDisabled           *bool                `json:"trim_disabled,omitempty"`                 // Turn off the tool-result elision that runs before compaction. Absent/false = on. A pointer so an explicit false is distinguishable from "unset" when configs merge.
 	Events                 *EventsConfig        `json:"events,omitempty"`                        // wake-on-event: inbound webhook sources (global-only; see EventsConfig).
 	Preview                *PreviewConfig       `json:"preview,omitempty"`                       // Live Preview proxy address, remembered so the web UI does not ask again (global-only).
 }
@@ -184,6 +185,17 @@ func IsPersistentShellEnabled(cfg MoaConfig) bool {
 // They are enabled by default; MOA_NO_UPDATE_CHECK=1 is handled by pkg/release.
 func IsUpdateCheckEnabled(cfg MoaConfig) bool {
 	return cfg.UpdateCheck == nil || *cfg.UpdateCheck
+}
+
+// GetTrimDisabled reports whether the pre-compaction tool-result elision is
+// turned off. Absent means on: the trim is the cheaper of the two ways to make
+// room, and a session that never edits its config should get it.
+//
+// It exists so the one feature that rewrites context on the critical path of
+// every session can be switched off by editing a file, without a rebuild — the
+// first thing anyone wants when a context change misbehaves.
+func GetTrimDisabled(cfg MoaConfig) bool {
+	return cfg.TrimDisabled != nil && *cfg.TrimDisabled
 }
 
 // GetCompactAt returns the default soft compaction threshold in tokens, applied
@@ -610,6 +622,10 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		// Same reasoning for the summarizer: a project may pick its own, and
 		// with none set the global choice must survive the merge.
 		CompactModel: mergeScalar(base.CompactModel, override.CompactModel),
+		// A pointer, so an unset project config (nil) leaves the global switch
+		// alone while an explicit false can still turn the trim back on for one
+		// project after disabling it globally.
+		TrimDisabled: mergeScalar(base.TrimDisabled, override.TrimDisabled),
 	}
 	// MaxBudget: project can tighten but not disable a global budget.
 	if override.MaxBudget > 0 {

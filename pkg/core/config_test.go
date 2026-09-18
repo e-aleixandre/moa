@@ -914,3 +914,39 @@ func TestLoadMCPFile_RejectsAmbiguousTransport(t *testing.T) {
 		t.Fatal("expected an error for a server with both command and url")
 	}
 }
+
+// The trim rewrites context on the critical path of every session, so turning
+// it off must not need a rebuild. Absent means on: a config nobody edited gets
+// the cheaper of the two ways to make room.
+func TestGetTrimDisabled(t *testing.T) {
+	yes, no := true, false
+	cases := []struct {
+		name string
+		cfg  MoaConfig
+		want bool
+	}{
+		{"absent means on", MoaConfig{}, false},
+		{"explicit false means on", MoaConfig{TrimDisabled: &no}, false},
+		{"explicit true turns it off", MoaConfig{TrimDisabled: &yes}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := GetTrimDisabled(tc.cfg); got != tc.want {
+				t.Fatalf("GetTrimDisabled = %v, want %v", got, tc.want)
+			}
+			settings := CompactionFromConfig(0, GetTrimDisabled(tc.cfg))
+			if settings.TrimDisabled != tc.want {
+				t.Fatalf("settings.TrimDisabled = %v, want %v", settings.TrimDisabled, tc.want)
+			}
+		})
+	}
+}
+
+// A project that says nothing must not switch the global setting back on.
+func TestMergeConfigs_TrimDisabledSurvivesAnUnsetProject(t *testing.T) {
+	yes := true
+	merged := mergeConfigs(MoaConfig{TrimDisabled: &yes}, MoaConfig{})
+	if !GetTrimDisabled(merged) {
+		t.Fatal("an unset project config erased the global trim switch")
+	}
+}
