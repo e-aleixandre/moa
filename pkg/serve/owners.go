@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -18,6 +19,13 @@ const (
 	defaultOwnerModel    = "opus"
 	defaultOwnerThinking = "low"
 )
+
+// ErrProjectSessionsOpen refuses creating or deleting an owner while sessions
+// of its project are loaded. Whether a session has an owner (its book, its book
+// tool, its reporting) is resolved once, when the session is built; changing
+// the answer underneath a live session would leave it working with a project it
+// no longer belongs to, in one direction or the other.
+var ErrProjectSessionsOpen = errors.New("this project has open sessions")
 
 // ownerStore resolves the on-disk owner store. It is resolved per call rather
 // than cached on the Manager so the config directory is read the same way
@@ -91,9 +99,9 @@ type CreateOwnerOpts struct {
 
 // CreateOwner creates the entity, its book and its conversation.
 //
-// The session is created after owner.json exists, so a failure half-way leaves
-// an owner without a conversation (recoverable, and visible in the API) rather
-// than a conversation flagged as an owner that nothing points at.
+// The session is created after owner.json exists — the entity is what makes a
+// codebase claimed — and a failure there rolls the entity back, so a retry is a
+// plain create instead of hitting ErrExists on a half-made owner.
 func (m *Manager) CreateOwner(opts CreateOwnerOpts) (OwnerInfo, error) {
 	store, err := m.ownerStore()
 	if err != nil {
@@ -113,6 +121,13 @@ func (m *Manager) CreateOwner(opts CreateOwnerOpts) (OwnerInfo, error) {
 	if !core.IsValidThinkingLevel(thinking) {
 		return OwnerInfo{}, fmt.Errorf("%w: %q (choose: %s)", ErrInvalidThinking, thinking, core.ThinkingLevelOptions())
 	}
+	// A session built before the owner existed resolved its book, its tools and
+	// its report subscription without one, and nothing re-resolves them while it
+	// is live. Rather than leave those sessions in a state neither the owner nor
+	// they can see, refuse until they are closed.
+	if live := m.liveChildrenOfRoot(opts.Root); len(live) > 0 {
+		return OwnerInfo{}, fmt.Errorf("%w: %s", ErrProjectSessionsOpen, openSessionsHint(len(live), "before creating its owner"))
+	}
 	own, err := store.Create(opts.Root, opts.Name, model, thinking, true)
 	if err != nil {
 		return OwnerInfo{}, err
@@ -129,9 +144,14 @@ func (m *Manager) CreateOwner(opts CreateOwnerOpts) (OwnerInfo, error) {
 		extraMeta: map[string]any{session.MetaKind: session.KindOwner},
 	})
 	if err != nil {
-		// Keep owner.json: the book and the identity survive, and a retry
-		// attaches a conversation instead of failing on ErrExists.
-		return m.ownerInfo(own), err
+		// Roll the entity back: an owner.json without a conversation would make
+		// every retry fail with ErrExists while doing nothing for the project.
+		// The book stays, as it does on delete.
+		if delErr := store.Delete(own.CodebaseKey); delErr != nil {
+			slog.Warn("owner: could not roll back an owner whose session failed",
+				"owner", own.ID, "error", delErr)
+		}
+		return OwnerInfo{}, err
 	}
 	own.SessionID = sess.ID
 	if err := store.Save(own); err != nil {
@@ -154,6 +174,12 @@ func (m *Manager) DeleteOwner(id string) error {
 	if !found {
 		return owner.ErrNotFound
 	}
+	// Same reason as CreateOwner, mirrored: a live child keeps the book, the
+	// book tool and its reporting subscription pointing at an owner that is
+	// about to stop existing.
+	if live := m.liveChildrenOfRoot(own.Root); len(live) > 0 {
+		return fmt.Errorf("%w: %s", ErrProjectSessionsOpen, openSessionsHint(len(live), "before deleting its owner"))
+	}
 	// Delete the entity first: while owner.json exists the session is still
 	// protected from the ordinary delete path, and a failure here leaves both
 	// halves in place rather than an owner pointing at a deleted session.
@@ -169,6 +195,45 @@ func (m *Manager) DeleteOwner(id string) error {
 		return err
 	}
 	return nil
+}
+
+// liveChildrenOfRoot returns the IDs of the ordinary sessions resident in the
+// Manager whose cwd belongs to the codebase of root. Owner conversations are
+// excluded: an owner is not a child of itself, and on delete its own session is
+// precisely what is being removed. Saved sessions are not counted either — they
+// resolve their owner when resumed, which is when they pick up the change.
+func (m *Manager) liveChildrenOfRoot(root string) []string {
+	canonical, err := core.CanonicalizePath(root)
+	if err != nil {
+		canonical = root
+	}
+	key := core.CodebaseKey(canonical)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var ids []string
+	for id, sess := range m.sessions {
+		if sess == nil || sess.Kind == session.KindOwner {
+			continue
+		}
+		cwd, err := core.CanonicalizePath(sess.CWD)
+		if err != nil {
+			cwd = sess.CWD
+		}
+		if core.CodebaseKey(cwd) == key {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// openSessionsHint is the message the user acts on: what to do, not what went
+// wrong internally.
+func openSessionsHint(n int, when string) string {
+	sessions := "sessions"
+	if n == 1 {
+		sessions = "session"
+	}
+	return fmt.Sprintf("close or let the %d open %s of this project finish %s", n, sessions, when)
 }
 
 func handleListOwners(mgr *Manager) http.HandlerFunc {
@@ -192,7 +257,7 @@ func handleCreateOwner(mgr *Manager) http.HandlerFunc {
 		}
 		info, err := mgr.CreateOwner(opts)
 		switch {
-		case errors.Is(err, owner.ErrExists):
+		case errors.Is(err, owner.ErrExists), errors.Is(err, ErrProjectSessionsOpen):
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		case errors.Is(err, ErrInvalidModel), errors.Is(err, ErrInvalidThinking), errors.Is(err, ErrInvalidCWD):
@@ -226,6 +291,10 @@ func handleDeleteOwner(mgr *Manager) http.HandlerFunc {
 		err := mgr.DeleteOwner(r.PathValue("id"))
 		if errors.Is(err, owner.ErrNotFound) {
 			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, ErrProjectSessionsOpen) {
+			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
 		if err != nil {
