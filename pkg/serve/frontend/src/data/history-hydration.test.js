@@ -313,7 +313,10 @@ test('a close after init revokes transcript authority', () => {
 test('a poll does not restore stale history after a successful hydration', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (path) => {
-    if (path === '/api/sessions') {
+    // The roster is fetched WITH the owner conversations: the store has to
+    // hold an owner's session to open and stream it, and the lists filter on
+    // `kind` instead (data/util/project-sessions.js).
+    if (String(path).startsWith('/api/sessions')) {
       return Promise.resolve(new Response(JSON.stringify([{
         id: 's1', title: 'Poll replacement', state: 'idle', cwd: '/x',
       }]), { status: 200 }));

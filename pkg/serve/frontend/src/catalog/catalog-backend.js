@@ -9,6 +9,9 @@
 // the wire: HTTP paths and the init payload handleWsInit already knows.
 
 import { CATALOG_SESSIONS } from "./specimen.js";
+import { OWNERS as CATALOG_OWNERS } from "./owners-fixtures.js";
+
+const basenameOf = (p) => String(p || "").replace(/\/+$/, "").split("/").filter(Boolean).pop() || "";
 
 export const CATALOG_MODELS = [
   { id: "claude-opus-4-8", name: "Claude Opus 4.8", provider: "anthropic", alias: "opus", max_input: 1000000 },
@@ -98,8 +101,12 @@ export const CATALOG_DEVICES = (() => {
 
 const FS_ENTRIES = {
   "/home/ealeixandre": ["dev", "src"],
-  "/home/ealeixandre/dev": ["moa", "pulse"],
+  "/home/ealeixandre/dev": ["moa", "pulse", "winerim-backend", "winerim-web"],
   "/home/ealeixandre/dev/moa": ["main", "desktop-design", "fast-mode", "pulse-api"],
+  // The owners lab browses to a project that has no owner yet, which is what
+  // the create flow is for: a folder the list does not already hold.
+  "/home/ealeixandre/dev/winerim-backend": ["main", "facturacion", "ocr-muga"],
+  "/home/ealeixandre/dev/winerim-web": ["main"],
 };
 
 let created = 0;
@@ -206,6 +213,35 @@ export function catalogResponse(method, path, body = null, sessions = CATALOG_SE
     return { devices: mode === "empty" ? [] : CATALOG_DEVICES };
   }
   if (m === "GET" && p === "/api/sessions") return rosterOf(sessions);
+  // The project owners (pkg/serve/server.go:135-138). The lab answers the two
+  // reads the surface performs; a create returns the entity the way the real
+  // handler does, so pressing it in the lab is not a silent no-op.
+  //
+  // NOTE for whoever wires this for real: `children` and the book are NOT in
+  // today's payload — see the report accompanying ?view=owners. They sit in
+  // the fixture because the surface cannot be judged without them.
+  if (m === "GET" && p === "/api/owners") return { owners: CATALOG_OWNERS };
+  if (m === "POST" && p === "/api/owners") {
+    created += 1;
+    return {
+      id: `own_lab${created}`,
+      name: body?.name || basenameOf(body?.root),
+      codebase_key: basenameOf(body?.root),
+      root: body?.root || "",
+      session_id: `own-sess-lab${created}`,
+      model: body?.model || "anthropic/claude-opus-4-8",
+      thinking: body?.thinking || "low",
+      answer_asks: true,
+      created: Date.now(),
+      session_state: "idle",
+    };
+  }
+  const ownerMatch = p.match(/^\/api\/owners\/([^/]+)$/);
+  if (ownerMatch) {
+    if (m === "DELETE") return {};
+    const found = CATALOG_OWNERS.find((o) => o.id === ownerMatch[1]);
+    return found || { __status: 404, error: "owner not found" };
+  }
   if (m === "GET" && p === "/api/fs/complete") {
     const dir = (queryOf(path).get("path") || "").replace(/\/+$/, "") || "/";
     return { entries: FS_ENTRIES[dir] || [] };

@@ -1,5 +1,6 @@
 import { allSessionIds, tileCount, treeShape, presetTree } from "../../data/tileTree.js";
 import { PRESETS } from "../../data/layoutPresets.js";
+import { isOrdinarySession } from "../../data/util/project-sessions.js";
 
 function matchPreset(tree) {
   const shape = treeShape(tree);
@@ -17,6 +18,7 @@ export function selectGridToolbar(state) {
   let needsYouCount = 0;
   let firstNeedsYouId = null;
   for (const s of Object.values(state.sessions || {})) {
+    if (!isOrdinarySession(s)) continue;
     if (assigned.has(s.id) && (s.state === "permission" || s.state === "error")) {
       if (!firstNeedsYouId) firstNeedsYouId = s.id;
       needsYouCount++;

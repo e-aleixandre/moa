@@ -30,6 +30,7 @@ import { Plus } from "lucide-preact";
 import { addToast } from "../../data/notifications.js";
 import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast, stopRun } from "../../data/session-actions.js";
 import { toggleSessionPanel, sessionPanelView } from "../../data/session-panel.js";
+import { OwnerChipEntry } from "../../components/Owners/OwnerChipEntry.jsx";
 import { cacheAlertLabel } from "../../data/cache-usage.js";
 import { setPopoverOpenFromClick } from "../../data/popover-click.js";
 import { positionModelPopover } from "../PaneGrid/model-popover-position.js";
@@ -261,7 +262,15 @@ export function ConversationScreen() {
           onGridToggle={() => navigate("grid")}
           previewOpen={!!session.previewOpen}
           onPreviewToggle={() => updateSession(session.id, { previewOpen: !session.previewOpen })}
-          headExtra={<ArtifactsEntry sessionId={session.id} />}
+          /* The chip says which project owner this conversation belongs to
+             and opens it. Provenance, not a state: no dot, no colour. It is
+             only mounted for a session whose codebase HAS an owner. */
+          headExtra={(
+            <>
+              <OwnerChipEntry session={session} />
+              <ArtifactsEntry sessionId={session.id} />
+            </>
+          )}
         />
         {viewingSub ? (
           <SubagentView

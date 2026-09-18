@@ -21,6 +21,7 @@ import { DesktopLab, PhoneLab } from "./catalog/desktop-lab.jsx";
 import { ZonesLab, ZonesPhone, LIVE_STATES } from "./catalog/zones-lab.jsx";
 import { Scene } from "./catalog/scene.jsx";
 import { InboxLab } from "./catalog/zones-inbox.jsx";
+import { OwnersLab } from "./catalog/owners-lab.jsx";
 import { WorkLab } from "./catalog/zones-work.jsx";
 import { U2Lab } from "./catalog/u2-lab.jsx";
 import { U6Lab } from "./catalog/u6-lab.jsx";
@@ -51,6 +52,7 @@ const LINKS = [
   { key: "zones", label: "Zones", href: "?view=zones" },
   { key: "phone", label: "Phone", href: "?view=phone" },
   { key: "inbox", label: "Inbox", href: "?view=inbox" },
+  { key: "owners", label: "Owners", href: "?view=owners" },
   { key: "work", label: "Work", href: "?view=work" },
   { key: "u2", label: "User 2", href: "?view=u2" },
   { key: "u6", label: "User 6", href: "?view=u6" },
@@ -191,6 +193,10 @@ function CatalogApp() {
   // page -- the frame is what the wrapper drops, not the screen.
   else if (view === "phone") body = <PhoneAlone />;
   else if (view === "inbox") body = <InboxLab />;
+  // Owners — the project owner as a surface: its door, its list, its dossier
+  // and the chip a child wears. Catalog-only pieces (src/catalog/owners-*),
+  // mounted around production's ChatHead, Sidebar, MobileChrome and Stream.
+  else if (view === "owners") body = <OwnersLab />;
   else if (view === "work") body = <WorkLab />;
   else if (view === "u2") body = <U2Lab />;
   else if (view === "u6") body = <U6Lab />;

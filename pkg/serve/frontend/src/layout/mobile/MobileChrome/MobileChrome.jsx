@@ -49,6 +49,10 @@ export function MobileChrome({
   // panel. Distinct from `attention`, which is about the OTHER sessions and
   // lives on the left capsule.
   alert = "",
+  // below — a quiet row under the three capsules. Today that is the Owner
+  // chip: it belongs with the header (it is about this conversation) but not
+  // INSIDE the capsule row, which already does three jobs (CRITERIO §3).
+  below,
 }) {
   const presentation = mobileTitleChipPresentation(attention);
   const arrivalRef = useRef(0);
@@ -57,7 +61,7 @@ export function MobileChrome({
   arrivalRef.current = nextRipple.arrival;
   rippleRef.current = nextRipple.ripple;
   return (
-    <div class="zl-chrome">
+    <div class="zl-chrome" data-below={below ? "true" : undefined}>
       <button
         type="button"
         class={`zl-cap zl-cap-left${presentation.hasAttention ? ` has-attention zl-cap-attention-${presentation.tone}` : ""}`}
@@ -86,6 +90,7 @@ export function MobileChrome({
       >
         <PlusIcon />
       </button>
+      {below && <div class="zl-chrome-below">{below}</div>}
     </div>
   );
 }

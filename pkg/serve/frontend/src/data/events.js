@@ -15,6 +15,7 @@ import { loadSessions } from './session-actions.js';
 import { openSession } from './tile-actions.js';
 import { addToast, removeToast } from './notifications.js';
 import { basename, modelCodename, projectKey, projectLabel, sessionTitle } from './util/format.js';
+import { ordinarySessions } from './util/project-sessions.js';
 
 // relAge is the session list's clock, kept identical to Sidebar/sessions.js and
 // the mobile chrome's: an event's age must not read like a different clock.
@@ -336,7 +337,8 @@ export async function dismissSource(source) {
 // Saved sessions are not candidates: an event delivered to a session nobody is
 // running would sit unread with no turn behind it.
 export function inboxCards(sessions, events) {
-  const all = Object.values(sessions || {});
+  // An owner is never a routing destination (the backend refuses one too).
+  const all = ordinarySessions(Object.values(sessions || {}));
   return (events || []).map((event) => {
     const project = projectKey(event.project);
     const targets = all

@@ -15,6 +15,7 @@ import {
   startUsagePolling, stopUsagePolling,
 } from "./data/session-actions.js";
 import { loadEvents, openInbox } from "./data/events.js"; // wake-on-event
+import { loadOwners } from "./data/owners.js";
 import { loadModelCatalog, ensureModelCatalog } from "./data/model-catalog.js";
 import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
@@ -155,6 +156,10 @@ function useBootstrap() {
     // changes when the server does.
     loadModelCatalog();
     loadEvents(); // wake-on-event: paint the inbox on first load, not one tick later
+    // The owners. Read once with the first roster and again on return, like
+    // the model catalog: an owner is created by hand and their number is one
+    // per project, so nothing is gained by polling them.
+    loadOwners();
     // Reconcile the browser's actual push state on load (/next relies on the
     // root /sw.js, no SW registration here). Guarded internally for unsupported.
     refreshPushState();
@@ -175,6 +180,7 @@ function useBootstrap() {
         reconnectAll();
         loadSessions();
         loadEvents(); // wake-on-event: an event may have arrived while away
+        loadOwners();
         startPolling();
         // Also restarts the usage timer, and refreshes immediately so the
         // status line is not showing a number from before the app was hidden.

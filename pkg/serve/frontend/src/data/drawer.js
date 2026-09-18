@@ -12,6 +12,7 @@
 // never poke the raw field names.
 
 import { setState } from './store.js';
+import { SIDEBAR_MODES } from './util/project-sessions.js';
 
 // openDrawer opens the drawer on a given screen: 'list' (the sessions) or
 // 'new' (choose a project and create).
@@ -39,7 +40,19 @@ export function setDrawerStep(step) {
 // "project" would promise that sessions in two worktrees group together when
 // they deliberately do not.
 export function setGroupByProject(on) {
-  setState({ groupByProject: !!on });
+  setSidebarMode(on ? 'project' : 'recent');
+}
+
+// setSidebarMode picks which of the three lists the column shows: the sessions
+// by recency, the sessions by folder, or the project owners. Persisted by the
+// store — a way of LOOKING at your work is chosen and kept.
+//
+// groupByProject is written alongside it and kept: the grouping code reads it,
+// and the key is persisted, so dropping it would silently reset the preference
+// of anyone who set it before Owners existed.
+export function setSidebarMode(mode) {
+  const next = SIDEBAR_MODES.includes(mode) ? mode : 'recent';
+  setState({ sidebarMode: next, groupByProject: next === 'project' });
 }
 
 export function setDrawerProjectCollapsed(key, collapsed) {

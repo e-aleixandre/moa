@@ -26,7 +26,7 @@ import {
   sessionTitle, sessionDisplayDotState, isRecentSession, projectLabel,
   tildify, expandHome, basename,
 } from "../../data/util/format.js";
-import { sessionSearchMatch } from "../../data/util/project-sessions.js";
+import { ordinarySessions, sessionSearchMatch } from "../../data/util/project-sessions.js";
 import { modLabel } from "../../data/util/shortcut.js";
 import { deriveModelSpecs } from "../../data/selectors.js";
 import { defaultModelSpec, modelStepItems, stepBack } from "./command-palette-model.js";
@@ -314,7 +314,7 @@ export function CommandPalette({
   // ── SEARCH: recent-projects for the create step (dedupe basename) ───────────
   const recents = useMemo(() => {
     const byCwd = {};
-    for (const sess of Object.values(state.sessions)) {
+    for (const sess of ordinarySessions(Object.values(state.sessions))) {
       const cwd = sess.cwd || "";
       if (!cwd) continue;
       const updated = sess.updated || 0;
@@ -413,7 +413,7 @@ export function CommandPalette({
     // word matcher as both session lists: sentence-length titles make command
     // fuzzy matching return distracting subsequence false positives. Actions
     // below deliberately retain their established command-palette fuzzy match.
-    const all = Object.values(state.sessions).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    const all = ordinarySessions(Object.values(state.sessions)).sort((a, b) => (b.updated || 0) - (a.updated || 0));
     const sessRows = [];
     for (const sess of all) {
       const cwd = sess.cwd || "";

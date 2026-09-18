@@ -35,6 +35,17 @@
   pointer-events: none;
 }
 
+/* A second row under the capsules, for what belongs to the header but not to
+   the capsule row: today the Owner chip. It wraps rather than shrinking the
+   three capsules, which have their own 44px floor. */
+.zl-chrome[data-below] { flex-wrap: wrap; }
+.zl-chrome-below {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+
 /* Only the capsules take the taps. The row spans the full width so the three
    sit at their edges, and the gaps between them are transcript, not chrome. */
 .zl-chrome > * {

@@ -1,0 +1,212 @@
+/* The owners lab. The product markup and CSS are owners-pieces.jsx /
+   owners.css (classes `ow-*`); this sheet is only the laboratory: the page,
+   the density frames, the switcher and the notes. Same shape as
+   zones-inbox.css, so the two labs read alike. */
+
+.owl {
+  position: relative;
+  min-height: 100vh;
+  padding: 32px 24px 64px;
+  background: var(--zl-canvas);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  letter-spacing: -0.005em;
+}
+
+.owl-lab-head { position: relative; max-width: 720px; margin: 0 auto 28px; text-align: center; }
+.owl-lab-head h1 { margin: 0 0 8px; font-size: var(--zl-fs-display); font-weight: 600; letter-spacing: -0.01em; }
+.owl-lab-head p { margin: 0; line-height: 1.6; color: var(--zl-t3); }
+
+.owl-lab-ctl { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 0 auto 20px; max-width: 880px; }
+.owl-lab-seg { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 2px; padding: 3px; border-radius: var(--zl-r-md); background: var(--zl-sheet); box-shadow: var(--zl-rim); }
+.owl-lab-opt {
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t3);
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
+}
+.owl-lab-opt:hover { color: var(--zl-t1); }
+.owl-lab-opt.is-on { background: var(--zl-control); color: var(--zl-t1); box-shadow: var(--zl-rim); }
+.owl-lab-note { margin: 0; max-width: 680px; text-align: center; font-size: var(--zl-fs-meta); line-height: 1.55; color: var(--zl-t4); }
+
+.owl-stage { position: relative; display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start; justify-content: center; margin-top: 8px; }
+.owl-density-label { margin-bottom: 10px; font-size: var(--zl-fs-meta); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--zl-t4); }
+.owl-hint { margin: 12px 0 0; max-width: 390px; font-size: var(--zl-fs-meta); line-height: 1.55; color: var(--zl-t4); }
+.owl-desk-wrap .owl-hint { max-width: 620px; }
+
+.owl-phone,
+.owl-desk {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim-2), 0 30px 70px rgba(0, 0, 0, 0.5);
+}
+.owl-phone { width: 390px; height: 780px; display: flex; flex-direction: column; isolation: isolate; }
+.owl-desk { display: flex; width: 1180px; height: 780px; }
+
+.owl-screen { display: flex; flex-direction: column; height: 100%; background: var(--zl-sheet); }
+.owl-screen .ow-owners { flex: 1; min-height: 0; }
+
+/* Production `.mconv` is a 100dvh column; inside the frame it fills the frame.
+   The only other adaptation is the stream's top padding: the lab frame has no
+   notch, so it does not need the iOS safe-area room the real screen keeps. */
+.owl-mconv.mconv { height: 100%; }
+.owl-mconv .zl-transcript { padding-top: 58px; }
+
+/* The phone's dossier: MobileSheet's geometry (bottom-anchored, scrim over the
+   whole surface, 88% ceiling), drawn statically here because the lab has no
+   gesture to open it and an animation would photograph mid-flight. */
+.owl-scrim { position: absolute; inset: 0; z-index: 8; background: rgba(17, 17, 27, 0.5); }
+.owl-msheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  max-height: 88%;
+  padding-top: 6px;
+  border-radius: var(--zl-r-lg) var(--zl-r-lg) 0 0;
+  background: var(--zl-sheet);
+  box-shadow: inset 0 1px 0 var(--zl-line-2), 0 -16px 48px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.owl-msheet .ow-panel { flex: 1; min-height: 0; background: transparent; }
+.owl-grab { display: block; width: 36px; height: 4px; margin: 4px auto 2px; border-radius: 2px; background: var(--zl-line-2); }
+
+/* The chip's row in a child, under the capsules. */
+.owl-chip-row {
+  position: absolute;
+  top: calc(14px + 44px + 8px);
+  left: 12px;
+  z-index: 4;
+}
+
+/* ── The sidebar chrome the lab draws ──────────────────────────────────────
+
+   The column in these frames is production's own: `zl-side-body`, with the
+   head, foot and list rules of layout/Sidebar/Sidebar.css. What the lab adds
+   is only what production does not have yet — the third stop of the mode
+   control — plus the scaffolding that lets production's <Sidebar/> supply the
+   LIST without also supplying a second head and a second foot. */
+
+.owl-chrome { display: flex; flex-direction: column; min-height: 0; flex: 1; background: transparent; box-shadow: none; }
+.owl-chrome .ow-owners { flex: 1; min-height: 0; }
+
+/* The embedded production sidebar contributes its list and nothing else: the
+   head and the foot around it are the ones this lab is drawing. */
+.owl-embed { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.owl-embed .zl-side-body { flex: 1; min-height: 0; background: transparent; box-shadow: none; }
+.owl-embed .zl-side-head,
+.owl-embed .zl-side-foot { display: none; }
+
+/* Three stops instead of two. Production's pill travels 28px per step on the
+   desktop and 44 on the phone (Sidebar.css `.zl-view::before`); the third
+   option only needs the third offset. */
+.owl-view.is-recent::before { transform: translateX(0); }
+.owl-view.is-project::before { transform: translateX(28px); }
+.owl-view.is-owners::before { transform: translateX(56px); }
+.zl-side-body.is-phone .owl-view.is-project::before { transform: translateX(44px); }
+.zl-side-body.is-phone .owl-view.is-owners::before { transform: translateX(88px); }
+
+/* ── The phone's drawer ────────────────────────────────────────────────────
+   The shipped chassis (SessionDrawer.css `.sdrawer-veil` / `.sdrawer`), drawn
+   open and at rest: the lab has no gesture, and an animation photographs
+   mid-flight. It anchors to the phone frame, not the window. */
+.owl-phone .sdrawer-veil { z-index: 20; }
+.owl-phone .sdrawer { padding-bottom: 0; }
+
+/* ── The desktop frame ─────────────────────────────────────────────────── */
+
+.owl-desk-side {
+  width: 272px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--zl-sheet);
+  box-shadow: inset -1px 0 0 var(--zl-line);
+}
+.owl-desk-side .owl-chrome { flex: 1; min-height: 0; }
+
+.owl-desk-main { position: relative; flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--base); }
+.owl-desk-stream { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.owl-desk-stream .zl-transcript { padding-top: 12px; }
+
+/* The third zone, docked — the geometry DesktopShell gives the dossier at
+   >=1456px (DesktopShell.css: --dossier-width). */
+.owl-desk-dossier {
+  width: 340px;
+  flex: none;
+  min-height: 0;
+  box-shadow: inset 1px 0 0 var(--zl-line-2);
+}
+
+/* ── The variant ───────────────────────────────────────────────────────── */
+
+.owl-variant { max-width: 720px; margin: 56px auto 0; }
+.owl-variant-frame {
+  width: 340px;
+  height: 300px;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim-2), 0 20px 50px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.owl-prows { display: flex; flex-direction: column; margin: 8px 4px 0; border-radius: var(--zl-r-md); background: var(--zl-raised); box-shadow: var(--zl-rim); overflow: hidden; }
+.owl-prow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.owl-prow + .owl-prow { box-shadow: inset 0 1px 0 var(--zl-line); }
+.owl-prow-t { flex: none; font-weight: 500; color: var(--zl-t1); }
+.owl-prow-v { flex: 1; min-width: 0; text-align: right; color: var(--zl-t4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.owl-prow-v.tone-yellow { color: var(--zl-yellow); }
+.owl-prow-v.tone-mauve { color: var(--zl-accent); }
+
+/* ── Notes ─────────────────────────────────────────────────────────────── */
+
+.owl-notes { max-width: 760px; margin: 56px auto 0; }
+.owl-notes h2 { margin: 0 0 16px; font-size: var(--zl-fs-title); font-weight: 600; letter-spacing: -0.01em; }
+.owl-notes dl { margin: 0; }
+.owl-notes dt { margin: 20px 0 6px; font-weight: 600; color: var(--zl-t1); }
+.owl-notes dd { margin: 0; line-height: 1.6; color: var(--zl-t3); }
+.owl-notes em { font-style: italic; color: var(--zl-t2); }
+
+.owl-data {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--zl-t4);
+}
+
+/* ?shots=1 — the frames alone, for the capture script. */
+.owl.is-shots { padding: 0; }
+.owl.is-shots .owl-stage { gap: 0; margin: 0; justify-content: flex-start; align-items: flex-start; }
+.owl.is-shots .owl-density-label, .owl.is-shots .owl-hint { display: none; }
+.owl.is-shots .owl-phone, .owl.is-shots .owl-desk { border-radius: 0; box-shadow: none; }

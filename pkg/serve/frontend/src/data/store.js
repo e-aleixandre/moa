@@ -3,7 +3,7 @@
 import {
   initIds, allTileIds, allSessionIds, tileCount,
 } from './tileTree.js';
-import { pruneDrawerCollapsed } from './util/project-sessions.js';
+import { pruneDrawerCollapsed, isOrdinarySession, SIDEBAR_MODES } from './util/project-sessions.js';
 import { ARTIFACTS_CLOSED } from './artifacts-model.js';
 
 const STORAGE_KEY = 'moa-next-ui-state';
@@ -15,6 +15,28 @@ export const SESSION_PANEL_CLOSED = Object.freeze({
   ownerSessionId: null,
   open: false,
   page: 'root',
+});
+
+// The project owners' slice at rest (see data/owners.js). It lives here for
+// the same reason the session panel's does: the initial state must not import
+// the controller that reads this store back.
+export const OWNERS_INITIAL = Object.freeze({
+  list: [],
+  loaded: false,
+  error: null,
+  retrying: false,
+  // The owner whose dossier is open, and its book. The book is fetched per
+  // owner and dropped when another one is opened: it is a listing on disk, and
+  // a stale one would offer a Save against content nobody is looking at.
+  bookOwnerId: null,
+  bookStatus: 'idle', // 'idle' | 'loading' | 'ready' | 'error'
+  bookFiles: [],
+  bookError: null,
+  // The file open inside the Book tab, with its content once read.
+  openPath: null,
+  openBody: '',
+  openEditable: false,
+  openStatus: 'idle',
 });
 
 // The share picker's closed slice (see data/share.js). Same reason it lives
@@ -40,6 +62,7 @@ function loadPersistedState() {
         focusedTile: typeof value.focusedTile === 'number' ? value.focusedTile : undefined,
         soundEnabled: typeof value.soundEnabled === 'boolean' ? value.soundEnabled : undefined,
         groupByProject: typeof value.groupByProject === 'boolean' ? value.groupByProject : undefined,
+        sidebarMode: SIDEBAR_MODES.includes(value.sidebarMode) ? value.sidebarMode : undefined,
         drawerCollapsed: value.drawerCollapsed && typeof value.drawerCollapsed === 'object' && !Array.isArray(value.drawerCollapsed)
           ? Object.fromEntries(Object.entries(value.drawerCollapsed).filter(([, collapsed]) => typeof collapsed === 'boolean'))
           : undefined,
@@ -56,6 +79,7 @@ function persistState(s) {
       focusedTile: s.focusedTile,
       soundEnabled: s.soundEnabled,
       groupByProject: s.groupByProject,
+      sidebarMode: s.sidebarMode,
       drawerCollapsed: s.drawerCollapsed,
     }));
   } catch (_) { /* ignore */ }
@@ -101,6 +125,12 @@ let state = {
   // groupByProject before the UI settled on "folder"; the key is persisted, so
   // renaming it would silently drop the preference of anyone who set it.
   groupByProject: persisted.groupByProject || false,
+  // sidebarMode — which of the three lists the sidebar shows: 'recent',
+  // 'project' or 'owners'. It is a way of LOOKING at your work, so it is
+  // chosen and kept, and it is persisted beside groupByProject rather than
+  // replacing it: the boolean is what the rest of the list code reads, and
+  // dropping it would silently reset the preference of anyone who set it.
+  sidebarMode: persisted.sidebarMode || (persisted.groupByProject ? 'project' : 'recent'),
   drawerCollapsed: persisted.drawerCollapsed || {},
 
   isMobile: false,
@@ -143,6 +173,10 @@ let state = {
   // ('search' | 'create') when it opens.
   paletteOpen: false,
   paletteStep: 'search',
+
+  // The project owners (see data/owners.js). Server state like `events`:
+  // never persisted, so a stale roster can never offer an owner that is gone.
+  owners: OWNERS_INITIAL,
 
   // Mobile session drawer. In the store for the same reason the palette is:
   // the empty state and the command palette both need to send the user into
@@ -207,6 +241,7 @@ export function setState(patch) {
     state.focusedTile !== previous.focusedTile ||
     state.soundEnabled !== previous.soundEnabled ||
     state.groupByProject !== previous.groupByProject ||
+    state.sidebarMode !== previous.sidebarMode ||
     state.drawerCollapsed !== previous.drawerCollapsed
   ) {
     persistState(state);
@@ -238,6 +273,7 @@ export function isSessionInTile(s, sessionId) {
 export function sessionsByGroup(s) {
   const groups = {};
   for (const sess of Object.values(s.sessions)) {
+    if (!isOrdinarySession(sess)) continue;
     const key = sess.cwd || 'Unknown';
     if (!groups[key]) groups[key] = [];
     groups[key].push(sess);
@@ -250,7 +286,7 @@ export function sessionsByGroup(s) {
 
 export function attentionCount(s) {
   return Object.values(s.sessions).filter(
-    sess => sess.state === 'permission' || sess.state === 'error'
+    sess => isOrdinarySession(sess) && (sess.state === 'permission' || sess.state === 'error')
   ).length;
 }
 

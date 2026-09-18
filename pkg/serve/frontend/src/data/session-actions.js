@@ -106,6 +106,17 @@ function normalizeSessionInfo(info, existing, visible) {
     // sessions (see the Automation API's origin metadata). No WS event
     // tracks it, so the poll is the only source.
     origin: info.origin || '',
+    // kind classifies a session that is not an ordinary conversation
+    // ("owner"). The roster is fetched WITH the owner conversations — they
+    // must be openable and streamable like any session — and every list
+    // projection filters on this instead (see util/project-sessions.js
+    // `isOrdinarySession`). Server-owned; the poll is its only source.
+    kind: info.kind || '',
+    // ownerId / ownerName — the project owner this session reports to, when
+    // its codebase has one. It is what the header's Owner chip says and the
+    // door it opens; a client cannot derive it (it needs core.CodebaseKey).
+    ownerId: info.owner_id || '',
+    ownerName: info.owner_name || '',
     // MCP health summary (poll-driven server truth): {total, ready,
     // unhealthy} or null when the session has no MCP servers. Not WS-owned —
     // it reflects the manager's live state, refreshed on each poll.
@@ -228,7 +239,12 @@ function normalizeSessionInfo(info, existing, visible) {
 export async function loadSessions() {
   const request = ++nextRosterRequest;
   try {
-    const list = await api('GET', '/api/sessions');
+    // WITH the owners: an owner's conversation is a session you open, stream
+    // and read like any other, so the store has to hold it. What no list shows
+    // is an owner among the ordinary sessions, and that is a filter on `kind`
+    // at each projection rather than a hole in the roster — a roster missing a
+    // session the user is reading would have it vanish on the next poll.
+    const list = await api('GET', '/api/sessions?include=owners');
     // Polls are allowed to overlap. Once a newer response has updated the
     // roster, an older snapshot is stale in every field, including the
     // process-scoped attention namespace.

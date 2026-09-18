@@ -3,6 +3,7 @@
 import { acknowledgeVisibleAttentionThrough, syncConnections } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import { armReadAnchor, __resetReadAnchorsForTests } from './stream-read-anchor.js';
+import { isOrdinarySession } from './util/project-sessions.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
   splitTileNode, removeTileNode, setTileSession, swapSessions,
@@ -155,7 +156,7 @@ export function autoFillTiles() {
   const state = store.get();
   const assigned = new Set(allSessionIds(state.tileTree));
   const available = Object.values(state.sessions)
-    .filter(s => s.state !== 'saved' && !assigned.has(s.id))
+    .filter(s => isOrdinarySession(s) && s.state !== 'saved' && !assigned.has(s.id))
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
 
   if (available.length === 0) return;
@@ -180,7 +181,7 @@ export function autoSelectMobile() {
   const state = store.get();
   if (state.activeSession && state.sessions[state.activeSession]) return;
   const active = Object.values(state.sessions)
-    .filter(s => s.state !== 'saved')
+    .filter(s => isOrdinarySession(s) && s.state !== 'saved')
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
   if (active.length > 0) {
     setState({ activeSession: active[0].id });

@@ -55,10 +55,19 @@ export function SessionDrawer({
   onCloseSession,
   onReopenSession,
   onDeleteSession,
-  groupByProject = false,
+  mode = "recent",
+  onMode,
   drawerCollapsed = {},
-  onGroupByProject,
   onToggleProject,
+  // Owners mode. The drawer mounts the same <Sidebar/> as the desktop, so the
+  // third list arrives here with the same control and the same rows.
+  owners = [],
+  ownersHealth,
+  activeOwnerId = null,
+  onOpenOwner,
+  onOpenOwnerChild,
+  onCreateOwner,
+  onRetryOwners,
   panelRef: externalPanelRef,
 }) {
   const panelRef = useRef(null);
@@ -206,8 +215,15 @@ export function SessionDrawer({
             onCloseSession={onCloseSession}
             onReopenSession={onReopenSession}
             onDeleteSession={onDeleteSession}
-            groupByProject={groupByProject}
-            onGroupByProject={onGroupByProject}
+            mode={mode}
+            onMode={onMode}
+            owners={owners}
+            ownersHealth={ownersHealth}
+            activeOwnerId={activeOwnerId}
+            onOpenOwner={onOpenOwner}
+            onOpenOwnerChild={onOpenOwnerChild}
+            onCreateOwner={onCreateOwner}
+            onRetryOwners={onRetryOwners}
             collapsedProjects={drawerCollapsed}
             onToggleProject={onToggleProject}
             inboxCount={inboxCount}

@@ -1,0 +1,665 @@
+/* Owners — the project owners surface.
+
+   CANDIDATE sheet, catalogue-only for now, written so it can move to
+   src/components beside its JSX with no edit: it declares no lab chrome, uses
+   only the product's `--zl-*` ladder (tokens.css:260-330) and the same
+   geometry the inbox settled on, and every class is prefixed `ow-`.
+
+   Where a rule is the inbox's, it is deliberately the same number rather than
+   a near-miss: the two doors of the sidebar have to look like siblings. */
+
+.ow-owners {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  letter-spacing: -0.005em;
+}
+
+.ow-owners :is(button, input, textarea, [tabindex]):focus-visible,
+.ow-panel :is(button, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
+}
+
+/* ── Head ──────────────────────────────────────────────────────────────── */
+
+.ow-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 60px;
+  padding: 12px 12px 4px 8px;
+}
+.ow-back,
+.ow-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-t2);
+  cursor: pointer;
+}
+.ow-back svg, .ow-x svg { width: 16px; height: 16px; }
+.ow-back:hover, .ow-x:hover { background: var(--zl-hi); color: var(--zl-t1); }
+.ow-x { margin-left: auto; background: var(--zl-raised); box-shadow: var(--zl-rim); }
+
+.ow-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--zl-fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ow-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--zl-line-2) transparent;
+}
+.ow-body.is-sub { animation: ow-push var(--motion-fast) var(--motion-ease); }
+@keyframes ow-push { from { opacity: 0; transform: translateX(12px); } }
+
+/* ── Group headings — the inbox's, so a section reads the same everywhere ── */
+
+.ow-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 12px 4px;
+  min-height: 32px;
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--zl-t4);
+}
+.ow-group:first-child { margin-top: 0; }
+.ow-group-n { letter-spacing: 0; color: var(--zl-t4); }
+.ow-group.is-attn { color: var(--zl-t1); }
+.ow-pill {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--zl-yellow);
+  color: var(--zl-canvas);
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  letter-spacing: 0;
+}
+
+.ow-quiet { margin: 4px 12px 8px; line-height: 20px; color: var(--zl-t4); }
+
+/* ── The owner row ─────────────────────────────────────────────────────── */
+
+.ow-list { padding: 0 8px 16px; }
+
+/* In the sidebar's Owners MODE the body starts where the list of sessions
+   starts: the head above it is the sidebar's own, shared by all three modes,
+   so this adds no title and no top furniture of its own. */
+.ow-owners.is-mode .ow-body { padding-top: 4px; }
+
+.ow-row-slot { display: block; }
+.ow-row-slot + .ow-row-slot { margin-top: 2px; }
+
+.ow-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-hover) ease;
+}
+.ow-row + .ow-row { margin-top: 2px; }
+@media (hover: hover) {
+  .ow-row:hover { background: var(--zl-hi); }
+}
+/* The selected owner, drawn exactly as the current session row is
+   (SessionRow.css `.zl-row.is-current`): a raised plane and a heavier name.
+   No left bar — that gesture belongs to "you said this" (CRITERIO §1) — and
+   no accent, which is for actions rather than for where you are. */
+.ow-row.is-current { background: var(--zl-raised); box-shadow: var(--zl-rim); }
+@media (hover: hover) {
+  .ow-row.is-current:hover { background: var(--zl-control); }
+}
+.ow-row.is-current .ow-row-name { color: var(--zl-t1); font-weight: 600; }
+.ow-row.is-current .ow-row-path { color: var(--zl-t3); }
+
+/* Triage variant: the stopped children under their owner. Indented to the
+   monogram's right edge so they read as belonging to the row above, and
+   quieter than it — the owner is what this list is of. */
+.ow-row-kids { margin: 2px 0 6px 40px; }
+.ow-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ow-row-l1 { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+/* The owner's NAME is the title of the row: one owner per project, so the
+   project below it is the address, not the identity. Title size, unlike a
+   session row, because this list is two or three items long and each one is a
+   standing thing rather than a piece of work. */
+.ow-row-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--zl-fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--zl-t1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ow-row-meta { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.ow-row-path { color: var(--zl-t4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ow-row-brief {
+  font-size: var(--zl-fs-meta);
+  line-height: 18px;
+  color: var(--zl-t3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Coloured by what the line SAYS, exactly as a session row's reason line is
+   (SessionRow.css `.zl-row-brief.tone-*`). Yellow only when something has
+   stopped; mauve for an unread result; grey otherwise. */
+.ow-row-brief.tone-yellow { color: var(--zl-yellow); }
+.ow-row-brief.tone-mauve { color: var(--zl-accent); }
+.ow-row-brief.tone-neutral { color: var(--zl-t3); }
+
+.ow-go { flex: none; width: 12px; height: 12px; margin-top: 12px; color: var(--zl-t4); }
+
+.ow-mono {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-top: 2px;
+  border-radius: var(--zl-r-md);
+  background: hsl(var(--h) 50% 60% / 0.16);
+  box-shadow: 0 0 0 1px hsl(var(--h) 50% 65% / 0.18);
+  color: hsl(var(--h) 65% 78%);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: lowercase;
+}
+.ow-mono.is-sm { width: 26px; height: 26px; margin-top: 0; border-radius: var(--zl-r-sm); font-size: var(--zl-fs-meta); }
+
+.ow-dot { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+.ow-dot.is-running { background: var(--blue); box-shadow: 0 0 0 3px rgba(137, 180, 250, 0.18); }
+.ow-dot.is-permission { background: var(--zl-yellow); box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22); }
+.ow-dot.is-error { background: var(--zl-red); box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.2); }
+/* Idle and saved are not drawn, which is the rule the session dot already
+   follows: a quiet thing does not need a mark to say it is quiet. */
+.ow-dot.is-idle, .ow-dot.is-saved { display: none; }
+
+/* New owner — a row at the end of the list, in the list's own shape. */
+.ow-new {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  margin-top: 8px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-t2);
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+.ow-new svg { width: 16px; height: 16px; }
+@media (hover: hover) {
+  .ow-new:hover { background: var(--zl-hi); color: var(--zl-t1); }
+}
+
+/* ── States that are not a list ────────────────────────────────────────── */
+
+.ow-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 4px 8px 0;
+  padding: 16px 12px;
+  border-radius: var(--zl-r-md);
+  line-height: 1.5;
+  color: var(--zl-t3);
+}
+.ow-state.is-error { background: var(--zl-raised); box-shadow: var(--zl-rim); }
+.ow-state-t {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--zl-fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--zl-t1);
+}
+.ow-state.is-error .ow-state-t { color: var(--zl-red); }
+.ow-state-d, .ow-state-p { color: var(--zl-t3); }
+/* The empty state's action is the one exception to "the accent goes to what
+   the screen is for": with no list to look at, creating IS what it is for.
+   Full width so it reads as a decision rather than a link. */
+.ow-state .ow-cta { margin-top: 6px; width: 100%; }
+
+.ow-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t1);
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+.ow-btn:hover:not(:disabled) { background: var(--zl-raised); box-shadow: var(--zl-rim-2); }
+.ow-btn:disabled { cursor: default; color: var(--zl-t4); background: transparent; box-shadow: none; }
+.ow-btn.is-quiet { background: transparent; box-shadow: none; color: var(--zl-t2); }
+.ow-btn.is-quiet:hover:not(:disabled) { background: var(--zl-hi); color: var(--zl-t1); }
+
+.ow-ghost { display: flex; align-items: flex-start; gap: 12px; min-height: 72px; padding: 10px 12px; }
+.ow-ghost-mono { flex: none; width: 36px; height: 36px; margin-top: 2px; border-radius: var(--zl-r-md); background: var(--zl-raised); }
+.ow-ghost-main { flex: 1; display: flex; flex-direction: column; gap: 7px; padding-top: 4px; }
+.ow-ghost-bar { display: block; height: 10px; border-radius: var(--zl-r-sm); background: var(--zl-raised); }
+.ow-ghost-bar.is-t { height: 14px; }
+/* The breathing tempo is the token, not a number copied from the inbox's
+   ghosts (InboxView.css `zi-breathe`, 1.6s): that one is part of the motion
+   debt the ratchet exists to shrink, and a new file must not add to it. The
+   two ghosts breathe together — a stagger of tens of milliseconds is invisible
+   against a two-second breath, so it was only a number. */
+.ow-ghost { animation: ow-breathe var(--breath-running) ease-in-out infinite; }
+@keyframes ow-breathe { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) {
+  .ow-ghost { animation: none; }
+  .ow-body.is-sub { animation: none; }
+}
+
+/* ── New owner form ────────────────────────────────────────────────────── */
+
+.ow-form { display: flex; flex-direction: column; gap: 18px; padding: 4px 12px 20px; }
+.ow-field { display: flex; flex-direction: column; gap: 6px; }
+.ow-label {
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--zl-t4);
+}
+.ow-hint { margin: 0; font-size: var(--zl-fs-meta); line-height: 1.5; color: var(--zl-t4); }
+
+.ow-browse {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  overflow: hidden;
+}
+.ow-browse-head { display: flex; align-items: center; gap: 8px; padding: 8px; }
+.ow-browse-head .field { flex: 1; min-width: 0; }
+.ow-up {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-control);
+  color: var(--zl-t2);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-body);
+  cursor: pointer;
+}
+.ow-up:hover { color: var(--zl-t1); }
+.ow-browse-list { max-height: 188px; overflow-y: auto; padding: 0 4px 6px; scrollbar-width: thin; }
+.ow-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t2);
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ow-entry svg { flex: none; width: 15px; height: 15px; color: var(--zl-t4); }
+.ow-entry-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (hover: hover) {
+  .ow-entry:hover { background: var(--zl-hi); color: var(--zl-t1); }
+}
+
+.ow-picks { display: flex; flex-direction: column; border-radius: var(--zl-r-md); background: var(--zl-raised); box-shadow: var(--zl-rim); overflow: hidden; }
+.ow-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ow-pick + .ow-pick { box-shadow: inset 0 1px 0 var(--zl-line); }
+.ow-pick.is-on { background: var(--zl-control); }
+.ow-pick.is-on .ow-pick-t { font-weight: 600; }
+.ow-pick-t { flex: none; color: var(--zl-t1); }
+.ow-pick-s { flex: 1; min-width: 0; text-align: right; color: var(--zl-t4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (hover: hover) {
+  .ow-pick:hover { background: var(--zl-control); }
+}
+
+.ow-form .ow-seg { background: var(--zl-canvas); border-color: var(--zl-line); }
+.ow-form .ow-seg .segmented-item { min-height: 40px; font-size: var(--zl-fs-body); font-family: var(--font); letter-spacing: inherit; }
+
+.ow-form-foot {
+  /* Pinned to the bottom of the scrolling surface. Measured in the lab: the
+     form is five sections tall in a 272px column, so a foot that scrolled put
+     the only action of the screen below the fold in BOTH densities — you had
+     to scroll past the model list to learn there was a button at all. */
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px -12px -20px;
+  padding: 12px;
+  background: var(--zl-sheet);
+  box-shadow: 0 -1px 0 var(--zl-line), 0 -14px 22px -14px rgba(0, 0, 0, 0.7);
+}
+.ow-form-foot .ow-cta { width: 100%; }
+.ow-form-pad { height: 24px; }
+
+/* ── The owner's panel ─────────────────────────────────────────────────── */
+
+/* The owner's dossier wears the session dossier's chassis (`zl-side-right`,
+   SessionPanel.css): position, width, slide and host fill are already decided
+   there, and a second set of numbers for the same zone is how two drawers end
+   up half a pixel apart. This block is only what is INSIDE it. */
+.ow-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  letter-spacing: -0.005em;
+}
+.ow-panel-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 12px 8px 20px;
+}
+.ow-panel-head:has(.ow-back) { padding-left: 12px; gap: 6px; }
+.ow-panel-eyebrow {
+  flex: 1;
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--zl-t4);
+}
+.ow-panel-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--zl-fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Two tabs, not two pushed pages: an owner has exactly two things to show and
+   a root menu of two rows would be a list whose only job is to be left. */
+.ow-tabs {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  margin: 4px 12px 8px;
+  padding: 3px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
+}
+.ow-tab {
+  flex: 1;
+  height: 38px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t3);
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+.ow-tab:hover { color: var(--zl-t1); }
+.ow-tab.is-on { background: var(--zl-control); color: var(--zl-t1); box-shadow: var(--zl-rim); }
+
+.ow-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--zl-line-2) transparent;
+  animation: ow-fade var(--motion-fast) var(--motion-ease);
+}
+@keyframes ow-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ow-panel-body { animation: none; } }
+
+.ow-page { padding: 0 8px 20px; }
+.ow-page-intro { margin: 0 12px 12px; line-height: 1.55; color: var(--zl-t3); }
+
+.ow-sum { display: flex; flex-direction: column; gap: 4px; margin: 0 12px 4px; }
+.ow-sum-t { font-size: var(--zl-fs-title); font-weight: 600; letter-spacing: -0.01em; color: var(--zl-t1); }
+.ow-sum-t.tone-yellow { color: var(--zl-yellow); }
+.ow-sum-t.tone-mauve { color: var(--zl-accent); }
+.ow-sum-d { font-size: var(--zl-fs-meta); line-height: 1.5; color: var(--zl-t4); }
+
+.ow-cgroup + .ow-cgroup { margin-top: 4px; }
+.ow-fgroup + .ow-fgroup { margin-top: 4px; }
+
+/* ── The book ──────────────────────────────────────────────────────────── */
+
+.ow-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ow-file > svg { flex: none; width: 16px; height: 16px; color: var(--zl-t4); }
+.ow-file + .ow-file { margin-top: 2px; }
+@media (hover: hover) {
+  .ow-file:hover { background: var(--zl-hi); }
+}
+.ow-file-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ow-file-t { font-weight: 500; color: var(--zl-t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ow-file-d { font-size: var(--zl-fs-meta); line-height: 16px; color: var(--zl-t4); }
+/* The index is the one file a child ever sees, so it is the one row that is
+   raised out of the list rather than another line in it. */
+.ow-file.is-index {
+  min-height: 60px;
+  margin-bottom: 6px;
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+}
+.ow-file.is-index .ow-file-t { font-size: var(--zl-fs-title); font-weight: 600; letter-spacing: -0.01em; }
+
+.ow-page.is-file { display: flex; flex-direction: column; min-height: 100%; }
+.ow-file-head { display: flex; align-items: center; gap: 10px; padding: 0 12px 10px; }
+.ow-file-path { flex: 1; min-width: 0; color: var(--zl-t4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ow-file-ro {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+}
+.ow-file-ro.is-edit { color: var(--zl-t2); }
+
+.ow-doc {
+  margin: 0 8px;
+  padding: 12px 14px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-family: var(--mono);
+  /* Read-only prose in the book is still read, at length: 14px, not the 12px
+     of a data label. */
+  font-size: var(--zl-fs-body);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Editable: 16px floor, no exceptions — below it iOS Safari zooms on focus
+   (CRITERIO §5). */
+.ow-edit {
+  flex: 1;
+  min-height: 260px;
+  margin: 0 8px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t1);
+  font-family: var(--mono);
+  font-size: var(--text-input);
+  line-height: 1.6;
+  resize: none;
+}
+.ow-edit:focus { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+.ow-edit-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 8px 0; }
+
+/* ── The chip in a child ───────────────────────────────────────────────── */
+
+.ow-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t3);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+@media (hover: hover) {
+  .ow-chip:hover { background: var(--zl-control); color: var(--zl-t1); }
+}
+.ow-chip-k { color: var(--zl-t4); }
+.ow-chip-sep { color: var(--zl-t4); }
+.ow-chip-v { font-weight: 600; color: var(--zl-t2); }
+.ow-chip:hover .ow-chip-v { color: var(--zl-t1); }
+/* On the phone the chip rides in the header capsule row, where 26px would be
+   a target nobody hits: the capsule's own 44px is the floor. */
+.ow-chip.is-compact { height: 34px; padding: 0 12px; }
+
+/* ── Phone sizing: everything the thumb reaches is 44 or more ──────────── */
+
+.ow-owners.is-phone .ow-back, .ow-owners.is-phone .ow-x { width: 44px; height: 44px; }
+.ow-owners.is-phone .ow-head { min-height: 64px; padding-top: calc(var(--shell-top) + 14px); }
+.ow-owners.is-phone .ow-row { min-height: 84px; }
+.ow-owners.is-phone .ow-new { min-height: 52px; }
+.ow-owners.is-phone .ow-btn { height: 44px; }
+.ow-owners.is-phone .ow-entry { min-height: 48px; }
+.ow-owners.is-phone .ow-pick { min-height: 56px; }
+.ow-owners.is-phone .ow-up { width: 44px; height: 44px; }
+.ow-owners.is-phone .ow-browse-list { max-height: 220px; }
+.ow-owners.is-phone .ow-form .ow-seg .segmented-item { min-height: 44px; }
+
+.ow-panel.is-sheet .ow-back, .ow-panel.is-sheet .ow-x { width: 44px; height: 44px; }
+.ow-panel.is-sheet .ow-tab { height: 44px; }
+.ow-panel.is-sheet .ow-file { min-height: 56px; }
+.ow-panel.is-sheet .ow-edit { min-height: 200px; }
+.ow-panel.is-sheet .ow-btn { height: 44px; }
+
+.ow-data {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.ow-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

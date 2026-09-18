@@ -1,3 +1,4 @@
+import { UserRound } from "lucide-preact";
 import { useMemo, useState } from "preact/hooks";
 import { useFlip } from "../../hooks/useFlip.js";
 import { InboxView } from "../../components/InboxView/InboxView.jsx";
@@ -14,6 +15,7 @@ import {
   visibleProjectSessions,
 } from "../../data/util/project-sessions.js";
 import { projectName } from "../../data/util/format.js";
+import { OwnersView } from "../../components/Owners/Owners.jsx";
 import "./Sidebar.css";
 
 // Sidebar — the other sessions. Markup and CSS are the catalogue's
@@ -37,12 +39,25 @@ import "./Sidebar.css";
 //   3. new  — one labelled action, at the bottom, where the thumb is
 //   4. foot — the inbox, the version and settings: the things about the APP
 
+// The three lists the column can show. Recent and By project are two
+// orderings of the SESSIONS; Owners is the third list — the standing agent of
+// each project (docs/owners.md). A mode is chosen and kept, not somewhere you
+// go: that is why Owners is here and not a door beside the Inbox in the foot,
+// and why nothing else in the column changes with it.
 const ORDERS = [
-  ["recent", "Recent", "Sort by recent"],
-  ["project", "By project", "Group by project"],
+  ["recent", "Recent", "Sort by recent", ByRecentIcon],
+  ["project", "By project", "Group by project", ByProjectIcon],
+  ["owners", "Owners", "Show the project owners", OwnersIcon],
 ];
 
 const ATTENTION_RANK = { permission: 0, error: 1, unseen: 2 };
+
+// OWNER_TRIAGE — whether an owner row also lists the children that have
+// STOPPED, at most three. It buys triage without opening a dossier, and it
+// costs the list its evenness by printing rows that also live in the other two
+// modes. The owner has not decided; it is on by default and this constant is
+// the whole switch, so turning it off is one word.
+export const OWNER_TRIAGE = true;
 
 function PlusIcon() {
   return (
@@ -103,6 +118,13 @@ function ByProjectIcon() {
   );
 }
 
+// The Owners glyph, from the icon library the project already depends on
+// (lucide-preact). Same 16px box and weight as its two hand-drawn siblings, so
+// the three survive as a set at 14px with no labels.
+function OwnersIcon() {
+  return <UserRound size={16} aria-hidden="true" />;
+}
+
 function ChevronIcon() {
   return (
     <svg class="zl-proj-chev" viewBox="0 0 16 16" aria-hidden="true">
@@ -159,8 +181,11 @@ export function Sidebar({
   onCloseSession,
   onReopenSession,
   onDeleteSession,
-  groupByProject = false,
-  onGroupByProject,
+  // mode — which of the three lists this column shows: "recent", "project" or
+  // "owners". groupByProject is derived from it and kept as a prop because the
+  // grouping code and the persisted preference both still speak it.
+  mode = "recent",
+  onMode,
   collapsedProjects = {},
   onToggleProject,
   // wake-on-event: on the desktop the inbox is the sidebar's OTHER list and
@@ -178,8 +203,22 @@ export function Sidebar({
   onNewSessionForEvent,
   onDismissEvent,
   onDismissEventSource,
+  // Owners mode: the rows, the health of the last read, and the three actions
+  // the list offers. The column supplies the head and the foot in every mode,
+  // so OwnersView contributes only the body.
+  owners = [],
+  ownersHealth,
+  activeOwnerId = null,
+  ownerTriage = OWNER_TRIAGE,
+  onOpenOwner,
+  onOpenOwnerChild,
+  onCreateOwner,
+  onRetryOwners,
+  ownerDefaultDir = "",
 }) {
   const phone = density === "phone";
+  const groupByProject = mode === "project";
+  const ownersMode = mode === "owners";
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const [showAllSaved, setShowAllSaved] = useState(false);
   const hasMenu = !!(onCloseSession || onReopenSession || onDeleteSession);
@@ -301,29 +340,41 @@ export function Sidebar({
               <PlusIcon />
             </button>
           )}
-          <div class={`zl-view${groupByProject ? " is-project" : ""}`} role="radiogroup" aria-label="Session order">
-            {ORDERS.map(([id, label, hint]) => {
-              const on = (id === "project") === !!groupByProject;
-              return (
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={on}
-                  aria-label={hint}
-                  title={label}
-                  class={`zl-view-b${on ? " is-on" : ""}`}
-                  onClick={() => onGroupByProject?.(id === "project")}
-                  key={id}
-                >
-                  {id === "project" ? <ByProjectIcon /> : <ByRecentIcon />}
-                </button>
-              );
-            })}
+          <div class={`zl-view is-${mode}`} role="radiogroup" aria-label="Session order">
+            {ORDERS.map(([id, label, hint, Icon]) => (
+              <button
+                type="button"
+                role="radio"
+                aria-checked={id === mode}
+                aria-label={hint}
+                title={label}
+                class={`zl-view-b${id === mode ? " is-on" : ""}`}
+                onClick={() => onMode?.(id)}
+                key={id}
+              >
+                <Icon />
+              </button>
+            ))}
           </div>
         </div>
       )}
 
-      {inboxOpen ? (
+      {ownersMode && !inboxOpen ? (
+        <div class="zl-list is-owners">
+          <OwnersView
+            owners={owners}
+            health={ownersHealth}
+            variant={phone ? "sheet" : "column"}
+            activeId={activeOwnerId}
+            triage={ownerTriage}
+            defaultDir={ownerDefaultDir}
+            onOpen={onOpenOwner}
+            onOpenChild={onOpenOwnerChild}
+            onCreate={onCreateOwner}
+            onRetry={onRetryOwners}
+          />
+        </div>
+      ) : inboxOpen ? (
         <div class="zl-list is-inbox">
           <InboxView
             cards={inbox}

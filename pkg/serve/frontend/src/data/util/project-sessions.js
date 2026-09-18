@@ -2,6 +2,27 @@ import { projectKey, projectLabel, shortPath } from "./format.js";
 
 export const PROJECT_SAVED_PREVIEW_LIMIT = 5;
 
+// The three ways the sidebar arranges what it shows. Recent and By project are
+// two orderings of the sessions; Owners is the third list — the standing agent
+// of each project (docs/owners.md). A mode is chosen and kept, which is why it
+// is persisted, and it lives here rather than in a controller so the store can
+// validate a restored value without importing the module that reads it back.
+export const SIDEBAR_MODES = ["recent", "project", "owners"];
+
+// isOrdinarySession excludes a project owner's conversation from the lists of
+// SESSIONS. The roster holds it — it is opened, streamed and read like any
+// other session — but it is not work waiting for you, and an owner listed
+// among the sessions it is responsible for would be one of its own rows. It is
+// reached from the sidebar's Owners mode instead (docs/owners.md).
+export function isOrdinarySession(session) {
+  return (session?.kind || "") !== "owner";
+}
+
+// ordinarySessions is the filter every session list applies to the roster.
+export function ordinarySessions(sessions = []) {
+  return sessions.filter(isOrdinarySession);
+}
+
 const updated = (session) => session.updated || 0;
 const isSaved = (session) => session.state === "saved" || session.saved;
 const attention = (session) => session.state === "permission" ? "permission" : session.state === "error" ? "error" : null;

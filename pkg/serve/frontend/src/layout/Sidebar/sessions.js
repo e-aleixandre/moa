@@ -1,6 +1,8 @@
 import { focusedSessionId } from "../../data/selectors.js";
 import { sessionDisplayDotState, sessionTitle, shortPath } from "../../data/util/format.js";
-import { attentionKind } from "../../data/util/project-sessions.js";
+import { attentionKind, ordinarySessions } from "../../data/util/project-sessions.js";
+import { ownerRows } from "../../data/owners-model.js";
+import { ownersHealth, ownersSlice } from "../../data/owners.js";
 import { allTileIds, findTile } from "../../data/tileTree.js";
 import { inboxCards, inboxHealth, inboxHealthSig, inboxPendingCount, inboxSig } from "../../data/events.js"; // wake-on-event
 
@@ -78,7 +80,9 @@ function toSpineRow(s, extra = {}) {
 // spineSessions — open vs saved, newest first. Optional paneOf (session id →
 // "P1") is the grid's badge; conversation view omits it.
 export function spineSessions(sessions, paneOf) {
-  const all = Object.values(sessions || {});
+  // The owners' own conversations are in the roster but never in this list:
+  // they are reached from the sidebar's Owners mode.
+  const all = ordinarySessions(Object.values(sessions || {}));
   const active = all
     .filter((s) => s.state !== "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
@@ -100,6 +104,17 @@ export function paneBadges(tileTree) {
   return paneOf;
 }
 
+// activeOwnerIdOf — the owner whose own conversation is the one on screen.
+// Read from the session rather than stored: the pane is the single source of
+// "where you are", and a second field could disagree with it.
+export function activeOwnerIdOf(state) {
+  const id = state?.isMobile ? state.activeSession : focusedSessionId(state);
+  const sess = id ? state.sessions[id] : null;
+  if (!sess || (sess.kind || "") !== "owner") return null;
+  const own = (ownersSlice(state).list || []).find((o) => o.session_id === sess.id);
+  return own ? own.id : null;
+}
+
 export function focusedTileSessionId(state) {
   const t = findTile(state.tileTree, state.focusedTile);
   return t ? t.sessionId : null;
@@ -116,8 +131,20 @@ function spineListSig(list) {
   return (list || []).map(spineRowSig).join("\n");
 }
 
+function ownersSig(list) {
+  return (list || []).map((o) => [
+    o.id, o.name, o.session_state || "", (o.children || []).map((c) => c.id + c.state + (c.unseen ? 1 : 0)).join(","),
+  ].join("\0")).join("\n");
+}
+
 function desktopChromeEqual(a, b) {
   return a.activeId === b.activeId
+    && a.sidebarMode === b.sidebarMode
+    && a.activeOwnerId === b.activeOwnerId
+    && a.ownersHealth?.status === b.ownersHealth?.status
+    && a.ownersHealth?.error === b.ownersHealth?.error
+    && a.ownersHealth?.retrying === b.ownersHealth?.retrying
+    && ownersSig(a.owners) === ownersSig(b.owners)
     && a.groupByProject === b.groupByProject
     && a.drawerCollapsed === b.drawerCollapsed
     && a.soundEnabled === b.soundEnabled
@@ -151,6 +178,14 @@ export function selectDesktopChrome(state) {
     // would make the door and the list disagree.
     inboxPending: inboxPendingCount(inbox), // wake-on-event
     activeId: inGrid ? focusedTileSessionId(state) : focusedSessionId(state),
+    // The owners, joined with their children out of the roster this same
+    // snapshot holds: one projection, so the dossier and the list can never
+    // disagree about which session is waiting.
+    owners: ownerRows(ownersSlice(state).list, state.sessions),
+    ownersHealth: ownersHealth(state),
+    // Which owner's conversation is in the pane, so its row is marked.
+    activeOwnerId: activeOwnerIdOf(state),
+    sidebarMode: state.sidebarMode || (state.groupByProject ? "project" : "recent"),
     groupByProject: !!state.groupByProject,
     // The folder accordion is one persisted preference, not one per surface:
     // collapsing a folder on the phone and finding it open on the desktop was

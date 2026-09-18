@@ -1,5 +1,6 @@
 import { useStore } from "../../hooks/useStore.js";
 import { SessionPanel } from "../../components/index.js";
+import { OwnerDossier } from "../../components/Owners/OwnerDossier.jsx";
 import { focusedSession, focusedSessionId } from "../../data/selectors.js";
 import { sessionPanelView, toggleSessionPanel } from "../../data/session-panel.js";
 import { desktopDossierView } from "./dossier.js";
@@ -27,6 +28,11 @@ export function DesktopDossier() {
   const shown = desktopDossierView({ view, session, panel });
   if (!shown) return null;
 
+  // An owner's conversation gets the OWNER's dossier: its children and its
+  // book, where a session's facts would be. Same zone, same width, same door
+  // (the crumb) — what changes is what the thing on screen HAS to show.
+  const isOwner = (session.kind || "") === "owner";
+
   return (
     <>
       {/* The veil dims what it covers and nothing else: it starts where the
@@ -35,7 +41,9 @@ export function DesktopDossier() {
           nothing to dim (see DesktopShell.css). */}
       {shown.open && <div class="desktop-dossier-scrim" onClick={() => toggleSessionPanel(session.id)} />}
       <div class={`desktop-dossier${shown.open ? " is-open" : ""}`}>
-        <SessionPanel session={session} usage={usage} open={shown.open} page={shown.page} />
+        {isOwner
+          ? <OwnerDossier session={session} open={shown.open} />
+          : <SessionPanel session={session} usage={usage} open={shown.open} page={shown.page} />}
       </div>
     </>
   );

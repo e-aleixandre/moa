@@ -5,7 +5,8 @@ import { useStore } from "../../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../../data/stream-model.js";
 import { focusedSessionId } from "../../../data/selectors.js";
 import { openSession, setActiveSession } from "../../../data/tile-actions.js";
-import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setGroupByProject } from "../../../data/drawer.js";
+import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setSidebarMode } from "../../../data/drawer.js";
+import { createOwner, openOwnerConversation, retryOwners } from "../../../data/owners.js";
 import { openPalette } from "../../../data/palette.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, rewindToMessage, stopRun } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
@@ -18,6 +19,8 @@ import { MobileChrome } from "../MobileChrome/MobileChrome.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SessionPanel } from "../../../components/index.js";
+import { OwnerDossier } from "../../../components/Owners/OwnerDossier.jsx";
+import { OwnerChipEntry } from "../../../components/Owners/OwnerChipEntry.jsx";
 import { sessionPanelView, closeSessionPanel, toggleSessionPanel } from "../../../data/session-panel.js";
 import { cacheAlertLabel } from "../../../data/cache-usage.js";
 import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
@@ -101,6 +104,7 @@ export function MobileConversationScreen({ version = null, forceMobile = false }
 
 function MobileConversationBody({ forceMobile = false }) {
   const session = useStore((s) => mobileFocusedSession(s, forceMobile).session);
+  const isOwnerSession = (session?.kind || "") === "owner";
   const activeId = useStore((s) => mobileFocusedSession(s, forceMobile).id);
   const loaded = useStore((s) => s.sessionsLoaded);
   const usage = useStore((s) => s.usage);
@@ -338,16 +342,22 @@ function MobileConversationBody({ forceMobile = false }) {
         <MobileSheet
           open={panel.open}
           onClose={closeSessionPanel}
-          title="This session"
+          title={isOwnerSession ? "This owner" : "This session"}
           bare
         >
-          <SessionPanel
-            session={session}
-            usage={usage}
-            open={panel.open}
-            page={panel.page}
-            variant="sheet"
-          />
+          {/* An owner's conversation gets the OWNER's dossier — its children
+              and its book — in the same sheet a session's dossier uses. */}
+          {isOwnerSession ? (
+            <OwnerDossier session={session} open={panel.open} variant="sheet" onClose={closeSessionPanel} />
+          ) : (
+            <SessionPanel
+              session={session}
+              usage={usage}
+              open={panel.open}
+              page={panel.page}
+              variant="sheet"
+            />
+          )}
         </MobileSheet>
       )}
       {session && (
@@ -448,6 +458,10 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   };
 
   const inboxCount = inboxPendingCount(chrome.inbox);
+  // The session the header is about, for the Owner chip. Read here rather than
+  // taken from `chrome`: the chrome snapshot is deliberately the ROSTER, and
+  // adding a whole session to it would rebuild the header on every token.
+  const chromeSession = useStore((s) => (chrome.activeId ? s.sessions[chrome.activeId] : null));
 
   return (
     <>
@@ -462,6 +476,10 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
           onPanel={() => toggleSessionPanel(chrome.activeId, cacheAlert ? "usage" : "root")}
           onNew={() => openPalette("create")}
           inboxCount={inboxCount}
+          /* The chip rides UNDER the capsule row, not inside it: the three
+             capsules already do three jobs, and one control does one job
+             (CRITERIO §3). */
+          below={chromeSession ? <OwnerChipEntry session={chromeSession} compact /> : null}
         />
       )}
       {chrome.inboxOpen && (
@@ -499,9 +517,18 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
         onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
         onReopenSession={(id) => { resumeSession(id).catch(() => {}); }}
         onDeleteSession={(id) => { deleteSession(id).catch(() => {}); }}
-        groupByProject={chrome.groupByProject}
+        mode={chrome.sidebarMode}
+        onMode={setSidebarMode}
+        owners={chrome.owners}
+        ownersHealth={chrome.ownersHealth}
+        activeOwnerId={chrome.activeOwnerId}
+        /* Choosing an owner closes the drawer onto its conversation, exactly
+           as choosing a session does. */
+        onOpenOwner={(own) => { if (openOwnerConversation(own)) closeDrawer(); }}
+        onOpenOwnerChild={(child) => { openSession(child.id); closeDrawer(); }}
+        onCreateOwner={async (spec) => { await createOwner(spec); closeDrawer(); }}
+        onRetryOwners={() => { retryOwners().catch(() => {}); }}
         drawerCollapsed={chrome.drawerCollapsed}
-        onGroupByProject={setGroupByProject}
         onToggleProject={setDrawerProjectCollapsed}
         panelRef={drawerPanelRef}
       />

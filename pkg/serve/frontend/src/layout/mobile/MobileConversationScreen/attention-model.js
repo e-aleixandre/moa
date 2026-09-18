@@ -1,4 +1,5 @@
 import { sessionDisplayDotState } from '../../../data/util/format.js';
+import { isOrdinarySession } from '../../../data/util/project-sessions.js';
 
 // These projections drive both the drawer's New results group and the title
 // chip. Keeping them here makes their use of the shared dot precedence explicit.
@@ -9,7 +10,7 @@ export function aggregateAttention(sessions, activeId) {
   let permission = 0;
   let arrival = 0;
   for (const session of Object.values(sessions)) {
-    if (session.id === activeId) continue;
+    if (session.id === activeId || !isOrdinarySession(session)) continue;
     const dotState = sessionDisplayDotState(session);
     if (dotState === 'error') {
       urgent += 1;

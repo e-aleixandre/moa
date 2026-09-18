@@ -3,6 +3,10 @@ import { shortPath, sessionDisplayDotState, sessionTitle } from "../../../data/u
 import { sessionRowReason } from "../../Sidebar/sessions.js";
 import { aggregateAttention, newResultSessions } from "./attention-model.js";
 import { inboxCards, inboxHealth, inboxHealthSig, inboxSig } from "../../../data/events.js"; // wake-on-event
+import { ordinarySessions } from "../../../data/util/project-sessions.js";
+import { ownerRows } from "../../../data/owners-model.js";
+import { ownersHealth, ownersSlice } from "../../../data/owners.js";
+import { activeOwnerIdOf } from "../../Sidebar/sessions.js";
 
 function relAge(updated) {
   if (!updated) return "";
@@ -21,7 +25,7 @@ function sessionBrief(sess) {
 }
 
 export function drawerSessions(sessions, activeId) {
-  const all = Object.values(sessions || {});
+  const all = ordinarySessions(Object.values(sessions || {}));
   const active = all
     .filter((s) => s.state !== "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
@@ -64,7 +68,7 @@ export function drawerSessions(sessions, activeId) {
 
 export function drawerProjects(sessions) {
   const byCwd = {};
-  for (const s of Object.values(sessions || {})) {
+  for (const s of ordinarySessions(Object.values(sessions || {}))) {
     const cwd = s.cwd || "";
     if (!cwd) continue;
     const updated = s.updated || 0;
@@ -74,7 +78,7 @@ export function drawerProjects(sessions) {
 }
 
 export function recentSavedSessions(sessions, limit = 3) {
-  return Object.values(sessions || {})
+  return ordinarySessions(Object.values(sessions || {}))
     .filter((s) => s.state === "saved")
     .sort((a, b) => (b.updated || 0) - (a.updated || 0))
     .slice(0, limit)
@@ -98,6 +102,12 @@ function listSig(list) {
   return (list || []).map(cardSig).join("\n");
 }
 
+function ownersSig(list) {
+  return (list || []).map((o) => [
+    o.id, o.name, o.session_state || "", (o.children || []).map((c) => c.id + c.state + (c.unseen ? 1 : 0)).join(","),
+  ].join("\0")).join("\n");
+}
+
 function attentionSig(a) {
   return [a.urgent, a.unseen, a.error, a.permission, a.arrival].join("\0");
 }
@@ -107,6 +117,11 @@ function mobileChromeEqual(a, b) {
     && a.drawerOpen === b.drawerOpen
     && a.drawerStep === b.drawerStep
     && a.groupByProject === b.groupByProject
+    && a.sidebarMode === b.sidebarMode
+    && a.activeOwnerId === b.activeOwnerId
+    && a.ownersHealth?.status === b.ownersHealth?.status
+    && a.ownersHealth?.error === b.ownersHealth?.error
+    && ownersSig(a.owners) === ownersSig(b.owners)
     && a.soundEnabled === b.soundEnabled
     && a.showChip === b.showChip
     && a.title === b.title
@@ -140,6 +155,10 @@ export function selectMobileChrome(state, forceMobile = false) {
     drawerOpen: !!state.drawerOpen,
     drawerStep: state.drawerStep || "list",
     groupByProject: !!state.groupByProject,
+    sidebarMode: state.sidebarMode || (state.groupByProject ? "project" : "recent"),
+    owners: ownerRows(ownersSlice(state).list, state.sessions),
+    ownersHealth: ownersHealth(state),
+    activeOwnerId: activeOwnerIdOf(state),
     drawerCollapsed: state.drawerCollapsed,
     soundEnabled: !!state.soundEnabled,
     inbox: inboxCards(state.sessions, state.events), // wake-on-event

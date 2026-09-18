@@ -244,6 +244,10 @@
    control missing and fixing itself. Overshoot needs room. This move does
    not have any, so it arrives and stays. */
 .zl-view.is-project::before { transform: translateX(28px); }
+/* The third stop. Measured docked: 3 × 28 + 4 of padding = 88pt in a head that
+   has 264 to give after the wordmark, the search and the "+". A fourth mode
+   would not fit — worth knowing before anyone proposes one. */
+.zl-view.is-owners::before { transform: translateX(56px); }
 
 .zl-view-b.is-on { color: var(--zl-t1); }
 /* The icon answers the press and nothing more. It had a dip choreographed
@@ -256,10 +260,16 @@
 .zl-side-body.is-phone .zl-view-b { width: 44px; height: 40px; }
 .zl-side-body.is-phone .zl-view::before { width: 44px; height: 40px; }
 .zl-side-body.is-phone .zl-view.is-project::before { transform: translateX(44px); }
+.zl-side-body.is-phone .zl-view.is-owners::before { transform: translateX(88px); }
 
 @media (prefers-reduced-motion: reduce) {
   .zl-view::before { transition: none; }
 }
+
+/* The Owners list fills the same slot the sessions do, and brings its own
+   padding (components/Owners/Owners.css), so the column adds none. */
+.zl-list.is-owners { padding: 0; overflow: hidden; display: flex; }
+.zl-list.is-owners > .ow-owners { flex: 1; min-width: 0; }
 
 /* Project heading: the name identifies, the path locates, the count sizes.
    Same row grammar as a session, one step quieter. */
