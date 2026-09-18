@@ -214,10 +214,10 @@ func TestConcurrentCreateYieldsOneOwner(t *testing.T) {
 	var created, exists int
 	for range 2 {
 		res := <-results
-		switch {
-		case res.err == nil:
+		switch res.err {
+		case nil:
 			created++
-		case res.err == ErrExists:
+		case ErrExists:
 			exists++
 		default:
 			t.Fatalf("unexpected Create error: %v", res.err)

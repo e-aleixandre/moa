@@ -162,11 +162,15 @@ func (s *Store) createExclusive(own Owner) error {
 	if err != nil {
 		return fmt.Errorf("create owner %s: %w", own.CodebaseKey, err)
 	}
-	defer f.Close()
 	if _, err := f.Write(append(data, '\n')); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("write owner %s: %w", own.CodebaseKey, err)
 	}
-	return f.Sync()
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // Save writes owner.json atomically.
