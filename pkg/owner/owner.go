@@ -52,13 +52,13 @@ const MaxProjectBytes = 8 * 1024
 // Owner is the persisted entity. Model and Thinking are the conversation's
 // defaults at creation time; the session owns them afterwards, like any other.
 type Owner struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	CodebaseKey string    `json:"codebase_key"`
-	Root        string    `json:"root"`
-	SessionID   string    `json:"session_id,omitempty"`
-	Model       string    `json:"model,omitempty"`
-	Thinking    string    `json:"thinking,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	CodebaseKey string `json:"codebase_key"`
+	Root        string `json:"root"`
+	SessionID   string `json:"session_id,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Thinking    string `json:"thinking,omitempty"`
 	// AnswerAsks allows the owner to resolve a child's ask_user. Permissions
 	// are never delegated: only questions.
 	AnswerAsks bool      `json:"answer_asks"`
