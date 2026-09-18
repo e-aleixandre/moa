@@ -314,6 +314,16 @@ func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 // The event carries the pre-trim view for exactly this reason: the originals go
 // in FIRST, then the marker. That order is what keeps the transcript showing
 // what actually happened while the model's context holds the elision.
+//
+// Crash guarantee, deliberately the weaker of the two available: the trim is
+// persisted asynchronously, like a compaction, so a crash between the trimmed
+// request and this append loses the marker. Reconstruction is therefore exact
+// only for a clean restart with the marker persisted; after a crash the session
+// reopens with the full context and the next threshold check simply trims
+// again, costing one cache rewrite. The alternative — persisting synchronously
+// before the first trimmed request — would put a disk write on the critical
+// path of every trim to buy consistency for a case that already resolves
+// itself. Not both promises: this one.
 func (ts *TreeSyncer) handleTrim(e ContextTrimmed) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
