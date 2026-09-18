@@ -18,6 +18,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/attachment"
+	"github.com/e-aleixandre/moa/pkg/book"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/git"
@@ -516,6 +517,10 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		promptSources.WithOwnerBook(func() string {
 			return owner.BookSection(projectOwner.Name, ownerStore.ProjectIndex(projectOwner.CodebaseKey))
 		})
+		// The book tool is registered in every session of the codebase, writable
+		// only in the owner's own conversation: one author is what keeps the book
+		// a record rather than a scratchpad.
+		core.RegisterOrLog(toolReg, book.NewTool(ownerStore.BookDir(projectOwner.CodebaseKey), cfg.OwnerSession))
 	}
 
 	// 9. Ask user bridge.

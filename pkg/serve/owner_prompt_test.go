@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/e-aleixandre/moa/pkg/book"
 	"github.com/e-aleixandre/moa/pkg/owner"
 )
 
@@ -141,4 +142,51 @@ func contains(list []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestBookToolIsWritableOnlyForTheOwner(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: root, Name: "Winerim"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerSess, ok := mgr.Get(info.SessionID)
+	if !ok {
+		t.Fatal("owner session missing")
+	}
+	ownerTool, ok := ownerSess.infra.toolReg.Get(book.ToolName)
+	if !ok {
+		t.Fatal("owner session has no book tool")
+	}
+	if !strings.Contains(string(ownerTool.Parameters), `"write"`) {
+		t.Fatal("the owner's book tool cannot write")
+	}
+
+	child, err := mgr.CreateSession(CreateOpts{CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childTool, ok := child.infra.toolReg.Get(book.ToolName)
+	if !ok {
+		t.Fatal("child session has no book tool")
+	}
+	if strings.Contains(string(childTool.Parameters), `"write"`) {
+		t.Fatal("a child session can write the book")
+	}
+}
+
+func TestSessionWithoutOwnerHasNoBookTool(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+
+	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sess.infra.toolReg.Get(book.ToolName); ok {
+		t.Fatal("a codebase without an owner registered the book tool")
+	}
 }
