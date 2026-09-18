@@ -1,0 +1,316 @@
+/* u7-lab — CATALOG ONLY. The user's message, eight grammars.
+
+   NOTHING here changes production. Every frame mounts the shipped
+   UserWaypoint / AssistantDocument / ActivityLedger / TurnFoot; each variant
+   is a wrapper class (`.u7-v-*`) scoped under `.u7-col`, so the shipped rules
+   stay exactly as they are and no golden moves.
+
+   What ALL eight share — the point of the round — is the foot grammar:
+
+     · the cell is row 1 of a single-column grid and the gutter is row 2, so
+       the hour lands UNDER the words instead of beside them, on the same
+       vertical rhythm as the assistant's TurnFoot (20px of ink, 6px of air).
+     · rewind leaves the cell's right lane and joins the hour on that line.
+       It is absolutely positioned against `.zl-user` (the cell is made
+       static for exactly this), at a fixed offset from the hour: the hour is
+       mono `tabular-nums`, so `09:14` is the same box at every hour and the
+       offset never drifts.
+     · `--u7-foot-x` is the one number a variant has to set: where its text
+       begins. The gutter is padded by it and the rewind rides
+       `--u7-foot-x + 46px`, so the foot always starts where the words start,
+       whatever surface the variant puts under them.
+
+   Tokens only, no `var(--zl-*, fallback)`. */
+
+/* ── lab chrome ─────────────────────────────────────────────────────────── */
+.u7 { margin: 0 auto; padding: 0 var(--space-6) var(--space-12); }
+
+/* The selector is sticky and thumb-sized: this is judged on the phone, and
+   reloading between eight variants is bookkeeping, not judging. */
+.u7-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin: 0 calc(var(--space-6) * -1);
+  padding: var(--space-3) var(--space-6);
+  background: var(--zl-canvas);
+  box-shadow: 0 1px 0 var(--zl-line);
+}
+.u7-chips, .u7-dens { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.u7-dens { margin-left: auto; }
+.u7-chip {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t3);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--motion-hover) var(--motion-ease), color var(--motion-hover) var(--motion-ease);
+}
+.u7-chip.is-on { background: var(--zl-accent); color: var(--zl-accent-ink); box-shadow: none; }
+.u7-chip.is-dens { background: none; box-shadow: var(--zl-rim); }
+.u7-chip.is-dens.is-on { background: var(--zl-control); color: var(--zl-t1); }
+.u7-chip:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
+
+.u7-head { padding-top: var(--space-6); }
+.u7-head h1 { font-size: var(--text-2xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.u7-head h1 em { font-style: normal; color: var(--zl-accent); }
+.u7-head p { color: var(--overlay1); margin-top: var(--space-2); max-width: 94ch; font-size: var(--text-md); }
+.u7-head strong { color: var(--zl-t2); font-weight: var(--weight-semibold); }
+.u7-head code, .u7-dir-head code { font-family: var(--mono); font-size: 0.9em; color: var(--zl-t2); }
+
+.u7-current { margin-top: var(--space-5); }
+.u7-current .u7-dir-head { margin-top: var(--space-5); }
+.u7-current .u7-strip { margin-top: 0; }
+.u7-all { margin-top: var(--space-12); }
+.u7-all-h { font-size: var(--text-xl); font-weight: var(--weight-semibold); color: var(--zl-t2); }
+.u7-one { margin-top: var(--space-10); }
+
+.u7-dir-head h2 { font-size: var(--text-xl); font-weight: var(--weight-semibold); }
+.u7-dir-head h2 em { font-style: normal; color: var(--peach); font-weight: var(--weight-medium); }
+.u7-fam {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  letter-spacing: 0.04em;
+  color: var(--zl-accent);
+}
+.u7-dir-head p { color: var(--overlay1); font-size: var(--text-sm); margin-top: var(--space-1); max-width: 104ch; }
+.u7-fam-lead { color: var(--zl-t3); }
+
+.u7-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  margin-top: var(--space-4);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+
+.u7-frame {
+  flex: none;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-canvas);
+  box-shadow: var(--zl-rim-2);
+  font-family: var(--font);
+  color: var(--zl-t1);
+  overflow: hidden;
+}
+/* Enough left padding for the variants whose mark lives OUTSIDE the measure
+   (Espejo's chevron, Baño's bleed) without letting either touch the edge. */
+.u7-desk { width: var(--content-block); padding: 24px 22px 16px; }
+.u7-phone { width: 390px; padding: 20px 20px 16px; }
+
+/* ── the shared foot grammar ────────────────────────────────────────────── */
+.u7-col { position: relative; --u7-foot-x: 0px; }
+
+.u7-col .zl-user {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  margin: 0 0 22px;
+}
+.u7-col .zl-user-cell {
+  grid-row: 1;
+  /* static so the rewind can anchor to the message, not to the slab: the
+     mark now belongs to the foot line, under the words. */
+  position: static;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+/* The gutter stops being a column and becomes the foot line. */
+.u7-col .zl-user-gutter {
+  grid-row: 2;
+  flex-direction: row;
+  align-items: center;
+  align-self: auto;
+  height: 20px;
+  margin-top: 6px;
+  padding-top: 0;
+  padding-left: var(--u7-foot-x);
+}
+.u7-col .zl-user-hhmm { line-height: 1; color: var(--surface1); }
+@media (hover: hover) {
+  .u7-col .zl-user:hover .zl-user-hhmm { color: var(--zl-t4); }
+}
+.u7-col .zl-user:focus-within .zl-user-hhmm { color: var(--zl-t4); }
+
+/* Rewind on the foot line, 46px past the start of the text: the hour is mono
+   tabular-nums (`09:14` = 36px at 12px), so that gap is the same at 03:07 as
+   at 23:58. 20px of ink like the assistant's copy, 44px of target from a halo
+   that overflows the line instead of inflating it. */
+.u7-col .zl-user-rail {
+  position: absolute;
+  top: auto;
+  right: auto;
+  bottom: 0;
+  left: calc(var(--u7-foot-x) + 46px);
+  height: 20px;
+  align-items: center;
+}
+.u7-col .zl-user .wp-rewind {
+  width: 20px;
+  height: 20px;
+  color: var(--surface1);
+}
+.u7-col .zl-user .wp-rewind::before { inset: -12px; }
+.u7-col .zl-user .wp-rewind .lucide { width: 14px; height: 14px; }
+@media (hover: none) { .u7-col .zl-user .wp-rewind { color: var(--zl-t4); } }
+
+.u7-col .zl-user-label { margin-bottom: 4px; }
+.u7-col .wp-attachments { margin-top: 10px; }
+
+/* ── A1 · Espejo ────────────────────────────────────────────────────────── */
+/* Identical to a turn: no surface, full measure, hour on the foot. The only
+   thing that says who is speaking is a peach chevron hung in the margin,
+   OUTSIDE the measure — seen, not read. */
+.u7-v-espejo .zl-user::before {
+  content: "";
+  position: absolute;
+  left: -14px;
+  top: 10px;
+  width: 0;
+  height: 0;
+  border-left: 6px solid var(--peach);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+
+/* ── A2 · Baño ──────────────────────────────────────────────────────────── */
+/* Same shape as a turn, different TONE: the block is washed in peach and
+   capped by a peach filament. The wash bleeds 14px past the measure on both
+   sides so the words still sit on the assistant's own left edge. */
+.u7-v-bano { --u7-foot-x: 0px; }
+.u7-v-bano .zl-user-cell {
+  margin: 0 -14px;
+  padding: 12px 14px;
+  border-radius: var(--zl-r-md);
+  background: color-mix(in srgb, var(--peach) 7%, transparent);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--peach) 55%, transparent);
+}
+
+/* ── A3 · Titular ───────────────────────────────────────────────────────── */
+/* What you ask heads the stretch and what the agent answers is the body. The
+   foot is closed by a hairline in peach: same place as the assistant's foot,
+   different material. */
+.u7-v-titular .zl-user {
+  font-size: var(--text-xl);
+  line-height: 1.4;
+}
+.u7-v-titular .zl-user-body { font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.u7-v-titular .zl-user-gutter {
+  height: auto;
+  min-height: 20px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--peach) 30%, transparent);
+}
+.u7-v-titular .zl-user-rail { bottom: 1px; }
+
+/* ── A4 · Hendido ───────────────────────────────────────────────────────── */
+/* The distinction is DEPTH: the block is sunk into the page while the
+   assistant floats with no box at all. No colour spent, no width spent, no
+   type spent. Peach survives as a single dot on the foot. */
+.u7-v-hendido .zl-user-cell {
+  margin: 0 -14px;
+  padding: 12px 14px;
+  border-radius: var(--zl-r-md);
+  background: color-mix(in srgb, var(--crust) 55%, #000);
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--zl-line);
+}
+.u7-v-hendido .zl-user-gutter::before {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 5px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--peach);
+}
+/* The dot and its gap push the hour 13px right, so the rewind follows. */
+.u7-v-hendido .zl-user-rail { left: calc(var(--u7-foot-x) + 59px); }
+
+/* ── B1 · Losa ──────────────────────────────────────────────────────────── */
+/* The slab that ships today, with the side gutter dead and the hour dropped
+   to the foot. The reference point of the round: everything else held, one
+   grammar corrected. */
+.u7-v-losa { --u7-foot-x: 14px; }
+.u7-v-losa .zl-user-cell {
+  padding: 10px 14px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+}
+
+/* ── B2 · Cápsula ───────────────────────────────────────────────────────── */
+/* The cell stops being a band and hugs its content: five words measure five
+   words. Capped at 85% of the measure so a long one still wraps like prose. */
+.u7-v-capsula { --u7-foot-x: 16px; }
+.u7-v-capsula .zl-user-cell {
+  justify-self: start;
+  max-width: 85%;
+  padding: 10px 16px;
+  border-radius: 18px;
+  background: var(--zl-raised);
+  box-shadow: var(--zl-rim);
+}
+
+/* ── B3 · Burbuja ───────────────────────────────────────────────────────── */
+/* The most widely known grammar there is: you on the right, the agent on the
+   left at full measure. The foot goes right with it. */
+.u7-v-burbuja .zl-user-cell {
+  justify-self: end;
+  max-width: 85%;
+  padding: 10px 16px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--peach) 9%, var(--zl-sheet));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--peach) 22%, transparent);
+}
+.u7-v-burbuja .zl-user-gutter { justify-content: flex-end; padding-left: 0; padding-right: 16px; }
+.u7-v-burbuja .zl-user-rail { left: auto; right: 62px; }
+
+/* ── B4 · Filo ──────────────────────────────────────────────────────────── */
+/* No surface at all: a 3px peach edge and an indent, the way a margin rule
+   marks a passage. The lightest of the eight — it adds no new surface to the
+   transcript. The foot lines up with the words, not with the edge. */
+.u7-v-filo { --u7-foot-x: 17px; }
+.u7-v-filo .zl-user-cell {
+  padding: 2px 0 2px 14px;
+  border-left: 3px solid var(--peach);
+}
+
+/* ── phone ──────────────────────────────────────────────────────────────── */
+/* 390px is where this is judged, so the two variants that bleed give back
+   some of the bleed and the headline drops a step. */
+.u7-phone .u7-v-bano .zl-user-cell,
+.u7-phone .u7-v-hendido .zl-user-cell { margin: 0 -12px; padding-left: 12px; padding-right: 12px; }
+.u7-phone .u7-v-titular .zl-user { font-size: var(--text-lg); }
+.u7-phone .u7-v-espejo .zl-user::before { left: -12px; }
+.u7-phone .u7-col .zl-user .wp-rewind,
+.u7-phone .u7-col .zl-user-hhmm { color: var(--zl-t4); }
+
+/* ── the lab on a phone ─────────────────────────────────────────────────── */
+/* This is judged at 390px, and a 390px frame inside a padded page does not
+   fit in a 390px window: the frame was cropped and the exchange ran off the
+   right edge. Below 480 the page gives up its own side padding, the frame
+   fills the window, and the desktop frame is still reachable by scrolling
+   the strip sideways. */
+@media (max-width: 480px) {
+  .u7 { padding-left: 0; padding-right: 0; }
+  .u7-bar { margin: 0; padding-left: var(--space-3); padding-right: var(--space-3); }
+  .u7-head, .u7-all-h, .u7-dir-head { padding-left: var(--space-3); padding-right: var(--space-3); }
+  .u7-strip { gap: var(--space-3); padding-left: 0; }
+  .u7-frame { border-radius: 0; box-shadow: none; }
+  .u7-phone { width: 100vw; padding: 16px 16px 12px; }
+}
