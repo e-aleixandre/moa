@@ -112,6 +112,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		return nil, err
 	}
 	sess.Origin = persisted.Origin()
+	sess.Kind = persisted.Kind()
 	sess.automationCreated = automationCreatedMeta(opts.extraMeta)
 	// Wire the outbound completion callback before the session is reachable, so
 	// the very first run cannot end before the subscription exists. A no-op
@@ -662,6 +663,11 @@ var (
 	ErrNoMCP                   = errors.New("session has no MCP servers")
 	ErrInvalidAttentionCursor  = errors.New("invalid attention cursor")
 	ErrStaleAttentionNamespace = errors.New("stale attention namespace")
+	// ErrOwnerSession refuses an operation on an owner's conversation through
+	// the ordinary session API. An owner is deleted as an owner (which also
+	// removes its session), so deleting just the conversation would leave an
+	// owner.json pointing at nothing.
+	ErrOwnerSession = errors.New("this session belongs to a project owner")
 )
 
 // Delete aborts any running agent, closes resources, and removes the session.
@@ -673,7 +679,27 @@ var (
 func (m *Manager) Delete(id string) error {
 	m.automationMu.Lock()
 	defer m.automationMu.Unlock()
+	if m.isOwnerSession(id) {
+		return ErrOwnerSession
+	}
 	return m.deleteSession(id)
+}
+
+// isOwnerSession reports whether a session is an owner conversation, live or
+// saved. A session that cannot be read at all answers false: the delete path
+// below reports the real error instead of a misleading refusal.
+func (m *Manager) isOwnerSession(id string) bool {
+	if sess, ok := m.Get(id); ok {
+		return sess.Kind == session.KindOwner
+	}
+	for _, sum := range m.cachedSavedSessions() {
+		if sum.ID != id {
+			continue
+		}
+		kind, _ := sum.Metadata[session.MetaKind].(string)
+		return kind == session.KindOwner
+	}
+	return false
 }
 
 // deleteSession is Delete's body. Callers must hold automationMu.
@@ -1085,6 +1111,7 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 		return nil, fmt.Errorf("resume: %w", err)
 	}
 	sess.Origin = saved.Origin()
+	sess.Kind = saved.Kind()
 	sess.automationCreated = automationCreatedMeta(saved.Metadata)
 	// 3. Restore permission mode and the context limit.
 	if savedPermMode != "" {

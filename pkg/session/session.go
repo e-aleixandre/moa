@@ -105,7 +105,26 @@ const (
 	// on exactly one code path, so it is the authority check for the scoped
 	// automation interaction endpoints.
 	MetaAutomationCreated = "automation_created"
+	// MetaKind classifies a session that is not an ordinary conversation, so
+	// listings and routing can tell them apart without loading the runtime.
+	// Only KindOwner exists today; an absent key means an ordinary session.
+	MetaKind = "kind"
 )
+
+// KindOwner marks the conversation of a project owner. Such a session is a
+// real session in every other respect, but it is not work to be handed out: it
+// is hidden from the ordinary session list, never chosen as a destination for
+// an incoming event, and not deletable through the session API.
+const KindOwner = "owner"
+
+// Kind returns the session classification, or "" for an ordinary session.
+func (s *Session) Kind() string {
+	if s.Metadata == nil {
+		return ""
+	}
+	kind, _ := s.Metadata[MetaKind].(string)
+	return kind
+}
 
 // OriginUser is the implicit origin of a session created by a human through
 // the web client. Sessions persisted before origins existed carry no
@@ -116,7 +135,7 @@ const OriginUser = "user"
 // does not know about. The persistence reactor rebuilds Metadata from scratch
 // on every snapshot, so persisters must carry these forward or they would be
 // dropped on the first save after creation.
-var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers}
+var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers, MetaKind}
 
 // SetOrigin records who created the session (e.g. "user", "automation", or a
 // caller-chosen label such as "linear-webhook"). An empty origin is not stored:
