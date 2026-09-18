@@ -22,10 +22,8 @@ import { ZonesLab, ZonesPhone, LIVE_STATES } from "./catalog/zones-lab.jsx";
 import { Scene } from "./catalog/scene.jsx";
 import { InboxLab } from "./catalog/zones-inbox.jsx";
 import { WorkLab } from "./catalog/zones-work.jsx";
-import { UserLab } from "./catalog/user-lab.jsx";
 import { U2Lab } from "./catalog/u2-lab.jsx";
 import { U6Lab } from "./catalog/u6-lab.jsx";
-import { U7Lab } from "./catalog/u7-lab.jsx";
 import { LPLab } from "./catalog/lp-lab.jsx";
 import { LP2Lab } from "./catalog/lp2-lab.jsx";
 import { HomeLab } from "./catalog/home-lab.jsx";
@@ -54,10 +52,8 @@ const LINKS = [
   { key: "phone", label: "Phone", href: "?view=phone" },
   { key: "inbox", label: "Inbox", href: "?view=inbox" },
   { key: "work", label: "Work", href: "?view=work" },
-  { key: "user", label: "User", href: "?view=user" },
   { key: "u2", label: "User 2", href: "?view=u2" },
   { key: "u6", label: "User 6", href: "?view=u6" },
-  { key: "u7", label: "User 7", href: "?view=u7" },
   { key: "lp", label: "Live Preview", href: "?view=lp" },
   { key: "lp2", label: "Live Preview 2", href: "?view=lp2" },
   { key: "home", label: "Home (3 ways)", href: "?view=home" },
@@ -196,11 +192,8 @@ function CatalogApp() {
   else if (view === "phone") body = <PhoneAlone />;
   else if (view === "inbox") body = <InboxLab />;
   else if (view === "work") body = <WorkLab />;
-  else if (view === "user") body = <UserLab />;
   else if (view === "u2") body = <U2Lab />;
   else if (view === "u6") body = <U6Lab />;
-  // The user message rebuilt, two families of grammar: ?view=u7
-  else if (view === "u7") body = <U7Lab />;
   else if (view === "lp") body = <LPLab />;
   else if (view === "lp2") body = <LP2Lab />;
   // The phone's first screen, three directions. Catalog-only: production's
