@@ -33,6 +33,11 @@ func BookSection(ownerName, projectIndex string) string {
 // RolePrompt is the owner's own role, injected only into the owner's
 // conversation. It is deliberately short: what the owner is, what the book is
 // for, what it must never decide, and how it escalates.
+//
+// "You never approve permissions" is policy for a cooperative agent, not a
+// security barrier: the owner runs with bash like any other session and could
+// do by hand what it is told not to authorize. What actually bounds it is the
+// capability set of each session — its permission mode and allowed paths.
 func RolePrompt(ownerName string) string {
 	return fmt.Sprintf(`# You are the owner of this project
 
