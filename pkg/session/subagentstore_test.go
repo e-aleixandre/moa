@@ -3,9 +3,11 @@ package session
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -313,5 +315,60 @@ func TestSubagentStore_ListSummariesReusesUnchangedSidecars(t *testing.T) {
 	}
 	if len(third) != 1 || third[0].Title != "changed" {
 		t.Fatalf("ListSummaries after Save = %#v, want updated title", third)
+	}
+}
+
+// LoadOutcome is what subagent_status falls back on when the live job is gone.
+// It must never pull the conversation in: a child's transcript can be
+// megabytes, and none of it is the verdict the parent asked for.
+func TestSubagentStore_LoadOutcomeReadsOnlyTheHeader(t *testing.T) {
+	s := NewSubagentStore(t.TempDir(), "sess1")
+	in := sampleTranscript("sa-outcome")
+	in.Result = "the verdict"
+	in.Messages = append(in.Messages, core.AgentMessage{Message: core.Message{
+		Role: "assistant", Content: []core.Content{{Type: "text", Text: strings.Repeat("noise ", 5000)}},
+	}})
+	if err := s.Save(in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := s.LoadOutcome("sa-outcome")
+	if err != nil {
+		t.Fatalf("LoadOutcome: %v", err)
+	}
+	if got.Status != "completed" || got.Result != "the verdict" || got.Task != "do a thing" {
+		t.Fatalf("LoadOutcome = %#v, want the stored header", got)
+	}
+	if len(got.Messages) != 0 {
+		t.Fatalf("LoadOutcome decoded %d messages; the header decoder must stop before them", len(got.Messages))
+	}
+}
+
+// Completed transcripts written before Result existed keep their verdict only
+// as the final assistant message; the fallback has to find it there too.
+func TestSubagentStore_LoadOutcomeRecoversLegacyResult(t *testing.T) {
+	s := NewSubagentStore(t.TempDir(), "sess1")
+	in := sampleTranscript("sa-legacy")
+	in.Result = ""
+	in.Messages = []core.AgentMessage{{Message: core.Message{
+		Role: "assistant", Content: []core.Content{{Type: "text", Text: "legacy verdict"}},
+	}}}
+	if err := s.Save(in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := s.LoadOutcome("sa-legacy")
+	if err != nil {
+		t.Fatalf("LoadOutcome: %v", err)
+	}
+	if got.Result != "legacy verdict" {
+		t.Fatalf("Result = %q, want the final assistant text", got.Result)
+	}
+}
+
+func TestSubagentStore_LoadOutcomeMissingIsNotFound(t *testing.T) {
+	s := NewSubagentStore(t.TempDir(), "sess1")
+	if _, err := s.LoadOutcome("sa-nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }

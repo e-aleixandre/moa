@@ -415,6 +415,26 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			}
 			return subagent.ResumedTranscript{Messages: t.Messages, Model: t.Model, Thinking: t.Thinking}, nil
 		},
+		// Scoped to this session's own store: job IDs are random identifiers,
+		// not capabilities, so one session must not be able to read another's
+		// children by guessing one.
+		SubagentOutcomeLoader: func(jobID string) (subagent.PersistedOutcome, error) {
+			s := sess
+			if s == nil || s.persister == nil {
+				return subagent.PersistedOutcome{}, fmt.Errorf("transcript store unavailable")
+			}
+			store := s.persister.subagentStore(s.ID)
+			if store == nil {
+				return subagent.PersistedOutcome{}, fmt.Errorf("transcript store unavailable")
+			}
+			t, err := store.LoadOutcome(jobID)
+			if err != nil {
+				return subagent.PersistedOutcome{}, err
+			}
+			return subagent.PersistedOutcome{
+				Task: t.Task, Model: t.Model, Status: t.Status, Result: t.Result, Error: t.Error,
+			}, nil
+		},
 		SnapshotTranscript: func() (string, error) {
 			return snapshotParentTranscript(sess)
 		},

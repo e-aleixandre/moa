@@ -155,6 +155,11 @@ type SessionConfig struct {
 	// SubagentStore).
 	SubagentTranscriptLoader func(jobID string) (subagent.ResumedTranscript, error)
 
+	// SubagentOutcomeLoader recovers a finished subagent's terminal outcome
+	// (status/result/error, never its messages) by job ID, so subagent_status
+	// can answer for a job whose in-memory record is gone. Optional.
+	SubagentOutcomeLoader func(jobID string) (subagent.PersistedOutcome, error)
+
 	// SnapshotTranscript freezes the parent's active conversation branch and
 	// returns an absolute path the child can read. Nil in the CLI: a forked
 	// skill that asks for parent-transcript: snapshot then errors instead of
@@ -625,6 +630,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		TitleEnabled:     cfg.SubagentTitleEnabled,
 		OnChildTitle:     cfg.OnSubagentTitle,
 		TranscriptLoader: cfg.SubagentTranscriptLoader,
+		OutcomeLoader:    cfg.SubagentOutcomeLoader,
 	})
 	if err != nil {
 		if mcpMgr != nil {

@@ -236,6 +236,36 @@ func cloneSubagentSummaries(in []SubagentTranscript) []SubagentTranscript {
 	return out
 }
 
+// LoadOutcome reads one transcript's HEADER — status, result, error, task —
+// without decoding its messages. It is what a parent needs to recover the
+// verdict of a subagent whose in-memory job is gone: the conversation itself
+// would be megabytes, and none of it is the answer.
+//
+// A transcript left in "running" by a crash is reported as interrupted rather
+// than running: nothing is executing it, and presenting a dead job as live
+// would have the parent wait forever.
+func (s *SubagentStore) LoadOutcome(jobID string) (SubagentTranscript, error) {
+	if err := validJobID(jobID); err != nil {
+		return SubagentTranscript{}, err
+	}
+	path := filepath.Join(s.dir, jobID+".json")
+	t, err := readSubagentSummary(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return SubagentTranscript{}, fmt.Errorf("session: subagent %q: %w", jobID, ErrNotFound)
+		}
+		return SubagentTranscript{}, fmt.Errorf("session: subagent read: %w", err)
+	}
+	// Transcripts written before Result existed keep their verdict only as the
+	// final assistant message.
+	if t.Status == "completed" && t.Result == "" {
+		if legacy, err := s.LegacyResult(jobID); err == nil {
+			t.Result = legacy
+		}
+	}
+	return t, nil
+}
+
 // LegacyResult reads the final assistant text from one legacy transcript
 // without constructing its complete Messages slice. Completed transcripts
 // written before Result existed need that fallback for their restored cards,

@@ -208,7 +208,7 @@ func newSubagentToolsWithStore(t *testing.T, cfg Config, parentTools ...core.Too
 		cfg.AppCtx = context.Background()
 	}
 	jobs := newJobStore()
-	return newSubagent(cfg, jobs), newSubagentStatus(jobs), newSubagentCancel(jobs), jobs
+	return newSubagent(cfg, jobs), newSubagentStatus(jobs, cfg), newSubagentCancel(jobs), jobs
 }
 
 func TestSubagentSyncBasic(t *testing.T) {

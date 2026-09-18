@@ -205,6 +205,28 @@ type Config struct {
 	// tool reports a clear error when resume is requested). The caller wires
 	// this to its session-scoped transcript store (see pkg/serve).
 	TranscriptLoader func(jobID string) (ResumedTranscript, error)
+
+	// OutcomeLoader recovers a finished job's terminal outcome from durable
+	// storage, for subagent_status to fall back on when the in-memory job is
+	// gone. That happens routinely, not rarely: jobs expire after jobTTL, and
+	// a synchronous child is dropped from the map the moment it delivers.
+	// Without this, a context trim that elided a subagent's report would point
+	// the model at a job ID that answers "unknown job ID".
+	//
+	// Session-scoped by construction — the caller binds it to its own store.
+	// Job IDs are random identifiers, not capabilities: one session must not be
+	// able to read another's children by guessing one.
+	OutcomeLoader func(jobID string) (PersistedOutcome, error)
+}
+
+// PersistedOutcome is a finished subagent's verdict as recovered from disk:
+// the header of its transcript, never its messages.
+type PersistedOutcome struct {
+	Task   string
+	Model  string
+	Status string
+	Result string
+	Error  string
 }
 
 // ResumedTranscript is what a TranscriptLoader hands back: the persisted
@@ -228,7 +250,7 @@ func RegisterAll(reg *core.Registry, cfg Config) (*Jobs, error) {
 	jobs := newJobStore()
 	for _, t := range []core.Tool{
 		newSubagent(cfg, jobs),
-		newSubagentStatus(jobs),
+		newSubagentStatus(jobs, cfg),
 		newSubagentWait(jobs),
 		newSubagentCancel(jobs),
 		newSubagentSteer(jobs),
@@ -476,11 +498,11 @@ func generateTitle(cfg Config, jobs *jobStore, jobID, task string) {
 	}
 }
 
-func newSubagentStatus(jobs *jobStore) core.Tool {
+func newSubagentStatus(jobs *jobStore, cfg Config) core.Tool {
 	return core.Tool{
 		Name:        "subagent_status",
 		Label:       "Subagent Status",
-		Description: "Check the status of an async subagent job.",
+		Description: "Check the status of an async subagent job, or recover the result of one that already finished.",
 		Effect:      core.EffectReadOnly,
 		Parameters: json.RawMessage(`{
 			"type": "object",
@@ -495,13 +517,61 @@ func newSubagentStatus(jobs *jobStore) core.Tool {
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			jobs.cleanup(jobTTL)
 			jobID, _ := params["job_id"].(string)
-			snap, ok := jobs.snapshot(jobID)
-			if !ok {
-				return core.ErrorResult("unknown job ID: " + jobID), nil
+			if snap, ok := jobs.snapshot(jobID); ok {
+				return core.TextResult(formatStatus(snap)), nil
 			}
-			return core.TextResult(formatStatus(snap)), nil
+			// Live memory is not the whole truth: jobs expire after jobTTL and
+			// a synchronous child is dropped as soon as it delivers, so a job
+			// ID the model legitimately holds — from a trimmed report, from a
+			// conversation resumed hours later — is routinely absent here while
+			// its transcript is still on disk.
+			if text, ok := persistedStatus(cfg, jobID); ok {
+				return core.TextResult(text), nil
+			}
+			return core.ErrorResult("unknown job ID: " + jobID), nil
 		},
 	}
+}
+
+// persistedStatus renders a finished job's outcome from its stored transcript.
+// Reports ok=false when there is no loader, the ID is not this session's, or
+// the sidecar is unreadable — the caller then answers "unknown job ID", which
+// is the truthful answer for a session that never ran it.
+func persistedStatus(cfg Config, jobID string) (string, bool) {
+	if cfg.OutcomeLoader == nil || strings.TrimSpace(jobID) == "" {
+		return "", false
+	}
+	outcome, err := cfg.OutcomeLoader(strings.TrimSpace(jobID))
+	if err != nil || outcome.Status == "" {
+		return "", false
+	}
+
+	var sb strings.Builder
+	switch outcome.Status {
+	case statusCompleted:
+		sb.WriteString("Status: completed (recovered from the stored transcript)")
+		if outcome.Task != "" {
+			sb.WriteString("\nTask: ")
+			sb.WriteString(outcome.Task)
+		}
+		sb.WriteString("\n\nResult:\n")
+		sb.WriteString(outcome.Result)
+	case statusFailed:
+		sb.WriteString("Status: failed (recovered from the stored transcript)\nError: ")
+		sb.WriteString(outcome.Error)
+	case statusCancelled:
+		sb.WriteString("Status: cancelled (recovered from the stored transcript)")
+	default:
+		// A transcript still marked running was left behind by a crash or a
+		// restart: nothing is executing it, and saying "running" would have
+		// the parent wait for a result that will never arrive.
+		sb.WriteString("Status: interrupted — this job is not active; its transcript was left unfinished and can be resumed with the subagent tool's resume parameter.")
+		if outcome.Task != "" {
+			sb.WriteString("\nTask: ")
+			sb.WriteString(outcome.Task)
+		}
+	}
+	return sb.String(), true
 }
 
 // subagentWaitMaxTimeout caps an explicit timeout so a huge value can't
