@@ -48,6 +48,10 @@ export function toolPath(name, args) {
 
   if (n === 'read' || n === 'write' || n === 'edit' || n === 'multiedit' || n === 'ls')
     return a.path || '';
+  // The book is a filesystem the owner writes: what identifies a call is the
+  // file it touched, never the word `write` the generic fallback picked up.
+  if (n === 'book')
+    return a.action === 'search' ? (a.query || '') : (a.path || '');
   if (n === 'send_file') {
     const p = a.path || '';
     return p.length > 80 ? p.split('/').pop() : p;
@@ -96,6 +100,7 @@ export function toolInputLine(name, args) {
   const n = (name || '').toLowerCase();
 
   if (n === 'read' || n === 'write') return a.path || '';
+  if (n === 'book') return bookWrites(a) ? (a.path || '') : '';
   if (n === 'ls') return a.path || '.';
   if (n === 'fetch_content') return a.url || '';
   if (n === 'web_search') return a.query || '';
@@ -124,6 +129,14 @@ export function toolPreview(name, args, result, status, startLine) {
   // For write/edit tools, show the content being written.
   if (n === 'write' && a.content)
     return { text: a.content, kind: 'input' };
+  // A book write IS a write and a book append IS an insertion edit: the same
+  // two previews, so what the owner recorded reads like any other file change
+  // instead of the one-line "wrote areas/x.md" that said nothing.
+  if (n === 'book' && bookWrites(a) && a.content) {
+    return a.action === 'append'
+      ? { text: live ? formatLiveDiff('', a.content) : formatDiff('', a.content), kind: 'diff' }
+      : { text: a.content, kind: 'input' };
+  }
   if (n === 'edit') {
     // Use server-computed diff (has real file line numbers).
     const liveResult = live && result ? liveUnifiedDiffPreview(result) : null;
@@ -182,6 +195,13 @@ export function toolPreview(name, args, result, status, startLine) {
   if (result) return { text: result, kind: 'output' };
 
   return null;
+}
+
+// bookWrites — the two book actions that CHANGE the book. The reading actions
+// keep the compact result row they already had.
+export function bookWrites(args) {
+  const a = args && typeof args === 'object' ? args : {};
+  return a.action === 'write' || a.action === 'append';
 }
 
 const PREVIEW_LINES = 12;

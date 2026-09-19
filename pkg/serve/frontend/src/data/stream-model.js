@@ -127,6 +127,7 @@ import {
   toolInputLine,
   toolPath,
   toolPreview,
+  bookWrites,
   shortModel,
   modelCodename,
 } from './util/format.js';
@@ -374,7 +375,11 @@ export function projectStream(session) {
       // generic ledger row; failed/rejected/invalid deliveries have no file
       // block and therefore keep their feedback row.
       const file = toFileBlock(msg);
-      if (!file) {
+      // The owner talking to one of its sessions is a MESSAGE, not a tool
+      // result: "Sent to 66f1… ()" named neither the session nor what was
+      // said. It gets its own block for the same reason a delivery does.
+      const sessionMessage = toSessionMessageBlock(msg);
+      if (!file && !sessionMessage) {
         if (!currentLedger) {
           currentLedger = { type: 'ledger', id: blockID('ledger', msg, i), rows: [] };
           doc.blocks.push(currentLedger);
@@ -396,6 +401,11 @@ export function projectStream(session) {
       if (file) {
         file.id = blockID('file', msg, i);
         doc.blocks.push(file);
+        closeLedger();
+      }
+      if (sessionMessage) {
+        sessionMessage.id = blockID('sessionmsg', msg, i);
+        doc.blocks.push(sessionMessage);
         closeLedger();
       }
       continue;
@@ -850,7 +860,7 @@ function mapStatus(status) {
 // from the head instead of the tail, and `.../MobileStream.jsx` survives where
 // `pkg/serve/frontend/src/lay…` said nothing. Everything else (commands,
 // patterns, URLs, queries) reads left to right and keeps the normal tail cut.
-const PATH_ARG_TOOLS = new Set(['read', 'write', 'edit', 'multiedit', 'ls', 'send_file']);
+const PATH_ARG_TOOLS = new Set(['read', 'write', 'edit', 'multiedit', 'ls', 'send_file', 'book']);
 
 // toLedgerRow builds one ActivityLedger row prop object from a tool_start message. This
 // is also the path terminated subagent/bash cards take (they arrive as
@@ -885,6 +895,13 @@ function toLedgerRow(msg) {
   if (name.toLowerCase() === 'bash') {
     const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
     if (args && typeof args.command === 'string' && args.command) row.command = args.command;
+  }
+  // A book write/append is an edit of a file that happens to live in the book,
+  // so its detail is fused like an edit's (content panel, insertion diff)
+  // without the row pretending to be the `write` tool.
+  if (name.toLowerCase() === 'book') {
+    const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
+    if (bookWrites(args)) row.detailKind = 'edit';
   }
   if (body) row.body = body;
   // The tool currently in flight (status running/generating) is marked `live`
@@ -1042,14 +1059,63 @@ function toDiffBlock(msg) {
   const name = msg.tool_name || '';
   const preview = toolPreview(name, msg.args, msg.result, msg.status, msg.start_line);
   if (!preview || preview.kind !== 'diff') return null;
-  if (!isUnifiedDiff(preview.text)) return null;
   const args = typeof msg.args === 'string' ? tryParse(msg.args) : (msg.args || {});
+  // A book append has no server diff to wait for: the appended text IS the
+  // insertion, and formatDiff's numbered rows are what toolPreview built from
+  // it. isUnifiedDiff would reject them, so the exception is stated here
+  // rather than by loosening what counts as a unified diff everywhere.
+  const bookAppend = name.toLowerCase() === 'book' && args && args.action === 'append';
+  if (!bookAppend && !isUnifiedDiff(preview.text)) return null;
   return {
     type: 'diff',
     filename: (args && args.path) || '',
     diffText: preview.text,
     startLine: msg.start_line,
   };
+}
+
+// toSessionMessageBlock returns the owner's message to one of its sessions —
+// `sessions` send/new/answer — as its own block, or null for every other call.
+//
+// Only a DONE call: a failure has no message to show, and its ledger row
+// carries the reason, which is the same rule toFileBlock follows.
+//
+// `new` has no session_id in its arguments — the session did not exist yet —
+// so the id comes from the result line the tool writes ("Started session <id>
+// in <cwd>."). Without it the block could name the child but not open it.
+function toSessionMessageBlock(msg) {
+  if ((msg.tool_name || '').toLowerCase() !== 'sessions' || msg.status !== 'done') return null;
+  const args = typeof msg.args === 'string' ? tryParse(msg.args) : (msg.args || {});
+  const action = args && args.action;
+  if (action !== 'send' && action !== 'new' && action !== 'answer') return null;
+  const result = String(msg.result || '');
+  const block = {
+    type: 'session_message',
+    action,
+    sessionId: String((args && args.session_id) || '').trim(),
+    text: '',
+  };
+  if (action === 'new') {
+    const started = result.match(/Started session (\S+?) in /);
+    if (started) block.sessionId = started[1];
+    block.text = String((args && args.text) || '');
+    if (args.cwd) block.cwd = String(args.cwd);
+    if (args.model) block.model = String(args.model);
+    if (args.thinking) block.thinking = String(args.thinking);
+    if (args.title) block.title = String(args.title);
+  } else if (action === 'send') {
+    block.text = String((args && args.text) || '');
+    // The session was working, so it reads this at its next step. The tool
+    // says so in its result and the owner should not have to open it to know.
+    block.queued = /^Queued for /.test(result);
+  } else {
+    block.answers = Array.isArray(args && args.answers) ? args.answers.map((a) => String(a)) : [];
+    block.askId = String((args && args.ask_id) || '');
+  }
+  // Nothing to show beats an empty card: an answer with no answers and a
+  // message with no text and no target are not worth a block.
+  if (!block.sessionId && !block.text && !(block.answers || []).length) return null;
+  return block;
 }
 
 function tryParse(s) {

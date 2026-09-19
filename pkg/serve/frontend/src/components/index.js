@@ -38,5 +38,6 @@ export { SessionPanel } from "./SessionPanel/SessionPanel.jsx";
 export { TokenFlow } from "./TokenFlow/TokenFlow.jsx";
 export { SubagentDetails } from "./SubagentDetails/SubagentDetails.jsx";
 export { EventBlock } from "./EventBlock/EventBlock.jsx"; // wake-on-event
+export { SessionMessage } from "./SessionMessage/SessionMessage.jsx"; // owners
 export { InboxView } from "./InboxView/InboxView.jsx"; // wake-on-event
 export { InboxButton } from "./InboxButton/InboxButton.jsx"; // wake-on-event

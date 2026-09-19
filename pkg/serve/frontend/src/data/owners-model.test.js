@@ -195,12 +195,13 @@ test("a collapsed Owners heading shows the most urgent thing it hides, and only 
 });
 
 test("ownerRows picks the owner's own conversation out of the roster when it is there", () => {
-  const owners = [{ id: "o1", name: "moa", session_id: "s-own" }];
+  const owners = [{ id: "o1", name: "moa", session_id: "s-own", session_state: "idle" }];
   const sessions = {
     "s-own": { id: "s-own", kind: "owner", state: "permission", unseen: true, updated: 10 },
     c1: { id: "c1", ownerId: "o1", state: "running", updated: 20 },
   };
   const [row] = ownerRows(owners, sessions, 30);
+  expect(ownerState(row)).toBe("asks");
   expect(row.unseen).toBe(true);
   expect(row.ownReason).toBe("Needs your answer");
   // The owner's own session is never one of its children.
@@ -209,4 +210,13 @@ test("ownerRows picks the owner's own conversation out of the roster when it is 
   const [bare] = ownerRows(owners, { c1: sessions.c1 }, 30);
   expect(bare.unseen).toBe(false);
   expect(bare.ownReason).toBe("");
+});
+
+test("ownerRows uses its loaded conversation's live state over the owner snapshot", () => {
+  const [row] = ownerRows(
+    [{ id: "o1", name: "Alpha", session_id: "s-own", session_state: "idle" }],
+    { "s-own": { id: "s-own", state: "running", updated: 10 } },
+    30,
+  );
+  expect(ownerState(row)).toBe("working");
 });

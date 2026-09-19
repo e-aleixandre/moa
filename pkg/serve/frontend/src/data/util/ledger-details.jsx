@@ -58,7 +58,9 @@ export function fuseLedgerDetails(rows, siblingDiff) {
   const diffs = Array.isArray(siblingDiff) ? siblingDiff.filter(Boolean) : (siblingDiff ? [siblingDiff] : []);
   const editIndexes = [];
   for (let i = 0; i < rows.length; i++) {
-    if (mapToolToKind(rows[i].tool) === "edit") editIndexes.push(i);
+    // `detailKind` lets a row declare that its detail behaves like an edit's
+    // (a book write/append) without renaming the tool it actually called.
+    if ((rows[i].detailKind || mapToolToKind(rows[i].tool)) === "edit") editIndexes.push(i);
   }
   const diffByRow = new Map();
   if (diffs.length === 1 && editIndexes.length > 0) {

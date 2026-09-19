@@ -8,6 +8,7 @@ import {
   ArtifactCard,
   CompactionCard,
   EventBlock,
+  SessionMessage,
   HistoryHydrationTail,
   historyHydrationTailVisible,
 } from "../../components/index.js";
@@ -77,6 +78,26 @@ function docChildren(blocks, onOpenSubagent, visibleDone, sessionId) {
         break;
       case "file":
         out.push(<ArtifactCard key={b.id} file={b.file} sessionId={sessionId} />);
+        break;
+      // The owner's message to one of its sessions: who it reached, and what
+      // it said, rendered as the session received it.
+      case "session_message":
+        out.push(
+          <SessionMessage
+            key={b.id}
+            action={b.action}
+            sessionId={b.sessionId}
+            text={b.text}
+            answers={b.answers}
+            askId={b.askId}
+            cwd={b.cwd}
+            model={b.model}
+            thinking={b.thinking}
+            title={b.title}
+            queued={b.queued}
+            onOpenSession={openSession}
+          />
+        );
         break;
       case "delegation":
         out.push(

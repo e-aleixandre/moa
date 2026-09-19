@@ -1592,3 +1592,126 @@ test('a terminated card with an empty args still uses the task the entry remembe
   const agents = projectStream(s).flatMap(b => (b.blocks || []).flatMap(i => i.agents || []));
   expect(agents).toEqual([expect.objectContaining({ id: 'j1', name: 'Delivery review' })]);
 });
+
+// ── the owner's tools: book writes and messages to sessions ──────────────────
+//
+// Both used to be one cryptic ledger row: "wrote areas/x.md" said nothing
+// about what was written, and "Sent to 66f1c2… ()" named neither the session
+// nor the message. Each mapping is pinned here.
+
+const docBlocks = (s) => projectStream(s).flatMap(b => b.blocks || []);
+
+test('a book write carries its content like a file write', () => {
+  const s = session([
+    tool('b1', 'book', { action: 'write', path: 'areas/erp/albaranes.md', content: '# Albaranes\n\nUno por pedido.' },
+      'done', 'Wrote areas/erp/albaranes.md in the book.'),
+  ]);
+  const [ledger] = docBlocks(s);
+  expect(ledger.type).toBe('ledger');
+  const [row] = ledger.rows;
+  expect(row.arg.text).toBe('areas/erp/albaranes.md');
+  expect(row.inputLine).toBe('areas/erp/albaranes.md');
+  expect(row.body).toBe('# Albaranes\n\nUno por pedido.');
+  expect(row.detailKind).toBe('edit');
+  expect(row.argTail).toBe(true);
+});
+
+test('a book append emits an insertion diff sibling for its row', () => {
+  const s = session([
+    tool('b1', 'book', { action: 'append', path: 'decisiones.md', content: 'Se decide X.' },
+      'done', 'Appended decisiones.md in the book.'),
+  ]);
+  const blocks = docBlocks(s);
+  expect(blocks.map(b => b.type)).toEqual(['ledger', 'diff']);
+  expect(blocks[0].rows[0].detailKind).toBe('edit');
+  expect(blocks[1].filename).toBe('decisiones.md');
+  expect(parseUnifiedDiff(blocks[1].diffText)).toEqual([
+    { newNo: 1, type: 'add', text: 'Se decide X.' },
+  ]);
+});
+
+test('a book read keeps its compact result row', () => {
+  const s = session([
+    tool('b1', 'book', { action: 'read', path: 'PROJECT.md' }, 'done', '# Proyecto\nÍndice'),
+  ]);
+  const [ledger] = docBlocks(s);
+  expect(ledger.rows[0].arg.text).toBe('PROJECT.md');
+  expect(ledger.rows[0].body).toBe('# Proyecto\nÍndice');
+  expect(ledger.rows[0].detailKind).toBeUndefined();
+});
+
+test('a book search names what was looked for, not the action', () => {
+  const s = session([
+    tool('b1', 'book', { action: 'search', query: 'albaranes' }, 'done', '1 file'),
+  ]);
+  expect(docBlocks(s)[0].rows[0].arg.text).toBe('albaranes');
+});
+
+test('sessions.send becomes a message block naming the target and the text', () => {
+  const s = session([
+    tool('s1', 'sessions', { action: 'send', session_id: 'abc123def456', text: 'gracias' },
+      'done', 'Sent to abc123def456 (m-9).'),
+  ]);
+  const blocks = docBlocks(s);
+  expect(blocks).toEqual([expect.objectContaining({
+    type: 'session_message', action: 'send', sessionId: 'abc123def456', text: 'gracias', queued: false,
+  })]);
+});
+
+test('a steered send says the session reads it at its next step', () => {
+  const s = session([
+    tool('s1', 'sessions', { action: 'send', session_id: 'abc', text: 'para' },
+      'done', 'Queued for abc (it is working; it will read this at its next step).'),
+  ]);
+  expect(docBlocks(s)[0].queued).toBe(true);
+});
+
+test('sessions.new takes the created session id from its result', () => {
+  const s = session([
+    tool('s1', 'sessions', { action: 'new', text: 'Saluda', cwd: '/repo/api', model: 'sol', thinking: 'high' },
+      'done', 'Started session new789 in /repo/api.'),
+  ]);
+  expect(docBlocks(s)).toEqual([expect.objectContaining({
+    type: 'session_message', action: 'new', sessionId: 'new789', text: 'Saluda',
+    cwd: '/repo/api', model: 'sol', thinking: 'high',
+  })]);
+});
+
+test('sessions.answer carries the answers it gave and the question id', () => {
+  const s = session([
+    tool('s1', 'sessions', { action: 'answer', session_id: 'abc', ask_id: 'ask-7', answers: ['Sí', 'La segunda'] },
+      'done', 'Answered ask-7 in session abc.'),
+  ]);
+  expect(docBlocks(s)).toEqual([expect.objectContaining({
+    type: 'session_message', action: 'answer', sessionId: 'abc', askId: 'ask-7', answers: ['Sí', 'La segunda'],
+  })]);
+});
+
+test('sessions.list and read stay ledger rows', () => {
+  const s = session([
+    tool('s1', 'sessions', { action: 'list' }, 'done', '2 sessions'),
+    tool('s2', 'sessions', { action: 'read', session_id: 'abc' }, 'done', 'abc — Fix\n\nuser: hola'),
+  ]);
+  const blocks = docBlocks(s);
+  expect(blocks.map(b => b.type)).toEqual(['ledger']);
+  expect(blocks[0].rows).toHaveLength(2);
+});
+
+test('a failed send keeps its ledger row so the reason is readable', () => {
+  const s = session([
+    tool('s1', 'sessions', { action: 'send', session_id: 'abc', text: 'hola' },
+      'error', 'cannot send to abc: session not found'),
+  ]);
+  const blocks = docBlocks(s);
+  expect(blocks.map(b => b.type)).toEqual(['ledger']);
+  expect(blocks[0].rows[0].echo).toBe('cannot send to abc: session not found');
+});
+
+test('a message block closes the ledger around it', () => {
+  const s = session([
+    tool('b1', 'book', { action: 'read', path: 'PROJECT.md' }, 'done', 'index'),
+    tool('s1', 'sessions', { action: 'send', session_id: 'abc', text: 'sigue' }, 'done', 'Sent to abc (m-1).'),
+    tool('b2', 'book', { action: 'read', path: 'areas/x.md' }, 'done', 'x'),
+  ]);
+  expect(docBlocks(s).map(b => b.type)).toEqual(['ledger', 'session_message', 'ledger']);
+});

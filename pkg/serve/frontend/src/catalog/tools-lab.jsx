@@ -22,7 +22,7 @@ import "./tools-lab.css";
 // toolPreview, deriveOut, mapStatus and fuseLedgerDetails, not by this file.
 // Nothing here re-implements a ledger row, and no rule below restyles one.
 //
-// Three conversations rather than one: the matrix is big enough that a single
+// Four conversations rather than one: the matrix is big enough that a single
 // transcript stops reading like work. Each is a plausible session; between
 // them they cover every tool, state, group size and ugly-content case (see
 // COVERAGE in tool-conversations.js).
@@ -33,6 +33,7 @@ import "./tools-lab.css";
 //   ?view=toolsphone         ONE phone filling the window, real scroll
 
 const noop = () => {};
+
 
 // fuseLedgerDetails runs inside ConversationStream, so the lab hands over the
 // projection and nothing else. Recomputed per render is fine: the fixtures are
@@ -133,7 +134,7 @@ export function ToolsLab() {
       <header class="tools-intro">
         <h1>Tool calls, in a conversation</h1>
         <p>
-          Three fake but plausible sessions, mounted on the SHIPPED transcript:
+          Four fake but plausible sessions, mounted on the SHIPPED transcript:
           production <code>MobileStream</code> / <code>Stream</code> fed by the
           production <code>projectStream</code>. The fixtures are raw
           server-shaped messages, so every row was derived by the real code

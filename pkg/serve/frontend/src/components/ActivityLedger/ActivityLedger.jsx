@@ -52,6 +52,12 @@ const ICONS = {
   moa_docs: <><path d="M8 4.4C6.9 3.4 5.3 2.9 3 2.9v8.6c2.3 0 3.9.5 5 1.5 1.1-1 2.7-1.5 5-1.5V2.9c-2.3 0-4.1.5-5 1.5z" {...STROKE} /><path d="M8 4.4v8.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></>,
   // A store, not a page: memory is where facts were put, and read back.
   memory: <><path d="M3.6 4c0-1.1 2-2 4.4-2s4.4.9 4.4 2v8c0 1.1-2 2-4.4 2s-4.4-.9-4.4-2z" {...STROKE} /><path d="M3.6 4c0 1.1 2 2 4.4 2s4.4-.9 4.4-2M3.6 8.2c0 1.1 2 2 4.4 2s4.4-.9 4.4-2" {...STROKE} /></>,
+  // The project book. The same volume as the docs because it IS one: the
+  // owner's record of the project, read and written as a book. Without it a
+  // `book` row wore the unknown-tool wrench, which said nothing at all.
+  book: <><path d="M8 4.4C6.9 3.4 5.3 2.9 3 2.9v8.6c2.3 0 3.9.5 5 1.5 1.1-1 2.7-1.5 5-1.5V2.9c-2.3 0-4.1.5-5 1.5z" {...STROKE} /><path d="M8 4.4v8.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></>,
+  // The owner's handle on the sessions of its project: people, not files.
+  sessions: <><circle cx="6" cy="5.6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M1.9 13c.5-2.3 2-3.5 4.1-3.5s3.6 1.2 4.1 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /><path d="M10.6 3.7a2 2 0 0 1 0 3.8M11.6 9.9c1.4.5 2.2 1.6 2.5 3.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></>,
 
   // ── mutating: a mark applied to something ──────────────────────────────
   edit: <path d="M11.6 2.3l2.1 2.1L6 12.1H3.9V9.9z" {...STROKE} />,

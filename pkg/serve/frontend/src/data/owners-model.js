@@ -243,14 +243,13 @@ function relAge(updated, now) {
 //
 // The owner's OWN conversation is picked out of the same roster when it is
 // there: it is hidden from GET /api/sessions and only loaded once you open it
-// (data/owners.js loadOwnerSessions), so `unseen` and the reason line are
-// attached when known and simply absent otherwise. The row never invents them.
+// (data/owners.js loadOwnerSessions). Its live state, unseen flag and reason
+// win over the GET /api/owners snapshot, which is only a fallback before that
+// conversation has been loaded.
 export function ownerRows(owners = [], sessions = {}, now = Date.now()) {
   const byOwner = new Map();
-  const ownSessions = new Map();
   for (const sess of Object.values(sessions || {})) {
     if ((sess?.kind || "") === "owner") {
-      if (sess.id) ownSessions.set(sess.id, sess);
       continue;
     }
     if (!sess?.ownerId) continue;
@@ -259,7 +258,7 @@ export function ownerRows(owners = [], sessions = {}, now = Date.now()) {
   }
   for (const list of byOwner.values()) list.sort((a, b) => b.updated - a.updated);
   return owners.map((own) => {
-    const mine = own.session_id ? ownSessions.get(own.session_id) : null;
+    const mine = own.session_id ? sessions?.[own.session_id] : null;
     // The reason of the owner's OWN conversation, read with the kind stripped:
     // attentionKind refuses an owner on purpose — that is what keeps it out of
     // Needs attention — but the sentence it produces is exactly what this row
@@ -268,8 +267,9 @@ export function ownerRows(owners = [], sessions = {}, now = Date.now()) {
     const reason = mine ? sessionRowReason({ ...mine, kind: "" }, now) : null;
     return {
       ...own,
+      session_state: mine?.state || own.session_state,
       children: byOwner.get(own.id) || [],
-      unseen: !!mine?.unseen,
+      unseen: mine ? !!mine.unseen : !!own.unseen,
       ownReason: reason?.text || "",
     };
   });

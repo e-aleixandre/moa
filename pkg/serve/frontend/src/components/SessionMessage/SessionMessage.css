@@ -1,0 +1,108 @@
+/* SessionMessage — the owner's message to one of its sessions.
+
+   Same surface as the tool ledger (sheet + rim), because it belongs to the
+   same run of work and a second card style beside it would say these were two
+   different kinds of thing. What it does NOT take is the user's left rule or
+   an identity colour: the owner speaking to a session is work, not a state
+   that needs anybody (CRITERIO-VISUAL §1).
+
+   The provenance line is mono and quiet; the message keeps the prose voice it
+   had when it was written, because that is what the session received. */
+
+.smsg {
+  margin: var(--space-3) 0;
+  padding: 10px 12px 12px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+}
+
+.smsg-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-height: 28px;
+}
+
+.smsg-verb {
+  font-family: var(--mono);
+  font-size: var(--text-micro);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+
+/* The target is the one thing in the head worth reading, and the only door
+   out of the block: full text colour, a hit area a thumb can find. */
+.smsg-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--zl-hi);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--zl-fs-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.smsg-target:disabled { cursor: default; opacity: 0.85; }
+
+@media (hover: hover) {
+  .smsg-target:not(:disabled):hover { background: var(--zl-line); }
+}
+
+.smsg-target:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.smsg-target-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.smsg-note,
+.smsg-meta {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--overlay0);
+  overflow-wrap: anywhere;
+}
+
+.smsg-meta { margin-top: 6px; }
+
+/* The message itself, in the prose voice of the transcript it was sent into. */
+.smsg-body {
+  margin-top: 8px;
+  color: var(--subtext1);
+}
+
+.smsg-body > :first-child { margin-top: 0; }
+.smsg-body > :last-child { margin-bottom: 0; }
+
+.smsg-answers {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  /* Numbered on purpose: an answer is the reply to the Nth question, and a
+     bare run of sentences loses which answered what. */
+  list-style: decimal;
+  color: var(--subtext1);
+  font-size: var(--zl-fs-body);
+}
+
+.smsg-answers li { margin: 2px 0; }
+
+/* A phone has no room for a second indent: the block already sits inside the
+   turn's column. */
+@media (max-width: 720px) {
+  .smsg { padding: 8px 10px 10px; }
+}

@@ -7,7 +7,7 @@
 // mapStatus, fuseLedgerDetails) rather than hand-written to look right. A
 // fixture that produced a prettier row than production would be worthless.
 //
-// Three conversations instead of one: a single transcript covering every tool
+// Four conversations instead of one: a single transcript covering every tool
 // and every state stops reading like work and becomes a catalogue in disguise.
 // Each one is a plausible session with its own problem, and between them they
 // cover the whole matrix (see COVERAGE at the bottom).
@@ -253,6 +253,46 @@ export const FAILING = {
   ],
 };
 
+/* ── 4 · The owner's own tools ─────────────────────────────────────────────
+   An owner working its project: it records a decision in the book, starts a
+   session to act on it, and corrects that session a minute later. These are
+   the calls that used to read "wrote areas/x.md" and "Sent to 66f1c2… ()" —
+   the book write opens its content like a file write, the append shows the
+   inserted lines, and each message to a session names the session and shows
+   what it said. */
+
+const FICHA = `# Albaranes
+
+Un albarán por pedido, nunca agrupados: el cliente factura contra el albarán y
+agrupar dos pedidos le rompe la conciliación.
+
+## Quién lo pidió
+Winerim (marzo). La decisión se tomó con ellos delante, no es una suposición
+nuestra.
+
+## Lo que NO se hace
+- No se agrupan albaranes de pedidos distintos.
+- No se borra un albarán emitido: se emite uno de abono.`;
+
+export const OWNING = {
+  id: "conv-owning",
+  title: "erp · albaranes",
+  messages: [
+    user("u1", "Winerim ha confirmado que los albaranes no se agrupan nunca. Apúntalo y que alguien lo arregle en el ERP.", 0),
+    said("a1", "Lo dejo escrito en el libro primero, que es donde lo va a leer quien toque el módulo, y luego abro una sesión para el arreglo.", 1),
+    done("bw1", "book", { action: "write", path: "areas/erp/albaranes.md", content: FICHA }, "Wrote areas/erp/albaranes.md in the book."),
+    done("ba1", "book", { action: "append", path: "decisiones.md", content: "\n## 2026-09-19 · Albaranes sin agrupar\nConfirmado por Winerim. Detalle en areas/erp/albaranes.md." }, "Appended decisiones.md in the book."),
+    done("bl1", "book", { action: "list", path: "areas/erp" }, "areas/erp/albaranes.md\nareas/erp/facturacion.md"),
+    said("a2", "Apuntado. Ahora la sesión que lo arregla.", 2),
+    done("sn1", "sessions", { action: "new", text: "En `internal/erp/albaran.go` hay un camino que agrupa pedidos del mismo cliente en un albarán. **No debe existir**: un albarán por pedido.\n\nMira primero `areas/erp/albaranes.md` en el libro, que explica por qué.", cwd: "/home/dev/erp/internal/erp", model: "terra", thinking: "medium" }, "Started session sqlite in /home/dev/erp/internal/erp."),
+    done("sl1", "sessions", { action: "list" }, "sqlite — migrate sqlite · running\nfrontend — frontend polish · idle"),
+    said("a3", "Está trabajando. Le falta un dato que sí está en el libro, se lo paso.", 3),
+    done("ss1", "sessions", { action: "send", session_id: "sqlite", text: "Un apunte: los albaranes ya emitidos **no se borran**, se emite uno de abono. Si el arreglo toca el borrado, párate y dímelo." }, "Queued for sqlite (it is working; it will read this at its next step)."),
+    done("sa1", "sessions", { action: "answer", session_id: "sqlite", ask_id: "ask-7d2", answers: ["Sí, uno por pedido siempre", "No toques la numeración"] }, "Answered ask-7d2 in session sqlite."),
+    said("a4", "Le he contestado yo: las dos preguntas las responde el libro, no hacía falta molestarte.", 4),
+  ],
+};
+
 export const CONVERSATIONS = [
   {
     id: "reading",
@@ -267,6 +307,12 @@ export const CONVERSATIONS = [
     note: "The fix. The edit family with diffs opening inside the row, the tools with their own detail panel (ask_user, send_file), a subagent, and a live GENERATING edit streaming its diff.",
   },
   {
+    id: "owning",
+    session: OWNING,
+    label: "The owner's tools",
+    note: "An owner recording a decision and directing a session: book write/append opening like a file change, and each message to a session naming its target and showing what was said.",
+  },
+  {
     id: "failing",
     session: FAILING,
     label: "Failures and extremes",
@@ -277,7 +323,8 @@ export const CONVERSATIONS = [
 /* COVERAGE — what the three conversations exercise, so a gap is visible here
    rather than discovered in a screenshot.
 
-   Tools ..... read ls grep find bash edit multiedit write apply_patch
+   Tools ..... book (write/append/list) sessions (new/send/answer/list)
+               read ls grep find bash edit multiedit write apply_patch
                fetch_content web_search tasks memory verify moa_docs send_file
                subagent ask_user load_skill checkpoint mcp__linear__create_issue
                pulse_deploy_status (unknown → generic `tool` icon)
