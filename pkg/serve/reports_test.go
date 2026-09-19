@@ -46,6 +46,17 @@ func doneReport(id, sessionID, text string) owner.Report {
 	return owner.Report{ID: id, SessionID: sessionID, Title: sessionID, Status: callbackStatusDone, FinalText: text}
 }
 
+func TestReportsDescribeSessionOrigin(t *testing.T) {
+	text := reportsMessage([]owner.Report{
+		{SessionID: "owner-child", Title: "Owner child", Origin: "owner", Status: callbackStatusDone},
+		{SessionID: "user-child", Title: "User child", Origin: "user", Status: callbackStatusDone},
+	})
+	if !strings.Contains(text, "owner-child — Owner child\n  origin: owner") ||
+		!strings.Contains(text, "user-child — User child\n  origin: user") {
+		t.Fatalf("report origins missing:\n%s", text)
+	}
+}
+
 func TestChildRunReportsToItsOwner(t *testing.T) {
 	shortReportWindow(t, 50*time.Millisecond)
 	ctx := context.Background()

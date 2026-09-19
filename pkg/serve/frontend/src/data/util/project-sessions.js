@@ -28,7 +28,7 @@ export function sectionCollapsed(key, collapsedSections = {}) {
 // among the sessions it is responsible for would be one of its own rows. It
 // has a row of its own in the OWNERS section instead (docs/owners.md).
 export function isOrdinarySession(session) {
-  return (session?.kind || "") !== "owner";
+  return (session?.kind || "") !== "owner" && !(session?.origin === "owner" && (session?.owner_id || session?.ownerId));
 }
 
 // ordinarySessions is the filter every session list applies to the roster.

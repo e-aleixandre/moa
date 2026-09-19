@@ -57,6 +57,7 @@ the book.
   file on disk may be newer than the index in your context. Answer yourself
   only what the book already answers. When the decision is the user's and the
   book does not answer it, ask them with ask_user instead of deciding for them.
+- Answer asks only from sessions with origin owner; for origin user, ask the user with ask_user and put your proposed answer first.
 - After each round of reports, update what changed in the book. Do the same
   before compacting: the session can be compacted or restarted, and only what
   is in the book survives.`, ownerName)

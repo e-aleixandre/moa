@@ -413,7 +413,9 @@ export function CommandPalette({
     // word matcher as both session lists: sentence-length titles make command
     // fuzzy matching return distracting subsequence false positives. Actions
     // below deliberately retain their established command-palette fuzzy match.
-    const all = ordinarySessions(Object.values(state.sessions)).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    // Owner-created children are deliberately absent from the user's sidebar,
+    // but the palette remains an explicit route to every conversation.
+    const all = Object.values(state.sessions).filter((s) => (s.kind || "") !== "owner").sort((a, b) => (b.updated || 0) - (a.updated || 0));
     const sessRows = [];
     for (const sess of all) {
       const cwd = sess.cwd || "";
@@ -434,6 +436,7 @@ export function CommandPalette({
         when: relativeWhen(sess.updated),
         paneN: paneOf(state.tileTree, sess.id),
         saved: sess.state === "saved",
+        origin: sess.origin || "",
       });
     }
     const cappedSessions = q ? sessRows : sessRows.slice(0, CAP_NO_QUERY);
@@ -851,6 +854,7 @@ export function CommandPalette({
             )}
           </span>
           {it.paneN && <span class="badge pane">P{it.paneN}</span>}
+          {it.origin === "owner" && <span class="badge origin">owner</span>}
           {it.when && <span class="when">{it.when}</span>}
         </div>
       );

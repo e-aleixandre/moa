@@ -52,6 +52,16 @@ The owner is **never steered**: a batch is delivered only when the owner is
 idle with an empty queue, otherwise it waits for the owner's run to end. An
 owner unloaded from memory is resumed to receive it.
 
+## Whose session is it
+
+| Origin | Who directs it | Questions |
+| --- | --- | --- |
+| `owner` | The owner | The owner answers from the book. |
+| `user` | The user | The owner reports what it would propose; it does not answer for the user. |
+
+Sessions with origin `owner` do not appear in the user's session list. They
+remain available in the owner's LiveBar and Overview, and can be opened directly.
+
 ## API
 
 ```

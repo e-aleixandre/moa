@@ -527,7 +527,7 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 		case []map[string]string:
 			out := make([]map[string]string, 0, len(list))
 			for _, item := range list {
-				out = append(out, map[string]string{"id": item["id"], "title": item["title"], "status": item["status"]})
+				out = append(out, map[string]string{"id": item["id"], "title": item["title"], "status": item["status"], "origin": item["origin"]})
 			}
 			projected["sessions"] = out
 		case []any:
@@ -537,8 +537,9 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 				id, _ := item["id"].(string)
 				title, _ := item["title"].(string)
 				status, _ := item["status"].(string)
+				origin, _ := item["origin"].(string)
 				if id != "" {
-					out = append(out, map[string]string{"id": id, "title": title, "status": status})
+					out = append(out, map[string]string{"id": id, "title": title, "status": status, "origin": origin})
 				}
 			}
 			projected["sessions"] = out

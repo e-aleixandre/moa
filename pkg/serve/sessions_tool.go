@@ -333,6 +333,9 @@ func (m *Manager) ownerAnswerAsk(own owner.Owner, id, askID string, answers []st
 	if !ok {
 		return core.ErrorResult(fmt.Sprintf("session %s is not loaded; it cannot be waiting on a question", id))
 	}
+	if sess.Origin != "owner" {
+		return core.ErrorResult("This session is the user's: do not answer for them. Ask the user with ask_user, proposing the answer you would give as the first option.")
+	}
 	if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: askID, Answers: answers}); err != nil {
 		// The user may have answered it in the UI first; the approval manager
 		// forgets a resolved ask, so this is the same error as an unknown one.

@@ -12,16 +12,18 @@ import { aggregateAttention } from "../layout/mobile/MobileConversationScreen/at
 // among the sessions it is responsible for.
 
 const owner = { id: "o", title: "Winerim", state: "idle", kind: "owner", cwd: "/p", updated: 400 };
-const child = { id: "c", title: "imports", state: "permission", ownerId: "own_1", cwd: "/p", updated: 300 };
+const child = { id: "c", title: "imports", state: "permission", owner_id: "own_1", cwd: "/p", updated: 300 };
+const ownerChild = { id: "oc", title: "owner imports", state: "permission", origin: "owner", owner_id: "own_1", cwd: "/p", updated: 200 };
 
 test("an owner conversation is not an ordinary session", () => {
   expect(isOrdinarySession(owner)).toBe(false);
   expect(isOrdinarySession(child)).toBe(true);
-  expect(ordinarySessions([owner, child]).map((s) => s.id)).toEqual(["c"]);
+  expect(isOrdinarySession(ownerChild)).toBe(false);
+  expect(ordinarySessions([owner, child, ownerChild]).map((s) => s.id)).toEqual(["c"]);
 });
 
 test("neither session list shows an owner", () => {
-  const sessions = { o: owner, c: child };
+  const sessions = { o: owner, c: child, oc: ownerChild };
   const spine = spineSessions(sessions);
   expect([...spine.active, ...spine.saved].map((s) => s.id)).toEqual(["c"]);
   const drawer = drawerSessions(sessions, null);
@@ -34,6 +36,7 @@ test("an owner never contributes to the phone's attention badge", () => {
   const asking = { ...owner, state: "permission" };
   expect(aggregateAttention({ o: asking }, null).urgent).toBe(0);
   expect(aggregateAttention({ c: child }, null).urgent).toBe(1);
+  expect(aggregateAttention({ oc: ownerChild }, null).urgent).toBe(0);
 });
 
 test("the segmented has exactly two positions: they are ORDERS, not lists", () => {

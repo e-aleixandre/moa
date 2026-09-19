@@ -20,6 +20,7 @@ type Report struct {
 	SessionID string         `json:"session_id"`
 	Title     string         `json:"title,omitempty"`
 	CWD       string         `json:"cwd,omitempty"`
+	Origin    string         `json:"origin"`
 	Status    string         `json:"status"`
 	FinalText string         `json:"final_text,omitempty"`
 	Pending   *ReportPending `json:"pending,omitempty"`

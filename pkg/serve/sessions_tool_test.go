@@ -145,7 +145,7 @@ func TestSessionsToolSendReachesAChild(t *testing.T) {
 	root := t.TempDir()
 	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
 
-	child, err := mgr.CreateSession(CreateOpts{CWD: root})
+	child, err := mgr.CreateSession(CreateOpts{CWD: root, Origin: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestSessionsToolAnswerResolvesAnAskOnce(t *testing.T) {
 	root := t.TempDir()
 	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
 
-	child, err := mgr.CreateSession(CreateOpts{CWD: root})
+	child, err := mgr.CreateSession(CreateOpts{CWD: root, Origin: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,6 +235,25 @@ func TestSessionsToolAnswerIsGatedOnAnswerAsks(t *testing.T) {
 	})
 	if !res.IsError || !strings.Contains(toolText(res), "not allowed") {
 		t.Fatalf("answer with answer_asks off = %q (IsError=%v)", toolText(res), res.IsError)
+	}
+}
+
+func TestSessionsToolCannotAnswerAUserSession(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+
+	child, err := mgr.CreateSession(CreateOpts{CWD: root, Origin: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := runSessionsTool(t, ownerSess, map[string]any{
+		"action": "answer", "session_id": child.ID, "ask_id": "whatever", "answers": []any{"x"},
+	})
+	const want = "This session is the user's: do not answer for them. Ask the user with ask_user, proposing the answer you would give as the first option."
+	if !res.IsError || !strings.Contains(toolText(res), want) {
+		t.Fatalf("answering user session = %q (IsError=%v)", toolText(res), res.IsError)
 	}
 }
 

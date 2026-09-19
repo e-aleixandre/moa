@@ -348,7 +348,7 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 	batchID := reportBatchID(pending)
 	sessions := make([]map[string]string, 0, len(pending))
 	for _, rep := range pending {
-		sessions = append(sessions, map[string]string{"id": rep.SessionID, "title": rep.Title, "status": rep.Status})
+		sessions = append(sessions, map[string]string{"id": rep.SessionID, "title": rep.Title, "status": rep.Status, "origin": rep.Origin})
 	}
 	custom := map[string]any{"source": reportSource, "batch": batchID, "count": len(pending), "sessions": sessions}
 
@@ -456,6 +456,7 @@ func reportFrom(sess *ManagedSession, out runOutcome) owner.Report {
 		SessionID: sess.ID,
 		Title:     sess.title(),
 		CWD:       sess.CWD,
+		Origin:    sess.Origin,
 		Status:    out.Status,
 		FinalText: reportTail(out.FinalText),
 		At:        time.Now().UTC().Format(time.RFC3339),
@@ -537,6 +538,7 @@ func reportsMessage(pending []owner.Report) string {
 	}
 	for _, rep := range pending {
 		fmt.Fprintf(&b, "- %s — %s\n", rep.SessionID, strings.TrimSpace(rep.Title))
+		fmt.Fprintf(&b, "  origin: %s\n", reportOrigin(rep.Origin))
 		fmt.Fprintf(&b, "  status: %s\n", rep.Status)
 		if rep.CWD != "" {
 			fmt.Fprintf(&b, "  directory: %s\n", rep.CWD)
@@ -556,6 +558,13 @@ func reportsMessage(pending []owner.Report) string {
 	b.WriteString("\nUse the sessions tool to read or answer any of them, and update the book " +
 		"with what this changes about the project.")
 	return b.String()
+}
+
+func reportOrigin(origin string) string {
+	if origin == "owner" {
+		return "owner"
+	}
+	return "user"
 }
 
 // indentReportText keeps a multi-line tail inside its bullet.

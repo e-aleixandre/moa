@@ -11,19 +11,19 @@ func TestProjectWSMessageCustom_OwnerAndReport(t *testing.T) {
 		t.Fatalf("unknown key leaked: %v", got)
 	}
 
-	live := projectWSMessageCustom(map[string]any{"source": "report", "count": 2, "sessions": []map[string]string{{"id": "s1", "title": "A", "status": "done"}}})
+	live := projectWSMessageCustom(map[string]any{"source": "report", "count": 2, "sessions": []map[string]string{{"id": "s1", "title": "A", "status": "done", "origin": "owner"}}})
 	if live["count"] != 2 {
 		t.Fatalf("count not projected live: %v", live)
 	}
-	if list, _ := live["sessions"].([]map[string]string); len(list) != 1 || list[0]["id"] != "s1" {
+	if list, _ := live["sessions"].([]map[string]string); len(list) != 1 || list[0]["id"] != "s1" || list[0]["origin"] != "owner" {
 		t.Fatalf("sessions not projected live: %v", live)
 	}
 
-	fromDisk := projectWSMessageCustom(map[string]any{"source": "report", "count": float64(1), "sessions": []any{map[string]any{"id": "s2", "title": "B", "status": "failed"}}})
+	fromDisk := projectWSMessageCustom(map[string]any{"source": "report", "count": float64(1), "sessions": []any{map[string]any{"id": "s2", "title": "B", "status": "failed", "origin": "user"}}})
 	if fromDisk["count"] != 1 {
 		t.Fatalf("count not projected from disk: %v", fromDisk)
 	}
-	if list, _ := fromDisk["sessions"].([]map[string]string); len(list) != 1 || list[0]["status"] != "failed" {
+	if list, _ := fromDisk["sessions"].([]map[string]string); len(list) != 1 || list[0]["status"] != "failed" || list[0]["origin"] != "user" {
 		t.Fatalf("sessions not projected from disk: %v", fromDisk)
 	}
 }
