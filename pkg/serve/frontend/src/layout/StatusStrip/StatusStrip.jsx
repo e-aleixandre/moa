@@ -255,7 +255,6 @@ export function StatusStrip({
             title={`Owner · ${owner.name}`}
           >
             {owner.avatar}
-            <span class="zl-st-word">{owner.name}</span>
           </button>
         )}
 
