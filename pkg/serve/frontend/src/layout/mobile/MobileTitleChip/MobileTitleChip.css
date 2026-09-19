@@ -43,8 +43,8 @@
    the mauve inbox count beside it — one says "events are waiting", the other
    says "this session is burning money". */
 .zl-chip-alert {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   flex: none;
   border-radius: 50%;
   background: var(--zl-yellow);
