@@ -1,0 +1,127 @@
+/* tally2-lab — CATALOG ONLY, round two of ?view=tally. Every rule is scoped
+   under `.t2*`, so it can only reach the wrapper chrome and the copies of the
+   shipped LiveBar mounted inside these hosts. The bar is never redrawn: where
+   a proposal hides a part of it (the background sentence) that is the MOCK of
+   a change to the component, called out in the JSX beside it.
+
+   Round one's page chrome (`.tb*`, tally-lab.css) is reused as-is, including
+   the phone and desk frames — the two rounds have to be comparable.
+
+   Tokens only (tokens/tokens.css). No `var(--zl-*, fallback)`. */
+
+/* ── The one shape that answers the question ───────────────────────────────
+
+   A running turn: the shipped `.zl-live-dot.is-working` — 7px, blue, a 3px
+   halo, breathing at --breath-running — a sentence that shimmers, and a mono
+   counter climbing at the right edge.
+
+   A stopped turn: this. Same slot, same baseline, same left edge. A 12×2 grey
+   DASH: flat, wide, still, haloless. Round versus straight, lit versus grey,
+   moving versus stopped — three differences in one 7px square, which is what
+   makes it readable before the words are. And no counter at the right, so the
+   whole line has a different silhouette, not just a different word. */
+
+.t2.is-idle .zl-live-now.is-bg { display: none; }
+/* With the sentence slot emptied the tally has to be told to keep the right
+   edge the flex row used to push it to. */
+.t2.is-idle .zl-live-bar { justify-content: flex-end; padding-right: 4px; }
+
+/* The turn's line is drawn OVER the emptied slot, not beside it: `.zl-live` is
+   a size container (container-type: inline-size), so a flex sibling would take
+   the bar's width to zero and the panel would unfold as a narrow column. */
+.t2-row { position: relative; display: flex; align-items: flex-end; }
+.t2-row > .zl-live { flex: 1; min-width: 0; }
+
+.t2-turn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 32px;
+  padding-left: 8px;
+}
+.t2-row.has-bar .t2-turn {
+  position: absolute;
+  left: 8px;
+  right: 76px;
+  bottom: 0;
+  padding-left: 0;
+}
+.zl-phone .t2-row.has-bar .t2-turn,
+.tb-phone .t2-row.has-bar .t2-turn { height: 44px; }
+
+.t2-turn-mark {
+  flex: none;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--zl-t4);
+}
+.t2-turn-s {
+  flex: none;
+  color: var(--zl-t3);
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+}
+/* The folded background: a count, in the caption voice, one step down from the
+   turn's own words. Never a verb, never a name, never a clock — the three
+   things that belong to a run. */
+.t2-turn-bg {
+  min-width: 0;
+  color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 1;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+/* Unfolding hands the voice to the list: the count leaves, it does not vanish,
+   and the line keeps its width so nothing beside it moves. */
+.t2-turn-bg.is-off { opacity: 0; }
+
+/* ── The settled row (state 4 only) ────────────────────────────────────────
+   A bash launched by a subagent belongs to the child and never wakes the
+   parent turn, so it is the one ending that has to be told. It settles INSIDE
+   the list, in the same rows, tense changed — never a card, never a badge. */
+.t2 .tb-done.is-row { margin: 0 0 4px; }
+
+/* ── Entering the conversation (P2) ────────────────────────────────────────
+   The unfold is the shipped panel's own (`zl-unfold`, 180ms, 6px + opacity):
+   the proposal adds no second animation, it only decides WHEN it plays. The
+   strip below holds that keyframe still at three points, because a capture
+   cannot hold a running one — frames 1 and 3 are real, frame 2 is staged and
+   labelled as such. */
+.t2.is-stage1 .zl-live-panel {
+  animation: none;
+  opacity: 0.45;
+  transform: translateY(3px);
+}
+.t2.is-stage0 .zl-live-panel,
+.t2.is-stage2 .zl-live-panel { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .t2-turn-bg { transition: none; }
+}
+
+/* ── Page ──────────────────────────────────────────────────────────────── */
+
+.t2-enter {
+  min-width: 44px;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-accent);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.t2-enter:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+@media (hover: hover) {
+  .t2-enter:hover { background: var(--zl-control); }
+}
+
+.t2-shots { padding: 20px; }

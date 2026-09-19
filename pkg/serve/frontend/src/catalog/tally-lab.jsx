@@ -44,7 +44,7 @@ import { UserWaypoint, AssistantDocument } from "../components/index.js";
 const LONG_CMD =
   "exec env MOA_CONFIG_DIR=/tmp/moa-probe-8821 MOA_LOG=debug ./moa serve --port 7399 --verbose";
 
-const IT = {
+export const IT = {
   terra: { id: "terra", kind: "subagent", name: "terra", accent: "teal", task: "review the diff", action: "Reading pkg/attach/store.go", ago: 134 },
   luna: { id: "luna", kind: "subagent", name: "luna", accent: "sky", task: "map the callers", action: "Reading pkg/serve/stream.go", ago: 78 },
   sol: { id: "sol", kind: "subagent", name: "sol", accent: "mauve", task: "the delete race", action: "Reading the index writer", ago: 212 },
@@ -99,12 +99,12 @@ function useNow(active, frozen) {
   return now;
 }
 
-function fixtureSession(fg, t0) {
+export function fixtureSession(fg, t0) {
   if (!fg) return { state: "idle" };
   return { state: "running", runStartedAtMs: t0 - fg.ago * 1000, liveLabel: fg.text };
 }
 
-function mins(sec) {
+export function mins(sec) {
   if (sec < 60) return `${Math.round(sec)}s`;
   return `${Math.floor(sec / 60)}m`;
 }
@@ -143,7 +143,7 @@ function Bar({ st, t0, now, dense, agents, open, onToggle }) {
    The piece production does not have. One component, three tones, so the five
    directions differ in where an ending goes and how loudly it lands, not in
    five separate drawings of the same row. */
-function Settled({ items, tone = "quiet", onDismiss }) {
+export function Settled({ items, tone = "quiet", onDismiss }) {
   if (!items.length) return null;
   return (
     <div class={`tb-done is-${tone}`} role="region" aria-label="Finished in the background">
@@ -184,7 +184,7 @@ function shortPhrase(items) {
   return countPhrase(items);
 }
 
-function countPhrase(items) {
+export function countPhrase(items) {
   const subs = items.filter((i) => i.kind === "subagent").length;
   const cmds = items.length - subs;
   const parts = [];
@@ -475,7 +475,7 @@ const PICKS = [...DIRS, TODAY];
 
 /* ── Hosts ─────────────────────────────────────────────────────────────── */
 
-function TranscriptTail() {
+export function TranscriptTail() {
   return (
     <div class="tb-stream">
       <UserWaypoint time="09:31">
@@ -492,7 +492,7 @@ function TranscriptTail() {
   );
 }
 
-function Phone({ dir, st, t0, now, tag }) {
+export function Phone({ dir, st, t0, now, tag }) {
   const Zone = dir.Zone;
   const Top = dir.Top;
   return (
@@ -515,7 +515,7 @@ function Phone({ dir, st, t0, now, tag }) {
   );
 }
 
-function Desk({ dir, st, t0, now }) {
+export function Desk({ dir, st, t0, now }) {
   const Zone = dir.Zone;
   const Top = dir.Top;
   return (
