@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Square } from "lucide-preact";
 import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
+import { StateDot } from "../../primitives/StateDot/StateDot.jsx";
 import { LiveSentence } from "./LiveSentence.jsx";
 import "./LiveBar.css";
 
@@ -199,8 +200,9 @@ export function LiveBar({
   };
 
   const { sentence, tally } = model;
+  const sessions = list.filter((a) => a.kind === "session");
   const subs = list.filter((a) => a.kind === "subagent");
-  const bashes = list.filter((a) => a.kind !== "subagent");
+  const bashes = list.filter((a) => a.kind === "bash");
   const waiting = sentence.waiting;
   const summary = backgroundSummary(list);
 
@@ -208,7 +210,7 @@ export function LiveBar({
     <div class={`zl-live${dense ? " is-dense" : ""}${openPanel ? " is-open" : ""}${sentence.kind === "ended" ? " is-ended" : ""}`}>
       {openPanel && (
         <div ref={panelRef} class={`zl-live-panel${panelOverflows ? " has-overflow" : ""}`} role="region" aria-label="Live in the background">
-          {[["Subagents", subs], ["Commands", bashes]].map(([title, items]) => items.length > 0 && (
+          {[["Sessions", sessions], ["Subagents", subs], ["Commands", bashes]].map(([title, items]) => items.length > 0 && (
             <div class="zl-live-grp" key={title}>
               <div class="zl-group">
                 <span>{title}</span>
@@ -279,9 +281,11 @@ export function LiveBar({
 }
 
 function backgroundSummary(agents) {
+  const sessions = agents.filter((agent) => agent.kind === "session").length;
   const subs = agents.filter((agent) => agent.kind === "subagent").length;
-  const commands = agents.length - subs;
+  const commands = agents.filter((agent) => agent.kind === "bash").length;
   const parts = [];
+  if (sessions) parts.push(`${sessions} session${sessions === 1 ? "" : "s"}`);
   if (subs) parts.push(`${subs} subagent${subs === 1 ? "" : "s"}`);
   if (commands) parts.push(`${commands} command${commands === 1 ? "" : "s"}`);
   return parts.join(" · ");
@@ -294,6 +298,9 @@ function backgroundSummary(agents) {
 // a price. The catalogue's model chips reuse this mark with a hue (`--h`);
 // production agents carry a named accent (`--sky` etc.).
 function LiveId({ agent }) {
+  if (agent.kind === "session") {
+    return <StateDot state={agent.state || "running"} size={7} aria-hidden="true" />;
+  }
   if (agent.kind === "subagent") {
     return <span class="zl-live-id is-agent" style={liveIdStyle(agent)} aria-hidden="true" />;
   }
@@ -315,14 +322,15 @@ function LiveRow({ agent, onOpen }) {
   // it can be tapped.
   const openable = !!onOpen;
   const Tag = openable ? "button" : "div";
-  const isBash = agent.kind !== "subagent";
+  const isBash = agent.kind === "bash";
+  const isSession = agent.kind === "session";
   return (
     <Tag
       class="zl-live-row"
       type={openable ? "button" : undefined}
       onClick={openable ? () => onOpen(agent.id, agent.kind) : undefined}
       aria-label={openable
-        ? (isBash ? `Show output of ${agent.action || agent.name}` : `Open subagent ${agent.name}`)
+        ? (isBash ? `Show output of ${agent.action || agent.name}` : isSession ? `Open session ${agent.name}` : `Open subagent ${agent.name}`)
         : undefined}
     >
       <LiveId agent={agent} />

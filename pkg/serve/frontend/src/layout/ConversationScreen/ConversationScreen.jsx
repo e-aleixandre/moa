@@ -15,12 +15,14 @@ import { usePermissionMenu } from "../../components/PermissionControl/Permission
 import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { updateSession } from "../../data/store.js";
+import { ownersSlice } from "../../data/owners.js";
 import { useStore } from "../../hooks/useStore.js";
 import { usePresence } from "../../hooks/usePresence.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
 import { focusedSession, focusedSessionId, matchSelectedModel } from "../../data/selectors.js";
 import { catalogThinkingPosition, ensureModelCatalog, modelCatalog } from "../../data/model-catalog.js";
 import { navigate } from "../../data/router.js";
+import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { shortModel, shortPath, modelCodename, sessionTitle } from "../../data/util/format.js";
@@ -59,7 +61,7 @@ export function ConversationScreen() {
   // The dock is the permanent home for live ASYNC work (async subagents + bash)
   // above the composer ("async in the dock, sync inline"). Sync subagents stay
   // inline in the delegation block instead.
-  const liveAgents = session ? liveTrayAgents(session) : [];
+  const liveAgents = useStore((s) => session ? liveTrayAgents(session, s.sessions, ownersSlice(s).list) : []);
 
   // --- Model selector popover (StatusStrip's ModelPill) ---
   const [modelOpen, setModelOpen] = useState(false);
@@ -316,9 +318,11 @@ export function ConversationScreen() {
                 agents={liveAgents}
                 open={!!session.dockOpen}
                 onToggle={(next) => updateSession(session.id, { dockOpen: next })}
-                onOpen={(id, kind) => (kind === "bash"
-                  ? openBashJob(session.id, id)
-                  : openPersistedSubagent(session.id, id))}
+                onOpen={(id, kind) => (kind === "session"
+                  ? openSession(id)
+                  : kind === "bash"
+                    ? openBashJob(session.id, id)
+                    : openPersistedSubagent(session.id, id))}
                 onStop={() => stopRun(session.id).catch(() => {})}
               />
               <Composer key={session.id} sessionId={session.id} session={session} onSecret={setSecretAliases} />

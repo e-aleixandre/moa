@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import { Plus } from "lucide-preact";
 import { updateSession, store } from "../../../data/store.js";
+import { ownersSlice } from "../../../data/owners.js";
 import { useStore } from "../../../hooks/useStore.js";
 import { projectStream, liveTrayAgents } from "../../../data/stream-model.js";
 import { focusedSessionId } from "../../../data/selectors.js";
@@ -123,7 +124,7 @@ function MobileConversationBody({ forceMobile = false }) {
   // --- Live Dock (SUBAGENTS-PERSISTENT-SPEC) ---
   // The dock is the permanent home for live ASYNC work (async subagents + bash)
   // above the composer ("async in the dock, sync inline").
-  const liveAgents = session ? liveTrayAgents(session) : [];
+  const liveAgents = useStore((s) => session ? liveTrayAgents(session, s.sessions, ownersSlice(s).list) : []);
   // Keyboard open → the dock folds to its compact bar (writing wins, §1.5). We
   // detect the soft keyboard by a large shrink of visualViewport vs the layout
   // viewport, the standard heuristic (no dedicated API).
@@ -294,9 +295,11 @@ function MobileConversationBody({ forceMobile = false }) {
             agents={liveAgents}
             open={!!session.dockOpen}
             onToggle={(next) => updateSession(session.id, { dockOpen: next })}
-            onOpen={(id, kind) => (kind === "bash"
-              ? openBashJob(session.id, id)
-              : openPersistedSubagent(session.id, id))}
+            onOpen={(id, kind) => (kind === "session"
+              ? openSession(id)
+              : kind === "bash"
+                ? openBashJob(session.id, id)
+                : openPersistedSubagent(session.id, id))}
             onStop={() => stopRun(session.id).catch(() => {})}
             forceCompact={kbdOpen}
           />

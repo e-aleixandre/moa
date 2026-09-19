@@ -17,11 +17,12 @@ import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { snapToRatio } from "../../data/snap.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import {
-  resizeSplit, assignToTile, swapTiles, splitTile, closeTile, focusTile,
+  resizeSplit, assignToTile, swapTiles, splitTile, closeTile, focusTile, openSession,
 } from "../../data/tile-actions.js";
 import { navigate } from "../../data/router.js";
 import { allTileIds } from "../../data/tileTree.js";
 import { getTileCount, updateSession } from "../../data/store.js";
+import { ownersSlice } from "../../data/owners.js";
 import { useStore } from "../../hooks/useStore.js";
 import { usePresence } from "../../hooks/usePresence.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
@@ -112,6 +113,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   const tileId = node.id;
   const sessionId = node.sessionId || null;
   const session = useStore((s) => (sessionId ? s.sessions[sessionId] : null));
+  const liveAgents = useStore((s) => session ? liveTrayAgents(session, s.sessions, ownersSlice(s).list) : []);
   const focused = useStore((s) => s.focusedTile === tileId);
   const usage = useStore((s) => s.usage);
   const [dragOver, setDragOver] = useState(false);
@@ -339,7 +341,6 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   }
 
   const blocks = projectStream(session);
-  const liveAgents = liveTrayAgents(session);
   const dotState = sessionDisplayDotState(session);
   const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
   const blocking = (session.untrustedMcp || session.pendingPerm || session.pendingAsk) ? (
@@ -431,6 +432,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
           onOpen={async (jobId, kind) => {
             // Detail views need room; open them in single conversation but
             // remember the grid so Back restores the layout (TOC-4).
+            if (kind === "session") return openSession(jobId);
             if (kind === "bash") openBashJob(session.id, jobId, { returnView: "grid" });
             else await openPersistedSubagent(session.id, jobId, { returnView: "grid" });
             navigate(null, { session: session.id });

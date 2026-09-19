@@ -717,13 +717,16 @@ function isTerminalSubagent(subagent) {
 // liveTrayAgents projects a session into the LiveBar's chip descriptors: the
 // LIVE ASYNC subagents (each carrying its fanout identity accent) followed by
 // ALL live bash jobs (no identity accent: spinner overlay1 + mono
-// `bash`; kind:'bash' is always async background work). SYNC subagents are
+// `bash`; kind:'bash' is always async background work). An owner's live child
+// sessions follow those jobs. `permission` children are included too: although
+// parked, they are still live work waiting for an answer, unlike idle/saved
+// sessions. SYNC subagents are
 // excluded — they block the conversation, so they stay inline in the
 // delegation block instead ("async in the dock, sync inline"). It reuses the
 // SAME liveSubagents/liveAgent rules the stream projection uses, so the dock
 // never diverges from the delegation block it complements. Each descriptor:
-//   { id, kind:'subagent'|'bash', name, accent?, action?, time? }
-export function liveTrayAgents(session) {
+//   { id, kind:'subagent'|'bash'|'session', name, accent?, action?, time? }
+export function liveTrayAgents(session, sessions = {}, owners = []) {
   if (!session) return [];
   const seen = seenJobIdsOf(session.messages);
   const { subs, bash } = liveSubagents(session.subagents, seen);
@@ -737,6 +740,24 @@ export function liveTrayAgents(session) {
     const chip = { id: job.jobId, kind: 'bash', name: 'bash', action: bashAction(job) };
     const time = job.usage && formatElapsed(job.usage.elapsedMs);
     if (time) chip.time = time;
+    chips.push(chip);
+  }
+  const owner = (owners || []).find((candidate) => candidate?.session_id === session.id);
+  if (!owner) return chips;
+  for (const child of Object.values(sessions || {})) {
+    if (!child || (child.ownerId || child.owner_id) !== owner.id ||
+      (child.state !== 'running' && child.state !== 'permission')) continue;
+    const chip = {
+      id: child.id,
+      kind: 'session',
+      name: child.title || child.id,
+      action: (child.briefProgress || child.briefAttempting || '').trim() ||
+        (child.state === 'permission' ? 'Waiting for permission' : 'Running'),
+      state: child.state,
+    };
+    if (child.runStartedAtMs > 0) {
+      chip.time = formatElapsed(Math.max(0, Date.now() - child.runStartedAtMs));
+    }
     chips.push(chip);
   }
   return chips;

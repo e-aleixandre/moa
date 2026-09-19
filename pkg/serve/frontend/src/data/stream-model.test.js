@@ -21,6 +21,29 @@ const compaction = (id, extra = {}) => ({
 });
 const session = (messages, extra = {}) => ({ messages, ...extra });
 
+test('liveTrayAgents includes only live child sessions for an owner', () => {
+  const ownerSession = { id: 'owner-session', kind: 'owner', messages: [], subagents: {} };
+  const sessions = {
+    running: { id: 'running', ownerId: 'owner-1', title: 'Run checks', state: 'running' },
+    permission: { id: 'permission', ownerId: 'owner-1', title: 'Approve deploy', state: 'permission' },
+    idle: { id: 'idle', ownerId: 'owner-1', title: 'Saved work', state: 'idle' },
+  };
+  const chips = liveTrayAgents(ownerSession, sessions, [{ id: 'owner-1', session_id: 'owner-session' }]);
+  expect(chips.filter((chip) => chip.kind === 'session')).toEqual([
+    expect.objectContaining({ id: 'running', name: 'Run checks', action: 'Running' }),
+    expect.objectContaining({ id: 'permission', name: 'Approve deploy', action: 'Waiting for permission' }),
+  ]);
+});
+
+test('liveTrayAgents adds no session chips for a non-owner session', () => {
+  const chips = liveTrayAgents(
+    { id: 'ordinary', messages: [], subagents: {} },
+    { running: { id: 'running', ownerId: 'owner-1', state: 'running' } },
+    [{ id: 'owner-1', session_id: 'owner-session' }],
+  );
+  expect(chips.filter((chip) => chip.kind === 'session')).toHaveLength(0);
+});
+
 test('projects the durable compaction contract as its own card block', () => {
   const [block] = projectStream(session([compaction('entry-42')]));
   expect(block).toEqual({
