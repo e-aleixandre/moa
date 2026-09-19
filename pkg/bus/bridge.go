@@ -1243,6 +1243,38 @@ func projectLiveCustom(custom map[string]any) map[string]any {
 			projected["secret_aliases"] = values
 		}
 	}
+	// An event's identity is what its block is headed with live; without it
+	// the block reads "event" until a reload brings the full record back.
+	if source == "event" {
+		for _, key := range []string{"id", "source_name", "title"} {
+			if value, ok := custom[key].(string); ok {
+				projected[key] = value
+			}
+		}
+		for _, key := range []string{"autorun", "steer"} {
+			if value, ok := custom[key].(bool); ok {
+				projected[key] = value
+			}
+		}
+	}
+	// A message an owner sent into a session names the owner.
+	if source == "owner" {
+		for _, key := range []string{"owner_id", "owner_name"} {
+			if value, ok := custom[key].(string); ok {
+				projected[key] = value
+			}
+		}
+	}
+	// A batch of reports names the sessions it is about; serve's projection
+	// narrows the list further, this only lets it through.
+	if source == "report" {
+		if count, ok := custom["count"].(int); ok {
+			projected["count"] = count
+		}
+		if sessions, ok := custom["sessions"]; ok {
+			projected["sessions"] = sessions
+		}
+	}
 	return projected
 }
 

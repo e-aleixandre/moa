@@ -388,8 +388,8 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 
 // awaitReportInTranscript waits for the batch message to land in history. The
 // prompt is appended by the run goroutine, so it is not there when Execute
-// returns; the message carries no live announcement to subscribe to, hence the
-// bounded poll.
+// returns. It is announced live for the transcript, but the outbox needs the
+// message on disk, hence the bounded poll on history.
 func (m *Manager) awaitReportInTranscript(sess *ManagedSession, batchID string) bool {
 	deadline := time.Now().Add(reportConfirmTimeout)
 	for {

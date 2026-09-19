@@ -3838,3 +3838,24 @@ func TestHandler_SendPrompt_ClaimReleasedOnceAppended(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectLiveCustomKeepsEventReportAndOwnerIdentity(t *testing.T) {
+	event := projectLiveCustom(map[string]any{"source": "event", "id": "ev_1", "source_name": "sentry", "title": "Boom", "autorun": true, "body_path": "/private"})
+	if event["source_name"] != "sentry" || event["title"] != "Boom" || event["id"] != "ev_1" || event["autorun"] != true {
+		t.Fatalf("event identity lost live: %v", event)
+	}
+	if _, leaked := event["body_path"]; leaked {
+		t.Fatalf("private field leaked: %v", event)
+	}
+	report := projectLiveCustom(map[string]any{"source": "report", "count": 2, "sessions": []map[string]string{{"id": "s1"}}, "batch": "b"})
+	if report["count"] != 2 || report["sessions"] == nil {
+		t.Fatalf("report sessions lost live: %v", report)
+	}
+	if _, leaked := report["batch"]; leaked {
+		t.Fatalf("batch leaked: %v", report)
+	}
+	owner := projectLiveCustom(map[string]any{"source": "owner", "owner_id": "o1", "owner_name": "Winerim"})
+	if owner["owner_name"] != "Winerim" {
+		t.Fatalf("owner name lost live: %v", owner)
+	}
+}
