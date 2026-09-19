@@ -70,6 +70,12 @@ button.zl-st { cursor: pointer; transition: background var(--motion-hover) ease;
 
 /* tier 1: settings */
 .zl-st-model { color: var(--zl-t2); }
+.zl-st-model-mark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
 /* Thinking meter: four bars (low..xhigh; production's fifth level, off, lights
    none), lit from the left in the accent. A setting, not a state. */
 .zl-think { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; flex: none; }

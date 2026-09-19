@@ -46,6 +46,13 @@ test('the resolved thinking level is projected for the model pill', () => {
   expect(subagentView(session, 'j1').thinking).toBe('high');
 });
 
+test('the child context percentage survives live and terminal projections', () => {
+  const live = { id: 's1', messages: [], subagents: { j1: sub({ contextPercent: 44 }) } };
+  const done = { id: 's1', messages: [], subagents: { j1: sub({ status: 'completed', contextPercent: 61 }) } };
+  expect(subagentView(live, 'j1').contextPercent).toBe(44);
+  expect(subagentView(done, 'j1').contextPercent).toBe(61);
+});
+
 // The codename is a label, not an identity: the model catalog that maps an
 // effort onto a meter position is keyed by the raw model, so the projection
 // keeps it alongside.

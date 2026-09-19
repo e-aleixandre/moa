@@ -83,8 +83,10 @@ export function StatusStrip({
   permAnchorRef,
   showTokens = true,
   modelName,
+  modelMark,
   thinking = "off",
   thinkingPosition = thinking,
+  showPermission = true,
   onModel,
   modelOpen,
   modelPopover,
@@ -139,6 +141,7 @@ export function StatusStrip({
               aria-haspopup={onModel ? "dialog" : undefined}
               aria-label={`Model & thinking: ${modelName}, ${thinking}`}
             >
+              {modelMark && <span class="zl-st-model-mark" style={{ background: modelMark }} aria-hidden="true" />}
               <span class="zl-st-word zl-st-model-name">{modelName}</span>
               {meterPosition !== null && <ThinkMeter level={meterPosition} />}
             </button>
@@ -151,7 +154,7 @@ export function StatusStrip({
             cycles — a stray touch must not be able to drop a session into
             YOLO. Locked while the agent is running, like the rest of the
             session settings. */}
-        <span class="zl-st-anchor" ref={permAnchorRef}>
+        {showPermission && <span class="zl-st-anchor" ref={permAnchorRef}>
           {onPerm ? (
             <button
               type="button"
@@ -175,7 +178,7 @@ export function StatusStrip({
             </span>
           )}
           {permPopover}
-        </span>
+        </span>}
 
         {session?.fast && (
           <span class={`zl-st zl-st-fast zl-${statusItemPriority("fast")}`} title="Fast mode: billed at a premium rate">

@@ -14,22 +14,38 @@ const streamCss = readFileSync(new URL("../Stream/Stream.css", import.meta.url),
 // its test deps. Treat a failure here as "the rule was crossed", then go look.
 
 test("a subagent screen does not grow a second set of turn controls", () => {
-  // The parent's status line owns the controls for the next turn. A subagent
-  // is an errand you are reading, not a session you are configuring, so the
-  // model pill, the permission control and the context ring have no business
-  // here -- they would offer to change settings that belong to the parent.
-  expect(view).not.toContain("<StatusStrip");
+  // A subagent is an errand you are reading, not a session you configure, so
+  // it must not grow the parent's controls. Its read-only StatusStrip carries
+  // only the child's own model, thinking, and context.
   expect(view).not.toContain("<ModelPill");
   expect(view).not.toContain("<PermissionControl");
+  expect(view).toMatch(/<StatusStrip[\s\S]*showPermission=\{false\}/);
 });
 
-test("the model is provenance beside the run's figures, not a control", () => {
-  // Which agent ran the errand still matters -- it just answers "who did
-  // this", asked after "what was it". It rides the live bar while the errand
-  // runs and the report's foot once it has ended, never the head, which is one
-  // row and has no line to spare.
+test("the model is configuration in the status strip and provenance in the report foot", () => {
+  // The live line answers only what is happening. The model and thinking use
+  // the same below-composer status-strip slot as the parent; when the run has
+  // ended, that configuration settles into the report foot beside its figures.
   expect(view).toContain("view.model");
-  expect(view).toMatch(/<SubIdent view=\{view\} \/>/);
+  expect(view).toMatch(/<SubagentStatusStrip view=\{view\} \/>/);
+  expect(mobile).toMatch(/<SubagentStatusStrip view=\{view\} compact \/>/);
+  expect(view).toMatch(/<SubIdent view=\{view\} \/>[\s\S]*marks\.map/);
+  const liveBar = view.slice(view.indexOf("export function SubagentLiveBar"), view.indexOf("// SubagentLive —"));
+  expect(liveBar).not.toContain("<SubIdent");
+});
+
+test("a live head stays quiet; a terminal head keeps its outcome", () => {
+  expect(view).toMatch(/state=\{view\.terminal \? <SubState view=\{view\} \/> : null\}/);
+  expect(mobile).toMatch(/state=\{view\.terminal \? <SubState view=\{view\} \/> : null\}/);
+  expect(view).not.toMatch(/word="Running"/);
+});
+
+test("child context uses the status-strip reading live and freezes in the report foot", () => {
+  // The view model supplies the child's real percentage (or -1 when unknown),
+  // not the parent's. CtxRing is the exact main-conversation representation.
+  expect(view).toMatch(/ctxPercent=\{view\.contextPercent >= 0 \? view\.contextPercent : undefined\}/);
+  expect(view).toMatch(/<CtxRing pct=\{view\.contextPercent\} \/>/);
+  expect(view).toMatch(/<SubagentContext view=\{view\} \/>[\s\S]*marks\.map/);
 });
 
 // The owner, after reading a finished run on his phone: "esa forma de ver la

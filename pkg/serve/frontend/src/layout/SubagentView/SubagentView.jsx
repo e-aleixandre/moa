@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { Square } from "lucide-preact";
 import { Stream } from "../Stream/Stream.jsx";
 import { Composer } from "../Composer/Composer.jsx";
+import { CtxRing, StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { WorkHead, StateWord, CopyAction, RunIds } from "../WorkChrome/WorkChrome.jsx";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import "../WorkChrome/WorkChrome.css";
@@ -31,8 +32,10 @@ import "./SubagentView.css";
 //                     title and the model under the first, which on a phone
 //                     read as two headers for one screen.
 //   2  the record     the conversation, at full width, never folded.
-//   3  the foot       live: what it is doing, who is doing it, and Stop.
-//                     Ended: model, mode, duration, tokens, cost, and Copy.
+//   3  the foot       live: what it is doing, for how long, and Stop; the
+//                     status strip keeps the model and thinking beside the
+//                     composer. Ended: model, mode, duration, tokens, cost,
+//                     and Copy.
 //
 // What earlier versions did wrong, and what each fix cost. A permanent strip
 // of model/started/turns/tokens/spend above the transcript answered none of
@@ -112,7 +115,7 @@ export function SubagentView({ session, jobId, onBack }) {
         onBack={onBack}
         title={view.name}
         inlineTitle
-        state={<SubState view={view} />}
+        state={view.terminal ? <SubState view={view} /> : null}
         actions={<SubagentActions view={view} onPromote={onPromote} />}
       />
 
@@ -124,10 +127,9 @@ export function SubagentView({ session, jobId, onBack }) {
 }
 
 // SubIdent — who ran the errand: the identity dot and the model that carried
-// it. Provenance, so it never rides the head — the head is the errand, its
-// state and what you can still do to it, on ONE row. This travels with the
-// run's other figures instead: on the live line while it runs, in the report's
-// foot once it has ended, which is the same band in both states.
+// it. Provenance lives with the model settings: in the live status strip and
+// in the finished report foot. It never rides the live line, whose only job is
+// to say what is happening now.
 //
 // Exported because the phone push mounts the same bands: two surfaces reading
 // the same errand must not name its agent in two different ways.
@@ -149,9 +151,6 @@ export function SubIdent({ view }) {
 // Exported with SubHead, and for the same reason: the state vocabulary is the
 // errand's, not the desktop's.
 export function SubState({ view }) {
-  if (!view.terminal) {
-    return <StateWord tone="running" word="Running" time={view.elapsed} />;
-  }
   if (view.outcome === "failed") return <StateWord tone="failed" word="Failed" />;
   if (view.outcome === "cancelled") return <StateWord tone="neutral" word="Cancelled" />;
   return <StateWord tone="neutral" word="Completed" />;
@@ -179,9 +178,8 @@ export function SubagentActions({ view, phone = false, onPromote }) {
 }
 
 // SubagentLiveBar — the band between the record and the steer composer, on
-// both surfaces. It carries what the head stopped carrying (which agent is
-// running this) beside what it always carried (what it is doing, for how
-// long), and it ends in Stop.
+// both surfaces. It says only what is happening now and for how long, then
+// ends in Stop; model and thinking belong to the status strip below composer.
 //
 // It is `.zl-live` verbatim, the parent conversation's own bar, so stopping a
 // child is the same gesture in the same place as stopping the parent.
@@ -193,7 +191,6 @@ export function SubagentLiveBar({ view, onStop, confirmCancel }) {
         <div class="zl-live-now" role="status" aria-live="polite">
           <span class="zl-live-dot is-working" aria-hidden="true" />
           <span class="zl-live-txt">{view.action || "working"}</span>
-          <SubIdent view={view} />
           {!!view.elapsed && <span class="zl-live-el zl-data">{view.elapsed}</span>}
         </div>
         {onStop && (
@@ -234,7 +231,39 @@ function SubagentLive({ view, session, jobId, onBack, onStop, confirmCancel }) {
         session={session}
         steer={{ jobId, name: view.name, onRebound: onBack }}
       />
+      <SubagentStatusStrip view={view} />
     </>
+  );
+}
+
+// The subagent inherits neither the parent's permission setting nor its usage
+// gauges. Its strip is only the child configuration, in the same status-strip
+// position the parent uses for configuration below the composer.
+export function SubagentStatusStrip({ view, compact = false }) {
+  if (!view.model && view.contextPercent < 0) return null;
+  return (
+    <StatusStrip
+      compact={compact}
+      ctxPercent={view.contextPercent >= 0 ? view.contextPercent : undefined}
+      modelName={view.model}
+      modelMark={`var(--${view.accent})`}
+      thinking={view.thinking || "off"}
+      showPermission={false}
+      showTokens={false}
+    />
+  );
+}
+
+// Context uses StatusStrip's own ring and percent, never an estimate from the
+// parent. While live it belongs in that strip as progress; once terminal the
+// same frozen reading settles into the report foot with the other run figures.
+export function SubagentContext({ view }) {
+  if (view.contextPercent < 0) return null;
+  return (
+    <span class="sa-context" title={`Child context ${view.contextPercent}% used`}>
+      <CtxRing pct={view.contextPercent} />
+      <span class="zl-data zl-num">{view.contextPercent}<span class="zl-unit">%</span></span>
+    </span>
   );
 }
 
@@ -335,9 +364,6 @@ function SubagentFoot({ view, session, phone }) {
   const usage = view.usage;
 
   const marks = [];
-  if (view.model) {
-    marks.push({ k: view.thinking && view.thinking !== "off" ? `${view.model} · ${view.thinking}` : view.model });
-  }
   marks.push({ k: view.async ? "background" : "sync" });
   if (view.elapsed) marks.push({ k: view.elapsed, mono: true });
   if (usage && (usage.inputTokens || usage.outputTokens)) {
@@ -360,6 +386,8 @@ function SubagentFoot({ view, session, phone }) {
         onClick={() => setOpenIds(true)}
         aria-label="Run identifiers"
       >
+        <SubIdent view={view} />
+        <SubagentContext view={view} />
         {marks.map((m) => (
           <span class={`sa-mark${m.mono ? " zl-data" : ""}`} key={m.k}>{m.k}</span>
         ))}

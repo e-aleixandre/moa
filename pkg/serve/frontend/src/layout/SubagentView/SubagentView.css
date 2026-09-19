@@ -38,9 +38,9 @@
   .subagent-view { animation: none; }
 }
 
-/* The identity dot beside the model name: which agent ran this. Provenance,
-   so it travels with the run's figures -- the live bar while it runs, the
-   report's foot once it has ended -- and never with the errand in the head. */
+/* The identity dot beside the model name: which agent ran this. Provenance
+   travels with configuration in the live status strip and in the finished
+   report's foot, never with the errand in the head or the live line. */
 .sa-ident {
   flex: none;
   display: inline-flex;
@@ -54,6 +54,13 @@
   height: 6px;
   border-radius: 50%;
   flex: none;
+}
+
+.sa-context {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 /* Stop on the live bar of a subagent keeps the bar's own control size; the

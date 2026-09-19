@@ -3,7 +3,7 @@ import { Composer } from "../../Composer/Composer.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { WorkHead } from "../../WorkChrome/WorkChrome.jsx";
 import {
-  SubagentReport, SubIdent, SubState, SubagentActions, SubagentLiveBar,
+  SubagentReport, SubState, SubagentActions, SubagentLiveBar, SubagentStatusStrip,
 } from "../../SubagentView/SubagentView.jsx";
 import { subagentView } from "../../../data/subagent-view-model.js";
 import { sessionTitle } from "../../../data/util/format.js";
@@ -105,7 +105,7 @@ export function MobileSubagentView({ session, jobId, onBack, onDraggingChange })
         onBack={onBack}
         title={view.name}
         inlineTitle
-        state={<SubState view={view} />}
+        state={view.terminal ? <SubState view={view} /> : null}
         actions={<SubagentActions view={view} phone onPromote={onPromote} />}
       />
 
@@ -149,6 +149,7 @@ function MobileSubagentLive({ view, session, jobId, onBack, onStop, confirmCance
           compact
           steer={{ jobId, name: view.name, onRebound: onBack }}
         />
+        <SubagentStatusStrip view={view} compact />
       </div>
     </>
   );

@@ -254,6 +254,31 @@ const SUBAGENT_COMPLETED = {
   jobId: "tests",
 };
 
+const SUBAGENT_FAILED = {
+  session: {
+    id: "sess-fail",
+    title: "migrate sqlite",
+    messages: [],
+    subagents: {
+      audit: {
+        jobId: "audit",
+        title: "Audit database schema",
+        task: "Audit every table in state.db for columns unused since v0.8 and propose the drop migration.",
+        model: "terra",
+        async: false,
+        status: "failed",
+        usage: { inputTokens: 12100, outputTokens: 1900, costUSD: 0.018 },
+        contextPercent: 29,
+        messages: [
+          { _type: "tool_start", tool_call_id: "f1", tool_name: "read", args: { path: "pkg/session/schema.go" }, status: "ok", result: "164 lines" },
+          { _type: "tool_start", tool_call_id: "f2", tool_name: "bash", args: { cmd: 'sqlite3 state.db ".schema"' }, status: "error", result: "Error: database is locked\nretry 2/3 after 2s… retry 3/3 after 4s…\nError: database is locked (SQLITE_BUSY)" },
+        ],
+      },
+    },
+  },
+  jobId: "audit",
+};
+
 // MobileSubagentSpecimen — the fork view inside the phone frame. It's a
 // full-screen surface, so it sits alone in a .mconv container (like the real
 // screen when session.viewingSubagent is set).
@@ -405,6 +430,18 @@ export function MobileGallery() {
           </div>
           <figcaption class="mgal-caption">
             Subagent — completed (outcome banner)
+          </figcaption>
+        </figure>
+
+        <figure class="mgal-figure">
+          <div class="mgal-device">
+            <span class="mgal-notch" aria-hidden="true" />
+            <div class="mgal-screen">
+              <MobileSubagentSpecimen spec={SUBAGENT_FAILED} />
+            </div>
+          </div>
+          <figcaption class="mgal-caption">
+            Subagent — failed (error in record)
           </figcaption>
         </figure>
       </div>
