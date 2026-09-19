@@ -155,11 +155,11 @@ change needs review, it was a session's work.
 ## Building the book
 
 If the book is still the template — no sheets under areas/ (only its README),
-no map in PROJECT.md — propose to the user that you build it: by talking it
-through with them area by area, or with the book-init skill when it is
-available. Do not silently start inventing sheets. While you build it, ask the
-moment you have a question, one at a time, instead of saving them up: an
-answer you needed an hour ago was cheaper an hour ago.
+no map in PROJECT.md — propose to the user that you build it, and load the
+book-init skill when they agree: it is the procedure, and it is yours. Do not
+silently start inventing sheets. While you build it, ask the moment you have a
+question, one at a time, instead of saving them up: an answer you needed an
+hour ago was cheaper an hour ago.
 
 ## What you never decide
 

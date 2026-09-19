@@ -36,6 +36,11 @@ type SnapshotFunc func() (path string, err error)
 type ToolConfig struct {
 	Fork     ForkFunc
 	Snapshot SnapshotFunc
+	// Builtin exposes the skills embedded in the binary to this session. It
+	// mirrors what the session's prompt index was built with: a skill the model
+	// can load but was never offered, or offered but cannot load, is a bug the
+	// model pays for.
+	Builtin bool
 }
 
 // NewTool creates the load_skill tool that lets the agent load skill content on
@@ -56,7 +61,7 @@ func NewTool(cwd string, cfg ...ToolConfig) core.Tool {
 
 	modelInvocable := func() map[string]Skill {
 		byName := map[string]Skill{}
-		for _, s := range Discover(cwd) {
+		for _, s := range Discover(cwd, Options{Builtin: opts.Builtin}) {
 			if s.ModelInvocable() {
 				byName[s.Name] = s
 			}

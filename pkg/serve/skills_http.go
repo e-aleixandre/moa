@@ -90,9 +90,9 @@ func skillCommands(skills []skill.Skill) []SkillCommand {
 //
 // Discovery reads the directory on every call rather than a set captured when
 // the session was built, so a skill created mid-session is invocable right away.
-func findInvocableSkill(cwd, typed string) (skill.Skill, bool) {
+func findInvocableSkill(cwd string, builtin bool, typed string) (skill.Skill, bool) {
 	want := strings.ToLower(typed)
-	for _, s := range skill.Discover(cwd) {
+	for _, s := range skill.Discover(cwd, skill.Options{Builtin: builtin}) {
 		if !s.UserInvocable {
 			continue
 		}
@@ -156,7 +156,7 @@ func handleSessionSkills(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"skills": skillCommands(skill.Discover(sess.CWD)),
+			"skills": skillCommands(skill.Discover(sess.CWD, skill.Options{Builtin: sess.Kind == session.KindOwner})),
 		})
 	}
 }

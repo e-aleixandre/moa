@@ -1,7 +1,7 @@
 package skill
 
 import (
-	"bufio"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -47,6 +47,10 @@ type Skill struct {
 	Description string // first paragraph after heading
 	Dir         string // absolute path to skill directory
 
+	// Builtin marks a skill shipped inside the binary rather than found on
+	// disk, so Load reads it from the embedded filesystem and Dir stays empty.
+	Builtin bool
+
 	// DisableModelInvocation keeps the skill out of the system prompt index and
 	// out of the model's reach: only the user invokes it, with "/<name>". Use it
 	// for skills that are occasionally useful but would otherwise cost tokens on
@@ -82,13 +86,35 @@ func (s Skill) WantsParentSnapshot() bool {
 	return s.IsFork() && strings.EqualFold(s.ParentTranscript, "snapshot")
 }
 
+// Options select which sources Discover reads.
+type Options struct {
+	// Builtin includes the skills embedded in the binary. It is off by default:
+	// a built-in skill answers one kind of session, and listing it everywhere
+	// would spend every other session's prompt advertising something it has no
+	// use for.
+	Builtin bool
+}
+
 // Discover scans skill directories and returns available skills.
 // Project-level skills (.moa/skills/) override global ones (~/.config/moa/skills/)
-// when they share the same name. Results are sorted by name.
-func Discover(cwd string) []Skill {
+// when they share the same name; both override a built-in of the same name, so
+// a user can iterate on a shipped skill by copying it into their own directory.
+// Results are sorted by name.
+func Discover(cwd string, opts ...Options) []Skill {
+	var o Options
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	skills := make(map[string]Skill)
 
-	// Global skills (lower priority).
+	// Built-in skills (lowest priority).
+	if o.Builtin {
+		for name, s := range builtinSkills() {
+			skills[name] = s
+		}
+	}
+
+	// Global skills.
 	if dir := core.ConfigSubdir("skills"); dir != "" {
 		scanDir(dir, skills, true)
 	}
@@ -119,7 +145,15 @@ const maxSkillBytes = 50 * 1024
 // Content past the cap is truncated with a marker rather than refused, so an
 // oversized skill still works instead of failing at the moment it is invoked.
 func Load(s Skill) (string, error) {
-	data, err := os.ReadFile(filepath.Join(s.Dir, skillFile))
+	var (
+		data []byte
+		err  error
+	)
+	if s.Builtin {
+		data, err = builtinFS.ReadFile(builtinPath(s.Name))
+	} else {
+		data, err = os.ReadFile(filepath.Join(s.Dir, skillFile))
+	}
 	if err != nil {
 		return "", err
 	}
@@ -179,58 +213,83 @@ func scanDir(dir string, out map[string]Skill, followSymlinks bool) {
 		}
 		name := e.Name()
 		path := filepath.Join(dir, name, skillFile)
-		if _, err := os.Stat(path); err != nil {
+		data, err := readHead(path)
+		if err != nil {
 			continue
 		}
 		absDir, _ := filepath.Abs(filepath.Join(dir, name))
-		displayName, desc := parseSkillHeader(path)
-		if displayName == "" {
-			displayName = name
-		}
-		fm := parseFrontmatter(path)
-		out[name] = Skill{
-			Name:                   name,
-			DisplayName:            displayName,
-			Description:            desc,
-			Dir:                    absDir,
-			DisableModelInvocation: fm.boolField("disable-model-invocation", false),
-			UserInvocable:          fm.boolField("user-invocable", true),
-			Context:                fm.field("context"),
-			Background:             fm.boolField("background", false),
-			ParentTranscript:       fm.field("parent-transcript"),
-		}
+		s := newSkill(name, data)
+		s.Dir = absDir
+		out[name] = s
+	}
+}
+
+// readHead reads as much of a skill file as discovery can possibly need: the
+// frontmatter and the first paragraph both live at the top, and Load caps the
+// body at the same ceiling anyway.
+//
+// Discovery runs when a session is built and on every reload, for every skill
+// on disk. Reading each file whole would make one oversized SKILL.md — a
+// vendored document dropped into the skills directory — expensive on a path
+// that never uses more than its first lines.
+func readHead(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxSkillBytes))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// newSkill builds a skill from the raw SKILL.md content. Name is the directory
+// the file was found in, which is what the agent and the user type.
+func newSkill(name, content string) Skill {
+	displayName, desc := parseSkillHeader(content)
+	if displayName == "" {
+		displayName = name
+	}
+	fm := parseFrontmatter(content)
+	return Skill{
+		Name:                   name,
+		DisplayName:            displayName,
+		Description:            desc,
+		DisableModelInvocation: fm.boolField("disable-model-invocation", false),
+		UserInvocable:          fm.boolField("user-invocable", true),
+		Context:                fm.field("context"),
+		Background:             fm.boolField("background", false),
+		ParentTranscript:       fm.field("parent-transcript"),
 	}
 }
 
 // parseSkillHeader reads the first # heading and the first paragraph after it.
-func parseSkillHeader(path string) (displayName, description string) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", ""
-	}
-	defer func() { _ = f.Close() }()
-
-	scanner := bufio.NewScanner(f)
+func parseSkillHeader(content string) (displayName, description string) {
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
 	foundHeading := false
+	start := 0
 
 	// A frontmatter block is configuration, not content: skip past it so the
 	// heading below it is still found.
-	if scanner.Scan() {
-		if strings.TrimSpace(scanner.Text()) == "---" {
-			for scanner.Scan() {
-				if strings.TrimSpace(scanner.Text()) == "---" {
+	if len(lines) > 0 {
+		start = 1
+		if strings.TrimSpace(lines[0]) == "---" {
+			start = len(lines)
+			for i := 1; i < len(lines); i++ {
+				if strings.TrimSpace(lines[i]) == "---" {
+					start = i + 1
 					break
 				}
 			}
-		} else if trimmed := strings.TrimSpace(scanner.Text()); strings.HasPrefix(trimmed, "# ") {
+		} else if trimmed := strings.TrimSpace(lines[0]); strings.HasPrefix(trimmed, "# ") {
 			displayName = strings.TrimSpace(trimmed[2:])
 			foundHeading = true
 		}
 	}
 
-	for scanner.Scan() {
-		line := scanner.Text()
-
+	for _, line := range lines[min(start, len(lines)):] {
 		if !foundHeading {
 			trimmed := strings.TrimSpace(line)
 			if strings.HasPrefix(trimmed, "# ") {

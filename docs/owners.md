@@ -266,6 +266,40 @@ It sits after the owner's invariants and is explicitly subordinated to them:
 preferences never override what the owner may not decide. "Merge to master
 whenever tests pass" in OWNER.md still results in the owner asking you.
 
+## Building the book: the `book-init` skill
+
+A new owner starts with an empty book, and the code alone cannot fill it: it
+says what exists, never why it exists or who asked for it. `book-init` is the
+procedure for filling it with you.
+
+It ships inside the binary and is offered to an owner's own conversation — it
+means nothing in a session that is writing code, and it is not listed there. The
+owner loads it with `load_skill`; you can start it yourself by typing
+`/book-init` in the owner's conversation. A copy in
+`~/.config/moa/skills/book-init/` overrides the shipped one, so you can edit the
+procedure without waiting for a release — and, like any skill in your own
+directory, that copy is then visible to your other sessions too.
+
+What it does:
+
+- One cheap subagent maps the candidate verticals of the project — the tree,
+  README, docs, routes — and the owner shows you that map in a single question:
+  what is missing, what does not belong, where to start. You are never asked to
+  enumerate your own project.
+- Then one vertical at a time. Subagents read the code and write drafts to a
+  scratch directory outside the book and outside the repository
+  (`~/.cache/moa/book-init/<project>/`, recorded in `book/INGEST.md`); they
+  never write the book. The owner reads the drafts and writes every sheet.
+- A sheet is not finished until *Producto*, *Uso* and *Implementación* all
+  hold. Whatever the code cannot answer, the owner asks you **the moment the
+  question comes up**, one at a time.
+- `book/INGEST.md` holds the state — areas, answers, what is next — so the work
+  survives compaction, a restart, or a week off, and resumes without re-reading
+  anything.
+- An area closes with its `README.md` (inspected, gaps, `coverage`) and its
+  line in `PROJECT.md`. Coverage is per area; there is no completion
+  percentage, because there is nothing to measure it against.
+
 ## Limits of this first version
 
 - Only `PROJECT.md` is editable from the interface; the rest of the book is
@@ -280,5 +314,5 @@ whenever tests pass" in OWNER.md still results in the owner asking you.
   by whoever writes the sheet.
 - The heartbeat only wakes an owner whose conversation is loaded; it never
   resumes one from disk to tell it something is waiting.
-- Building the book is conversational for now: the `book-init` skill and the
-  ingestion from transcripts are not implemented.
+- Ingesting knowledge from past session transcripts is not implemented: the
+  book is built from the code and from you.

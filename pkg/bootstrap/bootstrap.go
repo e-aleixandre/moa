@@ -499,7 +499,12 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 
 	// 8. Skills index. load_skill is registered after subagents so it can launch
 	// isolated children through the subagent tool without an import cycle.
-	skills := skill.Discover(cfg.CWD)
+	//
+	// Built-in skills are offered to the owner's own conversation: they exist
+	// because the owner's role prompt relies on them, and they would mean
+	// nothing in a session that is writing code. Subagents of the owner inherit
+	// this index, which is the owner's own work tree and costs them one line.
+	skills := skill.Discover(cfg.CWD, skill.Options{Builtin: cfg.OwnerSession})
 	skillsIndex := skill.FormatIndex(skills)
 
 	// One holder for the on-disk prompt inputs, shared by the base prompt
@@ -660,6 +665,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	core.RegisterOrLog(toolReg, skill.NewTool(cfg.CWD, skill.ToolConfig{
 		Fork:     NewSkillFork(subTool),
 		Snapshot: cfg.SnapshotTranscript,
+		Builtin:  cfg.OwnerSession,
 	}))
 
 	// 11. System prompt (after ALL tools registered).

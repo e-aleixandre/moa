@@ -87,17 +87,17 @@ func TestFindInvocableSkill(t *testing.T) {
 	writeTestSkill(t, cwd, "compact", "# Compact\n\nCollides.\n")
 	writeTestSkill(t, cwd, "background", "---\nuser-invocable: false\n---\n# B\n\nCtx.\n")
 
-	if _, ok := findInvocableSkill(cwd, "deploy"); !ok {
+	if _, ok := findInvocableSkill(cwd, false, "deploy"); !ok {
 		t.Error("bare name did not resolve")
 	}
 	// The prefixed form is the only way to reach a colliding skill.
-	if _, ok := findInvocableSkill(cwd, "skill:compact"); !ok {
+	if _, ok := findInvocableSkill(cwd, false, "skill:compact"); !ok {
 		t.Error("skill: prefix did not resolve a colliding skill")
 	}
-	if _, ok := findInvocableSkill(cwd, "background"); ok {
+	if _, ok := findInvocableSkill(cwd, false, "background"); ok {
 		t.Error("a model-only skill must not be invocable by name")
 	}
-	if _, ok := findInvocableSkill(cwd, "nope"); ok {
+	if _, ok := findInvocableSkill(cwd, false, "nope"); ok {
 		t.Error("unknown name resolved")
 	}
 }
@@ -149,10 +149,10 @@ func TestSkillCommands_CollisionIgnoresCase(t *testing.T) {
 	if len(got) != 1 || got[0].Name != "skill:Compact" {
 		t.Fatalf("a differently-cased skill escaped the collision rule: %+v", got)
 	}
-	if _, ok := findInvocableSkill(cwd, "Compact"); ok {
+	if _, ok := findInvocableSkill(cwd, false, "Compact"); ok {
 		t.Error("/Compact resolved to the skill instead of the built-in command")
 	}
-	if _, ok := findInvocableSkill(cwd, "skill:compact"); !ok {
+	if _, ok := findInvocableSkill(cwd, false, "skill:compact"); !ok {
 		t.Error("the prefixed form should resolve regardless of case")
 	}
 }
@@ -170,7 +170,7 @@ func TestSkillCommands_SkipsUnusableNames(t *testing.T) {
 	if got := skillCommands(skill.Discover(cwd)); len(got) != 0 {
 		t.Errorf("unusable names were offered: %+v", got)
 	}
-	if _, ok := findInvocableSkill(cwd, "skill:deploy"); ok {
+	if _, ok := findInvocableSkill(cwd, false, "skill:deploy"); ok {
 		t.Error("a skill literally named skill:deploy must not resolve")
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/handoff"
 	"github.com/e-aleixandre/moa/pkg/schedule"
+	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/verify"
 )
@@ -122,7 +123,7 @@ func (m *Manager) ExecCommand(sessionID, rawCommand, id string) (*CommandResult,
 		// Not a built-in: it may be a user-invocable skill. Skills are resolved
 		// after the registry so one can never shadow a command the user relies
 		// on; a colliding skill is reached as "/skill:<name>".
-		if s, found := findInvocableSkill(sess.CWD, cmd); found {
+		if s, found := findInvocableSkill(sess.CWD, sess.Kind == session.KindOwner, cmd); found {
 			return runSkillCommand(sess, s, args)
 		}
 		return &CommandResult{OK: false, Message: "unknown command: /" + cmd}, nil

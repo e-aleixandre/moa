@@ -127,15 +127,18 @@ func (s *Sources) Reload() (changed []Changed, revert func()) {
 		return nil, func() {}
 	}
 	agentsMD, _ := LoadAgentsMD(s.cwd, "")
-	skillsIndex := skill.FormatIndex(skill.Discover(s.cwd))
-	memoryIndex := ""
-	if s.memStore != nil {
-		memoryIndex = s.memStore.FormatIndex(s.memStore.List())
-	}
 	s.mu.RLock()
 	loadBook := s.ownerBook
 	loadRole := s.ownerRole
 	s.mu.RUnlock()
+	// Only an owner's own conversation has a role loader, and only it is offered
+	// the built-in skills: a reload that dropped them would quietly take back
+	// what the session was started with.
+	skillsIndex := skill.FormatIndex(skill.Discover(s.cwd, skill.Options{Builtin: loadRole != nil}))
+	memoryIndex := ""
+	if s.memStore != nil {
+		memoryIndex = s.memStore.FormatIndex(s.memStore.List())
+	}
 	ownerBook := ""
 	if loadBook != nil {
 		ownerBook = loadBook()

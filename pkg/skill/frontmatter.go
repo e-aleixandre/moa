@@ -1,8 +1,6 @@
 package skill
 
 import (
-	"bufio"
-	"os"
 	"strings"
 )
 
@@ -66,24 +64,17 @@ func stripFrontmatter(content string) string {
 }
 
 // parseFrontmatter reads the YAML block delimited by "---" at the very top of
-// the file. Per the convention the opening marker must be the first line;
+// the content. Per the convention the opening marker must be the first line;
 // otherwise the whole file — markers included — is skill content, so a document
 // that merely uses a horizontal rule is not mistaken for configuration.
-func parseFrontmatter(path string) frontmatter {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer func() { _ = f.Close() }()
-
-	scanner := bufio.NewScanner(f)
-	if !scanner.Scan() || strings.TrimSpace(scanner.Text()) != "---" {
+func parseFrontmatter(content string) frontmatter {
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
 		return nil
 	}
 
 	fm := frontmatter{}
-	for scanner.Scan() {
-		line := scanner.Text()
+	for _, line := range lines[1:] {
 		if strings.TrimSpace(line) == "---" {
 			return fm
 		}
