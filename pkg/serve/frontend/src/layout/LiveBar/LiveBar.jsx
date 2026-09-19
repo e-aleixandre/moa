@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Square } from "lucide-preact";
 import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
 import { LiveSentence } from "./LiveSentence.jsx";
@@ -91,6 +91,10 @@ export function liveBarModel(session, agents, nowMs) {
   return { sentence, tally: list.length ? { count: list.length, agents: list } : null };
 }
 
+export function panelHasOverflow({ scrollHeight, clientHeight }) {
+  return scrollHeight > clientHeight;
+}
+
 export function LiveBar({
   session,
   agents = [],
@@ -103,6 +107,7 @@ export function LiveBar({
   forceCompact = false,
 }) {
   const list = Array.isArray(agents) ? agents : [];
+  const panelRows = list.map((agent) => `${agent.kind}:${agent.id}`).join(",");
   const fgActive = activityPhase(session) !== null;
   const alive = fgActive || list.length > 0;
 
@@ -123,6 +128,8 @@ export function LiveBar({
 
   const [localExpanded, setLocalExpanded] = useState(false);
   const [forceCompactOverride, setForceCompactOverride] = useState(false);
+  const panelRef = useRef(null);
+  const [panelOverflows, setPanelOverflows] = useState(false);
   const controlled = onToggle != null;
   const expanded = controlled ? !!openProp : localExpanded;
   const setExpanded = (next) => {
@@ -133,6 +140,16 @@ export function LiveBar({
   // on iOS. A deliberate tap on this primary navigation control wins over that
   // heuristic, rather than leaving live work inaccessible until a reload.
   const openPanel = expanded && list.length > 0 && (!forceCompact || forceCompactOverride);
+
+  // The lower wash is a claim that rows are clipped. Measure the mounted panel
+  // before paint so that claim is never shown for a list that fits. Its row
+  // identity changes whenever background work starts or finishes, keeping it
+  // current without a persistent observer.
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    const next = !!panel && panelHasOverflow(panel);
+    setPanelOverflows((current) => current === next ? current : next);
+  }, [openPanel, panelRows, dense]);
 
   useEffect(() => {
     if (!forceCompact) setForceCompactOverride(false);
@@ -190,7 +207,7 @@ export function LiveBar({
   return (
     <div class={`zl-live${dense ? " is-dense" : ""}${openPanel ? " is-open" : ""}${sentence.kind === "ended" ? " is-ended" : ""}`}>
       {openPanel && (
-        <div class="zl-live-panel" role="region" aria-label="Live in the background">
+        <div ref={panelRef} class={`zl-live-panel${panelOverflows ? " has-overflow" : ""}`} role="region" aria-label="Live in the background">
           {[["Subagents", subs], ["Commands", bashes]].map(([title, items]) => items.length > 0 && (
             <div class="zl-live-grp" key={title}>
               <div class="zl-group">

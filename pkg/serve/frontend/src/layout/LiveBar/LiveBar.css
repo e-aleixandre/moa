@@ -370,10 +370,8 @@
   animation: zl-unfold 180ms var(--zl-ease);
   transform-origin: bottom;
 }
-/* The panel is capped. This quiet lower-edge wash keeps a clipped COMMANDS
-   group from reading as a deliberately finished list; it needs no second
-   presentation state or observer. */
-.zl-live-panel::after {
+/* The wash is only present after LiveBar measured genuinely clipped rows. */
+.zl-live-panel.has-overflow::after {
   content: "";
   position: sticky;
   display: block;

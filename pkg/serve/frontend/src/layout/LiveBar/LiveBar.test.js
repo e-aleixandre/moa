@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { foregroundLine, liveBarModel } from './LiveBar.jsx';
+import { foregroundLine, liveBarModel, panelHasOverflow } from './LiveBar.jsx';
 
 // The live bar is the ONE row of live work above the composer, the merge of the
 // old now-line (the foreground phrase) and the old dock (the async work). These
@@ -126,6 +126,11 @@ test('an ended turn never carries a background clock', () => {
 test('a missing or malformed agent list is simply no background', () => {
   expect(liveBarModel(WORKING, undefined, 13000).tally).toBe(null);
   expect(liveBarModel(IDLE, undefined, 13000)).toBe(null);
+});
+
+test('the panel wash is reserved for rows that are actually below its cap', () => {
+  expect(panelHasOverflow({ scrollHeight: 182, clientHeight: 208 })).toBe(false);
+  expect(panelHasOverflow({ scrollHeight: 294, clientHeight: 208 })).toBe(true);
 });
 
 test('the bar carries the catalogue classes, not a translation of them', () => {
