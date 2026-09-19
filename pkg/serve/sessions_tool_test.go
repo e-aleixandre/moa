@@ -8,6 +8,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/owner"
 )
 
 func runSessionsTool(t *testing.T, sess *ManagedSession, params map[string]any) core.Result {
@@ -287,4 +288,66 @@ func TestChildSessionHasNoSessionsTool(t *testing.T) {
 	if _, ok := child.infra.toolReg.Get(SessionsToolName); ok {
 		t.Fatal("a child session can direct its siblings")
 	}
+}
+
+// The balance the owner owes on every turn needs times, and the tool is where
+// they come from: how long ago each session moved, how long a blocked one has
+// been waiting, and whether the list is complete.
+func TestSessionsToolListPrintsTimesAndTruncation(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	provider := newMockProvider(toolCallHandlerFor("tc-ask", "ask_user", map[string]any{
+		"questions": []any{map[string]any{"question": "which one?"}},
+	}))
+	mgr := newTestManager(t, context.Background(), provider)
+	root := t.TempDir()
+	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+
+	child, err := mgr.CreateSession(CreateOpts{CWD: root, Origin: "owner", Title: "asking"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	asks := make(chan bus.AskUserRequested, 1)
+	t.Cleanup(child.runtime.Bus.Subscribe(func(e bus.AskUserRequested) { asks <- e }))
+	if _, _, _, err := mgr.Send(child.ID, "ask me something", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-asks:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the child never raised its question")
+	}
+
+	listed := toolText(runSessionsTool(t, ownerSess, map[string]any{"action": "list"}))
+	if !strings.Contains(listed, "updated ") {
+		t.Fatalf("list does not say when a session last moved:\n%s", listed)
+	}
+	if !strings.Contains(listed, "waiting since ") {
+		t.Fatalf("list does not say how long the question has been waiting:\n%s", listed)
+	}
+
+	// The pending time is the question's, not the session's: the child was
+	// written to and asked within the same second, so what is asserted here is
+	// that the number comes from the pending approval at all.
+	info, err := mgr.ownerSession(ownerSess.ownerOfTest(t), child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.PendingSince.IsZero() || info.PendingID == "" {
+		t.Fatalf("the pending approval carries no identity or time: %+v", info)
+	}
+}
+
+// ownerOfTest reads the owner a session belongs to, for assertions that need
+// the same authorization the tool does.
+func (s *ManagedSession) ownerOfTest(t *testing.T) owner.Owner {
+	t.Helper()
+	store, err := owner.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	own, found, err := store.FindByDir(s.CWD)
+	if err != nil || !found {
+		t.Fatalf("no owner for %s: %v", s.CWD, err)
+	}
+	return own
 }

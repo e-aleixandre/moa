@@ -47,7 +47,7 @@ func doneReport(id, sessionID, text string) owner.Report {
 }
 
 func TestReportsDescribeSessionOrigin(t *testing.T) {
-	text := reportsMessage([]owner.Report{
+	text := reportsMessage(owner.Owner{}, []owner.Report{
 		{SessionID: "owner-child", Title: "Owner child", Origin: "owner", Status: callbackStatusDone},
 		{SessionID: "user-child", Title: "User child", Origin: "user", Status: callbackStatusDone},
 	})

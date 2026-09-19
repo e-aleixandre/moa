@@ -1232,6 +1232,7 @@ func (m *Manager) Shutdown() {
 	// Stop the reports actor before the sessions are flushed: its timers would
 	// otherwise keep firing deliveries into sessions that are being closed.
 	// Close persists whatever was still batched, so the next process delivers it.
+	m.heartbeat.Close()
 	m.reports.Close()
 	m.mu.RLock()
 	sessions := make([]*ManagedSession, 0, len(m.sessions))

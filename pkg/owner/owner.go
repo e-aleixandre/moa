@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/book"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -63,11 +64,19 @@ type Owner struct {
 	// AnswerAsks allows the owner to resolve a child's ask_user. Permissions
 	// are never delegated: only questions.
 	AnswerAsks bool `json:"answer_asks"`
+	// CanonicalRef is the branch whose state areas/ describes (see git.go).
+	// Detected once at creation and editable by hand; empty means the position
+	// is unknown, which readers state explicitly instead of guessing. Additive:
+	// an owner.json written before it existed simply has no canonical ref.
+	CanonicalRef string `json:"canonical_ref,omitempty"`
 	// Avatar is the identity mark (see avatar.go). Additive and optional: an
 	// owner without one resolves to DefaultAvatar(CodebaseKey), so an owner.json
 	// written before avatars existed needs no migration.
-	Avatar  Avatar    `json:"avatar,omitzero"`
-	Created time.Time `json:"created"`
+	Avatar Avatar `json:"avatar,omitzero"`
+	// Heartbeat tunes the owner's own clock (see heartbeat.go). Additive and
+	// optional: nil means the defaults.
+	Heartbeat *Heartbeat `json:"heartbeat,omitempty"`
+	Created   time.Time  `json:"created"`
 }
 
 // Store reads and writes owners under a config directory.
@@ -144,7 +153,10 @@ func (s *Store) Create(root, name, model, thinking string, answerAsks bool, avat
 		Thinking:    thinking,
 		AnswerAsks:  answerAsks,
 		Avatar:      avatar,
-		Created:     time.Now().UTC(),
+		// Asked once, here: the answer is a property of the repository, not of
+		// the turn, and every report and prompt needs the same one.
+		CanonicalRef: DetectCanonicalRef(canonical),
+		Created:      time.Now().UTC(),
 	}
 	// Create exclusively rather than check-then-write: the check and the write
 	// are what makes "one owner per codebase" true, and only the filesystem can
@@ -295,6 +307,23 @@ func (s *Store) ProjectIndex(key string) string {
 	return truncateUTF8(string(data), MaxProjectBytes)
 }
 
+// MaxOwnerPrefsBytes caps what OWNER.md contributes to the owner's prompt. It
+// is the user's file and nobody trims it for them, so the prompt does.
+const MaxOwnerPrefsBytes = 16 * 1024
+
+// OwnerPrefs returns book/OWNER.md: the user's preferences for how this owner
+// should work. It is read through the same loader PROJECT.md uses, so editing
+// it reaches a live conversation on /reload, and it is never written by the
+// owner (pkg/book refuses it): instructions the agent can rewrite are not
+// instructions.
+func (s *Store) OwnerPrefs(key string) string {
+	data, err := os.ReadFile(filepath.Join(s.BookDir(key), book.OwnerFile))
+	if err != nil {
+		return ""
+	}
+	return truncateUTF8(string(data), MaxOwnerPrefsBytes)
+}
+
 // truncateUTF8 caps s at limit bytes without splitting a rune.
 func truncateUTF8(s string, limit int) string {
 	if len(s) <= limit {
@@ -307,40 +336,46 @@ func truncateUTF8(s string, limit int) string {
 	return s[:cut]
 }
 
-// projectTemplate is what a fresh book starts with: the shape of the index,
-// not content invented on the owner's behalf.
-const projectTemplate = `# Project
-
-What this project is, in two or three lines.
-
-## Current state
-
-What is being worked on right now.
-
-## Decisions that bind
-
-Decisions nobody should reopen without the owner, and where the full record
-lives in this book.
-
-## Map of this book
-
-- decisions/ — dated record of what was decided, by whom and why
-- people.md — who asks for what, and how
-- areas/<name>.md — deep context per module or area
-`
-
-// seedBook creates the book directory and writes PROJECT.md if absent. An
-// existing book is left untouched: a new owner over an old book inherits it.
+// seedBook creates the book directory and writes the template of the schema
+// (pkg/book) for every file that is absent. An existing book is left untouched
+// file by file: a new owner over an old book inherits what is there and only
+// gains the parts of the shape that were missing.
+//
+// Each file is created with O_EXCL rather than checked and then written: the
+// check and the write are what makes "never overwrite" true, and only the
+// filesystem can make them one step. An unreadable or otherwise failing
+// creation fails the seed — silently treating an error as "absent" is how a
+// book gets overwritten by a template.
+//
+// The template is a shape with an explanation inside each file, never invented
+// facts: an owner that cannot tell a placeholder from a verified fact is worse
+// than an owner with an empty book.
 func (s *Store) seedBook(own Owner) error {
 	dir := s.BookDir(own.CodebaseKey)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create book dir: %w", err)
 	}
-	path := filepath.Join(dir, ProjectFile)
-	if _, err := os.Stat(path); err == nil {
-		return nil
+	for rel, content := range book.Template() {
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return fmt.Errorf("create book dir: %w", err)
+		}
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			continue // the user's file, or a previous owner's: kept
+		}
+		if err != nil {
+			return fmt.Errorf("seed %s: %w", rel, err)
+		}
+		if _, err := f.WriteString(content); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("seed %s: %w", rel, err)
+		}
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("seed %s: %w", rel, err)
+		}
 	}
-	return writeFileAtomic(path, []byte(projectTemplate), 0o600)
+	return nil
 }
 
 // newOwnerID mints an opaque identifier. The "own_" prefix keeps it

@@ -144,10 +144,139 @@ owner's avatar at 20px, which opens the owner. It is provenance rather than a
 state — no dot and no count — though its eyes are the owner's, which is useful
 precisely where you are when the owner cannot reach you.
 
+## The book
+
+The book has a shape, because a sheet nobody recognises is a sheet nobody
+trusts. A new owner seeds this template — one file per part, each explaining
+what belongs in it — and never invents facts to fill it.
+
+```
+PROJECT.md               the index every session is given (8 KiB)
+OWNER.md                 your preferences for the owner; the book tool refuses to write it
+areas/README.md          the shape of an area and of a sheet
+areas/<area>/README.md   the area's cover: inspected, gaps, coverage
+areas/<area>/<sheet>.md  one feature, in three views
+work/<feature>.md        work on a branch, until it is merged
+decisions/<date>-<x>.md  one decision, dated
+people.md, glossary.md   who asks for what, what the words mean here
+```
+
+Nothing under `areas/` is seeded: an example area would be a sheet about
+nothing that the owner has to recognise as fake on every search. The shape is
+explained inside `areas/README.md`, and "the book is still the template" is
+detected by the absence of sheets, not by the absence of the directory.
+
+A **sheet** carries frontmatter — `title`, `aliases`, `verified_at`, optional
+`verified_commit` — and six sections: **Producto** (why it exists, who asked,
+what was decided), **Uso** (how it is used, screen by screen), **Implementación**
+(entities, tables, services, flows), **Ficheros clave**, **Decisiones que atan**,
+**Deuda**. A feature is not understood until all three views hold; `unknown` is
+a valid value, a guess is not.
+
+The area is the path: there is no per-area index file to keep in sync, and
+`list path=areas/erp/` reads the titles from the frontmatter.
+
+Truth in `areas/` is the **canonical branch**, recorded once at creation as
+`canonical_ref` in `owner.json` (`origin/HEAD`, else `master` or `main` if one
+of them exists; empty outside git). It is in the owner's prompt and in every
+report — `canonical: master · branch: feat/x` — because a branch name alone
+does not say which half of the book a delta belongs to, least of all in a
+worktree. Edit the field by hand when the project's truth lives elsewhere.
+ What a branch changes lives in
+`work/<feature>.md` until it is merged — what is being done, what was decided,
+what is missing, and what it will change in `areas/` when it lands. Branches
+stay open for weeks, and that context is knowledge, not a footnote. The owner
+decides which branches deserve a file.
+
+Every child session is asked to end its final message with a `## Book delta`
+section: one bullet per book file its work changes, or `none`. The server lifts
+that section from the **full** message before the 2 KiB tail is cut, and stores
+it on the report together with the session's `branch`, short `head` and whether
+the tree was `dirty` (three cheap `git` calls, bounded at 3 s). Those three are
+**all-or-none**: if any call fails or times out, the report says `git:
+unavailable (position unknown)` rather than showing a branch with a clean tree,
+which would read as verified work. A report with no delta is rendered as `book
+delta: missing`, so the owner asks for it instead of assuming nothing changed.
+The delta is capped at 4 KiB, cut on a rune boundary and marked `[truncated]`.
+
+## How the owner searches
+
+`book search` is ranked, and scans the book on every call — there is no
+persistent index to disagree with the files you edit by hand. Scoring is BM25
+over weighted fields: `title` and `aliases` count most, then the filename, then
+headings, then the body, and only the body's length normalizes the score — a
+long sheet does not lose its own title. Accents are folded (`albaran` finds
+`albarán`), Spanish and English stopwords are dropped except **negations**
+(`sin`, `no`, `not`, `without`: "pedidos sin factura" is not "pedidos con
+factura"), prefix matching works in both directions from four letters
+(`albaran` ↔ `albaranes`), and a minimal plural rule (-s, -es) makes `api` find
+`APIs`. Results are ordered by whether they carry every query term, then by
+**score**; what the file is — sheet, index, work file, decision — only breaks a
+tie, so a work file that is exactly what you asked about is not buried.
+
+A result is a path, a title, the area and one line of evidence; `limit`
+defaults to 10 and caps at 25. The owner reads the sheet the search names; it
+never answers from the list. Hidden files, `.git` and anything that is not
+`.md` are invisible to every walk. Measured: 500 sheets scan in ~50 ms (p50),
+budgeted at 200 ms in the test suite.
+
+## Heartbeat
+
+A project keeps moving when nobody is talking to the owner. Every 5 minutes a
+**deterministic** evaluator (Go, no model) looks for facts that are new since
+the last beat:
+
+- a session blocked on the user for longer than `idle_minutes`, counted from
+  when the question or the permission was actually raised — not from the last
+  time something was sent to that session;
+- a `work/*.md` file untouched for longer than `stale_days`.
+
+Reports and failures are deliberately not heartbeat facts: the report
+coordinator owns every outcome end to end (it persists, retries and resumes
+them), and a second reader of the same outbox either duplicates the turn or
+announces a failure that was already delivered.
+
+With no new fact it sends nothing, so a quiet project costs nothing. With one,
+it wakes the owner with an idle-only prompt (`custom.source = "heartbeat"`,
+rendered as an event block) listing the facts and asking for its balance. What
+was already announced is remembered in `codebases/<key>/heartbeat.json`, so a
+session that has been waiting since yesterday wakes the owner once, not every
+five minutes. A fact is written down as announced only once the beat is in the
+owner's transcript **and** the transcript is flushed to disk, so a crash in that
+window retries instead of losing the notice. A busy owner is never steered: the
+facts stay unannounced and the next tick tries again.
+
+Thresholds live in `owner.json`, additive and optional:
+
+```json
+"heartbeat": { "enabled": true, "idle_minutes": 30, "stale_days": 7 }
+```
+
+## OWNER.md
+
+`book/OWNER.md` is your half of the contract: how you want this owner to brief
+sessions, what to escalate, tone, conventions. It is read into the owner's
+prompt through the same loader `PROJECT.md` uses — edit it and a live owner
+picks it up on `/reload` — and the `book` tool **refuses** to write it.
+Instructions an agent can rewrite are not instructions.
+
+It sits after the owner's invariants and is explicitly subordinated to them:
+preferences never override what the owner may not decide. "Merge to master
+whenever tests pass" in OWNER.md still results in the owner asking you.
+
 ## Limits of this first version
 
 - Only `PROJECT.md` is editable from the interface; the rest of the book is
   edited on disk.
-- A live session sees a changed `PROJECT.md` only after `/reload`; new sessions
-  always see the current one.
+- A live session sees a changed `PROJECT.md` or `OWNER.md` only after
+  `/reload`; new sessions always see the current one.
 - Reports carry the session's final message, not the session brief.
+- `canonical_ref` is detected once at creation; a repository that later changes
+  its default branch needs the field edited by hand.
+- Freshness is not checked yet: there is no `book lint`, so a sheet the
+  default branch has outgrown is not flagged, and `verified_commit` is written
+  by whoever writes the sheet.
+- The heartbeat only wakes an owner whose conversation is loaded; it never
+  resumes one from disk to tell it something is waiting.
+- Building the book is conversational for now: the `book-init` skill and the
+  ingestion from transcripts are not implemented.

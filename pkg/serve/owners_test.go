@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/e-aleixandre/moa/pkg/book"
 	"github.com/e-aleixandre/moa/pkg/events"
 	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/session"
@@ -284,8 +285,10 @@ func TestOwnerBookIsListedReadAndOnlyTheIndexIsWritable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listing.Files) != 2 {
-		t.Fatalf("book = %+v, want the seeded index and the decision", listing.Files)
+	// The seeded template (the schema, one file per part) plus the decision
+	// written above; the count is the template's size, not a magic number.
+	if len(listing.Files) != len(book.Template())+1 {
+		t.Fatalf("book = %+v, want the seeded template and the decision", listing.Files)
 	}
 
 	index, err := mgr.OwnerBookFile(info.ID, owner.ProjectFile)

@@ -474,6 +474,22 @@ export function projectStream(session) {
         });
         continue;
       }
+      // The owner's own clock: a deterministic evaluator woke it because
+      // something in the project changed while nobody was talking to it. Same
+      // block as a report — it arrived, the owner did not say it.
+      if (msg.custom?.source === 'heartbeat') {
+        const facts = Number(msg.custom.facts) || 0;
+        blocks.push({
+          kind: 'event',
+          id: blockID('heartbeat', msg, i),
+          source: 'heartbeat',
+          title: facts > 1 ? `${facts} things` : '',
+          body: joinText(msg.content),
+          time: msg.timestamp,
+          autorun: true,
+        });
+        continue;
+      }
       const attachments = attachmentsOf(msg.content);
       const msgId = msg.msg_id || msg._msg_id || '';
       const wp = {

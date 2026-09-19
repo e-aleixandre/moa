@@ -504,6 +504,19 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 			projected["steer"] = steer
 		}
 	}
+	// A heartbeat carries its beat id (the server confirms delivery by it) and
+	// how many facts woke the owner.
+	if source == "heartbeat" {
+		if beat, ok := custom["beat"].(string); ok && beat != "" {
+			projected["beat"] = beat
+		}
+		switch facts := custom["facts"].(type) {
+		case int:
+			projected["facts"] = facts
+		case float64:
+			projected["facts"] = int(facts)
+		}
+	}
 	// A message an owner sent into one of its sessions names the owner, so
 	// the transcript can say who wrote it after any reconnect.
 	if source == "owner" {

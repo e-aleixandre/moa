@@ -290,6 +290,15 @@ type SessionInfo struct {
 	// reporting were, so the three cannot disagree.
 	OwnerID   string `json:"owner_id,omitempty"`
 	OwnerName string `json:"owner_name,omitempty"`
+	// PendingSince is when this session started waiting on the user (the
+	// ask_user or permission it is blocked on was requested then), and
+	// PendingID is what it is waiting on. Both are zero/empty when nothing is
+	// pending. Additive, and deliberately not derived from Updated: that one is
+	// the last time something was sent TO the session, so an old conversation
+	// asking a question right now would look like it had been blocked for
+	// hours.
+	PendingSince time.Time `json:"pending_since,omitzero"`
+	PendingID    string    `json:"pending_id,omitempty"`
 	Error              string    `json:"error,omitempty"`
 	Unseen             bool      `json:"unseen"`
 	UnseenSeq          uint64    `json:"unseen_seq,omitempty"`
@@ -476,6 +485,16 @@ func (s *ManagedSession) info() SessionInfo {
 	// show (and keep) an accurate elapsed counter across reconnects.
 	if runStartedAt := s.runtime.Context().RunStartedAt(); !runStartedAt.IsZero() && (info.State == StateRunning || info.State == StatePermission) {
 		info.RunStartedAt = runStartedAt
+	}
+	// What it is blocked on, and since when: the owner's heartbeat and its
+	// sessions listing both answer "how long has this been waiting" from here.
+	if pending, err := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](b, bus.GetPendingApproval{}); err == nil {
+		switch {
+		case pending.Ask != nil:
+			info.PendingID, info.PendingSince = pending.Ask.ID, pending.Ask.RequestedAt
+		case pending.Permission != nil:
+			info.PendingID, info.PendingSince = pending.Permission.ID, pending.Permission.RequestedAt
+		}
 	}
 	return info
 }
@@ -728,6 +747,9 @@ type Manager struct {
 	// reports batches the run outcomes of a project's sessions and delivers
 	// them to its owner. nil when owners are unavailable (no config dir).
 	reports   *reportCoordinator
+	// heartbeat wakes an owner when the project changed without anyone talking
+	// to it. nil when owners are unavailable.
+	heartbeat *heartbeatService
 	// ownerRefs memoizes which owner a working directory reports to, keyed by
 	// cwd. Dropped whole whenever an owner is created or deleted.
 	ownerRefMu sync.Mutex
@@ -968,6 +990,10 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	// The coordinator reads its outbox at startup, so it must exist before any
 	// session is resumed and starts reporting.
 	m.reports = newReportCoordinator(ctx, m)
+	// The heartbeat reads the same outbox, so it starts after the coordinator
+	// has recovered it.
+	m.heartbeat = newHeartbeatService(m)
+	m.heartbeat.Start()
 	if m.scheduler != nil {
 		m.scheduler.Start(m)
 	}

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,15 @@ var reportDeliveryAttempts atomic.Uint64
 // report. The owner reads the full session through the `sessions` tool when the
 // tail is not enough.
 const maxReportFinalTextBytes = 2 << 10
+
+// maxBookDeltaBytes caps the delta itself. It is a list of paths and one line
+// each; anything longer is a session writing its report into the wrong section.
+const maxBookDeltaBytes = 4 << 10
+
+// gitPositionTimeout bounds the three plumbing calls a report makes. A report
+// must not wait on a slow filesystem to be delivered. It is a var so a test
+// can prove what a git that never answers does to a report.
+var gitPositionTimeout = 3 * time.Second
 
 // reportCoordinator batches reports per codebase and delivers them to the
 // owner. It is a single actor per Manager: all batch state (pending reports,
@@ -344,7 +354,7 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 		sess = resumed
 	}
 
-	text := reportsMessage(pending)
+	text := reportsMessage(own, pending)
 	batchID := reportBatchID(pending)
 	sessions := make([]map[string]string, 0, len(pending))
 	for _, rep := range pending {
@@ -377,7 +387,7 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 
 	// Only a report that is in the transcript AND on disk may leave the outbox:
 	// anything else could be lost by a crash between the two.
-	if !m.awaitReportInTranscript(sess, batchID) {
+	if !m.awaitCustomInTranscript(sess, "batch", batchID) {
 		return errors.New("reports were sent but did not reach the transcript")
 	}
 	if err := sess.runtime.Flush(); err != nil {
@@ -386,11 +396,12 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 	return nil
 }
 
-// awaitReportInTranscript waits for the batch message to land in history. The
-// prompt is appended by the run goroutine, so it is not there when Execute
-// returns. It is announced live for the transcript, but the outbox needs the
-// message on disk, hence the bounded poll on history.
-func (m *Manager) awaitReportInTranscript(sess *ManagedSession, batchID string) bool {
+// awaitCustomInTranscript waits for a machine-sent message to land in history,
+// identified by one of its custom fields (a report batch, a heartbeat beat).
+// The prompt is appended by the run goroutine, so it is not there when Execute
+// returns. It is announced live for the transcript, but the outbox and the
+// heartbeat's memory need the message on disk, hence the bounded poll.
+func (m *Manager) awaitCustomInTranscript(sess *ManagedSession, field, value string) bool {
 	deadline := time.Now().Add(reportConfirmTimeout)
 	for {
 		msgs := sess.History()
@@ -398,7 +409,7 @@ func (m *Manager) awaitReportInTranscript(sess *ManagedSession, batchID string) 
 			if msgs[i].Custom == nil {
 				continue
 			}
-			if msgs[i].Custom["batch"] == batchID {
+			if msgs[i].Custom[field] == value {
 				return true
 			}
 		}
@@ -458,9 +469,15 @@ func reportFrom(sess *ManagedSession, out runOutcome) owner.Report {
 		CWD:       sess.CWD,
 		Origin:    sess.Origin,
 		Status:    out.Status,
+		// The delta comes out of the WHOLE message; the tail is what is carried
+		// for reading. A session that closes with a long summary would otherwise
+		// push its own book delta out of the report that exists to apply it.
+		BookDelta: extractBookDelta(out.FinalText),
 		FinalText: reportTail(out.FinalText),
 		At:        time.Now().UTC().Format(time.RFC3339),
 	}
+	pos := gitPosition(sess.CWD)
+	rep.GitAvailable, rep.Branch, rep.Head, rep.Dirty = pos.Available, pos.Branch, pos.Head, pos.Dirty
 	if out.Status == callbackStatusFailed && out.Err != "" {
 		rep.FinalText = strings.TrimSpace(out.Err + "\n\n" + rep.FinalText)
 	}
@@ -482,6 +499,155 @@ func reportFrom(sess *ManagedSession, out runOutcome) owner.Report {
 		}
 	}
 	return rep
+}
+
+// extractBookDelta lifts the "## Book delta" section out of a final message.
+//
+// The section runs to the next heading of the SAME level or higher (H1/H2) or
+// to the end of the text: a delta whose bullets carry an "### detail" heading
+// is still one delta, and stopping at any "#" cut it in half. Headings inside
+// a fenced block are text, not structure — a session pasting a diff of a
+// markdown file would otherwise truncate its own delta.
+//
+// An empty section is treated as absent, because a session that printed the
+// heading and nothing under it did not answer.
+func extractBookDelta(text string) string {
+	lines := strings.Split(text, "\n")
+	start := -1
+	fenced := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if isFence(trimmed) {
+			fenced = !fenced
+			continue
+		}
+		if fenced || !strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		heading := strings.ToLower(strings.TrimSpace(strings.TrimLeft(trimmed, "# ")))
+		heading = strings.TrimSuffix(heading, ":")
+		if heading == "book delta" {
+			start = i + 1
+			// Keep looking: a session that writes the section twice (a draft and
+			// a final one) means the last.
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	var body []string
+	fenced = false
+	for _, line := range lines[start:] {
+		trimmed := strings.TrimSpace(line)
+		if isFence(trimmed) {
+			fenced = !fenced
+		}
+		if !fenced && headingLevel(trimmed) > 0 && headingLevel(trimmed) <= 2 {
+			break
+		}
+		body = append(body, line)
+	}
+	delta := strings.TrimSpace(strings.Join(body, "\n"))
+	if delta == "" {
+		return ""
+	}
+	// "- none", "(none)", "none." all mean the same thing, and the owner should
+	// not have to parse three spellings of it.
+	flat := strings.ToLower(strings.Trim(delta, "-*() ."))
+	if flat == owner.BookDeltaNone {
+		return owner.BookDeltaNone
+	}
+	if len(delta) > maxBookDeltaBytes {
+		// Cut on a rune boundary and say so: a delta that ends mid-path reads
+		// like a path, and the owner would apply it to a file that does not
+		// exist.
+		delta = cutAtRuneBoundary(delta, maxBookDeltaBytes) + "\n[truncated]"
+	}
+	return delta
+}
+
+// isFence reports a markdown code fence (``` or ~~~).
+func isFence(trimmed string) bool {
+	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
+}
+
+// headingLevel is the number of leading '#' of an ATX heading, 0 when the line
+// is not one.
+func headingLevel(trimmed string) int {
+	level := 0
+	for level < len(trimmed) && trimmed[level] == '#' {
+		level++
+	}
+	if level == 0 || level >= len(trimmed) {
+		return level
+	}
+	if trimmed[level] != ' ' && trimmed[level] != '\t' {
+		return 0 // "#hashtag" is not a heading
+	}
+	return level
+}
+
+// cutAtRuneBoundary caps s at limit bytes without splitting a rune.
+func cutAtRuneBoundary(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8Start(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// gitPosition answers where the work happened: branch, short head, and whether
+// the tree was dirty. Three cheap plumbing calls with a short deadline.
+//
+// The result is all-or-none. A partial answer — a branch, an empty head and
+// "clean" because `status` timed out or the worktree disappeared between two
+// calls — reads exactly like verified work with nothing uncommitted, and that
+// is the one thing it must never be mistaken for. A directory that is not a
+// repository, a git that does not answer, or any call that fails: unavailable,
+// and the report says so.
+func gitPosition(cwd string) gitInfo {
+	if cwd == "" {
+		return gitInfo{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), gitPositionTimeout)
+	defer cancel()
+	run := func(args ...string) (string, bool) {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = cwd
+		// The deadline only kills git itself; a grandchild holding the output
+		// pipe would keep Output blocked past it. WaitDelay is what makes the
+		// timeout a real bound on how long a report can be delayed.
+		cmd.WaitDelay = time.Second
+		out, err := cmd.Output()
+		if err != nil {
+			return "", false
+		}
+		return strings.TrimSpace(string(out)), true
+	}
+	branch, ok := run("rev-parse", "--abbrev-ref", "HEAD")
+	if !ok {
+		return gitInfo{}
+	}
+	head, ok := run("rev-parse", "--short", "HEAD")
+	if !ok {
+		return gitInfo{}
+	}
+	status, ok := run("status", "--porcelain")
+	if !ok {
+		return gitInfo{}
+	}
+	return gitInfo{Available: true, Branch: branch, Head: head, Dirty: status != ""}
+}
+
+// gitInfo is where a report's work happened, or nothing at all.
+type gitInfo struct {
+	Available bool
+	Branch    string
+	Head      string
+	Dirty     bool
 }
 
 // newReportID mints the identity of one outcome, at the moment the outcome is
@@ -529,7 +695,13 @@ func reportTail(text string) string {
 // reportsMessage renders a batch. The format is fixed and plain: the owner is
 // reading a status board, and a stable shape is what lets it compare one cycle
 // with the next.
-func reportsMessage(pending []owner.Report) string {
+//
+// Every position is stated against the project's canonical ref, because that is
+// what decides where the delta goes: the canonical branch updates areas/, any
+// other branch updates work/. "git: unavailable" is said out loud rather than
+// rendered as an absence — an owner cannot tell a clean tree from an unasked
+// question unless the report distinguishes them.
+func reportsMessage(own owner.Owner, pending []owner.Report) string {
 	var b strings.Builder
 	if len(pending) == 1 {
 		b.WriteString("Report from a session of your project:\n\n")
@@ -554,6 +726,27 @@ func reportsMessage(pending []owner.Report) string {
 		if rep.FinalText != "" {
 			fmt.Fprintf(&b, "  said: %s\n", indentReportText(rep.FinalText))
 		}
+		switch {
+		case !rep.GitAvailable:
+			b.WriteString("  git: unavailable (position unknown — ask this session where its work is)\n")
+		default:
+			fmt.Fprintf(&b, "  canonical: %s · branch: %s", canonicalRefLabel(own), rep.Branch)
+			if rep.Head != "" {
+				fmt.Fprintf(&b, " @ %s", rep.Head)
+			}
+			if rep.Dirty {
+				b.WriteString(" (uncommitted changes)")
+			}
+			b.WriteString("\n")
+		}
+		switch rep.BookDelta {
+		case "":
+			b.WriteString("  book delta: missing — ask this session what its work changes in the book\n")
+		case owner.BookDeltaNone:
+			b.WriteString("  book delta: none\n")
+		default:
+			fmt.Fprintf(&b, "  book delta: %s\n", indentReportText(rep.BookDelta))
+		}
 	}
 	b.WriteString("\nUse the sessions tool to read or answer any of them, and update the book " +
 		"with what this changes about the project.")
@@ -565,6 +758,14 @@ func reportOrigin(origin string) string {
 		return "owner"
 	}
 	return "user"
+}
+
+// canonicalRefLabel names the branch areas/ describes, or says it is unknown.
+func canonicalRefLabel(own owner.Owner) string {
+	if ref := strings.TrimSpace(own.CanonicalRef); ref != "" {
+		return ref
+	}
+	return "unknown"
 }
 
 // indentReportText keeps a multi-line tail inside its bullet.

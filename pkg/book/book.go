@@ -16,7 +16,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -48,6 +47,14 @@ const ToolName = "book"
 // the owner writes it, and a tool that merely refused at execution time would
 // still invite the attempt on every turn.
 func NewTool(dir string, writable bool) core.Tool {
+	return newTool(dir, writable, false)
+}
+
+// newTool is the single builder. hideReserved makes the user's files (OWNER.md)
+// invisible rather than merely unwritable, which is what a child of the owner
+// gets: the preferences the user wrote for the owner are not context for a
+// session the owner delegated to.
+func newTool(dir string, writable, hideReserved bool) core.Tool {
 	description := "Read the project book: the owner's curated record of this project " +
 		"(decisions and why they were taken, people and what they ask for, deep context per " +
 		"area). PROJECT.md is its index and is already in your context; use this to read the " +
@@ -69,15 +76,19 @@ func NewTool(dir string, writable bool) core.Tool {
 			"action": {
 				"type": "string",
 				"enum": %s,
-				"description": "list: every file in the book. read: one file's content. search: find text across the book. write: replace a file. append: add to the end of a file."
+				"description": "list: the book's files, optionally under one path. read: one file's content. search: ranked search across the book, best files first. write: replace a file. append: add to the end of a file."
 			},
 			"path": {
 				"type": "string",
-				"description": "Path inside the book, relative and without \"..\" (e.g. \"decisions/2026-08-import.md\"). Required for read, write and append."
+				"description": "Path inside the book, relative and without \"..\" (e.g. \"areas/erp/albaranes.md\"). Required for read, write and append; optional for list (a directory)."
 			},
 			"query": {
 				"type": "string",
-				"description": "Text to look for, case-insensitive (for search)."
+				"description": "What to look for, in words: the search is ranked, titles and aliases count most, accents and stopwords are ignored (for search)."
+			},
+			"limit": {
+				"type": "integer",
+				"description": "For search: how many files to return (default 10, max 25)."
 			},
 			"content": {
 				"type": "string",
@@ -87,7 +98,11 @@ func NewTool(dir string, writable bool) core.Tool {
 		"required": ["action"]
 	}`, actions)
 
-	lockKey := "book:" + dir
+	lockKey := bookLockPrefix + dir
+	hidden := func(string) bool { return false }
+	if hideReserved {
+		hidden = func(rel string) bool { return ReservedFiles[rel] }
+	}
 	return core.Tool{
 		Name:        ToolName,
 		Label:       "Project book",
@@ -99,15 +114,22 @@ func NewTool(dir string, writable bool) core.Tool {
 		},
 		Execute: func(_ context.Context, params map[string]any, _ func(core.Result)) (core.Result, error) {
 			action, _ := params["action"].(string)
-			path, _ := params["path"].(string)
+			rawPath, _ := params["path"].(string)
+			// The path is normalized ONCE, here, and every rule below is applied
+			// to the clean form: checking "./OWNER.md" against the reserved list
+			// before cleaning it is how a reserved file stops being reserved.
+			path := CleanPath(rawPath)
 			switch action {
 			case "list":
-				return list(dir)
+				return list(dir, path, hidden)
 			case "read":
+				if hidden(path) {
+					return core.ErrorResult(fmt.Sprintf("%s is not in the book", rawPath)), nil
+				}
 				return read(dir, path)
 			case "search":
 				query, _ := params["query"].(string)
-				return search(dir, query)
+				return search(dir, query, toInt(params["limit"]), hidden)
 			case "write", "append":
 				if !writable {
 					return core.ErrorResult("the book is written by the project owner only"), nil
@@ -121,52 +143,76 @@ func NewTool(dir string, writable bool) core.Tool {
 	}
 }
 
-// ReadOnlyVariant returns the reading half of a book tool, delegating to the
-// original for the actions it keeps. It exists for subagents: a child inherits
-// its parent's tools, and an owner's child must be able to read the book
-// without rewriting the project's record from the paragraph of context it was
-// handed. It reports false for any tool that is not the book.
+// bookLockPrefix names the book directory inside the tool's lock key. It is
+// also how the read-only variant recovers the directory of the tool it
+// downgrades, which has no other handle on it.
+const bookLockPrefix = "book:"
+
+// ReadOnlyVariant returns the reading half of a book tool. It exists for
+// subagents: a child inherits its parent's tools, and an owner's child must be
+// able to read the book without rewriting the project's record from the
+// paragraph of context it was handed. It reports false for any tool that is
+// not the book.
 //
 // The downgrade is the schema as well as the check: a child offered "write" in
 // its tool list would attempt it every time the task sounds like note-taking.
+// It also hides the reserved files — book/OWNER.md is the user's instructions
+// to the owner, and "never to children" has to be invisibility, not a refusal
+// to write.
 func ReadOnlyVariant(t core.Tool) (core.Tool, bool) {
-	if t.Name != ToolName || t.Execute == nil {
+	if t.Name != ToolName || t.Execute == nil || t.LockKey == nil {
 		return core.Tool{}, false
 	}
-	shape := NewTool("", false)
-	inner := t.Execute
-	shape.Execute = func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
-		switch action, _ := params["action"].(string); action {
-		case "list", "read", "search":
-			return inner(ctx, params, onUpdate)
-		default:
-			return core.ErrorResult("the book is written by the project owner only"), nil
-		}
+	lockKey := t.LockKey(nil)
+	dir, ok := strings.CutPrefix(lockKey, bookLockPrefix)
+	if !ok {
+		return core.Tool{}, false
 	}
+	child := newTool(dir, false, true)
 	// The parent's lock key names the real directory; keep it so a child's read
 	// still serializes against the owner's write.
-	shape.LockKey = t.LockKey
-	return shape, true
+	child.LockKey = t.LockKey
+	return child, true
 }
 
-// resolve maps a book-relative path to an absolute one inside dir, refusing
-// anything that could leave the book: absolute paths, "..", and symlinks
-// pointing outside. The book holds the project's decisions and sits in the
-// config directory next to memory and credentials; a traversal here reads or
-// rewrites files that have nothing to do with it.
+// CleanPath normalizes a book path to the one form every rule is applied to:
+// slash-separated, no leading "./", no trailing slash. It is the first thing
+// any action does with a path, so "./OWNER.md" and "areas/../OWNER.md" are the
+// same file to the reserved-file check and to the walk.
+func CleanPath(rel string) string {
+	rel = strings.TrimSpace(filepath.ToSlash(rel))
+	if rel == "" {
+		return ""
+	}
+	if filepath.IsAbs(rel) {
+		// Left as-is: resolve refuses it, and cleaning would turn an absolute
+		// path into a plausible relative one.
+		return rel
+	}
+	clean := filepath.ToSlash(filepath.Clean(rel))
+	if clean == "." {
+		return ""
+	}
+	return strings.Trim(clean, "/")
+}
+
+// resolve maps a clean book-relative path (see CleanPath) to an absolute one
+// inside dir, refusing anything that could leave the book: absolute paths,
+// "..", and symlinks pointing outside. The book holds the project's decisions
+// and sits in the config directory next to memory and credentials; a traversal
+// here reads or rewrites files that have nothing to do with it.
 func resolve(dir, rel string) (string, error) {
-	rel = strings.TrimSpace(rel)
+	rel = CleanPath(rel)
 	if rel == "" {
 		return "", fmt.Errorf("path is required")
 	}
 	if filepath.IsAbs(rel) {
 		return "", fmt.Errorf("path must be relative to the book")
 	}
-	clean := filepath.Clean(filepath.ToSlash(rel))
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+	if rel == ".." || strings.HasPrefix(rel, "../") {
 		return "", fmt.Errorf("path must stay inside the book")
 	}
-	full := filepath.Join(dir, filepath.FromSlash(clean))
+	full := filepath.Join(dir, filepath.FromSlash(rel))
 	// Resolve symlinks on whatever part of the path already exists: a link
 	// inside the book pointing out of it must not become a door, while a file
 	// that does not exist yet (a write) is still a legal target.
@@ -222,23 +268,13 @@ type Entry struct {
 // an owner whose book was never seeded still has a book page to open.
 func Files(dir string) ([]Entry, error) {
 	var out []Entry
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // unreadable corner of the book: skip it, don't fail the call
-		}
-		if d.IsDir() || !d.Type().IsRegular() {
-			return nil
-		}
-		rel, relErr := filepath.Rel(dir, path)
-		if relErr != nil {
-			return nil
-		}
-		info, infoErr := d.Info()
+	err := walkBook(dir, func(rel, full string) error {
+		info, infoErr := os.Stat(full)
 		if infoErr != nil {
 			return nil
 		}
 		out = append(out, Entry{
-			Path:     filepath.ToSlash(rel),
+			Path:     rel,
 			Bytes:    info.Size(),
 			Modified: info.ModTime().UTC(),
 		})
@@ -288,38 +324,66 @@ func WriteFile(dir, rel string, content []byte) error {
 	return writeFileAtomic(full, content, 0o600)
 }
 
-func list(dir string) (core.Result, error) {
-	var files []string
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // unreadable corner of the book: skip it, don't fail the call
-		}
-		if d.IsDir() || !d.Type().IsRegular() {
+// list shows the book's files, optionally under one directory, each with the
+// title from its frontmatter: an area is a path, so listing it is how the
+// owner sees what an area holds without an index file to keep in sync.
+//
+// Files under work/ also carry how long ago they moved: "what is stopped and
+// since when" is a question the owner is asked on every turn, and a listing
+// without times cannot answer it.
+func list(dir, under string, hidden func(rel string) bool) (core.Result, error) {
+	prefix := CleanPath(under)
+	type entry struct {
+		path, title string
+		modified    time.Time
+	}
+	var files []entry
+	err := walkBook(dir, func(rel, full string) error {
+		if hidden != nil && hidden(rel) {
 			return nil
 		}
-		rel, relErr := filepath.Rel(dir, path)
-		if relErr != nil {
+		if prefix != "" && rel != prefix && !strings.HasPrefix(rel, prefix+"/") {
 			return nil
 		}
-		files = append(files, filepath.ToSlash(rel))
+		title := ""
+		if data, readErr := os.ReadFile(full); readErr == nil && len(data) <= maxFileBytes {
+			fm, _ := parseFrontmatter(string(data))
+			title = fm.Title
+		}
+		var modified time.Time
+		if info, statErr := os.Stat(full); statErr == nil {
+			modified = info.ModTime()
+		}
+		files = append(files, entry{path: rel, title: title, modified: modified})
 		return nil
 	})
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return core.ErrorResult(fmt.Sprintf("cannot read the book: %v", err)), nil
 	}
 	if len(files) == 0 {
+		if prefix != "" {
+			return core.TextResult(fmt.Sprintf("Nothing in the book under %s.", prefix)), nil
+		}
 		return core.TextResult("The book is empty."), nil
 	}
-	sort.Strings(files)
+	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
 	truncated := false
 	if len(files) > maxListEntries {
 		files = files[:maxListEntries]
 		truncated = true
 	}
 	var sb strings.Builder
+	now := time.Now()
 	for _, f := range files {
 		sb.WriteString("- ")
-		sb.WriteString(f)
+		sb.WriteString(f.path)
+		if f.title != "" {
+			sb.WriteString(" — ")
+			sb.WriteString(f.title)
+		}
+		if strings.HasPrefix(f.path, "work/") && !f.modified.IsZero() {
+			fmt.Fprintf(&sb, " (moved %s)", RelativeAge(now.Sub(f.modified)))
+		}
 		sb.WriteString("\n")
 	}
 	if truncated {
@@ -347,52 +411,40 @@ func read(dir, rel string) (core.Result, error) {
 	return core.TextResult(string(data)), nil
 }
 
-func search(dir, query string) (core.Result, error) {
+// search ranks the book (see search.go) rather than listing every line that
+// contains the query: a substring match returns the forty files that mention a
+// word once above the one sheet that is about it.
+func search(dir, query string, limit int, hidden func(rel string) bool) (core.Result, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return core.ErrorResult("query is required for search"), nil
 	}
-	needle := strings.ToLower(query)
-	var sb strings.Builder
-	hits := 0
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !d.Type().IsRegular() {
-			return nil
-		}
-		if sb.Len() >= maxSearchBytes {
-			return filepath.SkipAll
-		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil || len(data) > maxFileBytes {
-			return nil
-		}
-		rel, relErr := filepath.Rel(dir, path)
-		if relErr != nil {
-			return nil
-		}
-		for i, line := range strings.Split(string(data), "\n") {
-			if !strings.Contains(strings.ToLower(line), needle) {
-				continue
-			}
-			hits++
-			entry := fmt.Sprintf("- %s:%d — %s\n", filepath.ToSlash(rel), i+1, strings.TrimSpace(line))
-			if sb.Len()+len(entry) > maxSearchBytes {
-				return filepath.SkipAll
-			}
-			sb.WriteString(entry)
-		}
-		return nil
-	})
+	hits, total, err := searchBook(dir, query, limit, hidden)
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot search the book: %v", err)), nil
 	}
-	if hits == 0 {
-		return core.TextResult(fmt.Sprintf("Nothing in the book matches %q.", query)), nil
-	}
-	return core.TextResult(sb.String()), nil
+	return core.TextResult(formatSearch(hits, total, query)), nil
 }
 
+// toInt reads a JSON number parameter, which arrives as float64.
+func toInt(value any) int {
+	switch n := value.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	}
+	return 0
+}
+
+// write refuses the reserved files on the already-normalized path (see
+// CleanPath): the refusal is the tool's, and a cooperative agent with bash
+// could still edit the file by hand — what this guarantees is that the book
+// tool never does it.
 func write(dir, rel, content string, appendTo bool) (core.Result, error) {
+	if ReservedFiles[CleanPath(rel)] {
+		return core.ErrorResult(fmt.Sprintf("%s belongs to the user: it is what they ask of you, and you do not write it", rel)), nil
+	}
 	if len(content) > maxWriteBytes {
 		return core.ErrorResult(fmt.Sprintf("content is larger than %dKB; split it across book files", maxWriteBytes/1024)), nil
 	}
@@ -433,4 +485,21 @@ func truncateUTF8(s string, limit int) string {
 		cut--
 	}
 	return s[:cut]
+}
+
+// RelativeAge says how long ago something happened, at the resolution a
+// decision is made on: minutes for today, hours, then days. The phrase carries
+// its own "ago" so "just now ago" cannot happen. It is exported because the
+// owner's sessions listing answers the same question about a conversation.
+func RelativeAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%d days ago", int(d.Hours()/24))
+	}
 }

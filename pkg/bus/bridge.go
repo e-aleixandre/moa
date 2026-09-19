@@ -1257,6 +1257,19 @@ func projectLiveCustom(custom map[string]any) map[string]any {
 			}
 		}
 	}
+	// A heartbeat carries its beat id and how many facts woke the owner; the
+	// facts themselves are in the message body, so nothing else crosses.
+	if source == "heartbeat" {
+		if beat, ok := custom["beat"].(string); ok && beat != "" {
+			projected["beat"] = beat
+		}
+		switch facts := custom["facts"].(type) {
+		case int:
+			projected["facts"] = facts
+		case float64:
+			projected["facts"] = int(facts)
+		}
+	}
 	// A message an owner sent into a session names the owner.
 	if source == "owner" {
 		for _, key := range []string{"owner_id", "owner_name"} {

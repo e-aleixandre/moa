@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/permission"
@@ -67,8 +68,13 @@ type PendingPermission struct {
 	Args         map[string]any
 	AllowPattern string
 	RunGen       uint64
-	response     chan<- permission.Response
-	resolved     bool
+	// RequestedAt is when the user was asked. It is the only honest answer to
+	// "how long has this been waiting": the session's last-update time is when
+	// something was last sent TO it, which an old session asking a new question
+	// would report as hours of blockage.
+	RequestedAt time.Time
+	response    chan<- permission.Response
+	resolved    bool
 }
 
 // PermissionDecisionSnapshot is the non-sensitive, exact identity of one
@@ -88,8 +94,10 @@ type PendingAsk struct {
 	ID        string
 	Questions []AskQuestion
 	RunGen    uint64
-	response  chan<- []string
-	resolved  bool
+	// RequestedAt is when the question was asked (see PendingPermission).
+	RequestedAt time.Time
+	response    chan<- []string
+	resolved    bool
 }
 
 // NewApprovalManager creates an ApprovalManager.
@@ -135,6 +143,7 @@ func (am *ApprovalManager) StartPermissionBridge(sessionCtx context.Context, gat
 					Args:         argsCopy,
 					AllowPattern: allowPattern,
 					RunGen:       am.currentGen(),
+					RequestedAt:  time.Now(),
 					response:     req.Response,
 				}
 				am.mu.Unlock()
@@ -359,10 +368,11 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 
 				am.mu.Lock()
 				am.asks[id] = &PendingAsk{
-					ID:        id,
-					Questions: questions,
-					RunGen:    am.currentGen(),
-					response:  p.Response,
+					ID:          id,
+					Questions:   questions,
+					RunGen:      am.currentGen(),
+					RequestedAt: time.Now(),
+					response:    p.Response,
 				}
 				am.mu.Unlock()
 
@@ -494,12 +504,16 @@ type PendingPermissionInfo struct {
 	ToolName     string         `json:"tool_name"`
 	Args         map[string]any `json:"args"`
 	AllowPattern string         `json:"allow_pattern"`
+	// RequestedAt is when it started waiting. Additive: a client that does not
+	// know the field is unaffected.
+	RequestedAt time.Time `json:"requested_at,omitzero"`
 }
 
 // PendingAskInfo describes a pending ask_user request.
 type PendingAskInfo struct {
-	ID        string        `json:"id"`
-	Questions []AskQuestion `json:"questions"`
+	ID          string        `json:"id"`
+	Questions   []AskQuestion `json:"questions"`
+	RequestedAt time.Time     `json:"requested_at,omitzero"`
 }
 
 // PendingInfo returns the current pending approval state.
@@ -514,6 +528,7 @@ func (am *ApprovalManager) PendingInfo() PendingApprovalInfo {
 				ToolName:     p.ToolName,
 				Args:         p.Args,
 				AllowPattern: p.AllowPattern,
+				RequestedAt:  p.RequestedAt,
 			}
 			break
 		}
@@ -521,8 +536,9 @@ func (am *ApprovalManager) PendingInfo() PendingApprovalInfo {
 	for _, a := range am.asks {
 		if !a.resolved {
 			info.Ask = &PendingAskInfo{
-				ID:        a.ID,
-				Questions: a.Questions,
+				ID:          a.ID,
+				Questions:   a.Questions,
+				RequestedAt: a.RequestedAt,
 			}
 			break
 		}

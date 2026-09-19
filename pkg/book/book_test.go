@@ -63,7 +63,7 @@ func TestListReadSearch(t *testing.T) {
 	}
 
 	found := resultText(run(t, tool, map[string]any{"action": "search", "query": "IMPORTS"}))
-	if !strings.Contains(found, "people.md:1") {
+	if !strings.Contains(found, "people.md") {
 		t.Fatalf("case-insensitive search = %q", found)
 	}
 	none := resultText(run(t, tool, map[string]any{"action": "search", "query": "absent-token"}))

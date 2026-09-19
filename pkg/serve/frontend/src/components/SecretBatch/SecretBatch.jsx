@@ -16,7 +16,7 @@ export function SecretBatch({ open, sessionId, aliases, onClose, onStored }) {
     setRows(secretRowsForAliases(aliases));
     setErrors({ form: "", rows: {} });
     setSaving(false);
-    if (open) requestAnimationFrame(() => firstValueRef.current?.focus());
+    if (open) requestAnimationFrame(() => firstValueRef.current?.focus({ preventScroll: true }));
   }, [open, aliases]);
 
   const changeRow = (index, field, value) => {

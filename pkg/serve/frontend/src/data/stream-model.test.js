@@ -1476,6 +1476,27 @@ test('a report retains its structured child sessions', () => {
   expect(block.sessions).toEqual([{ id: 'child-1', title: 'Hello', status: 'done' }]);
 });
 
+// ── project owners: heartbeat ────────────────────────────────────────────────
+// The owner's own clock woke it: the message arrived, the owner did not type it.
+test('a heartbeat is projected as an event block', () => {
+  const [block] = projectStream(session([user('Heartbeat. Nobody is talking to you;', {
+    _msg_id: 'hb-msg-1',
+    custom: { source: 'heartbeat', facts: 3 },
+  })]));
+  expect(block).toMatchObject({
+    kind: 'event', id: 'heartbeat-hb-msg-1-0',
+    source: 'heartbeat', title: '3 things', autorun: true,
+  });
+});
+
+test('a heartbeat with one fact carries no count in its title', () => {
+  const [block] = projectStream(session([user('Heartbeat.', {
+    _msg_id: 'hb-msg-2',
+    custom: { source: 'heartbeat', facts: 1 },
+  })]));
+  expect(block).toMatchObject({ kind: 'event', source: 'heartbeat', title: '' });
+});
+
 test('an event block keeps a stable id across a history prepend, so its body stays collapsed', () => {
   const first = projectStream(session([event('{}')]));
   const later = projectStream(session([user('earlier'), assistant('ok'), event('{}')]));

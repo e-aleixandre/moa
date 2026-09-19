@@ -28,6 +28,11 @@ type Sources struct {
 	// on its own turns — so a reload has to re-read it like AGENTS.md.
 	ownerBook     func() string
 	ownerBookText string
+	// ownerRole is the owner's own role prompt, loaded the same way and for the
+	// same reason: it carries book/OWNER.md, which the user edits while the
+	// owner's conversation is open. Set only in an owner's session.
+	ownerRole     func() string
+	ownerRoleText string
 }
 
 // NewSources captures what a session was built with. cwd and memStore are kept
@@ -64,6 +69,29 @@ func (s *Sources) OwnerBook() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.ownerBookText
+}
+
+// WithOwnerRole attaches the owner role loader and reads it once. Only an
+// owner's own conversation has one.
+func (s *Sources) WithOwnerRole(load func() string) *Sources {
+	if s == nil || load == nil {
+		return s
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ownerRole = load
+	s.ownerRoleText = load()
+	return s
+}
+
+// OwnerRole returns the current owner role section ("" when there is none).
+func (s *Sources) OwnerRole() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ownerRoleText
 }
 
 // Snapshot returns the current values as one consistent set.
@@ -106,16 +134,21 @@ func (s *Sources) Reload() (changed []Changed, revert func()) {
 	}
 	s.mu.RLock()
 	loadBook := s.ownerBook
+	loadRole := s.ownerRole
 	s.mu.RUnlock()
 	ownerBook := ""
 	if loadBook != nil {
 		ownerBook = loadBook()
 	}
+	ownerRole := ""
+	if loadRole != nil {
+		ownerRole = loadRole()
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	prev := struct{ agentsMD, skillsIndex, memoryIndex, ownerBook string }{s.agentsMD, s.skillsIndex, s.memoryIndex, s.ownerBookText}
+	prev := struct{ agentsMD, skillsIndex, memoryIndex, ownerBook, ownerRole string }{s.agentsMD, s.skillsIndex, s.memoryIndex, s.ownerBookText, s.ownerRoleText}
 	if agentsMD != s.agentsMD {
 		changed = append(changed, Changed{Label: "AGENTS.md", Content: agentsMD})
 		s.agentsMD = agentsMD
@@ -132,10 +165,15 @@ func (s *Sources) Reload() (changed []Changed, revert func()) {
 		changed = append(changed, Changed{Label: "Project book", Content: ownerBook})
 		s.ownerBookText = ownerBook
 	}
+	if loadRole != nil && ownerRole != s.ownerRoleText {
+		changed = append(changed, Changed{Label: "Owner preferences", Content: ownerRole})
+		s.ownerRoleText = ownerRole
+	}
 	return changed, func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.agentsMD, s.skillsIndex, s.memoryIndex = prev.agentsMD, prev.skillsIndex, prev.memoryIndex
 		s.ownerBookText = prev.ownerBook
+		s.ownerRoleText = prev.ownerRole
 	}
 }

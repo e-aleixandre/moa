@@ -511,10 +511,20 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// book without anything being linked by hand. A codebase with no owner adds
 	// nothing to the prompt.
 	projectOwner, ownerStore := loadProjectOwner(cfg.CWD)
-	ownerRole := ""
 	if projectOwner.ID != "" && ownerStore != nil {
 		if cfg.OwnerSession {
-			ownerRole = owner.RolePrompt(projectOwner.Name)
+			// The role carries book/OWNER.md and the canonical ref, both of
+			// which the user edits by hand while the owner is running, so it
+			// is a loader like the book and not a string captured here.
+			key := projectOwner.CodebaseKey
+			name := projectOwner.Name
+			promptSources.WithOwnerRole(func() string {
+				canonical := projectOwner.CanonicalRef
+				if current, found, err := ownerStore.FindByCodebase(key); err == nil && found {
+					canonical = current.CanonicalRef
+				}
+				return owner.RolePrompt(name, canonical, ownerStore.OwnerPrefs(key))
+			})
 		}
 		// Read through the store on every build and reload: the owner edits the
 		// book from its own turns, so a value captured here would go stale in
@@ -665,7 +675,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			HasVerify:   hasVerify,
 			MemoryIndex: memoryIndex,
 			SkillsIndex: skillsIndex,
-			OwnerRole:   ownerRole,
+			OwnerRole:   promptSources.OwnerRole(),
 			OwnerBook:   promptSources.OwnerBook(),
 		})
 	}

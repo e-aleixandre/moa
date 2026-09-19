@@ -24,8 +24,31 @@ type Report struct {
 	Status    string         `json:"status"`
 	FinalText string         `json:"final_text,omitempty"`
 	Pending   *ReportPending `json:"pending,omitempty"`
-	At        string         `json:"at,omitempty"` // RFC3339
+	// BookDelta is what the session says its work changes about the book,
+	// lifted from the FULL final message before FinalText was cut to its tail:
+	// a delta that only exists in the part that was truncated is a delta the
+	// owner never applies. Empty means the session did not say (the owner has
+	// to ask); "none" is the session saying nothing changes, which is an answer.
+	BookDelta string `json:"book_delta,omitempty"`
+	// GitAvailable reports that the three fields below were ALL answered. It
+	// exists because a partial answer is indistinguishable from good news: a
+	// branch with no head and dirty=false reads as verified, committed work
+	// when it may only mean `git status` timed out. False means the position
+	// is unknown and the owner is told so.
+	GitAvailable bool `json:"git_available,omitempty"`
+	// Branch / Head / Dirty place the work in the repository, which is what
+	// decides where the delta goes: the canonical branch (see Owner.
+	// CanonicalRef) updates areas/, any other branch updates work/. Only
+	// meaningful when GitAvailable.
+	Branch string `json:"branch,omitempty"`
+	Head   string `json:"head,omitempty"`
+	Dirty  bool   `json:"dirty,omitempty"`
+	At     string `json:"at,omitempty"` // RFC3339
 }
+
+// BookDeltaNone is the value a session uses to say its work changes nothing in
+// the book. It is deliberately distinguishable from an absent delta.
+const BookDeltaNone = "none"
 
 // ReportPending is what a blocked session is waiting for, carried literally so
 // the owner reads the question (or the permission) as it was asked rather than

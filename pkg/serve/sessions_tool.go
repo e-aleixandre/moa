@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/e-aleixandre/moa/pkg/book"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/owner"
@@ -175,6 +177,11 @@ func (m *Manager) ownerSession(own owner.Owner, id string) (SessionInfo, error) 
 	return SessionInfo{}, fmt.Errorf("session %s not found", id)
 }
 
+// ownerListSessions is the roster the owner's balance is built on, so it
+// prints the times that balance is asked for: how long ago each session moved,
+// and — when one is blocked — how long it has been waiting. A truncated list
+// says so: "nothing else is open" and "the other 60 are not shown" are
+// different states of the project.
 func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
 	var mine []SessionInfo
 	for _, info := range m.List() {
@@ -186,14 +193,22 @@ func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
 		return core.TextResult("No sessions are open on this project.")
 	}
 	sort.Slice(mine, func(i, j int) bool { return mine[i].Updated.After(mine[j].Updated) })
+	total := len(mine)
 	if len(mine) > maxSessionsListed {
 		mine = mine[:maxSessionsListed]
 	}
+	now := time.Now()
 	var sb strings.Builder
+	if total > len(mine) {
+		fmt.Fprintf(&sb, "Showing %d of %d sessions, most recently updated first.\n", len(mine), total)
+	}
 	for _, info := range mine {
 		fmt.Fprintf(&sb, "- %s [%s] %s", info.ID, info.State, info.Title)
 		if info.CWD != own.Root {
 			fmt.Fprintf(&sb, " (%s)", info.CWD)
+		}
+		if !info.Updated.IsZero() {
+			fmt.Fprintf(&sb, " — updated %s", book.RelativeAge(now.Sub(info.Updated)))
 		}
 		sb.WriteString("\n")
 		if info.BriefAttempting != "" {
@@ -203,7 +218,11 @@ func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
 			fmt.Fprintf(&sb, "    progress: %s\n", info.BriefProgress)
 		}
 		if pending := m.ownerPendingLine(info.ID); pending != "" {
-			fmt.Fprintf(&sb, "    %s\n", pending)
+			fmt.Fprintf(&sb, "    %s", pending)
+			if !info.PendingSince.IsZero() {
+				fmt.Fprintf(&sb, " — waiting since %s", book.RelativeAge(now.Sub(info.PendingSince)))
+			}
+			sb.WriteString("\n")
 		}
 	}
 	return core.TextResult(sb.String())
