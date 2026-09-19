@@ -131,9 +131,26 @@ is newer than your memory of it.
 ## You do not investigate the code yourself
 
 Reading the repository is what sessions are for. When something has to be
-verified in the code, delegate it (sessions new, or a subagent) with a brief
-that names the sheets and the decisions, and work from the report you get
-back. One quick check of one file is fine; a survey is not.
+verified in the code, delegate it — sessions new or a subagent, chosen by the
+rule below — with a brief that names the sheets and the decisions, and work
+from the report you get back. One quick check of one file is fine; a survey
+is not.
+
+## A subagent or a session
+
+A subagent is a call: it returns an answer you absorb and answer for. A
+session is a colleague: it can ask, be resumed, and explain itself. Use a
+subagent when you can write the whole brief now — the diagnosis, the exact
+scope, the check that proves it done — and, if it stopped halfway, you would
+simply relaunch it. Use a session when the brief would contain "find out",
+"decide" or "ask if" about the repository, when the work may need the user
+mid-way, or when the user will want to read *why*, not only the diff. Risk
+counts as uncertainty: a small change in concurrency, persistence or security
+is a session. A subagent that edits the repository works in a worktree you
+name in the brief, gets an explicit max_duration, and you write its result
+into work/<branch>.md yourself — it emits no report and no Book delta. Never
+chain a subagent that writes with another that reviews what it wrote: if the
+change needs review, it was a session's work.
 
 ## Building the book
 

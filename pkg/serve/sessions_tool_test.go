@@ -65,11 +65,72 @@ func TestSessionsToolListsOnlyThisProject(t *testing.T) {
 	if !strings.Contains(listed, mine.ID) {
 		t.Fatalf("list omitted a session of the project:\n%s", listed)
 	}
-	if strings.Contains(listed, foreign.ID) {
-		t.Fatalf("list leaked a session of another codebase:\n%s", listed)
+	// A foreign session may be named as a warning at the end, never in the roster.
+	roster, _, _ := strings.Cut(listed, "Open elsewhere")
+	if strings.Contains(roster, foreign.ID) {
+		t.Fatalf("list put a session of another codebase in the roster:\n%s", listed)
 	}
 	if strings.Contains(listed, ownerSess.ID) {
 		t.Fatalf("list included the owner's own conversation:\n%s", listed)
+	}
+}
+
+// A session of another codebase that nobody owns is named — only as a warning,
+// with its directory and no title — because otherwise it reports to no one.
+func TestSessionsToolWarnsAboutUnownedSessionsElsewhere(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+
+	strayDir := t.TempDir()
+	stray, err := mgr.CreateSession(CreateOpts{CWD: strayDir, Title: "secret title"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	listed := toolText(runSessionsTool(t, ownerSess, map[string]any{"action": "list"}))
+	if !strings.Contains(listed, "Open elsewhere") || !strings.Contains(listed, stray.ID) {
+		t.Fatalf("list did not warn about an unowned session elsewhere:\n%s", listed)
+	}
+	if !strings.Contains(listed, strayDir) {
+		t.Fatalf("the warning did not say where the session is:\n%s", listed)
+	}
+	if strings.Contains(listed, "secret title") {
+		t.Fatalf("the warning leaked another project's title:\n%s", listed)
+	}
+	// Naming it is not reaching it.
+	if res := runSessionsTool(t, ownerSess, map[string]any{"action": "read", "session_id": stray.ID}); !res.IsError {
+		t.Fatal("the owner read a session of another codebase")
+	}
+
+	// Once it is closed it is not running any more, so it is not a warning.
+	if err := mgr.CloseSession(stray.ID); err != nil {
+		t.Fatal(err)
+	}
+	listed = toolText(runSessionsTool(t, ownerSess, map[string]any{"action": "list"}))
+	if strings.Contains(listed, stray.ID) {
+		t.Fatalf("list warned about a saved session elsewhere:\n%s", listed)
+	}
+}
+
+// A codebase with its own owner is already watched: it is not a gap.
+func TestSessionsToolDoesNotWarnAboutAnotherOwnersSessions(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+
+	otherRoot := t.TempDir()
+	ownerWithSession(t, mgr, otherRoot, "iREAD")
+	theirs, err := mgr.CreateSession(CreateOpts{CWD: otherRoot, Title: "theirs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	listed := toolText(runSessionsTool(t, ownerSess, map[string]any{"action": "list"}))
+	if strings.Contains(listed, theirs.ID) {
+		t.Fatalf("list named a session another owner already watches:\n%s", listed)
 	}
 }
 

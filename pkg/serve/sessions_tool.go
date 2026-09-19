@@ -22,6 +22,9 @@ const SessionsToolName = "sessions"
 const (
 	// maxSessionsListed bounds the roster an owner reads in one call.
 	maxSessionsListed = 40
+	// maxStraySessionsListed bounds the sessions of other codebases named at
+	// the end of that roster: it is a warning, not a second roster.
+	maxStraySessionsListed = 5
 	// defaultSessionReadLimit / maxSessionReadLimit bound `read`: an owner
 	// works from reports, and pulling a whole transcript into its context is
 	// exactly what reports exist to avoid.
@@ -183,21 +186,28 @@ func (m *Manager) ownerSession(own owner.Owner, id string) (SessionInfo, error) 
 // says so: "nothing else is open" and "the other 60 are not shown" are
 // different states of the project.
 func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
-	var mine []SessionInfo
+	var mine, strays []SessionInfo
 	for _, info := range m.List() {
 		if inCodebase(own, info.CWD) {
 			mine = append(mine, info)
+			continue
+		}
+		// A session with no cwd has no codebase to warn about, and a saved
+		// one is not running: the warning is about work happening now that
+		// reports to nobody.
+		if info.CWD != "" && info.State != StateSaved && info.OwnerID == "" {
+			strays = append(strays, info)
 		}
 	}
+	now := time.Now()
 	if len(mine) == 0 {
-		return core.TextResult("No sessions are open on this project.")
+		return core.TextResult("No sessions are open on this project." + strayNotice(strays, now))
 	}
 	sort.Slice(mine, func(i, j int) bool { return mine[i].Updated.After(mine[j].Updated) })
 	total := len(mine)
 	if len(mine) > maxSessionsListed {
 		mine = mine[:maxSessionsListed]
 	}
-	now := time.Now()
 	var sb strings.Builder
 	if total > len(mine) {
 		fmt.Fprintf(&sb, "Showing %d of %d sessions, most recently updated first.\n", len(mine), total)
@@ -225,7 +235,46 @@ func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
 			sb.WriteString("\n")
 		}
 	}
+	sb.WriteString(strayNotice(strays, now))
 	return core.TextResult(sb.String())
+}
+
+// strayNotice names live sessions of other codebases that no owner is
+// watching. A user's project can span several repositories — a backend, a web
+// client, an agent service — while an owner is one git repository, so a
+// session started in one of the others reports to nobody and disappears in
+// silence. There is no notion of sibling repository in the code and none is
+// invented here: the roster only reports what it sees, and whether a stray
+// belongs to this project is the owner's judgement from its cwd. Sessions
+// another owner already watches are not strays.
+func strayNotice(strays []SessionInfo, now time.Time) string {
+	if len(strays) == 0 {
+		return ""
+	}
+	sort.Slice(strays, func(i, j int) bool { return strays[i].Updated.After(strays[j].Updated) })
+	total := len(strays)
+	if len(strays) > maxStraySessionsListed {
+		strays = strays[:maxStraySessionsListed]
+	}
+	var sb strings.Builder
+	sb.WriteString("\nOpen elsewhere, in codebases with no owner")
+	if total > len(strays) {
+		fmt.Fprintf(&sb, " (%d of %d)", len(strays), total)
+	}
+	sb.WriteString(":\n")
+	for _, info := range strays {
+		// The directory, not the title: the cwd is what the owner judges
+		// with, and a title is another project's content.
+		fmt.Fprintf(&sb, "- %s [%s] %s", info.ID, info.State, info.CWD)
+		if !info.Updated.IsZero() {
+			fmt.Fprintf(&sb, " — updated %s", book.RelativeAge(now.Sub(info.Updated)))
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("These are not yours: you cannot read them, direct them or answer them. " +
+		"If one of them looks like work on this project in another repository, say so to " +
+		"the user in your balance.\n")
+	return sb.String()
 }
 
 // ownerPendingLine describes what a live session is blocked on. A permission
