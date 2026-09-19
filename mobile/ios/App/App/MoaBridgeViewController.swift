@@ -35,6 +35,24 @@ final class MoaBridgeViewController: CAPBridgeViewController {
             webView.navigationDelegate = recovery
         }
     }
+
+    func confirmUnpair() {
+        let alert = UIAlertController(
+            title: "Unpair moa?",
+            message: "This removes this app's connection to its current moa.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Unpair", style: .destructive) { [weak self] _ in
+            Task { [weak self] in
+                await self?.deviceAuthHandler.unpair()
+                await MainActor.run {
+                    self?.webView?.load(URLRequest(url: URL(string: "capacitor://localhost/?unpaired=1")!))
+                }
+            }
+        })
+        present(alert, animated: true)
+    }
 }
 
 // Capacitor owns WKWebView's navigation delegate. This proxy adds recovery for

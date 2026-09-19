@@ -58,6 +58,8 @@ func serveRouteAccess(r *http.Request) routeAccess {
 		return routePairingClaim
 	case r.Method == http.MethodPost && r.URL.Path == "/api/pulse/device-session":
 		return routeDeviceSession
+	case r.Method == http.MethodPost && r.URL.Path == "/api/pulse/device/revoke":
+		return routeDeviceSession
 	case r.URL.Path == "/api/pulse/pairings" && r.Method == http.MethodPost:
 		return routeOwnerAdmin
 	case r.URL.Path == "/api/pulse/devices" && r.Method == http.MethodGet:

@@ -13,6 +13,7 @@ import { startApp } from "./startup.js";
 
 const $ = (id) => document.getElementById(id);
 const error = $("error");
+const wasUnpaired = new URLSearchParams(location.search).has("unpaired");
 
 function fail(message) {
   error.textContent = message;
@@ -155,7 +156,11 @@ function showPairing(message = "") {
 // Already bound: renew a short browser session from Keychain before loading
 // the remote page. A revoked credential returns to a usable pairing screen;
 // a network failure preserves it for the next launch.
-const known = storedServer();
+if (wasUnpaired) {
+  forgetServer();
+  try { await clearNativeServer(); } catch { /* native binding is already gone */ }
+}
+const known = wasUnpaired ? null : storedServer();
 startApp(known, {
   authorizeDevice,
   bindNativeServer,

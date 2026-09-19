@@ -198,6 +198,34 @@ func handlePulseDeviceRevoke(store *deviceStore) http.HandlerFunc {
 	}
 }
 
+// handlePulseCurrentDeviceRevoke lets a device discard only its own credential.
+// Unlike owner device administration, this cannot grant access to another device.
+func handlePulseCurrentDeviceRevoke(store *deviceStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := requirePulseDeviceStore(w, r, store)
+		if !ok {
+			return
+		}
+		if identity.Kind != "device" || !validDeviceID(identity.DeviceID) {
+			http.Error(w, "paired device authentication required", http.StatusForbidden)
+			return
+		}
+		var body struct{}
+		if !decodePulseJSONBody(w, r, &body) {
+			return
+		}
+		if err := store.revoke(identity.DeviceID, identity.auditID()); errors.Is(err, errDeviceNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "device not found"})
+		} else if errors.Is(err, errDeviceStoreUnavailable) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "device pairing temporarily unavailable"})
+		} else if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unable to revoke device"})
+		} else {
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}
+}
+
 func decodePulseJSONBody(w http.ResponseWriter, r *http.Request, target any) bool {
 	limitBody(w, r, maxJSONBodySize)
 	decoder := json.NewDecoder(r.Body)

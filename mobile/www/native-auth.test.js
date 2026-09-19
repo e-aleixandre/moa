@@ -58,4 +58,20 @@ describe("native device authentication", () => {
     expect(capacitorPolicy.indexOf("plugin.shouldOverrideLoad(navigationAction)"))
       .toBeLessThan(capacitorPolicy.indexOf("UIApplication.shared.open(navURL"));
   });
+
+  it("keeps unpairing native, short-lived, and credential-private", () => {
+    const auth = readFileSync("ios/App/App/DeviceAuthBridge.swift", "utf8");
+    const scene = readFileSync("ios/App/App/SceneDelegate.swift", "utf8");
+    const controller = readFileSync("ios/App/App/MoaBridgeViewController.swift", "utf8");
+    const plist = readFileSync("ios/App/App/Info.plist", "utf8");
+
+    expect(plist).toContain("UIApplicationShortcutItems");
+    expect(scene).toContain("performActionFor shortcutItem");
+    expect(controller).toContain('title: "Unpair moa?"');
+    expect(auth).toContain('appendingPathComponent("api/pulse/device/revoke")');
+    expect(auth).toContain("timeoutInterval: 3");
+    expect(auth).toContain("configuration.timeoutIntervalForResource = 3");
+    expect(auth).toContain("try? await reset()");
+    expect(auth).not.toContain("print(");
+  });
 });

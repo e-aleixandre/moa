@@ -291,13 +291,51 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
     }
 
     private func reset() async throws {
-        let storedOrigin = try credentialStore.load()?.origin
-        try credentialStore.delete()
+        let storedOrigin = try? credentialStore.load()?.origin
+        let deleteError: Error?
+        do {
+            try credentialStore.delete()
+            deleteError = nil
+        } catch {
+            deleteError = error
+        }
         let origin = storedOrigin ?? NativeServerBinding.origin
         NativeServerBinding.clear()
         if let origin, let url = try? validatedOrigin(origin) {
             await clearSessionCookie(origin: url)
         }
+        if let deleteError { throw deleteError }
+    }
+
+    func unpair() async {
+        guard let stored = try? credentialStore.load() else {
+            try? await reset()
+            return
+        }
+        await revokeCurrentDevice(stored)
+        try? await reset()
+    }
+
+    private func revokeCurrentDevice(_ stored: StoredDeviceCredential) async {
+        guard let origin = try? validatedOrigin(stored.origin) else { return }
+        var request = URLRequest(
+            url: origin.appendingPathComponent("api/pulse/device/revoke"),
+            cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
+            timeoutInterval: 3
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("1", forHTTPHeaderField: "X-Moa-Request")
+        request.setValue("Moa-Device \(stored.credential)", forHTTPHeaderField: "Authorization")
+        request.httpBody = Data("{}".utf8)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpShouldSetCookies = false
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        configuration.timeoutIntervalForRequest = 3
+        configuration.timeoutIntervalForResource = 3
+        let shortSession = URLSession(configuration: configuration, delegate: sessionDelegate, delegateQueue: nil)
+        _ = try? await shortSession.data(for: request)
     }
 
     private func clearSessionCookie(origin: URL) async {

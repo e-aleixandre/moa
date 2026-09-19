@@ -216,6 +216,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/pulse/pairings", handlePulsePairing(devices))
 	mux.HandleFunc("POST /api/pulse/pairings/claim", handlePulsePairingClaim(devices))
 	mux.HandleFunc("POST /api/pulse/device-session", handlePulseDeviceSession(devices))
+	mux.HandleFunc("POST /api/pulse/device/revoke", handlePulseCurrentDeviceRevoke(devices))
 	mux.HandleFunc("GET /api/pulse/devices", handlePulseDevices(devices))
 	mux.HandleFunc("POST /api/pulse/devices/{id}/revoke", handlePulseDeviceRevoke(devices))
 	mux.HandleFunc("POST /api/pulse/realtime/client-secret", handleRealtimeClientSecret(devices, o.realtimeKey, o.realtimeHTTP))

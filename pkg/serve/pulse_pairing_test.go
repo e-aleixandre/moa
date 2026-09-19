@@ -404,9 +404,9 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 		t.Fatalf("device generic close = %d, want 200: %s", got.Code, got.Body.String())
 	}
 
-	revokeRec := pairingRequest(handler, http.MethodPost, "/api/pulse/devices/"+credential.DeviceID+"/revoke", `{}`, owner, "")
+	revokeRec := pairingRequest(handler, http.MethodPost, "/api/pulse/device/revoke", `{}`, nil, credential.Credential)
 	if revokeRec.Code != http.StatusNoContent {
-		t.Fatalf("revoke = %d: %s", revokeRec.Code, revokeRec.Body.String())
+		t.Fatalf("self revoke = %d: %s", revokeRec.Code, revokeRec.Body.String())
 	}
 	if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", nil, credential.Credential); got.Code != http.StatusUnauthorized {
 		t.Fatalf("revoked credential = %d", got.Code)
