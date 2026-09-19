@@ -14,6 +14,7 @@ const (
 	EventTargetInbox   = "inbox"
 	EventTargetProject = "project"
 	EventTargetSession = "session"
+	EventTargetOwner   = "owner"
 
 	EventWhenInbox  = "inbox"
 	EventWhenCreate = "create"
@@ -57,11 +58,12 @@ type EventCreateConfig struct {
 	Title    string `json:"title,omitempty"` // may contain "{title}"
 }
 
-// EventTarget is "inbox", {project: dir}, or {session: id}.
+// EventTarget is "inbox", {project: dir}, {session: id}, or {owner: id|name}.
 type EventTarget struct {
 	Kind    string `json:"-"` // inbox | project | session
 	Project string `json:"-"`
 	Session string `json:"-"`
+	Owner   string `json:"-"`
 }
 
 func (t EventTarget) MarshalJSON() ([]byte, error) {
@@ -74,6 +76,10 @@ func (t EventTarget) MarshalJSON() ([]byte, error) {
 		return json.Marshal(struct {
 			Session string `json:"session"`
 		}{Session: t.Session})
+	case EventTargetOwner:
+		return json.Marshal(struct {
+			Owner string `json:"owner"`
+		}{Owner: t.Owner})
 	default:
 		return []byte(`"inbox"`), nil
 	}
@@ -95,19 +101,21 @@ func (t *EventTarget) UnmarshalJSON(data []byte) error {
 			t.Kind = EventTargetInbox
 			return nil
 		}
-		return fmt.Errorf("unknown events target %q (want inbox, {project}, or {session})", s)
+		return fmt.Errorf("unknown events target %q (want inbox, {project}, {session}, or {owner})", s)
 	}
 	var obj struct {
 		Project string `json:"project"`
 		Session string `json:"session"`
+		Owner   string `json:"owner"`
 	}
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return fmt.Errorf("invalid events target: %w", err)
 	}
 	obj.Project = strings.TrimSpace(obj.Project)
 	obj.Session = strings.TrimSpace(obj.Session)
-	if obj.Project != "" && obj.Session != "" {
-		return fmt.Errorf("events target cannot set both project and session")
+	obj.Owner = strings.TrimSpace(obj.Owner)
+	if (obj.Project != "" && obj.Session != "") || (obj.Project != "" && obj.Owner != "") || (obj.Session != "" && obj.Owner != "") {
+		return fmt.Errorf("events target cannot set more than one of project, session and owner")
 	}
 	if obj.Session != "" {
 		t.Kind = EventTargetSession
@@ -117,6 +125,10 @@ func (t *EventTarget) UnmarshalJSON(data []byte) error {
 	if obj.Project != "" {
 		t.Kind = EventTargetProject
 		t.Project = obj.Project
+		return nil
+	}
+	if obj.Owner != "" {
+		t.Kind, t.Owner = EventTargetOwner, obj.Owner
 		return nil
 	}
 	t.Kind = EventTargetInbox
@@ -185,6 +197,10 @@ func (s EventSourceConfig) Validate(name string) error {
 	case EventTargetSession:
 		if strings.TrimSpace(s.Target.Session) == "" {
 			return fmt.Errorf("source %q: session id is empty", name)
+		}
+	case EventTargetOwner:
+		if strings.TrimSpace(s.Target.Owner) == "" {
+			return fmt.Errorf("source %q: owner id or name is empty", name)
 		}
 	default:
 		return fmt.Errorf("source %q: unknown target %q", name, s.Target.Kind)

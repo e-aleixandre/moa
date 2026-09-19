@@ -52,6 +52,8 @@ The owner is **never steered**: a batch is delivered only when the owner is
 idle with an empty queue, otherwise it waits for the owner's run to end. An
 owner unloaded from memory is resumed to receive it.
 
+Point a hook at the owner and it dispatches.
+
 ## Whose session is it
 
 | Origin | Who directs it | Questions |

@@ -15,6 +15,7 @@ func TestEventTargetJSON(t *testing.T) {
 		{`"inbox"`, EventTargetInbox, "", ""},
 		{`{"project":"/work/tienda"}`, EventTargetProject, "/work/tienda", ""},
 		{`{"session":"s1"}`, EventTargetSession, "", "s1"},
+		{`{"owner":"Gammaowner"}`, EventTargetOwner, "", ""},
 		{`{}`, EventTargetInbox, "", ""},
 		{`null`, EventTargetInbox, "", ""},
 	}
@@ -26,6 +27,10 @@ func TestEventTargetJSON(t *testing.T) {
 		if target.Kind != tt.kind || target.Project != tt.proj || target.Session != tt.sess {
 			t.Fatalf("%s → %+v", tt.raw, target)
 		}
+	}
+	var target EventTarget
+	if err := json.Unmarshal([]byte(`{"owner":"Gammaowner"}`), &target); err != nil || target.Owner != "Gammaowner" {
+		t.Fatalf("owner target = %+v, %v", target, err)
 	}
 }
 

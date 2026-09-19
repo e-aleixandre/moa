@@ -229,6 +229,7 @@ func (c *reportCoordinator) recover(batches map[string]*reportBatch) {
 		}
 		batch := &reportBatch{pending: pending}
 		batches[own.CodebaseKey] = batch
+		slog.Info("owner reports recovered", "codebase", own.CodebaseKey, "session", "", "owner", own.ID, "status", "recovered", "run_gen", 0, "batch", "", "n", len(pending))
 		// Arm the normal window rather than delivering now: a restart usually
 		// resumes several sessions at once, and one batched message is what the
 		// owner wants either way.
@@ -275,6 +276,7 @@ func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Repo
 		return true
 	}
 	batch.outboxFailed = false
+	slog.Info("owner report accepted in outbox", "codebase", key, "session", rep.SessionID, "owner", "", "status", rep.Status, "run_gen", 0, "batch", "", "n", len(batch.pending))
 	return true
 }
 
@@ -302,12 +304,19 @@ func (c *reportCoordinator) flush(key string, batch *reportBatch) {
 		return
 	}
 	reportDeliveryAttempts.Add(1)
+	slog.Info("owner reports delivery attempt", "codebase", key, "session", "", "owner", "", "status", "attempt", "run_gen", 0, "batch", "", "n", len(batch.pending))
 	err := c.deliver(key, batch.pending)
 	if err != nil {
+		status := "error"
+		if errors.Is(err, ErrBusy) {
+			status = "waiting"
+		}
+		slog.Info("owner reports delivery result", "codebase", key, "session", "", "owner", "", "status", status, "run_gen", 0, "batch", "", "n", len(batch.pending), "error", err)
 		slog.Debug("owner reports: batch waiting", "codebase", key, "error", err)
 		c.arm(key, batch)
 		return
 	}
+	slog.Info("owner reports delivery result", "codebase", key, "session", "", "owner", "", "status", "delivered", "run_gen", 0, "batch", "", "n", len(batch.pending))
 	batch.pending = nil
 	if err := c.store.SaveReports(key, nil); err != nil {
 		// The reports reached the owner and the transcript was flushed; a
@@ -446,11 +455,15 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 		return
 	}
 	if !found {
+		slog.Debug("owner reports: session has no resolved owner", "cwd", sess.CWD)
 		return
 	}
 	key := own.CodebaseKey
 	if ownerSession {
-		subscribeRunOutcomes(sess, func(runOutcome) { m.reports.nudge(key) })
+		subscribeRunOutcomes(sess, func(out runOutcome) {
+			slog.Info("owner reports nudge received", "codebase", key, "session", sess.ID, "owner", own.ID, "status", out.Status, "run_gen", out.RunGen, "batch", "", "n", 0)
+			m.reports.nudge(key)
+		})
 		return
 	}
 	subscribeRunOutcomes(sess, func(out runOutcome) {

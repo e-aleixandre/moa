@@ -160,6 +160,8 @@ pretty-printed JSON (or the raw text), capped at 256 KiB.
 |---|---|---|
 | `session:id` | live, not error, not waiting on a permission | deliver |
 | `session:id` | missing / error / permission | inbox + push |
+| `owner:id\|name` | idle | deliver to the owner's conversation |
+| `owner:id\|name` | busy / unavailable | inbox + push (`session_busy` / `owner_unavailable`) |
 | `project` | 1 | deliver |
 | `project` | 0 | `when_none`: inbox, or create with `create.*` then deliver |
 | `project` | >1 | `when_many`: inbox, or latest `Updated` |

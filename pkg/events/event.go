@@ -73,6 +73,7 @@ const (
 	PendingSessionUnavailable = "session_unavailable"
 	PendingSessionBusy        = "session_busy"
 	PendingRateLimited        = "rate_limited"
+	PendingOwnerUnavailable   = "owner_unavailable"
 )
 
 // NewID mints an event identifier, using the same crypto/rand mechanism as

@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/e-aleixandre/moa/pkg/book"
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/events"
 	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/session"
@@ -51,6 +53,49 @@ func TestCreateOwnerFlagsItsSessionAndHidesItFromTheList(t *testing.T) {
 	withOwners := mgr.ListWith(ListOptions{IncludeOwners: true})
 	if len(withOwners) != 1 || withOwners[0].Kind != session.KindOwner {
 		t.Fatalf("ListWith(IncludeOwners) = %+v", withOwners)
+	}
+}
+
+func TestEventOwnerTargetResolvesIDNameAndAmbiguity(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	first, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Gammaowner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := mgr.resolveEventOwner(first.ID); !ok || got.ID != first.ID {
+		t.Fatalf("id resolved %+v, %v", got, ok)
+	}
+	if got, ok := mgr.resolveEventOwner("gammaOWNER"); !ok || got.ID != first.ID {
+		t.Fatalf("name resolved %+v, %v", got, ok)
+	}
+	if _, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "GAMMAOWNER"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := mgr.resolveEventOwner("gammaowner"); ok {
+		t.Fatal("ambiguous owner name resolved")
+	}
+}
+
+func TestOwnerHookIdleRecordsWithoutAutorun(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Gammaowner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, _, err := mgr.IngestHook("ci", core.EventSourceConfig{Target: core.EventTarget{Kind: core.EventTargetOwner, Owner: info.ID}}, []byte(`{"title":"build"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.State != events.StateRouted || ev.RoutedTo != info.SessionID {
+		t.Fatalf("event = %+v", ev)
+	}
+	sess, _ := mgr.Get(info.SessionID)
+	msgs := sess.History()
+	if len(msgs) == 0 || msgs[len(msgs)-1].Custom["source"] != "event" {
+		t.Fatalf("event was not appended: %+v", msgs)
+	}
+	if sess.runtime.State.Current() != bus.StateIdle {
+		t.Fatalf("autorun false started owner: %s", sess.runtime.State.Current())
 	}
 }
 

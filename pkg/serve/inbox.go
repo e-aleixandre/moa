@@ -21,6 +21,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/events"
+	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/permission"
 	"github.com/e-aleixandre/moa/pkg/push"
 	"github.com/e-aleixandre/moa/pkg/session"
@@ -121,9 +122,10 @@ func handleListEvents(mgr *Manager) http.HandlerFunc {
 }
 
 // eventRouteRequest is POST /api/events/{id}/route. The frontend sends
-// {session_id} or {new:true, model?, thinking?}.
+// {session_id}, {owner_id}, or {new:true, model?, thinking?}.
 type eventRouteRequest struct {
 	SessionID string `json:"session_id"`
+	OwnerID   string `json:"owner_id"`
 	New       bool   `json:"new"`
 	Model     string `json:"model"`
 	Thinking  string `json:"thinking"`
@@ -137,11 +139,17 @@ func handleRouteEvent(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if req.SessionID == "" && !req.New {
-			http.Error(w, "session_id or new required", http.StatusBadRequest)
+		if req.SessionID == "" && req.OwnerID == "" && !req.New {
+			http.Error(w, "session_id, owner_id or new required", http.StatusBadRequest)
 			return
 		}
-		ev, err := mgr.RouteEvent(r.PathValue("id"), req.SessionID, req.New, req.Model, req.Thinking)
+		var ev events.Event
+		var err error
+		if req.OwnerID != "" {
+			ev, err = mgr.RouteEventToOwner(r.PathValue("id"), req.OwnerID)
+		} else {
+			ev, err = mgr.RouteEvent(r.PathValue("id"), req.SessionID, req.New, req.Model, req.Thinking)
+		}
 		if err != nil {
 			writeEventError(w, err)
 			return
@@ -283,11 +291,23 @@ func (m *Manager) eventProject(src core.EventSourceConfig) string {
 		if sess, ok := m.Get(src.Target.Session); ok {
 			return sess.CWD
 		}
+	case core.EventTargetOwner:
+		if own, ok := m.resolveEventOwner(src.Target.Owner); ok {
+			return own.Root
+		}
 	}
 	return ""
 }
 
 func (m *Manager) autoRouteEvent(ev events.Event, src core.EventSourceConfig) (events.Event, error) {
+	if src.TargetKind() == core.EventTargetOwner {
+		own, ok := m.resolveEventOwner(src.Target.Owner)
+		if !ok {
+			slog.Warn("wake-on-event: target owner unavailable", "event", ev.ID, "owner", src.Target.Owner)
+			return m.notePending(ev.ID, events.PendingOwnerUnavailable), nil
+		}
+		return m.routeEventToOwner(ev, own.SessionID, ev.Autorun)
+	}
 	decision := decideEventRoute(src, m.List())
 	if decision.Inbox {
 		return m.notePending(ev.ID, decision.Reason), nil
@@ -347,6 +367,9 @@ func decideEventRoute(src core.EventSourceConfig, sessions []SessionInfo) eventR
 			}
 			return eventRouteDecision{Inbox: true, Reason: events.PendingManySessions}
 		}
+	case core.EventTargetOwner:
+		// Resolution needs the owner store, not this pure routing table.
+		return eventRouteDecision{Inbox: true, Reason: events.PendingOwnerUnavailable}
 	default:
 		return eventRouteDecision{Inbox: true, Reason: events.PendingInbox}
 	}
@@ -450,6 +473,52 @@ func (m *Manager) RouteEvent(id, sessionID string, createNew bool, model, thinki
 	return m.routeEventTo(ev, sessionID, true)
 }
 
+// RouteEventToOwner is the explicit human route to an owner's conversation.
+// Unlike a source target, a hand route always starts a turn.
+func (m *Manager) RouteEventToOwner(id, ownerID string) (events.Event, error) {
+	if m.events == nil {
+		return events.Event{}, ErrEventsUnavailable
+	}
+	ev, ok := m.events.Get(id)
+	if !ok {
+		return events.Event{}, events.ErrNotFound
+	}
+	if ev.State != events.StateNew {
+		return events.Event{}, events.ErrSettled
+	}
+	own, ok := m.resolveEventOwner(ownerID)
+	if !ok {
+		return events.Event{}, owner.ErrNotFound
+	}
+	return m.routeEventToOwner(ev, own.SessionID, true)
+}
+
+// resolveEventOwner accepts an exact owner ID or a unique case-insensitive
+// name. A name collision is intentionally unavailable: hooks must not guess.
+func (m *Manager) resolveEventOwner(ref string) (owner.Owner, bool) {
+	store, err := m.ownerStore()
+	if err != nil {
+		return owner.Owner{}, false
+	}
+	if own, found, err := store.FindByID(ref); err == nil && found {
+		return own, own.SessionID != ""
+	}
+	owners, err := store.List()
+	if err != nil {
+		return owner.Owner{}, false
+	}
+	var found owner.Owner
+	for _, own := range owners {
+		if strings.EqualFold(strings.TrimSpace(own.Name), strings.TrimSpace(ref)) {
+			if found.ID != "" {
+				return owner.Owner{}, false
+			}
+			found = own
+		}
+	}
+	return found, found.ID != "" && found.SessionID != ""
+}
+
 func (m *Manager) createEventSession(ev events.Event, model, thinking string) (*ManagedSession, error) {
 	if model == "" {
 		model = ev.CreateModel
@@ -500,6 +569,27 @@ func (m *Manager) routeEventTo(ev events.Event, sessionID string, run bool) (eve
 		return claimed, err
 	}
 	return m.deliverAndSettle(claimed, sessionID, run)
+}
+
+func (m *Manager) routeEventToOwner(ev events.Event, sessionID string, run bool) (events.Event, error) {
+	claimed, err := m.events.MarkRouting(ev.ID)
+	if err != nil {
+		return claimed, err
+	}
+	if _, live := m.Get(sessionID); !live {
+		if _, err := m.ResumeSession(sessionID); err != nil {
+			m.releaseRouting(ev.ID)
+			return events.Event{}, err
+		}
+	}
+	if err := m.deliverOwnerEvent(sessionID, claimed, run); err != nil {
+		m.releaseRouting(ev.ID)
+		if errors.Is(err, errEventSessionBusy) {
+			return m.notePending(ev.ID, events.PendingSessionBusy), nil
+		}
+		return events.Event{}, err
+	}
+	return m.events.MarkRouted(ev.ID, sessionID)
 }
 
 // run tells delivery whether to start a turn. It is the source's autorun for an
@@ -593,6 +683,40 @@ func (m *Manager) deliverEvent(sessionID string, ev events.Event, autorun bool) 
 		return nil
 	}
 	err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text, Custom: custom})
+	if err == nil {
+		sess.sendGeneration.Add(1)
+	}
+	return err
+}
+
+// deliverOwnerEvent preserves the owner invariant: automation never steers an
+// owner. An idle autorun uses IdleOnly, while an idle non-autorun appends the
+// event block without starting a turn.
+func (m *Manager) deliverOwnerEvent(sessionID string, ev events.Event, autorun bool) error {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return ErrNotFound
+	}
+	sess.lifecycle.RLock()
+	defer sess.lifecycle.RUnlock()
+	if sess.closing.Load() {
+		return ErrNotFound
+	}
+	state := sess.runtime.State.Current()
+	if state == bus.StateRunning || state == bus.StatePermission || sess.runtime.Context().Agent.IsRunning() {
+		return errEventSessionBusy
+	}
+	ql, _ := bus.QueryTyped[bus.GetQueueLen, int](sess.runtime.Bus, bus.GetQueueLen{})
+	if ql > 0 {
+		return errEventSessionBusy
+	}
+	if !autorun {
+		return m.deliverEvent(sessionID, ev, false)
+	}
+	err := sess.runtime.Bus.Execute(bus.SendPrompt{SessionID: sess.ID, Text: m.eventMessage(ev), Custom: eventCustom(ev, true, false), IdleOnly: true})
+	if errors.Is(err, bus.ErrNotIdle) {
+		return errEventSessionBusy
+	}
 	if err == nil {
 		sess.sendGeneration.Add(1)
 	}

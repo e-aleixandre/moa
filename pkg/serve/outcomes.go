@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"log/slog"
 	"sync/atomic"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -57,6 +58,7 @@ func subscribeRunOutcomes(sess *ManagedSession, sink func(runOutcome)) {
 			return
 		}
 		needsInputSent = true
+		slog.Info("run outcome emitted", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusNeedsInput, "run_gen", runGen, "batch", "", "n", 1)
 		go sink(runOutcome{Status: callbackStatusNeedsInput, RunGen: runGen, Pending: pending})
 	}
 
@@ -71,6 +73,7 @@ func subscribeRunOutcomes(sess *ManagedSession, sink func(runOutcome)) {
 		case bus.RunEnded:
 			lastRunGen.Store(e.RunGen)
 			if e.Err != nil {
+				slog.Info("run outcome emitted", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusFailed, "run_gen", e.RunGen, "batch", "", "n", 1)
 				go sink(runOutcome{
 					Status:    callbackStatusFailed,
 					RunGen:    e.RunGen,
@@ -83,11 +86,14 @@ func subscribeRunOutcomes(sess *ManagedSession, sink func(runOutcome)) {
 				// WaitQuiescent drains the bus, so it must not run on a
 				// subscriber goroutine (it would wait on itself).
 				if !sess.runtime.WaitQuiescent(sess.infra.sessionCtx) {
+					slog.Info("run outcome discarded", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusDone, "run_gen", e.RunGen, "batch", "", "n", 0, "reason", "session going away")
 					return // session is going away; nothing useful to report
 				}
 				if lastRunGen.Load() != e.RunGen {
+					slog.Info("run outcome discarded", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusDone, "run_gen", e.RunGen, "batch", "", "n", 0, "reason", "superseded")
 					return // superseded by a newer run, which reports for itself
 				}
+				slog.Info("run outcome emitted", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusDone, "run_gen", e.RunGen, "batch", "", "n", 1)
 				sink(runOutcome{Status: callbackStatusDone, RunGen: e.RunGen, FinalText: e.FinalText})
 			}()
 		}

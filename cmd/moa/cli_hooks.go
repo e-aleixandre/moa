@@ -41,6 +41,7 @@ func hooksAdd(args []string) error {
 	fs.SetOutput(os.Stderr)
 	project := fs.String("project", "", "Project directory (target {project: DIR})")
 	sessionID := fs.String("session", "", "Deliver to this session id (target {session: ID})")
+	ownerID := fs.String("owner", "", "Deliver to this owner id or name (target {owner: ID_OR_NAME})")
 	inbox := fs.Bool("inbox", false, "Leave events in the inbox")
 	whenNone := fs.String("when-none", "inbox", "When the project has no live session: inbox or create")
 	whenMany := fs.String("when-many", "inbox", "When the project has several live sessions: inbox or latest")
@@ -71,14 +72,17 @@ func hooksAdd(args []string) error {
 	if *sessionID != "" {
 		n++
 	}
+	if *ownerID != "" {
+		n++
+	}
 	if *inbox {
 		n++
 	}
 	if n == 0 {
-		return fmt.Errorf("one of --project, --session or --inbox is required")
+		return fmt.Errorf("one of --project, --session, --owner or --inbox is required")
 	}
 	if n > 1 {
-		return fmt.Errorf("--project, --session and --inbox are mutually exclusive")
+		return fmt.Errorf("--project, --session, --owner and --inbox are mutually exclusive")
 	}
 
 	src := core.EventSourceConfig{
@@ -99,6 +103,8 @@ func hooksAdd(args []string) error {
 		src.Target = core.EventTarget{Kind: core.EventTargetInbox}
 	case *sessionID != "":
 		src.Target = core.EventTarget{Kind: core.EventTargetSession, Session: *sessionID}
+	case *ownerID != "":
+		src.Target = core.EventTarget{Kind: core.EventTargetOwner, Owner: *ownerID}
 	default:
 		abs, err := filepath.Abs(*project)
 		if err != nil {
@@ -210,6 +216,8 @@ func describeHookTarget(src core.EventSourceConfig) string {
 		return "project:" + src.Target.Project
 	case core.EventTargetSession:
 		return "session:" + src.Target.Session
+	case core.EventTargetOwner:
+		return "owner:" + src.Target.Owner
 	default:
 		return "inbox"
 	}
