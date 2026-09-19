@@ -255,6 +255,16 @@ func (s *FileStore) loadReadOnlyLocked(id string) (*Session, error) {
 }
 
 func (s *FileStore) loadLocked(id string) (*Session, error) {
+	return s.loadValidatedLocked(id, nil)
+}
+
+func (s *FileStore) loadValidated(id string, validate func(*Session) error) (*Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadValidatedLocked(id, validate)
+}
+
+func (s *FileStore) loadValidatedLocked(id string, validate func(*Session) error) (*Session, error) {
 	if err := ValidateID(id); err != nil {
 		return nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
 	}
@@ -272,6 +282,11 @@ func (s *FileStore) loadLocked(id string) (*Session, error) {
 	}
 	if sess.ID != id {
 		return nil, fmt.Errorf("session: ID does not match filename")
+	}
+	if validate != nil {
+		if err := validate(&sess); err != nil {
+			return nil, err
+		}
 	}
 
 	// Auto-migrate v1 → v2
@@ -678,36 +693,30 @@ func ScanCWDs(baseDir string) (CWDScan, error) {
 // FindSession searches all project stores under baseDir for a session by ID.
 // Returns the session, the store it was found in, and any error.
 func FindSession(baseDir, id string) (*Session, *FileStore, error) {
-	if err := ValidateID(id); err != nil {
-		return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
-	}
-	if baseDir == "" {
-		var err error
-		baseDir, err = defaultBaseDir()
-		if err != nil {
-			return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
-		}
-	}
-	entries, err := os.ReadDir(baseDir)
-	if err != nil {
-		return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		store := &FileStore{dir: filepath.Join(baseDir, e.Name())}
-		sess, err := store.Load(id)
-		if err == nil {
-			return sess, store, nil
-		}
-	}
-	return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+	return findSession(baseDir, id, func(store *FileStore, id string) (*Session, error) {
+		return store.Load(id)
+	})
+}
+
+// FindSessionValidated searches all project stores and validates each decoded
+// candidate before Load may migrate or write it. A rejected duplicate does not
+// prevent a later authorized candidate from being selected. validate must not
+// mutate the session.
+func FindSessionValidated(baseDir, id string, validate func(*Session) error) (*Session, *FileStore, error) {
+	return findSession(baseDir, id, func(store *FileStore, id string) (*Session, error) {
+		return store.loadValidated(id, validate)
+	})
 }
 
 // FindSessionReadOnly searches all project stores without migrating or writing
 // the matching session. It is the read-only counterpart to FindSession.
 func FindSessionReadOnly(baseDir, id string) (*Session, *FileStore, error) {
+	return findSession(baseDir, id, func(store *FileStore, id string) (*Session, error) {
+		return store.LoadReadOnly(id)
+	})
+}
+
+func findSession(baseDir, id string, load func(*FileStore, string) (*Session, error)) (*Session, *FileStore, error) {
 	if err := ValidateID(id); err != nil {
 		return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
 	}
@@ -715,22 +724,32 @@ func FindSessionReadOnly(baseDir, id string) (*Session, *FileStore, error) {
 		var err error
 		baseDir, err = defaultBaseDir()
 		if err != nil {
-			return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+			return nil, nil, fmt.Errorf("session %s: resolve store: %w", id, err)
 		}
 	}
 	entries, err := os.ReadDir(baseDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+		if os.IsNotExist(err) {
+			return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
+		}
+		return nil, nil, fmt.Errorf("session %s: list stores: %w", id, err)
 	}
+	var loadErrs []error
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		store := &FileStore{dir: filepath.Join(baseDir, e.Name())}
-		sess, err := store.LoadReadOnly(id)
+		sess, err := load(store, id)
 		if err == nil {
 			return sess, store, nil
 		}
+		if !errors.Is(err, ErrNotFound) {
+			loadErrs = append(loadErrs, fmt.Errorf("load from %s: %w", store.Dir(), err))
+		}
+	}
+	if err := errors.Join(loadErrs...); err != nil {
+		return nil, nil, fmt.Errorf("session %s: %w", id, err)
 	}
 	return nil, nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
 }

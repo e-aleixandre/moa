@@ -786,6 +786,36 @@ func TestFindSession_NotFound(t *testing.T) {
 	}
 }
 
+func TestFindSession_PreservesCandidateLoadError(t *testing.T) {
+	base := t.TempDir()
+	store, err := NewFileStore(base, "/project/corrupt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "0123456789abcdef01234567"
+	if err := os.WriteFile(filepath.Join(store.Dir(), id+".json"), []byte("{corrupt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, find := range map[string]func(string, string) (*Session, *FileStore, error){
+		"normal":    FindSession,
+		"read-only": FindSessionReadOnly,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := find(base, id)
+			if err == nil {
+				t.Fatal("corrupt session reported no error")
+			}
+			if errors.Is(err, ErrNotFound) {
+				t.Fatalf("corrupt session reported not found: %v", err)
+			}
+			if !strings.Contains(err.Error(), "unmarshal") {
+				t.Fatalf("error does not preserve the load failure: %v", err)
+			}
+		})
+	}
+}
+
 func TestDeleteByID(t *testing.T) {
 	base := t.TempDir()
 

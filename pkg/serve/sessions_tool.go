@@ -169,12 +169,22 @@ func (m *Manager) ownerSession(own owner.Owner, id string) (SessionInfo, error) 
 		if info.ID != id {
 			continue
 		}
-		if info.Kind == session.KindOwner || !inCodebase(own, info.CWD) {
-			return SessionInfo{}, fmt.Errorf("session %s does not belong to this project", id)
+		if err := ownerTargetError(own, info.ID, info.Kind, info.CWD); err != nil {
+			return SessionInfo{}, err
 		}
 		return info, nil
 	}
 	return SessionInfo{}, fmt.Errorf("session %s not found", id)
+}
+
+func ownerTargetError(own owner.Owner, id, kind, cwd string) error {
+	if id == own.SessionID {
+		return errors.New("that is your own conversation")
+	}
+	if kind == session.KindOwner || !inCodebase(own, cwd) {
+		return fmt.Errorf("session %s does not belong to this project", id)
+	}
+	return nil
 }
 
 // ownerListSessions is the roster the owner's balance is built on, so it
@@ -293,7 +303,25 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 	if _, err := m.ownerSession(own, id); err != nil {
 		return core.ErrorResult(err.Error())
 	}
-	action, msgID, _, err := m.send(id, text, nil, "", "", ownerPromptCustom(own))
+	if _, ok := m.Get(id); !ok {
+		if _, err := m.resumeSessionValidated(id, 0, func(saved *session.Session) error {
+			_, cwd, _, _ := saved.RuntimeMeta()
+			if cwd == "" {
+				cwd = m.workspaceRoot
+			}
+			return ownerTargetError(own, saved.ID, saved.Kind(), cwd)
+		}); err != nil {
+			// A concurrent resume may have completed between Get and
+			// resumeSessionValidated. In that case the target is ready despite
+			// ErrBusy and sendValidated rechecks that exact runtime below.
+			if _, loaded := m.Get(id); !errors.Is(err, ErrBusy) || !loaded {
+				return core.ErrorResult(fmt.Sprintf("cannot reopen session %s: %v", id, err))
+			}
+		}
+	}
+	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", ownerPromptCustom(own), func(sess *ManagedSession) error {
+		return ownerTargetError(own, sess.ID, sess.Kind, sess.CWD)
+	})
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot send to %s: %v", id, err))
 	}
