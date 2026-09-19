@@ -195,6 +195,11 @@ function normalizeSessionInfo(info, existing, visible) {
     runStartedAtMs: existing ? existing.runStartedAtMs : null,
     runTokensUp: existing ? existing.runTokensUp : undefined,
     runTokensDown: existing ? existing.runTokensDown : undefined,
+    // The cache summary is WS-only: init and cache_usage replace it with the
+    // server's whole-history aggregate. A roster poll has no equivalent field,
+    // so retain the last authoritative value instead of reverting the panel to
+    // "no reading yet" whenever any polled field changes.
+    cacheUsage: existing ? existing.cacheUsage : undefined,
     // Client-only counter of WS writes to the live per-run fields (see
     // nextRunEpoch in ws-handlers): a poll must not rewind it or an
     // in-flight send would misread "nothing happened meanwhile".
