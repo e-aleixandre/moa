@@ -26,3 +26,4 @@ test("anything else still says the owner was not created", () => {
   expect(fail.title).toBe("The owner was not created.");
   expect(fail.detail).toBe("network down");
 });
+

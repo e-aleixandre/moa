@@ -19,7 +19,6 @@ import { MobileChrome } from "../MobileChrome/MobileChrome.jsx";
 import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SessionPanel } from "../../../components/index.js";
-import { OwnerDossier } from "../../../components/Owners/OwnerDossier.jsx";
 import { NewOwnerDialog } from "../../../components/Owners/NewOwnerDialog.jsx";
 import { OwnerChipEntry } from "../../../components/Owners/OwnerChipEntry.jsx";
 import { sessionPanelView, closeSessionPanel, toggleSessionPanel } from "../../../data/session-panel.js";
@@ -346,19 +345,13 @@ function MobileConversationBody({ forceMobile = false }) {
           title={isOwnerSession ? "This owner" : "This session"}
           bare
         >
-          {/* An owner's conversation gets the OWNER's dossier — its children
-              and its book — in the same sheet a session's dossier uses. */}
-          {isOwnerSession ? (
-            <OwnerDossier session={session} open={panel.open} variant="sheet" onClose={closeSessionPanel} />
-          ) : (
-            <SessionPanel
-              session={session}
-              usage={usage}
-              open={panel.open}
-              page={panel.page}
-              variant="sheet"
-            />
-          )}
+          <SessionPanel
+            session={session}
+            usage={usage}
+            open={panel.open}
+            page={panel.page}
+            variant="sheet"
+          />
         </MobileSheet>
       )}
       {session && (

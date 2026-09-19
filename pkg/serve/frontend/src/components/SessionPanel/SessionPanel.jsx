@@ -12,6 +12,7 @@ import { closeSession, deleteSession, resumeSession } from "../../data/session-a
 import { sessionTitle, shortPath } from "../../data/util/format.js";
 import { renameSession } from "../../data/session-actions.js";
 import { addToast } from "../../data/notifications.js";
+import { OwnerPanelAvatar, OwnerPanelPage } from "../Owners/Owners.jsx";
 import "./SessionPanel.css";
 
 // SessionPanel — the session's DOSSIER, in a right-hand drawer.
@@ -34,6 +35,8 @@ import "./SessionPanel.css";
 // absent. Its second level is a PUSH, not a modal.
 
 const PANEL_ICONS = {
+  overview: <path d="M3 3.5h10v9H3z M5.5 6.5h5M5.5 9h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />,
+  book: <path d="M3 3.5h4.5c1 0 1.5.5 1.5 1.5v7c0-1-.5-1.5-1.5-1.5H3zM13 3.5H8.5C7.5 3.5 7 4 7 5v7c0-1 .5-1.5 1.5-1.5H13z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />,
   usage: <><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 8V4.5M8 8l2.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></>,
   mcp: <path d="M5 2v3M11 2v3M3.5 5h9v3a4.5 4.5 0 0 1-9 0zM8 12.5V15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />,
   artifacts: <path d="M3.5 2.5h6l3 3v8h-9z M9.5 2.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
@@ -54,13 +57,13 @@ function GoIcon() {
   );
 }
 
-function PanelRow({ id, title, verdict, warn, tone, onOpen }) {
+function PanelRow({ id, title, verdict = "", warn, tone, onOpen }) {
   const verdictTone = warn ? (tone === "warn" ? " is-warn-soft" : " is-warn") : "";
   return (
-    <button type="button" class="zl-prow" onClick={() => onOpen(id)} aria-label={`${title}: ${verdict}`}>
+    <button type="button" class="zl-prow" onClick={() => onOpen(id)} aria-label={verdict ? `${title}: ${verdict}` : title}>
       <svg class="zl-prow-ico" viewBox="0 0 16 16" aria-hidden="true">{PANEL_ICONS[id]}</svg>
       <span class="zl-prow-t">{title}</span>
-      <span class={`zl-prow-v zl-data${verdictTone}`}>{verdict}</span>
+      {verdict && <span class={`zl-prow-v zl-data${verdictTone}`}>{verdict}</span>}
       <GoIcon />
     </button>
   );
@@ -172,6 +175,7 @@ export function SessionPanel({
 
   if (!session) return null;
 
+  const isOwner = session.kind === "owner";
   const facts = factList || runFacts(session);
   const mcp = mcpVerdict(session);
   const usageRow = usageVerdict(session, usage);
@@ -182,7 +186,7 @@ export function SessionPanel({
       ref={panelRef}
       class={`zl-side zl-side-right${open ? " is-open" : ""}${sheet ? " is-sheet" : ""}`}
       role="dialog"
-      aria-label="This session"
+      aria-label={isOwner ? "This owner" : "This session"}
       aria-hidden={!open}
       /* Closed it is slid off-screen, not gone: its Close, its name field,
          Usage and Delete stay in the DOM, and aria-hidden removes them from
@@ -203,7 +207,10 @@ export function SessionPanel({
             <span class="zl-side-title is-page" key={page}>{PANEL_PAGES[page]}</span>
           </>
         ) : (
-          <span class="zl-side-title is-eyebrow">This session</span>
+          <>
+            {isOwner && <OwnerPanelAvatar session={session} />}
+            <span class="zl-side-title is-eyebrow">{isOwner ? "This owner" : "This session"}</span>
+          </>
         )}
         <button type="button" class="zl-x" onClick={close} aria-label="Close">
           <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -225,11 +232,12 @@ export function SessionPanel({
           {page === "mcp" && (
             <McpPage sessionId={session.id} mcpTick={session.mcpTick} servers={mcpServers} inline={inline} />
           )}
+          {(page === "overview" || page === "book") && <OwnerPanelPage session={session} page={page} />}
         </div>
       ) : (
         <>
           <div class="zl-panel-body">
-            <SessionIdentity session={session} inline={inline} />
+            {!isOwner && <SessionIdentity session={session} inline={inline} />}
             {facts.length > 0 && (
               <dl class="zl-facts is-run">
                 {facts.map((fact) => (
@@ -241,6 +249,8 @@ export function SessionPanel({
               </dl>
             )}
             <div class="zl-prows">
+              {isOwner && <PanelRow id="overview" title="Overview" onOpen={goPage} />}
+              {isOwner && <PanelRow id="book" title="Book" onOpen={goPage} />}
               <PanelRow
                 id="usage"
                 title="Usage"
@@ -255,7 +265,7 @@ export function SessionPanel({
               <ArtifactsRow sessionId={session.id} items={artifacts} />
             </div>
           </div>
-          <LifecycleActions session={session} inline={inline} />
+          {!isOwner && <LifecycleActions session={session} inline={inline} />}
         </>
       )}
     </aside>

@@ -11,8 +11,11 @@ import { ensureModelCatalog, modelCatalog } from "../../data/model-catalog.js";
 import { useStore } from "../../hooks/useStore.js";
 import { modelCodename } from "../../data/util/format.js";
 import { api } from "../../data/api.js";
-import { bookTree, childrenSummary, groupChildren, ownerState } from "../../data/owners-model.js";
+import { bookTree, childrenSummary, groupChildren, ownerRows, ownerState } from "../../data/owners-model.js";
 import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatar, OwnerAvatarFor, defaultAvatar } from "./OwnerAvatar.jsx";
+import { loadOwnerBook, openBookFile, ownersSlice, saveBookFile } from "../../data/owners.js";
+import { openSession } from "../../data/tile-actions.js";
+import { addToast } from "../../data/notifications.js";
 import "./OwnerAvatar.css";
 // The identity picker's sheet lives beside the owner row it is choosing a face
 // for, so the swatch grid and the row cannot drift apart.
@@ -640,108 +643,56 @@ function BookFile({ file, onSave }) {
   );
 }
 
-const PANEL_TABS = [
-  { id: "overview", label: "Overview" },
-  { id: "book", label: "Book" },
-];
+export function OwnerPanelPage({ session, page }) {
+  const slice = useStore(ownersSlice);
+  const sessions = useStore((s) => s.sessions);
+  const owner = ownerRows(slice.list, sessions).find((row) => row.session_id === session?.id) || null;
+  const ownerId = owner?.id || null;
 
-// OwnerPanel — RECOMMENDED placement: the owner's dossier is the same third
-// zone the session dossier already occupies (DesktopDossier on the desktop, a
-// MobileSheet on the phone), with two tabs instead of the session's facts.
-//
-// Why tabs and not two pages of the session dossier: "what this thing is and
-// what it has done" for an owner IS its children and its book — there is no
-// third thing to list, so a root page of two rows that each push would be a
-// menu with two items. Tabs keep both one tap away while the transcript is
-// what you are actually reading.
-export function OwnerPanel({
-  owner,
-  book = [],
-  bookStatus = "ready",
-  bookError = null,
-  fileStatus = "ready",
-  tab = "overview",
-  onTab,
-  openPath = null,
-  onOpenFile,
-  onSave,
-  onOpenChild,
-  onClose,
-  open = true,
-  variant = "",
-}) {
-  const sheet = variant === "sheet";
-  const file = openPath ? book.find((f) => f.path === openPath) : null;
+  useEffect(() => {
+    if (page !== "book" || !ownerId) return;
+    if (slice.bookOwnerId === ownerId && slice.bookStatus !== "idle") return;
+    loadOwnerBook(ownerId);
+  }, [page, ownerId]);
+
+  if (!owner) return null;
+
+  if (page === "overview") {
+    return <OwnerOverview owner={owner} onOpenChild={(child) => openSession(child.id)} />;
+  }
+
+  const mine = slice.bookOwnerId === ownerId;
+  const files = mine ? slice.bookFiles : [];
+  const openPath = mine ? slice.openPath : null;
+  const book = files.map((file) => ({
+    path: file.path,
+    label: file.path.split("/").pop(),
+    bytes: file.bytes,
+    body: file.path === openPath ? slice.openBody : "",
+    editable: file.path === openPath ? slice.openEditable : false,
+  }));
   return (
-    <aside
-      /* The chassis is the session dossier's own (`zl-side-right`): same
-         width, same slide, same host geometry in DesktopShell's third zone.
-         An owner's dossier IS that zone with different contents, so it must
-         not be a second drawer with its own arithmetic. */
-      class={`zl-side-right ow-panel${sheet ? " is-sheet" : ""}${open ? " is-open" : ""}`}
-      aria-label={`${owner.name}, the owner of this project`}
-      aria-hidden={!open}
-      /* Closed it is slid off-screen, not gone — the same rule the session
-         dossier keeps: inert removes it from the tab order without touching
-         what it paints. */
-      inert={!open}
-    >
-      <div class="ow-panel-head">
-        {file ? (
-          <>
-            <button type="button" class="ow-back" onClick={() => onOpenFile?.(null)} aria-label="Back to the book">
-              <BackIcon />
-            </button>
-            <span class="ow-panel-title">{file.label}</span>
-          </>
-        ) : (
-          <>
-            {/* The owner's own face in the head of its dossier: the same mark
-                the row and the chip carry, so the panel is visibly about the
-                thing you pressed rather than a generic "this owner" pane. */}
-            <OwnerAvatarFor owner={owner} state={ownerState(owner)} size={24} />
-            <span class="ow-panel-eyebrow">{owner.name}</span>
-          </>
-        )}
-        {onClose && (
-          <button type="button" class="ow-x" onClick={onClose} aria-label="Close">
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
-          </button>
-        )}
-      </div>
-      {!file && (
-        <div class="ow-tabs" role="tablist" aria-label="Owner">
-          {PANEL_TABS.map((t) => (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={t.id === tab}
-              class={`ow-tab${t.id === tab ? " is-on" : ""}`}
-              key={t.id}
-              onClick={() => onTab?.(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      )}
-      <div class="ow-panel-body" key={`${tab}-${openPath || ""}`}>
-        {tab === "overview"
-          ? <OwnerOverview owner={owner} onOpenChild={onOpenChild} />
-          : (
-            <OwnerBook
-              book={book}
-              openPath={openPath}
-              onOpenFile={onOpenFile}
-              onSave={onSave}
-              status={bookStatus}
-              error={bookError}
-              fileStatus={fileStatus}
-            />
-          )}
-      </div>
-    </aside>
+    <OwnerBook
+      book={book}
+      openPath={openPath}
+      onOpenFile={(path) => openBookFile(ownerId, path)}
+      onSave={(path, content) => {
+        saveBookFile(ownerId, path).catch((error) => {
+          addToast({ title: "Could not save the index", detail: String(error.message || error), type: "error" });
+        });
+      }}
+      status={mine ? slice.bookStatus : "idle"}
+      error={mine ? slice.bookError : null}
+      fileStatus={mine ? slice.openStatus : "idle"}
+    />
   );
+}
+
+export function OwnerPanelAvatar({ session }) {
+  const slice = useStore(ownersSlice);
+  const sessions = useStore((s) => s.sessions);
+  const owner = ownerRows(slice.list, sessions).find((row) => row.session_id === session?.id) || null;
+  return owner ? <OwnerAvatarFor owner={owner} state={ownerState(owner)} size={24} /> : null;
 }
 
 /* ── The chip in a child ─────────────────────────────────────────────── */

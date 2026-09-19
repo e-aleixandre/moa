@@ -15,8 +15,11 @@
 const now = Date.now();
 const min = (n) => now - n * 60000;
 
+// owner_id is what the server stamps on every session of a codebase that has
+// an owner; the fixtures do the same so By project can find the owner's group.
+const OWNER_OF_ROOT = {};
 const sess = (id, title, state, brief, briefTone, when, cwd, over = {}) => ({
-  id, title, state, brief, briefTone, when, cwd, updated: over.updated ?? now, ...over,
+  id, title, state, brief, briefTone, when, cwd, updated: over.updated ?? now, owner_id: OWNER_OF_ROOT[cwd], ...over,
 });
 
 const WINERIM_ROOT = "/home/ealeixandre/dev/winerim-backend/main";
@@ -77,6 +80,9 @@ export const MOA_OWNER = {
 };
 
 export const OWNERS = [WINERIM, WINERIM_WEB, MOA_OWNER];
+OWNER_OF_ROOT[WINERIM_ROOT] = WINERIM.id;
+OWNER_OF_ROOT[WINERIM_WEB_ROOT] = WINERIM_WEB.id;
+OWNER_OF_ROOT[MOA_ROOT] = MOA_OWNER.id;
 
 /* The owner states, as the preset switcher offers them. Each is the SAME
    owner wearing a different state, so what is being compared is the state and
@@ -157,6 +163,7 @@ export const CHILD_SESSION = {
   provider: "openai",
   thinking: "low",
   cwd: WINERIM_ROOT,
+  owner_id: "own_9f2c1a7b",
   updated: min(4),
   permissionMode: "ask",
   contextPercent: 47,

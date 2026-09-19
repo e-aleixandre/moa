@@ -19,7 +19,12 @@ import { fmtTokens } from './util/format.js';
 // Artifacts is deliberately absent: its row opens the drawer, which is the
 // one list of files in the product. It was a page here once, with its own
 // shape and its own reader, and two lists of the same thing is one too many.
-export const PANEL_PAGES = { usage: 'Usage', mcp: 'MCP' };
+export const PANEL_PAGES = {
+  overview: 'Overview',
+  book: 'Book',
+  usage: 'Usage',
+  mcp: 'MCP',
+};
 
 export { SESSION_PANEL_CLOSED };
 

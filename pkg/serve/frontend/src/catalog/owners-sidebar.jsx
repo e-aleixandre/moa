@@ -8,7 +8,7 @@ import {
   projectCollapsed,
 } from "../data/util/project-sessions.js";
 import { OwnerRow, SectionHead } from "../components/Owners/OwnerRow.jsx";
-import { ownerOfProject, worstOwnerState } from "../data/owners-model.js";
+import { worstOwnerState } from "../data/owners-model.js";
 import "../layout/Sidebar/Sidebar.css";
 import "../components/Owners/OwnerAvatar.css";
 import "../components/Owners/OwnerRow.css";
@@ -144,8 +144,8 @@ export function OwnersSidebar({
     />
   );
 
-  const projectSections = groupProjectSessions([...sessions, ...saved]);
-  const ownerOfSection = (key) => ownerOfProject(owners, key);
+  const projectSections = groupProjectSessions([...sessions, ...saved], owners);
+  const ownerOfSection = (section) => (section.ownerId ? owners.find((o) => o.id === section.ownerId) || null : null);
 
   return (
     <aside class={`zl-side-body${phone ? " is-phone" : ""}`}>
@@ -179,7 +179,7 @@ export function OwnersSidebar({
         <div class="zl-list">
           {mode === "project" ? projectSections.map((section) => {
             const open = !projectCollapsed(section, collapsedProjects, false);
-            const owner = ownerOfSection(section.key);
+            const owner = ownerOfSection(section);
             const name = projectName(section.key) || section.label;
             const worst = section.sessions.map(attentionKind).filter(Boolean)[0] || null;
             return (

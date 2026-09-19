@@ -157,18 +157,6 @@ export function worstOwnerState(owners = []) {
   return worst && worst !== "idle" ? OWNER_DOT[worst] : null;
 }
 
-// ownerOfProject finds the owner responsible for a project section's key. The
-// key is a directory and the owner's root is a directory of the same codebase
-// — a worktree of it, in the general case — so one contains the other.
-export function ownerOfProject(owners = [], key = "") {
-  if (!key) return null;
-  return owners.find((o) => {
-    const root = o?.root || "";
-    if (!root) return false;
-    return root === key || root.startsWith(`${key}/`) || key.startsWith(`${root}/`);
-  }) || null;
-}
-
 // ownersWaiting — how many owners want something from you, for the door's
 // badge. An owner wants you when its own conversation asked, or when one of
 // its children has stopped: both land on the same person.

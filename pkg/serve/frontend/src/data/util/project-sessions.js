@@ -70,16 +70,23 @@ export function groupProjectSessions(sessions, owners = []) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(session);
   }
-  // A project with an owner but no session still has a group: the owner is
-  // its first row, and without the group it would be nowhere in this order.
-  for (const owner of owners) {
-    const root = owner?.root;
-    if (!root) continue;
-    const key = projectKey(root);
-    const covered = [...groups.keys()].some((k) => k === key || k.startsWith(`${key}/`) || key.startsWith(`${k}/`));
-    if (!covered) groups.set(key, []);
+  // Which owner a group belongs to is the SERVER's answer (`owner_id` on each
+  // session, resolved by codebase key), never a path prefix: sibling
+  // directories under one folder can be unrelated repositories. A project
+  // with an owner but no session still has a group, keyed by the owner's
+  // root, so the owner is somewhere in this order.
+  const ownerOfGroup = new Map();
+  for (const [key, groupSessions] of groups) {
+    const id = groupSessions.find((s) => s.owner_id)?.owner_id;
+    if (id) ownerOfGroup.set(key, id);
   }
-  const ownerKeys = new Set(owners.map((o) => o?.root && projectKey(o.root)).filter(Boolean));
+  for (const owner of owners) {
+    if (!owner?.id || !owner?.root) continue;
+    if ([...ownerOfGroup.values()].includes(owner.id)) continue;
+    const key = projectKey(owner.root);
+    if (!groups.has(key)) groups.set(key, []);
+    if (!ownerOfGroup.has(key)) ownerOfGroup.set(key, owner.id);
+  }
   return [...groups.entries()].map(([key, groupSessions]) => {
     const openCount = groupSessions.filter((s) => !isSaved(s)).length;
     const savedCount = groupSessions.length - openCount;
@@ -96,7 +103,8 @@ export function groupProjectSessions(sessions, owners = []) {
       attention: hasPermission ? "permission" : hasError ? "error" : null,
       attentionCount: hasPermission || hasError ? attentionCount : 0,
       updated: groupSessions.length ? Math.max(...groupSessions.map(updated)) : 0,
-      hasOwner: [...ownerKeys].some((k) => k === key || k.startsWith(`${key}/`) || key.startsWith(`${k}/`)),
+      ownerId: ownerOfGroup.get(key) || null,
+      hasOwner: ownerOfGroup.has(key),
     };
   }).sort(projectSectionOrder);
 }

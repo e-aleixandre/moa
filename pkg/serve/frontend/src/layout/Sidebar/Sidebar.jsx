@@ -15,7 +15,7 @@ import {
   visibleProjectSessions,
 } from "../../data/util/project-sessions.js";
 import { projectName } from "../../data/util/format.js";
-import { ownerOfProject, worstOwnerState } from "../../data/owners-model.js";
+import { worstOwnerState } from "../../data/owners-model.js";
 import { OwnerRow, SectionHead } from "../../components/Owners/OwnerRow.jsx";
 import "./Sidebar.css";
 
@@ -387,7 +387,7 @@ export function Sidebar({
             const shownSessions = visibleProjectSessions(section, expanded, false);
             const hiddenSaved = hiddenProjectSavedCount(section, expanded, false);
             const worst = sectionWorst(section);
-            const sectionOwner = ownerOfProject(owners, section.key);
+            const sectionOwner = section.ownerId ? owners.find((o) => o.id === section.ownerId) || null : null;
             // The heading says the project's name, not its last two segments:
             // "moa" over ~/dev/moa/main, when the path beside it already has
             // the branch.

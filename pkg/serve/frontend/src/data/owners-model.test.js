@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   bookTree, childGroup, childrenSummary, groupChildren, ownerDotState, ownerLine,
-  ownerOfProject, ownerOfSession, ownerRows, ownerRowState, ownersWaiting, ownerState,
+  ownerOfSession, ownerRows, ownerRowState, ownersWaiting, ownerState,
   waitingChildren, worstOwnerState,
 } from "./owners-model.js";
 
@@ -192,14 +192,6 @@ test("a collapsed Owners heading shows the most urgent thing it hides, and only 
   // A child that has stopped is the owner's business too: it is what you have
   // to act on, so a folded heading must not hide it behind an idle owner.
   expect(worstOwnerState([{ id: "d", session_state: "idle", children: [waiting] }])).toBe("permission");
-});
-
-test("the owner of a project section is found through its worktree", () => {
-  const owners = [{ id: "o1", root: "/home/me/dev/moa/main" }];
-  expect(ownerOfProject(owners, "/home/me/dev/moa/main")?.id).toBe("o1");
-  expect(ownerOfProject(owners, "/home/me/dev/moa")?.id).toBe("o1");
-  expect(ownerOfProject(owners, "/home/me/dev/other")).toBe(null);
-  expect(ownerOfProject(owners, "")).toBe(null);
 });
 
 test("ownerRows picks the owner's own conversation out of the roster when it is there", () => {

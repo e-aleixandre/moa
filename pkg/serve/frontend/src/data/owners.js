@@ -63,8 +63,8 @@ export async function retryOwners() {
 // that conversation. The roster is reloaded first: the new owner's session is
 // an ordinary session as far as the store is concerned, and openSession only
 // works on one it knows.
-export async function createOwner({ root, name, model, thinking }) {
-  const info = await api('POST', '/api/owners', { root, name, model, thinking });
+export async function createOwner({ root, name, model, thinking, avatar }) {
+  const info = await api('POST', '/api/owners', { root, name, model, thinking, avatar });
   await loadOwners();
   await loadSessions();
   if (info?.session_id) openOwnerConversation(info);
