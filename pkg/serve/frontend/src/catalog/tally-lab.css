@@ -1,0 +1,459 @@
+/* tally-lab — CATALOG ONLY. Nothing in this sheet ships: every rule is scoped
+   under `.tb`, `.tb-v` or a direction class, so it can only reach the wrapper
+   chrome and the copies of the shipped LiveBar mounted inside these hosts.
+   The bar itself is never redrawn here — where a direction hides a part of it
+   (B's sentence, D's row) that is the MOCK of a change to the component, and
+   it is called out in the JSX beside the direction it belongs to.
+
+   Tokens only (tokens/tokens.css). No `var(--zl-*, fallback)`: the ladder is
+   global now, so a fallback here would be a second, drifting copy. */
+
+.tb {
+  --tb-gap: 14px;
+}
+
+/* ── Page ──────────────────────────────────────────────────────────────── */
+
+.tb-head { max-width: 780px; margin: 0 0 20px; }
+.tb-head h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--zl-t1);
+  letter-spacing: -0.01em;
+}
+.tb-head h1 em { font-style: normal; color: var(--zl-accent); }
+.tb-head p { margin: 0; color: var(--zl-t3); line-height: 1.55; }
+.tb-head b { color: var(--zl-t2); font-weight: 600; }
+
+.tb-bars {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 0;
+  background: var(--zl-canvas);
+}
+.tb-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+}
+.tb-seg button {
+  min-width: 44px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t3);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
+}
+.tb-seg button.is-on { background: var(--zl-control); color: var(--zl-t1); }
+.tb-seg button:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+.tb-legend {
+  max-width: 820px;
+  margin: 0 0 16px;
+  display: grid;
+  gap: 4px;
+  color: var(--zl-t3);
+  line-height: 1.5;
+}
+.tb-legend b { color: var(--zl-t2); font-weight: 600; }
+.tb-legend-g { color: var(--zl-t4); }
+
+.tb-stage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 28px;
+}
+
+.tb-phone-wrap { display: flex; flex-direction: column; gap: 8px; }
+.tb-tag {
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--zl-t4);
+}
+.tb-phone { flex: none; }
+.tb-phone .tb-stream {
+  flex: 1;
+  min-height: 0;
+  padding: 92px 18px 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  mask-image: linear-gradient(to bottom, transparent 44px, #000 96px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 44px, #000 96px);
+}
+
+/* Desktop: the conversation column, same pieces, pointer sizes. */
+.tb-desk {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: 760px;
+  height: 560px;
+  overflow: hidden;
+  border-radius: var(--zl-r-lg);
+  background: rgba(16, 16, 24, 0.78);
+  box-shadow: var(--zl-rim-2), 0 30px 70px rgba(0, 0, 0, 0.5);
+}
+.tb-desk-top { flex: none; padding: 10px 22px 0; }
+.tb-desk-stream {
+  flex: 1;
+  min-height: 0;
+  padding: 18px 22px 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.tb-desk-stream > .tb-stream > * { max-width: var(--content-block); margin-inline: auto; }
+.tb-desk-dock { flex: none; padding: 14px 22px 12px; }
+
+/* ── Settled work — the piece production does not have ─────────────────── */
+
+.tb-done { display: grid; gap: 2px; margin: 0 0 6px; }
+.tb-done-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 8px;
+  border-radius: var(--zl-r-sm);
+  color: var(--zl-t3);
+}
+.tb-done-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--zl-green);
+  background: color-mix(in srgb, var(--zl-green) 14%, transparent);
+}
+.tb-done-row.is-bad .tb-done-mark {
+  color: var(--zl-red);
+  background: color-mix(in srgb, var(--zl-red) 14%, transparent);
+}
+.tb-done-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tb-done-t {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tb-done-d {
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tb-done-el {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+}
+.tb-done-go {
+  flex: none;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-family: inherit;
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  cursor: pointer;
+}
+.tb-done-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t4);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .tb-done-go:hover { background: var(--zl-raised); color: var(--zl-t1); }
+  .tb-done-x:hover { background: var(--zl-hi); color: var(--zl-t2); }
+}
+.tb-done-go:focus-visible,
+.tb-done-x:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+/* Three tones, one row. Quiet: a caption in the margin. Row: inside a recess
+   that already has a rim. Card: an object that asks to be read. */
+.tb-done.is-quiet .tb-done-row { padding-left: 4px; }
+.tb-done.is-row {
+  margin: 0;
+  padding: 2px;
+}
+.tb-done.is-card .tb-done-row {
+  min-height: 48px;
+  padding: 8px 10px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+}
+.tb-done.is-card .tb-done-t { font-size: var(--zl-fs-body); color: var(--zl-t1); }
+.tb-done.is-card .tb-done-d { color: var(--zl-t3); }
+.zl-phone .tb-done-row, .tb-phone .tb-done-row { min-height: 44px; }
+.zl-phone .tb-done-go, .tb-phone .tb-done-go { min-height: 36px; }
+.zl-phone .tb-done-x, .tb-phone .tb-done-x { width: 36px; height: 36px; }
+
+/* ── A · the subject is the turn ───────────────────────────────────────── */
+
+/* The background never gets the sentence slot: with the turn stopped, the
+   shipped `.zl-live-now.is-bg` row is not drawn at all and what stands in its
+   place is a statement about the TURN, flat and dotless. The tally keeps its
+   place at the right, so the door to the work is where it always was. */
+.tb-a.is-idle .zl-live-now.is-bg { display: none; }
+/* With the sentence gone the tally is the row's only child, so it has to be
+   told to keep the right edge it used to be pushed to. */
+.tb-a.is-idle .zl-live-bar { justify-content: flex-end; padding-right: 4px; }
+/* The turn's statement stands where the sentence was, drawn OVER the emptied
+   slot rather than beside it: the bar is a size container
+   (`container-type: inline-size`), so a sibling with flex:1 takes the bar's
+   width down to zero and the panel unfolding from it comes out as a 50px
+   column. Overlaying the slot the component no longer fills keeps the bar full
+   width and the tally where it has always been. */
+.tb-a-row { position: relative; display: flex; align-items: flex-end; }
+.tb-a-row > .zl-live { flex: 1; min-width: 0; }
+.tb-a-turn {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  height: 44px;
+  padding-left: 8px;
+  line-height: 44px;
+}
+.tb-a-row.has-bar .tb-a-turn {
+  position: absolute;
+  left: 8px;
+  right: 76px;
+  bottom: 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  height: 44px;
+  line-height: 44px;
+}
+.tb-a-turn-s {
+  flex: none;
+  color: var(--zl-t3);
+  font-weight: 500;
+}
+.tb-a-bg {
+  min-width: 0;
+  color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── B · a marker, not a sentence ──────────────────────────────────────── */
+
+/* Collapsed: the sentence half of the shipped row is simply not there, and the
+   row's own left padding goes with it, so what remains is the tally holding
+   the right edge. The empty left half IS the message. */
+.tb-b.is-collapsed .zl-live-now { display: none; }
+.tb-b.is-collapsed .zl-live-bar { justify-content: flex-end; padding-right: 4px; }
+.tb-b-row { display: flex; align-items: flex-end; gap: 8px; }
+.tb-b-row > .zl-live { flex: 1; min-width: 0; }
+.tb-b-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-green);
+  font-family: inherit;
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  cursor: pointer;
+}
+.tb-b-mark-i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--zl-green) 16%, transparent);
+}
+.tb-b-mark-n { font-family: var(--mono); }
+.tb-b-mark-w { color: var(--zl-t3); font-weight: 500; }
+.tb-b-mark:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+/* ── C · somewhere else entirely ───────────────────────────────────────── */
+
+/* The strip under the header. It is the same in both turn states, which is the
+   point: background work never travels into the turn's slot, so that slot's
+   occupancy is a reliable answer on its own. */
+.tb-c-strip { margin: 6px 0 0; }
+.tb-c-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t3);
+  font-family: inherit;
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.tb-c-head:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+.tb-c-dots { display: inline-flex; align-items: center; gap: 2px; }
+.tb-c-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--zl-t3);
+}
+.tb-c-txt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-c-done { flex: none; color: var(--zl-green); font-weight: 600; }
+.tb-c-chev { width: 12px; height: 12px; flex: none; color: var(--zl-t4); transition: transform var(--motion-fast) var(--zl-ease); }
+.tb-c-chev.is-open { transform: rotate(180deg); }
+.tb-c-body {
+  margin-top: 4px;
+  padding: 4px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+  animation: tb-drop var(--motion-fast) var(--zl-ease);
+}
+@keyframes tb-drop { from { opacity: 0; transform: translateY(-6px); } }
+/* The shipped panel opens UPWARD (it lives above the composer). Under the
+   header it has to unfold downward, which is a flex order flip, not a second
+   panel: the same component, the same rows. */
+.tb-c-live .zl-live { display: flex; flex-direction: column-reverse; margin: 0; }
+.tb-c-live .zl-live-bar { display: none; }
+.tb-c-live .zl-live-panel {
+  margin: 0;
+  background: transparent;
+  box-shadow: none;
+  transform-origin: top;
+}
+
+/* ── D · the place becomes a ledger ────────────────────────────────────── */
+
+/* In repose the sentence row is gone and the shipped panel is the whole zone,
+   always open. A list is a different object from a sentence; that difference
+   is what the glance reads. The panel brings its own group headings
+   (SUBAGENTS / COMMANDS), so the wrapper adds none: two headers over one list
+   would be the noise this direction is trying to remove. */
+.tb-d.is-idle .zl-live-bar { display: none; }
+.tb-d.is-idle .zl-live-panel { margin-bottom: 6px; }
+
+/* ── E · only the ending speaks ────────────────────────────────────────── */
+
+/* A 44px hit with a 2px line inside it: a thread, not a row. One tick per live
+   thing, breathing together. No words at all — which is exactly why it cannot
+   be read as a running turn. */
+.tb-e-thread {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.zl-phone .tb-e-thread, .tb-phone .tb-e-thread { min-height: 44px; }
+.tb-e-thread:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -2px; border-radius: var(--zl-r-sm); }
+.tb-e-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 2px;
+}
+.tb-e-tick {
+  flex: 1;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--zl-line-2);
+  /* The product already has a tempo for "alive": the live dot's breath. The
+     ticks borrow it rather than inventing a second one, and they stagger by
+     the motion language's own step so the thread reads as several things
+     rather than one blinking rule. */
+  animation: tb-pulse var(--breath-running) ease-in-out infinite;
+}
+.tb-e-tick:nth-child(2) { animation-delay: calc(var(--motion-base) * 1); }
+.tb-e-tick:nth-child(3) { animation-delay: calc(var(--motion-base) * 2); }
+.tb-e-tick:nth-child(4) { animation-delay: calc(var(--motion-base) * 3); }
+.tb-e-tick:nth-child(5) { animation-delay: calc(var(--motion-base) * 4); }
+@keyframes tb-pulse { 50% { background: var(--zl-accent-line); } }
+.tb-e-thread.is-open .tb-e-tick { background: var(--zl-accent-line); animation: none; }
+.tb-e-panel .zl-live-bar { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tb-e-tick { animation: none; }
+  .tb-c-body { animation: none; }
+}
+
+/* ── Contact sheets ────────────────────────────────────────────────────── */
+
+.tb-shots { padding: 20px; }
+.tb-sheet, .tb-pair { margin: 0 0 28px; }
+.tb-sheet-h, .tb-pair-h {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--zl-t1);
+}
+.tb-sheet-h span { margin-left: 10px; font-weight: 400; color: var(--zl-t4); }
+.tb-sheet-row, .tb-pair-row { display: flex; gap: 18px; }
+
+/* The owner reads this ON the phone, which is the whole point, so on a narrow
+   window the preamble gets out of the way: the picker is what has to be within
+   a thumb's reach, and the argument is already in the captures. The toolbar is
+   sticky either way, so the comparison survives scrolling. */
+@media (max-width: 560px) {
+  .zl.tb { padding: 12px 10px 48px; }
+  .tb-head { margin-bottom: 8px; }
+  .tb-head h1 { font-size: 17px; }
+  .tb-head p { display: none; }
+  .tb-legend { font-size: var(--zl-fs-meta); line-height: 1.45; }
+  .tb-legend-g { display: none; }
+  .tb-stage { gap: 16px; }
+  .tb-desk { display: none; }
+}

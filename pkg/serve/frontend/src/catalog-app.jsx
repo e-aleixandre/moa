@@ -29,6 +29,7 @@ import { LPLab } from "./catalog/lp-lab.jsx";
 import { LP2Lab } from "./catalog/lp2-lab.jsx";
 import { HomeLab } from "./catalog/home-lab.jsx";
 import { ToolsLab, ToolsPhone, LedgerIcons } from "./catalog/tools-lab.jsx";
+import { TallyLab } from "./catalog/tally-lab.jsx";
 import { seedCatalogStore } from "./catalog/specimen.js";
 import { installCatalogBackend } from "./catalog/catalog-backend.js";
 import { announceArrivals } from "./data/events.js"; // wake-on-event
@@ -61,6 +62,7 @@ const LINKS = [
   { key: "home", label: "Home (3 ways)", href: "?view=home" },
   { key: "tools", label: "Tool calls", href: "?view=tools" },
   { key: "toolsphone", label: "Tool calls (phone)", href: "?view=toolsphone" },
+  { key: "tally", label: "Background work", href: "?view=tally" },
 ];
 
 // wake-on-event: the two inbox seed sets are a URL away from each other, so
@@ -211,6 +213,9 @@ function CatalogApp() {
   else if (view === "tools") body = <ToolsLab />;
   else if (view === "toolsphone") body = <ToolsPhone />;
   else if (view === "ledgericons") body = <LedgerIcons />;
+  // Background work when the turn is stopped: five directions over the shipped
+  // LiveBar. Catalog-only — the bar and its panel are imported, never redrawn.
+  else if (view === "tally") body = <TallyLab />;
   else if (view === "mobile") {
     body = (
       <PhoneLab>
