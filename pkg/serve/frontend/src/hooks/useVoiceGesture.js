@@ -24,7 +24,7 @@ import {
  * transcribing / supported), `cancel` for Esc, and toggleFromShortcut for
  * ⌘. / Alt+. — which is now the same action as a tap.
  */
-export function useVoiceGesture({ onTranscript, onError } = {}) {
+export function useVoiceGesture({ onTranscript, onError, onRecordingStart } = {}) {
   // useVoice's error callback is routed through a ref so we can (a) reset the
   // gesture machine to idle — a getUserMedia failure would otherwise leave the
   // button stuck visually in `recording` — and (b) surface the message via the
@@ -41,6 +41,9 @@ export function useVoiceGesture({ onTranscript, onError } = {}) {
   // face follows the phase.
   const stateRef = useRef(INITIAL);
   const [uiState, setUiState] = useState(INITIAL);
+  // Pointer down runs before the browser moves focus to the mic button. Keep
+  // that element until the toggle decides whether this is actually a start.
+  const pointerDownActiveElementRef = useRef(null);
 
   // dispatch — the single choke point: fold an event through the pure reducer,
   // apply the resulting state (ref + mirror), then run the emitted actions.
@@ -50,13 +53,19 @@ export function useVoiceGesture({ onTranscript, onError } = {}) {
     setUiState(state);
     for (const a of actions) {
       switch (a.type) {
-        case "start": startVoice(); break;
+        case "start": {
+          const activeElement = pointerDownActiveElementRef.current
+            ?? (typeof document !== "undefined" ? document.activeElement : null);
+          onRecordingStart?.(activeElement);
+          startVoice();
+          break;
+        }
         case "stop": stopVoice(); break;
         case "discard": cancelVoice(); break;
         default: break;
       }
     }
-  }, [startVoice, stopVoice, cancelVoice]);
+  }, [startVoice, stopVoice, cancelVoice, onRecordingStart]);
 
   // Bind the voice-error handler now that dispatch exists: a recorder error
   // (mic denied, no device, failed getUserMedia) must return the machine to
@@ -70,8 +79,15 @@ export function useVoiceGesture({ onTranscript, onError } = {}) {
 
   // One handler for every activation — touch, mouse and keyboard all arrive
   // here as a click, so tap-to-start / tap-to-stop needs nothing else.
+  const onPointerDown = useCallback(() => {
+    pointerDownActiveElementRef.current = typeof document !== "undefined"
+      ? document.activeElement
+      : null;
+  }, []);
+
   const onClick = useCallback(() => {
     dispatch(ev.toggle());
+    pointerDownActiveElementRef.current = null;
   }, [dispatch]);
 
   // toggleFromShortcut — ⌘. / Alt+. is the same decision as a tap.
@@ -101,7 +117,7 @@ export function useVoiceGesture({ onTranscript, onError } = {}) {
   }, [cancelVoice]);
 
   return {
-    handlers: { onClick },
+    handlers: { onPointerDown, onClick },
     recording: isRecordingPhase(uiState) || recording,
     transcribing,
     supported,

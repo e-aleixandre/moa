@@ -142,6 +142,42 @@ test("successive voice transcripts append at the caret without replacing the dra
   expect(textarea.selectionEnd).toBe("already first second".length);
 });
 
+test("a transcript returns focus when the textarea had it when recording began", () => {
+  refs.length = 0;
+  Composer({ sessionId: "s1", session: { state: "idle" } });
+  let focused = 0;
+  const textarea = {
+    value: "draft", selectionStart: 5, selectionEnd: 5,
+    focus() { focused += 1; }, dispatchEvent() {},
+  };
+  refs[0].current = textarea;
+
+  voiceOptions.onRecordingStart(textarea);
+  voiceOptions.onTranscript("more");
+
+  expect(textarea.value).toBe("draft more");
+  expect(focused).toBe(1);
+});
+
+test("a transcript leaves focus alone when recording began away from the textarea", () => {
+  refs.length = 0;
+  Composer({ sessionId: "s1", session: { state: "idle" } });
+  let focused = 0;
+  const textarea = {
+    value: "draft", selectionStart: 5, selectionEnd: 5,
+    focus() { focused += 1; }, dispatchEvent() {},
+  };
+  refs[0].current = textarea;
+
+  voiceOptions.onRecordingStart({});
+  voiceOptions.onTranscript("more");
+
+  expect(textarea.value).toBe("draft more");
+  expect(textarea.selectionStart).toBe("draft more".length);
+  expect(textarea.selectionEnd).toBe("draft more".length);
+  expect(focused).toBe(0);
+});
+
 // Dictation used to be switched off in steer mode, on the grounds that a steer
 // "targets a subagent, not the parent run" — which describes the rule instead
 // of justifying it. The thing that could have justified it is the only thing

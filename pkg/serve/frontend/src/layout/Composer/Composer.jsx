@@ -127,6 +127,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   const { skills, refreshSkills } = useSessionSkills(sessionId);
   const textareaRef = useRef(null);
   const attachInputRef = useRef(null);
+  const restoreVoiceFocusRef = useRef(false);
   const sessionState = session?.state;
   const pendingSteers = session?.pendingSteers;
   // In steer mode the box targets a subagent, not the parent run — so it
@@ -802,8 +803,13 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     writeComposer(el, before + sep + text + after);
     const newPos = start + sep.length + text.length;
     el.selectionStart = el.selectionEnd = newPos;
-    el.focus();
+    if (restoreVoiceFocusRef.current) el.focus();
+    restoreVoiceFocusRef.current = false;
     el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, []);
+
+  const captureVoiceFocus = useCallback((activeElement) => {
+    restoreVoiceFocusRef.current = activeElement === textareaRef.current;
   }, []);
 
   const onVoiceError = useCallback((msg) => {
@@ -816,6 +822,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   } = useVoiceGesture({
     onTranscript: insertAtCursor,
     onError: onVoiceError,
+    onRecordingStart: captureVoiceFocus,
   });
 
   // Voice is usable only when the backend can transcribe AND the browser has a
