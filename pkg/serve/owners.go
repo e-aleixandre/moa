@@ -147,6 +147,11 @@ func (m *Manager) CreateOwner(opts CreateOwnerOpts) (OwnerInfo, error) {
 	if live := m.liveChildrenOfRoot(opts.Root); len(live) > 0 {
 		return OwnerInfo{}, fmt.Errorf("%w: %s", ErrProjectSessionsOpen, openSessionsHint(len(live), "before creating its owner"))
 	}
+	// From here on owner.json may exist, may have been rolled back, or may
+	// have been left behind by a Store.Create that failed after writing it.
+	// Dropping the memo on every outcome is cheap and keeps it from naming an
+	// owner that a failed creation removed.
+	defer m.invalidateOwnerRefs()
 	own, err := store.Create(opts.Root, opts.Name, model, thinking, true, opts.Avatar)
 	if err != nil {
 		return OwnerInfo{}, err
@@ -176,8 +181,6 @@ func (m *Manager) CreateOwner(opts CreateOwnerOpts) (OwnerInfo, error) {
 	if err := store.Save(own); err != nil {
 		return OwnerInfo{}, err
 	}
-	// Every session of this codebase now has an owner to name.
-	m.invalidateOwnerRefs()
 	return m.ownerInfo(own), nil
 }
 

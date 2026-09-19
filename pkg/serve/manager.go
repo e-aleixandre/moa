@@ -519,25 +519,29 @@ func (m *Manager) ownerRefFor(cwd string) ownerRef {
 	if cwd == "" {
 		return ownerRef{}
 	}
+	// The lock is held across the resolution, not only around the map. It
+	// used to be released while disk was read, and an owner created in that
+	// gap was overwritten by the answer in flight: the invalidation its
+	// creation fired happened first, so the codebase went on looking
+	// unwatched until the next owner was created or deleted. Serializing is
+	// what makes "the memo never outlives an invalidation" true, and it also
+	// makes concurrent pollers of a cold directory pay for one git exec
+	// instead of one each.
 	m.ownerRefMu.Lock()
+	defer m.ownerRefMu.Unlock()
 	if ref, ok := m.ownerRefs[cwd]; ok {
-		m.ownerRefMu.Unlock()
 		return ref
 	}
-	m.ownerRefMu.Unlock()
-
 	ref := ownerRef{}
 	if store, err := m.ownerStore(); err == nil {
 		if own, found, err := store.FindByCodebase(codebaseKeyOf(cwd)); err == nil && found {
 			ref = ownerRef{id: own.ID, name: own.Name}
 		}
 	}
-	m.ownerRefMu.Lock()
 	if m.ownerRefs == nil {
 		m.ownerRefs = map[string]ownerRef{}
 	}
 	m.ownerRefs[cwd] = ref
-	m.ownerRefMu.Unlock()
 	return ref
 }
 
@@ -751,7 +755,8 @@ type Manager struct {
 	// to it. nil when owners are unavailable.
 	heartbeat *heartbeatService
 	// ownerRefs memoizes which owner a working directory reports to, keyed by
-	// cwd. Dropped whole whenever an owner is created or deleted.
+	// cwd. Dropped whole whenever an owner is created or deleted. ownerRefMu
+	// is held across the resolution, not only around the map: see ownerRefFor.
 	ownerRefMu sync.Mutex
 	ownerRefs  map[string]ownerRef
 	versionMu  sync.RWMutex
