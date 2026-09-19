@@ -113,7 +113,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--zl-cap-attn, var(--zl-yellow, #f9e2af));
+  background: var(--zl-cap-attn);
   border: 2px solid var(--zl-canvas);
 }
 .zl-cap-attention-unseen { --zl-cap-attn: var(--zl-accent); }
@@ -124,7 +124,7 @@
   content: "";
   position: absolute;
   inset: -2px;
-  border: 2px solid var(--zl-cap-attn, var(--zl-yellow, #f9e2af));
+  border: 2px solid var(--zl-cap-attn);
   border-radius: 50%;
   opacity: 0;
   animation: zl-cap-arrival-ripple 700ms var(--zl-ease) 2;
