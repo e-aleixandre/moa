@@ -30,7 +30,7 @@ import { Plus } from "lucide-preact";
 import { addToast } from "../../data/notifications.js";
 import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast, stopRun } from "../../data/session-actions.js";
 import { toggleSessionPanel, sessionPanelView } from "../../data/session-panel.js";
-import { OwnerChipEntry } from "../../components/Owners/OwnerChipEntry.jsx";
+import { useOwnerStatusItem } from "../../components/Owners/OwnerChipEntry.jsx";
 import { cacheAlertLabel } from "../../data/cache-usage.js";
 import { setPopoverOpenFromClick } from "../../data/popover-click.js";
 import { positionModelPopover } from "../PaneGrid/model-popover-position.js";
@@ -145,6 +145,7 @@ export function ConversationScreen() {
   // owns its open state the way it owns the model popover's. Hooks run before
   // the body branches: a screen with no session still has to call them.
   const busy = !!session && (session.state === "running" || session.state === "permission");
+  const ownerItem = useOwnerStatusItem(session);
   const permMenu = usePermissionMenu({
     mode: session?.permissionMode || "yolo",
     disabled: busy,
@@ -262,15 +263,7 @@ export function ConversationScreen() {
           onGridToggle={() => navigate("grid")}
           previewOpen={!!session.previewOpen}
           onPreviewToggle={() => updateSession(session.id, { previewOpen: !session.previewOpen })}
-          /* The chip says which project owner this conversation belongs to
-             and opens it. Provenance, not a state: no dot, no colour. It is
-             only mounted for a session whose codebase HAS an owner. */
-          headExtra={(
-            <>
-              <OwnerChipEntry session={session} />
-              <ArtifactsEntry sessionId={session.id} />
-            </>
-          )}
+          headExtra={<ArtifactsEntry sessionId={session.id} />}
         />
         {viewingSub ? (
           <SubagentView
@@ -318,6 +311,7 @@ export function ConversationScreen() {
                   session (session.dockOpen). flex:none, so it pushes the stream
                   up instead of overlaying the composer. */}
               <LiveBar
+                key={session.id}
                 session={session}
                 agents={liveAgents}
                 open={!!session.dockOpen}
@@ -356,6 +350,7 @@ export function ConversationScreen() {
                   modelOpen={modelOpen}
                   modelPopover={modelPopover}
                   modelAnchorRef={modelAnchorRef}
+                  owner={ownerItem}
                 />
               </div>
             </div>

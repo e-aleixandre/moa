@@ -97,16 +97,11 @@ test('the foreground owns the single sentence even when async work is alive', ()
   expect(model.sentence.agent).toBeUndefined();
 });
 
-test('the background takes the sentence only when the foreground is silent', () => {
+test('an ended turn owns the sentence while background work stays in the tally', () => {
   const model = liveBarModel(IDLE, AGENTS, 13000, 0);
-  expect(model.sentence.kind).toBe('background');
-  expect(model.sentence.agent.id).toBe('a1');
-});
-
-test('the spotlight moves the background sentence across the live work', () => {
-  expect(liveBarModel(IDLE, AGENTS, 13000, 1).sentence.agent.id).toBe('b1');
-  // Out-of-range indices clamp instead of blanking the sentence.
-  expect(liveBarModel(IDLE, AGENTS, 13000, 9).sentence.agent.id).toBe('b1');
+  expect(model.sentence.kind).toBe('ended');
+  expect(model.sentence.elapsed).toBe('');
+  expect(model.tally.count).toBe(2);
 });
 
 // The tally is the door to the panel, so it must not exist when there is
@@ -124,10 +119,8 @@ test('a foreground parked on you keeps the sentence amber and timerless', () => 
   expect(model.tally.count).toBe(2);
 });
 
-// A background sentence borrows the item's own age, not the run's: there is no
-// foreground run to count from.
-test('a background sentence carries the item elapsed', () => {
-  expect(liveBarModel(IDLE, AGENTS, 13000, 0).sentence.elapsed).toBe('1m12s');
+test('an ended turn never carries a background clock', () => {
+  expect(liveBarModel(IDLE, AGENTS, 13000).sentence.elapsed).toBe('');
 });
 
 test('a missing or malformed agent list is simply no background', () => {
@@ -160,11 +153,9 @@ function rule(selectorPattern) {
   return m ? m[1] : '';
 }
 
-test('the counter is anchored to the end of the sentence slot in both rows', () => {
-  for (const row of ['zl-live-now', 'zl-live-spot']) {
-    expect(rule(`\\.${row} > \\.zl-live-txt`)).toMatch(/flex:\s*1 1 auto/);
-    expect(rule(`\\.${row} > \\.zl-live-el`)).toMatch(/margin-left:\s*auto/);
-  }
+test('the counter is anchored to the end of the foreground sentence slot', () => {
+  expect(rule('\\.zl-live-now > \\.zl-live-txt')).toMatch(/flex:\s*1 1 auto/);
+  expect(rule('\\.zl-live-now > \\.zl-live-el')).toMatch(/margin-left:\s*auto/);
   // Anchored by flex, not by a width the counter has to fit.
   expect(rule('\\.zl-live-el(?![-\\w])')).not.toMatch(/(?:min-)?width:/);
 });

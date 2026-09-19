@@ -20,7 +20,6 @@ import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SessionPanel } from "../../../components/index.js";
 import { NewOwnerDialog } from "../../../components/Owners/NewOwnerDialog.jsx";
-import { OwnerChipEntry } from "../../../components/Owners/OwnerChipEntry.jsx";
 import { sessionPanelView, closeSessionPanel, toggleSessionPanel } from "../../../data/session-panel.js";
 import { cacheAlertLabel } from "../../../data/cache-usage.js";
 import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
@@ -290,6 +289,7 @@ function MobileConversationBody({ forceMobile = false }) {
             the fade stretches over the bar the way the catalogue drew it. */}
         <MobileComposer key={session.id} session={session} usage={usage} onSecret={setSecretAliases}>
           <LiveBar
+            key={session.id}
             session={session}
             agents={liveAgents}
             open={!!session.dockOpen}
@@ -483,10 +483,6 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
           onPanel={() => toggleSessionPanel(chrome.activeId, cacheAlert ? "usage" : "root")}
           onNew={() => openPalette("create")}
           inboxCount={inboxCount}
-          /* The chip rides UNDER the capsule row, not inside it: the three
-             capsules already do three jobs, and one control does one job
-             (CRITERIO §3). */
-          below={chromeSession ? <OwnerChipEntry session={chromeSession} compact /> : null}
         />
       )}
       {chrome.inboxOpen && (

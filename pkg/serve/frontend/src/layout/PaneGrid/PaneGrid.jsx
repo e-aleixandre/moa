@@ -422,6 +422,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
       )}
       dock={(
         <LiveBar
+          key={session.id}
           session={session}
           agents={liveAgents}
           dense

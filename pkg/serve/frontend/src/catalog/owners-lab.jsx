@@ -17,7 +17,6 @@ import {
   OwnerAvatar, AVATAR_COLORS, AVATAR_SHAPES, AVATAR_EYE_STATES, defaultAvatar,
 } from "../components/Owners/OwnerAvatar.jsx";
 import { OwnerRow } from "../components/Owners/OwnerRow.jsx";
-import { OwnerChip } from "../components/Owners/Owners.jsx";
 import { NewOwnerDialog } from "../components/Owners/NewOwnerDialog.jsx";
 import { OwnersSidebar, useAvatarChoice } from "./owners-sidebar.jsx";
 import {
@@ -259,12 +258,6 @@ function Desktop({ preset, state }) {
                 title={CHILD_SESSION.title}
                 path={shortPath(CHILD_SESSION.cwd, 40)}
                 onTitleClick={noop}
-                /* The chip rides in ChatHead's existing headExtra slot, so the
-                   head needs no change to carry it. The avatar replaces the
-                   word that used to stand there: at 20px the owner is the same
-                   mark it is in the list, which is what makes the chip a
-                   pointer at a thing you have seen rather than a label. */
-                headExtra={<OwnerChip name={WINERIM.name} owner={WINERIM} state={preset.id === "asks" ? "asks" : "idle"} onClick={noop} />}
                 onGridToggle={noop}
               />
               <div class="owl-desk-stream">
@@ -296,11 +289,6 @@ function Phone({ preset, state }) {
         <div class="mconv owl-mconv">
           <MobileStream session={CHILD_SESSION} blocks={blocks} onOpenSubagent={noop} />
           <MobileChrome title={CHILD_SESSION.title} open onToggle={noop} onNew={noop} />
-          {/* The chip under the capsule row, not inside it: the capsules are
-              already ≡ / name / +, and one control does one job (CRITERIO §3). */}
-          <div class="owl-chip-row">
-            <OwnerChip name={WINERIM.name} owner={WINERIM} state={preset.id === "asks" ? "asks" : "idle"} compact onClick={noop} />
-          </div>
           <div class="sdrawer-veil is-open">
             <div class="sdrawer is-open" role="dialog" aria-modal="true" aria-label="Sessions">
               <OwnersSidebar density="phone" {...sidebarProps(preset, state)} />

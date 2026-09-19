@@ -91,6 +91,7 @@ export function StatusStrip({
   modelOpen,
   modelPopover,
   modelAnchorRef,
+  owner,
   children,
 }) {
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
@@ -241,6 +242,22 @@ export function StatusStrip({
             <span class={cls} title={mcpLabel}>{body}</span>
           );
         })()}
+
+        {/* The owner a CHILD session reports to (docs/owners.md): a door, not
+            a reading. It is the least urgent thing on the strip, so it is the
+            first to drop when the width goes. */}
+        {owner && (
+          <button
+            type="button"
+            class={`zl-st zl-st-ev zl-st-owner zl-${statusItemPriority("owner")}`}
+            onClick={owner.onOpen}
+            aria-label={`Owner ${owner.name} — open its conversation`}
+            title={`Owner · ${owner.name}`}
+          >
+            {owner.avatar}
+            <span class="zl-st-word">{owner.name}</span>
+          </button>
+        )}
 
         {alerts.onExtra && (
           <span

@@ -217,20 +217,29 @@
 @keyframes zl-breathe { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .zl-live-dot { animation: none; } }
 
-/* Background spotlight: the sentence belongs to a background item, so it
-   is prefixed with that item's identity mark and the item's name is the
-   subject. It crossfades when the spotlight moves: opacity only. */
-.zl-live-spot {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  animation: zl-arrive 260ms ease-out both;
+/* An idle turn is deliberately a different silhouette from a run: a flat
+   grey dash, no timer and no Stop. Background work never borrows this line.
+   Folded, its plural tally speaks here; unfolded, the panel is its only voice. */
+.zl-live-now.is-ended { gap: 8px; }
+.zl-live-ended-mark {
+  flex: none;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--zl-t4);
 }
-@keyframes zl-arrive { from { opacity: 0; } }
-.zl-live-who { color: var(--zl-t2); }
-.zl-live-now.is-bg .zl-live-txt.zl-data { font-size: var(--zl-fs-body); color: var(--zl-t3); }
+.zl-live-ended-title { flex: none; }
+.zl-live-ended-summary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.zl-live-ended-summary.is-silent { opacity: 0; }
 
 /* Identity marks. A subagent is a 7px dot in its own hue, exactly the
    project monogram's palette, never green/yellow/red. A command is a mono
@@ -348,6 +357,7 @@
    never eat the conversation: measured on the phone, bar + open panel =
    242px of a 780px screen, and the transcript keeps 398px. */
 .zl-live-panel {
+  position: relative;
   max-height: 208px;
   margin: 0 0 4px;
   padding: 2px 4px 4px;
@@ -360,9 +370,23 @@
   animation: zl-unfold 180ms var(--zl-ease);
   transform-origin: bottom;
 }
+/* The panel is capped. This quiet lower-edge wash keeps a clipped COMMANDS
+   group from reading as a deliberately finished list; it needs no second
+   presentation state or observer. */
+.zl-live-panel::after {
+  content: "";
+  position: sticky;
+  display: block;
+  bottom: 0;
+  height: 14px;
+  margin: -14px -4px 0;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--zl-sheet));
+}
 @keyframes zl-unfold { from { opacity: 0; transform: translateY(6px); } }
 @media (prefers-reduced-motion: reduce) {
-  .zl-live-panel, .zl-live-spot { animation: none; }
+  .zl-live-panel { animation: none; }
+  .zl-live-ended-summary { transition: none; }
 }
 .zl-live-panel .zl-group {
   display: flex;
@@ -534,4 +558,3 @@ div.zl-live-row { cursor: default; }
   min-width: 0;
   width: 100%;
 }
-

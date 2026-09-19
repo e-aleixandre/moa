@@ -64,13 +64,6 @@
 .owl-mconv.mconv { height: 100%; }
 .owl-mconv .zl-transcript { padding-top: 58px; }
 
-/* The chip's row in a child, under the capsules. */
-.owl-chip-row {
-  position: absolute;
-  top: calc(14px + 44px + 8px);
-  left: 12px;
-  z-index: 4;
-}
 
 /* ── The phone's drawer ────────────────────────────────────────────────────
    The shipped chassis (SessionDrawer.css `.sdrawer-veil` / `.sdrawer`), drawn

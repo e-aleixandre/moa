@@ -102,6 +102,8 @@ button.zl-st { cursor: pointer; transition: background var(--motion-hover) ease;
 /* tier 3: events. Neutral by default; an alarm takes its state colour. */
 .zl-st-ev { gap: 5px; padding: 0 7px; color: var(--zl-t3); }
 .zl-st-ev .zl-data { color: var(--zl-t2); }
+.zl-st-owner { cursor: pointer; }
+.zl-st-owner .ow-av { flex: none; }
 .zl-st-ev.is-alarm-red, .zl-st-ev.is-alarm-red .zl-data { color: var(--zl-red); }
 .zl-st-ev.is-alarm-yellow, .zl-st-ev.is-alarm-yellow .zl-data { color: var(--zl-yellow); }
 

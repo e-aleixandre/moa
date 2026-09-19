@@ -16,11 +16,11 @@ import "./LiveBar.css";
 // of async work). They said two verbs at once and pushed the transcript twice;
 // now there is a single row with two fixed slots:
 //
-//   [ sentence ..................................... ] [ tally ]
+//   [ turn state / foreground sentence ............. ] [ tally ]
 //
-// The SENTENCE belongs to the foreground run whenever there is one; only when
-// the foreground is idle does the background take it over, with a spotlight
-// rotating across the live async work. Never two verbs at a time.
+// The SENTENCE belongs to the foreground run whenever there is one. When the
+// turn has ended, its own still line occupies that slot; background work never
+// borrows it or rotates through it.
 //
 // The TALLY only exists while something async is alive, and it is the door to
 // the panel: one row per live thing (subagents, then commands), grouped by
@@ -72,10 +72,11 @@ export function foregroundLine(session, nowMs) {
   return { text, waiting, elapsed, phase };
 }
 
-// liveBarModel decides the WHOLE bar: who owns the single sentence, and whether
-// there is a tally at all. Null means repose — no bar, the transcript reclaims
-// the space.
-export function liveBarModel(session, agents, nowMs, spot = 0) {
+// liveBarModel decides the WHOLE bar: the foreground run owns its sentence.
+// With no foreground, the line names the ended turn; background work is only
+// ever represented by the tally and its panel. Null means repose — no bar, the
+// transcript reclaims the space.
+export function liveBarModel(session, agents, nowMs) {
   const list = Array.isArray(agents) ? agents : [];
   const fg = foregroundLine(session, nowMs);
 
@@ -83,45 +84,11 @@ export function liveBarModel(session, agents, nowMs, spot = 0) {
   if (fg) {
     sentence = { kind: "foreground", text: fg.text, waiting: fg.waiting, elapsed: fg.elapsed, phase: fg.phase };
   } else if (list.length) {
-    // The background only speaks when the foreground is silent, so the bar
-    // never carries two verbs.
-    const agent = list[Math.min(Math.max(0, spot), list.length - 1)];
-    sentence = { kind: "background", agent, waiting: false, elapsed: agent.time || "" };
+    sentence = { kind: "ended", waiting: false, elapsed: "" };
   }
   if (!sentence) return null;
 
   return { sentence, tally: list.length ? { count: list.length, agents: list } : null };
-}
-
-// useSpotlight rotates an index across `count` items, so the bar can cycle
-// through what each live thing is doing without expanding. Rotation stops (and
-// pins index 0) under prefers-reduced-motion, with a single item, when it is
-// not the background's turn to speak, or in a fidelity scene (the capture has
-// to land on the first item, always).
-export function useSpotlight(count, active, intervalMs = 4000) {
-  const [index, setIndex] = useState(0);
-
-  useEffect(() => {
-    if (index >= count) setIndex(0);
-  }, [count, index]);
-
-  useEffect(() => {
-    if (!active || count <= 1) {
-      setIndex(0);
-      return;
-    }
-    const reduced =
-      typeof matchMedia !== "undefined" &&
-      matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const scene =
-      typeof location !== "undefined" &&
-      new URLSearchParams(location.search).get("view") === "scene";
-    if (reduced || scene) return;
-    const t = setInterval(() => setIndex((i) => (i + 1) % count), intervalMs);
-    return () => clearInterval(t);
-  }, [count, active, intervalMs]);
-
-  return Math.min(index, Math.max(0, count - 1));
 }
 
 export function LiveBar({
@@ -171,8 +138,17 @@ export function LiveBar({
     if (!forceCompact) setForceCompactOverride(false);
   }, [forceCompact]);
 
-  const spot = useSpotlight(list.length, !fgActive);
-  const model = liveBarModel(session, list, nowMs, spot);
+  const model = liveBarModel(session, list, nowMs);
+
+  // A LiveBar is keyed by its host's current session. On entering an idle
+  // conversation with background work, unfold once; a later explicit fold is
+  // not revisited until the user enters the conversation again.
+  useEffect(() => {
+    if (!fgActive && list.length && !expanded) setExpanded(true);
+  // This is deliberately mount-only: live work starting while the user is
+  // already in the conversation must not reopen a panel they folded.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [stopArmed, setStopArmed] = useState(false);
   useEffect(() => {
@@ -209,10 +185,10 @@ export function LiveBar({
   const subs = list.filter((a) => a.kind === "subagent");
   const bashes = list.filter((a) => a.kind !== "subagent");
   const waiting = sentence.waiting;
-  const item = sentence.kind === "background" ? sentence.agent : null;
+  const summary = backgroundSummary(list);
 
   return (
-    <div class={`zl-live${dense ? " is-dense" : ""}${openPanel ? " is-open" : ""}`}>
+    <div class={`zl-live${dense ? " is-dense" : ""}${openPanel ? " is-open" : ""}${sentence.kind === "ended" ? " is-ended" : ""}`}>
       {openPanel && (
         <div class="zl-live-panel" role="region" aria-label="Live in the background">
           {[["Subagents", subs], ["Commands", bashes]].map(([title, items]) => items.length > 0 && (
@@ -243,18 +219,11 @@ export function LiveBar({
             {!!sentence.elapsed && <span class="zl-live-el zl-data">{sentence.elapsed}</span>}
           </div>
         ) : (
-          <div class="zl-live-now is-bg" role="status" aria-live="polite">
-            <span class="zl-live-spot" key={item.id}>
-              <LiveId agent={item} />
-              {item.kind === "subagent"
-                ? (
-                  <span class="zl-live-txt">
-                    <span class="zl-live-who">{item.name}</span>
-                    {item.action ? ` · ${item.action}` : ""}
-                  </span>
-                )
-                : <span class="zl-live-txt zl-data">{item.action || item.name}</span>}
-              {!!sentence.elapsed && <span class="zl-live-el zl-data">{sentence.elapsed}</span>}
+          <div class="zl-live-now is-ended" role="status" aria-live="polite">
+            <span class="zl-live-ended-mark" aria-hidden="true" />
+            <span class="zl-live-ended-title">Turn ended</span>
+            <span class={`zl-live-ended-summary${openPanel ? " is-silent" : ""}`} aria-hidden={openPanel}>
+              {summary}
             </span>
           </div>
         )}
@@ -290,6 +259,15 @@ export function LiveBar({
       </div>
     </div>
   );
+}
+
+function backgroundSummary(agents) {
+  const subs = agents.filter((agent) => agent.kind === "subagent").length;
+  const commands = agents.length - subs;
+  const parts = [];
+  if (subs) parts.push(`${subs} subagent${subs === 1 ? "" : "s"}`);
+  if (commands) parts.push(`${commands} command${commands === 1 ? "" : "s"}`);
+  return parts.join(" · ");
 }
 
 // LiveId — the identity mark of a background item. A subagent gets its fanout

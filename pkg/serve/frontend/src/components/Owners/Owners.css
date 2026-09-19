@@ -665,35 +665,6 @@
 .ow-edit:focus { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
 .ow-edit-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 8px 0; }
 
-/* ── The chip in a child ───────────────────────────────────────────────── */
-
-.ow-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: var(--radius-full);
-  background: var(--zl-raised);
-  box-shadow: var(--zl-rim);
-  color: var(--zl-t3);
-  font-family: var(--font);
-  font-size: var(--zl-fs-meta);
-  letter-spacing: -0.005em;
-  cursor: pointer;
-  white-space: nowrap;
-}
-@media (hover: hover) {
-  .ow-chip:hover { background: var(--zl-control); color: var(--zl-t1); }
-}
-.ow-chip-k { color: var(--zl-t4); }
-.ow-chip-sep { color: var(--zl-t4); }
-.ow-chip-v { font-weight: 600; color: var(--zl-t2); }
-.ow-chip:hover .ow-chip-v { color: var(--zl-t1); }
-/* On the phone the chip rides in the header capsule row, where 26px would be
-   a target nobody hits: the capsule's own 44px is the floor. */
-.ow-chip.is-compact { height: 34px; padding: 0 12px; }
 
 /* ── Phone sizing: everything the thumb reaches is 44 or more ──────────── */
 

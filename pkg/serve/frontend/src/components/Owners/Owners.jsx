@@ -697,32 +697,3 @@ export function OwnerPanelAvatar({ session }) {
 
 /* ── The chip in a child ─────────────────────────────────────────────── */
 
-// OwnerChip — in a child session, the one thing that says this conversation
-// belongs to a project that has an owner, and the door to it. It carries the
-// owner's avatar at 20px rather than a word: the same mark as the list, so the
-// chip points at something you have seen rather than naming it. It stays
-// provenance and not state in the sense that matters — no dot, no count
-// (CRITERIO §1) — but its eyes are the owner's, which is useful precisely
-// where you are when the owner cannot reach you. On the desktop it needs no
-// change to production: ChatHead already renders `headExtra` beside its
-// actions.
-export function OwnerChip({ name, owner = null, state = "idle", onClick, compact = false }) {
-  return (
-    <button
-      type="button"
-      class={`ow-chip${compact ? " is-compact" : ""}`}
-      onClick={onClick}
-      aria-label={`Owner: ${name}. Open its conversation`}
-      title={`Owner: ${name}`}
-    >
-      {/* The avatar needs the owner, which the chip only has once the roster
-          has loaded. Until then the chip still says the true thing it was
-          given — the name — rather than drawing a face for a project it has
-          not identified yet. */}
-      {owner && <OwnerAvatarFor owner={owner} state={state} size={20} />}
-      <span class="ow-chip-k">Owner</span>
-      <span class="ow-chip-sep" aria-hidden="true">·</span>
-      <span class="ow-chip-v">{name}</span>
-    </button>
-  );
-}
