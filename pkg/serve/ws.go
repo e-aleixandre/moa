@@ -504,6 +504,46 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 			projected["steer"] = steer
 		}
 	}
+	// A message an owner sent into one of its sessions names the owner, so
+	// the transcript can say who wrote it after any reconnect.
+	if source == "owner" {
+		for _, key := range []string{"owner_id", "owner_name"} {
+			if value, ok := custom[key].(string); ok {
+				projected[key] = value
+			}
+		}
+	}
+	// A batch of reports carries which sessions it is about: the block opens
+	// each of them. Stored as []map[string]string when delivered live, and as
+	// []any once read back from the transcript on disk.
+	if source == "report" {
+		switch count := custom["count"].(type) {
+		case int:
+			projected["count"] = count
+		case float64:
+			projected["count"] = int(count)
+		}
+		switch list := custom["sessions"].(type) {
+		case []map[string]string:
+			out := make([]map[string]string, 0, len(list))
+			for _, item := range list {
+				out = append(out, map[string]string{"id": item["id"], "title": item["title"], "status": item["status"]})
+			}
+			projected["sessions"] = out
+		case []any:
+			out := make([]map[string]string, 0, len(list))
+			for _, raw := range list {
+				item, _ := raw.(map[string]any)
+				id, _ := item["id"].(string)
+				title, _ := item["title"].(string)
+				status, _ := item["status"].(string)
+				if id != "" {
+					out = append(out, map[string]string{"id": id, "title": title, "status": status})
+				}
+			}
+			projected["sessions"] = out
+		}
+	}
 	return projected
 }
 

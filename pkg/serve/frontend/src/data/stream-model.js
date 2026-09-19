@@ -193,6 +193,11 @@ export function turnFinalResponse(blocks) {
   return run.map((b) => b.text || '').filter(Boolean).join('\n\n');
 }
 
+function uniqueBy(list, key) {
+  const seen = new Set();
+  return list.filter((x) => { const k = key(x); if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
 export function projectStream(session) {
   if (!session) return [];
   const messages = Array.isArray(session.messages) ? session.messages : [];
@@ -463,6 +468,9 @@ export function projectStream(session) {
           body: joinText(msg.content),
           time: msg.timestamp,
           autorun: true,
+          // One row per session: a batch can carry two reports of the same
+          // session (it stopped twice), and the row is a door, not a log.
+          sessions: uniqueBy(Array.isArray(msg.custom.sessions) ? msg.custom.sessions : [], (x) => x.id),
         });
         continue;
       }
@@ -485,6 +493,7 @@ export function projectStream(session) {
       // but it is not authored by the owner steering this child from the UI.
       // Its explicit backend provenance survives resumes and reconnects.
       if (msg.custom?.source === 'subagent_parent') wp.fromParent = true;
+      if (msg.custom?.source === 'owner') wp.fromOwner = { name: msg.custom.owner_name || 'owner' };
       // A steered user message (injected mid-run) is labeled distinctly in the
       // transcript so it reads as a course-correction, not a fresh turn. Live
       // steers carry _steer_id; messages replayed from the persisted REST

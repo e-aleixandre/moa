@@ -155,7 +155,8 @@ func TestSessionsToolSendReachesAChild(t *testing.T) {
 	}
 	pollUntil(t, 5*time.Second, "the message reaching the child", func() bool {
 		for _, msg := range child.History() {
-			if msg.Role == "user" && strings.Contains(assistantText(msg), "use the book") {
+			if msg.Role == "user" && strings.Contains(assistantText(msg), "use the book") &&
+				msg.Custom["source"] == "owner" && msg.Custom["owner_name"] == "Winerim" && msg.Custom["owner_id"] != "" {
 				return true
 			}
 		}

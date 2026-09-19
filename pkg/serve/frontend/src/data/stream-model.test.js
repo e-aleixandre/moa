@@ -65,6 +65,13 @@ test('unmarked legacy user messages retain ordinary user treatment', () => {
   expect(waypoint.fromParent).toBeUndefined();
 });
 
+test('owner messages carry their owner provenance', () => {
+  const [waypoint] = projectStream(session([user('check the branch', {
+    custom: { source: 'owner', owner_id: 'owner-1', owner_name: 'Alpha' },
+  })]));
+  expect(waypoint.fromOwner).toEqual({ name: 'Alpha' });
+});
+
 // ── 1. consecutive tool calls → one ledger of N rows ─────────────────────────
 test('consecutive tool calls without prose form a single ledger', () => {
   const s = session([
@@ -1437,6 +1444,13 @@ test('a single report carries no count in its title', () => {
     custom: { source: 'report', batch: 'rep_def', count: 1 },
   })]));
   expect(block).toMatchObject({ kind: 'event', source: 'reports', title: '' });
+});
+
+test('a report retains its structured child sessions', () => {
+  const [block] = projectStream(session([user('Report from a session of your project:', {
+    custom: { source: 'report', count: 1, sessions: [{ id: 'child-1', title: 'Hello', status: 'done' }] },
+  })]));
+  expect(block.sessions).toEqual([{ id: 'child-1', title: 'Hello', status: 'done' }]);
 });
 
 test('an event block keeps a stable id across a history prepend, so its body stays collapsed', () => {

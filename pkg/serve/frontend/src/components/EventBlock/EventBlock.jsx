@@ -16,6 +16,7 @@ import { useState } from "preact/hooks";
 import { ChevronRight, Import } from "lucide-preact";
 import { CodeBlock } from "../CodeBlock/CodeBlock.jsx";
 import "./EventBlock.css";
+import { StateDot } from "../../primitives/StateDot/StateDot.jsx";
 
 export const EVENT_BODY_PREVIEW = 1200;
 
@@ -111,7 +112,11 @@ export function EventPayload({ body, compact = false }) {
 //   time     when it arrived (ms/ISO/label)
 //   steer    it landed mid-run and the model saw it after the current tool
 //   autorun  false → it was recorded and no turn was started
-export function EventBlock({ source = "event", title = "", body = "", time, steer = false, autorun = true }) {
+function sessionState(status) {
+  return ({ done: "saved", failed: "error", needs_input: "permission" })[status] || "idle";
+}
+
+export function EventBlock({ source = "event", title = "", body = "", time, steer = false, autorun = true, sessions = [], onOpenSession }) {
   const [open, setOpen] = useState(false);
   const age = eventAge(time);
   const hasBody = !!body;
@@ -137,7 +142,16 @@ export function EventBlock({ source = "event", title = "", body = "", time, stee
         </span>
         {hasBody && <span class="evb-chev" aria-hidden="true"><ChevronRight size={14} /></span>}
       </button>
-      {open && hasBody && <EventPayloadBody body={body} />}
+      {open && hasBody && <>
+        {sessions.length > 0 && <div class="evb-sessions">
+          {sessions.map((session) => <div class="evb-session" key={session.id}>
+            <span class="evb-session-title"><StateDot state={sessionState(session.status)} size={7} />{session.title || session.id}</span>
+            <span class="evb-session-status">{session.status}</span>
+            {onOpenSession && <button type="button" class="evb-open" onClick={() => onOpenSession(session.id)}>Open</button>}
+          </div>)}
+        </div>}
+        <EventPayloadBody body={body} />
+      </>}
     </section>
   );
 }

@@ -116,6 +116,21 @@
   max-width: 100%;
 }
 
+.evb-sessions {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  background: var(--mantle);
+  border-radius: var(--radius-md);
+}
+
+.evb-session { display: flex; align-items: center; gap: var(--space-2); min-height: 32px; }
+.evb-session-title { display: inline-flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evb-session-status { color: var(--subtext0); font-family: var(--mono); font-size: var(--text-micro); }
+.evb-open { border: 0; border-radius: var(--radius-sm); background: var(--surface0); color: var(--text); min-height: 28px; padding: 0 var(--space-2); font: inherit; cursor: pointer; }
+.evb-open:hover { background: var(--surface1); }
+
 .evb-body .code.flush {
   max-width: 100%;
   max-height: 420px;

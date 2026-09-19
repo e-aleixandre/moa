@@ -346,7 +346,11 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 
 	text := reportsMessage(pending)
 	batchID := reportBatchID(pending)
-	custom := map[string]any{"source": reportSource, "batch": batchID, "count": len(pending)}
+	sessions := make([]map[string]string, 0, len(pending))
+	for _, rep := range pending {
+		sessions = append(sessions, map[string]string{"id": rep.SessionID, "title": rep.Title, "status": rep.Status})
+	}
+	custom := map[string]any{"source": reportSource, "batch": batchID, "count": len(pending), "sessions": sessions}
 
 	if err := func() error {
 		sess.lifecycle.RLock()

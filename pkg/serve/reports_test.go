@@ -84,6 +84,17 @@ func TestReportsFromSeveralSessionsArriveAsOneBatch(t *testing.T) {
 		!strings.Contains(got[0], "sess-a") || !strings.Contains(got[0], "sess-b") {
 		t.Fatalf("batch did not coalesce both reports:\n%s", got[0])
 	}
+	for _, msg := range ownerSess.History() {
+		if msg.Custom["source"] != reportSource {
+			continue
+		}
+		sessions, ok := msg.Custom["sessions"].([]map[string]string)
+		if !ok || len(sessions) != 2 || sessions[0]["id"] != "sess-a" || sessions[0]["status"] != callbackStatusDone {
+			t.Fatalf("report sessions custom = %#v", msg.Custom["sessions"])
+		}
+		return
+	}
+	t.Fatal("report custom message missing")
 }
 
 func TestBlockedSessionReportSkipsTheBatchingWindow(t *testing.T) {

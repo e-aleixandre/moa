@@ -19,6 +19,7 @@ import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { parsePreviewReference } from "../../data/util/preview-reference.js";
 import { renderMarkdown, renderMarkdownWithCaret } from "../../data/util/markdown.js";
 import { retryHistoryHydration } from "../../data/api.js";
+import { openSession } from "../../data/tile-actions.js";
 import { captureHydrationAnchor, restoreHydrationAnchor } from "../../data/stream-hydration-anchor.js";
 import { useStreamScroll } from "../../data/stream-scroll.js";
 import {
@@ -106,7 +107,7 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
     // wake-on-event: an event delivered into this conversation gets its own
     // block — it is not the owner's turn, so it is never a waypoint.
     case "event":
-      return <EventBlock source={block.source} title={block.title} body={block.body} time={block.time} steer={block.steer} autorun={block.autorun} />;
+      return <EventBlock source={block.source} title={block.title} body={block.body} time={block.time} steer={block.steer} autorun={block.autorun} sessions={block.sessions} onOpenSession={openSession} />;
     case "waypoint": {
       // A message sent from the Live Preview carries the feedback block the
       // agent needs verbatim; the transcript paints it as a reference tied to
@@ -117,9 +118,9 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
       return (
         <UserWaypoint
           time={block.time}
-          label={block.fromParent ? "From the parent agent" : block.steer ? "You — steer" : undefined}
-          tone={block.fromParent ? "parent" : undefined}
-          accent={block.fromParent ? waypointAccent : undefined}
+          label={block.fromOwner ? `From the owner · ${block.fromOwner.name}` : block.fromParent ? "From the parent agent" : block.steer ? "You — steer" : undefined}
+          tone={block.fromOwner || block.fromParent ? "parent" : undefined}
+          accent={block.fromOwner || block.fromParent ? waypointAccent : undefined}
           attachments={block.attachments}
           sessionId={sessionId}
           reference={parsed?.reference}

@@ -274,7 +274,7 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 	if _, err := m.ownerSession(own, id); err != nil {
 		return core.ErrorResult(err.Error())
 	}
-	action, msgID, _, err := m.Send(id, text, nil, "", "")
+	action, msgID, _, err := m.send(id, text, nil, "", "", ownerPromptCustom(own))
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot send to %s: %v", id, err))
 	}
@@ -306,10 +306,14 @@ func (m *Manager) ownerNewSession(own owner.Owner, params map[string]any) core.R
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot create the session: %v", err))
 	}
-	if _, _, _, err := m.Send(sess.ID, prompt, nil, "", ""); err != nil {
+	if _, _, _, err := m.send(sess.ID, prompt, nil, "", "", ownerPromptCustom(own)); err != nil {
 		return core.ErrorResult(fmt.Sprintf("session %s was created but the prompt was refused: %v", sess.ID, err))
 	}
 	return core.TextResult(fmt.Sprintf("Started session %s in %s.", sess.ID, cwd))
+}
+
+func ownerPromptCustom(own owner.Owner) map[string]any {
+	return map[string]any{"source": "owner", "owner_id": own.ID, "owner_name": own.Name}
 }
 
 // ownerAnswerAsk answers a child's ask_user. It is gated on the owner's

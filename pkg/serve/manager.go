@@ -1064,6 +1064,12 @@ func (m *Manager) resolveAuxiliaryModel(spec, sessionID, feature string) (core.M
 // send — so the caller can reconcile its optimistic view by identity even when
 // the server re-minted it.
 func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID string) (action, id string, descriptors []attachment.Descriptor, err error) {
+	return m.send(sessionID, text, atts, steerID, msgID, nil)
+}
+
+// send delivers a user message with optional transcript provenance. The public
+// Send entrypoint deliberately remains the ordinary-user path.
+func (m *Manager) send(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any) (action, id string, descriptors []attachment.Descriptor, err error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return "", "", nil, ErrNotFound
@@ -1112,7 +1118,7 @@ retryAfterTerminalRun:
 			steerID = core.NewSteerID()
 		}
 		if len(atts) == 0 {
-			if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text}); err != nil {
+			if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text, Custom: custom}); err != nil {
 				if errors.Is(err, agent.ErrSteerAdmissionClosed) && sess.runtime.WaitSettled(m.baseCtx) {
 					goto retryAfterTerminalRun
 				}
@@ -1132,7 +1138,7 @@ retryAfterTerminalRun:
 		if text != "" {
 			content = append(content, core.TextContent(text))
 		}
-		if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text, Content: content}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text, Content: content, Custom: custom}); err != nil {
 			// The steer was rejected (e.g. full queue) — roll back any files
 			// written for it so they don't orphan and count against the quota.
 			for _, p := range writtenFiles {
@@ -1180,7 +1186,7 @@ retryAfterTerminalRun:
 	if len(atts) == 0 {
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{
 			Text: text, MsgID: msgID, AcceptedMsgID: &accepted,
-			SteerID: steerID, AcceptedSteerID: &acceptedSteer,
+			SteerID: steerID, AcceptedSteerID: &acceptedSteer, Custom: custom,
 		}); err != nil {
 			if errors.Is(err, agent.ErrSteerAdmissionClosed) && sess.runtime.WaitSettled(m.baseCtx) {
 				goto retryAfterTerminalRun
