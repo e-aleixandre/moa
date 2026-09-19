@@ -36,7 +36,7 @@ if (strip) {
 
 // One contact sheet per state: the same state in all three, side by side.
 await open(`http://127.0.0.1:${PORT}/?view=tally2&shots=state`);
-for (const s of ["working", "mixed", "stopped", "child", "crowd"]) {
+for (const s of ["working", "mixed", "stopped", "child", "crowd", "his"]) {
   const el = await page.$(`[data-sheet="${s}"]`);
   if (!el) { console.log("MISS sheet", s); continue; }
   await el.screenshot({ path: `/tmp/tally2-sheet-${s}.png` });
@@ -58,6 +58,45 @@ for (const d of ["p1", "p2", "p3"]) {
   if (desk) {
     await desk.screenshot({ path: `/tmp/tally2-desk-${d}.png` });
     console.log("saved", `/tmp/tally2-desk-${d}.png`);
+  }
+}
+
+// The owner's frame, open: four subagents and one command, with the chip in
+// shot. Measured, not eyeballed: whether the COMMANDS section is visible at
+// all before a scroll, and how much of the list is below the fold.
+for (const d of ["p1", "p2", "p3"]) {
+  await open(`http://127.0.0.1:${PORT}/?view=tally2&dir=${d}&state=his`);
+  if (d !== "p2") {
+    const tally = await page.$(".tb-phone .zl-live-tally");
+    if (tally) await tally.click();
+  }
+  await page.waitForTimeout(500);
+  const m = await page.evaluate(() => {
+    const panel = document.querySelector(".tb-phone .zl-live-panel");
+    if (!panel) return null;
+    const groups = [...panel.querySelectorAll(".zl-live-grp")].map((g) => {
+      const head = g.querySelector(".zl-group");
+      const r = head.getBoundingClientRect();
+      const p = panel.getBoundingClientRect();
+      return {
+        title: head.textContent.trim(),
+        visible: r.top >= p.top && r.bottom <= p.bottom,
+      };
+    });
+    return {
+      scrollable: panel.scrollHeight > panel.clientHeight + 1,
+      hidden: panel.scrollHeight - panel.clientHeight,
+      clientHeight: panel.clientHeight,
+      scrollHeight: panel.scrollHeight,
+      groups,
+      chip: document.querySelector(".tb-phone .zl-live-n")?.textContent || null,
+    };
+  });
+  console.log("FOLD", d, JSON.stringify(m));
+  const el = await page.$(`[data-tally="${d}-his"]`);
+  if (el) {
+    await el.screenshot({ path: `/tmp/tally2-his-${d}.png` });
+    console.log("saved", `/tmp/tally2-his-${d}.png`);
   }
 }
 

@@ -64,6 +64,14 @@ const DONE_CHILD = {
 
 const FG = { text: "Running go vet ./...", ago: 37 };
 
+// The owner's own frame: four subagents and one command, which is the shape
+// that produced "SUBAGENTS 4 and the tally says five". The number is right
+// (liveTrayAgents sums live subagents AND live bash jobs,
+// data/stream-model.js:708-735); what he could not see was the COMMANDS
+// section, which the panel's 208px cap pushes below the fold. Kept as a state
+// so the three proposals can be judged in it rather than discussed.
+const FABLE = { id: "fable", kind: "subagent", name: "fable", accent: "peach", task: "the unfold", action: "Drafting the motion", ago: 51 };
+
 export const T2_STATES = [
   {
     id: "working", n: 1, label: "Turn running",
@@ -89,6 +97,11 @@ export const T2_STATES = [
     id: "crowd", n: 5, label: "Turn stopped · 2 subagents + 3 commands",
     sub: "the phrase at its longest, on a 390 phone",
     fg: null, live: [IT.terra, IT.sol, IT.serve, IT.test, IT.build], done: [],
+  },
+  {
+    id: "his", n: 6, label: "Turn stopped · 4 subagents + 1 command",
+    sub: "THE OWNER'S FRAME · the command sits below the panel's fold",
+    fg: null, live: [IT.terra, IT.luna, IT.sol, FABLE, IT.test], done: [],
   },
 ];
 
