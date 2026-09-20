@@ -184,7 +184,13 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("PUT /api/preview/target", handlePreviewTarget(o.preview))
 	mux.HandleFunc("GET /api/usage", handleUsage(manager))
 	mux.HandleFunc("POST /api/transcribe", handleTranscribe(manager))
-	mux.HandleFunc("POST /api/voice/live/session", handleVoiceLiveSession(manager, o.realtimeKey, o.realtimeHTTP))
+	// One registry per server: it is what lets the server close a Live session
+	// the browser never closed, so it must be shared by the route that creates
+	// sessions and the routes that keep or end them.
+	voiceCalls := newVoiceLiveRegistry(o.realtimeKey, o.realtimeHTTP)
+	mux.HandleFunc("POST /api/voice/live/session", handleVoiceLiveSession(manager, o.realtimeKey, o.realtimeHTTP, voiceCalls))
+	mux.HandleFunc("POST /api/voice/live/close", handleVoiceLiveClose(voiceCalls))
+	mux.HandleFunc("POST /api/voice/live/heartbeat", handleVoiceLiveHeartbeat(voiceCalls))
 	voiceAskPost, voiceAskGet := voiceLiveAskHandlers(manager)
 	mux.HandleFunc("POST /api/voice/live/ask", voiceAskPost)
 	mux.HandleFunc("GET /api/voice/live/ask", voiceAskGet)
@@ -267,7 +273,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 func pulseNoStoreMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim", "/api/pulse/device-session", "/api/voice/live/session", "/api/voice/live/ask":
+		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim", "/api/pulse/device-session", "/api/voice/live/session", "/api/voice/live/ask", "/api/voice/live/close", "/api/voice/live/heartbeat":
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)

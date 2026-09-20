@@ -29,6 +29,16 @@ export const CLOSE_BACKSTOP_MS = 15_000;
 export const SESSION_ERROR_GRACE_MS = 10_000;
 // "disconnected" is recoverable in WebRTC; "failed"/"closed" are not.
 export const DISCONNECT_GRACE_MS = 10_000;
+// How often the server is told this call still has somebody on it. The server
+// closes a call it stops hearing from, because a locked screen, a closed tab
+// and a dropped network all leave the same silence and none of them sends
+// session.close.
+export const HEARTBEAT_MS = 20_000;
+// When the owner hangs up before the delegate wrote the minutes, the delegate
+// is asked for them and gets this long to answer. It is billed voice time and
+// the owner has already said he is done, so it is short; if nothing arrives,
+// the transcript rescue happens exactly as before.
+export const MINUTES_ON_HANGUP_MS = 8_000;
 // How long the call tolerates a microphone that is not demonstrably live
 // (page hidden, track muted or ended) before hanging up by itself. A delegate
 // talking to nobody still burns voice seconds and still asks the session
@@ -43,6 +53,32 @@ export const THINKING_TOKEN_BUDGET = 400;
 const BYTES_PER_TOKEN = 2;
 
 const REQUEST_HEADERS = { 'Content-Type': 'application/json', 'X-Moa-Request': '1' };
+
+// What the owner reads when a call will not start. Every sentence names the
+// problem and says what to do about it; none of them is the server's response
+// body. A raw `{"error":"live session rate limit exceeded"}` in a toast is not
+// an error message, it is a leak of the wire format.
+const FAILURE_COPY = {
+  rate_limited: 'Could not start the call: too many voice sessions open. Wait a few seconds and try again.',
+  upstream_busy: 'Could not start the call: the voice provider has too many sessions open for this project. Wait a few seconds and try again.',
+  no_api_key: 'Voice calls need an OpenAI API key on this server. Add one to its configuration, then try again.',
+  upstream_unreachable: 'Could not reach the voice provider. Check the server\u2019s connection and try again.',
+  upstream_refused: 'The voice provider refused to start the call. The reason is in the server log.',
+  upstream_unreadable: 'The voice provider answered something this server could not use. Try again; the response is in the server log.',
+  conversation_unavailable: 'This conversation could not be prepared for a call. Reopen it and try again.',
+  unknown_session: 'This conversation is no longer open on the server. Reload the page and try again.',
+  device_revoked: 'This device is no longer paired. Pair it again to make calls.',
+  bad_request: 'The server rejected the call request. Reload the page and try again.',
+};
+
+export function callFailureMessage(status, cause) {
+  const known = FAILURE_COPY[cause];
+  if (known) return known;
+  if (status === 429) return FAILURE_COPY.rate_limited;
+  if (status === 403) return FAILURE_COPY.device_revoked;
+  if (status >= 500) return 'The voice service is unavailable right now. Try again in a moment.';
+  return 'Could not start the call. Reload the page and try again.';
+}
 
 export const MIC_LIVE = 'live';
 export const MIC_NOT_LIVE = 'not-live';
@@ -152,6 +188,8 @@ export class VoiceLiveController {
     this.askTimers = new Set();
     this.micGraceTimer = null;
     this.closeTimer = null;
+    this.minutesTimer = null;
+    this.heartbeatTimer = null;
     this.sessionErrorTimer = null;
     this.disconnectTimer = null;
     this.onVisibility = null;
@@ -185,6 +223,7 @@ export class VoiceLiveController {
     this.startedWaiters = [];
     this.closedWaiters = [];
     this.channelOpenWaiters = [];
+    this.minutesWaiters = [];
     this.connectAborts = [];
   }
 
@@ -327,6 +366,9 @@ export class VoiceLiveController {
     this.ownerId = answer.owner_id || '';
     this.liveSessionId = answer.live_session_id || '';
     this.pricing = answer.pricing || null;
+    // The server now has a session to close on our behalf; from here it must
+    // keep hearing that somebody is on the call.
+    this.startHeartbeat();
     await pc.setRemoteDescription({ type: 'answer', sdp: answer.sdp });
 
     if (this.cancelled(epoch)) {
@@ -456,14 +498,69 @@ export class VoiceLiveController {
       body: JSON.stringify({ session_id: this.sessionId, sdp, note: this.note }),
     });
     if (!response.ok) {
-      const detail = (await response.text?.())?.trim?.() || '';
-      const error = new Error(detail || `HTTP ${response.status}`);
-      error.voiceLiveMessage = response.status === 503
-        ? (detail || 'Voice calls need an OpenAI API key on the server.')
-        : `Could not start the call: ${detail || `HTTP ${response.status}`}`;
+      // The body is read for its machine cause only. What the owner sees is
+      // our sentence for that cause, never the server's wire format.
+      let cause = '';
+      try {
+        cause = (await response.json?.())?.cause || '';
+      } catch { /* an unparseable body just leaves the status to speak */ }
+      const error = new Error(`voice live session: HTTP ${response.status}${cause ? ` (${cause})` : ''}`);
+      error.voiceLiveMessage = callFailureMessage(response.status, cause);
       throw error;
     }
     return response.json();
+  }
+
+  // --- server-side session lifetime ---------------------------------------
+
+  // The heartbeat is what tells the server this call is still being had. It
+  // stops on the first 404: a call the server no longer tracks cannot be kept
+  // alive, and pinging it forever would be noise.
+  startHeartbeat() {
+    if (!this.liveSessionId || this.heartbeatTimer !== null) return;
+    const beat = async () => {
+      this.heartbeatTimer = null;
+      if (!this.liveSessionId || this.phase === 'idle' || this.phase === 'ended') return;
+      let stop = false;
+      try {
+        const response = await this.callEndpoint('/api/voice/live/heartbeat');
+        stop = response?.status === 404;
+      } catch { /* a transient failure is just a missed beat */ }
+      if (stop || this.phase === 'idle' || this.phase === 'ended') return;
+      schedule();
+    };
+    const schedule = () => {
+      if (this.heartbeatTimer !== null) return;
+      this.heartbeatTimer = this.setTimeout(() => { void beat(); }, HEARTBEAT_MS);
+    };
+    schedule();
+  }
+
+  stopHeartbeat() {
+    if (this.heartbeatTimer === null) return;
+    this.clearTimeout(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+  }
+
+  // Told to the server as the call ends. The graceful close over the data
+  // channel stays the primary path; this is the one that also works when the
+  // channel is already dead, and closing twice is not an error.
+  async releaseServerSession(liveSessionId) {
+    if (!liveSessionId) return;
+    try {
+      await this.callEndpoint('/api/voice/live/close', liveSessionId);
+    } catch { /* the server's sweeper closes what this request could not */ }
+  }
+
+  callEndpoint(path, liveSessionId = this.liveSessionId) {
+    return this.fetch(path, {
+      method: 'POST',
+      headers: REQUEST_HEADERS,
+      // keepalive so the request survives the page going away, which is one of
+      // the cases this whole mechanism exists for.
+      keepalive: true,
+      body: JSON.stringify({ session_id: this.sessionId, live_session_id: liveSessionId }),
+    });
   }
 
   // The server created a session for an attempt we are abandoning. It bills
@@ -797,7 +894,11 @@ export class VoiceLiveController {
     // Only minutes that actually say something count as minutes. An empty
     // end_call must never suppress the transcript rescue: that would throw
     // away the entire call on the delegate's last mistake.
-    if (formatMinutes(minutes).trim()) this.minutes = minutes;
+    if (!this.minutes && formatMinutes(minutes).trim()) {
+      this.minutes = minutes;
+      // A hangup may be waiting for exactly this.
+      for (const resolve of this.minutesWaiters.splice(0)) resolve();
+    }
     await this.close(this.minutes ? 'completed' : 'no-minutes');
   }
 
@@ -899,6 +1000,17 @@ export class VoiceLiveController {
       this.finish(reason);
       return Promise.resolve();
     }
+    if (reason === 'hangup' && !this.minutes) {
+      // The owner hung up first. Which of the two ends the call must not
+      // decide whether there are minutes at all.
+      void this.closeAfterMinutes(reason);
+      return this.whenEnded();
+    }
+    this.sendClose(reason);
+    return this.whenEnded();
+  }
+
+  sendClose(reason) {
     this.send({ type: 'session.close' });
     this.closeTimer = this.setTimeout(() => {
       this.closeTimer = null;
@@ -906,7 +1018,49 @@ export class VoiceLiveController {
       // but the microphone cannot be held hostage by a silent session.
       this.finish(reason);
     }, CLOSE_BACKSTOP_MS);
-    return this.whenEnded();
+  }
+
+  // Asks the delegate to write the minutes now, waits a bounded moment, then
+  // closes either way. The instruction is application-authored context, not
+  // something to say aloud: the owner has already left the conversation.
+  async closeAfterMinutes(reason) {
+    this.send({
+      type: 'session.instructions.append',
+      delegation_id: null,
+      content: 'The owner has just hung up. Do not speak. Call end_call now with the minutes of this call, written in the language of the call.',
+    });
+    await this.waitForMinutes();
+    if (this.phase === 'ended' || this.phase === 'idle') return;
+    if (this.minutes) {
+      this.endedReason = 'completed';
+      this.emit();
+    }
+    const ending = this.minutes ? 'completed' : reason;
+    if (this.transportFailed || !this.channelUsable()) {
+      this.finish(ending);
+      return;
+    }
+    this.sendClose(ending);
+  }
+
+  waitForMinutes() {
+    if (this.minutes) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        if (this.minutesTimer !== null) {
+          this.clearTimeout(this.minutesTimer);
+          this.minutesTimer = null;
+        }
+        resolve();
+      };
+      this.minutesTimer = this.setTimeout(() => {
+        this.minutesTimer = null;
+        const index = this.minutesWaiters.indexOf(done);
+        if (index >= 0) this.minutesWaiters.splice(index, 1);
+        resolve();
+      }, MINUTES_ON_HANGUP_MS);
+      this.minutesWaiters.push(done);
+    });
   }
 
   channelUsable() {
@@ -935,9 +1089,13 @@ export class VoiceLiveController {
       usageConfirmed: this.sessionClosed,
     };
     const callbacks = this.callbacks;
+    const liveSessionId = this.liveSessionId;
     this.teardown();
     this.emit();
     for (const resolve of this.endWaiters.splice(0)) resolve();
+    // Last: the server is told the call is over, so it stops holding a
+    // session that nothing is using.
+    void this.releaseServerSession(liveSessionId);
     if (payload) callbacks.onResult?.(payload, meta);
   }
 
@@ -956,13 +1114,15 @@ export class VoiceLiveController {
   teardown() {
     this.clearMicGrace();
     this.clearSessionErrorWatchdog();
+    this.stopHeartbeat();
     for (const timer of this.askTimers) this.clearTimeout(timer);
     this.askTimers.clear();
-    for (const timer of [this.closeTimer, this.disconnectTimer]) {
+    for (const timer of [this.closeTimer, this.disconnectTimer, this.minutesTimer]) {
       if (timer !== null) this.clearTimeout(timer);
     }
     this.closeTimer = null;
     this.disconnectTimer = null;
+    this.minutesTimer = null;
     if (this.onVisibility && this.documentRef?.removeEventListener) {
       this.documentRef.removeEventListener('visibilitychange', this.onVisibility);
     }
@@ -970,6 +1130,7 @@ export class VoiceLiveController {
     this.startedWaiters = [];
     this.closedWaiters = [];
     this.channelOpenWaiters = [];
+    for (const resolve of this.minutesWaiters.splice(0)) resolve();
     this.connectAborts = [];
     for (const track of this.stream?.getTracks?.() || []) track.stop?.();
     this.stream = null;

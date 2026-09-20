@@ -24,6 +24,10 @@ function phaseCopy(phase, endedReason) {
   if (phase === 'live') return 'On a call';
   if (phase === 'closing') {
     if (endedReason === 'completed') return 'Writing the minutes…';
+    // The owner hung up before the delegate wrote anything, so the call is
+    // spending a few more seconds asking for the minutes. Saying so is the
+    // difference between a wait that makes sense and one that looks stuck.
+    if (endedReason === 'hangup') return 'Ending: asking for the minutes…';
     if (endedReason === 'mic-lost') return 'Ending: the microphone was lost…';
     if (endedReason === 'session-error') return 'Ending: the session failed…';
     return 'Ending the call…';

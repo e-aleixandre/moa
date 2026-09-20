@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"strconv"
@@ -19,7 +20,51 @@ const (
 	voiceLiveMaxInFlight   = 2
 	voiceLiveGlobalRate    = 8
 	voiceLivePrincipalRate = 2
+	// How much of an upstream error body reaches the log. Enough to carry
+	// OpenAI's `error.message` and `code`, short enough that a verbose refusal
+	// cannot flood the journal.
+	voiceLiveLogBodyLimit = 512
 )
+
+// The causes a failed call can have. They travel in the JSON body next to the
+// human line so the client can say something actionable instead of printing
+// the body: a server without a key and a server that is rate limiting are
+// different problems with different next actions, and both used to arrive as
+// one opaque 503.
+const (
+	voiceLiveCauseRateLimited   = "rate_limited"
+	voiceLiveCauseNoAPIKey      = "no_api_key"
+	voiceLiveCauseUnreachable   = "upstream_unreachable"
+	voiceLiveCauseRefused       = "upstream_refused"
+	voiceLiveCauseUpstreamBusy  = "upstream_busy"
+	voiceLiveCauseUnreadable    = "upstream_unreadable"
+	voiceLiveCauseBadRequest    = "bad_request"
+	voiceLiveCauseUnknownSess   = "unknown_session"
+	voiceLiveCauseConversation  = "conversation_unavailable"
+	voiceLiveCauseDeviceRevoked = "device_revoked"
+	voiceLiveCauseWrongCaller   = "wrong_caller"
+	voiceLiveCauseUnknownCall   = "unknown_call"
+)
+
+// voiceLiveError is the one shape every failure of this feature takes. The
+// cause is the contract with the client; the message exists for anything that
+// reads the body raw (curl, logs), never as UI copy.
+func voiceLiveError(w http.ResponseWriter, status int, cause, message string) {
+	writeJSON(w, status, map[string]string{"error": message, "cause": cause})
+}
+
+// voiceLiveLogSnippet keeps an upstream body loggable: bounded, on a single
+// line. Only the provider's response is ever passed here — never the request,
+// which carries the API key in its Authorization header.
+func voiceLiveLogSnippet(body []byte, secrets ...string) string {
+	text := string(body)
+	for _, secret := range secrets {
+		if secret != "" {
+			text = strings.ReplaceAll(text, secret, "[redacted]")
+		}
+	}
+	return strings.Join(strings.Fields(truncateUTF8(text, voiceLiveLogBodyLimit)), " ")
+}
 
 const (
 	voiceLiveModel        = "gpt-live-1"
@@ -49,13 +94,20 @@ func voiceLivePricing() map[string]any {
 	return pricing
 }
 
-func handleVoiceLiveSession(mgr *Manager, keyFn RealtimeAPIKeyFunc, client *http.Client) http.HandlerFunc {
-	return handleVoiceLiveSessionWithAdmission(mgr, keyFn, client, newVoiceLiveAdmission())
+func handleVoiceLiveSession(mgr *Manager, keyFn RealtimeAPIKeyFunc, client *http.Client, calls *voiceLiveRegistry) http.HandlerFunc {
+	return handleVoiceLiveSessionWithAdmission(mgr, keyFn, client, calls, newVoiceLiveAdmission())
 }
 
 // voiceLiveAdmission limits starts rather than Live connections: the upstream
 // session continues billing after this HTTP exchange has returned, so releasing
 // the request slot cannot be treated as releasing the cost of a call.
+//
+// Only calls that ESTABLISH spend a principal's allowance. A failed attempt
+// costs nothing upstream, and charging for it punishes exactly the behaviour a
+// human has when something does not start — retrying — by locking him out of
+// the feature. The in-flight cap and the global rate still count attempts:
+// those two exist against a runaway client loop, which fails in a tight cycle
+// and would otherwise be unbounded.
 type voiceLiveAdmission struct {
 	mu        sync.Mutex
 	now       func() time.Time
@@ -74,19 +126,41 @@ func (a *voiceLiveAdmission) acquire(principal string) (int, bool) {
 	now := a.now().UTC()
 	cutoff := now.Add(-time.Minute)
 	a.global = pruneTimes(a.global, cutoff)
-	a.principal[principal] = pruneTimes(a.principal[principal], cutoff)
+	a.prune(cutoff)
 	if a.active >= voiceLiveMaxInFlight || len(a.global) >= voiceLiveGlobalRate || len(a.principal[principal]) >= voiceLivePrincipalRate {
 		return retryAfter(now, append(a.global, a.principal[principal]...)), false
 	}
 	a.active++
 	a.global = append(a.global, now)
-	a.principal[principal] = append(a.principal[principal], now)
 	return 0, true
+}
+
+// established records the only thing the per-principal allowance counts: a
+// session that exists upstream and is billing.
+func (a *voiceLiveAdmission) established(principal string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := a.now().UTC()
+	a.prune(now.Add(-time.Minute))
+	a.principal[principal] = append(a.principal[principal], now)
+}
+
+// prune drops expired timestamps and the principals left with none, so a
+// long-lived server does not keep a map entry per identity ever seen.
+func (a *voiceLiveAdmission) prune(cutoff time.Time) {
+	for id, times := range a.principal {
+		times = pruneTimes(times, cutoff)
+		if len(times) == 0 {
+			delete(a.principal, id)
+			continue
+		}
+		a.principal[id] = times
+	}
 }
 
 func (a *voiceLiveAdmission) release() { a.mu.Lock(); a.active--; a.mu.Unlock() }
 
-func handleVoiceLiveSessionWithAdmission(mgr *Manager, keyFn RealtimeAPIKeyFunc, client *http.Client, admission *voiceLiveAdmission) http.HandlerFunc {
+func handleVoiceLiveSessionWithAdmission(mgr *Manager, keyFn RealtimeAPIKeyFunc, client *http.Client, calls *voiceLiveRegistry, admission *voiceLiveAdmission) http.HandlerFunc {
 	if client == nil {
 		client = &http.Client{Timeout: 20 * time.Second}
 	}
@@ -99,7 +173,7 @@ func handleVoiceLiveSessionWithAdmission(mgr *Manager, keyFn RealtimeAPIKeyFunc,
 		}
 		if retry, ok := admission.acquire(principal); !ok {
 			w.Header().Set("Retry-After", strconv.Itoa(retry))
-			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "live session rate limit exceeded"})
+			voiceLiveError(w, http.StatusTooManyRequests, voiceLiveCauseRateLimited, "too many voice sessions started")
 			return
 		}
 		defer admission.release()
@@ -112,16 +186,16 @@ func handleVoiceLiveSessionWithAdmission(mgr *Manager, keyFn RealtimeAPIKeyFunc,
 			return
 		}
 		if strings.TrimSpace(body.SDP) == "" || len(body.SDP) > voiceLiveSDPLimit {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid SDP"})
+			voiceLiveError(w, http.StatusBadRequest, voiceLiveCauseBadRequest, "invalid SDP")
 			return
 		}
 		if len(body.Note) > voiceLiveNoteLimit {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "note too large"})
+			voiceLiveError(w, http.StatusBadRequest, voiceLiveCauseBadRequest, "note too large")
 			return
 		}
 		sess, ok := mgr.Get(body.SessionID)
 		if !ok {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown session"})
+			voiceLiveError(w, http.StatusBadRequest, voiceLiveCauseUnknownSess, "unknown session")
 			return
 		}
 		key, keyOK := "", false
@@ -129,12 +203,16 @@ func handleVoiceLiveSessionWithAdmission(mgr *Manager, keyFn RealtimeAPIKeyFunc,
 			key, keyOK = keyFn()
 		}
 		if !keyOK || strings.TrimSpace(key) == "" {
-			realtimeUnavailable(w)
+			// Distinct from every upstream failure: nothing is wrong with the
+			// provider, the server was simply never given a key.
+			slog.Warn("voice live: no OpenAI API key configured; the call cannot be started")
+			voiceLiveError(w, http.StatusServiceUnavailable, voiceLiveCauseNoAPIKey, "no OpenAI API key is configured")
 			return
 		}
 		brief, err := buildVoiceLiveBrief(mgr, sess, body.Note)
 		if err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "conversation unavailable"})
+			slog.Warn("voice live: the conversation brief could not be built", "session", body.SessionID, "error", err)
+			voiceLiveError(w, http.StatusServiceUnavailable, voiceLiveCauseConversation, "conversation unavailable")
 			return
 		}
 		payload := map[string]any{"session": map[string]any{
@@ -150,7 +228,8 @@ func handleVoiceLiveSessionWithAdmission(mgr *Manager, keyFn RealtimeAPIKeyFunc,
 		defer cancel()
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/live/sessions", bytes.NewReader(encoded))
 		if err != nil {
-			http.Error(w, "could not create live session", http.StatusServiceUnavailable)
+			slog.Warn("voice live: the upstream request could not be built", "error", err)
+			voiceLiveError(w, http.StatusServiceUnavailable, voiceLiveCauseUnreachable, "could not create live session")
 			return
 		}
 		req.Header.Set("Authorization", "Bearer "+key)
@@ -158,22 +237,38 @@ func handleVoiceLiveSessionWithAdmission(mgr *Manager, keyFn RealtimeAPIKeyFunc,
 		if identity.Kind == "device" {
 			store, ok := requestDeviceStore(r)
 			if !ok || !activeRealtimeDevice(store, identity.DeviceID) {
-				http.Error(w, "device credential is no longer active", http.StatusForbidden)
+				voiceLiveError(w, http.StatusForbidden, voiceLiveCauseDeviceRevoked, "device credential is no longer active")
 				return
 			}
 		}
 		resp, err := client.Do(req)
-		if err != nil || resp.StatusCode < 200 || resp.StatusCode > 299 {
-			if resp != nil {
-				resp.Body.Close()
-			}
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "live session unavailable"})
+		if err != nil {
+			// The error carries the URL and the transport failure, never the
+			// request headers, so the key cannot travel into the log with it.
+			slog.Warn("voice live: the provider could not be reached", "error", err)
+			voiceLiveError(w, http.StatusBadGateway, voiceLiveCauseUnreachable, "the voice provider could not be reached")
 			return
 		}
 		defer resp.Body.Close() //nolint:errcheck // response body is read-only
 		answer, err := io.ReadAll(io.LimitReader(resp.Body, voiceLiveResponseLimit+1))
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			// The status and the provider's own message are the whole point of
+			// this log line: without them a refusal (bad key, quota, concurrent
+			// session cap) is indistinguishable from a network failure.
+			slog.Warn("voice live: the provider refused to start the session", "status", resp.StatusCode, "body", voiceLiveLogSnippet(answer, key))
+			if resp.StatusCode == http.StatusTooManyRequests {
+				if retry := resp.Header.Get("Retry-After"); retry != "" {
+					w.Header().Set("Retry-After", retry)
+				}
+				voiceLiveError(w, http.StatusTooManyRequests, voiceLiveCauseUpstreamBusy, "the voice provider rate limited this project")
+				return
+			}
+			voiceLiveError(w, http.StatusBadGateway, voiceLiveCauseRefused, "the voice provider refused to start the call")
+			return
+		}
 		if err != nil || len(answer) > voiceLiveResponseLimit {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "live session unavailable"})
+			slog.Warn("voice live: the provider response could not be read", "status", resp.StatusCode, "bytes", len(answer), "error", err)
+			voiceLiveError(w, http.StatusBadGateway, voiceLiveCauseUnreadable, "the voice provider sent a response this server could not read")
 			return
 		}
 		var result struct {
@@ -185,9 +280,22 @@ func handleVoiceLiveSessionWithAdmission(mgr *Manager, keyFn RealtimeAPIKeyFunc,
 			} `json:"transport"`
 		}
 		if json.Unmarshal(answer, &result) != nil || result.Session.ID == "" || result.Transport.SDP == "" {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "live session unavailable"})
+			// A 2xx with an id has already created a billable session even if its
+			// answer cannot be used. Keep it long enough for hangupNow to retry
+			// a failed close instead of losing the only id that can end it.
+			if result.Session.ID != "" {
+				calls.track(result.Session.ID, body.SessionID, principal)
+				calls.hangupNow(result.Session.ID)
+			}
+			slog.Warn("voice live: the provider response was not a usable session", "status", resp.StatusCode, "body", voiceLiveLogSnippet(answer, key))
+			voiceLiveError(w, http.StatusBadGateway, voiceLiveCauseUnreadable, "the voice provider sent a response this server could not read")
 			return
 		}
+		// From here the session EXISTS upstream and bills until somebody closes
+		// it, so it is remembered before anything else can fail, and only now
+		// does it spend the caller's allowance.
+		calls.track(result.Session.ID, body.SessionID, principal)
+		admission.established(principal)
 		deliver := func() error {
 			writeJSON(w, http.StatusOK, map[string]any{"live_session_id": result.Session.ID, "sdp": result.Transport.SDP, "owner_id": brief.OwnerID, "brief_messages": len(brief.Input), "pricing": voiceLivePricing()})
 			return nil
@@ -195,7 +303,10 @@ func handleVoiceLiveSessionWithAdmission(mgr *Manager, keyFn RealtimeAPIKeyFunc,
 		if identity.Kind == "device" {
 			store, ok := requestDeviceStore(r)
 			if !ok || store.withActiveDevice(identity.DeviceID, deliver) != nil {
-				http.Error(w, "device credential is no longer active", http.StatusForbidden)
+				// The session was already created: the browser will never learn
+				// its id, so this server is the only one that can end it.
+				calls.hangupNow(result.Session.ID)
+				voiceLiveError(w, http.StatusForbidden, voiceLiveCauseDeviceRevoked, "device credential is no longer active")
 			}
 			return
 		}
@@ -208,7 +319,7 @@ func decodeVoiceLiveJSON(w http.ResponseWriter, r *http.Request, target any) boo
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		voiceLiveError(w, http.StatusBadRequest, voiceLiveCauseBadRequest, "invalid JSON")
 		return false
 	}
 	return true

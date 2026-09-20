@@ -1,8 +1,9 @@
 import { test, expect } from 'bun:test';
 import {
-  VoiceLiveController, appendCallResult, callSpendNotice, truncateForTokens,
+  VoiceLiveController, appendCallResult, callSpendNotice, truncateForTokens, callFailureMessage,
   MAX_QUESTIONS, ASK_POLL_MS, ASK_TIMEOUT_MS, MIC_GRACE_MS, ICE_TIMEOUT_MS,
   CLOSE_BACKSTOP_MS, SESSION_ERROR_GRACE_MS, THINKING_TOKEN_BUDGET,
+  HEARTBEAT_MS, MINUTES_ON_HANGUP_MS,
   MIC_LIVE, MIC_NOT_LIVE, MIC_UNKNOWN,
 } from './voice-live.js';
 
@@ -154,6 +155,10 @@ function setup(overrides = {}) {
         backend_output_usd_per_mtok: 12,
       },
     }),
+    // The server-side lifetime of the call: a heartbeat while it runs and a
+    // close when it ends. Present by default because every call makes them.
+    '/api/voice/live/heartbeat': () => ({ ok: true, status: 204, json: async () => ({}), text: async () => '' }),
+    '/api/voice/live/close': () => ({ ok: true, status: 204, json: async () => ({}), text: async () => '' }),
     ...overrides.routes,
   };
   const controller = new VoiceLiveController({
@@ -523,6 +528,8 @@ test('a hangup keeps the call alive until session.closed, then delivers the fina
   channel.deliver({ type: 'session.output_transcript.delta', delta: 'Let me wrap up. ' });
   const hangup = fixture.controller.hangup();
   await flush();
+  // The delegate is asked for the minutes first; the close follows.
+  await fixture.clock.advance(MINUTES_ON_HANGUP_MS);
   expect(channel.typesSent()).toContain('session.close');
   expect(fixture.results).toHaveLength(0);
   expect(fixture.track.readyState).toBe('live'); // the microphone is not cut early
@@ -545,6 +552,7 @@ test('a session that never confirms its close releases the microphone at the bac
   channel.deliver({ type: 'session.output_transcript.delta', delta: 'Hello?' });
   const hangup = fixture.controller.hangup();
   await flush();
+  await fixture.clock.advance(MINUTES_ON_HANGUP_MS);
   await fixture.clock.advance(CLOSE_BACKSTOP_MS);
   await hangup;
 
@@ -725,17 +733,174 @@ test('dispose closes the session gracefully instead of abandoning it mid-call', 
   expect(fixture.results).toHaveLength(0);
 });
 
-test('a server without an API key surfaces as a message, not as a dead button', async () => {
+// Point 3: the owner must never read the wire format. Each cause gets its own
+// sentence, and every one of them says what to do next.
+test('a server without an API key says so and says what to do, without echoing the body', async () => {
   const fixture = setup({
     routes: {
-      '/api/voice/live/session': () => ({ ok: false, status: 503, text: async () => 'voice is unavailable: no OpenAI API key', json: async () => ({}) }),
+      '/api/voice/live/session': () => jsonResponse({ error: 'no OpenAI API key is configured', cause: 'no_api_key' }, 503),
     },
   });
   const ok = await fixture.controller.start();
   expect(ok).toBe(false);
-  expect(fixture.errors[0]).toContain('no OpenAI API key');
+  expect(fixture.errors[0]).toBe('Voice calls need an OpenAI API key on this server. Add one to its configuration, then try again.');
+  expect(fixture.errors[0]).not.toContain('{');
+  expect(fixture.errors[0]).not.toContain('cause');
   expect(fixture.controller.state().phase).toBe('ended');
   expect(fixture.track.readyState).toBe('ended');
+});
+
+test('a rate limited start reads as an instruction, not as JSON', async () => {
+  const fixture = setup({
+    routes: {
+      '/api/voice/live/session': () => jsonResponse({ error: 'too many voice sessions started', cause: 'rate_limited' }, 429),
+    },
+  });
+  expect(await fixture.controller.start()).toBe(false);
+  expect(fixture.errors[0]).toBe('Could not start the call: too many voice sessions open. Wait a few seconds and try again.');
+});
+
+test('every documented cause has its own actionable sentence, and an unknown one still gets one', () => {
+  const causes = [
+    'rate_limited', 'upstream_busy', 'no_api_key', 'upstream_unreachable', 'upstream_refused',
+    'upstream_unreadable', 'conversation_unavailable', 'unknown_session', 'device_revoked', 'bad_request',
+  ];
+  const messages = causes.map((cause) => callFailureMessage(503, cause));
+  expect(new Set(messages).size).toBe(causes.length);
+  for (const message of messages) {
+    expect(message).not.toContain('{');
+    expect(message.length).toBeGreaterThan(20);
+  }
+  // A cause this client does not know about must still produce a sentence,
+  // never an empty toast or a status code on its own.
+  expect(callFailureMessage(503, 'something_new')).toBe('The voice service is unavailable right now. Try again in a moment.');
+  expect(callFailureMessage(429, '')).toContain('Wait a few seconds');
+  expect(callFailureMessage(418, '')).toBe('Could not start the call. Reload the page and try again.');
+});
+
+// Point 4: the server keeps the session id, so it can close what the browser
+// never will. The client's part is to say it is still there, and to say when
+// it is done.
+test('the call is heartbeated while it runs and released on the server when it ends', async () => {
+  const fixture = setup();
+  const channel = await connected(fixture);
+
+  await fixture.clock.advance(HEARTBEAT_MS);
+  const beats = fixture.requests.filter((request) => request.url === '/api/voice/live/heartbeat');
+  expect(beats).toHaveLength(1);
+  expect(beats[0].body).toEqual({ session_id: 'sess-1', live_session_id: 'live-1' });
+  expect(beats[0].init.keepalive).toBe(true);
+  await fixture.clock.advance(HEARTBEAT_MS);
+  expect(fixture.requests.filter((request) => request.url === '/api/voice/live/heartbeat')).toHaveLength(2);
+
+  const hangup = fixture.controller.hangup();
+  await fixture.clock.advance(MINUTES_ON_HANGUP_MS);
+  channel.deliver({ type: 'session.closed', reason: 'close_requested', usage: { seconds: 12 } });
+  await hangup;
+  await flush();
+
+  const closes = fixture.requests.filter((request) => request.url === '/api/voice/live/close');
+  expect(closes).toHaveLength(1);
+  expect(closes[0].body).toEqual({ session_id: 'sess-1', live_session_id: 'live-1' });
+  // Nothing keeps pinging a call that is over.
+  await fixture.clock.advance(HEARTBEAT_MS * 3);
+  expect(fixture.requests.filter((request) => request.url === '/api/voice/live/heartbeat')).toHaveLength(2);
+});
+
+test('a call the server no longer tracks stops being heartbeated', async () => {
+  const fixture = setup({
+    routes: {
+      '/api/voice/live/heartbeat': () => jsonResponse({ error: 'that call is not tracked by this server', cause: 'unknown_call' }, 404),
+    },
+  });
+  await connected(fixture);
+  await fixture.clock.advance(HEARTBEAT_MS * 4);
+  expect(fixture.requests.filter((request) => request.url === '/api/voice/live/heartbeat')).toHaveLength(1);
+});
+
+test('a lost transport still tells the server the call is over', async () => {
+  const fixture = setup();
+  const channel = await connected(fixture);
+  channel.readyState = 'closed';
+  channel.onclose?.();
+  await flush();
+  expect(fixture.requests.filter((request) => request.url === '/api/voice/live/close')).toHaveLength(1);
+});
+
+// The pending defect: the minutes used to depend on who hung up first.
+test('a hangup before end_call asks the delegate for the minutes and delivers them', async () => {
+  const fixture = setup();
+  const channel = await connected(fixture);
+  channel.deliver({ type: 'session.output_transcript.delta', delta: 'We agreed on the plan. ' });
+
+  const hangup = fixture.controller.hangup();
+  await flush();
+  const request = channel.sent.find((message) => message.type === 'session.instructions.append');
+  expect(request.content).toContain('end_call');
+  expect(request.delegation_id).toBe(null);
+  // Still not closed: the delegate is being given its bounded moment.
+  expect(channel.typesSent()).not.toContain('session.close');
+  expect(fixture.controller.state().endedReason).toBe('hangup');
+
+  channel.deliver({
+    type: 'response.output_item.done',
+    item: { type: 'function_call', call_id: 'c1', name: 'end_call', arguments: JSON.stringify({ minutes: 'Decided: ship it.' }) },
+  });
+  await flush();
+  expect(channel.typesSent()).toContain('session.close');
+  channel.deliver({ type: 'session.closed', reason: 'close_requested', usage: { seconds: 20 } });
+  await hangup;
+
+  expect(fixture.results[0].text).toBe('Decided: ship it.');
+  expect(fixture.results[0].meta).toMatchObject({ minutes: true, reason: 'completed' });
+});
+
+test('duplicate end_call events keep the first minutes and close only once', async () => {
+  const fixture = setup();
+  const channel = await connected(fixture);
+  const hangup = fixture.controller.hangup();
+  await flush();
+
+  for (const [callId, minutes] of [['first', 'Decided: first answer.'], ['second', 'Decided: second answer.']]) {
+    channel.deliver({
+      type: 'response.output_item.done',
+      item: { type: 'function_call', call_id: callId, name: 'end_call', arguments: JSON.stringify({ minutes }) },
+    });
+  }
+  await flush();
+  expect(channel.typesSent().filter((type) => type === 'session.close')).toHaveLength(1);
+  channel.deliver({ type: 'session.closed', reason: 'close_requested', usage: { seconds: 20 } });
+  await hangup;
+
+  expect(fixture.results).toHaveLength(1);
+  expect(fixture.results[0].text).toBe('Decided: first answer.');
+});
+
+test('a delegate that never answers the hangup still yields the transcript, within the bound', async () => {
+  const fixture = setup();
+  const channel = await connected(fixture);
+  channel.deliver({ type: 'session.output_transcript.delta', delta: 'Half a plan.' });
+
+  const hangup = fixture.controller.hangup();
+  await fixture.clock.advance(MINUTES_ON_HANGUP_MS);
+  expect(channel.typesSent()).toContain('session.close');
+  channel.deliver({ type: 'session.closed', reason: 'close_requested', usage: { seconds: 20 } });
+  await hangup;
+
+  expect(fixture.results[0].text).toContain('Delegate: Half a plan.');
+  expect(fixture.results[0].meta.minutes).toBe(false);
+});
+
+// The wait belongs to the owner's own hangup and to nothing else: a call that
+// ends because the microphone or the connection died has nobody to ask.
+test('an ending that is not a hangup closes immediately, without asking for minutes', async () => {
+  const fixture = setup();
+  const channel = await connected(fixture);
+  fixture.track.muted = true;
+  fixture.track.onmute();
+  await fixture.clock.advance(MIC_GRACE_MS);
+  expect(channel.typesSent()).toContain('session.close');
+  expect(channel.typesSent()).not.toContain('session.instructions.append');
 });
 
 // Finding 5.
