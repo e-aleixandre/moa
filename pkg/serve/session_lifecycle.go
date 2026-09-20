@@ -386,25 +386,32 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				return
 			}
 
+			// The same metadata whichever rail the notification takes, as with
+			// subagent notifications above. The steer rail used to drop it, which
+			// left the resulting run with no way to say which job it was
+			// delivering — and a run whose provenance is unknown is treated as a
+			// new turn, so the owner read one completed turn as two.
+			bashNotificationCustom := map[string]any{
+				"source":       "bash_job",
+				"bash_job_id":  job.JobID,
+				"bash_command": job.Command,
+				"bash_status":  job.Status,
+			}
+
 			state := s.runtime.State.Current()
 			// StatePermission still belongs to the foreground run; starting a
 			// notification run there would race the agent blocked on ask_user.
 			if state == bus.StateRunning || state == bus.StatePermission {
 				subagentTexts.Store(agentText, struct{}{})
-				_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Internal: true})
+				_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Custom: bashNotificationCustom, Internal: true})
 			} else {
 				err := b.Execute(bus.SendPrompt{
-					Text: agentText,
-					Custom: map[string]any{
-						"source":       "bash_job",
-						"bash_job_id":  job.JobID,
-						"bash_command": job.Command,
-						"bash_status":  job.Status,
-					},
+					Text:   agentText,
+					Custom: bashNotificationCustom,
 				})
 				if err != nil {
 					subagentTexts.Store(agentText, struct{}{})
-					_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Internal: true})
+					_ = b.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: agentText, Custom: bashNotificationCustom, Internal: true})
 				}
 			}
 		},
@@ -786,6 +793,13 @@ func (m *Manager) deleteSession(id string) error {
 	m.deactivateAttentionRuntime(sess)
 	m.mu.Unlock()
 	sess.deleted.Store(true)
+	// An explicit delete is the user saying this conversation is gone: its
+	// unreported turns go with it, rather than arriving as a report pointing at
+	// a session the owner cannot open.
+	sess.discardOwnerReports()
+	// Delete waits for the runtime's users below; close generic outcome
+	// admission here so nothing new is started during that teardown.
+	sess.closeOutcomeWorkerAdmission()
 	m.forgetUnseen(id)
 	m.forgetSecretBatches(id)
 	// Mark closing and drain the runtime's users before tearing it down, so a
@@ -844,6 +858,11 @@ func (m *Manager) deleteSession(id string) error {
 
 	// Close runtime — stops bridges, aborts agent, closes bus.
 	sess.runtime.Close()
+	// discardOwnerReports and closeOutcomeWorkerAdmission closed admission
+	// before teardown. Wait for workers that were already admitted so none can
+	// write a report or callback after this deleted session has returned.
+	sess.waitOwnerReportWorkers()
+	sess.outcomeWorkers.Wait()
 
 	// Delete from disk.
 	// Report every failed removal so callers never claim a conversation was
@@ -903,12 +922,13 @@ func (s *ManagedSession) drainLifecycleUsers() {
 // bash jobs, verifiers) still in flight. StateIdle alone is not enough — closing
 // cancels the session context, which would kill that work and lose its output.
 //
-// Concurrency. The close is admitted under the state lock (DoIfQuiescent), which
-// is the same lock a run-start takes, so a /send cannot slip between the check
-// and the teardown: either it starts a run first (and the close is refused), or
-// it finds the session already marked closing. The ID stays reserved in
-// m.resuming until the teardown finishes, so a concurrent ResumeSession cannot
-// build a second runtime from disk while the old one is still flushing.
+// Concurrency. The close is admitted under the state lock, which is the same
+// lock a run-start takes. Admission closes the runtime's run gate, so a /send
+// cannot slip between the check and the teardown: either it starts a run first
+// (and the close is refused), or it finds admission closed. The ID stays
+// reserved in m.resuming until the teardown finishes, so a concurrent
+// ResumeSession cannot build a second runtime from disk while the old one is
+// still flushing.
 //
 // Runs under automationMu like Delete, so a close cannot interleave with the
 // automation check-create-send-register sequence. Lock order: automationMu → m.mu.
@@ -980,7 +1000,7 @@ func (m *Manager) CloseSession(id string) error {
 	// Admit the close atomically against run-start, and hold the ID reserved
 	// (m.resuming doubles as the lifecycle barrier) so ResumeSession waits for
 	// the teardown instead of racing it.
-	admitted := sess.runtime.DoIfQuiescent(func() {
+	admitted := sess.runtime.AdmitCloseIfQuiescent(func() {
 		sess.closing.Store(true)
 		delete(m.sessions, id)
 		m.resuming[id] = struct{}{}
@@ -1005,10 +1025,17 @@ func (m *Manager) CloseSession(id string) error {
 		m.mu.Lock()
 		m.sessions[id] = sess
 		sess.closing.Store(false)
+		sess.runtime.ReopenRunAdmission()
 		m.mu.Unlock()
 		return fmt.Errorf("close session: flush: %w", err)
 	}
 	sess.flushLiveSubagentTranscripts()
+	// A closing session was admitted only while fully quiescent AND with no
+	// terminal event outstanding, so any turn it still owes has settled. Hand
+	// it to the owner while the bus is still live and the subscriber is still
+	// attached — the barrier inside is what proves the observer saw it.
+	sess.flushOwnerReports()
+	sess.closeOutcomeWorkerAdmission()
 
 	// An automation idempotency key must not resolve to a session that is no
 	// longer loaded: the interaction endpoints refuse to resume saved sessions,
@@ -1040,6 +1067,10 @@ func (m *Manager) CloseSession(id string) error {
 	// still be writing when the deferred unreserve lets a resume rebuild this
 	// session from the same files.
 	sess.runtime.Close()
+	// The observer's admission is already closed by the flush above; wait for
+	// the waiters it had admitted so none outlives this close.
+	sess.waitOwnerReportWorkers()
+	sess.outcomeWorkers.Wait()
 
 	// Attachments are NOT released here: unlike delete, the conversation still
 	// exists and must render its images when reopened.
@@ -1244,11 +1275,13 @@ func (m *Manager) Shutdown() {
 	if m.scheduler != nil {
 		m.scheduler.Close()
 	}
-	// Stop the reports actor before the sessions are flushed: its timers would
-	// otherwise keep firing deliveries into sessions that are being closed.
-	// Close persists whatever was still batched, so the next process delivers it.
+	// Stop deliveries before anything else, and wait for the actor to confirm
+	// it. From here on no timer and no immediate report can start a run in an
+	// owner session that is about to be torn down. The actor stays alive and
+	// keeps ACCEPTING: a turn reported below must still reach the outbox.
 	m.heartbeat.Close()
-	m.reports.Close()
+	m.reports.BeginShutdown()
+
 	m.mu.RLock()
 	sessions := make([]*ManagedSession, 0, len(m.sessions))
 	for _, s := range m.sessions {
@@ -1258,6 +1291,10 @@ func (m *Manager) Shutdown() {
 	}
 	m.mu.RUnlock()
 
+	// 1. Let every run reach its terminal event. WaitSettled requires the
+	// RunEnded of every admitted generation to have been published, not merely
+	// an idle state, so a turn that finished microseconds before the signal is
+	// seen by its subscribers instead of being torn down underneath them.
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownDrainBudget)
 	defer cancel()
 	for _, s := range sessions {
@@ -1267,27 +1304,110 @@ func (m *Manager) Shutdown() {
 	}
 
 	for _, s := range sessions {
+		// 2. Persist the conversation itself while the runtime still holds it.
 		if err := s.runtime.Flush(); err != nil {
 			slog.Warn("shutdown flush failed", "session", s.ID, "error", err)
 		}
 		s.flushLiveSubagentTranscripts()
-		// Cancel the session context once the flush has captured everything:
-		// events drained by the Close below (an async RunEnded, say) can still
-		// reach subscribers that spawn work of their own — the automation
-		// callback waits for quiescence and then POSTs. The cancelled context is
-		// what makes that work give up instead of outliving the shutdown.
+		// 3. While the bus is still live, prove the owner observer has seen
+		// every terminal event (its own ordered barrier, not a global drain
+		// timeout), then flush the turns it holds in order and close its
+		// admission.
+		s.flushOwnerReports()
+		// 4. Stop admitting generic outcome workers BEFORE the teardown that
+		// can run subscriber callbacks: after this nothing new can be started
+		// that would outlive Shutdown.
+		s.closeOutcomeWorkerAdmission()
+		// 5. Cancel the session context and close the runtime. The cancelled
+		// context is what makes an automation callback already in flight give
+		// up instead of outliving the shutdown.
 		s.infra.sessionCancel()
-		// Close the runtime after flushing: this drains the bus's async
-		// persistence reactor (Bus.Close waits for subscriber goroutines to
-		// finish their queued events) so no delayed save can still be writing
-		// to the session dir after Shutdown returns. Without this an async
-		// RunEnded→save could race a caller that removes the session dir right
-		// after Shutdown (e.g. t.TempDir cleanup in tests). Idempotent.
 		s.runtime.Close()
+		// 6. Wait for the work already admitted, owner first.
+		s.waitOwnerReportWorkers()
+		s.outcomeWorkers.Wait()
 	}
+
+	// 5. Everything that was going to be reported has been handed over and
+	// acknowledged. Close shuts the admission gate, waits for the senders
+	// inside it, drains the mailbox and persists what is still pending.
+	m.reports.Close()
+
 	if m.attention != nil {
 		m.attention.Close()
 	}
+}
+
+// flushOwnerReports hands this session's completed but unreported turns to the
+// report coordinator, immediately.
+//
+// It does NOT wait for quiescence. At shutdown the choice is between reporting
+// a finished turn that left work running and reporting nothing at all, and the
+// turn is the owner's only record of what its project did.
+//
+// The barrier first: sync proves the observer's subscriber has consumed every
+// event published so far, so what it flushes is everything it should know
+// about. Then flush claims the pending turns in order and closes admission,
+// and the waiters already in flight find their turn reported and return.
+func (s *ManagedSession) flushOwnerReports() {
+	s.mu.Lock()
+	observer := s.ownerObserver
+	s.mu.Unlock()
+	if observer == nil {
+		return
+	}
+	observer.sync()
+	observer.flush()
+}
+
+// waitOwnerReportWorkers drains the observer's waiters. Called after the
+// runtime is closed, so nothing can admit another one.
+func (s *ManagedSession) waitOwnerReportWorkers() {
+	s.mu.Lock()
+	observer := s.ownerObserver
+	s.mu.Unlock()
+	if observer == nil {
+		return
+	}
+	observer.waitWorkers()
+}
+
+// admitOutcomeWorker reserves a slot for a generic run-outcome worker (the
+// automation callback's). Returns false once admission is closed, which is
+// what lets shutdown wait for the workers already running without racing an
+// Add from a bus subscriber goroutine.
+func (s *ManagedSession) admitOutcomeWorker() bool {
+	s.outcomeMu.Lock()
+	defer s.outcomeMu.Unlock()
+	if s.outcomeClosed {
+		return false
+	}
+	s.outcomeWorkers.Add(1)
+	return true
+}
+
+func (s *ManagedSession) outcomeWorkerDone() { s.outcomeWorkers.Done() }
+
+// closeOutcomeWorkerAdmission stops new generic outcome workers being
+// admitted. Called before the runtime is torn down, so a subscriber callback
+// running during teardown cannot start work that would outlive Shutdown.
+func (s *ManagedSession) closeOutcomeWorkerAdmission() {
+	s.outcomeMu.Lock()
+	s.outcomeClosed = true
+	s.outcomeMu.Unlock()
+}
+
+// discardOwnerReports abandons this session's unreported turns. A deleted
+// conversation has nothing left for the owner to look into, so reporting it
+// would point at a session that no longer exists.
+func (s *ManagedSession) discardOwnerReports() {
+	s.mu.Lock()
+	observer := s.ownerObserver
+	s.mu.Unlock()
+	if observer == nil {
+		return
+	}
+	observer.discardPending()
 }
 
 // flushLiveSubagentTranscripts persists the transcript of every still-live

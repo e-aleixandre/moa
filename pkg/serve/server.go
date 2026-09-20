@@ -179,11 +179,15 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("HEAD /api/sessions/{id}/attachments/{attID}", handleGetAttachment(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
-	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
+	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager, o.realtimeKey))
 	mux.HandleFunc("GET /api/preview/target", handlePreviewTarget(o.preview))
 	mux.HandleFunc("PUT /api/preview/target", handlePreviewTarget(o.preview))
 	mux.HandleFunc("GET /api/usage", handleUsage(manager))
 	mux.HandleFunc("POST /api/transcribe", handleTranscribe(manager))
+	mux.HandleFunc("POST /api/voice/live/session", handleVoiceLiveSession(manager, o.realtimeKey, o.realtimeHTTP))
+	voiceAskPost, voiceAskGet := voiceLiveAskHandlers(manager)
+	mux.HandleFunc("POST /api/voice/live/ask", voiceAskPost)
+	mux.HandleFunc("GET /api/voice/live/ask", voiceAskGet)
 	mux.HandleFunc("GET /api/push/vapid-public-key", handlePushVAPIDKey(manager))
 	mux.HandleFunc("POST /api/push/subscribe", handlePushSubscribe(manager))
 	mux.HandleFunc("POST /api/push/unsubscribe", handlePushUnsubscribe(manager))
@@ -263,7 +267,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 func pulseNoStoreMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim", "/api/pulse/device-session":
+		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim", "/api/pulse/device-session", "/api/voice/live/session", "/api/voice/live/ask":
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)
@@ -1202,7 +1206,7 @@ func handleSteerSubagent(mgr *Manager) http.HandlerFunc {
 	}
 }
 
-func handleCapabilities(mgr *Manager) http.HandlerFunc {
+func handleCapabilities(mgr *Manager, realtimeKey RealtimeAPIKeyFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		goalFlags := make([]map[string]string, 0, len(goal.Flags()))
 		for _, f := range goal.Flags() {
@@ -1212,8 +1216,17 @@ func handleCapabilities(mgr *Manager) http.HandlerFunc {
 				"desc":        f.Desc,
 			})
 		}
+		// voice_live is reported separately from transcribe even though both end up
+		// on the same OpenAI key slot today: a call that cannot start must be an
+		// absent button, not a button that fails after asking for the microphone.
+		voiceLive := false
+		if realtimeKey != nil {
+			key, ok := realtimeKey()
+			voiceLive = ok && strings.TrimSpace(key) != ""
+		}
 		caps := map[string]any{
 			"transcribe":    mgr.transcriber != nil,
+			"voice_live":    voiceLive,
 			"workspaceRoot": mgr.workspaceRoot,
 			"homeDir":       userHomeDir(),
 			"defaultModel":  bootstrap.FullModelSpec(mgr.defaultModel),

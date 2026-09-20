@@ -325,6 +325,26 @@
   .zl-mic.recording::after { animation: none; }
 }
 
+/* Talk live. Quiet like the other controls while idle; in a call it wears the
+   hang-up red, because then the one thing the button does is end the call and
+   it must not read as "start" by mistake. No breathing ring here: the panel
+   above already says the call is live, and two live signals competing in the
+   same slab is noise. */
+/* zl-call, not zl-live: .zl-live is the LiveBar's own root in this dock, and
+   sharing the name handed this button the bar's `width: 100%`. */
+.zl-call .spin { animation: composer-spin 1.2s linear infinite; }
+.zl-call.in-call {
+  background: var(--zl-hi);
+  color: var(--zl-red);
+  border-radius: var(--radius-full);
+}
+@media (hover: hover) {
+  .zl-call.in-call:hover { background: var(--zl-red); color: var(--zl-canvas); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zl-call .spin { animation: none; }
+}
+
 /* Send is always Send now, so the mic-mode / gesture / recording faces it
    used to borrow on the phone are gone with the takeover that needed them.
    Only its own pending spinner is left. */

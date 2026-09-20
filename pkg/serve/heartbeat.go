@@ -243,12 +243,18 @@ func (h *heartbeatService) beatOwner(own owner.Owner, now time.Time) {
 		h.persist(own, HeartbeatRecord{Announced: kept, LastBeat: state.LastBeat}, state)
 		return
 	}
-	if err := h.wake(own, fresh); err != nil {
-		// A busy owner, or a beat that never reached the transcript, is not a
-		// missed beat: the facts stay unannounced and the next tick tries
-		// again. Marking them announced here is how a crash between the send
-		// and the transcript loses the only notice the owner would ever get.
-		slog.Debug("owner heartbeat: not delivered", "codebase", own.CodebaseKey, "error", err)
+	result := heartbeatStopped
+	if h.mgr.reports != nil {
+		result = h.mgr.reports.heartbeat(own.CodebaseKey, func() error {
+			return h.wake(own, fresh)
+		})
+	}
+	if result != heartbeatDelivered {
+		// A report barrier, a busy owner, shutdown, or a beat that never
+		// reached the transcript is not a missed beat: the facts stay
+		// unannounced and the next tick retries them. Only the coordinator can
+		// say this beat was actually delivered after it established that no
+		// report already owned the owner's next wake-up.
 		h.persist(own, HeartbeatRecord{Announced: kept, LastBeat: state.LastBeat}, state)
 		return
 	}

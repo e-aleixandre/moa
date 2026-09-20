@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -475,3 +476,286 @@ func TestWaitSettled_TimesOutWhileRunning(t *testing.T) {
 // fileSessionPersister is a rebinding persister backed by real session JSON.
 // It lets the switching regression test verify disk state, not merely a fake
 // Snapshot call's arguments.
+
+// A run reaches StateIdle before it publishes RunEnded. WaitSettled must not
+// return in that window: on shutdown it is the caller's signal that every
+// subscriber has seen the turn, and returning early is how a finished turn
+// gets torn down before anything could react to it (the owner-report loss).
+func TestWaitSettled_WaitsForTheTerminalEventNotJustIdleState(t *testing.T) {
+	rt := newTestRuntime(t)
+	sctx := rt.Context()
+
+	// Reproduce the gap exactly as launchRun creates it: a generation is
+	// reserved (which writes the start anchor), the state goes back to idle,
+	// and RunEnded has not been published yet.
+	sctx.runMu.Lock()
+	_, gen := sctx.newRunContext()
+	sctx.runMu.Unlock()
+	if err := rt.State.Transition(StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.State.Transition(StateIdle); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if rt.WaitSettled(ctx) {
+		t.Fatal("WaitSettled = true inside the idle-before-RunEnded gap; the turn was not terminal yet")
+	}
+
+	// Once the run settles the way the launch path settles it — after the
+	// terminal event — the waiter is released.
+	settled := make(chan bool, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		settled <- rt.WaitSettled(ctx)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	sctx.Bus.Publish(RunEnded{RunGen: gen})
+	sctx.settleRun(gen)
+
+	select {
+	case ok := <-settled:
+		if !ok {
+			t.Fatal("WaitSettled = false after the run settled")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitSettled did not wake when the run settled")
+	}
+}
+
+// The panic path settles too: a run that blows up must not strand a waiter
+// (shutdown would then spend its whole budget on a run that is long over).
+func TestWaitSettled_ReleasedByThePanicPath(t *testing.T) {
+	rt := newTestRuntime(t)
+	sctx := rt.Context()
+	launchRun(sctx, "panics", func(context.Context) ([]core.AgentMessage, error) {
+		panic("boom")
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if !rt.WaitSettled(ctx) {
+		t.Fatal("WaitSettled = false after a panicking run; its anchor was never cleared")
+	}
+}
+
+// Generations can overlap: a queued steer's run is admitted while the previous
+// one is still finishing. The UI start anchor deliberately tracks only the
+// newest, so a terminal barrier built on it would report "settled" while an
+// older generation had yet to publish its outcome. WaitSettled must wait for
+// every admitted generation.
+func TestWaitSettled_WaitsForEveryAdmittedGeneration(t *testing.T) {
+	rt := newTestRuntime(t)
+	sctx := rt.Context()
+
+	sctx.runMu.Lock()
+	_, gen1 := sctx.newRunContext()
+	_, gen2 := sctx.newRunContext() // gen2 overwrites the UI anchor
+	sctx.runMu.Unlock()
+	if gen1 == gen2 {
+		t.Fatal("generations must be distinct")
+	}
+
+	// The older generation finishes first.
+	sctx.Bus.Publish(RunEnded{RunGen: gen1})
+	sctx.settleRun(gen1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if rt.WaitSettled(ctx) {
+		t.Fatal("WaitSettled = true while a second admitted generation had not published RunEnded")
+	}
+
+	settled := make(chan bool, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		settled <- rt.WaitSettled(ctx)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	sctx.Bus.Publish(RunEnded{RunGen: gen2})
+	sctx.settleRun(gen2)
+
+	select {
+	case ok := <-settled:
+		if !ok {
+			t.Fatal("WaitSettled = false once every generation had settled")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitSettled did not wake when the last generation settled")
+	}
+}
+
+// The newest generation clearing the UI anchor must not release the barrier
+// for an older one that is still running: the two are separate on purpose.
+func TestWaitSettled_NewerGenerationDoesNotReleaseAnOlderOne(t *testing.T) {
+	rt := newTestRuntime(t)
+	sctx := rt.Context()
+	sctx.runMu.Lock()
+	_, gen1 := sctx.newRunContext()
+	_, gen2 := sctx.newRunContext()
+	sctx.runMu.Unlock()
+
+	// gen2 settles; gen1 is still in flight.
+	sctx.Bus.Publish(RunEnded{RunGen: gen2})
+	sctx.settleRun(gen2)
+	if !sctx.runInFlight() {
+		t.Fatal("the older generation was released by the newer one settling")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if rt.WaitSettled(ctx) {
+		t.Fatal("WaitSettled = true while the older generation was still in flight")
+	}
+	sctx.Bus.Publish(RunEnded{RunGen: gen1})
+	sctx.settleRun(gen1)
+	if sctx.runInFlight() {
+		t.Fatal("the session is still in flight after every generation settled")
+	}
+}
+
+// A close is admitted through DoIfQuiescent. The state reaches idle before the
+// terminal event is published, so admitting a close there would tear the
+// runtime down with the outcome still unseen by its subscribers — the report
+// loss, reached through close instead of shutdown.
+func TestDoIfQuiescent_RefusesInsideTheTerminalGap(t *testing.T) {
+	rt := newTestRuntime(t)
+	sctx := rt.Context()
+
+	sctx.runMu.Lock()
+	_, gen := sctx.newRunContext()
+	sctx.runMu.Unlock()
+	// The run has gone back to idle but has not published RunEnded yet.
+	if err := rt.State.Transition(StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.State.Transition(StateIdle); err != nil {
+		t.Fatal(err)
+	}
+
+	if rt.DoIfQuiescent(func() {}) {
+		t.Fatal("DoIfQuiescent admitted a close while a terminal event was outstanding")
+	}
+
+	sctx.Bus.Publish(RunEnded{RunGen: gen})
+	sctx.settleRun(gen)
+	if !rt.DoIfQuiescent(func() {}) {
+		t.Fatal("DoIfQuiescent refused a genuinely quiescent session")
+	}
+}
+
+// Close admission is a distinct operation: it atomically closes run admission
+// while State is idle, so a producer that reaches reserveRunSlot afterwards
+// cannot launch into the runtime being torn down. A failed close reopens that
+// admission and leaves the runtime usable.
+func TestAdmitCloseIfQuiescent_ClosesAndReopensRunAdmission(t *testing.T) {
+	rt := newTestRuntime(t)
+	sctx := rt.Context()
+
+	called := false
+	if !rt.AdmitCloseIfQuiescent(func() { called = true }) {
+		t.Fatal("close admission refused an idle runtime")
+	}
+	if !called {
+		t.Fatal("close admission did not run its callback")
+	}
+	if err := reserveRunSlot(sctx); !errors.Is(err, ErrSessionBusy) {
+		t.Fatalf("reserveRunSlot after close admission = %v, want ErrSessionBusy", err)
+	}
+	if got := rt.State.Current(); got != StateIdle {
+		t.Fatalf("state after refused run = %s, want idle", got)
+	}
+
+	rt.ReopenRunAdmission()
+	if err := reserveRunSlot(sctx); err != nil {
+		t.Fatalf("reserveRunSlot after reopening admission: %v", err)
+	}
+}
+
+// The 15s an owner report allows for background work has to be 15s in total.
+// Each internal drain is capped by what is left of the deadline, so a caller
+// cannot be made to wait its budget plus however many drains were in flight.
+//
+// A deliberately slow subscriber is what makes this discriminating: with no
+// events in flight a drain returns at once and any cap looks correct.
+func TestWaitQuiescent_RespectsTheCallersDeadline(t *testing.T) {
+	rt := newTestRuntime(t)
+	// Background work that never ends: only the deadline can end this wait.
+	rt.Context().trackBackgroundEvent(BashJobStarted{JobID: "bash-endless"})
+
+	var slow sync.WaitGroup
+	slow.Add(1)
+	unsub := rt.Bus.SubscribeAll(func(any) { time.Sleep(80 * time.Millisecond) })
+	defer unsub()
+	go func() {
+		defer slow.Done()
+		for i := 0; i < 40; i++ { // ~3.2s of subscriber work to drain
+			rt.Bus.Publish(BashJobOutput{JobID: "bash-endless"})
+		}
+	}()
+
+	const budget = 300 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	start := time.Now()
+	if rt.WaitQuiescent(ctx) {
+		t.Fatal("WaitQuiescent = true while a background job was still running")
+	}
+	elapsed := time.Since(start)
+	slow.Wait()
+	// Generous slack for a loaded machine, but far below budget plus the two
+	// uncapped 2s drains the old code would have sat through.
+	if elapsed > budget+time.Second {
+		t.Fatalf("WaitQuiescent took %v for a %v budget; the drains overran the deadline", elapsed, budget)
+	}
+}
+
+// An already-expired context must not buy even one drain.
+func TestWaitQuiescent_ExpiredContextReturnsAtOnce(t *testing.T) {
+	rt := newTestRuntime(t)
+	rt.Context().trackBackgroundEvent(BashJobStarted{JobID: "bash-endless"})
+
+	unsub := rt.Bus.SubscribeAll(func(any) { time.Sleep(80 * time.Millisecond) })
+	defer unsub()
+	var pub sync.WaitGroup
+	pub.Add(1)
+	go func() {
+		defer pub.Done()
+		for i := 0; i < 40; i++ {
+			rt.Bus.Publish(BashJobOutput{JobID: "bash-endless"})
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	if rt.WaitQuiescent(ctx) {
+		t.Fatal("WaitQuiescent = true with background work outstanding")
+	}
+	elapsed := time.Since(start)
+	pub.Wait()
+	if elapsed > time.Second {
+		t.Fatalf("an expired context still cost %v in drains", elapsed)
+	}
+}
+
+func TestDrainBudget(t *testing.T) {
+	if got := drainBudget(context.Background()); got != maxQuiescenceDrain {
+		t.Fatalf("no deadline should allow the full drain, got %v", got)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if got := drainBudget(ctx); got <= 0 || got > 50*time.Millisecond {
+		t.Fatalf("a short deadline must shorten the drain, got %v", got)
+	}
+	expired, cancelExpired := context.WithCancel(context.Background())
+	cancelExpired()
+	deadlined, cancelDeadlined := context.WithTimeout(context.Background(), -time.Second)
+	defer cancelDeadlined()
+	if got := drainBudget(deadlined); got != 0 {
+		t.Fatalf("an expired deadline must allow no drain, got %v", got)
+	}
+	_ = expired
+}
