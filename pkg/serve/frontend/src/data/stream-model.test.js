@@ -1518,7 +1518,7 @@ const voiceAsk = (question, callId = 'call-1', extra = {}) => user(
 
 test('a voice question is its own block, never a waypoint, and shows what was asked and answered', () => {
   const blocks = projectStream(session([
-    voiceAsk('What did we decide about the drawer?', 'call-1', { _msg_id: 'vq-1', timestamp: 1725357600000 }),
+    voiceAsk('What did we decide about the drawer?', 'call-1', { _msg_id: 'vq-1', timestamp: 1725357600 }),
     assistant('We decided to group sessions by project.'),
   ]));
   expect(blocks).toEqual([{
@@ -1897,4 +1897,17 @@ test('a message block closes the ledger around it', () => {
     tool('b2', 'book', { action: 'read', path: 'areas/x.md' }, 'done', 'x'),
   ]);
   expect(docBlocks(s).map(b => b.type)).toEqual(['ledger', 'session_message', 'ledger']);
+});
+
+// The age on the collapsed line is the only metadata always on screen. It was
+// printed from Unix seconds fed to a millisecond clock, so every call block
+// claimed to be about fifty-seven years old.
+test('a voice call block carries a timestamp the relative clock can read', () => {
+  const seconds = Math.floor(Date.now() / 1000) - 120;
+  const blocks = projectStream(session([
+    voiceAsk('What did we decide?', 'c1', { _msg_id: 'vq-9', timestamp: seconds }),
+  ]));
+  const call = blocks.find((b) => b.kind === 'voice_call');
+  expect(call.time).toBe(seconds * 1000);
+  expect(Math.abs(Date.now() - call.time) < 10 * 60 * 1000).toBe(true);
 });

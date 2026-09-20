@@ -501,7 +501,10 @@ export function projectStream(session) {
             kind: 'voice_call',
             id: blockID('voicecall', msg, i),
             callId,
-            time: msg.timestamp,
+            // Message timestamps are Unix seconds; eventAge reads milliseconds.
+            // Handing it seconds dated every call to 1970 and printed an age of
+            // twenty thousand days on the one line that is always visible.
+            time: msg.timestamp * 1000,
             exchanges: [],
           };
           blocks.push(currentVoiceCall);
@@ -510,7 +513,7 @@ export function projectStream(session) {
           id: blockID('voiceask', msg, i),
           question,
           answer: '',
-          time: msg.timestamp,
+          time: msg.timestamp * 1000,
         });
         continue;
       }
