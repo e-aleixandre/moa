@@ -1,0 +1,144 @@
+/* VoiceCallBlock styles.
+
+   Same skeleton as the event's margin note (glyph in the gutter, everything
+   else indented past it), so a reader recognises "this arrived, you did not
+   say it" before reading a word. The difference is what the two things are:
+   an event is one payload, a call is a DIALOGUE, so the expanded body is a
+   ledger of exchanges hanging off a single hairline rail — the shape of a
+   conversation held to one side of this one.
+
+   Monochrome on purpose. Peach marks what the owner said and the accent is
+   Send; neither has any business labelling two machines talking. */
+
+.vcb {
+  position: relative;
+  margin: var(--space-5) 0;
+  padding-left: 22px;
+}
+
+.vcb-glyph {
+  position: absolute;
+  left: 0;
+  top: 15px;
+  display: inline-flex;
+  color: var(--zl-t4);
+}
+
+.vcb-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--control-touch);
+  padding: var(--space-1) 0;
+  border: 0;
+  background: transparent;
+  color: var(--zl-t3);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vcb-head:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.vcb-id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Provenance line: what it was and when. Only the source name is mono — it is
+   the one literal label, the rest is ordinary muted text. */
+.vcb-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.vcb-source {
+  font-family: var(--mono);
+  color: var(--zl-t3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The one line in reading colour: what happened during the call. */
+.vcb-title {
+  font-size: var(--zl-fs-title);
+  line-height: 1.5;
+  color: var(--zl-t1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.vcb-chev {
+  flex: none;
+  display: inline-flex;
+  color: var(--zl-t4);
+  transition: transform var(--duration) var(--ease);
+}
+
+.vcb.open .vcb-chev { transform: rotate(90deg); }
+
+/* The rail: every exchange of the call hangs off one line, so the block reads
+   as a single conversation rather than a stack of unrelated quotes. */
+.vcb-log {
+  margin: var(--space-2) 0 0;
+  padding: 0 0 0 var(--space-3);
+  list-style: none;
+  border-left: 1px solid var(--zl-line);
+  display: grid;
+  gap: var(--space-4);
+}
+
+.vcb-x {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.vcb-line { display: grid; gap: 2px; }
+
+/* The answer is indented under its question: the pair is one unit, and the
+   order inside it is never ambiguous. */
+.vcb-line.is-answer { padding-left: var(--space-3); }
+
+.vcb-who {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-micro);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--zl-t4);
+}
+
+/* Plain text, not markdown: the delegate speaks and the session answers in at
+   most three sentences of prose. Newlines are honoured, nothing is parsed. */
+.vcb-said {
+  margin: 0;
+  font-size: var(--zl-fs-body);
+  line-height: 1.55;
+  color: var(--zl-t2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.vcb-said.is-pending {
+  color: var(--zl-t4);
+  font-style: italic;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vcb-chev { transition: none; }
+}

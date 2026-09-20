@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import {
-  VoiceLiveController, appendCallResult, truncateForTokens,
+  VoiceLiveController, appendCallResult, callSpendNotice, truncateForTokens,
   MAX_QUESTIONS, ASK_POLL_MS, ASK_TIMEOUT_MS, MIC_GRACE_MS, ICE_TIMEOUT_MS,
   CLOSE_BACKSTOP_MS, SESSION_ERROR_GRACE_MS, THINKING_TOKEN_BUDGET,
   MIC_LIVE, MIC_NOT_LIVE, MIC_UNKNOWN,
@@ -144,7 +144,16 @@ function setup(overrides = {}) {
   const documentRef = overrides.document || { hidden: false, addEventListener() {}, removeEventListener() {} };
 
   const routes = {
-    '/api/voice/live/session': () => jsonResponse({ live_session_id: 'live-1', sdp: 'ANSWER', owner_id: 'owner-1', brief_messages: 12 }),
+    '/api/voice/live/session': () => jsonResponse({
+      live_session_id: 'live-1', sdp: 'ANSWER', owner_id: 'owner-1', brief_messages: 12,
+      pricing: {
+        voice_usd_per_minute: 0.05,
+        voice_min_billed_seconds: 15,
+        backend_model: 'gpt-5.6-terra',
+        backend_input_usd_per_mtok: 2,
+        backend_output_usd_per_mtok: 12,
+      },
+    }),
     ...overrides.routes,
   };
   const controller = new VoiceLiveController({
@@ -792,4 +801,74 @@ test('a thinking append stays under the token limit even when every character is
   // Never split a surrogate pair: the result must survive a round trip.
   expect([...cutEmoji].every((char) => char.codePointAt(0) !== 0xfffd)).toBe(true);
   expect(truncateForTokens('short answer')).toBe('short answer');
+});
+
+// --- what a call cost -----------------------------------------------------
+// The owner asked to see it. The rule he set is that an honest partial figure
+// beats an invented total, so these pin the honesty, not just the arithmetic.
+
+test('voice cost is metered duration at the published rate, with the billed floor', async () => {
+  const fixture = setup();
+  const channel = await connected(fixture);
+
+  // The floor is charged on creation, so it applies before any usage event.
+  expect(fixture.controller.state().cost.billedSeconds).toBe(15);
+
+  channel.deliver({ type: 'session.usage.updated', usage: { seconds: 6 } });
+  await flush();
+  // 6 seconds of talking still cost the 15 the provider bills for creating the
+  // session; showing $0.005 here would understate every short call.
+  expect(fixture.controller.state().cost.billedSeconds).toBe(15);
+  expect(fixture.controller.state().cost.voiceUSD).toBeCloseTo(0.0125, 6);
+
+  channel.deliver({ type: 'session.usage.updated', usage: { seconds: 120 } });
+  await flush();
+  expect(fixture.controller.state().cost.voiceUSD).toBeCloseTo(0.1, 6);
+});
+
+test('the backend is named but never priced: a wrong number is worse than none', async () => {
+  const fixture = setup();
+  const channel = await connected(fixture);
+  channel.deliver({ type: 'session.usage.updated', usage: { seconds: 60 } });
+  await flush();
+
+  // Even when a forwarded Responses event carries usage, no backend figure is
+  // produced: input_tokens hides cache reads and long-context tiers that are
+  // priced in core's table, so any arithmetic here would be confidently wrong.
+  channel.deliver({
+    type: 'response.event',
+    delegation_id: 'item_1',
+    event: { type: 'response.completed', response: { usage: { input_tokens: 10_000, output_tokens: 1_000 } } },
+  });
+  await flush();
+  const cost = fixture.controller.state().cost;
+  expect(cost.backendCounted).toBe(false);
+  expect(cost.backendUSD).toBeUndefined();
+  expect(cost.backendModel).toBe('gpt-5.6-terra');
+});
+
+test('with no pricing from the server no number is invented', async () => {
+  const fixture = setup({
+    routes: { '/api/voice/live/session': () => jsonResponse({ live_session_id: 'l', sdp: 'ANSWER', owner_id: 'owner-1' }) },
+  });
+  const channel = await connected(fixture);
+  channel.deliver({ type: 'session.usage.updated', usage: { seconds: 90 } });
+  await flush();
+  expect(fixture.controller.state().cost.voiceUSD).toBe(null);
+});
+
+test('the closing notice separates what is billed from what is not, and hedges an unconfirmed figure', () => {
+  const confirmed = callSpendNotice({
+    usageConfirmed: true,
+    cost: { voiceUSD: 0.12, billedSeconds: 144, backendCounted: false, backendModel: 'gpt-5.6-terra' },
+  });
+  expect(confirmed).toBe('2:24 of voice, $0.12. gpt-5.6-terra is billed separately and is not counted here.');
+
+  const unconfirmed = callSpendNotice({
+    usageConfirmed: false,
+    cost: { voiceUSD: 0.12, billedSeconds: 144, backendCounted: false, backendModel: 'gpt-5.6-terra' },
+  });
+  expect(unconfirmed).toBe('2:24 of voice, about $0.12. gpt-5.6-terra is billed separately and is not counted here.');
+
+  expect(callSpendNotice({ cost: null })).toBe('');
 });

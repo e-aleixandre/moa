@@ -20,6 +20,11 @@ const (
 	voiceLiveAskCap        = 64
 	voiceLiveQuestionLimit = 8 << 10
 	voiceLiveAnswerLimit   = 500 * 4
+	// The call id is minted by the provider and forwarded by the browser, so
+	// it is never trusted for a lookup — only compared with the previous one to
+	// group the exchanges of one call. The cap is what stops an arbitrary
+	// client string from riding into the transcript.
+	voiceLiveCallIDLimit = 128
 )
 
 type voiceLiveAsk struct {
@@ -28,6 +33,8 @@ type voiceLiveAsk struct {
 	answer    string
 	msgID     string
 	steerID   string
+	callID    string
+	question  string
 	runGen    uint64
 	unsub     func()
 }
@@ -51,10 +58,11 @@ func voiceLiveAskHandlers(mgr *Manager) (http.HandlerFunc, http.HandlerFunc) {
 		var body struct {
 			SessionID string `json:"session_id"`
 			Question  string `json:"question"`
+			CallID    string `json:"call_id"`
 		}
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBodySize))
 		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&body); err != nil || decoder.Decode(&struct{}{}) != io.EOF || strings.TrimSpace(body.SessionID) == "" || strings.TrimSpace(body.Question) == "" || len(body.Question) > voiceLiveQuestionLimit {
+		if err := decoder.Decode(&body); err != nil || decoder.Decode(&struct{}{}) != io.EOF || strings.TrimSpace(body.SessionID) == "" || strings.TrimSpace(body.Question) == "" || len(body.Question) > voiceLiveQuestionLimit || len(body.CallID) > voiceLiveCallIDLimit {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 			return
 		}
@@ -64,7 +72,7 @@ func voiceLiveAskHandlers(mgr *Manager) (http.HandlerFunc, http.HandlerFunc) {
 			return
 		}
 		msgID, steerID := core.NewMsgID(), core.NewSteerID()
-		id, err := store.create(body.SessionID, msgID, steerID)
+		id, err := store.create(body.SessionID, msgID, steerID, strings.TrimSpace(body.CallID), strings.TrimSpace(body.Question))
 		if errors.Is(err, errVoiceLiveAskPending) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "still waiting for the previous question"})
 			return
@@ -80,7 +88,7 @@ func voiceLiveAskHandlers(mgr *Manager) (http.HandlerFunc, http.HandlerFunc) {
 		unsub := sess.runtime.Bus.SubscribeAll(func(event any) { store.observe(id, event) })
 		store.setUnsub(id, unsub)
 		prompt := voiceLiveQuestionPrompt(body.Question)
-		action, acceptedID, _, err := mgr.send(body.SessionID, prompt, nil, steerID, msgID, nil)
+		action, acceptedID, _, err := mgr.send(body.SessionID, prompt, nil, steerID, msgID, voiceLiveAskCustom(body.CallID, body.Question))
 		if err != nil || (action == "send" && acceptedID != msgID) || (action == "steer" && acceptedID != steerID) || (action != "send" && action != "steer") {
 			store.fail(id)
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "could not ask session"})
@@ -103,7 +111,7 @@ func voiceLiveAskHandlers(mgr *Manager) (http.HandlerFunc, http.HandlerFunc) {
 var errVoiceLiveAskCap = errors.New("voice live ask capacity")
 var errVoiceLiveAskPending = errors.New("voice live ask pending")
 
-func (s *voiceLiveAskStore) create(sessionID, msgID, steerID string) (string, error) {
+func (s *voiceLiveAskStore) create(sessionID, msgID, steerID, callID, question string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.asks) >= s.cap {
@@ -119,7 +127,7 @@ func (s *voiceLiveAskStore) create(sessionID, msgID, steerID string) (string, er
 		return "", err
 	}
 	id := hex.EncodeToString(bytes)
-	s.asks[id] = &voiceLiveAsk{sessionID: sessionID, status: "pending", msgID: msgID, steerID: steerID}
+	s.asks[id] = &voiceLiveAsk{sessionID: sessionID, status: "pending", msgID: msgID, steerID: steerID, callID: callID, question: question}
 	time.AfterFunc(s.ttl, func() { s.expire(id) })
 	return id, nil
 }
@@ -154,7 +162,11 @@ func (s *voiceLiveAskStore) observe(id string, event any) {
 	}
 	switch event := event.(type) {
 	case bus.UserMessageAppended:
-		if event.MsgID == ask.msgID {
+		// A prompt carrying transcript provenance is appended by the agent
+		// under an ID it mints itself, so the pre-minted msgID only identifies
+		// the plain path. The announced envelope identifies this question on
+		// the other one, and a session holds at most one pending question.
+		if event.MsgID == ask.msgID || ask.announces(event.Custom) {
 			ask.runGen = event.RunGen
 		}
 	case bus.Steered:
@@ -190,6 +202,31 @@ func (s *voiceLiveAskStore) settle(id, status, answer string) {
 	s.mu.Unlock()
 	if unsub != nil {
 		unsub()
+	}
+}
+
+// announces reports whether an announced user message is THIS question: the
+// envelope the transcript block is built from is also what identifies the
+// prompt on the wire, so no second marker is needed to bind the run.
+func (a *voiceLiveAsk) announces(custom map[string]any) bool {
+	if source, _ := custom["source"].(string); source != "voice_call" {
+		return false
+	}
+	callID, _ := custom["call_id"].(string)
+	question, _ := custom["question"].(string)
+	return callID == a.callID && question == a.question
+}
+
+// voiceLiveAskCustom is the provenance the transcript keeps for a question a
+// voice delegate asked this session. The question travels raw because the
+// message the session receives is the prompt scaffolding around it, and a
+// conversation reopened days later has to show what was asked, not how it was
+// wrapped. The call id groups the exchanges of a single call and nothing else.
+func voiceLiveAskCustom(callID, question string) map[string]any {
+	return map[string]any{
+		"source":   "voice_call",
+		"call_id":  strings.TrimSpace(callID),
+		"question": strings.TrimSpace(question),
 	}
 }
 

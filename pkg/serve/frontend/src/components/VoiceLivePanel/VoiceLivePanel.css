@@ -47,6 +47,16 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Money reads as data, not as prose: same tabular treatment as the clock, so a
+   glance during a call compares like with like. */
+.voice-live-cost {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .voice-live-questions {
   font-size: var(--zl-fs-meta);
   color: var(--zl-t3);
@@ -101,4 +111,5 @@
   /* The question counter is the first thing to fold: the phase, the clock and
      the way out must stay on one line on a phone. */
   .voice-live-questions { font-size: var(--zl-fs-micro); }
+  .voice-live-cost { font-size: var(--zl-fs-micro); }
 }

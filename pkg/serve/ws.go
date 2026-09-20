@@ -526,6 +526,19 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 			}
 		}
 	}
+	// A question a voice delegate asked this session during a call. Both keys
+	// are what the transcript block is built from: the call groups every
+	// exchange of one call into a single block, and the question is the text
+	// the delegate actually spoke — the message body is the prompt wrapper
+	// around it, which nobody should have to read five days later.
+	if source == "voice_call" {
+		if callID, ok := custom["call_id"].(string); ok && callID != "" {
+			projected["call_id"] = callID
+		}
+		if question, ok := custom["question"].(string); ok && question != "" {
+			projected["question"] = truncateHistoryString(question)
+		}
+	}
 	// A batch of reports carries which sessions it is about: the block opens
 	// each of them. Stored as []map[string]string when delivered live, and as
 	// []any once read back from the transcript on disk.

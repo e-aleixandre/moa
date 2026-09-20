@@ -1503,6 +1503,189 @@ test('an event block keeps a stable id across a history prepend, so its body sta
   expect(later.find((b) => b.kind === 'event').id).toBe(first[0].id);
 });
 
+// ── voice call ───────────────────────────────────────────────────────────────
+// During a call the delegate can ask this session. The question arrives as a
+// user-role message for the same reason an event does — and for the same
+// reason must never be drawn as one: five days later a waypoint would read as
+// the owner asking his own questions.
+const voiceAsk = (question, callId = 'call-1', extra = {}) => user(
+  `<voice_question>\n${question}\n</voice_question>\n\nA voice delegate is talking with the owner right now`,
+  {
+    custom: { source: 'voice_call', call_id: callId, question },
+    ...extra,
+  },
+);
+
+test('a voice question is its own block, never a waypoint, and shows what was asked and answered', () => {
+  const blocks = projectStream(session([
+    voiceAsk('What did we decide about the drawer?', 'call-1', { _msg_id: 'vq-1', timestamp: 1725357600000 }),
+    assistant('We decided to group sessions by project.'),
+  ]));
+  expect(blocks).toEqual([{
+    kind: 'voice_call', id: 'voicecall-vq-1-0', callId: 'call-1', time: 1725357600000,
+    exchanges: [{
+      id: 'voiceask-vq-1-0',
+      question: 'What did we decide about the drawer?',
+      answer: 'We decided to group sessions by project.',
+      time: 1725357600000,
+    }],
+  }]);
+});
+
+test('every question of one call extends the same block', () => {
+  const blocks = projectStream(session([
+    voiceAsk('First?', 'call-1', { _msg_id: 'vq-1' }),
+    assistant('Yes.'),
+    voiceAsk('And second?', 'call-1', { _msg_id: 'vq-2' }),
+    assistant('Also yes.'),
+  ]));
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0].id).toBe('voicecall-vq-1-0');
+  expect(blocks[0].exchanges.map((x) => [x.question, x.answer])).toEqual([
+    ['First?', 'Yes.'],
+    ['And second?', 'Also yes.'],
+  ]);
+});
+
+test('two different calls are two blocks, and a question with no call id never merges', () => {
+  const twoCalls = projectStream(session([
+    voiceAsk('From the first call', 'call-1', { _msg_id: 'vq-1' }),
+    assistant('Answered.'),
+    voiceAsk('From the second call', 'call-2', { _msg_id: 'vq-2' }),
+  ]));
+  expect(twoCalls.map((b) => [b.kind, b.callId])).toEqual([
+    ['voice_call', 'call-1'], ['voice_call', 'call-2'],
+  ]);
+  const anonymous = projectStream(session([
+    voiceAsk('One', '', { _msg_id: 'vq-3' }),
+    voiceAsk('Two', '', { _msg_id: 'vq-4' }),
+  ]));
+  expect(anonymous).toHaveLength(2);
+});
+
+test('a question still being answered carries an empty answer instead of a phantom turn', () => {
+  const blocks = projectStream(session([voiceAsk('Still thinking?', 'call-1', { _msg_id: 'vq-1' })]));
+  expect(blocks.map((b) => b.kind)).toEqual(['voice_call']);
+  expect(blocks[0].exchanges[0].answer).toBe('');
+});
+
+// Absorbing the answer must not swallow the work behind it: a session that ran
+// tools to answer keeps the ledger it has always drawn.
+test('tool activity during a voice answer still projects as a ledger', () => {
+  const blocks = projectStream(session([
+    voiceAsk('What is in the book?', 'call-1', { _msg_id: 'vq-1' }),
+    tool('t1', 'book', { path: 'areas/voice.md' }),
+    assistant('The book says the delegate may ask.'),
+  ]));
+  expect(blocks.map((b) => b.kind)).toEqual(['voice_call', 'document']);
+  expect(blocks[0].exchanges[0].answer).toBe('The book says the delegate may ask.');
+  expect(blocks[1].blocks.map((b) => b.type)).toEqual(['ledger']);
+});
+
+// The owner's own message after a call is his again: the call is closed by
+// anything that is not the next question of the same call.
+test('the owner typing after a call closes it, and his turn is a waypoint', () => {
+  const blocks = projectStream(session([
+    voiceAsk('During the call', 'call-1', { _msg_id: 'vq-1' }),
+    assistant('Answered.'),
+    user('and now I am typing'),
+    assistant('Reply to you.'),
+  ]));
+  expect(blocks.map((b) => b.kind)).toEqual(['voice_call', 'waypoint', 'document']);
+  expect(blocks[2].blocks[0].text).toBe('Reply to you.');
+});
+
+test('a voice question survives history normalization and keeps its block id across a prepend', () => {
+  const [message] = normalizeHistory([{
+    role: 'user', msg_id: 'vq-1', timestamp: 1725357600000,
+    content: [{ type: 'text', text: '<voice_question>\nWhat did we decide?\n</voice_question>' }],
+    custom: { source: 'voice_call', call_id: 'call-1', question: 'What did we decide?' },
+  }]);
+  expect(message.custom).toEqual({ source: 'voice_call', call_id: 'call-1', question: 'What did we decide?' });
+  const first = projectStream(session([message]));
+  const later = projectStream(session([user('earlier'), assistant('ok'), message]));
+  expect(first[0]).toMatchObject({ kind: 'voice_call', callId: 'call-1' });
+  expect(first[0].exchanges[0].question).toBe('What did we decide?');
+  expect(later.find((b) => b.kind === 'voice_call').id).toBe(first[0].id);
+});
+
+// The answer is written FOR the question, so it belongs to it while it is
+// being written too. Projecting the live tokens as an ordinary document made
+// the owner read the answer as conversation prose and then watch it jump into
+// the call block at message_end.
+test('an answer still streaming renders inside the call block, not as a document', () => {
+  const blocks = projectStream(session(
+    [voiceAsk('What did we decide?', 'call-1', { _msg_id: 'vq-1' })],
+    { streamingText: 'We decided to group' },
+  ));
+  expect(blocks.map((b) => b.kind)).toEqual(['voice_call']);
+  expect(blocks[0].exchanges[0]).toMatchObject({
+    question: 'What did we decide?', answer: 'We decided to group', streaming: true,
+  });
+});
+
+// An exchange whose answer has not produced a token yet is being thought
+// about, not left unanswered: the block must be able to tell those apart.
+test('an answer that is still only being thought about is marked as on its way', () => {
+  const [block] = projectStream(session(
+    [voiceAsk('What did we decide?', 'call-1', { _msg_id: 'vq-1' })],
+    { thinkingText: 'considering the book' },
+  ));
+  expect(block.kind).toBe('voice_call');
+  expect(block.exchanges[0]).toMatchObject({ answer: '', streaming: true });
+});
+
+// The transition is the defect's visible half: when message_end lands, the
+// same words must stay in the same block, under the same id, so nothing moves
+// on the frame the stream ends.
+test('settling a streamed answer moves nothing between blocks and keeps the block id', () => {
+  const question = voiceAsk('What did we decide?', 'call-1', { _msg_id: 'vq-1' });
+  const streaming = projectStream(session([question], { streamingText: 'We decided to group sessions.' }));
+  const settled = projectStream(session([question, assistant('We decided to group sessions.')]));
+  expect(settled.map((b) => b.kind)).toEqual(streaming.map((b) => b.kind));
+  expect(settled[0].id).toBe(streaming[0].id);
+  expect(settled[0].exchanges[0].answer).toBe(streaming[0].exchanges[0].answer);
+  expect(settled[0].exchanges[0].id).toBe(streaming[0].exchanges[0].id);
+  // Only the live marker goes away.
+  expect(settled[0].exchanges[0].streaming).toBeUndefined();
+});
+
+// The call owns the model's live output, not the work behind it: a tool still
+// running during an answer keeps the document it has always had.
+test('a tool running during a voice answer still opens its live document', () => {
+  const blocks = projectStream(session([
+    voiceAsk('What is in the book?', 'call-1', { _msg_id: 'vq-1' }),
+    tool('t1', 'book', { path: 'areas/voice.md' }, 'running', ''),
+  ], { streamingText: 'Reading the book' }));
+  expect(blocks.map((b) => b.kind)).toEqual(['voice_call', 'streaming']);
+  // The words still belong to the exchange; only the activity is a document.
+  expect(blocks[0].exchanges[0].answer).toBe('Reading the book');
+  expect(blocks[1].blocks.map((b) => b.type)).toEqual(['ledger']);
+});
+
+// Everything that is not a voice answer must be untouched by the routing.
+test('streaming with no pending voice exchange still projects as a live document', () => {
+  const blocks = projectStream(session([user('do the thing')], { streamingText: 'On it' }));
+  expect(blocks.map((b) => b.kind)).toEqual(['waypoint', 'streaming']);
+  expect(blocks[1].blocks).toEqual([
+    expect.objectContaining({ type: 'prose', text: 'On it', caret: true }),
+  ]);
+  expect(blocks[1].textLive).toBe(true);
+});
+
+// A call the owner has already moved on from does not capture the answer to
+// what he typed next.
+test('a closed call does not absorb the streaming answer to the owner s own message', () => {
+  const blocks = projectStream(session([
+    voiceAsk('During the call', 'call-1', { _msg_id: 'vq-1' }),
+    assistant('Answered.'),
+    user('and now I am typing'),
+  ], { streamingText: 'Replying to you' }));
+  expect(blocks.map((b) => b.kind)).toEqual(['voice_call', 'waypoint', 'streaming']);
+  expect(blocks[0].exchanges[0].answer).toBe('Answered.');
+  expect(blocks[2].blocks[0].text).toBe('Replying to you');
+});
+
 // ── Subagent identity label (one rule across every surface) ─────────────────
 // A skill's task begins with a blank line before its `# Heading`, so the old
 // "first literal line" rule produced '' and every surface fell back to the raw

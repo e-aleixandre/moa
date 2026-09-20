@@ -94,6 +94,20 @@ export function formatMinutes({ minutes }) {
   return String(minutes || '').trim();
 }
 
+// What a finished call cost, in one line, for the notice that replaces the
+// panel. "about" is not hedging for its own sake: without a confirmed
+// session.closed the duration is the last figure seen, not the billed one.
+export function callSpendNotice(meta) {
+  const cost = meta?.cost;
+  if (!cost || typeof cost.voiceUSD !== 'number') return '';
+  const mins = Math.floor((cost.billedSeconds || 0) / 60);
+  const secs = Math.round((cost.billedSeconds || 0) % 60);
+  const duration = `${mins}:${String(secs).padStart(2, '0')}`;
+  const prefix = meta.usageConfirmed ? '' : 'about ';
+  const backend = `${cost.backendModel || 'The backend model'} is billed separately and is not counted here`;
+  return `${duration} of voice, ${prefix}$${cost.voiceUSD.toFixed(2)}. ${backend}.`;
+}
+
 // The call's result is APPENDED as its own block and never replaces anything.
 // The owner may have typed while the call ran, and an insertion at the caret
 // (or over a selection) would destroy what he wrote. Losing his own words to
@@ -159,6 +173,7 @@ export class VoiceLiveController {
     this.endedReason = '';
     this.ownerId = '';
     this.liveSessionId = '';
+    this.pricing = null;          // rates handed over by the server at connect
     this.transcript = [];         // [{ speaker, text }]
     this.minutes = null;          // { minutes, pending } once end_call ran
     this.sessionStarted = false;
@@ -188,7 +203,31 @@ export class VoiceLiveController {
       voiceSeconds: this.voiceSeconds,
       startedAt: this.startedAt,
       endedReason: this.endedReason,
+      cost: this.cost(),
       active: this.phase === 'connecting' || this.phase === 'live' || this.phase === 'closing',
+    };
+  }
+
+  // Two prices, and only one of them can be stated. Voice duration is metered
+  // by the provider and priced at a published per-minute rate, so it is known.
+  // The backend model is billed per token with cache and long-context rates
+  // that live in core's pricing table, and the forwarded Responses events do
+  // not reliably carry usage: any figure computed here would be a partial
+  // subtotal priced at the wrong rate, which is worse than no figure. So the
+  // backend is named and excluded, never estimated.
+  cost() {
+    const rate = Number(this.pricing?.voice_usd_per_minute);
+    const floor = Number(this.pricing?.voice_min_billed_seconds) || 0;
+    // The floor applies from the moment the session exists upstream, not from
+    // the first usage event: those 15 seconds are billed on creation, so a call
+    // that reported nothing yet still costs them.
+    const billedSeconds = this.liveSessionId ? Math.max(this.voiceSeconds || 0, floor) : 0;
+    const voiceUSD = rate > 0 && billedSeconds > 0 ? (billedSeconds / 60) * rate : null;
+    return {
+      voiceUSD,
+      billedSeconds,
+      backendModel: this.pricing?.backend_model || '',
+      backendCounted: false,
     };
   }
 
@@ -287,6 +326,7 @@ export class VoiceLiveController {
     // somebody closes it, whatever happens to this attempt.
     this.ownerId = answer.owner_id || '';
     this.liveSessionId = answer.live_session_id || '';
+    this.pricing = answer.pricing || null;
     await pc.setRemoteDescription({ type: 'answer', sdp: answer.sdp });
 
     if (this.cancelled(epoch)) {
@@ -683,7 +723,10 @@ export class VoiceLiveController {
       const response = await this.fetch('/api/voice/live/ask', {
         method: 'POST',
         headers: REQUEST_HEADERS,
-        body: JSON.stringify({ session_id: this.sessionId, question }),
+        // The Live session id groups every question of THIS call under one
+        // transcript block, instead of scattering loose messages through the
+        // conversation's history.
+        body: JSON.stringify({ session_id: this.sessionId, question, call_id: this.liveSessionId }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       askId = (await response.json())?.ask_id || '';
@@ -886,6 +929,7 @@ export class VoiceLiveController {
       reason,
       minutes: !!this.minutes,
       voiceSeconds: this.voiceSeconds,
+      cost: this.cost(),
       // Only session.closed confirms the final usage. Anything else is the
       // last figure we happened to see.
       usageConfirmed: this.sessionClosed,

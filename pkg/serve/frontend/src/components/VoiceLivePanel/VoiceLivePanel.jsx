@@ -38,11 +38,25 @@ function clock(seconds) {
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
+// One figure, and what it excludes. Voice minutes are metered by the provider
+// and priced at a published rate, so they can be stated. The backend model is
+// billed apart, per token, and cannot be priced correctly from here — so it is
+// named, not estimated. A number that looked like the cost of the whole call
+// would be the one kind of error money display must not make.
+function costCopy(cost) {
+  if (!cost || typeof cost.voiceUSD !== 'number') return null;
+  return {
+    text: `$${cost.voiceUSD.toFixed(2)} voice`,
+    title: `Voice duration only, billed per second. ${cost.backendModel || 'The backend model'} is billed separately at text rates and is not counted here.`,
+  };
+}
+
 export function VoiceLivePanel({
-  phase, endedReason, micState, questionsUsed, maxQuestions, pendingAsks, elapsed, onHangup,
+  phase, endedReason, micState, questionsUsed, maxQuestions, pendingAsks, elapsed, cost, onHangup,
 }) {
   const mic = MIC_COPY[micState] || MIC_COPY.unknown;
   const connecting = phase === 'connecting' || phase === 'closing';
+  const spend = costCopy(cost);
   return (
     <div class="voice-live" role="status" aria-live="polite">
       <div class="voice-live-head">
@@ -51,6 +65,7 @@ export function VoiceLivePanel({
         {connecting && <Loader2 size={14} class="spin" aria-hidden="true" />}
         {phase === 'live' && <span class="voice-live-clock">{clock(elapsed)}</span>}
         <span class="voice-live-spring" />
+        {spend && <span class="voice-live-cost" title={spend.title}>{spend.text}</span>}
         <span class="voice-live-questions" title="Questions the delegate may ask this conversation during the call">
           {questionsUsed}/{maxQuestions} questions
         </span>

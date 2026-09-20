@@ -29,6 +29,23 @@
 //       compaction card's, so the collapsed body survives loading older
 //       history.
 //
+//   { kind:'voice_call', id, callId, time, exchanges:[{ id, question, answer, time, streaming? }] }
+//       One voice call, with every question the delegate asked this session and
+//       the answer this session gave. The question arrives as a user-role
+//       message carrying `custom.source === 'voice_call'` (the only role the
+//       model can receive it in), so it would otherwise read as something the
+//       owner typed — which is exactly the thing a conversation reopened days
+//       later must not believe. Consecutive questions sharing `custom.call_id`
+//       EXTEND this block: one call is one block, not one per question. The
+//       assistant prose that follows a question, up to the next user message,
+//       is absorbed as that exchange's answer; tool activity is not, so a
+//       session that had to work for its answer still shows its ledger.
+//       An answer still being written streams into the exchange it belongs to
+//       (`streaming:true`) instead of opening a document: otherwise the owner
+//       reads it as ordinary conversation prose and then watches it jump into
+//       this block when the message settles — live and cold disagreeing about
+//       whose words those are.
+//
 //   { kind:'waypoint', time, text, msgId?, attachments? }
 //       A user turn. `text` is the joined text of the user message. `time` is
 //       the message's `timestamp` when present (else undefined — we never
@@ -232,6 +249,10 @@ export function projectStream(session) {
   // currentDelegation = the open delegation block for this turn (SUBAGENTS-
   // REDESIGN-SPEC §1), or null. Reset at every turn boundary like currentDoc.
   let currentDelegation = null;
+  // currentVoiceCall = the voice-call block still taking exchanges: the next
+  // question of the same call joins it, and the assistant prose after a
+  // question is its answer. Closed by anything that is not that pair.
+  let currentVoiceCall = null;
   const compactionOrdinals = new Map();
 
   // Persisted messages identify blocks by message and type, plus an ordinal
@@ -285,6 +306,7 @@ export function projectStream(session) {
       currentDoc = null;
       currentLedger = null;
       closeDelegation();
+      currentVoiceCall = null;
       continue;
     }
 
@@ -292,6 +314,7 @@ export function projectStream(session) {
       currentDoc = null;
       currentLedger = null;
       closeDelegation();
+      currentVoiceCall = null;
       const msgId = String(msg._msg_id || msg.msg_id || 'legacy');
       const ordinal = compactionOrdinals.get(msgId) || 0;
       compactionOrdinals.set(msgId, ordinal + 1);
@@ -415,6 +438,7 @@ export function projectStream(session) {
       currentDoc = null;
       currentLedger = null;
       closeDelegation();
+      currentVoiceCall = null;
       blocks.push({ kind: 'secret_batch', id: blockID('secret', msg, i), aliases: msg.aliases || [] });
       continue;
     }
@@ -422,6 +446,14 @@ export function projectStream(session) {
     if (msg && msg.role === 'assistant') {
       const text = joinText(msg.content);
       if (text) {
+        // What this session said back to the delegate belongs INSIDE the call,
+        // next to the question it answers: two machines talking is one
+        // exchange, not a turn of the conversation the owner is having.
+        const pending = currentVoiceCall?.exchanges[currentVoiceCall.exchanges.length - 1];
+        if (pending) {
+          pending.answer = pending.answer ? `${pending.answer}\n\n${text}` : text;
+          continue;
+        }
         // A response served by a model other than the one requested is durable
         // provenance, not an alert: it rides as the same quiet system line the
         // rest of the transcript uses, above the turn it explains, instead of
@@ -444,6 +476,44 @@ export function projectStream(session) {
       currentDoc = null;
       currentLedger = null;
       closeDelegation();
+      // Every user message closes the open call; only the next question of the
+      // SAME call reopens it, just below.
+      const openVoiceCall = currentVoiceCall;
+      currentVoiceCall = null;
+      // A question a voice delegate asked this session mid-call. Like an
+      // event, it is a user-role message nobody typed, so it never becomes a
+      // waypoint; unlike an event, it is half of an exchange, so it joins the
+      // block its call already opened.
+      if (msg.custom?.source === 'voice_call') {
+        const callId = String(msg.custom.call_id || '');
+        // The raw question, when the server recorded it: the body of the
+        // message is the prompt scaffolding wrapped around it.
+        const question = typeof msg.custom.question === 'string' && msg.custom.question
+          ? msg.custom.question
+          : joinText(msg.content);
+        // A call with no id cannot claim to be the same call as anything, so
+        // it never merges: better two blocks than one that fuses two calls.
+        currentVoiceCall = callId && openVoiceCall?.callId === callId
+          ? openVoiceCall
+          : null;
+        if (!currentVoiceCall) {
+          currentVoiceCall = {
+            kind: 'voice_call',
+            id: blockID('voicecall', msg, i),
+            callId,
+            time: msg.timestamp,
+            exchanges: [],
+          };
+          blocks.push(currentVoiceCall);
+        }
+        currentVoiceCall.exchanges.push({
+          id: blockID('voiceask', msg, i),
+          question,
+          answer: '',
+          time: msg.timestamp,
+        });
+        continue;
+      }
       // wake-on-event: an event is a user-role message only because that is
       // how the model must receive it; it is not the owner's turn, so it never
       // becomes a waypoint. The custom envelope is set by the server on
@@ -544,47 +614,73 @@ export function projectStream(session) {
   const hasLiveWork = liveSubs.length > 0 || liveBash.length > 0;
   const live = hasStreamingText || hasThinking || trailingRunningTool || hasLiveWork;
 
+  // An open voice exchange owns the model's live output: the answer is being
+  // written FOR that question, so it streams into it. Letting it open a
+  // document instead made the owner watch the answer arrive as ordinary
+  // conversation prose and then jump into the call block the moment the
+  // message settled — the live and the cold transcript disagreeing about
+  // whose words those are, which is the whole point of the block.
+  const liveVoiceAnswer = currentVoiceCall && (hasStreamingText || hasThinking)
+    ? currentVoiceCall.exchanges[currentVoiceCall.exchanges.length - 1]
+    : null;
+
   if (live) {
-    const doc = ensureDoc(lastMsg, messages.length);
-    closeLedger();
-    if (hasStreamingText || hasThinking) closeDelegation();
-    // Thinking is intentionally NOT projected to a rendered block: it streams
-    // live and is then dropped when the turn ends (never persisted in
-    // `messages`), so painting it made a block appear, be expandable, then
-    // vanish unrecoverably — confusing. The backend keeps sending it
-    // (`session.thinkingText` still drives the live caret + auto-scroll below);
-    // we just don't draw it. Revisit if thinking ever gets persisted.
-    if (hasStreamingText) doc.blocks.push({ type: 'prose', id: `${doc.id}-stream`, text: session.streamingText, caret: true });
-
-    // SYNC live subagents merge into this turn's delegation block (creating
-    // one if the turn had none yet), joining any already-terminated agent
-    // rows — the conversation is paused on them, so they belong inline
-    // ("async in the dock, sync inline"). ASYNC live subagents, and ALL live
-    // bash (kind:'bash' is always async background work), are NOT pushed
-    // inline: they only surface through liveTrayAgents() for the LiveBar.
-    // The block is `settled:false` while at least one agent is still running
-    // so the renderer keeps it live (hairline sweep, breathing dots) instead
-    // of auto-collapsing (SUBAGENTS-REDESIGN-SPEC §1.3).
-    const liveSyncSubs = liveSubs.filter((s) => s.async !== true);
-    if (liveSyncSubs.length > 0) {
-      if (!currentDelegation) {
-        currentDelegation = { type: 'delegation', id: `${doc.id}-delegation`, agents: [] };
-        doc.blocks.push(currentDelegation);
+    if (liveVoiceAnswer) {
+      // Joined exactly as a settled message is absorbed above, so the text
+      // does not reflow when the stream ends.
+      if (hasStreamingText) {
+        liveVoiceAnswer.answer = liveVoiceAnswer.answer
+          ? `${liveVoiceAnswer.answer}\n\n${session.streamingText}`
+          : session.streamingText;
       }
-      for (const s of liveSyncSubs) {
-        currentDelegation.agents.push(
-          delegationRunningAgent(s, subagentAccentIndex(session.subagents, s.jobId)),
-        );
-      }
-      currentDelegation.settled = false;
+      // The answer is on its way: an exchange with no text yet is being
+      // thought about, not left unanswered.
+      liveVoiceAnswer.streaming = true;
     }
+    // Live work that is not the answer itself — a tool still running, live
+    // subagents — keeps the document it has always had.
+    if (!liveVoiceAnswer || trailingRunningTool || hasLiveWork) {
+      const doc = ensureDoc(lastMsg, messages.length);
+      closeLedger();
+      if (hasStreamingText || hasThinking) closeDelegation();
+      // Thinking is intentionally NOT projected to a rendered block: it streams
+      // live and is then dropped when the turn ends (never persisted in
+      // `messages`), so painting it made a block appear, be expandable, then
+      // vanish unrecoverably — confusing. The backend keeps sending it
+      // (`session.thinkingText` still drives the live caret + auto-scroll below);
+      // we just don't draw it. Revisit if thinking ever gets persisted.
+      if (hasStreamingText && !liveVoiceAnswer) doc.blocks.push({ type: 'prose', id: `${doc.id}-stream`, text: session.streamingText, caret: true });
 
-    doc.kind = 'streaming';
-    // Whether the MODEL is actively producing text (streaming prose or
-    // thinking) — distinct from "some work is live" (a running tool/subagent).
-    // The assistant-document caret keys off this so it blinks only while the
-    // model writes, not while a tool merely runs (that has its own live row).
-    doc.textLive = hasStreamingText || hasThinking;
+      // SYNC live subagents merge into this turn's delegation block (creating
+      // one if the turn had none yet), joining any already-terminated agent
+      // rows — the conversation is paused on them, so they belong inline
+      // ("async in the dock, sync inline"). ASYNC live subagents, and ALL live
+      // bash (kind:'bash' is always async background work), are NOT pushed
+      // inline: they only surface through liveTrayAgents() for the LiveBar.
+      // The block is `settled:false` while at least one agent is still running
+      // so the renderer keeps it live (hairline sweep, breathing dots) instead
+      // of auto-collapsing (SUBAGENTS-REDESIGN-SPEC §1.3).
+      const liveSyncSubs = liveSubs.filter((s) => s.async !== true);
+      if (liveSyncSubs.length > 0) {
+        if (!currentDelegation) {
+          currentDelegation = { type: 'delegation', id: `${doc.id}-delegation`, agents: [] };
+          doc.blocks.push(currentDelegation);
+        }
+        for (const s of liveSyncSubs) {
+          currentDelegation.agents.push(
+            delegationRunningAgent(s, subagentAccentIndex(session.subagents, s.jobId)),
+          );
+        }
+        currentDelegation.settled = false;
+      }
+
+      doc.kind = 'streaming';
+      // Whether the MODEL is actively producing text (streaming prose or
+      // thinking) — distinct from "some work is live" (a running tool/subagent).
+      // The assistant-document caret keys off this so it blinks only while the
+      // model writes, not while a tool merely runs (that has its own live row).
+      doc.textLive = hasStreamingText || hasThinking;
+    }
   }
 
   // Finalize every delegation block: attach its summary and mark settled ones

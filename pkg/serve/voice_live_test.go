@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 type voiceLiveRoundTripper func(*http.Request) (*http.Response, error)
@@ -181,5 +183,29 @@ func TestVoiceLiveSessionRevalidatesDeviceBeforeUpstreamSpend(t *testing.T) {
 	handleVoiceLiveSession(mgr, func() (string, bool) { return "key", true }, client).ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("revoked device = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The client turns metered voice seconds into money, so it needs that rate and
+// the billed floor. It must NOT be handed backend token rates.
+func TestVoiceLivePricingStatesVoiceAndNamesTheBackend(t *testing.T) {
+	pricing := voiceLivePricing()
+	if pricing["voice_usd_per_minute"] != voiceLiveUSDPerMinute {
+		t.Fatalf("voice rate = %v", pricing["voice_usd_per_minute"])
+	}
+	if pricing["voice_min_billed_seconds"] != voiceLiveMinBilledSeconds {
+		t.Fatalf("billed floor = %v", pricing["voice_min_billed_seconds"])
+	}
+	if pricing["backend_model"] != voiceLiveBackendModel {
+		t.Fatalf("backend model = %v", pricing["backend_model"])
+	}
+	// No token rate travels to the browser: a backend figure computed there
+	// would ignore cache reads and long-context tiers and be wrong, not merely
+	// partial. The model is named so the UI can say what it excludes.
+	if _, leaked := pricing["backend_input_usd_per_mtok"]; leaked {
+		t.Fatalf("backend token rates must not be shipped to the client: %v", pricing)
+	}
+	if _, ok := core.ResolveModel(voiceLiveBackendModel); !ok {
+		t.Fatalf("the backend model is not resolvable in core")
 	}
 }

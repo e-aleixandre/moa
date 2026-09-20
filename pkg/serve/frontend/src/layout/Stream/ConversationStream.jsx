@@ -8,6 +8,7 @@ import {
   ArtifactCard,
   CompactionCard,
   EventBlock,
+  VoiceCallBlock,
   SessionMessage,
   HistoryHydrationTail,
   historyHydrationTailVisible,
@@ -129,6 +130,11 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
     // block — it is not the owner's turn, so it is never a waypoint.
     case "event":
       return <EventBlock source={block.source} title={block.title} body={block.body} time={block.time} steer={block.steer} autorun={block.autorun} sessions={block.sessions} onOpenSession={openSession} />;
+    // A voice call the owner had with the delegate: the questions it asked
+    // this session and what this session answered, grouped as one exchange
+    // between two agents — never as the owner's own messages.
+    case "voice_call":
+      return <VoiceCallBlock exchanges={block.exchanges} time={block.time} />;
     case "waypoint": {
       // A message sent from the Live Preview carries the feedback block the
       // agent needs verbatim; the transcript paints it as a reference tied to

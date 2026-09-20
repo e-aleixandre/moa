@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,34 @@ const (
 	voiceLiveGlobalRate    = 8
 	voiceLivePrincipalRate = 2
 )
+
+const (
+	voiceLiveModel        = "gpt-live-1"
+	voiceLiveBackendModel = "gpt-5.6-terra"
+	// Published rate for gpt-live-1 voice duration, billed per second. It is
+	// absent from core's model table because that table prices tokens, and a
+	// Live voice session is not billed in tokens at all.
+	voiceLiveUSDPerMinute = 0.05
+	// Creating a WebRTC session bills 15 seconds of duration up front, credited
+	// against the running session rather than added to it. A call therefore
+	// costs at least this much, and showing less would understate every short
+	// call.
+	voiceLiveMinBilledSeconds = 15
+)
+
+// voiceLivePricing is what the client needs to turn metered voice duration into
+// money. It deliberately carries no backend token rate: pricing a Responses
+// call correctly needs cache and long-context tiers (core.Pricing.Cost), and
+// the forwarded usage is not reliable enough to feed it. The backend is named
+// so the UI can say what it is NOT counting.
+func voiceLivePricing() map[string]any {
+	pricing := map[string]any{
+		"voice_usd_per_minute":     voiceLiveUSDPerMinute,
+		"voice_min_billed_seconds": voiceLiveMinBilledSeconds,
+		"backend_model":            voiceLiveBackendModel,
+	}
+	return pricing
+}
 
 func handleVoiceLiveSession(mgr *Manager, keyFn RealtimeAPIKeyFunc, client *http.Client) http.HandlerFunc {
 	return handleVoiceLiveSessionWithAdmission(mgr, keyFn, client, newVoiceLiveAdmission())
@@ -109,10 +138,10 @@ func handleVoiceLiveSessionWithAdmission(mgr *Manager, keyFn RealtimeAPIKeyFunc,
 			return
 		}
 		payload := map[string]any{"session": map[string]any{
-			"model": "gpt-live-1", "instructions": brief.VoiceInstructions,
+			"model": voiceLiveModel, "instructions": brief.VoiceInstructions,
 			"audio": map[string]any{"output": map[string]any{"voice": "marin"}}, "input": brief.Input,
 			"delegation": map[string]any{"type": "responses", "responses": map[string]any{
-				"model": "gpt-5.6-terra", "instructions": brief.DelegationInstructions,
+				"model": voiceLiveBackendModel, "instructions": brief.DelegationInstructions,
 				"reasoning": map[string]any{"effort": "low"}, "tools": voiceLiveTools(), "tool_choice": "auto",
 			}},
 		}, "transport": map[string]any{"type": "webrtc", "sdp": body.SDP}}
@@ -160,7 +189,7 @@ func handleVoiceLiveSessionWithAdmission(mgr *Manager, keyFn RealtimeAPIKeyFunc,
 			return
 		}
 		deliver := func() error {
-			writeJSON(w, http.StatusOK, map[string]any{"live_session_id": result.Session.ID, "sdp": result.Transport.SDP, "owner_id": brief.OwnerID, "brief_messages": len(brief.Input)})
+			writeJSON(w, http.StatusOK, map[string]any{"live_session_id": result.Session.ID, "sdp": result.Transport.SDP, "owner_id": brief.OwnerID, "brief_messages": len(brief.Input), "pricing": voiceLivePricing()})
 			return nil
 		}
 		if identity.Kind == "device" {

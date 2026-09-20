@@ -5,7 +5,7 @@ import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestion
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import { useVoiceLive } from "../../hooks/useVoiceLive.js";
-import { appendCallResult } from "../../data/voice-live.js";
+import { appendCallResult, callSpendNotice } from "../../data/voice-live.js";
 import { VoiceLivePanel } from "../../components/VoiceLivePanel/VoiceLivePanel.jsx";
 import { useStore } from "../../hooks/useStore.js";
 import {
@@ -851,7 +851,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // selected or moved the caret, so an insertion would replace his text with
   // the delegate's. The input event is dispatched the same way insertAtCursor
   // does it, so the draft, hasText and the auto-resize stay correct.
-  const onVoiceLiveResult = useCallback((text) => {
+  const onVoiceLiveResult = useCallback((text, meta) => {
     const el = textareaRef.current;
     if (!el) return;
     const next = appendCallResult(el.value, text);
@@ -859,7 +859,12 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     writeComposer(el, next);
     el.selectionStart = el.selectionEnd = next.length;
     el.dispatchEvent(new Event('input', { bubbles: true }));
-  }, [writeComposer]);
+    // What the call cost, once, when it is over. The panel is gone by now and
+    // the figure must not travel inside the draft: the owner sends that text to
+    // the session, and a price tag has no business in the message he sends.
+    const spend = callSpendNotice(meta);
+    if (spend) addToast({ sessionId, title: 'Call ended', detail: spend });
+  }, [writeComposer, sessionId]);
 
   const onVoiceLiveError = useCallback((msg) => {
     addToast({ sessionId, title: 'Voice call', detail: msg, type: 'error' });
@@ -1150,6 +1155,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           maxQuestions={voiceLive.maxQuestions}
           pendingAsks={voiceLive.pendingAsks}
           elapsed={voiceLive.elapsed}
+          cost={voiceLive.cost}
           onHangup={voiceLive.hangup}
         />
       )}

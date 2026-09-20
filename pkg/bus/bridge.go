@@ -1278,6 +1278,17 @@ func projectLiveCustom(custom map[string]any) map[string]any {
 			}
 		}
 	}
+	// A voice delegate's question to this session: the call that groups it and
+	// the question as it was asked. Without them a live transcript shows the
+	// prompt wrapper as an ordinary message until a reload brings the record
+	// back; serve's projection narrows the same keys further.
+	if source == "voice_call" {
+		for _, key := range []string{"call_id", "question"} {
+			if value, ok := custom[key].(string); ok {
+				projected[key] = value
+			}
+		}
+	}
 	// A batch of reports names the sessions it is about; serve's projection
 	// narrows the list further, this only lets it through.
 	if source == "report" {

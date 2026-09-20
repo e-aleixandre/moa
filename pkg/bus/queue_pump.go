@@ -209,6 +209,11 @@ func launchQueuedSteers(sctx *SessionContext, items []core.SteerItem) {
 				MsgID:     msgIDs[i],
 				Timestamp: timestamp,
 				Text:      it.Text,
+				// SendItems persists the item's provenance, so dropping it here
+				// made the live frame and the reloaded transcript disagree: a
+				// voice delegate's question arrived looking like a message the
+				// user had typed, and only became a call block on reload.
+				Custom: it.Custom,
 			})
 		}
 	}

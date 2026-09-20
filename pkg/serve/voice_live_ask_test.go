@@ -81,7 +81,7 @@ func TestVoiceLiveAskAllowsOnlyOnePendingQuestionAndBoundsInputOutput(t *testing
 	}
 
 	store := newVoiceLiveAskStore()
-	id, err := store.create(sess.ID, "msg", "steer")
+	id, err := store.create(sess.ID, "msg", "steer", "call", "question")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,12 +102,116 @@ func TestVoiceLiveQuestionPromptNeutralizesDelimiter(t *testing.T) {
 	}
 }
 
+// The provenance rides on the prompt itself, and a prompt carrying custom
+// metadata takes a different path through the agent than a plain one. This is
+// the end the delegate feels: the question must still be bound to its run, or
+// the answer never comes back and the call goes silent.
+func TestVoiceLiveAskFromACallStillGetsItsAnswer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("The drawer groups by project.")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post, get := voiceLiveAskHandlers(mgr)
+	created := postVoiceLiveAskFromCall(t, post, sess.ID, "How does the drawer group?", "sess_live_2")
+	waitVoiceLiveAskStatus(t, get, sess.ID, created.AskID, "answered")
+	rec := httptest.NewRecorder()
+	get.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/voice/live/ask?session_id="+sess.ID+"&ask_id="+created.AskID, nil))
+	if !strings.Contains(rec.Body.String(), "The drawer groups by project.") {
+		t.Fatalf("answer = %s", rec.Body.String())
+	}
+}
+
+// A question asked during a call must reach the transcript as what it was —
+// machine-to-machine traffic inside one call — and not as a message the owner
+// typed. The block is built from this envelope, so the envelope has to survive
+// the two things that erase metadata: the transport allowlist, and a restore
+// from disk days later.
+func TestVoiceLiveAskProvenanceCrossesTheTransportAndSurvivesARestore(t *testing.T) {
+	projected := projectWSMessageCustom(map[string]any{
+		"source": "voice_call", "call_id": "sess_live_1", "question": "What did we decide about the drawer?",
+		"internal": true,
+	})
+	if projected["source"] != "voice_call" || projected["call_id"] != "sess_live_1" ||
+		projected["question"] != "What did we decide about the drawer?" {
+		t.Fatalf("voice provenance not projected: %v", projected)
+	}
+	if _, leaked := projected["internal"]; leaked {
+		t.Fatalf("unknown key leaked: %v", projected)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("We decided to group them.")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post, _ := voiceLiveAskHandlers(mgr)
+	postVoiceLiveAskFromCall(t, post, sess.ID, "What did we decide about the drawer?", "sess_live_1")
+	if !sess.runtime.WaitSettled(ctx) {
+		t.Fatal("the voice question never ran")
+	}
+
+	if err := mgr.CloseSession(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := mgr.ResumeSession(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored map[string]any
+	for _, msg := range resumed.History() {
+		if source, _ := msg.Custom["source"].(string); source == "voice_call" {
+			restored = msg.Custom
+		}
+	}
+	if restored == nil {
+		t.Fatal("the voice question came back from disk with no provenance: it would read as a message the owner typed")
+	}
+	// Read back through JSON: this is the shape the client is served once the
+	// conversation has been closed for days.
+	fromDisk := projectWSMessageCustom(restored)
+	if fromDisk["call_id"] != "sess_live_1" || fromDisk["question"] != "What did we decide about the drawer?" {
+		t.Fatalf("restored voice provenance = %v", fromDisk)
+	}
+}
+
+// The call id is a client string. It groups exchanges and nothing else, so the
+// only thing demanded of it is that it cannot grow without bound.
+func TestVoiceLiveAskRejectsAnOversizedCallID(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post, _ := voiceLiveAskHandlers(mgr)
+	rec := httptest.NewRecorder()
+	body := `{"session_id":"` + sess.ID + `","question":"hi","call_id":"` + strings.Repeat("x", voiceLiveCallIDLimit+1) + `"}`
+	post.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/voice/live/ask", strings.NewReader(body)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized call id = %d", rec.Code)
+	}
+}
+
 func postVoiceLiveAsk(t *testing.T, post http.HandlerFunc, sessionID, question string) struct {
 	AskID string `json:"ask_id"`
 } {
 	t.Helper()
+	return postVoiceLiveAskFromCall(t, post, sessionID, question, "")
+}
+
+func postVoiceLiveAskFromCall(t *testing.T, post http.HandlerFunc, sessionID, question, callID string) struct {
+	AskID string `json:"ask_id"`
+} {
+	t.Helper()
 	rec := httptest.NewRecorder()
-	post.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/voice/live/ask", strings.NewReader(`{"session_id":"`+sessionID+`","question":"`+question+`"}`)))
+	body := `{"session_id":"` + sessionID + `","question":"` + question + `","call_id":"` + callID + `"}`
+	post.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/voice/live/ask", strings.NewReader(body)))
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("post = %d: %s", rec.Code, rec.Body.String())
 	}
