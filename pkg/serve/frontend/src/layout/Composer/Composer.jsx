@@ -1,9 +1,12 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Paperclip, X, Mic, Loader2, Image as ImageIcon } from "lucide-preact";
+import { Paperclip, X, Mic, Loader2, Image as ImageIcon, PhoneCall } from "lucide-preact";
 import { Chip } from "../../primitives/index.js";
 import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
+import { useVoiceLive } from "../../hooks/useVoiceLive.js";
+import { appendCallResult } from "../../data/voice-live.js";
+import { VoiceLivePanel } from "../../components/VoiceLivePanel/VoiceLivePanel.jsx";
 import { useStore } from "../../hooks/useStore.js";
 import {
   sendMessage, stopRun, cancelSteers, execCommand, execShell, newSteerId,
@@ -181,6 +184,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // --- Slash command + @-mention suggestion state ---
   const [goalFlags, setGoalFlags] = useState([]);
   const [canTranscribe, setCanTranscribe] = useState(false);
+  const [canVoiceLive, setCanVoiceLive] = useState(false);
   const [cmdSuggestions, setCmdSuggestions] = useState(null); // null = hidden
   const [cmdCursor, setCmdCursor] = useState(0);
   const [fileSuggestions, setFileSuggestions] = useState(null); // [{path, is_dir}] or null
@@ -210,6 +214,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       .then(caps => {
         setGoalFlags(Array.isArray(caps.goal_flags) ? caps.goal_flags : []);
         setCanTranscribe(!!caps.transcribe);
+        // A live call needs the same OpenAI key slot the transcriber uses, so
+        // `transcribe` is the honest fallback until the server publishes a
+        // capability of its own. Being wrong here costs a toast (the session
+        // endpoint answers 503), never a silent failure.
+        setCanVoiceLive(caps.voice_live === undefined ? !!caps.transcribe : !!caps.voice_live);
       })
       .catch(() => {});
   }, [sessionId]);
@@ -834,6 +843,42 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // subagent's steer box cannot spill into the parent's.
   const canVoice = canTranscribe && voiceSupported;
 
+  // --- Voice delegate (live call) ---
+  // The minutes land in the composer as a draft, and they are NEVER sent
+  // automatically: the owner reads, corrects or deletes them and sends them
+  // himself. They are APPENDED as their own block rather than inserted at the
+  // caret — a call runs for minutes, and during it the owner may have typed,
+  // selected or moved the caret, so an insertion would replace his text with
+  // the delegate's. The input event is dispatched the same way insertAtCursor
+  // does it, so the draft, hasText and the auto-resize stay correct.
+  const onVoiceLiveResult = useCallback((text) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const next = appendCallResult(el.value, text);
+    if (next === el.value) return;
+    writeComposer(el, next);
+    el.selectionStart = el.selectionEnd = next.length;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, [writeComposer]);
+
+  const onVoiceLiveError = useCallback((msg) => {
+    addToast({ sessionId, title: 'Voice call', detail: msg, type: 'error' });
+  }, [sessionId]);
+
+  const voiceLive = useVoiceLive(sessionId, {
+    onResult: onVoiceLiveResult,
+    onError: onVoiceLiveError,
+  });
+
+  // Never in steer mode: that box writes to a subagent, and a call is a
+  // conversation with THIS session.
+  const canCall = canVoiceLive && voiceLive.supported && !steer && !!sessionId;
+
+  const handleCallToggle = useCallback(() => {
+    if (voiceLive.active) voiceLive.hangup();
+    else voiceLive.start();
+  }, [voiceLive.active, voiceLive.hangup, voiceLive.start]);
+
   // ⌘. (Mac) / Alt+. (elsewhere) toggles push-to-talk for the FOCUSED composer.
   // Ctrl is deliberately excluded (project rule: ⌘ on Mac / Alt elsewhere,
   // never Ctrl). Gated to this composer having focus so multi-pane layouts only
@@ -1096,6 +1141,18 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           Prompt cache expired · your next message pays a cache write
         </div>
       )}
+      {voiceLive.active && (
+        <VoiceLivePanel
+          phase={voiceLive.phase}
+          endedReason={voiceLive.endedReason}
+          micState={voiceLive.micState}
+          questionsUsed={voiceLive.questionsUsed}
+          maxQuestions={voiceLive.maxQuestions}
+          pendingAsks={voiceLive.pendingAsks}
+          elapsed={voiceLive.elapsed}
+          onHangup={voiceLive.hangup}
+        />
+      )}
       {attachments.length > 0 && (
         <div class="attach-preview-strip">
           {attachments.map((a, i) => (
@@ -1232,6 +1289,29 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
                 MY input, not a stop control, and a square here read as the
                 same thing as the agent's Stop. The ring says "live". */}
             {transcribing ? <Loader2 size={15} class="spin" /> : <Mic size={15} />}
+          </button>
+        )}
+        {canCall && (
+          /* Talk live — turns this conversation into a voice call. It sits
+             next to dictation because both are "speak instead of type", but
+             they are different verbs: the mic writes what YOU said, this one
+             hands the conversation to a delegate that talks back and returns
+             minutes. Hence a phone glyph, never a second microphone. */
+          <button
+            type="button"
+            class={`zl-attach zl-call${voiceLive.active ? " in-call" : ""}`}
+            aria-label={voiceLive.active ? "End call" : "Talk live"}
+            title={
+              voiceLive.active
+                ? "End call — the minutes land here as a draft"
+                : "Talk live — a voice delegate takes this conversation"
+            }
+            disabled={contentSendPending || voiceLive.phase === 'closing'}
+            onClick={handleCallToggle}
+          >
+            {voiceLive.phase === 'connecting' || voiceLive.phase === 'closing'
+              ? <Loader2 size={15} class="spin" />
+              : <PhoneCall size={15} />}
           </button>
         )}
         {/* Send is always Send now. It no longer has to ask whose turn it is:

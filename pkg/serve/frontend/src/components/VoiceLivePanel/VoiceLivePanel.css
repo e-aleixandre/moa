@@ -1,0 +1,104 @@
+/* VoiceLivePanel — a docked strip above the composer's textarea, not an
+   overlay: the call runs WITH the conversation, and covering it would hide
+   exactly the thing being talked about. Tokens only, and the `--zl-*` ladder
+   rather than the legacy names, which are frozen debt. */
+
+.voice-live {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim-2);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  color: var(--zl-t1);
+}
+
+.voice-live-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.voice-live-spring { flex: 1; }
+
+.voice-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--zl-t4);
+  flex: none;
+}
+.voice-live-dot.is-live { background: var(--zl-green); }
+.voice-live-dot.is-connecting,
+.voice-live-dot.is-closing { background: var(--zl-yellow); }
+
+.voice-live-phase {
+  font-weight: var(--weight-semibold);
+}
+
+.voice-live-clock {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-live-questions {
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+  white-space: nowrap;
+}
+
+/* A hang-up is a one-handed action on a phone; it gets a full touch target. */
+.voice-live-hangup {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-touch);
+  height: var(--control-touch);
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--zl-red);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .voice-live-hangup:hover { background: var(--zl-hi); }
+}
+.voice-live-hangup:focus-visible {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
+}
+
+/* The waiting notice is the one thing here the owner must not miss: the
+   delegate is blocked on THIS conversation and only he can unblock it. */
+.voice-live-waiting {
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-hi);
+  color: var(--zl-yellow);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--zl-fs-body);
+  font-weight: var(--weight-medium);
+}
+
+.voice-live-mic {
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+}
+.voice-live-mic.is-ok { color: var(--zl-green); }
+.voice-live-mic.is-warn { color: var(--zl-yellow); }
+.voice-live-mic.is-bad { color: var(--zl-red); }
+
+.voice-live .spin { animation: voice-live-spin 1.2s linear infinite; }
+@keyframes voice-live-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 520px) {
+  /* The question counter is the first thing to fold: the phase, the clock and
+     the way out must stay on one line on a phone. */
+  .voice-live-questions { font-size: var(--zl-fs-micro); }
+}
