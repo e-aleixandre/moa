@@ -152,6 +152,9 @@ func registerHistoryHandlers(sctx *SessionContext) {
 			sctx.Agent.PushSteersFront([]core.SteerItem{{ID: barrierID, Command: barrierID}})
 		}
 		const prompt = "Prepare this conversation for imminent compaction. Do not continue the user's task. Only update existing relevant tracking or docs; never create docs merely for compaction. Use the ephemeral checkpoint for active non-reconstructible data, never memory. You may do nothing. Briefly report what you prepared."
+		// A machine step inside the work already under way: the conversation is
+		// being made to fit, not asked to do something new.
+		sctx.setPendingRunOrigin(RunOrigin{ContinueCurrent: true})
 		launchRun(sctx, "prepare compact", func(ctx context.Context) ([]core.AgentMessage, error) {
 			defer func() {
 				if addedBarrier {
@@ -231,6 +234,9 @@ func registerHistoryHandlers(sctx *SessionContext) {
 		if cmd.Options.Thinking != "" {
 			targetThinking = cmd.Options.Thinking
 		}
+		// Handing the conversation to another model continues the same work
+		// under a new runtime; it is not a fresh instruction.
+		sctx.setPendingRunOrigin(RunOrigin{ContinueCurrent: true})
 		launchRunWithSettled(sctx, "handoff", func(ctx context.Context) ([]core.AgentMessage, error) {
 			model := sctx.Agent.Model()
 			provider, err := sctx.ProviderFactory(model)

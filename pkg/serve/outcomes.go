@@ -17,6 +17,11 @@ type runOutcome struct {
 	FinalText string
 	Err       string
 	Pending   *CallbackPending
+	// BackgroundCount is how much autonomous work was still running when the
+	// outcome was decided. Only the owner-report policy sets it: it is the one
+	// consumer that reports a finished turn without waiting for the session to
+	// go quiet. Zero everywhere else, which is what it has always meant.
+	BackgroundCount int
 }
 
 // subscribeRunOutcomes installs the observer that turns bus traffic into
@@ -53,13 +58,29 @@ func subscribeRunOutcomes(sess *ManagedSession, sink func(runOutcome)) {
 	// the single subscriber goroutine below, in publication order.
 	var needsInputSent bool
 
+	// Every sink goroutine is admitted and registered in one critical section
+	// (admitOutcomeWorker), so shutdown can close admission and then wait
+	// without racing an Add happening on this subscriber goroutine. A denied
+	// worker simply does not run: the automation callback's contract is
+	// best-effort and its caller retries, which is exactly why owner reports
+	// do NOT share this gate and use their own barrier instead.
+	go1 := func(fn func()) {
+		if !sess.admitOutcomeWorker() {
+			return
+		}
+		go func() {
+			defer sess.outcomeWorkerDone()
+			fn()
+		}()
+	}
+
 	needsInput := func(runGen uint64, pending *CallbackPending) {
 		if needsInputSent {
 			return
 		}
 		needsInputSent = true
 		slog.Info("run outcome emitted", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusNeedsInput, "run_gen", runGen, "batch", "", "n", 1)
-		go sink(runOutcome{Status: callbackStatusNeedsInput, RunGen: runGen, Pending: pending})
+		go1(func() { sink(runOutcome{Status: callbackStatusNeedsInput, RunGen: runGen, Pending: pending}) })
 	}
 
 	sess.pushUnsubs = append(sess.pushUnsubs, sess.runtime.Bus.SubscribeAll(func(event any) {
@@ -74,15 +95,17 @@ func subscribeRunOutcomes(sess *ManagedSession, sink func(runOutcome)) {
 			lastRunGen.Store(e.RunGen)
 			if e.Err != nil {
 				slog.Info("run outcome emitted", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusFailed, "run_gen", e.RunGen, "batch", "", "n", 1)
-				go sink(runOutcome{
-					Status:    callbackStatusFailed,
-					RunGen:    e.RunGen,
-					FinalText: e.FinalText,
-					Err:       e.Err.Error(),
+				go1(func() {
+					sink(runOutcome{
+						Status:    callbackStatusFailed,
+						RunGen:    e.RunGen,
+						FinalText: e.FinalText,
+						Err:       e.Err.Error(),
+					})
 				})
 				return
 			}
-			go func() {
+			go1(func() {
 				// WaitQuiescent drains the bus, so it must not run on a
 				// subscriber goroutine (it would wait on itself).
 				if !sess.runtime.WaitQuiescent(sess.infra.sessionCtx) {
@@ -95,7 +118,7 @@ func subscribeRunOutcomes(sess *ManagedSession, sink func(runOutcome)) {
 				}
 				slog.Info("run outcome emitted", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusDone, "run_gen", e.RunGen, "batch", "", "n", 1)
 				sink(runOutcome{Status: callbackStatusDone, RunGen: e.RunGen, FinalText: e.FinalText})
-			}()
+			})
 		}
 	}))
 }

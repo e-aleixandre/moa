@@ -73,6 +73,16 @@ type reportCoordinator struct {
 	quit      chan struct{}
 	done      chan struct{}
 	closeOnce sync.Once
+	// postMu / closing / posters are the admission gate between senders and
+	// Close. A sender is admitted under the read side and counted; Close takes
+	// the write side, sets closing, and waits for the admitted senders. That
+	// ordering is what makes "nothing can enqueue after the actor's final
+	// drain" a property of the code rather than a matter of timing: once Close
+	// signals quit, every possible sender has already put its command in the
+	// mailbox, and the drain sees all of them.
+	postMu  sync.RWMutex
+	closing bool
+	posters sync.WaitGroup
 }
 
 // reportCommand is the actor's mailbox message: a new report, or a nudge to try
@@ -80,6 +90,14 @@ type reportCoordinator struct {
 type reportCommand struct {
 	key    string
 	report *owner.Report
+	// beginShutdown puts the actor in accept-only mode: timers disarmed, no
+	// deliveries, reports still accepted and still persisted.
+	beginShutdown bool
+	// ack is closed once the actor has processed this command, including its
+	// attempt to persist the outbox. A sink that reports a turn has crossed
+	// the outbox boundary only when this closes — before that the report exists
+	// solely in a channel, which a process exit does not preserve.
+	ack chan struct{}
 }
 
 // reportBatch is the per-codebase state: what is pending and the timer that
@@ -113,50 +131,140 @@ func newReportCoordinator(ctx context.Context, m *Manager) *reportCoordinator {
 	return c
 }
 
-// post hands a command to the actor without ever blocking the caller past
-// shutdown: senders are bus subscribers and timers, which must not be held.
-func (c *reportCoordinator) post(cmd reportCommand) {
+// post hands a command to the actor, returning whether it was admitted.
+//
+// It deliberately does NOT give up on the root context. A SIGTERM cancels that
+// context while sessions are still finishing their last turn, and a report
+// dropped there is the one thing this whole path exists to prevent. The only
+// thing that refuses a post is Close, through the admission gate: while a
+// sender holds admission the actor is guaranteed to still be running, so the
+// send cannot be left dangling.
+func (c *reportCoordinator) post(cmd reportCommand) bool {
+	if c == nil {
+		return false
+	}
+	c.postMu.RLock()
+	if c.closing {
+		c.postMu.RUnlock()
+		if cmd.report != nil {
+			slog.Warn("owner reports: report arrived after the coordinator closed",
+				"codebase", cmd.key, "session", cmd.report.SessionID)
+		}
+		return false
+	}
+	c.posters.Add(1)
+	c.postMu.RUnlock()
+	defer c.posters.Done()
+	c.mail <- cmd
+	return true
+}
+
+// add records one report for the codebase's owner and waits for the actor to
+// have processed it (queued, and its persistence attempted).
+//
+// The wait is what makes a sink's completion meaningful: "this turn was
+// reported" has to mean it reached the outbox, not that it reached a channel.
+// Nudges stay asynchronous — they carry nothing that can be lost.
+func (c *reportCoordinator) add(key string, rep owner.Report) {
 	if c == nil {
 		return
 	}
-	select {
-	case c.mail <- cmd:
-	case <-c.ctx.Done():
-	case <-c.quit:
+	ack := make(chan struct{})
+	if !c.post(reportCommand{key: key, report: &rep, ack: ack}) {
+		return
 	}
+	<-ack
 }
 
-// add records one report for the codebase's owner.
-func (c *reportCoordinator) add(key string, rep owner.Report) {
-	c.post(reportCommand{key: key, report: &rep})
+// BeginShutdown puts the actor in accept-only mode and waits for it to be in
+// that mode before returning.
+//
+// Every Manager.Shutdown calls it first, whether or not a signal cancelled the
+// root context. From here on no timer fires a delivery and no report — not
+// even an immediate failed or needs_input one — can start a run in an owner
+// session that is about to be torn down. Reports are still accepted and still
+// written to the outbox: that is the whole point of stopping deliveries
+// instead of stopping the actor.
+func (c *reportCoordinator) BeginShutdown() {
+	if c == nil {
+		return
+	}
+	ack := make(chan struct{})
+	if !c.post(reportCommand{beginShutdown: true, ack: ack}) {
+		return
+	}
+	<-ack
 }
 
 // nudge asks the actor to retry a codebase whose owner may now be free.
-func (c *reportCoordinator) nudge(key string) { c.post(reportCommand{key: key}) }
+func (c *reportCoordinator) nudge(key string) { _ = c.post(reportCommand{key: key}) }
 
 func (c *reportCoordinator) loop() {
 	batches := map[string]*reportBatch{}
 	c.recover(batches)
+	// ctxDone is dropped once observed, so the loop stops re-selecting a
+	// channel that is permanently ready.
+	ctxDone := c.ctx.Done()
+	// acceptOnly is the state after the root context is cancelled: the process
+	// is stopping, so nothing is delivered into sessions that are being torn
+	// down — but reports are still accepted and still written to the outbox,
+	// which is how the next process delivers them.
+	acceptOnly := false
 	for {
 		select {
-		case <-c.ctx.Done():
-			c.drain(batches)
-			return
+		case <-ctxDone:
+			ctxDone = nil
+			if !acceptOnly {
+				acceptOnly = true
+				for _, batch := range batches {
+					c.disarm(batch)
+				}
+				slog.Info("owner reports: accepting only, deliveries stopped",
+					"codebase", "", "session", "", "reason", "root context cancelled")
+			}
 		case <-c.quit:
 			c.drain(batches)
 			return
 		case cmd := <-c.mail:
+			if cmd.beginShutdown {
+				if !acceptOnly {
+					acceptOnly = true
+					for _, batch := range batches {
+						c.disarm(batch)
+					}
+					slog.Info("owner reports: accepting only, deliveries stopped",
+						"codebase", "", "session", "", "reason", "shutdown")
+				}
+				ackCommand(cmd)
+				continue
+			}
 			batch := batches[cmd.key]
 			if batch == nil {
 				batch = &reportBatch{}
 				batches[cmd.key] = batch
 			}
 			if cmd.report != nil {
-				c.accept(cmd.key, batch, *cmd.report)
+				if acceptOnly {
+					c.queue(cmd.key, batch, *cmd.report)
+				} else {
+					c.accept(cmd.key, batch, *cmd.report)
+				}
+				ackCommand(cmd)
 				continue
 			}
-			c.flush(cmd.key, batch)
+			if !acceptOnly {
+				c.flush(cmd.key, batch)
+			}
+			ackCommand(cmd)
 		}
+	}
+}
+
+// ackCommand releases a caller waiting for the actor to have processed its
+// command. Safe for commands that carry no ack.
+func ackCommand(cmd reportCommand) {
+	if cmd.ack != nil {
+		close(cmd.ack)
 	}
 }
 
@@ -165,13 +273,24 @@ func (c *reportCoordinator) loop() {
 // shutdown is not lost, and everything still pending is written to the outbox
 // for the next process to deliver.
 //
-// It is idempotent and safe to call after the root context was cancelled: the
-// loop closes done exactly once, whichever of the two paths wins.
+// It is idempotent. It is also the ONLY thing that stops the actor: the root
+// context being cancelled merely stops deliveries (see loop), so a report
+// produced while the process is shutting down still reaches the outbox.
+// Shutdown calls it after the owner observers have been flushed.
 func (c *reportCoordinator) Close() {
 	if c == nil {
 		return
 	}
-	c.closeOnce.Do(func() { close(c.quit) })
+	c.closeOnce.Do(func() {
+		// Shut the admission gate and wait for the senders already inside it.
+		// After this returns nothing can put anything in the mailbox, so the
+		// actor's final drain is guaranteed to see every accepted report.
+		c.postMu.Lock()
+		c.closing = true
+		c.postMu.Unlock()
+		c.posters.Wait()
+		close(c.quit)
+	})
 	<-c.done
 }
 
@@ -183,7 +302,12 @@ func (c *reportCoordinator) drain(batches map[string]*reportBatch) {
 	for {
 		select {
 		case cmd := <-c.mail:
+			if cmd.beginShutdown {
+				ackCommand(cmd)
+				continue
+			}
 			if cmd.report == nil {
+				ackCommand(cmd)
 				continue // a nudge has nowhere to deliver to any more
 			}
 			batch := batches[cmd.key]
@@ -192,6 +316,7 @@ func (c *reportCoordinator) drain(batches map[string]*reportBatch) {
 				batches[cmd.key] = batch
 			}
 			c.queue(cmd.key, batch, *cmd.report)
+			ackCommand(cmd)
 		default:
 			for key, batch := range batches {
 				c.disarm(batch)
@@ -436,8 +561,9 @@ func (m *Manager) awaitCustomInTranscript(sess *ManagedSession, field, value str
 // subscribeOwnerReports wires a session into the reports loop, according to
 // what it is inside the project:
 //
-//   - a child (an ordinary session whose codebase has an owner) feeds its run
-//     outcomes to the coordinator;
+//   - a child (an ordinary session whose codebase has an owner) feeds its
+//     completed semantic turns to the coordinator, through the owner observer
+//     (owner_observer.go) rather than the automation callback's policy;
 //   - the owner itself feeds nothing, but nudges the coordinator on every
 //     outcome of its own: that is the moment a retained batch can finally be
 //     delivered without steering it.
@@ -460,15 +586,31 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 	}
 	key := own.CodebaseKey
 	if ownerSession {
-		subscribeRunOutcomes(sess, func(out runOutcome) {
-			slog.Info("owner reports nudge received", "codebase", key, "session", sess.ID, "owner", own.ID, "status", out.Status, "run_gen", out.RunGen, "batch", "", "n", 0)
+		// The owner's own conversation needs no turn semantics: every time it
+		// stops working is a chance to hand it a waiting batch. Reacting to
+		// the terminal run event directly keeps it off the child policy (and
+		// off its 15s wait) entirely — a nudge is cheap and idempotent.
+		sess.pushUnsubs = append(sess.pushUnsubs, sess.runtime.Bus.Subscribe(func(e bus.RunEnded) {
+			slog.Info("owner reports nudge received", "codebase", key, "session", sess.ID,
+				"owner", own.ID, "status", "run_ended", "run_gen", e.RunGen, "batch", "", "n", 0)
 			m.reports.nudge(key)
-		})
+		}))
+		// Background work settling is the other moment the owner becomes
+		// deliverable: IdleOnly refuses a batch while the owner has any.
+		sess.pushUnsubs = append(sess.pushUnsubs, sess.runtime.Bus.Subscribe(func(e bus.BashJobSettled) {
+			m.reports.nudge(key)
+		}))
+		sess.pushUnsubs = append(sess.pushUnsubs, sess.runtime.Bus.Subscribe(func(e bus.SubagentEnded) {
+			m.reports.nudge(key)
+		}))
 		return
 	}
-	subscribeRunOutcomes(sess, func(out runOutcome) {
+	observer := newOwnerReportObserver(sess, func(out runOutcome) {
 		m.reports.add(key, reportFrom(sess, out))
 	})
+	sess.mu.Lock()
+	sess.ownerObserver = observer
+	sess.mu.Unlock()
 }
 
 // reportFrom turns a run outcome into the report the owner will read. The
@@ -487,7 +629,11 @@ func reportFrom(sess *ManagedSession, out runOutcome) owner.Report {
 		// push its own book delta out of the report that exists to apply it.
 		BookDelta: extractBookDelta(out.FinalText),
 		FinalText: reportTail(out.FinalText),
-		At:        time.Now().UTC().Format(time.RFC3339),
+		// What the session left running when its turn ended. A report is about
+		// a completed turn, not a quiet session; this is what keeps the two
+		// from reading the same.
+		BackgroundCount: out.BackgroundCount,
+		At:              time.Now().UTC().Format(time.RFC3339),
 	}
 	pos := gitPosition(sess.CWD)
 	rep.GitAvailable, rep.Branch, rep.Head, rep.Dirty = pos.Available, pos.Branch, pos.Head, pos.Dirty
@@ -725,6 +871,9 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 		fmt.Fprintf(&b, "- %s — %s\n", rep.SessionID, strings.TrimSpace(rep.Title))
 		fmt.Fprintf(&b, "  origin: %s\n", reportOrigin(rep.Origin))
 		fmt.Fprintf(&b, "  status: %s\n", rep.Status)
+		if line := backgroundWorkLine(rep.BackgroundCount); line != "" {
+			fmt.Fprintf(&b, "  %s\n", line)
+		}
 		if rep.CWD != "" {
 			fmt.Fprintf(&b, "  directory: %s\n", rep.CWD)
 		}
@@ -771,6 +920,21 @@ func reportOrigin(origin string) string {
 		return "owner"
 	}
 	return "user"
+}
+
+// backgroundWorkLine says what the session left running. It is stated in the
+// report rather than inferred from silence: a child that finished its turn and
+// a child that finished its turn while a dev server keeps running are two
+// different things for an owner deciding what to do next.
+func backgroundWorkLine(count int) string {
+	switch {
+	case count <= 0:
+		return ""
+	case count == 1:
+		return "1 background job still running"
+	default:
+		return fmt.Sprintf("%d background jobs still running", count)
+	}
 }
 
 // canonicalRefLabel names the branch areas/ describes, or says it is unknown.

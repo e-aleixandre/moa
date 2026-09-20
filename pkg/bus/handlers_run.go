@@ -191,8 +191,9 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 		}
 		// A genuine user prompt (not the goal loop's own relaunch) aborts any
 		// in-flight goal verification so stale build/tests don't run against the
-		// new run's edits.
-		if cmd.Custom == nil || cmd.Custom["source"] != "goal" {
+		// new run's edits. The goal's first kick counts as goal machinery here:
+		// only its reporting identity differs from a relaunch.
+		if !isGoalPromptSource(cmd.Custom) {
 			if sctx.cancelGoalVerify != nil {
 				sctx.cancelGoalVerify()
 			}
@@ -216,7 +217,7 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 				*cmd.AcceptedMsgID = msgID
 			}
 		}
-		if err := startRun(sctx, cmd.Text, func(ctx context.Context) ([]core.AgentMessage, error) {
+		if err := startRunWithOrigin(sctx, cmd.Text, originFromCustom(cmd.Custom), func(ctx context.Context) ([]core.AgentMessage, error) {
 			if cmd.Custom != nil {
 				switch cmd.Custom["source"] {
 				case "secret_batch", "event", "report", "owner", "heartbeat":
@@ -431,11 +432,60 @@ func steerAttachmentIDs(items []core.SteerItem) []string {
 // marker, matching the wording the frontends use for the live event so the
 
 func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context) ([]core.AgentMessage, error)) error {
+	return startRunWithOrigin(sctx, label, RunOrigin{Explicit: true}, runFn)
+}
+
+// startRunWithOrigin is startRun carrying the run's provenance. The origin is
+// recorded between claiming the slot and launching — both under abortMu — so a
+// failed reservation cannot leave it behind for an unrelated run to pick up.
+func startRunWithOrigin(sctx *SessionContext, label string, origin RunOrigin, runFn func(ctx context.Context) ([]core.AgentMessage, error)) error {
 	if err := reserveRunSlot(sctx); err != nil {
 		return err
 	}
+	sctx.setPendingRunOrigin(origin)
 	launchRun(sctx, label, runFn)
 	return nil
+}
+
+// originFromCustom reads a prompt's provenance off the Custom metadata every
+// internal producer already stamps. Nothing new is invented here: the sources
+// are the ones the send path itself switches on.
+func originFromCustom(custom map[string]any) RunOrigin {
+	if custom == nil {
+		return RunOrigin{Explicit: true} // a plain typed prompt
+	}
+	source, _ := custom["source"].(string)
+	switch source {
+	case "bash_job":
+		id, _ := custom["bash_job_id"].(string)
+		return continuationOrigin(id)
+	case "subagent":
+		id, _ := custom["subagent_job_id"].(string)
+		return continuationOrigin(id)
+	case goalSource, "auto_verify":
+		// The machinery continuing the turn that is already under way. Not a
+		// new thing that happened to the project: a goal iterating towards its
+		// objective is one piece of work, however many runs it takes.
+		return RunOrigin{ContinueCurrent: true}
+	case goalStartSource:
+		// The user asking for a goal. The iterations that follow continue this
+		// turn; the request itself opens it.
+		return RunOrigin{Explicit: true}
+	default:
+		// owner, report, heartbeat, event, secret_batch, schedule: somebody
+		// (or something acting for them) asked for this turn.
+		return RunOrigin{Explicit: true}
+	}
+}
+
+// continuationOrigin describes a run started by a background job's own
+// notification. A notification that lost its job ID is unknown provenance, not
+// a continuation: it must start a new turn rather than silently fold into one.
+func continuationOrigin(jobID string) RunOrigin {
+	if jobID == "" {
+		return RunOrigin{}
+	}
+	return RunOrigin{ContinuationOf: []string{jobID}}
 }
 
 // reserveRunSlot transitions the session idle/error → running, claiming the run
@@ -445,10 +495,22 @@ func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context
 // plus idle state and start a run that jumps ahead of the queued steers.
 // Returns an error if the session is not in a startable state.
 func reserveRunSlot(sctx *SessionContext) error {
+	if sctx.runAdmissionClosed.Load() {
+		return ErrSessionBusy
+	}
 	if sctx.State != nil {
 		if err := sctx.State.Transition(StateRunning); err != nil {
 			return fmt.Errorf("cannot send: %w", err)
 		}
+	}
+	// Close can win after the first admission check but before the transition
+	// takes State's lock. Undo that provisional transition rather than launching
+	// a run into a runtime that has already been accepted for teardown.
+	if sctx.runAdmissionClosed.Load() {
+		if sctx.State != nil {
+			_ = sctx.State.Transition(StateIdle)
+		}
+		return ErrSessionBusy
 	}
 	return nil
 }
@@ -492,8 +554,9 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 	// and is a no-op, while direct RunStarted publishers still reset it there.
 	resetRunTokens(sctx, gen)
 
-	// Notify subscribers of the run generation (single source of truth for runGen).
-	sctx.Bus.Publish(RunStarted{SessionID: sctx.SessionID, RunGen: gen})
+	// Notify subscribers of the run generation (single source of truth for
+	// runGen) and the provenance decided at admission.
+	sctx.Bus.Publish(RunStarted{SessionID: sctx.SessionID, RunGen: gen, Origin: sctx.takePendingRunOrigin()})
 
 	go func() {
 		defer func() {
@@ -512,6 +575,9 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 					settled(false, err)
 				}
 				sctx.Bus.Publish(RunEnded{SessionID: sctx.SessionID, RunGen: gen, Err: err})
+				// Terminal barrier last, as in the normal path: a settle
+				// waiter must not be released before RunEnded is on the bus.
+				sctx.settleRun(gen)
 			}
 		}()
 		// Open checkpoint.
@@ -552,6 +618,8 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 				_ = sctx.State.Transition(StateIdle)
 			}
 		}
+		// The UI anchor goes when the run stops occupying the session. The
+		// terminal barrier is separate and released after RunEnded below.
 		sctx.clearRunStartedAt(gen)
 
 		// Controllers used by integrations may return messages without emitting
@@ -581,6 +649,11 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 			HadEdits:  stats.hadEdits,
 			Cost:      stats.costUSD,
 		})
+		// The run's start anchor is released only now, after its terminal event
+		// is on the bus. Between the state going idle and this point the run is
+		// still in flight: a shutdown that flushed there would snapshot a
+		// session whose outcome no subscriber has seen yet.
+		sctx.settleRun(gen)
 	}()
 }
 

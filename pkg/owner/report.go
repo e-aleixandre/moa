@@ -43,7 +43,14 @@ type Report struct {
 	Branch string `json:"branch,omitempty"`
 	Head   string `json:"head,omitempty"`
 	Dirty  bool   `json:"dirty,omitempty"`
-	At     string `json:"at,omitempty"` // RFC3339
+	// BackgroundCount is how much autonomous work was still running when the
+	// turn was reported: async subagents, background bash jobs, verifiers. A
+	// report describes a completed semantic turn, not a quiet session — a
+	// child that leaves a dev server running is done with what it was asked,
+	// and the owner has to be told the difference. Zero (and absent from the
+	// outbox) means the session had fully quiesced.
+	BackgroundCount int    `json:"background_count,omitempty"`
+	At              string `json:"at,omitempty"` // RFC3339
 }
 
 // BookDeltaNone is the value a session uses to say its work changes nothing in

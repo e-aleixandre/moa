@@ -112,10 +112,13 @@ func registerGoalHandlers(sctx *SessionContext) {
 			"objective": cmd.Objective,
 		})
 		// Kick the first iteration. The driver takes over from RunEnded on.
+		// The kick is marked as the START of a goal, not as the loop's own
+		// relaunch: the user asked for this work, so it opens a new semantic
+		// turn. Only the relaunches continue that turn.
 		return sctx.Bus.Execute(SendPrompt{
 			SessionID: sctx.SessionID,
 			Text:      goalFirstKick(sctx.Goal.Info()),
-			Custom:    map[string]any{"source": "goal"},
+			Custom:    map[string]any{"source": goalStartSource},
 		})
 	})
 
@@ -689,6 +692,26 @@ func warnRejectedGoalWorkDir(dir, reason string) {
 	}
 }
 
+// goalStartSource marks the first kick of a goal: work the user just asked
+// for, and therefore a new semantic turn. goalSource marks the loop's own
+// relaunches, which continue that same turn however many iterations it takes.
+const (
+	goalStartSource = "goal_start"
+	goalSource      = "goal"
+)
+
+// isGoalPromptSource reports whether a prompt came from goal machinery, start
+// or relaunch. The queue gate and the goal-verify guard treat both alike: the
+// distinction between them is about what the owner reads, not about how the
+// prompt is admitted.
+func isGoalPromptSource(custom map[string]any) bool {
+	if custom == nil {
+		return false
+	}
+	source, _ := custom["source"].(string)
+	return source == goalSource || source == goalStartSource
+}
+
 // goalRelaunch sends the next iteration's prompt if the agent is idle/error.
 // Drops it if the goal is no longer active or a run is already in flight (a
 // newer user turn took over).
@@ -704,7 +727,7 @@ func goalRelaunch(sctx *SessionContext, text string) {
 	_ = sctx.Bus.Execute(SendPrompt{
 		SessionID: sctx.SessionID,
 		Text:      text,
-		Custom:    map[string]any{"source": "goal"},
+		Custom:    map[string]any{"source": goalSource},
 	})
 }
 

@@ -212,10 +212,27 @@ func launchQueuedSteers(sctx *SessionContext, items []core.SteerItem) {
 			})
 		}
 	}
+	sctx.setPendingRunOrigin(originFromItems(items))
 	launchRun(sctx, items[0].Text, func(ctx context.Context) ([]core.AgentMessage, error) {
 		msgs, _, e := sctx.Agent.SendItems(ctx, items, msgIDs, announce)
 		return msgs, e
 	})
+}
+
+// originFromItems aggregates the provenance of a drained queue batch. One
+// explicit item makes the whole run explicit: a batch that mixes a bash
+// notification with something the user typed is a turn the user asked for, and
+// treating it as a mere continuation would lose their instruction's outcome.
+func originFromItems(items []core.SteerItem) RunOrigin {
+	var jobIDs []string
+	for _, item := range items {
+		origin := originFromCustom(item.Custom)
+		if origin.Explicit {
+			return RunOrigin{Explicit: true}
+		}
+		jobIDs = append(jobIDs, origin.ContinuationOf...)
+	}
+	return RunOrigin{ContinuationOf: jobIDs}
 }
 
 // isInternalPromptSource reports whether a SendPrompt was issued by internal
@@ -227,7 +244,7 @@ func isInternalPromptSource(custom map[string]any) bool {
 		return false
 	}
 	switch custom["source"] {
-	case "goal", "auto_verify":
+	case goalSource, goalStartSource, "auto_verify":
 		return true
 	default:
 		return false
