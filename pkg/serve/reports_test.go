@@ -157,6 +157,11 @@ func TestReportsWaitForABusyOwnerInsteadOfSteeringIt(t *testing.T) {
 	mgr := newTestManager(t, ctx, provider)
 	root := t.TempDir()
 	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	store, err := mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stageStaleWork(t, store.BookDir(info.CodebaseKey), "parked.md")
 
 	if _, _, _, err := mgr.Send(ownerSess.ID, "hold the owner", nil, "", ""); err != nil {
 		t.Fatal(err)
@@ -171,13 +176,20 @@ func TestReportsWaitForABusyOwnerInsteadOfSteeringIt(t *testing.T) {
 		ID: "sess-a:1:failed", SessionID: "sess-a", Status: callbackStatusFailed, FinalText: "build broke",
 	})
 	// The batch must neither reach the running owner nor sit on its queue rail
-	// waiting to be spliced into the run it is holding.
-	time.Sleep(200 * time.Millisecond)
+	// waiting to be spliced into the run it is holding. add waits for its
+	// immediate delivery attempt, so no timing delay is needed here.
 	if got := ownerReportText(ownerSess); len(got) != 0 {
 		t.Fatalf("reports reached a busy owner: %v", got)
 	}
 	if ql, _ := bus.QueryTyped[bus.GetQueueLen, int](ownerSess.runtime.Bus, bus.GetQueueLen{}); ql != 0 {
 		t.Fatalf("the batch was queued as a steer on a busy owner: queue length %d", ql)
+	}
+	newHeartbeatService(mgr).beat(time.Now())
+	if got := heartbeatText(ownerSess); len(got) != 0 {
+		t.Fatalf("a pending report allowed a heartbeat to wake a busy owner: %v", got)
+	}
+	if state := store.LoadHeartbeatState(info.CodebaseKey); len(state.Announced) != 0 {
+		t.Fatalf("deferred heartbeat marked facts announced: %+v", state)
 	}
 	close(release)
 
@@ -220,9 +232,11 @@ func TestTheSameOutcomeIsReportedOnce(t *testing.T) {
 func TestPendingReportsSurviveARestart(t *testing.T) {
 	shortReportWindow(t, 50*time.Millisecond)
 	ctx := context.Background()
-	mgr := newOwnerTestManager(t, ctx)
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	sessionDir := t.TempDir()
 	root := t.TempDir()
-	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	mgr := newRestartableManager(t, ctx, sessionDir)
+	info, _ := ownerWithSession(t, mgr, root, "Winerim")
 
 	store, err := mgr.ownerStore()
 	if err != nil {
@@ -235,12 +249,13 @@ func TestPendingReportsSurviveARestart(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// A fresh coordinator is exactly what a restart builds. Do not leave two
-	// actors owning one outbox in this process.
-	mgr.reports.Close()
-	mgr.reports = newReportCoordinator(ctx, mgr)
-	if mgr.reports == nil {
-		t.Fatal("the coordinator was not created")
+	// A real restart creates a fresh manager and subscriptions, rather than
+	// swapping the actor under a live owner's callbacks.
+	mgr.Shutdown()
+	restarted := newRestartableManager(t, ctx, sessionDir)
+	ownerSess, err := restarted.ResumeSession(info.SessionID)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	got := waitForOwnerReports(t, ownerSess, 1)[0]
@@ -257,9 +272,11 @@ func TestPendingReportsSurviveARestart(t *testing.T) {
 func TestRecoveryReportsSurviveMalformedCanonicalOutbox(t *testing.T) {
 	shortReportWindow(t, time.Hour)
 	ctx := context.Background()
-	mgr := newOwnerTestManager(t, ctx)
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	sessionDir := t.TempDir()
 	root := t.TempDir()
-	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	mgr := newRestartableManager(t, ctx, sessionDir)
+	info, _ := ownerWithSession(t, mgr, root, "Winerim")
 	store, err := mgr.ownerStore()
 	if err != nil {
 		t.Fatal(err)
@@ -275,14 +292,14 @@ func TestRecoveryReportsSurviveMalformedCanonicalOutbox(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A fresh coordinator is what the next process starts. It must read the
-	// recovery lane even though the canonical path remains for manual repair.
-	mgr.reports.Close()
-	mgr.reports = newReportCoordinator(ctx, mgr)
-	if mgr.reports == nil {
-		t.Fatal("the recovery coordinator was not created")
+	// Use a real restart so the owner's callbacks bind to the new coordinator.
+	mgr.Shutdown()
+	restarted := newRestartableManager(t, ctx, sessionDir)
+	ownerSess, err := restarted.ResumeSession(info.SessionID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	mgr.reports.nudge(info.CodebaseKey)
+	restarted.reports.nudge(info.CodebaseKey)
 	if got := waitForOwnerReports(t, ownerSess, 1)[0]; !strings.Contains(got, "from recovery") {
 		t.Fatalf("recovery report did not reach the owner:\n%s", got)
 	}
@@ -296,7 +313,7 @@ func TestRecoveryReportsSurviveMalformedCanonicalOutbox(t *testing.T) {
 
 	// Once the recovered report is delivered, later reports still use a durable
 	// recovery lane rather than treating the malformed canonical as writable.
-	mgr.reports.add(info.CodebaseKey, doneReport("after-restart", "child", "still durable"))
+	restarted.reports.add(info.CodebaseKey, doneReport("after-restart", "child", "still durable"))
 	pollUntil(t, 5*time.Second, "the new recovery lane being written", func() bool {
 		data, err := os.ReadFile(recovery)
 		return err == nil && strings.Contains(string(data), "after-restart")
@@ -457,6 +474,227 @@ func TestAcceptedReportsArePersistedBeforeDelivery(t *testing.T) {
 	})
 	if _, err := os.Stat(filepath.Join(store.CodebaseDir(info.CodebaseKey), "reports.json")); err != nil {
 		t.Fatalf("the outbox file is missing: %v", err)
+	}
+}
+
+func TestHeartbeatAdmissionGivesAnAcceptedReportPrecedence(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	info, _ := ownerWithSession(t, mgr, root, "Winerim")
+
+	addAdmitted := make(chan struct{})
+	allowAdd := make(chan struct{})
+	mgr.reports.testReportAdmitted = func() {
+		close(addAdmitted)
+		<-allowAdd
+	}
+	addDone := make(chan struct{})
+	go func() {
+		mgr.reports.add(info.CodebaseKey, doneReport("first", "child", "accepted first"))
+		close(addDone)
+	}()
+	<-addAdmitted // add owns read admission but has not posted to the actor yet.
+
+	heartbeatStarted := make(chan struct{})
+	heartbeatDone := make(chan heartbeatResult, 1)
+	called := false
+	go func() {
+		close(heartbeatStarted)
+		heartbeatDone <- mgr.reports.heartbeat(info.CodebaseKey, func() error {
+			called = true
+			return nil
+		})
+	}()
+	<-heartbeatStarted
+	select {
+	case got := <-heartbeatDone:
+		t.Fatalf("heartbeat bypassed report admission: %d", got)
+	default:
+	}
+	close(allowAdd)
+	<-addDone
+	mgr.reports.testReportAdmitted = nil
+	if got := <-heartbeatDone; got != heartbeatDeferred {
+		t.Fatalf("heartbeat result = %d, want deferred", got)
+	}
+	if called {
+		t.Fatal("heartbeat callback ran after an accepted report")
+	}
+}
+
+func TestImmediateReportDefersExactlyOneLaterHeartbeat(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+
+	// failed and needs_input reports flush in add, so pending is empty by the
+	// time the heartbeat obtains exclusive admission.
+	mgr.reports.add(info.CodebaseKey, owner.Report{ID: "failed", SessionID: "child", Status: callbackStatusFailed})
+	if got := ownerReportText(ownerSess); len(got) != 1 {
+		t.Fatalf("immediate report deliveries = %d, want 1", len(got))
+	}
+	called := false
+	if got := mgr.reports.heartbeat(info.CodebaseKey, func() error {
+		called = true
+		return nil
+	}); got != heartbeatDeferred {
+		t.Fatalf("first heartbeat result = %d, want deferred", got)
+	}
+	if called {
+		t.Fatal("first heartbeat ran after an immediate report")
+	}
+	if got := mgr.reports.heartbeat(info.CodebaseKey, func() error { return nil }); got != heartbeatDelivered {
+		t.Fatalf("second heartbeat result = %d, want delivered", got)
+	}
+}
+
+func TestRepairedOutboxClearsHeartbeatBarrierMetadata(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	info, _ := ownerWithSession(t, mgr, root, "Winerim")
+	store, err := mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(store.CodebaseDir(info.CodebaseKey), "reports.json")
+	if err := os.WriteFile(canonical, []byte("not reports"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	called := false
+	if got := mgr.reports.heartbeat(info.CodebaseKey, func() error {
+		called = true
+		return nil
+	}); got != heartbeatDeferred {
+		t.Fatalf("corrupt outbox heartbeat result = %d, want deferred", got)
+	}
+	if called {
+		t.Fatal("corrupt-only lane woke the owner")
+	}
+	if err := os.Remove(canonical); err != nil {
+		t.Fatal(err)
+	}
+	if got := mgr.reports.heartbeat(info.CodebaseKey, func() error { return nil }); got != heartbeatDelivered {
+		t.Fatalf("heartbeat after repair = %d, want delivered", got)
+	}
+}
+
+func TestRootCancellationAcceptsReportsWithoutDelivery(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	store, err := mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+
+	mgr.reports.add(info.CodebaseKey, owner.Report{ID: "after-cancel", SessionID: "child", Status: callbackStatusFailed})
+	mgr.reports.nudge(info.CodebaseKey)
+	if got := ownerReportText(ownerSess); len(got) != 0 {
+		t.Fatalf("cancelled coordinator delivered a report: %v", got)
+	}
+	called := false
+	if got := mgr.reports.heartbeat(info.CodebaseKey, func() error {
+		called = true
+		return nil
+	}); got != heartbeatStopped {
+		t.Fatalf("cancelled coordinator heartbeat result = %d, want stopped", got)
+	}
+	if called {
+		t.Fatal("cancelled coordinator started a heartbeat")
+	}
+	if pending, err := store.LoadReports(info.CodebaseKey); err != nil || len(pending) != 1 {
+		t.Fatalf("cancelled coordinator did not persist report: %+v, %v", pending, err)
+	}
+}
+
+func TestOwnerRunEndedNudgeDoesNotBlockAHeartbeatConfirmation(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	held := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan heartbeatResult, 1)
+	go func() {
+		done <- mgr.reports.heartbeat(info.CodebaseKey, func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+
+	published := make(chan struct{}, 1)
+	go func() {
+		ownerSess.runtime.Bus.Publish(bus.RunEnded{SessionID: ownerSess.ID, RunGen: 99})
+		ownerSess.runtime.Bus.Drain(time.Second)
+		published <- struct{}{}
+	}()
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("owner RunEnded nudge blocked behind heartbeat confirmation")
+	}
+	close(release)
+	if got := <-done; got != heartbeatDelivered {
+		t.Fatalf("heartbeat result = %d, want delivered", got)
+	}
+}
+
+func TestHeartbeatAlreadyCommittedCanPrecedeALaterReport(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	info, _ := ownerWithSession(t, mgr, root, "Winerim")
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	heartbeatDone := make(chan heartbeatResult, 1)
+	go func() {
+		heartbeatDone <- mgr.reports.heartbeat(info.CodebaseKey, func() error {
+			close(started) // exclusive admission is held before the callback runs
+			<-release
+			return nil
+		})
+	}()
+	<-started
+
+	addStarted := make(chan struct{})
+	addDone := make(chan struct{})
+	go func() {
+		close(addStarted)
+		mgr.reports.add(info.CodebaseKey, doneReport("later", "child", "accepted later"))
+		close(addDone)
+	}()
+	<-addStarted
+	// The heartbeat has already crossed the actor's clear barrier. Releasing it
+	// is the explicit linearization point at which the later add may proceed.
+	close(release)
+	if got := <-heartbeatDone; got != heartbeatDelivered {
+		t.Fatalf("heartbeat result = %d, want delivered", got)
+	}
+	<-addDone
+}
+
+func TestAcceptOnlyCoordinatorStopsHeartbeatDelivery(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	info, _ := ownerWithSession(t, mgr, root, "Winerim")
+	mgr.reports.BeginShutdown()
+
+	called := false
+	if got := mgr.reports.heartbeat(info.CodebaseKey, func() error {
+		called = true
+		return nil
+	}); got != heartbeatStopped {
+		t.Fatalf("heartbeat result = %d, want stopped", got)
+	}
+	if called {
+		t.Fatal("accept-only coordinator started a heartbeat")
 	}
 }
 

@@ -141,6 +141,111 @@ func TestHeartbeatRepeatsNothingAndWakesOnNewFacts(t *testing.T) {
 	}
 }
 
+// An accepted report owns the owner's next wake-up even while it is still in
+// the ordinary 60 second batching window. The coordinator forces the report
+// through, but this heartbeat remains deferred rather than immediately waking
+// the owner a second time with a state it computed before that report arrived.
+func TestHeartbeatDefersToAPendingReport(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	store, err := mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stageStaleWork(t, store.BookDir(info.CodebaseKey), "parked.md")
+
+	mgr.reports.add(info.CodebaseKey, doneReport("pending", "child", "finished before the beat"))
+	newHeartbeatService(mgr).beat(time.Now())
+
+	if got := ownerReportText(ownerSess); len(got) != 1 {
+		t.Fatalf("forced report deliveries = %d, want 1", len(got))
+	}
+	if got := heartbeatText(ownerSess); len(got) != 0 {
+		t.Fatalf("heartbeat bypassed its report barrier: %v", got)
+	}
+	if state := store.LoadHeartbeatState(info.CodebaseKey); len(state.Announced) != 0 || !state.LastBeat.IsZero() {
+		t.Fatalf("deferred heartbeat marked facts announced: %+v", state)
+	}
+}
+
+func TestRecoveredOutboxBeatsImmediateHeartbeatAfterConstructorReady(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	sessionDir := t.TempDir()
+	root := t.TempDir()
+	first := newRestartableManager(t, ctx, sessionDir)
+	info, _ := ownerWithSession(t, first, root, "Winerim")
+	store, err := first.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stageStaleWork(t, store.BookDir(info.CodebaseKey), "parked.md")
+	if err := store.SaveReports(info.CodebaseKey, []owner.Report{doneReport("recovered", "child", "saved before restart")}); err != nil {
+		t.Fatal(err)
+	}
+	first.Shutdown()
+
+	// NewManager does not return until its coordinator has recovered this
+	// outbox. The immediately following beat must therefore see the report.
+	restarted := newRestartableManager(t, ctx, sessionDir)
+	resumed, err := restarted.ResumeSession(info.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newHeartbeatService(restarted).beat(time.Now())
+	if got := ownerReportText(resumed); len(got) != 1 {
+		t.Fatalf("recovered report deliveries = %d, want 1", len(got))
+	}
+	if got := heartbeatText(resumed); len(got) != 0 {
+		t.Fatalf("immediate heartbeat bypassed recovered outbox: %v", got)
+	}
+	if state := store.LoadHeartbeatState(info.CodebaseKey); len(state.Announced) != 0 || !state.LastBeat.IsZero() {
+		t.Fatalf("deferred recovered heartbeat marked facts announced: %+v", state)
+	}
+}
+
+func TestRecoveredRecoveryLaneBeatsImmediateHeartbeatAfterConstructorReady(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	sessionDir := t.TempDir()
+	root := t.TempDir()
+	first := newRestartableManager(t, ctx, sessionDir)
+	info, _ := ownerWithSession(t, first, root, "Winerim")
+	store, err := first.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stageStaleWork(t, store.BookDir(info.CodebaseKey), "parked.md")
+	dir := store.CodebaseDir(info.CodebaseKey)
+	if err := os.WriteFile(filepath.Join(dir, "reports.json"), []byte("bad canonical"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "reports.recovery.json"), []byte(`[{"id":"recovered","session_id":"child","status":"done"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first.Shutdown()
+
+	restarted := newRestartableManager(t, ctx, sessionDir)
+	resumed, err := restarted.ResumeSession(info.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newHeartbeatService(restarted).beat(time.Now())
+	if got := ownerReportText(resumed); len(got) != 1 {
+		t.Fatalf("recovery-lane report deliveries = %d, want 1", len(got))
+	}
+	if got := heartbeatText(resumed); len(got) != 0 {
+		t.Fatalf("immediate heartbeat bypassed recovery lane: %v", got)
+	}
+	if state := store.LoadHeartbeatState(info.CodebaseKey); len(state.Announced) != 0 || !state.LastBeat.IsZero() {
+		t.Fatalf("deferred recovery-lane heartbeat marked facts announced: %+v", state)
+	}
+}
+
 // A quiet project must not produce a run at all: the cost of the heartbeat is
 // the promise it makes, so it is asserted at the level where a model would be
 // charged, not only on the pure rule.

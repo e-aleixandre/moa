@@ -72,7 +72,13 @@ type reportCoordinator struct {
 	// pending, so Shutdown can wait for that to have happened.
 	quit      chan struct{}
 	done      chan struct{}
+	ready     chan struct{}
 	closeOnce sync.Once
+	// admission establishes the order between accepting a child outcome and a
+	// heartbeat. An add keeps its read admission until the actor has persisted
+	// it; a heartbeat keeps exclusive admission until its actor command has
+	// either delivered the beat or established a report barrier.
+	admission sync.RWMutex
 	// postMu / closing / posters are the admission gate between senders and
 	// Close. A sender is admitted under the read side and counted; Close takes
 	// the write side, sets closing, and waits for the admitted senders. That
@@ -83,6 +89,15 @@ type reportCoordinator struct {
 	postMu  sync.RWMutex
 	closing bool
 	posters sync.WaitGroup
+	// Advisory owner events must never wait for an actor currently confirming a
+	// transcript. The set coalesces them while their one best-effort mailbox
+	// command is outstanding.
+	advisoryMu sync.Mutex
+	advisory   map[string]struct{}
+	// testReportAdmitted makes the admission linearization observable without
+	// widening the production protocol. It is installed before tests start any
+	// worker and never changed concurrently.
+	testReportAdmitted func()
 }
 
 // reportCommand is the actor's mailbox message: a new report, or a nudge to try
@@ -93,6 +108,11 @@ type reportCommand struct {
 	// beginShutdown puts the actor in accept-only mode: timers disarmed, no
 	// deliveries, reports still accepted and still persisted.
 	beginShutdown bool
+	// heartbeat is deliberately executed by the actor, rather than returning a
+	// "clear" result to the ticker. That makes checking the report barrier and
+	// starting the owner run one indivisible protocol step.
+	heartbeat *heartbeatCommand
+	advisory  bool
 	// ack is closed once the actor has processed this command, including its
 	// attempt to persist the outbox. A sink that reports a turn has crossed
 	// the outbox boundary only when this closes — before that the report exists
@@ -100,12 +120,27 @@ type reportCommand struct {
 	ack chan struct{}
 }
 
+type heartbeatCommand struct {
+	wake  func() error
+	reply chan heartbeatResult
+}
+
+type heartbeatResult uint8
+
+const (
+	heartbeatDelivered heartbeatResult = iota
+	heartbeatDeferred
+	heartbeatFailed
+	heartbeatStopped
+)
+
 // reportBatch is the per-codebase state: what is pending and the timer that
 // will flush it.
 type reportBatch struct {
-	pending []owner.Report
-	outbox  owner.ReportsOutbox
-	timer   *time.Timer
+	pending            []owner.Report
+	outbox             owner.ReportsOutbox
+	timer              *time.Timer
+	deferNextHeartbeat bool
 	// outboxFailed remembers that the last write of this batch failed, so the
 	// warning is logged once rather than per report while the disk is broken.
 	outboxFailed   bool
@@ -121,15 +156,21 @@ func newReportCoordinator(ctx context.Context, m *Manager) *reportCoordinator {
 		return nil
 	}
 	c := &reportCoordinator{
-		mgr:    m,
-		store:  store,
-		mail:   make(chan reportCommand, 64),
-		ctx:    ctx,
-		window: reportBatchWindow,
-		quit:   make(chan struct{}),
-		done:   make(chan struct{}),
+		mgr:      m,
+		store:    store,
+		mail:     make(chan reportCommand, 64),
+		ctx:      ctx,
+		window:   reportBatchWindow,
+		quit:     make(chan struct{}),
+		done:     make(chan struct{}),
+		ready:    make(chan struct{}),
+		advisory: make(map[string]struct{}),
 	}
 	go c.loop()
+	// A heartbeat may not inspect an apparently empty actor while recovery is
+	// still loading its outboxes. Starting only after this barrier gives a
+	// recovered report the same precedence as a freshly accepted one.
+	<-c.ready
 	return c
 }
 
@@ -171,6 +212,11 @@ func (c *reportCoordinator) add(key string, rep owner.Report) {
 	if c == nil {
 		return
 	}
+	c.admission.RLock()
+	defer c.admission.RUnlock()
+	if c.testReportAdmitted != nil {
+		c.testReportAdmitted()
+	}
 	ack := make(chan struct{})
 	if !c.post(reportCommand{key: key, report: &rep, ack: ack}) {
 		return
@@ -201,9 +247,65 @@ func (c *reportCoordinator) BeginShutdown() {
 // nudge asks the actor to retry a codebase whose owner may now be free.
 func (c *reportCoordinator) nudge(key string) { _ = c.post(reportCommand{key: key}) }
 
+// advisoryNudge is for bus observer callbacks. The actor can be waiting for
+// the owner's transcript after it started a report or heartbeat; a callback in
+// that run must not block behind the actor and thereby delay that transcript.
+// Timers and owner creation use nudge instead: their retry is reliable.
+func (c *reportCoordinator) advisoryNudge(key string) {
+	if c == nil {
+		return
+	}
+	c.advisoryMu.Lock()
+	if _, ok := c.advisory[key]; ok {
+		c.advisoryMu.Unlock()
+		return
+	}
+	c.advisory[key] = struct{}{}
+	c.advisoryMu.Unlock()
+
+	c.postMu.RLock()
+	if c.closing {
+		c.postMu.RUnlock()
+		c.clearAdvisory(key)
+		return
+	}
+	select {
+	case c.mail <- reportCommand{key: key, advisory: true}:
+	default:
+		// An advisory is only an acceleration. The batch timer remains the
+		// durable retry path, and a later RunEnded can post another one.
+		c.clearAdvisory(key)
+	}
+	c.postMu.RUnlock()
+}
+
+func (c *reportCoordinator) clearAdvisory(key string) {
+	c.advisoryMu.Lock()
+	delete(c.advisory, key)
+	c.advisoryMu.Unlock()
+}
+
+// heartbeat requests a delivery under exclusive report admission. A child
+// report which acquired admission first has been persisted before this command
+// reaches the actor; a heartbeat which acquired it first is already committed
+// when a later add is allowed to proceed.
+func (c *reportCoordinator) heartbeat(key string, wake func() error) heartbeatResult {
+	if c == nil {
+		return heartbeatStopped
+	}
+	c.admission.Lock()
+	defer c.admission.Unlock()
+	reply := make(chan heartbeatResult, 1)
+	if !c.post(reportCommand{key: key, heartbeat: &heartbeatCommand{wake: wake, reply: reply}}) {
+		return heartbeatStopped
+	}
+	return <-reply
+}
+
 func (c *reportCoordinator) loop() {
 	batches := map[string]*reportBatch{}
 	c.recover(batches)
+	close(c.ready)
 	// ctxDone is dropped once observed, so the loop stops re-selecting a
 	// channel that is permanently ready.
 	ctxDone := c.ctx.Done()
@@ -216,31 +318,31 @@ func (c *reportCoordinator) loop() {
 		select {
 		case <-ctxDone:
 			ctxDone = nil
-			if !acceptOnly {
-				acceptOnly = true
-				for _, batch := range batches {
-					c.disarm(batch)
-				}
-				slog.Info("owner reports: accepting only, deliveries stopped",
-					"codebase", "", "session", "", "reason", "root context cancelled")
-			}
+			acceptOnly = c.enterAcceptOnly(batches, acceptOnly, "root context cancelled")
 		case <-c.quit:
 			c.drain(batches)
 			return
 		case cmd := <-c.mail:
+			// select is free to choose a queued command over ctxDone. Check the
+			// root context again before every command so cancellation cannot let
+			// an immediate report or nudge start an owner run.
+			if c.ctx.Err() != nil {
+				acceptOnly = c.enterAcceptOnly(batches, acceptOnly, "root context cancelled")
+			}
+			if cmd.advisory {
+				c.clearAdvisory(cmd.key)
+			}
 			if cmd.beginShutdown {
-				if !acceptOnly {
-					acceptOnly = true
-					for _, batch := range batches {
-						c.disarm(batch)
-					}
-					slog.Info("owner reports: accepting only, deliveries stopped",
-						"codebase", "", "session", "", "reason", "shutdown")
-				}
+				acceptOnly = c.enterAcceptOnly(batches, acceptOnly, "shutdown")
 				ackCommand(cmd)
 				continue
 			}
 			batch := c.batch(cmd.key, batches)
+			if cmd.heartbeat != nil {
+				c.handleHeartbeat(cmd.key, batch, cmd.heartbeat, acceptOnly)
+				ackCommand(cmd)
+				continue
+			}
 			if cmd.report != nil {
 				if acceptOnly {
 					c.queue(cmd.key, batch, *cmd.report)
@@ -255,6 +357,59 @@ func (c *reportCoordinator) loop() {
 			}
 			ackCommand(cmd)
 		}
+	}
+}
+
+func (c *reportCoordinator) enterAcceptOnly(batches map[string]*reportBatch, acceptOnly bool, reason string) bool {
+	if acceptOnly {
+		return true
+	}
+	for _, batch := range batches {
+		c.disarm(batch)
+	}
+	slog.Info("owner reports: accepting only, deliveries stopped",
+		"codebase", "", "session", "", "reason", reason)
+	return true
+}
+
+// handleHeartbeat makes reports an absolute barrier to a beat. In particular,
+// a successful forced report flush still replies deferred: this request has
+// observed a project state that was incomplete when it began, and it must not
+// wake the owner again in the same turn.
+func (c *reportCoordinator) handleHeartbeat(key string, batch *reportBatch, cmd *heartbeatCommand, acceptOnly bool) {
+	if acceptOnly || c.ctx.Err() != nil {
+		replyHeartbeat(cmd, heartbeatStopped)
+		return
+	}
+	c.reloadHeartbeatBatch(key, batch)
+	// A report accepted or recovered during the preceding batch belongs before
+	// this beat even when its immediate delivery already cleared pending. The
+	// first heartbeat consumes the marker but never falls through to wake in
+	// that same request.
+	deferForReport := batch.deferNextHeartbeat
+	batch.deferNextHeartbeat = false
+	if deferForReport || len(batch.pending) > 0 || batch.outbox.Incomplete || len(batch.outbox.Unreadable) > 0 {
+		if len(batch.pending) > 0 {
+			c.flush(key, batch)
+		}
+		replyHeartbeat(cmd, heartbeatDeferred)
+		return
+	}
+	if cmd.wake == nil {
+		replyHeartbeat(cmd, heartbeatFailed)
+		return
+	}
+	if err := cmd.wake(); err != nil {
+		slog.Debug("owner heartbeat: not delivered", "codebase", key, "error", err)
+		replyHeartbeat(cmd, heartbeatFailed)
+		return
+	}
+	replyHeartbeat(cmd, heartbeatDelivered)
+}
+
+func replyHeartbeat(cmd *heartbeatCommand, result heartbeatResult) {
+	if cmd != nil && cmd.reply != nil {
+		cmd.reply <- result
 	}
 }
 
@@ -301,6 +456,11 @@ func (c *reportCoordinator) drain(batches map[string]*reportBatch) {
 		select {
 		case cmd := <-c.mail:
 			if cmd.beginShutdown {
+				ackCommand(cmd)
+				continue
+			}
+			if cmd.heartbeat != nil {
+				replyHeartbeat(cmd.heartbeat, heartbeatStopped)
 				ackCommand(cmd)
 				continue
 			}
@@ -361,7 +521,7 @@ func (c *reportCoordinator) recover(batches map[string]*reportBatch) {
 			}
 			continue
 		}
-		batch := &reportBatch{pending: outbox.Reports, outbox: outbox, preservedPaths: warned}
+		batch := &reportBatch{pending: outbox.Reports, outbox: outbox, preservedPaths: warned, deferNextHeartbeat: true}
 		batches[own.CodebaseKey] = batch
 		slog.Info("owner reports recovered", "codebase", own.CodebaseKey, "session", "", "owner", own.ID, "status", "recovered", "run_gen", 0, "batch", "", "n", len(outbox.Reports))
 		// Arm the normal window rather than delivering now: a restart usually
@@ -379,6 +539,9 @@ func (c *reportCoordinator) accept(key string, batch *reportBatch, rep owner.Rep
 	if !c.queue(key, batch, rep) {
 		return
 	}
+	// The report owns the next heartbeat even if this status flushes it now.
+	// Set this before delivery, which can block awaiting the owner transcript.
+	batch.deferNextHeartbeat = true
 	// A session that failed or is stuck waiting for an answer is not worth
 	// batching: it is exactly what the owner has to act on now.
 	if rep.Status == callbackStatusDone {
@@ -486,7 +649,7 @@ func (c *reportCoordinator) batch(key string, batches map[string]*reportBatch) *
 	if err != nil {
 		c.warnIncomplete(key, outbox, err)
 	}
-	batch := &reportBatch{outbox: outbox, pending: outbox.Reports}
+	batch := &reportBatch{outbox: outbox, pending: outbox.Reports, deferNextHeartbeat: len(outbox.Reports) > 0}
 	batch.preservedPaths = c.warnPreserved(key, outbox, nil)
 	batches[key] = batch
 	return batch
@@ -510,6 +673,26 @@ func (c *reportCoordinator) reloadEmptyBatch(key string, batch *reportBatch) {
 	batch.outbox = mergeKnownOutboxes(batch.outbox, fresh)
 	batch.pending = appendUniqueOwnerReports(batch.pending, batch.outbox.Reports)
 	batch.preservedPaths = c.warnPreserved(key, batch.outbox, batch.preservedPaths)
+}
+
+// reloadHeartbeatBatch observes lanes which may have changed since recovery
+// or a prior empty nudge. It never discards in-memory reports after a failed
+// outbox write: a heartbeat is not permission to forget an accepted report.
+func (c *reportCoordinator) reloadHeartbeatBatch(key string, batch *reportBatch) {
+	fresh, err := c.store.LoadReportsOutbox(key)
+	if err != nil {
+		c.warnIncomplete(key, fresh, err)
+		batch.outbox = mergeKnownOutboxes(batch.outbox, fresh)
+		batch.pending = appendUniqueOwnerReports(batch.pending, fresh.Reports)
+		batch.preservedPaths = c.warnPreserved(key, batch.outbox, batch.preservedPaths)
+		return
+	}
+	// A complete enumeration is authoritative for lane health. Only pending
+	// reports are unioned: they may be accepted in memory after a failed write,
+	// but stale incomplete/unreadable metadata must disappear after repair.
+	batch.outbox = fresh
+	batch.pending = appendUniqueOwnerReports(batch.pending, fresh.Reports)
+	batch.preservedPaths = c.warnPreserved(key, fresh, batch.preservedPaths)
 }
 
 func mergeKnownOutboxes(known, partial owner.ReportsOutbox) owner.ReportsOutbox {
@@ -717,10 +900,14 @@ func (m *Manager) awaitCustomInTranscript(sess *ManagedSession, field, value str
 // in its prompt: a session that predates its project's owner starts reporting
 // when it is next resumed.
 func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool) {
-	if m.reports == nil {
+	// A subscription can outlive a test replacing the coordinator to model a
+	// restart. Keep it bound to the actor it was created for instead of reading
+	// m.reports from an asynchronous bus callback.
+	reports := m.reports
+	if reports == nil {
 		return
 	}
-	own, found, err := m.reports.store.FindByDir(sess.CWD)
+	own, found, err := reports.store.FindByDir(sess.CWD)
 	if err != nil {
 		slog.Warn("owner reports: cannot resolve the owner of a session", "session", sess.ID, "error", err)
 		return
@@ -738,20 +925,20 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 		sess.pushUnsubs = append(sess.pushUnsubs, sess.runtime.Bus.Subscribe(func(e bus.RunEnded) {
 			slog.Info("owner reports nudge received", "codebase", key, "session", sess.ID,
 				"owner", own.ID, "status", "run_ended", "run_gen", e.RunGen, "batch", "", "n", 0)
-			m.reports.nudge(key)
+			reports.advisoryNudge(key)
 		}))
 		// Background work settling is the other moment the owner becomes
 		// deliverable: IdleOnly refuses a batch while the owner has any.
 		sess.pushUnsubs = append(sess.pushUnsubs, sess.runtime.Bus.Subscribe(func(e bus.BashJobSettled) {
-			m.reports.nudge(key)
+			reports.advisoryNudge(key)
 		}))
 		sess.pushUnsubs = append(sess.pushUnsubs, sess.runtime.Bus.Subscribe(func(e bus.SubagentEnded) {
-			m.reports.nudge(key)
+			reports.advisoryNudge(key)
 		}))
 		return
 	}
 	observer := newOwnerReportObserver(sess, func(out runOutcome) {
-		m.reports.add(key, reportFrom(sess, out))
+		reports.add(key, reportFrom(sess, out))
 	})
 	sess.mu.Lock()
 	sess.ownerObserver = observer
