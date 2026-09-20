@@ -181,6 +181,9 @@ func (m *Manager) CreateOwner(opts CreateOwnerOpts) (OwnerInfo, error) {
 	if err := store.Save(own); err != nil {
 		return OwnerInfo{}, err
 	}
+	if m.reports != nil {
+		m.reports.nudge(own.CodebaseKey)
+	}
 	return m.ownerInfo(own), nil
 }
 

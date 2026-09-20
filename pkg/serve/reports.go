@@ -104,10 +104,12 @@ type reportCommand struct {
 // will flush it.
 type reportBatch struct {
 	pending []owner.Report
+	outbox  owner.ReportsOutbox
 	timer   *time.Timer
 	// outboxFailed remembers that the last write of this batch failed, so the
 	// warning is logged once rather than per report while the disk is broken.
-	outboxFailed bool
+	outboxFailed   bool
+	preservedPaths map[string]struct{}
 }
 
 // newReportCoordinator starts the actor. Reports are disabled (nil) when the
@@ -238,11 +240,7 @@ func (c *reportCoordinator) loop() {
 				ackCommand(cmd)
 				continue
 			}
-			batch := batches[cmd.key]
-			if batch == nil {
-				batch = &reportBatch{}
-				batches[cmd.key] = batch
-			}
+			batch := c.batch(cmd.key, batches)
 			if cmd.report != nil {
 				if acceptOnly {
 					c.queue(cmd.key, batch, *cmd.report)
@@ -310,11 +308,7 @@ func (c *reportCoordinator) drain(batches map[string]*reportBatch) {
 				ackCommand(cmd)
 				continue // a nudge has nowhere to deliver to any more
 			}
-			batch := batches[cmd.key]
-			if batch == nil {
-				batch = &reportBatch{}
-				batches[cmd.key] = batch
-			}
+			batch := c.batch(cmd.key, batches)
 			c.queue(cmd.key, batch, *cmd.report)
 			ackCommand(cmd)
 		default:
@@ -323,9 +317,11 @@ func (c *reportCoordinator) drain(batches map[string]*reportBatch) {
 				if len(batch.pending) == 0 {
 					continue
 				}
-				if err := c.store.SaveReports(key, batch.pending); err != nil {
+				if outbox, err := c.store.SaveReportsOutbox(key, batch.outbox, batch.pending); err != nil {
 					slog.Warn("owner reports: pending batch lost at shutdown",
 						"codebase", key, "error", err)
+				} else {
+					batch.outbox = outbox
 				}
 			}
 			return
@@ -344,17 +340,30 @@ func (c *reportCoordinator) recover(batches map[string]*reportBatch) {
 		return
 	}
 	for _, own := range owners {
-		pending, err := c.store.LoadReports(own.CodebaseKey)
+		outbox, err := c.store.LoadReportsOutbox(own.CodebaseKey)
 		if err != nil {
-			slog.Warn("owner reports: unreadable outbox", "codebase", own.CodebaseKey, "error", err)
+			c.warnIncomplete(own.CodebaseKey, outbox, err)
+		}
+		warned := c.warnPreserved(own.CodebaseKey, outbox, nil)
+		if len(outbox.Lanes) > 1 && !outbox.Incomplete {
+			consolidated, saveErr := c.store.SaveReportsOutbox(own.CodebaseKey, outbox, outbox.Reports)
+			if saveErr != nil {
+				slog.Warn("owner reports: could not consolidate recovery outboxes", "codebase", own.CodebaseKey, "error", saveErr)
+			} else {
+				outbox = consolidated
+			}
+		}
+		if len(outbox.Reports) == 0 {
+			if len(outbox.Unreadable) > 0 || outbox.Incomplete {
+				// Keep the warning and selected recovery lane with this actor so a
+				// later first report does not emit an ambiguous second warning.
+				batches[own.CodebaseKey] = &reportBatch{outbox: outbox, preservedPaths: warned}
+			}
 			continue
 		}
-		if len(pending) == 0 {
-			continue
-		}
-		batch := &reportBatch{pending: pending}
+		batch := &reportBatch{pending: outbox.Reports, outbox: outbox, preservedPaths: warned}
 		batches[own.CodebaseKey] = batch
-		slog.Info("owner reports recovered", "codebase", own.CodebaseKey, "session", "", "owner", own.ID, "status", "recovered", "run_gen", 0, "batch", "", "n", len(pending))
+		slog.Info("owner reports recovered", "codebase", own.CodebaseKey, "session", "", "owner", own.ID, "status", "recovered", "run_gen", 0, "batch", "", "n", len(outbox.Reports))
 		// Arm the normal window rather than delivering now: a restart usually
 		// resumes several sessions at once, and one batched message is what the
 		// owner wants either way.
@@ -386,19 +395,32 @@ func (c *reportCoordinator) accept(key string, batch *reportBatch, rep owner.Rep
 // least acceptable. The warning is logged once per batch so a broken disk does
 // not flood the log with one line per outcome.
 func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Report) bool {
+	if len(batch.pending) == 0 {
+		c.reloadEmptyBatch(key, batch)
+	}
+	if rep.ID == "" {
+		rep.ID = newReportID()
+	}
 	for _, existing := range batch.pending {
 		if existing.ID == rep.ID {
 			return false // the same outcome, re-delivered: already queued
 		}
 	}
 	batch.pending = append(batch.pending, rep)
-	if err := c.store.SaveReports(key, batch.pending); err != nil {
+	previous := batch.outbox
+	outbox, err := c.store.SaveReportsOutbox(key, batch.outbox, batch.pending)
+	if err != nil {
 		if !batch.outboxFailed {
 			batch.outboxFailed = true
 			slog.Warn("owner reports: could not persist the outbox; keeping the reports in memory",
 				"codebase", key, "session", rep.SessionID, "error", err)
 		}
 		return true
+	}
+	batch.outbox = outbox
+	batch.preservedPaths = c.warnPreserved(key, outbox, batch.preservedPaths)
+	if outbox.ActiveRecoveryOwned && (!previous.ActiveRecoveryOwned || previous.ActivePath != outbox.ActivePath) {
+		slog.Warn("owner reports: active recovery outbox created", "codebase", key, "active_path", outbox.ActivePath)
 	}
 	batch.outboxFailed = false
 	slog.Info("owner report accepted in outbox", "codebase", key, "session", rep.SessionID, "owner", "", "status", rep.Status, "run_gen", 0, "batch", "", "n", len(batch.pending))
@@ -443,11 +465,134 @@ func (c *reportCoordinator) flush(key string, batch *reportBatch) {
 	}
 	slog.Info("owner reports delivery result", "codebase", key, "session", "", "owner", "", "status", "delivered", "run_gen", 0, "batch", "", "n", len(batch.pending))
 	batch.pending = nil
-	if err := c.store.SaveReports(key, nil); err != nil {
+	outbox, err := c.store.SaveReportsOutbox(key, batch.outbox, nil)
+	if err != nil {
 		// The reports reached the owner and the transcript was flushed; a
 		// surviving outbox only means they are read twice after a restart.
 		slog.Warn("owner reports: delivered batch still on disk", "codebase", key, "error", err)
+	} else {
+		batch.outbox = outbox
 	}
+}
+
+// batch loads the lanes before the first report for a codebase. That matters
+// for an owner created after startup and for a manually repaired canonical
+// outbox: a fresh actor must merge it rather than blindly replacing it.
+func (c *reportCoordinator) batch(key string, batches map[string]*reportBatch) *reportBatch {
+	if batch := batches[key]; batch != nil {
+		return batch
+	}
+	outbox, err := c.store.LoadReportsOutbox(key)
+	if err != nil {
+		c.warnIncomplete(key, outbox, err)
+	}
+	batch := &reportBatch{outbox: outbox, pending: outbox.Reports}
+	batch.preservedPaths = c.warnPreserved(key, outbox, nil)
+	batches[key] = batch
+	return batch
+}
+
+// reloadEmptyBatch makes a cached empty batch observe manual repairs or lanes
+// created after startup before its first new report can replace the outbox.
+func (c *reportCoordinator) reloadEmptyBatch(key string, batch *reportBatch) {
+	fresh, err := c.store.LoadReportsOutbox(key)
+	if err != nil {
+		c.warnIncomplete(key, fresh, err)
+	}
+	if err == nil && !fresh.Incomplete {
+		batch.outbox = fresh
+		batch.pending = appendUniqueOwnerReports(nil, fresh.Reports)
+		batch.preservedPaths = c.warnPreserved(key, fresh, batch.preservedPaths)
+		return
+	}
+	// A failed enumeration is not permission to forget reports or an
+	// actor-created recovery lane that we already know is durable.
+	batch.outbox = mergeKnownOutboxes(batch.outbox, fresh)
+	batch.pending = appendUniqueOwnerReports(batch.pending, batch.outbox.Reports)
+	batch.preservedPaths = c.warnPreserved(key, batch.outbox, batch.preservedPaths)
+}
+
+func mergeKnownOutboxes(known, partial owner.ReportsOutbox) owner.ReportsOutbox {
+	out := partial
+	out.Reports = appendUniqueOwnerReports(appendUniqueOwnerReports(nil, known.Reports), partial.Reports)
+	out.Lanes = appendUniquePaths(known.Lanes, partial.Lanes)
+	out.Unreadable = appendUniqueUnreadable(known.Unreadable, partial.Unreadable)
+	if known.ActiveRecoveryOwned {
+		out.ActivePath = known.ActivePath
+		out.ActiveRecoveryOwned = true
+	}
+	out.Incomplete = known.Incomplete || partial.Incomplete
+	if partial.IncompleteErr != nil {
+		out.IncompleteErr = partial.IncompleteErr
+	} else {
+		out.IncompleteErr = known.IncompleteErr
+	}
+	if out.CanonicalPath == "" {
+		out.CanonicalPath = known.CanonicalPath
+	}
+	out.CanonicalUnreadable = known.CanonicalUnreadable || partial.CanonicalUnreadable
+	return out
+}
+
+func appendUniqueOwnerReports(dst, src []owner.Report) []owner.Report {
+	seen := make(map[string]struct{}, len(dst)+len(src))
+	for _, report := range dst {
+		seen[report.ID] = struct{}{}
+	}
+	for _, report := range src {
+		if _, ok := seen[report.ID]; !ok {
+			seen[report.ID] = struct{}{}
+			dst = append(dst, report)
+		}
+	}
+	return dst
+}
+
+func appendUniquePaths(dst, src []string) []string {
+	seen := make(map[string]struct{}, len(dst)+len(src))
+	for _, path := range dst {
+		seen[path] = struct{}{}
+	}
+	for _, path := range src {
+		if _, ok := seen[path]; !ok {
+			seen[path] = struct{}{}
+			dst = append(dst, path)
+		}
+	}
+	return dst
+}
+
+func appendUniqueUnreadable(dst, src []owner.ReportsUnreadableLane) []owner.ReportsUnreadableLane {
+	seen := make(map[string]struct{}, len(dst)+len(src))
+	for _, lane := range dst {
+		seen[lane.Path] = struct{}{}
+	}
+	for _, lane := range src {
+		if _, ok := seen[lane.Path]; !ok {
+			seen[lane.Path] = struct{}{}
+			dst = append(dst, lane)
+		}
+	}
+	return dst
+}
+
+func (c *reportCoordinator) warnPreserved(key string, outbox owner.ReportsOutbox, warned map[string]struct{}) map[string]struct{} {
+	if warned == nil {
+		warned = make(map[string]struct{})
+	}
+	for _, lane := range outbox.Unreadable {
+		if _, ok := warned[lane.Path]; ok {
+			continue
+		}
+		slog.Warn("owner reports: outbox lane preserved; using recovery outbox",
+			"codebase", key, "preserved_path", lane.Path, "active_path", outbox.ActivePath, "error", lane.Err)
+		warned[lane.Path] = struct{}{}
+	}
+	return warned
+}
+
+func (c *reportCoordinator) warnIncomplete(key string, outbox owner.ReportsOutbox, err error) {
+	slog.Warn("owner reports: incomplete outbox", "codebase", key, "active_path", outbox.ActivePath, "error", err)
 }
 
 // deliver resolves the owner and puts the batch into its conversation.

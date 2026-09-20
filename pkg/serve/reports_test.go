@@ -1,7 +1,9 @@
 package serve
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -233,8 +235,11 @@ func TestPendingReportsSurviveARestart(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// A fresh coordinator is exactly what a restart builds.
-	if c := newReportCoordinator(ctx, mgr); c == nil {
+	// A fresh coordinator is exactly what a restart builds. Do not leave two
+	// actors owning one outbox in this process.
+	mgr.reports.Close()
+	mgr.reports = newReportCoordinator(ctx, mgr)
+	if mgr.reports == nil {
 		t.Fatal("the coordinator was not created")
 	}
 
@@ -247,6 +252,189 @@ func TestPendingReportsSurviveARestart(t *testing.T) {
 		pending, err := store.LoadReports(info.CodebaseKey)
 		return err == nil && len(pending) == 0
 	})
+}
+
+func TestRecoveryReportsSurviveMalformedCanonicalOutbox(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	store, err := mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := store.CodebaseDir(info.CodebaseKey)
+	canonical := filepath.Join(dir, "reports.json")
+	broken := []byte("{unreadable reports\n")
+	if err := os.WriteFile(canonical, broken, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recovery := filepath.Join(dir, "reports.recovery.json")
+	if err := os.WriteFile(recovery, []byte(`[{"id":"recovered","session_id":"child","status":"done","final_text":"from recovery"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh coordinator is what the next process starts. It must read the
+	// recovery lane even though the canonical path remains for manual repair.
+	mgr.reports.Close()
+	mgr.reports = newReportCoordinator(ctx, mgr)
+	if mgr.reports == nil {
+		t.Fatal("the recovery coordinator was not created")
+	}
+	mgr.reports.nudge(info.CodebaseKey)
+	if got := waitForOwnerReports(t, ownerSess, 1)[0]; !strings.Contains(got, "from recovery") {
+		t.Fatalf("recovery report did not reach the owner:\n%s", got)
+	}
+	pollUntil(t, 5*time.Second, "the valid recovery lane being removed", func() bool {
+		_, err := os.Stat(recovery)
+		return os.IsNotExist(err)
+	})
+	if got, err := os.ReadFile(canonical); err != nil || string(got) != string(broken) {
+		t.Fatalf("canonical outbox changed to %q (%v)", got, err)
+	}
+
+	// Once the recovered report is delivered, later reports still use a durable
+	// recovery lane rather than treating the malformed canonical as writable.
+	mgr.reports.add(info.CodebaseKey, doneReport("after-restart", "child", "still durable"))
+	pollUntil(t, 5*time.Second, "the new recovery lane being written", func() bool {
+		data, err := os.ReadFile(recovery)
+		return err == nil && strings.Contains(string(data), "after-restart")
+	})
+	if got, err := os.ReadFile(canonical); err != nil || string(got) != string(broken) {
+		t.Fatalf("canonical outbox changed after restart to %q (%v)", got, err)
+	}
+}
+
+func TestReportsWarnForEveryPreservedLane(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	var logs bytes.Buffer
+	orig := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(orig) })
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	info, _ := ownerWithSession(t, mgr, root, "Winerim")
+	store, err := mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := store.CodebaseDir(info.CodebaseKey)
+	canonical := filepath.Join(dir, "reports.json")
+	recovery := filepath.Join(dir, "reports.recovery.json")
+	if err := os.WriteFile(canonical, []byte("bad canonical"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recovery, []byte("bad recovery"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mgr.reports.add(info.CodebaseKey, doneReport("new", "child", "saved"))
+	got := logs.String()
+	if n := strings.Count(got, "preserved_path="); n != 2 {
+		t.Fatalf("preserved lane warning count = %d, want 2:\n%s", n, got)
+	}
+	for _, path := range []string{canonical, recovery} {
+		if !strings.Contains(got, "preserved_path="+path) || !strings.Contains(got, "active_path="+filepath.Join(dir, "reports.recovery.1.json")) {
+			t.Fatalf("preserved lane warning missing exact paths:\n%s", got)
+		}
+	}
+}
+
+func TestCreateOwnerRecoversPreexistingOutbox(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	store, err := mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := core.CodebaseKey(root)
+	if err := store.SaveReports(key, []owner.Report{doneReport("before-owner", "child", "preexisting")}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: root, Name: "Winerim"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerSess, ok := mgr.Get(info.SessionID)
+	if !ok {
+		t.Fatal("owner session not loaded")
+	}
+	if got := waitForOwnerReports(t, ownerSess, 1)[0]; !strings.Contains(got, "preexisting") {
+		t.Fatalf("outbox was not recovered when owner was created:\n%s", got)
+	}
+}
+
+func TestReportBatchIDDoesNotReuseEmptyIDs(t *testing.T) {
+	a := reportBatchID([]owner.Report{{ID: "recovered_a"}, {ID: "recovered_b"}})
+	b := reportBatchID([]owner.Report{{ID: "recovered_a"}, {ID: "recovered_c"}})
+	if a == b {
+		t.Fatalf("batch IDs reused: %q", a)
+	}
+}
+
+func TestIncomingReportWithoutIDGetsAnIdentityBeforeDedupe(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	info, _ := ownerWithSession(t, mgr, root, "Winerim")
+	mgr.reports.add(info.CodebaseKey, owner.Report{SessionID: "child-a", Status: callbackStatusDone})
+	mgr.reports.add(info.CodebaseKey, owner.Report{SessionID: "child-b", Status: callbackStatusDone})
+	store, err := mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := store.LoadReports(info.CodebaseKey)
+	if err != nil || len(pending) != 2 || pending[0].ID == "" || pending[1].ID == "" || pending[0].ID == pending[1].ID {
+		t.Fatalf("incoming empty IDs were not independently persisted: %+v, %v", pending, err)
+	}
+}
+
+func TestFirstReportReloadsLanesAfterEmptyNudge(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	info, _ := ownerWithSession(t, mgr, root, "Winerim")
+	// This leaves the actor with a cached, empty batch.
+	mgr.reports.nudge(info.CodebaseKey)
+	store, err := mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveReports(info.CodebaseKey, []owner.Report{doneReport("manual", "manual", "written after nudge")}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.reports.add(info.CodebaseKey, doneReport("new", "child", "new report"))
+	pending, err := store.LoadReports(info.CodebaseKey)
+	if err != nil || len(pending) != 2 {
+		t.Fatalf("first report replaced lanes after empty nudge: %+v, %v", pending, err)
+	}
+}
+
+func TestFirstReportReloadsLanesAfterDelivery(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	mgr.reports.add(info.CodebaseKey, doneReport("delivered", "child", "delivered first"))
+	mgr.reports.nudge(info.CodebaseKey)
+	waitForOwnerReports(t, ownerSess, 1)
+	store, err := mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "the delivered outbox being cleared", func() bool {
+		pending, loadErr := store.LoadReports(info.CodebaseKey)
+		return loadErr == nil && len(pending) == 0
+	})
+	if err := store.SaveReports(info.CodebaseKey, []owner.Report{doneReport("manual", "manual", "written after delivery")}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.reports.add(info.CodebaseKey, doneReport("new", "child", "new report"))
+	pending, err := store.LoadReports(info.CodebaseKey)
+	if err != nil || len(pending) != 2 {
+		t.Fatalf("first report replaced lanes after delivery: %+v, %v", pending, err)
+	}
 }
 
 func TestAcceptedReportsArePersistedBeforeDelivery(t *testing.T) {
