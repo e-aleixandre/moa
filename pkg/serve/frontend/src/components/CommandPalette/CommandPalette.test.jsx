@@ -152,19 +152,28 @@ const byClass = (cls) => nodes().filter((n) => typeof n.props?.class === "string
 const rowTexts = () => byClass("row").concat(byClass("sel")).filter((n, i, a) => a.indexOf(n) === i).map(text);
 const groups = () => byClass("pal-group").map(text);
 
+// on() reads an event handler off a vnode whatever case it is in. preact/compat
+// installs an options.vnode hook that LOWERCASES DOM event props -- `onInput`
+// becomes `oninput` -- for every vnode created after it loads, process-wide. So
+// these lookups passed or failed depending on whether another file in the same
+// `bun test` run had pulled compat in (any module that reaches a Sheet does),
+// which is a property of the file list rather than of the palette. Reading both
+// spellings makes the assertion about the component again.
+const on = (node, name) => node?.props?.[name] || node?.props?.[name.toLowerCase()];
+
 async function press(key, init = {}) {
-  const handler = nodes().find((n) => n.props?.onKeyDown)?.props.onKeyDown;
+  const handler = on(nodes().find((n) => on(n, "onKeyDown")), "onKeyDown");
   handler({ key, preventDefault() {}, ...init });
   await flush();
 }
 
 async function type(value) {
-  nodes().find((n) => n.props?.class === "pal-input").props.onInput({ target: { value } });
+  on(nodes().find((n) => n.props?.class === "pal-input"), "onInput")({ target: { value } });
   await flush();
 }
 
 async function click(node) {
-  node.props.onClick({});
+  on(node, "onClick")({});
   await flush();
 }
 

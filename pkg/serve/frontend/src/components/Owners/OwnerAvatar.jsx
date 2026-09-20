@@ -1,3 +1,5 @@
+import { useMemo } from "preact/hooks";
+
 // OwnerAvatar — the owner's identity mark, drawn wherever an owner appears:
 // the sidebar's OWNERS section, its row inside a project group, the chip a
 // child session wears, and the New owner picker.
@@ -203,6 +205,22 @@ export function ownerAvatar(owner) {
 
 // size — 32 in a row, 20 in a chip. Only two, because the mark is a token and
 // a third size would be a third set of eye positions to keep honest.
+/* ── Where the light comes from ─────────────────────────────────────────
+   The mark used to be one flat fill with a rim, in an interface where nothing
+   else is: every sheet is lit from above (`inset 0 1px 0 var(--zl-line)`, in
+   19 stylesheets), the page sits over the aurora (tokens/shell.css) and the
+   surfaces drop soft shadows. So the plane is lit and its top edge catches
+   that light — the same two gradients any other surface has, said in SVG. The
+   DRAWING did not change: same shapes, same eight hues, same eyes, and the
+   fill still averages the ~46% strength the palette was verified legible at
+   (the gradient spends that strength, it does not lower it).
+
+   Two alternatives were drawn beside this one and rejected by the owner: a
+   halo in the identity colour (a glow reads as "something is happening", and
+   identity never carries state) and a translucent glass pebble (it spends its
+   contrast on the bottom edge, which is what a 20px chip can least afford). */
+let paintSeq = 0;
+
 export function OwnerAvatar({
   shape = "circle",
   color = "peach",
@@ -212,18 +230,35 @@ export function OwnerAvatar({
 }) {
   const hex = (COLOR_BY_ID.get(color) || AVATAR_COLORS[0]).hex;
   const eyes = eyeStateFor(state);
+  // One id per mounted mark: a document holds dozens of these at once, and
+  // two <defs> sharing an id is the first paint server winning everywhere.
+  const uid = useMemo(() => `ova${++paintSeq}`, []);
   return (
     <svg
       class={`ow-av is-${size} is-${eyes}`}
       viewBox="0 0 32 32"
       width={size}
       height={size}
-      style={`--ow-av-c:${hex}`}
+      style={`--ow-av-c:${hex};--ow-av-fill:url(#${uid}f);--ow-av-edge:url(#${uid}l)`}
       role={title ? "img" : undefined}
       aria-label={title}
       aria-hidden={title ? undefined : "true"}
     >
+      <defs>
+        <linearGradient id={`${uid}f`} x1="0" y1="0" x2="0" y2="1">
+          <stop class="ow-av-f0" offset="0" />
+          <stop class="ow-av-f1" offset="1" />
+        </linearGradient>
+        {/* The lit edge runs out at mid-height rather than at the bottom: a
+            highlight faded over the whole outline reads as a thinner rim, not
+            as one edge facing the light. */}
+        <linearGradient id={`${uid}l`} x1="0" y1="0" x2="0" y2="0.5">
+          <stop class="ow-av-l0" offset="0" />
+          <stop class="ow-av-l1" offset="1" />
+        </linearGradient>
+      </defs>
       <path class="ow-av-body" d={SHAPE_PATHS[shape] || SHAPE_PATHS.circle} />
+      <path class="ow-av-lit" d={SHAPE_PATHS[shape] || SHAPE_PATHS.circle} />
       <Eyes state={eyes} shape={shape} />
     </svg>
   );

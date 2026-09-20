@@ -71,6 +71,15 @@ export async function createOwner({ root, name, model, thinking, avatar }) {
   return info;
 }
 
+// updateOwner reloads both projections because an owner rename can also
+// retitle its standing conversation, which is carried by the session list.
+export async function updateOwner(id, { name, avatar }) {
+  const info = await api('PATCH', `/api/owners/${id}`, { name, avatar });
+  await loadOwners();
+  await loadSessions();
+  return info;
+}
+
 // openOwnerConversation opens the owner's own session in the pane. The backend
 // creates that session with the owner (pkg/serve/owners.go), so there is no
 // "create on first use" step: an owner without a session_id is an owner whose

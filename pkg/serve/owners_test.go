@@ -1,8 +1,12 @@
 package serve
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +19,15 @@ import (
 	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/session"
 )
+
+func patchOwner(t *testing.T, mgr *Manager, id, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /api/owners/{id}", handleUpdateOwner(mgr))
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/api/owners/"+id, bytes.NewBufferString(body)))
+	return response
+}
 
 // newOwnerTestManager isolates the owner store in a temp config dir, the same
 // way the memory store is isolated: owners live under MOA_CONFIG_DIR.
@@ -53,6 +66,124 @@ func TestCreateOwnerFlagsItsSessionAndHidesItFromTheList(t *testing.T) {
 	withOwners := mgr.ListWith(ListOptions{IncludeOwners: true})
 	if len(withOwners) != 1 || withOwners[0].Kind != session.KindOwner {
 		t.Fatalf("ListWith(IncludeOwners) = %+v", withOwners)
+	}
+}
+
+func TestUpdateOwnerRenamesAndRetitlesUntouchedConversation(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := patchOwner(t, mgr, info.ID, `{"name":"  After  "}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("PATCH = %d: %s", response.Code, response.Body.String())
+	}
+	var got OwnerInfo
+	if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "After" {
+		t.Fatalf("name = %q, want After", got.Name)
+	}
+	sess, ok := mgr.Get(info.SessionID)
+	if !ok || sess.title() != "After" {
+		t.Fatalf("owner conversation title = %q, want After", sess.title())
+	}
+}
+
+// A name past the title cap is stored whole on the owner and truncated on the
+// conversation. The rule has to compare against what it WROTE, or its own
+// truncation reads as somebody's edit and the title is orphaned for good.
+func TestUpdateOwnerKeepsRetitlingAfterATruncatedName(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("x", maxTitleLength+20)
+	if response := patchOwner(t, mgr, info.ID, `{"name":"`+long+`"}`); response.Code != http.StatusOK {
+		t.Fatalf("PATCH = %d: %s", response.Code, response.Body.String())
+	}
+	sess, _ := mgr.Get(info.SessionID)
+	if got := sess.title(); got != long[:maxTitleLength]+"\u2026" {
+		t.Fatalf("title after a long rename = %q", got)
+	}
+	// The next rename must still be admitted: the truncation was the system's.
+	if response := patchOwner(t, mgr, info.ID, `{"name":"Short again"}`); response.Code != http.StatusOK {
+		t.Fatalf("second PATCH = %d: %s", response.Code, response.Body.String())
+	}
+	sess, _ = mgr.Get(info.SessionID)
+	if got := sess.title(); got != "Short again" {
+		t.Fatalf("owner conversation title = %q, want Short again", got)
+	}
+}
+
+func TestUpdateOwnerKeepsHandEditedConversationTitle(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.SetTitle(info.SessionID, "A human title"); err != nil {
+		t.Fatal(err)
+	}
+	if response := patchOwner(t, mgr, info.ID, `{"name":"After"}`); response.Code != http.StatusOK {
+		t.Fatalf("PATCH = %d: %s", response.Code, response.Body.String())
+	}
+	sess, _ := mgr.Get(info.SessionID)
+	if got := sess.title(); got != "A human title" {
+		t.Fatalf("owner conversation title = %q, want human title", got)
+	}
+}
+
+func TestUpdateOwnerPatchesOnlyProvidedFields(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	info, err := mgr.CreateOwner(CreateOwnerOpts{
+		Root: t.TempDir(), Name: "Before", Avatar: owner.Avatar{Shape: "circle", Color: "peach"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := patchOwner(t, mgr, info.ID, `{"avatar":{"shape":"pill","color":"mint"}}`); response.Code != http.StatusOK {
+		t.Fatalf("avatar PATCH = %d: %s", response.Code, response.Body.String())
+	}
+	afterAvatar, err := mgr.GetOwner(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterAvatar.Name != "Before" || afterAvatar.Avatar != (owner.Avatar{Shape: "pill", Color: "mint"}) {
+		t.Fatalf("avatar-only PATCH = %+v", afterAvatar.Owner)
+	}
+	if response := patchOwner(t, mgr, info.ID, `{"name":"After"}`); response.Code != http.StatusOK {
+		t.Fatalf("name PATCH = %d: %s", response.Code, response.Body.String())
+	}
+	afterName, err := mgr.GetOwner(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterName.Avatar != (owner.Avatar{Shape: "pill", Color: "mint"}) {
+		t.Fatalf("name-only PATCH changed avatar: %+v", afterName.Avatar)
+	}
+}
+
+func TestUpdateOwnerRejectsInvalidInputAndUnknownOwner(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"name":"   "}`,
+		`{"avatar":{"shape":"nope","color":"mint"}}`,
+		`{"avatar":{"shape":"pill","color":"nope"}}`,
+	} {
+		if response := patchOwner(t, mgr, info.ID, body); response.Code != http.StatusBadRequest {
+			t.Errorf("PATCH %s = %d, want 400: %s", body, response.Code, response.Body.String())
+		}
+	}
+	if response := patchOwner(t, mgr, "missing", `{"name":"After"}`); response.Code != http.StatusNotFound {
+		t.Fatalf("unknown PATCH = %d, want 404: %s", response.Code, response.Body.String())
 	}
 }
 

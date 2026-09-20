@@ -232,7 +232,7 @@ export function SessionPanel({
           {page === "mcp" && (
             <McpPage sessionId={session.id} mcpTick={session.mcpTick} servers={mcpServers} inline={inline} />
           )}
-          {(page === "overview" || page === "book") && <OwnerPanelPage session={session} page={page} />}
+          {(page === "overview" || page === "book") && <OwnerPanelPage session={session} page={page} phone={variant === "sheet"} />}
         </div>
       ) : (
         <>

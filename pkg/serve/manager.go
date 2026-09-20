@@ -755,10 +755,15 @@ type Manager struct {
 	// to it. nil when owners are unavailable.
 	heartbeat *heartbeatService
 	// ownerRefs memoizes which owner a working directory reports to, keyed by
-	// cwd. Dropped whole whenever an owner is created or deleted. ownerRefMu
-	// is held across the resolution, not only around the map: see ownerRefFor.
+	// cwd. Dropped whole whenever an owner is created, renamed or deleted.
+	// ownerRefMu is held across the resolution, not only around the map: see
+	// ownerRefFor.
 	ownerRefMu sync.Mutex
 	ownerRefs  map[string]ownerRef
+	// ownerEdit serializes read-modify-write edits of an owner's identity, so
+	// two concurrent renames cannot each save a whole owner and drop the
+	// other's field. See UpdateOwner.
+	ownerEdit  sync.Mutex
 	versionMu  sync.RWMutex
 	version    release.Result
 

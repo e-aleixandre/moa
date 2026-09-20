@@ -570,6 +570,7 @@
 .ow-page-intro { margin: 0 12px 12px; line-height: 1.55; color: var(--zl-t3); }
 
 .ow-sum { display: flex; flex-direction: column; gap: 4px; margin: 0 12px 4px; }
+.ow-edit-owner { margin: 0 12px 16px; }
 .ow-sum-t { font-size: var(--zl-fs-title); font-weight: 600; letter-spacing: -0.01em; color: var(--zl-t1); }
 .ow-sum-t.tone-yellow { color: var(--zl-yellow); }
 .ow-sum-t.tone-mauve { color: var(--zl-accent); }

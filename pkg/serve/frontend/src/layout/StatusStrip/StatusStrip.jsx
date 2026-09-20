@@ -244,8 +244,9 @@ export function StatusStrip({
         })()}
 
         {/* The owner a CHILD session reports to (docs/owners.md): a door, not
-            a reading. It is the least urgent thing on the strip, so it is the
-            first to drop when the width goes. */}
+            a reading. It never drops (p1): on a phone, where there is no
+            column beside the conversation, it is the only thing that says
+            whose session this is. */}
         {owner && (
           <button
             type="button"
