@@ -53,10 +53,28 @@ func voiceLiveError(w http.ResponseWriter, status int, cause, message string) {
 	writeJSON(w, status, map[string]string{"error": message, "cause": cause})
 }
 
+// TEMPORARY INSTRUMENTATION — voice 503 diagnosis. Remove by flipping this to
+// false and deleting it along with voiceLiveLogSnippet and its call sites.
+//
+// The owner authorised logging the provider's response body only as a means of
+// identifying one specific failure: users were shown "live session unavailable"
+// for three different causes and the real error was discarded, so two rounds
+// were spent guessing. A provider body can echo request context, which for this
+// feature can include what was said on a call, so this is a privacy cost the
+// owner accepted for a purpose, not a permanent behaviour.
+//
+// It is a named constant, not a comment or a memory, because the commitment to
+// withdraw it must be visible in the code that does it. Once a 503 has been
+// diagnosed in production, this goes.
+const voiceLiveLogUpstreamBodies = true
+
 // voiceLiveLogSnippet keeps an upstream body loggable: bounded, on a single
 // line. Only the provider's response is ever passed here — never the request,
 // which carries the API key in its Authorization header.
 func voiceLiveLogSnippet(body []byte, secrets ...string) string {
+	if !voiceLiveLogUpstreamBodies {
+		return "(body logging disabled)"
+	}
 	text := string(body)
 	for _, secret := range secrets {
 		if secret != "" {

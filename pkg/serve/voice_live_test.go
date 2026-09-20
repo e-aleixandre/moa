@@ -411,3 +411,17 @@ func TestVoiceLivePricingStatesVoiceAndNamesTheBackend(t *testing.T) {
 		t.Fatalf("the backend model is not resolvable in core")
 	}
 }
+
+// The owner authorised the provider body in the log as temporary means, not as
+// behaviour. This test exists so the withdrawal is a code change someone has to
+// make deliberately, and so the switch cannot rot into decoration: it pins that
+// the flag is the single thing that turns it off.
+func TestVoiceLiveUpstreamBodyLoggingIsASingleRemovableSwitch(t *testing.T) {
+	body := []byte(`{"error":{"message":"model_not_found"}}`)
+	if got := voiceLiveLogSnippet(body, "sk-secret"); !strings.Contains(got, "model_not_found") {
+		t.Fatalf("with logging on the body must be diagnosable: %q", got)
+	}
+	if !voiceLiveLogUpstreamBodies {
+		t.Fatal("the switch is off: delete voiceLiveLogSnippet and its call sites rather than leaving dead instrumentation")
+	}
+}
