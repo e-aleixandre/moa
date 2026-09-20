@@ -134,7 +134,7 @@ func TestTreeSyncer_TrimUsesLiveMarkerID(t *testing.T) {
 	for _, c := range all[0].Content {
 		text += c.Text
 	}
-	if !strings.Contains(text, "3 results") {
-		t.Fatalf("marker text = %q, want the result count", text)
+	if !strings.Contains(text, "~50K tokens freed") || !strings.Contains(text, "compaction avoided") {
+		t.Fatalf("marker text = %q, want the token saving and avoided compaction", text)
 	}
 }

@@ -19,7 +19,7 @@ func NewTrimMarker(payload *core.TrimPayload) *core.AgentMessage {
 		Message: core.Message{
 			Role:    "session_event",
 			MsgID:   core.NewMsgID(),
-			Content: []core.Content{core.TextContent(session.TrimMarkerText(payload.Results, removed))},
+			Content: []core.Content{core.TextContent(session.TrimMarkerText(removed))},
 		},
 		Custom: map[string]any{
 			"type":           "trim_marker",

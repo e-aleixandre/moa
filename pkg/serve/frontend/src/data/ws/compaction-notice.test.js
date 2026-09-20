@@ -59,7 +59,7 @@ describe('the trim marker', () => {
         msg_id: 't-1',
         timestamp: 1788359600,
         custom: { type: 'trim_marker', results: 42, tokens_removed: 180000 },
-        content: [{ type: 'text', text: '✂ Older tool outputs removed from model context (42 results, ~180K tokens)' }],
+        content: [{ type: 'text', text: '✂ ~180K tokens freed from model context — compaction avoided' }],
       },
     ]);
 
@@ -67,7 +67,8 @@ describe('the trim marker', () => {
     expect(rows[0]._type).toBe('system');
     expect(rows[0]._msg_id).toBe('t-1');
     expect(rows[0].timestamp).toBe(1788359600);
-    expect(rows[0].text).toContain('42 results');
+    expect(rows[0].text).toContain('~180K tokens freed');
+    expect(rows[0].text).toContain('compaction avoided');
     expect(projectStream({ messages: rows, subagents: {} }).some(b => b.kind === 'compaction')).toBe(false);
   });
 });
