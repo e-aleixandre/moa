@@ -188,6 +188,20 @@ type ManagedSession struct {
 	unreadUnsub  func()
 	runProvider  string
 
+	// ownerObserver turns this session's completed turns into the project
+	// owner's reports. Nil unless the session is a child of a codebase that
+	// has an owner. Held so shutdown can flush the turns that have not been
+	// reported yet, and delete can discard them. Guarded by mu.
+	ownerObserver *ownerReportObserver
+	// outcomeWorkers tracks the goroutines subscribeRunOutcomes launches (the
+	// automation callback's), behind an explicit admission gate: admission and
+	// the Add happen together under outcomeMu, so once admission is closed no
+	// Add can follow and Wait cannot race one. A bare WaitGroup could not give
+	// that guarantee, because the Add happens on a bus subscriber goroutine.
+	outcomeMu      sync.Mutex
+	outcomeClosed  bool
+	outcomeWorkers sync.WaitGroup
+
 	// verifyRunning serializes the web /verify command: two concurrent POSTs
 	// must not run verify.Execute at once and interleave AutoVerify events.
 	verifyRunning atomic.Bool
@@ -273,14 +287,14 @@ type SessionInfo struct {
 	Thinking string       `json:"thinking"`
 	// Fast is whether this session buys premium speed, and FastSupported
 	// whether the model it is on can serve it at all.
-	Fast               bool      `json:"fast,omitempty"`
-	FastSupported      bool      `json:"fast_supported,omitempty"`
-	FastNote           string    `json:"fast_note,omitempty"`
-	CWD                string    `json:"cwd"`
-	Created            time.Time `json:"created"`
-	Updated            time.Time `json:"updated"`
-	Origin             string    `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
-	Kind               string    `json:"kind,omitempty"`   // session.KindOwner for an owner conversation; empty otherwise
+	Fast          bool      `json:"fast,omitempty"`
+	FastSupported bool      `json:"fast_supported,omitempty"`
+	FastNote      string    `json:"fast_note,omitempty"`
+	CWD           string    `json:"cwd"`
+	Created       time.Time `json:"created"`
+	Updated       time.Time `json:"updated"`
+	Origin        string    `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
+	Kind          string    `json:"kind,omitempty"`   // session.KindOwner for an owner conversation; empty otherwise
 	// OwnerID / OwnerName name the project owner this session reports to, when
 	// its codebase has one. Additive and per-session because that is what the
 	// chip in a child's header asks: "does THIS conversation belong to a
@@ -297,8 +311,8 @@ type SessionInfo struct {
 	// the last time something was sent TO the session, so an old conversation
 	// asking a question right now would look like it had been blocked for
 	// hours.
-	PendingSince time.Time `json:"pending_since,omitzero"`
-	PendingID    string    `json:"pending_id,omitempty"`
+	PendingSince       time.Time `json:"pending_since,omitzero"`
+	PendingID          string    `json:"pending_id,omitempty"`
 	Error              string    `json:"error,omitempty"`
 	Unseen             bool      `json:"unseen"`
 	UnseenSeq          uint64    `json:"unseen_seq,omitempty"`
@@ -750,15 +764,20 @@ type Manager struct {
 	attention *attention.Service
 	// reports batches the run outcomes of a project's sessions and delivers
 	// them to its owner. nil when owners are unavailable (no config dir).
-	reports   *reportCoordinator
+	reports *reportCoordinator
 	// heartbeat wakes an owner when the project changed without anyone talking
 	// to it. nil when owners are unavailable.
 	heartbeat *heartbeatService
 	// ownerRefs memoizes which owner a working directory reports to, keyed by
-	// cwd. Dropped whole whenever an owner is created or deleted. ownerRefMu
-	// is held across the resolution, not only around the map: see ownerRefFor.
+	// cwd. Dropped whole whenever an owner is created, renamed or deleted.
+	// ownerRefMu is held across the resolution, not only around the map: see
+	// ownerRefFor.
 	ownerRefMu sync.Mutex
 	ownerRefs  map[string]ownerRef
+	// ownerEdit serializes read-modify-write edits of an owner's identity, so
+	// two concurrent renames cannot each save a whole owner and drop the
+	// other's field. See UpdateOwner.
+	ownerEdit  sync.Mutex
 	versionMu  sync.RWMutex
 	version    release.Result
 

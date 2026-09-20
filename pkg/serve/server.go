@@ -135,6 +135,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/owners", handleListOwners(manager))
 	mux.HandleFunc("POST /api/owners", handleCreateOwner(manager))
 	mux.HandleFunc("GET /api/owners/{id}", handleGetOwner(manager))
+	mux.HandleFunc("PATCH /api/owners/{id}", handleUpdateOwner(manager))
 	mux.HandleFunc("DELETE /api/owners/{id}", handleDeleteOwner(manager))
 	mux.HandleFunc("GET /api/owners/{id}/book", handleOwnerBook(manager))
 	mux.HandleFunc("GET /api/owners/{id}/book/{path...}", handleGetOwnerBookFile(manager))

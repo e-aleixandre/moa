@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/book"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -32,6 +33,8 @@ var ErrProjectSessionsOpen = errors.New("this project has open sessions")
 // ErrInvalidAvatar refuses an identity mark outside the closed lists, so
 // nothing on disk can be a face no client knows how to draw.
 var ErrInvalidAvatar = errors.New("invalid owner avatar")
+
+var ErrInvalidOwnerName = errors.New("owner name is required")
 
 // ownerStore resolves the on-disk owner store. It is resolved per call rather
 // than cached on the Manager so the config directory is read the same way
@@ -111,6 +114,20 @@ type CreateOwnerOpts struct {
 	Avatar owner.Avatar `json:"avatar,omitzero"`
 }
 
+// UpdateOwnerOpts is the PATCH /api/owners/{id} body. Pointers distinguish a
+// field omitted from a field deliberately supplied with an empty value.
+type UpdateOwnerOpts struct {
+	Name   *string       `json:"name"`
+	Avatar *owner.Avatar `json:"avatar"`
+}
+
+func validateOwnerAvatar(avatar owner.Avatar) error {
+	if !avatar.Valid() {
+		return fmt.Errorf("%w: shape must be one of %v and colour one of %v", ErrInvalidAvatar, owner.AvatarShapes, owner.AvatarColors)
+	}
+	return nil
+}
+
 // CreateOwner creates the entity, its book and its conversation.
 //
 // The session is created after owner.json exists — the entity is what makes a
@@ -137,8 +154,10 @@ func (m *Manager) CreateOwner(opts CreateOwnerOpts) (OwnerInfo, error) {
 	}
 	// The avatar is checked here rather than only in the store so a bad one is
 	// a 400 about the form the user is looking at, not a 500.
-	if !opts.Avatar.IsZero() && !opts.Avatar.Valid() {
-		return OwnerInfo{}, fmt.Errorf("%w: shape must be one of %v and colour one of %v", ErrInvalidAvatar, owner.AvatarShapes, owner.AvatarColors)
+	if !opts.Avatar.IsZero() {
+		if err := validateOwnerAvatar(opts.Avatar); err != nil {
+			return OwnerInfo{}, err
+		}
 	}
 	// A session built before the owner existed resolved its book, its tools and
 	// its report subscription without one, and nothing re-resolves them while it
@@ -181,7 +200,79 @@ func (m *Manager) CreateOwner(opts CreateOwnerOpts) (OwnerInfo, error) {
 	if err := store.Save(own); err != nil {
 		return OwnerInfo{}, err
 	}
+	if m.reports != nil {
+		m.reports.nudge(own.CodebaseKey)
+	}
 	return m.ownerInfo(own), nil
+}
+
+// UpdateOwner changes the editable identity fields of an existing owner.
+//
+// Serialized on ownerEdit: this is a read-modify-write over one JSON file, and
+// two edits admitted at once (two tabs, or a tab and the API) would each save
+// the whole owner, so the later write would silently drop the earlier one's
+// field. The lock is on the Manager rather than per owner id because editing
+// an owner is a once-in-a-while act by one person; a map of mutexes would be
+// machinery for a queue that is never more than one deep.
+func (m *Manager) UpdateOwner(id string, opts UpdateOwnerOpts) (OwnerInfo, error) {
+	m.ownerEdit.Lock()
+	defer m.ownerEdit.Unlock()
+	store, err := m.ownerStore()
+	if err != nil {
+		return OwnerInfo{}, err
+	}
+	own, found, err := store.FindByID(id)
+	if err != nil {
+		return OwnerInfo{}, err
+	}
+	if !found {
+		return OwnerInfo{}, owner.ErrNotFound
+	}
+	oldName := own.Name
+	if opts.Name != nil {
+		name := strings.TrimSpace(*opts.Name)
+		if name == "" {
+			return OwnerInfo{}, ErrInvalidOwnerName
+		}
+		own.Name = name
+	}
+	if opts.Avatar != nil {
+		if err := validateOwnerAvatar(*opts.Avatar); err != nil {
+			return OwnerInfo{}, err
+		}
+		own.Avatar = *opts.Avatar
+	}
+	if err := store.Save(own); err != nil {
+		return OwnerInfo{}, err
+	}
+	// The name travels on every child session (SessionInfo.owner_name), resolved
+	// through a memo that until now only create and delete could invalidate. A
+	// rename that skipped this left every already-resolved session reporting the
+	// old name until the process restarted.
+	m.invalidateOwnerRefs()
+	// The owner wrote this title, so it may maintain it; a title that is no
+	// longer what it wrote has been changed by a person and stays theirs.
+	// Compared against the title SetTitle would have PRODUCED, because a name
+	// longer than maxTitleLength was stored whole on the owner and truncated on
+	// the conversation — and comparing against the untruncated name would then
+	// read its own truncation as somebody's edit and never retitle again.
+	if opts.Name != nil && own.Name != oldName {
+		if sess, ok := m.Get(own.SessionID); ok && sess.title() == titleForName(oldName) {
+			if _, err := m.SetTitle(own.SessionID, own.Name); err != nil {
+				return OwnerInfo{}, err
+			}
+		}
+	}
+	return m.ownerInfo(own), nil
+}
+
+// titleForName is what SetTitle stores for a given owner name.
+func titleForName(name string) string {
+	name = strings.TrimSpace(name)
+	if len(name) > maxTitleLength {
+		return name[:maxTitleLength] + "…"
+	}
+	return name
 }
 
 // DeleteOwner removes owner.json and the owner's conversation. The book is
@@ -404,6 +495,30 @@ func handleGetOwner(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, info)
+	}
+}
+
+func handleUpdateOwner(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		limitBody(w, r, maxJSONBodySize)
+		var opts UpdateOwnerOpts
+		if err := json.NewDecoder(r.Body).Decode(&opts); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		info, err := mgr.UpdateOwner(r.PathValue("id"), opts)
+		switch {
+		case errors.Is(err, owner.ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		case errors.Is(err, ErrInvalidAvatar), errors.Is(err, ErrInvalidOwnerName):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		case err != nil:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

@@ -13,9 +13,12 @@ import { modelCodename } from "../../data/util/format.js";
 import { api } from "../../data/api.js";
 import { bookTree, childrenSummary, groupChildren, ownerRows, ownerState } from "../../data/owners-model.js";
 import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatar, OwnerAvatarFor, defaultAvatar } from "./OwnerAvatar.jsx";
-import { loadOwnerBook, openBookFile, ownersSlice, saveBookFile } from "../../data/owners.js";
+import { loadOwnerBook, openBookFile, ownersSlice, saveBookFile, updateOwner } from "../../data/owners.js";
 import { openSession } from "../../data/tile-actions.js";
 import { addToast } from "../../data/notifications.js";
+import { EditOwnerDialog } from "./EditOwnerDialog.jsx";
+import { OwnerIdentityPicker } from "./OwnerIdentityPicker.jsx";
+
 import "./OwnerAvatar.css";
 // The identity picker's sheet lives beside the owner row it is choosing a face
 // for, so the swatch grid and the row cannot drift apart.
@@ -195,62 +198,6 @@ export function createFailure(error) {
   return { title: "The owner was not created.", detail: text.replace(/^\d{3}:\s*/, "").trim() || "Try again, or check that moa is up." };
 }
 
-/* ── The identity picker ──────────────────────────────────────────────────
-   The one new thing in the form: the face, above the two rows that change it.
-   Preview first and large, because what you are choosing is what you will see
-   in the list for months; the rows under it are swatches at the touch floor
-   (44px), not a dropdown — six shapes and eight colours are fewer decisions
-   than a menu costs to open.
-
-   The eyes in the preview are the idle ones. The picker is not a place to
-   show states: it is where you choose the half of the mark that never
-   changes. */
-export function OwnerIdentityPicker({ name, shape, color, onShape, onColor }) {
-  return (
-    <div class="ow-idp">
-      <div class="ow-idp-preview">
-        <OwnerAvatar shape={shape} color={color} state="idle" size={64} />
-        <span class="ow-idp-name">{name || "New owner"}</span>
-      </div>
-      <div class="ow-idp-field">
-        <span class="ow-idp-label">Shape</span>
-        <div class="ow-idp-row is-shapes" role="radiogroup" aria-label="Avatar shape">
-          {AVATAR_SHAPES.map((s) => (
-            <button
-              type="button"
-              role="radio"
-              aria-checked={s === shape}
-              aria-label={s}
-              class={`ow-swatch${s === shape ? " is-on" : ""}`}
-              key={s}
-              onClick={() => onShape(s)}
-            >
-              <OwnerAvatar shape={s} color={color} state="idle" size={32} />
-            </button>
-          ))}
-        </div>
-      </div>
-      <div class="ow-idp-field">
-        <span class="ow-idp-label">Colour</span>
-        <div class="ow-idp-row is-colours" role="radiogroup" aria-label="Avatar colour">
-          {AVATAR_COLORS.map((c) => (
-            <button
-              type="button"
-              role="radio"
-              aria-checked={c.id === color}
-              aria-label={c.id}
-              class={`ow-swatch is-colour${c.id === color ? " is-on" : ""}`}
-              key={c.id}
-              onClick={() => onColor(c.id)}
-            >
-              <span class="ow-swatch-c" style={`--ow-av-c:${c.hex}`} aria-hidden="true" />
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 const basename = (p) => String(p || "").replace(/\/+$/, "").split("/").filter(Boolean).pop() || "";
 
@@ -510,11 +457,13 @@ function ChildRow({ child, onOpen }) {
   );
 }
 
-export function OwnerOverview({ owner, onOpenChild }) {
+export function OwnerOverview({ owner, onOpenChild, phone = false }) {
   const groups = groupChildren(owner.children || []);
   const summary = childrenSummary(owner.children || []);
+  const [editing, setEditing] = useState(false);
   return (
     <div class="ow-page">
+      <button type="button" class="ow-btn ow-edit-owner" onClick={() => setEditing(true)}>Edit owner</button>
       <div class="ow-sum">
         <span class={`ow-sum-t tone-${summary.tone}`}>{summary.text}</span>
         <span class="ow-sum-d">Every session whose folder resolves to this project is one of these — nothing is linked by hand.</span>
@@ -526,6 +475,13 @@ export function OwnerOverview({ owner, onOpenChild }) {
           {group.children.map((child) => <ChildRow child={child} onOpen={onOpenChild} key={child.id} />)}
         </div>
       ))}
+      <EditOwnerDialog
+        open={editing}
+        owner={owner}
+        phone={phone}
+        onClose={() => setEditing(false)}
+        onSave={(identity) => updateOwner(owner.id, identity)}
+      />
     </div>
   );
 }
@@ -643,7 +599,7 @@ function BookFile({ file, onSave }) {
   );
 }
 
-export function OwnerPanelPage({ session, page }) {
+export function OwnerPanelPage({ session, page, phone = false }) {
   const slice = useStore(ownersSlice);
   const sessions = useStore((s) => s.sessions);
   const owner = ownerRows(slice.list, sessions).find((row) => row.session_id === session?.id) || null;
@@ -658,7 +614,7 @@ export function OwnerPanelPage({ session, page }) {
   if (!owner) return null;
 
   if (page === "overview") {
-    return <OwnerOverview owner={owner} onOpenChild={(child) => openSession(child.id)} />;
+    return <OwnerOverview owner={owner} phone={phone} onOpenChild={(child) => openSession(child.id)} />;
   }
 
   const mine = slice.bookOwnerId === ownerId;
@@ -696,4 +652,3 @@ export function OwnerPanelAvatar({ session }) {
 }
 
 /* ── The chip in a child ─────────────────────────────────────────────── */
-

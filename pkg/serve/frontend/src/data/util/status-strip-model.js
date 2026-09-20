@@ -94,7 +94,18 @@ export function statusStripModel(session, globalUsage) {
 
    Note that MCP takes its priority from its STATE, not its type: healthy it
    drops early, unhealthy it stays. A rule keyed on the kind of datum alone
-   could not express that. */
+   could not express that.
+
+   THE OWNER'S FACE IS p1, and it is the one item here that is not a reading.
+   It arrived with no case of its own and fell into the p4 default, which the
+   sheet hides below 640px -- that is every phone dock and most grid panes, so
+   the mark existed in the DOM and nobody on a phone had ever seen it. It
+   belongs at the top instead: "whose session is this, and where do I go to
+   ask it" is not read after the fact, it is what tells you where you are, and
+   it is on a phone -- one session filling the screen, no column beside it to
+   give context -- that the question is hardest to answer. The line can afford
+   it: a 14px mark with no word costs ~24px, against the ~90px of the model
+   pill that never drops. */
 export const STATUS_PRIORITY = { p1: 1, p2: 2, p3: 3, p4: 4 };
 
 export function statusItemPriority(kind, state) {
@@ -102,6 +113,7 @@ export function statusItemPriority(kind, state) {
     case "model":
     case "perm":
     case "context":
+    case "owner":
       return "p1";
     case "mcp":
       return state === "unhealthy" ? "p2" : "p4";

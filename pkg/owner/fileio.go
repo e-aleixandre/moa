@@ -45,3 +45,37 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	}
 	return nil
 }
+
+// writeFileExclusive publishes a fully-written file only if path did not
+// already exist. Link is the filesystem's atomic create-if-absent operation;
+// unlike rename, it cannot replace any pre-existing recovery lane.
+func writeFileExclusive(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("creating dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".owner-*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("writing temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("syncing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		return fmt.Errorf("setting permissions: %w", err)
+	}
+	if err := os.Link(tmpPath, path); err != nil {
+		return err
+	}
+	return nil
+}

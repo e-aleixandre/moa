@@ -283,17 +283,27 @@ func (r *SessionRuntime) Flush() error {
 }
 
 // WaitSettled blocks until the session leaves the active states (running or
-// waiting on a permission) — meaning any in-flight run has observed its
-// context's cancellation and transitioned to idle/error — or ctx is done.
+// waiting on a permission) AND the terminal event of the run that was in
+// flight has been published — or ctx is done.
+//
+// The second condition is not redundant. A run transitions to idle before it
+// publishes RunEnded, so a caller that only watched the state could return in
+// that gap, while the outcome no subscriber has seen yet. On shutdown that gap
+// is a lost turn: the flush happens, the session is torn down, and the
+// RunEnded that would have produced a report is never observed. The run's
+// start anchor — written when the generation is reserved, cleared only after
+// RunEnded is on the bus — is what closes it.
 //
 // It reads the state machine directly (the authoritative source) and is woken
-// by StateChanged events rather than busy-polling. Returns true if the session
-// settled, false if ctx expired while a run was still active. Used on shutdown
-// so Flush snapshots a complete turn instead of a partial one.
+// by StateChanged events and by the terminal barrier rather than busy-polling.
+// Returns true if the session settled, false if ctx expired first.
 func (r *SessionRuntime) WaitSettled(ctx context.Context) bool {
 	settled := func() bool {
 		s := r.State.Current()
-		return s != StateRunning && s != StatePermission
+		if s == StateRunning || s == StatePermission {
+			return false
+		}
+		return !r.sctx.runInFlight()
 	}
 	if settled() {
 		return true
@@ -311,15 +321,27 @@ func (r *SessionRuntime) WaitSettled(ctx context.Context) bool {
 	// Re-check after subscribing: a transition may have landed between the
 	// first check and the subscription taking effect.
 	for {
+		// The barrier is taken BEFORE the condition is tested, so a run that
+		// settles in between wakes this waiter instead of leaving it asleep.
+		barrier := r.sctx.settleBarrier()
 		if settled() {
 			return true
 		}
 		select {
 		case <-woke:
+		case <-barrier:
 		case <-ctx.Done():
 			return settled()
 		}
 	}
+}
+
+// BackgroundWork is how much autonomous work is still outstanding: async
+// subagents, background bash jobs, auto-verify and goal verifiers. Same lock
+// and same sources as the quiescence check, so a caller that stops waiting can
+// say exactly what it stopped waiting for.
+func (r *SessionRuntime) BackgroundWork() int {
+	return r.sctx.BackgroundWork()
 }
 
 // DoIfQuiescent runs fn atomically with respect to run-start if the session is
@@ -329,11 +351,42 @@ func (r *SessionRuntime) WaitSettled(ctx context.Context) bool {
 // work is also required to be absent; that part is a snapshot (background jobs
 // don't flip a tool set mid-fn), but the run-start edge, which does, is
 // serialized. fn must not call back into the state machine.
+//
+// An admitted generation that has not published its RunEnded yet also refuses:
+// a run reaches StateIdle before its terminal event reaches subscribers, and a
+// close admitted in that gap would tear the runtime down with the outcome
+// still unseen — the very loss this whole path exists to prevent.
 func (r *SessionRuntime) DoIfQuiescent(fn func()) bool {
-	if r.sctx.hasBackgroundWork() {
+	if r.sctx.hasBackgroundWork() || r.sctx.runInFlight() {
 		return false
 	}
 	return r.State.DoIfIdle(fn)
+}
+
+// AdmitCloseIfQuiescent closes run admission and runs fn while holding the
+// state lock, but only when there is no work left that close would discard.
+// It is intentionally separate from DoIfQuiescent: MCP operations need only
+// an idle run boundary, while close must also permanently prevent a new run
+// from claiming the slot after it has been admitted.
+//
+// fn must not call back into the state machine.
+func (r *SessionRuntime) AdmitCloseIfQuiescent(fn func()) bool {
+	admitted := false
+	r.State.DoIfIdle(func() {
+		if r.sctx.Agent.QueueLen() != 0 || r.sctx.hasBackgroundWork() || r.sctx.runInFlight() {
+			return
+		}
+		r.sctx.runAdmissionClosed.Store(true)
+		fn()
+		admitted = true
+	})
+	return admitted
+}
+
+// ReopenRunAdmission reverses a close admission after close failed before the
+// runtime was torn down. Callers must also restore their own lifecycle state.
+func (r *SessionRuntime) ReopenRunAdmission() {
+	r.sctx.runAdmissionClosed.Store(false)
 }
 
 // WaitQuiescent waits for the complete autonomous session chain to finish.
@@ -362,15 +415,25 @@ func (r *SessionRuntime) WaitQuiescent(ctx context.Context) bool {
 	}
 
 	for {
+		// Honour the caller's deadline before doing anything expensive: a
+		// caller that allotted 15s must not spend 15s plus two drains.
+		if ctx.Err() != nil {
+			return quiescent()
+		}
 		// A RunEnded fan-out schedules the automatic reactors asynchronously.
 		// Drain the currently accepted publication batch before inspecting the
 		// counters, otherwise a caller observing RunEnded could win the race
-		// just before the auto-verify/goal reactor marks itself active.
-		r.Bus.Drain(2 * time.Second)
+		// just before the auto-verify/goal reactor marks itself active. Each
+		// drain is capped by what is left of the deadline, so the total wait
+		// stays inside it.
+		r.Bus.Drain(drainBudget(ctx))
+		if ctx.Err() != nil {
+			return quiescent()
+		}
 		if quiescent() {
 			// One final drain closes the check-after-drain race for events emitted
 			// by a reactor while its RunEnded handler was unwinding.
-			r.Bus.Drain(2 * time.Second)
+			r.Bus.Drain(drainBudget(ctx))
 			if quiescent() {
 				return true
 			}
@@ -382,6 +445,28 @@ func (r *SessionRuntime) WaitQuiescent(ctx context.Context) bool {
 			return quiescent()
 		}
 	}
+}
+
+// maxQuiescenceDrain bounds one drain when the caller set no deadline at all.
+// It is the long-standing value; a deadline shortens it, never lengthens it.
+const maxQuiescenceDrain = 2 * time.Second
+
+// drainBudget is how long a drain may take without overrunning the caller's
+// deadline. A caller who asked for 15 seconds gets 15 seconds in total, not 15
+// plus however many drains happened to be in flight.
+func drainBudget(ctx context.Context) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return maxQuiescenceDrain
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return 0
+	}
+	if remaining > maxQuiescenceDrain {
+		return maxQuiescenceDrain
+	}
+	return remaining
 }
 
 // Context returns the SessionContext. For testing and advanced use.

@@ -242,6 +242,37 @@ type SessionContext struct {
 	activeSubagents   map[string]struct{}
 	activeBashJobs    map[string]struct{}
 
+	// pendingRunOrigin is the provenance the next launched run will carry. It
+	// is written between claiming the run slot and launching it, both under
+	// abortMu, and taken (cleared) by the launch — so it can never be read by
+	// a later, unrelated run.
+	pendingRunOriginMu sync.Mutex
+	pendingRunOrigin   RunOrigin
+
+	// settleWake is closed-and-replaced every time a run reaches its terminal
+	// barrier (RunEnded published AND the generation released). Waiters grab
+	// the channel before they test the condition, so a settle that lands in
+	// between still wakes them.
+	settleMu   sync.Mutex
+	settleWake chan struct{}
+
+	// admittedGens holds every run generation that has been reserved and whose
+	// terminal RunEnded has not been published yet.
+	//
+	// It is a set rather than a single anchor because generations can overlap:
+	// a queued steer's run can be admitted while the previous one is still
+	// finishing, and the UI start anchor deliberately tracks only the newest.
+	// A shutdown that asked "is anything still in flight" off that anchor would
+	// be told no while an older generation had yet to publish its outcome.
+	admittedMu   sync.Mutex
+	admittedGens map[uint64]struct{}
+
+	// runAdmissionClosed is set by close admission while State's lock is held.
+	// A run that was already checking the flag must check it again after its
+	// idle → running transition, so it cannot launch into a runtime that close
+	// has accepted for teardown.
+	runAdmissionClosed atomic.Bool
+
 	// Queue pump coalescing. The pump drains the agent's unified queue rail at
 	// each idle point (RunEnded / CompactionEnded), executing barrier commands
 	// and starting runs for trailing steers. Two idle signals arrive on two
@@ -415,6 +446,88 @@ func (sctx *SessionContext) hasBackgroundWork() bool {
 	sctx.quiescenceMu.Lock()
 	defer sctx.quiescenceMu.Unlock()
 	return sctx.autoVerifyRunning > 0 || sctx.goalVerifyRunning > 0 || len(sctx.activeSubagents) > 0 || len(sctx.activeBashJobs) > 0
+}
+
+// BackgroundWork is the count of outstanding autonomous work, taken under the
+// same lock and from the same sources as hasBackgroundWork so the two can
+// never disagree. A caller that gives up waiting for quiescence reports this
+// number, which is the difference between "it finished" and "it finished the
+// part it could".
+func (sctx *SessionContext) BackgroundWork() int {
+	sctx.quiescenceMu.Lock()
+	defer sctx.quiescenceMu.Unlock()
+	return sctx.autoVerifyRunning + sctx.goalVerifyRunning + len(sctx.activeSubagents) + len(sctx.activeBashJobs)
+}
+
+// setPendingRunOrigin records the provenance of the run that is about to be
+// launched. Callers hold abortMu across this and the launch.
+func (sctx *SessionContext) setPendingRunOrigin(origin RunOrigin) {
+	sctx.pendingRunOriginMu.Lock()
+	sctx.pendingRunOrigin = origin
+	sctx.pendingRunOriginMu.Unlock()
+}
+
+// takePendingRunOrigin consumes the pending provenance, leaving the unknown
+// zero value behind so a run launched without one cannot inherit it.
+func (sctx *SessionContext) takePendingRunOrigin() RunOrigin {
+	sctx.pendingRunOriginMu.Lock()
+	defer sctx.pendingRunOriginMu.Unlock()
+	origin := sctx.pendingRunOrigin
+	sctx.pendingRunOrigin = RunOrigin{}
+	return origin
+}
+
+// settleBarrier returns the channel that closes at the next terminal barrier.
+// Take it BEFORE testing the settled condition: that ordering is what makes a
+// settle landing in between a wake-up rather than a missed one.
+func (sctx *SessionContext) settleBarrier() <-chan struct{} {
+	sctx.settleMu.Lock()
+	defer sctx.settleMu.Unlock()
+	if sctx.settleWake == nil {
+		sctx.settleWake = make(chan struct{})
+	}
+	return sctx.settleWake
+}
+
+// notifySettled releases everyone waiting on the current barrier. Called after
+// RunEnded has been published AND the run's start anchor cleared, in both the
+// normal and the panic path, so a waiter that wakes sees a fully terminal run.
+func (sctx *SessionContext) notifySettled() {
+	sctx.settleMu.Lock()
+	wake := sctx.settleWake
+	sctx.settleWake = make(chan struct{})
+	sctx.settleMu.Unlock()
+	if wake != nil {
+		close(wake)
+	}
+}
+
+// runInFlight reports whether any admitted run generation has not published
+// its terminal RunEnded yet. Overlapping generations all count: the session is
+// terminal only when every one of them has been released.
+func (sctx *SessionContext) runInFlight() bool {
+	sctx.admittedMu.Lock()
+	defer sctx.admittedMu.Unlock()
+	return len(sctx.admittedGens) > 0
+}
+
+// markRunAdmitted records a generation as in flight. Called synchronously with
+// reserving it, before RunStarted is published, so there is no window in which
+// a run exists and nothing knows about it.
+func (sctx *SessionContext) markRunAdmitted(gen uint64) {
+	sctx.admittedMu.Lock()
+	defer sctx.admittedMu.Unlock()
+	if sctx.admittedGens == nil {
+		sctx.admittedGens = make(map[uint64]struct{})
+	}
+	sctx.admittedGens[gen] = struct{}{}
+}
+
+// releaseRunAdmitted retires a generation once its RunEnded is on the bus.
+func (sctx *SessionContext) releaseRunAdmitted(gen uint64) {
+	sctx.admittedMu.Lock()
+	defer sctx.admittedMu.Unlock()
+	delete(sctx.admittedGens, gen)
 }
 
 // GoalVerifying reports whether a goal verifier is currently running, so a
@@ -684,6 +797,11 @@ func (sctx *SessionContext) newRunContext() (context.Context, uint64) {
 	sctx.runGen++
 	sctx.RunGenAtomic.Store(sctx.runGen)
 	sctx.runStartedAnchor.Store(&runStartAnchor{gen: sctx.runGen, at: time.Now()})
+	// Admit the generation in the same critical section that mints it. The
+	// anchor above is the UI's, and a newer run overwrites it; this set is the
+	// terminal barrier's, and every generation stays in it until its own
+	// RunEnded is published.
+	sctx.markRunAdmitted(sctx.runGen)
 	sctx.runStatsMu.Lock()
 	sctx.runStats = runStats{gen: sctx.runGen}
 	sctx.runStatsMu.Unlock()
@@ -807,6 +925,14 @@ func (sctx *SessionContext) clearRunCancel(gen uint64) {
 		sctx.runCancel = nil
 	}
 	sctx.clearRunStartedAt(gen)
+}
+
+// settleRun closes a generation's terminal barrier: the generation is retired
+// from the admitted set, then everyone waiting on a settled session is woken.
+// Call it after RunEnded has been published, and only there.
+func (sctx *SessionContext) settleRun(gen uint64) {
+	sctx.releaseRunAdmitted(gen)
+	sctx.notifySettled()
 }
 
 // settleRunCancel atomically closes the AbortRun window for gen and reports

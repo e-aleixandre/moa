@@ -266,6 +266,38 @@ type StateChanged struct {
 type RunStarted struct {
 	SessionID string
 	RunGen    uint64
+	// Origin says what caused this run, for consumers that have to tell one
+	// semantic turn from its own continuations. It is in-memory only (never
+	// persisted, never sent to clients) and additive: a consumer that ignores
+	// it behaves exactly as it did before.
+	Origin RunOrigin
+}
+
+// RunOrigin is the provenance of a run, decided centrally at admission.
+//
+// The distinction it draws is "did somebody ask for this turn, or is this the
+// machinery delivering the result of work that turn already started". A bash
+// job or an async subagent that finishes long after its run ended injects its
+// own notification, which starts a fresh run with a fresh generation; without
+// provenance that second run is indistinguishable from a new instruction.
+//
+// The zero value means unknown: neither explicitly asked for nor tied to a
+// known job. Consumers must treat it as a new turn — losing a real turn is
+// worse than reporting one twice.
+type RunOrigin struct {
+	// Explicit is a turn a person or the project's owner asked for. A run that
+	// mixes queued internal notifications with explicit input is explicit: the
+	// instruction is what the run is about.
+	Explicit bool
+	// ContinuationOf carries the IDs of the background jobs whose completion
+	// injected this run's input. Only meaningful when Explicit is false.
+	ContinuationOf []string
+	// ContinueCurrent marks machinery that continues whatever turn is already
+	// under way without naming a job: the goal loop's next iteration,
+	// auto-verify, a handoff, the compaction a long turn needs. These are
+	// steps inside the current work, not new things that happened, so they
+	// must not become a second entry on the owner's status board.
+	ContinueCurrent bool
 }
 
 // RunEnded is published when a full agent run completes (may span multiple turns).

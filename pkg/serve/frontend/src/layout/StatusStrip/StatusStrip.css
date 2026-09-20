@@ -143,8 +143,10 @@ button.zl-st { cursor: pointer; transition: background var(--motion-hover) ease;
    The order is the owner's: "mejor poder ver modelo, contexto, permisos que
    ver si está en fast o no, o ver los MCPs".
 
-     p1  model, permissions, context  — never drops. What you glance at while
-                                        typing, and what changes the answer.
+     p1  model, permissions, context,
+         the owner's face              — never drops. What you glance at while
+                                        typing, what changes the answer, and
+                                        (the face) whose session this is.
      p2  real alarms (mcp down, on extra) — only exist while something is
                                         wrong, so they outrank normal numbers.
      p3  tokens, spend                — read after the fact, not during.
