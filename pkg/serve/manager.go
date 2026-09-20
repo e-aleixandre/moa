@@ -1101,6 +1101,14 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 // send delivers a user message with optional transcript provenance. The public
 // Send entrypoint deliberately remains the ordinary-user path.
 func (m *Manager) send(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any) (action, id string, descriptors []attachment.Descriptor, err error) {
+	return m.sendValidated(sessionID, text, atts, steerID, msgID, custom, nil)
+}
+
+// sendValidated binds an optional authorization check to the exact runtime
+// that receives the message. Callers which may load a saved session before
+// sending cannot safely authorize only its earlier roster entry: the same ID
+// may resolve to a different persisted record when it is resumed.
+func (m *Manager) sendValidated(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any, validate func(*ManagedSession) error) (action, id string, descriptors []attachment.Descriptor, err error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return "", "", nil, ErrNotFound
@@ -1123,6 +1131,11 @@ func (m *Manager) send(sessionID, text string, atts []Attachment, steerID, msgID
 	// client that raced a close sees.
 	if sess.closing.Load() {
 		return "", "", nil, ErrNotFound
+	}
+	if validate != nil {
+		if err := validate(sess); err != nil {
+			return "", "", nil, err
+		}
 	}
 
 retryAfterTerminalRun:

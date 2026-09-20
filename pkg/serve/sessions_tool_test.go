@@ -1,7 +1,10 @@
 package serve
 
 import (
+	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +12,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/owner"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 func runSessionsTool(t *testing.T, sess *ManagedSession, params map[string]any) core.Result {
@@ -224,6 +228,147 @@ func TestSessionsToolSendReachesAChild(t *testing.T) {
 		}
 		return false
 	})
+}
+
+func TestSessionsToolSendResumesASavedChild(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+
+	child, err := mgr.CreateSession(CreateOpts{CWD: root, Origin: "owner", Title: "saved child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.CloseSession(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, loaded := mgr.Get(child.ID); loaded {
+		t.Fatal("child remained loaded after close")
+	}
+
+	res := runSessionsTool(t, ownerSess, map[string]any{"action": "send", "session_id": child.ID, "text": "continue the work"})
+	if res.IsError {
+		t.Fatalf("send failed: %s", toolText(res))
+	}
+	resumed, loaded := mgr.Get(child.ID)
+	if !loaded {
+		t.Fatal("send did not resume the saved child")
+	}
+	pollUntil(t, 5*time.Second, "the message reaching the resumed child", func() bool {
+		for _, msg := range resumed.History() {
+			if msg.Role == "user" && strings.Contains(assistantText(msg), "continue the work") &&
+				msg.Custom["source"] == "owner" && msg.Custom["owner_name"] == "Winerim" && msg.Custom["owner_id"] != "" {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestSessionsToolSendSelectsAnAuthorizedDuplicateWithoutTouchingForeignData(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	root := t.TempDir()
+	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+
+	child, err := mgr.CreateSession(CreateOpts{CWD: root, Origin: "owner", Title: "owned copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.CloseSession(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	authorizedStore, err := session.NewFileStore(mgr.sessionBaseDir, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := authorizedStore.LoadReadOnly(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	foreignRoot := filepath.Join(t.TempDir(), "000-foreign")
+	if err := os.MkdirAll(foreignRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	foreignStore, err := session.NewFileStore(mgr.sessionBaseDir, foreignRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foreignStore.Dir() >= authorizedStore.Dir() {
+		t.Fatalf("test requires foreign store %q to sort before authorized store %q", foreignStore.Dir(), authorizedStore.Dir())
+	}
+	foreign := *saved
+	foreign.Metadata = make(map[string]any, len(saved.Metadata))
+	for key, value := range saved.Metadata {
+		foreign.Metadata[key] = value
+	}
+	model, _, permissionMode, thinking := foreign.RuntimeMeta()
+	foreign.SetRuntimeMetadata(model, foreignRoot, permissionMode, thinking)
+	foreign.Title = "foreign copy"
+	foreign.Version = 0
+	foreign.Messages = []core.AgentMessage{core.WrapMessage(core.NewUserMessage("legacy foreign history"))}
+	foreign.Entries = nil
+	foreign.LeafID = ""
+	if err := foreignStore.Save(&foreign); err != nil {
+		t.Fatal(err)
+	}
+	foreignPath := filepath.Join(foreignStore.Dir(), child.ID+".json")
+	foreignBefore, err := os.ReadFile(foreignPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ownerSession authorizes the newest roster record, while ResumeSession's
+	// directory scan resolves the foreign duplicate first.
+	if err := authorizedStore.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	mgr.invalidateSavedCache()
+	info, err := mgr.ownerSession(ownerSess.ownerOfTest(t), child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.CWD != root {
+		t.Fatalf("roster authorized cwd %q, want %q", info.CWD, root)
+	}
+	resolved, _, err := session.FindSessionReadOnly(mgr.sessionBaseDir, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, resolvedCWD, _, _ := resolved.RuntimeMeta()
+	if resolvedCWD != foreignRoot {
+		t.Fatalf("global lookup resolved cwd %q, want foreign cwd %q", resolvedCWD, foreignRoot)
+	}
+
+	res := runSessionsTool(t, ownerSess, map[string]any{"action": "send", "session_id": child.ID, "text": "do not cross projects"})
+	if res.IsError {
+		t.Fatalf("send did not select the authorized duplicate: %s", toolText(res))
+	}
+	loaded, ok := mgr.Get(child.ID)
+	if !ok {
+		t.Fatal("authorized record was not resumed")
+	}
+	if loaded.CWD != root {
+		t.Fatalf("resumed target cwd = %q, want authorized cwd %q", loaded.CWD, root)
+	}
+	pollUntil(t, 5*time.Second, "the owner message reaching the authorized duplicate", func() bool {
+		for _, msg := range loaded.History() {
+			if msg.Custom["source"] == "owner" && strings.Contains(assistantText(msg), "do not cross projects") {
+				return true
+			}
+		}
+		return false
+	})
+	foreignAfter, err := os.ReadFile(foreignPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(foreignAfter, foreignBefore) {
+		t.Fatal("authorization migrated or otherwise rewrote the foreign V1 session")
+	}
+	if _, err := os.Stat(foreignPath + ".v1.bak"); !os.IsNotExist(err) {
+		t.Fatalf("foreign V1 migration backup exists: %v", err)
+	}
 }
 
 func TestSessionsToolAnswerResolvesAnAskOnce(t *testing.T) {

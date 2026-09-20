@@ -1744,6 +1744,81 @@ func TestResumeSession(t *testing.T) {
 	}
 }
 
+func TestResumeSession_ToolResultLeafAcceptsFollowUp(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	root := t.TempDir()
+	sessionBase := t.TempDir()
+	store, err := session.NewFileStore(sessionBase, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := session.NewTree()
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.NewUserMessage("run a tool"))})
+	tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{Message: core.Message{
+		Role: "assistant",
+		Content: []core.Content{
+			core.ToolCallContent("call-1", "read", map[string]any{"path": "README.md"}),
+		},
+	}}})
+	resultID := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.NewToolResultMessage(
+		"call-1", "read", []core.Content{core.TextContent("contents")}, false,
+	))})
+	entries, leafID := tree.Snapshot()
+	saved := store.Create()
+	saved.Metadata = map[string]any{"model": "test-model", "cwd": root}
+	saved.Entries = entries
+	saved.LeafID = leafID
+	if err := store.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+
+	requests := make(chan core.Request, 1)
+	provider := newMockProvider(func(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		requests <- req
+		return simpleResponse("continued"), nil
+	})
+	mgr := NewManager(ctx, ManagerConfig{
+		ProviderFactory: func(_ core.Model) (core.Provider, error) { return provider, nil },
+		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
+		WorkspaceRoot:   root,
+		MoaCfg:          core.MoaConfig{DisableSandbox: true},
+		ConfigLoader:    isolatedTestConfigLoader(t, core.MoaConfig{DisableSandbox: true}),
+		SessionBaseDir:  sessionBase,
+	})
+	t.Cleanup(mgr.Shutdown)
+
+	resumed, err := mgr.ResumeSession(saved.ID)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if got := resumed.runtime.Context().Tree.LeafID(); got != resultID {
+		t.Fatalf("leaf = %q, want tool result %q", got, resultID)
+	}
+	if history := resumed.History(); len(history) != 3 || history[2].Role != "tool_result" {
+		t.Fatalf("resumed history = %+v", history)
+	}
+	if action, _, _, err := mgr.Send(saved.ID, "continue after restart", nil, "", ""); err != nil || action != "send" {
+		t.Fatalf("follow-up action=%q err=%v", action, err)
+	}
+	select {
+	case req := <-requests:
+		if len(req.Messages) != 4 {
+			t.Fatalf("provider received %d messages, want 4", len(req.Messages))
+		}
+		roles := []string{req.Messages[0].Role, req.Messages[1].Role, req.Messages[2].Role, req.Messages[3].Role}
+		if got, want := strings.Join(roles, ","), "user,assistant,tool_result,user"; got != want {
+			t.Fatalf("provider roles = %q, want %q", got, want)
+		}
+		if req.Messages[2].ToolCallID != "call-1" {
+			t.Fatalf("provider tool result call id = %q, want call-1", req.Messages[2].ToolCallID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("follow-up did not reach the provider")
+	}
+}
+
 // TestResumeSession_KeepsSystemPrompt verifies that resuming a legacy session
 // with removed plan-mode metadata preserves its usable session data.
 func TestResumeSession_KeepsSystemPrompt(t *testing.T) {

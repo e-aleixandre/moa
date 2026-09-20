@@ -1099,6 +1099,14 @@ func (m *Manager) ResumeSession(id string) (*ManagedSession, error) {
 // reached it. The check happens inside the same critical section as the
 // reservation so concurrent callers cannot race past the cap.
 func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, error) {
+	return m.resumeSessionValidated(id, maxLoaded, nil)
+}
+
+// resumeSessionValidated validates the exact persisted record before building
+// its runtime. This matters to scoped callers which resolve sessions globally
+// by ID: a duplicate or replaced record must not start resources before its
+// persisted CWD and kind have been authorized.
+func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func(*session.Session) error) (*ManagedSession, error) {
 	// Reserve the ID without exposing a nil placeholder to readers.
 	m.mu.Lock()
 	if _, ok := m.sessions[id]; ok {
@@ -1123,7 +1131,14 @@ func (m *Manager) resumeSession(id string, maxLoaded int) (*ManagedSession, erro
 	}
 
 	// 1. Load from disk.
-	saved, store, err := session.FindSession(m.sessionBaseDir, id)
+	var saved *session.Session
+	var store *session.FileStore
+	var err error
+	if validate == nil {
+		saved, store, err = session.FindSession(m.sessionBaseDir, id)
+	} else {
+		saved, store, err = session.FindSessionValidated(m.sessionBaseDir, id, validate)
+	}
 	if err != nil {
 		cleanup()
 		return nil, err
