@@ -203,9 +203,19 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
     const following = isAtBottom(el.scrollTop, el.scrollHeight, el.clientHeight);
     stickToBottom.current = following;
     setShowNewBtn(!following);
-    queueMicrotask(() => {
+    // Released after the frame, not after the microtask: the caller may be
+    // placing a node that GREW in this same commit — an assignment the reader
+    // just unfolded — and the resize observer runs later in the frame. Clearing
+    // sooner let it read that growth as new tail content and pin the bottom
+    // over the position placed here, dropping the reader past what they opened.
+    const release = () => {
       programmaticScroll.current = false;
-    });
+    };
+    if (typeof globalThis.requestAnimationFrame === "function") {
+      globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(release));
+    } else {
+      queueMicrotask(release);
+    }
   }, []);
 
   return { containerRef, contentRef, setScrollEl, checkScroll, scrollToBottom, placeReadAnchor, showNewBtn, stickToBottom };

@@ -297,3 +297,49 @@ test("an ordinary user message is a bare cell, not a You label", () => {
   expect(textContent(waypoint)).toContain("09:12");
   expect(textContent(waypoint)).toContain("Steer the child.");
 });
+
+// A folded message (the owner's assignments). useState is stubbed above, so
+// only the shut state renders here; opening is exercised in the browser.
+test("folded, the owner's message shows its summary and not its body", () => {
+  const waypoint = UserWaypoint({
+    time: "09:12",
+    label: "From the owner · Moa",
+    tone: "parent",
+    collapsible: true,
+    summary: "Encargo: la skill book-init",
+    children: <p>Cuatro mil caracteres de encargo.</p>,
+  });
+  const text = textContent(waypoint);
+  const toggle = descendants(waypoint).find((node) =>
+    String(node.props?.class || "").split(/\s+/).includes("zl-user-disc")
+  );
+
+  expect(toggle).toBeDefined();
+  expect(toggle.props["aria-expanded"]).toBe(false);
+  // The label is still there: folding must not cost the reader who is talking.
+  expect(text).toContain("From the owner · Moa");
+  expect(text).toContain("Encargo: la skill book-init");
+  expect(text).not.toContain("Cuatro mil caracteres de encargo.");
+});
+
+test("a message that is not folded keeps the markup it always had", () => {
+  const waypoint = UserWaypoint({
+    time: "09:12",
+    label: "From the owner · Moa",
+    tone: "parent",
+    children: <p>Pushea la rama.</p>,
+  });
+  const toggle = descendants(waypoint).find((node) =>
+    String(node.props?.class || "").split(/\s+/).includes("zl-user-disc")
+  );
+
+  expect(toggle).toBeUndefined();
+  expect(textContent(waypoint)).toContain("Pushea la rama.");
+});
+
+// Same disclosure grammar as the event block and the voice call: the chevron
+// turns, and it does not move for a reader who asked for no motion.
+test("the fold borrows the transcript's disclosure grammar", () => {
+  expect(css).toMatch(/\.zl-user-disc\[aria-expanded="true"\] \.zl-user-chev/);
+  expect(css).toMatch(/prefers-reduced-motion[\s\S]*\.zl-user-chev \{ transition: none; \}/);
+});

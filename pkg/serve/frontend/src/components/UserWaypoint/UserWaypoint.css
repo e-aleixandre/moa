@@ -650,3 +650,80 @@
   max-height: 70vh;
   object-fit: contain;
 }
+
+/* Folded message (the owner's assignments).
+
+   The owner's message is liked as it is: a cell with the accent dot naming
+   who is talking to this session. What it cannot keep doing is arriving
+   whole — an encargo is the height of a phone screen, and the conversation it
+   was sent into disappears under it.
+
+   So the label row becomes the disclosure, borrowing the grammar the event
+   block and the voice call already use (one-line summary, chevron at the end,
+   shut by default) rather than inventing a third way to open something. The
+   cell, the dot and the label do not move: what changes is that the body
+   waits. */
+.zl-user-disc {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--control-touch);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.zl-user-disc:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.zl-user-disc-id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* Inside the disclosure the label is a row of the stack, not a block with a
+   gap under it: the summary sits right below it. */
+.zl-user-disc .zl-user-label {
+  margin-bottom: 0;
+}
+
+/* The summary is the message while it is shut, so it is read as text — the
+   body's size, not the label's — and it stops at two lines. */
+.zl-user-sum {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--zl-fs-body);
+  line-height: 1.45;
+  color: var(--zl-t2);
+}
+
+.zl-user-chev {
+  flex: none;
+  display: inline-flex;
+  color: var(--zl-t4);
+  transition: transform var(--duration) var(--ease);
+}
+.zl-user-disc[aria-expanded="true"] .zl-user-chev {
+  transform: rotate(90deg);
+}
+
+/* Open, the body starts under the disclosure rather than against it. */
+.zl-user-disc[aria-expanded="true"] + .zl-user-body {
+  margin-top: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zl-user-chev { transition: none; }
+}

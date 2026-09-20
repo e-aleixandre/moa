@@ -1,5 +1,5 @@
-import { useRef, useState } from "preact/hooks";
-import { Rewind as RewindIcon } from "lucide-preact";
+import { useRef, useState, useLayoutEffect } from "preact/hooks";
+import { Rewind as RewindIcon, ChevronRight } from "lucide-preact";
 import { sanitizeHtml } from "../../util/sanitize.js";
 import { clockHHMM, clockFull } from "../../data/util/clock.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
@@ -106,13 +106,30 @@ export function UserWaypoint({
   // rather than read off `children`/`html`, which may be a rendered VNode or
   // sanitized markup — the caller already holds the source string.
   rewindPreview = "",
+  // A folded message: the label row becomes its disclosure and `summary` is
+  // what stands in for the body until someone opens it. Used by the owner's
+  // assignments, which are long by nature (see data/util/owner-message.js).
+  collapsible = false,
+  summary = "",
+  // Called with the disclosure's own node right after the body mounts, so the
+  // transcript can keep what was just opened where the reader tapped it
+  // instead of letting the growth pin the tail (see stream-scroll.js).
+  onExpand,
   ...rest
 }) {
   const [openAttachment, setOpenAttachment] = useState(null);
   const [confirmRewind, setConfirmRewind] = useState(false);
+  const [open, setOpen] = useState(false);
+  const discRef = useRef(null);
+  const folded = collapsible && !open;
+  useLayoutEffect(() => {
+    if (open && discRef.current && onExpand) onExpand(discRef.current);
+  }, [open]);
   // The attachments skirt is the card's own foot: it bleeds to the edges and
   // closes the bottom corners, so the card gives up its bottom padding.
-  const hasSkirt = Array.isArray(attachments) && attachments.filter(Boolean).length > 0;
+  // Folded, the skirt is not rendered, so the cell must keep the bottom
+  // padding the skirt would otherwise have replaced.
+  const hasSkirt = !folded && Array.isArray(attachments) && attachments.filter(Boolean).length > 0;
   // Ordinary messages have no label: the peach edge is the identity. Steer and
   // parent-session messages still name their source, because that is not "you".
   const showLabel = label && label !== "You";
@@ -135,12 +152,37 @@ export function UserWaypoint({
         {...rest}
       >
         <div class="zl-user-cell">
-          {showLabel && <div class="zl-user-label">{label}</div>}
-          <div class="zl-user-body">
-            {reference && <PreviewReference reference={reference} />}
-            {html != null ? <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} /> : children}
-          </div>
-          <WaypointAttachments attachments={attachments} sessionId={sessionId} onOpenImage={setOpenAttachment} />
+          {/* Folded, the label row is the control: the same label, with the
+              summary under it and a chevron at the end — EventBlock's and the
+              voice call's disclosure, worn by a message rather than by a
+              margin note. The dot and the cell do not move, so what the block
+              IS reads the same open or shut. */}
+          {collapsible ? (
+            <button
+              type="button"
+              class="zl-user-disc"
+              ref={discRef}
+              aria-expanded={open}
+              onClick={() => setOpen((value) => !value)}
+            >
+              <span class="zl-user-disc-id">
+                {showLabel && <span class="zl-user-label">{label}</span>}
+                {folded && summary && <span class="zl-user-sum">{summary}</span>}
+              </span>
+              <span class="zl-user-chev" aria-hidden="true"><ChevronRight size={14} /></span>
+            </button>
+          ) : (
+            showLabel && <div class="zl-user-label">{label}</div>
+          )}
+          {!folded && (
+            <>
+              <div class="zl-user-body">
+                {reference && <PreviewReference reference={reference} />}
+                {html != null ? <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} /> : children}
+              </div>
+              <WaypointAttachments attachments={attachments} sessionId={sessionId} onOpenImage={setOpenAttachment} />
+            </>
+          )}
         </div>
         <div class="zl-user-foot">
           {hhmm && (
