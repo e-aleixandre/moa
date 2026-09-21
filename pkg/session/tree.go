@@ -490,7 +490,7 @@ func displayMessages(entries []Entry) []core.AgentMessage {
 				Message: core.Message{
 					Role:      "session_event",
 					MsgID:     e.ID,
-					Content:   []core.Content{core.TextContent(TrimMarkerText(e.Trim.Results, e.Trim.TokensRemoved))},
+					Content:   []core.Content{core.TextContent(TrimMarkerText(e.Trim.TokensRemoved))},
 					Timestamp: e.Timestamp.Unix(),
 				},
 				Custom: map[string]any{"type": "trim_marker", "results": e.Trim.Results, "tokens_removed": e.Trim.TokensRemoved},
@@ -504,9 +504,8 @@ func displayMessages(entries []Entry) []core.AgentMessage {
 // Exported so the live event and the durable entry render identically: two
 // copies of the wording would drift, and the line a client paints mid-run would
 // stop matching the one it gets back after a reload.
-func TrimMarkerText(results, tokensRemoved int) string {
-	return fmt.Sprintf("✂ Older tool outputs removed from model context (%d results, ~%dK tokens)",
-		results, tokensRemoved/1000)
+func TrimMarkerText(tokensRemoved int) string {
+	return fmt.Sprintf("✂ ~%dK tokens freed from model context — compaction avoided", tokensRemoved/1000)
 }
 
 // isLLMRole returns true if the role should be included in LLM context.

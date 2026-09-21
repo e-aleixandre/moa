@@ -1,4 +1,4 @@
-import { useRef, useLayoutEffect } from "preact/hooks";
+import { useRef, useLayoutEffect, useCallback } from "preact/hooks";
 import {
   UserWaypoint,
   AssistantDocument,
@@ -24,6 +24,7 @@ import { retryHistoryHydration } from "../../data/api.js";
 import { openSession } from "../../data/tile-actions.js";
 import { captureHydrationAnchor, restoreHydrationAnchor } from "../../data/stream-hydration-anchor.js";
 import { useStreamScroll } from "../../data/stream-scroll.js";
+import { ownerMessageSummary, ownerMessageFolds } from "../../data/util/owner-message.js";
 import {
   READ_ANCHOR_MARGIN, consumeReadAnchor, hasReadAnchor, readAnchorTargetID, settleReadAnchor,
 } from "../../data/stream-read-anchor.js";
@@ -118,7 +119,7 @@ function docChildren(blocks, onOpenSubagent, visibleDone, sessionId) {
   return out;
 }
 
-function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent, visibleDone }) {
+function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent, visibleDone, onExpandBlock }) {
   switch (block.kind) {
     case "system":
       return <div class="zl-sys">{block.text}</div>;
@@ -157,6 +158,14 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
           onOpenTimeline={rewind?.openTimeline}
           rewindDisabled={rewind?.disabled}
           rewindPreview={text || block.text}
+          // The owner's messages are assignments, and an assignment is long
+          // enough to bury the conversation it arrived in — on a phone it is
+          // the whole screen. It arrives folded, with a line saying what it
+          // was about. Short ones (and everything that is not the owner) are
+          // untouched: folding two lines of text hides nothing.
+          collapsible={!!block.fromOwner && ownerMessageFolds(text)}
+          summary={block.fromOwner ? ownerMessageSummary(text) : undefined}
+          onExpand={onExpandBlock}
         >
           {text && <p>{text}</p>}
         </UserWaypoint>
@@ -240,6 +249,13 @@ export function ConversationStream({
     return settleReadAnchor(el, contentRef.current, node, reposition);
   }, [session, blocks, placeReadAnchor]);
 
+  // A message the reader unfolds grows by thousands of pixels under their
+  // thumb. Without this the tail-follow reads that growth as new content and
+  // pins the bottom, so the tap lands the reader at the END of what they
+  // opened. The disclosure keeps the place it had instead — the same primitive
+  // the read anchor uses, with no margin: the reader chose this line.
+  const placeOpenedBlock = useCallback((node) => placeReadAnchor(node, 0), [placeReadAnchor]);
+
   return (
     <div class="zl-transcript-frame">
       <div
@@ -251,7 +267,7 @@ export function ConversationStream({
           {lead}
           {blocks.map((block) => (
             <div key={block.id} data-stream-anchor={block.id}>
-              <StreamBlock block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} waypointAccent={waypointAccent} visibleDone={visibleDone} />
+              <StreamBlock block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} waypointAccent={waypointAccent} visibleDone={visibleDone} onExpandBlock={placeOpenedBlock} />
             </div>
           ))}
           {tail}
