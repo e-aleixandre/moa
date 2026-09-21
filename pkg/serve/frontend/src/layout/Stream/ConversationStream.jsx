@@ -48,7 +48,7 @@ import {
 // the markdown pipeline through DOMPurify, so the output is safe to inject; the
 // component's own sanitizeHtml pass is a second, allowlist-based guard. No raw
 // user/assistant text ever reaches innerHTML unsanitized.
-function docChildren(blocks, onOpenSubagent, visibleDone, sessionId) {
+function docChildren(blocks, onOpenSubagent, visibleDone, sessionId, onExpandBlock) {
   const out = [];
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
@@ -98,6 +98,7 @@ function docChildren(blocks, onOpenSubagent, visibleDone, sessionId) {
             title={b.title}
             queued={b.queued}
             onOpenSession={openSession}
+            onExpand={onExpandBlock}
           />
         );
         break;
@@ -176,7 +177,7 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
       const proseHasCaret = block.blocks.some((b) => b.type === "prose" && b.caret);
       return (
         <AssistantDocument streaming={block.kind === "streaming" && block.textLive === true && !proseHasCaret}>
-          {docChildren(block.blocks, onOpenSubagent, visibleDone, sessionId)}
+          {docChildren(block.blocks, onOpenSubagent, visibleDone, sessionId, onExpandBlock)}
           {/* The foot marks the END of a turn, so a turn still running has
               none: there is no final response yet and no hour to stamp on it.
               It lands under the last line rather than inside it, so nothing

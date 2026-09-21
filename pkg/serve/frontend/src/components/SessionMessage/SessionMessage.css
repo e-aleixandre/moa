@@ -106,3 +106,61 @@
 @media (max-width: 720px) {
   .smsg { padding: 8px 10px 10px; }
 }
+
+/* The message, folded.
+
+   The head is what the reader wants: the verb, the session it went to, its
+   folder, the model, the thinking. What buries the conversation is the text
+   under it — an assignment runs to thousands of pixels, and getting back to
+   the last thing said in THIS conversation was a long scroll.
+
+   So the body waits behind the same disclosure the rest of the transcript
+   uses (event block, voice call, the owner's message in the child's
+   transcript): one line saying what the assignment was, a chevron, shut by
+   default. The summary stays visible while open — it is the way back to
+   shut. */
+.smsg-disc {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--control-touch);
+  margin: 0;
+  padding: 2px 0 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.smsg-disc:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.smsg-sum {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--zl-fs-body);
+  line-height: 1.45;
+  color: var(--subtext1);
+}
+
+.smsg-chev {
+  flex: none;
+  display: inline-flex;
+  color: var(--overlay0);
+  transition: transform var(--duration) var(--ease);
+}
+.smsg-disc[aria-expanded="true"] .smsg-chev { transform: rotate(90deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .smsg-chev { transition: none; }
+}
