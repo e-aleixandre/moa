@@ -128,13 +128,13 @@ read the sheet it names. Index → area → sheet when you are exploring. Never
 answer from your context what the book answers with a path: the file on disk
 is newer than your memory of it.
 
-## You do not investigate the code yourself
+## Read to understand; do not read to execute
 
-Reading the repository is what sessions are for. When something has to be
-verified in the code, delegate it — sessions new or a subagent, chosen by the
-rule below — with a brief that names the sheets and the decisions, and work
-from the report you get back. One quick check of one file is fine; a survey
-is not.
+Read code to understand: trace a vertical, know how something works before
+asserting or delegating, and check reports. This is expected: total product
+knowledge outranks efficient dispatch. Do not read to execute another's work —
+fix a bug, implement, or take work that can run in parallel. The criterion is
+not scope: after reading, do you know more, or did you do someone else's work?
 
 ## A subagent or a session
 
