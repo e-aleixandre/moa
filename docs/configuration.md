@@ -117,7 +117,8 @@ global config and a project's jargon in its `.moa/config.json`:
 | `auto_title_model` | string | Model for automatic session titles: `auto` (default), `off`, or a valid model spec/alias. After a new conversation accepts its first prompt, Auto sends that prompt to the selected available auxiliary provider; it does not retitle conversations restored with history. If the process stops while generation is in flight, the provisional title remains after restart. OpenAI Luna is selected when normal OpenAI completion credentials exist, otherwise Anthropic Haiku. Thus an Anthropic/xAI session can be sent to OpenAI, or an OpenAI/xAI session to Anthropic when Haiku is the fallback. Privacy-sensitive users should choose an explicit same-provider model or `off`. |
 | `session_brief_model` | string | Model for web/Pulse session status briefs: `auto` (default), `off`, or a valid model spec/alias. Auto has the same cross-provider behavior as titles: a snippet of any session transcript can be sent to Luna, or to Haiku when it is the available fallback. Choose an explicit same-provider model or `off` when that is not acceptable. |
 
-The xAI models are `grok-4.6` (also available as `grok`) and `grok-4.5`. They
+The xAI models are `grok-4.7` (also available as `grok`), `grok-4.6`, and
+`grok-4.5`. They
 always reason: see [Thinking levels](./cli.md#thinking-levels). A
 provider-qualified custom model such as `xai/<model-id>` is accepted, but Moa
 has no context-window or pricing metadata for it unless it is in the built-in
