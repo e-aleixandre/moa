@@ -1163,7 +1163,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   const showStack = proposal === "c" && queue.length > 0;
 
   return (
-    <div class={`zl-composer${busy ? " is-busy" : ""}${armed ? " is-armed" : ""}${showStack ? " dp-has-stack" : ""}${callFace ? " dp-in-call" : ""}`}>
+    <div class={`zl-composer${busy ? " is-busy" : ""}${armed ? " is-armed" : ""}${showStack ? " dp-has-stack" : ""}`}>
       {showStack && (
         <QueueStack count={queue.length} onOpen={() => setQueueSheetOpen(true)} />
       )}

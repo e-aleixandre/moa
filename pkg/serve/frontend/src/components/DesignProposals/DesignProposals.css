@@ -5,11 +5,25 @@
 
 .dp-queued-tail { margin-top: 4px; }
 
-/* The pending face of a user cell: the same cell, at half strength. The
-   message is yours and already delivered, but not yet read. */
+/* The state, said once for the whole block instead of under every cell. A
+   hairline label: mono micro, t4, no fill — it names what the cells below
+   are, and then gets out of the way. */
+.dp-queued-group {
+  margin: 0 0 8px 2px;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-micro);
+  letter-spacing: 0.01em;
+  color: var(--zl-t4);
+}
+
+/* The pending face of a user cell: SAME type, size and margins as a message
+   that landed, and no fill — a dotted hairline instead. Said, not landed. */
 .dp-queued .zl-user-cell {
-  background: color-mix(in srgb, var(--zl-raised) 50%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-line) 50%, transparent);
+  background: transparent;
+  box-shadow: none;
+  border: 1px dashed color-mix(in srgb, var(--zl-t4) 40%, transparent);
+  /* The border takes a pixel the shadow did not, so the text keeps its box. */
+  padding: 9px 13px;
   color: var(--zl-t2);
 }
 .dp-queued .zl-user-body { color: var(--zl-t2); }
@@ -17,13 +31,8 @@
   font-family: var(--mono);
   font-size: var(--zl-fs-body);
 }
-.dp-queued .zl-user-foot { gap: 8px; }
-.dp-queued-state {
-  font-family: var(--mono);
-  font-size: var(--zl-fs-micro);
-  letter-spacing: 0.01em;
-  color: var(--zl-t4);
-}
+/* Only the cancel is left in the foot, at its right edge. */
+.dp-queued .zl-user-foot { justify-content: flex-end; height: 18px; margin-top: 2px; }
 .dp-queued-x {
   display: inline-flex;
   align-items: center;
@@ -239,38 +248,45 @@
   box-shadow: 0 0 0 1px var(--zl-line);
 }
 
-.dp-stack-count {
+/* The tab: the count, worded, seated ON the slab's top edge and rounded like
+   the paper behind it. Most of it is over the rim, so it reads as part of the
+   object rather than as a badge pinned to its corner. */
+.dp-stack-tab {
   position: absolute;
-  top: 6px;
-  right: 8px;
+  top: -7px;
+  right: 12px;
   z-index: 2;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 26px;
-  height: 26px;
-  padding: 0 7px;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
   border: 0;
-  border-radius: var(--radius-full);
+  border-radius: var(--zl-r-sm);
   background: var(--zl-control);
-  box-shadow: var(--zl-rim);
+  box-shadow: var(--zl-rim-2);
   color: var(--zl-t2);
+  font-family: inherit;
+  cursor: pointer;
+}
+.dp-stack-tab-n {
   font-family: var(--mono);
   font-size: var(--zl-fs-meta);
   font-variant-numeric: tabular-nums;
-  cursor: pointer;
 }
-@media (hover: hover) { .dp-stack-count:hover { background: var(--zl-raised); color: var(--zl-t1); } }
-.dp-stack-count:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+.dp-stack-tab-w {
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+}
+@media (hover: hover) {
+  .dp-stack-tab:hover { background: var(--zl-raised); color: var(--zl-t1); }
+}
+.dp-stack-tab:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
 
-/* The textarea must not run under the counter while it is there. */
-.zl-composer.dp-has-stack .zl-ta { padding-right: 40px; }
-/* Nor may the call face's meta, on the desktop, where it holds that corner.
-   On the phone the face stacks and the corner is free. */
-.zl-composer.dp-has-stack.dp-in-call .dp-callface-meta { margin-right: 32px; }
-@media (max-width: 520px) {
-  .zl-composer.dp-has-stack.dp-in-call .dp-callface-meta { margin-right: 0; }
-}
+/* The tab dips into the slab's top padding, so the text wraps before it
+   rather than running under it. The call face keeps its own corner: the tab
+   is above the edge, not inside the face. */
+.zl-composer.dp-has-stack .zl-ta { padding-right: 76px; }
 
 .dp-queue-sheet-lead {
   margin: 0 0 10px;

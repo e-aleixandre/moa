@@ -10,9 +10,12 @@ import "./DesignProposals.css";
 
 // --- A -------------------------------------------------------------------
 // A queued message painted as what it already is: a message. Same grammar as
-// UserWaypoint (a cell with a surface of its own, no peach), in a "pending"
-// face: the surface at half strength, the text at t2, and in the foot, where
-// the hour would go, "queued · not read yet" plus a cancel for THIS message.
+// UserWaypoint (position, type, margins), in a "said but not landed" face:
+// no fill, a dotted hairline, and only its own ✕ in the foot.
+//
+// The state is said ONCE, as a hairline label over the block: repeating
+// "queued · not read yet" under every cell turned three messages into three
+// identical lines of noise, and the noise was louder than the idea.
 
 export function QueuedWaypoint({ message, onCancel }) {
   const isCommand = !!message.command;
@@ -22,7 +25,6 @@ export function QueuedWaypoint({ message, onCancel }) {
         <div class={`zl-user-body${isCommand ? " dp-queued-cmd" : ""}`}>{message.text}</div>
       </div>
       <div class="zl-user-foot">
-        <span class="dp-queued-state zl-data">queued · not read yet</span>
         <button
           type="button"
           class="dp-queued-x"
@@ -39,8 +41,12 @@ export function QueuedWaypoint({ message, onCancel }) {
 
 export function QueuedTail({ queue, onCancel }) {
   if (!queue?.length) return null;
+  const n = queue.length;
   return (
     <div class="dp-queued-tail">
+      <div class="dp-queued-group zl-data">
+        {n} queued · read at the next step
+      </div>
       {queue.map((m) => <QueuedWaypoint key={m.id} message={m} onCancel={onCancel} />)}
     </div>
   );
@@ -141,14 +147,18 @@ export function QueueStack({ count, onOpen }) {
       <div class="dp-stack" aria-hidden="true">
         {Array.from({ length: leaves }, (_, i) => <span class={`dp-stack-leaf is-${i + 1}`} key={i} />)}
       </div>
+      {/* A tab seated ON the slab's top edge, in the paper's own language: a
+          bare number floating in the corner read as a notification badge
+          stuck to the object rather than as part of it. */}
       <button
         type="button"
-        class="dp-stack-count zl-data"
+        class="dp-stack-tab"
         onClick={onOpen}
         aria-label={`${count} queued message${count === 1 ? "" : "s"} — open the list`}
         title="Queued messages"
       >
-        {count}
+        <span class="dp-stack-tab-n zl-data">{count}</span>
+        <span class="dp-stack-tab-w">queued</span>
       </button>
     </>
   );
