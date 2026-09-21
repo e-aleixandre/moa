@@ -1,6 +1,7 @@
 import { setState } from "../data/store.js";
 import { setTileSession } from "../data/tileTree.js";
 import { skillForkLaunchRow } from "../data/ws/history.js";
+import { designCase, designQueue } from "../data/design-variant.js";
 
 // Frozen conversations the real screens wear. The chrome is production; only
 // this data is fake. Each roster row is a full session so opening it shows
@@ -657,8 +658,21 @@ export function seedCatalogStore() {
     const query = typeof location === "undefined" ? "" : location.search;
     inboxOpen = new URLSearchParams(query).get("inbox") === "1";
   } catch (_) { /* ignore */ }
+  const sessions = { ...CATALOG_SESSIONS };
+  // PROPOSAL LAB (?cqcase=): the specimen becomes a session with a run in
+  // flight and a queue behind it — the situation the queue and the call
+  // proposals are about. Inert without the parameter.
+  if (designCase()) {
+    sessions[SPECIMEN_ID] = {
+      ...specimen,
+      state: "running",
+      liveLabel: "Running the frontend tests…",
+      runStartedAtMs: Date.now() - 84000,
+      pendingSteers: designQueue(),
+    };
+  }
   setState((s) => ({
-    sessions: { ...CATALOG_SESSIONS },
+    sessions,
     sessionsLoaded: true,
     events: catalogEvents(), // wake-on-event
     inboxOpen, // wake-on-event: ?inbox=1 opens the inbox the same way a pending push does

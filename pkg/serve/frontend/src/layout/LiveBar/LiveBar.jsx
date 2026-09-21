@@ -1,8 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { Square } from "lucide-preact";
+import { Square, PhoneOff } from "lucide-preact";
 import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
 import { StateDot } from "../../primitives/StateDot/StateDot.jsx";
 import { LiveSentence } from "./LiveSentence.jsx";
+// PROPOSAL LAB — inert in production (see data/design-variant.js).
+import {
+  designVariant, designCall, labCancelQueued, labEditQueued, callClock, formatCallCost,
+  CALL_COST_TITLE,
+} from "../../data/design-variant.js";
+import { QueuePill, QueueRows } from "../../components/DesignProposals/DesignProposals.jsx";
 import "./LiveBar.css";
 
 // LiveBar — ONE bar of live work above the composer. Markup and CSS are the
@@ -128,6 +134,8 @@ export function LiveBar({
   const nowMs = driven ? nowMsProp : ownNowMs;
 
   const [localExpanded, setLocalExpanded] = useState(false);
+  // PROPOSAL B state: the queue's own panel, opened from its pill.
+  const [queueOpen, setQueueOpen] = useState(false);
   const [forceCompactOverride, setForceCompactOverride] = useState(false);
   const panelRef = useRef(null);
   const [panelOverflows, setPanelOverflows] = useState(false);
@@ -206,6 +214,24 @@ export function LiveBar({
   const waiting = sentence.waiting;
   const summary = backgroundSummary(list);
 
+  /* ── PROPOSAL B ────────────────────────────────────────────────────────
+     Everything transitory lives in this row: the queue is one more item of
+     the tally, with the bar's own panel as its list, and a call takes over
+     the sentence while it lasts (cost, questions and the way out at the
+     right, where Stop would be). Null/empty in production. */
+  const proposalB = designVariant() === "b";
+  const labQueue = proposalB ? (session?.pendingSteers || []).filter(Boolean) : [];
+  const labCall = proposalB ? designCall() : null;
+  const callAlert = !labCall
+    ? null
+    : labCall.pendingAsks > 0 ? "waiting" : labCall.micState !== "live" ? "mic" : null;
+  const callText = callAlert === "waiting"
+    ? "On a call — the delegate is waiting for an answer"
+    : callAlert === "mic"
+      ? "On a call — the mic is not live, it cannot hear you"
+      : "On a call";
+  const labCost = labCall ? formatCallCost(labCall.costUSD) : "";
+
   return (
     <div class={`zl-live${dense ? " is-dense" : ""}${openPanel ? " is-open" : ""}${sentence.kind === "ended" ? " is-ended" : ""}`}>
       {openPanel && (
@@ -222,8 +248,24 @@ export function LiveBar({
         </div>
       )}
 
-      <div class="zl-live-bar">
-        {sentence.kind === "foreground" ? (
+      {proposalB && queueOpen && labQueue.length > 0 && (
+        <div class="zl-live-panel" role="region" aria-label="Queued messages">
+          <QueueRows
+            queue={labQueue}
+            onCancel={(id) => labCancelQueued(session.id, id)}
+            onEdit={(id) => { labEditQueued(session.id, id); setQueueOpen(false); }}
+          />
+        </div>
+      )}
+
+      <div class={`zl-live-bar${labCall ? " dp-bar-call" : ""}`}>
+        {labCall ? (
+          <div class={`zl-live-now dp-call-now${callAlert ? " is-waiting" : ""}`} role="status" aria-live="polite">
+            <span class="dp-call-dot" aria-hidden="true" />
+            <span class="zl-live-txt">{callText}</span>
+            <span class="zl-live-el zl-data">{callClock(labCall.elapsed)}</span>
+          </div>
+        ) : sentence.kind === "foreground" ? (
           <div class={`zl-live-now${waiting ? " is-waiting" : ""}`} role="status" aria-live="polite">
             <span class={`zl-live-dot is-${sentence.phase || "working"}`} aria-hidden="true" />
             {/* LiveSentence owns the shimmer and the cross-fade: it keeps the
@@ -263,7 +305,23 @@ export function LiveBar({
           </button>
         )}
 
-        {canStop && (
+        {proposalB && labQueue.length > 0 && (
+          <QueuePill count={labQueue.length} open={queueOpen} onToggle={() => setQueueOpen((v) => !v)} />
+        )}
+
+        {labCall && (
+          <>
+            <span class="dp-live-call-meta" title={CALL_COST_TITLE}>
+              {labCost}{labCost && " · "}{labCall.questionsUsed}/{labCall.maxQuestions}
+            </span>
+            <button type="button" class="dp-live-hangup" onClick={labCall.hangup} aria-label="End call" title="End call — the minutes land in the composer">
+              <PhoneOff size={12} aria-hidden="true" />
+              <span>Hang up</span>
+            </button>
+          </>
+        )}
+
+        {canStop && !labCall && (
           <button
             type="button"
             class={`zl-live-stop${stopArmed ? " is-armed" : ""}`}

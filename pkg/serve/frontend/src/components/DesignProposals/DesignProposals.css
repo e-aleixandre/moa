@@ -1,0 +1,466 @@
+/* DesignProposals — PROPOSAL CSS. Only reachable from ?cq= branches; nothing
+   here applies to the product. Tokens only, like the rest of the house. */
+
+/* ── A: queued messages in the transcript ─────────────────────────────── */
+
+.dp-queued-tail { margin-top: 4px; }
+
+/* The pending face of a user cell: the same cell, at half strength. The
+   message is yours and already delivered, but not yet read. */
+.dp-queued .zl-user-cell {
+  background: color-mix(in srgb, var(--zl-raised) 50%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-line) 50%, transparent);
+  color: var(--zl-t2);
+}
+.dp-queued .zl-user-body { color: var(--zl-t2); }
+.dp-queued .dp-queued-cmd {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-body);
+}
+.dp-queued .zl-user-foot { gap: 8px; }
+.dp-queued-state {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-micro);
+  letter-spacing: 0.01em;
+  color: var(--zl-t4);
+}
+.dp-queued-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t4);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .dp-queued-x:hover { color: var(--zl-red); background: var(--zl-hi); }
+}
+.dp-queued-x:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+/* ── A / C: the call as one flat line inside the slab ─────────────────── */
+
+.dp-callline-wrap {
+  flex: 1 0 100%;
+  order: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dp-callline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 6px;
+  color: var(--zl-t2);
+  font-size: var(--zl-fs-body);
+}
+.dp-call-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--zl-green);
+  animation: dp-breathe var(--breath-running) ease-in-out infinite;
+}
+@keyframes dp-breathe { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .dp-call-dot { animation: none; } }
+.dp-call-phase { flex: none; font-weight: var(--weight-medium); color: var(--zl-t1); }
+.dp-call-clock, .dp-call-cost, .dp-call-q {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+  font-variant-numeric: tabular-nums;
+}
+.dp-call-spring { flex: 1 1 auto; min-width: 0; }
+.dp-call-hangup {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--zl-red);
+  cursor: pointer;
+}
+@media (hover: hover) { .dp-call-hangup:hover { background: var(--zl-hi); } }
+.dp-call-hangup:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+.dp-call-waiting {
+  margin: 0 6px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-hi);
+  color: var(--zl-yellow);
+  font-size: var(--zl-fs-meta);
+  font-weight: var(--weight-medium);
+}
+.dp-call-mic {
+  padding: 0 6px 2px;
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+}
+.dp-call-mic.is-bad { color: var(--zl-red); }
+.dp-call-mic.is-warn { color: var(--zl-yellow); }
+
+/* ── B: the queue in the live bar ─────────────────────────────────────── */
+
+.dp-queue-pill { gap: 6px; padding: 0 10px 0 8px; }
+.dp-queue-mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--zl-t3);
+  box-shadow: 0 -3px 0 -1px var(--zl-t4);
+}
+.dp-queue-word {
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  color: var(--zl-t3);
+}
+.dp-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 4px 0 8px;
+  border-radius: var(--zl-r-sm);
+  color: var(--zl-t2);
+  font-size: var(--zl-fs-body);
+}
+@media (hover: hover) { .dp-queue-row:hover { background: var(--zl-hi); } }
+.dp-queue-row-t {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dp-queue-edit {
+  flex: none;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t3);
+  font-family: inherit;
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+}
+.dp-queue-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t4);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .dp-queue-edit:hover { background: var(--zl-control); color: var(--zl-t1); }
+  .dp-queue-x:hover { background: var(--zl-hi); color: var(--zl-red); }
+}
+.dp-queue-edit:focus-visible,
+.dp-queue-x:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+/* B's call: the live bar wears it. Amber/red while the mic or the delegate
+   need the owner, which is the state the bar already has for "waiting". */
+.zl-live-now.dp-call-now .zl-live-txt { color: var(--zl-t1); }
+.dp-live-call-meta {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+  font-variant-numeric: tabular-nums;
+}
+.dp-live-hangup {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: color-mix(in srgb, var(--zl-red) 16%, var(--zl-control));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-red) 45%, transparent);
+  color: var(--zl-red);
+  font-family: inherit;
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  cursor: pointer;
+}
+.dp-live-hangup:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+/* ── C: sheets behind the slab, and the call face ─────────────────────── */
+
+.dp-stack {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: -10px;
+  height: 10px;
+  /* Only the paper ABOVE the slab is the signal; the rest is behind it. */
+  overflow: hidden;
+  pointer-events: none;
+}
+.dp-stack-leaf {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 14px;
+  border-radius: var(--zl-r-lg) var(--zl-r-lg) 0 0;
+  background: var(--zl-raised);
+  box-shadow: 0 0 0 1px var(--zl-line-2);
+}
+/* Two leaves at most: 5px and 10px up, the far one narrower and dimmer. More
+   than two is a texture, not a count — the count is the number on the rim. */
+.dp-stack-leaf.is-1 { top: 5px; }
+.dp-stack-leaf.is-2 {
+  top: 0;
+  left: 9px;
+  right: 9px;
+  background: color-mix(in srgb, var(--zl-raised) 65%, var(--zl-canvas));
+  box-shadow: 0 0 0 1px var(--zl-line);
+}
+
+.dp-stack-count {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--zl-control);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+@media (hover: hover) { .dp-stack-count:hover { background: var(--zl-raised); color: var(--zl-t1); } }
+.dp-stack-count:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+/* The textarea must not run under the counter while it is there. */
+.zl-composer.dp-has-stack .zl-ta { padding-right: 40px; }
+/* Nor may the call face's meta, on the desktop, where it holds that corner.
+   On the phone the face stacks and the corner is free. */
+.zl-composer.dp-has-stack.dp-in-call .dp-callface-meta { margin-right: 32px; }
+@media (max-width: 520px) {
+  .zl-composer.dp-has-stack.dp-in-call .dp-callface-meta { margin-right: 0; }
+}
+
+.dp-queue-sheet-lead {
+  margin: 0 0 10px;
+  color: var(--zl-t3);
+  font-size: var(--zl-fs-meta);
+}
+.dp-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 6px 4px 6px 10px;
+  border-radius: var(--zl-r-sm);
+  color: var(--zl-t1);
+  font-size: var(--zl-fs-body);
+}
+.dp-sheet-row + .dp-sheet-row { box-shadow: inset 0 1px 0 var(--zl-line); }
+.dp-sheet-row-t {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.dp-sheet-row-t.dp-mono { font-family: var(--mono); font-size: var(--zl-fs-meta); }
+.dp-sheet-edit {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: var(--zl-control);
+  color: var(--zl-t2);
+  font-family: inherit;
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+}
+.dp-sheet-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t4);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .dp-sheet-edit:hover { background: var(--zl-raised); color: var(--zl-t1); }
+  .dp-sheet-x:hover { background: var(--zl-hi); color: var(--zl-red); }
+}
+
+/* The call face: same slab, same height as its two rows, different face. */
+.dp-callface {
+  flex: 1 0 100%;
+  order: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 88px;
+  padding: 6px 4px 6px 8px;
+}
+.dp-callface-id {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dp-callface-glyph {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--zl-green) 16%, transparent);
+  color: var(--zl-green);
+}
+.dp-callface-glyph::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: var(--radius-full);
+  border: 1px solid color-mix(in srgb, var(--zl-green) 45%, transparent);
+  animation: dp-pulse var(--breath-running) ease-in-out infinite;
+}
+@keyframes dp-pulse {
+  0%, 100% { opacity: 0.9; transform: scale(1); }
+  50% { opacity: 0; transform: scale(1.25); }
+}
+@media (prefers-reduced-motion: reduce) { .dp-callface-glyph::after { animation: none; } }
+.dp-callface-lines {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dp-callface-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--zl-t1);
+  font-size: var(--zl-fs-title);
+  font-weight: var(--weight-medium);
+}
+.dp-callface-mic { font-size: var(--zl-fs-meta); color: var(--zl-t3); }
+.dp-callface-mic.is-ok { color: var(--zl-green); }
+.dp-callface-mic.is-warn { color: var(--zl-yellow); }
+.dp-callface-mic.is-bad { color: var(--zl-red); }
+.dp-callface-waiting { font-size: var(--zl-fs-meta); color: var(--zl-yellow); font-weight: var(--weight-medium); }
+.dp-callface-right {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.dp-callface-meta {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.dp-callface-acts { display: flex; align-items: center; gap: 8px; }
+.dp-callface-type {
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t3);
+  font-family: inherit;
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+}
+@media (hover: hover) { .dp-callface-type:hover { background: var(--zl-hi); color: var(--zl-t1); } }
+.dp-callface-hangup {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--zl-red);
+  color: var(--zl-canvas);
+  cursor: pointer;
+}
+.dp-callface-type:focus-visible,
+.dp-callface-hangup:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+/* The phone: the face folds to two stacked halves rather than squeezing. */
+@media (max-width: 520px) {
+  .dp-callface {
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 88px;
+  }
+  .dp-callface-id { flex: 1 0 100%; }
+  .dp-callface-right {
+    flex: 1 0 100%;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+/* B on the phone: with a call, a queue and a cost, five things do not fit in
+   one 32px row — "On a call" was being cut to "On a…". The bar wraps into two
+   rows instead of shortening the sentence: the phrase and its clock on top,
+   the queue, the cost and the way out under them. Still one object, and still
+   less than the 44px note plus the call card it replaces. */
+@media (max-width: 520px) {
+  .zl-live-bar.dp-bar-call {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    padding-bottom: 2px;
+  }
+  .zl-live-bar.dp-bar-call > .dp-call-now { flex: 1 0 100%; }
+  .zl-live-bar.dp-bar-call > .dp-live-call-meta { margin-left: auto; }
+}

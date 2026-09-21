@@ -27,6 +27,9 @@ import { ownerMessageSummary, ownerMessageFolds } from "../../data/util/owner-me
 import {
   READ_ANCHOR_MARGIN, consumeReadAnchor, hasReadAnchor, readAnchorTargetID, settleReadAnchor,
 } from "../../data/stream-read-anchor.js";
+// PROPOSAL LAB — inert in production (see data/design-variant.js).
+import { designVariant, labCancelQueued } from "../../data/design-variant.js";
+import { QueuedTail } from "../../components/DesignProposals/DesignProposals.jsx";
 
 // Stream — the scrollable conversation area. It renders the REAL
 // projected block list from stream-model.js (projectStream), mapping each
@@ -266,6 +269,16 @@ export function ConversationStream({
             </div>
           ))}
           {tail}
+          {/* PROPOSAL A: what you have already said belongs to the thread. The
+              queued messages are painted at the end of the transcript as user
+              cells in a pending face, in order, and they are the last thing in
+              the scroll. Nothing renders here in production. */}
+          {designVariant() === "a" && (session?.pendingSteers || []).filter(Boolean).length > 0 && (
+            <QueuedTail
+              queue={session.pendingSteers.filter(Boolean)}
+              onCancel={(id) => labCancelQueued(session.id, id)}
+            />
+          )}
           {historyHydrationTailVisible(session) && (
             <HistoryHydrationTail
               hasCachedTranscript={(session.messages || []).length > 0}

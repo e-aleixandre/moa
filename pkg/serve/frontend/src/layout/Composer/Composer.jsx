@@ -24,6 +24,9 @@ import { useSessionSkills } from '../../hooks/useSessionSkills.js';
 import { interceptSecretCommand } from "../../data/secrets.js";
 import { loadDraft, saveDraft } from "../../data/composer-draft.js";
 import { classifyCommand, POLICY_QUEUE, POLICY_REJECT } from "../../data/util/command-policy.js";
+// PROPOSAL LAB — inert in production (see data/design-variant.js).
+import { designVariant, designCall, labCancelQueued, labEditQueued } from "../../data/design-variant.js";
+import { CallLine, CallFace, QueueStack, QueueSheet } from "../../components/DesignProposals/DesignProposals.jsx";
 import { processFile } from "../../data/util/attachments.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import {
@@ -444,6 +447,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   }, []);
 
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  // PROPOSAL LAB state: C's queue sheet, and C's "Type instead" escape from
+  // the call face. Both are dead in production (the branches never render).
+  const [queueSheetOpen, setQueueSheetOpen] = useState(false);
+  const [typeInstead, setTypeInstead] = useState(false);
   // Never leave the menu hanging over another screen: a session switch remounts
   // this composer, and a send closes it below.
   useEffect(() => { setPlusMenuOpen(false); }, [sessionId]);
@@ -865,10 +872,15 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     addToast({ sessionId, title: 'Voice call', detail: msg, type: 'error' });
   }, [sessionId]);
 
-  const voiceLive = useVoiceLive(sessionId, {
+  const voiceLiveHook = useVoiceLive(sessionId, {
     onResult: onVoiceLiveResult,
     onError: onVoiceLiveError,
   });
+  // PROPOSAL LAB: a simulated call replaces the hook's state so the call can be
+  // photographed without a microphone or an OpenAI key. `designCall()` is null
+  // in production, so this is the hook itself there.
+  const simulatedCall = designCall();
+  const voiceLive = simulatedCall || voiceLiveHook;
 
   // Never in steer mode: that box writes to a subagent, and a call is a
   // conversation with THIS session.
@@ -1133,15 +1145,44 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       as sendable as a sentence. */
   const armed = hasText || attachments.length > 0;
 
+  /* ── PROPOSAL LAB ──────────────────────────────────────────────────────
+     Three proposals for where the queue and the call live, guarded by the
+     URL (data/design-variant.js). `proposal` is "today" in production and
+     every branch below collapses to what ships.
+
+       A  the composer draws no queue (it is in the transcript) and the call
+          is ONE flat line inside the slab.
+       B  the composer draws neither: both live in the LiveBar.
+       C  the queue is paper stacked behind the slab's top edge plus a sheet,
+          and the call REPLACES the composer's face. */
+  const proposal = designVariant();
+  const queue = steer ? [] : (pendingSteers || []).filter(Boolean);
+  const callFace = proposal === "c" && voiceLive.active && !typeInstead;
+  // The queue's paper stays during the call: a call must not make what you
+  // already said disappear.
+  const showStack = proposal === "c" && queue.length > 0;
+
   return (
-    <div class={`zl-composer${busy ? " is-busy" : ""}${armed ? " is-armed" : ""}`}>
+    <div class={`zl-composer${busy ? " is-busy" : ""}${armed ? " is-armed" : ""}${showStack ? " dp-has-stack" : ""}${callFace ? " dp-in-call" : ""}`}>
+      {showStack && (
+        <QueueStack count={queue.length} onOpen={() => setQueueSheetOpen(true)} />
+      )}
+      {proposal === "c" && (
+        <QueueSheet
+          open={queueSheetOpen}
+          queue={queue}
+          onClose={() => setQueueSheetOpen(false)}
+          onCancel={(id) => labCancelQueued(sessionId, id)}
+          onEdit={(id) => { labEditQueued(sessionId, id); setQueueSheetOpen(false); }}
+        />
+      )}
       {cacheExpired && (
         <div class="cache-warn" title="The prompt cache for this conversation has expired. Your next message will pay for a fresh cache write (more expensive).">
           <span class="cache-warn-dot" />
           Prompt cache expired · your next message pays a cache write
         </div>
       )}
-      {voiceLive.active && (
+      {voiceLive.active && proposal === "today" && (
         <VoiceLivePanel
           phase={voiceLive.phase}
           endedReason={voiceLive.endedReason}
@@ -1150,8 +1191,13 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           maxQuestions={voiceLive.maxQuestions}
           pendingAsks={voiceLive.pendingAsks}
           elapsed={voiceLive.elapsed}
+          costUSD={voiceLive.costUSD}
           onHangup={voiceLive.hangup}
         />
+      )}
+      {/* A's call — and C's, once the owner has asked to type instead. */}
+      {voiceLive.active && (proposal === "a" || (proposal === "c" && typeInstead)) && (
+        <CallLine call={voiceLive} onHangup={voiceLive.hangup} />
       )}
       {attachments.length > 0 && (
         <div class="attach-preview-strip">
@@ -1200,6 +1246,14 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           ))}
         </div>
       )}
+      {callFace && (
+        <CallFace
+          call={voiceLive}
+          onHangup={voiceLive.hangup}
+          onTypeInstead={() => setTypeInstead(true)}
+        />
+      )}
+      {!callFace && (
       <textarea
         ref={textareaRef}
         rows={1}
@@ -1215,7 +1269,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         onBlur={onFocusChange ? () => onFocusChange(false) : undefined}
         readOnly={contentSendPending}
       />
-      {summary && (
+      )}
+      {summary && proposal === "today" && (
         <button
           type="button"
           class="queue-note"
@@ -1237,9 +1292,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           </span>
         </button>
       )}
-      {busy && hasText && !summary && (
+      {busy && hasText && !summary && !callFace && (
         <span class="steer-hint" aria-hidden="true">⏎ steers — won't interrupt</span>
       )}
+      {!callFace && (
       <div class="zl-controls">
         {plusActions.length > 0 ? (
           <ActionMenu
@@ -1336,6 +1392,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           {contentSendPending ? <Loader2 size={16} class="spin" /> : <SendIcon />}
         </button>
       </div>
+      )}
     </div>
   );
 }

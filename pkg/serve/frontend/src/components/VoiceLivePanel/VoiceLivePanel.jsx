@@ -40,6 +40,11 @@ function clock(seconds) {
 
 export function VoiceLivePanel({
   phase, endedReason, micState, questionsUsed, maxQuestions, pendingAsks, elapsed, onHangup,
+  // `costUSD` exists on feat/voice-delegate (3ef0bf32), which is what the
+  // owner runs; this branch has no cost line. The proposal lab passes it so
+  // the "today" photograph is faithful to what he sees. Absent -> nothing is
+  // drawn, so this branch's own screens are unchanged.
+  costUSD,
 }) {
   const mic = MIC_COPY[micState] || MIC_COPY.unknown;
   const connecting = phase === 'connecting' || phase === 'closing';
@@ -51,6 +56,11 @@ export function VoiceLivePanel({
         {connecting && <Loader2 size={14} class="spin" aria-hidden="true" />}
         {phase === 'live' && <span class="voice-live-clock">{clock(elapsed)}</span>}
         <span class="voice-live-spring" />
+        {costUSD > 0 && (
+          <span class="voice-live-cost" title="What this call has cost so far (voice model)">
+            ${costUSD.toFixed(2)} voice
+          </span>
+        )}
         <span class="voice-live-questions" title="Questions the delegate may ask this conversation during the call">
           {questionsUsed}/{maxQuestions} questions
         </span>

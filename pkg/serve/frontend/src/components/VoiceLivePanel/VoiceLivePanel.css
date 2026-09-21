@@ -53,6 +53,15 @@
   white-space: nowrap;
 }
 
+/* The cost, as feat/voice-delegate draws it. */
+.voice-live-cost {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 /* A hang-up is a one-handed action on a phone; it gets a full touch target. */
 .voice-live-hangup {
   display: inline-flex;
