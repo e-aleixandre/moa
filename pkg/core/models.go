@@ -170,6 +170,18 @@ var knownModels = map[string]Model{
 			},
 		},
 	},
+	// Grok 4.7 applies the same whole-request long-context rule and token rates
+	// as 4.6, including the doubled rates after the 200K-token threshold.
+	"grok-4.7": {
+		ID: "grok-4.7", Provider: "xai", API: "xai-responses",
+		Name: "Grok 4.7", MaxInput: 500_000,
+		Pricing: &Pricing{
+			Input: 2, Output: 6, CacheRead: 0.5,
+			Tiers: []PricingTier{
+				{Threshold: 200_000, Input: 4, Output: 12, CacheRead: 1},
+			},
+		},
+	},
 
 	// --- Meta ---
 	// MaxOutput is not published. api.meta.ai accepts large
@@ -230,10 +242,11 @@ var modelAliases = map[string]string{
 	"gpt5-mini":   "gpt-5.4-mini",
 	"gpt5.5":      "gpt-5.5",
 	// xAI
-	"grok": "grok-4.6",
+	"grok": "grok-4.7",
 	// The subscription backend names the same models "-build"; the API backend
 	// omits the suffix. Same model, same pricing, so both spellings resolve to
 	// one entry and cost/identity work whichever backend answered.
+	"grok-4.7-build": "grok-4.7",
 	"grok-4.6-build": "grok-4.6",
 	"grok-4.5-build": "grok-4.5",
 	// Meta

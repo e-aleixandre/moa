@@ -22,13 +22,19 @@ func TestResolveModel_Alias(t *testing.T) {
 
 func TestResolveModel_Grok(t *testing.T) {
 	// The short alias tracks the newest model; older ones stay reachable by ID.
-	for _, spec := range []string{"grok", "grok-4.6", "xai/grok-4.6"} {
+	for _, spec := range []string{"grok", "grok-4.7", "xai/grok-4.7", "grok-4.7-build"} {
+		m, ok := ResolveModel(spec)
+		if !ok || m.ID != "grok-4.7" || m.Provider != "xai" {
+			t.Errorf("ResolveModel(%q) = %+v, %v", spec, m, ok)
+		}
+	}
+	for _, spec := range []string{"grok-4.6", "xai/grok-4.6", "grok-4.6-build"} {
 		m, ok := ResolveModel(spec)
 		if !ok || m.ID != "grok-4.6" || m.Provider != "xai" {
 			t.Errorf("ResolveModel(%q) = %+v, %v", spec, m, ok)
 		}
 	}
-	for _, spec := range []string{"grok-4.5", "xai/grok-4.5"} {
+	for _, spec := range []string{"grok-4.5", "xai/grok-4.5", "grok-4.5-build"} {
 		m, ok := ResolveModel(spec)
 		if !ok || m.ID != "grok-4.5" || m.Provider != "xai" {
 			t.Errorf("ResolveModel(%q) = %+v, %v", spec, m, ok)
@@ -100,6 +106,23 @@ func TestGrok46Pricing(t *testing.T) {
 	got46 := p.Cost(cached)
 	if got46 <= got45 {
 		t.Fatalf("4.6 cached cost %v should exceed 4.5 %v", got46, got45)
+	}
+}
+
+func TestGrok47Pricing(t *testing.T) {
+	model, ok := ResolveModel("grok-4.7")
+	if !ok || model.Pricing == nil {
+		t.Fatal("Grok 4.7 pricing missing")
+	}
+	p := model.Pricing
+	if model.MaxInput != 500_000 || p.Input != 2 || p.Output != 6 || p.CacheRead != 0.5 {
+		t.Fatalf("base Grok 4.7 definition = %+v, pricing = %+v", model, p)
+	}
+	if len(p.Tiers) != 1 || p.Tiers[0] != (PricingTier{Threshold: 200_000, Input: 4, Output: 12, CacheRead: 1}) {
+		t.Fatalf("Grok 4.7 tiers = %+v", p.Tiers)
+	}
+	if got, want := p.Cost(Usage{Input: 200_000, CacheRead: 100_000, Output: 1_000}), 0.912; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("Grok 4.7 long-context cost = %v, want %v", got, want)
 	}
 }
 
@@ -406,6 +429,18 @@ func TestListModels_Deduplicated(t *testing.T) {
 		}
 		seen[e.Model.ID] = true
 	}
+}
+
+func TestListModels_HasGrok47SelectorEntry(t *testing.T) {
+	for _, entry := range ListModels() {
+		if entry.Model.ID == "grok-4.7" {
+			if entry.Model.Provider != "xai" || entry.Alias != "grok" || entry.Model.MaxInput != 500_000 {
+				t.Fatalf("Grok 4.7 selector entry = %+v", entry)
+			}
+			return
+		}
+	}
+	t.Fatal("Grok 4.7 missing from model selector catalog")
 }
 
 func TestListModels_HasAliases(t *testing.T) {
