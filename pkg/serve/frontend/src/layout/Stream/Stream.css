@@ -172,8 +172,11 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-height: 32px;
-  padding: 0 14px;
+  padding: 0 14px 0 10px;
   border: 0;
   border-radius: var(--zl-r-sm);
   background: var(--zl-control);
@@ -183,4 +186,4 @@
   font-size: var(--zl-fs-meta);
   cursor: pointer;
 }
-.mconv .zl-transcript-new { min-height: 44px; padding: 0 16px; font-size: var(--zl-fs-body); }
+.mconv .zl-transcript-new { min-height: 44px; padding: 0 16px 0 12px; font-size: var(--zl-fs-body); }
