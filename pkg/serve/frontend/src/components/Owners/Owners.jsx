@@ -567,7 +567,7 @@ export function OwnerBook({ book = [], openPath = null, onOpenFile, onSave, stat
           <FileIcon />
           <span class="ow-file-main">
             <span class="ow-file-t">{f.label}</span>
-            <span class="ow-file-d">The index every session of this project is given</span>
+            <span class="ow-file-d">Shared context for every session here</span>
           </span>
           <GoIcon />
         </button>

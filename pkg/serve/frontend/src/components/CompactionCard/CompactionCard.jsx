@@ -63,7 +63,7 @@ export function CompactionCard({ summary = "", tokensBefore = 0, timestamp = 0, 
                 </button>
               )}
             </section>
-          ) : <p class="cc-empty">No summary details are available for this older compaction.</p>}
+          ) : <p class="cc-empty">No summary saved for this part of the conversation.</p>}
           {tokensBefore > 0 && <p class="cc-tokens">{tokensBefore.toLocaleString()} tokens before compaction</p>}
           <FileList title="Files read" files={readFiles} Icon={FileText} />
           <FileList title="Files modified" files={modifiedFiles} Icon={Pencil} />

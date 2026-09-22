@@ -106,8 +106,8 @@ export function PulsePairingPanel({ open, onClose }) {
       <div class="pairing-content">
         {!pairing && !creating && (
           <>
-            <p>Connect Pulse on a phone by scanning a short-lived QR code.</p>
-            <p class="pairing-note">The code is only for pairing this device. Keep it private until it expires.</p>
+            <p>Scan this code with Pulse on your phone.</p>
+            <p class="pairing-note">Keep this code private.</p>
             <button type="button" class="pairing-create-button" onClick={createPairing}>
               <QrCode size={15} /> Create QR code
             </button>

@@ -101,7 +101,7 @@ export function VoiceLivePanel({
           type="button"
           class="voice-live-hangup"
           aria-label="End call"
-          title="End call — the minutes land in the composer"
+          title="End call"
           disabled={phase === 'closing'}
           onClick={onHangup}
         >

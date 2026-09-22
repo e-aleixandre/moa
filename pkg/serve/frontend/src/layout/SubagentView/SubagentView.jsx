@@ -327,7 +327,7 @@ function ReportOutcome({ view }) {
         <p class="sa-cancelled">
           {view.lastProgress
             ? <>Last progress: it had run <span class="sa-data">{view.lastProgress}</span>. It reached no conclusion.</>
-            : <>It was stopped before it recorded any work.</>}
+            : <>It was stopped before it produced anything.</>}
         </p>
       </div>
     );

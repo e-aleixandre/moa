@@ -804,7 +804,7 @@ export function CommandPalette({
         {(share.files?.length || 0) > 0 ? <Paperclip size={13} /> : <Link2 size={13} />}
       </span>
       <span class="pal-share-what">{shareSummary(share)}</span>
-      <span class="pal-share-verb">Pick a conversation — it waits in its composer</span>
+      <span class="pal-share-verb">Pick a conversation to paste this into</span>
     </div>
   ) : null;
 

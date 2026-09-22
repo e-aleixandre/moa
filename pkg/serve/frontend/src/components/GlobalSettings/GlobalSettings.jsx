@@ -497,7 +497,7 @@ function CompactModelPage({ state, onDone }) {
         ))}
       </div>
       {loaded && choices.length === 0 && (
-        <p class="zl-set-empty">No other model has a credential right now.</p>
+        <p class="zl-set-empty">No other model is connected yet.</p>
       )}
     </>
   );

@@ -269,7 +269,7 @@ export function StatusStrip({
         {alerts.onExtra && (
           <span
             class={`zl-st zl-st-ev zl-${statusItemPriority("extra")} is-alarm-yellow`}
-            title="This session is being served from extra usage (pay-as-you-go)"
+            title="Extra usage (pay-as-you-go)"
           >
             <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5c.5 3-3 4-3 8a3 3 0 0 0 6 0c0-1.5-.6-2.5-1.2-3.2-.3 1.2-1 1.7-1.3 1.7C9 6 9.5 3.5 8 1.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
             <span class="zl-st-word">extra</span>

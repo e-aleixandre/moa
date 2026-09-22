@@ -70,7 +70,7 @@ function ResourceReport({ report }) {
       {report.insecure.length > 0 && (
         <section class="html-resource-group html-resource-blocked">
           <h4>Non-HTTPS resources ({report.insecure.length})</h4>
-          <p>These are listed for information and are blocked in the preview.</p>
+          <p>Blocked in the preview.</p>
           <ul>
             {report.insecure.map((item) => <li key={`${item.type}-${item.url}`}><code>{item.url}</code></li>)}
           </ul>

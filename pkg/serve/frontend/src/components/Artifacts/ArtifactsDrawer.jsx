@@ -360,7 +360,7 @@ export function ArtifactsDrawer() {
       ) : (
         <div class="af-empty" role="alert">
           <h2>Not in this conversation</h2>
-          <p>This artifact is not in this collection any more.</p>
+          <p>This file is no longer here.</p>
           <button type="button" class="af-text-button" onClick={backToArtifactsList}>See all artifacts</button>
         </div>
       )}

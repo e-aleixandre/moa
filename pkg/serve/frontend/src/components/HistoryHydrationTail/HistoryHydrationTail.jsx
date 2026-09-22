@@ -51,7 +51,7 @@ export function HistoryHydrationTail({ hasCachedTranscript, stale = false, onRet
       </div>
       <StreamingSkeleton widths={["100%"]} aria-hidden="true" />
       <StreamingSkeleton widths={["92%", "76%", "48%"]} aria-hidden="true" />
-      <span class="history-hydration-sr">Showing your last view while the newest messages load.</span>
+      <span class="history-hydration-sr">Loading the newest messages.</span>
     </div>
   );
 }

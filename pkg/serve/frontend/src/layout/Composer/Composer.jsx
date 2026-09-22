@@ -1094,7 +1094,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   return (
     <div class={`zl-composer${busy ? " is-busy" : ""}${armed ? " is-armed" : ""}`}>
       {cacheExpired && (
-        <div class="cache-warn" title="The prompt cache for this conversation has expired. Your next message will pay for a fresh cache write (more expensive).">
+        <div class="cache-warn" title="Cache expired: your next message costs more">
           <span class="cache-warn-dot" />
           Prompt cache expired · your next message pays a cache write
         </div>

@@ -188,7 +188,7 @@ function InboxError({ detail, retrying, onRetry }) {
     <div class="zi-state is-error" role="alert">
       <span class="zi-state-t"><span class="zi-dot is-error" aria-hidden="true" />Can't reach the inbox</span>
       {detail && <span class="zi-state-d zi-data">{detail}</span>}
-      <span class="zi-state-p">Whatever arrived is still waiting on the server. Try again, or check that moa is up.</span>
+      <span class="zi-state-p">Try again, or check that moa is running.</span>
       {onRetry && (
         <button type="button" class="zi-btn" onClick={onRetry} disabled={retrying}>
           {retrying ? "Retrying…" : "Retry"}
