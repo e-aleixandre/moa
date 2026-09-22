@@ -12,24 +12,17 @@
 // same one every other piece of this turn's work sits on.
 import { useState, useRef, useLayoutEffect } from "preact/hooks";
 import { ChevronRight } from "lucide-preact";
-import { useStore } from "../../hooks/useStore.js";
-import { StateDot } from "../../primitives/StateDot/StateDot.jsx";
 import { renderMarkdown } from "../../data/util/markdown.js";
-import { sessionDotState } from "../../data/util/format.js";
 import { ownerMessageSummary, ownerMessageFolds } from "../../data/util/owner-message.js";
+import { SessionChip, shortId } from "../SessionChip/SessionChip.jsx";
 import "./SessionMessage.css";
 
 // VERBS — the mono provenance line. It names the act, not the tool: `new` is
 // the only one that also created the session it is talking to.
 const VERBS = { send: "sent to", new: "started", answer: "answered in" };
 
-// shortId is the fallback name for a session this client has never loaded (an
-// old transcript, another project's roster). A 32-char id fills the line and
-// says nothing more than its head does.
-export function shortId(id) {
-  const value = String(id || "");
-  return value.length > 8 ? value.slice(0, 8) : value;
-}
+// Re-exported: callers and tests reached it through this module first.
+export { shortId };
 
 export function SessionMessage({
   action = "send", sessionId = "", text = "", answers = [], askId = "",
@@ -38,12 +31,6 @@ export function SessionMessage({
   // transcript can keep it where it was tapped (see stream-scroll.js).
   onExpand,
 }) {
-  // The store is the only place a session id becomes a name. A session that is
-  // not loaded keeps its short id rather than an invented title, and its chip
-  // does not offer to open what this client cannot open.
-  const session = useStore((state) => (sessionId ? state.sessions[sessionId] : null));
-  const name = (session?.title || "").trim() || title.trim() || shortId(sessionId);
-  const openable = !!session && !!onOpenSession;
   const meta = [cwd, model && `${model}${thinking ? ` · ${thinking}` : ""}`].filter(Boolean);
   // What the owner SENT is an assignment, and an assignment is long: measured
   // in the owner's own conversation, one of these blocks was 3705px on an
@@ -70,18 +57,7 @@ export function SessionMessage({
     <section class="smsg">
       <div class="smsg-head">
         <span class="smsg-verb">{VERBS[action] || action}</span>
-        {sessionId && (
-          <button
-            type="button"
-            class="smsg-target"
-            disabled={!openable}
-            onClick={() => openable && onOpenSession(sessionId)}
-            title={openable ? `Open ${name}` : name}
-          >
-            <StateDot state={session ? sessionDotState(session) : "saved"} size={7} />
-            <span class="smsg-target-name">{name}</span>
-          </button>
-        )}
+        {sessionId && <SessionChip sessionId={sessionId} title={title} onOpen={onOpenSession} />}
         {queued && <span class="smsg-note">queued · read at its next step</span>}
       </div>
       {meta.length > 0 && <div class="smsg-meta">{meta.join(" · ")}</div>}

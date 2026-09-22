@@ -30,9 +30,15 @@ mock.module("../../data/util/markdown.js", () => ({
 
 const { SessionMessage } = await import("./SessionMessage.jsx");
 
+// The target is its own component now (SessionChip, shared with the report
+// block), so a child whose type is a function is rendered in place: the head
+// is still what is under test, whoever draws its parts.
+const expand = (n) => (n && typeof n.type === "function" ? n.type(n.props) : n);
+
 function descendants(node) {
   const out = [];
   const walk = (n) => {
+    n = expand(n);
     if (!n || typeof n !== "object") return;
     if (Array.isArray(n)) return n.forEach(walk);
     out.push(n);
@@ -45,6 +51,7 @@ function descendants(node) {
 function textContent(node) {
   let text = "";
   const walk = (n) => {
+    n = expand(n);
     if (n == null || typeof n === "boolean") return;
     if (Array.isArray(n)) return n.forEach(walk);
     if (typeof n === "object") return walk(n.props?.children);

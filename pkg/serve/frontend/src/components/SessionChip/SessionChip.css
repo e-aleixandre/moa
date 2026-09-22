@@ -1,0 +1,37 @@
+/* The target is the one thing worth reading beside it, and the only door out
+   of the block: full text colour, a hit area a thumb can find. */
+.session-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--zl-hi);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--zl-fs-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-chip:disabled { cursor: default; opacity: 0.85; }
+
+@media (hover: hover) {
+  .session-chip:not(:disabled):hover { background: var(--zl-line); }
+}
+
+.session-chip:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.session-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

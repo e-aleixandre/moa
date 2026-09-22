@@ -33,43 +33,6 @@
   color: var(--overlay0);
 }
 
-/* The target is the one thing in the head worth reading, and the only door
-   out of the block: full text colour, a hit area a thumb can find. */
-.smsg-target {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  max-width: 100%;
-  padding: 2px 8px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--zl-hi);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--zl-fs-body);
-  text-align: left;
-  cursor: pointer;
-}
-
-.smsg-target:disabled { cursor: default; opacity: 0.85; }
-
-@media (hover: hover) {
-  .smsg-target:not(:disabled):hover { background: var(--zl-line); }
-}
-
-.smsg-target:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.smsg-target-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .smsg-note,
 .smsg-meta {
   font-family: var(--mono);
