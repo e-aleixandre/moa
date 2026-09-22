@@ -39,6 +39,14 @@ approving what a session wants to do stays yours. That is policy for a
 cooperative agent, not a security barrier — the owner has bash like any
 session; what bounds it is the session's permission mode and allowed paths.
 
+`read` saves tokens without hiding anything: each message is abridged to its
+beginning and end, and the cut is replaced by a notice with how many
+characters are missing and the call that reads them (`message_id`, with
+`offset` to page a message longer than 20,000 characters; `message_id=last`
+is the latest assistant message). Tool calls are left out unless
+`tools=true`, which lists them with abridged arguments and results under the
+same notice.
+
 **Sessions → owner**: reports. The same observer that feeds
 [automation callbacks](./automation.md#callbacks) produces `done`, `failed`
 and `needs_input` outcomes; for a child they become a report delivered into
@@ -306,7 +314,10 @@ What it does:
   edited on disk.
 - A live session sees a changed `PROJECT.md` or `OWNER.md` only after
   `/reload`; new sessions always see the current one.
-- Reports carry the session's final message, not the session brief.
+- Reports carry the session's final message, not the session brief: its
+  beginning and end, with a notice of what was cut and how to read it whole.
+  A turn that ends without a final message is reported as such, not as a bare
+  `done`.
 - `canonical_ref` is detected once at creation; a repository that later changes
   its default branch needs the field edited by hand.
 - Freshness is not checked yet: there is no `book lint`, so a sheet the

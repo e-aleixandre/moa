@@ -30,8 +30,22 @@ const (
 	// exactly what reports exist to avoid.
 	defaultSessionReadLimit = 20
 	maxSessionReadLimit     = 60
-	// maxReadTextBytes truncates each message of a `read`.
-	maxReadTextBytes = 1500
+	// readMessageHead / readMessageTail abridge each message of a `read`:
+	// the beginning says what it is about, the end what it concluded. The
+	// middle is replaced by a notice saying how much is missing and how to
+	// read it (message_id).
+	readMessageHead = 1000
+	readMessageTail = 500
+	// readToolHead / readToolTail abridge a tool call's arguments and result
+	// when read asks for tools.
+	readToolHead = 200
+	readToolTail = 200
+	// readChunkChars is how much of one message a message_id read returns at
+	// a time. It holds a long final report whole; beyond it, offset pages.
+	readChunkChars = 20000
+	// lastMessageID names the session's latest assistant message, the one a
+	// report quotes.
+	lastMessageID = "last"
 )
 
 // newSessionsTool builds the owner's sessions tool over a live Manager. It
@@ -65,7 +79,9 @@ func newSessionsTool(mgr *Manager, codebaseKey string) core.Tool {
 		Label: "Sessions",
 		Description: "See and direct the moa sessions working on this project. list: who is " +
 			"working, on what and what they are waiting for. read: the last messages of one " +
-			"session. send: a message or a correction to a session. new: start a session in a " +
+			"session, each abridged to its beginning and end with a notice of what was cut; " +
+			"message_id reads one message whole (offset pages a very long one), and tools=true " +
+			"adds the tool calls. send: a message or a correction to a session. new: start a session in a " +
 			"directory of this project with a prompt. answer: answer a question a session asked " +
 			"the user, when the book already answers it. You cannot approve permissions: those " +
 			"are the user's.",
@@ -80,6 +96,9 @@ func newSessionsTool(mgr *Manager, codebaseKey string) core.Tool {
 				"session_id": {"type": "string", "description": "Target session (read, send, answer)."},
 				"text": {"type": "string", "description": "Message to send (send), or the prompt for a new session (new)."},
 				"limit": {"type": "integer", "description": "For read: how many recent messages (default 20, max 60)."},
+				"message_id": {"type": "string", "description": "For read: read this one message (or tool call) whole instead of the abridged list. \"last\" is the session's latest assistant message."},
+				"offset": {"type": "integer", "description": "For read with message_id: character to start from, for a message longer than one read returns."},
+				"tools": {"type": "boolean", "description": "For read: also list the tool calls, with abridged arguments and results (default false)."},
 				"cwd": {"type": "string", "description": "For new: the directory to work in. Must belong to this project."},
 				"title": {"type": "string", "description": "For new: an explicit title."},
 				"model": {"type": "string", "description": "For new: model spec (default: the usual default)."},
@@ -103,7 +122,12 @@ func newSessionsTool(mgr *Manager, codebaseKey string) core.Tool {
 			case "list":
 				return mgr.ownerListSessions(own), nil
 			case "read":
-				return mgr.ownerReadSession(own, getStr(params, "session_id"), getNum(params, "limit")), nil
+				return mgr.ownerReadSession(own, getStr(params, "session_id"), sessionReadOptions{
+					limit:     getNum(params, "limit"),
+					messageID: getStr(params, "message_id"),
+					offset:    getNum(params, "offset"),
+					tools:     params["tools"] == true,
+				}), nil
 			case "send":
 				return mgr.ownerSendToSession(own, getStr(params, "session_id"), getStr(params, "text")), nil
 			case "new":
@@ -319,42 +343,6 @@ func (m *Manager) ownerPendingLine(id string) string {
 	return ""
 }
 
-func (m *Manager) ownerReadSession(own owner.Owner, id string, limit int) core.Result {
-	if _, err := m.ownerSession(own, id); err != nil {
-		return core.ErrorResult(err.Error())
-	}
-	if limit <= 0 {
-		limit = defaultSessionReadLimit
-	}
-	if limit > maxSessionReadLimit {
-		limit = maxSessionReadLimit
-	}
-	snapshot, err := m.conversationSnapshot(id)
-	if err != nil {
-		return core.ErrorResult(fmt.Sprintf("cannot read session %s: %v", id, err))
-	}
-	// Only the conversation itself: an owner reads what was said, not every
-	// tool call made on the way.
-	var talk []ConversationMessage
-	for _, msg := range snapshot.messages {
-		if msg.Role == "user" || msg.Role == "assistant" {
-			talk = append(talk, msg)
-		}
-	}
-	if len(talk) > limit {
-		talk = talk[len(talk)-limit:]
-	}
-	if len(talk) == 0 {
-		return core.TextResult("That session has said nothing yet.")
-	}
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "%s — %s\n\n", snapshot.id, snapshot.title)
-	for _, msg := range talk {
-		fmt.Fprintf(&sb, "%s: %s\n\n", msg.Role, truncateText(msg.Text, maxReadTextBytes))
-	}
-	return core.TextResult(sb.String())
-}
-
 func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Result {
 	if text == "" {
 		return core.ErrorResult("text is required")
@@ -448,15 +436,4 @@ func (m *Manager) ownerAnswerAsk(own owner.Owner, id, askID string, answers []st
 		return core.ErrorResult(fmt.Sprintf("cannot answer %s: %v (it may already have been answered)", askID, err))
 	}
 	return core.TextResult(fmt.Sprintf("Answered %s in session %s.", askID, id))
-}
-
-func truncateText(s string, limit int) string {
-	if len(s) <= limit {
-		return s
-	}
-	cut := limit
-	for cut > 0 && s[cut]&0xC0 == 0x80 {
-		cut--
-	}
-	return s[:cut] + "…"
 }

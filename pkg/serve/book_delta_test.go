@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,20 +27,20 @@ func TestBookDeltaSurvivesALongFinalMessage(t *testing.T) {
 	}
 }
 
-// The delta is before more than 2 KiB of tail: it is provably NOT in what the
-// report carries as `said`, so nothing about this passing is luck.
+// The delta sits in the middle of a long message: it is provably NOT in what
+// the report carries as `said`, so nothing about this passing is luck.
 func TestBookDeltaIsReadBeyondTheReportTail(t *testing.T) {
 	tail := strings.Repeat("Un párrafo final que el modelo escribió después del delta.\n", 200)
-	text := "Trabajo hecho.\n\n## Book delta\n- areas/erp/albaranes.md: cambia el estado\n\n## Notas\n" + tail
-	if len(tail) <= maxReportFinalTextBytes {
-		t.Fatalf("the fixture is too short to prove anything: %d bytes", len(tail))
+	text := strings.Repeat("Trabajo hecho, contado con detalle.\n", 60) + "\n## Book delta\n- areas/erp/albaranes.md: cambia el estado\n\n## Notas\n" + tail
+	if len([]rune(tail)) <= reportTailChars {
+		t.Fatalf("the fixture is too short to prove anything: %d characters", len([]rune(tail)))
 	}
 	delta := extractBookDelta(text)
 	if delta != "- areas/erp/albaranes.md: cambia el estado" {
 		t.Fatalf("delta = %q", delta)
 	}
-	if strings.Contains(reportTail(text), "## Book delta") {
-		t.Fatal("the tail still carries the delta; the fixture does not test the mechanism")
+	if strings.Contains(reportAbridge("s1", text), "## Book delta") {
+		t.Fatal("the abridged text still carries the delta; the fixture does not test the mechanism")
 	}
 }
 
@@ -80,13 +81,17 @@ func TestBookDeltaTruncationIsUTF8SafeAndMarked(t *testing.T) {
 		t.Fatalf("the fixture does not exceed the cap: %d bytes", len(body))
 	}
 	delta := extractBookDelta(text)
-	if !strings.HasSuffix(delta, "\n[truncated]") {
+	notice := delta[strings.LastIndex(delta, "\n[... "):]
+	if !strings.HasSuffix(delta, "characters truncated — read the session's final message for the rest ...]") {
 		t.Fatalf("a truncated delta did not say so: %q", delta[max(0, len(delta)-60):])
+	}
+	if cut := strings.TrimSuffix(delta, notice); !strings.Contains(notice, fmt.Sprintf("[... %d more", len([]rune(strings.TrimSpace(body)))-len([]rune(cut)))) {
+		t.Fatalf("the notice does not say how much is missing: %q", notice)
 	}
 	if !utf8Valid(delta) {
 		t.Fatal("the truncation split a rune")
 	}
-	if len(delta) > maxBookDeltaBytes+len("\n[truncated]") {
+	if len(delta) > maxBookDeltaBytes+len(notice) {
 		t.Fatalf("truncated delta is %d bytes", len(delta))
 	}
 }
