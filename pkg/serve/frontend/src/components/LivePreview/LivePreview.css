@@ -165,36 +165,105 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* A pane is its own density: first the Inspect word goes, then the address
-   yields its width to the controls. */
-@container (max-width: 560px) {
-  .live-preview-action-label { display: none; }
-  .live-preview-inspect { padding: 0; }
-}
-
-/* Phones: every control is a 44px target, the widths fold into one menu and
-   the address takes whatever is left. */
-.live-preview-bar.is-compact {
-  gap: 2px;
-}
+/* The head before there is an app: phones get 44px targets. */
 .live-preview-bar.is-compact .live-preview-act {
   min-width: 44px;
   height: 44px;
 }
-.live-preview-bar.is-compact .live-preview-address,
-.live-preview-bar.is-compact .live-preview-title {
-  height: 44px;
-  line-height: 44px;
+.live-preview-title.is-address {
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-weight: 400;
 }
-.live-preview-bar .action-menu-trigger.is-open svg {
+
+/* ── The dock ───────────────────────────────────────────────────────────────
+   Every control of a loaded preview in one floating piece at the bottom edge:
+   the surface every floating thing in moa uses (sheet colour, lit rim, soft
+   shadow), so it reads as moa's over any app. */
+.live-preview-dock {
+  position: absolute;
+  left: 50%;
+  bottom: max(var(--space-2), var(--shell-bottom));
+  z-index: 5;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: max-content;
+  max-width: calc(100% - var(--space-4));
+  padding: 4px;
+  border-radius: var(--zl-r-lg);
+  background: color-mix(in srgb, var(--zl-sheet) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--zl-rim-2), 0 12px 32px -8px rgba(0, 0, 0, 0.55);
+  touch-action: manipulation;
+}
+.live-preview-dock .live-preview-address {
+  max-width: 220px;
+}
+.live-preview-dock-write {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  margin-left: 2px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-control);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.live-preview-dock-write svg {
+  flex: none;
+  color: var(--zl-t3);
+}
+.live-preview-dock-write:disabled {
+  color: var(--zl-t4);
+  cursor: default;
+}
+@media (hover: hover) {
+  .live-preview-dock-write:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--zl-t1) 6%, var(--zl-control));
+  }
+}
+.live-preview-dock-write:focus-visible {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
+}
+.live-preview-dock .action-menu-trigger.is-open svg {
   transform: none;
 }
-.live-preview-bar .action-menu-trigger.is-open {
+.live-preview-dock .action-menu-trigger.is-open {
   background: var(--zl-hi);
 }
-.live-preview-bar.is-compact .live-preview-address {
-  flex: 1 1 auto;
-  text-align: left;
+/* The menu opens upwards from the dock; its first item is the address. */
+.live-preview-dock .action-menu-list {
+  min-width: 220px;
+}
+.live-preview-dock.is-compact .live-preview-act {
+  min-width: 44px;
+  height: 44px;
+}
+.live-preview-dock.is-compact .live-preview-dock-write {
+  height: 44px;
+}
+
+/* A narrow pane: the Inspect word goes first, then the widths' number. */
+@container (max-width: 700px) {
+  .live-preview-action-label { display: none; }
+  .live-preview-inspect { padding: 0; }
+  .live-preview-dock .live-preview-address { max-width: 140px; }
+}
+@container (max-width: 520px) {
+  .live-preview-dock .live-preview-width-label { display: none; }
+  .live-preview-dock .live-preview-width.is-on { padding: 0; }
 }
 
 /* ── The stage ──────────────────────────────────────────────────────────────
@@ -682,7 +751,7 @@
 /* Reserve independent lanes: activity cards never sit over either the closed
    handle or the open composer. */
 .live-preview-stage.has-composer-handle .lp-stream {
-  bottom: calc(max(var(--space-3), var(--shell-bottom)) + 52px);
+  bottom: calc(max(var(--space-2), var(--shell-bottom)) + 60px);
 }
 .live-preview-stage.has-composer .lp-stream {
   bottom: 200px;
