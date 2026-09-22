@@ -1,20 +1,22 @@
 /* DelegationBlock — one wave of subagents in the stream. Structural sizing
-   (38/44px row heights, header/agent grid gaps) mostly follows the visual
-   mockup's px values (SUBAGENTS-REDESIGN-SPEC-FABLE.md §1.2 + mockup); token
-   colors/spacing/radii/text-scale everywhere else. */
+   (header/agent grid gaps) mostly follows the visual mockup's px values
+   (SUBAGENTS-REDESIGN-SPEC-FABLE.md §1.2 + mockup). The chassis is the tool
+   ledger's (sheet + rim, 36/44px header), because a wave of subagents is
+   the conversation's activity just like a tool call; only a live wave tints
+   its rim. */
 
 .dlg {
-  border: 1px solid color-mix(in srgb, var(--sky) 22%, var(--surface0));
-  border-radius: var(--radius-md);
+  border-radius: var(--zl-r-md);
   overflow: hidden;
   margin: var(--space-2) 0;
   max-width: var(--content-block);
-  background: color-mix(in srgb, var(--mantle) 65%, transparent);
-  transition: border-color var(--duration) var(--ease);
+  background: var(--zl-sheet);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sky) 22%, var(--zl-line-2));
+  transition: box-shadow var(--duration) var(--ease);
 }
 
 .dlg.settled {
-  border-color: var(--surface0);
+  box-shadow: var(--zl-rim);
 }
 
 /* header: single summary line, clickable to collapse/expand */
@@ -24,7 +26,7 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
-  min-height: 38px; /* px: mockup row height, not a reusable token */
+  min-height: 36px;
   font-size: var(--text-sm);
   color: var(--subtext0);
   background: transparent;
@@ -78,7 +80,7 @@
   width: 100%;
   padding: var(--space-2) var(--space-4);
   min-height: 38px; /* px: mockup row height */
-  border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
+  border-top: 1px solid var(--zl-line);
   font-size: var(--text-sm);
   background: transparent;
   border-left: none;
@@ -162,7 +164,7 @@
 .dlg-complete {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
+  border-top: 1px solid var(--zl-line);
 }
 
 .dlg-complete .dlg-agent {
@@ -214,7 +216,7 @@
   overflow: auto;
   margin: 0;
   padding: var(--space-3) var(--space-4);
-  border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent);
+  border-top: 1px solid var(--zl-line);
   background: color-mix(in srgb, var(--mantle) 65%, transparent);
 	color: var(--subtext0);
 	display: grid;
@@ -479,7 +481,7 @@
 /* Outcome-line is a cataloged alternative to the dense default row. It keeps
    payload and actions in separate bands so narrow screens never make two
    destinations compete for one horizontal track. */
-.dlg-outcome-card { border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent); }
+.dlg-outcome-card { border-top: 1px solid var(--zl-line); }
 .dlg-outcome-summary { width: 100%; display: grid; gap: 3px; padding: var(--space-3) var(--space-4); border: 0; background: transparent; color: inherit; text-align: left; font: inherit; }
 .dlg-outcome-summary.clickable { cursor: pointer; }
 @media (hover: hover) {
@@ -495,10 +497,10 @@
 .outcome-preview { margin-left: 26px; color: var(--subtext0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: var(--text-xs); }
 .dlg-outcome-card.failed .outcome-preview { color: var(--red); }
 .dlg-outcome-card.cancelled .outcome-preview { color: var(--overlay1); }
-.dlg-outcome-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent); }
+.dlg-outcome-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--zl-line); }
 .dlg-outcome-actions.single { grid-template-columns: minmax(0, 1fr); }
 .dlg-outcome-actions button { min-height: 44px; display: inline-flex; justify-content: center; align-items: center; gap: 3px; border: 0; background: transparent; color: var(--a); font: inherit; font-size: var(--text-xs); cursor: pointer; }
-.dlg-outcome-actions button + button { border-left: 1px solid color-mix(in srgb, var(--surface0) 55%, transparent); }
+.dlg-outcome-actions button + button { border-left: 1px solid var(--zl-line); }
 @media (hover: hover) {
 
 .dlg-outcome-actions button:hover { background: color-mix(in srgb, var(--surface0) 30%, transparent); }
