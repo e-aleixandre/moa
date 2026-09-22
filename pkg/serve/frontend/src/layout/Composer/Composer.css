@@ -53,12 +53,14 @@
   margin-inline: auto;
 }
 
-/* A desktop subagent is a branch of the same conversation, but its live bar
-   and steer field are mounted directly in the view instead of in a dock. Keep
-   them on the shared reading axis without changing the deliberately fluid
-   grid-pane or mobile hosts. */
+/* A desktop subagent is a branch of the same conversation, but its live bar,
+   steer field and status line are mounted directly in the view instead of in
+   a dock. Keep the three on the shared reading axis without changing the
+   deliberately fluid grid-pane or mobile hosts. The status line was missing
+   here, so it alone ran edge to edge while the other two held the column. */
 .subagent-view > .zl-live,
-.subagent-view > .zl-composer {
+.subagent-view > .zl-composer,
+.subagent-view > .zl-status {
   width: calc(100% - 44px);
   max-width: var(--content-block);
   margin-inline: auto;
