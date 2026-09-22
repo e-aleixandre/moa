@@ -197,7 +197,8 @@ export function AskUserPrompt({ session }) {
   // Continue is the primary: on an earlier question it steps forward, on the
   // last one it submits (jumping back to whatever is still blank).
   const handleContinue = () => (last ? handleSubmit() : goTo(current + 1));
-  const continueLabel = last ? (canSubmit ? "Submit" : "Submit — jump to unanswered") : "Continue";
+  // With one question there is nowhere to jump: the blank one is on screen.
+  const continueLabel = last ? (canSubmit || questions.length === 1 ? "Submit" : "Submit — jump to unanswered") : "Continue";
   // The ⏎ drawn on Continue is a real key: Enter with focus on the card (a
   // click inside gives it focus) but not in the field or on a button, which
   // answer Enter themselves. Focus is never pulled from the composer.
