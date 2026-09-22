@@ -36,6 +36,10 @@ type RuntimeConfig struct {
 	BaseSystemPrompt  string
 	Persister         SessionPersister
 	SteerFilter       func(text string) bool
+	// BeforeFirstRun runs after the first run is admitted and has a cancellable
+	// run context, but before the prompt reaches the agent. A cancellation keeps
+	// it armed for the next run; a nil result consumes it.
+	BeforeFirstRun func(context.Context) error
 
 	CWD        string // workspace directory
 	AutoVerify bool   // run verify after edit runs
@@ -124,6 +128,7 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		CWD:               cfg.CWD,
 		AutoVerify:        cfg.AutoVerify,
 		SteerFilter:       cfg.SteerFilter,
+		BeforeFirstRun:    cfg.BeforeFirstRun,
 		GateConfig:        cfg.GateConfig,
 	}
 	sctx.SetGate(cfg.Gate)

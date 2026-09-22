@@ -120,6 +120,11 @@ type SessionContext struct {
 	// the prompt builder; nil in tests and in the CLI. Returns the names of the
 	// inputs that changed, empty when nothing did.
 	ReloadPrompt func() []string
+	// BeforeFirstRun is a frontend-owned initialization gate. It runs inside the
+	// first admitted run, before Agent.Send, so Stop can cancel the wait. A
+	// canceled gate is retried by the next run.
+	BeforeFirstRun     func(context.Context) error
+	beforeFirstRunDone bool
 
 	// goalPrevCompactAt is the CompactAt threshold captured when goal mode
 	// started, restored when it ends. Written by EnterGoal before any goal run,

@@ -1624,7 +1624,13 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	ctx = attachment.WithScope(ctx, a.config.AttachmentScope)
 
 	a.steerMu.Lock()
-	a.aborting = false
+	// A pre-cancelled context is used to finish bookkeeping for an accepted
+	// prompt whose pre-run gate was stopped. Keep admission closed during that
+	// cleanup so a concurrent send is retried as a fresh run instead of entering
+	// a queue this cancelled execution is about to discard.
+	if ctx.Err() == nil {
+		a.aborting = false
+	}
 	a.runTerminal = false
 	a.steerMu.Unlock()
 

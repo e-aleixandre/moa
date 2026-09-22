@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,6 +52,45 @@ func newRelayMCPServer(t *testing.T) string {
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)
 	return httpServer.URL
+}
+
+// newGatedRelayMCPServer starts a real MCP server whose HTTP handshake waits
+// until the test releases it. This keeps discovery deterministically in flight
+// while a session receives its first prompt.
+func newGatedRelayMCPServer(t *testing.T) (url string, started <-chan struct{}, release func()) {
+	t.Helper()
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "relay", Version: "0.1"}, nil)
+	sdkmcp.AddTool(server, &sdkmcp.Tool{
+		Name:        "mark_task_done",
+		Description: "Marks the originating task done",
+	}, func(ctx context.Context, req *sdkmcp.CallToolRequest, input struct {
+		ID string `json:"id"`
+	}) (*sdkmcp.CallToolResult, any, error) {
+		return &sdkmcp.CallToolResult{
+			Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "done " + input.ID}},
+		}, nil, nil
+	})
+
+	requestStarted := make(chan struct{})
+	gate := make(chan struct{})
+	var startedOnce sync.Once
+	var releaseOnce sync.Once
+	mcpHandler := sdkmcp.NewStreamableHTTPHandler(func(r *http.Request) *sdkmcp.Server { return server }, nil)
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedOnce.Do(func() { close(requestStarted) })
+		select {
+		case <-gate:
+		case <-r.Context().Done():
+			return
+		}
+		mcpHandler.ServeHTTP(w, r)
+	}))
+	releaseGate := func() { releaseOnce.Do(func() { close(gate) }) }
+	t.Cleanup(func() {
+		releaseGate()
+		httpServer.Close()
+	})
+	return httpServer.URL, requestStarted, releaseGate
 }
 
 // readBody reads an error response body for assertions.
@@ -123,6 +163,140 @@ func TestAutomationRunWithPerRunMCPServer(t *testing.T) {
 	headers, _ := entry["headers"].(map[string]any)
 	if headers["Authorization"] != "Bearer x" {
 		t.Fatalf("persisted headers = %v", headers)
+	}
+}
+
+func TestAutomationFirstTurnWaitsForMCPDiscovery(t *testing.T) {
+	relayURL, handshakeStarted, releaseHandshake := newGatedRelayMCPServer(t)
+	requests := make(chan core.Request, 1)
+	provider := newMockProvider(func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		requests <- req
+		return simpleResponse("done"), nil
+	})
+	mgr := newTestManagerWithConfig(t, context.Background(), provider, t.TempDir(), core.MoaConfig{
+		DisableSandbox: true,
+		MCPServers: map[string]core.MCPServer{
+			"relay": {URL: relayURL},
+		},
+	})
+	srv := httptest.NewServer(NewServer(mgr, WithAutomationToken(testAutomationToken)))
+	t.Cleanup(srv.Close)
+
+	httpReq, err := http.NewRequest("POST", srv.URL+"/api/automation/runs", strings.NewReader(`{"prompt":"close the task"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+testAutomationToken)
+	httpReq.Header.Set("Content-Type", "application/json")
+	type response struct {
+		resp *http.Response
+		err  error
+	}
+	responseCh := make(chan response, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(httpReq)
+		responseCh <- response{resp: resp, err: err}
+	}()
+
+	select {
+	case <-handshakeStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("MCP handshake did not start")
+	}
+	select {
+	case req := <-requests:
+		releaseHandshake()
+		t.Fatalf("first model request reached provider before MCP discovery completed; tools=%v", req.Tools)
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	releaseHandshake()
+	var res response
+	select {
+	case res = <-responseCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("automation request did not finish after MCP discovery")
+	}
+	if res.err != nil {
+		t.Fatal(res.err)
+	}
+	defer res.resp.Body.Close() //nolint:errcheck
+	if res.resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", res.resp.StatusCode, readBody(t, res.resp))
+	}
+
+	select {
+	case req := <-requests:
+		for _, tool := range req.Tools {
+			if tool.Name == "mcp__relay__mark_task_done" {
+				return
+			}
+		}
+		t.Fatalf("first model request tools = %v, want relay MCP tool", req.Tools)
+	case <-time.After(5 * time.Second):
+		t.Fatal("first model request did not reach provider")
+	}
+}
+
+func TestCancelStopsFirstTurnWaitingForMCP(t *testing.T) {
+	relayURL, handshakeStarted, releaseHandshake := newGatedRelayMCPServer(t)
+	requests := make(chan core.Request, 1)
+	provider := newMockProvider(func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		requests <- req
+		return simpleResponse("done"), nil
+	})
+	mgr := newTestManagerWithConfig(t, context.Background(), provider, t.TempDir(), core.MoaConfig{
+		DisableSandbox: true,
+		MCPServers: map[string]core.MCPServer{
+			"relay": {URL: relayURL},
+		},
+	})
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(sess.ID, "first", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-handshakeStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("MCP handshake did not start")
+	}
+	if _, err := mgr.CancelWithDiscardedSteers(sess.ID); err != nil {
+		t.Fatalf("CancelWithDiscardedSteers: %v", err)
+	}
+	settledCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if !sess.runtime.WaitSettled(settledCtx) {
+		t.Fatal("cancelled first turn did not settle")
+	}
+	history := sess.History()
+	if len(history) == 0 || history[0].Role != "user" {
+		t.Fatalf("cancelled accepted prompt history = %+v, want its user message retained", history)
+	}
+	select {
+	case req := <-requests:
+		t.Fatalf("cancelled first prompt reached provider; tools=%v", req.Tools)
+	default:
+	}
+
+	// Cancellation leaves the one-time gate armed. A later first prompt still
+	// waits for discovery and receives the MCP tool.
+	releaseHandshake()
+	if _, _, _, err := mgr.Send(sess.ID, "second", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case req := <-requests:
+		for _, tool := range req.Tools {
+			if tool.Name == "mcp__relay__mark_task_done" {
+				return
+			}
+		}
+		t.Fatalf("retry tools = %v, want relay MCP tool", req.Tools)
+	case <-time.After(5 * time.Second):
+		t.Fatal("retried first prompt did not reach provider")
 	}
 }
 

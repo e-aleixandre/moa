@@ -44,6 +44,8 @@ type CreateOpts struct {
 	extraMCPServers map[string]core.MCPServer
 }
 
+const firstTurnMCPWaitTimeout = 16 * time.Second
+
 // CreateSession creates a new agent session.
 func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	cwd := opts.CWD
@@ -497,6 +499,15 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		_, was := subagentTexts.LoadAndDelete(text)
 		return !was
 	}
+	initialHistory := opts != nil && (len(opts.initialMessages) > 0 || len(opts.initialEntries) > 0)
+	if !initialHistory {
+		rcfg.BeforeFirstRun = func(ctx context.Context) error {
+			if sess == nil {
+				return nil
+			}
+			return sess.waitForInitialMCP(ctx)
+		}
+	}
 	if opts != nil {
 		rcfg.InitialMetadata = opts.initialMetadata
 		if len(opts.initialEntries) > 0 {
@@ -612,7 +623,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		// A resumed session that already has history, or that already carries an
 		// automatic title, has had its one shot. An untouched empty session
 		// remains eligible for its first prompt.
-		if len(opts.initialMessages) > 0 || len(opts.initialEntries) > 0 ||
+		if initialHistory ||
 			opts.titleSource == session.TitleSourceAuto {
 			sess.autoTitled.Store(true)
 		}
@@ -1523,6 +1534,88 @@ func (s *ManagedSession) wireMCPRefresh() {
 			}
 		}
 	}
+}
+
+// waitForInitialMCP gives an empty session's first model request a stable tool
+// set. Session construction remains non-blocking; only the first prompt waits,
+// and failures or a deadline still let the turn proceed; late tools follow the
+// existing deferred sync path. The manager already logs each failed server;
+// this method adds the otherwise-invisible timeout/cancellation case.
+func (s *ManagedSession) waitForInitialMCP(runCtx context.Context) error {
+	s.mu.Lock()
+	mgr := s.infra.mcpMgr
+	s.mu.Unlock()
+	if mgr == nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(runCtx, firstTurnMCPWaitTimeout)
+	defer cancel()
+	err := mgr.WaitSettled(ctx)
+	if runCtx.Err() != nil {
+		return runCtx.Err()
+	}
+	if err != nil {
+		states := make([]string, 0)
+		for _, st := range mgr.Status() {
+			if st.State == mcp.StateStarting || st.State == mcp.StateRestarting || st.State == mcp.StateDisabling {
+				states = append(states, st.Name+"="+string(st.State))
+			}
+		}
+		slog.Warn("first turn starting before MCP startup settled",
+			"session", s.ID, "error", err, "servers", states)
+	}
+	// WaitSettled can observe Ready just before OnChange copies the discovered
+	// tools into the registry. Synchronize terminal states here, before Agent.Send
+	// begins. TryLock keeps the same deadline over both discovery and a concurrent
+	// reload/restart. If discovery used the whole budget, take the lock only when
+	// immediately available: ready servers still reach this turn, while no slow
+	// lifecycle operation can extend the timeout.
+	locked := s.mcpLifecycleMu.TryLock()
+	if ctx.Err() != nil {
+		if !locked {
+			slog.Warn("first turn starting before settled MCP tools could be synchronized", "session", s.ID)
+			return nil
+		}
+	} else {
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		for !locked {
+			select {
+			case <-runCtx.Done():
+				return runCtx.Err()
+			case <-ctx.Done():
+				locked = s.mcpLifecycleMu.TryLock()
+				if !locked {
+					slog.Warn("first turn starting before settled MCP tools could be synchronized", "session", s.ID)
+					return nil
+				}
+			case <-ticker.C:
+				locked = s.mcpLifecycleMu.TryLock()
+			}
+		}
+	}
+	defer s.mcpLifecycleMu.Unlock()
+	if runCtx.Err() != nil {
+		return runCtx.Err()
+	}
+	s.mu.Lock()
+	mgr = s.infra.mcpMgr
+	ctrl := s.infra.mcpController
+	s.mu.Unlock()
+	if mgr == nil || ctrl == nil {
+		return nil
+	}
+	for _, st := range mgr.Status() {
+		if runCtx.Err() != nil {
+			return runCtx.Err()
+		}
+		switch st.State {
+		case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled, mcp.StateAuthRequired:
+			ctrl.SyncServer(st.Name)
+		}
+	}
+	return nil
 }
 
 // publishMCPChanged emits the current MCP summary on the session bus so open
