@@ -1,7 +1,6 @@
 import { setState } from "../data/store.js";
 import { setTileSession } from "../data/tileTree.js";
 import { skillForkLaunchRow } from "../data/ws/history.js";
-import { designCase, designQueue } from "../data/design-variant.js";
 import { OWNERS, WINERIM_SESSION, CHILD_SESSION } from "./owners-fixtures.js";
 
 // Frozen conversations the real screens wear. The chrome is production; only
@@ -678,18 +677,6 @@ export function seedCatalogStore() {
     // The children are selected out of the roster by `ownerId`, so a child of
     // this owner has to carry it or Overview reads "No sessions yet".
     sessions[CHILD_SESSION.id] = { ...CHILD_SESSION, ownerId: OWNERS[0].id };
-  }
-  // PROPOSAL LAB (?cqcase=): the specimen becomes a session with a run in
-  // flight and a queue behind it — the situation the queue and the call
-  // proposals are about. Inert without the parameter.
-  if (designCase()) {
-    sessions[SPECIMEN_ID] = {
-      ...specimen,
-      state: "running",
-      liveLabel: "Running the frontend tests…",
-      runStartedAtMs: Date.now() - 84000,
-      pendingSteers: designQueue(),
-    };
   }
   setState((s) => ({
     sessions,

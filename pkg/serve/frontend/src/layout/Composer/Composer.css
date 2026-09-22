@@ -69,9 +69,9 @@
    on its rim: the object does not change shape, it is chosen.
 
    TWO ROWS, always: the field on top, the controls under it. It stays a wrap
-   flex because the full-width children (cache warning, attachment strip,
-   queue note, steer hint) already order themselves inside it; the control row
-   is the same trick, ordered last. */
+   flex because the full-width children (cache warning, attachment strip, call
+   row, steer hint) already order themselves inside it; the control row is the
+   same trick, ordered last. */
 .zl-composer {
   position: relative;
   display: flex;
@@ -193,50 +193,9 @@
 
 .zl-composer .cache-warn,
 .zl-composer .attach-preview-strip,
-.zl-composer .queue-note,
 .zl-composer .steer-hint {
   flex: 1 0 100%;
   order: 5;
-}
-
-.zl-composer .queue-note {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2, 8px);
-  min-height: 44px;
-  padding: 4px 8px;
-  overflow: hidden;
-  background: transparent;
-  border: none;
-  border-radius: var(--zl-r-sm);
-  color: var(--zl-t3);
-  font-size: var(--zl-fs-meta);
-  cursor: pointer;
-  text-align: left;
-  min-width: 0;
-}
-@media (hover: hover) {
-  .zl-composer button.queue-note:hover { background: var(--zl-hi); }
-}
-.zl-composer button.queue-note:focus-visible {
-  outline: 2px solid var(--zl-accent);
-  outline-offset: 2px;
-}
-.zl-composer .queue-note span {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* Neutral on purpose. Queued messages are information, not a warning and not
-   something you wrote: peach means "you wrote this" and belongs to the user
-   message's edge. */
-.zl-composer .queue-note .chip {
-  color: var(--zl-t2);
-  flex: none;
-}
-.zl-composer .queue-note span .lucide {
-  vertical-align: -2px;
-  margin-right: var(--space-1, 4px);
 }
 
 .zl-composer .steer-hint {

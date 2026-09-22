@@ -11,6 +11,7 @@ import {
   SessionMessage,
   HistoryHydrationTail,
   historyHydrationTailVisible,
+  QueuedTail,
 } from "../../components/index.js";
 import { Prose } from "../../components/AssistantDocument/AssistantDocument.jsx";
 import { TurnFoot } from "../../components/AssistantDocument/TurnFoot.jsx";
@@ -27,9 +28,9 @@ import { ownerMessageSummary, ownerMessageFolds } from "../../data/util/owner-me
 import {
   READ_ANCHOR_MARGIN, consumeReadAnchor, hasReadAnchor, readAnchorTargetID, settleReadAnchor,
 } from "../../data/stream-read-anchor.js";
-// PROPOSAL LAB — inert in production (see data/design-variant.js).
-import { designVariant, labCancelQueued, labBringBack } from "../../data/design-variant.js";
-import { QueuedTail, QueuedRecallTail, QueuedCompactTail } from "../../components/DesignProposals/DesignProposals.jsx";
+// The queue lives at the end of the thread: what the owner already said, with
+// the one gesture that brings it back to the input.
+import { recallQueuedSteers } from "../../data/session-actions.js";
 
 // Stream — the scrollable conversation area. It renders the REAL
 // projected block list from stream-model.js (projectStream), mapping each
@@ -269,36 +270,10 @@ export function ConversationStream({
             </div>
           ))}
           {tail}
-          {/* PROPOSAL A: what you have already said belongs to the thread. The
-              queued messages are painted at the end of the transcript as user
-              cells in a pending face, in order, and they are the last thing in
-              the scroll. Nothing renders here in production. */}
-          {designVariant() === "a" && (session?.pendingSteers || []).filter(Boolean).length > 0 && (
-            <QueuedTail
-              queue={session.pendingSteers.filter(Boolean)}
-              onCancel={(id) => labCancelQueued(session.id, id)}
-            />
-          )}
-          {/* PROPOSAL P: the same idea after the decision that the queue is
-              not managed message by message — the cells, and ONE line that
-              says how many there are and brings them all back to the input.
-              Nothing renders here in production. */}
-          {designVariant() === "p" && (session?.pendingSteers || []).filter(Boolean).length > 0 && (
-            <QueuedRecallTail
-              queue={session.pendingSteers.filter(Boolean)}
-              onBringBack={() => labBringBack(session.id)}
-            />
-          )}
-          {/* PROPOSALS P2 / P3: a queue belongs to the thread, but it need not
-              consume the space of message cells. P2 is one receipt marker;
-              P3 adds one clipped trace per message. */}
-          {(designVariant() === "p2" || designVariant() === "p3") && (session?.pendingSteers || []).filter(Boolean).length > 0 && (
-            <QueuedCompactTail
-              queue={session.pendingSteers.filter(Boolean)}
-              onBringBack={() => labBringBack(session.id)}
-              trace={designVariant() === "p3"}
-            />
-          )}
+          <QueuedTail
+            queue={session?.pendingSteers}
+            onBringBack={() => recallQueuedSteers(session?.id)}
+          />
           {historyHydrationTailVisible(session) && (
             <HistoryHydrationTail
               hasCachedTranscript={(session.messages || []).length > 0}
