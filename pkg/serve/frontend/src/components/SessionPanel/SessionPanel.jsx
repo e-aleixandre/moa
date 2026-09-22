@@ -2,7 +2,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { useStore } from "../../hooks/useStore.js";
 import { registerOverlay } from "../../data/overlays.js";
 import {
-  PANEL_PAGES, artifactsVerdict, closeSessionPanel, mcpVerdict, runFacts,
+  PANEL_PAGES, artifactsVerdict, closeSessionPanel, mcpVerdict, panelPageParent, runFacts,
   setSessionPanelPage, usageVerdict,
 } from "../../data/session-panel.js";
 import { artifactsSlice, listArtifactsInPanel, openArtifactsList } from "../../data/artifacts.js";
@@ -154,6 +154,7 @@ export function SessionPanel({
 }) {
   const panelRef = useRef(null);
   const sub = page !== "root";
+  const parent = panelPageParent(page);
   const close = onClose || closeSessionPanel;
   const goPage = onPage || setSessionPanelPage;
 
@@ -163,7 +164,7 @@ export function SessionPanel({
     const onKey = (event) => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
-      if (sub) goPage("root");
+      if (sub) goPage(parent);
       else close();
     };
     document.addEventListener("keydown", onKey);
@@ -171,7 +172,7 @@ export function SessionPanel({
       unregister();
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, sub, inline]);
+  }, [open, sub, parent, inline]);
 
   if (!session) return null;
 
@@ -201,7 +202,14 @@ export function SessionPanel({
       <div class={`zl-side-head${sub ? " is-sub" : ""}`}>
         {sub ? (
           <>
-            <button type="button" class="zl-back" onClick={() => goPage("root")} aria-label="Back to this session">
+            <button
+              type="button"
+              class="zl-back"
+              onClick={() => goPage(parent)}
+              aria-label={parent === "root"
+                ? (isOwner ? "Back to this owner" : "Back to this session")
+                : `Back to ${PANEL_PAGES[parent]}`}
+            >
               <BackIcon />
             </button>
             <span class="zl-side-title is-page" key={page}>{PANEL_PAGES[page]}</span>
@@ -232,7 +240,9 @@ export function SessionPanel({
           {page === "mcp" && (
             <McpPage sessionId={session.id} mcpTick={session.mcpTick} servers={mcpServers} inline={inline} />
           )}
-          {(page === "overview" || page === "book") && <OwnerPanelPage session={session} page={page} phone={variant === "sheet"} />}
+          {(page === "overview" || page === "book" || page === "ownerEdit") && (
+            <OwnerPanelPage session={session} page={page} phone={variant === "sheet"} />
+          )}
         </div>
       ) : (
         <>
