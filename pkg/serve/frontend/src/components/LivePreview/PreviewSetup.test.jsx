@@ -16,6 +16,8 @@ const find = (node, predicate) => {
 const byClass = (node, cls) => find(node, (n) => typeof n.props?.class === "string" && n.props.class.split(" ").includes(cls));
 const byLabel = (node, label) => find(node, (n) => n.props?.["aria-label"] === label);
 const handler = (node, name) => node.props?.[name] || node.props?.[name.toLowerCase()];
+// The card's title is a prop of the card, not a node of its own.
+const titleOf = (node) => find(node, (n) => typeof n.props?.title === "string")?.props.title;
 const textOf = (node) => {
   if (node == null || node === false) return "";
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -27,9 +29,33 @@ const textOf = (node) => {
 // there is something to point it at.
 test("the first screen asks for the app URL and cannot be submitted empty", () => {
   const tree = PreviewURLSetup({ value: "", onInput: () => {}, onCommit: () => {}, onCancel: () => {} });
-  expect(textOf(byClass(tree, "live-preview-setup-title"))).toBe("Enter your app URL");
+  expect(titleOf(tree)).toBe("Open your app");
   expect(byLabel(tree, "Preview URL").props.value).toBe("");
   expect(find(tree, (n) => n.props?.disabled === true)).toBeTruthy();
+});
+
+// On a phone, typing "localhost:5173" is the expensive part: an address this
+// browser already previewed is one tap, and that tap loads it.
+test("an address used before is offered and opens with one tap", () => {
+  const picked = [];
+  const tree = PreviewURLSetup({
+    value: "",
+    onInput: () => {},
+    onCommit: () => {},
+    onCancel: () => {},
+    recent: ["http://localhost:5173", "http://localhost:3000/"],
+    onPick: (url) => picked.push(url),
+  });
+  const chip = find(tree, (n) => textOf(n) === "localhost:3000" && n.props?.onClick);
+  expect(chip).toBeTruthy();
+  chip.props.onClick();
+  expect(picked).toEqual(["http://localhost:3000/"]);
+});
+
+test("the first screen offers nothing when there is nothing to offer", () => {
+  const tree = PreviewURLSetup({ value: "", onInput: () => {}, onCommit: () => {}, onCancel: () => {} });
+  expect(byClass(tree, "live-preview-recent")).toBeNull();
+  expect(byClass(tree, "live-preview-setup-back")).toBeNull();
 });
 
 // The address the browser uses to reach the proxy is proposed, editable, and
@@ -43,7 +69,7 @@ test("the address screen shows the suggestion, takes edits and confirms with a b
     onCommit: () => { committed += 1; },
     onBack: () => {},
   });
-  expect(textOf(byClass(tree, "live-preview-setup-title"))).toBe("Confirm the preview address");
+  expect(titleOf(tree)).toBe("Confirm the preview address");
 
   const field = byLabel(tree, "Preview proxy address");
   expect(field.props.value).toBe("https://dev.taild072ac.ts.net:7402");
