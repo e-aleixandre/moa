@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { ArrowLeft, MousePointerClick, X, RotateCw, Smartphone, Tablet, Monitor, Scan, PencilLine, MoreHorizontal, Link } from "lucide-preact";
+import { ArrowLeft, MousePointerClick, X, RotateCw, Smartphone, Tablet, Monitor, Scan, PencilLine, MoreHorizontal, Link, GripVertical, GripHorizontal } from "lucide-preact";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { ActionMenu } from "../ActionMenu/ActionMenu.jsx";
 import { AssistantDocument } from "../AssistantDocument/AssistantDocument.jsx";
@@ -14,6 +14,7 @@ import { PreviewAddressSetup, PreviewErrorBanner, PreviewLoading, PreviewRecover
 import { activatePreview, deactivatePreview, fetchPreviewStatus, portOf, suggestPublicURL, validPublicURL } from "./preview-proxy.js";
 import { applyGesture, appToStage, chainPan, panBy, pinchState, stageGesture, wheelFactor, zoomAt, IDENTITY } from "./zoom.js";
 import { createScrollChain, setViewIfChanged } from "./scroll-chain.js";
+import { anchorForKey, isVertical, loadDockAnchor, nearestAnchor, oppositeAnchor, saveDockAnchor } from "./dock-position.js";
 import { applyReport, backTitle, canGoBack, newEpoch, press, resetBack, shouldAutoReturn, INITIAL_BACK } from "./preview-back.js";
 import "./LivePreview.css";
 
@@ -170,6 +171,11 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   // a blank rectangle.
   const [frameLoaded, setFrameLoaded] = useState(false);
   const [widthMenuOpen, setWidthMenuOpen] = useState(false);
+  const [dockAnchor, setDockAnchorState] = useState(loadDockAnchor);
+  const setDockAnchor = (next) => {
+    setDockAnchorState(next);
+    saveDockAnchor(next);
+  };
 
   const clearBridgeFallback = () => {
     if (bridgeFallbackRef.current) clearTimeout(bridgeFallbackRef.current);
@@ -690,7 +696,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           still amber line while the run waits on the user, nothing when idle.
           State colours only: which tool is running is what the cards say. */}
       <div
-        class={`live-preview-stage is-${stage.mode}${composerOpen ? " has-composer" : " has-composer-handle"}${hasApp && frameLoaded ? " is-loaded" : ""}`}
+        class={`live-preview-stage is-${stage.mode}${composerOpen ? " has-composer" : " has-composer-handle"}${hasApp && frameLoaded ? " is-loaded" : ""}${isMobile ? ` dock-at-${dockAnchor}` : ""}`}
         onPointerDownCapture={(event) => {
           if (selected && !event.target.closest(".live-preview-composer")) setSelected(null);
         }}
@@ -801,7 +807,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
               note("sent", "Sent");
             }}
           />
-        ) : hasApp && !loading && inspect ? (
+        ) : hasApp && !loading && inspect && !isMobile ? (
           // Inspect is a mode over the app, so the mode says what it wants and
           // how to leave it, where the thumb already is.
           <div class="live-preview-composer-handle is-hint" role="status">
@@ -816,6 +822,9 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
         ) : hasApp && isMobile ? (
           <PreviewDock
             address={displayURL(targetURL)}
+            anchor={dockAnchor}
+            onAnchor={setDockAnchor}
+            inspect={inspect}
             loading={loading}
             back={back}
             onBack={goBack}
@@ -995,12 +1004,132 @@ function PreviewHead({ address, onClose }) {
 // piece where the thumb is: close, back, a menu for the rare actions (the
 // address, reload, the four widths), Inspect and "Write to Moa". Every target
 // is 44px.
+//
+// It must never cover a control of the app for good, so it moves. Only the
+// grip moves it: a button always means its button and the app under the dock
+// never receives the gesture. Dragged, it follows the thumb and snaps to the
+// nearest of four anchors (dock-position.js); tapped, the grip sends it to the
+// other side of its axis; arrow keys point it anywhere. The anchor is kept on
+// the device.
+//
+// Inspect does not replace the dock: the mode is shown and ended where it was
+// turned on, and a dock the user put out of the way stays out of the way.
 function PreviewDock({
-  address, loading, back, onBack, onReload, onChangeURL,
+  address, anchor, onAnchor, inspect, loading, back, onBack, onReload, onChangeURL,
   width, onWidth, menuOpen, onMenu, inspectButtonRef, onInspect, onWrite, onClose,
 }) {
+  const vertical = isVertical(anchor);
+  const dockRef = useRef(null);
+  const [drag, setDrag] = useState(null);
+  const gesture = useRef(null);
+  // The rect the dock had when it was let go: the new anchor is animated FROM
+  // there, so the snap reads as a magnet pulling it in, not a jump.
+  const snapFrom = useRef(null);
+
+  useLayoutEffect(() => {
+    const el = dockRef.current;
+    const from = snapFrom.current;
+    snapFrom.current = null;
+    if (!el || !from) return;
+    const to = el.getBoundingClientRect();
+    const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+    const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+    if (!dx && !dy) return;
+    el.style.transition = "none";
+    el.style.setProperty("--dock-dx", `${dx}px`);
+    el.style.setProperty("--dock-dy", `${dy}px`);
+    el.getBoundingClientRect();
+    el.style.transition = "";
+    el.style.setProperty("--dock-dx", "0px");
+    el.style.setProperty("--dock-dy", "0px");
+  }, [anchor]);
+
+  const moveTo = (next) => {
+    if (!next || next === anchor) return;
+    snapFrom.current = dockRef.current?.getBoundingClientRect() || null;
+    onMenu(false);
+    onAnchor(next);
+  };
+
+  const onGripDown = (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    gesture.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onGripMove = (e) => {
+    const g = gesture.current;
+    if (!g || e.pointerId !== g.id) return;
+    const dx = e.clientX - g.x;
+    const dy = e.clientY - g.y;
+    // A few pixels of wobble is still a tap on the grip.
+    if (!g.moved && Math.hypot(dx, dy) < 8) return;
+    if (!g.moved) onMenu(false);
+    g.moved = true;
+    setDrag({ dx, dy });
+  };
+  const onGripUp = (e) => {
+    const g = gesture.current;
+    if (!g || e.pointerId !== g.id) return;
+    gesture.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    if (!g.moved) {
+      if (e.type === "pointerup") moveTo(oppositeAnchor(anchor));
+      return;
+    }
+    const el = dockRef.current;
+    const stageEl = el?.parentElement;
+    if (!el || !stageEl) {
+      setDrag(null);
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    const box = stageEl.getBoundingClientRect();
+    const next = nearestAnchor(
+      { x: rect.left + rect.width / 2 - box.left, y: rect.top + rect.height / 2 - box.top },
+      { w: box.width, h: box.height },
+    );
+    // Same anchor: dropping the offset lets the transform's own transition
+    // carry it home. Another anchor changes the layout, so it is animated from
+    // the release point (the layout effect above).
+    if (next !== anchor) snapFrom.current = rect;
+    setDrag(null);
+    if (next !== anchor) onAnchor(next);
+  };
+
+  const Grip = vertical ? GripHorizontal : GripVertical;
+  const style = drag ? { "--dock-dx": `${drag.dx}px`, "--dock-dy": `${drag.dy}px` } : undefined;
+
   return (
-    <div class="live-preview-dock" role="toolbar" aria-label="Preview controls">
+    <div
+      ref={dockRef}
+      class={`live-preview-dock at-${anchor}${vertical ? " is-vertical" : ""}${drag ? " is-dragging" : ""}`}
+      style={style}
+      role="toolbar"
+      aria-label="Preview controls"
+      aria-orientation={vertical ? "vertical" : "horizontal"}
+    >
+      <button
+        type="button"
+        class="live-preview-dock-grip"
+        aria-label="Move controls"
+        title="Drag to move · tap to send to the other side"
+        onPointerDown={onGripDown}
+        onPointerMove={onGripMove}
+        onPointerUp={onGripUp}
+        onPointerCancel={onGripUp}
+        onKeyDown={(e) => {
+          const next = anchorForKey(e.key);
+          if (!next) return;
+          e.preventDefault();
+          moveTo(next);
+        }}
+        onClick={(e) => {
+          // Keyboard activation (Enter/Space) has no pointer gesture behind it.
+          if (e.detail === 0) moveTo(oppositeAnchor(anchor));
+        }}
+      >
+        <Grip size={16} aria-hidden="true" />
+      </button>
       <button type="button" class="zl-desk-act live-preview-act" onClick={onClose} aria-label="Close preview" title="Close preview">
         <X size={16} aria-hidden="true" />
       </button>
@@ -1021,7 +1150,8 @@ function PreviewDock({
         label="Preview options"
         triggerClass="zl-desk-act live-preview-act"
         triggerSize={18}
-        placement="up"
+        placement={anchor === "top" ? "down" : anchor === "bottom" ? "up" : "down"}
+        align={anchor === "right" ? "end" : "start"}
         actions={[
           { id: "url", icon: Link, label: address, onClick: onChangeURL },
           { id: "reload", icon: RotateCw, label: "Reload", onClick: onReload },
@@ -1037,20 +1167,33 @@ function PreviewDock({
       <span class="live-preview-bar-sep" aria-hidden="true" />
       <button
         type="button"
-        class="zl-desk-act live-preview-act"
+        class={`zl-desk-act live-preview-act${inspect ? " is-on" : ""}`}
         ref={inspectButtonRef}
         onClick={onInspect}
         disabled={loading}
-        aria-pressed={false}
+        aria-pressed={inspect}
         aria-label="Inspect"
-        title="Inspect — point at an element in the app"
+        title={inspect ? "Tap an element · tap here when done" : "Inspect — point at an element in the app"}
       >
         <MousePointerClick size={16} aria-hidden="true" />
       </button>
-      <button type="button" class="live-preview-dock-write" onClick={onWrite} disabled={loading}>
-        <PencilLine size={14} aria-hidden="true" />
-        Write to Moa
-      </button>
+      {/* One slot, one size, whatever it says: the dock never changes shape
+          under the thumb that has to tap Inspect again to end the mode. */}
+      {inspect && !vertical ? (
+        <span class="live-preview-dock-hint" role="status">Tap an element</span>
+      ) : (
+        <button
+          type="button"
+          class={`live-preview-dock-write${vertical ? " is-icon" : ""}`}
+          onClick={onWrite}
+          disabled={loading}
+          aria-label="Write to Moa"
+          title="Write to Moa"
+        >
+          <PencilLine size={vertical ? 16 : 14} aria-hidden="true" />
+          {!vertical && "Write to Moa"}
+        </button>
+      )}
     </div>
   );
 }

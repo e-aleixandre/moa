@@ -177,15 +177,21 @@
 }
 
 /* ── The dock (phone) ───────────────────────────────────────────────────────
-   Every control of a loaded preview in one floating piece at the bottom edge:
-   the surface every floating thing in moa uses (sheet colour, lit rim, soft
-   shadow), so it reads as moa's over any app. */
+   Every control of a loaded preview in one floating piece: the surface every
+   floating thing in moa uses (sheet colour, lit rim, soft shadow), so it reads
+   as moa's over any app.
+
+   It rests at one of four anchors (dock-position.js). Each anchor is a place
+   plus a transform, and the drag offset rides on top of that transform as two
+   custom properties: while the thumb holds the grip the dock follows it with no
+   transition; let go, the offset returns to zero and the transform's own
+   transition is the magnet. */
 .live-preview-dock {
+  --dock-dx: 0px;
+  --dock-dy: 0px;
+  --dock-inset: var(--space-2);
   position: absolute;
-  left: 50%;
-  bottom: max(var(--space-2), var(--shell-bottom));
   z-index: 5;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 2px;
@@ -198,6 +204,118 @@
   -webkit-backdrop-filter: blur(12px);
   box-shadow: var(--zl-rim-2), 0 12px 32px -8px rgba(0, 0, 0, 0.55);
   touch-action: manipulation;
+  transition: transform var(--motion-base, 240ms) var(--motion-ease-spring, cubic-bezier(0.34, 1.3, 0.64, 1)),
+    box-shadow var(--motion-exit-fast, 120ms) var(--motion-ease, ease);
+}
+.live-preview-dock.at-bottom {
+  left: 50%;
+  bottom: max(var(--dock-inset), var(--shell-bottom));
+  transform: translate(calc(-50% + var(--dock-dx)), var(--dock-dy));
+}
+.live-preview-dock.at-top {
+  left: 50%;
+  top: var(--dock-inset);
+  transform: translate(calc(-50% + var(--dock-dx)), var(--dock-dy));
+}
+.live-preview-dock.at-left {
+  left: var(--dock-inset);
+  top: 50%;
+  transform: translate(var(--dock-dx), calc(-50% + var(--dock-dy)));
+}
+.live-preview-dock.at-right {
+  right: var(--dock-inset);
+  top: 50%;
+  transform: translate(var(--dock-dx), calc(-50% + var(--dock-dy)));
+}
+.live-preview-dock.is-vertical {
+  flex-direction: column;
+  max-width: none;
+  max-height: calc(100% - var(--space-4));
+}
+.live-preview-dock.is-vertical .live-preview-bar-sep {
+  width: 18px;
+  height: 1px;
+  margin: 4px 0;
+}
+/* Held: it lifts, and follows the thumb with nothing in between. */
+.live-preview-dock.is-dragging {
+  transition: none;
+  box-shadow: var(--zl-rim-2), 0 20px 48px -8px rgba(0, 0, 0, 0.65);
+}
+
+/* The grip: the only part of the dock that moves it, so a button is always
+   its button and a drag never reaches the app. Dim, like a handle should be;
+   it brightens while held. */
+.live-preview-dock-grip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-t4);
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.live-preview-dock.is-vertical .live-preview-dock-grip {
+  width: 44px;
+  height: 28px;
+}
+.live-preview-dock.is-dragging .live-preview-dock-grip {
+  color: var(--zl-t1);
+  cursor: grabbing;
+}
+.live-preview-dock-grip:focus-visible {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
+}
+
+/* Inspect is on: the dock says so where "Write to Moa" was, and the lit
+   Inspect button is how it ends. */
+.live-preview-dock-hint,
+.live-preview-dock-write:not(.is-icon) {
+  min-width: 132px;
+  justify-content: center;
+}
+.live-preview-dock-hint {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 44px;
+  margin-left: 2px;
+  padding: 0 12px;
+  color: var(--zl-t2);
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* The menu opens away from the edge the dock rests on. */
+.live-preview-dock.is-vertical .action-menu-list {
+  top: 0;
+}
+.live-preview-dock.at-left .action-menu-list {
+  left: calc(100% + 8px);
+  right: auto;
+}
+.live-preview-dock.at-right .action-menu-list {
+  right: calc(100% + 8px);
+  left: auto;
+}
+
+/* The activity cards keep their lane clear of the dock only while the dock
+   is at the bottom. */
+.live-preview-stage.dock-at-top.has-composer-handle .lp-stream,
+.live-preview-stage.dock-at-left.has-composer-handle .lp-stream,
+.live-preview-stage.dock-at-right.has-composer-handle .lp-stream {
+  bottom: max(var(--space-3), var(--shell-bottom));
 }
 .live-preview-dock-write {
   flex: none;
@@ -220,6 +338,12 @@
 .live-preview-dock-write svg {
   flex: none;
   color: var(--zl-t3);
+}
+.live-preview-dock-write.is-icon {
+  width: 44px;
+  margin: 2px 0 0;
+  padding: 0;
+  justify-content: center;
 }
 .live-preview-dock-write:disabled {
   color: var(--zl-t4);
