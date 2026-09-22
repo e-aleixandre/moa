@@ -299,6 +299,9 @@
 .zl-prow:hover .zl-go { color: var(--zl-t2); }
 .zl-prow-ico { width: 15px; height: 15px; flex: none; color: var(--zl-t3); }
 .zl-prow-t { flex: none; }
+/* A row with no verdict (Overview, Book) has nothing pushing the chevron
+   right, so it sat against the title while its neighbours' sat at the edge. */
+.zl-prow .zl-go { margin-left: auto; }
 .zl-prow-v {
   flex: 1;
   min-width: 0;
