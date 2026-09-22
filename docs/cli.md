@@ -124,7 +124,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | Alias | Resolves to |
 |-------|------------|
 | `sonnet` | `claude-sonnet-5` |
-| `opus` | `claude-opus-5` |
+| `opus` | `claude-opus-5-5` |
 | `haiku` | `claude-haiku-4-5-20251001` |
 | `fable` | `claude-fable-5-1` |
 | `codex` | `gpt-5.3-codex` |
@@ -146,7 +146,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | `gpt5.5` | `gpt-5.5` |
 | `gpt5-mini` | `gpt-5.4-mini` |
 
-You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-4-8`, `grok-4.5`, `grok-4.6`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
+You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-5`, `claude-opus-4-8`, `grok-4.5`, `grok-4.6`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
 
 ## Thinking levels
 
