@@ -5,10 +5,10 @@ import { StateDot } from "../../primitives/StateDot/StateDot.jsx";
 import { LiveSentence } from "./LiveSentence.jsx";
 // PROPOSAL LAB — inert in production (see data/design-variant.js).
 import {
-  designVariant, designCall, labCancelQueued, labEditQueued, callClock, formatCallCost,
+  designVariant, designCall, labCancelQueued, labEditQueued, labBringBack, callClock, formatCallCost,
   CALL_COST_TITLE,
 } from "../../data/design-variant.js";
-import { QueuePill, QueueRows } from "../../components/DesignProposals/DesignProposals.jsx";
+import { QueuePill, QueueRows, QueueRecallPill } from "../../components/DesignProposals/DesignProposals.jsx";
 import "./LiveBar.css";
 
 // LiveBar — ONE bar of live work above the composer. Markup and CSS are the
@@ -222,6 +222,12 @@ export function LiveBar({
   const proposalB = designVariant() === "b";
   const labQueue = proposalB ? (session?.pendingSteers || []).filter(Boolean) : [];
   const labCall = proposalB ? designCall() : null;
+  /* ── PROPOSAL V ────────────────────────────────────────────────────────
+     Only the marker: a pill next to Stop that says how many are queued and,
+     when pressed, gives them all back to the input. No panel, no list — what
+     you queued is read in the input, where it is edited. */
+  const proposalV = designVariant() === "v";
+  const recallQueue = proposalV ? (session?.pendingSteers || []).filter(Boolean) : [];
   const callAlert = !labCall
     ? null
     : labCall.pendingAsks > 0 ? "waiting" : labCall.micState !== "live" ? "mic" : null;
@@ -307,6 +313,10 @@ export function LiveBar({
 
         {proposalB && labQueue.length > 0 && (
           <QueuePill count={labQueue.length} open={queueOpen} onToggle={() => setQueueOpen((v) => !v)} />
+        )}
+
+        {proposalV && recallQueue.length > 0 && (
+          <QueueRecallPill count={recallQueue.length} onBringBack={() => labBringBack(session.id)} />
         )}
 
         {labCall && (

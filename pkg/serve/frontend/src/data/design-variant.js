@@ -1,15 +1,20 @@
 // design-variant — LABORATORY ONLY, and deliberately dumb.
 //
-// It is the switch behind three PROPOSALS for the message queue and the call
-// block (A, B, C), plus the current product ("today"), so the owner can see
-// them mounted in the real screens instead of in a mock-up. Nothing here is a
-// decided design: the branches guarded by this module are proposal code,
-// marked as such at every site.
+// It is the switch behind the PROPOSALS for the message queue and the call
+// block, plus the current product ("today"), so the owner can see them mounted
+// in the real screens instead of in a mock-up. Nothing here is a decided
+// design: the branches guarded by this module are proposal code, marked as
+// such at every site.
+//
+// A, B and C are the FIRST round, kept as historical reference. They still
+// offer per-message cancel/edit, which the owner has since ruled out: the
+// queue is not managed message by message, it comes back whole or not at all.
+// P and V are the second round and obey that decision.
 //
 // The whole laboratory hangs off two URL parameters that production never
 // carries:
 //
-//   ?cq=today|a|b|c        which proposal to paint
+//   ?cq=today|a|b|c|p|v    which proposal to paint
 //   ?cqcase=one|many|call  which situation to seed (see the fixtures below)
 //
 // With no parameters — i.e. the product — `designVariant()` is "today" and
@@ -17,8 +22,9 @@
 // ships today.
 
 import { setState, store, updateSession } from "./store.js";
+import { combineQueueText } from "./composer-queue.js";
 
-const VARIANTS = new Set(["today", "a", "b", "c"]);
+const VARIANTS = new Set(["today", "a", "b", "c", "p", "v"]);
 const CASES = new Set(["one", "many", "call"]);
 
 // Read once: the URL does not change under the app (the lab is entered by
@@ -121,6 +127,31 @@ export function labEditQueued(sessionId, id) {
     composerDrops: {
       ...state.composerDrops,
       [sessionId]: { id: `lab-edit-${id}`, text: target.text, focus: true },
+    },
+  }));
+}
+
+// --- The only queue action of the second round (LAB) ----------------------
+// Bring back = what Alt+↑ already does in the product: every queued message
+// joins the draft in the input and the queue is emptied. The product path is
+// Composer.handleDequeueSteers (combineQueueText + cancelSteers on the
+// server); the lab has no server, so it writes the same text through the
+// composerDrops handoff and empties the seeded queue in the store. The gesture
+// is therefore real against the lab's state, not a painted button.
+
+export function labBringBack(sessionId) {
+  const session = store.get().sessions[sessionId];
+  const queue = (session?.pendingSteers || []).filter(Boolean);
+  if (!queue.length) return;
+  updateSession(sessionId, { pendingSteers: null });
+  setState((state) => ({
+    composerDrops: {
+      ...state.composerDrops,
+      [sessionId]: {
+        id: `lab-bring-back-${Date.now()}`,
+        text: combineQueueText("", queue),
+        focus: true,
+      },
     },
   }));
 }

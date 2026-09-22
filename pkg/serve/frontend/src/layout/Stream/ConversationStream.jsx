@@ -28,8 +28,8 @@ import {
   READ_ANCHOR_MARGIN, consumeReadAnchor, hasReadAnchor, readAnchorTargetID, settleReadAnchor,
 } from "../../data/stream-read-anchor.js";
 // PROPOSAL LAB — inert in production (see data/design-variant.js).
-import { designVariant, labCancelQueued } from "../../data/design-variant.js";
-import { QueuedTail } from "../../components/DesignProposals/DesignProposals.jsx";
+import { designVariant, labCancelQueued, labBringBack } from "../../data/design-variant.js";
+import { QueuedTail, QueuedRecallTail } from "../../components/DesignProposals/DesignProposals.jsx";
 
 // Stream — the scrollable conversation area. It renders the REAL
 // projected block list from stream-model.js (projectStream), mapping each
@@ -277,6 +277,16 @@ export function ConversationStream({
             <QueuedTail
               queue={session.pendingSteers.filter(Boolean)}
               onCancel={(id) => labCancelQueued(session.id, id)}
+            />
+          )}
+          {/* PROPOSAL P: the same idea after the decision that the queue is
+              not managed message by message — the cells, and ONE line that
+              says how many there are and brings them all back to the input.
+              Nothing renders here in production. */}
+          {designVariant() === "p" && (session?.pendingSteers || []).filter(Boolean).length > 0 && (
+            <QueuedRecallTail
+              queue={session.pendingSteers.filter(Boolean)}
+              onBringBack={() => labBringBack(session.id)}
             />
           )}
           {historyHydrationTailVisible(session) && (

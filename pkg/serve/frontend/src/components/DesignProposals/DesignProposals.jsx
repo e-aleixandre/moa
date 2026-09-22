@@ -7,6 +7,12 @@ import "./DesignProposals.css";
 // only from a branch guarded by data/design-variant.js, which is inert unless
 // the URL carries ?cq= / ?cqcase=. Kept in one file so the proposal can be
 // deleted in one movement once the owner has chosen.
+//
+// A, B and C are the first round and are left untouched as reference. P and V
+// are the second round, after the decision that the queue is never managed
+// message by message: no edit, no per-message cancel, no reorder — one gesture
+// that brings the whole queue back to the input, which is the only place text
+// is edited.
 
 // --- A -------------------------------------------------------------------
 // A queued message painted as what it already is: a message. Same grammar as
@@ -221,5 +227,63 @@ export function CallFace({ call, onHangup, onTypeInstead }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// --- P -------------------------------------------------------------------
+// "The conversation acknowledges receipt". A stripped of everything the
+// decision removes: no ✕ anywhere, no per-message anything. One group line
+// that says how many are queued and carries the single action, and under it
+// the messages themselves in a said-but-not-landed face.
+//
+// The whole line is the button, 44px tall: on the phone the target is the
+// width of the column, so it is hit without aiming. Its title names the
+// shortcut that already exists in the product (Alt+↑), because this button and
+// that key are literally the same gesture.
+
+export function QueuedRecallTail({ queue, onBringBack }) {
+  if (!queue?.length) return null;
+  const n = queue.length;
+  return (
+    <div class="dp-queued-tail dp-recall-tail">
+      <button
+        type="button"
+        class="dp-recall-line"
+        onClick={onBringBack}
+        title={`Bring back — the ${n === 1 ? "message goes" : "messages go"} back to the input (Alt+↑)`}
+        aria-label={`${n} queued message${n === 1 ? "" : "s"} — bring ${n === 1 ? "it" : "them"} back to the input`}
+      >
+        <span class="dp-recall-count zl-data">{n} queued · read at the next step</span>
+        <span class="dp-recall-act">Bring back</span>
+      </button>
+      {queue.map((m) => (
+        <div class="zl-user dp-queued dp-queued-flat" key={m.id}>
+          <div class="zl-user-cell">
+            <div class={`zl-user-body${m.command ? " dp-queued-cmd" : ""}`}>{m.text}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// --- V -------------------------------------------------------------------
+// "Only the marker". Same single action, no list: a pill in the LiveBar next
+// to Stop. It does not open anything — pressing it is the recall. The bar is
+// always there when there is a queue, because a queue only exists while the
+// agent is working.
+
+export function QueueRecallPill({ count, onBringBack }) {
+  return (
+    <button
+      type="button"
+      class="zl-live-tally dp-recall-pill"
+      onClick={onBringBack}
+      title={`Bring back — the ${count === 1 ? "message goes" : "messages go"} back to the input (Alt+↑)`}
+      aria-label={`${count} queued message${count === 1 ? "" : "s"} — bring ${count === 1 ? "it" : "them"} back to the input`}
+    >
+      <span class="zl-live-n zl-data">{count}</span>
+      <span class="dp-recall-word">queued</span>
+    </button>
   );
 }

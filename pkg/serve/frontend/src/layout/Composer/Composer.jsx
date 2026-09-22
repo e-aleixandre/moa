@@ -1154,7 +1154,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           is ONE flat line inside the slab.
        B  the composer draws neither: both live in the LiveBar.
        C  the queue is paper stacked behind the slab's top edge plus a sheet,
-          and the call REPLACES the composer's face. */
+          and the call REPLACES the composer's face.
+       P  the composer draws no queue (it is in the transcript, with one line
+          that brings it all back) and the call is A's flat line.
+       V  the composer draws no queue (it is a pill in the LiveBar) and the
+          call is the same flat line: P and V differ in the queue ONLY. */
   const proposal = designVariant();
   const queue = steer ? [] : (pendingSteers || []).filter(Boolean);
   const callFace = proposal === "c" && voiceLive.active && !typeInstead;
@@ -1195,8 +1199,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           onHangup={voiceLive.hangup}
         />
       )}
-      {/* A's call — and C's, once the owner has asked to type instead. */}
-      {voiceLive.active && (proposal === "a" || (proposal === "c" && typeInstead)) && (
+      {/* A's call — shared by P and V, and by C once the owner has asked to
+          type instead. The input stays reachable during a call on purpose:
+          the delegate can block waiting for an answer from this conversation. */}
+      {voiceLive.active && (proposal === "a" || proposal === "p" || proposal === "v" || (proposal === "c" && typeInstead)) && (
         <CallLine call={voiceLive} onHangup={voiceLive.hangup} />
       )}
       {attachments.length > 0 && (

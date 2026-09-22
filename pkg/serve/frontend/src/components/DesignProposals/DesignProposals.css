@@ -480,3 +480,64 @@
   .zl-live-bar.dp-bar-call > .dp-call-now { flex: 1 0 100%; }
   .zl-live-bar.dp-bar-call > .dp-live-call-meta { margin-left: auto; }
 }
+
+/* ── P / V: the queue at its minimum ──────────────────────────────────── */
+
+/* P's group line IS the action: the whole 44px row is the button, so on the
+   phone it is hit without aiming. Nothing is boxed — a filled control here
+   would weigh more than the three words it carries. The tail sits after the
+   last block with the same air a message has. */
+.dp-recall-tail { margin-top: 2px; }
+.dp-recall-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 4px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--zl-r-sm);
+}
+.dp-recall-count {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-micro);
+  letter-spacing: 0.01em;
+  color: var(--zl-t4);
+}
+/* The action is a word, not a button: one step brighter than the count so it
+   reads as the live half of the line. */
+.dp-recall-act {
+  flex: none;
+  font-size: var(--zl-fs-meta);
+  font-weight: var(--weight-medium);
+  color: var(--zl-t3);
+}
+@media (hover: hover) {
+  .dp-recall-line:hover { background: var(--zl-hi); }
+  .dp-recall-line:hover .dp-recall-act { color: var(--zl-t1); }
+  .dp-recall-line:hover .dp-recall-count { color: var(--zl-t3); }
+}
+.dp-recall-line:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+
+/* The cells: same type, size and margins as a landed message, dotted hairline
+   and no fill (the .dp-queued face above), and no foot at all — there is
+   nothing per message to press. They are closer together than ordinary
+   messages because they are one block, not a conversation. */
+.dp-queued-flat { margin-bottom: 8px; }
+.dp-queued-flat:last-child { margin-bottom: 0; }
+
+/* V's marker: the LiveBar's own tally shape, no chevron, no panel. Pressing
+   it is the recall. */
+.dp-recall-pill { gap: 6px; padding: 0 10px; }
+.dp-recall-word {
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  color: var(--zl-t3);
+}
