@@ -282,7 +282,9 @@ export function QueuedRecallTail({ queue, onBringBack }) {
 export function QueuedCompactTail({ queue, onBringBack, trace = false }) {
   if (!queue?.length) return null;
   const n = queue.length;
-  const count = `${n} message${n === 1 ? "" : "s"} queued · read at the next step`;
+  // Short on purpose: "N messages queued · …" wraps to a second line at 390px,
+  // which is half the height of a marker whose whole premise is being small.
+  const count = `${n} queued · read at the next step`;
   return (
     <div class="zl-sys dp-compact-tail">
       <button
