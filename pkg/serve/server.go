@@ -1127,9 +1127,9 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 }
 
 // handleCancelSteers drops all steer messages still queued (not yet delivered)
-// for a session's agent. The web client calls this when the user pulls queued
-// messages back into the input to edit them, so the agent doesn't also deliver
-// the originals (double-delivery).
+// for a session's agent. Clients that opt in receive the exact items removed,
+// so a recall never loses a steer that arrived after their queue snapshot.
+// The historical 204 remains the default for installed and third-party clients.
 func handleCancelSteers(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := mgr.Get(r.PathValue("id"))
@@ -1137,7 +1137,34 @@ func handleCancelSteers(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		_ = sess.runtime.Bus.Execute(bus.CancelSteer{})
+		var discarded []core.SteerItem
+		if err := sess.runtime.Bus.Execute(bus.CancelSteer{DiscardedSteers: &discarded}); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if r.Header.Get("X-Moa-Steers-Cancel-Response") == "discarded" {
+			steers := make([]PendingSteerData, 0, len(discarded))
+			for _, steer := range discarded {
+				if steer.Internal {
+					continue
+				}
+				steers = append(steers, PendingSteerData{
+					ID:      steer.ID,
+					Text:    steer.Text,
+					Command: steer.IsBarrier(),
+					Images:  countImageContent(steer.Content),
+				})
+			}
+			ids := make([]string, len(steers))
+			for i, steer := range steers {
+				ids[i] = steer.ID
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"discarded_steer_ids": ids,
+				"discarded_steers":    steers,
+			})
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

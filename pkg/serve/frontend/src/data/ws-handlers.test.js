@@ -972,7 +972,19 @@ test('handleWsSteersCanceled clears the shared queue on every client', async () 
 
   handleWsSteersCanceled('s1');
 
-  expect(store.get().sessions.s1.pendingSteers).toBeNull();
+	expect(store.get().sessions.s1.pendingSteers).toBeNull();
+});
+
+test('handleWsSteersCanceled preserves steers admitted after the cancellation cut', async () => {
+	seedSession('s1');
+	setState({ sessions: { s1: { ...store.get().sessions.s1, pendingSteers: [
+		{ id: 'discarded', text: 'old queue' },
+		{ id: 'newer', text: 'arrived after cancel' },
+	] } } });
+
+	handleWsSteersCanceled('s1', ['discarded']);
+
+	expect(store.get().sessions.s1.pendingSteers).toEqual([{ id: 'newer', text: 'arrived after cancel' }]);
 });
 
 test('handleWsCommandQueued appends a command chip and confirms an optimistic one by ID', async () => {

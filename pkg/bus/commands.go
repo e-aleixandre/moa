@@ -119,7 +119,8 @@ type QueueCommand struct {
 // CancelSteer drops steer messages still queued (not yet delivered) for the
 // running agent. Pairs with a frontend pulling queued steers back for editing.
 type CancelSteer struct {
-	SessionID string
+	SessionID       string
+	DiscardedSteers *[]core.SteerItem
 }
 
 // AppendToConversation adds a message to the conversation without running the agent.

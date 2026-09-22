@@ -389,9 +389,15 @@ function chronologicalSubagentOutcomes(outcomes) {
 
 // handleWsSteersCanceled clears the shared queue on every client when the
 // queued (not yet delivered) steers were dropped (e.g. dequeued for editing).
-export function handleWsSteersCanceled(id) {
+export function handleWsSteersCanceled(id, discardedSteerIDs) {
   const sess = store.get().sessions[id];
   if (!sess || !sess.pendingSteers) return;
+  if (Array.isArray(discardedSteerIDs)) {
+    const discarded = new Set(discardedSteerIDs);
+    const pendingSteers = sess.pendingSteers.filter((steer) => !discarded.has(steer.id));
+    updateSession(id, { pendingSteers: pendingSteers.length > 0 ? pendingSteers : null });
+    return;
+  }
   updateSession(id, { pendingSteers: null });
 }
 

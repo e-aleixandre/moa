@@ -66,6 +66,7 @@ func registerRunControlHandlers(sctx *SessionContext) {
 		sctx.Bus.Publish(SteersCanceled{
 			SessionID:     sctx.SessionID,
 			AttachmentIDs: steerAttachmentIDs(discarded),
+			SteerIDs:      visibleSteerIDs(discarded),
 		})
 		return nil
 	}
@@ -122,14 +123,28 @@ func registerCancelSteerHandler(sctx *SessionContext) {
 	b := sctx.Bus
 	b.OnCommand(func(cmd CancelSteer) error {
 		discarded := sctx.Agent.CancelSteer()
+		if cmd.DiscardedSteers != nil {
+			*cmd.DiscardedSteers = discarded
+		}
 		// Broadcast the invalidation so every client of this session clears its
 		// queued chips (the queue is shared/authoritative).
 		sctx.Bus.Publish(SteersCanceled{
 			SessionID:     sctx.SessionID,
 			AttachmentIDs: steerAttachmentIDs(discarded),
+			SteerIDs:      visibleSteerIDs(discarded),
 		})
 		return nil
 	})
+}
+
+func visibleSteerIDs(items []core.SteerItem) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if !item.Internal {
+			ids = append(ids, item.ID)
+		}
+	}
+	return ids
 }
 
 func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState) {
