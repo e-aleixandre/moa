@@ -43,9 +43,9 @@ export const MCP_RESTART_TIMEOUT_MS = 30000;
 // marked stale. Only an authoritative init may acknowledge its attention.
 export const HISTORY_HYDRATION_TIMEOUT_MS = 12000;
 
-export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_MS, cache } = {}) {
-  const controller = timeoutMs > 0 ? new AbortController() : null;
-  const opts = { method, headers: REQUEST_HEADERS };
+export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_MS, cache, headers } = {}) {
+	const controller = timeoutMs > 0 ? new AbortController() : null;
+	const opts = { method, headers: { ...REQUEST_HEADERS, ...headers } };
   if (body) opts.body = JSON.stringify(body);
   if (cache) opts.cache = cache;
   if (controller) opts.signal = controller.signal;
@@ -464,7 +464,7 @@ function routeEvent(sessionId, evt) {
       handleWsSteer(sessionId, evt.data);
       break;
     case 'steers_canceled':
-      handleWsSteersCanceled(sessionId);
+      handleWsSteersCanceled(sessionId, evt.data?.discarded_steer_ids);
       break;
     case 'command_queued':
       handleWsCommandQueued(sessionId, evt.data);

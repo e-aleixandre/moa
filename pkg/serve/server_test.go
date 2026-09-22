@@ -32,6 +32,78 @@ func newTestServer(t *testing.T) (*httptest.Server, *Manager, context.CancelFunc
 	return newTestServerWithRoot(t, "/tmp")
 }
 
+func TestCancelSteersReturnsExactDiscardedQueueAfterClientSnapshot(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(3*time.Second, "slow")))
+	httpSrv := httptest.NewServer(NewServer(mgr))
+	defer httpSrv.Close()
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action, _, _, err := mgr.Send(sess.ID, "start", nil, "", ""); err != nil || action != "send" {
+		t.Fatalf("start = (%q, %v), want (send, nil)", action, err)
+	}
+	pollUntil(t, 2*time.Second, "running", func() bool { return sessState(sess) == StateRunning })
+	if action, id, _, err := mgr.Send(sess.ID, "read before cancel", nil, "q1", ""); err != nil || action != "steer" || id != "q1" {
+		t.Fatalf("first steer = (%q, %q, %v), want (steer, q1, nil)", action, id, err)
+	}
+	if got := sess.runtime.Context().Agent.PendingSteers(); len(got) != 1 || got[0].ID != "q1" {
+		t.Fatalf("snapshot = %+v, want q1", got)
+	}
+	if action, id, _, err := mgr.Send(sess.ID, "arrived in the gap", nil, "q2", ""); err != nil || action != "steer" || id != "q2" {
+		t.Fatalf("second steer = (%q, %q, %v), want (steer, q2, nil)", action, id, err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, httpSrv.URL+"/api/sessions/"+sess.ID+"/steers/cancel", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Moa-Request", "1")
+	req.Header.Set("X-Moa-Steers-Cancel-Response", "discarded")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("cancel status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var got struct {
+		IDs    []string           `json:"discarded_steer_ids"`
+		Steers []PendingSteerData `json:"discarded_steers"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got.IDs, ",") != "q1,q2" || len(got.Steers) != 2 || got.Steers[0].Text != "read before cancel" || got.Steers[1].Text != "arrived in the gap" {
+		t.Fatalf("discarded response = %+v, want q1 and q2 in queue order", got)
+	}
+	if pending := sess.runtime.Context().Agent.PendingSteers(); len(pending) != 0 {
+		t.Fatalf("queue after cancel = %+v, want empty", pending)
+	}
+}
+
+func TestCancelSteersKeepsLegacyNoContentContract(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider(delayedResponseHandler(3*time.Second, "slow")))
+	httpSrv := httptest.NewServer(NewServer(mgr))
+	defer httpSrv.Close()
+
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := apiReq(t, httpSrv, http.MethodPost, "/api/sessions/"+sess.ID+"/steers/cancel", "")
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("legacy cancel status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+}
+
 func TestListModelsIncludesDeclaredReasoningEfforts(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/models", nil)
 	res := httptest.NewRecorder()

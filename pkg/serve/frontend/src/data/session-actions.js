@@ -808,17 +808,16 @@ export async function stopRun(id) {
 }
 
 // cancelSteers drops every steer message still queued (not yet delivered) on
-// the server. Called when the user pulls queued messages back into the input to
-// edit them, so the agent doesn't also deliver the originals (double-delivery).
+// the server and returns the precise server-owned set it removed.
 export async function cancelSteers(id) {
-  await api('POST', `/api/sessions/${id}/steers/cancel`);
+  return api('POST', `/api/sessions/${id}/steers/cancel`, undefined, {
+    headers: { 'X-Moa-Steers-Cancel-Response': 'discarded' },
+  });
 }
 
 // Recall state is per session. A response can reach HTTP before its WebSocket
-// broadcast, or the broadcast can be lost altogether, so a 204 reconciles the
-// recalled IDs locally. On a failed request we remember which texts are already
-// in the composer: a retry sends cancel again but never appends those texts a
-// second time.
+// broadcast, or the broadcast can be lost altogether, so the response
+// reconciles the exact server-owned queue.
 const queuedRecalls = new Map();
 
 // recallQueuedSteers is THE queue recall: the whole queue leaves the server and
@@ -831,21 +830,6 @@ const queuedRecalls = new Map();
 // The text travels through `composerDrops`, the same handoff stopRun and a
 // share use: appendSharedText joins it after the current draft exactly as
 // combineQueueText did, and `focus: true` puts the caret back in the box.
-//
-// The write happens BEFORE the server answers, on purpose: the owner sees the
-// text return instantly, and a failed cancel leaves the text in the box plus an
-// error toast rather than swallowing it.
-//
-// KNOWN RACE (server contract, not fixable here): the queue read here is the
-// client's, and `POST /steers/cancel` discards whatever is queued when it lands
-// (pkg/serve/server.go handleCancelSteers -> bus.CancelSteer). A steer that
-// arrives in between is therefore cancelled without its text ever reaching the
-// box, and one the agent has already taken is restored as text it will not
-// deliver twice but the owner may resend. The endpoint answers 204 and the
-// steers_canceled event carries no ids, so the client cannot reconcile what was
-// actually discarded — unlike cancel-and-recall, which returns
-// discarded_steer_ids and is why stopRun can. Closing it needs that same answer
-// here; see the report.
 export function recallQueuedSteers(id) {
   if (!id) return false;
   const queued = (store.get().sessions[id]?.pendingSteers || []).filter(Boolean);
@@ -857,35 +841,32 @@ export function recallQueuedSteers(id) {
   let recall = queuedRecalls.get(id);
   if (recall?.pending) return false;
   if (!recall) {
-    recall = { ids: new Set(), pending: false };
+    recall = { pending: false, restoredIDs: new Set() };
     queuedRecalls.set(id, recall);
   }
-  const fresh = queued.filter((steer) => !recall.ids.has(steer.id));
-  if (fresh.length > 0) {
-    fresh.forEach((steer) => recall.ids.add(steer.id));
-    setState((state) => ({
-      composerDrops: {
-        ...state.composerDrops,
-        [id]: { id: `recall-${Date.now()}`, text: combineQueueText('', fresh), files: [], focus: true },
-      },
-    }));
-
-    // Queued images cannot be pulled back (only their count was ever tracked
-    // client-side), so they are reported instead.
-    const dropped = droppedImageCount(fresh);
-    if (dropped > 0) {
-      addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'attention' });
-    }
-  }
-
   recall.pending = true;
   cancelSteers(id)
-    .then(() => {
-      // The broadcast is still useful to the other clients, but this client
-      // already knows its request succeeded. Remove only its snapshot IDs so
-      // a steer that arrived after the cancel remains visible and recallable.
+    .then((result) => {
+      const discarded = result?.discarded_steers || [];
+      const restored = discarded.filter((steer) => !recall.restoredIDs.has(steer.id));
+      if (restored.length > 0) {
+        restored.forEach((steer) => recall.restoredIDs.add(steer.id));
+        setState((state) => ({
+          composerDrops: {
+            ...state.composerDrops,
+            [id]: { id: `recall-${Date.now()}`, text: combineQueueText('', restored), files: [], focus: true },
+          },
+        }));
+
+        const dropped = droppedImageCount(restored);
+        if (dropped > 0) {
+          addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'attention' });
+        }
+      }
+
+      const discardedIDs = new Set(result?.discarded_steer_ids || discarded.map((steer) => steer.id));
       const current = store.get().sessions[id];
-      const pendingSteers = (current?.pendingSteers || []).filter((steer) => !recall.ids.has(steer.id));
+      const pendingSteers = (current?.pendingSteers || []).filter((steer) => !discardedIDs.has(steer.id));
       if (current?.pendingSteers?.length) {
         updateSession(id, { pendingSteers: pendingSteers.length > 0 ? pendingSteers : null });
       }
@@ -893,6 +874,20 @@ export function recallQueuedSteers(id) {
     })
     .catch((e) => {
       recall.pending = false;
+      const fallback = queued.filter((steer) => !recall.restoredIDs.has(steer.id));
+      if (fallback.length > 0) {
+        fallback.forEach((steer) => recall.restoredIDs.add(steer.id));
+        setState((state) => ({
+          composerDrops: {
+            ...state.composerDrops,
+            [id]: { id: `recall-${Date.now()}`, text: combineQueueText('', fallback), files: [], focus: true },
+          },
+        }));
+        const dropped = droppedImageCount(fallback);
+        if (dropped > 0) {
+          addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'attention' });
+        }
+      }
       console.error('cancelSteers failed:', e);
       addToast({ sessionId: id, title: 'Could not cancel queued messages', detail: e.message, type: 'error' });
     });

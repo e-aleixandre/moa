@@ -312,7 +312,7 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.CommandDequeued:
 		return Event{Type: "command_dequeued", Data: CommandDequeuedData{ID: e.ID, Raw: e.Raw, Executed: e.Executed, Err: e.Err}}, true
 	case bus.SteersCanceled:
-		return Event{Type: "steers_canceled"}, true
+		return Event{Type: "steers_canceled", Data: map[string]any{"discarded_steer_ids": e.SteerIDs}}, true
 	case bus.AutoVerifyStarted:
 		return Event{Type: "auto_verify_start", Data: map[string]any{
 			"dir": e.Dir, "manual": e.Manual,

@@ -219,6 +219,7 @@ type Steered struct {
 type SteersCanceled struct {
 	SessionID     string
 	AttachmentIDs []string
+	SteerIDs      []string
 }
 
 // CommandQueued is published when a slash command is enqueued as a barrier in
