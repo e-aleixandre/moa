@@ -812,7 +812,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   );
   return inline
     ? <section class="live-preview-inline" aria-label="Live preview">{preview}</section>
-    : <Sheet open={open} onClose={onClose} ariaLabel="Live preview" class="live-preview-sheet">{preview}</Sheet>;
+    : <Sheet open={open} onClose={onClose} ariaLabel="Live preview" class="live-preview-sheet" page>{preview}</Sheet>;
 }
 
 function useTouchPreviewInput() {

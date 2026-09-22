@@ -24,6 +24,11 @@
 .msheet-scrim.is-drag {
   transition: none;
 }
+/* Covered by a sheet opened over it (hooks/useSheetLayer.js): hidden, not
+   closed — it is shown again, as it was, when that sheet goes. */
+.msheet-scrim[data-covered] {
+  visibility: hidden;
+}
 
 .msheet {
   position: absolute;
@@ -96,6 +101,31 @@
   font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--text);
+}
+.msheet-head.is-sub {
+  justify-content: flex-start;
+  gap: var(--space-1);
+  padding-left: 8px;
+}
+.msheet-head.is-sub .msheet-title { margin: 0; }
+.msheet-back {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--zl-t2, var(--subtext0));
+  cursor: pointer;
+}
+.msheet-back svg { width: 16px; height: 16px; }
+.msheet-back:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
 }
 .msheet-scope {
   font-family: var(--mono);

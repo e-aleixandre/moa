@@ -41,6 +41,13 @@ export function panelPageParent(page) {
   return PANEL_PAGE_PARENT[page] || 'root';
 }
 
+// sessionPanelBack — what Back does from `page` (the ‹, and Escape through its
+// sheet): the page's parent. Null at the root, where the panel closes instead.
+export function sessionPanelBack(page) {
+  if (!page || page === 'root') return null;
+  return () => setSessionPanelPage(panelPageParent(page));
+}
+
 // panelAccessibleName names the surface after the page currently in front of
 // the user. At the root, the dossier still names what it belongs to.
 export function panelAccessibleName(session, page) {

@@ -2,7 +2,8 @@ import { useEffect, useRef } from "preact/hooks";
 import { createPortal } from "preact/compat";
 import { X } from "lucide-preact";
 import { IconButton } from "../../primitives/index.js";
-import { pushLayer } from "../../data/overlay-layers.js";
+import { useSheetLayer } from "../../hooks/useSheetLayer.js";
+import { useStore } from "../../hooks/useStore.js";
 import { usePresence } from "../../hooks/usePresence.js";
 import { MOTION } from "../../hooks/motion.js";
 import "./Sheet.css";
@@ -10,15 +11,18 @@ import "./Sheet.css";
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-let sheetIdCounter = 0;
-
 // Sheet — centered modal panel with overlay. Closes with Escape and click on the
 // overlay, traps focus while open and restores it to the trigger on close.
 // While open, it registers itself as the top layer (data/overlay-layers.js) so
 // a capture-phase key handler BELOW it (the artifacts drawer) knows to leave
-// Escape to this Sheet. It does not touch browser history: a back/forward
-// gesture has no meaning in the installed app, and every Sheet already closes
-// through Escape, its X or the backdrop.
+// Escape to this Sheet, and keys reach only the top one when two are open. On
+// a phone it is also under the one-sheet rule (hooks/useSheetLayer.js): asked
+// for over another sheet, it covers that one instead of stacking on it.
+// `page` marks a Sheet that is a full-screen surface on the phone (the live
+// preview): a sheet over it is still the only sheet, so it is never covered.
+// It does not touch browser history: a back/forward gesture has no meaning in
+// the installed app, and every Sheet already closes through Escape, its X or
+// the backdrop.
 //
 // The overlay is PORTALLED to <body>. `.sheet-overlay` is position:fixed with
 // --z-sheet (200), above the composer/dock's --z-overlay (100), but z-index is
@@ -28,41 +32,39 @@ let sheetIdCounter = 0;
 // so the browser painted those on top of it regardless of z-index. Escaping to
 // <body> puts the overlay in the root stacking context, where --z-sheet
 // actually wins.
-export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabelAttr, children, class: className, ...rest }) {
+export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabelAttr, children, class: className, page = false, ...rest }) {
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
-  const popLayerRef = useRef(null);
-  const idRef = useRef(null);
   const label = ariaLabel ?? ariaLabelAttr ?? title;
   // The generic Sheet had no motion at all: rewind, the secrets dialog and the
   // file lightbox simply appeared and vanished. It is the least frequent of
   // the overlays and the most jarring when it happens.
   const presence = usePresence(open, MOTION.exitBase);
-  if (idRef.current === null) idRef.current = `sheet-${++sheetIdCounter}`;
-
-  // Register/unregister as the top layer whenever `open` toggles. Cleanup
-  // covers unmount-while-open too, so the layer never outlives the panel.
-  useEffect(() => {
-    if (!open) return undefined;
-    popLayerRef.current = pushLayer(idRef.current);
-    return () => {
-      popLayerRef.current?.();
-      popLayerRef.current = null;
-    };
-  }, [open]);
+  // The desktop keeps its centred modal exactly as it was: only the phone
+  // gets the one-sheet rule.
+  const isMobile = useStore((s) => s.isMobile);
+  const oneSheet = isMobile && !page;
+  const layer = useSheetLayer({ open, present: open || presence.mounted, sheet: oneSheet });
+  // The panel is only in the DOM from the commit after `open` (usePresence),
+  // so on `open` alone there is nothing to focus. Under the one-sheet rule the
+  // focus would stay behind on the sheet this one covers, now hidden — so on
+  // the phone focus waits for the panel. The desktop keeps its timing.
+  const focusReady = oneSheet ? presence.mounted : true;
 
   // requestClose is the single close path (Escape, backdrop, close button): it
   // drops the layer claim immediately, so an overlay below stops deferring to
   // this Sheet even before the unmount effect runs.
   const requestClose = () => {
-    popLayerRef.current?.();
-    popLayerRef.current = null;
+    layer.close();
     onClose?.();
   };
 
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e) => {
+      // Keys belong to the top layer only: with a sheet covered below this
+      // one, Escape must close what is on screen, not both.
+      if (!layer.takesKey(e)) return;
       if (e.key === "Escape") {
         requestClose();
         return;
@@ -93,7 +95,7 @@ export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabel
   }, [open, onClose]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !focusReady) return;
     previousFocusRef.current = document.activeElement;
     const panel = panelRef.current;
     if (panel) {
@@ -106,7 +108,7 @@ export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabel
         toRestore.focus();
       }
     };
-  }, [open]);
+  }, [open, focusReady]);
 
   if (!presence.mounted) return null;
 
@@ -115,7 +117,7 @@ export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabel
   };
 
   const overlay = (
-    <div class={`sheet-overlay${presence.leaving ? " is-leaving" : ""}`} onClick={onOverlayClick}>
+    <div class={`sheet-overlay${presence.leaving ? " is-leaving" : ""}`} onClick={onOverlayClick} ref={layer.rootRef}>
       <div
         class={`sheet${className ? ` ${className}` : ""}${presence.leaving ? " is-leaving" : ""}`}
         role="dialog"
