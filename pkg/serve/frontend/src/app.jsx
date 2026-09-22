@@ -27,7 +27,7 @@ import { installNativeShareNavigation } from "./data/native-share.js";
 import { shareIdFromLocation } from "./data/share-target.js";
 import { detectShell, applyShell } from "./data/shell.js";
 import {
-  setMobile, autoFillTiles, autoSelectMobile, openSession, afterVisibilityChange,
+  setMobile, autoFillTiles, autoSelectMobile, openSession, afterVisibilityChange, watchLanding,
 } from "./data/tile-actions.js";
 
 // Design galleries live in catalog-app.jsx and are served by `npm run catalog`.
@@ -56,8 +56,6 @@ function checkBuild(result) {
 // the old SPA's App (pkg/serve/frontend/src/app.jsx).
 function useBootstrap() {
   const [version, setVersion] = useState(null);
-  const isMobile = useStore((s) => s.isMobile);
-  const sessionCount = useStore((s) => Object.keys(s.sessions).length);
 
   // Warm notification taps use the same openSession behavior as a cold
   // ?session= deep link, waiting for the authoritative initial session list.
@@ -107,7 +105,10 @@ function useBootstrap() {
   // Initial session load + selection, polling.
   useEffect(() => {
     let mounted = true;
-    loadSessions()
+    // Both lists before deciding between the empty state and a landing: a
+    // live child only points at its owner once the owners have answered.
+    // loadOwners never rejects — a failed owners load lands as before.
+    Promise.all([loadSessions(), loadOwners()])
       .then(() => {
         if (!mounted) return; // unmounted mid-flight: don't touch the store/view
         const params = new URLSearchParams(location.search);
@@ -156,10 +157,9 @@ function useBootstrap() {
     // changes when the server does.
     loadModelCatalog();
     loadEvents(); // wake-on-event: paint the inbox on first load, not one tick later
-    // The owners. Read once with the first roster and again on return, like
-    // the model catalog: an owner is created by hand and their number is one
-    // per project, so nothing is gained by polling them.
-    loadOwners();
+    // The owners are read with the first roster above and again on return,
+    // like the model catalog: an owner is created by hand and their number is
+    // one per project, so nothing is gained by polling them.
     // Reconcile the browser's actual push state on load (/next relies on the
     // root /sw.js, no SW registration here). Guarded internally for unsupported.
     refreshPushState();
@@ -212,12 +212,9 @@ function useBootstrap() {
     };
   }, []);
 
-  // Re-fill tiles / re-select mobile when the layout or session count changes,
-  // so a newly-loaded session lands in the focused tile automatically.
-  useEffect(() => {
-    if (!isMobile) autoFillTiles();
-    else autoSelectMobile();
-  }, [isMobile, sessionCount]);
+  // Re-fill tiles / re-select mobile when the layout, the session count or the
+  // set of live conversations changes (watchLanding).
+  useEffect(() => watchLanding(), []);
 
   // ⌘K / Ctrl+K — global command-palette toggle. Active in every view.
   // The chord always works, even inside the composer textarea (spec §6): we

@@ -14,6 +14,7 @@ import { addToast } from "../../../data/notifications.js";
 import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, openInbox, retryEvents, routeEvent, routeEventToNewSession } from "../../../data/events.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
 import { SessionRow } from "../../../components/SessionRow/SessionRow.jsx";
+import { OwnerAvatarFor } from "../../../components/Owners/OwnerAvatar.jsx";
 import { LivePreview } from "../../../components/LivePreview/LivePreview.jsx";
 import { MobileComposer } from "../MobileComposer/MobileComposer.jsx";
 import { MobileChrome } from "../MobileChrome/MobileChrome.jsx";
@@ -178,7 +179,30 @@ function MobileConversationBody({ forceMobile = false }) {
   useEffect(() => { setRewindOpen(false); }, [activeId]);
   useEffect(() => { setSecretAliases(null); }, [activeId]);
 
-  const { recentSaved, activeCount, savedCount } = chrome;
+  const { recentSaved, recentOwners, activeCount, savedCount } = chrome;
+
+  // The owners at rest, as faces: the empty state is where you pick up what you
+  // were last on, and an owner is one of those things. No state mark — nothing
+  // is live when this screen shows (landingOrder lands on anything that is).
+  const ownerFaces = recentOwners.length > 0 && (
+    <>
+      <p class="mconv-empty-label">Owners</p>
+      <div class="mconv-owners">
+        {recentOwners.map((own) => (
+          <button
+            key={own.id}
+            type="button"
+            class="mconv-owner"
+            aria-label={`${own.name}, project owner`}
+            onClick={() => openOwnerConversation(own)}
+          >
+            <OwnerAvatarFor owner={own} state="idle" size={40} />
+            <span class="mconv-owner-name" aria-hidden="true">{own.name}</span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
 
   let body;
   if (!loaded) {
@@ -189,7 +213,8 @@ function MobileConversationBody({ forceMobile = false }) {
     if (totalCount === 0) {
       // First run — no sessions at all (EMPTY-STATE-SPEC §2.4). New is primary.
       body = (
-        <div class="mconv-empty mconv-empty-firstrun">
+        <div class={`mconv-empty mconv-empty-firstrun${ownerFaces ? " has-owners" : ""}`}>
+          {ownerFaces}
           <p class="mconv-empty-title">No sessions yet</p>
           <p class="mconv-empty-sub">Start one to begin working with moa.</p>
           <button
@@ -215,7 +240,8 @@ function MobileConversationBody({ forceMobile = false }) {
       // screen. A group heading separates lists; there is one.
       body = (
         <div class="mconv-empty">
-          <p class="mconv-empty-title">No open sessions</p>
+          {ownerFaces}
+          <p class={`mconv-empty-title${ownerFaces ? " is-after-owners" : ""}`}>No open sessions</p>
           {recents.length > 0 && (
             <div class="mconv-empty-recents">
               {recents.map((r) => (

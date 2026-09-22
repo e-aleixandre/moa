@@ -40,3 +40,16 @@ test("selectMobileChrome replaces the snapshot when another session needs you", 
   expect(second).not.toBe(first);
   expect(second.attention.permission).toBe(1);
 });
+
+test("the empty state's owners: most recent conversation first, no state carried", async () => {
+  const { recentOwners } = await import("./chrome.js");
+  const owners = [
+    { id: "a", name: "A", session_id: "sa", avatar: { shape: "pill", color: "sky" }, session_state: "saved" },
+    { id: "b", name: "B", session_id: "sb", codebase_key: "kb" },
+    { id: "c", name: "C", session_id: "" },
+  ];
+  const sessions = { sa: { id: "sa", updated: 10 }, sb: { id: "sb", updated: 30 } };
+  const rows = recentOwners(owners, sessions);
+  expect(rows.map((o) => o.id)).toEqual(["b", "a", "c"]);
+  expect(Object.keys(rows[1]).sort()).toEqual(["avatar", "codebase_key", "id", "name", "session_id"]);
+});

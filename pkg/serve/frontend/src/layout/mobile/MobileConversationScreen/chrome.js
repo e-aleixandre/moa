@@ -90,6 +90,21 @@ export function recentSavedSessions(sessions, limit = 3) {
     }));
 }
 
+// recentOwners is the empty state's grid of faces: every owner, the most
+// recently active conversation first. No state travels with it: the empty
+// state only shows when nothing is live (landingOrder), so every owner here is
+// at rest and a state mark would be a fact that never holds.
+export function recentOwners(owners = [], sessions = {}) {
+  const at = (own) => sessions?.[own.session_id]?.updated || 0;
+  return [...(owners || [])]
+    .sort((a, b) => at(b) - at(a))
+    .map((own) => ({ id: own.id, name: own.name, session_id: own.session_id, avatar: own.avatar, codebase_key: own.codebase_key }));
+}
+
+function recentOwnersSig(list) {
+  return (list || []).map((o) => [o.id, o.name, o.session_id || "", o.avatar?.shape || "", o.avatar?.color || ""].join("\0")).join("\n");
+}
+
 function cardSig(row) {
   return [
     row.id, row.title, row.state, row.when, row.last, row.lastTone || "",
@@ -139,6 +154,7 @@ function mobileChromeEqual(a, b) {
     && listSig(a.active) === listSig(b.active)
     && listSig(a.saved) === listSig(b.saved)
     && listSig(a.recentSaved) === listSig(b.recentSaved)
+    && recentOwnersSig(a.recentOwners) === recentOwnersSig(b.recentOwners)
     && (a.projects || []).map((p) => `${p.cwd}\0${p.updated}`).join("\n")
       === (b.projects || []).map((p) => `${p.cwd}\0${p.updated}`).join("\n");
 }
@@ -171,6 +187,7 @@ export function selectMobileChrome(state, forceMobile = false) {
     inboxOpen: !!state.inboxOpen, // wake-on-event
     projects: drawerProjects(state.sessions),
     recentSaved: recentSavedSessions(state.sessions),
+    recentOwners: recentOwners(ownersSlice(state).list, state.sessions),
     ...lists,
   };
   const prev = selectMobileChrome._prev;

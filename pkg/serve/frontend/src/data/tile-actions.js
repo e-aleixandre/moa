@@ -3,7 +3,7 @@
 import { acknowledgeVisibleAttentionThrough, syncConnections } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import { armReadAnchor, __resetReadAnchorsForTests } from './stream-read-anchor.js';
-import { isOrdinarySession } from './util/project-sessions.js';
+import { landingOrder } from './util/project-sessions.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
   splitTileNode, removeTileNode, setTileSession, swapSessions,
@@ -155,9 +155,8 @@ export function setMobile(isMobile) { setState({ isMobile }); }
 export function autoFillTiles() {
   const state = store.get();
   const assigned = new Set(allSessionIds(state.tileTree));
-  const available = Object.values(state.sessions)
-    .filter(s => isOrdinarySession(s) && s.state !== 'saved' && !assigned.has(s.id))
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const available = landingOrder(state.sessions, state.owners?.list)
+    .filter(id => !assigned.has(id));
 
   if (available.length === 0) return;
 
@@ -167,7 +166,7 @@ export function autoFillTiles() {
     if (available.length === 0) break;
     const tile = findTile(tree, tileId);
     if (tile && !tile.sessionId) {
-      tree = setTileSession(tree, tileId, available.shift().id);
+      tree = setTileSession(tree, tileId, available.shift());
       changed = true;
     }
   }
@@ -180,13 +179,63 @@ export function autoFillTiles() {
 export function autoSelectMobile() {
   const state = store.get();
   if (state.activeSession && state.sessions[state.activeSession]) return;
-  const active = Object.values(state.sessions)
-    .filter(s => isOrdinarySession(s) && s.state !== 'saved')
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0));
-  if (active.length > 0) {
-    setState({ activeSession: active[0].id });
+  const [first] = landingOrder(state.sessions, state.owners?.list);
+  if (first) {
+    setState({ activeSession: first });
     afterVisibilityChange();
   }
+}
+
+// landingKey names the SET of conversations the app may land on. Landing is
+// re-decided when it changes, not when the roster's size does: a conversation
+// that turns live in place — an owner woken by a report, a saved session
+// resumed from another client — keeps the count but must still pull an empty
+// screen onto it. Sorted, so recency churn alone never re-decides.
+export function landingKey(state) {
+  return landingOrder(state.sessions, state.owners?.list).sort().join(',');
+}
+
+// watchLanding re-lands whenever the layout, the roster size or the landing set
+// changes. It waits for `sessionsLoaded`, which bootstrap only sets once both
+// the sessions and the owners have answered: deciding earlier could show the
+// empty state for work whose owner is not known yet.
+//
+// On desktop a change of the landing set alone only fills the FOCUSED pane when
+// it is empty — that is the empty state. Other empty panes keep being filled
+// only when a session is created or deleted: a pane the user emptied on purpose
+// is not refilled because some conversation woke up elsewhere.
+export function watchLanding() {
+  let last = null;
+  let lastLanding = null;
+  let seen = null;
+  const check = (s) => {
+    if (!s.sessionsLoaded) return;
+    // Every stream token is a store update; only the inputs of the key matter.
+    if (seen && seen.sessions === s.sessions && seen.owners === s.owners && seen.isMobile === s.isMobile) return;
+    seen = s;
+    const key = `${s.isMobile ? 1 : 0}|${Object.keys(s.sessions).length}`;
+    const landing = landingKey(s);
+    if (key === last && landing === lastLanding) return;
+    const layoutOrCount = key !== last;
+    last = key;
+    lastLanding = landing;
+    if (s.isMobile) autoSelectMobile();
+    else if (layoutOrCount) autoFillTiles();
+    else fillFocusedIfEmpty();
+  };
+  check(store.get());
+  return store.subscribe(check);
+}
+
+function fillFocusedIfEmpty() {
+  const state = store.get();
+  const tile = findTile(state.tileTree, state.focusedTile);
+  if (!tile || tile.sessionId) return;
+  const assigned = new Set(allSessionIds(state.tileTree));
+  const next = landingOrder(state.sessions, state.owners?.list).find(id => !assigned.has(id));
+  if (!next) return;
+  setState({ tileTree: setTileSession(state.tileTree, tile.id, next) });
+  afterVisibilityChange();
 }
 
 // releaseStaleSaved drops any session that is currently `saved` (closed) from
