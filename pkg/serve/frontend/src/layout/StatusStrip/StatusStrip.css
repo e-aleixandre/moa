@@ -251,6 +251,9 @@ button.zl-st:disabled { cursor: default; }
   margin-top: var(--space-1);
 }
 .mcomposer .zl-status > * { align-self: stretch; }
+/* The line's children are the groups, not the segments: a group centres its
+   segments by default, which left them 14-21px tall inside the 44px row. */
+.mcomposer .zl-status .zl-st-group { align-items: stretch; }
 .mcomposer .zl-status .zl-st { height: auto; align-items: center; }
 
 /* The pane's line is the compact one in a shorter dock. Catalogue:
