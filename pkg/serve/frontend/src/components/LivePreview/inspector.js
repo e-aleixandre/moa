@@ -51,6 +51,12 @@
   var pinned = null;
   var hovered = null;
 
+  if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
+    navigator.serviceWorker.getRegistrations().then(function (registrations) {
+      registrations.forEach(function (registration) { registration.unregister(); });
+    }).catch(function () {});
+  }
+
   function ensureOverlay() {
     if (overlay) return overlay;
     overlay = document.createElement('div');
