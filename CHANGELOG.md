@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.0] - 2026-09-22
+
+### Added
+
+- OpenAI **GPT-6 Sol** (`sol`) and **GPT-6 Luna** (`luna`), each with a
+  1.05M-token context window, a 128K-token output limit, documented
+  short/long-context input, output, and prompt-cache pricing, and support for
+  ChatGPT/Codex OAuth.
+
+### Changed
+
+- OpenAI's long-context pricing threshold now includes prompt-cache writes.
+  Responses reports those writes inside its input context; excluding them could
+  apply short-context rates to the whole request and understate calculated cost
+  for OpenAI models.
+
 ## [0.39.0] - 2026-09-22
 
 ### Added

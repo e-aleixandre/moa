@@ -50,7 +50,7 @@ func supportsFastModel(m Model) bool {
 		return strings.HasPrefix(m.ID, "gpt-5.4") ||
 			strings.HasPrefix(m.ID, "gpt-5.5") ||
 			strings.HasPrefix(m.ID, "gpt-5.6") ||
-			strings.HasPrefix(m.ID, "gpt-6")
+			m.ID == "gpt-6-astra"
 	case "xai":
 		return true
 	}

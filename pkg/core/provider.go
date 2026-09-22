@@ -115,7 +115,7 @@ func ResolveMaxOutputTokens(model Model, requested *int) int {
 // those higher-context rates in ascending Threshold order; the base
 // Input/Output/CacheRead/CacheWrite fields are the tier that applies below
 // the first threshold ("short context"). Cost picks the tier by the
-// request's total input context (Input+CacheRead tokens count toward the
+// request's total input context (Input+CacheRead+CacheWrite tokens count toward the
 // prompt length the provider bills against) and applies it to the *whole*
 // request, matching how these providers actually bill — not a blended rate.
 type Pricing struct {
@@ -139,9 +139,9 @@ type Pricing struct {
 }
 
 // PricingTier is a pricing tier that applies once the request's context
-// (input + cache-read tokens) reaches Threshold tokens.
+// (input + cache-read + cache-write tokens) reaches Threshold tokens.
 type PricingTier struct {
-	Threshold    int     `json:"threshold"`                // tier applies when Input+CacheRead >= this
+	Threshold    int     `json:"threshold"`                // tier applies when Input+CacheRead+CacheWrite >= this
 	Input        float64 `json:"input"`                    // $/M input tokens
 	Output       float64 `json:"output"`                   // $/M output tokens
 	CacheRead    float64 `json:"cache_read"`               // $/M cached input tokens
@@ -150,7 +150,7 @@ type PricingTier struct {
 }
 
 // Cost calculates the USD cost for a given Usage, selecting the pricing
-// tier based on the request's total context (Input+CacheRead tokens) and
+// tier based on the request's total context (Input+CacheRead+CacheWrite tokens) and
 // applying that tier's rates to the entire request.
 //
 // Cache writes are split: Usage.CacheWrite1h is the portion written into the
@@ -166,7 +166,7 @@ func (p *Pricing) Cost(u Usage) float64 {
 		Input, Output, CacheRead, CacheWrite, CacheWrite1h float64
 	}{p.Input, p.Output, p.CacheRead, p.CacheWrite, p.CacheWrite1h}
 
-	context := u.Input + u.CacheRead
+	context := u.Input + u.CacheRead + u.CacheWrite
 	for _, t := range p.Tiers {
 		if context >= t.Threshold {
 			rate.Input, rate.Output, rate.CacheRead, rate.CacheWrite = t.Input, t.Output, t.CacheRead, t.CacheWrite
