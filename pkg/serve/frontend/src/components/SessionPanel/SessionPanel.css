@@ -452,6 +452,8 @@
    eleven hours. */
 .zl-kv-v.is-warn { color: var(--zl-yellow); }
 .zl-kv-note.is-warn { color: var(--zl-yellow); }
+/* A sentence under a reading is words, and words are not mono (StatusStrip.css:67). */
+.zl-kv-note.is-prose { font-family: var(--font); font-variant-numeric: normal; }
 .zl-kv-v.is-dim { color: var(--zl-t4); }
 .zl-kv-row.is-cache-alert .zl-meter-fill { background: var(--zl-yellow); }
 /* "↓16194k read · ↑879k written" is longer than any other value in this list,
@@ -497,7 +499,9 @@
    session carries no compactAt field, so the catalogue fixture — which has
    a window for the "126k of 200k" note but no threshold — still matches. */
 .zl-kv-row.is-limit { padding-bottom: 8px; }
-.zl-kv-row.is-limit .zl-kv-v { color: var(--zl-green); }
+/* A threshold you chose, not a state the system is in: accent, like the
+   settings switch (GlobalSettings.css), not the green of "ok". */
+.zl-kv-row.is-limit .zl-kv-v { color: var(--zl-accent); }
 .zl-limit {
   -webkit-appearance: none;
   appearance: none;
@@ -513,12 +517,12 @@
 .zl-limit::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: var(--radius-full);
-  background: linear-gradient(to right, var(--zl-green) 0 var(--fill), var(--zl-line-2) var(--fill) 100%);
+  background: linear-gradient(to right, var(--zl-accent) 0 var(--fill), var(--zl-line-2) var(--fill) 100%);
 }
 .zl-limit::-moz-range-track {
   height: 4px;
   border-radius: var(--radius-full);
-  background: linear-gradient(to right, var(--zl-green) 0 var(--fill), var(--zl-line-2) var(--fill) 100%);
+  background: linear-gradient(to right, var(--zl-accent) 0 var(--fill), var(--zl-line-2) var(--fill) 100%);
 }
 .zl-limit::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -528,14 +532,14 @@
   margin-top: -7px;
   border: 0;
   border-radius: var(--radius-full);
-  background: var(--zl-green);
+  background: var(--zl-accent);
 }
 .zl-limit::-moz-range-thumb {
   width: 18px;
   height: 18px;
   border: 0;
   border-radius: var(--radius-full);
-  background: var(--zl-green);
+  background: var(--zl-accent);
 }
 .zl-limit:focus-visible {
   outline: 2px solid var(--zl-accent);
