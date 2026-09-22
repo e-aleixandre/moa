@@ -312,8 +312,8 @@
   font-size: inherit;
 }
 
-/* the attachments skirt — a list inside the cell, below the words. The cell
-   keeps its padding, so the skirt no longer has to close any corners. */
+/* the attachments skirt. On its own (the catalogue's labs) it is a small
+   rimmed list. */
 .wp-attachments {
   margin: 10px 0 0;
   border-top: 0;
@@ -322,6 +322,20 @@
   box-shadow: var(--zl-rim);
   overflow: hidden;
 }
+
+/* Inside a message the skirt is the cell's own foot, not a box within it: it
+   bleeds through the cell's side padding, takes the place of its bottom
+   padding and closes the cell's bottom corners. A hairline, not a rim,
+   separates it from the words. The negative margins track the cell padding
+   (14px, 12px dense). */
+.zl-user.has-skirt .zl-user-cell { padding-bottom: 0; }
+.zl-user .wp-attachments {
+  margin: 10px -14px 0;
+  border-top: 1px solid var(--zl-line);
+  border-radius: 0 0 var(--zl-r-md) var(--zl-r-md);
+  box-shadow: none;
+}
+.zl-transcript.is-dense .zl-user .wp-attachments { margin: 8px -12px 0; }
 
 .skirt-head {
   display: flex;
