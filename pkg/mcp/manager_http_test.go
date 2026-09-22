@@ -43,6 +43,7 @@ func newRemoteTestServer(t *testing.T) (url string, lastAuth *atomic.Value) {
 }
 
 func TestManagerRemoteServerLifecycle(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir()) // remote servers open the OAuth store
 	url, _ := newRemoteTestServer(t)
 
 	mgr := NewManager(nil, "")
@@ -92,6 +93,7 @@ func TestManagerRemoteServerLifecycle(t *testing.T) {
 }
 
 func TestManagerRemoteServerHeaders(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir()) // remote servers open the OAuth store
 	url, lastAuth := newRemoteTestServer(t)
 
 	mgr := NewManager(nil, "")
@@ -109,6 +111,7 @@ func TestManagerRemoteServerHeaders(t *testing.T) {
 }
 
 func TestManagerRemoteServerDisableEnable(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir()) // remote servers open the OAuth store
 	url, _ := newRemoteTestServer(t)
 
 	mgr := NewManager(nil, "")
@@ -135,6 +138,7 @@ func TestManagerRemoteServerDisableEnable(t *testing.T) {
 }
 
 func TestManagerRemoteServerUnreachable(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir()) // remote servers open the OAuth store
 	// A closed listener: connect must fail into StateFailed rather than hang.
 	srv := httptest.NewServer(http.NotFoundHandler())
 	url := srv.URL
@@ -153,6 +157,7 @@ func TestManagerRemoteServerUnreachable(t *testing.T) {
 }
 
 func TestManagerRejectsInvalidServerConfig(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir()) // remote servers open the OAuth store
 	mgr := NewManager(nil, "")
 	startWait(t, mgr, map[string]core.MCPServer{
 		"both": {Command: "echo", URL: "https://example.com/mcp"},
@@ -168,6 +173,7 @@ func TestManagerRejectsInvalidServerConfig(t *testing.T) {
 }
 
 func TestRemoteClientDoesNotFollowRedirects(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir()) // remote servers open the OAuth store
 	// A redirect must never carry the configured headers to another origin.
 	var secondHits atomic.Int32
 	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -223,6 +229,7 @@ func blackholeListener(t *testing.T) string {
 }
 
 func TestRemoteBlackholeDoesNotHang(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir()) // remote servers open the OAuth store
 	// Shorten the transport bounds so the test doesn't wait the production 15s.
 	prevHeader := remoteResponseHeaderTimeout
 	remoteResponseHeaderTimeout = 300 * time.Millisecond
@@ -263,6 +270,7 @@ func TestRemoteBlackholeDoesNotHang(t *testing.T) {
 }
 
 func TestRemoteToolCallGetsADeadline(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir()) // remote servers open the OAuth store
 	// A deadline-less context must not let a dead remote wedge the call forever.
 	prev := remoteToolCallTimeout
 	remoteToolCallTimeout = 300 * time.Millisecond

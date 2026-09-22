@@ -87,6 +87,11 @@
   background: var(--red);
 }
 
+/* Waiting for sign-in: needs the user, but nothing is in progress. */
+.mcp-dot-warn {
+  background: var(--yellow);
+}
+
 .mcp-dot-busy {
   background: var(--yellow);
   animation: mcp-breathe var(--breath-attention) ease-in-out infinite;
@@ -427,6 +432,76 @@
 }
 }
 
+/* Sign-in for a remote server: the one action it is waiting for. */
+.mcp-connect {
+  color: var(--text);
+  border-color: var(--yellow);
+}
+
+.mcp-oauth {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mcp-oauth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mcp-oauth-link {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--blue);
+  text-decoration: underline;
+}
+
+.mcp-oauth-hint {
+  font-size: var(--text-sm);
+  color: var(--subtext1);
+  line-height: var(--leading-normal);
+}
+
+.mcp-oauth-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.mcp-oauth-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: var(--space-1) var(--space-3);
+  /* --text-input (≥16px) or iOS zooms the whole screen on focus. */
+  font-size: var(--text-input);
+  color: var(--text);
+  background: var(--base);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md);
+}
+
+.mcp-oauth-input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+.mcp-oauth-row .mcp-cbtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mcp-oauth-error {
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: color-mix(in srgb, var(--red) 85%, var(--text));
+}
+
 /* Touch targets grow on the mobile sheet. */
 .mcp-sheet .mcp-schip {
   min-height: 44px;
@@ -434,6 +509,8 @@
 }
 
 .mcp-sheet .mcp-restart,
-.mcp-sheet .mcp-cbtn {
+.mcp-sheet .mcp-cbtn,
+.mcp-sheet .mcp-oauth-link,
+.mcp-sheet .mcp-oauth-input {
   min-height: 44px;
 }

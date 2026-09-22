@@ -1245,7 +1245,7 @@ func (s *ManagedSession) mcpSummary() *MCPSummary {
 			sum.Ready++
 		case mcp.StateStarting, mcp.StateRestarting, mcp.StateDisabling:
 			sum.Pending++
-		case mcp.StateFailed, mcp.StateExited:
+		case mcp.StateFailed, mcp.StateExited, mcp.StateAuthRequired:
 			sum.Unhealthy++
 		}
 		if st.PendingAction != "" {
@@ -1288,7 +1288,7 @@ func (s *ManagedSession) wireMCPRefresh() {
 		mgr.OnChange(func(st mcp.ServerStatus) {
 			s.publishMCPChanged()
 			switch st.State {
-			case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled:
+			case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled, mcp.StateAuthRequired:
 				name := st.Name
 				go s.scheduleMCPToolSync(name)
 			}
@@ -1298,7 +1298,7 @@ func (s *ManagedSession) wireMCPRefresh() {
 		// observes transitions after it is registered.
 		for _, st := range mgr.Status() {
 			switch st.State {
-			case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled:
+			case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled, mcp.StateAuthRequired:
 				go s.scheduleMCPToolSync(st.Name)
 			}
 		}

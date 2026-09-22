@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -21,6 +22,24 @@ func withPlatformFileLock(path string, fn func() error) error {
 	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN) //nolint:errcheck
 	return fn()
 }
+
+// tryLockFile takes an exclusive lock on f without blocking; false means
+// another holder has it.
+func tryLockFile(f *os.File) (bool, error) {
+	for {
+		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		switch {
+		case err == nil:
+			return true, nil
+		case errors.Is(err, unix.EWOULDBLOCK):
+			return false, nil
+		case !errors.Is(err, unix.EINTR):
+			return false, err
+		}
+	}
+}
+
+func unlockFile(f *os.File) { _ = unix.Flock(int(f.Fd()), unix.LOCK_UN) }
 
 func syncDir(path string) error {
 	dir, err := os.Open(path)

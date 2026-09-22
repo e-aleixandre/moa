@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
-import { RefreshCw, AlertTriangle, Check, ChevronRight } from "lucide-preact";
+import { RefreshCw, AlertTriangle, Check, ChevronRight, LogIn } from "lucide-preact";
 import { api, MCP_RESTART_TIMEOUT_MS } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
+import { openBlankWindow, startConnect, finishConnect, oauthErrorText } from "./mcp-oauth-flow.js";
 import "./McpPanel.css";
 
 // McpPanel — the per-session MCP panel, "dossier" layout: the list at rest is
@@ -39,7 +40,11 @@ const STATE_META = {
   disabled: { label: "off", pill: "mcp-pill-off", dot: "mcp-dot-off" },
   failed: { label: "failed", pill: "mcp-pill-bad", dot: "mcp-dot-bad" },
   exited: { label: "exited", pill: "mcp-pill-bad", dot: "mcp-dot-bad" },
+  // Waiting for the user to sign in: an action to take, not a failure.
+  auth_required: { label: "sign-in needed", pill: "mcp-pill-prog", dot: "mcp-dot-warn" },
 };
+
+const authLabel = (server) => (server.auth_action === "reconnect" ? "Reconnect" : "Connect");
 
 // verdictFor builds the one-sentence truth at the top of an expanded server:
 // what is true now and, when it is off, exactly what it takes to start it.
@@ -52,6 +57,9 @@ function verdictFor(server) {
   if (off.length === 0) {
     if (server.state === "failed" || server.state === "exited") {
       return { text: "On everywhere, but it isn’t running — see the error below.", names: [] };
+    }
+    if (server.state === "auth_required") {
+      return { text: "On everywhere, waiting for you to sign in.", names: [] };
     }
     if (server.state === "ready") return { text: "On everywhere and running.", names: [] };
     return { text: "On everywhere.", names: [] };
@@ -109,6 +117,8 @@ function ServerDossier({ sessionId, server, onMutated }) {
   // Inline confirm for a broad, persistent change: {scope, next} or null.
   // Never window.confirm — that is a native dialog and breaks the PWA.
   const [confirming, setConfirming] = useState(null);
+  // Sign-in in progress: { url, opened, pasted, error } or null.
+  const [oauth, setOauth] = useState(null);
 
   const offScopes = server.disabled_scopes || [];
   const pending = server.pending_action || "";
@@ -169,6 +179,51 @@ function ServerDossier({ sessionId, server, onMutated }) {
         detail: String(e.message || e),
         type: "error",
       });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const needsAuth = server.state === "auth_required" && !pending;
+
+  const connect = async () => {
+    if (busy) return;
+    // Opened here, inside the click, so popup blockers allow it; startConnect
+    // routes it to the sign-in page once the URL arrives.
+    const handle = openBlankWindow();
+    setBusy(true);
+    setOauth(null);
+    try {
+      const { url, opened } = await startConnect(api, sessionId, server.name, handle);
+      setOauth({ url, opened, pasted: "", error: "" });
+    } catch (e) {
+      setOauth({ url: "", opened: false, pasted: "", error: oauthErrorText(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const finish = async (ev) => {
+    ev?.preventDefault?.();
+    const pasted = oauth?.pasted?.trim() || "";
+    if (busy || !pasted) return;
+    setBusy(true);
+    setOauth((o) => o && { ...o, error: "" });
+    try {
+      const st = await finishConnect(api, sessionId, server.name, pasted);
+      if (st && st.state === "auth_required") {
+        setOauth({
+          url: "",
+          opened: false,
+          pasted: "",
+          error: `Sign-in didn’t work. Press ${authLabel(st)} again.`,
+        });
+      } else {
+        setOauth(null);
+      }
+      onMutated();
+    } catch (e) {
+      setOauth((o) => o && { ...o, error: oauthErrorText(e) });
     } finally {
       setBusy(false);
     }
@@ -235,10 +290,23 @@ function ServerDossier({ sessionId, server, onMutated }) {
         )}
       </div>
 
-      {server.error && <div class="mcp-row-error">{server.error}</div>}
+      {server.error && server.state !== "auth_required" && (
+        <div class="mcp-row-error">{server.error}</div>
+      )}
 
       <div class="mcp-dfoot">
-        {canRestart && (
+        {needsAuth && (
+          <button
+            type="button"
+            class="mcp-restart mcp-connect"
+            onClick={connect}
+            disabled={busy}
+            aria-label={`${authLabel(server)} ${server.name}`}
+          >
+            <LogIn size={13} aria-hidden="true" /> {authLabel(server)}
+          </button>
+        )}
+        {canRestart && !needsAuth && (
           <button
             type="button"
             class="mcp-restart"
@@ -257,6 +325,59 @@ function ServerDossier({ sessionId, server, onMutated }) {
               : `${server.tool_count || 0} tools`}
         </span>
       </div>
+
+      {needsAuth && oauth && (
+        <div class="mcp-oauth">
+          {oauth.url && (
+            <form class="mcp-oauth-form" onSubmit={finish} noValidate>
+              {!oauth.opened && (
+                <a
+                  class="mcp-oauth-link"
+                  href={oauth.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open sign-in page
+                </a>
+              )}
+              <p class="mcp-oauth-hint">
+                Sign in, then paste the address of the page that doesn’t load.
+              </p>
+              <div class="mcp-oauth-row">
+                <input
+                  class="mcp-oauth-input"
+                  type="url"
+                  inputMode="url"
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellcheck={false}
+                  placeholder="Paste the address"
+                  aria-label="Address of the page that doesn’t load"
+                  value={oauth.pasted}
+                  disabled={busy}
+                  onInput={(e) => {
+                    const value = e.currentTarget.value;
+                    setOauth((o) => o && { ...o, pasted: value });
+                  }}
+                />
+                <button
+                  type="submit"
+                  class="mcp-cbtn mcp-cbtn-go"
+                  disabled={busy || !oauth.pasted.trim()}
+                >
+                  Finish
+                </button>
+              </div>
+            </form>
+          )}
+          {oauth.error && (
+            <p class="mcp-oauth-error" role="alert">
+              {oauth.error}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
