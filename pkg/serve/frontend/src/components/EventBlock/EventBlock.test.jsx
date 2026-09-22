@@ -25,6 +25,15 @@ test("the block speaks the session list's clock", () => {
   expect(eventAge(now - 3 * 86400_000)).toBe("3d");
 });
 
+// Reports, heartbeats and events from the transcript carry Unix SECONDS (the
+// server's core.Message). Read as ms they dated every one to 1970: "20698d".
+test("a transcript timestamp in seconds is read as seconds", () => {
+  const nowSec = Math.floor(Date.now() / 1000);
+  expect(eventAge(nowSec - 12 * 60)).toBe("12m");
+  expect(eventAge(nowSec - 3 * 86400)).toBe("3d");
+  expect(eventAge(0)).toBe("");
+});
+
 // A fixture (or a server that already formatted the age) must survive intact:
 // re-parsing "18m" as a date would blank the only provenance the header has.
 test("an already-formatted age is passed through, and garbage is dropped", () => {

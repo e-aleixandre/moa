@@ -17,6 +17,7 @@ import { ChevronRight, Import } from "lucide-preact";
 import { CodeBlock } from "../CodeBlock/CodeBlock.jsx";
 import "./EventBlock.css";
 import { SessionChip } from "../SessionChip/SessionChip.jsx";
+import { clockMs } from "../../data/util/clock.js";
 
 export const EVENT_BODY_PREVIEW = 1200;
 
@@ -32,9 +33,11 @@ export function eventBodyPreview(body, limit = EVENT_BODY_PREVIEW) {
 // sessions.js relAge). A pre-formatted string passes through untouched so a
 // caller with its own label (or a fixture) is not forced through Date parsing.
 export function eventAge(time) {
-  if (typeof time === "string" && !/^\d+$/.test(time)) return time;
-  const ms = typeof time === "number" ? time : Date.parse(time);
-  if (!Number.isFinite(ms)) return "";
+  if (typeof time === "string" && !/^\d+$/.test(time) && !Number.isFinite(Date.parse(time))) return time;
+  // Transcript timestamps are Unix seconds and live ones are milliseconds.
+  // Reading seconds as ms dated every report and heartbeat to 1970 ("20698d").
+  const ms = clockMs(time);
+  if (ms == null) return "";
   const min = Math.floor((Date.now() - ms) / 60000);
   if (min < 1) return "now";
   if (min < 60) return `${min}m`;
