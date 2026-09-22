@@ -1,4 +1,4 @@
-import { PhoneOff, PhoneCall, X, Pencil } from "lucide-preact";
+import { PhoneOff, PhoneCall, X, Pencil, CornerUpLeft } from "lucide-preact";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { callClock, formatCallCost, CALL_COST_TITLE } from "../../data/design-variant.js";
 import "./DesignProposals.css";
@@ -236,10 +236,13 @@ export function CallFace({ call, onHangup, onTypeInstead }) {
 // that says how many are queued and carries the single action, and under it
 // the messages themselves in a said-but-not-landed face.
 //
-// The whole line is the button, 44px tall: on the phone the target is the
-// width of the column, so it is hit without aiming. Its title names the
-// shortcut that already exists in the product (Alt+↑), because this button and
-// that key are literally the same gesture.
+// The whole row is the button, 44px tall: on the phone the target is the
+// width of the column, so it is hit without aiming. But the count and the
+// action are ONE group pinned to the left, with the spring after them: on a
+// 1440px screen the two halves sat a thousand pixels apart and stopped
+// reading as a single control. Its title names the shortcut that already
+// exists in the product (Alt+↑), because this button and that key are
+// literally the same gesture.
 
 export function QueuedRecallTail({ queue, onBringBack }) {
   if (!queue?.length) return null;
@@ -253,8 +256,11 @@ export function QueuedRecallTail({ queue, onBringBack }) {
         title={`Bring back — the ${n === 1 ? "message goes" : "messages go"} back to the input (Alt+↑)`}
         aria-label={`${n} queued message${n === 1 ? "" : "s"} — bring ${n === 1 ? "it" : "them"} back to the input`}
       >
-        <span class="dp-recall-count zl-data">{n} queued · read at the next step</span>
-        <span class="dp-recall-act">Bring back</span>
+        <span class="dp-recall-grp">
+          <span class="dp-recall-count zl-data">{n} queued · read at the next step</span>
+          <span class="dp-recall-act">Bring back</span>
+        </span>
+        <span class="dp-recall-spring" aria-hidden="true" />
       </button>
       {queue.map((m) => (
         <div class="zl-user dp-queued dp-queued-flat" key={m.id}>
@@ -272,6 +278,11 @@ export function QueuedRecallTail({ queue, onBringBack }) {
 // to Stop. It does not open anything — pressing it is the recall. The bar is
 // always there when there is a queue, because a queue only exists while the
 // agent is working.
+//
+// The arrow is what stops it reading as a tally: a bare number next to Stop
+// is a counter, and nothing warned that pressing it empties the queue into
+// the input. The glyph says "this comes back to you" in the width the pill
+// already had.
 
 export function QueueRecallPill({ count, onBringBack }) {
   return (
@@ -282,6 +293,7 @@ export function QueueRecallPill({ count, onBringBack }) {
       title={`Bring back — the ${count === 1 ? "message goes" : "messages go"} back to the input (Alt+↑)`}
       aria-label={`${count} queued message${count === 1 ? "" : "s"} — bring ${count === 1 ? "it" : "them"} back to the input`}
     >
+      <CornerUpLeft size={13} aria-hidden="true" />
       <span class="zl-live-n zl-data">{count}</span>
       <span class="dp-recall-word">queued</span>
     </button>

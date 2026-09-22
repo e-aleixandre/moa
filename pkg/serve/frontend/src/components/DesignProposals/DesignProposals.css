@@ -491,7 +491,6 @@
 .dp-recall-line {
   display: flex;
   align-items: center;
-  gap: 10px;
   width: 100%;
   min-height: 44px;
   margin: 0 0 4px;
@@ -503,8 +502,22 @@
   cursor: pointer;
   border-radius: var(--zl-r-sm);
 }
+/* The count and the action read as one thing, so they sit together at the
+   left and the spring comes after. The row stays the target; only this group
+   lights up, which is what makes the two words look like the same control on
+   a wide screen. */
+.dp-recall-grp {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 6px 8px;
+  margin-left: -6px;
+  border-radius: var(--zl-r-sm);
+}
+.dp-recall-spring { flex: 1 1 auto; min-width: 0; }
 .dp-recall-count {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   font-family: var(--mono);
   font-size: var(--zl-fs-micro);
@@ -520,11 +533,15 @@
   color: var(--zl-t3);
 }
 @media (hover: hover) {
-  .dp-recall-line:hover { background: var(--zl-hi); }
+  .dp-recall-line:hover .dp-recall-grp { background: var(--zl-hi); }
   .dp-recall-line:hover .dp-recall-act { color: var(--zl-t1); }
   .dp-recall-line:hover .dp-recall-count { color: var(--zl-t3); }
 }
-.dp-recall-line:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+.dp-recall-line:focus-visible { outline: none; }
+.dp-recall-line:focus-visible .dp-recall-grp {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
+}
 
 /* The cells: same type, size and margins as a landed message, dotted hairline
    and no fill (the .dp-queued face above), and no foot at all — there is
@@ -534,8 +551,9 @@
 .dp-queued-flat:last-child { margin-bottom: 0; }
 
 /* V's marker: the LiveBar's own tally shape, no chevron, no panel. Pressing
-   it is the recall. */
-.dp-recall-pill { gap: 6px; padding: 0 10px; }
+   it is the recall, and the arrow is what says so. */
+.dp-recall-pill { gap: 5px; padding: 0 9px; }
+.dp-recall-pill > svg { flex: none; color: var(--zl-t3); }
 .dp-recall-word {
   font-size: var(--zl-fs-meta);
   font-weight: 500;
