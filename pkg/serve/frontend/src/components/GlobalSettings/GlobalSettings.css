@@ -90,6 +90,8 @@
   display: block;
   margin-bottom: 6px;
   color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
   letter-spacing: .08em;
   text-transform: uppercase;
 }
