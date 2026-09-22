@@ -199,22 +199,43 @@ export function landingKey(state) {
 // changes. It waits for `sessionsLoaded`, which bootstrap only sets once both
 // the sessions and the owners have answered: deciding earlier could show the
 // empty state for work whose owner is not known yet.
+//
+// On desktop a change of the landing set alone only fills the FOCUSED pane when
+// it is empty — that is the empty state. Other empty panes keep being filled
+// only when a session is created or deleted: a pane the user emptied on purpose
+// is not refilled because some conversation woke up elsewhere.
 export function watchLanding() {
   let last = null;
+  let lastLanding = null;
   let seen = null;
   const check = (s) => {
     if (!s.sessionsLoaded) return;
     // Every stream token is a store update; only the inputs of the key matter.
     if (seen && seen.sessions === s.sessions && seen.owners === s.owners && seen.isMobile === s.isMobile) return;
     seen = s;
-    const key = `${s.isMobile ? 1 : 0}|${Object.keys(s.sessions).length}|${landingKey(s)}`;
-    if (key === last) return;
+    const key = `${s.isMobile ? 1 : 0}|${Object.keys(s.sessions).length}`;
+    const landing = landingKey(s);
+    if (key === last && landing === lastLanding) return;
+    const layoutOrCount = key !== last;
     last = key;
+    lastLanding = landing;
     if (s.isMobile) autoSelectMobile();
-    else autoFillTiles();
+    else if (layoutOrCount) autoFillTiles();
+    else fillFocusedIfEmpty();
   };
   check(store.get());
   return store.subscribe(check);
+}
+
+function fillFocusedIfEmpty() {
+  const state = store.get();
+  const tile = findTile(state.tileTree, state.focusedTile);
+  if (!tile || tile.sessionId) return;
+  const assigned = new Set(allSessionIds(state.tileTree));
+  const next = landingOrder(state.sessions, state.owners?.list).find(id => !assigned.has(id));
+  if (!next) return;
+  setState({ tileTree: setTileSession(state.tileTree, tile.id, next) });
+  afterVisibilityChange();
 }
 
 // releaseStaleSaved drops any session that is currently `saved` (closed) from

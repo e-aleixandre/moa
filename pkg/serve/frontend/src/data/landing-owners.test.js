@@ -134,3 +134,40 @@ test('nothing is decided until both lists have loaded', () => {
   setState({ sessionsLoaded: true });
   expect(store.get().activeSession).toBe('oa');
 });
+
+const { createSplit } = await import('./tileTree.js');
+
+function desktop(tree, focusedTile, sessions) {
+  setState({
+    isMobile: false,
+    sessionsLoaded: true,
+    tileTree: tree,
+    focusedTile,
+    owners: { list: owners, loaded: true, error: null, retrying: false },
+    sessions,
+  });
+}
+
+test('desktop: a conversation turning live fills the empty focused pane', () => {
+  const tile = createTile();
+  initIds(tile);
+  desktop(tile, tile.id, { oa: { id: 'oa', kind: 'owner', state: 'saved', updated: 10, subagents: {} } });
+  unwatch = watchLanding();
+  expect(allSessionIds(store.get().tileTree)).toEqual([]);
+  updateSession('oa', { state: 'idle', updated: 60 });
+  expect(allSessionIds(store.get().tileTree)).toEqual(['oa']);
+});
+
+test('desktop: a pane left empty beside a shown session is not refilled when something turns live', () => {
+  const shown = createTile('s1');
+  const empty = createTile();
+  const tree = createSplit('horizontal', [shown, empty]);
+  initIds(tree);
+  desktop(tree, shown.id, {
+    s1: { id: 's1', state: 'idle', updated: 50, subagents: {} },
+    oa: { id: 'oa', kind: 'owner', state: 'saved', updated: 10, subagents: {} },
+  });
+  unwatch = watchLanding();
+  updateSession('oa', { state: 'idle', updated: 60 });
+  expect(allSessionIds(store.get().tileTree)).toEqual(['s1']);
+});
