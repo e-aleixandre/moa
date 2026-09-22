@@ -64,6 +64,14 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// A session id is 24 lowercase hex chars (pkg/session newID). Inline code that
+// is exactly one is tagged here so a transcript can turn it into a door to the
+// session. The tag depends only on the text, never on which sessions exist, so
+// the cached HTML stays valid when the session list changes; whether the tag
+// becomes a chip is decided at mount time (SessionMention).
+export const SESSION_ID_RE = /^[0-9a-f]{24}$/;
+export const SESSION_REF_CLASS = 'session-ref';
+
 // Customize renderer: wrap code blocks for CodeBlock component, and wrap GFM
 // tables in a horizontal-scroll container.
 const renderer = {
@@ -85,6 +93,10 @@ const renderer = {
       </div>
       <pre><code class="hljs">${highlighted}</code></pre>
     </div>`;
+  },
+  codespan({ text }) {
+    if (!SESSION_ID_RE.test(text)) return false;
+    return `<code class="${SESSION_REF_CLASS}">${text}</code>`;
   },
   // Wrap the default table rendering in a scrollable container so wide tables
   // scroll horizontally on narrow screens (mobile) instead of squashing their

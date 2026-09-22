@@ -35,3 +35,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* A mention sits inside a line of prose: it keeps to that line, and a long
+   title gives way to an ellipsis rather than pushing the text around. */
+.session-mention > .session-chip {
+  min-height: 24px;
+  padding: 0 8px;
+  vertical-align: middle;
+}

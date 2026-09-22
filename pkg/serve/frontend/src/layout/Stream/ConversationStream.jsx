@@ -63,6 +63,7 @@ function docChildren(blocks, onOpenSubagent, visibleDone, sessionId, onExpandBlo
             streaming={!!b.caret}
             live={!!b.caret}
             html={b.caret ? renderMarkdownWithCaret(b.text) : renderMarkdown(b.text)}
+            onOpenSession={openSession}
           />
         );
         break;
