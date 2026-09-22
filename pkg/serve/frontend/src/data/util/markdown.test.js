@@ -132,3 +132,25 @@ test('large fenced code skips synchronous highlighting', () => {
   expect(html).toContain('const x = 1;');
   expect(html).not.toContain('hljs-keyword');
 });
+
+// A session id in inline code is tagged so the transcript can mount a chip on
+// it; the tag is text-only, so cached HTML never goes stale with the roster.
+const SESSION_ID = '5d18914e4e62ac2206e1d77f';
+
+test('a session id in inline code is tagged as a session reference', () => {
+  const html = parseMarkdown(`falta elegir en \`${SESSION_ID}\`.`);
+  expect(html).toContain(`<code class="session-ref">${SESSION_ID}</code>`);
+});
+
+test('inline code that is not exactly a session id stays plain code', () => {
+  for (const text of [SESSION_ID.slice(0, 23), `${SESSION_ID}0`, SESSION_ID.toUpperCase(), `id ${SESSION_ID}`]) {
+    expect(parseMarkdown(`\`${text}\``)).not.toContain('session-ref');
+  }
+});
+
+test('a session id in prose or inside a fenced code block is not tagged', () => {
+  expect(parseMarkdown(`sesión ${SESSION_ID} suelta`)).not.toContain('session-ref');
+  const html = parseMarkdown(`\`\`\`\n${SESSION_ID}\n\`\`\`\n`);
+  expect(html).toContain(SESSION_ID);
+  expect(html).not.toContain('session-ref');
+});

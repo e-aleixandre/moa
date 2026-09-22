@@ -1,4 +1,6 @@
+import { useLayoutEffect, useRef } from "preact/hooks";
 import { sanitizeHtml } from "../../util/sanitize.js";
+import { mountSessionMentions } from "../SessionChip/SessionMention.jsx";
 import "./AssistantDocument.css";
 
 // AssistantDocument — a turn of assistant work. Markup and CSS are the
@@ -29,13 +31,21 @@ export function Prose({
   className = "",
   children,
   html,
+  onOpenSession,
   ...rest
 }) {
+  // With a way to open sessions, session ids in the prose become chips.
+  const ref = useRef(null);
+  useLayoutEffect(
+    () => (html != null && onOpenSession ? mountSessionMentions(ref.current, onOpenSession) : undefined),
+    [html, onOpenSession],
+  );
   const busy = streaming && !done;
   const cls = `zl-prose${busy ? " is-streaming" : ""}${done ? " is-done" : ""}${live ? " is-live" : ""}${className ? ` ${className}` : ""}`;
   if (html != null) {
     return (
       <div
+        ref={ref}
         class={cls}
         aria-busy={busy || undefined}
         dangerouslySetInnerHTML={{ __html: html }}

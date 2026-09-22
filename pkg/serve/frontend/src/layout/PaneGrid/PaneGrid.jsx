@@ -7,7 +7,7 @@ import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { LiveBar } from "../LiveBar/LiveBar.jsx";
 import {
-  McpBanner, PermissionPrompt, AskUserPrompt, UsagePanel, ModelSelector, ArtifactsPaneButton,
+  McpBanner, PermissionPrompt, AskUserPrompt, ModelSelector, ArtifactsPaneButton,
 } from "../../components/index.js";
 import { PickerPopover } from "../../components/ModelSelector/ModelSelector.jsx";
 import { usePermissionMenu } from "../../components/PermissionControl/PermissionControl.jsx";
@@ -216,7 +216,6 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   // Without these handlers the StatusStrip is read-only and model is decorative:
   // clicks look broken (TOC-3). Popovers are local to this pane so multi-pane
   // grids don't share one global open state.
-  const [usageOpen, setUsageOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const catalog = useStore(modelCatalog);
   const stripAnchorRef = useRef(null);
@@ -235,7 +234,6 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   });
 
   useEffect(() => {
-    setUsageOpen(false);
     setModelOpen(false);
     permMenu.close();
   }, [node.sessionId]);
@@ -282,20 +280,16 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   }, [modelOpen, placeModelPopover]);
 
   useEffect(() => {
-    if (!usageOpen && !modelOpen) return undefined;
+    if (!modelOpen) return undefined;
     const onDocDown = (e) => {
       const t = e.target;
       if (stripAnchorRef.current?.contains(t)) return;
       if (modelAnchorRef.current?.contains(t)) return;
       if (modelPopoverRef.current?.contains(t)) return;
-      setUsageOpen(false);
       setModelOpen(false);
     };
     const onKeyDown = (e) => {
-      if (e.key === "Escape") {
-        setUsageOpen(false);
-        setModelOpen(false);
-      }
+      if (e.key === "Escape") setModelOpen(false);
     };
     document.addEventListener("mousedown", onDocDown);
     document.addEventListener("keydown", onKeyDown);
@@ -303,7 +297,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
       document.removeEventListener("mousedown", onDocDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [usageOpen, modelOpen]);
+  }, [modelOpen]);
 
   const commonProps = {
     paneRef,
@@ -453,12 +447,15 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
             session={session}
             owner={owner}
             usage={usage}
-            onOpenUsage={(event) => {
+            // The grid has no dossier (DesktopDossier/dossier.js), so both
+            // doors take the tile's session to the conversation view and open
+            // its panel there, the same panel the conversation's strip opens.
+            onOpenUsage={() => {
               setModelOpen(false);
-              setPopoverOpenFromClick(setUsageOpen, event);
+              navigate(null, { session: session.id });
+              openSessionPanel(session.id, "usage");
             }}
             onOpenMcp={() => {
-              setUsageOpen(false);
               setModelOpen(false);
               navigate(null, { session: session.id });
               openSessionPanel(session.id, "mcp");
@@ -477,24 +474,11 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
               provider: session.provider,
               thinking,
             })}
-            onModel={(event) => {
-              setUsageOpen(false);
-              setPopoverOpenFromClick(setModelOpen, event);
-            }}
+            onModel={(event) => setPopoverOpenFromClick(setModelOpen, event)}
             modelOpen={modelOpen}
             modelPopover={modelPopover}
             modelAnchorRef={modelAnchorRef}
           />
-          {usageOpen && (
-            <div class="status-strip-usage-popover">
-              <UsagePanel
-                session={session}
-                usage={usage}
-                ctxPercent={session.contextPercent}
-                costUSD={session.costUSD}
-              />
-            </div>
-          )}
         </div>
       )}
       overlay={(
