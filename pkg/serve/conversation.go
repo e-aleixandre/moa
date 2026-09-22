@@ -43,6 +43,22 @@ type ConversationMessage struct {
 	Target        string          `json:"target,omitempty"`
 	Status        string          `json:"status,omitempty"`
 	Attachments   []AttachmentDTO `json:"attachments,omitempty"`
+	// full is what Text or Target was cut from, kept only when it was cut. It
+	// never reaches the wire (the HTTP budget stays as it is); the owner's
+	// sessions tool reads it to serve a message whole on request.
+	full string
+}
+
+// fullText is the uncut text of a message, or the uncut arguments of a tool
+// item.
+func (msg ConversationMessage) fullText() string {
+	if msg.full != "" {
+		return msg.full
+	}
+	if msg.Role == "tool" {
+		return msg.Target
+	}
+	return msg.Text
 }
 
 type conversationBranch struct {
@@ -263,6 +279,9 @@ func (m *Manager) safeConversationMessages(sessionID string, messages []core.Age
 		text, omitted, truncated := safeDisplayText(msg.Content)
 		if shouldShowConversationMessage(msg.Role, text, omitted, msg.Content) {
 			item := ConversationMessage{ID: id, Role: msg.Role, Text: text, Omitted: omitted, Truncated: truncated}
+			if truncated {
+				item.full = fullDisplayText(msg.Content)
+			}
 			if msg.Timestamp > 0 {
 				item.Timestamp = time.Unix(msg.Timestamp, 0).UTC()
 			}
@@ -283,15 +302,18 @@ func (m *Manager) safeConversationMessages(sessionID string, messages []core.Age
 				continue
 			}
 			toolID := fmt.Sprintf("tool:%s:%d", id, blockIndex)
-			action, target := conversationToolActivity(block.ToolName, block.Arguments)
+			action, rawTarget := conversationToolActivityRaw(block.ToolName, block.Arguments)
 			toolItem := ConversationMessage{
 				ID:        toolID,
 				Role:      "tool",
 				Tool:      block.ToolName,
 				Action:    action,
-				Target:    target,
+				Target:    conversationToolText(rawTarget),
 				Status:    "pending",
 				Timestamp: conversationTimestamp(msg.Timestamp),
+			}
+			if toolItem.Target != rawTarget {
+				toolItem.full = rawTarget
 			}
 			if result, found := results[block.ToolCallID]; found {
 				toolItem.Status = conversationToolStatus(result)
@@ -430,17 +452,26 @@ func conversationToolDetailFromResult(result core.AgentMessage) conversationTool
 // arguments: owner-authorized clients need to know what each tool was asked to
 // do, including MCP and other unknown tools.
 func conversationToolActivity(name string, args map[string]any) (action, target string) {
+	action, raw := conversationToolActivityRaw(name, args)
+	return action, conversationToolText(raw)
+}
+
+// conversationToolActivityRaw is conversationToolActivity before the size
+// bound, so a reader that asks for the whole call can have it.
+func conversationToolActivityRaw(name string, args map[string]any) (action, target string) {
 	action = name
 	switch name {
 	case "bash":
-		return action, conversationToolText(conversationToolString(args, "command"))
+		target = conversationToolString(args, "command")
 	case "fetch_content":
 		action = "fetch"
-		return action, conversationToolText(conversationToolString(args, "url"))
+		target = conversationToolString(args, "url")
 	case "subagent":
-		return action, conversationToolText(conversationToolString(args, "task"))
+		target = conversationToolString(args, "task")
+	default:
+		target = conversationToolArgumentsRaw(args)
 	}
-	return action, conversationToolArguments(args)
+	return action, strings.ToValidUTF8(strings.TrimSpace(target), "�")
 }
 
 func conversationToolString(args map[string]any, key string) string {
@@ -449,12 +480,16 @@ func conversationToolString(args map[string]any, key string) string {
 }
 
 func conversationToolArguments(args map[string]any) string {
+	return conversationToolText(conversationToolArgumentsRaw(args))
+}
+
+func conversationToolArgumentsRaw(args map[string]any) string {
 	if len(args) == 0 {
 		return ""
 	}
 	encoded, err := json.Marshal(args)
 	if err == nil {
-		return conversationToolText(string(encoded))
+		return string(encoded)
 	}
 
 	// json.Marshal rejects an entire argument map when only one value is not
@@ -477,7 +512,7 @@ func conversationToolArguments(args map[string]any) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return conversationToolText("{" + strings.Join(parts, ",") + "}")
+	return "{" + strings.Join(parts, ",") + "}"
 }
 
 func conversationToolText(value string) string {
@@ -497,6 +532,18 @@ func conversationHead(value string, maxBytes int) string {
 		end--
 	}
 	return value[:end]
+}
+
+// fullDisplayText is safeDisplayText without the byte budget: the same text
+// blocks joined the same way.
+func fullDisplayText(content []core.Content) string {
+	var parts []string
+	for _, block := range content {
+		if block.Type == "text" {
+			parts = append(parts, block.Text)
+		}
+	}
+	return strings.ToValidUTF8(strings.Join(parts, "\n"), "�")
 }
 
 func safeDisplayText(content []core.Content) (text string, omitted, truncated bool) {

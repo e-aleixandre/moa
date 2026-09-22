@@ -41,10 +41,14 @@ var reportConfirmTimeout = 10 * time.Second
 // so shutdown can be asserted to be a full stop: after Close nothing may retry.
 var reportDeliveryAttempts atomic.Uint64
 
-// maxReportFinalTextBytes caps the tail of a child's final message carried in a
-// report. The owner reads the full session through the `sessions` tool when the
-// tail is not enough.
-const maxReportFinalTextBytes = 2 << 10
+// reportHeadChars / reportTailChars abridge a child's final message in a
+// report: the beginning says what the turn was about, the end carries the
+// conclusion and the book delta. What is cut in between is announced, with how
+// to read it whole through the `sessions` tool.
+const (
+	reportHeadChars = 800
+	reportTailChars = 1500
+)
 
 // maxBookDeltaBytes caps the delta itself. It is a list of paths and one line
 // each; anything longer is a session writing its report into the wrong section.
@@ -956,11 +960,11 @@ func reportFrom(sess *ManagedSession, out runOutcome) owner.Report {
 		CWD:       sess.CWD,
 		Origin:    sess.Origin,
 		Status:    out.Status,
-		// The delta comes out of the WHOLE message; the tail is what is carried
+		// The delta comes out of the WHOLE message; an abridged copy is carried
 		// for reading. A session that closes with a long summary would otherwise
 		// push its own book delta out of the report that exists to apply it.
 		BookDelta: extractBookDelta(out.FinalText),
-		FinalText: reportTail(out.FinalText),
+		FinalText: reportAbridge(sess.ID, out.FinalText),
 		// What the session left running when its turn ended. A report is about
 		// a completed turn, not a quiet session; this is what keeps the two
 		// from reading the same.
@@ -1052,7 +1056,9 @@ func extractBookDelta(text string) string {
 		// Cut on a rune boundary and say so: a delta that ends mid-path reads
 		// like a path, and the owner would apply it to a file that does not
 		// exist.
-		delta = cutAtRuneBoundary(delta, maxBookDeltaBytes) + "\n[truncated]"
+		cut := cutAtRuneBoundary(delta, maxBookDeltaBytes)
+		delta = cut + fmt.Sprintf("\n[... %d more characters truncated — read the session's final message for the rest ...]",
+			len([]rune(delta))-len([]rune(cut)))
 	}
 	return delta
 }
@@ -1169,18 +1175,11 @@ func reportBatchID(pending []owner.Report) string {
 	return "rep_" + hex.EncodeToString(sum.Sum(nil))[:16]
 }
 
-// reportTail keeps the end of the child's final message: what it concluded is
-// nearer the end than the beginning.
-func reportTail(text string) string {
-	text = strings.TrimSpace(text)
-	if len(text) <= maxReportFinalTextBytes {
-		return text
-	}
-	cut := len(text) - maxReportFinalTextBytes
-	for cut < len(text) && !utf8Start(text[cut]) {
-		cut++
-	}
-	return "…" + text[cut:]
+// reportAbridge keeps the beginning and the end of the child's final message
+// and says what is missing in between and how to read it.
+func reportAbridge(sessionID, text string) string {
+	return abridge(strings.TrimSpace(text), reportHeadChars, reportTailChars,
+		fmt.Sprintf("read the whole message with the sessions tool: action=read, session_id=%s, message_id=%s", sessionID, lastMessageID))
 }
 
 // reportsMessage renders a batch. The format is fixed and plain: the owner is
@@ -1219,6 +1218,11 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 		}
 		if rep.FinalText != "" {
 			fmt.Fprintf(&b, "  said: %s\n", indentReportText(rep.FinalText))
+		} else if rep.Status == callbackStatusDone {
+			// A run that stops on a tool call or an empty reply ends "done"
+			// with nothing to quote. Saying nothing would read as finished work.
+			fmt.Fprintf(&b, "  said: nothing — the turn ended without a final message, so it may have "+
+				"stopped mid-work. See where with the sessions tool: action=read, session_id=%s, tools=true\n", rep.SessionID)
 		}
 		switch {
 		case !rep.GitAvailable:

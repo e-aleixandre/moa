@@ -29,8 +29,8 @@ type Report struct {
 	FinalText string         `json:"final_text,omitempty"`
 	Pending   *ReportPending `json:"pending,omitempty"`
 	// BookDelta is what the session says its work changes about the book,
-	// lifted from the FULL final message before FinalText was cut to its tail:
-	// a delta that only exists in the part that was truncated is a delta the
+	// lifted from the FULL final message before FinalText was abridged:
+	// a delta that only exists in the part that was cut is a delta the
 	// owner never applies. Empty means the session did not say (the owner has
 	// to ask); "none" is the session saying nothing changes, which is an answer.
 	BookDelta string `json:"book_delta,omitempty"`
