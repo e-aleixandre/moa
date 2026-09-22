@@ -1206,6 +1206,7 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 	}
 	sess.Origin = saved.Origin()
 	sess.Kind = saved.Kind()
+	sess.ownerDetached.Store(saved.OwnerDetached())
 	sess.automationCreated = automationCreatedMeta(saved.Metadata)
 	// 3. Restore permission mode and the context limit.
 	if savedPermMode != "" {

@@ -109,6 +109,12 @@ const (
 	// listings and routing can tell them apart without loading the runtime.
 	// Only KindOwner exists today; an absent key means an ordinary session.
 	MetaKind = "kind"
+	// MetaOwnerDetached marks a session the user detached from the owner of its
+	// codebase: it neither reports to nor is visible to that owner. Stored as
+	// true; absent means attached, so reattaching deletes the key rather than
+	// writing false, and binaries that predate it simply see an attached
+	// session.
+	MetaOwnerDetached = "owner_detached"
 )
 
 // KindOwner marks the conversation of a project owner. Such a session is a
@@ -135,7 +141,7 @@ const OriginUser = "user"
 // does not know about. The persistence reactor rebuilds Metadata from scratch
 // on every snapshot, so persisters must carry these forward or they would be
 // dropped on the first save after creation.
-var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers, MetaKind}
+var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers, MetaKind, MetaOwnerDetached}
 
 // SetOrigin records who created the session (e.g. "user", "automation", or a
 // caller-chosen label such as "linear-webhook"). An empty origin is not stored:
@@ -159,6 +165,32 @@ func (s *Session) Origin() string {
 		return origin
 	}
 	return OriginUser
+}
+
+// OwnerDetached reports whether the user detached this session from the owner
+// of its codebase.
+func (s *Session) OwnerDetached() bool {
+	return OwnerDetachedIn(s.Metadata)
+}
+
+// OwnerDetachedIn reads the detach marker from a metadata map, so a
+// saved summary can be classified without loading the whole session.
+func OwnerDetachedIn(meta map[string]any) bool {
+	detached, _ := meta[MetaOwnerDetached].(bool)
+	return detached
+}
+
+// SetOwnerDetached records or clears the detach marker. Clearing deletes the
+// key: an attached session never carries it.
+func (s *Session) SetOwnerDetached(detached bool) {
+	if !detached {
+		delete(s.Metadata, MetaOwnerDetached)
+		return
+	}
+	if s.Metadata == nil {
+		s.Metadata = make(map[string]any)
+	}
+	s.Metadata[MetaOwnerDetached] = true
 }
 
 // SetIdempotencyKey records the Automation API key this session answers. It is

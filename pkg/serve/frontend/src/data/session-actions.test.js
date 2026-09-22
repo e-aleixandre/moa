@@ -10,7 +10,7 @@ let apiResponse = [];
 
 const { store, setState, updateSession } = await import('./store.js');
 const { syncConnections } = await import('./api.js');
-const { createSession, deleteSession, loadSessions, loadUsage, openPersistedSubagent, openBashJob, recallQueuedSteers, sendMessage, startPolling, stopPolling, stopRun } = await import('./session-actions.js');
+const { createSession, deleteSession, loadSessions, loadUsage, openPersistedSubagent, openBashJob, recallQueuedSteers, sendMessage, setOwnerDetached, startPolling, stopPolling, stopRun } = await import('./session-actions.js');
 const { getToasts, removeToast } = await import('./notifications.js');
 const { adoptAttentionNamespace, handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
 
@@ -90,6 +90,29 @@ test('a successful delete fences an older roster without losing concurrent updat
 
   expect(store.get().sessions.deleted).toBeUndefined();
   expect(store.get().sessions.kept.title).toBe('updated while deleting');
+});
+
+test('setOwnerDetached fences an older roster owner reference', async () => {
+  let resolveOldRoster;
+  globalThis.fetch = (path, opts) => {
+    if (opts.method === 'GET') return new Promise(resolve => { resolveOldRoster = resolve; });
+    return Promise.resolve(new Response(JSON.stringify({
+      id: 's1', owner_id: '', owner_name: '', detached_owner_id: 'owner-1', detached_owner_name: 'Owner',
+    }), { status: 200 }));
+  };
+  setState({ sessions: { s1: { id: 's1', state: 'idle', provider: 'openai', cwd: '/work', subagents: {} } } });
+
+  const oldRoster = loadSessions();
+  await Promise.resolve();
+  await setOwnerDetached('s1', true);
+  resolveOldRoster(new Response(JSON.stringify([{
+    id: 's1', state: 'idle', provider: 'openai', cwd: '/work', owner_id: 'owner-1', owner_name: 'Owner',
+  }]), { status: 200 }));
+  await oldRoster;
+
+  expect(store.get().sessions.s1).toMatchObject({
+    ownerId: '', ownerName: '', detachedOwnerId: 'owner-1', detachedOwnerName: 'Owner',
+  });
 });
 
 test('a failed create does not add a roster entry', async () => {

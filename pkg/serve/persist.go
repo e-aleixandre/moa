@@ -157,6 +157,48 @@ func (sp *servePersister) recordIdempotencyKey(key string) error {
 	return sp.store.Save(&snapshot)
 }
 
+// recordOwnerDetached sets or clears the detach marker and saves synchronously.
+// It is changed at runtime, so it is written to the preserved set as well as
+// the persisted metadata; clearing must delete it from both, because
+// ApplyPreservedMetadata only ever adds keys and a stale preserved entry would
+// re-detach the session on the next snapshot.
+func (sp *servePersister) recordOwnerDetached(detached bool) error {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.deleted || sp.persisted == nil || sp.store == nil {
+		return nil
+	}
+	previousPersisted, hadPersisted := sp.persisted.Metadata[session.MetaOwnerDetached]
+	previousPreserved, hadPreserved := sp.preserved[session.MetaOwnerDetached]
+	sp.persisted.SetOwnerDetached(detached)
+	if detached {
+		if sp.preserved == nil {
+			sp.preserved = make(map[string]any, 1)
+		}
+		sp.preserved[session.MetaOwnerDetached] = true
+	} else {
+		delete(sp.preserved, session.MetaOwnerDetached)
+	}
+	snapshot := *sp.persisted
+	if err := sp.store.Save(&snapshot); err != nil {
+		if hadPersisted {
+			sp.persisted.Metadata[session.MetaOwnerDetached] = previousPersisted
+		} else {
+			delete(sp.persisted.Metadata, session.MetaOwnerDetached)
+		}
+		if hadPreserved {
+			if sp.preserved == nil {
+				sp.preserved = make(map[string]any, 1)
+			}
+			sp.preserved[session.MetaOwnerDetached] = previousPreserved
+		} else {
+			delete(sp.preserved, session.MetaOwnerDetached)
+		}
+		return err
+	}
+	return nil
+}
+
 // markDeleted prevents future Snapshot calls from writing to disk.
 func (sp *servePersister) markDeleted() {
 	sp.mu.Lock()
