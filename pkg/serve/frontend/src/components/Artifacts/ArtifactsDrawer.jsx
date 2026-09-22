@@ -1,19 +1,19 @@
 import { createPortal } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { ArrowLeft, Layers, Loader2, Maximize2, Minimize2, Search, X } from 'lucide-preact';
+import { ArrowLeft, ChevronLeft, ChevronRight, Layers, Loader2, Maximize2, Minimize2, Search, X } from 'lucide-preact';
 import { useStore } from '../../hooks/useStore.js';
 import { usePresence } from '../../hooks/usePresence.js';
 import { MOTION } from '../../hooks/motion.js';
 import { isTopLayer, pushLayer } from '../../data/overlay-layers.js';
 import { registerOverlay } from '../../data/overlays.js';
 import {
-  artifactsOrigin, artifactsSlice, backToArtifactsList, closeArtifacts, openArtifactFromList,
+  artifactsOrigin, artifactsSlice, backToArtifactsList, closeArtifacts, moveArtifact, openArtifactFromList,
   restoreArtifactsFocus, retryArtifacts, setArtifactExpanded,
 } from '../../data/artifacts.js';
-import { currentArtifact, filterArtifacts, originLabel } from '../../data/artifacts-model.js';
+import { artifactPosition, currentArtifact, filterArtifacts, originLabel } from '../../data/artifacts-model.js';
 import { Field } from '../../primitives/index.js';
 import { ArtifactRow, KindIcon, ShareButton } from './ArtifactRow.jsx';
-import { ArtifactContent, ARTIFACT_ESCAPE } from './ArtifactContent.jsx';
+import { ArtifactContent, ARTIFACT_ESCAPE, ARTIFACT_SWIPE } from './ArtifactContent.jsx';
 import { groupArtifactsByDay } from './artifact-groups.js';
 import './Artifacts.css';
 
@@ -33,6 +33,14 @@ function focusableIn(node) {
   if (!node) return [];
   return Array.from(node.querySelectorAll(FOCUSABLE_SELECTOR))
     .filter((el) => el.offsetParent !== null || el === document.activeElement);
+}
+
+function swipeDirection(start, end) {
+  if (!start || !end) return null;
+  const horizontal = end.x - start.x;
+  const vertical = end.y - start.y;
+  if (Math.abs(horizontal) < 72 || Math.abs(vertical) > 40 || Math.abs(horizontal) <= Math.abs(vertical)) return null;
+  return horizontal < 0 ? 1 : -1;
 }
 
 // OriginName — the conversation that owns the drawer, inside the SAME single
@@ -69,6 +77,9 @@ export function ArtifactsDrawer() {
   const fromList = slice.view === 'reader' && slice.from === 'list';
   const modal = isMobile || slice.expanded;
   const artifact = currentArtifact(slice);
+  const position = artifactPosition(slice.items, slice.fileId);
+  const swipeStart = useRef(null);
+  const activeTouchPointers = useRef(new Set());
 
   useEffect(() => { if (!list) { setSearching(false); setQuery(''); } }, [list]);
   useEffect(() => { setQuery(''); }, [slice.ownerSessionId]);
@@ -121,6 +132,14 @@ export function ArtifactsDrawer() {
         dismiss();
         return;
       }
+      const editable = event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]');
+      if (slice.view === 'reader' && panel.current?.contains(event.target) && !editable && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && isTopLayer(ownId()) && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        // Reader content has no editable fields. Keeping arrows on the drawer
+        // means comparison works from the keyboard without stealing movement
+        // inside an embedded HTML document, whose events do not leave its frame.
+        if (moveArtifact(event.key === 'ArrowRight' ? 1 : -1)) event.preventDefault();
+        return;
+      }
       if (event.key !== 'Tab' || !modal || !isTopLayer(ownId())) return;
       // Modal means the dialog owns the tab ring: wrap at both ends instead of
       // letting Tab walk into the (inert) app behind it.
@@ -146,6 +165,10 @@ export function ArtifactsDrawer() {
       const frame = panel.current?.querySelector('iframe');
       if (!frame || event.source !== frame.contentWindow) return;
       if (event.data?.type === ARTIFACT_ESCAPE) dismiss();
+      if (event.data?.type === ARTIFACT_SWIPE) {
+        const direction = swipeDirection(event.data.start, event.data.end);
+        if (direction !== null) moveArtifact(direction);
+      }
     };
     document.addEventListener('keydown', onKey, true);
     window.addEventListener('message', onMessage);
@@ -153,7 +176,7 @@ export function ArtifactsDrawer() {
       document.removeEventListener('keydown', onKey, true);
       window.removeEventListener('message', onMessage);
     };
-  }, [open, list, fromList, searching, modal]);
+  }, [open, list, fromList, searching, modal, slice.view]);
 
   // Modal (mobile, or expanded on desktop): the app behind the dialog stops
   // taking focus, and the panel takes it. A NON-modal desktop drawer does none
@@ -174,7 +197,7 @@ export function ArtifactsDrawer() {
     if (!node) return undefined;
     (focusableIn(node)[0] || node).focus?.({ preventScroll: true });
     return undefined;
-  }, [open, modal, slice.view, slice.fileId]);
+  }, [open, modal, slice.view]);
 
   // Closing restores focus to whatever opened the drawer (head entry, pane
   // button or stream card), so the conversation is where the user left it.
@@ -206,6 +229,24 @@ export function ArtifactsDrawer() {
   const items = slice.items;
   const filtered = filterArtifacts(items, query);
   const back = () => (fromList ? backToArtifactsList() : closeArtifacts());
+  const onPointerDown = (event) => {
+    if (event.pointerType !== 'touch' || event.target.closest('.af-image-wrap.is-zoomed')) return;
+    activeTouchPointers.current.add(event.pointerId);
+    // A pinch belongs to the image zoomer, never to collection navigation.
+    if (activeTouchPointers.current.size !== 1) {
+      swipeStart.current = null;
+      return;
+    }
+    swipeStart.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  };
+  const onPointerUp = (event) => {
+    const start = swipeStart.current;
+    activeTouchPointers.current.delete(event.pointerId);
+    swipeStart.current = null;
+    if (!start || start.id !== event.pointerId || event.pointerType !== 'touch' || event.target.closest('.af-image-wrap.is-zoomed')) return;
+    const direction = swipeDirection(start, { x: event.clientX, y: event.clientY });
+    if (direction !== null) moveArtifact(direction);
+  };
 
   const panelNode = (
     <aside
@@ -233,8 +274,27 @@ export function ArtifactsDrawer() {
           </span>
         ) : artifact && (
           <span class="af-head-title af-head-file">
+            <button
+              type="button"
+              class="af-icon-button af-nav-button"
+              onClick={() => moveArtifact(-1)}
+              disabled={!position || position.index === 0}
+              aria-label="Previous artifact"
+            >
+              <ChevronLeft size={17} />
+            </button>
             <KindIcon artifact={artifact} size={14} />
             <span class="af-head-name">{artifact.name}</span>
+            {position && <output class="af-head-position" aria-live="polite">{position.index + 1} of {position.total}</output>}
+            <button
+              type="button"
+              class="af-icon-button af-nav-button"
+              onClick={() => moveArtifact(1)}
+              disabled={(!position || position.index === position.total - 1)}
+              aria-label="Next artifact"
+            >
+              <ChevronRight size={17} />
+            </button>
             <OriginName origin={origin} />
           </span>
         )}
@@ -292,7 +352,7 @@ export function ArtifactsDrawer() {
           <ArtifactListBody slice={slice} items={items} filtered={filtered} onClearSearch={() => { setQuery(''); setSearching(false); }} />
         </div>
       ) : artifact ? (
-        <div class="af-document-body">
+        <div class="af-document-body" onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerCancel={(event) => { activeTouchPointers.current.delete(event.pointerId); swipeStart.current = null; }}>
           <ArtifactContent key={artifact.id} artifact={artifact} />
         </div>
       ) : slice.status === 'loading' ? (

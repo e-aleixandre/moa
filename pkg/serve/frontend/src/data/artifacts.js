@@ -161,6 +161,19 @@ export function openArtifactFromList(fileId) {
   patch({ view: 'reader', fileId, from: 'list', expanded: false });
 }
 
+// moveArtifact stays inside the collection already loaded for this owner. It
+// deliberately does not wrap: the position and disabled controls make the end
+// of a comparison explicit instead of silently jumping to an unrelated file.
+export function moveArtifact(direction) {
+  const slice = artifactsSlice(store.get());
+  if (slice.view !== 'reader') return false;
+  const index = slice.items.findIndex((artifact) => artifact.id === slice.fileId);
+  const next = index + direction;
+  if (index < 0 || next < 0 || next >= slice.items.length) return false;
+  patch({ fileId: slice.items[next].id, seed: null, expanded: false });
+  return true;
+}
+
 export function backToArtifactsList() {
   patch({ view: 'list', fileId: null, from: 'chat', expanded: false, seed: null });
 }

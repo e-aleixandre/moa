@@ -107,6 +107,14 @@ export function currentArtifact(slice) {
   return slice.seed && slice.seed.id === slice.fileId ? slice.seed : null;
 }
 
+// artifactPosition is the reader's place in the owner conversation's
+// chronological collection. The API orders the collection newest first, so
+// moving forward follows the recent deliveries the user is comparing.
+export function artifactPosition(items, fileId) {
+  const index = items.findIndex((artifact) => artifact.id === fileId);
+  return index < 0 ? null : { index, total: items.length };
+}
+
 // seedFromFile turns a send_file card descriptor into a provisional artifact.
 export function seedFromFile(file) {
   const id = artifactFileId(file?.url);

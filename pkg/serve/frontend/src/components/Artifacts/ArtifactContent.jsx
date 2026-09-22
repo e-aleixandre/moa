@@ -12,6 +12,7 @@ import { ShareButton } from './ArtifactRow.jsx';
 // close, mirroring the LivePreview inspector's bridge. Only a message coming
 // from THIS iframe's contentWindow is honoured (see ArtifactsDrawer).
 export const ARTIFACT_ESCAPE = 'moa-artifact-escape';
+export const ARTIFACT_SWIPE = 'moa-artifact-swipe';
 
 // artifactRevision moved to data/artifacts-model.js (pure, shared with the
 // drawer and testable without pulling a component's hook runtime in).
@@ -128,4 +129,4 @@ export function ArtifactContent({ artifact, onEscapeFrame }) {
 // acts on a message whose source is that very iframe. It rides in the body,
 // under the preview's existing CSP (which already allows inline scripts), and
 // leaves the document's own appearance untouched.
-export const ESCAPE_BRIDGE = `<script>document.addEventListener('keydown',function(e){if(e.key==='Escape')parent.postMessage({type:'${ARTIFACT_ESCAPE}'},'*');});<\/script>`;
+export const ESCAPE_BRIDGE = `<script>(function(){document.addEventListener('keydown',function(e){if(e.key==='Escape')parent.postMessage({type:'${ARTIFACT_ESCAPE}'},'*');});var start=null,touches={};document.addEventListener('pointerdown',function(e){if(e.pointerType!=='touch')return;touches[e.pointerId]=true;if(Object.keys(touches).length!==1){start=null;return;}start={id:e.pointerId,x:e.clientX,y:e.clientY};});document.addEventListener('pointerup',function(e){if(e.pointerType!=='touch')return;var only=Object.keys(touches).length===1;delete touches[e.pointerId];if(!start||e.pointerId!==start.id||!only){start=null;return;}parent.postMessage({type:'${ARTIFACT_SWIPE}',start:start,end:{x:e.clientX,y:e.clientY}},'*');start=null;});document.addEventListener('pointercancel',function(e){delete touches[e.pointerId];start=null;});}());<\/script>`;
