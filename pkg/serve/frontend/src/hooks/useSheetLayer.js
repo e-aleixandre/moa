@@ -46,7 +46,7 @@ export function useSheetLayer({ open, present, sheet = true }) {
     if (!next) {
       const back = focusBeforeCover.current;
       focusBeforeCover.current = null;
-      if (back?.isConnected) back.focus();
+      if (back?.isConnected) back.focus({ preventScroll: true });
     }
   };
 

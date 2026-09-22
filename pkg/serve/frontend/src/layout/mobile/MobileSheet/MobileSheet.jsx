@@ -157,10 +157,13 @@ export function MobileSheet({ open, onClose, onClosed, onBack, backLabel = "Back
     if (!open || !visible) return undefined;
     previousFocusRef.current = document.activeElement;
     const panel = panelRef.current;
-    if (panel) panel.focus();
+    // preventScroll: the panel is still translated below the fold while it
+    // enters, and a plain focus() scrolls the overflow:hidden .mconv to reach
+    // it, leaving the sheet (and the screen under it) shifted up for good.
+    if (panel) panel.focus({ preventScroll: true });
     return () => {
       const toRestore = previousFocusRef.current;
-      if (toRestore && typeof toRestore.focus === "function") toRestore.focus();
+      if (toRestore && typeof toRestore.focus === "function") toRestore.focus({ preventScroll: true });
     };
   }, [open, visible]);
 
@@ -168,7 +171,7 @@ export function MobileSheet({ open, onClose, onClosed, onBack, backLabel = "Back
   // its ‹, whose label says where it returns.
   const onPage = !!onBack && !bare;
   useLayoutEffect(() => {
-    if (open && visible && onPage) backRef.current?.focus();
+    if (open && visible && onPage) backRef.current?.focus({ preventScroll: true });
   }, [open, visible, onPage, title]);
 
   if (!visible && !dragging) return null;

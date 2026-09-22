@@ -12,7 +12,12 @@
    focus ring (the lab gets it from `.zl :is(button…)`), and the phone's 44px
    floor on rows that open something. */
 
+/* position: relative holds the ledger's .sr-only labels. Without it they
+   anchor to .zl-transcript-frame, outside the scroller, and every ledger in a
+   long conversation adds to the scroll height of the overflow:hidden screens
+   around it (.mconv measured at 22,658px on an 844px phone). */
 .zl-ledger {
+  position: relative;
   border-radius: var(--zl-r-md);
   background: var(--zl-sheet);
   box-shadow: var(--zl-rim);
