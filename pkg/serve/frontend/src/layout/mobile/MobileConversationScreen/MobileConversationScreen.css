@@ -178,6 +178,76 @@
 .mconv-empty-firstrun .mconv-empty-sub {
   margin-bottom: var(--space-4);
 }
+/* With owners there is a list again: the screen takes the ordinary empty
+   state's column so the faces and the heading share its left edge. */
+.mconv-empty-firstrun.has-owners {
+  justify-content: flex-start;
+  align-items: stretch;
+  text-align: left;
+  padding-inline: var(--space-2);
+}
+.mconv-empty-firstrun.has-owners .mconv-empty-sub,
+.mconv-empty-firstrun.has-owners .mconv-empty-new {
+  margin-inline: var(--space-3);
+  padding-inline: 0;
+}
+.mconv-empty-firstrun.has-owners .mconv-empty-title { margin-top: var(--space-3); }
+
+/* ── Owners as faces ─────────────────────────────────────────────────────
+   The label is the drawer's group heading (.zl-list .zl-group type), so the
+   empty state names the owners the way the list does. */
+.mconv-empty-label {
+  margin: 0;
+  padding: 8px 12px 4px;
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--zl-t4);
+}
+.mconv-empty-title.is-after-owners { margin-top: var(--space-3); }
+.mconv-owners {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 0 4px;
+}
+.mconv-owner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 88px;
+  padding: 8px 4px 6px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: none;
+  color: var(--zl-t1);
+  font-family: var(--font);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mconv-owner:active { background: var(--zl-hi); }
+@media (hover: hover) {
+  .mconv-owner:hover { background: var(--zl-hi); }
+}
+.mconv-owner:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, #cba6f7);
+  outline-offset: -2px;
+}
+.mconv-owner-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  max-width: 100%;
+  text-align: center;
+  overflow-wrap: anywhere;
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+  line-height: 16px;
+}
 /* Mauve, like every other New session in the product (.zl-side-new). This was
    peach, which the prototype reserves for "you wrote this" -- and spending the
    user-message colour on the biggest button of the first screen is exactly the
