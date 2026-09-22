@@ -186,6 +186,37 @@ export function autoSelectMobile() {
   }
 }
 
+// landingKey names the SET of conversations the app may land on. Landing is
+// re-decided when it changes, not when the roster's size does: a conversation
+// that turns live in place — an owner woken by a report, a saved session
+// resumed from another client — keeps the count but must still pull an empty
+// screen onto it. Sorted, so recency churn alone never re-decides.
+export function landingKey(state) {
+  return landingOrder(state.sessions, state.owners?.list).sort().join(',');
+}
+
+// watchLanding re-lands whenever the layout, the roster size or the landing set
+// changes. It waits for `sessionsLoaded`, which bootstrap only sets once both
+// the sessions and the owners have answered: deciding earlier could show the
+// empty state for work whose owner is not known yet.
+export function watchLanding() {
+  let last = null;
+  let seen = null;
+  const check = (s) => {
+    if (!s.sessionsLoaded) return;
+    // Every stream token is a store update; only the inputs of the key matter.
+    if (seen && seen.sessions === s.sessions && seen.owners === s.owners && seen.isMobile === s.isMobile) return;
+    seen = s;
+    const key = `${s.isMobile ? 1 : 0}|${Object.keys(s.sessions).length}|${landingKey(s)}`;
+    if (key === last) return;
+    last = key;
+    if (s.isMobile) autoSelectMobile();
+    else autoFillTiles();
+  };
+  check(store.get());
+  return store.subscribe(check);
+}
+
 // releaseStaleSaved drops any session that is currently `saved` (closed) from
 // the places that decide what the conversation surface shows: desktop tiles and
 // the mobile activeSession. Called once at bootstrap, BEFORE autoFillTiles /
