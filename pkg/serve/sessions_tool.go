@@ -172,7 +172,7 @@ func (m *Manager) ownerSession(own owner.Owner, id string) (SessionInfo, error) 
 		if info.ID != id {
 			continue
 		}
-		if err := ownerTargetError(own, info.ID, info.Kind, info.CWD); err != nil {
+		if err := ownerTargetError(own, info.ID, info.Kind, info.CWD, info.ownerDetached); err != nil {
 			return SessionInfo{}, err
 		}
 		return info, nil
@@ -180,12 +180,15 @@ func (m *Manager) ownerSession(own owner.Owner, id string) (SessionInfo, error) 
 	return SessionInfo{}, fmt.Errorf("session %s not found", id)
 }
 
-func ownerTargetError(own owner.Owner, id, kind, cwd string) error {
+func ownerTargetError(own owner.Owner, id, kind, cwd string, detached bool) error {
 	if id == own.SessionID {
 		return errors.New("that is your own conversation")
 	}
 	if kind == session.KindOwner || !inCodebase(own, cwd) {
 		return fmt.Errorf("session %s does not belong to this project", id)
+	}
+	if detached {
+		return fmt.Errorf("the user detached session %s from you: you cannot read, direct or answer it", id)
 	}
 	return nil
 }
@@ -204,8 +207,9 @@ func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
 		}
 		// A session with no cwd has no codebase to warn about, and a saved
 		// one is not running: the warning is about work happening now that
-		// reports to nobody.
-		if info.CWD != "" && info.State != StateSaved && info.OwnerID == "" {
+		// reports to nobody. A detached one has an owner; the user chose to
+		// keep it apart, so it is nobody's business to flag.
+		if info.CWD != "" && info.State != StateSaved && info.OwnerID == "" && info.DetachedOwnerID == "" {
 			strays = append(strays, info)
 		}
 	}
@@ -223,6 +227,12 @@ func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
 		fmt.Fprintf(&sb, "Showing %d of %d sessions, most recently updated first.\n", len(mine), total)
 	}
 	for _, info := range mine {
+		// That it exists is all a detached session tells its owner: no title,
+		// state, brief or pending question, which are its content.
+		if info.ownerDetached {
+			fmt.Fprintf(&sb, "- %s detached by the user\n", info.ID)
+			continue
+		}
 		fmt.Fprintf(&sb, "- %s [%s] %s", info.ID, info.State, info.Title)
 		if info.CWD != own.Root {
 			fmt.Fprintf(&sb, " (%s)", info.CWD)
@@ -358,7 +368,7 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 			if cwd == "" {
 				cwd = m.workspaceRoot
 			}
-			return ownerTargetError(own, saved.ID, saved.Kind(), cwd)
+			return ownerTargetError(own, saved.ID, saved.Kind(), cwd, saved.OwnerDetached())
 		}); err != nil {
 			// A concurrent resume may have completed between Get and
 			// resumeSessionValidated. In that case the target is ready despite
@@ -369,7 +379,7 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 		}
 	}
 	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", ownerPromptCustom(own), func(sess *ManagedSession) error {
-		return ownerTargetError(own, sess.ID, sess.Kind, sess.CWD)
+		return ownerTargetError(own, sess.ID, sess.Kind, sess.CWD, sess.ownerDetached.Load())
 	})
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot send to %s: %v", id, err))

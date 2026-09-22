@@ -167,6 +167,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("PATCH /api/sessions/{id}/mcp/{server}", handleMCPToggle(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/mcp/{server}/restart", handleMCPRestart(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", handleConfig(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/owner", handleSessionOwner(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/shell", handleShell(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/branch", handleBranch(manager))

@@ -293,11 +293,11 @@ func sameHeartbeatState(a, b HeartbeatRecord) bool {
 
 // sessionsOf snapshots the owner's children: what they are blocked on and
 // since when. Only live sessions are read — a session on disk is not waiting
-// for anybody.
+// for anybody — and a detached one is not the owner's to be woken by.
 func (h *heartbeatService) sessionsOf(own owner.Owner) []heartbeatSession {
 	var out []heartbeatSession
 	for _, info := range h.mgr.ListWith(ListOptions{IncludeOwners: true}) {
-		if info.Kind == session.KindOwner || !inCodebase(own, info.CWD) {
+		if info.Kind == session.KindOwner || info.ownerDetached || !inCodebase(own, info.CWD) {
 			continue
 		}
 		out = append(out, heartbeatSession{

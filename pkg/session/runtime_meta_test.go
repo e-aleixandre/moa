@@ -177,3 +177,26 @@ func TestApplyPreservedMetadata(t *testing.T) {
 		t.Errorf("nil in, nil out expected, got %v", out)
 	}
 }
+
+// The detach marker is a runtime-mutable key: it must be carried across a
+// rebuilt snapshot like the creation-time ones, and clearing it deletes the
+// key instead of storing false.
+func TestOwnerDetachedIsPreservedAndClearedByDeletion(t *testing.T) {
+	s := &Session{}
+	if s.OwnerDetached() {
+		t.Fatal("a session without the key reads as detached")
+	}
+	s.SetOwnerDetached(true)
+	preserved := PreservedMetadata(s.Metadata)
+	if preserved[MetaOwnerDetached] != true {
+		t.Fatalf("preserved = %v, want the detach marker", preserved)
+	}
+	rebuilt := ApplyPreservedMetadata(map[string]any{"model": "m"}, preserved)
+	if !OwnerDetachedIn(rebuilt) {
+		t.Fatalf("rebuilt metadata lost the detach marker: %v", rebuilt)
+	}
+	s.SetOwnerDetached(false)
+	if _, present := s.Metadata[MetaOwnerDetached]; present {
+		t.Fatalf("reattach stored the key instead of deleting it: %v", s.Metadata)
+	}
+}

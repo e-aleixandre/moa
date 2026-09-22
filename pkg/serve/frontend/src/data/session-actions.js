@@ -118,6 +118,12 @@ function normalizeSessionInfo(info, existing, visible) {
     // door it opens; a client cannot derive it (it needs core.CodebaseKey).
     ownerId: info.owner_id || '',
     ownerName: info.owner_name || '',
+    // detachedOwnerId / detachedOwnerName — the owner the user detached this
+    // session from. The server sends these INSTEAD of owner_id, so every
+    // owner grouping leaves it out; only the panel reads them, to offer the
+    // reattach.
+    detachedOwnerId: info.detached_owner_id || '',
+    detachedOwnerName: info.detached_owner_name || '',
     // MCP health summary (poll-driven server truth): {total, ready,
     // unhealthy} or null when the session has no MCP servers. Not WS-owned —
     // it reflects the manager's live state, refreshed on each poll.
@@ -1072,6 +1078,25 @@ export async function setSessionFast(id, fast) {
 export async function trustMcp(id) {
   await api('POST', `/api/sessions/${id}/trust-mcp`, undefined, { timeoutMs: 0 });
   updateSession(id, { untrustedMcp: false });
+}
+
+// setOwnerDetached detaches a session from its project owner or reattaches
+// it. The answer is the session's info, so the owner fields are applied at
+// once rather than on the next roster poll.
+export async function setOwnerDetached(id, detached) {
+  const res = await api('POST', `/api/sessions/${id}/owner`, { detached });
+  if (res) {
+    // A roster GET started before this change still has the old owner fields.
+    // Fence it before publishing this authoritative response.
+    lastAppliedRosterRequest = ++nextRosterRequest;
+    updateSession(id, {
+      ownerId: res.owner_id || '',
+      ownerName: res.owner_name || '',
+      detachedOwnerId: res.detached_owner_id || '',
+      detachedOwnerName: res.detached_owner_name || '',
+    });
+  }
+  return res;
 }
 
 // renameSession sets the conversation's title through the same /rename command

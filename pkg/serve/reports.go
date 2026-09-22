@@ -938,7 +938,28 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 		return
 	}
 	observer := newOwnerReportObserver(sess, func(out runOutcome) {
-		reports.add(key, reportFrom(sess, out))
+		// The observer stays installed while detached, so a reattach takes
+		// effect on the next turn without rewiring anything; the turns in
+		// between are simply never reported.
+		dropped := func() bool {
+			if !sess.ownerDetached.Load() {
+				return false
+			}
+			slog.Info("owner report dropped: session detached", "session", sess.ID)
+			return true
+		}
+		if dropped() {
+			return
+		}
+		report := reportFrom(sess, out)
+		sess.ownerDetachMu.Lock()
+		defer sess.ownerDetachMu.Unlock()
+		// Build git state without the lock, then serialize final admission with
+		// detach so it cannot return while this report is still admitted.
+		if dropped() {
+			return
+		}
+		reports.add(key, report)
 	})
 	sess.mu.Lock()
 	sess.ownerObserver = observer

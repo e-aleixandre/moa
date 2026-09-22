@@ -8,7 +8,7 @@ import {
 import { artifactsSlice, listArtifactsInPanel, openArtifactsList } from "../../data/artifacts.js";
 import { UsagePage } from "./UsagePage.jsx";
 import { McpPage } from "./McpPage.jsx";
-import { closeSession, deleteSession, resumeSession } from "../../data/session-actions.js";
+import { closeSession, deleteSession, resumeSession, setOwnerDetached } from "../../data/session-actions.js";
 import { sessionTitle, shortPath } from "../../data/util/format.js";
 import { renameSession } from "../../data/session-actions.js";
 import { addToast } from "../../data/notifications.js";
@@ -92,8 +92,31 @@ function LifecycleActions({ session, inline }) {
     if (inline) return;
     fn();
   };
+  // Only a conversation the user opened can leave its owner; one the owner
+  // opened, or the owner's own, has no such door.
+  const detached = !session.ownerId && !!session.detachedOwnerId;
+  const ownerName = detached ? session.detachedOwnerName : session.ownerName;
+  const canDetach = (session.ownerId || session.detachedOwnerId)
+    && session.origin !== "owner" && session.kind !== "owner";
   return (
     <div class="zl-panel-acts">
+      {canDetach && (
+        <button
+          type="button"
+          class="zl-act"
+          onClick={() => run(() => {
+            setOwnerDetached(session.id, !detached).catch((error) => {
+              addToast({
+                title: detached ? `Could not reattach to ${ownerName}` : `Could not detach from ${ownerName}`,
+                detail: String(error.message || error),
+                type: "error",
+              });
+            });
+          })}
+        >
+          <span class="zl-act-t">{detached ? `Reattach to ${ownerName}` : `Detach from ${ownerName}`}</span>
+        </button>
+      )}
       {saved ? (
         <button
           type="button"

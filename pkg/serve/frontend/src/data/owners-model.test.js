@@ -122,6 +122,19 @@ test("ownerRows attaches each owner's children out of the roster", () => {
   expect(groupChildren(rows[0].children).map((g) => g.key)).toEqual(["waiting", "working"]);
 });
 
+test("a session detached from its owner is not in its row nor its tally", () => {
+  const sessions = {
+    a: { id: "a", title: "kept", state: "running", ownerId: "own_1", updated: 200 },
+    // The server sends the detached fields INSTEAD of ownerId.
+    d: { id: "d", title: "private", state: "permission", detachedOwnerId: "own_1", detachedOwnerName: "Winerim", updated: 300 },
+  };
+  const [row] = ownerRows([{ id: "own_1", name: "Winerim" }], sessions);
+  expect(row.children.map((c) => c.id)).toEqual(["a"]);
+  expect(childrenSummary(row.children).waiting).toBe(0);
+  expect(ownersWaiting([row])).toBe(0);
+  expect(ownerOfSession([row], sessions.d)).toBeNull();
+});
+
 test("a child row speaks the session list's own vocabulary", () => {
   const rows = ownerRows([{ id: "own_1", name: "W" }], {
     a: { id: "a", title: "imports", state: "permission", ownerId: "own_1", updated: Date.now() },

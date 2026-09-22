@@ -63,6 +63,13 @@ type ManagedSession struct {
 	// label any creator may pass, it is what authorizes the automation token to
 	// interact with the session.
 	automationCreated bool
+	// ownerDetached mirrors session.MetaOwnerDetached for the hot paths that
+	// must not read disk: every report emission and every owner listing
+	// consults it. Written only by SetOwnerDetached.
+	ownerDetached atomic.Bool
+	// ownerDetachMu linearizes detach with report admission: a report that has
+	// not entered the coordinator before detach returns cannot enter afterward.
+	ownerDetachMu sync.Mutex
 	// serverInstance identifies the Manager process that assigned this
 	// runtime's process-local attention generations. It is sent with snapshots
 	// and session info so clients do not compare generations across a restart.
@@ -304,6 +311,15 @@ type SessionInfo struct {
 	// reporting were, so the three cannot disagree.
 	OwnerID   string `json:"owner_id,omitempty"`
 	OwnerName string `json:"owner_name,omitempty"`
+	// DetachedOwnerID / DetachedOwnerName name the owner the user detached
+	// this session from, in place of OwnerID/OwnerName. Separate fields rather
+	// than a flag next to owner_id so a client that predates detaching stops
+	// counting the session under its owner instead of misreporting it.
+	DetachedOwnerID   string `json:"detached_owner_id,omitempty"`
+	DetachedOwnerName string `json:"detached_owner_name,omitempty"`
+	// ownerDetached carries the persisted detach marker into withOwnerRef,
+	// which is the only place that turns it into the fields above.
+	ownerDetached bool
 	// PendingSince is when this session started waiting on the user (the
 	// ask_user or permission it is blocked on was requested then), and
 	// PendingID is what it is waiting on. Both are zero/empty when nothing is
@@ -474,6 +490,7 @@ func (s *ManagedSession) info() SessionInfo {
 		Updated:        s.Updated,
 		Origin:         nonUserOrigin(s.Origin),
 		Kind:           s.Kind,
+		ownerDetached:  s.ownerDetached.Load(),
 		Error:          stateErr,
 		UntrustedMCP:   s.infra.UntrustedMCP,
 		MCP:            mcpSummary,
@@ -567,12 +584,18 @@ func (m *Manager) invalidateOwnerRefs() {
 }
 
 // withOwnerRef stamps the owner of an ordinary session onto its info. An owner
-// conversation is left alone: it is not its own child.
+// conversation is left alone: it is not its own child. A detached session
+// names its owner only in the detached fields, so nothing that groups by
+// owner_id counts it.
 func (m *Manager) withOwnerRef(info SessionInfo) SessionInfo {
 	if info.Kind == session.KindOwner {
 		return info
 	}
 	ref := m.ownerRefFor(info.CWD)
+	if info.ownerDetached {
+		info.DetachedOwnerID, info.DetachedOwnerName = ref.id, ref.name
+		return info
+	}
 	info.OwnerID, info.OwnerName = ref.id, ref.name
 	return info
 }
@@ -777,9 +800,9 @@ type Manager struct {
 	// ownerEdit serializes read-modify-write edits of an owner's identity, so
 	// two concurrent renames cannot each save a whole owner and drop the
 	// other's field. See UpdateOwner.
-	ownerEdit  sync.Mutex
-	versionMu  sync.RWMutex
-	version    release.Result
+	ownerEdit sync.Mutex
+	versionMu sync.RWMutex
+	version   release.Result
 
 	// configMutationMu serializes global and project configuration mutations
 	// across the process: the core persistence helpers atomically replace a file,
@@ -1381,6 +1404,7 @@ func (m *Manager) ListWith(opts ListOptions) []SessionInfo {
 			CWD:            cwd,
 			Origin:         nonUserOrigin(origin),
 			Kind:           kind,
+			ownerDetached:  session.OwnerDetachedIn(sum.Metadata),
 			Created:        sum.Created,
 			Updated:        sum.Updated,
 			Unseen:         m.isUnseen(sum.ID),
