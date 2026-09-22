@@ -604,7 +604,26 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 			sctx.Checkpoints.Begin(cpLabel)
 		}
 
-		msgs, err := runFn(runCtx)
+		var msgs []core.AgentMessage
+		var err error
+		if sctx.BeforeFirstRun != nil && !sctx.beforeFirstRunDone {
+			err = sctx.BeforeFirstRun(runCtx)
+			if err == nil {
+				sctx.beforeFirstRunDone = true
+			}
+		}
+		if err != nil {
+			// The prompt was already accepted before the frontend-owned gate ran.
+			// Let its normal ingress path append/announce the message and release
+			// reservations, but force a cancelled context so it cannot call the
+			// provider. This keeps reconnect history and attachment accounting
+			// consistent when Stop cancels first-run initialization.
+			cleanupCtx, cancel := context.WithCancel(runCtx)
+			cancel()
+			_, _ = runFn(cleanupCtx)
+		} else {
+			msgs, err = runFn(runCtx)
+		}
 
 		// Close checkpoint: Discard on cancel, Commit otherwise.
 		cancelled := runCtx.Err() != nil
