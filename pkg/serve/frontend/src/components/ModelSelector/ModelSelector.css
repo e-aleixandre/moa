@@ -330,6 +330,15 @@
   line-height: 1.4;
   color: var(--zl-t3);
 }
+/* On a provider page the line also carries the way out, so it becomes a row:
+   the sentence on the left, Done on the right, where Edit sits one page back. */
+.zl-pin-hint.is-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.zl-pin-hint.is-row > span { flex: 1 1 auto; min-width: 0; }
 
 /* Provider list. `.zl-kv` / `.zl-kv-row` live on SessionPanel; the picker
    repeats the flush list so it does not depend on the dossier being mounted. */

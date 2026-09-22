@@ -211,10 +211,11 @@ test("each tap sends its own PATCH with the catalog id and the new pin state", a
   expect(chip("Sol").props["aria-pressed"]).toBe(false);
   expect(chip("Sol").props.class).not.toContain("is-pinned");
 
-  // A model that is not pinned yet is reached through its provider's page.
+  // A model that is not pinned yet is reached through its provider's page,
+  // which carries the instruction and its own way out of the mode.
   props = { ...props, view: "anthropic", setView: () => {} };
   await flush();
-  expect(hints()).toEqual(["Tap a model to pin or unpin it."]);
+  expect(hints()).toEqual(["Tap a model to pin or unpin it.Done"]);
   expect(chip("Haiku").props["aria-pressed"]).toBe(false);
   await click(chip("Haiku"));
   expect(chip("Haiku").props["aria-pressed"]).toBe(true);

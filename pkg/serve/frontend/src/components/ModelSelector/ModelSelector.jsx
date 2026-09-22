@@ -393,7 +393,22 @@ export function ModelSelector({
         </div>
       ) : view !== "root" ? (
         <>
-          {pinningActive && <p class="zl-pin-hint">Tap a model to pin or unpin it.</p>}
+          {pinningActive && (
+            // The Done that ends the mode lives on the Pinned header, which is
+            // a page back from here. Repeat it on the instruction line so the
+            // way out is wherever the mode is announced.
+            <p class="zl-pin-hint is-row">
+              <span>Tap a model to pin or unpin it.</span>
+              <button
+                type="button"
+                class="zl-group-act"
+                onClick={togglePinning}
+                aria-label="Done pinning models"
+              >
+                Done
+              </button>
+            </p>
+          )}
           <div class="zl-chips">
             {(providerGroup?.items || []).map((m) => (
               <ModelChip
