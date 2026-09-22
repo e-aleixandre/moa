@@ -9,7 +9,7 @@ func TestResolveAuxiliaryModel_AutoPriorityAndAvailability(t *testing.T) {
 		want      string
 		enabled   bool
 	}{
-		{"OpenAI wins", map[string]bool{"openai": true, "anthropic": true}, "gpt-5.6-luna", true},
+		{"OpenAI wins", map[string]bool{"openai": true, "anthropic": true}, "gpt-6-luna", true},
 		{"Anthropic fallback", map[string]bool{"anthropic": true}, "claude-haiku-4-5-20251001", true},
 		{"xAI is never automatic", map[string]bool{"xai": true}, "", false},
 		{"none", nil, "", false},

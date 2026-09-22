@@ -18,6 +18,8 @@ func TestSupportsFast(t *testing.T) {
 		{"claude-haiku-4-5-20251001", false, "Haiku answers: does not support the `speed` parameter"},
 		{"gpt-5.6", true, "OpenAI prices a priority tier on the 5.4 generation onwards"},
 		{"gpt-6", true, "GPT-6 Astra documents Fast mode"},
+		{"gpt-6-sol", false, "Fast mode is not verified for GPT-6 Sol"},
+		{"gpt-6-luna", false, "Fast mode is not verified for GPT-6 Luna"},
 		{"grok-4.5", true, "xAI accepts the priority tier across its catalogue"},
 		{"no-such-model", false, "an unknown model must not be offered a switch the API would reject"},
 	}
