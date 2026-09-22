@@ -1,6 +1,7 @@
 import { test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { foregroundLine, liveBarModel, panelHasOverflow } from './LiveBar.jsx';
+import { liveTrayAgents } from '../../data/stream-model.js';
 
 // The live bar is the ONE row of live work above the composer, the merge of the
 // old now-line (the foreground phrase) and the old dock (the async work). These
@@ -130,6 +131,19 @@ test('the tally is amber only when a child session waits on you', () => {
   expect(liveBarModel(IDLE, [...AGENTS, RUNNING_CHILD, WAITING_CHILD], 13000).tally).toEqual({ count: 4, waiting: true });
   // A subagent or a command carries no waiting state of its own.
   expect(liveBarModel(IDLE, [{ ...AGENTS[0], state: 'permission' }], 13000).tally.waiting).toBe(false);
+});
+
+// A child that stopped with an error waits on you exactly as one asking for
+// permission does: the owner row already says so, and the tally must agree.
+test('an errored child session is counted and turns the tally amber', () => {
+  const ownerSession = { id: 'owner-session', messages: [], subagents: {} };
+  const sessions = {
+    run: { id: 'run', ownerId: 'o1', title: 'Deploy notes', state: 'running' },
+    bad: { id: 'bad', ownerId: 'o1', title: 'Migrate stock', state: 'error' },
+  };
+  const agents = liveTrayAgents(ownerSession, sessions, [{ id: 'o1', session_id: 'owner-session' }]);
+  expect(liveBarModel(IDLE, agents, 13000).tally).toEqual({ count: 2, waiting: true });
+  expect(liveBarModel(IDLE, agents.filter((a) => a.id !== 'bad'), 13000).tally).toEqual({ count: 1, waiting: false });
 });
 
 test('the tally chip draws the number and no mark per item', () => {

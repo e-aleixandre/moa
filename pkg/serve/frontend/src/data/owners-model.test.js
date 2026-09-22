@@ -152,10 +152,10 @@ test("ownerOfSession finds the owner a child names, and nothing for an orphan", 
 // keeps speaking only about the owner.
 const idleChild = child({ id: "i", state: "idle" });
 
-test("an idle owner whose children are all stopped reads a neutral count", () => {
+test("an idle owner whose children are all stopped says nothing but its name", () => {
   const owner = { session_state: "idle", children: [idleChild, unread, child({ id: "s", state: "saved" })] };
   const line = ownerLine(owner);
-  expect(line.lead).toEqual({ tone: "neutral", text: "2 live" });
+  expect(line.lead).toBe(null);
   expect(line.tail).toBe("");
   expect(line.stated).toBe(false);
   expect(ownerDotState(owner)).toBe("idle");
@@ -177,15 +177,27 @@ test("a waiting child adds the amber clause beside the count, on the same line",
   expect(line.tail).toBe("2 waiting on you");
   expect(line.stated).toBe(false);
   expect(ownerDotState(owner)).toBe("idle");
-  // Nothing running: the count stays neutral and the amber clause still speaks.
+  // Nothing running: no count, the amber clause speaks alone.
   expect(ownerLine({ session_state: "idle", children: [waiting, idleChild] })).toEqual({
-    lead: { tone: "neutral", text: "2 live" }, tail: "1 waiting on you", stated: false,
+    lead: null, tail: "1 waiting on you", stated: false,
   });
+});
+
+// With every child stopped the row is the name: no empty second line, no
+// orphan separator, and an accessible name that does not say "live" either.
+test("the owner row drops its second line when there is nothing to say", () => {
+  const src = readFileSync(new URL("../components/Owners/OwnerRow.jsx", import.meta.url), "utf8");
+  expect(src).toMatch(/\{\(lead \|\| \(tail && !tailBelow\)\) && \(\s*<span class="zl-row-l2">/);
+  expect(src).toMatch(/\{lead && tail && !tailBelow && <span class="ow-orow-sep"/);
+  expect(src).not.toMatch(/ live`/);
+  const all = ownerLine({ session_state: "idle", children: [idleChild, child({ id: "i2", state: "idle" })] });
+  expect(all).toEqual({ lead: null, tail: "", stated: false });
+  expect(ownerLine({ session_state: "idle", children: [] }).lead).toBe(null);
 });
 
 test("the owner row wears no mark per session and colours its clauses", () => {
   const src = readFileSync(new URL("../components/Owners/OwnerRow.jsx", import.meta.url), "utf8");
-  expect(src).toMatch(/tone-\$\{lead\.tone\}/);
+  expect(src).toMatch(/tone-\$\{lead\?\.tone/);
   expect(src).toMatch(/class="ow-orow-wait"/);
   expect(src).toMatch(/<Dot state=\{ownerDotState\(owner\)\} \/>/);
   expect(src).not.toMatch(/children\.map/);

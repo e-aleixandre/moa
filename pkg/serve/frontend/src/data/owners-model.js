@@ -94,8 +94,8 @@ export function ownerRowState(owner) {
 /* ── What an owner's row says ─────────────────────────────────────────────
 
    Four things an owner can be, and they are NOT the four a session can be:
-     idle    — standing by. Its line is the count of its children, and the
-               count says what they are doing (see ownerLine).
+     idle    — standing by. Its line says what its children are doing, and
+               says nothing when none of them work or wait (see ownerLine).
      working — it is doing something of its own (reading reports, writing the
                book). Blue, the product's running colour.
      asks    — its own conversation stopped on a question or an error. Amber.
@@ -139,8 +139,11 @@ export function ownerDotState(owner) {
 //
 // An idle owner's line is its children's state said in words, never one mark
 // per session (decisions/lenguaje-de-estado.md): "4 working" in blue when any
-// run, the neutral count when none do, and "N waiting on you" in amber beside
-// either. The owner's dot keeps speaking only about the owner. `stated` marks
+// run and "N waiting on you" in amber beside or instead of it. When nothing
+// works or waits there is no lead at all (`lead` is null) and the row is the
+// name alone: a count of stopped sessions ("6 live", "6 idle") is a number
+// that asks nothing, and the owner decided the row should not spend a line on
+// it. The owner's dot keeps speaking only about the owner. `stated` marks
 // a lead that is the owner's own sentence, which is what sends the waiting
 // clause down to the third line (OwnerRow.jsx).
 export function ownerLine(owner) {
@@ -157,7 +160,7 @@ export function ownerLine(owner) {
           // longer watching: "6 live" under shut eyes is two claims at once.
           : state === "saved" ? { tone: "neutral", text: "Saved" }
             : summary.working > 0 ? { tone: "blue", text: `${summary.working} working` }
-              : { tone: "neutral", text: `${summary.live} live` };
+              : null;
   const stated = state === "asks" || state === "working" || state === "unread";
   return { lead, tail: summary.waiting > 0 ? `${summary.waiting} waiting on you` : "", stated };
 }

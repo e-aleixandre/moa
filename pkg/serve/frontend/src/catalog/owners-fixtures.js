@@ -323,17 +323,19 @@ export const CHILD_SESSION = {
 };
 
 /* ── The three states the owner row and the tally speak ───────────────────
-   ?children=stopped|working|waiting seeds Winerim's children as ordinary
+   ?children=stopped|working|waiting|error seeds Winerim's children as ordinary
    sessions carrying `ownerId` — the store's shape, joined by ownerRows — with
    Winerim's own conversation idle and active, so the sidebar row and the
    LiveBar tally both read them through the production path
-   (liveTrayAgents lists an owner's running and waiting children). moa is the
+   (liveTrayAgents lists an owner's running and waiting children; `error` is
+   one that stopped with an error, which waits on you too). moa is the
    control: one idle child in every case. */
 
 const CHILD_STATES = {
   stopped: ["idle", "idle", "idle", "idle", "idle", "idle"],
   working: ["running", "running", "running", "running", "idle", "idle"],
   waiting: ["running", "running", "running", "running", "permission", "idle"],
+  error: ["running", "running", "error", "idle", "idle", "idle"],
 };
 
 export function childrenStateSeed(which) {

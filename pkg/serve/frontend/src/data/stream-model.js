@@ -744,9 +744,11 @@ function isTerminalSubagent(subagent) {
 // LIVE ASYNC subagents (each carrying its fanout identity accent) followed by
 // ALL live bash jobs (no identity accent: spinner overlay1 + mono
 // `bash`; kind:'bash' is always async background work). An owner's live child
-// sessions follow those jobs. `permission` children are included too: although
-// parked, they are still live work waiting for an answer, unlike idle/saved
-// sessions. SYNC subagents are
+// sessions follow those jobs. `permission` and `error` children are included
+// too: although stopped, they wait on the owner (waitsOnYou), unlike idle/saved
+// sessions, so the tally counts them and turns amber exactly as the owner row
+// does. An errored child says so rather than repeating its last progress line,
+// and carries no clock: it is not running. SYNC subagents are
 // excluded — they block the conversation, so they stay inline in the
 // delegation block instead ("async in the dock, sync inline"). It reuses the
 // SAME liveSubagents/liveAgent rules the stream projection uses, so the dock
@@ -772,16 +774,17 @@ export function liveTrayAgents(session, sessions = {}, owners = []) {
   if (!owner) return chips;
   for (const child of Object.values(sessions || {})) {
     if (!child || (child.ownerId || child.owner_id) !== owner.id ||
-      (child.state !== 'running' && child.state !== 'permission')) continue;
+      (child.state !== 'running' && child.state !== 'permission' && child.state !== 'error')) continue;
     const chip = {
       id: child.id,
       kind: 'session',
       name: child.title || child.id,
-      action: (child.briefProgress || child.briefAttempting || '').trim() ||
-        (child.state === 'permission' ? 'Waiting for permission' : 'Running'),
+      action: child.state === 'error' ? 'Stopped with an error'
+        : (child.briefProgress || child.briefAttempting || '').trim() ||
+          (child.state === 'permission' ? 'Waiting for permission' : 'Running'),
       state: child.state,
     };
-    if (child.runStartedAtMs > 0) {
+    if (child.state !== 'error' && child.runStartedAtMs > 0) {
       chip.time = formatElapsed(Math.max(0, Date.now() - child.runStartedAtMs));
     }
     chips.push(chip);

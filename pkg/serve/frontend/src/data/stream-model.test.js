@@ -26,13 +26,17 @@ test('liveTrayAgents includes only live child sessions for an owner', () => {
   const sessions = {
     running: { id: 'running', ownerId: 'owner-1', title: 'Run checks', state: 'running' },
     permission: { id: 'permission', ownerId: 'owner-1', title: 'Approve deploy', state: 'permission' },
+    failed: { id: 'failed', ownerId: 'owner-1', title: 'Migrate stock', state: 'error', briefProgress: 'Running tests', runStartedAtMs: 1 },
     idle: { id: 'idle', ownerId: 'owner-1', title: 'Saved work', state: 'idle' },
   };
   const chips = liveTrayAgents(ownerSession, sessions, [{ id: 'owner-1', session_id: 'owner-session' }]);
   expect(chips.filter((chip) => chip.kind === 'session')).toEqual([
     expect.objectContaining({ id: 'running', name: 'Run checks', action: 'Running' }),
     expect.objectContaining({ id: 'permission', name: 'Approve deploy', action: 'Waiting for permission' }),
+    expect.objectContaining({ id: 'failed', name: 'Migrate stock', action: 'Stopped with an error', state: 'error' }),
   ]);
+  // A stopped child is not running: no clock beside it.
+  expect(chips.find((chip) => chip.id === 'failed').time).toBeUndefined();
 });
 
 test('liveTrayAgents adds no session chips for a non-owner session', () => {

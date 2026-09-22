@@ -57,7 +57,10 @@ export function OwnerRow({ owner, project = false, active = false, onOpen }) {
   // stops work. So a stated owner drops it to the third line, where it sits
   // with the address rather than competing with the question.
   const tailBelow = !!tail && stated;
-  const label = `${owner.name}, project owner. ${lead.text}${tail ? `. ${tail}` : ""}`;
+  // An owner whose children all stopped has no lead and, without anything
+  // waiting, no second line: the row is its name (ownerLine).
+  const said = [lead?.text, tail].filter(Boolean);
+  const label = `${owner.name}, project owner${said.length ? `. ${said.join(". ")}` : ""}`;
   return (
     <span class="zl-row-slot">
       <button
@@ -81,13 +84,15 @@ export function OwnerRow({ owner, project = false, active = false, onOpen }) {
               <Dot state={ownerDotState(owner)} />
             </span>
           </span>
-          <span class="zl-row-l2">
-            <span class={`zl-row-brief ow-orow-brief tone-${lead.tone}`} aria-hidden="true">
-              {lead.text}
-              {tail && !tailBelow && <span class="ow-orow-sep" aria-hidden="true"> · </span>}
-              {tail && !tailBelow && <span class="ow-orow-wait" aria-hidden="true">{tail}</span>}
+          {(lead || (tail && !tailBelow)) && (
+            <span class="zl-row-l2">
+              <span class={`zl-row-brief ow-orow-brief tone-${lead?.tone || "neutral"}`} aria-hidden="true">
+                {lead?.text}
+                {lead && tail && !tailBelow && <span class="ow-orow-sep" aria-hidden="true"> · </span>}
+                {tail && !tailBelow && <span class="ow-orow-wait" aria-hidden="true">{tail}</span>}
+              </span>
             </span>
-          </span>
+          )}
           {/* The third line: what is waiting, and where this owner lives. The
               address is here and not on the state line — sharing cost the
               state clause 45% of the width, and the state is why the row is

@@ -671,7 +671,7 @@ export function seedCatalogStore() {
     inboxOpen = new URLSearchParams(query).get("inbox") === "1";
   } catch (_) { /* ignore */ }
   const sessions = { ...CATALOG_SESSIONS };
-  // ?children=stopped|working|waiting — Winerim's children in one of the three
+  // ?children=stopped|working|waiting|error — Winerim's children in one of the
   // states the owner row and the LiveBar tally say, with its conversation open.
   let children = null;
   try {
