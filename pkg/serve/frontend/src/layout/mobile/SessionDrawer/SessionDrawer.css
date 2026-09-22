@@ -160,14 +160,6 @@
   gap: 7px;
 }
 
-.sdrawer-group {
-  font-size: var(--zl-fs-meta);
-  font-weight: var(--weight-semibold);
-  color: var(--zl-t4);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 8px 4px 2px;
-}
 
 /* Empty result / empty project list — a quiet line where a row would be. */
 .sdrawer-note {
@@ -350,10 +342,6 @@
   font-size: 20px;
   font-weight: var(--weight-semibold);
   letter-spacing: -0.01em;
-}
-.sdrawer-group {
-  font-family: var(--font);
-  color: var(--zl-t4);
 }
 .sdrawer-search.field-inset {
   background: rgba(0, 0, 0, 0.30);

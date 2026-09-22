@@ -252,29 +252,6 @@
 }
 }
 
-/* Global Settings sheet body (drawer footer → sheet handoff) — a labelled
-   section wrapping NotificationSettings, which ships as a bordered dropdown;
-   inside the sheet it sheds its own chrome and fills the width. Global scope
-   only — no per-session rows. */
-.mconv-settings-lbl {
-  font-size: var(--zl-fs-meta);
-  font-weight: var(--weight-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--zl-t4);
-  margin-bottom: var(--space-3);
-}
-.mconv-settings-body .notif-dropdown {
-  width: 100%;
-  border: 0;
-  box-shadow: none;
-  background: none;
-  padding: 0;
-}
-.mconv-settings-body .notif-dropdown .notif-title {
-  display: none; /* the section label already says "Notifications" */
-}
-
 @media (prefers-reduced-motion: reduce) {
   .mconv-empty-browse,
   .mconv-empty-new {
