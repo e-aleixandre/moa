@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "fs";
 import {
   bookTree, childGroup, childrenSummary, groupChildren, ownerDotState, ownerLine,
   ownerOfSession, ownerRows, ownerRowState, ownersWaiting, ownerState,
@@ -146,10 +147,51 @@ test("ownerOfSession finds the owner a child names, and nothing for an orphan", 
    row can say — and the rule that its own state and its children's are TWO
    clauses, because they are two different conversations. */
 
-test("an idle owner counts its live children and nothing else", () => {
-  const line = ownerLine({ session_state: "idle", children: [running, unread] });
+// The state language (decisions/lenguaje-de-estado.md): an idle owner's count
+// says what its children are doing, in words and colour, and the owner's dot
+// keeps speaking only about the owner.
+const idleChild = child({ id: "i", state: "idle" });
+
+test("an idle owner whose children are all stopped reads a neutral count", () => {
+  const owner = { session_state: "idle", children: [idleChild, unread, child({ id: "s", state: "saved" })] };
+  const line = ownerLine(owner);
   expect(line.lead).toEqual({ tone: "neutral", text: "2 live" });
   expect(line.tail).toBe("");
+  expect(line.stated).toBe(false);
+  expect(ownerDotState(owner)).toBe("idle");
+});
+
+test("an idle owner with children running says how many work, in blue", () => {
+  const owner = { session_state: "idle", children: [running, child({ id: "r2", state: "running", unseen: true }), idleChild] };
+  const line = ownerLine(owner);
+  expect(line.lead).toEqual({ tone: "blue", text: "2 working" });
+  expect(line.tail).toBe("");
+  // The children's work never borrows the owner's dot.
+  expect(ownerDotState(owner)).toBe("idle");
+});
+
+test("a waiting child adds the amber clause beside the count, on the same line", () => {
+  const owner = { session_state: "idle", children: [running, running, waiting, child({ id: "e", state: "error" }), idleChild] };
+  const line = ownerLine(owner);
+  expect(line.lead).toEqual({ tone: "blue", text: "2 working" });
+  expect(line.tail).toBe("2 waiting on you");
+  expect(line.stated).toBe(false);
+  expect(ownerDotState(owner)).toBe("idle");
+  // Nothing running: the count stays neutral and the amber clause still speaks.
+  expect(ownerLine({ session_state: "idle", children: [waiting, idleChild] })).toEqual({
+    lead: { tone: "neutral", text: "2 live" }, tail: "1 waiting on you", stated: false,
+  });
+});
+
+test("the owner row wears no mark per session and colours its clauses", () => {
+  const src = readFileSync(new URL("../components/Owners/OwnerRow.jsx", import.meta.url), "utf8");
+  expect(src).toMatch(/tone-\$\{lead\.tone\}/);
+  expect(src).toMatch(/class="ow-orow-wait"/);
+  expect(src).toMatch(/<Dot state=\{ownerDotState\(owner\)\} \/>/);
+  expect(src).not.toMatch(/children\.map/);
+  const css = readFileSync(new URL("../components/Owners/OwnerRow.css", import.meta.url), "utf8");
+  expect(css).toMatch(/\.zl-row-brief\.tone-blue\s*\{\s*color:\s*var\(--blue\)/);
+  expect(css).toMatch(/\.ow-orow-wait\s*\{\s*color:\s*var\(--zl-yellow\)/);
 });
 
 test("a working owner reads blue, and its blocked children stay amber beside it", () => {
@@ -160,6 +202,7 @@ test("a working owner reads blue, and its blocked children stay amber beside it"
   // The two facts never merge: the owner is working, one of its sessions is
   // stopped, and a single badge would lose which one to go and unblock.
   expect(line.tail).toBe("1 waiting on you");
+  expect(line.stated).toBe(true);
 });
 
 test("an owner that asked you takes amber and says what it asked", () => {

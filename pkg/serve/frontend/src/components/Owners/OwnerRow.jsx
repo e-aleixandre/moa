@@ -42,7 +42,7 @@ function ChevronIcon() {
    but the avatar and the missing age say "this is not one of the sessions
    below" before you have read a word. */
 export function OwnerRow({ owner, project = false, active = false, onOpen }) {
-  const { lead, tail } = ownerLine(owner);
+  const { lead, tail, stated } = ownerLine(owner);
   const state = ownerState(owner);
   const place = projectName(owner.root);
   // The address is dropped when it is the name again. Compared on letters
@@ -50,13 +50,13 @@ export function OwnerRow({ owner, project = false, active = false, onOpen }) {
   // that under it spends a line on the same word with a hyphen in it.
   const same = (a, b) => a.toLowerCase().replace(/[^a-z0-9]/g, "") === b.toLowerCase().replace(/[^a-z0-9]/g, "");
   const showPath = !project && !same(place, owner.name);
-  // Where "N waiting on you" goes. Beside an idle owner's "6 live" it is a
+  // Where "N waiting on you" goes. Beside an idle owner's count ("4 working") it is a
   // short second half of a short line and the two belong together. Beside a
   // quoted question it is not: measured in the 300px drawer, "Needs your
   // answer · 2 waiting on you" truncated at "2 w…", losing the number that
   // stops work. So a stated owner drops it to the third line, where it sits
   // with the address rather than competing with the question.
-  const tailBelow = !!tail && lead.tone !== "neutral";
+  const tailBelow = !!tail && stated;
   const label = `${owner.name}, project owner. ${lead.text}${tail ? `. ${tail}` : ""}`;
   return (
     <span class="zl-row-slot">

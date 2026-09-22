@@ -243,8 +243,8 @@
 
 /* Identity marks. A subagent is a 7px dot in its own hue, exactly the
    project monogram's palette, never green/yellow/red. A command is a mono
-   `$` in t3: neutral, and it says "shell" without an icon. In the tally
-   the marks cluster; in the sentence and the panel each stands alone.
+   `$` in t3: neutral, and it says "shell" without an icon. They stand in the
+   panel's rows; the tally carries none (see below).
 
    Production agents carry a named accent (`--zl-live-accent: var(--sky)`);
    the catalogue's model chips and fixture names carry a hue (`--h`). */
@@ -265,15 +265,16 @@
 }
 .zl-live-id.is-bash { color: var(--zl-t3); font-weight: 500; line-height: 1; }
 
-/* The tally: the door to the panel. A control-tone chip with the identity
-   marks, the count and a chevron pointing where the panel will open (up). */
+/* The tally: the door to the panel. A control-tone chip with the count and a
+   chevron pointing where the panel will open (up) -- no mark per item: the
+   state is said by the chip as a whole (decisions/lenguaje-de-estado.md). */
 .zl-live-tally {
   flex: none;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 28px;
-  padding: 0 6px 0 8px;
+  padding: 0 6px 0 7px;
   border: 0;
   border-radius: var(--zl-r-md);
   background: var(--zl-control);
@@ -285,24 +286,24 @@
 }
 @media (hover: hover) {
   .zl-live-tally:hover { background: var(--zl-raised); color: var(--zl-t1); box-shadow: var(--zl-rim-2); }
+  .zl-live-tally.is-waiting:hover {
+    color: var(--zl-yellow);
+    background: color-mix(in srgb, var(--zl-yellow) 20%, var(--zl-control));
+  }
 }
 .zl-live-tally:focus-visible {
   outline: 2px solid var(--zl-accent);
   outline-offset: 2px;
 }
-.zl-live-dots { display: inline-flex; align-items: center; gap: 1px; }
-.zl-live-dots .zl-live-id { width: 10px; }
-/* In the cluster a command is a neutral dot, not a `$`: two of them side by
-   side read as a price. The glyph stays where the item stands alone. */
-.zl-live-dots .zl-live-id.is-bash { font-size: 0; }
-.zl-live-dots .zl-live-id.is-bash::before {
-  content: "";
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--zl-t3);
-}
 .zl-live-n { color: inherit; }
+/* Something in the background waits on you: the whole chip goes amber, the
+   same amber as "N waiting on you" on the owner row. No motion -- a parked
+   session is not moving. */
+.zl-live-tally.is-waiting {
+  color: var(--zl-yellow);
+  background: color-mix(in srgb, var(--zl-yellow) 14%, var(--zl-control));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-yellow) 40%, transparent);
+}
 
 /* Stop: the subagent head's control (WorkChrome `.wk-stop`), drawn in the
    bar's own ladder so it sits beside the tally: a word with a small filled
@@ -470,11 +471,9 @@ div.zl-live-row { cursor: default; }
   box-shadow: none;
   padding: 0 3px;
 }
-/* Production phone: 44 in BOTH axes. Measured: with only a count and a
-   chevron the chip came out 36px wide, which is a target on paper and a miss
-   under a thumb. The catalogue's 390px frame already had the dots, so it did
-   not need this floor — applying it there stretched the chip and failed the
-   golden. */
+/* Phone: 44 in BOTH axes. Measured: with only a count and a chevron the chip
+   came out 36px wide, which is a target on paper and a miss under a thumb. */
+.zl-phone .zl-live-tally,
 .mconv .zl-live-tally {
   min-width: 44px;
   justify-content: center;
@@ -520,6 +519,14 @@ div.zl-live-row { cursor: default; }
   .zl-phone .zl-live-tally:hover::before,
   .mconv .zl-live-tally:hover::before { background: var(--zl-raised); }
 }
+/* The waiting amber on the phone lives on the inset chip, not the 44px box. */
+.zl-phone .zl-live-tally.is-waiting,
+.mconv .zl-live-tally.is-waiting { background: transparent; box-shadow: none; }
+.zl-phone .zl-live-tally.is-waiting::before,
+.mconv .zl-live-tally.is-waiting::before {
+  background: color-mix(in srgb, var(--zl-yellow) 14%, var(--zl-control));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-yellow) 40%, transparent);
+}
 .zl-phone .zl-live-row,
 .mconv .zl-live-row { min-height: 44px; }
 .zl-phone .zl-live-panel,
@@ -535,13 +542,8 @@ div.zl-live-row { cursor: default; }
 .zl-live.is-dense .zl-live-row-d { display: none; }
 .zl-live.is-dense .zl-live-panel { max-height: 160px; }
 
-/* Degradation by the zone's own width: the tally loses its dots first
-   (the count says the same thing), then the counter goes. The verb is the
+/* Degradation by the zone's own width: the counter goes. The verb is the
    last thing, and it only truncates. */
-@container (max-width: 420px) {
-  .zl-live-dots { display: none; }
-  .zl-live-tally { padding-left: 7px; }
-}
 @container (max-width: 340px) {
   .zl-live-now > .zl-live-el, .zl-live-spot > .zl-live-el { display: none; }
 }

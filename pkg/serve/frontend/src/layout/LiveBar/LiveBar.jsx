@@ -3,6 +3,7 @@ import { Square } from "lucide-preact";
 import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
 import { StateDot } from "../../primitives/StateDot/StateDot.jsx";
 import { LiveSentence } from "./LiveSentence.jsx";
+import { waitsOnYou } from "../../data/owners-model.js";
 import "./LiveBar.css";
 
 // LiveBar — ONE bar of live work above the composer. Markup and CSS are the
@@ -24,8 +25,12 @@ import "./LiveBar.css";
 // borrows it or rotates through it.
 //
 // The TALLY only exists while something async is alive, and it is the door to
-// the panel: one row per live thing (subagents, then commands), grouped by
-// kind, opening UPWARD so the bar stays where it was. Opening a row goes to its
+// the panel. It speaks the owner row's state language
+// (decisions/lenguaje-de-estado.md): the number and nothing else, never one
+// mark per item, and the whole chip amber when something waits on you. Only a
+// child session can wait -- a subagent or a command carries no such state. The
+// panel holds one row per live thing (sessions, subagents, commands), grouped
+// by kind, opening UPWARD so the bar stays where it was. Opening a row goes to its
 // screen (a subagent's conversation, a background bash's output).
 //
 // What is NOT the catalogue's is everything the prototype never had, grafted
@@ -75,7 +80,8 @@ export function foregroundLine(session, nowMs) {
 
 // liveBarModel decides the WHOLE bar: the foreground run owns its sentence.
 // With no foreground, the line names the ended turn; background work is only
-// ever represented by the tally and its panel. Null means repose — no bar, the
+// ever represented by the tally and its panel. `tally.waiting` is what turns
+// the chip amber. Null means repose — no bar, the
 // transcript reclaims the space.
 export function liveBarModel(session, agents, nowMs) {
   const list = Array.isArray(agents) ? agents : [];
@@ -89,7 +95,10 @@ export function liveBarModel(session, agents, nowMs) {
   }
   if (!sentence) return null;
 
-  return { sentence, tally: list.length ? { count: list.length, agents: list } : null };
+  const tally = list.length
+    ? { count: list.length, waiting: list.some((a) => a.kind === "session" && waitsOnYou(a.state)) }
+    : null;
+  return { sentence, tally };
 }
 
 export function panelHasOverflow({ scrollHeight, clientHeight }) {
@@ -250,14 +259,11 @@ export function LiveBar({
         {tally && (
           <button
             type="button"
-            class="zl-live-tally"
+            class={`zl-live-tally${tally.waiting ? " is-waiting" : ""}`}
             onClick={toggle}
             aria-expanded={openPanel}
-            aria-label={`${tally.count} in the background${openPanel ? ", collapse" : ", expand"}`}
+            aria-label={`${tally.count} in the background${tally.waiting ? ", something waits on you" : ""}${openPanel ? ", collapse" : ", expand"}`}
           >
-            <span class="zl-live-dots" aria-hidden="true">
-              {tally.agents.map((a) => <LiveId agent={a} key={a.id} />)}
-            </span>
             <span class="zl-live-n zl-data">{tally.count}</span>
             <ChevIcon up={!openPanel} />
           </button>
@@ -293,9 +299,8 @@ function backgroundSummary(agents) {
 
 // LiveId — the identity mark of a background item. A subagent gets its fanout
 // accent (identity, never a state colour); a command gets a mono `$`, which
-// says "shell" without borrowing a hue that would mean something else. In the
-// tally cluster the `$` becomes a neutral dot: two of them side by side read as
-// a price. The catalogue's model chips reuse this mark with a hue (`--h`);
+// says "shell" without borrowing a hue that would mean something else. The
+// catalogue's model chips reuse this mark with a hue (`--h`);
 // production agents carry a named accent (`--sky` etc.).
 function LiveId({ agent }) {
   if (agent.kind === "session") {

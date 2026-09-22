@@ -1,7 +1,7 @@
 import { setState } from "../data/store.js";
 import { setTileSession } from "../data/tileTree.js";
 import { skillForkLaunchRow } from "../data/ws/history.js";
-import { OWNERS, WINERIM_SESSION, CHILD_SESSION } from "./owners-fixtures.js";
+import { OWNERS, WINERIM_SESSION, CHILD_SESSION, childrenStateSeed } from "./owners-fixtures.js";
 
 // Frozen conversations the real screens wear. The chrome is production; only
 // this data is fake. Each roster row is a full session so opening it shows
@@ -671,8 +671,16 @@ export function seedCatalogStore() {
     inboxOpen = new URLSearchParams(query).get("inbox") === "1";
   } catch (_) { /* ignore */ }
   const sessions = { ...CATALOG_SESSIONS };
-  const owner = ownerSeed(query);
-  if (owner) {
+  // ?children=stopped|working|waiting — Winerim's children in one of the three
+  // states the owner row and the LiveBar tally say, with its conversation open.
+  let children = null;
+  try {
+    children = childrenStateSeed(new URLSearchParams(query).get("children"));
+  } catch (_) { /* ignore */ }
+  const owner = ownerSeed(query) || !!children;
+  if (children) {
+    Object.assign(sessions, children.sessions);
+  } else if (owner) {
     sessions[WINERIM_SESSION.id] = WINERIM_SESSION;
     // The children are selected out of the roster by `ownerId`, so a child of
     // this owner has to carry it or Overview reads "No sessions yet".
@@ -684,7 +692,7 @@ export function seedCatalogStore() {
     events: catalogEvents(), // wake-on-event
     inboxOpen, // wake-on-event: ?inbox=1 opens the inbox the same way a pending push does
     activeSession: owner ? WINERIM_SESSION.id : SPECIMEN_ID,
-    ...(owner ? { owners: { ...s.owners, list: OWNERS, loaded: true } } : null),
+    ...(owner ? { owners: { ...s.owners, list: children ? children.owners : OWNERS, loaded: true } } : null),
     usage: {
       available: true,
       five_hour: { utilization: 42, resets_at: new Date(Date.now() + 3 * 3600000).toISOString() },
