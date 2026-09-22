@@ -176,7 +176,7 @@
   font-weight: 400;
 }
 
-/* ── The dock ───────────────────────────────────────────────────────────────
+/* ── The dock (phone) ───────────────────────────────────────────────────────
    Every control of a loaded preview in one floating piece at the bottom edge:
    the surface every floating thing in moa uses (sheet colour, lit rim, soft
    shadow), so it reads as moa's over any app. */
@@ -199,15 +199,12 @@
   box-shadow: var(--zl-rim-2), 0 12px 32px -8px rgba(0, 0, 0, 0.55);
   touch-action: manipulation;
 }
-.live-preview-dock .live-preview-address {
-  max-width: 220px;
-}
 .live-preview-dock-write {
   flex: none;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 36px;
+  height: 44px;
   margin-left: 2px;
   padding: 0 12px;
   border: 0;
@@ -247,23 +244,15 @@
 .live-preview-dock .action-menu-list {
   min-width: 220px;
 }
-.live-preview-dock.is-compact .live-preview-act {
+.live-preview-dock .live-preview-act {
   min-width: 44px;
   height: 44px;
 }
-.live-preview-dock.is-compact .live-preview-dock-write {
-  height: 44px;
-}
 
-/* A narrow pane: the Inspect word goes first, then the widths' number. */
-@container (max-width: 700px) {
+/* A narrow desktop pane: the Inspect word goes first. */
+@container (max-width: 560px) {
   .live-preview-action-label { display: none; }
   .live-preview-inspect { padding: 0; }
-  .live-preview-dock .live-preview-address { max-width: 140px; }
-}
-@container (max-width: 520px) {
-  .live-preview-dock .live-preview-width-label { display: none; }
-  .live-preview-dock .live-preview-width.is-on { padding: 0; }
 }
 
 /* ── The stage ──────────────────────────────────────────────────────────────

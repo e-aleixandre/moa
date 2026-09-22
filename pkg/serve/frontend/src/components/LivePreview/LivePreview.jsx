@@ -35,10 +35,9 @@ import "./LivePreview.css";
 // inspector. Idle, the only thing over the app is the "Write to Moa" pill.
 //
 // The controls are the conversation header's own buttons (ChatHead's borderless
-// `zl-desk-act`), gathered in one dock at the app's bottom edge: the app takes
-// the whole panel, the controls sit where the thumb is. The address is pressed
-// to change it, the way an address bar works; reload sits next to it because
-// both act on that address.
+// `zl-desk-act`). On desktop they are that header's row; on the phone the app
+// takes the whole screen and they gather in one dock where the thumb is. The
+// address is pressed to change it, the way an address bar works.
 
 // Each width is an icon first (the device it stands for); only the active one
 // spells its number. The number always lives in the accessible name, so "768"
@@ -658,13 +657,30 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
 
   const preview = (
     <>
-      {/* Before there is an app the panel has a head: what it is (or which
-          address failed) and the way out. With an app, the app takes the whole
-          panel and every control lives in the dock at its bottom edge. */}
-      {!hasApp && (
-        <PreviewHead
+      {/* One task, two densities. Desktop: the conversation header's own row,
+          always there. Phone: a head only until the app loads; then the app
+          takes the whole screen and every control lives in the dock, where
+          the thumb is. */}
+      {isMobile ? (
+        !hasApp && (
+          <PreviewHead
+            address={targetURL && !showSetup ? displayURL(targetURL) : ""}
+            onClose={onClose}
+          />
+        )
+      ) : (
+        <PreviewRail
           address={targetURL && !showSetup ? displayURL(targetURL) : ""}
-          compact={isMobile}
+          hasApp={hasApp}
+          back={back}
+          onBack={goBack}
+          onReload={reload}
+          onChangeURL={changeURL}
+          width={width}
+          onWidth={pickWidth}
+          inspect={inspect}
+          inspectButtonRef={inspectButtonRef}
+          onInspect={toggleInspect}
           onClose={onClose}
         />
       )}
@@ -797,10 +813,9 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
               </button>
             </span>
           </div>
-        ) : hasApp ? (
+        ) : hasApp && isMobile ? (
           <PreviewDock
             address={displayURL(targetURL)}
-            compact={isMobile}
             loading={loading}
             back={back}
             onBack={goBack}
@@ -815,6 +830,18 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
             onWrite={() => setComposerOpen(true)}
             onClose={onClose}
           />
+        ) : hasApp && !loading ? (
+          <button
+            type="button"
+            class="live-preview-composer-handle"
+            onClick={() => setComposerOpen(true)}
+            title="Open the message composer"
+          >
+            <span class="live-preview-composer-handle-pill">
+              <PencilLine size={14} aria-hidden="true" />
+              Write to Moa
+            </span>
+          </button>
         ) : null}
         {!showSetup && (
           <PreviewStream
@@ -858,11 +885,101 @@ function useTouchPreviewInput() {
   return [touch, () => setTouch(false)];
 }
 
-// PreviewHead — the panel's row before there is an app: its name (or the
-// address that failed) and close. Nothing that could not act is drawn.
-function PreviewHead({ address, compact, onClose }) {
+// PreviewRail — the desktop row, in the conversation header's grammar. Three
+// zones that mean three things: the address and what acts on it (back, reload,
+// change), how it is shown (widths, inspect), and the panel itself (close),
+// set apart by hairlines so the control that ends the preview never reads as
+// one that changes it. Before there is an app only the title and close exist.
+function PreviewRail({
+  address, hasApp, back, onBack, onReload, onChangeURL,
+  width, onWidth, inspect, inspectButtonRef, onInspect, onClose,
+}) {
   return (
-    <div class={`live-preview-bar${compact ? " is-compact" : ""}`}>
+    <div class="live-preview-bar">
+      {hasApp && (
+        <button
+          type="button"
+          class="zl-desk-act live-preview-act"
+          onClick={onBack}
+          disabled={!canGoBack(back)}
+          aria-label="Back in preview"
+          title={backTitle(back)}
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+        </button>
+      )}
+      {address && hasApp ? (
+        <button
+          type="button"
+          class="live-preview-address"
+          onClick={onChangeURL}
+          aria-label={`Change URL, now ${address}`}
+          title="Change URL"
+        >
+          {address}
+        </button>
+      ) : address ? (
+        <span class="live-preview-title is-address">{address}</span>
+      ) : (
+        <span class="live-preview-title">Live preview</span>
+      )}
+      {hasApp && (
+        <button type="button" class="zl-desk-act live-preview-act" onClick={onReload} aria-label="Reload" title="Reload">
+          <RotateCw size={15} aria-hidden="true" />
+        </button>
+      )}
+      <span class="live-preview-bar-spring" />
+      {hasApp && (
+        <div class="live-preview-widths" role="radiogroup" aria-label="Viewport width">
+          {WIDTHS.map((w) => {
+            const Icon = w.icon;
+            const on = w.value === width;
+            return (
+              <button
+                key={w.value}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                class={`zl-desk-act live-preview-act live-preview-width${on ? " is-on" : ""}`}
+                onClick={() => onWidth(w.value)}
+                aria-label={w.ariaLabel}
+                title={w.ariaLabel}
+              >
+                <Icon size={w.size} aria-hidden="true" />
+                {on && <span class="live-preview-width-label" aria-hidden="true">{w.label}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {hasApp && <span class="live-preview-bar-sep" aria-hidden="true" />}
+      {hasApp && (
+        <button
+          type="button"
+          class={`zl-desk-act live-preview-act live-preview-inspect${inspect ? " is-on" : ""}`}
+          ref={inspectButtonRef}
+          onClick={onInspect}
+          aria-pressed={inspect}
+          aria-label="Inspect"
+          title="Inspect — point at an element in the app"
+        >
+          <MousePointerClick size={16} aria-hidden="true" />
+          <span class="live-preview-action-label">Inspect</span>
+        </button>
+      )}
+      {hasApp && <span class="live-preview-bar-sep" aria-hidden="true" />}
+      <button type="button" class="zl-desk-act live-preview-act" onClick={onClose} aria-label="Close preview" title="Close preview">
+        <X size={16} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+// PreviewHead — the phone's row before there is an app: its name (or the
+// address that failed) and close. Nothing that could not act is drawn.
+function PreviewHead({ address, onClose }) {
+  return (
+    <div class="live-preview-bar is-compact">
       {address
         ? <span class="live-preview-title is-address">{address}</span>
         : <span class="live-preview-title">Live preview</span>}
@@ -874,129 +991,66 @@ function PreviewHead({ address, compact, onClose }) {
   );
 }
 
-// PreviewDock — every control, in one floating piece at the app's bottom edge,
-// where the thumb is and where "Write to Moa" already lived. Three groups:
-// the address and what acts on it, how it is shown, and talking to Moa; close
-// sits apart. On a phone the address, reload and the widths fold into one
-// menu so the dock keeps 44px targets and still fits one hand.
+// PreviewDock — the phone's controls once an app is loaded, in one floating
+// piece where the thumb is: close, back, a menu for the rare actions (the
+// address, reload, the four widths), Inspect and "Write to Moa". Every target
+// is 44px.
 function PreviewDock({
-  address, compact, loading, back, onBack, onReload, onChangeURL,
+  address, loading, back, onBack, onReload, onChangeURL,
   width, onWidth, menuOpen, onMenu, inspectButtonRef, onInspect, onWrite, onClose,
 }) {
-  const current = WIDTHS.find((w) => w.value === width) || WIDTHS[WIDTHS.length - 1];
-  const backButton = (
-    <button
-      type="button"
-      class="zl-desk-act live-preview-act"
-      onClick={onBack}
-      disabled={!canGoBack(back)}
-      aria-label="Back in preview"
-      title={backTitle(back)}
-    >
-      <ArrowLeft size={16} aria-hidden="true" />
-    </button>
-  );
-  const inspectButton = (
-    <button
-      type="button"
-      class="zl-desk-act live-preview-act live-preview-inspect"
-      ref={inspectButtonRef}
-      onClick={onInspect}
-      disabled={loading}
-      aria-pressed={false}
-      aria-label="Inspect"
-      title="Inspect — point at an element in the app"
-    >
-      <MousePointerClick size={16} aria-hidden="true" />
-      {!compact && <span class="live-preview-action-label">Inspect</span>}
-    </button>
-  );
-  const writeButton = (
-    <button type="button" class="live-preview-dock-write" onClick={onWrite} disabled={loading}>
-      <PencilLine size={14} aria-hidden="true" />
-      Write to Moa
-    </button>
-  );
-  const closeButton = (
-    <button type="button" class="zl-desk-act live-preview-act" onClick={onClose} aria-label="Close preview" title="Close preview">
-      <X size={16} aria-hidden="true" />
-    </button>
-  );
-
-  if (compact) {
-    return (
-      <div class="live-preview-dock is-compact" role="toolbar" aria-label="Preview controls">
-        {closeButton}
-        {backButton}
-        <ActionMenu
-          open={menuOpen}
-          onOpenChange={onMenu}
-          icon={MoreHorizontal}
-          label="Preview options"
-          triggerClass="zl-desk-act live-preview-act"
-          triggerSize={18}
-          placement="up"
-          actions={[
-            { id: "url", icon: Link, label: address, onClick: onChangeURL },
-            { id: "reload", icon: RotateCw, label: "Reload", onClick: onReload },
-            ...WIDTHS.map((w) => ({
-              id: w.value,
-              icon: w.icon,
-              label: w.ariaLabel,
-              active: w.value === width,
-              onClick: () => onWidth(w.value),
-            })),
-          ]}
-        />
-        <span class="live-preview-bar-sep" aria-hidden="true" />
-        {inspectButton}
-        {writeButton}
-      </div>
-    );
-  }
-
   return (
     <div class="live-preview-dock" role="toolbar" aria-label="Preview controls">
-      {backButton}
+      <button type="button" class="zl-desk-act live-preview-act" onClick={onClose} aria-label="Close preview" title="Close preview">
+        <X size={16} aria-hidden="true" />
+      </button>
       <button
         type="button"
-        class="live-preview-address"
-        onClick={onChangeURL}
-        aria-label={`Change URL, now ${address}`}
-        title="Change URL"
+        class="zl-desk-act live-preview-act"
+        onClick={onBack}
+        disabled={!canGoBack(back)}
+        aria-label="Back in preview"
+        title={backTitle(back)}
       >
-        {address}
+        <ArrowLeft size={16} aria-hidden="true" />
       </button>
-      <button type="button" class="zl-desk-act live-preview-act" onClick={onReload} aria-label="Reload" title="Reload">
-        <RotateCw size={15} aria-hidden="true" />
+      <ActionMenu
+        open={menuOpen}
+        onOpenChange={onMenu}
+        icon={MoreHorizontal}
+        label="Preview options"
+        triggerClass="zl-desk-act live-preview-act"
+        triggerSize={18}
+        placement="up"
+        actions={[
+          { id: "url", icon: Link, label: address, onClick: onChangeURL },
+          { id: "reload", icon: RotateCw, label: "Reload", onClick: onReload },
+          ...WIDTHS.map((w) => ({
+            id: w.value,
+            icon: w.icon,
+            label: w.ariaLabel,
+            active: w.value === width,
+            onClick: () => onWidth(w.value),
+          })),
+        ]}
+      />
+      <span class="live-preview-bar-sep" aria-hidden="true" />
+      <button
+        type="button"
+        class="zl-desk-act live-preview-act"
+        ref={inspectButtonRef}
+        onClick={onInspect}
+        disabled={loading}
+        aria-pressed={false}
+        aria-label="Inspect"
+        title="Inspect — point at an element in the app"
+      >
+        <MousePointerClick size={16} aria-hidden="true" />
       </button>
-      <span class="live-preview-bar-sep" aria-hidden="true" />
-      <div class="live-preview-widths" role="radiogroup" aria-label="Viewport width">
-        {WIDTHS.map((w) => {
-          const Icon = w.icon;
-          const on = w.value === width;
-          return (
-            <button
-              key={w.value}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              class={`zl-desk-act live-preview-act live-preview-width${on ? " is-on" : ""}`}
-              onClick={() => onWidth(w.value)}
-              aria-label={w.ariaLabel}
-              title={w.ariaLabel}
-            >
-              <Icon size={w.size} aria-hidden="true" />
-              {on && <span class="live-preview-width-label" aria-hidden="true">{w.label}</span>}
-            </button>
-          );
-        })}
-      </div>
-      <span class="live-preview-bar-sep" aria-hidden="true" />
-      {inspectButton}
-      {writeButton}
-      <span class="live-preview-bar-sep" aria-hidden="true" />
-      {closeButton}
+      <button type="button" class="live-preview-dock-write" onClick={onWrite} disabled={loading}>
+        <PencilLine size={14} aria-hidden="true" />
+        Write to Moa
+      </button>
     </div>
   );
 }
