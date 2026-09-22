@@ -2,17 +2,23 @@ import { Layers } from 'lucide-preact';
 import { IconButton } from '../../primitives/index.js';
 import { useStore } from '../../hooks/useStore.js';
 import { artifactsSlice, openArtifactsList } from '../../data/artifacts.js';
+import { artifactsViewIsOpen } from '../../data/artifacts-model.js';
 import './Artifacts.css';
 
 // artifactsEntryState — what every entry shows for ITS conversation. Pure and
 // exported so the ownership rule is testable without a renderer: an entry is
 // "on" only while the shared drawer belongs to its own conversation, never
 // because that conversation happens to be focused.
+//
+// "on" means the drawer is OPEN, not merely claimed: a closed dossier still
+// mounts its artifacts page and claims the collection with view 'panel' to
+// load it, which used to light this button on entering a conversation with no
+// panel in sight.
 export function artifactsEntryState(state, sessionId) {
   const slice = artifactsSlice(state);
   return {
     visible: !!sessionId,
-    active: !!sessionId && !!slice.view && slice.ownerSessionId === sessionId,
+    active: !!sessionId && artifactsViewIsOpen(slice.view) && slice.ownerSessionId === sessionId,
   };
 }
 
