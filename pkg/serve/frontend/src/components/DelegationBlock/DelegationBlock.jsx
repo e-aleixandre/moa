@@ -22,11 +22,11 @@ import { copyToClipboard } from "../../data/util/format.js";
 // arrive empty in this phase — the row is left prepared but unrendered.
 
 function summaryText(summary) {
-  const { done, failed } = summary;
-  if (!done && !failed) return "";
-  if (done && failed) return `· ${done} done · ${failed} failed`;
-  if (failed) return `· ${failed} failed`;
-  return `· ${done} done`;
+  const { done, failed, cancelled } = summary;
+  return [[done, "done"], [failed, "failed"], [cancelled, "cancelled"]]
+    .filter(([n]) => n)
+    .map(([n, word]) => `· ${n} ${word}`)
+    .join(" ");
 }
 
 function NestedBashRow({ job, accent }) {
