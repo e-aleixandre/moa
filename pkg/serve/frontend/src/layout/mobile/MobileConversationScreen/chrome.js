@@ -44,9 +44,13 @@ export function drawerSessions(sessions, activeId) {
       title: sessionTitle(s),
       state: dotState,
       when: relAge(s.updated),
-      last: reason?.text || "",
-      lastTone: reason?.tone || "",
-      path: shortPath(s.cwd) || s.cwd || "",
+      // `brief`/`briefTone`, the names <Sidebar/> reads (sessions.js
+      // toSpineRow). Named `last` here, the phone's rows never showed why a
+      // session wanted you: the desktop said "Needs your answer", the phone
+      // printed the path.
+      brief: reason?.text || "",
+      briefTone: reason?.tone || "",
+      path: reason ? "" : (shortPath(s.cwd) || s.cwd || ""),
       unseen: !!s.unseen,
       active: s.id === activeId,
       saved: s.state === "saved",
@@ -107,7 +111,7 @@ function recentOwnersSig(list) {
 
 function cardSig(row) {
   return [
-    row.id, row.title, row.state, row.when, row.last, row.lastTone || "",
+    row.id, row.title, row.state, row.when, row.brief, row.briefTone || "",
     row.path, row.unseen ? 1 : 0, row.active ? 1 : 0, row.saved ? 1 : 0,
     row.origin || "",
   ].join("\0");

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
-import { ChevronUp, ChevronDown } from "lucide-preact";
+import { ChevronUp, ChevronDown, Check } from "lucide-preact";
 import { AskUserCard } from "./AskUserCard.jsx";
 import { resolveAskUser } from "../../data/session-actions.js";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
@@ -134,7 +134,7 @@ export function AskUserPrompt({ session }) {
   }, [voiceUsable, ask?.id, submitting, toggleVoice]);
 
   if (!ask || questions.length === 0) return null;
-  if (submitting) return <div class="ask-user-resolved">✓ Answered</div>;
+  if (submitting) return <div class="ask-user-resolved"><Check size={14} aria-hidden="true" /> Answered</div>;
 
   const q = questions[current];
   const options = (q.options || []).map((label) => ({ label }));
@@ -197,7 +197,8 @@ export function AskUserPrompt({ session }) {
   // Continue is the primary: on an earlier question it steps forward, on the
   // last one it submits (jumping back to whatever is still blank).
   const handleContinue = () => (last ? handleSubmit() : goTo(current + 1));
-  const continueLabel = last ? (canSubmit ? "Submit" : "Submit — jump to unanswered") : "Continue";
+  // With one question there is nowhere to jump: the blank one is on screen.
+  const continueLabel = last ? (canSubmit || questions.length === 1 ? "Submit" : "Submit — jump to unanswered") : "Continue";
   // The ⏎ drawn on Continue is a real key: Enter with focus on the card (a
   // click inside gives it focus) but not in the field or on a button, which
   // answer Enter themselves. Focus is never pulled from the composer.

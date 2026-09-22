@@ -57,7 +57,7 @@ export function panelAccessibleName(session, page) {
 // A pushed page replaces the control that opened it. Put the keyboard at its
 // Back button, whose label says exactly where that control returns.
 export function focusPanelSubpage({ open, page, backButton }) {
-  if (open && page !== 'root') backButton?.focus();
+  if (open && page !== 'root') backButton?.focus({ preventScroll: true });
 }
 
 export { SESSION_PANEL_CLOSED };

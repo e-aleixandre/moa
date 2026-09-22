@@ -1,4 +1,5 @@
 import { useRef, useLayoutEffect, useCallback } from "preact/hooks";
+import { ArrowDown } from "lucide-preact";
 import {
   UserWaypoint,
   AssistantDocument,
@@ -292,8 +293,11 @@ export function ConversationStream({
       </div>
 
       {showNewBtn && (
-        <button class="zl-transcript-new" onClick={scrollToBottom} title="Scroll to latest">
-          ↓ New messages
+        // It shows whenever the reader is above the bottom, new content or
+        // not, so it names where it goes rather than promising news.
+        <button class="zl-transcript-new" onClick={scrollToBottom} aria-label="Scroll to the latest message">
+          <ArrowDown size={16} aria-hidden="true" />
+          Latest
         </button>
       )}
     </div>

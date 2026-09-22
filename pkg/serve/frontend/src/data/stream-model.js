@@ -402,7 +402,13 @@ export function projectStream(session) {
       // result: "Sent to 66f1… ()" named neither the session nor what was
       // said. It gets its own block for the same reason a delivery does.
       const sessionMessage = toSessionMessageBlock(msg);
-      if (!file && !sessionMessage) {
+      // The pending card is the live ask_user interaction. Keep its durable
+      // completed row after resolution, but do not repeat the question while
+      // the card is asking it.
+      const liveAskShownAsCard = msg.tool_name?.toLowerCase() === 'ask_user'
+        && session.pendingAsk
+        && (msg.status === 'running' || msg.status === 'generating');
+      if (!file && !sessionMessage && !liveAskShownAsCard) {
         if (!currentLedger) {
           currentLedger = { type: 'ledger', id: blockID('ledger', msg, i), rows: [] };
           doc.blocks.push(currentLedger);
@@ -1371,14 +1377,16 @@ function delegationDoneAgent(msg, accent, jobIDOverride, openable = true, entry 
   return agent;
 }
 
-// delegationSummary counts states for the block header (·N done ·N failed).
+// delegationSummary counts states for the block header (·N done ·N failed
+// ·N cancelled). A cancelled agent did not fail: the header says so in words.
 function delegationSummary(agents) {
-  let done = 0, failed = 0;
+  let done = 0, failed = 0, cancelled = 0;
   for (const a of agents) {
     if (a.state === 'done') done++;
-    else if (a.state === 'failed' || a.state === 'cancelled') failed++;
+    else if (a.state === 'failed') failed++;
+    else if (a.state === 'cancelled') cancelled++;
   }
-  return { total: agents.length, done, failed };
+  return { total: agents.length, done, failed, cancelled };
 }
 
 // finalizeDelegations walks the projected tree, attaches a summary to every

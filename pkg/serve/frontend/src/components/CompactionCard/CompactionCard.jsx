@@ -1,5 +1,7 @@
 import { useState } from "preact/hooks";
 import { ChevronRight, FileText, Pencil, Scissors } from "lucide-preact";
+import { clockHHMM } from "../../data/util/clock.js";
+import { fmtTokens } from "../../data/util/format.js";
 import "./CompactionCard.css";
 
 export const COMPACTION_SUMMARY_PREVIEW = 1200;
@@ -13,9 +15,11 @@ export function compactionSummaryPreview(summary, limit = COMPACTION_SUMMARY_PRE
 // session hours later, when it happened is what places it against the work
 // around it. The transcript carries epoch SECONDS (tree.Entry.Timestamp.Unix),
 // so it is scaled here like every other timestamp in the UI.
+// Through clockHHMM, the 24-hour clock the rest of the transcript prints: left
+// to the locale it read "09:07 PM" two lines under a waypoint saying "21:08".
 export function compactionClock(timestampSeconds) {
   if (!Number.isFinite(timestampSeconds) || timestampSeconds <= 0) return "";
-  return new Date(timestampSeconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return clockHHMM(timestampSeconds);
 }
 
 function FileList({ title, files, Icon }) {
@@ -36,7 +40,7 @@ export function CompactionCard({ summary = "", tokensBefore = 0, timestamp = 0, 
   const [open, setOpen] = useState(false);
   const [fullSummary, setFullSummary] = useState(false);
   const preview = compactionSummaryPreview(summary);
-  const tokenLabel = tokensBefore > 0 ? `${Math.round(tokensBefore / 1000)}K tokens summarized` : "Context compacted";
+  const tokenLabel = tokensBefore > 0 ? `${fmtTokens(tokensBefore)} tokens summarized` : "Context compacted";
   const shownSummary = fullSummary ? summary : preview.text;
   const clockLabel = compactionClock(timestamp);
 
@@ -59,7 +63,7 @@ export function CompactionCard({ summary = "", tokensBefore = 0, timestamp = 0, 
                 </button>
               )}
             </section>
-          ) : <p class="cc-empty">No summary details are available for this older compaction.</p>}
+          ) : <p class="cc-empty">No summary saved for this part of the conversation.</p>}
           {tokensBefore > 0 && <p class="cc-tokens">{tokensBefore.toLocaleString()} tokens before compaction</p>}
           <FileList title="Files read" files={readFiles} Icon={FileText} />
           <FileList title="Files modified" files={modifiedFiles} Icon={Pencil} />

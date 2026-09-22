@@ -163,11 +163,11 @@ export function SessionDrawer({
     // Focus the dialog itself, NOT its first focusable: that is the search
     // input, and focusing it would throw the soft keyboard up over the list the
     // user just asked to see. Tab from here still enters the trap in order.
-    panelRef.current?.focus();
+    panelRef.current?.focus({ preventScroll: true });
     return () => {
       const toRestore = previousFocusRef.current;
       if (toRestore && typeof toRestore.focus === "function") {
-        toRestore.focus();
+        toRestore.focus({ preventScroll: true });
       }
     };
   }, [open]);

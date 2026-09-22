@@ -48,7 +48,7 @@ export function SecretBatch({ open, sessionId, aliases, onClose, onStored }) {
 
   return (
     <div class="secret-batch">
-      <p class="secret-batch-intro">Each value goes straight to a protected file. Values never enter the chat.</p>
+      <p class="secret-batch-intro">Values never enter the chat.</p>
       <div class="secret-batch-rows">
         {rows.map((row, index) => {
           const rowErrors = errors.rows[index] || {};
@@ -76,7 +76,7 @@ export function SecretBatch({ open, sessionId, aliases, onClose, onStored }) {
       </div>
       {errors.form && <p class="secret-batch-form-error" role="alert">{errors.form}</p>}
       <button type="button" class="secret-batch-add" onClick={addRow} disabled={rows.length >= MAX_SECRET_ROWS}><Plus size={15} /> Add another</button>
-      <p class="secret-batch-hint">The model only sees the temporary directory path and aliases, never values.</p>
+      <p class="secret-batch-hint">The model sees the names you chose, never the values.</p>
       <div class="secret-batch-actions">
         <Button variant="ghost" size="md" onClick={onClose} disabled={saving}>Cancel</Button>
         <Button variant="solid" size="md" className="secret-batch-save" onClick={save} disabled={saving}>{saving ? "Sending…" : "Send"}</Button>

@@ -69,10 +69,10 @@
   align-items: center;
   gap: 6px;
   font-family: var(--mono);
-  font-size: var(--text-micro);
+  font-size: var(--zl-fs-micro);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
-  color: var(--overlay0);
+  color: var(--zl-t4);
   white-space: nowrap;
   overflow: hidden;
 }

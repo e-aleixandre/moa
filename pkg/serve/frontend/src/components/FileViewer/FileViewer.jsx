@@ -120,7 +120,7 @@ export function FileViewer({ open = true, name, mime, url, size, onClose }) {
         {state.kind === 'document' && (
           <iframe class="file-viewer-frame" sandbox={HTML_PREVIEW_SANDBOX} srcdoc={state.srcdoc} referrerpolicy="no-referrer" title={name} />
         )}
-        {state.kind === 'expired' && <StatusMessage>Link expired (the server restarted) — ask the agent to resend it</StatusMessage>}
+        {state.kind === 'expired' && <StatusMessage>Link expired — ask the agent to resend it</StatusMessage>}
         {state.kind === 'too-large' && <StatusMessage>Too large to preview</StatusMessage>}
         {state.kind === 'binary' && <StatusMessage>Cannot preview (looks binary)</StatusMessage>}
         {state.kind === 'error' && <StatusMessage>Could not load the preview</StatusMessage>}

@@ -46,22 +46,22 @@
 
 /* Variants */
 
-/* variant-accent — the ONE dominant action of a screen. The gradient is the
-   product's own: the same peach→mauve the composer's send button already uses,
-   lifted here so it stops being copied by hand wherever an accent is needed.
-   Reserve it: if the most eye-catching thing on screen is not what the screen
-   is for, the weight is inverted (see CRITERIO-VISUAL §2). */
+/* variant-accent — the ONE dominant action of a screen: the same flat accent
+   as the other primaries (Allow once, Submit), so "the thing to press" looks
+   one way everywhere. It was a peach→mauve gradient copied from a send button
+   that has since gone flat, which left New owner and Edit owner the only
+   gradients among the product's buttons. Reserve it: if the most eye-catching
+   thing on screen is not what the screen is for, the weight is inverted (see
+   CRITERIO-VISUAL §2). */
 .button.variant-accent {
-  background: linear-gradient(135deg, var(--peach), color-mix(in srgb, var(--peach) 60%, var(--mauve)));
-  color: var(--crust);
+  background: var(--zl-accent);
+  color: var(--zl-accent-ink);
   font-weight: var(--weight-semibold);
 }
 @media (hover: hover) {
-
-
-.button.variant-accent:hover:not(:disabled) {
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--peach) 35%, transparent);
-}
+  .button.variant-accent:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--zl-accent) 88%, white);
+  }
 }
 
 .button.variant-solid {

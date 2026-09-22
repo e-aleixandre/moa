@@ -57,8 +57,8 @@
   flex-direction: column;
   background: var(--zl-sheet);
   border: 1px solid var(--zl-line);
-  border-radius: 16px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
+  border-radius: var(--zl-r-lg);
+  box-shadow: var(--zl-shadow-pop);
   overflow: hidden;
   color: var(--zl-t1);
   font-family: var(--font);
@@ -90,6 +90,8 @@
   display: block;
   margin-bottom: 6px;
   color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
   letter-spacing: .08em;
   text-transform: uppercase;
 }

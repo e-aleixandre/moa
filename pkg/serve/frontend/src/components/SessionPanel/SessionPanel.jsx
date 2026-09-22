@@ -124,7 +124,7 @@ function LifecycleActions({ session, inline }) {
           onClick={() => run(() => { resumeSession(session.id).catch(() => {}); })}
         >
           <span class="zl-act-t">Reopen session</span>
-          <span class="zl-act-d">Loads it back into memory and picks up where it left off.</span>
+          <span class="zl-act-d">Picks up where it left off.</span>
         </button>
       ) : (
         <button
@@ -133,7 +133,7 @@ function LifecycleActions({ session, inline }) {
           onClick={() => run(() => { closeSession(session.id).then(closeSessionPanel).catch(() => {}); })}
         >
           <span class="zl-act-t">Save for later</span>
-          <span class="zl-act-d">Stops the agent, keeps the session in Saved.</span>
+          <span class="zl-act-d">Stops the agent. You can reopen it later.</span>
         </button>
       )}
       <button

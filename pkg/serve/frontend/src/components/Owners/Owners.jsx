@@ -407,7 +407,6 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated, 
           onInput={(e) => { setTouchedName(true); setName(e.currentTarget.value); }}
           aria-label="Owner name"
         />
-        <span class="ow-hint">What you will call it in the list. Its conversation keeps this name.</span>
       </label>
 
       <div class="ow-field">
@@ -439,10 +438,6 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated, 
           </span>
           <GoIcon />
         </button>
-        <span class="ow-hint">
-          An owner reads reports and keeps a book rather than writing code, so it
-          starts on the default model at the cheapest thinking.
-        </span>
       </div>
       {picker}
 
@@ -503,9 +498,6 @@ export function OwnerOverview({ owner, onOpenChild, onEdit }) {
     <div class="ow-page">
       <button type="button" class="ow-btn ow-edit-owner" onClick={() => onEdit?.()}>Edit owner</button>
       <OwnerStateSummary owner={owner} />
-      <div class="ow-sum">
-        <span class="ow-sum-d">Every session whose folder resolves to this project is one of these — nothing is linked by hand.</span>
-      </div>
       {groups.length === 0 && <p class="ow-quiet">No session has run in this project yet.</p>}
       {groups.map((group) => (
         <div class="ow-cgroup" key={group.key}>
@@ -575,7 +567,7 @@ export function OwnerBook({ book = [], openPath = null, onOpenFile, onSave, stat
           <FileIcon />
           <span class="ow-file-main">
             <span class="ow-file-t">{f.label}</span>
-            <span class="ow-file-d">The index every session of this project is given</span>
+            <span class="ow-file-d">Shared context for every session here</span>
           </span>
           <GoIcon />
         </button>

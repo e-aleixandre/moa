@@ -22,11 +22,11 @@ import { copyToClipboard } from "../../data/util/format.js";
 // arrive empty in this phase — the row is left prepared but unrendered.
 
 function summaryText(summary) {
-  const { done, failed } = summary;
-  if (!done && !failed) return "";
-  if (done && failed) return `· ${done} ✓ · ${failed} ✗`;
-  if (failed) return `· ${failed} ✗`;
-  return `· ${done} done`;
+  const { done, failed, cancelled } = summary;
+  return [[done, "done"], [failed, "failed"], [cancelled, "cancelled"]]
+    .filter(([n]) => n)
+    .map(([n, word]) => `· ${n} ${word}`)
+    .join(" ");
 }
 
 function NestedBashRow({ job, accent }) {
@@ -118,7 +118,7 @@ function DoneAgentRow({ agent, onOpenAgent }) {
       {expanded && <div class="dlg-result-body">
         <span class="dlg-result-label">Result</span>
         <pre>{result}</pre>
-        <button type="button" class="dlg-copy" onClick={() => copyToClipboard(result).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1200); } })}>{copied ? "Copied ✓" : "Copy result"}</button>
+        <button type="button" class="dlg-copy" onClick={() => copyToClipboard(result).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1200); } })}>{copied ? <><Check size={14} aria-hidden="true" /> Copied</> : "Copy result"}</button>
       </div>}
     </div>
   );
@@ -164,7 +164,7 @@ function OutcomeAgentRow({ agent, onOpenAgent }) {
 		</div>}
 		{expanded && <div class="dlg-result-body">
 			<span class="dlg-result-label">{outcomeLabel}</span><pre>{outcomeText}</pre>
-			<button type="button" class="dlg-copy" onClick={() => copyToClipboard(outcomeText).then((ok) => { if (ok) { clearTimeout(copiedTimer.current); setCopied(true); copiedTimer.current = setTimeout(() => setCopied(false), 1200); } })}>{copied ? "Copied ✓" : `Copy ${outcomeLabel.toLowerCase()}`}</button>
+			<button type="button" class="dlg-copy" onClick={() => copyToClipboard(outcomeText).then((ok) => { if (ok) { clearTimeout(copiedTimer.current); setCopied(true); copiedTimer.current = setTimeout(() => setCopied(false), 1200); } })}>{copied ? <><Check size={14} aria-hidden="true" /> Copied</> : `Copy ${outcomeLabel.toLowerCase()}`}</button>
 		</div>}
     </div>
   );

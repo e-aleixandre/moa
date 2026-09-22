@@ -92,7 +92,7 @@ function ContextLimitRow({ session, disabled }) {
         onInput={(e) => setDragPct(Number(e.currentTarget.value))}
         onChange={(e) => commit(Number(e.currentTarget.value))}
       />
-      <span class="zl-kv-note zl-data">
+      <span class="zl-kv-note is-prose">
         {pct < 100
           ? `Summarizes and keeps going once the ring hits ${pct}%.`
           : "Summarizes only when the model's window is nearly full."}
@@ -142,7 +142,7 @@ function CacheRows({ session }) {
         <span class={`zl-kv-v zl-data${u.alert ? " is-warn" : ""}`}>{pct}%</span>
         <Meter pct={pct} neutral />
         {u.alert && (
-          <span class="zl-kv-note zl-data is-warn">
+          <span class="zl-kv-note is-prose is-warn">
             {u.streak} turns without a cache read
           </span>
         )}
@@ -153,7 +153,7 @@ function CacheRows({ session }) {
           ↓{fmtTokens(u.read)} read
           <span class="zl-kv-dim"> · ↑{fmtTokens(u.written)} written</span>
         </span>
-        {u.alert && <span class="zl-kv-note">{cacheAdvice(session)}</span>}
+        {u.alert && <span class="zl-kv-note is-prose">{cacheAdvice(session)}</span>}
       </div>
     </>
   );

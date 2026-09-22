@@ -12,28 +12,8 @@
   overflow: hidden;
 }
 
-/* A breath of aurora, inside the product. Moved from the catalogue
-   (.zl-phone::before) with its values intact.
-
-   It has to live HERE and not on body: the aurora on body::before is painted
-   behind everything, and this screen is an opaque --base sheet covering the
-   whole viewport, so on a phone it ate the wash completely and the screen read
-   flat. The catalogue says the same thing in its own words -- the wash goes in
-   the reading canvas, not behind the sheet.
-
-   Deliberately weak, and deliberately not peach: peach means "you wrote this".
-   Two soft pools, one cool and one mauve, at opposite corners so the long
-   reading area is never uniformly tinted. */
-.mconv::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background:
-    radial-gradient(78% 46% at 12% 0%, rgba(137, 180, 250, 0.11), transparent 72%),
-    radial-gradient(64% 42% at 96% 8%, rgba(203, 166, 247, 0.09), transparent 74%);
-}
+/* No glow of its own: the aurora on body::before is the one wash, and a
+   second pair of pools here doubled it (tokens/shell.css). */
 
 /* A pushed child normally replaces this tree. Keep the real conversation
    mounted only for the interactive back drag, where it is the surface being
@@ -270,29 +250,6 @@
   box-shadow: 0 0 0 1px var(--zl-accent-med),
     0 0 16px color-mix(in srgb, var(--zl-accent) 30%, transparent);
 }
-}
-
-/* Global Settings sheet body (drawer footer → sheet handoff) — a labelled
-   section wrapping NotificationSettings, which ships as a bordered dropdown;
-   inside the sheet it sheds its own chrome and fills the width. Global scope
-   only — no per-session rows. */
-.mconv-settings-lbl {
-  font-family: var(--mono);
-  font-size: var(--text-micro);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  color: var(--overlay0);
-  margin-bottom: var(--space-3);
-}
-.mconv-settings-body .notif-dropdown {
-  width: 100%;
-  border: 0;
-  box-shadow: none;
-  background: none;
-  padding: 0;
-}
-.mconv-settings-body .notif-dropdown .notif-title {
-  display: none; /* the section label already says "Notifications" */
 }
 
 @media (prefers-reduced-motion: reduce) {

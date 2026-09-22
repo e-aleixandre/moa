@@ -85,7 +85,7 @@ export function ChatHead({
               onClick={onPreviewToggle}
               aria-label="Live preview"
               aria-pressed={previewOpen || undefined}
-              title="Live preview — look at your dev server and point the agent at an element"
+              title="Live preview"
             >
               <PreviewIcon />
             </button>

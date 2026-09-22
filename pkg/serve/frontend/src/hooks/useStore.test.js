@@ -1,5 +1,6 @@
 import { test, expect, beforeEach } from "bun:test";
 import { store, setState, updateSession } from "../data/store.js";
+import { subscribeSelected } from "./useStore.js";
 
 // The hook itself is a subscribe + Object.is. These tests pin that contract
 // against the live store, which is what DesktopShell / ConversationScreen /
@@ -48,5 +49,21 @@ test('a primitive selector ignores unrelated keys', () => {
   expect(n).toBe(0);
   setState({ view: "conversation" });
   expect(n).toBe(1);
+  unsub();
+});
+
+// The render reads the value, the effect subscribes later. A change landing in
+// between (the first roster on a cold start) must not wait for the next one.
+test('a change between the render and the subscription is not lost', () => {
+  setState({ sessionsLoaded: false });
+  const selectorRef = { current: (s) => s.sessionsLoaded };
+  const valueRef = { current: selectorRef.current(store.get()) }; // the render
+  setState({ sessionsLoaded: true }); // lands before the effect runs
+  let renders = 0;
+  const unsub = subscribeSelected(selectorRef, valueRef, () => renders++);
+  expect(renders).toBe(1);
+  expect(valueRef.current).toBe(true);
+  setState({ view: "grid" });
+  expect(renders).toBe(1);
   unsub();
 });

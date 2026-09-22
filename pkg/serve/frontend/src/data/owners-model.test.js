@@ -255,10 +255,10 @@ test("an unread owner is mauve, which is what mauve already means here", () => {
   expect(ownerLine(owner).lead.tone).toBe("mauve");
 });
 
-test("a parked owner says so rather than counting sessions it is not watching", () => {
+test("a parked owner neither counts sessions it is not watching nor says Saved", () => {
   const owner = { session_state: "saved", children: [running, running] };
   expect(ownerState(owner)).toBe("saved");
-  expect(ownerLine(owner).lead).toEqual({ tone: "neutral", text: "Saved" });
+  expect(ownerLine(owner).lead).toBeNull();
 });
 
 test("a collapsed Owners heading shows the most urgent thing it hides, and only that", () => {

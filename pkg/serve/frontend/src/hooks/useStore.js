@@ -16,11 +16,23 @@ export function useStore(selector) {
   }
 
   const [, setRev] = useState(0);
-  useEffect(() => store.subscribe(() => {
+  useEffect(() => subscribeSelected(selectorRef, valueRef, () => setRev((n) => n + 1)), []);
+  return valueRef.current;
+}
+
+// subscribeSelected subscribes and then compares once, straight away. The
+// subscription is made in an effect, after the render that read the value, and
+// a store change in between reaches no listener. Measured on the phone: the
+// first roster landed in that gap on a third of cold starts, and the app sat
+// on "Loading sessions…" with sessionsLoaded already true until the 15 s poll.
+export function subscribeSelected(selectorRef, valueRef, onChange) {
+  const check = () => {
     const next = selectorRef.current(store.get());
     if (Object.is(valueRef.current, next)) return;
     valueRef.current = next;
-    setRev((n) => n + 1);
-  }), []);
-  return valueRef.current;
+    onChange();
+  };
+  const unsubscribe = store.subscribe(check);
+  check();
+  return unsubscribe;
 }

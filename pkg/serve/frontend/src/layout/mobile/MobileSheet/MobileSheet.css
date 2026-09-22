@@ -128,11 +128,12 @@
   outline-offset: 2px;
 }
 .msheet-scope {
-  font-family: var(--mono);
-  font-size: var(--text-micro);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
   text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  color: var(--overlay0);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  color: var(--zl-t4);
   white-space: nowrap;
 }
 
@@ -170,6 +171,4 @@
 }
 .msheet-scope {
   font-family: var(--font);
-  letter-spacing: 0.08em;
-  color: var(--zl-t4);
 }

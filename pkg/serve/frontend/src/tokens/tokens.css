@@ -273,6 +273,7 @@
   --zl-line-2: rgba(255, 255, 255, 0.12);
   --zl-rim: 0 0 0 1px var(--zl-line);
   --zl-rim-2: 0 0 0 1px var(--zl-line-2);
+  --zl-shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.45);
 
   /* Text. Not pure white: Linear ships #F7F8F8, Raycast #F4F4F6. */
   --zl-t1: #f4f4f7;

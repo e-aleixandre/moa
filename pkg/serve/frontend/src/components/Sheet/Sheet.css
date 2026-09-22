@@ -24,8 +24,8 @@
   max-width: 600px;
   max-height: 85vh;
   overflow: auto;
-  background: var(--mantle);
-  border: 1px solid var(--surface1);
+  background: var(--zl-sheet);
+  border: 1px solid var(--zl-line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   /* A modal is a large surface that arrives in the middle of the screen, so

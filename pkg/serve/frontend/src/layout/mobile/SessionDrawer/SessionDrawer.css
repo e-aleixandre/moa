@@ -160,15 +160,6 @@
   gap: 7px;
 }
 
-.sdrawer-group {
-  font-family: var(--font);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--overlay0);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  padding: 8px 4px 2px;
-}
 
 /* Empty result / empty project list — a quiet line where a row would be. */
 .sdrawer-note {
@@ -331,10 +322,11 @@
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
+/* Solid, the sheets' own surface: through a 93% glass the conversation's
+   words could still be read under the list, competing with it. The veil
+   beside the panel already says there is something behind. */
 .sdrawer {
-  background: rgba(20, 20, 34, 0.93);
-  backdrop-filter: blur(28px) saturate(1.4);
-  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  background: var(--zl-sheet);
   border: 0;
   /* Only the trailing corners: the sheet is flush with the left edge it came
      out of. 24px against the app's 18px — the radius family is one of the few
@@ -350,10 +342,6 @@
   font-size: 20px;
   font-weight: var(--weight-semibold);
   letter-spacing: -0.01em;
-}
-.sdrawer-group {
-  font-family: var(--font);
-  color: var(--zl-t4);
 }
 .sdrawer-search.field-inset {
   background: rgba(0, 0, 0, 0.30);

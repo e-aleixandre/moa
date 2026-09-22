@@ -57,7 +57,6 @@ export function EditOwner({ owner, onSave, onClose, phone }) {
           onInput={(event) => setName(event.currentTarget.value)}
           aria-label="Owner name"
         />
-        <span class="ow-hint">What you will call it in the list. Its conversation keeps this name until you rename it yourself.</span>
       </label>
       <div class="ow-form-foot">
         {failure && <p class="ow-fail" role="alert">{failure}</p>}

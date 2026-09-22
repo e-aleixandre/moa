@@ -118,9 +118,17 @@
   font-weight: 500;
   line-height: 1;
 }
+/* The ⏎ promises a key. A touch screen has none to press, so there the
+   keycap is only noise on the primary button. */
+@media (hover: none) and (pointer: coarse) {
+  .ask-user-prompt-key { display: none; }
+}
 
 /* Answered: a note, not a green banner. The card is gone, the run moved on. */
 .ask-user-resolved {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   max-width: 560px;
   padding: 12px 16px;

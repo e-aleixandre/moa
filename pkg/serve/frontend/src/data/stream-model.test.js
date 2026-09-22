@@ -269,6 +269,17 @@ test('an answered ask_user row retains its raw Q&A data without a generic body',
   expect(row.body).toBeUndefined();
 });
 
+test('a live ask_user row is hidden while its pending card asks the question', () => {
+  const questions = [{ question: 'Which colour theme?', options: ['Dark', 'Light'] }];
+  const s = session([tool('ask-1', 'ask_user', { questions }, 'running')], {
+    pendingAsk: { id: 'pending-ask-1', questions },
+  });
+
+  expect(projectStream(s)[0].blocks).toEqual([]);
+  s.pendingAsk = null;
+  expect(projectStream(s)[0].blocks[0].rows[0].tool).toBe('ask_user');
+});
+
 test('the right-hand slot separates a measure from an echo', () => {
   const [multi, single, failed, rejected] = projectStream(session([
     tool('t1', 'read', { path: 'a.go' }, 'done', 'one\ntwo\nthree'),
@@ -337,7 +348,7 @@ test('two live subagents form a delegation block, one running agent row each', (
   const delegation = doc.blocks.find(b => b.type === 'delegation');
   expect(delegation).toBeTruthy();
   expect(delegation.settled).toBe(false); // still running
-  expect(delegation.summary).toEqual({ total: 2, done: 0, failed: 0 });
+  expect(delegation.summary).toEqual({ total: 2, done: 0, failed: 0, cancelled: 0 });
   expect(delegation.agents).toHaveLength(2);
   const byId = Object.fromEntries(delegation.agents.map(a => [a.id, a]));
   expect(byId.j1.state).toBe('running');
@@ -489,7 +500,7 @@ test('a terminated subagent in messages folds into a delegation block, not a led
   expect(doc.blocks.map(b => b.type)).toEqual(['prose', 'delegation', 'prose']);
   const delegation = doc.blocks[1];
   expect(delegation.settled).toBe(true); // all terminated → auto-collapses
-  expect(delegation.summary).toEqual({ total: 1, done: 1, failed: 0 });
+  expect(delegation.summary).toEqual({ total: 1, done: 1, failed: 0, cancelled: 0 });
   expect(delegation.agents[0].id).toBe('j1');
   expect(delegation.agents[0].state).toBe('done');
   expect(delegation.agents[0].name).toBe('Analyze auth');
@@ -630,7 +641,7 @@ test('two sequential terminated subagents form one delegation block, two agents'
   expect(doc.blocks.map(b => b.type)).toEqual(['prose', 'delegation']);
   const delegation = doc.blocks[1];
   expect(delegation.agents.map(a => a.id)).toEqual(['j1', 'j2']);
-  expect(delegation.summary).toEqual({ total: 2, done: 2, failed: 0 });
+  expect(delegation.summary).toEqual({ total: 2, done: 2, failed: 0, cancelled: 0 });
   expect(delegation.settled).toBe(true);
   expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
 });
@@ -1240,7 +1251,7 @@ test('a failed subagent is summarised as failed with an error chip', () => {
   expect(delegation.agents[0].state).toBe('failed');
   expect(delegation.agents[0].chip).toBe('panic: nil map');
   expect(delegation.agents[0].error).toBe('panic: nil map');
-  expect(delegation.summary).toEqual({ total: 1, done: 0, failed: 1 });
+  expect(delegation.summary).toEqual({ total: 1, done: 0, failed: 1, cancelled: 0 });
   expect(delegation.settled).toBe(true);
 });
 
@@ -1261,7 +1272,7 @@ test('a live subagent joins the same turn\'s already-terminated agents in one bl
   expect(delegation.agents[0].state).toBe('done');
   expect(delegation.agents[1].state).toBe('running');
   expect(delegation.settled).toBe(false);
-  expect(delegation.summary).toEqual({ total: 2, done: 1, failed: 0 });
+  expect(delegation.summary).toEqual({ total: 2, done: 1, failed: 0, cancelled: 0 });
 });
 
 test('a cancelled subagent keeps a distinct cancelled state', () => {
@@ -1272,8 +1283,8 @@ test('a cancelled subagent keeps a distinct cancelled state', () => {
   const doc = projectStream(s)[0];
   const delegation = doc.blocks.find(b => b.type === 'delegation');
   expect(delegation.agents[0].state).toBe('cancelled');
-  // cancelled counts with failed for the header summary
-  expect(delegation.summary).toEqual({ total: 1, done: 0, failed: 1 });
+  // the header says it in words, so cancelled is not counted as failed
+  expect(delegation.summary).toEqual({ total: 1, done: 0, failed: 0, cancelled: 1 });
   expect(delegation.settled).toBe(true);
 });
 
