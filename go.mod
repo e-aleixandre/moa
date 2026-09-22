@@ -8,6 +8,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
+	golang.org/x/oauth2 v0.35.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 )
@@ -26,6 +27,5 @@ require (
 	github.com/yuin/goldmark v1.8.2 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 )

@@ -267,14 +267,17 @@ type serveInfra struct {
 // configured servers (including disabled ones); Disabled is the count in the
 // intentionally-off state (neutral, not an alarm); Unhealthy counts only servers
 // that are enabled yet failed/exited (the alert color); Pending counts servers
-// mid-transition (desired differs from applied). The indicator shows whenever
-// Total > 0 and turns to an alert color only when Unhealthy > 0.
+// mid-transition (desired differs from applied); AuthRequired counts servers
+// waiting for the user to sign in, which need the user but are not down. The
+// indicator shows whenever Total > 0 and turns to an alert color only when
+// Unhealthy > 0.
 type MCPSummary struct {
-	Total     int `json:"total"`
-	Ready     int `json:"ready"`
-	Disabled  int `json:"disabled"`
-	Unhealthy int `json:"unhealthy"`
-	Pending   int `json:"pending"`
+	Total        int `json:"total"`
+	Ready        int `json:"ready"`
+	Disabled     int `json:"disabled"`
+	Unhealthy    int `json:"unhealthy"`
+	Pending      int `json:"pending"`
+	AuthRequired int `json:"auth_required"`
 }
 
 // SessionInfo is the public representation returned by List/Get endpoints.
@@ -777,9 +780,9 @@ type Manager struct {
 	// ownerEdit serializes read-modify-write edits of an owner's identity, so
 	// two concurrent renames cannot each save a whole owner and drop the
 	// other's field. See UpdateOwner.
-	ownerEdit  sync.Mutex
-	versionMu  sync.RWMutex
-	version    release.Result
+	ownerEdit sync.Mutex
+	versionMu sync.RWMutex
+	version   release.Result
 
 	// configMutationMu serializes global and project configuration mutations
 	// across the process: the core persistence helpers atomically replace a file,

@@ -277,7 +277,7 @@ export function SessionPanel({
                 onOpen={goPage}
               />
               {mcp && (
-                <PanelRow id="mcp" title="MCP" verdict={mcp.text} warn={mcp.warn} onOpen={goPage} />
+                <PanelRow id="mcp" title="MCP" verdict={mcp.text} warn={mcp.warn} tone={mcp.tone} onOpen={goPage} />
               )}
               <ArtifactsRow sessionId={session.id} items={artifacts} />
             </div>

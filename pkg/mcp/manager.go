@@ -17,6 +17,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/e-aleixandre/moa/pkg/attachment"
+	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -64,7 +65,14 @@ const (
 	// StateDisabled means the server is configured but intentionally not
 	// running (no process, no tools). It is an expected state, not a failure.
 	StateDisabled ServerState = "disabled"
+	// StateAuthRequired means a remote server answered 401 and only the user
+	// can fix it by authorizing moa (see ServerStatus.AuthAction).
+	StateAuthRequired ServerState = "auth_required"
 )
+
+// authRequiredMessage is the error shown for StateAuthRequired; the UI offers
+// the Connect/Reconnect action next to it.
+const authRequiredMessage = "sign-in required"
 
 // ServerStatus is an immutable snapshot of one server's health, for the UI.
 type ServerStatus struct {
@@ -73,6 +81,9 @@ type ServerStatus struct {
 	ToolCount int         `json:"tool_count"`
 	ToolNames []string    `json:"tool_names,omitempty"`
 	Error     string      `json:"error,omitempty"`
+	// AuthAction is set only in StateAuthRequired: "connect" when moa has
+	// never been authorized for this server, "reconnect" when it had been.
+	AuthAction string `json:"auth_action,omitempty"`
 	// StartedAt is when the server last connected; zero if it never has.
 	StartedAt time.Time `json:"started_at,omitempty"`
 	// ChangedAt is when the state last changed.
@@ -95,6 +106,14 @@ type Manager struct {
 	configs  map[string]core.MCPServer // last config per server, for restart
 	onChange func(ServerStatus)        // notified on any state transition (may be nil)
 	closed   bool
+
+	// oauthStore holds the OAuth tokens of remote servers; process-wide, so an
+	// authorization done from one session reaches every manager.
+	oauthStore *auth.MCPOAuthStore
+	// startCtx is the Start context, reused for reconnects after sign-in.
+	startCtx context.Context
+	// unsubscribeOAuth stops store notifications; set by Start, run by Close.
+	unsubscribeOAuth func()
 }
 
 // serverSession holds one MCP server subprocess and its live connection. The
@@ -129,6 +148,12 @@ type serverSession struct {
 	// already taken over — so a slow Wait() from an old process can't clobber
 	// the state of a fresh restart.
 	gen uint64
+
+	// oauth is the handler of the live remote connection, so a late auth-loss
+	// callback can tell whether it still refers to the current connection.
+	oauth *oauthHandler
+	// authAction is reported with StateAuthRequired ("connect"/"reconnect").
+	authAction string
 }
 
 // toolInfo is the discovered metadata for one MCP tool, kept so tools can be
@@ -152,6 +177,34 @@ func NewManager(logger *slog.Logger, cwd string) *Manager {
 	}
 }
 
+// SetOAuthStore replaces the OAuth token store. It must be called before
+// Start; tests use it to point at a temporary file. Without it, Start opens
+// the default store only when some server is remote.
+func (m *Manager) SetOAuthStore(s *auth.MCPOAuthStore) {
+	m.mu.Lock()
+	m.oauthStore = s
+	m.mu.Unlock()
+}
+
+// OAuthStore returns the store this manager reads OAuth tokens from.
+func (m *Manager) OAuthStore() *auth.MCPOAuthStore {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.oauthStore
+}
+
+// ServerURL returns the endpoint of a configured remote server; ok is false
+// for an unknown or command-based server.
+func (m *Manager) ServerURL(name string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg, ok := m.configs[name]
+	if !ok || !cfg.IsRemote() {
+		return "", false
+	}
+	return cfg.URL, true
+}
+
 // OnChange registers a callback fired whenever a server's state changes
 // (connect, exit, restart). It must be set before Start and is not called
 // concurrently for the same server. A nil callback disables notifications.
@@ -170,24 +223,38 @@ func (m *Manager) OnChange(fn func(ServerStatus)) {
 // they get a StateDisabled placeholder (visible in Status, no process, no
 // tools) so the UI can offer to enable them. A nil map starts everything.
 func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, initiallyDisabled map[string]bool) {
+	// Parallel start: a slow server no longer serializes the 15s timeout behind
+	// every other one. Names are sorted for a stable server order in the UI.
+	names := make([]string, 0, len(servers))
+	var defaultStore *auth.MCPOAuthStore
+	for name, cfg := range servers {
+		names = append(names, name)
+		if cfg.IsRemote() && defaultStore == nil && m.OAuthStore() == nil {
+			defaultStore = auth.DefaultMCPOAuthStore()
+		}
+	}
+	sortStrings(names)
+
+	// One critical section with Close: either Close already ran and nothing
+	// is registered or subscribed, or Close will see and undo all of it.
+	now := time.Now()
+	sessions := make([]*serverSession, len(names))
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
 	m.configs = make(map[string]core.MCPServer, len(servers))
 	for name, cfg := range servers {
 		m.configs[name] = cfg
 	}
-	m.mu.Unlock()
-
-	// Parallel start: a slow server no longer serializes the 15s timeout behind
-	// every other one. Names are sorted for a stable server order in the UI.
-	names := make([]string, 0, len(servers))
-	for name := range servers {
-		names = append(names, name)
+	m.startCtx = ctx
+	if m.oauthStore == nil {
+		m.oauthStore = defaultStore
 	}
-	sortStrings(names)
-
-	now := time.Now()
-	sessions := make([]*serverSession, len(names))
-	m.mu.Lock()
+	if m.oauthStore != nil && m.unsubscribeOAuth == nil {
+		m.unsubscribeOAuth = m.oauthStore.Subscribe(m.onOAuthAuthorized)
+	}
 	for i, name := range names {
 		var sess *serverSession
 		if initiallyDisabled[name] {
@@ -255,7 +322,7 @@ func (m *Manager) finishStart(ctx context.Context, sess *serverSession, cfg core
 	}
 
 	if err := m.connect(ctx, sess, cfg); err != nil {
-		sess.setFailed(err.Error())
+		m.setConnectFailed(sess, cfg, err)
 		st := sess.status()
 		m.logger.Warn("MCP server failed to start", "server", st.Name, "error", st.Error)
 		m.notify(st)
@@ -289,11 +356,26 @@ func (m *Manager) connect(ctx context.Context, sess *serverSession, cfg core.MCP
 	// lifecycle collapses to closing the client session.
 	var cmd *exec.Cmd
 	var transport sdkmcp.Transport
+	var oauth *oauthHandler
 	if cfg.IsRemote() {
-		transport = &sdkmcp.StreamableClientTransport{
+		// Every remote connect carries the handler: that is what turns a 401
+		// into StateAuthRequired, with or without stored tokens.
+		m.mu.Lock()
+		store := m.oauthStore
+		m.mu.Unlock()
+		if store != nil {
+			h := &oauthHandler{store: store, key: auth.MCPOAuthKey(cfg.URL)}
+			h.onAuthRequired = func() { go m.handleAuthLost(sess, h) }
+			oauth = h
+		}
+		t := &sdkmcp.StreamableClientTransport{
 			Endpoint:   cfg.URL,
 			HTTPClient: remoteHTTPClient(cfg.Headers),
 		}
+		if oauth != nil {
+			t.OAuthHandler = oauth
+		}
+		transport = t
 	} else {
 		cmd = exec.Command(cfg.Command, cfg.Args...)
 		if m.cwd != "" {
@@ -317,6 +399,9 @@ func (m *Manager) connect(ctx context.Context, sess *serverSession, cfg core.MCP
 	session, err := client.Connect(startCtx, transport, nil)
 	if err != nil {
 		killProcGroup(cmd)
+		if authFailed(oauth, err) {
+			return errAuthRequired
+		}
 		return fmt.Errorf("connect: %w", err)
 	}
 
@@ -324,6 +409,9 @@ func (m *Manager) connect(ctx context.Context, sess *serverSession, cfg core.MCP
 	if err != nil {
 		_ = session.Close()
 		killProcGroup(cmd)
+		if authFailed(oauth, err) {
+			return errAuthRequired
+		}
 		return fmt.Errorf("list tools: %w", err)
 	}
 
@@ -345,6 +433,7 @@ func (m *Manager) connect(ctx context.Context, sess *serverSession, cfg core.MCP
 	sess.client = client
 	sess.session = session
 	sess.remote = cfg.IsRemote()
+	sess.oauth = oauth
 	sess.tools = tools
 	sess.state = StateReady
 	sess.err = ""
@@ -534,7 +623,7 @@ func (m *Manager) RestartServer(ctx context.Context, name string) (ServerStatus,
 
 	err := m.connect(ctx, sess, cfg)
 	if err != nil {
-		sess.setFailed(err.Error())
+		m.setConnectFailed(sess, cfg, err)
 		st := sess.status()
 		m.logger.Warn("MCP server restart failed", "server", name, "error", err)
 		m.notify(st)
@@ -610,7 +699,7 @@ func (m *Manager) enableLocked(ctx context.Context, sess *serverSession, cfg cor
 	m.notify(sess.status())
 
 	if err := m.connect(ctx, sess, cfg); err != nil {
-		sess.setFailed(err.Error())
+		m.setConnectFailed(sess, cfg, err)
 		st := sess.status()
 		m.logger.Warn("MCP server enable failed", "server", sess.name, "error", err)
 		m.notify(st)
@@ -661,7 +750,12 @@ func (m *Manager) Close() {
 	servers := m.servers
 	m.servers = nil
 	m.byName = map[string]*serverSession{}
+	unsubscribe := m.unsubscribeOAuth
+	m.unsubscribeOAuth = nil
 	m.mu.Unlock()
+	if unsubscribe != nil {
+		unsubscribe()
+	}
 
 	for _, s := range servers {
 		// Take the lifecycle lock so we serialize against an in-flight restart:
@@ -704,6 +798,19 @@ func (s *serverSession) setFailed(msg string) {
 	s.err = msg
 	s.tools = nil
 	s.session = nil
+	s.oauth = nil
+	s.changedAt = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *serverSession) setAuthRequired(action string) {
+	s.mu.Lock()
+	s.state = StateAuthRequired
+	s.err = authRequiredMessage
+	s.authAction = action
+	s.tools = nil
+	s.session = nil
+	s.oauth = nil
 	s.changedAt = time.Now()
 	s.mu.Unlock()
 }
@@ -719,7 +826,7 @@ func (s *serverSession) statusLocked() ServerStatus {
 	for i, t := range s.tools {
 		names[i] = t.name
 	}
-	return ServerStatus{
+	st := ServerStatus{
 		Name:      s.name,
 		State:     s.state,
 		ToolCount: len(s.tools),
@@ -728,6 +835,10 @@ func (s *serverSession) statusLocked() ServerStatus {
 		StartedAt: s.startedAt,
 		ChangedAt: s.changedAt,
 	}
+	if s.state == StateAuthRequired {
+		st.AuthAction = s.authAction
+	}
+	return st
 }
 
 func sortStrings(s []string) {

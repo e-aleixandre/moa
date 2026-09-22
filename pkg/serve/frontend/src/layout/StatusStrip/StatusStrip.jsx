@@ -118,10 +118,16 @@ export function StatusStrip({
 
   const mcp = session?.mcp;
   const mcpUnhealthy = !!(mcp && mcp.unhealthy > 0);
+  const mcpNeedsSignIn = !!(mcp && mcp.auth_required > 0);
+  const mcpState = mcpUnhealthy ? "unhealthy" : mcpNeedsSignIn ? "needs-sign-in" : "healthy";
   const mcpLabel = mcp
-    ? (mcpUnhealthy
-        ? `MCP: ${mcp.unhealthy} of ${mcp.total} need attention`
-        : `MCP: ${mcp.total} server${mcp.total === 1 ? "" : "s"} ready`)
+    ? (mcpUnhealthy && mcpNeedsSignIn
+        ? `MCP: ${mcp.unhealthy} down · ${mcp.auth_required} needs sign-in`
+        : mcpUnhealthy
+          ? `MCP: ${mcp.unhealthy} of ${mcp.total} down`
+          : mcpNeedsSignIn
+            ? `MCP: ${mcp.auth_required} needs sign-in`
+            : `MCP: ${mcp.total} server${mcp.total === 1 ? "" : "s"} ready`)
       + (mcp.disabled > 0 ? `, ${mcp.disabled} disabled` : "")
     : "";
 
@@ -216,14 +222,15 @@ export function StatusStrip({
         )}
 
         {/* MCP takes its priority from its STATE, not its type: healthy it
-            drops early, unhealthy it stays and keeps its number. */}
+            drops early, while failures and sign-in both stay in view. */}
         {mcp && mcp.total > 0 && (() => {
-          const cls = `zl-st zl-st-ev zl-st-mcp zl-${statusItemPriority("mcp", mcpUnhealthy ? "unhealthy" : "healthy")}${mcpUnhealthy ? " is-alarm-red" : ""}`;
+          const cls = `zl-st zl-st-ev zl-st-mcp zl-${statusItemPriority("mcp", mcpState)}${mcpUnhealthy ? " is-alarm-red" : mcpNeedsSignIn ? " is-alarm-yellow" : ""}`;
+          const count = mcpUnhealthy ? `${mcp.unhealthy}/${mcp.total}` : mcpNeedsSignIn ? `${mcp.auth_required}/${mcp.total}` : mcp.total;
           const body = (
             <>
               <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2v3M11 2v3M3.5 5h9v3a4.5 4.5 0 0 1-9 0zM8 12.5V15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
               <span class="zl-st-word">mcp</span>
-              <span class="zl-data">{mcpUnhealthy ? `${mcp.unhealthy}/${mcp.total}` : mcp.total}</span>
+              <span class="zl-data">{count}</span>
             </>
           );
           return onOpenMcp ? (

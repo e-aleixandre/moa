@@ -171,18 +171,25 @@ func oauthCredential(provider string, previous Credential, refreshed *OAuthCrede
 }
 
 func (s *Store) save() error {
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("creating config dir: %w", err)
-	}
-
 	data, err := json.MarshalIndent(s.data, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling credentials: %w", err)
 	}
+	return writeCredentialFile(s.path, data)
+}
+
+// writeCredentialFile atomically replaces a credential file with data (mode
+// 0600, parent dir 0700): unique temp file + sync + rename + dir sync, so a
+// crash or a concurrent reader never observes a truncated file. Shared by every
+// credential store in this package.
+func writeCredentialFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("creating config dir: %w", err)
+	}
 
 	// Atomic write: unique temp file + sync + rename to prevent corruption
-	tmp, err := os.CreateTemp(dir, "auth-*.tmp")
+	tmp, err := os.CreateTemp(dir, strings.TrimSuffix(filepath.Base(path), ".json")+"-*.tmp")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
@@ -206,7 +213,7 @@ func (s *Store) save() error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("setting permissions: %w", err)
 	}
-	if err := os.Rename(tmpPath, s.path); err != nil {
+	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming credentials: %w", err)
 	}

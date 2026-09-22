@@ -255,11 +255,12 @@ type ContextUpdateData struct {
 // indicator, matching the MCPSummary fields. An open panel re-fetches full
 // per-server detail from GET /api/sessions/{id}/mcp when this arrives.
 type MCPChangeData struct {
-	Total     int `json:"total"`
-	Ready     int `json:"ready"`
-	Disabled  int `json:"disabled"`
-	Unhealthy int `json:"unhealthy"`
-	Pending   int `json:"pending"`
+	Total        int `json:"total"`
+	Ready        int `json:"ready"`
+	Disabled     int `json:"disabled"`
+	Unhealthy    int `json:"unhealthy"`
+	Pending      int `json:"pending"`
+	AuthRequired int `json:"auth_required"`
 }
 
 // RunTokensData carries the current run's estimated logical input/output traffic.

@@ -239,7 +239,7 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.MCPChanged:
 		return Event{Type: "mcp_change", Data: MCPChangeData{
 			Total: e.Total, Ready: e.Ready, Disabled: e.Disabled,
-			Unhealthy: e.Unhealthy, Pending: e.Pending,
+			Unhealthy: e.Unhealthy, Pending: e.Pending, AuthRequired: e.AuthRequired,
 		}}, true
 	case bus.RunTokensUpdated:
 		return Event{Type: "run_tokens", Data: RunTokensData{Up: e.Up, Down: e.Down}}, true

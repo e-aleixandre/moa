@@ -17,6 +17,7 @@ describe("statusItemPriority", () => {
 
   it("gives MCP its priority from its state, not its type", () => {
     expect(statusItemPriority("mcp", "unhealthy")).toBe("p2");
+    expect(statusItemPriority("mcp", "needs-sign-in")).toBe("p2");
     expect(statusItemPriority("mcp", "healthy")).toBe("p4");
   });
 

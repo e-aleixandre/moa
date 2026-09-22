@@ -116,7 +116,7 @@ export function statusItemPriority(kind, state) {
     case "owner":
       return "p1";
     case "mcp":
-      return state === "unhealthy" ? "p2" : "p4";
+      return state === "unhealthy" || state === "needs-sign-in" ? "p2" : "p4";
     case "extra":
       return "p2";
     case "tokens":

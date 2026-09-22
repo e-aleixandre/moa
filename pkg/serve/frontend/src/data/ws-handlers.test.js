@@ -1541,14 +1541,15 @@ import { handleWsMcpChange } from './ws-handlers.js';
 
 test('handleWsMcpChange updates the summary and bumps mcpTick', async () => {
   setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [] } } });
-  handleWsMcpChange('s1', { total: 3, ready: 1, disabled: 1, unhealthy: 1, pending: 1 });
+  handleWsMcpChange('s1', { total: 4, ready: 1, disabled: 1, unhealthy: 1, pending: 1, auth_required: 1 });
   const s = store.get().sessions.s1;
-  expect(s.mcp).toEqual({ total: 3, ready: 1, disabled: 1, unhealthy: 1, pending: 1 });
+  expect(s.mcp).toEqual({ total: 4, ready: 1, disabled: 1, unhealthy: 1, pending: 1, auth_required: 1 });
   expect(s.mcpTick).toBe(1);
   // A second event increments the tick so an open panel re-fetches again.
   handleWsMcpChange('s1', { total: 3, ready: 2, disabled: 1, unhealthy: 0, pending: 0 });
   expect(store.get().sessions.s1.mcpTick).toBe(2);
   expect(store.get().sessions.s1.mcp.unhealthy).toBe(0);
+  expect(store.get().sessions.s1.mcp.auth_required).toBe(0);
 });
 
 test('handleWsInit keeps the finished subagent being viewed', async () => {

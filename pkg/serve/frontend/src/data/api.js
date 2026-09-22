@@ -38,6 +38,9 @@ export const DEFAULT_API_TIMEOUT_MS = 15000;
 // slow-but-valid restart and mislabel it as failed, so restart uses a longer,
 // coherent timeout.
 export const MCP_RESTART_TIMEOUT_MS = 30000;
+// MCP OAuth start/finish talk to the remote authorization server (up to 45s on
+// the backend) and finish then waits up to 20s more for the reconnect.
+export const MCP_OAUTH_TIMEOUT_MS = 75000;
 // A live socket normally sends init immediately. If a proxy or half-open
 // transport swallows it, keep the cached transcript legible but explicitly
 // marked stale. Only an authoritative init may acknowledge its attention.

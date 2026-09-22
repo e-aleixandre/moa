@@ -167,9 +167,18 @@ test('a session with no MCP servers has no MCP row', () => {
 });
 
 test('MCP wears its state: down is a warning, ready is a plain count', () => {
-  expect(mcpVerdict({ mcp: { total: 3, unhealthy: 1 } })).toEqual({ text: '1 of 3 down', warn: true });
+  expect(mcpVerdict({ mcp: { total: 3, unhealthy: 1 } })).toEqual({ text: '1 down', warn: true });
   expect(mcpVerdict({ mcp: { total: 3, unhealthy: 0 } })).toEqual({ text: '3 ready', warn: false });
   expect(mcpVerdict({ mcp: { total: 3, unhealthy: 0, disabled: 1 } }).text).toBe('3 ready · 1 off');
+});
+
+test('MCP sign-in needs you in amber and never reads as down', () => {
+  expect(mcpVerdict({ mcp: { total: 3, unhealthy: 0, auth_required: 1 } }))
+    .toEqual({ text: '1 needs sign-in', warn: true, tone: 'warn' });
+  expect(mcpVerdict({ mcp: { total: 3, unhealthy: 2, auth_required: 1 } }))
+    .toEqual({ text: '2 down · 1 needs sign-in', warn: true });
+  // A summary from a backend without the field still reads as before.
+  expect(mcpVerdict({ mcp: { total: 3, unhealthy: 0 } }).text).toBe('3 ready');
 });
 
 test('the artifacts verdict counts files and never colours', () => {

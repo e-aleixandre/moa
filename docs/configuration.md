@@ -170,12 +170,22 @@ A server entry declares **exactly one** transport:
 ```
 
 Setting both `command` and `url` — or neither — is a configuration error and the
-file is rejected. `headers` are the **only** supported authentication mechanism
-for a remote server: they are sent on every request to that endpoint, so it is
-where credentials go; they are stored in plain text in the config file like any
-other key there. Credentials embedded in the URL itself
+file is rejected. `headers` are sent on every request to that endpoint, so they
+are where static credentials go; they are stored in plain text in the config
+file like any other key there. Credentials embedded in the URL itself
 (`https://user:pass@host/mcp`) are rejected — the URL is shown in the MCP panel
 and written to logs, so it is not a place for secrets.
+
+A remote server that answers `401` shows up in the MCP panel as needing sign-in,
+with a **Connect** button (**Reconnect** once a previous sign-in has expired).
+Moa supports servers that follow the MCP authorization spec: it discovers the
+authorization server, registers itself with a loopback redirect
+(`http://127.0.0.1:<port>/callback`) and uses PKCE. Sign in on the page that
+opens; it ends on a `127.0.0.1` address that does not load — paste that address
+into the panel. Tokens are kept in `mcp-oauth.json` in the config directory
+(mode `0600`), shared by every session, and renewed automatically. Once signed
+in, the OAuth token replaces any static `Authorization` header for that server.
+Servers that require a pre-registered OAuth client are not supported.
 
 Redirects are never followed: `headers` would be re-sent to whatever origin a
 `30x` points at, so a redirecting endpoint fails the request instead.

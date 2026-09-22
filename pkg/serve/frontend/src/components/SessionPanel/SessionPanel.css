@@ -152,6 +152,7 @@
 .zl-side-right .zl-act:focus-visible,
 .zl-side-right .zl-kv-row.is-btn:focus-visible,
 .zl-side-right .zl-input:focus-visible,
+.zl-side-right .zl-mcp-oauth-link:focus-visible,
 .zl-side-right .zl-switch:focus-visible,
 .zl-side-right .zl-btn:focus-visible {
   outline: 2px solid var(--zl-accent);
@@ -622,6 +623,25 @@
 }
 .zl-mcp-confirm p { margin: 0 0 8px; }
 .zl-mcp-confirm-acts { display: flex; gap: 8px; justify-content: flex-end; }
+/* Waiting for sign-in: amber like progress, but still — it waits on you. */
+.zl-mcp-dot.is-need { background: var(--zl-yellow); }
+.zl-mcp-state.is-need { color: var(--zl-yellow); }
+.zl-mcp-oauth { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.zl-mcp-oauth-form { display: flex; flex-direction: column; gap: 8px; }
+.zl-mcp-oauth-link {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  font-weight: 500;
+  color: var(--zl-accent);
+  text-decoration: underline;
+}
+.zl-mcp-oauth-hint { margin: 0; line-height: 1.45; color: var(--zl-t2); }
+.zl-mcp-oauth-row { display: flex; align-items: center; gap: 8px; }
+.zl-mcp-oauth-row .zl-input { flex: 1; min-width: 0; }
+.zl-mcp-oauth-row .zl-btn { flex: none; }
+.zl-mcp-oauth-err { margin: 0; line-height: 1.45; color: var(--zl-red); overflow-wrap: anywhere; }
 .zl-btn {
   height: 36px;
   padding: 0 14px;
@@ -656,6 +676,7 @@
 .zl-side-right.is-sheet .zl-prow { min-height: 52px; }
 .zl-side-right.is-sheet .zl-kv-row.is-btn { min-height: 48px; }
 .zl-side-right.is-sheet .zl-btn { height: 44px; }
+.zl-side-right.is-sheet .zl-mcp-oauth-link { min-height: 44px; }
 .zl-phone .zl-input { height: 48px; }
 .zl-phone .zl-prow { min-height: 52px; }
 .zl-phone .zl-kv-row.is-btn { min-height: 48px; }
@@ -666,4 +687,5 @@
   .zl-prow { min-height: 52px; }
   .zl-kv-row.is-btn { min-height: 48px; }
   .zl-btn { height: 44px; }
+  .zl-mcp-oauth-link { min-height: 44px; }
 }

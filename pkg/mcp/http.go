@@ -31,6 +31,11 @@ func (h headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 	// A RoundTripper must not modify the request it is given.
 	clone := req.Clone(req.Context())
 	for k, v := range h.headers {
+		// An Authorization already on the request was set by the OAuth
+		// handler from stored tokens; those take precedence over a static one.
+		if http.CanonicalHeaderKey(k) == "Authorization" && clone.Header.Get("Authorization") != "" {
+			continue
+		}
 		clone.Header.Set(k, v)
 	}
 	base := h.base

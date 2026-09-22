@@ -119,7 +119,7 @@ function normalizeSessionInfo(info, existing, visible) {
     ownerId: info.owner_id || '',
     ownerName: info.owner_name || '',
     // MCP health summary (poll-driven server truth): {total, ready,
-    // unhealthy} or null when the session has no MCP servers. Not WS-owned —
+    // unhealthy, auth_required, ...} or null when the session has no MCP servers. Not WS-owned —
     // it reflects the manager's live state, refreshed on each poll.
     mcp: info.mcp || null,
     messages: existing ? existing.messages : [],

@@ -118,6 +118,7 @@ export function handleWsMcpChange(id, data) {
     disabled: data.disabled || 0,
     unhealthy: data.unhealthy || 0,
     pending: data.pending || 0,
+    auth_required: data.auth_required || 0,
   };
   const prev = store.get().sessions[id];
   updateSession(id, { mcp, mcpTick: ((prev && prev.mcpTick) || 0) + 1 });

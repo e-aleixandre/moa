@@ -363,6 +363,8 @@ type MCPChanged struct {
 	Disabled  int
 	Unhealthy int
 	Pending   int
+	// AuthRequired counts servers waiting for the user to sign in.
+	AuthRequired int
 }
 
 // CacheUsageUpdated carries the session's prompt-cache summary after a turn

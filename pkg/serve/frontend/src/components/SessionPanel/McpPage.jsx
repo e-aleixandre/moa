@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import { api, MCP_RESTART_TIMEOUT_MS } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
+import { openBlankWindow, startConnect, finishConnect, oauthErrorText } from "./mcp-oauth-flow.js";
 
 // McpPage — the dossier's MCP page. Markup is the catalogue's
 // (catalog/zones-lab.jsx `McpPage`, classes `.zl-mcp*` / `.zl-scope*` /
 // `.zl-switch`), grafted onto the production fetch, the three-scope toggle
-// with confirm for project/global, and restart.
+// with confirm for project/global, restart, and sign-in for remote servers.
 
 const SCOPES = [
   { id: "session", label: "This session", why: "Only this conversation, until it ends" },
@@ -22,7 +23,11 @@ const MCP_STATE = {
   disabled: ["off", "is-off"],
   starting: ["starting…", "is-busy"],
   disabling: ["turning off…", "is-busy"],
+  // Waiting for the user to sign in: it needs you, it is not down.
+  auth_required: ["needs sign-in", "is-need"],
 };
+
+const authLabel = (server) => (server.auth_action === "reconnect" ? "Reconnect" : "Connect");
 
 function Switch({ on, onChange, label, disabled }) {
   return (
@@ -49,6 +54,9 @@ function verdictFor(server) {
   if (off.length === 0) {
     if (server.state === "failed" || server.state === "exited") {
       return { text: "On everywhere, but it isn’t running — see the error below.", names: [] };
+    }
+    if (server.state === "auth_required") {
+      return { text: "On everywhere, waiting for you to sign in.", names: [] };
     }
     if (server.state === "ready") return { text: "On everywhere and running.", names: [] };
     return { text: "On everywhere.", names: [] };
@@ -88,6 +96,8 @@ function whyFor(server, scope, on) {
 function ServerBody({ sessionId, server, onMutated, inline, onLocalToggle }) {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(null);
+  // Sign-in in progress: { url, opened, pasted, error } or null.
+  const [oauth, setOauth] = useState(null);
   const offScopes = server.disabled_scopes || [];
   const pending = server.pending_action || "";
   const verdict = verdictFor(server);
@@ -153,6 +163,51 @@ function ServerBody({ sessionId, server, onMutated, inline, onLocalToggle }) {
     }
   };
 
+  const needsAuth = server.state === "auth_required" && !pending;
+
+  const connect = async () => {
+    if (busy || inline) return;
+    // Opened here, inside the click, so popup blockers allow it; startConnect
+    // routes it to the sign-in page once the URL arrives.
+    const handle = openBlankWindow();
+    setBusy(true);
+    setOauth(null);
+    try {
+      const { url, opened } = await startConnect(api, sessionId, server.name, handle);
+      setOauth({ url, opened, pasted: "", error: "" });
+    } catch (e) {
+      setOauth({ url: "", opened: false, pasted: "", error: oauthErrorText(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const finish = async (ev) => {
+    ev?.preventDefault?.();
+    const pasted = oauth?.pasted?.trim() || "";
+    if (busy || inline || !pasted) return;
+    setBusy(true);
+    setOauth((o) => o && { ...o, error: "" });
+    try {
+      const st = await finishConnect(api, sessionId, server.name, pasted);
+      if (st && st.state === "auth_required") {
+        setOauth({
+          url: "",
+          opened: false,
+          pasted: "",
+          error: `Sign-in didn’t work. Press ${authLabel(st)} again.`,
+        });
+      } else {
+        setOauth(null);
+      }
+      onMutated();
+    } catch (e) {
+      setOauth((o) => o && { ...o, error: oauthErrorText(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const tools = server.tools ?? server.tool_count ?? 0;
   const footMeta = server.foot
     || (server.state === "disabled" ? "no process while off" : `${tools} tools`);
@@ -194,15 +249,60 @@ function ServerBody({ sessionId, server, onMutated, inline, onLocalToggle }) {
           </div>
         </div>
       )}
-      {server.error && <div class="zl-mcp-err zl-data">{server.error}</div>}
+      {server.error && server.state !== "auth_required" && (
+        <div class="zl-mcp-err zl-data">{server.error}</div>
+      )}
       <div class="zl-mcp-foot">
-        {canRestart ? (
+        {needsAuth ? (
+          <button type="button" class="zl-btn" onClick={connect} disabled={busy} aria-label={`${authLabel(server)} ${server.name}`}>
+            {authLabel(server)}
+          </button>
+        ) : canRestart ? (
           <button type="button" class="zl-btn" onClick={restart} disabled={busy} aria-label={`Restart ${server.name}`}>
             Restart
           </button>
         ) : <span />}
         <span class="zl-kv-hint zl-data">{footMeta}</span>
       </div>
+      {needsAuth && oauth && (
+        <div class="zl-mcp-oauth">
+          {oauth.url && (
+            <form class="zl-mcp-oauth-form" onSubmit={finish} noValidate>
+              {!oauth.opened && (
+                <a class="zl-mcp-oauth-link" href={oauth.url} target="_blank" rel="noopener noreferrer">
+                  Open sign-in page
+                </a>
+              )}
+              <p class="zl-mcp-oauth-hint">Sign in, then paste the address of the page that doesn’t load.</p>
+              <div class="zl-mcp-oauth-row">
+                <input
+                  class="zl-input"
+                  type="url"
+                  inputMode="url"
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellcheck={false}
+                  placeholder="Paste the address"
+                  aria-label="Address of the page that doesn’t load"
+                  value={oauth.pasted}
+                  disabled={busy}
+                  onInput={(e) => {
+                    const value = e.currentTarget.value;
+                    setOauth((o) => o && { ...o, pasted: value });
+                  }}
+                />
+                <button type="submit" class="zl-btn" disabled={busy || !oauth.pasted.trim()}>
+                  Finish
+                </button>
+              </div>
+            </form>
+          )}
+          {oauth.error && (
+            <p class="zl-mcp-oauth-err" role="alert">{oauth.error}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -212,7 +312,7 @@ export function McpPage({ sessionId, mcpTick, servers: fixtureServers, inline = 
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(() => {
     const list = fixtureServers || [];
-    const bad = list.find((s) => s.state === "failed" || s.state === "exited");
+    const bad = list.find((s) => s.state === "failed" || s.state === "exited" || s.state === "auth_required");
     return bad ? bad.name : (list[0] && list.length === 1 ? list[0].name : null);
   });
   const reqSeqRef = useRef(0);

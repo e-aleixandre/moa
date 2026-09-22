@@ -196,9 +196,15 @@ export function usageVerdict(session, globalUsage) {
 export function mcpVerdict(session) {
   const mcp = session?.mcp;
   if (!mcp || !mcp.total) return null; // no servers: no row, not an empty one
-  if (mcp.unhealthy > 0) {
-    return { text: `${mcp.unhealthy} of ${mcp.total} down`, warn: true };
+  // Waiting for sign-in needs the user but is not a failure: alone it reads
+  // amber, and it never counts as down.
+  const down = mcp.unhealthy || 0;
+  const signin = mcp.auth_required || 0;
+  if (down > 0 && signin > 0) {
+    return { text: `${down} down · ${signin} needs sign-in`, warn: true };
   }
+  if (down > 0) return { text: `${down} down`, warn: true };
+  if (signin > 0) return { text: `${signin} needs sign-in`, warn: true, tone: 'warn' };
   const disabled = mcp.disabled > 0 ? ` · ${mcp.disabled} off` : '';
   return { text: `${mcp.total} ready${disabled}`, warn: false };
 }

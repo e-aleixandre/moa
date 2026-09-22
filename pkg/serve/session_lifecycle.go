@@ -1445,7 +1445,9 @@ func (s *ManagedSession) MCPStatus() []mcp.ControllerStatus {
 //
 // A disabled server is a voluntary choice, so it is counted as Disabled (neutral)
 // rather than Unhealthy; only an enabled server that failed or exited is an
-// alarm. Pending counts servers whose desired policy hasn't been applied yet.
+// alarm. A server waiting for sign-in is counted as AuthRequired, not
+// Unhealthy: it needs the user, it is not broken. Pending counts servers whose
+// desired policy hasn't been applied yet.
 func (s *ManagedSession) mcpSummary() *MCPSummary {
 	status := s.MCPStatus()
 	if len(status) == 0 {
@@ -1462,6 +1464,8 @@ func (s *ManagedSession) mcpSummary() *MCPSummary {
 			sum.Pending++
 		case mcp.StateFailed, mcp.StateExited:
 			sum.Unhealthy++
+		case mcp.StateAuthRequired:
+			sum.AuthRequired++
 		}
 		if st.PendingAction != "" {
 			switch st.State {
@@ -1503,7 +1507,7 @@ func (s *ManagedSession) wireMCPRefresh() {
 		mgr.OnChange(func(st mcp.ServerStatus) {
 			s.publishMCPChanged()
 			switch st.State {
-			case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled:
+			case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled, mcp.StateAuthRequired:
 				name := st.Name
 				go s.scheduleMCPToolSync(name)
 			}
@@ -1513,7 +1517,7 @@ func (s *ManagedSession) wireMCPRefresh() {
 		// observes transitions after it is registered.
 		for _, st := range mgr.Status() {
 			switch st.State {
-			case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled:
+			case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled, mcp.StateAuthRequired:
 				go s.scheduleMCPToolSync(st.Name)
 			}
 		}
@@ -1529,12 +1533,13 @@ func (s *ManagedSession) publishMCPChanged() {
 		return
 	}
 	s.runtime.Bus.Publish(bus.MCPChanged{
-		SessionID: s.ID,
-		Total:     sum.Total,
-		Ready:     sum.Ready,
-		Disabled:  sum.Disabled,
-		Unhealthy: sum.Unhealthy,
-		Pending:   sum.Pending,
+		SessionID:    s.ID,
+		Total:        sum.Total,
+		Ready:        sum.Ready,
+		Disabled:     sum.Disabled,
+		Unhealthy:    sum.Unhealthy,
+		Pending:      sum.Pending,
+		AuthRequired: sum.AuthRequired,
 	})
 }
 
