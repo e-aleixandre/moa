@@ -1,20 +1,20 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { ArrowLeft, MousePointerClick, X, MoreVertical, Smartphone, Tablet, Monitor, Scan, PencilLine } from "lucide-preact";
+import { ArrowLeft, MousePointerClick, X, RotateCw, Smartphone, Tablet, Monitor, Scan, PencilLine, MoreHorizontal, Link, GripVertical, GripHorizontal } from "lucide-preact";
 import { Sheet } from "../Sheet/Sheet.jsx";
-import { Segmented } from "../Segmented/Segmented.jsx";
+import { ActionMenu } from "../ActionMenu/ActionMenu.jsx";
 import { AssistantDocument } from "../AssistantDocument/AssistantDocument.jsx";
 import { Button } from "../../primitives/index.js";
 import { renderMarkdown } from "../../data/util/markdown.js";
 import { feedbackMessage, previewReferenceContext } from "../../data/util/preview-reference.js";
 import { Composer } from "../../layout/Composer/Composer.jsx";
 import { useStore } from "../../hooks/useStore.js";
-import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
 import { PreviewStream } from "./PreviewStream.jsx";
 import { streamEvents, stageState } from "./stream.js";
-import { PreviewAddressSetup, PreviewErrorBanner, PreviewRecoveryNotice, PreviewURLSetup } from "./PreviewSetup.jsx";
+import { PreviewAddressSetup, PreviewErrorBanner, PreviewLoading, PreviewRecoveryNotice, PreviewURLSetup, displayURL } from "./PreviewSetup.jsx";
 import { activatePreview, deactivatePreview, fetchPreviewStatus, portOf, suggestPublicURL, validPublicURL } from "./preview-proxy.js";
 import { applyGesture, appToStage, chainPan, panBy, pinchState, stageGesture, wheelFactor, zoomAt, IDENTITY } from "./zoom.js";
 import { createScrollChain, setViewIfChanged } from "./scroll-chain.js";
+import { anchorForKey, isVertical, loadDockAnchor, nearestAnchor, oppositeAnchor, saveDockAnchor } from "./dock-position.js";
 import { applyReport, backTitle, canGoBack, newEpoch, press, resetBack, shouldAutoReturn, INITIAL_BACK } from "./preview-back.js";
 import "./LivePreview.css";
 
@@ -31,39 +31,47 @@ import "./LivePreview.css";
 // DESIGN RULE, everywhere below: the app owns every pixel, permanently. The
 // preview covers the transcript, so the run still has to be visible — but not as
 // a place. It is a STREAM: each thing the agent does floats up over the app and
-// dissolves (PreviewStream), the tool in flight tints the stage's own frame, and
-// what changed is shown INSIDE the app by the inspector. Idle, there is nothing
-// over the app at all.
+// dissolves (PreviewStream), a running or waiting run marks the stage's top edge
+// in the ledger's state colours, and what changed is shown INSIDE the app by the
+// inspector. Idle, the only thing over the app is the "Write to Moa" pill.
 //
-// The URL follows the same rule: it is typed once, on a first-run screen, and
-// then its row is gone for good — changing it is a rare action, so it lives in
-// the overflow menu with the reload.
+// The controls are the conversation header's own buttons (ChatHead's borderless
+// `zl-desk-act`). On desktop they are that header's row; on the phone the app
+// takes the whole screen and they gather in one dock where the thumb is. The
+// address is pressed to change it, the way an address bar works.
 
-// Each width is an icon first (the device it stands for) and a number second:
-// the number is shown only where the bar has room for it and always lives in
-// the accessible name, so "768" is still what a screen reader or a tooltip says.
-// Glyph sizes follow the device: phone < tablet < desktop, so the three
-// rectangles read apart at a glance even without their numbers.
+// Each width is an icon first (the device it stands for); only the active one
+// spells its number. The number always lives in the accessible name, so "768"
+// is still what a screen reader or a tooltip says. Glyph sizes follow the
+// device: phone < tablet < desktop, so the three read apart at a glance.
 const WIDTHS = [
-  { value: "390", label: "390", icon: Smartphone, size: 14, ariaLabel: "Phone · 390px", title: "Phone · 390px" },
-  { value: "768", label: "768", icon: Tablet, size: 17, ariaLabel: "Tablet · 768px", title: "Tablet · 768px" },
-  { value: "1280", label: "1280", icon: Monitor, size: 18, ariaLabel: "Desktop · 1280px", title: "Desktop · 1280px" },
-  { value: "fit", label: "Fit", icon: Scan, size: 16, ariaLabel: "Fit to pane", title: "Fit to pane" },
+  { value: "390", label: "390", icon: Smartphone, size: 14, ariaLabel: "Phone · 390px" },
+  { value: "768", label: "768", icon: Tablet, size: 16, ariaLabel: "Tablet · 768px" },
+  { value: "1280", label: "1280", icon: Monitor, size: 17, ariaLabel: "Desktop · 1280px" },
+  { value: "fit", label: "Fit", icon: Scan, size: 15, ariaLabel: "Fit to pane" },
 ];
 
 const INSPECTOR_READY_GRACE_MS = 10_000;
 
-function renderWidth(opt) {
-  const Icon = opt.icon;
-  return (
-    <>
-      <Icon size={opt.size} aria-hidden="true" />
-      <span class="live-preview-width-label" aria-hidden="true">{opt.label}</span>
-    </>
-  );
-}
+const URL_PREFIX = "moa-preview-url:";
+const urlKey = (sessionId) => `${URL_PREFIX}${sessionId}`;
 
-const urlKey = (sessionId) => `moa-preview-url:${sessionId}`;
+// recentPreviewURLs — the addresses this browser already previewed in other
+// sessions, read from the per-session keys that already exist. No new storage.
+export function recentPreviewURLs(exclude = "", limit = 3) {
+  const seen = new Set();
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(URL_PREFIX)) continue;
+      const url = localStorage.getItem(key);
+      if (url && url !== exclude) seen.add(url);
+    }
+  } catch {
+    return [];
+  }
+  return [...seen].sort().slice(0, limit);
+}
 
 export function loadPreviewURL(sessionId) {
   try {
@@ -158,6 +166,16 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     setBack(next);
   };
   const [touchInput, disableTouchInput] = useTouchPreviewInput();
+  const isMobile = useStore((s) => s.isMobile);
+  // Between "Open" and the frame's load event: what the stage shows instead of
+  // a blank rectangle.
+  const [frameLoaded, setFrameLoaded] = useState(false);
+  const [widthMenuOpen, setWidthMenuOpen] = useState(false);
+  const [dockAnchor, setDockAnchorState] = useState(loadDockAnchor);
+  const setDockAnchor = (next) => {
+    setDockAnchorState(next);
+    saveDockAnchor(next);
+  };
 
   const clearBridgeFallback = () => {
     if (bridgeFallbackRef.current) clearTimeout(bridgeFallbackRef.current);
@@ -455,6 +473,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   }, [frameURL, reloadNonce, open]);
 
   useEffect(() => {
+    setFrameLoaded(false);
     if (!frameURL) return undefined;
     inspectorReadyRef.current = false;
     setInspectorReady(false);
@@ -477,10 +496,20 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     setReading(null);
   }, [open]);
 
+  // The question is the field. It can mount after the sheet has already put
+  // focus on the first control it found (close), so focus follows the field's
+  // own mount, one frame later — after the sheet's effect, not before it.
+  const setupField = useRef(null);
+  const setupFieldRef = useRef((el) => {
+    const mounted = el && el !== setupField.current;
+    setupField.current = el;
+    if (mounted) requestAnimationFrame(() => { if (el.isConnected) el.focus({ preventScroll: true }); });
+  });
+
   if (!open) return null;
 
-  const commitURL = async () => {
-    const next = normalizeURL(draftURL);
+  const commitURL = async (raw = draftURL) => {
+    const next = normalizeURL(raw);
     setDraftURL(next);
     setEditingURL(false);
     if (!next) return;
@@ -562,6 +591,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   };
 
   const onFrameLoad = () => {
+    setFrameLoaded(true);
     // A navigation inside the app (or a reload) drops the inspector state:
     // re-arm it so the toggle keeps meaning what it says.
     chain.current.invalidate();
@@ -614,88 +644,64 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const holderStyle = zoomed ? { width: "100%", height: "100%" } : { width: `${frameW * scale}px`, height: `${frameH * scale}px` };
 
   const showSetup = setupMode === "address" ? "address" : (!targetURL || editingURL || setupMode === "url") ? "url" : null;
-  const showRecovery = bridgeLost;
+  // The stage has an app in it (or one on its way). Until then the only
+  // controls that exist are the ones that can do something: close.
+  const showError = !!previewError && !showSetup;
+  const hasApp = !!frameURL && !showSetup && !showError;
+  const loading = !showSetup && !showError && !!targetURL && (!frameURL || !frameLoaded);
+  const showRecovery = bridgeLost && hasApp;
+  const recent = showSetup === "url" ? recentPreviewURLs(targetURL) : [];
+  const changeURL = () => {
+    setDraftURL(targetURL);
+    setEditingURL(true);
+  };
+  const pickWidth = (next) => {
+    chain.current.invalidate();
+    setWidth(next);
+    setView(IDENTITY);
+  };
 
   const preview = (
     <>
-      <div class="live-preview-bar">
-        <PreviewMenu
-          onChangeURL={() => {
-            setDraftURL(targetURL);
-            setEditingURL(true);
-          }}
+      {/* One task, two densities. Desktop: the conversation header's own row,
+          always there. Phone: a head only until the app loads; then the app
+          takes the whole screen and every control lives in the dock, where
+          the thumb is. */}
+      {isMobile ? (
+        !hasApp && (
+          <PreviewHead
+            address={targetURL && !showSetup ? displayURL(targetURL) : ""}
+            onClose={onClose}
+          />
+        )
+      ) : (
+        <PreviewRail
+          address={targetURL && !showSetup ? displayURL(targetURL) : ""}
+          hasApp={hasApp}
+          back={back}
+          onBack={goBack}
           onReload={reload}
-        />
-        <button
-          type="button"
-          class="live-preview-action"
-          onClick={goBack}
-          disabled={!canGoBack(back)}
-          aria-label="Back in preview"
-          title={backTitle(back)}
-        >
-          <ArrowLeft size={16} aria-hidden="true" />
-        </button>
-        <Segmented
-          className="live-preview-widths"
-          options={WIDTHS}
-          value={width}
-          onChange={(next) => {
-            chain.current.invalidate();
-            setWidth(next);
-            setView(IDENTITY);
-          }}
-          renderOption={renderWidth}
-          aria-label="Viewport width"
-        />
-        <div class="live-preview-bar-end">
-          <button
-            type="button"
-            class={`live-preview-action${inspect ? " is-on" : ""}`}
-            ref={inspectButtonRef}
-            onClick={toggleInspect}
-            aria-pressed={inspect}
-            aria-label="Inspect"
-            title="Inspect — tap an element in the app"
-          >
-            <MousePointerClick size={16} />
-            <span class="live-preview-action-label">Inspect</span>
-          </button>
-          <button type="button" class="live-preview-action" onClick={onClose} aria-label="Close preview" title="Close preview">
-            <X size={16} />
-          </button>
-        </div>
-      </div>
-      {showRecovery && !showSetup && (
-        <PreviewRecoveryNotice
-          message="Moa’s inspector didn’t start on this page."
-          onReturn={returnToApp}
-        />
-      )}
-      {previewError && showSetup !== "address" && (
-        <PreviewErrorBanner
-          message={previewError}
-          onChangeAddress={() => {
-            setAddressDraft(previewPublicURL || addressDraft);
-            setSetupMode("address");
-          }}
+          onChangeURL={changeURL}
+          width={width}
+          onWidth={pickWidth}
+          inspect={inspect}
+          inspectButtonRef={inspectButtonRef}
+          onInspect={toggleInspect}
+          onClose={onClose}
         />
       )}
 
-      {/* The live border: the stage's own frame carries the identity color of
-          the tool in flight and breathes while it runs, amber and still while
-          the run is parked on the user, invisible when idle. Peripheral vision
-          is the whole point — it is read without looking, and it costs the app
-          nothing but the 2px the panel's edge already spent. */}
+      {/* The live edge: the ledger's running mark (a steady blue baseline and a
+          sweep over it) along the stage's top edge while the agent works, a
+          still amber line while the run waits on the user, nothing when idle.
+          State colours only: which tool is running is what the cards say. */}
       <div
-        class={
-          `live-preview-stage is-${stage.mode}${composerOpen ? " has-composer" : " has-composer-handle"}` +
-          `${stage.mode === "working" && stage.kind ? ` k-${stage.kind}` : ""}`
-        }
+        class={`live-preview-stage is-${stage.mode}${composerOpen ? " has-composer" : " has-composer-handle"}${hasApp && frameLoaded ? " is-loaded" : ""}${isMobile ? ` dock-at-${dockAnchor}` : ""}`}
         onPointerDownCapture={(event) => {
           if (selected && !event.target.closest(".live-preview-composer")) setSelected(null);
         }}
       >
+        <span class="live-preview-edge" aria-hidden="true" />
         <div
           class={`live-preview-scroller${zoomed ? " is-zoomed" : ""}`}
           ref={stageRef}
@@ -716,6 +722,8 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           )}
         </div>
 
+        {loading && <PreviewLoading url={targetURL} />}
+
         {showSetup === "url" && (
           <PreviewURLSetup
             value={draftURL}
@@ -723,6 +731,12 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
             onCommit={commitURL}
             onCancel={() => setEditingURL(false)}
             canCancel={!!targetURL}
+            recent={recent}
+            inputRef={setupFieldRef.current}
+            onPick={(url) => {
+              setDraftURL(url);
+              commitURL(url);
+            }}
           />
         )}
 
@@ -731,14 +745,32 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
             value={addressDraft}
             onInput={setAddressDraft}
             onCommit={commitAddress}
+            inputRef={setupFieldRef.current}
             onBack={() => { setSetupMode("url"); setDraftURL(targetURL); }}
             error={addressError || previewError}
           />
         )}
 
+        {showError && (
+          <PreviewErrorBanner
+            message={previewError}
+            onChangeAddress={() => {
+              setAddressDraft(previewPublicURL || addressDraft);
+              setSetupMode("address");
+            }}
+          />
+        )}
+
+        {showRecovery && (
+          <PreviewRecoveryNotice
+            message="Inspect isn’t available on this page."
+            onReturn={returnToApp}
+          />
+        )}
+
         {/* Siblings of the scroller, not children: what floats over the app must
             not slide away when the app under it scrolls. */}
-        {frameURL && !showSetup && (
+        {hasApp && (
           <>
             {touchInput && (
               <TouchZoomOverlay
@@ -775,7 +807,39 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
               note("sent", "Sent");
             }}
           />
-        ) : (
+        ) : hasApp && !loading && inspect && !isMobile ? (
+          // Inspect is a mode over the app, so the mode says what it wants and
+          // how to leave it, where the thumb already is.
+          <div class="live-preview-composer-handle is-hint" role="status">
+            <span class="live-preview-composer-handle-pill">
+              <MousePointerClick size={14} aria-hidden="true" />
+              {touchInput ? "Tap an element" : "Click an element"}
+              <button type="button" class="live-preview-hint-done" onClick={toggleInspect}>
+                Done
+              </button>
+            </span>
+          </div>
+        ) : hasApp && isMobile ? (
+          <PreviewDock
+            address={displayURL(targetURL)}
+            anchor={dockAnchor}
+            onAnchor={setDockAnchor}
+            inspect={inspect}
+            loading={loading}
+            back={back}
+            onBack={goBack}
+            onReload={reload}
+            onChangeURL={changeURL}
+            width={width}
+            onWidth={pickWidth}
+            menuOpen={widthMenuOpen}
+            onMenu={setWidthMenuOpen}
+            inspectButtonRef={inspectButtonRef}
+            onInspect={toggleInspect}
+            onWrite={() => setComposerOpen(true)}
+            onClose={onClose}
+          />
+        ) : hasApp && !loading ? (
           <button
             type="button"
             class="live-preview-composer-handle"
@@ -787,7 +851,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
               Write to Moa
             </span>
           </button>
-        )}
+        ) : null}
         {!showSetup && (
           <PreviewStream
             events={events}
@@ -830,87 +894,333 @@ function useTouchPreviewInput() {
   return [touch, () => setTouch(false)];
 }
 
-// PreviewMenu — the two rare actions on the URL, out of the way. Changing the
-// dev server address happens once a session at most, so it does not get to keep
-// a row of the app forever; reload joins it because it is one tap deeper and
-// still instant.
-function PreviewMenu({ onChangeURL, onReload }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  const triggerRef = useRef(null);
-  const actionsRef = useRef(null);
-  const { onMenuKeyDown, closeMenu } = useMenuKeyboard(open, setOpen, triggerRef, actionsRef);
+// PreviewRail — the desktop row, in the conversation header's grammar. Three
+// zones that mean three things: the address and what acts on it (back, reload,
+// change), how it is shown (widths, inspect), and the panel itself (close),
+// set apart by hairlines so the control that ends the preview never reads as
+// one that changes it. Before there is an app only the title and close exist.
+function PreviewRail({
+  address, hasApp, back, onBack, onReload, onChangeURL,
+  width, onWidth, inspect, inspectButtonRef, onInspect, onClose,
+}) {
+  return (
+    <div class="live-preview-bar">
+      {hasApp && (
+        <button
+          type="button"
+          class="zl-desk-act live-preview-act"
+          onClick={onBack}
+          disabled={!canGoBack(back)}
+          aria-label="Back in preview"
+          title={backTitle(back)}
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+        </button>
+      )}
+      {address && hasApp ? (
+        <button
+          type="button"
+          class="live-preview-address"
+          onClick={onChangeURL}
+          aria-label={`Change URL, now ${address}`}
+          title="Change URL"
+        >
+          {address}
+        </button>
+      ) : address ? (
+        <span class="live-preview-title is-address">{address}</span>
+      ) : (
+        <span class="live-preview-title">Live preview</span>
+      )}
+      {hasApp && (
+        <button type="button" class="zl-desk-act live-preview-act" onClick={onReload} aria-label="Reload" title="Reload">
+          <RotateCw size={15} aria-hidden="true" />
+        </button>
+      )}
+      <span class="live-preview-bar-spring" />
+      {hasApp && (
+        <div class="live-preview-widths" role="radiogroup" aria-label="Viewport width">
+          {WIDTHS.map((w) => {
+            const Icon = w.icon;
+            const on = w.value === width;
+            return (
+              <button
+                key={w.value}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                class={`zl-desk-act live-preview-act live-preview-width${on ? " is-on" : ""}`}
+                onClick={() => onWidth(w.value)}
+                aria-label={w.ariaLabel}
+                title={w.ariaLabel}
+              >
+                <Icon size={w.size} aria-hidden="true" />
+                {on && <span class="live-preview-width-label" aria-hidden="true">{w.label}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {hasApp && <span class="live-preview-bar-sep" aria-hidden="true" />}
+      {hasApp && (
+        <button
+          type="button"
+          class={`zl-desk-act live-preview-act live-preview-inspect${inspect ? " is-on" : ""}`}
+          ref={inspectButtonRef}
+          onClick={onInspect}
+          aria-pressed={inspect}
+          aria-label="Inspect"
+          title="Inspect — point at an element in the app"
+        >
+          <MousePointerClick size={16} aria-hidden="true" />
+          <span class="live-preview-action-label">Inspect</span>
+        </button>
+      )}
+      {hasApp && <span class="live-preview-bar-sep" aria-hidden="true" />}
+      <button type="button" class="zl-desk-act live-preview-act" onClick={onClose} aria-label="Close preview" title="Close preview">
+        <X size={16} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDocDown = (event) => {
-      if (ref.current && !ref.current.contains(event.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocDown);
-    return () => document.removeEventListener("mousedown", onDocDown);
-  }, [open]);
+// PreviewHead — the phone's row before there is an app: its name (or the
+// address that failed) and close. Nothing that could not act is drawn.
+function PreviewHead({ address, onClose }) {
+  return (
+    <div class="live-preview-bar is-compact">
+      {address
+        ? <span class="live-preview-title is-address">{address}</span>
+        : <span class="live-preview-title">Live preview</span>}
+      <span class="live-preview-bar-spring" />
+      <button type="button" class="zl-desk-act live-preview-act" onClick={onClose} aria-label="Close preview" title="Close preview">
+        <X size={16} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+// PreviewDock — the phone's controls once an app is loaded, in one floating
+// piece where the thumb is: close, back, a menu for the rare actions (the
+// address, reload, the four widths), Inspect and "Write to Moa". Every target
+// is 44px.
+//
+// It must never cover a control of the app for good, so it moves. Only the
+// grip moves it: a button always means its button and the app under the dock
+// never receives the gesture. Dragged, it follows the thumb and snaps to the
+// nearest of four anchors (dock-position.js); tapped, the grip sends it to the
+// other side of its axis; arrow keys point it anywhere. The anchor is kept on
+// the device.
+//
+// Inspect does not replace the dock: the mode is shown and ended where it was
+// turned on, and a dock the user put out of the way stays out of the way.
+function PreviewDock({
+  address, anchor, onAnchor, inspect, loading, back, onBack, onReload, onChangeURL,
+  width, onWidth, menuOpen, onMenu, inspectButtonRef, onInspect, onWrite, onClose,
+}) {
+  const vertical = isVertical(anchor);
+  const dockRef = useRef(null);
+  const [drag, setDrag] = useState(null);
+  const gesture = useRef(null);
+  // The rect the dock had when it was let go: the new anchor is animated FROM
+  // there, so the snap reads as a magnet pulling it in, not a jump.
+  const snapFrom = useRef(null);
+
+  useLayoutEffect(() => {
+    const el = dockRef.current;
+    const from = snapFrom.current;
+    snapFrom.current = null;
+    if (!el || !from) return;
+    const to = el.getBoundingClientRect();
+    const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+    const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+    if (!dx && !dy) return;
+    el.style.transition = "none";
+    el.style.setProperty("--dock-dx", `${dx}px`);
+    el.style.setProperty("--dock-dy", `${dy}px`);
+    el.getBoundingClientRect();
+    el.style.transition = "";
+    el.style.setProperty("--dock-dx", "0px");
+    el.style.setProperty("--dock-dy", "0px");
+  }, [anchor]);
+
+  const moveTo = (next) => {
+    if (!next || next === anchor) return;
+    snapFrom.current = dockRef.current?.getBoundingClientRect() || null;
+    onMenu(false);
+    onAnchor(next);
+  };
+
+  const onGripDown = (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    gesture.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onGripMove = (e) => {
+    const g = gesture.current;
+    if (!g || e.pointerId !== g.id) return;
+    const dx = e.clientX - g.x;
+    const dy = e.clientY - g.y;
+    // A few pixels of wobble is still a tap on the grip.
+    if (!g.moved && Math.hypot(dx, dy) < 8) return;
+    if (!g.moved) onMenu(false);
+    g.moved = true;
+    setDrag({ dx, dy });
+  };
+  const onGripUp = (e) => {
+    const g = gesture.current;
+    if (!g || e.pointerId !== g.id) return;
+    gesture.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    if (!g.moved) {
+      if (e.type === "pointerup") moveTo(oppositeAnchor(anchor));
+      return;
+    }
+    const el = dockRef.current;
+    const stageEl = el?.parentElement;
+    if (!el || !stageEl) {
+      setDrag(null);
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    const box = stageEl.getBoundingClientRect();
+    const next = nearestAnchor(
+      { x: rect.left + rect.width / 2 - box.left, y: rect.top + rect.height / 2 - box.top },
+      { w: box.width, h: box.height },
+    );
+    // Same anchor: dropping the offset lets the transform's own transition
+    // carry it home. Another anchor changes the layout, so it is animated from
+    // the release point (the layout effect above).
+    if (next !== anchor) snapFrom.current = rect;
+    setDrag(null);
+    if (next !== anchor) onAnchor(next);
+  };
+
+  const Grip = vertical ? GripHorizontal : GripVertical;
+  const style = drag ? { "--dock-dx": `${drag.dx}px`, "--dock-dy": `${drag.dy}px` } : undefined;
 
   return (
-    <div class="live-preview-menu" ref={ref}>
+    <div
+      ref={dockRef}
+      class={`live-preview-dock at-${anchor}${vertical ? " is-vertical" : ""}${drag ? " is-dragging" : ""}`}
+      style={style}
+      role="toolbar"
+      aria-label="Preview controls"
+      aria-orientation={vertical ? "vertical" : "horizontal"}
+    >
       <button
         type="button"
-        class="live-preview-action"
-        ref={triggerRef}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Preview options"
-        onClick={() => setOpen((v) => !v)}
+        class="live-preview-dock-grip"
+        aria-label="Move controls"
+        title="Drag to move · tap to send to the other side"
+        onPointerDown={onGripDown}
+        onPointerMove={onGripMove}
+        onPointerUp={onGripUp}
+        onPointerCancel={onGripUp}
+        onKeyDown={(e) => {
+          const next = anchorForKey(e.key);
+          if (!next) return;
+          e.preventDefault();
+          moveTo(next);
+        }}
+        onClick={(e) => {
+          // Keyboard activation (Enter/Space) has no pointer gesture behind it.
+          if (e.detail === 0) moveTo(oppositeAnchor(anchor));
+        }}
       >
-        <MoreVertical size={15} />
+        <Grip size={16} aria-hidden="true" />
       </button>
-      {open && (
-        <div
-          class="live-preview-menu-items"
-          role="menu"
-          aria-label="Preview options"
-          ref={actionsRef}
-          onKeyDown={onMenuKeyDown}
+      <button type="button" class="zl-desk-act live-preview-act" onClick={onClose} aria-label="Close preview" title="Close preview">
+        <X size={16} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        class="zl-desk-act live-preview-act"
+        onClick={onBack}
+        disabled={!canGoBack(back)}
+        aria-label="Back in preview"
+        title={backTitle(back)}
+      >
+        <ArrowLeft size={16} aria-hidden="true" />
+      </button>
+      <ActionMenu
+        open={menuOpen}
+        onOpenChange={onMenu}
+        icon={MoreHorizontal}
+        label="Preview options"
+        triggerClass="zl-desk-act live-preview-act"
+        triggerSize={18}
+        placement={anchor === "top" ? "down" : anchor === "bottom" ? "up" : "down"}
+        align={anchor === "right" ? "end" : "start"}
+        actions={[
+          { id: "url", icon: Link, label: address, onClick: onChangeURL },
+          { id: "reload", icon: RotateCw, label: "Reload", onClick: onReload },
+          ...WIDTHS.map((w) => ({
+            id: w.value,
+            icon: w.icon,
+            label: w.ariaLabel,
+            active: w.value === width,
+            onClick: () => onWidth(w.value),
+          })),
+        ]}
+      />
+      <span class="live-preview-bar-sep" aria-hidden="true" />
+      <button
+        type="button"
+        class={`zl-desk-act live-preview-act${inspect ? " is-on" : ""}`}
+        ref={inspectButtonRef}
+        onClick={onInspect}
+        disabled={loading}
+        aria-pressed={inspect}
+        aria-label="Inspect"
+        title={inspect ? "Tap an element · tap here when done" : "Inspect — point at an element in the app"}
+      >
+        <MousePointerClick size={16} aria-hidden="true" />
+      </button>
+      {/* One slot, one size, whatever it says: the dock never changes shape
+          under the thumb that has to tap Inspect again to end the mode. */}
+      {inspect && !vertical ? (
+        <span class="live-preview-dock-hint" role="status">Tap an element</span>
+      ) : (
+        <button
+          type="button"
+          class={`live-preview-dock-write${vertical ? " is-icon" : ""}`}
+          onClick={onWrite}
+          disabled={loading}
+          aria-label="Write to Moa"
+          title="Write to Moa"
         >
-          <button
-            type="button"
-            role="menuitem"
-            class="live-preview-menu-item"
-            onClick={() => {
-              closeMenu();
-              onReload();
-            }}
-          >
-            Reload
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            class="live-preview-menu-item"
-            onClick={() => {
-              closeMenu();
-              onChangeURL();
-            }}
-          >
-            Change URL
-          </button>
-        </div>
+          <PencilLine size={vertical ? 16 : 14} aria-hidden="true" />
+          {!vertical && "Write to Moa"}
+        </button>
       )}
     </div>
   );
 }
 
+// PreviewComposer — the conversation's own Composer, over the app. Its head
+// says what the message will point at (or that it points at nothing) and holds
+// the way out, inside the panel rather than floating above it.
 function PreviewComposer({ sessionId, session, selected, onClose, onSent }) {
   const context = selected && previewReferenceContext(selected.ancestors);
   const label = selected?.text || selected?.tag || "Element";
 
   return (
     <section class="live-preview-composer" role="dialog" aria-label="Message the agent">
-      {selected && (
-        <div class="live-preview-reference">
-          <span class="live-preview-reference-dot" aria-hidden="true" />
-          <span>Element: {label}{context && ` · ${context}`}</span>
-        </div>
-      )}
+      <div class="live-preview-composer-head">
+        {selected ? (
+          <span class="live-preview-reference" title={`${label}${context ? ` · ${context}` : ""}`}>
+            <MousePointerClick size={13} aria-hidden="true" />
+            <span class="live-preview-reference-label">{label}</span>
+            {context && <span class="live-preview-reference-context">{context}</span>}
+          </span>
+        ) : (
+          <span class="live-preview-composer-title" />
+        )}
+        <button type="button" class="zl-desk-act live-preview-act live-preview-composer-close" onClick={onClose} aria-label="Close message composer">
+          <X size={16} aria-hidden="true" />
+        </button>
+      </div>
       <Composer
         sessionId={sessionId}
         session={session}
@@ -919,9 +1229,6 @@ function PreviewComposer({ sessionId, session, selected, onClose, onSent }) {
         transformMessage={(text) => feedbackMessage(text, selected)}
         onSent={onSent}
       />
-      <button type="button" class="live-preview-composer-close" onClick={onClose} aria-label="Close message composer">
-        <X size={15} />
-      </button>
     </section>
   );
 }
