@@ -187,7 +187,7 @@ func TestGPT56TerraPricing(t *testing.T) {
 	if got, want := *p, (Pricing{Input: 2, Output: 12, CacheRead: 0.2, CacheWrite: 2.5, FastMultiplier: 2.5, Tiers: []PricingTier{{Threshold: 272_000, Input: 4, Output: 18, CacheRead: 0.4, CacheWrite: 5}}}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Terra pricing = %+v, want %+v", got, want)
 	}
-	if got, want := p.Cost(Usage{Input: 261_999, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), 0.542998; math.Abs(got-want) > 1e-12 {
+	if got, want := p.Cost(Usage{Input: 259_999, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), 0.538998; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("short Terra cost = %v, want %v", got, want)
 	}
 	if got, want := p.Cost(Usage{Input: 262_000, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), 1.08; math.Abs(got-want) > 1e-12 {
@@ -207,7 +207,7 @@ func TestGPT6AstraPricing(t *testing.T) {
 	if got, want := *p, (Pricing{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_000, Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25}}}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Astra pricing = %+v, want %+v", got, want)
 	}
-	if got, want := p.Cost(Usage{Input: 271_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 2.794981; math.Abs(got-want) > 1e-12 {
+	if got, want := p.Cost(Usage{Input: 269_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 2.774981; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("short Astra cost = %v, want %v", got, want)
 	}
 	if got, want := p.Cost(Usage{Input: 272_000, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 5.565002; math.Abs(got-want) > 1e-12 {
@@ -215,8 +215,44 @@ func TestGPT6AstraPricing(t *testing.T) {
 	}
 }
 
-func TestGPT56LunaPricing(t *testing.T) {
+func TestGPT6SolPricing(t *testing.T) {
+	model, ok := ResolveModel("sol")
+	if !ok || model.ID != "gpt-6-sol" || model.Pricing == nil {
+		t.Fatalf("sol = %+v, %v; want gpt-6-sol", model, ok)
+	}
+	p := model.Pricing
+	if model.MaxInput != 1_050_000 || model.MaxOutput != 128_000 ||
+		p.Input != 2 || p.Output != 10 || p.CacheRead != 0.2 || p.CacheWrite != 2.5 {
+		t.Fatalf("GPT-6 Sol definition = %+v, pricing = %+v", model, p)
+	}
+	if got, want := p.Cost(Usage{Input: 269_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 0.5549962; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("short GPT-6 Sol cost = %v, want %v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 272_000, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 1.1130004; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("long GPT-6 Sol cost = %v, want %v", got, want)
+	}
+}
+
+func TestGPT6LunaPricing(t *testing.T) {
 	model, ok := ResolveModel("luna")
+	if !ok || model.ID != "gpt-6-luna" || model.Pricing == nil {
+		t.Fatalf("luna = %+v, %v; want gpt-6-luna", model, ok)
+	}
+	p := model.Pricing
+	if model.MaxInput != 1_050_000 || model.MaxOutput != 128_000 ||
+		p.Input != 0.1 || p.Output != 0.5 || p.CacheRead != 0.01 || p.CacheWrite != 0.125 {
+		t.Fatalf("GPT-6 Luna definition = %+v, pricing = %+v", model, p)
+	}
+	if got, want := p.Cost(Usage{Input: 269_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 0.02774981; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("short GPT-6 Luna cost = %v, want %v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 272_000, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 0.05565002; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("long GPT-6 Luna cost = %v, want %v", got, want)
+	}
+}
+
+func TestGPT56LunaPricing(t *testing.T) {
+	model, ok := ResolveModel("gpt-5.6-luna")
 	if !ok || model.Pricing == nil {
 		t.Fatal("Luna pricing missing")
 	}
@@ -224,7 +260,7 @@ func TestGPT56LunaPricing(t *testing.T) {
 	if got, want := *p, (Pricing{Input: .2, Output: 1.2, CacheRead: .02, CacheWrite: .25, FastMultiplier: 2.5, Tiers: []PricingTier{{Threshold: 272_000, Input: .4, Output: 1.8, CacheRead: .04, CacheWrite: .5}}}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Luna pricing = %+v, want %+v", got, want)
 	}
-	if got, want := p.Cost(Usage{Input: 261_999, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), .0542998; math.Abs(got-want) > 1e-12 {
+	if got, want := p.Cost(Usage{Input: 259_999, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), .0538998; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("short Luna cost = %v, want %v", got, want)
 	}
 	if got, want := p.Cost(Usage{Input: 262_000, CacheRead: 10_000, CacheWrite: 2_000, Output: 1_000}), .108; math.Abs(got-want) > 1e-12 {
@@ -621,6 +657,18 @@ func TestPricing_Cost_Tiers(t *testing.T) {
 		}
 	})
 
+	t.Run("cache write counts toward threshold", func(t *testing.T) {
+		// Responses usage reports cache writes inside input_tokens, but splits
+		// them into their own billing bucket. They still occupy context and can
+		// put the entire request on the long-context rate.
+		u := Usage{Input: 100_000, CacheWrite: 172_000, Output: 1_000}
+		got := p.Cost(u)
+		want := float64(100_000)*10/1e6 + float64(1_000)*45/1e6 + float64(172_000)*12.5/1e6
+		if got < want-1e-9 || got > want+1e-9 {
+			t.Errorf("cost = %v, want %v", got, want)
+		}
+	})
+
 	t.Run("no tiers behaves like base pricing", func(t *testing.T) {
 		base := &Pricing{Input: 1, Output: 4}
 		u := Usage{Input: 1_000_000, Output: 1_000_000}
@@ -645,15 +693,15 @@ func TestKnownModels_PricingIsExplicit(t *testing.T) {
 // the exact lowercase form resolved and everything else failed.
 func TestResolveModel_CaseAndSpaceInsensitive(t *testing.T) {
 	cases := map[string]string{
-		"Sol":             "gpt-5.6-sol",
-		"SOL":             "gpt-5.6-sol",
+		"Sol":             "gpt-6-sol",
+		"SOL":             "gpt-6-sol",
 		"Terra":           "gpt-5.6-terra",
-		"Luna":            "gpt-5.6-luna",
+		"Luna":            "gpt-6-luna",
 		"Astra":           "gpt-6-astra",
 		"Opus":            "claude-opus-5-5",
 		"Fable":           "claude-fable-5-1",
-		" sol ":           "gpt-5.6-sol",
-		"openai/Sol":      "gpt-5.6-sol",
+		" sol ":           "gpt-6-sol",
+		"openai/Sol":      "gpt-6-sol",
 		"ANTHROPIC/Opus":  "claude-opus-5-5",
 		"Claude-Sonnet-5": "claude-sonnet-5",
 		"Claude Sonnet 5": "claude-sonnet-5",

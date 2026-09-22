@@ -60,7 +60,7 @@ func TestAuxiliaryModelResolver_UsesCompletionCredentialsOnly(t *testing.T) {
 	if err := store.Set("openai", auth.Credential{Type: "api_key", Key: "openai-key"}); err != nil {
 		t.Fatal(err)
 	}
-	if model, enabled, err := resolve("auto"); err != nil || !enabled || model.ID != "gpt-5.6-luna" {
+	if model, enabled, err := resolve("auto"); err != nil || !enabled || model.ID != "gpt-6-luna" {
 		t.Fatalf("OpenAI priority = %+v, %v, %v", model, enabled, err)
 	}
 }

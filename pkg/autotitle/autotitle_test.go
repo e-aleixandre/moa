@@ -65,7 +65,7 @@ func TestGenerate_UsesConfiguredModel(t *testing.T) {
 	if err != nil || title != "Fix Grok title" {
 		t.Fatalf("title=%q err=%v", title, err)
 	}
-	if factoryModel.ID != "gpt-5.6-luna" || p.request.Model.ID != "gpt-5.6-luna" {
+	if factoryModel.ID != "gpt-6-luna" || p.request.Model.ID != "gpt-6-luna" {
 		t.Fatalf("model=%+v thinking=%q", factoryModel, p.request.Options.ThinkingLevel)
 	}
 }

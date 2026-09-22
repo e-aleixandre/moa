@@ -79,6 +79,18 @@ var knownModels = map[string]Model{
 			},
 		},
 	},
+	"gpt-6-sol": {
+		ID: "gpt-6-sol", Provider: "openai", API: "openai-chat",
+		Name: "GPT-6 Sol", MaxInput: 1_050_000, MaxOutput: 128_000,
+		// Short-context (under 272K tokens) pricing is $2/$10 input/output.
+		// OpenAI bills the whole request at its long-context rates above it.
+		Pricing: &Pricing{
+			Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5,
+			Tiers: []PricingTier{
+				{Threshold: 272_000, Input: 4, Output: 15, CacheRead: 0.4, CacheWrite: 5},
+			},
+		},
+	},
 	"gpt-5.6-sol": {
 		ID: "gpt-5.6-sol", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.6 Sol", MaxInput: 1_050_000, MaxOutput: 128_000,
@@ -117,6 +129,18 @@ var knownModels = map[string]Model{
 			Input: 2, Output: 12, CacheRead: 0.2, CacheWrite: 2.5,
 			Tiers: []PricingTier{
 				{Threshold: 272_000, Input: 4, Output: 18, CacheRead: 0.4, CacheWrite: 5},
+			},
+		},
+	},
+	"gpt-6-luna": {
+		ID: "gpt-6-luna", Provider: "openai", API: "openai-chat",
+		Name: "GPT-6 Luna", MaxInput: 1_050_000, MaxOutput: 128_000,
+		// Short-context (under 272K tokens) pricing is $0.10/$0.50 input/output.
+		// OpenAI bills the whole request at its long-context rates above it.
+		Pricing: &Pricing{
+			Input: 0.1, Output: 0.5, CacheRead: 0.01, CacheWrite: 0.125,
+			Tiers: []PricingTier{
+				{Threshold: 272_000, Input: 0.2, Output: 0.75, CacheRead: 0.02, CacheWrite: 0.25},
 			},
 		},
 	},
@@ -238,10 +262,10 @@ var modelAliases = map[string]string{
 	"codex-5.2":   "gpt-5.2-codex",
 	"astra":       "gpt-6-astra",
 	"gpt-6":       "gpt-6-astra",
-	"sol":         "gpt-5.6-sol",
+	"sol":         "gpt-6-sol",
 	"daybreak":    "gpt-daybreak-blue-latest",
 	"terra":       "gpt-5.6-terra",
-	"luna":        "gpt-5.6-luna",
+	"luna":        "gpt-6-luna",
 	"gpt-5.6":     "gpt-5.6-sol",
 	"gpt5":        "gpt-5.5",
 	"gpt5-mini":   "gpt-5.4-mini",
@@ -393,8 +417,8 @@ type ModelEntry struct {
 // modelDisplayOrder is the explicit order models appear in selectors (web
 // dropdown). Grouped by provider, and within each provider roughly by
 // generation and then by capability/power — not strict release date (e.g.
-// Fable 5.1 before Fable 5 before Opus 5 before Sonnet 5, and GPT-5.6 Sol
-// before Terra before Luna). Models not listed here fall to the end, in
+// Fable 5.1 before Fable 5 before Opus 5 before Sonnet 5, and GPT-6 Sol
+// before GPT-6 Luna). Models not listed here fall to the end, in
 // provider-then-name order.
 var modelDisplayOrder = []string{
 	// Anthropic
@@ -410,6 +434,8 @@ var modelDisplayOrder = []string{
 	"muse-spark-1.3-contributor",
 	// OpenAI
 	"gpt-6-astra",
+	"gpt-6-sol",
+	"gpt-6-luna",
 	"gpt-5.6-sol",
 	"gpt-daybreak-blue-latest",
 	"gpt-5.6-terra",
