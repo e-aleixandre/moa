@@ -21,7 +21,7 @@ import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SessionPanel } from "../../../components/index.js";
 import { NewOwnerDialog } from "../../../components/Owners/NewOwnerDialog.jsx";
-import { sessionPanelView, closeSessionPanel, toggleSessionPanel } from "../../../data/session-panel.js";
+import { panelAccessibleName, sessionPanelView, closeSessionPanel, toggleSessionPanel } from "../../../data/session-panel.js";
 import { cacheAlertLabel } from "../../../data/cache-usage.js";
 import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
@@ -104,7 +104,6 @@ export function MobileConversationScreen({ version = null, forceMobile = false }
 
 function MobileConversationBody({ forceMobile = false }) {
   const session = useStore((s) => mobileFocusedSession(s, forceMobile).session);
-  const isOwnerSession = (session?.kind || "") === "owner";
   const activeId = useStore((s) => mobileFocusedSession(s, forceMobile).id);
   const loaded = useStore((s) => s.sessionsLoaded);
   const usage = useStore((s) => s.usage);
@@ -345,7 +344,7 @@ function MobileConversationBody({ forceMobile = false }) {
         <MobileSheet
           open={panel.open}
           onClose={closeSessionPanel}
-          title={isOwnerSession ? "This owner" : "This session"}
+          title={panelAccessibleName(session, panel.page)}
           bare
         >
           <SessionPanel

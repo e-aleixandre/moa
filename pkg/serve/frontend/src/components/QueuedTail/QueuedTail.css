@@ -1,0 +1,62 @@
+/* QueuedTail — the queue as a thread marker. It inherits .zl-sys, the
+   transcript's marker grammar: the target is 44px while the ink stays a single
+   quiet hairline of type. Tokens only, like the rest of the house. */
+
+.queued-tail {
+  padding: 2px 0;
+  color: var(--zl-t4);
+}
+
+/* The whole row is the button, so on the phone it is hit without aiming.
+   Nothing is boxed — a filled control here would weigh more than the two words
+   it carries, and this is a receipt, not a call to action. */
+.queued-line {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.queued-count,
+.queued-trace {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-micro);
+  letter-spacing: 0.01em;
+  color: var(--zl-t4);
+}
+.queued-spring { flex: 1 1 auto; min-width: 8px; }
+.queued-act {
+  flex: none;
+  color: var(--zl-t4);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-micro);
+  letter-spacing: 0.01em;
+}
+.queued-line:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+@media (hover: hover) {
+  .queued-line:hover .queued-count,
+  .queued-line:hover .queued-act { color: var(--zl-t3); }
+}
+
+/* One clipped line per message: enough to recognise what is waiting, never
+   enough to become a second transcript. Commands keep their own "/". */
+.queued-trace {
+  display: flex;
+  gap: 6px;
+  line-height: 1.5;
+}
+.queued-prefix { flex: none; }
+.queued-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.queued-trace.is-command { font-family: var(--mono); }

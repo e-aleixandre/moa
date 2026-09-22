@@ -12,6 +12,7 @@ import {
   SessionMessage,
   HistoryHydrationTail,
   historyHydrationTailVisible,
+  QueuedTail,
 } from "../../components/index.js";
 import { Prose } from "../../components/AssistantDocument/AssistantDocument.jsx";
 import { TurnFoot } from "../../components/AssistantDocument/TurnFoot.jsx";
@@ -28,6 +29,9 @@ import { ownerMessageSummary, ownerMessageFolds } from "../../data/util/owner-me
 import {
   READ_ANCHOR_MARGIN, consumeReadAnchor, hasReadAnchor, readAnchorTargetID, settleReadAnchor,
 } from "../../data/stream-read-anchor.js";
+// The queue lives at the end of the thread: what the owner already said, with
+// the one gesture that brings it back to the input.
+import { recallQueuedSteers } from "../../data/session-actions.js";
 
 // Stream — the scrollable conversation area. It renders the REAL
 // projected block list from stream-model.js (projectStream), mapping each
@@ -272,6 +276,10 @@ export function ConversationStream({
             </div>
           ))}
           {tail}
+          <QueuedTail
+            queue={session?.pendingSteers}
+            onBringBack={() => recallQueuedSteers(session?.id)}
+          />
           {historyHydrationTailVisible(session) && (
             <HistoryHydrationTail
               hasCachedTranscript={(session.messages || []).length > 0}

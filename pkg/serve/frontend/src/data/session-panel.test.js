@@ -9,8 +9,8 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState, SESSION_PANEL_CLOSED } from '../data/store.js';
 import {
-  artifactsVerdict, closeSessionPanel, closeSessionPanelForSession, mcpVerdict,
-  openSessionPanel, runFacts, sessionPanelSlice, sessionPanelView,
+  PANEL_PAGES, artifactsVerdict, closeSessionPanel, closeSessionPanelForSession, mcpVerdict,
+  openSessionPanel, panelPageParent, runFacts, sessionPanelSlice, sessionPanelView,
   setSessionPanelPage, toggleSessionPanel, usageVerdict,
 } from '../data/session-panel.js';
 
@@ -63,6 +63,27 @@ test('closing resets the page, so the next open starts at the root', () => {
   openSessionPanel('A', 'mcp');
   closeSessionPanel();
   expect(sessionPanelSlice(store.get()).page).toBe('root');
+});
+
+/* ── The steps inside the panel ───────────────────────────────────────── */
+
+test('Edit owner is a page of the panel, not a surface of its own', () => {
+  // It used to be a modal opened over the panel, which on a phone stacked a
+  // second bottom sheet — two grabbers, two headers, two ✕ — over the first.
+  expect(PANEL_PAGES.ownerEdit).toBe('Edit owner');
+  openSessionPanel('A', 'ownerEdit');
+  expect(sessionPanelView(store.get(), 'A')).toEqual({ open: true, page: 'ownerEdit' });
+});
+
+test('back from Edit owner lands on Overview, and every other page on the root', () => {
+  expect(panelPageParent('ownerEdit')).toBe('overview');
+  expect(panelPageParent('overview')).toBe('root');
+  expect(panelPageParent('book')).toBe('root');
+  expect(panelPageParent('usage')).toBe('root');
+  expect(panelPageParent('mcp')).toBe('root');
+  // An unknown page still has somewhere to go back to.
+  expect(panelPageParent('nonsense')).toBe('root');
+  expect(panelPageParent(undefined)).toBe('root');
 });
 
 test('a deleted conversation loses its dossier, and only its own', () => {

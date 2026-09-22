@@ -5,7 +5,7 @@
 import { test, expect, beforeEach, afterEach } from 'bun:test';
 import { store, setState } from '../../data/store.js';
 import { ARTIFACTS_CLOSED, seedFromFile } from '../../data/artifacts-model.js';
-import { artifactsSlice, openArtifactFromCard, openArtifactsList } from '../../data/artifacts.js';
+import { artifactsSlice, listArtifactsInPanel, openArtifactFromCard, openArtifactsList } from '../../data/artifacts.js';
 import { artifactsEntryState } from './ArtifactsEntry.jsx';
 
 const originalFetch = globalThis.fetch;
@@ -29,6 +29,20 @@ afterEach(() => {
 
 test('an entry without a conversation is not shown', () => {
   expect(artifactsEntryState(store.get(), null)).toEqual({ visible: false, active: false });
+});
+
+test("the dossier loading its own page does not light the head entry", () => {
+  // What the closed desktop dossier does on mount: claim the collection under
+  // its own token, with no drawer anywhere. The button used to read "open".
+  listArtifactsInPanel('A');
+  const slice = artifactsSlice(store.get());
+  expect(slice.ownerSessionId).toBe('A');
+  expect(slice.view).toBe('panel');
+  expect(artifactsEntryState(store.get(), 'A').active).toBe(false);
+
+  // And it does light up for the two views that are a surface.
+  openArtifactsList('A');
+  expect(artifactsEntryState(store.get(), 'A').active).toBe(true);
 });
 
 test('only the owning conversation entry reads as on', () => {

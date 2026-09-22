@@ -10,7 +10,7 @@ let apiResponse = [];
 
 const { store, setState, updateSession } = await import('./store.js');
 const { syncConnections } = await import('./api.js');
-const { createSession, deleteSession, loadSessions, loadUsage, openPersistedSubagent, openBashJob, sendMessage, startPolling, stopPolling, stopRun } = await import('./session-actions.js');
+const { createSession, deleteSession, loadSessions, loadUsage, openPersistedSubagent, openBashJob, recallQueuedSteers, sendMessage, startPolling, stopPolling, stopRun } = await import('./session-actions.js');
 const { getToasts, removeToast } = await import('./notifications.js');
 const { adoptAttentionNamespace, handleWsRunTokens, handleWsStateChange } = await import('./ws-handlers.js');
 
@@ -1395,4 +1395,85 @@ test('stopRun with nothing discarded leaves the composer alone', async () => {
 
   expect(store.get().composerDrops.s1).toBeUndefined();
   expect(store.get().sessions.s1.pendingSteers).toEqual([{ id: 'q1', text: 'delivered' }]);
+});
+
+// ── The queue recall ───────────────────────────────────────────────────────
+// ONE action behind two triggers: the marker at the end of the transcript and
+// Alt+↑ in the composer. It cancels the queue server-side and hands the text
+// back through composerDrops, because the marker has no path to the textarea.
+
+test('recallQueuedSteers gives the whole queue back to the composer, in order', async () => {
+  setState({ composerDrops: {} });
+  const calls = [];
+  globalThis.fetch = (path, opts) => {
+    calls.push({ path, method: opts?.method });
+    return Promise.resolve(new Response(null, { status: 204 }));
+  };
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [
+    { id: 'recall-a1', text: 'first' },
+    { id: 'recall-a2', text: '/model opus', command: true },
+    { id: 'recall-a3', text: 'third', images: 2 },
+  ] } } });
+
+  expect(recallQueuedSteers('s1')).toBe(true);
+
+  // The text is back before the server answers: a recall must feel immediate,
+  // and a failed cancel must not swallow what the owner wrote.
+  expect(store.get().composerDrops.s1).toMatchObject({
+    text: 'first\n/model opus\nthird', focus: true,
+  });
+  await Promise.resolve();
+  expect(calls).toEqual([{ path: '/api/sessions/s1/steers/cancel', method: 'POST' }]);
+  // Queued images cannot come back; they are reported instead of being lost in
+  // silence.
+  expect(getToasts().some((t) => t.title === 'Queued images dropped')).toBe(true);
+});
+
+test('recallQueuedSteers does nothing without a queue, and never twice at once', async () => {
+  setState({ composerDrops: {} });
+  let inflight;
+  globalThis.fetch = () => new Promise((resolve) => { inflight = resolve; });
+  setState({ sessions: { s1: { id: 's1', state: 'running' } } });
+  expect(recallQueuedSteers('s1')).toBe(false);
+  expect(store.get().composerDrops.s1).toBeUndefined();
+
+  updateSession('s1', { pendingSteers: [{ id: 'q1', text: 'only one' }] });
+  expect(recallQueuedSteers('s1')).toBe(true);
+  // A second activation before the cancel settles (the marker pressed twice, or
+  // the marker plus Alt+↑) would otherwise combine the same text again.
+  expect(recallQueuedSteers('s1')).toBe(false);
+  inflight(new Response(null, { status: 204 }));
+  // HTTP and WebSocket are independent transports: the 204 can beat the
+  // steers_canceled frame. The successful HTTP response clears the recalled
+  // IDs locally, so a missing broadcast cannot leave a dead marker.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(store.get().sessions.s1.pendingSteers).toBeNull();
+  expect(recallQueuedSteers('s1')).toBe(false);
+
+  // Once the old IDs have disappeared, a genuinely new queue is recallable.
+  updateSession('s1', { pendingSteers: [{ id: 'q2', text: 'new queue' }] });
+  expect(recallQueuedSteers('s1')).toBe(true);
+});
+
+test('a failed cancel leaves recalled text in the box, reports the error, and retries without duplicating it', async () => {
+  setState({ composerDrops: {} });
+  let calls = 0;
+  globalThis.fetch = () => {
+    calls += 1;
+    return Promise.resolve(new Response(calls === 1 ? 'nope' : null, { status: calls === 1 ? 500 : 204 }));
+  };
+  setState({ sessions: { s2: { id: 's2', state: 'running', pendingSteers: [{ id: 'q1', text: 'keep me' }] } } });
+
+  recallQueuedSteers('s2');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(store.get().composerDrops.s2).toMatchObject({ text: 'keep me' });
+  expect(getToasts().some((t) => t.title === 'Could not cancel queued messages')).toBe(true);
+
+  // A retry is a cancellation retry, not a second restoration of the same text.
+  expect(recallQueuedSteers('s2')).toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(calls).toBe(2);
+  expect(store.get().composerDrops.s2).toMatchObject({ text: 'keep me' });
+  expect(store.get().sessions.s2.pendingSteers).toBeNull();
 });

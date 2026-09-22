@@ -1,6 +1,7 @@
 import { setState } from "../data/store.js";
 import { setTileSession } from "../data/tileTree.js";
 import { skillForkLaunchRow } from "../data/ws/history.js";
+import { OWNERS, WINERIM_SESSION, CHILD_SESSION } from "./owners-fixtures.js";
 
 // Frozen conversations the real screens wear. The chrome is production; only
 // this data is fake. Each roster row is a full session so opening it shows
@@ -651,23 +652,44 @@ export const CATALOG_SESSIONS = {
   verifier,
 };
 
+// ?owner=1 — the owner's own conversation is the active one, and the roster of
+// owners is already believed. The dossier is the panel of a session whose kind
+// is "owner", matched to its owner by session_id, so without both halves the
+// phone's panel draws the ordinary session's pages and Overview is unreachable.
+function ownerSeed(query) {
+  try {
+    return new URLSearchParams(query).get("owner") === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
 export function seedCatalogStore() {
   let inboxOpen = false;
+  const query = typeof location === "undefined" ? "" : location.search;
   try {
-    const query = typeof location === "undefined" ? "" : location.search;
     inboxOpen = new URLSearchParams(query).get("inbox") === "1";
   } catch (_) { /* ignore */ }
+  const sessions = { ...CATALOG_SESSIONS };
+  const owner = ownerSeed(query);
+  if (owner) {
+    sessions[WINERIM_SESSION.id] = WINERIM_SESSION;
+    // The children are selected out of the roster by `ownerId`, so a child of
+    // this owner has to carry it or Overview reads "No sessions yet".
+    sessions[CHILD_SESSION.id] = { ...CHILD_SESSION, ownerId: OWNERS[0].id };
+  }
   setState((s) => ({
-    sessions: { ...CATALOG_SESSIONS },
+    sessions,
     sessionsLoaded: true,
     events: catalogEvents(), // wake-on-event
     inboxOpen, // wake-on-event: ?inbox=1 opens the inbox the same way a pending push does
-    activeSession: SPECIMEN_ID,
+    activeSession: owner ? WINERIM_SESSION.id : SPECIMEN_ID,
+    ...(owner ? { owners: { ...s.owners, list: OWNERS, loaded: true } } : null),
     usage: {
       available: true,
       five_hour: { utilization: 42, resets_at: new Date(Date.now() + 3 * 3600000).toISOString() },
       seven_day: { utilization: 61, resets_at: new Date(Date.now() + 4 * 86400000).toISOString() },
     },
-    tileTree: setTileSession(s.tileTree, s.focusedTile, SPECIMEN_ID),
+    tileTree: setTileSession(s.tileTree, s.focusedTile, owner ? WINERIM_SESSION.id : SPECIMEN_ID),
   }));
 }

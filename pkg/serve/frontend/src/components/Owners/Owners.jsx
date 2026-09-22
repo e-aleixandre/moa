@@ -15,8 +15,9 @@ import { bookTree, childrenSummary, groupChildren, ownerRows, ownerState } from 
 import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatar, OwnerAvatarFor, defaultAvatar } from "./OwnerAvatar.jsx";
 import { loadOwnerBook, openBookFile, ownersSlice, saveBookFile, updateOwner } from "../../data/owners.js";
 import { openSession } from "../../data/tile-actions.js";
+import { setSessionPanelPage } from "../../data/session-panel.js";
 import { addToast } from "../../data/notifications.js";
-import { EditOwnerDialog } from "./EditOwnerDialog.jsx";
+import { EditOwner } from "./EditOwner.jsx";
 import { OwnerIdentityPicker } from "./OwnerIdentityPicker.jsx";
 
 import "./OwnerAvatar.css";
@@ -457,13 +458,12 @@ function ChildRow({ child, onOpen }) {
   );
 }
 
-export function OwnerOverview({ owner, onOpenChild, phone = false }) {
+export function OwnerOverview({ owner, onOpenChild, onEdit }) {
   const groups = groupChildren(owner.children || []);
   const summary = childrenSummary(owner.children || []);
-  const [editing, setEditing] = useState(false);
   return (
     <div class="ow-page">
-      <button type="button" class="ow-btn ow-edit-owner" onClick={() => setEditing(true)}>Edit owner</button>
+      <button type="button" class="ow-btn ow-edit-owner" onClick={() => onEdit?.()}>Edit owner</button>
       <div class="ow-sum">
         <span class={`ow-sum-t tone-${summary.tone}`}>{summary.text}</span>
         <span class="ow-sum-d">Every session whose folder resolves to this project is one of these — nothing is linked by hand.</span>
@@ -475,13 +475,6 @@ export function OwnerOverview({ owner, onOpenChild, phone = false }) {
           {group.children.map((child) => <ChildRow child={child} onOpen={onOpenChild} key={child.id} />)}
         </div>
       ))}
-      <EditOwnerDialog
-        open={editing}
-        owner={owner}
-        phone={phone}
-        onClose={() => setEditing(false)}
-        onSave={(identity) => updateOwner(owner.id, identity)}
-      />
     </div>
   );
 }
@@ -614,7 +607,26 @@ export function OwnerPanelPage({ session, page, phone = false }) {
   if (!owner) return null;
 
   if (page === "overview") {
-    return <OwnerOverview owner={owner} phone={phone} onOpenChild={(child) => openSession(child.id)} />;
+    return (
+      <OwnerOverview
+        owner={owner}
+        onOpenChild={(child) => openSession(child.id)}
+        onEdit={() => setSessionPanelPage("ownerEdit")}
+      />
+    );
+  }
+
+  // Edit owner is a STEP of this panel, so saving returns to the page it was
+  // pushed from rather than dismissing a surface of its own.
+  if (page === "ownerEdit") {
+    return (
+      <EditOwner
+        owner={owner}
+        phone={phone}
+        onSave={(identity) => updateOwner(owner.id, identity)}
+        onClose={() => setSessionPanelPage("overview")}
+      />
+    );
   }
 
   const mine = slice.bookOwnerId === ownerId;

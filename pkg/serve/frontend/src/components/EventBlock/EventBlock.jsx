@@ -16,7 +16,7 @@ import { useState } from "preact/hooks";
 import { ChevronRight, Import } from "lucide-preact";
 import { CodeBlock } from "../CodeBlock/CodeBlock.jsx";
 import "./EventBlock.css";
-import { StateDot } from "../../primitives/StateDot/StateDot.jsx";
+import { SessionChip } from "../SessionChip/SessionChip.jsx";
 
 export const EVENT_BODY_PREVIEW = 1200;
 
@@ -145,9 +145,16 @@ export function EventBlock({ source = "event", title = "", body = "", time, stee
       {open && hasBody && <>
         {sessions.length > 0 && <div class="evb-sessions">
           {sessions.map((session) => <div class="evb-session" key={session.id}>
-            <span class="evb-session-title"><StateDot state={sessionState(session.status)} size={7} />{session.title || session.id}</span>
+            {/* The session is the door, as it is in "sent to": a separate Open
+                button beside a name you could not tap said the same thing twice
+                and made the two directions of one exchange read differently. */}
+            <SessionChip
+              sessionId={session.id}
+              title={session.title}
+              fallbackState={sessionState(session.status)}
+              onOpen={onOpenSession}
+            />
             <span class="evb-session-status">{session.status}</span>
-            {onOpenSession && <button type="button" class="evb-open" onClick={() => onOpenSession(session.id)}>Open</button>}
           </div>)}
         </div>}
         <EventPayloadBody body={body} />

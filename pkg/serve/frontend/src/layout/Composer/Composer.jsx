@@ -1,6 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Paperclip, X, Mic, Loader2, Image as ImageIcon, PhoneCall } from "lucide-preact";
-import { Chip } from "../../primitives/index.js";
+import { Paperclip, X, Mic, Loader2, PhoneCall } from "lucide-preact";
 import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
@@ -9,14 +8,14 @@ import { appendCallResult, callSpendNotice } from "../../data/voice-live.js";
 import { VoiceLivePanel } from "../../components/VoiceLivePanel/VoiceLivePanel.jsx";
 import { useStore } from "../../hooks/useStore.js";
 import {
-  sendMessage, stopRun, cancelSteers, execCommand, execShell, newSteerId,
-  steerSubagent,
+  sendMessage, stopRun, execCommand, execShell, newSteerId,
+  steerSubagent, recallQueuedSteers,
 } from "../../data/session-actions.js";
 import { store, updateSession } from "../../data/store.js";
 import { consumeComposerDrop } from "../../data/share.js";
 import { appendSharedText } from "../../data/share-target.js";
 import { addToast } from "../../data/notifications.js";
-import { combineQueueText, droppedImageCount, queueSummary, recallActivates, sendMayClear } from "../../data/composer-queue.js";
+import { sendMayClear } from "../../data/composer-queue.js";
 import {
   slashSuggestions, findMentionToken, computeMentionInsertion, normalizeDashes,
 } from "../../data/composer-suggest.js";
@@ -132,9 +131,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   const attachInputRef = useRef(null);
   const restoreVoiceFocusRef = useRef(false);
   const sessionState = session?.state;
-  const pendingSteers = session?.pendingSteers;
   // In steer mode the box targets a subagent, not the parent run — so it
-  // must never enter the parent's "busy" affordances (Esc-aborts, queue note).
+  // must never enter the parent's "busy" affordances (Esc-aborts).
   // It always shows a Send button that fires a steer.
   const busy = sessionState === "running" && !steer;
   const [hasText, setHasText] = useState(false);
@@ -148,21 +146,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // The last normal DOM value lets us remove precisely one stale IME insertion
   // without erasing text typed for the next message after a successful send.
   const inputValueRef = useRef("");
-  // Guards a recall (chip click / Alt+↑) against double-activation before the
-  // WS steers_canceled round-trip clears the chips: without it, a second click
-  // (or click + Alt+↑) would see the same pendingSteers and combine the texts
-  // twice into the textarea. Released once cancelSteers settles.
-  const recallInFlight = useRef(false);
-  // A click only counts as a recall when this chip also received its
-  // pointerdown. The chip is born under the finger: it appears in the composer
-  // the instant a message is queued, which is exactly where the send button was
-  // just tapped, so the click that follows that tap lands on a control that did
-  // not exist when the gesture started. Production traces caught it firing the
-  // recall 11ms after a send (a real tap on it measured ~1500ms), cancelling
-  // the message server-side while the send was still in flight — the text was
-  // destroyed on both sides. Requiring the whole gesture to happen on the chip
-  // rejects an inherited click by construction, with no timing heuristics.
-  const recallPointerDown = useRef(null);
   // Counts every write to the textarea that a send did not make itself: a queue
   // recall or abort restoring messages, a voice transcript, history recall, an
   // accepted suggestion. A send captures the count before awaiting the server
@@ -258,48 +241,15 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   }, [sessionId]);
 
   // --- Dequeue steers (recall to input for editing) ---
-  // Ported from InputBar.handleDequeueSteers: pull every queued chip's text
-  // into the textarea, warn about queued images that can't be restored, and
-  // cancel the not-yet-delivered steers server-side so re-submitting the edited
-  // text doesn't deliver both the originals and the edit. The server broadcasts
-  // steers_canceled to every client (shared queue), which clears the chips.
-  const handleDequeueSteers = useCallback((opts) => {
-    const armedPointerId = recallPointerDown.current;
-    recallPointerDown.current = null;
-    if (!recallActivates({
-      armedPointerId,
-      pointerId: opts?.pointerId,
-      detail: opts?.detail,
-      fromKeyboard: opts?.fromKeyboard === true,
-    })) return;
-    if (recallInFlight.current) return; // a recall is already in flight
-    const sess = store.get().sessions[sessionId];
-    if (!sess?.pendingSteers?.length) return;
-
-    const el = textareaRef.current;
-    if (!el) return;
-
-    recallInFlight.current = true;
-    writeComposer(el, combineQueueText(el.value, sess.pendingSteers));
-    setHasText(!!el.value.trim());
-    saveDraft(sessionId, el.value); // persist the recalled text (no input event)
-
-    const dropped = droppedImageCount(sess.pendingSteers);
-    if (dropped > 0) {
-      addToast({ sessionId, title: "Queued images dropped", detail: `${dropped} attached image${dropped > 1 ? "s were" : " was"} not restored — re-attach if still needed.`, type: "attention" });
-    }
-
-    cancelSteers(sessionId)
-      .catch((e) => {
-        console.error("cancelSteers failed:", e);
-        addToast({ sessionId, title: "Could not cancel queued messages", detail: e.message, type: "error" });
-      })
-      .finally(() => { recallInFlight.current = false; });
-
-    autoResize();
-    el.focus();
-    el.selectionStart = el.selectionEnd = el.value.length;
-  }, [sessionId, autoResize]);
+  // Alt+↑ is one of the two triggers of THE recall; the other is the marker at
+  // the end of the transcript. The work — cancel the queue server-side, put the
+  // combined text back in order, report the images that cannot come back — is
+  // recallQueuedSteers', shared with that marker, and the text lands here
+  // through the composerDrops handoff below, the same way Stop's does.
+  const handleDequeueSteers = useCallback(() => {
+    if (!sessionId) return;
+    recallQueuedSteers(sessionId);
+  }, [sessionId]);
 
   // --- Slash command suggestions ---
   // Recomputes the popup from the textarea's current value/cursor. Ported from
@@ -1116,7 +1066,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   }, [cacheExpiresAt, busy]);
   const cacheExpired = cacheExpiresAt > 0 && !busy && nowTick >= cacheExpiresAt;
 
-  const summary = steer ? null : queueSummary(pendingSteers);
   const short = compact || shortPlaceholder;
   // "Message moa" everywhere. The keyboard hints used to be printed here — 71
   // characters of instructions inside the field, which is the noisiest place in
@@ -1138,6 +1087,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       as sendable as a sentence. */
   const armed = hasText || attachments.length > 0;
 
+  /* The composer draws NO queue: what has been said belongs to the thread,
+     and the marker at the end of the transcript is where it is seen and
+     recalled (components/QueuedTail). This slab holds what is about to be
+     said. */
   return (
     <div class={`zl-composer${busy ? " is-busy" : ""}${armed ? " is-armed" : ""}`}>
       {cacheExpired && (
@@ -1146,6 +1099,9 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           Prompt cache expired · your next message pays a cache write
         </div>
       )}
+      {/* The call is a flat row inside this slab, not a card: the input stays
+          reachable during a call on purpose — the delegate can block waiting
+          for an answer from this conversation. */}
       {voiceLive.active && (
         <VoiceLivePanel
           phase={voiceLive.phase}
@@ -1221,29 +1177,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         onBlur={onFocusChange ? () => onFocusChange(false) : undefined}
         readOnly={contentSendPending}
       />
-      {summary && (
-        <button
-          type="button"
-          class="queue-note"
-          title="Click or Alt+↑ to edit queued messages"
-          onPointerDown={(e) => { recallPointerDown.current = e.pointerId ?? true; }}
-          onPointerCancel={() => { recallPointerDown.current = null; }}
-          onClick={(e) => handleDequeueSteers({ pointerId: e.pointerId, detail: e.detail })}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter" && e.key !== " ") return;
-            e.preventDefault();
-            handleDequeueSteers({ fromKeyboard: true });
-          }}
-        >
-          <Chip size="sm" mono>{summary.count} queued</Chip>
-          <span>
-            {summary.lastImages > 0 && <ImageIcon size={13} aria-hidden="true" />}
-            {summary.lastIsCommand && <span aria-hidden="true">/</span>}
-            “{summary.lastText}”
-          </span>
-        </button>
-      )}
-      {busy && hasText && !summary && (
+      {busy && hasText && (
         <span class="steer-hint" aria-hidden="true">⏎ steers — won't interrupt</span>
       )}
       <div class="zl-controls">

@@ -150,7 +150,7 @@ func TestRolePromptPlacesPreferencesUnderTheRules(t *testing.T) {
 	}
 	for _, want := range []string{
 		"balance", "sessions tool", "work/", "book search first",
-		"You do not investigate the code yourself", "book-init",
+		"Read to understand; do not read to execute", "book-init",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("role prompt missing %q", want)

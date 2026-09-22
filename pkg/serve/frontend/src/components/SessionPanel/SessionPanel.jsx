@@ -2,8 +2,8 @@ import { useEffect, useRef } from "preact/hooks";
 import { useStore } from "../../hooks/useStore.js";
 import { registerOverlay } from "../../data/overlays.js";
 import {
-  PANEL_PAGES, artifactsVerdict, closeSessionPanel, mcpVerdict, runFacts,
-  setSessionPanelPage, usageVerdict,
+  PANEL_PAGES, artifactsVerdict, closeSessionPanel, mcpVerdict, panelPageParent, runFacts,
+  focusPanelSubpage, panelAccessibleName, setSessionPanelPage, usageVerdict,
 } from "../../data/session-panel.js";
 import { artifactsSlice, listArtifactsInPanel, openArtifactsList } from "../../data/artifacts.js";
 import { UsagePage } from "./UsagePage.jsx";
@@ -153,9 +153,15 @@ export function SessionPanel({
   style,
 }) {
   const panelRef = useRef(null);
+  const backRef = useRef(null);
   const sub = page !== "root";
+  const parent = panelPageParent(page);
   const close = onClose || closeSessionPanel;
   const goPage = onPage || setSessionPanelPage;
+
+  useEffect(() => {
+    focusPanelSubpage({ open, page, backButton: backRef.current });
+  }, [open, page]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -163,7 +169,7 @@ export function SessionPanel({
     const onKey = (event) => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
-      if (sub) goPage("root");
+      if (sub) goPage(parent);
       else close();
     };
     document.addEventListener("keydown", onKey);
@@ -171,11 +177,12 @@ export function SessionPanel({
       unregister();
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, sub, inline]);
+  }, [open, sub, parent, inline]);
 
   if (!session) return null;
 
   const isOwner = session.kind === "owner";
+  const panelName = panelAccessibleName(session, page);
   const facts = factList || runFacts(session);
   const mcp = mcpVerdict(session);
   const usageRow = usageVerdict(session, usage);
@@ -186,7 +193,7 @@ export function SessionPanel({
       ref={panelRef}
       class={`zl-side zl-side-right${open ? " is-open" : ""}${sheet ? " is-sheet" : ""}`}
       role="dialog"
-      aria-label={isOwner ? "This owner" : "This session"}
+      aria-label={panelName}
       aria-hidden={!open}
       /* Closed it is slid off-screen, not gone: its Close, its name field,
          Usage and Delete stay in the DOM, and aria-hidden removes them from
@@ -201,10 +208,18 @@ export function SessionPanel({
       <div class={`zl-side-head${sub ? " is-sub" : ""}`}>
         {sub ? (
           <>
-            <button type="button" class="zl-back" onClick={() => goPage("root")} aria-label="Back to this session">
+            <button
+              type="button"
+              class="zl-back"
+              ref={backRef}
+              onClick={() => goPage(parent)}
+              aria-label={parent === "root"
+                ? (isOwner ? "Back to this owner" : "Back to this session")
+                : `Back to ${PANEL_PAGES[parent]}`}
+            >
               <BackIcon />
             </button>
-            <span class="zl-side-title is-page" key={page}>{PANEL_PAGES[page]}</span>
+            <h2 class="zl-side-title is-page" key={page}>{PANEL_PAGES[page]}</h2>
           </>
         ) : (
           <>
@@ -232,7 +247,9 @@ export function SessionPanel({
           {page === "mcp" && (
             <McpPage sessionId={session.id} mcpTick={session.mcpTick} servers={mcpServers} inline={inline} />
           )}
-          {(page === "overview" || page === "book") && <OwnerPanelPage session={session} page={page} phone={variant === "sheet"} />}
+          {(page === "overview" || page === "book" || page === "ownerEdit") && (
+            <OwnerPanelPage session={session} page={page} phone={variant === "sheet"} />
+          )}
         </div>
       ) : (
         <>

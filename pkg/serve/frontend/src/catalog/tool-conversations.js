@@ -290,6 +290,16 @@ export const OWNING = {
     done("ss1", "sessions", { action: "send", session_id: "sqlite", text: "Un apunte: los albaranes ya emitidos **no se borran**, se emite uno de abono. Si el arreglo toca el borrado, párate y dímelo." }, "Queued for sqlite (it is working; it will read this at its next step)."),
     done("sa1", "sessions", { action: "answer", session_id: "sqlite", ask_id: "ask-7d2", answers: ["Sí, uno por pedido siempre", "No toques la numeración"] }, "Answered ask-7d2 in session sqlite."),
     said("a4", "Le he contestado yo: las dos preguntas las responde el libro, no hacía falta molestarte.", 4),
+    // What comes back the other way: a session's report. It must name the
+    // session the way "sent to" does, so both directions read alike.
+    {
+      role: "user",
+      _msg_id: "rp1",
+      msg_id: "rp1",
+      timestamp: at(9),
+      content: [{ type: "text", text: "sqlite: done. Un albarán por pedido; el camino que agrupaba está borrado y los emitidos siguen intactos." }],
+      custom: { source: "report", count: 1, sessions: [{ id: "sqlite", title: "migrate sqlite", status: "done" }] },
+    },
   ],
 };
 

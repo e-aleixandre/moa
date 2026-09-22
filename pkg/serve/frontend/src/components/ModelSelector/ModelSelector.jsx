@@ -1,5 +1,7 @@
+import { Fragment } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "../../data/api.js";
+import { addToast } from "../../data/notifications.js";
 import { thinkingOptionsFor, thinkingPositionFor } from "../../data/selectors.js";
 import { groupByProvider, pinnedModelSpecs } from "./model-selector-model.js";
 import { useSheetDismiss } from "../../hooks/useSheetDismiss.js";
@@ -19,11 +21,16 @@ import "./ModelSelector.css";
 // phone sheet, and the house rule that a missing datum hides its segment
 // rather than drawing a zero.
 //
-// The prototype's search box, pin stars and "show more" fold are not here:
-// they were a different navigation. The accepted design pushes providers
-// inside the same surface the panel uses for its pages (eyebrow → back +
-// title). Pinning is still *read* so the Pinned group is the user's, not a
-// fixture; there is no star on a chip to write it.
+// The prototype's search box and "show more" fold are not here: they were a
+// different navigation. The accepted design pushes providers inside the same
+// surface the panel uses for its pages (eyebrow → back + title).
+//
+// Pinning is written through a MODE, not a star on each chip. On a phone a
+// chip is tapped to pick a model, so a second target inside it (or a
+// long-press nobody finds) makes every tap a guess. `Edit` on the Pinned
+// header turns the chips into pin toggles everywhere in the sheet, providers'
+// pages included, and picking is off until `Done`: one meaning per tap. The
+// mode is state of this opening only, so a closed sheet never reopens in it.
 
 const HUES = [210, 265, 170, 320, 40, 190];
 
@@ -66,10 +73,29 @@ function Switch({ on, onChange, label, disabled }) {
   );
 }
 
-function ModelChip({ model, on, onPick }) {
+function PinMark() {
+  return (
+    <svg class="zl-mchip-pin" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 17v5" />
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+    </svg>
+  );
+}
+
+// In the pinning mode the chip is a toggle for its pin, so what it reports as
+// pressed is the pin, and the pin mark leads the chip: the trailing check is
+// still "the model you are on", and the two must never read as one mark.
+function ModelChip({ model, on, onPick, pinning = false, pinned = false, onTogglePin }) {
   const name = model.codename || model.name;
   return (
-    <button type="button" class={`zl-mchip${on ? " is-on" : ""}`} onClick={() => onPick(model.id)} aria-pressed={on}>
+    <button
+      type="button"
+      class={`zl-mchip${on ? " is-on" : ""}${pinning ? " is-pinning" : ""}${pinning && pinned ? " is-pinned" : ""}`}
+      onClick={() => (pinning ? onTogglePin(model) : onPick(model.id))}
+      aria-pressed={pinning ? pinned : on}
+      aria-label={pinning ? `Pin ${name}` : undefined}
+    >
+      {pinning && <PinMark />}
       <span class="zl-mchip-txt">
         <span class="zl-mchip-name">{name}</span>
         {model.sub && <span class="zl-mchip-sub zl-data">{model.sub}</span>}
@@ -119,6 +145,27 @@ function modelIsSelected(model, selected) {
   return model.id === selected || model.name === selected;
 }
 
+function modelIsPinned(model, ids) {
+  return ids.includes(model.catalogId) || ids.includes(model.id) || ids.includes(model.name);
+}
+
+function withoutModel(ids, model) {
+  return ids.filter((id) => id !== model.catalogId && id !== model.id && id !== model.name);
+}
+
+// useOpening counts the openings of a host that stays mounted to leave. A
+// reopen during the exit cancels it (usePresence), so without a fresh key the
+// picker inside would come back still in whatever mode it was left in.
+function useOpening(leaving) {
+  const [opening, setOpening] = useState(0);
+  const wasLeaving = useRef(leaving);
+  useEffect(() => {
+    if (wasLeaving.current && !leaving) setOpening((n) => n + 1);
+    wasLeaving.current = leaving;
+  }, [leaving]);
+  return opening;
+}
+
 // usePickView — the host's second-level navigation. The model picker's
 // provider list is a PUSH inside the popover/sheet, the same idiom the
 // session panel uses for its pages, so the HOST's head swaps eyebrow for
@@ -156,16 +203,34 @@ export function ModelSelector({
   view: viewProp,
   setView: setViewProp,
   pinnedIDs: pinnedIDsProp,
+  onPinnedChange,
   ...rest
 }) {
   const hosted = typeof setViewProp === "function";
   const [innerView, setInnerView] = useState("root");
   const view = hosted ? viewProp : innerView;
   const setView = hosted ? setViewProp : setInnerView;
-  const [fetchedPins, setFetchedPins] = useState([]);
+  // null until the preference arrives, so the empty-state line does not
+  // flash on every opening before the pins land.
+  const [fetchedPins, setFetchedPins] = useState(null);
+  const fetchedPinsRef = useRef(null);
+  const [labPins, setLabPins] = useState(null);
   const preferenceRevisionRef = useRef(0);
+  const preferenceQueueRef = useRef(Promise.resolve());
+  const [pinning, setPinning] = useState(false);
+  // The Pinned grid while pinning: what was pinned on entry stays put, so an
+  // unpinned chip does not vanish from under the finger and the next tap does
+  // not land on its neighbour. Undoing a mis-tap is the same tap again.
+  const [roster, setRoster] = useState(null);
   const controlledPins = pinnedIDsProp != null;
-  const pinnedIDs = controlledPins ? pinnedIDsProp : fetchedPins;
+  // A caller can turn this reduced picker on while the full picker is still
+  // mounted. Never leave an invisible pinning mode behind: model-only chips
+  // must retain their one meaning, choosing a model, in that render too.
+  const pinningActive = pinning && !modelOnly;
+  const pinnedIDs = controlledPins
+    ? (onPinnedChange ? pinnedIDsProp : (labPins ?? pinnedIDsProp))
+    : (fetchedPins || []);
+  const pinsLoaded = controlledPins || fetchedPins !== null;
 
   const groups = useMemo(() => groupByProvider(models), [models]);
   const selectedSpec = useMemo(
@@ -174,10 +239,15 @@ export function ModelSelector({
   );
   const pinned = useMemo(
     () => (controlledPins
-      ? models.filter((model) => pinnedIDs.includes(model.catalogId) || pinnedIDs.includes(model.id) || pinnedIDs.includes(model.name))
+      ? models.filter((model) => modelIsPinned(model, pinnedIDs))
       : pinnedModelSpecs(models, pinnedIDs)),
     [models, pinnedIDs, controlledPins],
   );
+  const pinnedGrid = useMemo(() => {
+    if (!pinningActive || !roster) return pinned;
+    const kept = roster.map((id) => models.find((model) => model.id === id)).filter(Boolean);
+    return [...kept, ...pinned.filter((model) => !roster.includes(model.id))];
+  }, [pinningActive, roster, pinned, models]);
   const currentName = selectedSpec
     ? (selectedSpec.codename || selectedSpec.name)
     : (sessionModel || selected || "");
@@ -188,7 +258,10 @@ export function ModelSelector({
   const thinkValue = thinkingPositionFor(thinking, selectedSpec, sessionProvider);
   const providerGroup = groups.find((group) => group.provider === view);
 
-  const applyPinnedIDs = (ids) => setFetchedPins(ids);
+  const applyPinnedIDs = (ids) => {
+    fetchedPinsRef.current = ids;
+    setFetchedPins(ids);
+  };
 
   useEffect(() => {
     if (modelOnly || controlledPins) return undefined;
@@ -206,7 +279,70 @@ export function ModelSelector({
     return () => { live = false; };
   }, [modelOnly, controlledPins]);
 
+  useEffect(() => {
+    if (!modelOnly) return;
+    setPinning(false);
+    setRoster(null);
+  }, [modelOnly]);
+
   const pick = (id) => onSelect?.(id);
+
+  const togglePinning = () => {
+    setRoster(pinning ? null : pinned.map((model) => model.id));
+    setPinning(!pinning);
+  };
+
+  // One tap, one PATCH, applied at once. Requests run in order so the last tap
+  // is the one the server keeps, and only the latest answer is adopted.
+  //
+  // A failure does NOT put back a local snapshot: with two taps in flight, the
+  // snapshot taken before the second one already contains the first one's
+  // optimistic guess, so restoring it can leave a model drawn as pinned that
+  // the server never stored. The server is the one that knows, so we ask it
+  // instead of reconstructing it here.
+  const togglePin = (model) => {
+    // Read from the ref, not from the rendered `pinnedIDs`: two taps in the
+    // same frame both see the same stale render, and the second one would
+    // compute its list without the first one's model, dropping a pin the user
+    // just made. The ref carries what the previous tap already applied.
+    const current = controlledPins ? pinnedIDs : (fetchedPinsRef.current || pinnedIDs);
+    const shouldPin = !modelIsPinned(model, current);
+    const key = model.catalogId || model.id;
+    const next = shouldPin ? [...withoutModel(current, model), key] : withoutModel(current, model);
+    if (controlledPins) {
+      if (onPinnedChange) onPinnedChange(next);
+      else setLabPins(next);
+      return;
+    }
+    const before = fetchedPinsRef.current || [];
+    const revision = ++preferenceRevisionRef.current;
+    applyPinnedIDs(next);
+    const request = preferenceQueueRef.current
+      .catch(() => {})
+      .then(() => api("PATCH", "/api/model-preferences", { model_id: key, pinned: shouldPin }));
+    preferenceQueueRef.current = request;
+    request
+      .then((preferences) => {
+        if (revision === preferenceRevisionRef.current) applyPinnedIDs(preferences?.pinned_models || next);
+      })
+      .catch((error) => {
+        addToast({
+          title: `Could not ${shouldPin ? "pin" : "unpin"} ${model.codename || model.name}`,
+          detail: error?.message,
+          type: "error",
+        });
+        if (revision !== preferenceRevisionRef.current) return undefined;
+        // Re-read, and only adopt it while no newer tap has happened. If even
+        // this fails there is nothing better than the last snapshot we hold.
+        return api("GET", "/api/model-preferences")
+          .then((preferences) => {
+            if (revision === preferenceRevisionRef.current) applyPinnedIDs(preferences?.pinned_models || []);
+          })
+          .catch(() => {
+            if (revision === preferenceRevisionRef.current) applyPinnedIDs(before);
+          });
+      });
+  };
 
   const showRoot = () => setView("root");
 
@@ -256,11 +392,37 @@ export function ModelSelector({
           })}
         </div>
       ) : view !== "root" ? (
-        <div class="zl-chips">
-          {(providerGroup?.items || []).map((m) => (
-            <ModelChip model={m} on={modelIsSelected(m, selected)} onPick={pick} key={m.id} />
-          ))}
-        </div>
+        <>
+          {pinningActive && (
+            // The Done that ends the mode lives on the Pinned header, which is
+            // a page back from here. Repeat it on the instruction line so the
+            // way out is wherever the mode is announced.
+            <p class="zl-pin-hint is-row">
+              <span>Tap a model to pin or unpin it.</span>
+              <button
+                type="button"
+                class="zl-group-act"
+                onClick={togglePinning}
+                aria-label="Done pinning models"
+              >
+                Done
+              </button>
+            </p>
+          )}
+          <div class="zl-chips">
+            {(providerGroup?.items || []).map((m) => (
+              <ModelChip
+                model={m}
+                on={modelIsSelected(m, selected)}
+                onPick={pick}
+                pinning={pinningActive}
+                pinned={modelIsPinned(m, pinnedIDs)}
+                onTogglePin={togglePin}
+                key={m.id}
+              />
+            ))}
+          </div>
+        </>
       ) : (
         <>
           {/* The model you are on, as a STATEMENT. It used to be a button that
@@ -279,11 +441,39 @@ export function ModelSelector({
           )}
           {!modelOnly && (
             <>
-              <div class="zl-group"><span>Pinned</span><span class="zl-group-n zl-data">{pinned.length}</span></div>
-              {pinned.length > 0 && (
+              <div class="zl-group is-pinned">
+                <span>Pinned</span>
+                {pinsLoaded && <span class="zl-group-n zl-data">{pinned.length}</span>}
+                {pinsLoaded && (
+                  <button
+                    type="button"
+                    class="zl-group-act"
+                    onClick={togglePinning}
+                    aria-label={pinningActive ? "Done pinning models" : "Edit pinned models"}
+                  >
+                    {pinningActive ? "Done" : "Edit"}
+                  </button>
+                )}
+              </div>
+              {pinningActive ? (
+                <p class="zl-pin-hint">
+                  {pinnedGrid.length > 0 ? "Tap a model to pin or unpin it." : "Open All models and tap one to pin it."}
+                </p>
+              ) : pinsLoaded && pinned.length === 0 && (
+                <p class="zl-pin-hint">Tap Edit to keep your go-to models here.</p>
+              )}
+              {pinnedGrid.length > 0 && (
                 <div class="zl-chips">
-                  {pinned.map((m) => (
-                    <ModelChip model={m} on={modelIsSelected(m, selected)} onPick={pick} key={m.id} />
+                  {pinnedGrid.map((m) => (
+                    <ModelChip
+                      model={m}
+                      on={modelIsSelected(m, selected)}
+                      onPick={pick}
+                      pinning={pinningActive}
+                      pinned={modelIsPinned(m, pinnedIDs)}
+                      onTogglePin={togglePin}
+                      key={m.id}
+                    />
                   ))}
                 </div>
               )}
@@ -355,6 +545,7 @@ export function PickerPopover({
   leaving = false,
 }) {
   const v = usePickView(kind, models);
+  const opening = useOpening(leaving);
   useEffect(() => {
     if (!onClose) return undefined;
     const k = (e) => { if (e.key === "Escape") onClose(); };
@@ -370,7 +561,7 @@ export function PickerPopover({
       ref={popoverRef}
     >
       <div class={`zl-side-head is-pop${v.sub ? " is-sub" : ""}`}>{v.head}</div>
-      {typeof children === "function" ? children(v) : children}
+      <Fragment key={opening}>{typeof children === "function" ? children(v) : children}</Fragment>
     </div>
   );
 }
@@ -391,6 +582,7 @@ export function PickerSheet({
   children,
 }) {
   const v = usePickView(kind, models);
+  const opening = useOpening(leaving);
   const dismiss = useSheetDismiss({ onClose: dismissible ? onClose : undefined });
   useEffect(() => {
     if (!dismissible || !onClose) return undefined;
@@ -426,7 +618,7 @@ export function PickerSheet({
           </button>
         </div>
         <div class="zl-sheet-body">
-          {typeof children === "function" ? children(v) : children}
+          <Fragment key={opening}>{typeof children === "function" ? children(v) : children}</Fragment>
         </div>
       </div>
     </>

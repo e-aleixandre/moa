@@ -112,7 +112,9 @@ test("Stop is on the live bar, with its confirmation intact", () => {
 
 test("desktop subagent live content shares the conversation measure", () => {
   // The branch bypasses ConversationScreen's dock, so this remains explicit:
-  // deleting either rule makes its composer or record stretch across desktop.
-  expect(composerCss).toMatch(/\.subagent-view > \.zl-live,\s*\.subagent-view > \.zl-composer\s*\{[^}]*max-width:\s*var\(--content-block\)[^}]*margin-inline:\s*auto/s);
+  // deleting any of the three rules makes its composer, status line or record
+  // stretch across desktop. The status line is named because it is the one
+  // that was missing: it ran edge to edge while the other two held the column.
+  expect(composerCss).toMatch(/\.subagent-view > \.zl-live,\s*\.subagent-view > \.zl-composer,\s*\.subagent-view > \.zl-status\s*\{[^}]*max-width:\s*var\(--content-block\)[^}]*margin-inline:\s*auto/s);
   expect(streamCss).toMatch(/\.subagent-view \.zl-transcript:not\(\.is-dense\) > \*\s*\{[^}]*max-width:\s*var\(--content-block\)[^}]*margin-inline:\s*auto/s);
 });

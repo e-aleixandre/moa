@@ -12,6 +12,8 @@ let steerResult = {};
 let commandResult = { ok: true };
 let commandError = null;
 const commands = [];
+// Session ids the composer handed to the shared queue recall.
+const recalled = [];
 // Lets a test hold a send in flight, reproducing the window in which the box
 // can legitimately acquire other text before the server answers.
 let sendResult;
@@ -71,6 +73,10 @@ mock.module("../../data/session-actions.js", () => ({
   },
   execShell: async () => {},
   steerSubagent: async (...args) => { steered.push(args); return steerResult; },
+  // The recall itself is tested against the real store in
+  // data/session-actions.test.js; here what matters is that the composer
+  // delegates to it instead of cancelling steers on its own.
+  recallQueuedSteers: (id) => { recalled.push(id); return true; },
 }));
 
 const { Composer, keepCommandSuggestionVisible } = await import("./Composer.jsx");
@@ -316,17 +322,16 @@ test("a send still clears the composer when its text is untouched", async () => 
   expect(refs[0].current.value).toBe("");
 });
 
-// A touch tap on the chip fires pointerout/pointerleave BEFORE the click. The
-// first version of the guard disarmed on pointerleave, so on a phone the recall
-// was killed by the very gesture activating it and the queue could not be
-// reached at all. This drives the chip's real handlers in the browser's touch
-// order, which the pure recallActivates tests cannot catch: they were green
-// while the chip was dead.
-test("tapping the queue chip recalls it despite the touch pointerleave", async () => {
+// The composer no longer draws the queue: what has been said belongs to the
+// thread, and the marker at its end is where it is seen and recalled
+// (components/QueuedTail). Alt+\u2191 is the composer's trigger of that same
+// gesture, and it must route to the ONE shared action rather than owning a
+// second implementation of it.
+test("Alt+\u2191 recalls the queue through the shared action", async () => {
   refs.length = 0;
-  const sessionId = "touch-recall";
-  // The recall reads the queue from the store, so the session must exist there;
-  // updateSession ignores ids it doesn't know.
+  recalled.length = 0;
+  const sessionId = "alt-up-recall";
+  // The action reads the queue from the store, so the session must exist there.
   setState({
     sessions: {
       ...store.get().sessions,
@@ -337,19 +342,20 @@ test("tapping the queue chip recalls it despite the touch pointerleave", async (
     sessionId,
     session: { state: "running", pendingSteers: [{ id: "a", text: "queued thought" }] },
   });
-  const chip = descendants(tree).find((node) => node.props?.class === "queue-note");
-  expect(chip).toBeDefined();
+  // No queue is painted in the slab any more.
+  expect(descendants(tree).find((node) => node.props?.class === "queue-note")).toBeUndefined();
+  const textarea = descendants(tree).find((node) => node.type === "textarea");
   refs[0].current = { value: "", style: {}, scrollHeight: 24, focus() {}, dispatchEvent() {} };
 
-  // The exact sequence a real finger produces (verified in Chromium): the
-  // leave arrives BEFORE the click. Called only if the chip listens for it, so
-  // the test states the browser's order rather than the current wiring.
-  chip.props.onPointerDown({ pointerId: 2 });
-  chip.props.onPointerLeave?.({ pointerId: 2 });
-  chip.props.onClick({ pointerId: 2, detail: 1 });
+  let prevented = false;
+  textarea.props.onKeyDown({
+    key: "ArrowUp", altKey: true, shiftKey: false, metaKey: false,
+    isComposing: false, preventDefault() { prevented = true; },
+  });
   await Promise.resolve();
 
-  expect(refs[0].current.value).toContain("queued thought");
+  expect(prevented).toBe(true);
+  expect(recalled).toEqual([sessionId]);
 });
 
 // `/compact` is answered immediately now ({ok:true, queued:true} with no id:

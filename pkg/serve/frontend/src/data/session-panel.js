@@ -21,10 +21,37 @@ import { fmtTokens } from './util/format.js';
 // shape and its own reader, and two lists of the same thing is one too many.
 export const PANEL_PAGES = {
   overview: 'Overview',
+  ownerEdit: 'Edit owner',
   book: 'Book',
   usage: 'Usage',
   mcp: 'MCP',
 };
+
+// The second level is not always one step deep. Edit owner is entered FROM
+// Overview, so its back has to land there and not on the root — it used to be
+// a modal opened over the panel, which on a phone stacked a second sheet with
+// a second grabber and a second ✕ on top of the first one.
+export const PANEL_PAGE_PARENT = {
+  ownerEdit: 'overview',
+};
+
+// panelPageParent — where "back" goes from a page. The root's parent is the
+// root: the panel itself is what closes from there.
+export function panelPageParent(page) {
+  return PANEL_PAGE_PARENT[page] || 'root';
+}
+
+// panelAccessibleName names the surface after the page currently in front of
+// the user. At the root, the dossier still names what it belongs to.
+export function panelAccessibleName(session, page) {
+  return PANEL_PAGES[page] || (session?.kind === 'owner' ? 'This owner' : 'This session');
+}
+
+// A pushed page replaces the control that opened it. Put the keyboard at its
+// Back button, whose label says exactly where that control returns.
+export function focusPanelSubpage({ open, page, backButton }) {
+  if (open && page !== 'root') backButton?.focus();
+}
 
 export { SESSION_PANEL_CLOSED };
 

@@ -10,7 +10,7 @@ import {
   artifactsOrigin, artifactsSlice, backToArtifactsList, closeArtifacts, openArtifactFromList,
   restoreArtifactsFocus, retryArtifacts, setArtifactExpanded,
 } from '../../data/artifacts.js';
-import { currentArtifact, filterArtifacts, originLabel } from '../../data/artifacts-model.js';
+import { artifactsViewIsOpen, currentArtifact, filterArtifacts, originLabel } from '../../data/artifacts-model.js';
 import { Field } from '../../primitives/index.js';
 import { ArtifactRow, KindIcon, ShareButton } from './ArtifactRow.jsx';
 import { ArtifactContent, ARTIFACT_ESCAPE } from './ArtifactContent.jsx';
@@ -62,8 +62,8 @@ export function ArtifactsDrawer() {
 
   // 'panel' is a claim, not a door: the dossier's own artifacts page needs the
   // collection loaded under its own token without this drawer sliding over it.
-  // Only 'list' and 'reader' are surfaces this component renders.
-  const open = slice.view === 'list' || slice.view === 'reader';
+  // The head entry asks the same question, so the answer lives in one place.
+  const open = artifactsViewIsOpen(slice.view);
   const presence = usePresence(open, isMobile ? MOTION.exitBase : MOTION.exitFast);
   const list = slice.view === 'list';
   const fromList = slice.view === 'reader' && slice.from === 'list';

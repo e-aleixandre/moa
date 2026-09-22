@@ -1,16 +1,18 @@
 import { useEffect, useState } from "preact/hooks";
-import { Sheet } from "../Sheet/Sheet.jsx";
-import { MobileSheet } from "../../layout/mobile/MobileSheet/MobileSheet.jsx";
 import { Field } from "../../primitives/Field/Field.jsx";
 import { Button } from "../../primitives/Button/Button.jsx";
 import { ownerAvatar } from "./OwnerAvatar.jsx";
 import { OwnerIdentityPicker } from "./OwnerIdentityPicker.jsx";
 
-/* EditOwnerDialog — changing an owner's name and face after it exists.
+/* EditOwner — changing an owner's name and face after it exists.
 
-   The same picker and the same two surfaces as New owner (Sheet on a desktop,
-   MobileSheet on a phone): choosing a face and changing it are the same act,
-   and a second picker would be a second place for the palette to drift.
+   It is a PAGE of the owner's dossier, pushed from Overview, not a dialog: the
+   panel's own rule is that no modal ever opens over it (data/session-panel.js),
+   and on a phone the panel IS a bottom sheet, so a second sheet put two
+   grabbers, two headers and two ✕ over the same content.
+
+   The same picker as New owner: choosing a face and changing it are the same
+   act, and a second picker would be a second place for the palette to drift.
 
    WHAT IS NOT HERE: the eyes. They are the owner's state, and nobody chooses
    a state — the editor offers the two axes that are identity and no more.
@@ -21,7 +23,7 @@ import { OwnerIdentityPicker } from "./OwnerIdentityPicker.jsx";
    empty object. Saving then writes it, which is the moment a derived face
    becomes a stored one — from creation onwards the name and the face are
    independent, and renaming never moves the face. */
-function EditOwner({ owner, onSave, onClose, phone }) {
+export function EditOwner({ owner, onSave, onClose, phone }) {
   const current = ownerAvatar(owner);
   const [name, setName] = useState(owner.name);
   const [avatar, setAvatar] = useState(current);
@@ -83,13 +85,4 @@ function EditOwner({ owner, onSave, onClose, phone }) {
       {phone && <div class="ow-form-pad" aria-hidden="true" />}
     </div>
   );
-}
-
-export function EditOwnerDialog({ open, owner, onSave, onClose, phone = false }) {
-  if (!owner) return null;
-  const form = <EditOwner owner={owner} onSave={onSave} onClose={onClose} phone={phone} />;
-  if (phone) {
-    return <MobileSheet open={open} onClose={onClose} title="Edit owner">{form}</MobileSheet>;
-  }
-  return <Sheet open={open} onClose={onClose} title="Edit owner" class="ow-dialog">{form}</Sheet>;
 }

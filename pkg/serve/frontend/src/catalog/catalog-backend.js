@@ -180,6 +180,17 @@ function subagentPayload(sessions, sessionId, jobId) {
   };
 }
 
+// The pins are the one preference the lab keeps between requests: the picker
+// writes them one model at a time, as core.UpdatePinnedModels does, and a
+// reopened picker has to show what was just pinned.
+let catalogPinned = ["claude-opus-4-8", "gpt-5-sol"];
+
+function updatePinned(ids, id, pinned) {
+  if (!id) return ids;
+  if (pinned) return ids.includes(id) ? ids : [...ids, id];
+  return ids.filter((x) => x !== id);
+}
+
 // catalogResponse is the pure dispatcher. Unknown /api reads return {} so a
 // new chrome call does not 404 the lab; unknown writes succeed empty. Tests
 // pass a session map; the running lab passes the store.
@@ -190,8 +201,11 @@ export function catalogResponse(method, path, body = null, sessions = CATALOG_SE
   if (m === "GET" && p === "/api/models") return CATALOG_MODELS;
   if (m === "GET" && p === "/api/capabilities") return CATALOG_CAPS;
   if (m === "GET" && p === "/api/usage") return CATALOG_USAGE;
-  if (m === "GET" && p === "/api/model-preferences") return { pinned_models: ["claude-opus-4-8", "gpt-5-sol"] };
-  if (m === "PATCH" && p === "/api/model-preferences") return { pinned_models: body?.pinned_models || [] };
+  if (m === "GET" && p === "/api/model-preferences") return { pinned_models: catalogPinned };
+  if (m === "PATCH" && p === "/api/model-preferences") {
+    catalogPinned = updatePinned(catalogPinned, body?.model_id, !!body?.pinned);
+    return { pinned_models: catalogPinned };
+  }
   if (m === "GET" && p === "/api/compact-at") return { compact_at: 0, compact_at_min: 0 };
   if (m === "PATCH" && p === "/api/compact-at") return { compact_at: body?.compact_at || 0, compact_at_min: 0 };
   if (m === "GET" && p === "/api/compact-strategy") return { compact_strategy: "notify" };

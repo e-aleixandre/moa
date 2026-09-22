@@ -280,6 +280,66 @@
 .zl-mchip-sub { color: var(--zl-t4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .zl-mchip-check { flex: none; width: 12px; height: 12px; color: var(--zl-accent); }
 
+/* Pinning mode. The pin LEADS the chip and is drawn in ink, never in accent:
+   the trailing accent check keeps meaning "the model you are on", and a chip
+   can wear both. Unpinned is the outline, pinned the filled shape. */
+.zl-mchip-pin {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--zl-t3);
+}
+.zl-mchip.is-pinned .zl-mchip-pin { fill: currentColor; color: var(--zl-t1); }
+
+/* The mode's door sits on the Pinned header line. The header is a small
+   uppercase caption, so the 44px target is borrowed from the space above it
+   (the group's own top margin and padding) rather than pushing the chips
+   down, and its word sits on the caption's line, at the foot of the box. */
+.zl-pick .zl-group.is-pinned { align-items: center; }
+.zl-pick .zl-group-act {
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -20px -4px -6px auto;
+  padding: 0 8px 4px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: transparent;
+  color: var(--zl-accent);
+  font-family: inherit;
+  font-size: var(--zl-fs-body);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+  appearance: none;
+}
+@media (hover: hover) {
+  .zl-pick .zl-group-act:hover { color: var(--zl-t1); }
+}
+.zl-pin-hint {
+  margin: 0 4px 8px;
+  font-size: var(--zl-fs-meta);
+  line-height: 1.4;
+  color: var(--zl-t3);
+}
+/* On a provider page the line also carries the way out, so it becomes a row:
+   the sentence on the left, Done on the right, where Edit sits one page back. */
+.zl-pin-hint.is-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.zl-pin-hint.is-row > span { flex: 1 1 auto; min-width: 0; }
+
 /* Provider list. `.zl-kv` / `.zl-kv-row` live on SessionPanel; the picker
    repeats the flush list so it does not depend on the dossier being mounted. */
 .zl-pick .zl-kv.is-flush { background: transparent; box-shadow: none; border-radius: 0; }
@@ -430,6 +490,7 @@
 .zl-sheet .zl-back:focus-visible,
 .zl-sheet .zl-x:focus-visible,
 .zl-pick-all:focus-visible,
+.zl-pick .zl-group-act:focus-visible,
 .zl-mchip:focus-visible,
 .zl-seg-opt:focus-visible,
 .zl-pick .zl-kv-row.is-btn:focus-visible,

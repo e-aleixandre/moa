@@ -43,7 +43,9 @@ test("an ordinary model keeps its own level in the picker", () => {
 // no button, no chevron and no navigation handler.
 test("the current model is not a control", () => {
   const src = readFileSync(new URL("./ModelSelector.jsx", import.meta.url), "utf8");
-  const row = src.slice(src.indexOf('<div class="zl-pick-cur">'), src.indexOf('class="zl-pick-all"'));
+  // The slice ends where the Pinned group begins: its Edit button is the
+  // next control down and is not part of the row.
+  const row = src.slice(src.indexOf('<div class="zl-pick-cur">'), src.indexOf('<div class="zl-group is-pinned">'));
   expect(row).toContain('<div class="zl-pick-cur">');
   expect(row).not.toContain("<GoIcon />");
   expect(row).not.toContain("onClick");

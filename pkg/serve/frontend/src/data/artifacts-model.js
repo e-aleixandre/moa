@@ -8,6 +8,14 @@ import { previewKind } from './util/file-card.js';
 
 export const EMPTY_ARTIFACTS = Object.freeze([]);
 
+// artifactsViewIsOpen — which `view` values are a surface the reader actually
+// shows. 'panel' is the dossier claiming the collection so it can load it
+// behind its own closed page: a request, not a door. Defined once because the
+// head entry lit up for any truthy view and said "open" while nothing was.
+export function artifactsViewIsOpen(view) {
+  return view === 'list' || view === 'reader';
+}
+
 // The whole feature is one ephemeral, global slice: which conversation owns
 // the drawer, what it is showing, and the state of the in-flight list request.
 // `owner` is set explicitly by the entry that was clicked — never inferred
