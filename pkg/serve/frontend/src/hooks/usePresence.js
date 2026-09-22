@@ -46,7 +46,11 @@ export function usePresence(open, exitMs = MOTION.exitFast) {
     return () => clearTimeout(timer.current);
   }, [open, exitMs]);
 
-  return { mounted, leaving: mounted && !open };
+  // Opening must render the surface in the same commit. Waiting for the effect
+  // leaves first-open layout effects with no DOM node to measure; they do not
+  // run again when only this hook's internal state catches up.
+  const present = open || mounted;
+  return { mounted: present, leaving: present && !open };
 }
 
 // usePresenceList — the same idea for a list whose items come and go on their
