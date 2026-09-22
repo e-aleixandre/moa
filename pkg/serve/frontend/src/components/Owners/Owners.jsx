@@ -4,14 +4,14 @@ import { Field } from "../../primitives/Field/Field.jsx";
 import { Button } from "../../primitives/Button/Button.jsx";
 import { defaultModelSpec } from "../CommandPalette/command-palette-model.js";
 import {
-  ModelSelector, PickerPopover, PickerSheet, thinkingButtonsFor,
+  ModelSelector, PickerPopover, thinkingButtonsFor,
 } from "../ModelSelector/ModelSelector.jsx";
 import { thinkingPositionFor } from "../../data/selectors.js";
 import { ensureModelCatalog, modelCatalog } from "../../data/model-catalog.js";
 import { useStore } from "../../hooks/useStore.js";
 import { modelCodename } from "../../data/util/format.js";
 import { api } from "../../data/api.js";
-import { bookTree, childrenSummary, groupChildren, ownerRows, ownerState } from "../../data/owners-model.js";
+import { bookTree, groupChildren, ownerLine, ownerRows, ownerState } from "../../data/owners-model.js";
 import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatar, OwnerAvatarFor, defaultAvatar } from "./OwnerAvatar.jsx";
 import { loadOwnerBook, openBookFile, ownersSlice, saveBookFile, updateOwner } from "../../data/owners.js";
 import { openSession } from "../../data/tile-actions.js";
@@ -200,9 +200,31 @@ export function createFailure(error) {
 }
 
 
+/* ── The model step on a phone ──────────────────────────────────────────
+   On a phone the model is chosen on a PAGE of the New owner sheet, the way
+   Edit owner is a page of the dossier: a second sheet over the form meant two
+   grabbers, and one Escape closing both. The page is the ModelSelector in its
+   hosted mode, so its own levels (All models → a provider) are this sheet's
+   pages too. `null` is the form itself. */
+export function modelPageParent(view) {
+  if (view == null || view === "root") return null;
+  return view === "providers" ? "root" : "providers";
+}
+
+export function modelPageTitle(view) {
+  if (view == null) return "New owner";
+  if (view === "root") return "Model";
+  if (view === "providers") return "All models";
+  return view;
+}
+
+export function modelPageBackLabel(view) {
+  return `Back to ${modelPageTitle(modelPageParent(view))}`;
+}
+
 const basename = (p) => String(p || "").replace(/\/+$/, "").split("/").filter(Boolean).pop() || "";
 
-export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated }) {
+export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated, modelView = null, onModelView }) {
   const [dir, setDir] = useState(defaultDir);
   // What the server said, in the form, beside the button that caused it. A
   // create fails for two reasons the user can act on — the codebase already
@@ -220,7 +242,7 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated }
      with its own idea of what a model row looks like, of which one is pinned,
      of whether "low" means the same thing on every provider. It is now ONE
      ROW that states the current model and opens the product's own
-     ModelSelector: the popover on the desktop, the sheet on a phone, thinking
+     ModelSelector: the popover on the desktop, a page of this sheet on a phone, thinking
      chosen inside it exactly as it is from the composer.
 
      `null` means "not chosen", and what is drawn then is the same default a
@@ -268,14 +290,24 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated }
   };
 
   /* ── Hosting the ModelSelector ──────────────────────────────────────────
-     The picker mounts INSIDE this form's own surface rather than being
-     portalled to <body>. The surface is already a positioned container with
-     its own z-index (the modal on the desktop, MobileSheet on a phone), so
-     the two hosts land where they should without a second placement system:
-     `PickerPopover` right above the row it belongs to, `PickerSheet` at the
-     foot of the sheet. This is how the Composer hosts it inside a pane. */
-  const [modelOpen, setModelOpen] = useState(false);
+     On the desktop the picker mounts INSIDE the modal rather than being
+     portalled to <body>: `PickerPopover` right above the row it belongs to,
+     as the Composer hosts it inside a pane. On a phone it is the model page
+     (`modelView`, owned by NewOwnerDialog so the sheet's head and Escape
+     can walk it back). */
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const onModelPage = phone && modelView != null;
+  const modelOpen = phone ? onModelPage : popoverOpen;
   useEffect(() => { if (modelOpen) ensureModelCatalog(); }, [modelOpen]);
+  const openModel = () => (phone ? onModelView?.("root") : setPopoverOpen(!popoverOpen));
+  const closeModel = () => (phone ? onModelView?.(null) : setPopoverOpen(false));
+  // Back from the model page lands on the row that opened it.
+  const modelRowRef = useRef(null);
+  const wasOnModelPage = useRef(false);
+  useEffect(() => {
+    if (wasOnModelPage.current && !onModelPage) modelRowRef.current?.focus();
+    wasOnModelPage.current = onModelPage;
+  }, [onModelPage]);
 
   const thinkingOptions = thinkingButtonsFor(modelSpec, modelSpec?.provider);
   const thinkingValue = thinkingPositionFor(thinking, modelSpec, modelSpec?.provider);
@@ -294,22 +326,28 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated }
       sessionProvider={modelSpec?.provider}
       view={v.view}
       setView={v.setView}
-      onSelect={(spec) => { setModel(spec); setModelOpen(false); }}
+      onSelect={(spec) => { setModel(spec); closeModel(); }}
       onThinkingChange={setThinking}
       fastSupported={false}
     />
   );
-  const picker = modelOpen && (phone ? (
-    <PickerSheet kind="model" models={models} includeScrim onClose={() => setModelOpen(false)}>
-      {selector}
-    </PickerSheet>
-  ) : (
+  const picker = !phone && popoverOpen && (
     <div class="ow-model-anchor">
-      <PickerPopover kind="model" models={models} onClose={() => setModelOpen(false)}>
+      <PickerPopover kind="model" models={models} onClose={closeModel}>
         {selector}
       </PickerPopover>
     </div>
-  ));
+  );
+
+  // The model page stands in for the form; what was typed is this
+  // component's state, so it is all there on the way back.
+  if (onModelPage) {
+    return (
+      <div class="ow-model-page">
+        {selector({ view: modelView, setView: onModelView })}
+      </div>
+    );
+  }
 
   return (
     <div class="ow-form">
@@ -383,9 +421,10 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated }
         <button
           type="button"
           class="ow-modelrow"
-          aria-haspopup="dialog"
-          aria-expanded={modelOpen}
-          onClick={() => setModelOpen(!modelOpen)}
+          ref={modelRowRef}
+          aria-haspopup={phone ? undefined : "dialog"}
+          aria-expanded={phone ? undefined : popoverOpen}
+          onClick={openModel}
         >
           <span class="ow-mono is-sm" style={`--h:${hueOf(modelSpec?.codename || chosenModel)}`} aria-hidden="true">
             {String(modelSpec?.codename || modelCodename(chosenModel) || "?").slice(0, 2)}
@@ -460,12 +499,11 @@ function ChildRow({ child, onOpen }) {
 
 export function OwnerOverview({ owner, onOpenChild, onEdit }) {
   const groups = groupChildren(owner.children || []);
-  const summary = childrenSummary(owner.children || []);
   return (
     <div class="ow-page">
       <button type="button" class="ow-btn ow-edit-owner" onClick={() => onEdit?.()}>Edit owner</button>
+      <OwnerStateSummary owner={owner} />
       <div class="ow-sum">
-        <span class={`ow-sum-t tone-${summary.tone}`}>{summary.text}</span>
         <span class="ow-sum-d">Every session whose folder resolves to this project is one of these — nothing is linked by hand.</span>
       </div>
       {groups.length === 0 && <p class="ow-quiet">No session has run in this project yet.</p>}
@@ -475,6 +513,18 @@ export function OwnerOverview({ owner, onOpenChild, onEdit }) {
           {group.children.map((child) => <ChildRow child={child} onOpen={onOpenChild} key={child.id} />)}
         </div>
       ))}
+    </div>
+  );
+}
+
+function OwnerStateSummary({ owner }) {
+  const { lead, tail } = ownerLine(owner);
+  if (!lead && !tail) return null;
+  return (
+    <div class="ow-sum ow-sum-state">
+      {lead && <span class={`ow-sum-t tone-${lead.tone}`}>{lead.text}</span>}
+      {lead && tail && <span class="ow-sum-sep" aria-hidden="true"> · </span>}
+      {tail && <span class="ow-sum-t ow-sum-wait">{tail}</span>}
     </div>
   );
 }

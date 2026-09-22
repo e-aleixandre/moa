@@ -1,6 +1,7 @@
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { MobileSheet } from "../../layout/mobile/MobileSheet/MobileSheet.jsx";
-import { NewOwner } from "./Owners.jsx";
+import { useState } from "preact/hooks";
+import { NewOwner, modelPageBackLabel, modelPageParent, modelPageTitle } from "./Owners.jsx";
 
 // NewOwnerDialog — where creating an owner happens now, in BOTH densities.
 //
@@ -22,19 +23,31 @@ import { NewOwner } from "./Owners.jsx";
 // tests for `createFailure`; keeping the two surfaces apart keeps the form
 // testable without a DOM.
 export function NewOwnerDialog({ open, defaultDir = "", onCreate, onClose, phone = false }) {
+  // The phone's model page (Owners.jsx `modelPageParent`): null is the form.
+  // It lives here because the sheet's head and its Escape walk it back.
+  const [modelView, setModelView] = useState(null);
+  const close = () => { setModelView(null); onClose?.(); };
   const form = (
     <NewOwner
       defaultDir={defaultDir}
       phone={phone}
+      modelView={modelView}
+      onModelView={setModelView}
       /* The dialog leaves only once the owner EXISTS. A form that closes on a
          failed request loses both the failure and everything that was typed,
          so a refusal stays here, beside the button that caused it. */
-      onCreate={async (spec) => { await onCreate?.(spec); onClose?.(); }}
+      onCreate={async (spec) => { await onCreate?.(spec); close(); }}
     />
   );
   if (phone) {
     return (
-      <MobileSheet open={open} onClose={onClose} title="New owner">
+      <MobileSheet
+        open={open}
+        onClose={close}
+        title={modelPageTitle(modelView)}
+        onBack={modelView == null ? undefined : () => setModelView(modelPageParent(modelView))}
+        backLabel={modelPageBackLabel(modelView)}
+      >
         {form}
       </MobileSheet>
     );

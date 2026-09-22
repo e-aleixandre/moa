@@ -22,7 +22,7 @@ import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SessionPanel } from "../../../components/index.js";
 import { NewOwnerDialog } from "../../../components/Owners/NewOwnerDialog.jsx";
-import { panelAccessibleName, sessionPanelView, closeSessionPanel, toggleSessionPanel } from "../../../data/session-panel.js";
+import { panelAccessibleName, sessionPanelBack, sessionPanelView, closeSessionPanel, toggleSessionPanel } from "../../../data/session-panel.js";
 import { cacheAlertLabel } from "../../../data/cache-usage.js";
 import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
@@ -370,6 +370,7 @@ function MobileConversationBody({ forceMobile = false }) {
         <MobileSheet
           open={panel.open}
           onClose={closeSessionPanel}
+          onBack={sessionPanelBack(panel.page)}
           title={panelAccessibleName(session, panel.page)}
           bare
         >

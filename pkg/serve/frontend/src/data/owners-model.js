@@ -29,10 +29,17 @@ export const CHILD_GROUPS = [
 // something that has stopped. Reading it does not unblock it.
 export function childGroup(child) {
   const state = child?.state || "idle";
-  if (state === "permission" || state === "error") return "waiting";
+  if (waitsOnYou(state)) return "waiting";
   if (child?.unseen) return "unread";
   if (state === "running") return "working";
   return "idle";
+}
+
+// waitsOnYou — the one test for "this session has stopped until the owner
+// answers". Shared by the owner row and the LiveBar tally, so the two places
+// that speak the state language cannot disagree about what waits.
+export function waitsOnYou(state) {
+  return state === "permission" || state === "error";
 }
 
 // groupChildren returns the non-empty groups, in CHILD_GROUPS order. Empty
@@ -46,22 +53,21 @@ export function groupChildren(children = []) {
     .filter((g) => g.children.length > 0);
 }
 
-// childrenSummary — the one line an owner row can afford. "Live" is every
-// child that is not parked: the owner is answerable for them. "Waiting" is the
+// childrenSummary — the counts the owner surfaces need. "Waiting" is the
 // subset that has stopped until someone answers, which is the only number that
 // should ever pull the eye.
 export function childrenSummary(children = []) {
   const live = children.filter((c) => (c.state || "idle") !== "saved");
   const waiting = children.filter((c) => childGroup(c) === "waiting");
   const unread = children.filter((c) => childGroup(c) === "unread");
-  const parts = [`${live.length} live`];
-  if (waiting.length > 0) parts.push(`${waiting.length} waiting on you`);
-  else if (unread.length > 0) parts.push(`${unread.length} unread`);
+  // Working counts every child that runs, read or not: an unseen result on a
+  // running session does not stop it moving.
+  const working = children.filter((c) => (c.state || "idle") === "running");
   return {
     live: live.length,
+    working: working.length,
     waiting: waiting.length,
     unread: unread.length,
-    text: children.length === 0 ? "No sessions yet" : parts.join(" · "),
     // The reason line is coloured by what it says, exactly as the session row
     // does it (SessionRow.css `.zl-row-brief.tone-*`): yellow only when
     // something has stopped, mauve for a result nobody has read.
@@ -83,8 +89,8 @@ export function ownerRowState(owner) {
 /* ── What an owner's row says ─────────────────────────────────────────────
 
    Four things an owner can be, and they are NOT the four a session can be:
-     idle    — standing by. The only number that matters is how many of its
-               children are live.
+     idle    — standing by. Its line says what its children are doing, and
+               says nothing when none of them work or wait (see ownerLine).
      working — it is doing something of its own (reading reports, writing the
                book). Blue, the product's running colour.
      asks    — its own conversation stopped on a question or an error. Amber.
@@ -125,6 +131,16 @@ export function ownerDotState(owner) {
 // the state clause takes the state's colour and the waiting clause is always
 // amber, so a working owner with two blocked children reads as one blue fact
 // and one amber fact instead of one line in a compromise colour.
+//
+// An idle owner's line is its children's state said in words, never one mark
+// per session (decisions/lenguaje-de-estado.md): "4 working" in blue when any
+// run and "N waiting on you" in amber beside or instead of it. When nothing
+// works or waits there is no lead at all (`lead` is null) and the row is the
+// name alone: a count of stopped sessions ("6 live", "6 idle") is a number
+// that asks nothing, and the owner decided the row should not spend a line on
+// it. The owner's dot keeps speaking only about the owner. `stated` marks
+// a lead that is the owner's own sentence, which is what sends the waiting
+// clause down to the third line (OwnerRow.jsx).
 export function ownerLine(owner) {
   const state = ownerState(owner);
   const summary = childrenSummary(owner?.children || []);
@@ -138,8 +154,10 @@ export function ownerLine(owner) {
           // A parked owner says so rather than counting sessions it is no
           // longer watching: "6 live" under shut eyes is two claims at once.
           : state === "saved" ? { tone: "neutral", text: "Saved" }
-            : { tone: "neutral", text: `${summary.live} live` };
-  return { lead, tail: summary.waiting > 0 ? `${summary.waiting} waiting on you` : "" };
+            : summary.working > 0 ? { tone: "blue", text: `${summary.working} working` }
+              : null;
+  const stated = state === "asks" || state === "working" || state === "unread";
+  return { lead, tail: summary.waiting > 0 ? `${summary.waiting} waiting on you` : "", stated };
 }
 
 // worstOwnerState — what a COLLAPSED Owners heading shows beside its count.

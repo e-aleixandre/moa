@@ -158,6 +158,7 @@ export function SessionPanel({
   const parent = panelPageParent(page);
   const close = onClose || closeSessionPanel;
   const goPage = onPage || setSessionPanelPage;
+  const sheet = variant === "sheet";
 
   useEffect(() => {
     focusPanelSubpage({ open, page, backButton: backRef.current });
@@ -166,6 +167,9 @@ export function SessionPanel({
   useEffect(() => {
     if (!open) return undefined;
     const unregister = inline ? () => {} : registerOverlay("session-panel");
+    // In a sheet the Escape is the sheet's (MobileSheet `onBack`): a second
+    // listener here made one key leave the page AND close the sheet.
+    if (sheet) return unregister;
     const onKey = (event) => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
@@ -177,7 +181,7 @@ export function SessionPanel({
       unregister();
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, sub, parent, inline]);
+  }, [open, sub, parent, inline, sheet]);
 
   if (!session) return null;
 
@@ -186,7 +190,6 @@ export function SessionPanel({
   const facts = factList || runFacts(session);
   const mcp = mcpVerdict(session);
   const usageRow = usageVerdict(session, usage);
-  const sheet = variant === "sheet";
 
   return (
     <aside

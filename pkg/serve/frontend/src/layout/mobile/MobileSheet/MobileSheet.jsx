@@ -1,6 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { MOTION, prefersReducedMotion } from "../../../hooks/motion.js";
 import { useSheetDismiss } from "../../../hooks/useSheetDismiss.js";
+import { useSheetLayer } from "../../../hooks/useSheetLayer.js";
+import { sheetEscape } from "../../../data/overlay-layers.js";
 import "./MobileSheet.css";
 
 const FOCUSABLE_SELECTOR =
@@ -23,20 +25,40 @@ const FOCUSABLE_SELECTOR =
 // positioned ancestor (.mconv), pinned to its edges (scrim inset:0, sheet
 // bottom:0) — same anchoring the SessionDrawer uses.
 //
+// One sheet at a time (hooks/useSheetLayer.js): asked for while another sheet
+// is showing, this one covers it instead of stacking a second grabber and ✕ on
+// top; when it goes, the covered one is shown again as it was. No door has to
+// remember that — it comes with being a MobileSheet.
+//
 // `bare` is for a child that IS a surface with its own head — the session panel,
 // which carries the eyebrow/back/X the dossier keeps in both densities. The
 // sheet still owns the scrim, the enter/leave, the focus trap and the grabber;
 // it just does not draw a second title over the child's.
-export function MobileSheet({ open, onClose, onClosed, title, scope, bare = false, children }) {
+//
+// `onBack` says the sheet is showing a PAGE pushed inside it, not its root:
+// Escape goes back one page instead of closing, and (unless bare) the head
+// draws ‹ `backLabel` beside the page's title. The page is still this sheet —
+// one grabber, one ✕ — so a step never becomes a second sheet over the first.
+export function MobileSheet({ open, onClose, onClosed, onBack, backLabel = "Back", title, scope, bare = false, children }) {
   const { sheetRef, veilRef, dragging, grabBind } = useSheetDismiss({ onClose });
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
   const closeTimerRef = useRef(null);
   const onClosedRef = useRef(onClosed);
   onClosedRef.current = onClosed;
+  const onBackRef = useRef(onBack);
+  onBackRef.current = onBack;
+  const backRef = useRef(null);
   const wasOpenRef = useRef(open);
   const [visible, setVisible] = useState(open);
   const [entered, setEntered] = useState(open);
+  // Before the focus effect below: on close its cleanup must run after this
+  // one has shown the covered sheet again, or focus has nowhere to land.
+  const layer = useSheetLayer({ open, present: open || visible });
+  const scrimRef = useCallback((el) => {
+    veilRef.current = el;
+    layer.rootRef(el);
+  }, [veilRef, layer.rootRef]);
 
   // Enter/leave state machine (mirrors SessionDrawer): mount then flip `entered`
   // next frame so the .is-open transition runs; on close drop `entered` and
@@ -96,8 +118,10 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, bare = fals
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e) => {
+      // A covered sheet hears nothing: the keys are the visible sheet's.
+      if (!layer.takesKey(e)) return;
       if (e.key === "Escape") {
-        onClose?.();
+        sheetEscape({ onBack: onBackRef.current, onClose });
         return;
       }
       if (e.key !== "Tab") return;
@@ -126,8 +150,11 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, bare = fals
   }, [open, onClose]);
 
   // On open: remember the trigger and focus the panel. On close: restore focus.
+  // `visible` too: the panel is only in the DOM from the commit after `open`,
+  // so on `open` alone there was nothing to focus and focus stayed behind —
+  // under a sheet this one covers, on an element that is now hidden.
   useLayoutEffect(() => {
-    if (!open) return undefined;
+    if (!open || !visible) return undefined;
     previousFocusRef.current = document.activeElement;
     const panel = panelRef.current;
     if (panel) panel.focus();
@@ -135,7 +162,14 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, bare = fals
       const toRestore = previousFocusRef.current;
       if (toRestore && typeof toRestore.focus === "function") toRestore.focus();
     };
-  }, [open]);
+  }, [open, visible]);
+
+  // A pushed page replaces the control that opened it: the keyboard goes to
+  // its ‹, whose label says where it returns.
+  const onPage = !!onBack && !bare;
+  useLayoutEffect(() => {
+    if (open && visible && onPage) backRef.current?.focus();
+  }, [open, visible, onPage, title]);
 
   if (!visible && !dragging) return null;
 
@@ -149,7 +183,7 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, bare = fals
   return (
     <div
       class={`msheet-scrim${isOpen ? " is-open" : ""}${dragging ? " is-drag" : ""}`}
-      ref={veilRef}
+      ref={scrimRef}
       onClick={onScrimClick}
     >
       <section
@@ -176,8 +210,19 @@ export function MobileSheet({ open, onClose, onClosed, title, scope, bare = fals
           children
         ) : (
           <>
-            <div class="msheet-head" {...grabBind}>
-              <span class="msheet-title">{title}</span>
+            <div class={`msheet-head${onPage ? " is-sub" : ""}`} {...grabBind}>
+              {onPage ? (
+                <>
+                  <button type="button" class="msheet-back" ref={backRef} onClick={onBack} aria-label={backLabel}>
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                  </button>
+                  <h2 class="msheet-title" key={title}>{title}</h2>
+                </>
+              ) : (
+                <span class="msheet-title">{title}</span>
+              )}
               {scope && <span class="msheet-scope">{scope}</span>}
             </div>
             <div class="msheet-body">{children}</div>

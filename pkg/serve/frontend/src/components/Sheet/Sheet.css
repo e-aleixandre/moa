@@ -15,6 +15,9 @@
 }
 @keyframes sheet-veil-in { from { opacity: 0; } }
 @keyframes sheet-veil-out { to { opacity: 0; } }
+/* Covered by a sheet opened over it on the phone (hooks/useSheetLayer.js):
+   hidden, not closed — it is shown again, as it was, when that sheet goes. */
+.sheet-overlay[data-covered] { visibility: hidden; }
 
 .sheet {
   width: 100%;
