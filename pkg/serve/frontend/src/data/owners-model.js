@@ -151,9 +151,11 @@ export function ownerLine(owner) {
     state === "asks" ? { tone: "yellow", text: own || "Asks you" }
       : state === "working" ? { tone: "blue", text: own || "Working…" }
         : state === "unread" ? { tone: "mauve", text: own || "Wrote to you · not read yet" }
-          // A parked owner says so rather than counting sessions it is no
-          // longer watching: "6 live" under shut eyes is two claims at once.
-          : state === "saved" ? { tone: "neutral", text: "Saved" }
+          // A parked owner does not count sessions it is no longer watching
+          // ("6 live" under shut eyes is two claims at once), and says nothing
+          // either: stopped reads as the bare name everywhere
+          // (decisions/lenguaje-de-estado.md), and its shut eyes already say it.
+          : state === "saved" ? null
             : summary.working > 0 ? { tone: "blue", text: `${summary.working} working` }
               : null;
   const stated = state === "asks" || state === "working" || state === "unread";
