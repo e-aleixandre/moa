@@ -550,6 +550,60 @@
 .dp-queued-flat { margin-bottom: 8px; }
 .dp-queued-flat:last-child { margin-bottom: 0; }
 
+/* P2 / P3 inherit .zl-sys, the transcript's marker grammar. The target is
+   44px, while the ink stays a single quiet hairline of type. */
+.dp-compact-tail {
+  padding: 2px 0;
+  color: var(--zl-t4);
+}
+.dp-compact-line {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dp-compact-count,
+.dp-compact-trace {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-micro);
+  letter-spacing: 0.01em;
+  color: var(--zl-t4);
+}
+.dp-compact-spring { flex: 1 1 auto; min-width: 8px; }
+.dp-compact-act {
+  flex: none;
+  color: var(--zl-t4);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-micro);
+  letter-spacing: 0.01em;
+}
+.dp-compact-line:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+@media (hover: hover) {
+  .dp-compact-line:hover .dp-compact-count,
+  .dp-compact-line:hover .dp-compact-act { color: var(--zl-t3); }
+}
+.dp-compact-trace {
+  display: flex;
+  gap: 6px;
+  line-height: 1.5;
+}
+.dp-compact-prefix { flex: none; }
+.dp-compact-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dp-compact-trace.is-command { font-family: var(--mono); }
+
 /* V's marker: the LiveBar's own tally shape, no chevron, no panel. Pressing
    it is the recall, and the arrow is what says so. */
 .dp-recall-pill { gap: 5px; padding: 0 9px; }

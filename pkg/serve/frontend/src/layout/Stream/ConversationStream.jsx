@@ -29,7 +29,7 @@ import {
 } from "../../data/stream-read-anchor.js";
 // PROPOSAL LAB — inert in production (see data/design-variant.js).
 import { designVariant, labCancelQueued, labBringBack } from "../../data/design-variant.js";
-import { QueuedTail, QueuedRecallTail } from "../../components/DesignProposals/DesignProposals.jsx";
+import { QueuedTail, QueuedRecallTail, QueuedCompactTail } from "../../components/DesignProposals/DesignProposals.jsx";
 
 // Stream — the scrollable conversation area. It renders the REAL
 // projected block list from stream-model.js (projectStream), mapping each
@@ -287,6 +287,16 @@ export function ConversationStream({
             <QueuedRecallTail
               queue={session.pendingSteers.filter(Boolean)}
               onBringBack={() => labBringBack(session.id)}
+            />
+          )}
+          {/* PROPOSALS P2 / P3: a queue belongs to the thread, but it need not
+              consume the space of message cells. P2 is one receipt marker;
+              P3 adds one clipped trace per message. */}
+          {(designVariant() === "p2" || designVariant() === "p3") && (session?.pendingSteers || []).filter(Boolean).length > 0 && (
+            <QueuedCompactTail
+              queue={session.pendingSteers.filter(Boolean)}
+              onBringBack={() => labBringBack(session.id)}
+              trace={designVariant() === "p3"}
             />
           )}
           {historyHydrationTailVisible(session) && (

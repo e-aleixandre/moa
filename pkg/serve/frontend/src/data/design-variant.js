@@ -14,7 +14,7 @@
 // The whole laboratory hangs off two URL parameters that production never
 // carries:
 //
-//   ?cq=today|a|b|c|p|v    which proposal to paint
+//   ?cq=today|a|b|c|p|p2|p3|v    which proposal to paint
 //   ?cqcase=one|many|call  which situation to seed (see the fixtures below)
 //
 // With no parameters — i.e. the product — `designVariant()` is "today" and
@@ -24,7 +24,7 @@
 import { setState, store, updateSession } from "./store.js";
 import { combineQueueText } from "./composer-queue.js";
 
-const VARIANTS = new Set(["today", "a", "b", "c", "p", "v"]);
+const VARIANTS = new Set(["today", "a", "b", "c", "p", "p2", "p3", "v"]);
 const CASES = new Set(["one", "many", "call"]);
 
 // Read once: the URL does not change under the app (the lab is entered by

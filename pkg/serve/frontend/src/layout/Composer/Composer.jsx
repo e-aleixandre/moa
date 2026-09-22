@@ -1202,7 +1202,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       {/* A's call — shared by P and V, and by C once the owner has asked to
           type instead. The input stays reachable during a call on purpose:
           the delegate can block waiting for an answer from this conversation. */}
-      {voiceLive.active && (proposal === "a" || proposal === "p" || proposal === "v" || (proposal === "c" && typeInstead)) && (
+      {voiceLive.active && (proposal === "a" || proposal === "p" || proposal === "p2" || proposal === "p3" || proposal === "v" || (proposal === "c" && typeInstead)) && (
         <CallLine call={voiceLive} onHangup={voiceLive.hangup} />
       )}
       {attachments.length > 0 && (

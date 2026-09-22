@@ -273,6 +273,39 @@ export function QueuedRecallTail({ queue, onBringBack }) {
   );
 }
 
+// --- P2 / P3 -------------------------------------------------------------
+// The queue becomes a thread marker, in the same family as a context-trim
+// notice: receipt is visible in the conversation but is not another message
+// cell. P2 is only that marker; P3 keeps one deliberately faint trace per
+// message. In both cases the single 44px row performs the only queue action.
+
+export function QueuedCompactTail({ queue, onBringBack, trace = false }) {
+  if (!queue?.length) return null;
+  const n = queue.length;
+  const count = `${n} message${n === 1 ? "" : "s"} queued · read at the next step`;
+  return (
+    <div class="zl-sys dp-compact-tail">
+      <button
+        type="button"
+        class="dp-compact-line"
+        onClick={onBringBack}
+        title={`Bring back — the ${n === 1 ? "message goes" : "messages go"} back to the input (Alt+↑)`}
+        aria-label={`${n} queued message${n === 1 ? "" : "s"} — bring ${n === 1 ? "it" : "them"} back to the input`}
+      >
+        <span class="dp-compact-count zl-data">{count}</span>
+        <span class="dp-compact-spring" aria-hidden="true" />
+        <span class="dp-compact-act">Bring back</span>
+      </button>
+      {trace && queue.map((m) => (
+        <div class={`dp-compact-trace${m.command ? " is-command" : ""}`} key={m.id}>
+          <span class="dp-compact-prefix" aria-hidden="true">›</span>
+          <span class="dp-compact-text">{m.text}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // --- V -------------------------------------------------------------------
 // "Only the marker". Same single action, no list: a pill in the LiveBar next
 // to Stop. It does not open anything — pressing it is the recall. The bar is
