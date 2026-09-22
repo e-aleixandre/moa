@@ -257,11 +257,11 @@
    inside the sheet it sheds its own chrome and fills the width. Global scope
    only — no per-session rows. */
 .mconv-settings-lbl {
-  font-family: var(--mono);
-  font-size: var(--text-micro);
+  font-size: var(--zl-fs-meta);
+  font-weight: var(--weight-semibold);
   text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  color: var(--overlay0);
+  letter-spacing: 0.08em;
+  color: var(--zl-t4);
   margin-bottom: var(--space-3);
 }
 .mconv-settings-body .notif-dropdown {

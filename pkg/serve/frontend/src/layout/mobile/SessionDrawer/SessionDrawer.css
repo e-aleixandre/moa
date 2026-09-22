@@ -161,12 +161,11 @@
 }
 
 .sdrawer-group {
-  font-family: var(--font);
-  font-size: var(--text-sm);
+  font-size: var(--zl-fs-meta);
   font-weight: var(--weight-semibold);
-  color: var(--overlay0);
+  color: var(--zl-t4);
   text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
+  letter-spacing: 0.08em;
   padding: 8px 4px 2px;
 }
 
