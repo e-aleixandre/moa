@@ -238,6 +238,14 @@ test('fmtTokens: 10k and above rounds to whole k (no 10.0k)', () => {
   expect(fmtTokens(999000)).toBe('999k');
 });
 
+test('fmtTokens: a million and above is M, like the model chips', () => {
+  expect(fmtTokens(999_600)).toBe('1M');
+  expect(fmtTokens(1_000_000)).toBe('1M');
+  expect(fmtTokens(2_552_000)).toBe('2.6M');
+  expect(fmtTokens(9_960_000)).toBe('10M');
+  expect(fmtTokens(127_682_000)).toBe('128M');
+});
+
 test('fmtTokens: invalid/negative is zero', () => {
   expect(fmtTokens(-5)).toBe('0');
   expect(fmtTokens(NaN)).toBe('0');

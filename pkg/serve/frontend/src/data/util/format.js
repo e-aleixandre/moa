@@ -445,7 +445,7 @@ export function mobileModelLabel(model) {
 }
 
 /** A compact token count for the status line: 41200 → "41k", 8700 → "8.7k",
- *  940 → "940". Keeps one decimal only while the value stays below 10k; at/above
+ *  940 → "940", 1_000_000 → "1M", 127_682_000 → "128M". Keeps one decimal only while the value stays below 10k; at/above
  *  10k it rounds to a whole "k" (and a value like 9990 that would round up to
  *  10.0k is shown as "10k", not "10.0k"). */
 export function fmtTokens(n) {
@@ -454,7 +454,12 @@ export function fmtTokens(n) {
   const k = n / 1000;
   const oneDecimal = Math.round(k * 10) / 10;
   if (oneDecimal < 10) return oneDecimal + 'k';
-  return Math.round(k) + 'k';
+  if (Math.round(k) < 1000) return Math.round(k) + 'k';
+  // Millions the way the model chips say them ("1M ctx"): a 1M window read
+  // "1000k" and a long session's cache "↓127682k".
+  const m = n / 1_000_000;
+  const mDecimal = Math.round(m * 10) / 10;
+  return (mDecimal < 10 ? mDecimal : Math.round(m)) + 'M';
 }
 
 /** A stable key identifying the project a session belongs to (its cwd). */
