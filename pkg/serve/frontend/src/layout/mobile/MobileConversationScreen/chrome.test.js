@@ -20,7 +20,10 @@ test("selectMobileChrome reuses the snapshot when only streaming text changes", 
   expect(second).toBe(first);
   expect(first.title).toBe("A");
   expect(first.showChip).toBe(true);
-  expect(first.active[0].last).toBe("Running");
+  expect(first.active[0].brief).toBe("Running");
+  // The row shape <Sidebar/> reads: a row with a reason names its project at
+  // the end instead of repeating the path.
+  expect(first.active[0].path).toBe("");
 });
 
 test("selectMobileChrome replaces the snapshot when another session needs you", () => {
