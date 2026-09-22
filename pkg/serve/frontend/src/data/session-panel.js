@@ -41,6 +41,18 @@ export function panelPageParent(page) {
   return PANEL_PAGE_PARENT[page] || 'root';
 }
 
+// panelAccessibleName names the surface after the page currently in front of
+// the user. At the root, the dossier still names what it belongs to.
+export function panelAccessibleName(session, page) {
+  return PANEL_PAGES[page] || (session?.kind === 'owner' ? 'This owner' : 'This session');
+}
+
+// A pushed page replaces the control that opened it. Put the keyboard at its
+// Back button, whose label says exactly where that control returns.
+export function focusPanelSubpage({ open, page, backButton }) {
+  if (open && page !== 'root') backButton?.focus();
+}
+
 export { SESSION_PANEL_CLOSED };
 
 export function sessionPanelSlice(state) {

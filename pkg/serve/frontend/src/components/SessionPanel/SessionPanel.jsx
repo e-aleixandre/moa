@@ -3,7 +3,7 @@ import { useStore } from "../../hooks/useStore.js";
 import { registerOverlay } from "../../data/overlays.js";
 import {
   PANEL_PAGES, artifactsVerdict, closeSessionPanel, mcpVerdict, panelPageParent, runFacts,
-  setSessionPanelPage, usageVerdict,
+  focusPanelSubpage, panelAccessibleName, setSessionPanelPage, usageVerdict,
 } from "../../data/session-panel.js";
 import { artifactsSlice, listArtifactsInPanel, openArtifactsList } from "../../data/artifacts.js";
 import { UsagePage } from "./UsagePage.jsx";
@@ -153,10 +153,15 @@ export function SessionPanel({
   style,
 }) {
   const panelRef = useRef(null);
+  const backRef = useRef(null);
   const sub = page !== "root";
   const parent = panelPageParent(page);
   const close = onClose || closeSessionPanel;
   const goPage = onPage || setSessionPanelPage;
+
+  useEffect(() => {
+    focusPanelSubpage({ open, page, backButton: backRef.current });
+  }, [open, page]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -177,6 +182,7 @@ export function SessionPanel({
   if (!session) return null;
 
   const isOwner = session.kind === "owner";
+  const panelName = panelAccessibleName(session, page);
   const facts = factList || runFacts(session);
   const mcp = mcpVerdict(session);
   const usageRow = usageVerdict(session, usage);
@@ -187,7 +193,7 @@ export function SessionPanel({
       ref={panelRef}
       class={`zl-side zl-side-right${open ? " is-open" : ""}${sheet ? " is-sheet" : ""}`}
       role="dialog"
-      aria-label={isOwner ? "This owner" : "This session"}
+      aria-label={panelName}
       aria-hidden={!open}
       /* Closed it is slid off-screen, not gone: its Close, its name field,
          Usage and Delete stay in the DOM, and aria-hidden removes them from
@@ -205,6 +211,7 @@ export function SessionPanel({
             <button
               type="button"
               class="zl-back"
+              ref={backRef}
               onClick={() => goPage(parent)}
               aria-label={parent === "root"
                 ? (isOwner ? "Back to this owner" : "Back to this session")
@@ -212,7 +219,7 @@ export function SessionPanel({
             >
               <BackIcon />
             </button>
-            <span class="zl-side-title is-page" key={page}>{PANEL_PAGES[page]}</span>
+            <h2 class="zl-side-title is-page" key={page}>{PANEL_PAGES[page]}</h2>
           </>
         ) : (
           <>
