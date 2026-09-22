@@ -24,7 +24,7 @@
   flex-direction: column;
   border-radius: var(--zl-r-lg);
   background: var(--zl-sheet);
-  box-shadow: var(--zl-rim-2), 0 16px 48px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--zl-rim-2), var(--zl-shadow-pop);
   color: var(--zl-t1);
   font-family: var(--font);
   font-size: var(--zl-fs-body);

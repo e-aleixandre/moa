@@ -60,7 +60,7 @@
   background: var(--zl-sheet);
   /* Rim and shadow rather than a border: the surface is lit from its own edge,
      which is what keeps it reading as floating rather than drawn. */
-  box-shadow: var(--zl-rim-2), 0 24px 64px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--zl-rim-2), var(--zl-shadow-pop);
   border-radius: var(--zl-r-lg);
   color: var(--zl-t1);
   font-family: var(--font);

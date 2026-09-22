@@ -68,7 +68,7 @@
      which is what keeps it reading as floating rather than drawn. */
   box-shadow:
     var(--zl-rim-2),
-    0 16px 48px rgba(0, 0, 0, 0.45);
+    var(--zl-shadow-pop);
   color: var(--zl-t1);
   /* It GROWS from the corner nearest the button: the menu belongs to the
      control that opened it and the eye should see it come out of it.
