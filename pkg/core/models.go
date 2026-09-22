@@ -25,6 +25,11 @@ var knownModels = map[string]Model{
 		// Cache writes: 1.25x input for the 5m window, 2x for the 1h window.
 		Pricing: &Pricing{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5, CacheWrite1h: 20},
 	},
+	"claude-opus-5-5": {
+		ID: "claude-opus-5-5", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Opus 5.5", MaxInput: 1_000_000, MaxOutput: 131072,
+		Pricing: &Pricing{Input: 4, Output: 20, CacheRead: 0.2, CacheWrite: 5, CacheWrite1h: 8},
+	},
 	"claude-opus-5": {
 		ID: "claude-opus-5", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Opus 5", MaxInput: 1_000_000, MaxOutput: 131072,
@@ -224,7 +229,7 @@ func init() {
 var modelAliases = map[string]string{
 	// Anthropic
 	"sonnet": "claude-sonnet-5",
-	"opus":   "claude-opus-5",
+	"opus":   "claude-opus-5-5",
 	"haiku":  "claude-haiku-4-5-20251001",
 	"fable":  "claude-fable-5-1",
 	// OpenAI
@@ -395,6 +400,7 @@ var modelDisplayOrder = []string{
 	// Anthropic
 	"claude-fable-5-1",
 	"claude-fable-5",
+	"claude-opus-5-5",
 	"claude-opus-5",
 	"claude-sonnet-5",
 	"claude-opus-4-8",

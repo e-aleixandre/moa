@@ -20,6 +20,15 @@ func TestResolveModel_Alias(t *testing.T) {
 	}
 }
 
+func TestResolveModel_Opus55(t *testing.T) {
+	for _, spec := range []string{"opus", "claude-opus-5-5", "anthropic/claude-opus-5-5"} {
+		m, ok := ResolveModel(spec)
+		if !ok || m.ID != "claude-opus-5-5" || m.Provider != "anthropic" {
+			t.Errorf("ResolveModel(%q) = %+v, %v", spec, m, ok)
+		}
+	}
+}
+
 func TestResolveModel_Grok(t *testing.T) {
 	// The short alias tracks the newest model; older ones stay reachable by ID.
 	for _, spec := range []string{"grok", "grok-4.7", "xai/grok-4.7", "grok-4.7-build"} {
@@ -141,6 +150,22 @@ func TestFable51Pricing(t *testing.T) {
 	prev, ok := ResolveModel("claude-fable-5")
 	if !ok || prev.Pricing == nil || prev.Pricing.CacheRead != 1 {
 		t.Fatalf("claude-fable-5 = %+v, %v; want cache read $1", prev, ok)
+	}
+}
+
+func TestOpus55Pricing(t *testing.T) {
+	model, ok := ResolveModel("opus")
+	if !ok || model.ID != "claude-opus-5-5" || model.Pricing == nil {
+		t.Fatalf("opus alias = %+v, %v; want claude-opus-5-5", model, ok)
+	}
+	p := model.Pricing
+	if model.MaxInput != 1_000_000 || model.MaxOutput != 131072 ||
+		p.Input != 4 || p.Output != 20 || p.CacheRead != 0.2 ||
+		p.CacheWrite != 5 || p.CacheWrite1h != 8 {
+		t.Fatalf("Opus 5.5 definition = %+v, pricing = %+v", model, p)
+	}
+	if got, want := p.Cost(Usage{Input: 1_000, CacheRead: 2_000, CacheWrite: 7_000, CacheWrite1h: 4_000, Output: 5_000}), 0.1514; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("Opus 5.5 cost = %v, want %v", got, want)
 	}
 }
 
@@ -625,11 +650,11 @@ func TestResolveModel_CaseAndSpaceInsensitive(t *testing.T) {
 		"Terra":           "gpt-5.6-terra",
 		"Luna":            "gpt-5.6-luna",
 		"Astra":           "gpt-6-astra",
-		"Opus":            "claude-opus-5",
+		"Opus":            "claude-opus-5-5",
 		"Fable":           "claude-fable-5-1",
 		" sol ":           "gpt-5.6-sol",
 		"openai/Sol":      "gpt-5.6-sol",
-		"ANTHROPIC/Opus":  "claude-opus-5",
+		"ANTHROPIC/Opus":  "claude-opus-5-5",
 		"Claude-Sonnet-5": "claude-sonnet-5",
 		"Claude Sonnet 5": "claude-sonnet-5",
 	}
