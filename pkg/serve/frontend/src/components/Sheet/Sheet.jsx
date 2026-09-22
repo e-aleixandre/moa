@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "preact/hooks";
 import { createPortal } from "preact/compat";
 import { X } from "lucide-preact";
-import { IconButton } from "../../primitives/index.js";
 import { useSheetLayer } from "../../hooks/useSheetLayer.js";
 import { useStore } from "../../hooks/useStore.js";
 import { usePresence } from "../../hooks/usePresence.js";
@@ -130,9 +129,11 @@ export function Sheet({ open, onClose, title, ariaLabel, "aria-label": ariaLabel
         {title && (
           <div class="sheet-head">
             <h3>{title}</h3>
-            <IconButton label="Close" onClick={requestClose}>
-              <X size={15} />
-            </IconButton>
+            {/* The close button every other sheet uses (settings, session
+                panel, model picker): one way to shut a surface. */}
+            <button type="button" class="zl-x" onClick={requestClose} aria-label="Close">
+              <X size={16} />
+            </button>
           </div>
         )}
         <div class="sheet-body">{children}</div>
