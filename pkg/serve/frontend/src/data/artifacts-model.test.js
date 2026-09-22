@@ -3,7 +3,7 @@
 import { test, expect } from 'bun:test';
 import {
   ARTIFACTS_CLOSED, acceptsResponse, artifactFailure, artifactFileId, artifactKind, artifactSessionId,
-  currentArtifact, filterArtifacts, isHtmlArtifact, normalizeArtifacts, seedFromFile,
+  artifactPosition, currentArtifact, filterArtifacts, isHtmlArtifact, normalizeArtifacts, seedFromFile,
 } from './artifacts-model.js';
 
 const payload = {
@@ -86,6 +86,13 @@ test('currentArtifact prefers the authoritative entry over the card seed', () =>
   expect(currentArtifact(slice).name).toBe('Report.md');
   expect(currentArtifact({ ...slice, items: [] }).name).toBe('stale.md');
   expect(currentArtifact({ ...slice, view: 'list' })).toBeNull();
+});
+
+test('artifactPosition follows the server collection order and ignores a seed outside it', () => {
+  const items = normalizeArtifacts(payload);
+  expect(artifactPosition(items, 'aaa')).toEqual({ index: 0, total: 2 });
+  expect(artifactPosition(items, 'bbb')).toEqual({ index: 1, total: 2 });
+  expect(artifactPosition(items, 'seed-only')).toBeNull();
 });
 
 test('seedFromFile carries optional send_file metadata and falls back to the name', () => {

@@ -6,7 +6,7 @@
 import { test, expect, beforeEach, afterEach } from 'bun:test';
 import { store, setState } from '../../data/store.js';
 import { ARTIFACTS_CLOSED, artifactRevision, originLabel } from '../../data/artifacts-model.js';
-import { artifactsOrigin, openArtifactsList } from '../../data/artifacts.js';
+import { artifactsOrigin, moveArtifact, openArtifactsList } from '../../data/artifacts.js';
 import { pushLayer, isTopLayer, __resetOverlayLayersForTests } from '../../data/overlay-layers.js';
 
 const originalFetch = globalThis.fetch;
@@ -63,6 +63,27 @@ test('the origin changes with the owner when the drawer switches conversation', 
   expect(artifactsOrigin(store.get())).toBe('ws race fix');
   openArtifactsList('B');
   expect(artifactsOrigin(store.get())).toBe('Untitled');
+});
+
+test('reader navigation follows the collection without wrapping', () => {
+  setState({ artifacts: {
+    ...ARTIFACTS_CLOSED,
+    ownerSessionId: 'A',
+    view: 'reader',
+    fileId: 'second',
+    from: 'chat',
+    items: [
+      { id: 'first', name: 'first.png' },
+      { id: 'second', name: 'second.png' },
+      { id: 'third', name: 'third.pdf' },
+    ],
+  } });
+  expect(moveArtifact(1)).toBe(true);
+  expect(store.get().artifacts.fileId).toBe('third');
+  expect(moveArtifact(1)).toBe(false);
+  expect(store.get().artifacts.fileId).toBe('third');
+  expect(moveArtifact(-1)).toBe(true);
+  expect(store.get().artifacts.fileId).toBe('second');
 });
 
 test('the accessible name always carries the origin, even where it is hidden', () => {
