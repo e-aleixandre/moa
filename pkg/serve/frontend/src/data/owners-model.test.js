@@ -37,24 +37,22 @@ test("groups come back in reading order and empty ones are dropped", () => {
   expect(groups[0].children.map((c) => c.id)).toEqual(["b"]);
 });
 
-test("the summary counts live children and names only what has stopped", () => {
+test("the summary counts live children and what has stopped", () => {
   const sum = childrenSummary([
     child({ state: "running" }),
     child({ state: "permission" }),
     child({ state: "saved" }),
   ]);
   expect(sum).toMatchObject({ live: 2, waiting: 1, tone: "yellow" });
-  expect(sum.text).toBe("2 live · 1 waiting on you");
 });
 
-test("unread is reported only when nothing is waiting, and in mauve", () => {
+test("unread wins only when nothing is waiting, and is mauve", () => {
   const sum = childrenSummary([child({ state: "idle", unseen: true }), child({ state: "running" })]);
   expect(sum).toMatchObject({ waiting: 0, unread: 1, tone: "mauve" });
-  expect(sum.text).toBe("2 live · 1 unread");
 });
 
-test("an owner with no sessions says so instead of printing a zero", () => {
-  expect(childrenSummary([]).text).toBe("No sessions yet");
+test("an owner with no sessions has no child counts", () => {
+  expect(childrenSummary([])).toMatchObject({ live: 0, working: 0, waiting: 0, unread: 0 });
 });
 
 test("the owner's dot is its conversation's state, and saved is not a state to draw", () => {

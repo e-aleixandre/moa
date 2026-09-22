@@ -53,8 +53,7 @@ export function groupChildren(children = []) {
     .filter((g) => g.children.length > 0);
 }
 
-// childrenSummary — the one line an owner row can afford. "Live" is every
-// child that is not parked: the owner is answerable for them. "Waiting" is the
+// childrenSummary — the counts the owner surfaces need. "Waiting" is the
 // subset that has stopped until someone answers, which is the only number that
 // should ever pull the eye.
 export function childrenSummary(children = []) {
@@ -64,15 +63,11 @@ export function childrenSummary(children = []) {
   // Working counts every child that runs, read or not: an unseen result on a
   // running session does not stop it moving.
   const working = children.filter((c) => (c.state || "idle") === "running");
-  const parts = [`${live.length} live`];
-  if (waiting.length > 0) parts.push(`${waiting.length} waiting on you`);
-  else if (unread.length > 0) parts.push(`${unread.length} unread`);
   return {
     live: live.length,
     working: working.length,
     waiting: waiting.length,
     unread: unread.length,
-    text: children.length === 0 ? "No sessions yet" : parts.join(" · "),
     // The reason line is coloured by what it says, exactly as the session row
     // does it (SessionRow.css `.zl-row-brief.tone-*`): yellow only when
     // something has stopped, mauve for a result nobody has read.
