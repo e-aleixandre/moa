@@ -269,6 +269,17 @@ test('an answered ask_user row retains its raw Q&A data without a generic body',
   expect(row.body).toBeUndefined();
 });
 
+test('a live ask_user row is hidden while its pending card asks the question', () => {
+  const questions = [{ question: 'Which colour theme?', options: ['Dark', 'Light'] }];
+  const s = session([tool('ask-1', 'ask_user', { questions }, 'running')], {
+    pendingAsk: { id: 'pending-ask-1', questions },
+  });
+
+  expect(projectStream(s)[0].blocks).toEqual([]);
+  s.pendingAsk = null;
+  expect(projectStream(s)[0].blocks[0].rows[0].tool).toBe('ask_user');
+});
+
 test('the right-hand slot separates a measure from an echo', () => {
   const [multi, single, failed, rejected] = projectStream(session([
     tool('t1', 'read', { path: 'a.go' }, 'done', 'one\ntwo\nthree'),
