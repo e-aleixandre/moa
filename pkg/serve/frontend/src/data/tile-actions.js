@@ -3,7 +3,7 @@
 import { acknowledgeVisibleAttentionThrough, syncConnections } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import { armReadAnchor, __resetReadAnchorsForTests } from './stream-read-anchor.js';
-import { isOrdinarySession } from './util/project-sessions.js';
+import { landingOrder } from './util/project-sessions.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
   splitTileNode, removeTileNode, setTileSession, swapSessions,
@@ -155,9 +155,8 @@ export function setMobile(isMobile) { setState({ isMobile }); }
 export function autoFillTiles() {
   const state = store.get();
   const assigned = new Set(allSessionIds(state.tileTree));
-  const available = Object.values(state.sessions)
-    .filter(s => isOrdinarySession(s) && s.state !== 'saved' && !assigned.has(s.id))
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const available = landingOrder(state.sessions, state.owners?.list)
+    .filter(id => !assigned.has(id));
 
   if (available.length === 0) return;
 
@@ -167,7 +166,7 @@ export function autoFillTiles() {
     if (available.length === 0) break;
     const tile = findTile(tree, tileId);
     if (tile && !tile.sessionId) {
-      tree = setTileSession(tree, tileId, available.shift().id);
+      tree = setTileSession(tree, tileId, available.shift());
       changed = true;
     }
   }
@@ -180,11 +179,9 @@ export function autoFillTiles() {
 export function autoSelectMobile() {
   const state = store.get();
   if (state.activeSession && state.sessions[state.activeSession]) return;
-  const active = Object.values(state.sessions)
-    .filter(s => isOrdinarySession(s) && s.state !== 'saved')
-    .sort((a, b) => (b.updated || 0) - (a.updated || 0));
-  if (active.length > 0) {
-    setState({ activeSession: active[0].id });
+  const [first] = landingOrder(state.sessions, state.owners?.list);
+  if (first) {
+    setState({ activeSession: first });
     afterVisibilityChange();
   }
 }

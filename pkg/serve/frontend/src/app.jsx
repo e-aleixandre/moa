@@ -58,6 +58,9 @@ function useBootstrap() {
   const [version, setVersion] = useState(null);
   const isMobile = useStore((s) => s.isMobile);
   const sessionCount = useStore((s) => Object.keys(s.sessions).length);
+  // Which owner conversation each owner's children credit when choosing where
+  // to land (landingOrder); it changes only when an owner is created or removed.
+  const ownersKey = useStore((s) => (s.owners?.list || []).map((o) => `${o.id}:${o.session_id || ""}`).sort().join(","));
 
   // Warm notification taps use the same openSession behavior as a cold
   // ?session= deep link, waiting for the authoritative initial session list.
@@ -217,7 +220,7 @@ function useBootstrap() {
   useEffect(() => {
     if (!isMobile) autoFillTiles();
     else autoSelectMobile();
-  }, [isMobile, sessionCount]);
+  }, [isMobile, sessionCount, ownersKey]);
 
   // ⌘K / Ctrl+K — global command-palette toggle. Active in every view.
   // The chord always works, even inside the composer textarea (spec §6): we

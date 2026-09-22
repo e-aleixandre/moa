@@ -36,6 +36,36 @@ export function ordinarySessions(sessions = []) {
   return sessions.filter(isOrdinarySession);
 }
 
+// landingOrder ranks the conversations the app may land on when nothing is
+// shown: open ones, most recent activity first. Unlike the lists, an owner
+// counts here — a moa whose only live work belongs to owners must not open on
+// the empty state as if it had restarted. The sessions an owner dispatched are
+// not landed on themselves: their activity is credited to their owner's
+// conversation, which is where the user reads them from. Children whose owner
+// is not in `owners` yet are skipped until the owners roster arrives. An owner
+// credited only by a live child may itself be saved; landing on it resumes it,
+// which the product owner chose over hiding live work behind the empty state.
+export function landingOrder(sessions = {}, owners = []) {
+  const ownerSessionIds = new Map();
+  for (const own of owners || []) {
+    if (own?.id && own.session_id && sessions[own.session_id]) ownerSessionIds.set(own.id, own.session_id);
+  }
+  const recency = new Map();
+  const credit = (id, at) => {
+    if (!recency.has(id) || at > recency.get(id)) recency.set(id, at);
+  };
+  for (const sess of Object.values(sessions || {})) {
+    if (!sess || sess.state === "saved") continue;
+    if (isOrdinarySession(sess) || sess.kind === "owner") {
+      credit(sess.id, sess.updated || 0);
+      continue;
+    }
+    const ownerSessionId = ownerSessionIds.get(sess.ownerId || sess.owner_id);
+    if (ownerSessionId) credit(ownerSessionId, sess.updated || 0);
+  }
+  return [...recency].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+}
+
 const updated = (session) => session.updated || 0;
 const isSaved = (session) => session.state === "saved" || session.saved;
 const attention = (session) => session.state === "permission" ? "permission" : session.state === "error" ? "error" : null;
