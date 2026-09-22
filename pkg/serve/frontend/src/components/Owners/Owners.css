@@ -576,7 +576,9 @@
 .ow-sum-t.tone-blue { color: var(--blue); }
 .ow-sum-t.tone-yellow { color: var(--zl-yellow); }
 .ow-sum-t.tone-mauve { color: var(--zl-accent); }
-.ow-sum-sep { color: var(--zl-t4); }
+/* A flex item trims its own edge spaces, so " · " collapsed to a dot glued
+   to both clauses; at title size a bare space is still too tight to part them. */
+.ow-sum-sep { color: var(--zl-t4); white-space: pre; margin: 0 0.2em; }
 .ow-sum-wait { color: var(--zl-yellow); }
 .ow-sum-d { font-size: var(--zl-fs-meta); line-height: 1.5; color: var(--zl-t4); }
 
