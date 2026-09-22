@@ -195,6 +195,19 @@ test("the owner row drops its second line when there is nothing to say", () => {
   expect(ownerLine({ session_state: "idle", children: [] }).lead).toBe(null);
 });
 
+test("the owner detail reuses the row clauses and omits its stopped summary", () => {
+  const src = readFileSync(new URL("../components/Owners/Owners.jsx", import.meta.url), "utf8");
+  expect(src).toMatch(/const \{ lead, tail \} = ownerLine\(owner\)/);
+  expect(src).toMatch(/if \(!lead && !tail\) return null/);
+  expect(src).toMatch(/lead && tail && <span class="ow-sum-sep"/);
+  expect(ownerLine({ session_state: "idle", children: [running, waiting] })).toEqual({
+    lead: { tone: "blue", text: "1 working" }, tail: "1 waiting on you", stated: false,
+  });
+  expect(ownerLine({ session_state: "idle", children: [idleChild] })).toEqual({
+    lead: null, tail: "", stated: false,
+  });
+});
+
 test("the owner row wears no mark per session and colours its clauses", () => {
   const src = readFileSync(new URL("../components/Owners/OwnerRow.jsx", import.meta.url), "utf8");
   expect(src).toMatch(/tone-\$\{lead\?\.tone/);

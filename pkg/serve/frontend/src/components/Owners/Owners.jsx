@@ -11,7 +11,7 @@ import { ensureModelCatalog, modelCatalog } from "../../data/model-catalog.js";
 import { useStore } from "../../hooks/useStore.js";
 import { modelCodename } from "../../data/util/format.js";
 import { api } from "../../data/api.js";
-import { bookTree, childrenSummary, groupChildren, ownerRows, ownerState } from "../../data/owners-model.js";
+import { bookTree, groupChildren, ownerLine, ownerRows, ownerState } from "../../data/owners-model.js";
 import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatar, OwnerAvatarFor, defaultAvatar } from "./OwnerAvatar.jsx";
 import { loadOwnerBook, openBookFile, ownersSlice, saveBookFile, updateOwner } from "../../data/owners.js";
 import { openSession } from "../../data/tile-actions.js";
@@ -499,12 +499,11 @@ function ChildRow({ child, onOpen }) {
 
 export function OwnerOverview({ owner, onOpenChild, onEdit }) {
   const groups = groupChildren(owner.children || []);
-  const summary = childrenSummary(owner.children || []);
   return (
     <div class="ow-page">
       <button type="button" class="ow-btn ow-edit-owner" onClick={() => onEdit?.()}>Edit owner</button>
+      <OwnerStateSummary owner={owner} />
       <div class="ow-sum">
-        <span class={`ow-sum-t tone-${summary.tone}`}>{summary.text}</span>
         <span class="ow-sum-d">Every session whose folder resolves to this project is one of these — nothing is linked by hand.</span>
       </div>
       {groups.length === 0 && <p class="ow-quiet">No session has run in this project yet.</p>}
@@ -514,6 +513,18 @@ export function OwnerOverview({ owner, onOpenChild, onEdit }) {
           {group.children.map((child) => <ChildRow child={child} onOpen={onOpenChild} key={child.id} />)}
         </div>
       ))}
+    </div>
+  );
+}
+
+function OwnerStateSummary({ owner }) {
+  const { lead, tail } = ownerLine(owner);
+  if (!lead && !tail) return null;
+  return (
+    <div class="ow-sum ow-sum-state">
+      {lead && <span class={`ow-sum-t tone-${lead.tone}`}>{lead.text}</span>}
+      {lead && tail && <span class="ow-sum-sep" aria-hidden="true"> · </span>}
+      {tail && <span class="ow-sum-t ow-sum-wait">{tail}</span>}
     </div>
   );
 }
