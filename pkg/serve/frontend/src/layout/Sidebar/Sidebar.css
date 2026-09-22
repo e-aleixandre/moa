@@ -31,7 +31,11 @@
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: var(--zl-sheet);
+  /* Translucent, so the aurora reaches the column: opaque, it read flat
+     beside a conversation that lets the aurora through (78% canvas). The
+     sheet colour keeps its lift, and 60% is where the pools show without
+     touching the contrast of the rows. */
+  background: color-mix(in srgb, var(--zl-sheet) 60%, transparent);
   box-shadow: inset -1px 0 0 var(--zl-line);
   color: var(--zl-t1);
   font-family: var(--font);
