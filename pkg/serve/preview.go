@@ -29,12 +29,13 @@ const previewHTMLPrefix = 64 << 10
 const previewAuthCookie = "moa_preview_auth"
 
 type previewTarget struct {
-	url          *url.URL
-	aliases      []string
-	ips          []net.IP
-	port         string
-	generation   uint64
-	parentOrigin string
+	url             *url.URL
+	aliases         []string
+	ips             []net.IP
+	port            string
+	generation      uint64
+	cookieNamespace string
+	parentOrigin    string
 }
 
 type previewDialPlanKey struct{}
@@ -62,12 +63,13 @@ type PreviewProxy struct {
 	closeCtx    context.Context
 	closeCancel context.CancelFunc
 
-	mu           sync.RWMutex
-	target       *previewTarget
-	generation   uint64
-	connections  map[uint64]map[net.Conn]struct{}
-	clearPending bool
-	closed       bool
+	mu              sync.RWMutex
+	target          *previewTarget
+	generation      uint64
+	cookieNamespace string
+	connections     map[uint64]map[net.Conn]struct{}
+	clearPending    bool
+	closed          bool
 }
 
 func NewPreviewProxy(publicURL string, moaPort, listenPort int) *PreviewProxy {
@@ -79,10 +81,14 @@ func NewPreviewProxy(publicURL string, moaPort, listenPort int) *PreviewProxy {
 	if err != nil {
 		panic(fmt.Sprintf("preview authentication: %v", err))
 	}
+	cookieNamespace, err := newPreviewSecret()
+	if err != nil {
+		panic(fmt.Sprintf("preview cookie namespace: %v", err))
+	}
 	closeCtx, closeCancel := context.WithCancel(context.Background())
 	p := &PreviewProxy{
 		publicURL: strings.TrimRight(publicURL, "/"), moaPort: moaPort, listenPort: listenPort,
-		capability: capability, authSecret: authSecret, resolve: net.LookupIP, localIPs: localInterfaceIPs,
+		capability: capability, authSecret: authSecret, cookieNamespace: cookieNamespace, resolve: net.LookupIP, localIPs: localInterfaceIPs,
 		connections: make(map[uint64]map[net.Conn]struct{}),
 		closeCtx:    closeCtx,
 		closeCancel: closeCancel,
@@ -201,7 +207,7 @@ func (p *PreviewProxy) setTarget(raw string, aliases []string, parentOrigin stri
 	}
 	oldGeneration := p.generation
 	p.generation++
-	p.target = &previewTarget{url: u, aliases: clean, ips: ips, port: port, generation: p.generation, parentOrigin: parent}
+	p.target = &previewTarget{url: u, aliases: clean, ips: ips, port: port, generation: p.generation, cookieNamespace: p.cookieNamespace, parentOrigin: parent}
 	p.capability = capability
 	p.authSecret = authSecret
 	p.clearPending = true
@@ -306,7 +312,17 @@ func (p *PreviewProxy) Handler() http.Handler {
 		_, _ = w.Write(previewInspector)
 	})
 	mux.HandleFunc("/", p.serve)
-	return mux
+	return blockServiceWorkerScripts(mux)
+}
+
+func blockServiceWorkerScripts(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Service-Worker"), "script") {
+			http.Error(w, "Service Worker scripts are disabled in live previews.", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ProtectedHandler authenticates every document, asset, request and upgrade.
@@ -391,7 +407,7 @@ func (p *PreviewProxy) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		pr.Out.Header.Del("Accept-Encoding")
 		pr.Out.Header.Del("Authorization")
-		filterRequestCookies(pr.Out, target.generation)
+		filterRequestCookies(pr.Out, target.cookieNamespace, target.generation)
 		pr.Out.Header.Set("X-Forwarded-Proto", target.url.Scheme)
 		pr.Out.Header.Set("X-Forwarded-Host", r.Host)
 	}
@@ -481,8 +497,8 @@ func (p *PreviewProxy) closeGenerations(through uint64) {
 	}
 }
 
-func filterRequestCookies(r *http.Request, generation uint64) {
-	prefix := previewCookiePrefix(generation)
+func filterRequestCookies(r *http.Request, namespace string, generation uint64) {
+	prefix := previewCookiePrefix(namespace, generation)
 	var keep []string
 	for _, c := range r.Cookies() {
 		if strings.HasPrefix(c.Name, prefix) {
@@ -494,8 +510,8 @@ func filterRequestCookies(r *http.Request, generation uint64) {
 		r.Header.Set("Cookie", strings.Join(keep, "; "))
 	}
 }
-func previewCookiePrefix(generation uint64) string {
-	return "moa_preview_" + strconv.FormatUint(generation, 10) + "_"
+func previewCookiePrefix(namespace string, generation uint64) string {
+	return "moa_preview_" + namespace + "_" + strconv.FormatUint(generation, 10) + "_"
 }
 
 var metaCSP = regexp.MustCompile(`(?is)<meta\b[^>]*\bhttp-equiv\s*=\s*(?:"content-security-policy"|'content-security-policy'|content-security-policy)[^>]*>`)
@@ -514,7 +530,7 @@ func (p *PreviewProxy) rewriteResponse(resp *http.Response, target *previewTarge
 	for _, h := range []string{"Location", "Refresh", "Link"} {
 		rewriteHeaderValues(resp.Header, h, func(v string) string { return p.rewrite(v, target) })
 	}
-	filterResponseCookies(resp.Header, target.generation, p.secure)
+	filterResponseCookies(resp.Header, target.cookieNamespace, target.generation, p.secure)
 	if resp.Body == nil || resp.Header.Get("Content-Encoding") != "" || resp.Request.Method == http.MethodHead || resp.StatusCode == http.StatusPartialContent || resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotModified {
 		return nil
 	}
@@ -712,7 +728,7 @@ func insertBytes(body []byte, at int, addition []byte) []byte {
 	out = append(out, addition...)
 	return append(out, body[at:]...)
 }
-func filterResponseCookies(h http.Header, generation uint64, secure bool) {
+func filterResponseCookies(h http.Header, namespace string, generation uint64, secure bool) {
 	out := []string{}
 	for _, v := range h.Values("Set-Cookie") {
 		parts := strings.Split(v, ";")
@@ -723,7 +739,7 @@ func filterResponseCookies(h http.Header, generation uint64, secure bool) {
 		if !ok || strings.EqualFold(name, authCookieName) || strings.EqualFold(name, previewAuthCookie) {
 			continue
 		}
-		kept := []string{previewCookiePrefix(generation) + name + "=" + value}
+		kept := []string{previewCookiePrefix(namespace, generation) + name + "=" + value}
 		for _, part := range parts[1:] {
 			t := strings.TrimSpace(part)
 			if strings.HasPrefix(strings.ToLower(t), "domain=") {

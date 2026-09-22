@@ -47,7 +47,7 @@ func TestPreviewRewritesInjectsAndNamespacesCookies(t *testing.T) {
 	p := newPreviewFor(t, up.URL)
 	r := httptest.NewRequest("GET", "http://node.ts.net:7492/", nil)
 	r.Header.Set("Authorization", "Bearer owner")
-	r.Header.Set("Cookie", previewCookiePrefix(1)+"app=y; moa_auth=x; app=z")
+	r.Header.Set("Cookie", previewCookiePrefix(p.cookieNamespace, 1)+"app=y; moa_auth=x; app=z")
 	w := httptest.NewRecorder()
 	p.Handler().ServeHTTP(w, r)
 	if got := w.Header().Get("Location"); got != "https://node.ts.net:7492/login" {
@@ -57,7 +57,7 @@ func TestPreviewRewritesInjectsAndNamespacesCookies(t *testing.T) {
 		t.Fatal("frame options survived")
 	}
 	cookies := strings.Join(w.Header().Values("Set-Cookie"), ";")
-	if !strings.Contains(cookies, previewCookiePrefix(1)+"app=x") || !strings.Contains(cookies, "SameSite=Lax") || !strings.Contains(cookies, "Secure") || strings.Contains(cookies, "Domain=") || strings.Contains(cookies, "moa_auth") {
+	if !strings.Contains(cookies, previewCookiePrefix(p.cookieNamespace, 1)+"app=x") || !strings.Contains(cookies, "SameSite=Lax") || !strings.Contains(cookies, "Secure") || strings.Contains(cookies, "Domain=") || strings.Contains(cookies, "moa_auth") {
 		t.Fatalf("cookies=%s", cookies)
 	}
 	body := w.Body.String()
@@ -66,6 +66,58 @@ func TestPreviewRewritesInjectsAndNamespacesCookies(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(body), "content-security-policy") {
 		t.Fatalf("meta CSP survived: %q", body)
+	}
+}
+
+func TestPreviewCookiesAreNotForwardedAcrossActivations(t *testing.T) {
+	upstreamA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "session=app-a; HttpOnly")
+	}))
+	defer upstreamA.Close()
+	proxyA := newPreviewFor(t, upstreamA.URL)
+	responseA := httptest.NewRecorder()
+	proxyA.Handler().ServeHTTP(responseA, httptest.NewRequest(http.MethodGet, "https://preview.test/", nil))
+	cookieA := findCookie(responseA.Result().Cookies(), previewCookiePrefix(proxyA.cookieNamespace, 1)+"session")
+	if cookieA == nil {
+		t.Fatal("app A cookie was not rewritten")
+	}
+	proxyA.Close()
+
+	var receivedByB string
+	upstreamB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedByB = r.Header.Get("Cookie")
+	}))
+	defer upstreamB.Close()
+	proxyB := newPreviewFor(t, upstreamB.URL)
+	if proxyA.cookieNamespace == proxyB.cookieNamespace {
+		t.Fatal("separate activations reused a cookie namespace")
+	}
+	requestB := httptest.NewRequest(http.MethodGet, "https://preview.test/", nil)
+	requestB.AddCookie(cookieA)
+	proxyB.Handler().ServeHTTP(httptest.NewRecorder(), requestB)
+	if receivedByB != "" {
+		t.Fatalf("app B received app A cookie: %q", receivedByB)
+	}
+}
+
+func TestPreviewBlocksServiceWorkerRegistration(t *testing.T) {
+	var reached atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Store(true)
+	}))
+	defer upstream.Close()
+	proxy := newPreviewFor(t, upstream.URL)
+	for _, path := range []string{"/sw.js", "/__moa/inspector.js"} {
+		request := httptest.NewRequest(http.MethodGet, "https://preview.test"+path, nil)
+		request.Header.Set("Service-Worker", "script")
+		response := httptest.NewRecorder()
+		proxy.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("service worker script request to %s = %d, want %d", path, response.Code, http.StatusForbidden)
+		}
+	}
+	if reached.Load() {
+		t.Fatal("service worker script request reached the upstream app")
 	}
 }
 

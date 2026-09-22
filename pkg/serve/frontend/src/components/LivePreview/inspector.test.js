@@ -4,6 +4,37 @@ import vm from "node:vm";
 
 const source = readFileSync(new URL("./inspector.js", import.meta.url), "utf8");
 
+test("removes existing service worker registrations", async () => {
+  let unregistered = 0;
+  const document = {
+    currentScript: { getAttribute: () => "https://shell.test" },
+    documentElement: { style: {} },
+    addEventListener() {},
+    removeEventListener() {},
+    createElement: () => ({ style: {}, setAttribute() {} }),
+  };
+  const window = {
+    parent: { postMessage() {} },
+    location: { href: "https://app.test/" },
+    addEventListener() {},
+    removeEventListener() {},
+    getComputedStyle: () => ({}),
+    scrollBy() {},
+  };
+  const navigator = {
+    serviceWorker: {
+      getRegistrations: async () => [
+        { unregister: async () => { unregistered++; } },
+        { unregister: async () => { unregistered++; } },
+      ],
+    },
+  };
+
+  vm.runInNewContext(source, { window, document, navigator, MouseEvent: class {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(unregistered).toBe(2);
+});
+
 function bridgeAt(element, style = { overflowX: "visible", overflowY: "visible" }) {
   const listeners = {};
   const documentElement = { style: {} };
