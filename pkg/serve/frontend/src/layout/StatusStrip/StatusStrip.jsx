@@ -205,7 +205,7 @@ export function StatusStrip({
             <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5" /><circle cx="8" cy="8" r="1.8" fill="currentColor" /></svg>
             <span class="zl-st-word">goal</span>
             {modes.goal.verifying
-              ? <span class="zl-data">✓?</span>
+              ? <span>verifying</span>
               : !!modes.goal.iteration && <span class="zl-data">{modes.goal.iteration}</span>}
           </span>
         )}

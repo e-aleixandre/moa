@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
-import { ChevronUp, ChevronDown } from "lucide-preact";
+import { ChevronUp, ChevronDown, Check } from "lucide-preact";
 import { AskUserCard } from "./AskUserCard.jsx";
 import { resolveAskUser } from "../../data/session-actions.js";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
@@ -134,7 +134,7 @@ export function AskUserPrompt({ session }) {
   }, [voiceUsable, ask?.id, submitting, toggleVoice]);
 
   if (!ask || questions.length === 0) return null;
-  if (submitting) return <div class="ask-user-resolved">✓ Answered</div>;
+  if (submitting) return <div class="ask-user-resolved"><Check size={14} aria-hidden="true" /> Answered</div>;
 
   const q = questions[current];
   const options = (q.options || []).map((label) => ({ label }));

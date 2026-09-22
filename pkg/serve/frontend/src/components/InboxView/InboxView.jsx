@@ -14,6 +14,7 @@
 // so the transcript does not move. On the phone it is a full-screen push
 // (variant="sheet") and a decision rises as a sheet over the list.
 import { useEffect, useRef, useState } from "preact/hooks";
+import { ArrowRight } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { deriveModelSpecs } from "../../data/selectors.js";
 import { defaultModelSpec } from "../CommandPalette/command-palette-model.js";
@@ -138,8 +139,8 @@ function InboxRow({ card, onOpen }) {
   let sub = null;
   if (pending) sub = <span class="zi-row-sub">{pendingReasonLabel(event.pending_reason)}</span>;
   else if (state === "routing") sub = <span class="zi-row-sub is-live"><span class="zi-dot is-running" aria-hidden="true" />Delivering to {card.routedToTitle || "session"}…</span>;
-  else if (unavailable) sub = <span class="zi-row-sub is-broken">→ destination unavailable</span>;
-  else if (routed) sub = <span class="zi-row-sub is-dest">→ {card.routedToTitle}</span>;
+  else if (unavailable) sub = <span class="zi-row-sub is-broken"><ArrowRight size={14} aria-hidden="true" /> destination unavailable</span>;
+  else if (routed) sub = <span class="zi-row-sub is-dest"><ArrowRight size={14} aria-hidden="true" /> {card.routedToTitle}</span>;
   else sub = <span class="zi-row-sub">Ignored</span>;
   const label = pending
     ? `${event.source}, ${card.age}, ${event.title} — choose where to send it`

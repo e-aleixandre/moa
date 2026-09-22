@@ -126,6 +126,9 @@
 
 /* Answered: a note, not a green banner. The card is gone, the run moved on. */
 .ask-user-resolved {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   max-width: 560px;
   padding: 12px 16px;
