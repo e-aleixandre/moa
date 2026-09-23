@@ -90,9 +90,16 @@ func TestPreviewControllerOpensAndClosesARealListener(t *testing.T) {
 	if status := c.Status(); !status.Enabled || status.Port != port {
 		t.Fatalf("status after activation = %+v", status)
 	}
-	// The address is remembered so the UI never asks twice; "running" is not.
-	if store.settings.PublicURL != "http://dev.test:"+strconv.Itoa(port) || store.settings.Port != port {
-		t.Fatalf("settings not persisted: %+v", store.settings)
+	// The port is remembered so a restart proposes the same one; "running" is
+	// not. The address a browser derived for itself is never written back —
+	// only an explicit Configure (flags or an already-saved legacy value) may
+	// set PublicURL, so one browser's activation cannot become the default
+	// address handed to a different browser.
+	if store.settings.Port != port {
+		t.Fatalf("port not persisted: %+v", store.settings)
+	}
+	if store.settings.PublicURL != "" {
+		t.Fatalf("the derived public URL leaked into global settings: %+v", store.settings)
 	}
 
 	c.Deactivate()
@@ -109,6 +116,28 @@ func TestPreviewControllerOpensAndClosesARealListener(t *testing.T) {
 	}
 	if !listening(port) {
 		t.Fatal("reactivation did not bind the port again")
+	}
+}
+
+func TestPreviewFailedActivationDoesNotCloseAnotherDevicesListener(t *testing.T) {
+	port := freePort(t)
+	c := NewPreviewController(7401, nil, &memoryPreviewStore{})
+	t.Cleanup(c.Close)
+	first, _, err := c.Activate("http://localhost:"+strconv.Itoa(port), port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := c.Activate("http://127.0.0.1:"+strconv.Itoa(port), port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.deactivateIfCurrent(first)
+	if c.Proxy() != second || !listening(port) {
+		t.Fatal("failed activation closed the newer device's preview")
+	}
+	c.deactivateIfCurrent(second)
+	if c.Proxy() != nil || listening(port) {
+		t.Fatal("failed activation left its own listener running")
 	}
 }
 
@@ -402,9 +431,13 @@ func TestPreviewSuggestedPortIsDerivedFromMoaPort(t *testing.T) {
 	}
 }
 
-// The remembered address lives in the user's global moa config — never in the
+// The remembered port lives in the user's global moa config — never in the
 // repository, never in a session — and survives a restart of the controller.
-func TestPreviewSettingsPersistInTheGlobalConfig(t *testing.T) {
+// The address itself is deliberately not among what a restart restores from
+// activation: it is derived per browser, and a loopback address saved from
+// one activation must never resurface as the default proposed to a different
+// browser after a restart.
+func TestPreviewSettingsPersistPortNotDerivedAddressInTheGlobalConfig(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv("MOA_CONFIG_DIR", configDir)
 
@@ -418,10 +451,13 @@ func TestPreviewSettingsPersistInTheGlobalConfig(t *testing.T) {
 
 	raw, err := os.ReadFile(filepath.Join(configDir, "config.json"))
 	if err != nil {
-		t.Fatalf("the preview address was not written to the global config: %v", err)
+		t.Fatalf("the preview port was not written to the global config: %v", err)
 	}
-	if !strings.Contains(string(raw), address) {
-		t.Fatalf("config.json does not carry the address: %s", raw)
+	if !strings.Contains(string(raw), strconv.Itoa(port)) {
+		t.Fatalf("config.json does not carry the port: %s", raw)
+	}
+	if strings.Contains(string(raw), address) {
+		t.Fatalf("the derived public URL leaked into the global config: %s", raw)
 	}
 	// Activation is per use: nothing in the file may make a restart reopen it.
 	if strings.Contains(string(raw), "\"enabled\"") {
@@ -431,11 +467,59 @@ func TestPreviewSettingsPersistInTheGlobalConfig(t *testing.T) {
 	second := NewPreviewController(7401, nil, GlobalPreviewStore())
 	t.Cleanup(second.Close)
 	status := second.Status()
-	if status.PublicURL != address || status.Port != port {
-		t.Fatalf("the saved address was not restored: %+v", status)
+	if status.PublicURL != "" || status.Port != port {
+		t.Fatalf("a restart restored a derived address, or lost the port: %+v", status)
 	}
 	if status.Enabled || listening(port) {
 		t.Fatal("a restarted controller opened the port on its own")
+	}
+}
+
+// A config.json written by an older Moa still has a saved PublicURL (from
+// before per-browser addresses). That value must keep surfacing as the
+// configured fallback, and must survive being activated from a different,
+// browser-derived address: only the port field may move.
+func TestPreviewLegacyPublicURLSurvivesActivation(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("MOA_CONFIG_DIR", configDir)
+
+	legacyAddress := "https://legacy.example:7351"
+	if err := GlobalPreviewStore().Save(PreviewSettings{PublicURL: legacyAddress, Port: 7351}); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewPreviewController(7401, nil, GlobalPreviewStore())
+	t.Cleanup(c.Close)
+	if status := c.Status(); status.PublicURL != legacyAddress || status.Port != 7351 {
+		t.Fatalf("the legacy address was not loaded as the fallback: %+v", status)
+	}
+
+	port := freePort(t)
+	browserAddress := "http://192.168.1.20:" + strconv.Itoa(port)
+	if _, _, err := c.Activate(browserAddress, 0); err != nil {
+		t.Fatal(err)
+	}
+	c.Deactivate()
+
+	raw, err := os.ReadFile(filepath.Join(configDir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), legacyAddress) {
+		t.Fatalf("the legacy address was overwritten by a browser's own activation: %s", raw)
+	}
+	if strings.Contains(string(raw), browserAddress) {
+		t.Fatalf("the browser's derived address leaked into the global config: %s", raw)
+	}
+
+	restarted := NewPreviewController(7401, nil, GlobalPreviewStore())
+	t.Cleanup(restarted.Close)
+	status := restarted.Status()
+	if status.PublicURL != legacyAddress {
+		t.Fatalf("the legacy address did not survive a restart: %+v", status)
+	}
+	if status.Port != port {
+		t.Fatalf("the activated port was not remembered: %+v", status)
 	}
 }
 

@@ -326,8 +326,8 @@ func blockServiceWorkerScripts(next http.Handler) http.Handler {
 }
 
 // ProtectedHandler authenticates every document, asset, request and upgrade.
-// In both token and network-owner modes the capability is issued only by the
-// owner-only main API, so publishing this port does not publish a network pivot.
+// The capability is issued only by the authenticated main API (including
+// paired devices), so publishing this port does not expose an anonymous pivot.
 func (p *PreviewProxy) ProtectedHandler(allowedHosts []string) http.Handler {
 	return previewReferrerPolicy(hostMiddleware(allowedHosts, p.requireCapability(bodyTimeoutMiddleware(p.Handler()))))
 }
@@ -828,7 +828,7 @@ func handlePreviewTarget(c *PreviewController) http.HandlerFunc {
 			// This call opened the port and then found the target unusable:
 			// close it again rather than leave a listener nobody asked for.
 			if started {
-				c.Deactivate()
+				c.deactivateIfCurrent(proxy)
 			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

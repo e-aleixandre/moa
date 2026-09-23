@@ -14,9 +14,16 @@ import (
 )
 
 // PreviewSettings is what Moa remembers about the Live Preview proxy between
-// runs: how the browser reaches the listener, and which port it binds. Whether
-// the proxy is RUNNING is never persisted — activation is per use, in memory,
-// so a restart leaves no port open until someone opens a preview again.
+// runs. Port is the listener's own address (127.0.0.1:Port) and follows every
+// successful activation, from any browser, because it is not sensitive: it
+// names nothing about who is asking. PublicURL is how a browser reaches that
+// listener from its own host and is per-browser, not per-server — it is set
+// only by explicit configuration (startup flags, or a value already saved by
+// an older Moa) and never overwritten by what one browser derives for itself
+// on activation, or a loopback address saved here would leak into every other
+// browser's proposal on the next restart. Whether the proxy is RUNNING is
+// never persisted either — activation is per use, in memory, so a restart
+// leaves no port open until someone opens a preview again.
 type PreviewSettings struct {
 	PublicURL string
 	Port      int
@@ -201,19 +208,25 @@ func (c *PreviewController) Activate(publicURL string, port int) (*PreviewProxy,
 	go func() { _ = server.Serve(listener) }()
 
 	c.proxy, c.server, c.listener, c.activeURL, c.activePort = proxy, server, listener, origin, port
-	c.remember(PreviewSettings{PublicURL: origin, Port: port})
+	c.remember(port)
 	return proxy, true, nil
 }
 
-// remember persists the address only once a listener is actually bound, so a
-// port that cannot be opened is never written back as the saved default.
-func (c *PreviewController) remember(s PreviewSettings) {
-	if c.store == nil || (c.settings == s && c.storeErr == "") {
-		c.settings = s
+// remember persists the port a listener actually bound to, once bound, so a
+// port that cannot be opened is never written back as the saved default. The
+// public URL is deliberately left untouched: it is whatever each browser
+// reports for itself (its own host), and one browser's — possibly
+// localhost's — activation must never overwrite the address every other
+// browser is proposed on the next restart. Only an explicit Configure (flags,
+// or a legacy config already on disk) sets that field.
+func (c *PreviewController) remember(port int) {
+	next := PreviewSettings{PublicURL: c.settings.PublicURL, Port: port}
+	if c.store == nil || (c.settings == next && c.storeErr == "") {
+		c.settings = next
 		return
 	}
-	c.settings = s
-	if err := c.store.Save(s); err != nil {
+	c.settings = next
+	if err := c.store.Save(next); err != nil {
 		c.storeErr = fmt.Sprintf("could not save the preview settings: %v", err)
 		return
 	}
@@ -227,6 +240,15 @@ func (c *PreviewController) Deactivate() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stopLocked()
+}
+
+// A failed activation must not close a newer listener started by another device.
+func (c *PreviewController) deactivateIfCurrent(proxy *PreviewProxy) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.proxy == proxy {
+		c.stopLocked()
+	}
 }
 
 func (c *PreviewController) stopLocked() {

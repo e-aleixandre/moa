@@ -10,8 +10,8 @@ import { Composer } from "../../layout/Composer/Composer.jsx";
 import { useStore } from "../../hooks/useStore.js";
 import { PreviewStream } from "./PreviewStream.jsx";
 import { streamEvents, stageState } from "./stream.js";
-import { PreviewAddressSetup, PreviewErrorBanner, PreviewLoading, PreviewRecoveryNotice, PreviewURLSetup, displayURL } from "./PreviewSetup.jsx";
-import { activatePreview, deactivatePreview, fetchPreviewStatus, portOf, suggestPublicURL, validPublicURL } from "./preview-proxy.js";
+import { PreviewErrorBanner, PreviewLoading, PreviewRecoveryNotice, PreviewURLSetup, displayURL } from "./PreviewSetup.jsx";
+import { activatePreview, checkPreviewReachable, deactivatePreview, fetchPreviewStatus, suggestPublicURL } from "./preview-proxy.js";
 import { applyGesture, appToStage, chainPan, panBy, pinchState, stageGesture, wheelFactor, zoomAt, IDENTITY } from "./zoom.js";
 import { createScrollChain, setViewIfChanged } from "./scroll-chain.js";
 import { anchorForKey, isVertical, loadDockAnchor, nearestAnchor, oppositeAnchor, saveDockAnchor } from "./dock-position.js";
@@ -108,13 +108,10 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   const [selected, setSelected] = useState(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
-  const [previewPublicURL, setPreviewPublicURL] = useState("");
+  const [previewPort, setPreviewPort] = useState(0);
   const [previewError, setPreviewError] = useState("");
-  // setupMode is which question the panel is asking: the app URL, the address
-  // the browser reaches the proxy through, or nothing (it is showing the app).
+  // setupMode asks only for the app URL, never for the proxy address.
   const [setupMode, setSetupMode] = useState(null);
-  const [addressDraft, setAddressDraft] = useState("");
-  const [addressError, setAddressError] = useState("");
   const [proxySupported, setProxySupported] = useState(true);
   const [inspectorReady, setInspectorReady] = useState(true);
   const [bridgeLost, setBridgeLost] = useState(false);
@@ -198,10 +195,8 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
 
   // The saved value is always the upstream target; the iframe uses the proxy URL.
   //
-  // Opening the panel is what turns the proxy on: there is no flag and no
-  // restart. What Moa cannot know by itself is the address the browser reaches
-  // that listener through, so the first time it asks, proposing the host the
-  // user is already on. Afterwards the address is remembered server-side.
+  // The app URL is saved per session. The proxy address is derived anew from
+  // this browser's host and the listener port, not another device's settings.
   useEffect(() => {
     if (!open) return undefined;
     let cancelled = false;
@@ -214,24 +209,21 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
         if (cancelled) return;
         const supported = status.supported !== false;
         setProxySupported(supported);
-        setPreviewPublicURL(supported ? status.public_url || "" : "");
+        const port = status.port || status.suggested_port;
+        setPreviewPort(port);
         setPreviewError(status.error || "");
         if (!saved) {
           setSetupMode("url");
           return;
         }
         setTargetURL(saved);
+        setSetupMode(null);
         if (!supported) {
           setFrameURL(saved);
           setSetupMode(null);
           return;
         }
-        if (!status.public_url) {
-          setAddressDraft(suggestPublicURL(window.location, status.suggested_port));
-          setSetupMode("address");
-          return;
-        }
-        await startPreview(saved, status.public_url, () => cancelled);
+        await startPreview(saved, port, () => cancelled);
       } catch {
         if (!cancelled) {
           setFrameURL("");
@@ -257,7 +249,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   // failure mode of a slow response and a second tab.
   const activation = useRef(0);
 
-  const startPreview = async (target, publicURL, cancelled = () => false) => {
+  const startPreview = async (target, port, cancelled = () => false) => {
     const token = ++activation.current;
     const stale = () => cancelled() || activation.current !== token;
     clearBridgeFallback();
@@ -266,16 +258,25 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
     setBridgeLost(false);
     setBackState(resetBack(backRef.current));
     setFrameURL("");
+    setPreviewError("");
     try {
+      const publicURL = suggestPublicURL(window.location, port);
+      if (!publicURL) throw new Error("Moa could not determine the preview port. Reload the page and try again.");
       const result = await activatePreview(fetch, {
         url: target,
         publicURL,
-        port: publicURL ? portOf(publicURL) : 0,
+        port,
         parentOrigin: location.origin,
       });
       if (stale()) return false;
-      setPreviewPublicURL(result.public_url || publicURL || "");
-      setFrameURL(result.preview_url || result.public_url || "");
+      try {
+        await checkPreviewReachable(fetch, publicURL);
+      } catch {
+        if (stale()) return false;
+        throw new Error(`Make ${publicURL} reachable from this device, then try again.`);
+      }
+      if (stale()) return false;
+      setFrameURL(result.preview_url || "");
       setPreviewError("");
       setSetupMode(null);
       setSelected(null);
@@ -528,36 +529,10 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
       setReloadNonce((n) => n + 1);
       return;
     }
-    if (!previewPublicURL) {
-      // First run: the app URL is known, the address of the proxy is not. Ask
-      // for it now, with a proposal, rather than opening a listener the browser
-      // may have no way to reach.
-      try {
-        const status = await fetchPreviewStatus();
-        setAddressDraft(addressDraft || suggestPublicURL(window.location, status.suggested_port));
-      } catch {
-        setAddressDraft(addressDraft || suggestPublicURL(window.location, 0));
-      }
-      setSetupMode("address");
-      return;
-    }
     // A target switch gets a new capability and a new iframe document. Never
     // leave the previous target running while the proxy is being repointed.
-    await startPreview(next, previewPublicURL);
-  };
-
-  // commitAddress is the one-time confirmation of the address the browser uses
-  // to reach the proxy. Moa binds the port it names, so a busy port or an
-  // unusable address comes back here as an error the user can correct.
-  const commitAddress = async () => {
-    const address = addressDraft.trim().replace(/\/+$/, "");
-    if (!validPublicURL(address)) {
-      setAddressError("Enter a full address, including http:// or https:// and the port.");
-      return;
-    }
-    setAddressError("");
-    const started = await startPreview(targetURL, address);
-    if (!started) setSetupMode("address");
+    setSetupMode(null);
+    await startPreview(next, previewPort);
   };
 
   // Moving the view by any other means ends the chain: a scroll answer minted
@@ -643,7 +618,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
   // unscaled height. Zoomed, the pan is the position and the holder just fills.
   const holderStyle = zoomed ? { width: "100%", height: "100%" } : { width: `${frameW * scale}px`, height: `${frameH * scale}px` };
 
-  const showSetup = setupMode === "address" ? "address" : (!targetURL || editingURL || setupMode === "url") ? "url" : null;
+  const showSetup = (!targetURL || editingURL || setupMode === "url") ? "url" : null;
   // The stage has an app in it (or one on its way). Until then the only
   // controls that exist are the ones that can do something: close.
   const showError = !!previewError && !showSetup;
@@ -729,7 +704,7 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
             value={draftURL}
             onInput={setDraftURL}
             onCommit={commitURL}
-            onCancel={() => setEditingURL(false)}
+            onCancel={() => { setEditingURL(false); setSetupMode(null); }}
             canCancel={!!targetURL}
             recent={recent}
             inputRef={setupFieldRef.current}
@@ -740,24 +715,11 @@ export function LivePreview({ sessionId, open, onClose, inline = false }) {
           />
         )}
 
-        {showSetup === "address" && (
-          <PreviewAddressSetup
-            value={addressDraft}
-            onInput={setAddressDraft}
-            onCommit={commitAddress}
-            inputRef={setupFieldRef.current}
-            onBack={() => { setSetupMode("url"); setDraftURL(targetURL); }}
-            error={addressError || previewError}
-          />
-        )}
-
         {showError && (
           <PreviewErrorBanner
             message={previewError}
-            onChangeAddress={() => {
-              setAddressDraft(previewPublicURL || addressDraft);
-              setSetupMode("address");
-            }}
+            onRetry={() => startPreview(targetURL, previewPort)}
+            onChangeURL={() => { setDraftURL(targetURL); setEditingURL(true); }}
           />
         )}
 

@@ -29,7 +29,7 @@ func routeAuthorizationMiddleware(next http.Handler) http.Handler {
 		switch access {
 		case routeOwnerAdmin:
 			if !authenticated || (identity.Kind != "token" && identity.Kind != "network") {
-				http.Error(w, "paired devices cannot administer pairing", http.StatusForbidden)
+				http.Error(w, "this route requires owner authentication", http.StatusForbidden)
 				return
 			}
 		case routePairingClaim:
@@ -50,8 +50,10 @@ func routeAuthorizationMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// serveRouteAccess reserves pairing administration to the owner. Every other
-// generic Serve route is available to an authenticated paired device.
+// serveRouteAccess reserves pairing and device administration to the owner.
+// Every other generic Serve route — including the Live Preview target, a
+// per-device browser setting — is available to an authenticated paired
+// device.
 func serveRouteAccess(r *http.Request) routeAccess {
 	switch {
 	case r.Method == http.MethodPost && r.URL.Path == "/api/pulse/pairings/claim":
@@ -65,8 +67,6 @@ func serveRouteAccess(r *http.Request) routeAccess {
 	case r.URL.Path == "/api/pulse/devices" && r.Method == http.MethodGet:
 		return routeOwnerAdmin
 	case isPulseDeviceRevokeRoute(r.URL.Path) && r.Method == http.MethodPost:
-		return routeOwnerAdmin
-	case r.URL.Path == "/api/preview/target":
 		return routeOwnerAdmin
 	default:
 		return routeOwnerSurface

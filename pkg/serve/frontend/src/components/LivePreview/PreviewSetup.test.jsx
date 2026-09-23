@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { PreviewAddressSetup, PreviewErrorBanner, PreviewRecoveryNotice, PreviewURLSetup } from "./PreviewSetup.jsx";
+import { PreviewErrorBanner, PreviewRecoveryNotice, PreviewURLSetup } from "./PreviewSetup.jsx";
 
 const find = (node, predicate) => {
   if (!node || typeof node !== "object") return null;
@@ -15,7 +15,6 @@ const find = (node, predicate) => {
 };
 const byClass = (node, cls) => find(node, (n) => typeof n.props?.class === "string" && n.props.class.split(" ").includes(cls));
 const byLabel = (node, label) => find(node, (n) => n.props?.["aria-label"] === label);
-const handler = (node, name) => node.props?.[name] || node.props?.[name.toLowerCase()];
 // The card's title is a prop of the card, not a node of its own.
 const titleOf = (node) => find(node, (n) => typeof n.props?.title === "string")?.props.title;
 const textOf = (node) => {
@@ -58,60 +57,19 @@ test("the first screen offers nothing when there is nothing to offer", () => {
   expect(byClass(tree, "live-preview-setup-back")).toBeNull();
 });
 
-// The address the browser uses to reach the proxy is proposed, editable, and
-// confirmed with a button — Moa cannot derive it, so it asks once.
-test("the address screen shows the suggestion, takes edits and confirms with a button", () => {
-  const edits = [];
-  let committed = 0;
-  const tree = PreviewAddressSetup({
-    value: "https://dev.taild072ac.ts.net:7402",
-    onInput: (v) => edits.push(v),
-    onCommit: () => { committed += 1; },
-    onBack: () => {},
-  });
-  expect(titleOf(tree)).toBe("Confirm the preview address");
-
-  const field = byLabel(tree, "Preview proxy address");
-  expect(field.props.value).toBe("https://dev.taild072ac.ts.net:7402");
-  handler(field, "onInput")({ currentTarget: { value: "https://dev.taild072ac.ts.net:9000" } });
-  expect(edits).toEqual(["https://dev.taild072ac.ts.net:9000"]);
-
-  const start = find(tree, (n) => textOf(n) === "Start" && n.props?.onClick);
-  start.props.onClick();
-  handler(field, "onKeyDown")({ key: "Enter" });
-  expect(committed).toBe(2);
-});
-
-// An address that cannot be bound is reported where it is corrected, not as a
-// banner over an app that is not being shown.
-test("a rejected address is reported next to the field", () => {
-  const tree = PreviewAddressSetup({
-    value: "https://dev.test:7402",
-    onInput: () => {},
-    onCommit: () => {},
-    onBack: () => {},
-    error: "port 7402 is not available for the preview proxy",
-  });
-  expect(textOf(byClass(tree, "live-preview-setup-error"))).toContain("port 7402 is not available");
-});
-
-test("the address screen can go back to the app URL", () => {
-  let back = 0;
-  const tree = PreviewAddressSetup({ value: "https://dev.test:7402", onInput: () => {}, onCommit: () => {}, onBack: () => { back += 1; }, });
-  byClass(tree, "live-preview-setup-back").props.onClick();
-  expect(back).toBe(1);
-});
-
-// An open socket is not a usable preview: when the frame cannot load through
-// the public origin, the fix is one tap from the message.
-test("a preview error offers the way to change the address", () => {
+test("a preview error offers a retry without asking for a proxy address", () => {
   let opened = 0;
-  const tree = PreviewErrorBanner({ message: "The preview proxy could not be started.", onChangeAddress: () => { opened += 1; } });
-  expect(textOf(tree)).toContain("The preview proxy could not be started.");
+  let changed = 0;
+  const tree = PreviewErrorBanner({ message: "Make https://dev.test:7351 reachable from this device, then try again.", onRetry: () => { opened += 1; }, onChangeURL: () => { changed += 1; } });
+  expect(textOf(tree)).toContain("reachable from this device");
   const action = byClass(tree, "live-preview-proxy-error-action");
-  expect(textOf(action)).toBe("Change the preview address");
+  expect(textOf(action)).toBe("Try again");
   action.props.onClick();
   expect(opened).toBe(1);
+  const change = byClass(tree, "live-preview-setup-back");
+  expect(textOf(change)).toBe("Change the app URL");
+  change.props.onClick();
+  expect(changed).toBe(1);
 });
 
 test("a disconnected bridge offers an explicit return to the configured app", () => {

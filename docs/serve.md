@@ -171,33 +171,30 @@ preview panel, and closed again when you leave it. With no preview open Moa
 holds no extra port at all. This matters because `moa serve` is long-lived —
 restarting it to turn a preview on would cut every session running under it.
 
-The one thing Moa cannot work out on its own is **the address your browser uses
-to reach that listener**, because it depends on how you expose the port (a
-tailnet, a reverse proxy, a LAN address). So the first time it is needed the
-panel proposes one, built from the address you are already on — reaching Moa at
-`https://dev.example.ts.net:7401` proposes `https://dev.example.ts.net:7402` —
-and you confirm it or correct the port. The default is Moa's own port plus one,
-so two Moa instances never propose the same listener. The address is then
-remembered in your global config (`preview` in
-[Configuration](./configuration.md#config-fields)) and never asked again;
-whether the proxy is *running* is not remembered, since that is decided per use.
+The browser derives the proxy address each time from the host and scheme it
+uses for Moa and the configured listener port. For example, reaching Moa at
+`https://dev.example.ts.net:7401` with a preview port of `7402` uses
+`https://dev.example.ts.net:7402`. The default port is Moa's own port plus one;
+you can set it with `--preview-port`. Only the port is remembered in your global
+config (`preview` in [Configuration](./configuration.md#config-fields)), not a
+browser-specific address. Running state is never remembered.
 
 If the port is busy, activation fails and says so — Moa never reports a live
-preview it did not bind. If the address is wrong, the frame will not load: the
-error offers to change the address on the spot.
+preview it did not bind. If the address is unreachable from this device, expose
+that same host and port through your network ingress, then retry. If an ingress
+remaps the external port, the automatic address will not work.
 
 The listener binds `127.0.0.1`. Moa is **transport-agnostic** and never manages
-tunnels: expose that port however you already expose Moa itself. The address you
-confirm must be the one browsers actually use, because the proxy rewrites your
-dev server's own origin to it, which is what keeps `localhost:5173` links, HMR
+tunnels: expose that port however you already expose Moa itself. The proxy
+rewrites the dev server's origin to the browser's derived address, keeping links, HMR
 websockets and redirects inside the app working.
 
-`moa serve --preview-port` / `--preview-public-url` still work: they are initial
-configuration, so the panel never has to ask. They do not open the port either —
-that still happens on first use.
+`--preview-port` selects the listener port without opening it until first use.
+The older `--preview-public-url` remains a fallback for API clients that do not
+send their own address; the web UI always derives its address per browser.
 
 ```bash
-moa serve --preview-port 7492 --preview-public-url https://moa.example.test:7492
+moa serve --preview-port 7492
 ```
 
 What the proxy does to the traffic:
@@ -213,8 +210,9 @@ What the proxy does to the traffic:
   switch target, so two apps previewed in turn never see each other's state.
 - Refuses a redirect that leaves the validated target.
 
-Only one target is active at a time. Changing the URL in the panel repoints the
-proxy, closes the previous target's connections and issues fresh credentials.
+Only one target is active at a time, across all browsers and paired devices.
+Opening the preview on another device or changing the URL in the panel repoints
+the proxy, closes the previous target's connections and issues fresh credentials.
 Closing the preview goes further: the listener itself is torn down along with
 every connection through it, including requests still in flight and HMR
 websockets, and the credentials issued for that session stop working — turning
@@ -235,7 +233,7 @@ Moa enforces the boundary it can:
 - Validated addresses are pinned at dial time, so a hostname cannot be
   re-resolved to a different address between the check and the connection.
 - Every request through the listener — documents, assets, websocket upgrades —
-  needs a capability issued only by Moa's owner-authenticated API, exchanged
+  needs a capability issued by Moa's authenticated API (including paired devices), exchanged
   once for an `HttpOnly` cookie. Publishing the preview port therefore does not
   publish an unauthenticated way into your private network.
 

@@ -7,8 +7,7 @@ import { Field, Spinner } from "../../primitives/index.js";
 // that would explain how the preview works is left out; the field's placeholder
 // already shows the shape of the answer.
 
-// SetupCard — the one surface every non-app state of the stage uses, so a first
-// run, an address question and a failure read as the same object.
+// SetupCard — the one surface every non-app state of the stage uses.
 function SetupCard({ title, children, tone }) {
   return (
     <div class="live-preview-setup">
@@ -77,54 +76,18 @@ export function PreviewURLSetup({ value, onInput, onCommit, onCancel, canCancel,
   );
 }
 
-// PreviewAddressSetup — asked once, then remembered. Moa opens the proxy port
-// itself, but only the user knows how their browser reaches that machine (a
-// tailnet name, a reverse proxy, a LAN address), so the field arrives filled in
-// with the host they are already on and they confirm it or fix the port.
-export function PreviewAddressSetup({ value, onInput, onCommit, onBack, error, inputRef }) {
-  return (
-    <SetupCard title="Confirm the preview address">
-      <p class="live-preview-setup-hint">Change it if this device reaches Moa at another address.</p>
-      <div class="live-preview-setup-row">
-        <Field
-          variant="box"
-          size="lg"
-          mono
-          class="live-preview-url"
-          type="url"
-          inputMode="url"
-          autocapitalize="off"
-          autoCorrect="off"
-          spellcheck={false}
-          placeholder="https://your-host:7492"
-          value={value}
-          inputRef={inputRef}
-          autofocus
-          onInput={(e) => onInput(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onCommit();
-          }}
-          aria-label="Preview proxy address"
-        />
-        <GoButton onClick={onCommit} disabled={!String(value || "").trim()}>Start</GoButton>
-      </div>
-      {error && <p class="live-preview-setup-error" role="alert">{error}</p>}
-      <button type="button" class="live-preview-setup-back" onClick={onBack}>
-        Change the app URL
-      </button>
-    </SetupCard>
-  );
-}
-
 // PreviewErrorBanner — the proxy did not start, so there is no app to cover:
 // the failure takes the stage, in the same card, with the fix as its action.
-export function PreviewErrorBanner({ message, onChangeAddress }) {
+export function PreviewErrorBanner({ message, onRetry, onChangeURL }) {
   return (
     <SetupCard title="The preview didn’t start" tone="error">
       <p class="live-preview-setup-hint" role="alert">{message}</p>
       <div class="live-preview-setup-actions">
-        <button type="button" class="live-preview-go live-preview-proxy-error-action" onClick={onChangeAddress}>
-          Change the preview address
+        <button type="button" class="live-preview-go live-preview-proxy-error-action" onClick={onRetry}>
+          Try again
+        </button>
+        <button type="button" class="live-preview-setup-back" onClick={onChangeURL}>
+          Change the app URL
         </button>
       </div>
     </SetupCard>

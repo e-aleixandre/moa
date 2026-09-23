@@ -97,7 +97,7 @@ handle on the element you meant, page and selector included.
   <em>Point at the button, say what is wrong with it. The agent gets the element, not a description of it.</em>
 </p>
 
-Optionally, `moa serve --preview-port … --preview-public-url …` proxies your dev server so
+Optionally, `moa serve --preview-port …` proxies your dev server so
 the inspector is injected without touching your project. It is for **your own development
 servers**: the previewed app runs at the proxy's origin, and only loopback, private and
 tailnet addresses are accepted. See the [Live Preview guide](docs/serve.md#live-preview).

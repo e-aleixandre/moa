@@ -29,7 +29,7 @@ func runServe(args []string) {
 	modelFlag := fs.String("model", "sonnet", "Default model for new sessions")
 	allowedHosts := fs.String("allowed-hosts", "", "Comma-separated extra Host names accepted by the anti DNS-rebinding check (localhost and IP literals are always allowed; e.g. a Tailscale MagicDNS name)")
 	previewPort := fs.Int("preview-port", 0, "Initial local port for the Live Preview proxy (0 = decide when the preview is first used)")
-	previewPublicURL := fs.String("preview-public-url", "", "Public URL of the Live Preview proxy. Required with --preview-port; otherwise the web UI asks for it the first time a preview is opened")
+	previewPublicURL := fs.String("preview-public-url", "", "Legacy fallback public URL for API clients; the web UI derives the address from each browser's host")
 	tokenFlag := fs.String("token", "", "Shared secret for opt-in auth. When set, requests must present a valid session cookie or ?token=<secret> in the URL (which sets the cookie). Overrides MOA_SERVE_TOKEN.")
 	automationTokenFlag := fs.String("automation-token", "", "Shared secret enabling the Automation API (POST /api/automation/runs), presented as 'Authorization: Bearer <secret>'. Separate from --token; without it the automation routes do not exist. Overrides MOA_AUTOMATION_TOKEN.")
 	_ = fs.Parse(args)
@@ -129,14 +129,9 @@ func runServe(args []string) {
 	// running several agent sessions at once, so needing a restart to turn the
 	// preview on is unacceptable: the controller binds a port only when someone
 	// opens a preview, and releases it when they close it. The flags remain the
-	// initial configuration — with them, the address is known from the start and
-	// the UI never has to ask.
+	// initial configuration; the web UI derives the public address per browser.
 	preview := serve.NewPreviewController(*port, splitCSV(*allowedHosts), serve.GlobalPreviewStore())
-	if *previewPort != 0 {
-		if *previewPublicURL == "" {
-			fmt.Fprintln(os.Stderr, "error: --preview-public-url is required with --preview-port")
-			os.Exit(2)
-		}
+	if *previewPort != 0 || *previewPublicURL != "" {
 		preview.Configure(*previewPublicURL, *previewPort)
 	}
 	srv := serve.NewServer(mgr,

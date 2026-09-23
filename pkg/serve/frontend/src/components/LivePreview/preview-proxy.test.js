@@ -2,21 +2,19 @@ import { test, expect } from "bun:test";
 import {
   INSPECTOR_NOTICE,
   activatePreview,
+  checkPreviewReachable,
   deactivatePreview,
   fetchPreviewStatus,
-  portOf,
-  setupStep,
   suggestPublicURL,
-  validPublicURL,
 } from "./preview-proxy.js";
 
-// First run: the address the browser must use to reach the proxy is proposed
-// from the address the user is already on, so confirming is usually enough.
-test("the suggested address keeps the host the user reached moa through", () => {
+test("each device's preview address keeps the host it reached moa through", () => {
   expect(suggestPublicURL({ protocol: "https:", hostname: "dev.taild072ac.ts.net" }, 7402))
     .toBe("https://dev.taild072ac.ts.net:7402");
   expect(suggestPublicURL({ protocol: "http:", hostname: "192.168.1.20" }, 8081))
     .toBe("http://192.168.1.20:8081");
+  expect(suggestPublicURL({ protocol: "https:", hostname: "dev.taild072ac.ts.net" }, 7351))
+    .toBe("https://dev.taild072ac.ts.net:7351");
 });
 
 test("an IPv6 host is bracketed so the suggestion is a usable URL", () => {
@@ -25,39 +23,13 @@ test("an IPv6 host is bracketed so the suggestion is a usable URL", () => {
   expect(new URL(suggested).port).toBe("7402");
 });
 
-test("no suggestion is offered when there is nothing to derive it from", () => {
+test("no address is derived when there is nothing to derive it from", () => {
   expect(suggestPublicURL(null, 7402)).toBe("");
   expect(suggestPublicURL({ protocol: "https:", hostname: "" }, 7402)).toBe("");
   expect(suggestPublicURL({ protocol: "https:", hostname: "dev.test" }, 0)).toBe("");
 });
 
-// The user may edit the suggestion: the port they type is the port Moa binds,
-// so a corrected address moves the listener instead of pointing at nothing.
-test("the port comes from the edited address", () => {
-  expect(portOf("https://dev.test:9000")).toBe(9000);
-  expect(portOf("https://dev.test")).toBe(443);
-  expect(portOf("http://dev.test")).toBe(80);
-  expect(portOf("nonsense")).toBe(0);
-});
-
-test("only an absolute http(s) address is accepted", () => {
-  expect(validPublicURL("https://dev.test:7402")).toBe(true);
-  expect(validPublicURL("  http://dev.test:7402 ")).toBe(true);
-  expect(validPublicURL("dev.test:7402")).toBe(false);
-  expect(validPublicURL("ftp://dev.test:7402")).toBe(false);
-  expect(validPublicURL("")).toBe(false);
-});
-
-// The address is asked for once. Once the server reports one, the panel goes
-// straight to the app.
-test("the address is asked for only until the server has one", () => {
-  expect(setupStep({ status: { supported: true, public_url: "" }, savedURL: "" })).toBe("url");
-  expect(setupStep({ status: { supported: true, public_url: "" }, savedURL: "http://localhost:5173" })).toBe("address");
-  expect(setupStep({ status: { supported: true, public_url: "https://dev.test:7402" }, savedURL: "http://localhost:5173" })).toBe(null);
-  expect(setupStep({ status: { supported: true, public_url: "https://dev.test:7402" }, savedURL: "http://localhost:5173", editing: "address" })).toBe("address");
-});
-
-test("activation sends the app URL and the address in one owner request", async () => {
+test("activation sends the app URL and the current device address", async () => {
   let seen;
   const result = await activatePreview(async (path, options) => {
     seen = { path, options };
@@ -74,6 +46,19 @@ test("activation sends the app URL and the address in one owner request", async 
     public_url: "https://dev.test:7402",
     port: 7402,
   });
+});
+
+test("an unauthenticated opaque response establishes that the preview port is reachable", async () => {
+  let request;
+  await checkPreviewReachable(async (url, options) => {
+    request = { url, options };
+    return { type: "opaque", status: 0 };
+  }, "https://dev.test:7351");
+  expect(request.url).toBe("https://dev.test:7351");
+  expect(request.options.mode).toBe("no-cors");
+  expect(request.options.credentials).toBe("omit");
+  await expect(checkPreviewReachable(async () => { throw new TypeError("network error"); }, "https://dev.test:7351"))
+    .rejects.toThrow("network error");
 });
 
 // A busy port or an unusable address must arrive as the server's own words, so
