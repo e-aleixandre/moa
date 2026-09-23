@@ -46,7 +46,7 @@ caveat.
 
 ## Requirements
 
-- A provider login: an API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `XAI_API_KEY`) or an interactive OAuth login (see [Authenticate](#authenticate)) — at least one provider
+- A provider login: an API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, or `META_API_KEY`) or an interactive OAuth login (see [Authenticate](#authenticate)) — at least one provider
 - To build from source instead of installing a release: Go 1.25+ and Node.js/npm (the latter only to build the embedded web UI frontend via `make build`)
 
 ## Build from source
@@ -117,9 +117,9 @@ naming the provider to sign in to again. Switching that session to a model from
 a provider that is still authenticated is enough to keep working. A one-shot CLI
 run reports the problem before it starts, since it has nothing to fall back to.
 
-For voice input in the web UI (and Pulse Realtime), store a plain OpenAI API key
-in a separate slot, so the agent itself can stay on an OpenAI OAuth
-subscription:
+For voice in the web UI — dictation and live calls with a voice delegate — and
+for Pulse Realtime, store a plain OpenAI API key in a separate slot, so the agent
+itself can stay on an OpenAI OAuth subscription:
 
 ```bash
 moa --login openai-transcribe
@@ -178,17 +178,18 @@ old** — Anthropic requires OAuth clients to announce a recent Claude Code clie
 version, and raises the floor over time. Moa hardcodes that version, so the fix
 is to update moa (`moa update`); nothing in your configuration affects it.
 
-**An MCP server never becomes ready** — sessions no longer wait for the MCP
-handshake, so a server that fails to start shows up afterwards as failed in the
-session's MCP panel, and its tools are simply absent. The server's own error is
-reported there; the handshake has a 15-second timeout. Enable, disable or
-restart it from that panel. For a project `.mcp.json`, also check the directory
-is trusted — an untrusted project's servers are not loaded at all (see
-[Configuration](./configuration.md#project-directory-moa)).
+**An MCP server never becomes ready** — a new session's first message waits up
+to about 15 seconds for its MCP servers to start, then goes ahead without the
+ones that are not ready. Open the session's **MCP** page (from the session panel
+or the status line): a server that failed shows its error there, and you can turn
+it on or off or restart it. A remote server that needs a login shows **needs
+sign-in**: press **Connect** and follow the steps. For a project `.mcp.json`,
+also check the directory is trusted — an untrusted project's servers are not
+loaded at all (see [Configuration](./configuration.md#project-directory-moa)).
 
 **Voice input does nothing** — it needs `moa --login openai-transcribe` (or a
 plain `OPENAI_API_KEY`), and browsers only grant microphone access over HTTPS or
-on localhost.
+on localhost. Without that key the composer shows no phone button (**Talk live**).
 
 ## Next
 
