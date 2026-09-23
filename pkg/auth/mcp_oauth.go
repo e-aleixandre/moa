@@ -73,6 +73,9 @@ type MCPOAuthRecord struct {
 	// ObtainedAt is when the current access token was issued (unix ms).
 	ObtainedAt  int64 `json:"obtained_at"`
 	NeedsReauth bool  `json:"needs_reauth,omitempty"`
+	// SignedOut prevents a configured static Authorization header from
+	// reactivating this server after the user explicitly signed out.
+	SignedOut bool `json:"signed_out,omitempty"`
 }
 
 func (r MCPOAuthRecord) oauthConfig() *oauth2.Config {
@@ -123,12 +126,13 @@ type MCPOAuthStore struct {
 	strictClient *http.Client
 	addrPublic   func(netip.AddrPort) bool
 
-	mu       sync.Mutex
-	data     map[string]MCPOAuthRecord
-	keyLocks map[string]*sync.Mutex
-	pending  map[string]*mcpPending // by OAuth state
-	subs     map[uint64]func(string)
-	nextSub  uint64
+	mu          sync.Mutex
+	data        map[string]MCPOAuthRecord
+	keyLocks    map[string]*sync.Mutex
+	pending     map[string]*mcpPending // by OAuth state
+	subs        map[uint64]func(string)
+	signOutSubs map[uint64]func(string)
+	nextSub     uint64
 }
 
 var mcpStores = struct {
@@ -146,13 +150,14 @@ func MCPOAuthStoreAt(path string) *MCPOAuthStore {
 		return s
 	}
 	s := &MCPOAuthStore{
-		path:       path,
-		client:     newMCPHTTPClient(nil, nil),
-		addrPublic: isPublicAddr,
-		data:       map[string]MCPOAuthRecord{},
-		keyLocks:   map[string]*sync.Mutex{},
-		pending:    map[string]*mcpPending{},
-		subs:       map[uint64]func(string){},
+		path:        path,
+		client:      newMCPHTTPClient(nil, nil),
+		addrPublic:  isPublicAddr,
+		data:        map[string]MCPOAuthRecord{},
+		keyLocks:    map[string]*sync.Mutex{},
+		pending:     map[string]*mcpPending{},
+		subs:        map[uint64]func(string){},
+		signOutSubs: map[uint64]func(string){},
 	}
 	s.strictClient = newMCPHTTPClient(nil, func(ap netip.AddrPort) bool { return s.addrPublic(ap) })
 	// A corrupt file leaves memory empty; every mutation re-reads it under the
@@ -324,6 +329,34 @@ func (s *MCPOAuthStore) Has(key string) (exists, needsReauth bool) {
 	return ok, ok && rec.NeedsReauth
 }
 
+// SignedOut reports whether key has an explicit tokenless sign-out marker.
+func (s *MCPOAuthStore) SignedOut(key string) bool {
+	rec, ok := s.get(key)
+	return ok && rec.SignedOut
+}
+
+// SignOut removes all OAuth credentials for serverURL and leaves a tokenless
+// sign-in marker. The marker makes an explicit OAuth sign-out take precedence
+// over a configured static Authorization header until the user connects again.
+func (s *MCPOAuthStore) SignOut(ctx context.Context, serverURL string) error {
+	key := MCPOAuthKey(serverURL)
+	kl := s.keyLock(key)
+	kl.Lock()
+	defer kl.Unlock()
+
+	if err := s.withFileLock(ctx, func() error {
+		if err := s.adoptDisk(); err != nil {
+			return err
+		}
+		s.put(key, MCPOAuthRecord{ServerURL: serverURL, NeedsReauth: true, SignedOut: true})
+		return s.save()
+	}); err != nil {
+		return fmt.Errorf("removing MCP credentials: %w", err)
+	}
+	s.notifySignOut(key)
+	return nil
+}
+
 // Token returns the access token for key, refreshing it first when it is
 // about to expire. It returns (nil, nil) when no record exists, so a server
 // without OAuth is left to its static headers, and ErrMCPAuthRequired when
@@ -443,6 +476,7 @@ func applyToken(rec *MCPOAuthRecord, t *oauth2.Token, now time.Time) {
 	}
 	rec.ObtainedAt = now.UnixMilli()
 	rec.NeedsReauth = false
+	rec.SignedOut = false
 }
 
 // isPermanentRefreshError reports whether a refresh failure means the grant is
@@ -527,10 +561,38 @@ func (s *MCPOAuthStore) Subscribe(fn func(key string)) (unsubscribe func()) {
 	}
 }
 
+// SubscribeSignOut registers fn to be called after a server is explicitly
+// signed out. It is separate from Subscribe because authorization reconnects
+// waiting servers while sign-out must close live ones.
+func (s *MCPOAuthStore) SubscribeSignOut(fn func(key string)) (unsubscribe func()) {
+	s.mu.Lock()
+	id := s.nextSub
+	s.nextSub++
+	s.signOutSubs[id] = fn
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		delete(s.signOutSubs, id)
+		s.mu.Unlock()
+	}
+}
+
 func (s *MCPOAuthStore) notify(key string) {
 	s.mu.Lock()
 	fns := make([]func(string), 0, len(s.subs))
 	for _, fn := range s.subs {
+		fns = append(fns, fn)
+	}
+	s.mu.Unlock()
+	for _, fn := range fns {
+		fn(key)
+	}
+}
+
+func (s *MCPOAuthStore) notifySignOut(key string) {
+	s.mu.Lock()
+	fns := make([]func(string), 0, len(s.signOutSubs))
+	for _, fn := range s.signOutSubs {
 		fns = append(fns, fn)
 	}
 	s.mu.Unlock()

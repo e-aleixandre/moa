@@ -3,10 +3,13 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +17,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/mcp"
 )
@@ -207,5 +211,100 @@ func TestMCPOAuthEndpoints(t *testing.T) {
 				t.Fatalf("response %q leaks %q", b, s)
 			}
 		}
+	}
+}
+
+func TestMCPOAuthSignOutClearsCredentialsAndAllSessions(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("MOA_CONFIG_DIR", configDir)
+	mcpURL, _ := newOAuthProtectedMCP(t)
+	srv, mgr := newTestServerWithMCP(t, core.MoaConfig{DisableSandbox: true, MCPServers: map[string]core.MCPServer{
+		"remote": {URL: mcpURL, Headers: map[string]string{"Authorization": "Bearer stale-static"}},
+	}})
+	first, err := mgr.CreateSession(CreateOpts{Title: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := mgr.CreateSession(CreateOpts{Title: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitMCPSettled(t, first.infra.mcpMgr)
+	waitMCPSettled(t, second.infra.mcpMgr)
+
+	call := func(path string, body string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, srv.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Moa-Request", "1")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close() //nolint:errcheck
+		data, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(data)
+	}
+	base := "/api/sessions/" + first.ID + "/mcp/remote/oauth/"
+	code, body := call(base+"start", "")
+	if code != http.StatusOK {
+		t.Fatalf("start = %d %s", code, body)
+	}
+	var started struct {
+		AuthorizeURL string `json:"authorize_url"`
+	}
+	if err := json.Unmarshal([]byte(body), &started); err != nil {
+		t.Fatal(err)
+	}
+	authorizeURL, _ := url.Parse(started.AuthorizeURL)
+	callback, _ := url.Parse(authorizeURL.Query().Get("redirect_uri"))
+	callback.RawQuery = url.Values{"code": {"code"}, "state": {authorizeURL.Query().Get("state")}}.Encode()
+	finishBody, _ := json.Marshal(map[string]string{"url": callback.String()})
+	code, body = call(base+"finish", string(finishBody))
+	if code != http.StatusOK || !strings.Contains(body, `"state":"ready"`) {
+		t.Fatalf("finish = %d %s", code, body)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		st, _ := second.mcpServerStatus("remote")
+		if st.State == mcp.StateReady {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("second session never connected: %+v", st)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if code, _ := call(base+"signout", ""); code != http.StatusOK {
+		t.Fatalf("signout = %d", code)
+	}
+	for _, sess := range []*ManagedSession{first, second} {
+		st, _ := sess.mcpServerStatus("remote")
+		if st.State != mcp.StateAuthRequired || st.AuthAction != "connect" || st.ToolCount != 0 {
+			t.Fatalf("session %s after signout = %+v", sess.ID, st)
+		}
+	}
+	store := first.infra.mcpMgr.OAuthStore()
+	if token, err := store.Token(context.Background(), auth.MCPOAuthKey(mcpURL)); token != nil || !errors.Is(err, auth.ErrMCPAuthRequired) {
+		t.Fatalf("signed-out token = %v, %v", token, err)
+	}
+	persisted, err := os.ReadFile(filepath.Join(configDir, "mcp-oauth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"at-secret-1", "rt-secret-1", "cs-secret-1"} {
+		if strings.Contains(string(persisted), secret) {
+			t.Fatalf("signout left %q on disk", secret)
+		}
+	}
+	// A fresh Connect goes through discovery and authorization rather than the
+	// configured static Authorization header.
+	code, body = call(base+"start", "")
+	if code != http.StatusOK || !strings.Contains(body, "authorize_url") {
+		t.Fatalf("start after signout = %d %s", code, body)
 	}
 }
