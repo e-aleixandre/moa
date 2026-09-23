@@ -1,5 +1,6 @@
 import { Inbox } from "lucide-preact";
 import { mobileTitleChipLabel } from "../MobileConversationScreen/attention-model.js";
+import { OwnerAvatarFor } from "../../../components/Owners/OwnerAvatar.jsx";
 import "./MobileTitleChip.css";
 
 // MobileTitleChip — the session's name, the middle capsule of the phone's
@@ -14,7 +15,11 @@ import "./MobileTitleChip.css";
 // because events waiting have to be legible WITHOUT opening anything, and a
 // 44px icon button has no room for a number next to its glyph.
 
-export function MobileTitleChip({ title, open = false, onToggle, inboxCount = 0, alert = "" }) {
+// owner — in an owner's own conversation, the owner's face sits left of the
+// name, alive and in its real state: this conversation IS that owner. It is
+// a fixed 20px and never shrinks; the name is what gives way (ellipsis), so
+// the capsule keeps its width and never pushes ☰ or +.
+export function MobileTitleChip({ title, open = false, onToggle, inboxCount = 0, alert = "", owner = null }) {
   return (
     <button
       type="button"
@@ -26,6 +31,11 @@ export function MobileTitleChip({ title, open = false, onToggle, inboxCount = 0,
         ? `${mobileTitleChipLabel(title, inboxCount)}; ${alert}`
         : mobileTitleChipLabel(title, inboxCount)}
     >
+      {owner && (
+        <span class="zl-chip-face" aria-hidden="true">
+          <OwnerAvatarFor owner={owner} state={owner.state} size={20} />
+        </span>
+      )}
       <span class="zl-chip-name">{title}</span>
       {/* This session's own alarm (the cache streak), on this session's own
           door. Yellow, and a dot rather than a number: the capsule is 44px of

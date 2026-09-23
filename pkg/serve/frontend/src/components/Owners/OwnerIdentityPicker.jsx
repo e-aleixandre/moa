@@ -1,4 +1,5 @@
 import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatar } from "./OwnerAvatar.jsx";
+import { OwnerFace, faceBodyColor } from "./OwnerFace.jsx";
 
 /* OwnerIdentityPicker — the two rows that choose a face, in their own file.
 
@@ -12,17 +13,22 @@ import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatar } from "./OwnerAvatar.jsx";
    The one new thing in the form: the face, above the two rows that change it.
    Preview first and large, because what you are choosing is what you will see
    in the list for months; the rows under it are swatches at the touch floor
-   (44px), not a dropdown — six shapes and eight colours are fewer decisions
-   than a menu costs to open.
+   (44px), not a dropdown — eight shapes and eight colours are fewer decisions
+   than a menu costs to open. The last two shapes (triangle, cloud) are only
+   ever chosen, never a default; they sit at the end of the row without a
+   badge, because to the person choosing they are just two more shapes.
 
-   The eyes in the preview are the idle ones. The picker is not a place to
-   show states: it is where you choose the half of the mark that never
-   changes. */
-export function OwnerIdentityPicker({ name, shape, color, onShape, onColor }) {
+   The preview is the live face, idle, seeded like the owner it will be (so
+   it blinks here the way it will in the list) and watching the pointer. The
+   swatches hold still: six faces blinking at once would be the picker
+   performing instead of offering. Unchosen shapes are grey so the one in
+   colour IS the choice, and the colour dots are the body colour the face
+   actually wears, not the palette token behind it. */
+export function OwnerIdentityPicker({ name, shape, color, seedKey, onShape, onColor }) {
   return (
     <div class="ow-idp">
       <div class="ow-idp-preview">
-        <OwnerAvatar shape={shape} color={color} state="idle" size={64} />
+        <OwnerAvatar shape={shape} color={color} seedKey={seedKey} state="idle" size={64} follow />
         <span class="ow-idp-name">{name || "New owner"}</span>
       </div>
       <div class="ow-idp-field">
@@ -38,7 +44,14 @@ export function OwnerIdentityPicker({ name, shape, color, onShape, onColor }) {
               key={s}
               onClick={() => onShape(s)}
             >
-              <OwnerAvatar shape={s} color={color} state="idle" size={32} />
+              <OwnerFace
+                shape={s}
+                color={color}
+                seedKey={seedKey}
+                muted={s !== shape}
+                gaze={[0, 0]}
+                size={32}
+              />
             </button>
           ))}
         </div>
@@ -56,7 +69,7 @@ export function OwnerIdentityPicker({ name, shape, color, onShape, onColor }) {
               key={c.id}
               onClick={() => onColor(c.id)}
             >
-              <span class="ow-swatch-c" style={`--ow-av-c:${c.hex}`} aria-hidden="true" />
+              <span class="ow-swatch-c" style={`--ow-sw-c:${faceBodyColor(c.id)}`} aria-hidden="true" />
             </button>
           ))}
         </div>

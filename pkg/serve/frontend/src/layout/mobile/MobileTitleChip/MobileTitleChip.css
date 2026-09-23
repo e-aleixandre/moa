@@ -12,7 +12,11 @@
    ring the catalogue declared on `.zl` rather than on the chip. */
 
 .zl-chip { flex: 1; min-width: 0; gap: 6px; }
-.zl-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zl-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* An owner's own conversation: its face, left of the name. Fixed; the name
+   is what truncates. The chip's gap already separates them. */
+.zl-chip-face { flex: none; display: inline-flex; }
 .zl-chip .zl-chev {
   width: 14px;
   height: 14px;

@@ -4,7 +4,7 @@ import { sessionRowReason } from "../../Sidebar/sessions.js";
 import { aggregateAttention, newResultSessions } from "./attention-model.js";
 import { inboxCards, inboxHealth, inboxHealthSig, inboxSig } from "../../../data/events.js"; // wake-on-event
 import { ordinarySessions } from "../../../data/util/project-sessions.js";
-import { ownerRows } from "../../../data/owners-model.js";
+import { ownerRows, ownerState } from "../../../data/owners-model.js";
 import { ownersHealth, ownersSlice } from "../../../data/owners.js";
 import { activeOwnerIdOf } from "../../Sidebar/sessions.js";
 
@@ -95,18 +95,46 @@ export function recentSavedSessions(sessions, limit = 3) {
 }
 
 // recentOwners is the empty state's grid of faces: every owner, the most
-// recently active conversation first. No state travels with it: the empty
-// state only shows when nothing is live (landingOrder), so every owner here is
-// at rest and a state mark would be a fact that never holds.
+// recently active conversation first, each with its own state — the same
+// ownerState the sidebar row paints, so the face behaves here as it does
+// there. Pass the joined rows (ownerRows): the owner's own conversation is
+// hidden from the session list, and only the join knows its state and unseen.
 export function recentOwners(owners = [], sessions = {}) {
   const at = (own) => sessions?.[own.session_id]?.updated || 0;
   return [...(owners || [])]
     .sort((a, b) => at(b) - at(a))
-    .map((own) => ({ id: own.id, name: own.name, session_id: own.session_id, avatar: own.avatar, codebase_key: own.codebase_key }));
+    .map((own) => ({
+      id: own.id,
+      name: own.name,
+      session_id: own.session_id,
+      avatar: own.avatar,
+      codebase_key: own.codebase_key,
+      state: ownerState(own),
+    }));
+}
+
+// titleOwner is the owner whose OWN conversation is on screen, for the face in
+// the header's title capsule; null for every other session (an ordinary
+// session, or a child of an owner — that one wears the Owner chip instead).
+export function titleOwner(session, owners = []) {
+  if (!session || (session.kind || "") !== "owner") return null;
+  const own = (owners || []).find((o) => o.session_id === session.id);
+  if (!own) return null;
+  return {
+    id: own.id,
+    name: own.name,
+    avatar: own.avatar,
+    codebase_key: own.codebase_key,
+    state: ownerState(own),
+  };
+}
+
+function titleOwnerSig(o) {
+  return o ? [o.id, o.avatar?.shape || "", o.avatar?.color || "", o.codebase_key || "", o.state].join("\0") : "";
 }
 
 function recentOwnersSig(list) {
-  return (list || []).map((o) => [o.id, o.name, o.session_id || "", o.avatar?.shape || "", o.avatar?.color || ""].join("\0")).join("\n");
+  return (list || []).map((o) => [o.id, o.name, o.session_id || "", o.avatar?.shape || "", o.avatar?.color || "", o.state || ""].join("\0")).join("\n");
 }
 
 function cardSig(row) {
@@ -159,6 +187,7 @@ function mobileChromeEqual(a, b) {
     && listSig(a.saved) === listSig(b.saved)
     && listSig(a.recentSaved) === listSig(b.recentSaved)
     && recentOwnersSig(a.recentOwners) === recentOwnersSig(b.recentOwners)
+    && titleOwnerSig(a.titleOwner) === titleOwnerSig(b.titleOwner)
     && (a.projects || []).map((p) => `${p.cwd}\0${p.updated}`).join("\n")
       === (b.projects || []).map((p) => `${p.cwd}\0${p.updated}`).join("\n");
 }
@@ -170,6 +199,7 @@ export function selectMobileChrome(state, forceMobile = false) {
   const activeId = forceMobile ? (state.activeSession || null) : focusedSessionId(state);
   const session = activeId ? state.sessions[activeId] : null;
   const lists = drawerSessions(state.sessions, activeId);
+  const owners = ownerRows(ownersSlice(state).list, state.sessions);
   const next = {
     activeId,
     title: session ? sessionTitle(session) : "",
@@ -179,7 +209,7 @@ export function selectMobileChrome(state, forceMobile = false) {
     drawerStep: state.drawerStep || "list",
     groupByProject: !!state.groupByProject,
     sidebarMode: state.sidebarMode || (state.groupByProject ? "project" : "recent"),
-    owners: ownerRows(ownersSlice(state).list, state.sessions),
+    owners,
     ownersHealth: ownersHealth(state),
     activeOwnerId: activeOwnerIdOf(state),
     drawerCollapsed: state.drawerCollapsed,
@@ -191,7 +221,8 @@ export function selectMobileChrome(state, forceMobile = false) {
     inboxOpen: !!state.inboxOpen, // wake-on-event
     projects: drawerProjects(state.sessions),
     recentSaved: recentSavedSessions(state.sessions),
-    recentOwners: recentOwners(ownersSlice(state).list, state.sessions),
+    recentOwners: recentOwners(owners, state.sessions),
+    titleOwner: titleOwner(session, owners),
     ...lists,
   };
   const prev = selectMobileChrome._prev;

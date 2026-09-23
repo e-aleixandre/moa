@@ -44,15 +44,52 @@ test("selectMobileChrome replaces the snapshot when another session needs you", 
   expect(second.attention.permission).toBe(1);
 });
 
-test("the empty state's owners: most recent conversation first, no state carried", async () => {
+test("the empty state's owners: most recent conversation first, each with its own state", async () => {
   const { recentOwners } = await import("./chrome.js");
   const owners = [
     { id: "a", name: "A", session_id: "sa", avatar: { shape: "pill", color: "sky" }, session_state: "saved" },
-    { id: "b", name: "B", session_id: "sb", codebase_key: "kb" },
-    { id: "c", name: "C", session_id: "" },
+    { id: "b", name: "B", session_id: "sb", codebase_key: "kb", session_state: "running" },
+    { id: "c", name: "C", session_id: "", session_state: "permission" },
   ];
   const sessions = { sa: { id: "sa", updated: 10 }, sb: { id: "sb", updated: 30 } };
   const rows = recentOwners(owners, sessions);
   expect(rows.map((o) => o.id)).toEqual(["b", "a", "c"]);
-  expect(Object.keys(rows[1]).sort()).toEqual(["avatar", "codebase_key", "id", "name", "session_id"]);
+  expect(Object.keys(rows[1]).sort()).toEqual(["avatar", "codebase_key", "id", "name", "session_id", "state"]);
+  // The sidebar's own words: ownerState, not the raw session state.
+  expect(rows.map((o) => o.state)).toEqual(["working", "saved", "asks"]);
+});
+test("the title capsule wears a face only in an owner's own conversation", async () => {
+  const { titleOwner } = await import("./chrome.js");
+  const owners = [
+    { id: "o1", name: "Winerim", session_id: "os", codebase_key: "winerim-backend",
+      avatar: { shape: "cloud", color: "sky" }, session_state: "permission" },
+  ];
+  expect(titleOwner({ id: "os", kind: "owner" }, owners)).toEqual({
+    id: "o1", name: "Winerim", avatar: { shape: "cloud", color: "sky" },
+    codebase_key: "winerim-backend", state: "asks",
+  });
+  // An ordinary session, or one of the owner's children, keeps a plain title.
+  expect(titleOwner({ id: "x", kind: "" }, owners)).toBeNull();
+  expect(titleOwner({ id: "c", kind: "", ownerId: "o1" }, owners)).toBeNull();
+  // An owner conversation whose owner is not loaded yet shows no face.
+  expect(titleOwner({ id: "other", kind: "owner" }, owners)).toBeNull();
+  expect(titleOwner(null, owners)).toBeNull();
+});
+
+test("selectMobileChrome carries the owner's face into the header, and only for owners", () => {
+  __resetMobileChromeForTests();
+  const base = {
+    isMobile: true, drawerOpen: false, drawerStep: "list", groupByProject: false,
+    soundEnabled: true, drawerCollapsed: {},
+    owners: { list: [{ id: "o1", name: "Winerim", session_id: "os", codebase_key: "k" }] },
+    sessions: {
+      os: { id: "os", kind: "owner", title: "Winerim", state: "running", updated: 2, cwd: "/w" },
+      a: { id: "a", title: "A", state: "idle", updated: 1, cwd: "/x" },
+    },
+  };
+  const own = selectMobileChrome({ ...base, activeSession: "os" });
+  expect(own.titleOwner?.id).toBe("o1");
+  expect(own.titleOwner?.state).toBe("working");
+  __resetMobileChromeForTests();
+  expect(selectMobileChrome({ ...base, activeSession: "a" }).titleOwner).toBeNull();
 });

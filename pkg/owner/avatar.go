@@ -15,7 +15,7 @@ import "slices"
 // stored here.
 //
 // Only the NAMES are here. The values the clients draw live beside the drawing
-// (src/components/Owners/OwnerAvatar.jsx), which is what lets the palette be
+// (src/components/Owners/avatar-identity.js), which is what lets the palette be
 // restyled without touching a single owner.json.
 //
 // The field is ADDITIVE: an owner.json written before avatars existed has none
@@ -24,9 +24,16 @@ import "slices"
 
 // AvatarShapes and AvatarColors are closed lists: anything else is refused on
 // create rather than stored and silently dropped by whatever draws it.
+//
+// DefaultAvatarShapes is the pool the deterministic default hashes over, and
+// it must never change: DefaultAvatar is `hash % len(pool)`, so appending to it
+// would silently re-face every owner that never chose one. Shapes added later
+// (triangle, cloud) are therefore selectable only — in AvatarShapes, never in
+// the pool.
 var (
-	AvatarShapes = []string{"circle", "squircle", "blob", "hexagon", "drop", "pill"}
-	AvatarColors = []string{"peach", "mauve", "sage", "sky", "azure", "rose", "mint", "lilac"}
+	DefaultAvatarShapes = []string{"circle", "squircle", "blob", "hexagon", "drop", "pill"}
+	AvatarShapes        = append(slices.Clone(DefaultAvatarShapes), "triangle", "cloud")
+	AvatarColors        = []string{"peach", "mauve", "sage", "sky", "azure", "rose", "mint", "lilac"}
 )
 
 // renamedAvatarColors maps an id that has LEFT the closed list onto the one an
@@ -68,7 +75,7 @@ func (a Avatar) Valid() bool {
 }
 
 // hash is FNV-1a with a final avalanche, and it is the frontend's hash byte
-// for byte (src/components/Owners/OwnerAvatar.jsx). The two must agree, or an
+// for byte (src/components/Owners/avatar-identity.js). The two must agree, or an
 // owner created by one and drawn by the other would change face; the client
 // keeps its own copy because it has to draw an owner whose avatar field a
 // server of an older build never sent.
@@ -97,7 +104,7 @@ func hash(text string, seed uint32) uint32 {
 // lockstep and the 48 combinations would collapse to 8.
 func DefaultAvatar(codebaseKey string) Avatar {
 	return Avatar{
-		Shape: AvatarShapes[hash(codebaseKey, 2166136261)%uint32(len(AvatarShapes))],
+		Shape: DefaultAvatarShapes[hash(codebaseKey, 2166136261)%uint32(len(DefaultAvatarShapes))],
 		Color: AvatarColors[hash(codebaseKey, 5381)%uint32(len(AvatarColors))],
 	}
 }

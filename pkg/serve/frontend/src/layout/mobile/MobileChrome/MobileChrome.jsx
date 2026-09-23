@@ -49,6 +49,9 @@ export function MobileChrome({
   // panel. Distinct from `attention`, which is about the OTHER sessions and
   // lives on the left capsule.
   alert = "",
+  // owner — set only in an OWNER's own conversation: its face goes in the
+  // title capsule, left of the name.
+  owner = null,
   // below — a quiet row under the three capsules. Today that is the Owner
   // chip: it belongs with the header (it is about this conversation) but not
   // INSIDE the capsule row, which already does three jobs (CRITERIO §3).
@@ -81,6 +84,7 @@ export function MobileChrome({
         onToggle={onPanel}
         inboxCount={inboxCount}
         alert={alert}
+        owner={owner}
       />
       <button
         type="button"

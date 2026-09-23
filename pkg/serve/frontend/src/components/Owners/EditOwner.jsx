@@ -45,6 +45,7 @@ export function EditOwner({ owner, onSave, onClose, phone }) {
         name={name}
         shape={avatar.shape}
         color={avatar.color}
+        seedKey={owner.codebase_key || owner.name}
         onShape={(shape) => setAvatar({ ...avatar, shape })}
         onColor={(color) => setAvatar({ ...avatar, color })}
       />
