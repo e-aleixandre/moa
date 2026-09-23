@@ -28,11 +28,18 @@ narrative visual feed of sessions and conversations is a later phase.
   receive, proxy, or persist it.
 - Realtime tools run in the Swift app through typed calls to Moa's generic API;
   the model receives neither the Moa credential nor unrestricted HTTP.
+- The web voice delegate (`/api/voice/live/*`) is a separate path, not part of
+  Pulse: the browser sends its SDP offer to Moa, which exchanges it with OpenAI
+  using the server's key and does not use the client-secret broker. Both share
+  the same OpenAI API key.
 
 ## Access and context
 
 A paired device represents the owner and can use Serve's full generic API
-surface, except to administer pairing. The model can read user/assistant
+surface, except to administer pairing and the live preview target.
+It can exchange its credential for a short-lived browser session
+(`POST /api/pulse/device-session`) and revoke its own credential
+(`POST /api/pulse/device/revoke`). The model can read user/assistant
 messages and tool activity from any session on demand; the owner accepts that
 this context reaches OpenAI.
 
