@@ -181,9 +181,11 @@ function MobileConversationBody({ forceMobile = false }) {
 
   const { recentSaved, recentOwners, activeCount, savedCount } = chrome;
 
-  // The owners at rest, as faces: the empty state is where you pick up what you
-  // were last on, and an owner is one of those things. No state mark — nothing
-  // is live when this screen shows (landingOrder lands on anything that is).
+  // The owners as faces: the empty state is where you pick up what you were
+  // last on, and an owner is one of those things. Each face wears its owner's
+  // real state (ownerState, as the sidebar row does), so it behaves here the
+  // way it does there. The grid itself prints no word for that state — only
+  // the name — so the words live in the drawer's owner rows.
   const ownerFaces = recentOwners.length > 0 && (
     <>
       <p class="mconv-empty-label">Owners</p>
@@ -196,7 +198,7 @@ function MobileConversationBody({ forceMobile = false }) {
             aria-label={`${own.name}, project owner`}
             onClick={() => openOwnerConversation(own)}
           >
-            <OwnerAvatarFor owner={own} state="idle" size={40} />
+            <OwnerAvatarFor owner={own} state={own.state} size={40} />
             <span class="mconv-owner-name" aria-hidden="true">{own.name}</span>
           </button>
         ))}
@@ -512,6 +514,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
           onPanel={() => toggleSessionPanel(chrome.activeId, cacheAlert ? "usage" : "root")}
           onNew={() => openPalette("create")}
           inboxCount={inboxCount}
+          owner={chrome.titleOwner}
         />
       )}
       {chrome.inboxOpen && (

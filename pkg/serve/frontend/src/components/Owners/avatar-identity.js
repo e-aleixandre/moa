@@ -9,7 +9,13 @@
 
 // ── The two identity axes ───────────────────────────────────────────────
 
-export const AVATAR_SHAPES = ["circle", "squircle", "blob", "hexagon", "drop", "pill"];
+// DEFAULT_AVATAR_SHAPES is the pool the deterministic default hashes over, and
+// it must never change: the default is `hash % length`, so appending to it
+// would silently re-face every owner that never chose one. Shapes added later
+// are selectable only (AVATAR_SHAPES), never part of the pool. Both lists are
+// pkg/owner/avatar.go's DefaultAvatarShapes / AvatarShapes, in that order.
+export const DEFAULT_AVATAR_SHAPES = ["circle", "squircle", "blob", "hexagon", "drop", "pill"];
+export const AVATAR_SHAPES = [...DEFAULT_AVATAR_SHAPES, "triangle", "cloud"];
 
 // The identity palette. EIGHT HUES SPREAD ROUND THE WHEEL, not eight tints of
 // the theme: the first attempt derived them from `--peach` / `--mauve` /
@@ -60,7 +66,7 @@ export function avatarColor(id) {
 }
 
 /* The outlines, in one 32×32 box so the two sizes are one drawing scaled.
-   Hand-written paths rather than a library: six shapes is not a dependency,
+   Hand-written paths rather than a library: eight shapes is not a dependency,
    and clip-path would have cost a second definition per shape for the rim.
    The ids are pkg/owner/avatar.go's AvatarShapes, in that order. */
 export const SHAPE_PATHS = {
@@ -72,6 +78,10 @@ export const SHAPE_PATHS = {
   hexagon: "M16 1.5 28.6 8.75v14.5L16 30.5 3.4 23.25V8.75Z",
   drop: "M16 1.8c5.8 6 11.7 8.4 11.7 15.4a11.7 11.7 0 1 1-23.4 0c0-7 5.9-9.4 11.7-15.4Z",
   pill: "M11.5 6h9a10 10 0 0 1 0 20h-9a10 10 0 0 1 0-20Z",
+  // Selectable only (not in the default pool). A triangle with softened
+  // corners, and a cloud whose flat base gives the eyes somewhere to sit.
+  triangle: "M13.2 5.4Q16 .9 18.8 5.4L29.3 23.4Q31.9 28 26.6 28H5.4Q.1 28 2.7 23.4Z",
+  cloud: "M9.2 27.2A6.4 6.4 0 0 1 7.7 14.6 8.4 8.4 0 0 1 24 12.1 7.5 7.5 0 0 1 24.4 27.2Z",
 };
 
 // Where the eyes sit inside each outline. A drop is heavy at the bottom and a
@@ -83,6 +93,9 @@ export const EYE_CENTER = {
   hexagon: [16, 15.2],
   drop: [16, 18],
   pill: [16, 16],
+  // Both are heavy at the bottom, like the drop.
+  triangle: [16, 19.4],
+  cloud: [16.4, 19],
 };
 
 /* ── The one state axis: the eyes ────────────────────────────────────────
@@ -140,7 +153,7 @@ export function hash(text, seed) {
 
 export function defaultAvatar(codebaseKey) {
   return {
-    shape: AVATAR_SHAPES[hash(codebaseKey, 2166136261) % AVATAR_SHAPES.length],
+    shape: DEFAULT_AVATAR_SHAPES[hash(codebaseKey, 2166136261) % DEFAULT_AVATAR_SHAPES.length],
     color: AVATAR_COLORS[hash(codebaseKey, 5381) % AVATAR_COLORS.length].id,
   };
 }

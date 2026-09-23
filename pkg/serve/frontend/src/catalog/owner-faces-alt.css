@@ -1,0 +1,80 @@
+/* owner-faces-alt — CATALOG ONLY. The previous static tile (OwnerAvatarClassic)
+   and the two proposals that wore it (B · Pupilas, C · Sobria). They share
+   the product face's root and blink rules (OwnerFace.css: `.of`, `.of-lid`,
+   `.of-open`, the breath); only what is theirs lives here, so none of it
+   reaches the production bundle. */
+
+/* ── The lit tile ──────────────────────────────────────────────────────────
+   Lit from above like every sheet in the product: two gradients and the same
+   small shadow. The colour is one variable (`--ow-av-c`) spent at three
+   strengths: the plane, the outline, and the eyes. */
+.ow-av .ow-av-body {
+  fill: var(--ow-av-fill);
+  stroke: color-mix(in srgb, var(--ow-av-c) 95%, transparent);
+  stroke-width: 1.4;
+}
+.ow-av .ow-av-f0 { stop-color: color-mix(in srgb, var(--ow-av-c) 64%, var(--zl-raised)); }
+.ow-av .ow-av-f1 { stop-color: color-mix(in srgb, var(--ow-av-c) 32%, var(--zl-raised)); }
+
+/* The lit edge: the same outline stroked in white, running out by mid-height
+   so that only the edge facing up is lit. A highlight drawn round the whole
+   outline would read as a paler rim instead of as light. */
+.ow-av .ow-av-lit { fill: none; stroke: var(--ow-av-edge); stroke-width: 1.4; }
+.ow-av .ow-av-l0 { stop-color: rgba(255, 255, 255, 0.42); }
+.ow-av .ow-av-l1 { stop-color: rgba(255, 255, 255, 0); }
+
+/* The eyes are the only part at full identity strength, which is deliberate:
+   they are what you look at, and they are also what changes. */
+.ow-av .ow-av-eyes ellipse { fill: color-mix(in srgb, var(--ow-av-c) 92%, var(--zl-t1)); }
+.ow-av .ow-av-eyes path { stroke: color-mix(in srgb, var(--ow-av-c) 92%, var(--zl-t1)); fill: none; }
+
+/* At 20px the outline's 1.4 stroke is a third of an eye, so it is thinned
+   rather than scaled: a chip-sized avatar must read as the same mark, not as
+   the same drawing shrunk. The lit edge follows it, or the light would be
+   drawn at a different weight from the rim it sits on. */
+.ow-av.is-20 .ow-av-body,
+.ow-av.is-20 .ow-av-lit { stroke-width: 1.7; }
+
+.of .of-pupil,
+.of .of-s-gaze {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.of-pupilas.is-working .of-open { transform: scaleY(0.78); }
+.of-pupilas.is-asks .of-open { transform: scale(1.08); }
+
+/* ── B · Pupilas ────────────────────────────────────────────────────────── */
+
+.of-pupilas .of-p-sclera {
+  fill: color-mix(in srgb, var(--ow-av-c) 14%, var(--zl-t1, #f4f4f7));
+}
+.of-pupilas .of-p-pupil { fill: var(--of-ink); }
+.of-pupilas .of-p-glint { fill: #fff; opacity: 0; }
+.of-pupilas.is-40 .of-p-glint,
+.of-pupilas.is-64 .of-p-glint,
+.of-pupilas.is-96 .of-p-glint,
+.of-pupilas.is-112 .of-p-glint,
+.of-pupilas.is-128 .of-p-glint { opacity: 0.9; }
+.of-pupilas .of-pupil {
+  transform: translate(calc(var(--px, 0) * 1px), calc(var(--py, 0) * 1px));
+  transition: transform var(--motion-base) var(--of-spring);
+}
+.of-pupilas.is-working .of-pupil { transition-duration: var(--motion-fast); }
+.of-pupilas .of-p-brow {
+  fill: none;
+  stroke: color-mix(in srgb, var(--ow-av-c) 92%, var(--zl-t1));
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+/* ── C · Sobria ─────────────────────────────────────────────────────────── */
+
+.of-sobria .of-s-gaze {
+  transform: translate(calc(var(--ox, 0) * 1px), calc(var(--oy, 0) * 1px));
+  transition: transform var(--motion-base) var(--motion-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .of .of-pupil,
+  .of .of-s-gaze { transition: none; }
+}

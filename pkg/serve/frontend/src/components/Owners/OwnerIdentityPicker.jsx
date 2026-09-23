@@ -13,8 +13,10 @@ import { OwnerFace, faceBodyColor } from "./OwnerFace.jsx";
    The one new thing in the form: the face, above the two rows that change it.
    Preview first and large, because what you are choosing is what you will see
    in the list for months; the rows under it are swatches at the touch floor
-   (44px), not a dropdown — six shapes and eight colours are fewer decisions
-   than a menu costs to open.
+   (44px), not a dropdown — eight shapes and eight colours are fewer decisions
+   than a menu costs to open. The last two shapes (triangle, cloud) are only
+   ever chosen, never a default; they sit at the end of the row without a
+   badge, because to the person choosing they are just two more shapes.
 
    The preview is the live face, idle, seeded like the owner it will be (so
    it blinks here the way it will in the list) and watching the pointer. The
@@ -43,7 +45,6 @@ export function OwnerIdentityPicker({ name, shape, color, seedKey, onShape, onCo
               onClick={() => onShape(s)}
             >
               <OwnerFace
-                variant="mirada"
                 shape={s}
                 color={color}
                 seedKey={seedKey}

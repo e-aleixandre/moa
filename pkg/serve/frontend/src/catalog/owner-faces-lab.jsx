@@ -1,7 +1,8 @@
 import { createContext } from "preact";
 import { useContext, useEffect, useState } from "preact/hooks";
-import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatarClassicFor } from "../components/Owners/OwnerAvatar.jsx";
-import { OwnerFace, FACE_VARIANTS, OPT_IN_SHAPES, faceBodyColor } from "../components/Owners/OwnerFace.jsx";
+import { AVATAR_COLORS, AVATAR_SHAPES, DEFAULT_AVATAR_SHAPES } from "../components/Owners/OwnerAvatar.jsx";
+import { OwnerFace, faceBodyColor } from "../components/Owners/OwnerFace.jsx";
+import { OwnerAvatarClassicFor, OwnerFaceAlt } from "./owner-faces-alt.jsx";
 import { facePersonality, faceMotion } from "../components/Owners/faceMotion.js";
 import { MOA_OWNER, WINERIM, WINERIM_WEB } from "./owners3-fixtures.js";
 import "./owner-faces-lab.css";
@@ -82,9 +83,15 @@ const BLURB = {
 // The lab's switches every face reads (only the sheen, for now).
 const Lab = createContext({ sheen: false });
 
-function Face(props) {
+const FACE_VARIANTS = ["mirada", "pupilas", "sobria"];
+// Selectable only: never a default (see DEFAULT_AVATAR_SHAPES).
+const OPT_IN_SHAPES = AVATAR_SHAPES.filter((s) => !DEFAULT_AVATAR_SHAPES.includes(s));
+
+// Mirada is the product's OwnerFace; B and C are the catalog-only drawings.
+function Face({ variant, ...props }) {
   const { sheen } = useContext(Lab);
-  return <OwnerFace sheen={props.variant === "mirada" && sheen} {...props} />;
+  if (variant === "mirada") return <OwnerFace sheen={sheen} {...props} />;
+  return <OwnerFaceAlt variant={variant} {...props} />;
 }
 
 function Seg({ label, value, options, onChange }) {
@@ -214,7 +221,7 @@ function Personality({ owner }) {
    face large and alive on top, the name, then colour and shape as two
    scrolling rows. Unchosen shapes are grey so the one in colour is the
    choice. The opt-in shapes sit after a divider: they are never a default
-   (see OPT_IN_SHAPES) and the server does not store them yet. */
+   (DEFAULT_AVATAR_SHAPES). */
 function CharacterEditor({ phone }) {
   const [name, setName] = useState("Winerim");
   const [color, setColor] = useState("peach");
@@ -231,7 +238,7 @@ function CharacterEditor({ phone }) {
       class={`ofl-ce-shape${s === shape ? " is-on" : ""}`}
       onClick={() => setShape(s)}
     >
-      <OwnerFace variant="mirada" shape={s} color={color} seedKey={seedKey} muted={s !== shape} sheen={sheen} gaze={[0, 0]} size={36} />
+      <OwnerFace shape={s} color={color} seedKey={seedKey} muted={s !== shape} sheen={sheen} gaze={[0, 0]} size={36} />
       {OPT_IN_SHAPES.includes(s) && <span class="ofl-ce-new">new</span>}
     </button>
   );
@@ -268,7 +275,7 @@ function CharacterEditor({ phone }) {
         ))}
       </div>
       <div class="ofl-ce-row" role="radiogroup" aria-label="Shape">
-        {AVATAR_SHAPES.map(shapeBtn)}
+        {DEFAULT_AVATAR_SHAPES.map(shapeBtn)}
         <span class="ofl-ce-div" aria-hidden="true" />
         {OPT_IN_SHAPES.map(shapeBtn)}
       </div>

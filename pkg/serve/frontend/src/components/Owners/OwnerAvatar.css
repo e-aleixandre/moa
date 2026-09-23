@@ -1,42 +1,8 @@
-/* OwnerAvatar — the sheet of the owner's PREVIOUS identity mark, the static
-   lit tile. The product now draws the Mirada face (OwnerFace.css); what is
-   still live here for the product is only the root `.ow-av` rules (shadow,
-   saved opacity), which the face shares so the selectors around it keep
-   working. The tile below is what the design labs show as "Antes" and what
-   the faces lab's B/C proposals wear. It uses only the `--zl-*` ladder and
-   every class is prefixed `ow-av`.
-
-   The colour is ONE variable set by the component (`--ow-av-c`), spent at
-   three strengths: the plane, the outline one step stronger, and the eyes at
-   full strength.
-
-   THE STRENGTHS WENT UP, and that was the first fix the owner asked for. The
-   plane was 22% and the rim 55% — eight marks that close to the surface are
-   eight greys with a tint, and on a phone two of them read as one colour. At
-   an average 46% the fill carries the hue itself rather than a memory of it,
-   and the rim at 95% draws the outline in the identity colour proper, so the
-   mark survives 32px on a bright screen at arm's length. It is still a TILE
-   and not a dot: the fill stays half-way to the surface, so nothing here
-   competes with the solid 7px state dot beside it (CRITERIO §1).
-
-   THE SECOND FIX IS THE LIGHT. The mark was a flat fill with a rim in an
-   interface where nothing else is: every sheet carries
-   `inset 0 1px 0 var(--zl-line)`, the page sits over the aurora
-   (tokens/shell.css) and surfaces drop a soft shadow. The owner's words were
-   that everything is ambient "y los avatares son como un color plano con
-   borde". So the plane is LIT FROM ABOVE, its top edge catches that light and
-   it drops the same small shadow every other surface does — two gradients and
-   one shadow, the product's own idiom said in SVG.
-
-   The DRAWING did not change for it: same six shapes, same eight hues, same
-   eyes. 64% at the top and 32% at the bottom SPEND the verified 46%, they do
-   not lower it.
-
-   Two alternatives were photographed beside this one and rejected by the
-   owner: a halo in the identity colour (a glow says "something is happening",
-   and identity never carries state — an idle owner would have glowed like a
-   working one) and a translucent glass pebble (it spent its contrast on the
-   bottom edge, which is what a 20px chip can least afford). */
+/* OwnerAvatar — the root rules every owner mark shares. The product draws
+   the Mirada face (OwnerFace.css); `.ow-av` is kept on it because the
+   surfaces around the mark already select it (StatusStrip's
+   `.zl-st-owner .ow-av`). The previous static tile's sheet, and the two
+   proposals that wore it, moved to the catalog (catalog/owner-faces-alt.css). */
 
 .ow-av {
   flex: none;
@@ -47,38 +13,6 @@
   filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.45));
 }
 
-.ow-av .ow-av-body {
-  fill: var(--ow-av-fill);
-  stroke: color-mix(in srgb, var(--ow-av-c) 95%, transparent);
-  stroke-width: 1.4;
-}
-.ow-av .ow-av-f0 { stop-color: color-mix(in srgb, var(--ow-av-c) 64%, var(--zl-raised)); }
-.ow-av .ow-av-f1 { stop-color: color-mix(in srgb, var(--ow-av-c) 32%, var(--zl-raised)); }
-
-/* The lit edge: the same outline stroked in white, running out by mid-height
-   so that only the edge facing up is lit. A highlight drawn round the whole
-   outline would read as a paler rim instead of as light. */
-.ow-av .ow-av-lit { fill: none; stroke: var(--ow-av-edge); stroke-width: 1.4; }
-.ow-av .ow-av-l0 { stop-color: rgba(255, 255, 255, 0.42); }
-.ow-av .ow-av-l1 { stop-color: rgba(255, 255, 255, 0); }
-
-/* The eyes are the only part at full identity strength, which is deliberate:
-   they are what you look at, and they are also what changes. */
-.ow-av .ow-av-eyes ellipse { fill: color-mix(in srgb, var(--ow-av-c) 92%, var(--zl-t1)); }
-.ow-av .ow-av-eyes path { stroke: color-mix(in srgb, var(--ow-av-c) 92%, var(--zl-t1)); fill: none; }
-
-/* At 20px the outline's 1.4 stroke is a third of an eye, so it is thinned
-   rather than scaled: a chip-sized avatar must read as the same mark, not as
-   the same drawing shrunk. The lit edge follows it, or the light would be
-   drawn at a different weight from the rim it sits on. */
-.ow-av.is-20 .ow-av-body,
-.ow-av.is-20 .ow-av-lit { stroke-width: 1.7; }
-
 /* A saved owner is parked on purpose, so its mark steps back the way the
    saved dot does by not being drawn — one step of opacity, not a grey. */
 .ow-av.is-saved { opacity: 0.66; }
-
-/* The tile itself never animates. The face that replaced it does, and the
-   reasons it stays bearable (one sleeping timer, nothing offscreen, stillness
-   under prefers-reduced-motion) live with it in OwnerFace.css and
-   faceMotion.js. */

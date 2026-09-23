@@ -194,13 +194,13 @@ button.zl-group.ow-sec .zl-dot { flex: none; }
   color: var(--zl-t4);
 }
 /* A grid rather than a wrapping strip, and a different column count per row
-   on purpose: six shapes divide into 3 × 2 and eight colours into 4 × 2, so
-   each field is a full rectangle. Left to wrap freely in a 272px column they
+   on purpose: eight shapes and eight colours both divide into 4 × 2, so
+   each field is a full rectangle (shapes were 3 × 2 while there were six). Left to wrap freely in a 272px column they
    came out 5+1 and 5+3 — two ragged tails that read as an accident.
    Horizontal scrolling was never an option: it hides half the palette behind
    a gesture nobody knows is there. */
 .ow-idp-row { display: grid; gap: 4px; justify-items: center; }
-.ow-idp-row.is-shapes { grid-template-columns: repeat(3, minmax(44px, 1fr)); }
+.ow-idp-row.is-shapes { grid-template-columns: repeat(4, minmax(44px, 1fr)); }
 .ow-idp-row.is-colours { grid-template-columns: repeat(4, minmax(44px, 1fr)); }
 
 /* 44px is the touch floor (CRITERIO §5) and it is the floor in BOTH densities

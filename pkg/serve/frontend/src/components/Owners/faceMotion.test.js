@@ -9,8 +9,8 @@ import { expect, test } from "bun:test";
 import {
   BLINK_MS, NUDGE_MS, createFaceScheduler, facePersonality, motionScript,
 } from "./faceMotion.js";
-import { combineGaze, poseVars, FACE_SHAPES, OPT_IN_SHAPES } from "./OwnerFace.jsx";
-import { AVATAR_SHAPES, defaultAvatar } from "./OwnerAvatar.jsx";
+import { combineGaze, poseVars } from "./OwnerFace.jsx";
+import { AVATAR_SHAPES, DEFAULT_AVATAR_SHAPES, defaultAvatar, ownerAvatar } from "./avatar-identity.js";
 
 // A fake clock: timers fire only when the test advances time.
 function fakeEnv(over = {}) {
@@ -215,27 +215,24 @@ test("pointer follow holds the script off, then hands back", () => {
   expect(sch.followers()).toEqual([]);
 });
 
-test("state poses: working rests aside, and Sobria's working is today's 3.4", () => {
+test("state poses: working rests low and aside, asks is pinned on you", () => {
   const p = facePersonality("moa");
-  expect(combineGaze("idle", 0, 0, "mirada")).toEqual([0, 0]);
-  const [wx] = combineGaze("working", 0, 0, "sobria");
-  expect(poseVars("sobria", p, "circle", wx, 0)["--ox"]).toBe(3.4);
+  expect(combineGaze("idle", 0, 0)).toEqual([0, 0]);
   // Working saccades stay around the working rest: never back to centre.
   const w = motionScript(p, { mode: "working" });
   for (let i = 0; i < 200; i++) {
     const g = w.gaze();
-    const [x, y] = combineGaze("working", g.gx, g.gy, "mirada");
+    const [x, y] = combineGaze("working", g.gx, g.gy);
     expect(x).toBeGreaterThan(0.25);
     expect(y).toBeGreaterThan(0.25);
   }
   // Waiting for you is pinned on you whatever the script says.
-  expect(combineGaze("asks", 0.6, -0.6, "mirada")).toEqual([0, 0]);
-  // Mirada's head turn: the far eye is the foreshortened one.
-  const v = poseVars("mirada", p, "circle", 1, 0);
+  expect(combineGaze("asks", 0.6, -0.6)).toEqual([0, 0]);
+  // The head turn: the far eye is the foreshortened one.
+  const v = poseVars(p, "circle", 1, 0);
   expect(v["--rs"]).toBeLessThan(v["--ls"]);
   expect(v["--rs"]).toBeLessThan(0.7);
 });
-
 test("each state has its own deterministic script", () => {
   for (const mode of ["idle", "working", "asks"]) {
     expect(script("moa", 20, false, mode)).toEqual(script("moa", 20, false, mode));
@@ -284,15 +281,23 @@ test("live (the breath) is on only while the face is visible and running", () =>
   expect(lives()).toEqual([true, false, true, false]);
 });
 
-test("opt-in shapes are never a default, and the default pool is unchanged", () => {
-  expect(AVATAR_SHAPES).toEqual(["circle", "squircle", "blob", "hexagon", "drop", "pill"]);
-  expect(FACE_SHAPES.slice(0, AVATAR_SHAPES.length)).toEqual(AVATAR_SHAPES);
-  for (const s of OPT_IN_SHAPES) expect(AVATAR_SHAPES).not.toContain(s);
+test("triangle and cloud are selectable but never a default; the pool is unchanged", () => {
+  expect(DEFAULT_AVATAR_SHAPES).toEqual(["circle", "squircle", "blob", "hexagon", "drop", "pill"]);
+  expect(AVATAR_SHAPES).toEqual([...DEFAULT_AVATAR_SHAPES, "triangle", "cloud"]);
   for (let i = 0; i < 2000; i++) {
-    expect(OPT_IN_SHAPES).not.toContain(defaultAvatar(`k${i}`).shape);
+    expect(DEFAULT_AVATAR_SHAPES).toContain(defaultAvatar(`k${i}`).shape);
   }
+  // Golden, computed before the two shapes existed (pkg/owner/avatar_test.go
+  // holds the same values): no owner that never chose changes face.
+  expect(defaultAvatar("winerim-backend")).toEqual({ shape: "blob", color: "mint" });
+  expect(defaultAvatar("etiquetas-pdf")).toEqual({ shape: "pill", color: "peach" });
+  expect(defaultAvatar("")).toEqual({ shape: "squircle", color: "sage" });
+  // A stored opt-in shape is honoured, not sent back to the default.
+  for (const shape of ["triangle", "cloud"]) {
+    expect(ownerAvatar({ codebase_key: "moa", avatar: { shape, color: "sky" } })).toEqual({ shape, color: "sky" });
+  }
+  expect(ownerAvatar({ codebase_key: "moa", avatar: { shape: "star", color: "sky" } }).shape).toBe("circle");
 });
-
 test("each eye stroke leans its own way for most owners", () => {
   let asymmetric = 0;
   for (let i = 0; i < 200; i++) if (facePersonality(`k${i}`).skew !== 0) asymmetric++;

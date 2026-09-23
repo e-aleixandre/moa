@@ -1,7 +1,6 @@
-/* OwnerFace — the owner's animated face. "Mirada" is what the product draws
-   (through OwnerAvatar); Pupilas and Sobria remain for the ?view=faces lab.
-   Every class is prefixed `of`. Pupilas and Sobria also wear OwnerAvatar's
-   `ow-av` sheet for the tile, so their body is the previous mark's rules.
+/* OwnerFace — the owner's animated "Mirada" face (drawn through OwnerAvatar).
+   Every class is prefixed `of`. The proposals it was chosen over live in the
+   catalog (catalog/owner-faces-alt.css) and are not in the product bundle.
 
    HOW IT MOVES. Eyes: faceMotion sets a few custom properties (the gaze) and
    toggles `.is-blink` / `.is-nudge`; the transitions below are the whole
@@ -52,9 +51,7 @@
 .of .of-gaze,
 .of .of-open,
 .of .of-lid,
-.of .of-pupil,
-.of .of-body,
-.of .of-s-gaze {
+.of .of-body {
   transform-box: fill-box;
   transform-origin: center;
 }
@@ -71,8 +68,6 @@
 .of .of-open { transition: transform var(--motion-base) var(--of-spring); }
 .of.is-working .of-open { transform: scaleY(0.62); }
 .of.is-asks .of-open { transform: scale(1.14); }
-.of-pupilas.is-working .of-open { transform: scaleY(0.78); }
-.of-pupilas.is-asks .of-open { transform: scale(1.08); }
 
 /* ── A · Mirada ─────────────────────────────────────────────────────────── */
 
@@ -123,37 +118,6 @@
 .of-mirada .of-m-shut { stroke: #fff; stroke-width: 2; }
 .of-mirada.is-saved { opacity: 0.66; }
 
-/* ── B · Pupilas ────────────────────────────────────────────────────────── */
-
-.of-pupilas .of-p-sclera {
-  fill: color-mix(in srgb, var(--ow-av-c) 14%, var(--zl-t1, #f4f4f7));
-}
-.of-pupilas .of-p-pupil { fill: var(--of-ink); }
-.of-pupilas .of-p-glint { fill: #fff; opacity: 0; }
-.of-pupilas.is-40 .of-p-glint,
-.of-pupilas.is-64 .of-p-glint,
-.of-pupilas.is-96 .of-p-glint,
-.of-pupilas.is-112 .of-p-glint,
-.of-pupilas.is-128 .of-p-glint { opacity: 0.9; }
-.of-pupilas .of-pupil {
-  transform: translate(calc(var(--px, 0) * 1px), calc(var(--py, 0) * 1px));
-  transition: transform var(--motion-base) var(--of-spring);
-}
-.of-pupilas.is-working .of-pupil { transition-duration: var(--motion-fast); }
-.of-pupilas .of-p-brow {
-  fill: none;
-  stroke: color-mix(in srgb, var(--ow-av-c) 92%, var(--zl-t1));
-  stroke-width: 1.6;
-  stroke-linecap: round;
-}
-
-/* ── C · Sobria ─────────────────────────────────────────────────────────── */
-
-.of-sobria .of-s-gaze {
-  transform: translate(calc(var(--ox, 0) * 1px), calc(var(--oy, 0) * 1px));
-  transition: transform var(--motion-base) var(--motion-ease);
-}
-
 /* The system asked for stillness: no breath, and whatever pose is set is
    reached without travelling. The scheduler also stops sending events. */
 @media (prefers-reduced-motion: reduce) {
@@ -161,8 +125,6 @@
   .of .of-lid,
   .of .of-open,
   .of .of-gaze,
-  .of .of-pupil,
-  .of .of-bodybox,
-  .of .of-s-gaze { transition: none; }
+  .of .of-bodybox { transition: none; }
   .of.is-breathe { animation: none; }
 }
