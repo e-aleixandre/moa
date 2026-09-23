@@ -9,7 +9,7 @@ import { api } from './api.js';
 import { closeSessionPanel } from './session-panel.js';
 import {
   ARTIFACTS_CLOSED, EMPTY_ARTIFACTS, acceptsResponse, artifactFileId,
-  normalizeArtifacts, seedFromFile,
+  artifactsViewIsOpen, normalizeArtifacts, seedFromFile,
 } from './artifacts-model.js';
 
 // artifactsOrigin — the conversation the drawer belongs to, as a stable
@@ -140,6 +140,11 @@ export function listArtifactsInPanel(sessionId) {
 // caller passes the conversation the entry belongs to.
 export function openArtifactsList(sessionId) {
   if (!sessionId) return;
+  const slice = artifactsSlice(store.get());
+  if (slice.ownerSessionId === sessionId && artifactsViewIsOpen(slice.view)) {
+    closeArtifacts();
+    return;
+  }
   rememberTrigger();
   const token = beginRequest(sessionId, { view: 'list', fileId: null, from: 'chat', expanded: false, seed: null });
   loadArtifacts(sessionId, { token });
