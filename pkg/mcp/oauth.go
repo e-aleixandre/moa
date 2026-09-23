@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"golang.org/x/oauth2"
@@ -108,7 +109,7 @@ func (m *Manager) authAction(cfg core.MCPServer) string {
 	store := m.oauthStore
 	m.mu.Unlock()
 	if store != nil {
-		if exists, _ := store.Has(auth.MCPOAuthKey(cfg.URL)); exists {
+		if exists, _ := store.Has(auth.MCPOAuthKey(cfg.URL)); exists && !store.SignedOut(auth.MCPOAuthKey(cfg.URL)) {
 			return "reconnect"
 		}
 	}
@@ -177,6 +178,63 @@ func (m *Manager) onOAuthAuthorized(key string) {
 	for _, t := range targets {
 		go m.reconnectAfterAuth(ctx, t.sess, t.cfg)
 	}
+}
+
+// onOAuthSignedOut closes every live connection for key. The token store keeps
+// a tokenless marker, so reconnects cannot fall back to a static header.
+func (m *Manager) onOAuthSignedOut(key string) {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
+	type target struct {
+		sess *serverSession
+		cfg  core.MCPServer
+	}
+	var targets []target
+	for _, sess := range m.servers {
+		if cfg, ok := m.configs[sess.name]; ok && cfg.IsRemote() && auth.MCPOAuthKey(cfg.URL) == key {
+			targets = append(targets, target{sess, cfg})
+		}
+	}
+	m.mu.Unlock()
+	for _, target := range targets {
+		m.signOut(target.sess)
+	}
+}
+
+func (m *Manager) signOut(sess *serverSession) {
+	sess.lifecycle.Lock()
+	defer sess.lifecycle.Unlock()
+	m.mu.Lock()
+	closed := m.closed
+	m.mu.Unlock()
+	if closed {
+		return
+	}
+	sess.mu.Lock()
+	if sess.state == StateDisabled || sess.state == StateDisabling {
+		sess.mu.Unlock()
+		return
+	}
+	sess.gen++
+	oldSession := sess.session
+	sess.session = nil
+	sess.client = nil
+	sess.oauth = nil
+	sess.oauthAuthenticated = false
+	sess.tools = nil
+	sess.state = StateAuthRequired
+	sess.authAction = "connect"
+	sess.err = authRequiredMessage
+	sess.changedAt = time.Now()
+	st := sess.statusLocked()
+	sess.mu.Unlock()
+	if oldSession != nil {
+		_ = oldSession.Close()
+	}
+	m.notify(st)
 }
 
 func (m *Manager) reconnectAfterAuth(ctx context.Context, sess *serverSession, cfg core.MCPServer) {

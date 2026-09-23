@@ -84,6 +84,9 @@ type ServerStatus struct {
 	// AuthAction is set only in StateAuthRequired: "connect" when moa has
 	// never been authorized for this server, "reconnect" when it had been.
 	AuthAction string `json:"auth_action,omitempty"`
+	// OAuthAuthenticated reports that this live connection uses stored OAuth
+	// credentials rather than only configured static headers.
+	OAuthAuthenticated bool `json:"oauth_authenticated,omitempty"`
 	// StartedAt is when the server last connected; zero if it never has.
 	StartedAt time.Time `json:"started_at,omitempty"`
 	// ChangedAt is when the state last changed.
@@ -113,7 +116,8 @@ type Manager struct {
 	// startCtx is the Start context, reused for reconnects after sign-in.
 	startCtx context.Context
 	// unsubscribeOAuth stops store notifications; set by Start, run by Close.
-	unsubscribeOAuth func()
+	unsubscribeOAuth        func()
+	unsubscribeOAuthSignOut func()
 }
 
 // serverSession holds one MCP server subprocess and its live connection. The
@@ -154,6 +158,9 @@ type serverSession struct {
 	oauth *oauthHandler
 	// authAction is reported with StateAuthRequired ("connect"/"reconnect").
 	authAction string
+	// oauthAuthenticated distinguishes a live OAuth connection from one that
+	// succeeded solely with configured static headers.
+	oauthAuthenticated bool
 }
 
 // toolInfo is the discovered metadata for one MCP tool, kept so tools can be
@@ -254,6 +261,7 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, 
 	}
 	if m.oauthStore != nil && m.unsubscribeOAuth == nil {
 		m.unsubscribeOAuth = m.oauthStore.Subscribe(m.onOAuthAuthorized)
+		m.unsubscribeOAuthSignOut = m.oauthStore.SubscribeSignOut(m.onOAuthSignedOut)
 	}
 	for i, name := range names {
 		var sess *serverSession
@@ -434,6 +442,11 @@ func (m *Manager) connect(ctx context.Context, sess *serverSession, cfg core.MCP
 	sess.session = session
 	sess.remote = cfg.IsRemote()
 	sess.oauth = oauth
+	sess.oauthAuthenticated = false
+	if oauth != nil {
+		exists, needsReauth := oauth.store.Has(oauth.key)
+		sess.oauthAuthenticated = exists && !needsReauth
+	}
 	sess.tools = tools
 	sess.state = StateReady
 	sess.err = ""
@@ -752,9 +765,14 @@ func (m *Manager) Close() {
 	m.byName = map[string]*serverSession{}
 	unsubscribe := m.unsubscribeOAuth
 	m.unsubscribeOAuth = nil
+	unsubscribeSignOut := m.unsubscribeOAuthSignOut
+	m.unsubscribeOAuthSignOut = nil
 	m.mu.Unlock()
 	if unsubscribe != nil {
 		unsubscribe()
+	}
+	if unsubscribeSignOut != nil {
+		unsubscribeSignOut()
 	}
 
 	for _, s := range servers {
@@ -811,6 +829,7 @@ func (s *serverSession) setAuthRequired(action string) {
 	s.tools = nil
 	s.session = nil
 	s.oauth = nil
+	s.oauthAuthenticated = false
 	s.changedAt = time.Now()
 	s.mu.Unlock()
 }
@@ -827,13 +846,14 @@ func (s *serverSession) statusLocked() ServerStatus {
 		names[i] = t.name
 	}
 	st := ServerStatus{
-		Name:      s.name,
-		State:     s.state,
-		ToolCount: len(s.tools),
-		ToolNames: names,
-		Error:     s.err,
-		StartedAt: s.startedAt,
-		ChangedAt: s.changedAt,
+		Name:               s.name,
+		State:              s.state,
+		ToolCount:          len(s.tools),
+		ToolNames:          names,
+		Error:              s.err,
+		StartedAt:          s.startedAt,
+		ChangedAt:          s.changedAt,
+		OAuthAuthenticated: s.oauthAuthenticated,
 	}
 	if s.state == StateAuthRequired {
 		st.AuthAction = s.authAction

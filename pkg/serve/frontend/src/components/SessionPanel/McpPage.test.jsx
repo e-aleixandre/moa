@@ -154,6 +154,22 @@ test("Connect or Reconnect replaces Restart, following auth_action", () => {
   expect(button(tree, "Connect")).toBeUndefined();
 });
 
+test("an OAuth-connected server offers Sign out beside Restart", async () => {
+  fetchReply = (path) =>
+    path.endsWith("/oauth/signout")
+      ? new Response(JSON.stringify(serverIn({ state: "auth_required", auth_action: "connect" })), { status: 200 })
+      : new Response(JSON.stringify({ servers: [] }), { status: 200 });
+  const tree = render(serverIn({ state: "ready", auth_action: undefined, error: "", oauth_authenticated: true }));
+  expect(button(tree, "Sign out").props["aria-label"]).toBe("Sign out linear");
+  expect(button(tree, "Restart")).toBeDefined();
+
+  await button(tree, "Sign out").props.onClick();
+  expect(fetchCalls[0]).toMatchObject({
+    path: "/api/sessions/s1/mcp/linear/oauth/signout",
+    method: "POST",
+  });
+});
+
 test("Connect opens a window in the click and sends it to the sign-in page", async () => {
   const handle = { closed: false, opener: {}, location: { href: "about:blank" } };
   openReturns = () => handle;

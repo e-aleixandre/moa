@@ -163,6 +163,24 @@ function ServerBody({ sessionId, server, onMutated, inline, onLocalToggle }) {
     }
   };
 
+  const signOut = async () => {
+    if (busy || inline) return;
+    setBusy(true);
+    try {
+      await api("POST", `/api/sessions/${sessionId}/mcp/${encodeURIComponent(server.name)}/oauth/signout`);
+      setOauth(null);
+      onMutated();
+    } catch (e) {
+      addToast({
+        title: `Could not sign out ${server.name}`,
+        detail: String(e.message || e),
+        type: "error",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const needsAuth = server.state === "auth_required" && !pending;
 
   const connect = async () => {
@@ -258,9 +276,16 @@ function ServerBody({ sessionId, server, onMutated, inline, onLocalToggle }) {
             {authLabel(server)}
           </button>
         ) : canRestart ? (
-          <button type="button" class="zl-btn" onClick={restart} disabled={busy} aria-label={`Restart ${server.name}`}>
-            Restart
-          </button>
+          <>
+            {server.oauth_authenticated && (
+              <button type="button" class="zl-btn" onClick={signOut} disabled={busy} aria-label={`Sign out ${server.name}`}>
+                Sign out
+              </button>
+            )}
+            <button type="button" class="zl-btn" onClick={restart} disabled={busy} aria-label={`Restart ${server.name}`}>
+              Restart
+            </button>
+          </>
         ) : <span />}
         <span class="zl-kv-hint zl-data">{footMeta}</span>
       </div>

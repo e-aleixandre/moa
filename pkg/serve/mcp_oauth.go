@@ -109,6 +109,25 @@ func handleMCPOAuthFinish(mgr *Manager) http.HandlerFunc {
 	}
 }
 
+// handleMCPOAuthSignOut clears the server's OAuth credentials. Store
+// notifications close matching live connections in every open session.
+func handleMCPOAuthSignOut(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, mcpMgr, serverURL, ok := mcpOAuthTarget(mgr, w, r)
+		if !ok {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), mcpOAuthRequestTimeout)
+		defer cancel()
+		if err := mcpMgr.OAuthStore().SignOut(ctx, serverURL); err != nil {
+			http.Error(w, "could not sign out: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		st, _ := sess.mcpServerStatus(r.PathValue("server"))
+		writeJSON(w, http.StatusOK, st)
+	}
+}
+
 // waitMCPOAuthReconnect waits until a server that was waiting for sign-in has
 // gone through its reconnect. The reconnect is asynchronous, so the server may
 // still read auth_required from before; a newer ChangedAt tells a fresh
