@@ -127,7 +127,7 @@ websites' framing restrictions.
 <p align="center">
   <img
     src="./assets/serve-live-preview-inspect.png"
-    alt="Live Preview on a phone with Inspect on: a button in the previewed app is highlighted and a popover asks what should change"
+    alt="Live Preview on a phone with Inspect on: a button in the previewed app is highlighted and the composer opens with it as the reference"
     width="320"
   />
   <br/>

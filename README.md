@@ -90,7 +90,7 @@ handle on the element you meant, page and selector included.
 <p align="center">
   <img
     src="docs/assets/serve-live-preview-inspect.png"
-    alt="Live Preview on a phone: a button in the previewed app is highlighted and a popover asks what should change"
+    alt="Live Preview on a phone: a button in the previewed app is highlighted and the composer opens with it as the reference"
     width="320"
   />
   <br/>
