@@ -302,7 +302,7 @@ export function projectStream(session) {
     const msg = messages[i];
     if (msg && msg._type === 'system') {
       // System line breaks the turn: emit at top level, start fresh doc after.
-      blocks.push({ kind: 'system', id: blockID('sys', msg, i), text: msg.text || '' });
+      blocks.push({ kind: 'system', id: blockID('sys', msg, i), text: msg.text || '', systemType: msg.systemType });
       currentDoc = null;
       currentLedger = null;
       closeDelegation();

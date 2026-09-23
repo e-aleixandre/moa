@@ -106,6 +106,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
         _type: 'system',
         _msg_id: msg.msg_id,
         timestamp: msg.timestamp,
+        systemType: 'trim_marker',
         text: (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join(''),
       });
     } else if (msg.role === 'session_event' && msg.custom?.type === 'compaction_marker') {

@@ -1,5 +1,5 @@
 import { useRef, useLayoutEffect, useCallback } from "preact/hooks";
-import { ArrowDown } from "lucide-preact";
+import { ArrowDown, Scissors } from "lucide-preact";
 import {
   UserWaypoint,
   AssistantDocument,
@@ -129,6 +129,14 @@ function docChildren(blocks, onOpenSubagent, visibleDone, sessionId, onExpandBlo
 function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent, visibleDone, onExpandBlock }) {
   switch (block.kind) {
     case "system":
+      if (block.systemType === "trim_marker") {
+        return (
+          <div class="zl-sys zl-sys--trim">
+            <Scissors class="zl-sys-icon" size={14} strokeWidth={1.75} aria-hidden="true" />
+            {block.text.replace(/^\s*✂\s*/, "")}
+          </div>
+        );
+      }
       return <div class="zl-sys">{block.text}</div>;
     case "secret_batch":
       return <SecretBatchCard aliases={block.aliases} />;

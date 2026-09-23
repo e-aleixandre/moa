@@ -65,6 +65,7 @@ describe('the trim marker', () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]._type).toBe('system');
+    expect(rows[0].systemType).toBe('trim_marker');
     expect(rows[0]._msg_id).toBe('t-1');
     expect(rows[0].timestamp).toBe(1788359600);
     expect(rows[0].text).toContain('~180K tokens freed');

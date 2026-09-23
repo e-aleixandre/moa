@@ -163,6 +163,8 @@
 }
 .zl-sys.is-error { color: var(--zl-red); }
 .zl-sys .zl-data { color: inherit; }
+.zl-sys--trim { display: flex; align-items: center; gap: 6px; }
+.zl-sys-icon { flex: none; }
 
 /* "New messages below": it floats over the transcript, so it earns a shadow.
    Peach is not available to it — it is not you speaking. */
