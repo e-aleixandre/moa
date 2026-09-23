@@ -19,11 +19,13 @@ index.
 - **Every session in that codebase is a child.** Nothing to link: a session
   whose working directory resolves to the codebase starts with the book's
   index in its prompt, gets a read-only `book` tool, and reports to the owner
-  when its run ends, fails, or stops to ask.
+  when its run ends, fails, or stops to ask. You can detach a session you
+  opened yourself (see [Detaching a session](#detaching-a-session)).
 - **The owner's conversation is a normal session** with `kind: "owner"`,
   hidden from `GET /api/sessions` unless `?include=owners`. It cannot be
-  deleted through the generic session route, and an inbox event cannot be
-  routed to it.
+  deleted through the generic session route, and an inbox event reaches it only
+  as the owner (`owner_id`, or a hook whose target is `owner`), never by its
+  `session_id`.
 - **The book** lives in `~/.config/moa/codebases/<key>/book/`. It has no size
   limit. Only `PROJECT.md` (capped at 8 KiB) is injected into prompts: it is
   the index, and pointing at the rest of the book is its job. The owner writes
@@ -32,7 +34,8 @@ index.
 ## Loops
 
 **Owner → sessions**: the `sessions` tool, scoped to the owner's codebase:
-`list`, `read`, `send` (message or steer), `new` (create a child in a
+`list` (which also names live sessions in other directories that no owner
+watches), `read`, `send` (message or steer), `new` (create a child in a
 directory of the codebase and send its first prompt), and `answer` (resolve a
 pending `ask_user` of a child). There is deliberately no permission action:
 approving what a session wants to do stays yours. That is policy for a
@@ -47,18 +50,23 @@ is the latest assistant message). Tool calls are left out unless
 `tools=true`, which lists them with abridged arguments and results under the
 same notice.
 
-**Sessions → owner**: reports. The same observer that feeds
-[automation callbacks](./automation.md#callbacks) produces `done`, `failed`
-and `needs_input` outcomes; for a child they become a report delivered into
-the owner's conversation (`custom.source = "report"`). Reports are batched
-per owner over 60 s; `failed` and `needs_input` flush at once. A report is
+**Sessions → owner**: reports. A child's turns produce the same `done`,
+`failed` and `needs_input` outcomes as
+[automation callbacks](./automation.md#callbacks), delivered as a report into
+the owner's conversation (`custom.source = "report"`). Unlike a callback, a
+finished turn does not wait indefinitely for the session to go quiet: it waits
+up to 15 s for background work (subagents, background shell jobs), then
+reports anyway and says how many jobs are still running. A background job that
+finishes later belongs to the same turn and is not reported twice. Reports are
+batched per owner over 60 s; `failed` and `needs_input` flush at once. A report is
 written to `codebases/<key>/reports.json` before it is queued, and removed
 only once it is in the owner's transcript on disk, so a restart re-delivers
 rather than loses it.
 
 The owner is **never steered**: a batch is delivered only when the owner is
-idle with an empty queue, otherwise it waits for the owner's run to end. An
-owner unloaded from memory is resumed to receive it.
+idle with an empty queue and no background work of its own, otherwise it waits
+for the owner's run or that work to end. An owner unloaded from memory is
+resumed to receive it.
 
 Point a hook at the owner and it dispatches.
 
@@ -72,17 +80,33 @@ Point a hook at the owner and it dispatches.
 Sessions with origin `owner` do not appear in the user's session list. They
 remain available in the owner's LiveBar and Overview, and can be opened directly.
 
+### Detaching a session
+
+A session you opened in an owner's codebase can be detached from the session
+panel (**Detach from <owner>**), and reattached the same way. A detached
+session sends that owner no reports, drops out of its row and Overview, and the
+owner's `sessions` tool only sees that it exists: it cannot read, direct or
+answer it. The choice is stored with the session and survives a restart.
+Sessions the owner opened, and the owner's own conversation, cannot be
+detached.
+
 ## API
 
 ```
 GET    /api/owners                    list
 POST   /api/owners                    {root, name, model?, thinking?, avatar?}
 GET    /api/owners/{id}               owner and its session state
+PATCH  /api/owners/{id}               {name?, avatar?}
 DELETE /api/owners/{id}               remove owner and its conversation; the book stays
 GET    /api/owners/{id}/book          the book's files, with sizes
 GET    /api/owners/{id}/book/{path}   one file's content, and whether it is editable
 PUT    /api/owners/{id}/book/{path}   replace it — PROJECT.md only, 403 otherwise
+POST   /api/sessions/{id}/owner       {detached: bool} — detach or reattach a session
 ```
+
+A detached session lists `detached_owner_id` / `detached_owner_name` in place
+of `owner_id` / `owner_name`. Detaching answers `409` for a session that cannot
+be detached or is busy loading.
 
 There is deliberately **no** `children` endpoint. Every session carries
 `owner_id` / `owner_name` in `GET /api/sessions`, resolved where its book and
@@ -121,12 +145,14 @@ section there: a row printed in a section and again inside its folder is the
 same row twice.
 
 An owner's row says its own state and its children's as two clauses, because
-they are two different conversations: the lead is the owner (amber asking, blue
-working, mauve unread, grey idle) and `N waiting on you` is always amber,
-because it is the number that stops work. An owner **never** rises into Needs
-attention: it is standing, and a permanent row that moves between sections is a
-row you have to find again every time it changes
-(`attentionKind` in `data/util/project-sessions.js`).
+they are two different conversations. The lead is the owner's own state (amber
+when it asks, blue when it works, mauve when it wrote something unread); an idle
+owner's lead is its children's state in words — `N working` in blue — and is
+omitted when none of them work. `N waiting on you` is always amber, because it
+is the number that stops work. A parked owner's row is its name alone. An
+owner **never** rises into Needs attention: it is standing, and a permanent
+row that moves between sections is a row you have to find again every time it
+changes (`attentionKind` in `data/util/project-sessions.js`).
 
 Each owner carries an **avatar**: a shape × a colour, 48 combinations, chosen
 in New owner and stored as `avatar:{shape,color}` in `owner.json`. The field is
@@ -138,8 +164,14 @@ those are the product's state dots. What moves with state is the eyes, and only
 the eyes — idle looks at you, working holds a glance aside, asks raises a brow,
 saved shuts them. Nothing animates.
 
-`+ New owner` sits at the end of the section, and the form is a page pushed
-inside the column exactly as New session is.
+`+ New owner` sits at the end of the section and opens a dialog (a bottom
+sheet on a phone), so the list it was launched from stays in view. **Edit
+owner**, in the owner's Overview, renames it or changes its avatar.
+
+When nothing is open, moa lands on the most recently active conversation, and
+owners count: a child's activity is credited to its owner's conversation, so a
+moa whose only live work belongs to owners opens on that owner rather than on
+the empty state.
 
 Choosing an owner opens its conversation. Its dossier takes the same zone a
 session's does, with two tabs: **Overview**, its children grouped as Waiting on
@@ -200,14 +232,15 @@ decides which branches deserve a file.
 
 Every child session is asked to end its final message with a `## Book delta`
 section: one bullet per book file its work changes, or `none`. The server lifts
-that section from the **full** message before the 2 KiB tail is cut, and stores
-it on the report together with the session's `branch`, short `head` and whether
+that section from the **full** message before it is abridged, and stores it on
+the report together with the session's `branch`, short `head` and whether
 the tree was `dirty` (three cheap `git` calls, bounded at 3 s). Those three are
 **all-or-none**: if any call fails or times out, the report says `git:
 unavailable (position unknown)` rather than showing a branch with a clean tree,
 which would read as verified work. A report with no delta is rendered as `book
 delta: missing`, so the owner asks for it instead of assuming nothing changed.
-The delta is capped at 4 KiB, cut on a rune boundary and marked `[truncated]`.
+The delta is capped at 4 KiB, cut on a rune boundary, and ends with a notice of
+how many characters were cut.
 
 ## How the owner searches
 
@@ -227,8 +260,8 @@ tie, so a work file that is exactly what you asked about is not buried.
 A result is a path, a title, the area and one line of evidence; `limit`
 defaults to 10 and caps at 25. The owner reads the sheet the search names; it
 never answers from the list. Hidden files, `.git` and anything that is not
-`.md` are invisible to every walk. Measured: 500 sheets scan in ~50 ms (p50),
-budgeted at 200 ms in the test suite.
+`.md` are invisible to every walk. A 500-sheet scan is held to a 200 ms (p50)
+budget in the test suite.
 
 ## Heartbeat
 
@@ -254,7 +287,8 @@ session that has been waiting since yesterday wakes the owner once, not every
 five minutes. A fact is written down as announced only once the beat is in the
 owner's transcript **and** the transcript is flushed to disk, so a crash in that
 window retries instead of losing the notice. A busy owner is never steered: the
-facts stay unannounced and the next tick tries again.
+facts stay unannounced and the next tick tries again. Reports come first: a beat
+that finds reports waiting delivers them instead and wakes the owner no further.
 
 Thresholds live in `owner.json`, additive and optional:
 
