@@ -74,7 +74,7 @@ const COLOR_BY_ID = new Map(AVATAR_COLORS.map((c) => [c.id, c]));
    Hand-written paths rather than a library: six shapes is not a dependency,
    and clip-path would have cost a second definition per shape for the rim.
    The ids are pkg/owner/avatar.go's AvatarShapes, in that order. */
-const SHAPE_PATHS = {
+export const SHAPE_PATHS = {
   circle: "M16 1.5a14.5 14.5 0 1 1 0 29 14.5 14.5 0 0 1 0-29Z",
   // A cubic superellipse: the corner never becomes a radius, which is what
   // separates it from the rounded square at a glance.
@@ -87,7 +87,7 @@ const SHAPE_PATHS = {
 
 // Where the eyes sit inside each outline. A drop is heavy at the bottom and a
 // pill has no top, so a single centre would have put eyes on an edge.
-const EYE_CENTER = {
+export const EYE_CENTER = {
   circle: [16, 15],
   squircle: [16, 15],
   blob: [16.4, 15],
@@ -168,7 +168,7 @@ function Eyes({ state, shape }) {
    plain `h*31 + c` it replaced, "winerim-backend" and "winerim-web" (the exact
    pair the mark exists to tell apart) hashed to the same shape AND the same
    colour, because both axes read low bits that the seed barely reaches. */
-function hash(text, seed) {
+export function hash(text, seed) {
   let h = seed >>> 0;
   const s = String(text || "");
   for (let i = 0; i < s.length; i++) {
