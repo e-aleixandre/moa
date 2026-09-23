@@ -227,24 +227,27 @@ second port:
 tailscale funnel --bg --https=8443 --set-path=/hooks http://127.0.0.1:<port>/hooks
 ```
 
-**A mail reply as an event.** The AgentMail wrapper blocks on one thread, so a
-skill that waits for a reply keeps a session occupied. Launch a detached watcher
-instead and end the turn; when the reply arrives it posts the hook:
+**A mail reply as an event.** Skip polling: point the provider's own webhook at
+the hook URL and let it wake moa when the reply lands, no session held open and
+no watcher to keep alive. [AgentMail](https://docs.agentmail.to/webhook-setup),
+used here as an example, delivers a `message.received`
+[webhook](https://docs.agentmail.to/api-reference/webhooks/events/message-received)
+for every inbound message; any other provider with webhooks works the same way.
+Register the hook URL from `moa hooks add` (`/hooks/<source>/<secret>`, see
+above) as the webhook endpoint for `message.received`.
 
-```bash
-setsid nohup sh -c '
-  id=$(moa-agentmail wait-reply --from "$ALIAS" --thread-id "$THREAD" \
-        --after "$SENT_AT" --timeout 86400 --interval 60) || exit 0
-  body=$(moa-agentmail get "$id")
-  curl -sS -X POST "$MOA_HOOK_URL" \
-    -H "Content-Type: application/json" \
-    --data "$(jq -n --arg b "$body" --arg s "$SUBJECT" --arg k "$id" \
-      '"'"'{title:("Re: "+$s),body:$b,id:$k}'"'"')"
-' >/dev/null 2>&1 &
-```
+AgentMail's payload nests the subject and body under `message` (`{"type":
+"event", "event_type": "message.received", "message": {"subject": …, "text":
+…, …}}`), not at the top level, so moa's title lookup (`title`, `subject`,
+`summary`, `event`, `message`) won't find it there: the event lands with the
+default title `<source> event`, and `message.subject` / `message.text` stay
+readable inside the pretty-printed body. If the provider lets you shape the
+outgoing payload, put `subject` at the top level; otherwise leave it, the reply
+is still delivered in full.
 
-Known limit: restarting the machine kills the watcher, and the thread has to be
-watched again by hand.
+AgentMail signs each request with [Svix headers](https://docs.agentmail.to/webhook-verification)
+(`svix-id`, `svix-timestamp`, `svix-signature`); moa's own hook secret already
+authenticates the URL, so no extra verification is required on this end.
 
 ## Idempotency
 
