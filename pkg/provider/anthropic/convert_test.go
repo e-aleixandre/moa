@@ -215,6 +215,61 @@ func TestBuildRequestBody_Fable51OffStillSendsAdaptiveHigh(t *testing.T) {
 	}
 }
 
+// TestBuildRequestBody_EffortPerModelAndLevel pins the thinking config sent
+// for every adaptive Anthropic model at every selector level. "-" means no
+// thinking and no output_config.
+func TestBuildRequestBody_EffortPerModelAndLevel(t *testing.T) {
+	levels := []string{"off", "low", "medium", "high", "xhigh"}
+	want := map[string][]string{
+		"claude-opus-5-5":  {"high", "low", "medium", "high", "xhigh"},
+		"claude-opus-5":    {"-", "low", "medium", "high", "xhigh"},
+		"claude-opus-4-8":  {"-", "low", "medium", "high", "xhigh"},
+		"claude-opus-4-7":  {"-", "low", "medium", "high", "xhigh"},
+		"claude-opus-4-6":  {"-", "low", "medium", "high", "max"},
+		"claude-fable-5-1": {"high", "low", "medium", "high", "high"},
+		"claude-sonnet-5":  {"-", "low", "medium", "high", "high"},
+	}
+	for modelID, efforts := range want {
+		for i, level := range levels {
+			req := core.Request{
+				Model:    core.Model{ID: modelID, Provider: "anthropic"},
+				Messages: []core.Message{core.NewUserMessage("hi")},
+				Options:  core.StreamOptions{ThinkingLevel: level},
+			}
+			if modelID == "claude-opus-4-7" || modelID == "claude-opus-4-6" {
+				// Not adaptive in moa; resolveEffort still owns their mapping.
+				wantEffort := efforts[i]
+				if wantEffort == "-" {
+					wantEffort = ""
+				}
+				if got := resolveEffort(level, modelID); got != wantEffort {
+					t.Errorf("resolveEffort(%q, %s) = %q, want %q", level, modelID, got, efforts[i])
+				}
+				continue
+			}
+			data, err := buildRequestBody(req, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(data, &body); err != nil {
+				t.Fatal(err)
+			}
+			if efforts[i] == "-" {
+				if body["thinking"] != nil || body["output_config"] != nil {
+					t.Errorf("%s %s: thinking=%v output_config=%v, want none", modelID, level, body["thinking"], body["output_config"])
+				}
+				continue
+			}
+			thinking, _ := body["thinking"].(map[string]any)
+			outputConfig, _ := body["output_config"].(map[string]any)
+			if thinking["type"] != "adaptive" || outputConfig["effort"] != efforts[i] {
+				t.Errorf("%s %s: thinking=%v output_config=%v, want adaptive/%s", modelID, level, body["thinking"], body["output_config"], efforts[i])
+			}
+		}
+	}
+}
+
 func TestBuildRequestBody_Fable5KeepsManualThinking(t *testing.T) {
 	req := core.Request{
 		Model: core.Model{ID: "claude-fable-5"},

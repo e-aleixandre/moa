@@ -579,14 +579,27 @@ func resolveEffort(level, modelID string) string {
 	case "high":
 		return "high"
 	case "xhigh":
-		// Only Opus exposes the "max" effort tier; Sonnet caps at "high".
-		if strings.Contains(strings.ToLower(modelID), "opus") {
+		id := strings.ToLower(modelID)
+		if supportsXHighEffort(id) {
+			return "xhigh"
+		}
+		// Opus 4.6 accepts "max" but not "xhigh", so its top tier is "max".
+		if strings.Contains(id, "opus") {
 			return "max"
 		}
 		return "high"
 	default:
 		return "medium"
 	}
+}
+
+// supportsXHighEffort reports whether an Opus model accepts effort "xhigh",
+// which sits below "max": Opus 4.7 and later. Other families are left to their
+// existing caps.
+func supportsXHighEffort(id string) bool {
+	return strings.Contains(id, "opus-5") ||
+		strings.Contains(id, "opus-4-8") || strings.Contains(id, "opus-4.8") ||
+		strings.Contains(id, "opus-4-7") || strings.Contains(id, "opus-4.7")
 }
 
 // resolveThinking maps thinking level to Anthropic manual thinking config.

@@ -262,13 +262,15 @@ func ThinkingLevelOptions() string {
 }
 
 // ThinkingAlwaysOn reports whether a model thinks on every turn. Off is not a
-// real setting there: the API still thinks, at its default effort (high).
+// real setting there: the API still thinks. Fable 5.1 and Opus 5.5 run adaptive
+// thinking unconditionally; Opus 5.5 rejects thinking disabled with a 400.
 func ThinkingAlwaysOn(model Model) bool {
 	id := strings.ToLower(model.ID)
 	if resolved, ok := ResolveModel(model.ID); ok {
 		id = strings.ToLower(resolved.ID)
 	}
-	return strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1")
+	return strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1") ||
+		strings.Contains(id, "opus-5-5") || strings.Contains(id, "opus-5.5")
 }
 
 // EffectiveThinkingLevel resolves a persisted level for a model. xAI requires
@@ -276,7 +278,8 @@ func ThinkingAlwaysOn(model Model) bool {
 // becomes "low" so a session never persists a level the selector can't show,
 // while internal callers may ask for "minimal" explicitly. GPT-6 Astra maps
 // Moa's five selector positions onto its five supported efforts. Models whose
-// thinking cannot be turned off promote "off" to the API default ("high").
+// thinking cannot be turned off promote "off" to "high", the level the
+// selector falls back to when off is not offered.
 // Other providers keep the value.
 func EffectiveThinkingLevel(model Model, level string) (string, error) {
 	if model.Provider == "xai" {

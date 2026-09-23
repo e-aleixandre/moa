@@ -81,12 +81,15 @@ test('nextThinkingLevel: Grok cycles only supported persisted levels', () => {
   expect(nextThinkingLevel('high', ['low', 'medium', 'high'])).toBe('low');
 });
 
-test('thinkingLevelsFor: Fable 5.1 cannot turn thinking off; Fable 5 and Opus still can', () => {
+test('thinkingLevelsFor: Fable 5.1 and Opus 5.5 cannot turn thinking off; Fable 5 and Opus 5 still can', () => {
   expect(thinkingLevelsFor({ catalogId: 'claude-fable-5-1', provider: 'anthropic' })).toEqual([
     'low', 'medium', 'high', 'xhigh',
   ]);
   expect(thinkingLevelsFor({ catalogId: 'claude-fable-5', provider: 'anthropic' })).toBeUndefined();
   expect(thinkingLevelsFor({ catalogId: 'claude-opus-5', provider: 'anthropic' })).toBeUndefined();
+  expect(thinkingLevelsFor({ catalogId: 'claude-opus-5-5', provider: 'anthropic' })).toEqual([
+    'low', 'medium', 'high', 'xhigh',
+  ]);
   expect(thinkingLevelsFor({ catalogId: 'grok-4.6', provider: 'xai' })).toEqual(['low', 'medium', 'high']);
   expect(thinkingLevelsFor({ catalogId: 'muse-spark-1.3', provider: 'meta' })).toEqual([
     'low', 'medium', 'high', 'xhigh',

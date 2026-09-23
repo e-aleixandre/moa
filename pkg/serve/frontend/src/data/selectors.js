@@ -132,13 +132,15 @@ export function nextThinkingLevel(level, levels = THINKING_CYCLE) {
 // thinkingLevelsFor is the selector's option list for the current model.
 // Undefined means the full THINKING_CYCLE. xAI cannot persist off/xhigh;
 // Meta cannot disable reasoning at all, so off is not offered either;
-// Fable 5.1 thinks on every turn so off is not a real setting.
+// Fable 5.1 and Opus 5.5 think on every turn so off is not a real setting
+// (mirrors core.ThinkingAlwaysOn).
 export function thinkingLevelsFor(spec, sessionProvider) {
   const provider = spec?.provider || sessionProvider;
   if (provider === "xai") return ["low", "medium", "high"];
   if (provider === "meta") return ["low", "medium", "high", "xhigh"];
   const id = String(spec?.catalogId || spec?.id || "").toLowerCase();
-  if (id.includes("fable-5-1") || id.includes("fable-5.1")) {
+  if (id.includes("fable-5-1") || id.includes("fable-5.1") ||
+      id.includes("opus-5-5") || id.includes("opus-5.5")) {
     return ["low", "medium", "high", "xhigh"];
   }
   return undefined;
