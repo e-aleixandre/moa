@@ -82,7 +82,9 @@ func TestSessionCost_ZeroCostRunDoesNotPublish(t *testing.T) {
 func TestSessionCost_ManualCompactionAddsPricedUsage(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
-	fa := &fakeAgent{model: core.Model{Pricing: &core.Pricing{Input: 1_000_000}}}
+	// The session's current model is priced differently: the summary is
+	// charged at the rates of the model that wrote it, carried by the payload.
+	fa := &fakeAgent{model: core.Model{Pricing: &core.Pricing{Input: 7_000_000}}}
 	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
 
@@ -92,6 +94,11 @@ func TestSessionCost_ManualCompactionAddsPricedUsage(t *testing.T) {
 	got := make(chan SessionCostUpdated, 1)
 	b.Subscribe(func(e SessionCostUpdated) { got <- e })
 
+	b.Publish(CompactionEnded{
+		SessionID: "test-session",
+		Payload:   &core.CompactionPayload{Usage: &core.Usage{Input: 3}, Pricing: &core.Pricing{Input: 1_000_000}},
+	})
+	// An unpriced summarizer costs nothing, whatever the session model costs.
 	b.Publish(CompactionEnded{
 		SessionID: "test-session",
 		Payload:   &core.CompactionPayload{Usage: &core.Usage{Input: 3}},

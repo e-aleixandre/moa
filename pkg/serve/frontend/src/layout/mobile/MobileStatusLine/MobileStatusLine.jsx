@@ -67,7 +67,6 @@ export function MobileStatusLine({ session, usage }) {
   const hasCtx = typeof ctx === "number" && ctx >= 0;
   const model = statusStripModel(session, usage);
   const spend = hasSession && session.costUSD > 0 ? fmtCost(session.costUSD) : undefined;
-  const busy = hasSession && (session.state === "running" || session.state === "permission");
   // Per-run token heartbeat — shown only once the run has actually moved any,
   // so an idle session's line stays quiet rather than reading a hollow "↑0 ·↓0".
   const tokensUp = hasSession ? session.runTokensUp : undefined;
@@ -172,7 +171,6 @@ export function MobileStatusLine({ session, usage }) {
           <PermissionOptions
             mode={permMode}
             onPick={changePerm}
-            isDisabled={(_value, on) => busy && !on}
           />
         </PickerSheet>
       )}

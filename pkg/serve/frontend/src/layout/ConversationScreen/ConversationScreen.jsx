@@ -150,7 +150,6 @@ export function ConversationScreen() {
   const ownerItem = useOwnerStatusItem(session);
   const permMenu = usePermissionMenu({
     mode: session?.permissionMode || "yolo",
-    disabled: busy,
     onChange: (mode) => configureSession(session.id, { permissionMode: mode }),
   });
   useEffect(() => { permMenu.close(); }, [activeId]);
@@ -341,7 +340,6 @@ export function ConversationScreen() {
                   permOpen={permMenu.open}
                   permAnchorRef={permMenu.anchorRef}
                   permPopover={permMenu.menu}
-                  permBusy={settingsBusy}
                   showTokens={true}
                   modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
                   thinking={thinking}

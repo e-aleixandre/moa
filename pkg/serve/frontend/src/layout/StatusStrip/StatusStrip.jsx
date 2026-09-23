@@ -19,8 +19,8 @@ import { TokenFlow } from "../../components/index.js";
 //
 // What is NOT the catalogue's is everything the prototype never had, grafted on
 // top: real sessions, accessible names, the model popover, the permission menu
-// and the MCP panel anchored by their hosts, the busy lock, and the house rule
-// that a missing datum hides its segment rather than drawing a zero.
+// and the MCP panel anchored by their hosts, and the house rule that a
+// missing datum hides its segment rather than drawing a zero.
 //
 // Every door on the line opens OVER the line (model, permissions, mcp); the one
 // exception is the gauges, which open the session's panel on its Usage page,
@@ -78,7 +78,6 @@ export function StatusStrip({
   mcpOpen,
   onPerm,
   permOpen,
-  permBusy = false,
   permPopover,
   permAnchorRef,
   showTokens = true,
@@ -159,20 +158,16 @@ export function StatusStrip({
         {/* Permission mode is the one setting you must never misread, so it is
             the one setting in a state colour. A tap OPENS the choice; it never
             cycles — a stray touch must not be able to drop a session into
-            YOLO. Locked while the agent is running, like the rest of the
-            session settings. */}
+            YOLO. It stays open to change mid-run, like model and thinking. */}
         {showPermission && <span class="zl-st-anchor" ref={permAnchorRef}>
           {onPerm ? (
             <button
               type="button"
               class={`zl-st zl-st-perm zl-${statusItemPriority("perm")} is-${perm.mode}${permOpen ? " is-open" : ""}`}
               onClick={onPerm}
-              disabled={permBusy}
               aria-haspopup="dialog"
               aria-expanded={!!permOpen}
-              aria-label={permBusy
-                ? `Permission mode: ${perm.mode} (locked while the agent is running)`
-                : `Permission mode: ${perm.mode}`}
+              aria-label={`Permission mode: ${perm.mode}`}
             >
               <span class="zl-st-word">{perm.mode}</span>
             </button>

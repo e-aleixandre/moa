@@ -13,7 +13,9 @@ import (
 )
 
 // ReconfigureSession changes the model and/or thinking level of a session.
-// Only allowed when the session is idle (not running).
+// Allowed while it runs, including while a permission request is pending
+// (which stays pending): the agent's next provider request uses the new
+// settings, and the request already in flight keeps the ones it was sent with.
 func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map[string]string, error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
@@ -38,26 +40,22 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 		sess.afterFastConfigLock()
 	}
 
-	state := sess.runtime.State.Current()
-	if state == bus.StateRunning || state == bus.StatePermission {
-		return nil, ErrBusy
-	}
-
 	result := map[string]string{}
 
 	if modelSpec != "" {
 		if err := core.ValidateModelSpec(modelSpec); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidModel, err)
 		}
-		if err := sess.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: modelSpec}); err != nil {
+		// Thinking travels with the model: a running agent must never send a
+		// request with one of them changed and not the other, and an invalid
+		// level must reject the whole change.
+		if err := sess.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: modelSpec, Thinking: normalizeThinkingLevel(thinking)}); err != nil {
 			return nil, err
 		}
 		model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
 		sess.setProviderName(model.Provider)
 		result["model"] = modelDisplayName(model)
-	}
-
-	if thinking != "" {
+	} else if thinking != "" {
 		normalized := normalizeThinkingLevel(thinking)
 		if err := sess.runtime.Bus.Execute(bus.SetThinking{Level: normalized}); err != nil {
 			return nil, err

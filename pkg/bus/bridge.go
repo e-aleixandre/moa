@@ -39,7 +39,11 @@ type AgentController interface {
 	PeekQueueHead() (core.SteerItem, bool)
 	PopQueueBarrier(id string) bool
 	SendItems(ctx context.Context, items []core.SteerItem, msgIDs []string, announce func([]core.AgentMessage)) ([]core.AgentMessage, []string, error)
-	SetModel(provider core.Provider, model core.Model) error
+	// Reconfigure replaces provider (nil keeps it), model, thinking level and
+	// compaction threshold as one change. Allowed while running: the next
+	// provider request uses it, the one in flight keeps its own.
+	Reconfigure(provider core.Provider, model core.Model, thinkingLevel string, compactAt int) error
+	// SetThinkingLevel is allowed while running, like Reconfigure.
 	SetThinkingLevel(level string) error
 	SetSystemPrompt(prompt string) error
 	SetCompactAt(tokens int) error
@@ -849,10 +853,6 @@ func (sctx *SessionContext) addRunEvent(gen uint64, e core.AgentEvent) {
 	if sctx.runStats.gen != gen {
 		return
 	}
-	var pricing *core.Pricing
-	if sctx.Agent != nil {
-		pricing = sctx.Agent.Model().Pricing
-	}
 	switch e.Type {
 	case core.AgentEventEnd:
 		// A cancelled stream can leave a partial assistant message without a
@@ -864,8 +864,11 @@ func (sctx *SessionContext) addRunEvent(gen uint64, e core.AgentEvent) {
 	case core.AgentEventMessageEnd:
 		if e.Message.Role == "assistant" {
 			sctx.runStats.finalText = messageText(e.Message)
-			if pricing != nil && e.Message.Usage != nil {
-				sctx.runStats.costUSD += pricing.Cost(*e.Message.Usage)
+			// Charged at the rates of the model that served this request,
+			// which the event carries: the session's model may have changed
+			// since. No rates (an unpriced model) means no charge.
+			if e.Pricing != nil && e.Message.Usage != nil {
+				sctx.runStats.costUSD += e.Pricing.Cost(*e.Message.Usage)
 			}
 		}
 	case core.AgentEventToolExecEnd:
@@ -873,8 +876,8 @@ func (sctx *SessionContext) addRunEvent(gen uint64, e core.AgentEvent) {
 			sctx.runStats.hadEdits = true
 		}
 	case core.AgentEventCompactionEnd:
-		if pricing != nil && e.Compaction != nil && e.Compaction.Usage != nil {
-			sctx.runStats.costUSD += pricing.Cost(*e.Compaction.Usage)
+		if e.Compaction != nil && e.Compaction.Usage != nil && e.Compaction.Pricing != nil {
+			sctx.runStats.costUSD += e.Compaction.Pricing.Cost(*e.Compaction.Usage)
 		}
 	}
 }

@@ -223,10 +223,8 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   const modelPopoverRef = useRef(null);
   const [modelPopoverPosition, setModelPopoverPosition] = useState(null);
 
-  const settingsBusy = !!session && (session.state === "running" || session.state === "permission");
   const permMenu = usePermissionMenu({
     mode: session?.permissionMode || "yolo",
-    disabled: settingsBusy,
     onChange: (mode) => {
       if (!session) return;
       configureSession(session.id, { permissionMode: mode });
@@ -465,7 +463,6 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
             permOpen={permMenu.open}
             permAnchorRef={permMenu.anchorRef}
             permPopover={permMenu.menu}
-            permBusy={settingsBusy}
             showTokens
             modelName={modelCodename(session.model) || shortModel(session.model) || session.model || ""}
             thinking={thinking}

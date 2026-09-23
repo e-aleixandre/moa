@@ -937,79 +937,90 @@ func (a *Agent) CompactionEpoch() int {
 	return a.state.CompactionEpoch
 }
 
-// Reconfigure swaps the provider, model, and/or thinking level mid-conversation.
-// Preserves conversation history. Strips thinking blocks from historical assistant
-// messages to avoid invalid signatures when the model changes.
-// Returns error if the agent is currently running.
-func (a *Agent) Reconfigure(provider core.Provider, model core.Model, thinkingLevel string) error {
+// Reconfigure swaps the provider, model, thinking level and the session's own
+// compaction threshold together. Allowed while running: the four are written
+// under one lock and the loop reads them together at its next request boundary,
+// so a request never mixes the new model with the old model's thinking level or
+// threshold, and the request already in flight keeps what it was sent with.
+// A nil provider keeps the current one. compactAt follows SetCompactAt.
+func (a *Agent) Reconfigure(provider core.Provider, model core.Model, thinkingLevel string, compactAt int) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.cancel != nil {
-		return fmt.Errorf("cannot reconfigure while agent is running")
+	if compactAt < 0 {
+		return fmt.Errorf("compaction threshold cannot be negative")
 	}
 	// Preserve New()'s invariant: a live MaxBudget requires pricing, else the
 	// cost guardrail silently stops accumulating and never trips.
 	if a.config.MaxBudget > 0 && model.Pricing == nil {
 		return fmt.Errorf("cannot switch to a model without pricing while MaxBudget is set")
 	}
-
-	oldProvider := a.config.Model.Provider
-	oldModel := a.config.Model.ID
-
 	if provider != nil {
 		a.config.Provider = provider
 	}
 	a.config.Model = model
 	a.config.ThinkingLevel = thinkingLevel
-	a.state.Model = model
-
-	// Strip thinking blocks from history when the model changes.
-	// Thinking signatures are model-specific and become invalid.
-	if model.ID != oldModel || model.Provider != oldProvider {
-		stripThinkingFromHistory(a.state.Messages)
+	current := 0
+	if a.config.Compaction != nil {
+		current = a.config.Compaction.CompactAt
 	}
-
+	if compactAt != current {
+		// Copy-on-write, as in SetCompactAt.
+		settings := core.DefaultCompactionSettings
+		if a.config.Compaction != nil {
+			settings = *a.config.Compaction
+		}
+		settings.CompactAt = compactAt
+		a.config.Compaction = &settings
+	}
+	a.syncStateModelLocked()
 	return nil
 }
 
-// SetModel changes the model and optionally the provider.
-// If provider is nil, keeps the current provider.
-// Strips thinking blocks from history when the model changes.
-// Returns error if the agent is currently running.
+// SetModel changes the model and optionally the provider (nil keeps the
+// current one). Allowed while running; see Reconfigure.
 func (a *Agent) SetModel(provider core.Provider, model core.Model) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.cancel != nil {
-		return fmt.Errorf("cannot reconfigure while agent is running")
-	}
 	if a.config.MaxBudget > 0 && model.Pricing == nil {
 		return fmt.Errorf("cannot switch to a model without pricing while MaxBudget is set")
 	}
-
-	oldProvider := a.config.Model.Provider
-	oldModel := a.config.Model.ID
-
 	if provider != nil {
 		a.config.Provider = provider
 	}
 	a.config.Model = model
-	a.state.Model = model
-
-	if model.ID != oldModel || model.Provider != oldProvider {
-		stripThinkingFromHistory(a.state.Messages)
-	}
-
+	a.syncStateModelLocked()
 	return nil
 }
 
-// SetThinkingLevel changes only the thinking level.
-// Returns error if the agent is currently running.
+// syncStateModelLocked brings the conversation in line with the configured
+// model when no run owns it: thinking signatures are model-specific, so
+// switching models strips them from history. While a run is in flight the loop
+// owns the history and does this itself at its next request boundary
+// (loopConfig.applySettings); the run-slot release repeats it for a change the
+// run ended before using. Caller holds a.mu.
+func (a *Agent) syncStateModelLocked() {
+	if a.cancel != nil {
+		return
+	}
+	a.state.Messages = syncHistoryModel(&a.state, a.config.Model)
+}
+
+// syncHistoryModel returns the history to use with model and records model as
+// the one the history now belongs to. Caller holds the state lock.
+func syncHistoryModel(state *AgentState, model core.Model) []core.AgentMessage {
+	msgs := state.Messages
+	if state.Model.ID != "" && !sameModel(state.Model, model) {
+		msgs = stripThinkingFromHistory(msgs)
+	}
+	state.Model = model
+	return msgs
+}
+
+// SetThinkingLevel changes only the thinking level. Allowed while running: the
+// next provider request reads it, the one in flight keeps its own.
 func (a *Agent) SetThinkingLevel(level string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.cancel != nil {
-		return fmt.Errorf("cannot reconfigure while agent is running")
-	}
 	a.config.ThinkingLevel = level
 	return nil
 }
@@ -1202,34 +1213,48 @@ func (a *Agent) PermissionCheck() func(ctx context.Context, name string, args ma
 	return a.config.PermissionCheck
 }
 
-// stripThinkingFromHistory removes thinking content blocks from assistant
-// messages. Thinking signatures are model-specific — sending stale signatures
-// to a different model causes errors.
-// Allocates new content slices (doesn't mutate original slices that may be
-// shared with async session saves).
-func stripThinkingFromHistory(msgs []core.AgentMessage) {
+// stripThinkingFromHistory returns msgs without thinking content blocks on
+// assistant messages. Thinking signatures are model-specific — sending stale
+// signatures to a different model causes errors.
+// Copy-on-write: returns msgs itself when nothing changes, otherwise a new
+// slice with new content slices. Neither the slice's backing array nor any
+// content slice is mutated: async subscribers (agent_end's Messages, session
+// saves) may still be reading them.
+func stripThinkingFromHistory(msgs []core.AgentMessage) []core.AgentMessage {
+	var out []core.AgentMessage
 	for i := range msgs {
-		if msgs[i].Role != "assistant" {
+		if msgs[i].Role != "assistant" || !hasThinking(msgs[i].Content) {
 			continue
 		}
-		hasThinking := false
-		for _, c := range msgs[i].Content {
-			if c.Type == "thinking" {
-				hasThinking = true
-				break
-			}
+		if out == nil {
+			out = make([]core.AgentMessage, len(msgs))
+			copy(out, msgs)
 		}
-		if !hasThinking {
-			continue
-		}
-		filtered := make([]core.Content, 0, len(msgs[i].Content))
-		for _, c := range msgs[i].Content {
-			if c.Type != "thinking" {
-				filtered = append(filtered, c)
-			}
-		}
-		msgs[i].Content = filtered
+		out[i].Content = withoutThinking(msgs[i].Content)
 	}
+	if out == nil {
+		return msgs
+	}
+	return out
+}
+
+func withoutThinking(content []core.Content) []core.Content {
+	filtered := make([]core.Content, 0, len(content))
+	for _, c := range content {
+		if c.Type != "thinking" {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
+func hasThinking(content []core.Content) bool {
+	for _, c := range content {
+		if c.Type == "thinking" {
+			return true
+		}
+	}
+	return false
 }
 
 // Messages returns a shallow copy of the current conversation messages.
@@ -1296,6 +1321,7 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	msgs := a.state.Messages
 	model := a.config.Model
 	provider := a.config.Provider
+	thinking := a.config.ThinkingLevel
 	settings := a.config.Compaction
 	epoch := a.state.CompactionEpoch
 	summarizer := a.config.CompactSummarizer
@@ -1313,6 +1339,7 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 		cancel()
 		a.mu.Lock()
 		a.cancel = nil
+		a.syncStateModelLocked()
 		a.mu.Unlock()
 	}()
 	a.steerMu.Lock()
@@ -1336,7 +1363,7 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	// never repeated. Writing it would pay the cache-write premium for an entry
 	// with no possible reader. The cache key still travels: the request belongs
 	// to this conversation and must route with it.
-	streamOpts := core.StreamOptions{ThinkingLevel: a.config.ThinkingLevel, PromptCacheKey: a.config.PromptCacheKey, CacheRetention: core.CacheOff}
+	streamOpts := core.StreamOptions{ThinkingLevel: thinking, PromptCacheKey: a.config.PromptCacheKey, CacheRetention: core.CacheOff}
 
 	// A configured summarizer writes the summary instead of the session's
 	// model. The window stays the session's: it decides when and how much to
@@ -1389,6 +1416,7 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 		}(),
 		Usage:            result.Usage,
 		SummarizerNotice: fallbackNotice,
+		Pricing:          sumModel.Pricing,
 	}, nil
 }
 
@@ -1598,6 +1626,9 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		ctx, a.cancel = context.WithCancel(ctx)
 	}
 	cancel := a.cancel
+	// Model settings can change while the run is in flight, so they are read
+	// here under the lock; the loop re-reads them at each request boundary.
+	initial := a.requestSettingsLocked()
 	a.mu.Unlock()
 	defer func() {
 		cancel()
@@ -1606,6 +1637,9 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		a.steerMu.Lock()
 		a.mu.Lock()
 		a.cancel = nil
+		// A model change the run ended before using has not reached the
+		// history yet.
+		a.syncStateModelLocked()
 		a.mu.Unlock()
 		a.runTerminal = false
 		a.steerMu.Unlock()
@@ -1644,7 +1678,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 
 	// Build stream options
 	streamOpts := core.StreamOptions{
-		ThinkingLevel:  a.config.ThinkingLevel,
+		ThinkingLevel:  initial.thinking,
 		CacheRetention: a.config.CacheTTL,
 		PromptCacheKey: a.config.PromptCacheKey,
 		OnFastUnavailable: func() {
@@ -1672,13 +1706,13 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		}
 	}
 	cfg := &loopConfig{
-		provider:            a.config.Provider,
+		provider:            initial.provider,
 		tools:               tools,
 		hooks:               a.hooks,
 		emitter:             a.emitter,
 		state:               &a.state,
 		stateMu:             &a.mu,
-		model:               a.config.Model,
+		model:               initial.model,
 		compactSummarizer:   a.config.CompactSummarizer,
 		systemPrompt:        a.config.SystemPrompt + extraPrompt,
 		streamOpts:          streamOpts,
@@ -1690,13 +1724,14 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		convertToLLM:        a.config.ConvertToLLM,
 		materializeContent:  a.materializeContent(),
 		permissionCheck:     permissionCheck,
-		// A function, not the pointer: SetDefaultCompactAt replaces the struct
-		// copy-on-write, so a run in flight must re-read it to see a global
-		// threshold change.
-		compaction: func() *core.CompactionSettings {
+		// A function, not a snapshot: model, thinking and the compaction
+		// settings can all change while the run is in flight (the settings are
+		// replaced copy-on-write), and each request must see them as of its own
+		// boundary.
+		settings: func() requestSettings {
 			a.mu.Lock()
 			defer a.mu.Unlock()
-			return a.config.Compaction
+			return a.requestSettingsLocked()
 		},
 		// A prepare-compact run writes the checkpoint and is then discarded by
 		// restoreConversation, so an auto-compaction inside it must not consume
@@ -1883,6 +1918,17 @@ func (a *Agent) RunCost() float64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.lastRunCost
+}
+
+// requestSettingsLocked reads the settings a provider request is built from.
+// Caller holds a.mu.
+func (a *Agent) requestSettingsLocked() requestSettings {
+	return requestSettings{
+		provider:   a.config.Provider,
+		model:      a.config.Model,
+		thinking:   a.config.ThinkingLevel,
+		compaction: a.config.Compaction,
+	}
 }
 
 // checkpointReader adapts the session checkpoint slot for the agent loop.

@@ -2514,7 +2514,7 @@ func TestReconfigure_SwapModel(t *testing.T) {
 	}
 
 	// Reconfigure to model 2 (different provider).
-	err = ag.Reconfigure(prov2, core.Model{ID: "model-2", Provider: "prov-b"}, "high")
+	err = ag.Reconfigure(prov2, core.Model{ID: "model-2", Provider: "prov-b"}, "high", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2555,7 +2555,7 @@ func TestSetModel_RejectsUnpricedModelWhenBudgetSet(t *testing.T) {
 	if err := ag.SetModel(nil, unpriced); err == nil {
 		t.Error("SetModel to unpriced model should be rejected while MaxBudget is set")
 	}
-	if err := ag.Reconfigure(nil, unpriced, "medium"); err == nil {
+	if err := ag.Reconfigure(nil, unpriced, "medium", 0); err == nil {
 		t.Error("Reconfigure to unpriced model should be rejected while MaxBudget is set")
 	}
 	if ag.Model().ID != "priced" {
@@ -2590,7 +2590,7 @@ func TestReconfigure_StripsThinking(t *testing.T) {
 	}
 
 	// Reconfigure to a different model.
-	err := ag.Reconfigure(nil, core.Model{ID: "model-2", Provider: "anthropic"}, "medium")
+	err := ag.Reconfigure(nil, core.Model{ID: "model-2", Provider: "anthropic"}, "medium", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2632,7 +2632,7 @@ func TestReconfigure_SameModelKeepsThinking(t *testing.T) {
 	}
 
 	// Reconfigure same model, different thinking level — should NOT strip.
-	err := ag.Reconfigure(nil, core.Model{ID: "model-1", Provider: "anthropic"}, "high")
+	err := ag.Reconfigure(nil, core.Model{ID: "model-1", Provider: "anthropic"}, "high", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2649,37 +2649,6 @@ func TestReconfigure_SameModelKeepsThinking(t *testing.T) {
 	if !hasThinking {
 		t.Fatal("thinking blocks should be preserved when model doesn't change")
 	}
-}
-
-func TestReconfigure_WhileRunning(t *testing.T) {
-	blocker := make(chan struct{})
-	prov := NewMockProvider(func(req core.Request) (<-chan core.AssistantEvent, error) {
-		ch := make(chan core.AssistantEvent, 5)
-		go func() {
-			defer close(ch)
-			<-blocker
-			msg := core.Message{Role: "assistant", Content: []core.Content{core.TextContent("done")}, StopReason: "end_turn"}
-			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
-			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
-		}()
-		return ch, nil
-	})
-
-	ag, _ := New(AgentConfig{Provider: prov, Model: core.Model{ID: "test"}})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go func() { _, _ = ag.Run(ctx, "hello") }()
-	time.Sleep(50 * time.Millisecond) // let it start
-
-	err := ag.Reconfigure(nil, core.Model{ID: "other"}, "high")
-	if err == nil {
-		t.Fatal("expected error while running")
-	}
-
-	close(blocker)
-	time.Sleep(100 * time.Millisecond)
 }
 
 func TestLoadState(t *testing.T) {

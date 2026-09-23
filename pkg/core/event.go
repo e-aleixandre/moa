@@ -27,6 +27,10 @@ type AgentEvent struct {
 	// a frame carrying the whole conversation.
 	TrimOriginals []AgentMessage // context_trimmed
 	Error         error          // agent_error, compaction_end (non-fatal)
+	// Pricing is the rate card of the model that served a message_end's
+	// request. The session's model can change while a run is in flight, so its
+	// current pricing is not necessarily this response's.
+	Pricing *Pricing // message_end
 }
 
 // Agent event type constants.

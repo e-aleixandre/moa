@@ -83,6 +83,9 @@ type CompactionPayload struct {
 	// to know when judging it.
 	SummarizerNotice string `json:"summarizer_notice,omitempty"`
 	Usage            *Usage `json:"usage,omitempty"`
+	// Pricing is the rate card of the model that wrote the summary, for
+	// charging Usage. Not persisted: cost is settled when the event is seen.
+	Pricing *Pricing `json:"-"`
 }
 
 // compactionTailMargin is the extra headroom (≈2× the summary-message estimate)

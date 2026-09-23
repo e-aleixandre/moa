@@ -299,6 +299,20 @@ func (f *fakeAgent) SetModel(provider core.Provider, model core.Model) error {
 	return nil
 }
 
+func (f *fakeAgent) Reconfigure(provider core.Provider, model core.Model, thinkingLevel string, compactAt int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.setModelProvider = provider
+	f.setModelModel = model
+	if f.setModelErr != nil {
+		return f.setModelErr
+	}
+	f.model = model
+	f.thinkingLevel = thinkingLevel
+	f.compactAt = compactAt
+	return nil
+}
+
 func (f *fakeAgent) SetThinkingLevel(level string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1289,16 +1303,23 @@ func TestRunStats_UsesLifecycleEventsForCostAndFinalText(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 	pricing := &core.Pricing{Input: 1_000_000}
-	fa := &fakeAgent{model: core.Model{Pricing: pricing}}
+	// The session's model now is priced differently from the ones that served
+	// the events: each event is charged at the rates it carries, and one with
+	// no rates (an unpriced model) at nothing.
+	fa := &fakeAgent{model: core.Model{Pricing: &core.Pricing{Input: 9_000_000}}}
 	sctx := newTestSessionContext(b, fa)
 	sctx.RunGenAtomic.Store(7)
 	sctx.runStats = runStats{gen: 7}
 
 	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventMessageEnd,
+		Message: core.AgentMessage{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("unpriced")}, Usage: &core.Usage{Input: 100}}}})
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventMessageEnd, Pricing: pricing,
 		Message: core.AgentMessage{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent("final")}, Usage: &core.Usage{Input: 2}}}})
 	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecEnd, ToolName: "edit"})
 	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventCompactionEnd,
-		Compaction: &core.CompactionPayload{Usage: &core.Usage{Input: 3}}})
+		Compaction: &core.CompactionPayload{Usage: &core.Usage{Input: 3}, Pricing: pricing}})
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventCompactionEnd,
+		Compaction: &core.CompactionPayload{Usage: &core.Usage{Input: 100}}})
 
 	stats := sctx.snapshotRunStats(7)
 	if stats.finalText != "final" || !stats.hadEdits || stats.costUSD != 5 {
@@ -2616,6 +2637,41 @@ func TestHandler_SwitchModel_CustomProviderModel(t *testing.T) {
 	}
 	if fa.setModelModel.Provider != "xai" || fa.setModelModel.ID != "future-grok" {
 		t.Fatalf("switched model = %+v", fa.setModelModel)
+	}
+}
+
+// A model switch with a thinking level is one change: an invalid level rejects
+// it before anything moves, and a valid one lands with the model in a single
+// agent reconfiguration and a single ConfigChanged.
+func TestHandler_SwitchModel_WithThinkingIsOneChange(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{model: core.Model{ID: "grok-4.5", Provider: "xai"}, thinkingLevel: "low"}
+	sctx := newTestSessionContext(b, fa)
+	sctx.ProviderFactory = func(core.Model) (core.Provider, error) { return errProvider{}, nil }
+	RegisterHandlers(sctx)
+	changed := make(chan ConfigChanged, 4)
+	b.Subscribe(func(e ConfigChanged) { changed <- e })
+
+	if err := b.Execute(SwitchModel{ModelSpec: "xai/future-grok", Thinking: "bogus"}); err == nil {
+		t.Fatal("invalid thinking level accepted")
+	}
+	if fa.Model().ID != "grok-4.5" || fa.ThinkingLevel() != "low" {
+		t.Fatalf("rejected switch changed the agent: %s/%s", fa.Model().ID, fa.ThinkingLevel())
+	}
+
+	if err := b.Execute(SwitchModel{ModelSpec: "xai/future-grok", Thinking: "high"}); err != nil {
+		t.Fatal(err)
+	}
+	if fa.Model().ID != "future-grok" || fa.ThinkingLevel() != "high" {
+		t.Fatalf("agent = %s/%s, want future-grok/high", fa.Model().ID, fa.ThinkingLevel())
+	}
+	b.Drain(time.Second)
+	if len(changed) != 1 {
+		t.Fatalf("ConfigChanged events = %d, want 1", len(changed))
+	}
+	if e := <-changed; e.Model != "future-grok" || e.Thinking != "high" {
+		t.Fatalf("ConfigChanged = %+v", e)
 	}
 }
 

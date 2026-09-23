@@ -59,8 +59,9 @@ func runAutoPrepare(ctx context.Context, cfg *loopConfig, slot *sessioncheckpoin
 	sub.maxTurns = maxPrepareTurns
 	// No compaction and no checkpoint read inside the preparation turn: the
 	// first would recurse into the compaction that is calling us, the second
-	// would consume the slot this turn is still filling.
-	sub.compaction = nil
+	// would consume the slot this turn is still filling. Nil settings also
+	// keep the preparation on the model of the compaction it precedes.
+	sub.settings = nil
 	sub.readCheckpoint = nil
 	sub.compactStrategy = nil
 	// Steers and barriers belong to the parent run: draining them here would

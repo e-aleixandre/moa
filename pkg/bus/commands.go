@@ -162,10 +162,13 @@ type CancelBashJob struct {
 // Configuration
 // ---------------------------------------------------------------------------
 
-// SwitchModel changes the active model.
+// SwitchModel changes the active model. Thinking, when set, changes the
+// thinking level in the same step, validated against the new model; empty keeps
+// the current level (clamped to what the new model accepts).
 type SwitchModel struct {
 	SessionID string
 	ModelSpec string
+	Thinking  string
 }
 
 // SetThinking changes the thinking level.

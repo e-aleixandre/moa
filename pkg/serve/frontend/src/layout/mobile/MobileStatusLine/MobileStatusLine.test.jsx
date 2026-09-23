@@ -9,9 +9,18 @@ import { test, expect, mock, beforeEach } from "bun:test";
 // "Export named 'useMemo' not found" that only appears when these files run
 // together.
 const realHooks = await import("preact/hooks");
+// `pick(index, initial)` lets a test force one particular useState call (by
+// its position in render order) away from its default, the same device
+// McpPage.test.jsx uses -- everything else keeps returning its own initial.
+let pick = () => undefined;
+let stateCalls = 0;
 mock.module("preact/hooks", () => ({
   ...realHooks,
-  useState(initial) { return [typeof initial === "function" ? initial() : initial, () => {}]; },
+  useState(initial) {
+    const index = stateCalls++;
+    const chosen = pick(index, initial);
+    return [chosen === undefined ? (typeof initial === "function" ? initial() : initial) : chosen, () => {}];
+  },
   useEffect() {},
   useLayoutEffect() {},
   useRef(initial) { return { current: initial }; },
@@ -79,7 +88,20 @@ function litBars(meter) {
 
 beforeEach(() => {
   setState({ modelCatalog: MODEL_CATALOG_IDLE, sessions: { s1: SESSION } });
+  pick = () => undefined;
+  stateCalls = 0;
 });
+
+// Force the permission sheet open (its own useState is the second call in
+// render order: 0 sessionOpen, 1 permsOpen) and pull out the row buttons the
+// sheet draws through PermissionOptions.
+function permButtons(session) {
+  pick = (index) => (index === 1 ? true : undefined);
+  const tree = expand(MobileStatusLine({ session, usage: null }));
+  const group = findByClass(tree, "zl-pick");
+  expect(group).toBeDefined();
+  return group.props.children.filter(Boolean);
+}
 
 test("the status line draws no meter until the shared model catalog answers", () => {
   // The bug this replaces: with no catalog the line drew Astra's "low" as one
@@ -94,6 +116,20 @@ test("once the catalog is ready Astra low paints the zero position", async () =>
   const meter = renderMeter();
   expect(meter).toBeDefined();
   expect(litBars(meter)).toHaveLength(0);
+});
+
+test("the mobile permission sheet stays open to change while the agent is running", () => {
+  const running = { ...SESSION, state: "running" };
+  const buttons = permButtons(running);
+  expect(buttons.length).toBeGreaterThan(0);
+  for (const button of buttons) expect(button.props.disabled).toBeFalsy();
+});
+
+test("the mobile permission sheet stays open to change while a permission request is pending", () => {
+  const pending = { ...SESSION, state: "permission" };
+  const buttons = permButtons(pending);
+  expect(buttons.length).toBeGreaterThan(0);
+  for (const button of buttons) expect(button.props.disabled).toBeFalsy();
 });
 
 test("an ordinary model keeps its own level once the catalog is ready", async () => {

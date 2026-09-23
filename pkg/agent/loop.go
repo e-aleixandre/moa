@@ -127,12 +127,11 @@ type loopConfig struct {
 	// Permission check (nil = all approved)
 	permissionCheck func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision
 
-	// Compaction
-	// compaction is read through a function, not captured once: the global
-	// threshold can change mid-run (Settings applies to every conversation, open
-	// or not), and a long run is exactly when that matters. Returns nil when
-	// compaction is disabled.
-	compaction func() *core.CompactionSettings
+	// settings is read at each request boundary, not captured once: model,
+	// thinking and the compaction threshold can change mid-run, and a long run
+	// is exactly when that matters. Nil keeps provider/model/thinking fixed and
+	// disables compaction.
+	settings func() requestSettings
 	// readCheckpoint returns the ephemeral session checkpoint to append to an
 	// automatic compaction summary, and a callback to clear it once consumed.
 	// Nil when no checkpoint slot is wired.
@@ -155,6 +154,71 @@ type loopConfig struct {
 	registerSteerWait func(context.CancelCauseFunc) func()
 	// steerMu makes cancellation and the post-tool delivery boundary atomic.
 	steerMu *sync.Mutex
+}
+
+// requestSettings is what a provider request is built from that the session can
+// change while a run is in flight. Read as one value so a request never mixes
+// halves of a concurrent reconfiguration.
+type requestSettings struct {
+	provider core.Provider
+	model    core.Model
+	thinking string
+	// compaction is nil when compaction is disabled.
+	compaction *core.CompactionSettings
+}
+
+// applySettings switches the loop to s for the requests that follow. Only the
+// loop goroutine calls it, between requests, so a request in flight keeps the
+// provider, model and thinking level it was sent with. The history belongs to
+// the loop while it runs, so this is also where a model change strips thinking
+// from it.
+func (cfg *loopConfig) applySettings(s requestSettings) {
+	cfg.provider, cfg.model = s.provider, s.model
+	cfg.streamOpts.ThinkingLevel = s.thinking
+	cfg.stateMu.Lock()
+	cfg.state.Messages = syncHistoryModel(cfg.state, s.model)
+	cfg.stateMu.Unlock()
+}
+
+func sameModel(a, b core.Model) bool {
+	return a.ID == b.ID && a.Provider == b.Provider
+}
+
+// contextExceeds reports whether the conversation is past the compaction
+// threshold of s's model — the same judgement the compaction check makes.
+func contextExceeds(cfg *loopConfig, s requestSettings, toolSpecs []core.ToolSpec) bool {
+	c := s.compaction
+	if c == nil || !c.Enabled || s.model.MaxInput <= 0 {
+		return false
+	}
+	estimate := core.EstimateContextTokens(cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch)
+	return core.ShouldCompact(estimate.Tokens, c.EffectiveWindow(s.model.MaxInput), *c)
+}
+
+// withoutForeignThinking drops thinking from assistant messages another model
+// produced, judged by the model the loop requested for them. Thinking
+// signatures are model-specific; this model's own are kept. Messages without
+// that provenance (written before it was recorded) are left as they are, as
+// they always were. Copy-on-write: neither msgs nor its content is mutated.
+func withoutForeignThinking(msgs []core.Message, model core.Model) []core.Message {
+	var out []core.Message
+	for i := range msgs {
+		m := msgs[i]
+		foreign := m.RequestedModel != "" &&
+			(m.RequestedModel != model.ID || (m.Provider != "" && model.Provider != "" && m.Provider != model.Provider))
+		if m.Role != "assistant" || !foreign || !hasThinking(m.Content) {
+			continue
+		}
+		if out == nil {
+			out = make([]core.Message, len(msgs))
+			copy(out, msgs)
+		}
+		out[i].Content = withoutThinking(m.Content)
+	}
+	if out == nil {
+		return msgs
+	}
+	return out
 }
 
 func (cfg *loopConfig) requestOptions() core.StreamOptions {
@@ -253,12 +317,19 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Skipped on a pause_turn resubmit: the continuation must resend the
 		// paused conversation as-is, and compacting it away here would drop the
 		// message the model is waiting to continue.
-		// Read the settings fresh on every iteration: a global threshold change
-		// must reach a run already in flight.
+		// Read the settings fresh on every iteration: a model, thinking or
+		// threshold change must reach a run already in flight. The compaction
+		// below uses this snapshot; the request itself re-reads right before it
+		// is sent. A pause_turn resubmit follows a change too: the user chose
+		// the model for what comes next, and only compaction is skipped for it.
 		var compactionSettings *core.CompactionSettings
-		if cfg.compaction != nil {
-			compactionSettings = cfg.compaction()
+		if cfg.settings != nil {
+			settings := cfg.settings()
+			cfg.applySettings(settings)
+			compactionSettings = settings.compaction
 		}
+		// The model whose window the check below judges the context against.
+		checkedFor := cfg.model
 		if !justPaused && compactionSettings != nil && compactionSettings.Enabled && cfg.model.MaxInput > 0 {
 			estimate := core.EstimateContextTokens(
 				cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch,
@@ -371,8 +442,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					if consumeCheckpoint != nil {
 						consumeCheckpoint()
 					}
-					// Account for compaction LLM call cost.
-					addRunCost(cfg, result.Usage)
+					// Account for compaction LLM call cost, at the rates of
+					// the model that wrote the summary.
+					addRunCostAt(cfg, sumModel.Pricing, result.Usage)
 					emitLifecycle(cfg, core.AgentEvent{
 						Type: core.AgentEventCompactionEnd,
 						Compaction: &core.CompactionPayload{
@@ -390,6 +462,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 							}(),
 							Usage:            result.Usage,
 							SummarizerNotice: fallbackNotice,
+							Pricing:          sumModel.Pricing,
 						},
 					})
 				} else {
@@ -453,11 +526,36 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		var assistantMsg *core.Message
 		var streamErr error
 		emptyRetry := false
+		recheckContext := false
 		for attempt := 0; ; attempt++ {
+			// Last read before the request leaves: hooks, materialization and
+			// repair backoff all take time a change can land in.
+			if cfg.settings != nil {
+				next := cfg.settings()
+				// A partial response belongs to the model that wrote it: the
+				// new model must not continue it, nor record it as its own.
+				// Drop it and ask the new model afresh.
+				if repairPartial != nil && !sameModel(next.model, cfg.model) {
+					repairPartial = nil
+				}
+				// A model switched in since the compaction check may have a
+				// smaller window than this context. Go back through the check
+				// rather than send an oversized request. Once per switch: after
+				// the check the model is checkedFor, even if compaction failed.
+				if !justPaused && !sameModel(next.model, checkedFor) && contextExceeds(cfg, next, toolSpecs) {
+					recheckContext = true
+					break
+				}
+				cfg.applySettings(next)
+			}
 			reqMessages := baseMessages
 			if repairPartial != nil {
 				reqMessages = append(append([]core.Message{}, baseMessages...), *repairPartial, streamContinueHint())
 			}
+			// History can carry thinking another model signed: a switch since
+			// these messages were prepared, or a restored session whose append-
+			// only tree keeps it. Only the request drops it; history keeps it.
+			reqMessages = withoutForeignThinking(reqMessages, cfg.model)
 			req := core.Request{
 				Model:    cfg.model,
 				System:   cfg.systemPrompt,
@@ -510,6 +608,13 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			break
 		}
 		if emptyRetry {
+			inTurn = false
+			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+			continue
+		}
+		if recheckContext {
+			// Nothing was sent: this was not a turn.
+			turnCount--
 			inTurn = false
 			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
 			continue
@@ -575,7 +680,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		cfg.appendState(wrapped)
 		// MessageEnd is a state-observable boundary: reconnect snapshots that
 		// include this lifecycle event must also include its stable MsgID.
-		emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventMessageEnd, Message: wrapped})
+		emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventMessageEnd, Message: wrapped, Pricing: cfg.model.Pricing})
 
 		// === STOP-REASON HANDLING (Anthropic pause_turn / refusal; OpenAI continue) ===
 		// Runs after the message is committed and MessageEnd emitted, so any
@@ -1348,8 +1453,14 @@ func errorToolResultMessages(toolCalls []core.Content, errMsg string) []core.Age
 // unlimited-budget runs; budget *enforcement* stays gated on maxBudget > 0 at
 // each call site.
 func addRunCost(cfg *loopConfig, usage *core.Usage) {
-	if usage != nil && cfg.model.Pricing != nil {
-		cfg.runCost += cfg.model.Pricing.Cost(*usage)
+	addRunCostAt(cfg, cfg.model.Pricing, usage)
+}
+
+// addRunCostAt is addRunCost for a call not served by the session model (a
+// compaction summarizer).
+func addRunCostAt(cfg *loopConfig, pricing *core.Pricing, usage *core.Usage) {
+	if usage != nil && pricing != nil {
+		cfg.runCost += pricing.Cost(*usage)
 	}
 }
 

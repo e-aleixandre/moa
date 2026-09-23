@@ -39,16 +39,24 @@ func registerConfigHandlers(sctx *SessionContext) {
 		if err != nil {
 			return fmt.Errorf("provider error: %w", err)
 		}
-		oldWindow := sctx.Agent.Model().MaxInput
-		if err := sctx.Agent.SetModel(newProvider, newModel); err != nil {
+		thinking := cmd.Thinking
+		if thinking == "" {
+			thinking = sctx.Agent.ThinkingLevel()
+		}
+		thinking, err = core.EffectiveThinkingLevel(newModel, thinking)
+		if err != nil {
 			return err
 		}
-		if effective, err := core.EffectiveThinkingLevel(newModel, sctx.Agent.ThinkingLevel()); err != nil {
+		compactAt := sctx.Agent.CompactAt()
+		rescaled, rescale := rescaleCompactAt(compactAt, sctx.Agent.CompactAtFloor(), sctx.Agent.Model().MaxInput, newModel.MaxInput)
+		if rescale {
+			compactAt = rescaled
+		}
+		// One change, not three: a running agent picks it up at its next
+		// request, which must not see the new model with the old model's
+		// thinking level or threshold.
+		if err := sctx.Agent.Reconfigure(newProvider, newModel, thinking, compactAt); err != nil {
 			return err
-		} else if effective != sctx.Agent.ThinkingLevel() {
-			if err := sctx.Agent.SetThinkingLevel(effective); err != nil {
-				return err
-			}
 		}
 		modelName := newModel.Name
 		if modelName == "" {
@@ -68,14 +76,14 @@ func registerConfigHandlers(sctx *SessionContext) {
 			SessionID:     sctx.SessionID,
 			Model:         modelName,
 			Provider:      newModel.Provider,
-			Thinking:      sctx.Agent.ThinkingLevel(),
+			Thinking:      thinking,
 			ContextWindow: newModel.MaxInput,
 			Fast:          &fast,
 			FastSupported: &fastSupported,
 			FastNote:      &fastNote,
 		}
-		if at, ok := rescaleCompactAt(sctx, oldWindow, newModel.MaxInput); ok {
-			changed.CompactAt = &at
+		if rescale {
+			changed.CompactAt = &rescaled
 		}
 		sctx.Bus.Publish(changed)
 		return nil
@@ -177,22 +185,20 @@ func registerPathPolicyHandlers(sctx *SessionContext) {
 	})
 }
 
-func rescaleCompactAt(sctx *SessionContext, oldWindow, newWindow int) (int, bool) {
-	current := sctx.Agent.CompactAt()
+// rescaleCompactAt keeps a session's threshold at the same fraction of the
+// context window across a model switch. Reports false when it stays as is.
+func rescaleCompactAt(current, floor, oldWindow, newWindow int) (int, bool) {
 	if current <= 0 || oldWindow <= 0 || newWindow <= 0 || newWindow == oldWindow {
 		return 0, false
 	}
 	rescaled := int(float64(current) / float64(oldWindow) * float64(newWindow))
-	if floor := sctx.Agent.CompactAtFloor(); rescaled < floor {
+	if rescaled < floor {
 		rescaled = floor
 	}
 	if rescaled >= newWindow {
 		rescaled = 0
 	}
 	if rescaled == current {
-		return 0, false
-	}
-	if err := sctx.Agent.SetCompactAt(rescaled); err != nil {
 		return 0, false
 	}
 	return rescaled, true

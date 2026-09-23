@@ -408,7 +408,8 @@ func registerRunReactors(sctx *SessionContext) {
 		if e.CostIncludedInRun || sctx.Agent == nil || e.Payload == nil || e.Payload.Usage == nil {
 			return
 		}
-		pricing := sctx.Agent.Model().Pricing
+		// The summarizing model's rates, carried by the payload.
+		pricing := e.Payload.Pricing
 		if pricing == nil {
 			return
 		}
