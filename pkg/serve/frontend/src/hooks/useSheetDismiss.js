@@ -1,26 +1,23 @@
 import { useRef, useState, useCallback, useEffect } from "preact/hooks";
 import { MOTION, prefersReducedMotion } from "./motion.js";
+import { classifyDrag, releaseVelocity, sheetDragBlocked, shouldDismiss } from "../data/dismiss-gesture.js";
 
-// useSheetDismiss — a real swipe-down gesture that DISMISSES (closes) the mobile
-// SessionDrawer (MOBILE-DRAWER-SPEC §1.4). The grab handle and the sheet head
-// are the gesture surface: a touch that moves net DOWNWARD past a small
-// threshold starts a drag; horizontal-dominant or upward moves are ignored so
-// the list can still scroll. During the drag the sheet follows the finger — the
-// sheet's translateY and the veil's opacity are written IMPERATIVELY to the DOM
-// (via the refs this hook owns) so a touchmove never re-renders the whole
-// conversation screen. Finger down → sheet down: natural direct manipulation.
-// On release the gesture settles: past CLOSE_FRACTION of the sheet's travel OR a
-// downward flick faster than FLICK_VELOCITY closes it, otherwise it springs back
-// open.
+// useSheetDismiss — a real swipe-down gesture that DISMISSES a mobile bottom
+// sheet (MobileSheet, the phone pickers). `dragBind` goes on the WHOLE sheet:
+// a touch anywhere on it — grabber, head, or content — can drag it down, as
+// in iOS sheets. The content keeps its own gestures: a touch on the field
+// being edited, or inside a scroller that is not at its top, is left alone
+// (dragging down scrolls back first), and upward or sideways moves are the
+// content's too.
+// During the drag the sheet follows the finger — the sheet's translateY and
+// the veil's opacity are written IMPERATIVELY to the DOM (via the refs this
+// hook owns) so a touchmove never re-renders the whole conversation screen.
+// On release it closes past a capped fraction of its height or on a downward
+// flick (data/dismiss-gesture.js), otherwise it springs back open.
 //
 // A plain tap (no drag) is left untouched, so the grab button's own onClick (and
 // any button under the finger) still fires — the drag is a progressive
 // enhancement on top of the accessible tap path.
-
-const BEGIN_THRESHOLD = 12; // px of net downward travel before a drag begins
-const HORIZONTAL_SLOP = 10; // px of horizontal travel (or upward) that abandons
-const CLOSE_FRACTION = 0.4; // fraction of sheet travel past which release closes
-const FLICK_VELOCITY = 0.5; // px/ms downward flick that closes regardless of travel
 
 // Settle timings/curves come from the motion language (hooks/motion.js), the
 // same numbers MobileSheet.css and SessionDrawer.css transition with, so a
@@ -38,7 +35,7 @@ export function useSheetDismiss({ onClose }) {
 
   const startRef = useRef(null); // { x, y } of the touch that might become a drag
   const activeRef = useRef(false); // has a drag actually begun
-  const samplesRef = useRef([]); // recent { t, y } for release velocity
+  const samplesRef = useRef([]); // recent { t, v } (v = clientY) for release velocity
   const progressRef = useRef(1); // last drag progress 1..0 (1 = fully open)
   const settleTimerRef = useRef(null); // pending settle() finish timeout
 
@@ -94,11 +91,13 @@ export function useSheetDismiss({ onClose }) {
   );
 
   const onTouchStart = useCallback((e) => {
+    startRef.current = null;
     if (e.touches.length !== 1) return;
+    if (sheetDragBlocked(e.target, e.currentTarget, (el) => getComputedStyle(el), document.activeElement)) return;
     const t = e.touches[0];
     startRef.current = { x: t.clientX, y: t.clientY };
     activeRef.current = false;
-    samplesRef.current = [{ t: performance.now(), y: t.clientY }];
+    samplesRef.current = [{ t: performance.now(), v: t.clientY }];
   }, []);
 
   const onTouchMove = useCallback(
@@ -109,18 +108,19 @@ export function useSheetDismiss({ onClose }) {
       const dy = t.clientY - startRef.current.y;
 
       if (!activeRef.current) {
-        // Not yet a drag — decide whether this gesture is ours.
-        if (Math.abs(dx) > HORIZONTAL_SLOP || dy < -HORIZONTAL_SLOP) {
-          // Horizontal (let the list scroll) or upward — abandon.
+        const verdict = classifyDrag(dx, dy, { axis: "y", sign: 1 });
+        if (verdict === "abandon") {
           startRef.current = null;
           return;
         }
-        if (dy > BEGIN_THRESHOLD && dy > Math.abs(dx)) {
-          activeRef.current = true;
-          setDragging(true); // drawer switches to its dragging state
-        } else {
+        if (verdict === "pending") {
+          // Mainly downward so far: hold the page still so the content's
+          // overscroll does not bounce under a drag that is about to start.
+          if (dy > 0 && dy >= Math.abs(dx) && e.cancelable) e.preventDefault();
           return;
         }
+        activeRef.current = true;
+        setDragging(true); // the sheet switches to its dragging state
       }
 
       // Active drag: follow the finger and stop the page from scrolling.
@@ -130,10 +130,9 @@ export function useSheetDismiss({ onClose }) {
       // Progress runs 1 → 0 as the finger drags the sheet down.
       const p = Math.max(0, Math.min(1, 1 - dy / travel));
       progressRef.current = p;
-      const now = performance.now();
       const s = samplesRef.current;
-      s.push({ t: now, y: t.clientY });
-      if (s.length > 6) s.shift();
+      s.push({ t: performance.now(), v: t.clientY });
+      if (s.length > 12) s.shift();
       paint(p);
     },
     [paint]
@@ -147,18 +146,14 @@ export function useSheetDismiss({ onClose }) {
     activeRef.current = false;
     startRef.current = null;
 
-    // Downward velocity from the last two recent samples (px/ms).
-    const s = samplesRef.current;
-    let velocity = 0;
-    if (s.length >= 2) {
-      const a = s[s.length - 2];
-      const b = s[s.length - 1];
-      const dt = b.t - a.t;
-      if (dt > 0) velocity = (b.y - a.y) / dt;
-    }
-    const progressDropped = 1 - progressRef.current;
-    const toOpen = !(progressDropped > CLOSE_FRACTION || velocity > FLICK_VELOCITY);
-    settle(toOpen);
+    const sheet = sheetRef.current;
+    const size = sheet ? sheet.offsetHeight : window.innerHeight;
+    const close = shouldDismiss({
+      distance: (1 - progressRef.current) * size,
+      size,
+      velocity: releaseVelocity(samplesRef.current),
+    });
+    settle(!close);
   }, [settle]);
 
   // Cancel any pending settle finish if the hook unmounts mid-animation, so it
@@ -169,7 +164,7 @@ export function useSheetDismiss({ onClose }) {
     sheetRef,
     veilRef,
     dragging,
-    grabBind: {
+    dragBind: {
       onTouchStart,
       onTouchMove,
       onTouchEnd: endGesture,

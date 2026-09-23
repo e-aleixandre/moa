@@ -19,7 +19,8 @@ const FOCUSABLE_SELECTOR =
 //
 // It reuses the exact proven mobile-sheet plumbing the SessionDrawer already
 // ships: the enter/leave state machine (both directions animate, MOBILE-POLISH
-// §5), swipe-down-to-dismiss via useSheetDismiss, and focus trap + restore.
+// §5), swipe-down-to-dismiss from anywhere on the sheet via useSheetDismiss,
+// and focus trap + restore.
 //
 // Placement: the panel/scrim are absolutely positioned inside the nearest
 // positioned ancestor (.mconv), pinned to its edges (scrim inset:0, sheet
@@ -40,7 +41,7 @@ const FOCUSABLE_SELECTOR =
 // draws ‹ `backLabel` beside the page's title. The page is still this sheet —
 // one grabber, one ✕ — so a step never becomes a second sheet over the first.
 export function MobileSheet({ open, onClose, onClosed, onBack, backLabel = "Back", title, scope, bare = false, children }) {
-  const { sheetRef, veilRef, dragging, grabBind } = useSheetDismiss({ onClose });
+  const { sheetRef, veilRef, dragging, dragBind } = useSheetDismiss({ onClose });
   const panelRef = useRef(null);
   const previousFocusRef = useRef(null);
   const closeTimerRef = useRef(null);
@@ -199,13 +200,13 @@ export function MobileSheet({ open, onClose, onClosed, onBack, backLabel = "Back
           panelRef.current = el;
           sheetRef.current = el;
         }}
+        {...dragBind}
       >
         <button
           type="button"
           class="msheet-grab"
           aria-label="Close"
           onClick={() => onClose?.()}
-          {...grabBind}
         >
           <span class="msheet-grab-bar" aria-hidden="true" />
         </button>
@@ -213,7 +214,7 @@ export function MobileSheet({ open, onClose, onClosed, onBack, backLabel = "Back
           children
         ) : (
           <>
-            <div class={`msheet-head${onPage ? " is-sub" : ""}`} {...grabBind}>
+            <div class={`msheet-head${onPage ? " is-sub" : ""}`}>
               {onPage ? (
                 <>
                   <button type="button" class="msheet-back" ref={backRef} onClick={onBack} aria-label={backLabel}>

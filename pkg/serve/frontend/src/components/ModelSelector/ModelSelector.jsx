@@ -604,11 +604,11 @@ export function PickerSheet({
         role="dialog"
         aria-label={PICK_TITLES[kind] || kind}
         ref={dismissible ? dismiss.sheetRef : undefined}
+        {...(dismissible ? dismiss.dragBind : {})}
       >
         <span class="zl-grab" aria-hidden="true" />
         <div
           class={`zl-side-head is-sheet${v.sub ? " is-sub" : ""}`}
-          {...(dismissible ? dismiss.grabBind : {})}
         >
           {v.head}
           <button type="button" class="zl-x" onClick={onClose} aria-label="Close">

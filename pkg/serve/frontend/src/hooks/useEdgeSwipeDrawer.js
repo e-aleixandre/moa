@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { tap } from "../data/haptics.js";
 import { MOTION, prefersReducedMotion } from "./motion.js";
+import { classifyDrag, releaseVelocity, shouldDismiss } from "../data/dismiss-gesture.js";
 
 // The drawer is mounted only after an opening drag has crossed the intent
 // threshold. From then on its transform is written directly so moving a finger
-// does not re-render the conversation beneath it.
+// does not re-render the conversation beneath it. Opening starts at the left
+// edge; once open, a sideways drag from anywhere — the panel or the veil —
+// closes it, and so does a quick leftward flick (data/dismiss-gesture.js).
 const EDGE_ZONE = 24;
-const BEGIN_THRESHOLD = 12;
-const VERTICAL_SLOP = 12;
 const OPEN_FRACTION = 0.35;
 const SETTLE_MS = MOTION.base;
 const SETTLE_EASE = MOTION.ease;
@@ -29,6 +30,7 @@ export function useEdgeSwipeDrawer({ open, enabled, onOpen, onClose }) {
   // the tick fires on the crossing and not on every frame past it.
   const pastThresholdRef = useRef(false);
   const travelRef = useRef(0);
+  const samplesRef = useRef([]); // recent { t, v } (v = clientX) for release velocity
   const offsetRef = useRef(0);
   const settleTimerRef = useRef(null);
   const settlingRef = useRef(false);
@@ -88,11 +90,8 @@ export function useEdgeSwipeDrawer({ open, enabled, onOpen, onClose }) {
   const onTouchStart = useCallback((e) => {
     if (!enabledRef.current || settlingRef.current || e.touches.length !== 1) return;
     const touch = e.touches[0];
-    const panel = panelRef.current;
     if (openRef.current) {
-      if (!panel) return;
-      const rect = panel.getBoundingClientRect();
-      if (touch.clientX < rect.left || touch.clientX > rect.right) return;
+      if (!panelRef.current) return;
     } else {
       const left = surfaceRef.current?.getBoundingClientRect().left || 0;
       if (touch.clientX - left > EDGE_ZONE) return;
@@ -100,6 +99,7 @@ export function useEdgeSwipeDrawer({ open, enabled, onOpen, onClose }) {
     startRef.current = { x: touch.clientX, y: touch.clientY };
     openingRef.current = !openRef.current;
     activeRef.current = false;
+    samplesRef.current = [{ t: performance.now(), v: touch.clientX }];
     // An opening gesture starts closed, a closing one starts past the
     // threshold: either way the first crossing is the one worth feeling.
     pastThresholdRef.current = !openingRef.current;
@@ -113,11 +113,12 @@ export function useEdgeSwipeDrawer({ open, enabled, onOpen, onClose }) {
     const opening = openingRef.current;
 
     if (!activeRef.current) {
-      if (Math.abs(dy) > VERTICAL_SLOP || (opening ? dx < 0 : dx > 0)) {
+      const verdict = classifyDrag(dx, dy, { axis: "x", sign: opening ? 1 : -1 });
+      if (verdict === "abandon") {
         startRef.current = null;
         return;
       }
-      if (Math.abs(dx) <= BEGIN_THRESHOLD || Math.abs(dx) <= Math.abs(dy)) return;
+      if (verdict === "pending") return;
       activeRef.current = true;
       setDragging(true);
       if (opening) onOpen?.();
@@ -131,13 +132,18 @@ export function useEdgeSwipeDrawer({ open, enabled, onOpen, onClose }) {
       : Math.min(0, Math.max(-panelWidth, dx));
     offsetRef.current = offset;
     paint(offset);
+    const samples = samplesRef.current;
+    samples.push({ t: performance.now(), v: touch.clientX });
+    if (samples.length > 12) samples.shift();
 
     // The tick that tells the finger what releasing now would do, fired on the
     // crossing rather than the position so that hovering around the threshold
     // does not buzz. Only felt in the native container: iOS gives a web app no
     // haptics at all (data/haptics.js).
     const travelled = opening ? panelWidth + offset : -offset;
-    const past = travelled > panelWidth * OPEN_FRACTION;
+    const past = opening
+      ? travelled > panelWidth * OPEN_FRACTION
+      : shouldDismiss({ distance: travelled, size: panelWidth, velocity: 0 });
     if (past !== pastThresholdRef.current) {
       pastThresholdRef.current = past;
       tap("select");
@@ -152,7 +158,9 @@ export function useEdgeSwipeDrawer({ open, enabled, onOpen, onClose }) {
     activeRef.current = false;
     const opening = openingRef.current;
     const travelled = opening ? width() + offsetRef.current : -offsetRef.current;
-    const commit = !cancelled && travelled > width() * OPEN_FRACTION;
+    const commit = !cancelled && (opening
+      ? travelled > width() * OPEN_FRACTION
+      : shouldDismiss({ distance: travelled, size: width(), velocity: -releaseVelocity(samplesRef.current) }));
     const keepOpen = opening ? commit : !commit;
     // Closing updates the overlay state now, while the inline transform keeps
     // the panel under this gesture until the slide has reached its edge.
