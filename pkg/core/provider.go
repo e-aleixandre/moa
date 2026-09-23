@@ -415,6 +415,13 @@ type AssistantEvent struct {
 	// RateLimit — populated for the "ratelimit" event, emitted once at stream
 	// start from the response headers (independent of message success).
 	RateLimit *RateLimit `json:"rate_limit,omitempty"`
+
+	// Provider identifies which provider produced this event (e.g. "openai",
+	// "anthropic"). Populated alongside RateLimit so consumers can attribute
+	// each reading to the provider that actually served this request, instead
+	// of relying on the session's provider at some other point in time — the
+	// two can differ when the model changes mid-run.
+	Provider string `json:"provider,omitempty"`
 }
 
 // IsTerminal returns true for "done" or "error" events.

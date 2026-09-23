@@ -1220,7 +1220,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 			return nil
 		case core.ProviderEventRateLimit:
 			if e.AssistantEvent.RateLimit != nil {
-				return []any{RateLimitUpdated{SessionID: sid, RunGen: gen, RateLimit: *e.AssistantEvent.RateLimit}}
+				return []any{RateLimitUpdated{SessionID: sid, RunGen: gen, Provider: e.AssistantEvent.Provider, RateLimit: *e.AssistantEvent.RateLimit}}
 			}
 			return nil
 		}

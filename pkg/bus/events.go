@@ -400,9 +400,15 @@ type SessionCostUpdated struct {
 // reported rate-limit state (plan-window utilization + whether the request drew
 // on extra usage). Enables instant, per-session overage awareness without
 // waiting for the account-global usage poll.
+//
+// Provider identifies which provider served THIS request (e.g. "openai",
+// "anthropic"), stamped by the provider at the point of emission — not read
+// back from the session's current model, which can have changed already if
+// the model was switched mid-run.
 type RateLimitUpdated struct {
 	SessionID string
 	RunGen    uint64
+	Provider  string
 	RateLimit core.RateLimit
 }
 

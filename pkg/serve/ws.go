@@ -256,6 +256,7 @@ func wsEventFromBus(event any) (Event, bool) {
 			FiveHourPct:         pctOf(rl.FiveHourUtil),
 			SevenDayPct:         pctOf(rl.SevenDayUtil),
 			OveragePct:          pctOf(rl.OverageUtil),
+			Provider:            e.Provider,
 		}}, true
 	case bus.ConfigChanged:
 		return Event{Type: "config_change", Data: ConfigChangeData{

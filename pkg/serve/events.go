@@ -310,6 +310,12 @@ type RateLimitData struct {
 	FiveHourPct         int    `json:"five_hour_pct"`
 	SevenDayPct         int    `json:"seven_day_pct"`
 	OveragePct          int    `json:"overage_pct"`
+	// Provider identifies which provider served THIS request (e.g. "openai",
+	// "anthropic"). The session's selected provider can already differ by the
+	// time this event is delivered — a model switch mid-run — so clients must
+	// attribute the reading to Provider, not to their current session state.
+	// Omitted (and empty) only for events predating this field.
+	Provider string `json:"provider,omitempty"`
 }
 
 // pctOf converts a [0,1] utilization fraction to a rounded percentage, or -1

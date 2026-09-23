@@ -24,6 +24,20 @@ test('an unrelated config change keeps fast mode enabled', () => {
   expect(store.get().sessions.fast).toMatchObject({ thinking: 'high', fast: true, fastSupported: true, fastNote: 'premium' });
 });
 
+test('a provider switch clears the previous provider’s session-local quota and overage', () => {
+  setState({ sessions: { s1: { id: 's1', provider: 'openai', rlFiveHourPct: 80, rlSevenDayPct: 90, onOverage: true, subagents: {} } } });
+  handleWsConfigChange('s1', { provider: 'anthropic', model: 'Opus' });
+  expect(store.get().sessions.s1).toMatchObject({ provider: 'anthropic', onOverage: false });
+  expect(store.get().sessions.s1.rlFiveHourPct).toBeUndefined();
+  expect(store.get().sessions.s1.rlSevenDayPct).toBeUndefined();
+});
+
+test('a same-provider model switch keeps session-local quota readings', () => {
+  setState({ sessions: { s1: { id: 's1', provider: 'openai', rlFiveHourPct: 80, onOverage: true, subagents: {} } } });
+  handleWsConfigChange('s1', { provider: 'openai', model: 'Luna' });
+  expect(store.get().sessions.s1).toMatchObject({ rlFiveHourPct: 80, onOverage: true });
+});
+
 test('a tool update schedules and flushes its live result', () => {
   const original = globalThis.requestAnimationFrame;
   let flush;
@@ -843,6 +857,19 @@ test('handleWsMessageEnd keeps the server timestamp on a live assistant turn', (
   expect(projectStream(store.get().sessions.s1)[0].time).toBe(1789000010);
 });
 
+test('an interrupted partial stays visible through run_end and a repeated message_end', () => {
+  seedSession('s1');
+  setState({ sessions: { s1: { ...store.get().sessions.s1, streamingText: 'partial from A' } } });
+  const text = 'partial from A\n(stopped: the model was changed)';
+  handleWsMessageEnd('s1', text, 'partial-a', 1789000011);
+  handleWsRunEnd('s1', { has_error: true }, 10);
+  handleWsMessageEnd('s1', text, 'partial-a', 1789000011);
+  const sess = store.get().sessions.s1;
+  expect(sess.streamingText).toBeNull();
+  expect(sess.messages).toHaveLength(1);
+  expect(sess.messages[0]).toMatchObject({ role: 'assistant', _msg_id: 'partial-a', content: [{ type: 'text', text }] });
+});
+
 test('secret batch delivery uses trusted metadata and never renders the backend note text', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [] } } });
@@ -1519,6 +1546,96 @@ test('handleWsRateLimit isolates providers in a mixed layout', async () => {
   expect(store.get().usage.providers.openai.five_hour.utilization).toBe(80);
   expect(store.get().sessions.o.rlFiveHourPct).toBe(80);
   expect(store.get().sessions.a.rlFiveHourPct).toBe(30);
+});
+
+// A model switch (config-while-running) applies at the next request boundary,
+// not instantly: a header from the request still in flight under the OLD
+// provider can arrive after the session has already moved to the new one.
+// data.provider names who actually answered. The PER-SESSION meter must gate
+// on the session's current provider (a stale header must not paint this
+// session's own widget with the wrong provider's numbers), but the GLOBAL
+// account-wide snapshot is not session-scoped: it is still a legitimate
+// reading for the provider that sent it and must be routed there regardless
+// of what this session is showing right now.
+test('handleWsRateLimit routes a stale openai header to the global snapshot but not this session\'s meter (post openai->anthropic switch)', async () => {
+  setState({
+    sessions: { s1: { id: 's1', provider: 'anthropic', subagents: {} } },
+    usage: { available: true, five_hour: { utilization: 10 }, seven_day: { utilization: 20 } },
+  });
+
+  // Session already switched to anthropic; this header is from the openai
+  // request that was in flight before the switch.
+  handleWsRateLimit('s1', { provider: 'openai', five_hour_pct: 99, seven_day_pct: 98, on_overage: false });
+
+  const sess = store.get().sessions.s1;
+  // This session's own meter (now anthropic) is untouched by the stale openai header.
+  expect(sess.rlFiveHourPct).toBeUndefined();
+  expect(sess.rlSevenDayPct).toBeUndefined();
+  expect(store.get().usage.five_hour.utilization).toBe(10);
+  // The global openai snapshot still legitimately receives it.
+  expect(store.get().usage.providers.openai.five_hour.utilization).toBe(99);
+  expect(store.get().usage.providers.openai.seven_day.utilization).toBe(98);
+});
+
+test('handleWsRateLimit routes a stale anthropic header to the global snapshot but not this session\'s meter (post anthropic->openai switch)', async () => {
+  setState({
+    sessions: { s1: { id: 's1', provider: 'openai', subagents: {} } },
+    usage: { available: true, five_hour: { utilization: 10 }, seven_day: { utilization: 20 } },
+  });
+
+  // Session already switched to openai; this header is from the anthropic
+  // request that was in flight before the switch.
+  handleWsRateLimit('s1', { provider: 'anthropic', five_hour_pct: 1, seven_day_pct: 2, on_overage: false });
+
+  const sess = store.get().sessions.s1;
+  // This session's own meter (now openai) is untouched by the stale anthropic header.
+  expect(sess.rlFiveHourPct).toBeUndefined();
+  expect(sess.rlSevenDayPct).toBeUndefined();
+  // The (still anthropic-shaped) global snapshot legitimately receives it.
+  expect(store.get().usage.five_hour.utilization).toBe(1);
+  expect(store.get().usage.seven_day.utilization).toBe(2);
+});
+
+
+test('handleWsRateLimit still applies a header delayed past a second switch back', async () => {
+  setState({
+    sessions: { s1: { id: 's1', provider: 'openai', subagents: {} } },
+    usage: { available: true, five_hour: { utilization: 10 }, seven_day: { utilization: 20 } },
+  });
+
+  // openai -> anthropic -> openai: a header for the FIRST openai request,
+  // delayed until after both switches, matches the session's current
+  // provider again and must be applied like any other current-provider header.
+  handleWsRateLimit('s1', { provider: 'openai', five_hour_pct: 55, seven_day_pct: 66, on_overage: false });
+
+  const sess = store.get().sessions.s1;
+  expect(sess.rlFiveHourPct).toBe(55);
+  expect(sess.rlSevenDayPct).toBe(66);
+  expect(store.get().usage.providers.openai.five_hour.utilization).toBe(55);
+});
+
+test('handleWsRateLimit applies a provider-tagged header matching the current provider', async () => {
+  setState({
+    sessions: { s1: { id: 's1', provider: 'anthropic', subagents: {} } },
+    usage: { available: true, five_hour: { utilization: 10 }, seven_day: { utilization: 20 } },
+  });
+
+  handleWsRateLimit('s1', { provider: 'anthropic', five_hour_pct: 40, seven_day_pct: 51, on_overage: false });
+
+  expect(store.get().usage.five_hour.utilization).toBe(40);
+  expect(store.get().sessions.s1.rlFiveHourPct).toBe(40);
+});
+
+test('handleWsRateLimit trusts a providerless event as before (legacy server)', async () => {
+  setState({
+    sessions: { s1: { id: 's1', provider: 'openai', subagents: {} } },
+    usage: { available: true, five_hour: { utilization: 10 }, seven_day: { utilization: 20 } },
+  });
+
+  handleWsRateLimit('s1', { five_hour_pct: 40, seven_day_pct: 51, on_overage: false });
+
+  expect(store.get().sessions.s1.rlFiveHourPct).toBe(40);
+  expect(store.get().usage.providers.openai.five_hour.utilization).toBe(40);
 });
 
 // --- Per-run logical token tally ---

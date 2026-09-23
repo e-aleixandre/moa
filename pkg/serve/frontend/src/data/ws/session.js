@@ -79,6 +79,13 @@ export function handleWsConfigChange(id, data) {
     provider: data.provider || sess?.provider,
     thinking: data.thinking || sess?.thinking,
   };
+  // A provider switch invalidates this session's header-derived meter; the
+  // provider-qualified account snapshots remain intact.
+  if (data.provider && sess?.provider && data.provider !== sess.provider) {
+    patch.rlFiveHourPct = undefined;
+    patch.rlSevenDayPct = undefined;
+    patch.onOverage = false;
+  }
   // Fast mode travels with the model: whether it is on, and whether the model
   // it is now on can serve it at all — a model switch can take the option away.
   if (data.fast !== undefined) patch.fast = data.fast;
@@ -153,20 +160,36 @@ export function handleWsCacheUsage(id, data) {
 // the global snapshot. Anthropic also patches its global plan snapshot here so
 // the widget does not lag the 60s poll; extra-usage spend (€) stays poller-owned.
 export function handleWsRateLimit(id, data) {
-  // Per-session utilizations: always record when the header was present
-  // (pct >= 0). This is what the OpenAI widget reads (no global poller), and it
-  // keeps each session's meter independent in a mixed-provider layout.
-  const patch = { onOverage: !!data.on_overage };
-  if (data.five_hour_pct >= 0) patch.rlFiveHourPct = data.five_hour_pct;
-  if (data.seven_day_pct >= 0) patch.rlSevenDayPct = data.seven_day_pct;
-  updateSession(id, patch);
-
-  // Patch the global (poller-owned) snapshot only for Anthropic sessions: those
-  // windows are account-wide and share the /api/usage shape. An OpenAI session
-  // must NOT overwrite the Anthropic snapshot in a mixed layout.
   const sess = store.get().sessions[id];
-  const isAnthropic = !sess?.provider || sess.provider === 'anthropic';
-  if (sess?.provider === 'openai') {
+  // A request's headers can arrive after the session has already switched to
+  // a different provider mid-run (fix/config-while-running: model changes
+  // apply at the next request boundary, not instantly). data.provider names
+  // the provider that actually answered THIS request. Events without a
+  // provider predate this field and are trusted as before, so older servers
+  // keep working: fall back to the session's current provider.
+  const eventProvider = data.provider || sess?.provider;
+  // Per-session fields (this session's own meter) reflect only ITS current
+  // provider: a stale header from the provider we just left must not touch
+  // this session's widget, or a switch would show the wrong numbers here.
+  const matchesSession = !data.provider || !sess?.provider || data.provider === sess.provider;
+
+  if (matchesSession) {
+    // Per-session utilizations: always record when the header was present
+    // (pct >= 0). This is what the OpenAI widget reads (no global poller), and
+    // it keeps each session's meter independent in a mixed-provider layout.
+    const patch = { onOverage: !!data.on_overage };
+    if (data.five_hour_pct >= 0) patch.rlFiveHourPct = data.five_hour_pct;
+    if (data.seven_day_pct >= 0) patch.rlSevenDayPct = data.seven_day_pct;
+    updateSession(id, patch);
+  }
+
+  // The global (account-wide) snapshot is NOT session-scoped: it reflects
+  // whichever provider actually answered this request, regardless of what
+  // the session is showing right now. Routing it by the session's current
+  // provider would drop a legitimate delayed reading from the provider we
+  // just left — the account-wide window it reports is still true. Only the
+  // per-session meter above needs the match guard.
+  if (eventProvider === 'openai') {
     const current = store.get().usage || { available: false, version: 2, providers: {}, provider_status: {} };
     const prior = current.providers?.openai || {};
     const openai = {
@@ -185,7 +208,7 @@ export function handleWsRateLimit(id, data) {
     } });
     return;
   }
-  if (!isAnthropic) return;
+  if (eventProvider && eventProvider !== 'anthropic') return;
 
   const u = store.get().usage;
   if (u && u.available) {

@@ -195,6 +195,16 @@ func contextExceeds(cfg *loopConfig, s requestSettings, toolSpecs []core.ToolSpe
 	return core.ShouldCompact(estimate.Tokens, c.EffectiveWindow(s.model.MaxInput), *c)
 }
 
+// compactionWindow is the window the compaction check judges s against, 0 when
+// s does not compact at all.
+func compactionWindow(s requestSettings) int {
+	c := s.compaction
+	if c == nil || !c.Enabled || s.model.MaxInput <= 0 {
+		return 0
+	}
+	return c.EffectiveWindow(s.model.MaxInput)
+}
+
 // withoutForeignThinking drops thinking from assistant messages another model
 // produced, judged by the model the loop requested for them. Thinking
 // signatures are model-specific; this model's own are kept. Messages without
@@ -320,13 +330,17 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Read the settings fresh on every iteration: a model, thinking or
 		// threshold change must reach a run already in flight. The compaction
 		// below uses this snapshot; the request itself re-reads right before it
-		// is sent. A pause_turn resubmit follows a change too: the user chose
-		// the model for what comes next, and only compaction is skipped for it.
+		// is sent. A continuation (pause_turn, Responses continue, truncation
+		// resubmit) is not a new request: it finishes the paused one on the
+		// provider, model and thinking level that started it, with that model's
+		// own thinking intact. A change waits for the next ordinary request.
 		var compactionSettings *core.CompactionSettings
-		if cfg.settings != nil {
+		checkedWindow := 0
+		if cfg.settings != nil && !justPaused {
 			settings := cfg.settings()
 			cfg.applySettings(settings)
 			compactionSettings = settings.compaction
+			checkedWindow = compactionWindow(settings)
 		}
 		// The model whose window the check below judges the context against.
 		checkedFor := cfg.model
@@ -530,19 +544,27 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		for attempt := 0; ; attempt++ {
 			// Last read before the request leaves: hooks, materialization and
 			// repair backoff all take time a change can land in.
-			if cfg.settings != nil {
+			if cfg.settings != nil && !justPaused {
 				next := cfg.settings()
 				// A partial response belongs to the model that wrote it: the
-				// new model must not continue it, nor record it as its own.
-				// Drop it and ask the new model afresh.
+				// new model must not continue it, nor record it as its own, and
+				// dropping it would lose what the user already saw. End the run
+				// through the stream-failure path, which keeps the partial
+				// stamped with the model that wrote it; the new model serves
+				// the next run.
 				if repairPartial != nil && !sameModel(next.model, cfg.model) {
-					repairPartial = nil
+					assistantMsg = nil
+					streamErr = fmt.Errorf("%w (not retried: the model was changed)", streamErr)
+					break
 				}
-				// A model switched in since the compaction check may have a
-				// smaller window than this context. Go back through the check
-				// rather than send an oversized request. Once per switch: after
-				// the check the model is checkedFor, even if compaction failed.
-				if !justPaused && !sameModel(next.model, checkedFor) && contextExceeds(cfg, next, toolSpecs) {
+				// A model or threshold changed since the compaction check may
+				// leave less room than this context. Go back through the check
+				// rather than send an oversized request. Once per change: after
+				// the check the model and window are the checked ones, even if
+				// compaction failed.
+				window := compactionWindow(next)
+				shrunk := window > 0 && (checkedWindow == 0 || window < checkedWindow)
+				if (!sameModel(next.model, checkedFor) || shrunk) && contextExceeds(cfg, next, toolSpecs) {
 					recheckContext = true
 					break
 				}
@@ -638,6 +660,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					toolResultErr,
 				)...)
 				cfg.appendState(msgs...)
+				// Announce the persisted partial like any committed response,
+				// before the run ends: a client that saw it stream would
+				// otherwise drop it at run end until a reload. cfg.model is
+				// still the model that wrote it (a switch stops before applying).
+				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventMessageEnd, Message: msgs[0], Pricing: cfg.model.Pricing})
 			}
 			loopErr = streamErr
 			return loopErr

@@ -245,7 +245,7 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		// parseRateLimit returns nil there, so nothing is emitted.
 		if o.accountID != "" {
 			if rl := parseRateLimit(resp.Header); rl != nil {
-				ch <- core.AssistantEvent{Type: core.ProviderEventRateLimit, RateLimit: rl}
+				ch <- core.AssistantEvent{Type: core.ProviderEventRateLimit, RateLimit: rl, Provider: "openai"}
 			}
 		}
 		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))

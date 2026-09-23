@@ -167,7 +167,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		defer resp.Body.Close() //nolint:errcheck
 		defer close(ch)
 		if rl != nil {
-			ch <- core.AssistantEvent{Type: core.ProviderEventRateLimit, RateLimit: rl}
+			ch <- core.AssistantEvent{Type: core.ProviderEventRateLimit, RateLimit: rl, Provider: "anthropic"}
 		}
 		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))
 		a.consumeStream(ctx, body, ch, tools, oauthMode)

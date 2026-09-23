@@ -193,7 +193,9 @@ type ManagedSession struct {
 	pushUnsubs   []func()
 	usageUnsub   func()
 	unreadUnsub  func()
-	runProvider  string
+	// runProvider is the fallback provider used for a RateLimitUpdated event
+	// that predates event-level Provider tagging (see subscribeUsageCache).
+	runProvider string
 
 	// ownerObserver turns this session's completed turns into the project
 	// owner's reports. Nil unless the session is a child of a codebase that

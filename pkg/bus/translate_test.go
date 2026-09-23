@@ -160,6 +160,48 @@ func TestTranslateAgentEvent_ToolExecEnd_TasksUpdate(t *testing.T) {
 	}
 }
 
+// TestTranslateAgentEvent_RateLimitCarriesRequestProvider verifies that the
+// bus RateLimitUpdated event carries the Provider stamped on the source
+// AssistantEvent by the provider that actually served the request — not some
+// other identity read from session state — so a model switch mid-run cannot
+// cause one provider's rate-limit reading to be misattributed to another.
+func TestTranslateAgentEvent_RateLimitCarriesRequestProvider(t *testing.T) {
+	rl := core.RateLimit{FiveHourUtil: 0.4, SevenDayUtil: 0.51}
+
+	openaiEvents := TranslateAgentEvent("s", 3, core.AgentEvent{
+		Type: core.AgentEventMessageUpdate,
+		AssistantEvent: &core.AssistantEvent{
+			Type: core.ProviderEventRateLimit, RateLimit: &rl, Provider: "openai",
+		},
+	}, nil)
+	if len(openaiEvents) != 1 {
+		t.Fatalf("openaiEvents = %#v, want exactly one event", openaiEvents)
+	}
+	got, ok := openaiEvents[0].(RateLimitUpdated)
+	if !ok {
+		t.Fatalf("openaiEvents[0] = %T, want RateLimitUpdated", openaiEvents[0])
+	}
+	if got.Provider != "openai" {
+		t.Fatalf("Provider = %q, want %q", got.Provider, "openai")
+	}
+	if got.RateLimit != rl {
+		t.Fatalf("RateLimit = %#v, want %#v", got.RateLimit, rl)
+	}
+
+	// A later request from a different provider (after a mid-run model switch)
+	// must carry ITS OWN provider identity, not the previous request's.
+	anthropicEvents := TranslateAgentEvent("s", 4, core.AgentEvent{
+		Type: core.AgentEventMessageUpdate,
+		AssistantEvent: &core.AssistantEvent{
+			Type: core.ProviderEventRateLimit, RateLimit: &rl, Provider: "anthropic",
+		},
+	}, nil)
+	got2, ok := anthropicEvents[0].(RateLimitUpdated)
+	if !ok || got2.Provider != "anthropic" {
+		t.Fatalf("anthropicEvents[0] = %#v, want RateLimitUpdated{Provider: anthropic}", anthropicEvents[0])
+	}
+}
+
 func TestTranslateAgentEvent_FastUnavailablePublishesExplicitFalse(t *testing.T) {
 	events := TranslateAgentEvent("s", 1, core.AgentEvent{Type: core.AgentEventFastUnavailable}, nil)
 	if len(events) != 1 {
