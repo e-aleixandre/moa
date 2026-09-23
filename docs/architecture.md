@@ -30,6 +30,12 @@
 | `pkg/goal/` | Autonomous maker→verifier loop toward an objective (`/goal`). The verifier is a read-only mini-agent (read/grep/find/ls, `luna` by default, 25 inspection turns) that inspects the repo to judge completion, and carries memory of its earlier verdicts across iterations; `--verify-oneshot` falls back to the legacy tool-less check. Exhausting its turns or time is not a verdict: it retries once with double the turns and, failing that, pauses the goal instead of relaying a non-verdict to the maker. When the project defines `.moa/verify.json`, red checks are a hard gate — the goal can't be declared done while they fail, whatever the verdict says |
 | `pkg/autotitle/` | Generates short session titles from the conversation via a cheap LLM call |
 | `pkg/pulsebrief/` | Generates a per-session status brief (attempting/progress) via a cheap same-vendor LLM call; feeds the web dashboard and Pulse voice (web/Pulse-only) |
+| `pkg/handoff/` | Prepares a compact, standalone prompt that starts a new session from the current conversation (`/handoff`) |
+| `pkg/sessioncheckpoint/` | The single ephemeral checkpoint slot a session writes before compaction (see [Compaction](#compaction)) |
+| `pkg/moadocs/` | Serves moa's own documentation to the agent (`moa_docs` tool) |
+| `pkg/secrets/` | Stages short-lived credentials for the agent to install without passing them through chat |
+| `pkg/owner/` | Project owners: the standing agent of a codebase, its reports and heartbeat (see [Project owners](owners.md)) |
+| `pkg/book/` | The owner's book: on-disk project record, the `book` tool and its ranked search |
 
 ### Providers
 
@@ -48,7 +54,7 @@
 
 | Package | Role |
 |---------|------|
-| `pkg/serve/` | HTTP/WebSocket server + web UI session manager; also hosts the Pulse backend (device pairing, guardian WebSocket, Realtime client-secret broker, session brief) |
+| `pkg/serve/` | HTTP/WebSocket server + web UI session manager; also hosts the Pulse backend (device pairing, guardian WebSocket, Realtime client-secret broker, session brief) and the web voice delegate (`/api/voice/live/*`) |
 
 ### Infrastructure
 
@@ -66,6 +72,7 @@
 | `pkg/usage/` | Provider-qualified plan-usage pollers; Claude and xAI consumer data come from private, best-effort endpoints |
 | `pkg/attention/` | Attention Service: consumes every session's event bus and produces a priority-ordered attention queue |
 | `pkg/schedule/` | Durable one-shot schedule records (backs the web `/schedule` command) |
+| `pkg/events/` | Wake-on-event inbox: model and durable store for external events; routing lives in `pkg/serve` |
 | `pkg/release/` | Build metadata and best-effort release update checks |
 | `pkg/ansi/` | Strips terminal control sequences from untrusted text before rendering |
 
