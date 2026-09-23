@@ -13,9 +13,11 @@ Moa is a coding agent runtime in Go. One core, two interfaces: web UI and headle
 - **Skills**: loadable knowledge packs discovered from `.moa/skills/` or `~/.config/moa/skills/`. The agent pulls one in with `load_skill`; you can invoke one yourself with `/<name>`. `context: fork` runs the skill as an isolated subagent instead of loading it into the current conversation
 - **Budget & limits**: per-run USD caps, turn limits, duration limits
 - **Checkpoint / undo**: revert file changes per agent turn
-- **Context compaction**: automatic summarization when context grows large, written by the session's model or by a [summarizer you choose](./configuration.md#features)
-- **MCP**: connect external tool servers
-- **Voice input**: in the web UI
+- **Context compaction**: when context grows large, old tool outputs are trimmed first (a line in the transcript says how much was freed) and the conversation is summarized only when that is not enough — by the session's model or by a [summarizer you choose](./configuration.md#features)
+- **MCP**: connect external tool servers, local or remote; remote servers that need a login sign in with OAuth from the session's MCP page
+- **Mid-run messages**: what you send while the agent works is [queued](./serve.md#queued-commands-and-mid-run-messages) and read at its next step; one tap brings the whole queue back to the input
+- **[Artifacts](./serve.md#files-sent-by-the-agent)**: files the agent sends you stay reachable from the conversation
+- **Voice input**: dictate messages in the web UI, or hand the conversation to a voice delegate and get its minutes back as a draft
 - **[Live Preview](./serve.md#live-preview)**: watch the web app the agent is building inside the conversation, at a chosen viewport width, and tap an element to tell the agent what should change about it
 - **[Wake on event](./automation.md#event-hooks)**: give an external system (CI, error tracker, mail watcher) its own webhook URL and let what it sends reach a session, or wait in an inbox for you to place it
 - **[Project owners](./owners.md)**: a standing agent per codebase that keeps the project's book, starts and directs its sessions, receives their reports and answers what the book already answers
@@ -47,9 +49,12 @@ All state lives under `~/.config/moa/` (or `MOA_CONFIG_DIR`):
 | `skills/` | Global skill packs (`<name>/SKILL.md`) |
 | `global/memory/` | Global memory facts (scope: global) |
 | `codebases/<key>/memory/` | Project memory facts, keyed by repository |
+| `codebases/<key>/book/`, `owner.json` | A [project owner](./owners.md)'s book and settings |
 | `codebases/orphaned-memory.json` | Older project memory that no repository could claim |
 | `.mcp.json` | Global MCP server definitions |
-| `devices.json` | Paired Pulse device credentials |
+| `mcp-oauth.json` | Sign-in tokens for remote MCP servers |
+| `events.json` | Event inbox for [wake on event](./automation.md#event-hooks) |
+| `devices.json` | Paired device credentials |
 | `update.json` | Cached release-check state |
 | `vapid.json` | Web-push VAPID keypair |
 | `push_subscriptions.json` | Web-push subscriptions |
