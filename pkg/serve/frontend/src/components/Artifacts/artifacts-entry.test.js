@@ -52,6 +52,15 @@ test('only the owning conversation entry reads as on', () => {
   expect(calls).toEqual(['/api/sessions/A/artifacts']);
 });
 
+test('the owning entry closes its open drawer on a second click', () => {
+  openArtifactsList('A');
+  openArtifactsList('A');
+
+  expect(artifactsSlice(store.get()).view).toBeNull();
+  expect(artifactsEntryState(store.get(), 'A').active).toBe(false);
+  expect(calls).toEqual(['/api/sessions/A/artifacts']);
+});
+
 test("opening another pane's entry switches the same drawer", () => {
   openArtifactsList('A');
   openArtifactsList('B');
