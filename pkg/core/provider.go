@@ -261,25 +261,80 @@ func ThinkingLevelOptions() string {
 	return s
 }
 
-// ThinkingAlwaysOn reports whether a model thinks on every turn. Off is not a
-// real setting there: the API still thinks. Fable 5.1 and Opus 5.5 run adaptive
-// thinking unconditionally; Opus 5.5 rejects thinking disabled with a 400.
-func ThinkingAlwaysOn(model Model) bool {
+// AnthropicThinking describes how an Anthropic model thinks, per
+// https://platform.claude.com/docs/en/build-with-claude/effort (levels,
+// defaults) and
+// https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting#thinking-support-defaults-and-rejected-configurations
+// (which thinking types each model accepts). Moa does not expose "max".
+//
+//	model       thinking            levels (moa)           API default effort
+//	Fable 5.1   adaptive, always on low medium high xhigh  high
+//	Fable 5     adaptive, always on low medium high xhigh  high
+//	Opus 5.5    adaptive, always on low medium high xhigh  medium
+//	Opus 5      adaptive, on        off low … xhigh        high
+//	Opus 4.8    adaptive, off       off low … xhigh        high
+//	Sonnet 5    adaptive, on        off low … xhigh        high
+//	Haiku 4.5   extended (budget)   off low medium high    — (no effort)
+type AnthropicThinking struct {
+	// Adaptive models take output_config.effort; the rest take budget_tokens.
+	Adaptive bool
+	// AlwaysOn models reject thinking disabled: off is not a real setting.
+	AlwaysOn bool
+	// OnByDefault models think when the request omits thinking, so off must
+	// send thinking disabled explicitly.
+	OnByDefault bool
+	// DefaultEffort is the effort the API applies when the request omits it.
+	DefaultEffort string
+	// XHigh reports whether effort "xhigh" exists for the model.
+	XHigh bool
+}
+
+// anthropicThinking is ordered: a prefix that is a substring of a later ID
+// (opus-5 in opus-5-5, fable-5 in fable-5-1) must come after it.
+var anthropicThinking = []struct {
+	ids  []string
+	spec AnthropicThinking
+}{
+	{[]string{"fable-5-1", "fable-5.1"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "high", XHigh: true}},
+	{[]string{"fable-5"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "high", XHigh: true}},
+	{[]string{"opus-5-5", "opus-5.5"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "medium", XHigh: true}},
+	{[]string{"opus-5"}, AnthropicThinking{Adaptive: true, OnByDefault: true, DefaultEffort: "high", XHigh: true}},
+	{[]string{"opus-4-8", "opus-4.8"}, AnthropicThinking{Adaptive: true, DefaultEffort: "high", XHigh: true}},
+	{[]string{"sonnet-5"}, AnthropicThinking{Adaptive: true, OnByDefault: true, DefaultEffort: "high", XHigh: true}},
+	{[]string{"haiku-4-5", "haiku-4.5"}, AnthropicThinking{}},
+}
+
+// AnthropicThinkingFor returns the thinking spec of a known Anthropic model.
+// Aliases resolve first, so "opus" and "fable" work.
+func AnthropicThinkingFor(model Model) (AnthropicThinking, bool) {
 	id := strings.ToLower(model.ID)
 	if resolved, ok := ResolveModel(model.ID); ok {
 		id = strings.ToLower(resolved.ID)
 	}
-	return strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1") ||
-		strings.Contains(id, "opus-5-5") || strings.Contains(id, "opus-5.5")
+	for _, entry := range anthropicThinking {
+		for _, sub := range entry.ids {
+			if strings.Contains(id, sub) {
+				return entry.spec, true
+			}
+		}
+	}
+	return AnthropicThinking{}, false
+}
+
+// ThinkingAlwaysOn reports whether a model thinks on every turn. Off is not a
+// real setting there: the API still thinks, at its default effort.
+func ThinkingAlwaysOn(model Model) bool {
+	spec, ok := AnthropicThinkingFor(model)
+	return ok && spec.AlwaysOn
 }
 
 // EffectiveThinkingLevel resolves a persisted level for a model. xAI requires
 // reasoning and only accepts low/medium/high. Meta also requires it; "off"
 // becomes "low" so a session never persists a level the selector can't show,
 // while internal callers may ask for "minimal" explicitly. GPT-6 Astra maps
-// Moa's five selector positions onto its five supported efforts. Models whose
-// thinking cannot be turned off promote "off" to "high", the level the
-// selector falls back to when off is not offered.
+// Moa's five selector positions onto its five supported efforts. Anthropic
+// models whose thinking cannot be turned off promote "off" to their API
+// default effort, and models without "xhigh" cap it at "high".
 // Other providers keep the value.
 func EffectiveThinkingLevel(model Model, level string) (string, error) {
 	if model.Provider == "xai" {
@@ -329,8 +384,13 @@ func EffectiveThinkingLevel(model Model, level string) (string, error) {
 	if !IsValidThinkingLevel(level) {
 		return "", fmt.Errorf("invalid thinking level %q", level)
 	}
-	if ThinkingAlwaysOn(model) && level == "off" {
-		return "high", nil
+	if spec, ok := AnthropicThinkingFor(model); ok {
+		if spec.AlwaysOn && level == "off" {
+			return spec.DefaultEffort, nil
+		}
+		if !spec.XHigh && level == "xhigh" {
+			return "high", nil
+		}
 	}
 	return level, nil
 }

@@ -81,15 +81,20 @@ test('nextThinkingLevel: Grok cycles only supported persisted levels', () => {
   expect(nextThinkingLevel('high', ['low', 'medium', 'high'])).toBe('low');
 });
 
-test('thinkingLevelsFor: Fable 5.1 and Opus 5.5 cannot turn thinking off; Fable 5 and Opus 5 still can', () => {
-  expect(thinkingLevelsFor({ catalogId: 'claude-fable-5-1', provider: 'anthropic' })).toEqual([
-    'low', 'medium', 'high', 'xhigh',
-  ]);
-  expect(thinkingLevelsFor({ catalogId: 'claude-fable-5', provider: 'anthropic' })).toBeUndefined();
-  expect(thinkingLevelsFor({ catalogId: 'claude-opus-5', provider: 'anthropic' })).toBeUndefined();
-  expect(thinkingLevelsFor({ catalogId: 'claude-opus-5-5', provider: 'anthropic' })).toEqual([
-    'low', 'medium', 'high', 'xhigh',
-  ]);
+test('thinkingLevelsFor: each Anthropic model offers only the levels it accepts', () => {
+  const alwaysOn = ['low', 'medium', 'high', 'xhigh'];
+  const cases = {
+    'claude-fable-5-1': alwaysOn,
+    'claude-fable-5': alwaysOn,
+    'claude-opus-5-5': alwaysOn,
+    'claude-opus-5': undefined,
+    'claude-opus-4-8': undefined,
+    'claude-sonnet-5': undefined,
+    'claude-haiku-4-5-20251001': ['off', 'low', 'medium', 'high'],
+  };
+  for (const [catalogId, levels] of Object.entries(cases)) {
+    expect(thinkingLevelsFor({ catalogId, provider: 'anthropic' })).toEqual(levels);
+  }
   expect(thinkingLevelsFor({ catalogId: 'grok-4.6', provider: 'xai' })).toEqual(['low', 'medium', 'high']);
   expect(thinkingLevelsFor({ catalogId: 'muse-spark-1.3', provider: 'meta' })).toEqual([
     'low', 'medium', 'high', 'xhigh',

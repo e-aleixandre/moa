@@ -134,14 +134,19 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 	}
 
 	// Thinking
-	if supportsAdaptiveThinking(req.Model.ID) {
-		effort := resolveEffort(req.Options.ThinkingLevel, req.Model.ID)
-		if effort == "" && core.ThinkingAlwaysOn(req.Model) {
-			effort = "high"
-		}
-		if effort != "" {
+	spec, known := core.AnthropicThinkingFor(req.Model)
+	if known && spec.Adaptive {
+		effort := resolveEffort(req.Options.ThinkingLevel, spec)
+		switch {
+		case effort != "":
 			ar.Thinking = &thinkingConfig{Type: "adaptive"}
 			ar.OutputConfig = &outputConfig{Effort: effort}
+		case spec.AlwaysOn:
+			ar.Thinking = &thinkingConfig{Type: "adaptive"}
+			ar.OutputConfig = &outputConfig{Effort: spec.DefaultEffort}
+		case spec.OnByDefault:
+			// Omitting thinking would still think; off has to say so.
+			ar.Thinking = &thinkingConfig{Type: "disabled"}
 		}
 	} else if t := resolveThinking(req); t != nil {
 		ar.Thinking = t
@@ -545,19 +550,6 @@ func resolveMaxTokens(req core.Request) int {
 	return core.ResolveMaxOutputTokens(req.Model, req.Options.MaxTokens)
 }
 
-// supportsAdaptiveThinking reports whether a model supports Anthropic adaptive
-// thinking (Fable 5.1, Opus 5, Opus 4.8 and Sonnet 5). Haiku 4.5 and Fable 5
-// use manual extended thinking.
-func supportsAdaptiveThinking(modelID string) bool {
-	id := strings.ToLower(modelID)
-	return strings.Contains(id, "fable-5-1") ||
-		strings.Contains(id, "fable-5.1") ||
-		strings.Contains(id, "opus-5") ||
-		strings.Contains(id, "opus-4-8") ||
-		strings.Contains(id, "opus-4.8") ||
-		strings.Contains(id, "sonnet-5")
-}
-
 // bindsThinkingPrefix reports whether the model validates a thinking block's
 // signature against everything sent before it. Claude Fable 5.1 is the first
 // to do so; Mythos 5.1 does not, and older models reject the block_binding
@@ -567,8 +559,9 @@ func bindsThinkingPrefix(modelID string) bool {
 	return strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1")
 }
 
-// resolveEffort maps our thinking levels to Anthropic adaptive effort.
-func resolveEffort(level, modelID string) string {
+// resolveEffort maps our thinking levels to Anthropic adaptive effort. An
+// empty result means off.
+func resolveEffort(level string, spec core.AnthropicThinking) string {
 	switch strings.ToLower(level) {
 	case "", "off", "none":
 		return ""
@@ -579,27 +572,13 @@ func resolveEffort(level, modelID string) string {
 	case "high":
 		return "high"
 	case "xhigh":
-		id := strings.ToLower(modelID)
-		if supportsXHighEffort(id) {
+		if spec.XHigh {
 			return "xhigh"
-		}
-		// Opus 4.6 accepts "max" but not "xhigh", so its top tier is "max".
-		if strings.Contains(id, "opus") {
-			return "max"
 		}
 		return "high"
 	default:
 		return "medium"
 	}
-}
-
-// supportsXHighEffort reports whether an Opus model accepts effort "xhigh",
-// which sits below "max": Opus 4.7 and later. Other families are left to their
-// existing caps.
-func supportsXHighEffort(id string) bool {
-	return strings.Contains(id, "opus-5") ||
-		strings.Contains(id, "opus-4-8") || strings.Contains(id, "opus-4.8") ||
-		strings.Contains(id, "opus-4-7") || strings.Contains(id, "opus-4.7")
 }
 
 // resolveThinking maps thinking level to Anthropic manual thinking config.
@@ -612,9 +591,8 @@ func resolveThinking(req core.Request) *thinkingConfig {
 	case "medium":
 		return &thinkingConfig{Type: "enabled", BudgetTokens: 10000}
 	case "high", "xhigh":
-		// Manual-thinking models (Haiku 4.5, Fable) expose no tier above "high",
-		// so "xhigh" caps here — mirroring resolveEffort, which caps non-Opus
-		// "xhigh" at "high". Never fall through to default: that would return nil
+		// Manual-thinking models (Haiku 4.5) expose no tier above "high", so
+		// "xhigh" caps here. Never fall through to default: that would return nil
 		// and silently disable thinking when the *maximum* level was requested.
 		return &thinkingConfig{Type: "enabled", BudgetTokens: 32000}
 	default:

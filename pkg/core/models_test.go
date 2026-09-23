@@ -324,43 +324,18 @@ func TestEffectiveThinkingLevel_GPT6Astra(t *testing.T) {
 	}
 }
 
-func TestEffectiveThinkingLevel_Fable51AlwaysOn(t *testing.T) {
-	model, ok := ResolveModel("claude-fable-5-1")
-	if !ok {
-		t.Fatal("claude-fable-5-1 must resolve")
-	}
-	if !ThinkingAlwaysOn(model) || !ThinkingAlwaysOn(Model{ID: "fable"}) {
-		t.Fatal("Fable 5.1 thinking is always on")
-	}
-	got, err := EffectiveThinkingLevel(model, "off")
-	if err != nil || got != "high" {
-		t.Fatalf("off = %q, %v; want high (API default)", got, err)
-	}
-	for _, level := range []string{"low", "medium", "high", "xhigh"} {
-		got, err := EffectiveThinkingLevel(model, level)
-		if err != nil || got != level {
-			t.Errorf("EffectiveThinkingLevel(%q) = %q, %v; want unchanged", level, got, err)
-		}
-	}
-	prev, _ := ResolveModel("claude-fable-5")
-	if ThinkingAlwaysOn(prev) {
-		t.Fatal("Fable 5 still allows thinking off")
-	}
-	if got, err := EffectiveThinkingLevel(prev, "off"); err != nil || got != "off" {
-		t.Fatalf("Fable 5 off = %q, %v; want off", got, err)
-	}
-}
-
 func TestThinkingAlwaysOn_PerModel(t *testing.T) {
 	cases := map[string]bool{
-		"claude-fable-5-1": true,
-		"fable":            true,
-		"claude-opus-5-5":  true,
-		"opus":             true,
-		"claude-opus-5":    false,
-		"claude-opus-4-8":  false,
-		"claude-fable-5":   false,
-		"claude-sonnet-5":  false,
+		"claude-fable-5-1":          true,
+		"fable":                     true,
+		"claude-fable-5":            true,
+		"claude-opus-5-5":           true,
+		"opus":                      true,
+		"claude-opus-5":             false,
+		"claude-opus-4-8":           false,
+		"claude-sonnet-5":           false,
+		"claude-haiku-4-5-20251001": false,
+		"gpt-6-sol":                 false,
 	}
 	for id, want := range cases {
 		if got := ThinkingAlwaysOn(Model{ID: id}); got != want {
@@ -369,22 +344,30 @@ func TestThinkingAlwaysOn_PerModel(t *testing.T) {
 	}
 }
 
-func TestEffectiveThinkingLevel_Opus55AlwaysOn(t *testing.T) {
-	model, ok := ResolveModel("claude-opus-5-5")
-	if !ok {
-		t.Fatal("claude-opus-5-5 must resolve")
+// TestEffectiveThinkingLevel_AnthropicPerModel pins what a persisted level
+// becomes on every catalog Anthropic model.
+func TestEffectiveThinkingLevel_AnthropicPerModel(t *testing.T) {
+	levels := []string{"off", "low", "medium", "high", "xhigh", "max"}
+	want := map[string][]string{
+		"claude-fable-5-1":          {"high", "low", "medium", "high", "xhigh", "xhigh"},
+		"claude-fable-5":            {"high", "low", "medium", "high", "xhigh", "xhigh"},
+		"claude-opus-5-5":           {"medium", "low", "medium", "high", "xhigh", "xhigh"},
+		"claude-opus-5":             {"off", "low", "medium", "high", "xhigh", "xhigh"},
+		"claude-opus-4-8":           {"off", "low", "medium", "high", "xhigh", "xhigh"},
+		"claude-sonnet-5":           {"off", "low", "medium", "high", "xhigh", "xhigh"},
+		"claude-haiku-4-5-20251001": {"off", "low", "medium", "high", "high", "high"},
 	}
-	if got, err := EffectiveThinkingLevel(model, "off"); err != nil || got != "high" {
-		t.Fatalf("off = %q, %v; want high", got, err)
-	}
-	for _, level := range []string{"low", "medium", "high", "xhigh"} {
-		if got, err := EffectiveThinkingLevel(model, level); err != nil || got != level {
-			t.Errorf("EffectiveThinkingLevel(%q) = %q, %v; want unchanged", level, got, err)
+	for id, expected := range want {
+		model, ok := ResolveModel(id)
+		if !ok {
+			t.Fatalf("%s must resolve", id)
 		}
-	}
-	prev, _ := ResolveModel("claude-opus-5")
-	if got, err := EffectiveThinkingLevel(prev, "off"); err != nil || got != "off" {
-		t.Fatalf("Opus 5 off = %q, %v; want off", got, err)
+		for i, level := range levels {
+			got, err := EffectiveThinkingLevel(model, level)
+			if err != nil || got != expected[i] {
+				t.Errorf("EffectiveThinkingLevel(%s, %q) = %q, %v; want %q", id, level, got, err, expected[i])
+			}
+		}
 	}
 }
 

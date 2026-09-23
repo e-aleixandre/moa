@@ -131,18 +131,20 @@ export function nextThinkingLevel(level, levels = THINKING_CYCLE) {
 
 // thinkingLevelsFor is the selector's option list for the current model.
 // Undefined means the full THINKING_CYCLE. xAI cannot persist off/xhigh;
-// Meta cannot disable reasoning at all, so off is not offered either;
-// Fable 5.1 and Opus 5.5 think on every turn so off is not a real setting
-// (mirrors core.ThinkingAlwaysOn).
+// Meta cannot disable reasoning at all, so off is not offered either.
+// Anthropic mirrors core.AnthropicThinking, from
+// https://platform.claude.com/docs/en/build-with-claude/effort: Fable 5 and
+// 5.1 and Opus 5.5 always think, so off is not a real setting; Haiku 4.5 has
+// no xhigh.
 export function thinkingLevelsFor(spec, sessionProvider) {
   const provider = spec?.provider || sessionProvider;
   if (provider === "xai") return ["low", "medium", "high"];
   if (provider === "meta") return ["low", "medium", "high", "xhigh"];
   const id = String(spec?.catalogId || spec?.id || "").toLowerCase();
-  if (id.includes("fable-5-1") || id.includes("fable-5.1") ||
-      id.includes("opus-5-5") || id.includes("opus-5.5")) {
+  if (/fable-5|opus-5[-.]5/.test(id)) {
     return ["low", "medium", "high", "xhigh"];
   }
+  if (/haiku-4[-.]5/.test(id)) return ["off", "low", "medium", "high"];
   return undefined;
 }
 

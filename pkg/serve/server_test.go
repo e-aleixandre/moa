@@ -1285,7 +1285,8 @@ func TestReconfigureSession_AstraThinkingNormalizesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normal, err := mgr.CreateSession(CreateOpts{})
+	// A model that exposes all five selector levels unchanged.
+	normal, err := mgr.CreateSession(CreateOpts{Model: "claude-opus-5"})
 	if err != nil {
 		t.Fatal(err)
 	}
