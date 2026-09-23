@@ -2,8 +2,10 @@ package owner
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -100,14 +102,61 @@ func TestResolvedAvatarMigratesARetiredColour(t *testing.T) {
 // Go and the JS implementations agree without either one asking the other.
 // These values are the ones src/components/Owners/OwnerAvatar.jsx computes.
 func TestDefaultAvatarMatchesTheFrontendHash(t *testing.T) {
+	// Golden values, computed before triangle and cloud became selectable:
+	// adding shapes must not change the face of any owner that never chose.
 	cases := map[string]Avatar{
 		"winerim-backend": {Shape: "blob", Color: "mint"},
 		"winerim-web":     {Shape: "drop", Color: "mauve"},
 		"moa":             {Shape: "circle", Color: "lilac"},
+		"facturas-api":    {Shape: "drop", Color: "mauve"},
+		"catas-app":       {Shape: "circle", Color: "sage"},
+		"etiquetas-pdf":   {Shape: "pill", Color: "peach"},
+		"landing-2026":    {Shape: "blob", Color: "rose"},
+		"sommelier-bot":   {Shape: "circle", Color: "azure"},
+		"dotfiles":        {Shape: "pill", Color: "sky"},
+		"":                {Shape: "squircle", Color: "sage"},
 	}
 	for key, want := range cases {
 		if got := DefaultAvatar(key); got != want {
 			t.Fatalf("DefaultAvatar(%q) = %+v, want %+v", key, got, want)
+		}
+	}
+}
+
+// Triangle and cloud are selectable: accepted on create and read back from
+// owner.json exactly as chosen.
+func TestSelectableShapesRoundTripThroughOwnerJSON(t *testing.T) {
+	for _, shape := range []string{"triangle", "cloud"} {
+		cfg := t.TempDir()
+		store := NewStore(cfg)
+		want := Avatar{Shape: shape, Color: "sky"}
+		own, err := store.Create(t.TempDir(), "Winerim", "", "", true, want)
+		if err != nil {
+			t.Fatalf("create with %s: %v", shape, err)
+		}
+		loaded, found, err := NewStore(cfg).FindByCodebase(own.CodebaseKey)
+		if err != nil || !found {
+			t.Fatalf("reload: found=%v err=%v", found, err)
+		}
+		if loaded.Avatar != want || loaded.ResolvedAvatar() != want {
+			t.Fatalf("%s: loaded %+v, resolved %+v, want %+v", shape, loaded.Avatar, loaded.ResolvedAvatar(), want)
+		}
+	}
+}
+
+// The default pool is the original six, in their original order, and the
+// opt-in shapes never come out of the hash.
+func TestDefaultAvatarNeverPicksAnOptInShape(t *testing.T) {
+	if !slices.Equal(DefaultAvatarShapes, []string{"circle", "squircle", "blob", "hexagon", "drop", "pill"}) {
+		t.Fatalf("default pool changed: %v", DefaultAvatarShapes)
+	}
+	if !slices.Contains(AvatarShapes, "triangle") || !slices.Contains(AvatarShapes, "cloud") {
+		t.Fatalf("selectable shapes = %v", AvatarShapes)
+	}
+	for i := range 5000 {
+		got := DefaultAvatar(fmt.Sprintf("codebase-%d", i)).Shape
+		if !slices.Contains(DefaultAvatarShapes, got) {
+			t.Fatalf("DefaultAvatar picked %q", got)
 		}
 	}
 }

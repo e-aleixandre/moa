@@ -548,3 +548,31 @@ func TestCreateOwnerDefaultsAndValidatesTheAvatar(t *testing.T) {
 		t.Fatalf("create with a bad avatar = %v, want ErrInvalidAvatar", err)
 	}
 }
+
+// Triangle and cloud are selectable through the API, on create and on PATCH,
+// and survive a reload from owner.json; an unknown shape is still refused.
+func TestOwnerAPIAcceptsTheSelectableShapes(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	info, err := mgr.CreateOwner(CreateOwnerOpts{
+		Root: t.TempDir(), Name: "Winerim", Avatar: owner.Avatar{Shape: "triangle", Color: "sky"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Avatar != (owner.Avatar{Shape: "triangle", Color: "sky"}) {
+		t.Fatalf("created avatar = %+v", info.Avatar)
+	}
+	if response := patchOwner(t, mgr, info.ID, `{"avatar":{"shape":"cloud","color":"rose"}}`); response.Code != http.StatusOK {
+		t.Fatalf("cloud PATCH = %d: %s", response.Code, response.Body.String())
+	}
+	got, err := mgr.GetOwner(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Avatar != (owner.Avatar{Shape: "cloud", Color: "rose"}) {
+		t.Fatalf("reloaded avatar = %+v", got.Avatar)
+	}
+	if response := patchOwner(t, mgr, info.ID, `{"avatar":{"shape":"star","color":"rose"}}`); response.Code != http.StatusBadRequest {
+		t.Fatalf("unknown shape PATCH = %d, want 400", response.Code)
+	}
+}
