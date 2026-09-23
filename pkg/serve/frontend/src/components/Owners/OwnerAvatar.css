@@ -1,5 +1,10 @@
-/* OwnerAvatar — the sheet of the owner's identity mark. It uses only the
-   product's `--zl-*` ladder and every class is prefixed `ow-av`.
+/* OwnerAvatar — the sheet of the owner's PREVIOUS identity mark, the static
+   lit tile. The product now draws the Mirada face (OwnerFace.css); what is
+   still live here for the product is only the root `.ow-av` rules (shadow,
+   saved opacity), which the face shares so the selectors around it keep
+   working. The tile below is what the design labs show as "Antes" and what
+   the faces lab's B/C proposals wear. It uses only the `--zl-*` ladder and
+   every class is prefixed `ow-av`.
 
    The colour is ONE variable set by the component (`--ow-av-c`), spent at
    three strengths: the plane, the outline one step stronger, and the eyes at
@@ -73,6 +78,7 @@
    saved dot does by not being drawn — one step of opacity, not a grey. */
 .ow-av.is-saved { opacity: 0.66; }
 
-/* Nothing here animates. An avatar that blinks in a column you look at for
-   hours is a permanent interruption (CRITERIO §5), so there is no keyframe to
-   reduce under prefers-reduced-motion — the state change is a re-render. */
+/* The tile itself never animates. The face that replaced it does, and the
+   reasons it stays bearable (one sleeping timer, nothing offscreen, stillness
+   under prefers-reduced-motion) live with it in OwnerFace.css and
+   faceMotion.js. */

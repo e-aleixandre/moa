@@ -240,7 +240,7 @@ button.zl-group.ow-sec .zl-dot { flex: none; }
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--ow-av-c) 78%, var(--zl-raised));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ow-av-c) 55%, transparent);
+  /* Solid: the dot is the colour the face's body is drawn in. */
+  background: var(--ow-sw-c);
 }
 

@@ -1,4 +1,4 @@
-import { hash } from "./OwnerAvatar.jsx";
+import { hash } from "./avatar-identity.js";
 
 // faceMotion — the one clock every animated owner face shares.
 //
@@ -422,6 +422,12 @@ export function createFaceScheduler(env) {
 
 let shared = null;
 
+// Tests build the DOM glue against a fake window; this lets each one start
+// from a fresh singleton.
+export function __resetFaceMotionForTests() {
+  shared = null;
+}
+
 export function faceMotion() {
   if (shared) return shared;
   if (typeof window === "undefined") return null;
@@ -438,7 +444,9 @@ export function faceMotion() {
   });
   const notify = () => { for (const fn of listeners) fn(); syncPointer(); };
 
-  document.addEventListener("visibilitychange", () => core.setHidden(document.hidden));
+  // A hidden tab has no visible faces, so it has no reason to keep the
+  // pointer listener either.
+  document.addEventListener("visibilitychange", () => { core.setHidden(document.hidden); syncPointer(); });
   rm?.addEventListener?.("change", (e) => { core.setSystemReduced(e.matches); notify(); });
 
   const byEl = new Map();

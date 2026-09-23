@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef } from "preact/hooks";
 import {
   AVATAR_COLORS, AVATAR_SHAPES, EYE_CENTER, SHAPE_PATHS, eyeStateFor, ownerAvatar,
-} from "./OwnerAvatar.jsx";
+} from "./avatar-identity.js";
 import { facePersonality, faceMotion } from "./faceMotion.js";
 import "./OwnerAvatar.css";
 import "./OwnerFace.css";
 
-// OwnerFace — LAB CANDIDATE (?view=faces). OwnerAvatar with eyes that are
-// alive: they blink, look around and behave by state, on the owner's own
-// deterministic script (faceMotion.js). Three drawings are on trial:
+// OwnerFace — the owner's face with eyes that are alive: they blink, look
+// around and behave by state, on the owner's own deterministic script
+// (faceMotion.js). The product draws "mirada" through OwnerAvatar; the other
+// two variants remain for the ?view=faces lab, where the three were compared:
 //
-//   mirada  — THE MAIN ONE. A flat ball of the identity colour (optionally a
+//   mirada  — THE PRODUCT'S. A flat ball of the identity colour (optionally a
 //             satin sheen) with two short, rounded white strokes for eyes,
 //             each leaning its own way. The pair turns like a head.
 //   pupilas — today's lit tile, with light sclera and dark pupils.
@@ -201,6 +202,9 @@ export function OwnerFace({
     "--of-body": muted ? "#4a4b5c" : faceBodyColor(av.color),
     "--ow-av-fill": `url(#${uid}f)`,
     "--ow-av-edge": `url(#${uid}l)`,
+    // One viewBox unit in CSS pixels: Mirada's HTML eyes move in the same
+    // units the SVG was drawn in.
+    "--of-u": `${size / 32}px`,
     // The breath: each owner its own period and phase, so a column of idle
     // owners never inhales in unison.
     "--of-breath": `${p.breath}ms`,
@@ -209,13 +213,15 @@ export function OwnerFace({
   };
 
   const breathes = expressive && eyes === "idle" && !gaze;
-  // Sobria and Pupilas wear OwnerAvatar's own sheet (`ow-av`), so the tile is
-  // not a copy of today's but the same rules.
-  const base = variant === "mirada" ? "of" : "of ow-av";
+  // Every variant also answers to `ow-av`, the class the surfaces around the
+  // mark already select (StatusStrip's `.zl-st-owner .ow-av`). Sobria and
+  // Pupilas draw with that sheet's tile; Mirada only shares its root rules.
+  const base = "of ow-av";
   // The root is an HTML <span>, not the <svg>: Chrome never hands an
   // animation on an SVG element (the outer <svg> included) to the compositor,
   // so a breath on the <svg> re-styled and re-painted every face on every
   // frame. On a span it runs off the main thread (measured in the lab).
+  const svg = <FaceSvg variant={variant} uid={uid} size={size} sheen={sheen} d={d} p={p} s={s} eyes={eyes} />;
   return (
     <span
       ref={ref}
@@ -225,6 +231,15 @@ export function OwnerFace({
       aria-label={title}
       aria-hidden={title ? undefined : "true"}
     >
+    {variant === "mirada" && <span class="of-bodybox">{svg}</span>}
+    {variant === "mirada" && eyes !== "saved" && <MiradaEyes p={p} shape={s} size={size} />}
+    {variant !== "mirada" && svg}
+    </span>
+  );
+}
+
+function FaceSvg({ variant, uid, size, sheen, d, p, s, eyes }) {
+  return (
     <svg class="of-svg" viewBox="0 0 32 32" width={size} height={size} aria-hidden="true">
       <defs>
         <linearGradient id={`${uid}f`} x1="0" y1="0" x2="0" y2="1">
@@ -266,11 +281,10 @@ export function OwnerFace({
           <path class="ow-av-lit" d={d} />
         </>
       )}
-      {variant === "mirada" && <MiradaEyes p={p} shape={s} eyes={eyes} />}
+      {variant === "mirada" && eyes === "saved" && <MiradaShut p={p} shape={s} />}
       {variant === "pupilas" && <PupilasEyes p={p} shape={s} eyes={eyes} uid={uid} />}
       {variant === "sobria" && <SobriaEyes shape={s} eyes={eyes} />}
     </svg>
-    </span>
   );
 }
 
@@ -291,38 +305,61 @@ function ShutEyes({ cx, cy, dx, cls }) {
 }
 
 /* ── A · Mirada ──────────────────────────────────────────────────────────
-   Per eye: position (attr) → gaze (CSS: head-turn translate + foreshortening)
-   → the stroke's own lean (attr) → open (CSS: narrowed when working, wider
-   when asking) → lid (CSS: blink) → the stroke. Each moving group scales
-   about its own centre, which is the stroke's centre. */
+   The eyes are HTML, not SVG. Measured with CDP over 10 s on 8 faces: when
+   they were SVG groups every frame of every gaze/blink transition cost a
+   style recalc AND a layout on the main thread (~380 layouts per 10 s on a
+   desktop sidebar, 11% of a 4×-throttled phone), because Chrome runs no SVG
+   animation on the compositor. As HTML boxes the same transform transitions
+   are composited, and the main thread only pays for the event that starts
+   them.
 
-function MiradaEyes({ p, shape, eyes }) {
+   Per eye, four boxes sharing one centre, so each transform-origin: center
+   is the stroke's centre, exactly like the SVG groups they replace:
+     gaze  (head-turn translate + foreshortening, set by faceMotion)
+     lean  (the stroke's own tilt, static)
+     open  (narrowed when working, wider when asking)
+     lid   (blink) — the white pill itself.
+   Geometry is in viewBox units turned into % of the face, so one drawing
+   serves every size. */
+
+function MiradaEyes({ p, shape, size }) {
   const [cx, cy0] = eyeCenter(shape);
   // A touch lower than the tile's eyes: more forehead reads as a head, and a
   // head is what this drawing turns.
   const cy = cy0 + 1;
-  const dx = p.eyeGap;
-  if (eyes === "saved") return <ShutEyes cx={cx} cy={cy} dx={dx - 0.4} cls="of-m-shut" />;
-  const half = p.strokeLen / 2;
+  // At chip and row sizes a 2.6 stroke is under 2px; a little heavier keeps
+  // the eyes from dissolving into the colour.
+  const sw = size <= 24 ? 3 : 2.6;
+  // A round-capped line of length L and width w is a w × (L + w) pill.
+  const h = p.strokeLen + sw;
+  const pct = (n) => `${r3((n / 32) * 100)}%`;
   const eye = (side) => (
-    <g transform={`translate(${r3(cx + side * dx)} ${cy})`}>
-      <g class={`of-gaze of-gaze-${side < 0 ? "l" : "r"}`}>
-        <g transform={`rotate(${p.tilt + side * p.skew})`}>
-          <g class="of-open">
-            <g class="of-lid">
-              <line class="of-m-stroke" x1="0" y1={-half} x2="0" y2={half} />
-            </g>
-          </g>
-        </g>
-      </g>
-    </g>
+    <span
+      class={`of-gaze of-gaze-${side < 0 ? "l" : "r"}`}
+      style={{
+        left: pct(cx + side * p.eyeGap - sw / 2),
+        top: pct(cy - h / 2),
+        width: pct(sw),
+        height: pct(h),
+      }}
+    >
+      <span class="of-lean" style={{ transform: `rotate(${p.tilt + side * p.skew}deg)` }}>
+        <span class="of-open"><span class="of-lid" /></span>
+      </span>
+    </span>
   );
   return (
-    <g class="of-m-eyes">
+    <span class="of-m-eyes" aria-hidden="true">
       {eye(-1)}
       {eye(1)}
-    </g>
+    </span>
   );
+}
+
+// Shut eyes never move, so they stay in the SVG.
+function MiradaShut({ p, shape }) {
+  const [cx, cy0] = eyeCenter(shape);
+  return <ShutEyes cx={cx} cy={cy0 + 1} dx={p.eyeGap - 0.4} cls="of-m-shut" />;
 }
 
 /* ── B · Pupilas ─────────────────────────────────────────────────────────

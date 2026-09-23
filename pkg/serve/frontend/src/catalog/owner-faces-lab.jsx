@@ -1,16 +1,16 @@
 import { createContext } from "preact";
 import { useContext, useEffect, useState } from "preact/hooks";
-import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatarFor } from "../components/Owners/OwnerAvatar.jsx";
+import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatarClassicFor } from "../components/Owners/OwnerAvatar.jsx";
 import { OwnerFace, FACE_VARIANTS, OPT_IN_SHAPES, faceBodyColor } from "../components/Owners/OwnerFace.jsx";
 import { facePersonality, faceMotion } from "../components/Owners/faceMotion.js";
 import { MOA_OWNER, WINERIM, WINERIM_WEB } from "./owners3-fixtures.js";
 import "./owner-faces-lab.css";
 
 /* Owner faces — ways of giving the owner's mark eyes that are alive.
-   Catalog only: the product still draws OwnerAvatar everywhere. Every face
-   here is the candidate component itself (components/Owners/OwnerFace.jsx),
-   on the shared scheduler (faceMotion.js). A · Mirada is the main proposal;
-   B and C stay as the alternatives. */
+   Every face here is the component itself (components/Owners/OwnerFace.jsx)
+   on the shared scheduler (faceMotion.js). A · Mirada is what the product now
+   draws through OwnerAvatar; B and C stay as the alternatives, and "Antes" is
+   the static mark it replaced (OwnerAvatarClassic). */
 
 const own = (name, codebase_key, extra = {}) => ({ id: `own_${codebase_key}`, name, codebase_key, ...extra });
 
@@ -39,7 +39,7 @@ const STRESS_KEYS = [
 ];
 const STRESS = STRESS_KEYS.map((k) => own(k, k));
 
-const SIZES = [24, 32, 40, 96];
+const SIZES = [14, 24, 32, 40, 96];
 
 const ROWS = [
   { owner: WINERIM, state: "idle", line: "3 live · 2 waiting on you" },
@@ -47,6 +47,8 @@ const ROWS = [
   { owner: MOA_OWNER, state: "idle", line: "Answered · not read yet" },
   { owner: SAMPLE[3], state: "asks", line: "Asks you: ¿migramos hoy?" },
   { owner: SAMPLE[4], state: "idle", line: "2 live" },
+  { owner: SAMPLE[5], state: "working", line: "Running · 12m" },
+  { owner: SAMPLE[6], state: "idle", line: "1 live" },
   { owner: SAMPLE[7], state: "saved", line: "Saved" },
 ];
 
@@ -143,7 +145,7 @@ function SizesColumn({ variant }) {
           {SIZES.map((s) => (
             <span class="ofl-cell" key={s} style={{ width: `${s}px` }}>
               {before
-                ? <OwnerAvatarFor owner={o} size={s} />
+                ? <OwnerAvatarClassicFor owner={o} size={s} />
                 : <Face variant={variant} owner={o} size={s} title={o.name} />}
             </span>
           ))}
@@ -386,7 +388,7 @@ export function OwnerFacesLab() {
           </div>
         </Section>
 
-        <Section id="sizes" title="Eight owners · 24 32 40 96">
+        <Section id="sizes" title="Eight owners · 14 24 32 40 96">
           <div class="ofl-cols">
             <SizesColumn variant="before" />
             {variants.map((v) => <SizesColumn key={v} variant={v} />)}

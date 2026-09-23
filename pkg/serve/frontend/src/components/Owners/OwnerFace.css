@@ -1,10 +1,13 @@
-/* OwnerFace — LAB CANDIDATE (?view=faces). The three animated drawings.
-   Every class is prefixed `of`. Pupilas and Sobria also wear OwnerAvatar's own
-   `ow-av` sheet for the tile, so their body is today's rules, not a copy.
+/* OwnerFace — the owner's animated face. "Mirada" is what the product draws
+   (through OwnerAvatar); Pupilas and Sobria remain for the ?view=faces lab.
+   Every class is prefixed `of`. Pupilas and Sobria also wear OwnerAvatar's
+   `ow-av` sheet for the tile, so their body is the previous mark's rules.
 
    HOW IT MOVES. Eyes: faceMotion sets a few custom properties (the gaze) and
    toggles `.is-blink` / `.is-nudge`; the transitions below are the whole
-   tween, and between two events no frame is produced.
+   tween, and between two events no frame is produced. Everything Mirada
+   moves is an HTML box (see MiradaEyes), so those transitions run on the
+   compositor rather than restyling and re-laying-out the page every frame.
    The ONE continuous animation is the idle breath, and it is written to be
    cheap: a transform on the face's HTML root <span> (Chrome composites
    animations on HTML boxes but never on SVG elements, the outer <svg>
@@ -13,6 +16,7 @@
    tab visible, not frozen, no reduced motion. */
 
 .of {
+  position: relative;
   flex: none;
   display: block;
   overflow: visible;
@@ -89,27 +93,32 @@
 .of-mirada .of-sheen-2 { stop-color: rgba(255, 255, 255, 0); }
 .of-mirada .of-shade-0 { stop-color: rgba(0, 0, 0, 0); }
 .of-mirada .of-shade-1 { stop-color: rgba(0, 0, 0, 0.16); }
-.of-mirada .of-body {
-  transform: translate(calc(var(--bx, 0) * 1px), calc(var(--by, 0) * 1px));
+/* The body's sub-pixel follow of the head turn, on an HTML box. */
+.of-mirada .of-bodybox {
+  display: block;
+  transform: translate(calc(var(--bx, 0) * var(--of-u)), calc(var(--by, 0) * var(--of-u)));
   transition: transform var(--motion-slow) var(--of-spring);
 }
-.of-mirada .of-m-stroke {
-  stroke: #fff;
-  stroke-width: 2.6;
-  stroke-linecap: round;
+.of-mirada .of-m-eyes,
+.of-mirada .of-gaze,
+.of-mirada .of-lean,
+.of-mirada .of-open,
+.of-mirada .of-lid {
+  position: absolute;
+  display: block;
 }
-/* At chip and row sizes a 2.3 stroke is under 2px; a little heavier keeps
-   the eyes from dissolving into the colour. */
-.of-mirada.is-14 .of-m-stroke,
-.of-mirada.is-20 .of-m-stroke,
-.of-mirada.is-24 .of-m-stroke { stroke-width: 3; }
+.of-mirada .of-m-eyes { inset: 0; pointer-events: none; }
+.of-mirada .of-lean,
+.of-mirada .of-open,
+.of-mirada .of-lid { inset: 0; }
+.of-mirada .of-lid { border-radius: 999px; background: #fff; }
 .of-mirada .of-gaze { transition: transform var(--motion-slow) var(--of-spring); }
 .of-mirada.is-working .of-gaze { transition-duration: var(--motion-fast); }
 .of-mirada .of-gaze-l {
-  transform: translate(calc(var(--lx, 0) * 1px), calc(var(--gy, 0) * 1px)) scale(var(--ls, 1), var(--sy, 1));
+  transform: translate(calc(var(--lx, 0) * var(--of-u)), calc(var(--gy, 0) * var(--of-u))) scale(var(--ls, 1), var(--sy, 1));
 }
 .of-mirada .of-gaze-r {
-  transform: translate(calc(var(--rx, 0) * 1px), calc(var(--gy, 0) * 1px)) scale(var(--rs, 1), var(--sy, 1));
+  transform: translate(calc(var(--rx, 0) * var(--of-u)), calc(var(--gy, 0) * var(--of-u))) scale(var(--rs, 1), var(--sy, 1));
 }
 .of-mirada .of-m-shut { stroke: #fff; stroke-width: 2; }
 .of-mirada.is-saved { opacity: 0.66; }
@@ -153,7 +162,7 @@
   .of .of-open,
   .of .of-gaze,
   .of .of-pupil,
-  .of .of-body,
+  .of .of-bodybox,
   .of .of-s-gaze { transition: none; }
   .of.is-breathe { animation: none; }
 }

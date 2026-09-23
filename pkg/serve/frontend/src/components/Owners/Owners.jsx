@@ -355,6 +355,7 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated, 
         name={effectiveName}
         shape={avatar.shape}
         color={avatar.color}
+        seedKey={basename(dir)}
         onShape={(shape) => setChosenAvatar({ ...avatar, shape })}
         onColor={(color) => setChosenAvatar({ ...avatar, color })}
       />
