@@ -1112,7 +1112,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           pendingAsks={voiceLive.pendingAsks}
           elapsed={voiceLive.elapsed}
           cost={voiceLive.cost}
-          onHangup={voiceLive.hangup}
         />
       )}
       {attachments.length > 0 && (
