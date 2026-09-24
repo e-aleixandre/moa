@@ -230,6 +230,7 @@ export class VoiceLiveController {
     // whether any output was sent since the last response.create.
     this.delegations = new Map();
     this.wantsContinue = false;
+    this.outputMuted = false;
   }
 
   setCallbacks({ onState, onResult, onError } = {}) {
@@ -401,6 +402,7 @@ export class VoiceLiveController {
     if (!this.audio) {
       this.audio = new this.Audio();
       this.audio.autoplay = true;
+      if (this.outputMuted) this.audio.muted = true;
     }
     this.audio.srcObject = remote;
     this.audio.play?.()?.catch?.(() => { /* autoplay is best effort */ });
@@ -743,7 +745,20 @@ export class VoiceLiveController {
 
   async dispatchTool(item, delegationId = '') {
     const callId = item.call_id;
-    const respond = (output) => this.respondTool(callId, output, delegationId);
+    let answered = false;
+    const respond = (output) => {
+      answered = true;
+      this.respondTool(callId, output, delegationId);
+    };
+    try {
+      await this.runTool(item, respond);
+    } catch (error) {
+      // Every call must get an output, or its response can never be resumed.
+      if (!answered) respond({ status: 'error', message: `The tool failed: ${error?.message || String(error)}` });
+    }
+  }
+
+  async runTool(item, respond) {
     let args = {};
     try {
       args = item.arguments ? JSON.parse(item.arguments) : {};
@@ -1085,6 +1100,7 @@ export class VoiceLiveController {
   // in about 2s. The voice model may still say something as it happens, and
   // the owner has already left the conversation, so its audio is muted.
   async closeAfterMinutes(reason) {
+    this.outputMuted = true;
     if (this.audio) this.audio.muted = true;
     this.send({
       type: 'response.item.create',

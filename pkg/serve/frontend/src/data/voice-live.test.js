@@ -338,6 +338,21 @@ test('parallel tool calls of one backend response are resumed once, after every 
   expect(fixture.errors).toEqual([]);
 });
 
+test('a tool whose request fails still answers its call, so the response can resume', async () => {
+  const fixture = setup({
+    routes: { '/api/owners/owner-1/book': async () => { throw new Error('offline'); } },
+  });
+  const channel = await connected(fixture);
+  const wrapped = (event) => channel.deliver({ type: 'response.event', delegation_id: 'item_1', event });
+  wrapped({ type: 'response.created', response: { id: 'resp_1', output: [] } });
+  wrapped({ type: 'response.output_item.done', item: { type: 'function_call', call_id: 'c1', name: 'book_list', arguments: '{}' } });
+  wrapped({ type: 'response.completed', response: { id: 'resp_1', output: [] } });
+  await flush();
+  expect(channel.typesSent()).toEqual(['response.item.create', 'response.create']);
+  expect(channel.outputs()[0]).toMatchObject({ status: 'error' });
+  expect(channel.outputs()[0].message).toContain('offline');
+});
+
 test('the book is reported unavailable, never fabricated, when the session has no owner', async () => {
   const fixture = setup({
     routes: {
