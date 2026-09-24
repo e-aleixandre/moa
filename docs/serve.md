@@ -412,7 +412,8 @@ of you to a voice delegate you talk to:
 - While the call runs, one line shows its state, time, voice cost so far and
   questions used. If the delegate is waiting on this session, the line says so;
   answer it in the composer.
-- Hang up with **End call**. The minutes land in the composer as a draft —
+- Hang up with the same phone button in the composer (**End call**). The
+  minutes land in the composer as a draft —
   nothing is sent until you send it. If the call drops, you still get the
   minutes, or the raw transcript.
 - The questions and answers stay in the transcript as one call block.
