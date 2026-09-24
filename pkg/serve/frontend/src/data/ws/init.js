@@ -215,6 +215,8 @@ export function withLiveTools(messages, liveTools) {
     const t = byId.get(m.tool_call_id);
     if (!t) return m;
     byId.delete(m.tool_call_id);
+    // History already holds the result: nothing the registry says is newer.
+    if (m.status !== 'running' && m.status !== 'generating') return m;
     return { ...m, ...liveToolRow(t), tool_name: t.tool_name || m.tool_name, args: t.args || m.args };
   });
   for (const t of byId.values()) out.push(liveToolRow(t));
@@ -227,13 +229,17 @@ export function withLiveToolsInPlace(messages, liveTools) {
   return messages;
 }
 
+const LIVE_TOOL_STATUSES = new Set(['generating', 'running', 'done', 'error', 'rejected']);
+
 export function liveToolRow(t) {
   return {
     _type: 'tool_start',
     tool_call_id: t.tool_call_id,
     tool_name: t.tool_name || '',
     args: t.args || {},
-    status: t.status === 'generating' ? 'generating' : 'running',
+    // A call that ended while a sibling in its batch still runs is terminal
+    // here, although its result reaches history only with the whole batch.
+    status: LIVE_TOOL_STATUSES.has(t.status) ? t.status : 'running',
     result: null,
     // Server-anchored so the row's elapsed timer resumes from the real start
     // instead of restarting at the moment this pane reconnected.

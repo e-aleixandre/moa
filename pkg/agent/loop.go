@@ -1165,11 +1165,14 @@ const (
 //     and validation. Tool start is emitted per-call right before permission check.
 //  2. Execute (concurrent): approved calls run in parallel goroutines.
 //     Each writes to its own slot — no shared mutable state.
-//  3. Collect (sequential, in original order): run FireToolResult hooks,
-//     emit tool_execution_end, append tool_result messages.
+//  3. Collect (sequential, on this goroutine): as each call finishes, run its
+//     FireToolResult hooks and emit tool_execution_end; once all are done,
+//     append the tool_result messages.
 //
-// Result messages are always appended in the same order as tool calls,
-// regardless of execution completion order.
+// End events follow completion order, so a quick call batched with a long one
+// (e.g. a subagent_wait) is reported finished when it finishes, not when the
+// batch does. Result messages are still appended in the same order as tool
+// calls, regardless of execution completion order.
 func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content) {
 	slots := make([]toolExecSlot, len(toolCalls))
 
@@ -1236,7 +1239,8 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 	// sharing the same lock key run sequentially (preserving original order),
 	// but different keys run in parallel. Shell/Unknown tools act as barriers:
 	// they wait for all prior non-read calls before executing.
-	var allDone sync.WaitGroup
+	finished := make(chan int, len(slots))
+	pending := 0
 
 	pathDone := map[string]<-chan struct{}{} // per-path: signals when prior writer finishes
 	var lastShell <-chan struct{}            // last shell completion (nil initially)
@@ -1270,9 +1274,9 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				rKey = t.LockKey(slots[i].tc.Arguments)
 			}
 			if rKey == "" {
-				allDone.Add(1)
+				pending++
 				go func(idx int) {
-					defer allDone.Done()
+					defer func() { finished <- idx }()
 					slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
 				}(i)
 				break
@@ -1281,9 +1285,9 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 			waitForPath := pathDone[rKey]
 			waitForShell := lastShell
 			pathDone[rKey] = done
-			allDone.Add(1)
+			pending++
 			go func(idx int, wPath, wShell <-chan struct{}) {
-				defer allDone.Done()
+				defer func() { finished <- idx }()
 				defer close(done)
 				if wPath != nil {
 					<-wPath
@@ -1300,9 +1304,9 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 			waitForShell := lastShell        // wait for most recent shell barrier
 			pathDone[lockKey] = done
 
-			allDone.Add(1)
+			pending++
 			go func(idx int, wPath, wShell <-chan struct{}) {
-				defer allDone.Done()
+				defer func() { finished <- idx }()
 				defer close(done)
 				if wPath != nil {
 					<-wPath
@@ -1315,7 +1319,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 
 		default: // EffectShell, EffectUnknown, EffectInteractive
 			done := make(chan struct{})
-			allDone.Add(1)
+			pending++
 			// Wait for all pending path writers + previous shell.
 			waits := make([]<-chan struct{}, 0, len(pathDone)+1)
 			for _, ch := range pathDone {
@@ -1325,7 +1329,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				waits = append(waits, lastShell)
 			}
 			go func(idx int, waits []<-chan struct{}) {
-				defer allDone.Done()
+				defer func() { finished <- idx }()
 				defer close(done)
 				for _, w := range waits {
 					<-w
@@ -1338,28 +1342,28 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		}
 	}
 
-	allDone.Wait()
-
-	// Phase 3: collect results in original order.
-	for i := range slots {
-		if !slots[i].approved {
-			rejectToolCall(cfg, slots[i])
-			continue
-		}
-
+	// Phase 3: report each call as it finishes, then append results in
+	// original order.
+	for ; pending > 0; pending-- {
+		i := <-finished
 		resultWithFeedback := appendPermissionFeedback(slots[i].result, slots[i].permissionFeedback)
 		result := cfg.hooks.FireToolResult(ctx, slots[i].tc.ToolName, resultWithFeedback, slots[i].isError)
-		isError := result.IsError
-
-		cfg.appendState(toolResultMessage(slots[i].tc, result, isError, false))
+		slots[i].result, slots[i].isError = result, result.IsError
 		cfg.emitter.Emit(core.AgentEvent{
 			Type:       core.AgentEventToolExecEnd,
 			ToolCallID: slots[i].tc.ToolCallID,
 			ToolName:   slots[i].tc.ToolName,
 			Result:     &result,
-			IsError:    isError,
+			IsError:    result.IsError,
 			Rejected:   false,
 		})
+	}
+	for i := range slots {
+		if !slots[i].approved {
+			rejectToolCall(cfg, slots[i])
+			continue
+		}
+		cfg.appendState(toolResultMessage(slots[i].tc, slots[i].result, slots[i].isError, false))
 	}
 }
 

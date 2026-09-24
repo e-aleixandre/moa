@@ -72,10 +72,16 @@ func TestBridgeEvent_LiveToolRegistry(t *testing.T) {
 		t.Fatalf("StartedAt moved on the generating→running transition: %v → %v", firstSeen, got[0].StartedAt)
 	}
 
-	// Phase 3: the tool ends → the row leaves the registry (it is history now).
+	// Phase 3: the tool ends → the row turns terminal. Its result reaches
+	// history only when its whole batch is collected, so the turn end, not the
+	// tool end, removes it.
 	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecEnd, ToolCallID: "tc1", ToolName: "edit"})
+	if got := sctx.LiveTools(); len(got) != 1 || got[0].Phase != LiveToolPhaseDone {
+		t.Fatalf("after tool_end: %+v, want the row marked done", got)
+	}
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventTurnEnd})
 	if got := sctx.LiveTools(); len(got) != 0 {
-		t.Fatalf("registry not cleaned after tool_end: %+v", got)
+		t.Fatalf("registry not cleaned at turn end: %+v", got)
 	}
 }
 
@@ -154,8 +160,8 @@ func TestBridgeEvent_LiveToolClearedAtRunBoundaries(t *testing.T) {
 }
 
 // A rejected call (permission denied, blocked, validation error) still emits
-// tool_end, so it must leave the registry like any other terminal path.
-func TestBridgeEvent_LiveToolClearedOnRejection(t *testing.T) {
+// tool_end, so it must stop reading as running like any other terminal path.
+func TestBridgeEvent_LiveToolTerminalOnRejection(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 	sctx := newTestSessionContext(b, nil)
@@ -165,13 +171,14 @@ func TestBridgeEvent_LiveToolClearedOnRejection(t *testing.T) {
 		Type: core.AgentEventToolExecEnd, ToolCallID: "tc1", ToolName: "bash",
 		IsError: true, Rejected: true,
 	})
-	if got := sctx.LiveTools(); len(got) != 0 {
-		t.Fatalf("registry not cleaned after a rejected call: %+v", got)
+	if got := sctx.LiveTools(); len(got) != 1 || got[0].Phase != LiveToolPhaseRejected {
+		t.Fatalf("after a rejected call: %+v, want the row marked rejected", got)
 	}
 }
 
 // Concurrent calls (executeTools runs tools in parallel) each keep their own
-// row, and only the one that ends is removed.
+// row, and only the one that ends turns terminal — the case of a quick call
+// batched with a long wait, which a reconnect must not restore as running.
 func TestBridgeEvent_LiveToolConcurrentCalls(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
@@ -180,10 +187,10 @@ func TestBridgeEvent_LiveToolConcurrentCalls(t *testing.T) {
 	for _, id := range []string{"a", "b", "c"} {
 		bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecStart, ToolCallID: id, ToolName: "read"})
 	}
-	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecEnd, ToolCallID: "b", ToolName: "read"})
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecEnd, ToolCallID: "b", ToolName: "read", IsError: true})
 	got := sctx.LiveTools()
-	if len(got) != 2 || got[0].ToolCallID != "a" || got[1].ToolCallID != "c" {
-		t.Fatalf("live calls after one ended: %+v, want a and c in order", got)
+	if len(got) != 3 || got[0].Phase != LiveToolPhaseRunning || got[1].Phase != LiveToolPhaseError || got[2].Phase != LiveToolPhaseRunning {
+		t.Fatalf("live calls after one ended: %+v, want a and c running, b error, in order", got)
 	}
 }
 

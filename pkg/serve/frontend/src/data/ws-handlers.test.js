@@ -1794,6 +1794,45 @@ test('handleWsInit does not duplicate a live tool already present in history', a
   expect(rows[0]).toMatchObject({ tool_call_id: 'tc1', status: 'running', startedAt: 42 });
 });
 
+// A quick call batched with a long wait ends first, but its result reaches
+// history only when the batch is collected: the snapshot must restore it as
+// finished, not as a running row with a ticking timer.
+test('handleWsInit restores a call that ended ahead of its batch as finished', async () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [{
+      role: 'assistant',
+      content: [
+        { type: 'tool_call', tool_call_id: 'tc1', tool_name: 'ls', arguments: { path: '.' } },
+        { type: 'tool_call', tool_call_id: 'tc2', tool_name: 'subagent_wait', arguments: { job_id: 'sa-1' } },
+      ],
+    }],
+    live_tools: [
+      { tool_call_id: 'tc1', tool_name: 'ls', args: { path: '.' }, status: 'done', started_at_ms: 42 },
+      { tool_call_id: 'tc2', tool_name: 'subagent_wait', args: { job_id: 'sa-1' }, status: 'running', started_at_ms: 43 },
+    ],
+  });
+  const rows = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
+  expect(rows.map(r => r.status)).toEqual(['done', 'running']);
+  const ledger = projectStream(store.get().sessions.s1)
+    .flatMap(b => b.blocks || []).find(b => b.type === 'ledger');
+  expect(ledger.rows).toHaveLength(1);
+  expect(ledger.rows[0].live).toBeUndefined();
+});
+
+test('a terminal registry entry never overwrites a result already in history', async () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [
+      { role: 'assistant', content: [{ type: 'tool_call', tool_call_id: 'tc1', tool_name: 'ls', arguments: { path: '.' } }] },
+      { role: 'tool_result', tool_call_id: 'tc1', tool_name: 'ls', content: [{ type: 'text', text: 'a.go' }], is_error: true },
+    ],
+    live_tools: [{ tool_call_id: 'tc1', tool_name: 'ls', args: { path: '.' }, status: 'error', started_at_ms: 42 }],
+  });
+  const [row] = store.get().sessions.s1.messages.filter(m => m._type === 'tool_start');
+  expect(row).toMatchObject({ status: 'error', result: 'a.go' });
+});
+
 test('a live event arriving after the snapshot updates the restored row instead of duplicating it', async () => {
   seedSession('s1');
   handleWsInit('s1', {

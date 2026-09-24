@@ -186,9 +186,9 @@ type SessionContext struct {
 	streamThinking []byte
 	streamMsgID    string
 
-	// liveTools is the registry of tool calls that exist but are not yet
-	// finished: either the model is still streaming their arguments, or they
-	// are executing. Such a call may not be represented in the history a
+	// liveTools is the registry of the turn's tool calls whose results are not
+	// in history yet: the model is still streaming their arguments, they are
+	// executing, or they ended while a sibling in their batch still runs. Such a call may not be represented in the history a
 	// reconnect snapshot is rebuilt from — it is written there only when its
 	// assistant message closes, and its result only when the tool ends — so
 	// without this the client re-renders a live row it can't name ("Calling")
@@ -705,11 +705,13 @@ func (sctx *SessionContext) upsertLiveToolLocked(call LiveToolCall) {
 	sctx.liveTools = append(sctx.liveTools, call)
 }
 
-// removeLiveToolLocked drops a finished tool call. Caller must hold streamMu.
-func (sctx *SessionContext) removeLiveToolLocked(toolCallID string) {
+// endLiveToolLocked records a finished tool call's terminal phase. The row
+// stays until the turn ends, because its result reaches history only when the
+// whole batch is collected. Caller must hold streamMu.
+func (sctx *SessionContext) endLiveToolLocked(call LiveToolCall) {
 	for i := range sctx.liveTools {
-		if sctx.liveTools[i].ToolCallID == toolCallID {
-			sctx.liveTools = append(sctx.liveTools[:i], sctx.liveTools[i+1:]...)
+		if sctx.liveTools[i].ToolCallID == call.ToolCallID {
+			sctx.liveTools[i].Phase = call.Phase
 			return
 		}
 	}
@@ -1034,8 +1036,8 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 			switch toolDelta.kind {
 			case liveToolKindUpsert:
 				sctx.upsertLiveToolLocked(toolDelta.call)
-			case liveToolKindRemove:
-				sctx.removeLiveToolLocked(toolDelta.call.ToolCallID)
+			case liveToolKindEnd:
+				sctx.endLiveToolLocked(toolDelta.call)
 			case liveToolKindReset:
 				sctx.resetLiveToolsLocked()
 			}
@@ -1093,7 +1095,7 @@ type liveToolDeltaKind int
 
 const (
 	liveToolKindUpsert liveToolDeltaKind = iota
-	liveToolKindRemove
+	liveToolKindEnd
 	liveToolKindReset
 )
 
@@ -1155,7 +1157,13 @@ func liveToolDelta(e core.AgentEvent) (liveToolMutation, bool) {
 		// Covers every terminal path — success, error, permission rejection,
 		// blocked/validation rejection — because the loop emits ToolExecEnd for
 		// all of them (see rejectToolCall).
-		return liveToolMutation{kind: liveToolKindRemove, call: LiveToolCall{ToolCallID: e.ToolCallID}}, true
+		phase := LiveToolPhaseDone
+		if e.Rejected {
+			phase = LiveToolPhaseRejected
+		} else if e.IsError {
+			phase = LiveToolPhaseError
+		}
+		return liveToolMutation{kind: liveToolKindEnd, call: LiveToolCall{ToolCallID: e.ToolCallID, Phase: phase}}, true
 
 	case core.AgentEventTurnEnd, core.AgentEventEnd, core.AgentEventError:
 		return liveToolMutation{kind: liveToolKindReset}, true

@@ -564,6 +564,55 @@ func TestSchedule_ResultsInOriginalOrder(t *testing.T) {
 	}
 }
 
+// TestSchedule_EndEmittedWhenToolFinishes verifies a tool's end event is not
+// withheld until a slower sibling in the same batch finishes: a quick call
+// batched with a long wait (subagent_wait, bash_wait) must stop reading as
+// running as soon as it is done.
+func TestSchedule_EndEmittedWhenToolFinishes(t *testing.T) {
+	proceed := make(chan struct{})
+	reg := core.NewRegistry()
+	_ = reg.Register(core.Tool{
+		Name: "slow", Effect: core.EffectReadOnly,
+		Execute: func(_ context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+			<-proceed
+			return core.TextResult("slow"), nil
+		},
+	})
+	_ = reg.Register(core.Tool{
+		Name: "fast", Effect: core.EffectReadOnly,
+		Execute: func(_ context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+			return core.TextResult("fast"), nil
+		},
+	})
+
+	cfg := makeCfg(reg)
+	ends := make(chan string, 4)
+	unsub := cfg.emitter.Subscribe(func(e core.AgentEvent) {
+		if e.Type == core.AgentEventToolExecEnd {
+			ends <- e.ToolCallID
+		}
+	})
+	defer unsub()
+
+	done := runExecuteTools(context.Background(), cfg, []core.Content{
+		makeToolCall("fast-1", "fast", nil),
+		makeToolCall("slow-2", "slow", nil),
+	})
+	defer func() {
+		close(proceed)
+		<-done
+	}()
+
+	select {
+	case id := <-ends:
+		if id != "fast-1" {
+			t.Fatalf("first end event = %q, want fast-1", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("fast tool's end event was withheld while its sibling was still running")
+	}
+}
+
 func TestRunTool_PanicRecovery(t *testing.T) {
 	reg := core.NewRegistry()
 	_ = reg.Register(core.Tool{

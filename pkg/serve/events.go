@@ -108,7 +108,9 @@ type LiveToolInitData struct {
 	ToolCallID string         `json:"tool_call_id"`
 	ToolName   string         `json:"tool_name"`
 	Args       map[string]any `json:"args,omitempty"`
-	// Status is "generating" (arguments still streaming) or "running".
+	// Status is "generating" (arguments still streaming), "running", or the
+	// terminal "done"/"error"/"rejected" of a call whose result is not in
+	// history yet because a sibling in its batch is still running.
 	Status string `json:"status"`
 	// StartedAtMs is when the call first appeared, epoch milliseconds (same
 	// encoding as RunStartedAtMs), so the row's elapsed timer resumes instead

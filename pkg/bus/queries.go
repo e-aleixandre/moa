@@ -133,10 +133,18 @@ const (
 	LiveToolPhaseGenerating = "generating"
 	// LiveToolPhaseRunning: the tool started executing and has not ended.
 	LiveToolPhaseRunning = "running"
+	// LiveToolPhaseDone, LiveToolPhaseError and LiveToolPhaseRejected: the
+	// tool ended, but its result is not in history yet. A batch of parallel
+	// calls appends its results only once the slowest one ends, so without
+	// these a reconnect would restore a finished call as still running.
+	LiveToolPhaseDone     = "done"
+	LiveToolPhaseError    = "error"
+	LiveToolPhaseRejected = "rejected"
 )
 
-// LiveToolCall is one tool call that exists but has not finished. It is the
-// tool-call counterpart of StreamingAggregate: while a call streams its
+// LiveToolCall is one tool call of the current turn whose result is not in
+// history yet: it is streaming, executing, or ended ahead of its batch. It is
+// the tool-call counterpart of StreamingAggregate: while a call streams its
 // arguments or executes, it is in no message history (a call lands in history
 // when its assistant message closes, its result when the tool ends), so a
 // client that (re)opens the session mid-call would otherwise render a nameless
@@ -146,7 +154,7 @@ type LiveToolCall struct {
 	ToolCallID string
 	ToolName   string
 	Args       map[string]any
-	// Phase is LiveToolPhaseGenerating or LiveToolPhaseRunning.
+	// Phase is one of the LiveToolPhase* values.
 	Phase string
 	// StartedAt anchors the client's elapsed timer to the moment the call first
 	// appeared, so a reconnect resumes the count instead of restarting it.
