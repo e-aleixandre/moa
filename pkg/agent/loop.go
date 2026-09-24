@@ -1159,6 +1159,64 @@ const (
 	rejectKindOther      = "other"
 )
 
+// preflightToolCall runs guardrails, the permission check, extension hooks
+// and validation for one call, marking the slot approved or recording why it
+// was rejected.
+func preflightToolCall(ctx context.Context, cfg *loopConfig, slot *toolExecSlot, index int) {
+	tc := slot.tc
+	maxCalls := cfg.maxToolCallsPerTurn
+	if maxCalls > 0 && index >= maxCalls {
+		slot.rejectReason = "Tool call skipped: max tool calls per turn exceeded"
+		slot.rejectKind = rejectKindOther
+		return
+	}
+
+	// Emit start right before permission evaluation so the UI can show
+	// what is being requested before the prompt appears.
+	cfg.emitter.Emit(core.AgentEvent{
+		Type:       core.AgentEventToolExecStart,
+		ToolCallID: tc.ToolCallID,
+		ToolName:   tc.ToolName,
+		Args:       tc.Arguments,
+	})
+	slot.startEmitted = true
+	// Best effort: flush start to subscribers before we might block on
+	// permission checks, so the UI sees the tool call first.
+	if cfg.permissionCheck != nil {
+		cfg.emitter.Drain(250 * time.Millisecond)
+	}
+
+	// Permission check (may block waiting for user approval).
+	if cfg.permissionCheck != nil {
+		if decision := cfg.permissionCheck(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
+			kind := decision.Kind
+			if kind == "" {
+				kind = core.ToolCallDecisionKindPermission
+			}
+			if kind == core.ToolCallDecisionKindPermission {
+				slot.rejectReason = "Permission denied: " + decision.Reason
+				slot.rejectKind = rejectKindPermission
+			} else {
+				slot.rejectReason = "Tool call blocked: " + decision.Reason
+				slot.rejectKind = rejectKindOther
+			}
+			return
+		}
+	}
+	slot.permissionFeedback = permission.PopApprovedFeedback(tc.Arguments)
+	if decision := cfg.hooks.FireToolCall(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
+		slot.rejectReason = "Tool call blocked: " + decision.Reason
+		slot.rejectKind = rejectKindOther
+		return
+	}
+	if err := tool.ValidateToolCall(cfg.tools, tc.ToolName, tc.Arguments); err != nil {
+		slot.rejectReason = "Parameter validation error: " + err.Error()
+		slot.rejectKind = rejectKindOther
+		return
+	}
+	slot.approved = true
+}
+
 // executeTools runs tool calls concurrently using a three-phase approach:
 //
 //  1. Pre-flight (sequential): guardrails, permission checks, extension hooks,
@@ -1176,61 +1234,14 @@ const (
 func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content) {
 	slots := make([]toolExecSlot, len(toolCalls))
 
-	// Phase 1: pre-flight (sequential).
-	maxCalls := cfg.maxToolCallsPerTurn
+	// Phase 1: pre-flight (sequential). A rejected call never runs, so it is
+	// reported ended right away; its result is appended in order with the rest.
 	for i, tc := range toolCalls {
 		slots[i].tc = tc
-
-		if maxCalls > 0 && i >= maxCalls {
-			slots[i].rejectReason = "Tool call skipped: max tool calls per turn exceeded"
-			slots[i].rejectKind = rejectKindOther
-			continue
+		preflightToolCall(ctx, cfg, &slots[i], i)
+		if !slots[i].approved {
+			endRejectedToolCall(cfg, &slots[i])
 		}
-
-		// Emit start right before permission evaluation so the UI can show
-		// what is being requested before the prompt appears.
-		cfg.emitter.Emit(core.AgentEvent{
-			Type:       core.AgentEventToolExecStart,
-			ToolCallID: tc.ToolCallID,
-			ToolName:   tc.ToolName,
-			Args:       tc.Arguments,
-		})
-		slots[i].startEmitted = true
-		// Best effort: flush start to subscribers before we might block on
-		// permission checks, so the UI sees the tool call first.
-		if cfg.permissionCheck != nil {
-			cfg.emitter.Drain(250 * time.Millisecond)
-		}
-
-		// Permission check (may block waiting for user approval).
-		if cfg.permissionCheck != nil {
-			if decision := cfg.permissionCheck(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
-				kind := decision.Kind
-				if kind == "" {
-					kind = core.ToolCallDecisionKindPermission
-				}
-				if kind == core.ToolCallDecisionKindPermission {
-					slots[i].rejectReason = "Permission denied: " + decision.Reason
-					slots[i].rejectKind = rejectKindPermission
-				} else {
-					slots[i].rejectReason = "Tool call blocked: " + decision.Reason
-					slots[i].rejectKind = rejectKindOther
-				}
-				continue
-			}
-		}
-		slots[i].permissionFeedback = permission.PopApprovedFeedback(tc.Arguments)
-		if decision := cfg.hooks.FireToolCall(ctx, tc.ToolName, tc.Arguments); decision != nil && decision.Block {
-			slots[i].rejectReason = "Tool call blocked: " + decision.Reason
-			slots[i].rejectKind = rejectKindOther
-			continue
-		}
-		if err := tool.ValidateToolCall(cfg.tools, tc.ToolName, tc.Arguments); err != nil {
-			slots[i].rejectReason = "Parameter validation error: " + err.Error()
-			slots[i].rejectKind = rejectKindOther
-			continue
-		}
-		slots[i].approved = true
 	}
 
 	// Phase 2: execute with conflict-aware scheduling.
@@ -1359,11 +1370,8 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		})
 	}
 	for i := range slots {
-		if !slots[i].approved {
-			rejectToolCall(cfg, slots[i])
-			continue
-		}
-		cfg.appendState(toolResultMessage(slots[i].tc, slots[i].result, slots[i].isError, false))
+		rejected := !slots[i].approved && slots[i].rejectKind == rejectKindPermission
+		cfg.appendState(toolResultMessage(slots[i].tc, slots[i].result, slots[i].isError, rejected))
 	}
 }
 
@@ -1429,10 +1437,10 @@ func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (result core
 	return result, result.IsError
 }
 
-// rejectToolCall emits tool lifecycle end state and appends an error result
-// for a tool call that was rejected (skipped, blocked, permission denied,
-// or failed validation).
-func rejectToolCall(cfg *loopConfig, slot toolExecSlot) {
+// endRejectedToolCall reports a rejected call (skipped, blocked, permission
+// denied, or failed validation) as ended and keeps its error result in the
+// slot, for executeTools to append in call order.
+func endRejectedToolCall(cfg *loopConfig, slot *toolExecSlot) {
 	if !slot.startEmitted {
 		cfg.emitter.Emit(core.AgentEvent{
 			Type:       core.AgentEventToolExecStart,
@@ -1441,19 +1449,18 @@ func rejectToolCall(cfg *loopConfig, slot toolExecSlot) {
 			Args:       slot.tc.Arguments,
 		})
 	}
-	rejected := slot.rejectKind == rejectKindPermission
 	reason := slot.rejectReason
 	if reason == "" {
 		reason = "Tool call rejected"
 	}
 	result := core.ErrorResult(reason)
-	cfg.appendState(toolResultMessage(slot.tc, result, true, rejected))
+	slot.result, slot.isError = result, true
 	cfg.emitter.Emit(core.AgentEvent{
 		Type:       core.AgentEventToolExecEnd,
 		ToolCallID: slot.tc.ToolCallID,
 		ToolName:   slot.tc.ToolName,
 		IsError:    true,
-		Rejected:   rejected,
+		Rejected:   slot.rejectKind == rejectKindPermission,
 		Result:     &result,
 	})
 }

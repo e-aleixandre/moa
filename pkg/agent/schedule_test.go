@@ -613,6 +613,58 @@ func TestSchedule_EndEmittedWhenToolFinishes(t *testing.T) {
 	}
 }
 
+// TestSchedule_RejectionEndedBeforeSiblingFinishes: a rejected call never
+// runs, so its end must not wait for an approved sibling either — and its
+// result still lands in call order.
+func TestSchedule_RejectionEndedBeforeSiblingFinishes(t *testing.T) {
+	proceed := make(chan struct{})
+	reg := core.NewRegistry()
+	_ = reg.Register(core.Tool{
+		Name: "slow", Effect: core.EffectReadOnly,
+		Execute: func(_ context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+			<-proceed
+			return core.TextResult("slow"), nil
+		},
+	})
+
+	cfg := makeCfg(reg)
+	ends := make(chan core.AgentEvent, 4)
+	unsub := cfg.emitter.Subscribe(func(e core.AgentEvent) {
+		if e.Type == core.AgentEventToolExecEnd {
+			ends <- e
+		}
+	})
+	defer unsub()
+
+	done := runExecuteTools(context.Background(), cfg, []core.Content{
+		makeToolCall("slow-1", "slow", nil),
+		makeToolCall("missing-2", "missing", nil),
+	})
+
+	select {
+	case e := <-ends:
+		if e.ToolCallID != "missing-2" || !e.IsError {
+			t.Fatalf("first end event = %+v, want the rejected missing-2", e)
+		}
+	case <-time.After(2 * time.Second):
+		close(proceed)
+		<-done
+		t.Fatal("rejected call's end event was withheld while its sibling was still running")
+	}
+	close(proceed)
+	<-done
+
+	if len(cfg.state.Messages) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(cfg.state.Messages))
+	}
+	if cfg.state.Messages[0].ToolCallID != "slow-1" || cfg.state.Messages[1].ToolCallID != "missing-2" {
+		t.Fatalf("results out of call order: %s, %s", cfg.state.Messages[0].ToolCallID, cfg.state.Messages[1].ToolCallID)
+	}
+	if !cfg.state.Messages[1].IsError {
+		t.Fatal("rejected call's result is not an error")
+	}
+}
+
 func TestRunTool_PanicRecovery(t *testing.T) {
 	reg := core.NewRegistry()
 	_ = reg.Register(core.Tool{
