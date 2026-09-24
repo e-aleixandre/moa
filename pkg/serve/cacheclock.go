@@ -23,14 +23,26 @@ import (
 // next message had already paid the cache write.
 func (m *Manager) subscribeCacheClock(sess *ManagedSession) {
 	b := sess.runtime.Bus
-	if at := lastAnthropicResponseAt(sess.runtime.Context().Agent.Messages()); !at.IsZero() {
+	// The full transcript, not the model's context: a start-fresh cut may have
+	// dropped the response that last warmed the cache.
+	if transcript, err := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](b, bus.GetDisplayMessages{}); err == nil {
+		at, provider := lastCachedResponse(transcript, sess.cacheTTL)
+		freshAt := lastFreshAt(transcript)
 		sess.mu.Lock()
-		if sess.lastRunAt.IsZero() {
-			sess.lastRunAt = at
+		if sess.lastRunAt.IsZero() && !at.IsZero() {
+			sess.lastRunAt, sess.lastRunProvider = at, provider
+		}
+		if sess.startedFreshAt.IsZero() {
+			sess.startedFreshAt = freshAt
 		}
 		sess.mu.Unlock()
 	}
 	sess.pushUnsubs = append(sess.pushUnsubs,
+		b.Subscribe(func(e bus.ContextFreshStarted) {
+			sess.mu.Lock()
+			sess.startedFreshAt = time.Now()
+			sess.mu.Unlock()
+		}),
 		b.Subscribe(func(e bus.RunStarted) {
 			// Anchor the activity-indicator elapsed counter. Recorded server-side
 			// so it survives WebSocket reconnects instead of restarting at zero.
@@ -42,15 +54,16 @@ func (m *Manager) subscribeCacheClock(sess *ManagedSession) {
 			sess.mu.Unlock()
 		}),
 		b.Subscribe(func(e bus.MessageStarted) {
-			// Only Anthropic requests warm a TTL-based prompt cache. Gate on the
-			// message's own provider rather than the session's current model: a
-			// later switch to an Anthropic model must not reinterpret a write
-			// that some other provider's request never made.
-			if e.Message.Provider != "anthropic" {
+			// Only providers with a known window are tracked. The provider is
+			// the message's own, not the session's current model: a later
+			// switch must not reinterpret a write that another provider's
+			// request never made (info() also requires them to match).
+			if cacheWindow(e.Message.Provider, sess.cacheTTL) == 0 {
 				return
 			}
 			sess.mu.Lock()
 			sess.lastRunAt = time.Now()
+			sess.lastRunProvider = e.Message.Provider
 			sess.mu.Unlock()
 		}),
 		b.Subscribe(func(e bus.RunEnded) {
@@ -67,14 +80,46 @@ func (m *Manager) subscribeCacheClock(sess *ManagedSession) {
 	)
 }
 
-// lastAnthropicResponseAt dates the last request that warmed an Anthropic
-// prompt cache, from the persisted history. The response's own timestamp is a
-// little later than the request's, so the restored expiry errs late by at most
-// one response's duration.
-func lastAnthropicResponseAt(msgs []core.AgentMessage) time.Time {
+// cacheWindow is how long after the last request a provider's prompt cache is
+// assumed warm. 0 means moa does not warn for that provider.
+//
+//   - anthropic: the configured TTL (5m or 1h), refreshed by every request.
+//   - openai: 30m, what OpenAI guarantees ("at least 30 minutes since last
+//     write or reuse" for GPT-5.6 and later; older models keep it "5 to 10
+//     minutes of inactivity, up to one hour"). moa never sends
+//     prompt_cache_retention, so the 24h extended retention does not apply.
+//   - xai, meta and the rest: no documented TTL, no warning.
+func cacheWindow(provider string, anthropicTTL time.Duration) time.Duration {
+	switch provider {
+	case "anthropic":
+		return anthropicTTL
+	case "openai":
+		return 30 * time.Minute
+	default:
+		return 0
+	}
+}
+
+// lastCachedResponse dates the last request that warmed a prompt cache, from
+// the persisted history. The response's own timestamp is a little later than
+// the request's, so the restored expiry errs late by at most one response's
+// duration.
+func lastCachedResponse(msgs []core.AgentMessage, anthropicTTL time.Duration) (time.Time, string) {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
-		if m.Role == "assistant" && m.Provider == "anthropic" && m.Timestamp > 0 {
+		if m.Role == "assistant" && m.Timestamp > 0 && cacheWindow(m.Provider, anthropicTTL) > 0 {
+			return time.Unix(m.Timestamp, 0), m.Provider
+		}
+	}
+	return time.Time{}, ""
+}
+
+// lastFreshAt is when the conversation was last cut with start fresh, from the
+// transcript's fresh markers. Zero when it never was.
+func lastFreshAt(msgs []core.AgentMessage) time.Time {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m.Role == "session_event" && m.Custom["type"] == "fresh_marker" && m.Timestamp > 0 {
 			return time.Unix(m.Timestamp, 0)
 		}
 	}

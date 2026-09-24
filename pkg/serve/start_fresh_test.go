@@ -27,7 +27,13 @@ func (p *recordingProvider) Stream(_ context.Context, req core.Request) (<-chan 
 	p.mu.Lock()
 	p.reqs = append(p.reqs, req)
 	p.mu.Unlock()
-	return simpleResponse("ok"), nil
+	// Stamped like the real Anthropic provider, so the cache clock runs.
+	ch := make(chan core.AssistantEvent, 2)
+	msg := core.Message{Role: "assistant", Provider: "anthropic", Content: []core.Content{core.TextContent("ok")}, StopReason: "end_turn", Timestamp: time.Now().Unix()}
+	ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+	ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+	close(ch)
+	return ch, nil
 }
 
 func (p *recordingProvider) count() int {
@@ -183,12 +189,18 @@ func TestStartFresh_CutsModelContextKeepsTranscriptAndSurvivesRestart(t *testing
 	if agentMsgs[0].MsgID != firstKept {
 		t.Fatalf("agent context starts at %s, want %s", agentMsgs[0].MsgID, firstKept)
 	}
+	if sess.info().CacheExpiresAt.IsZero() || !sess.info().StartedFresh {
+		t.Fatalf("info after the cut: expiry %v, started fresh %v; want the action spent", sess.info().CacheExpiresAt, sess.info().StartedFresh)
+	}
 	afterPct := sess.info().ContextPercent
 	if afterPct >= beforePct {
 		t.Fatalf("context percent %d -> %d, want it to drop", beforePct, afterPct)
 	}
 
 	sendAndWait(t, mgr, sess, "after the cut")
+	if sess.info().StartedFresh {
+		t.Fatal("a run warmed the cache again, but the action is still reported spent")
+	}
 	req := prov.last()
 	tag := firstUserTag(req)
 	if tag == "" || tag == "turn-A" || tag == "turn-B" {

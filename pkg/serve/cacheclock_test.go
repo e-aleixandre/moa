@@ -55,9 +55,10 @@ func TestCacheClock_AnchorsOnRequestNotRunEnd(t *testing.T) {
 	}
 }
 
-// TestCacheClock_IgnoresNonAnthropicRequests guards the provider gate: only
-// Anthropic writes a TTL-based prompt cache, so another provider's request
-// must not make info() report a warm Anthropic cache after a model switch.
+// TestCacheClock_IgnoresNonAnthropicRequests guards the provider gate: a
+// provider without a documented TTL (xAI) never warms the clock, and another
+// provider's request (OpenAI) must not make info() report a warm Anthropic
+// cache.
 func TestCacheClock_IgnoresNonAnthropicRequests(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -71,14 +72,23 @@ func TestCacheClock_IgnoresNonAnthropicRequests(t *testing.T) {
 
 	sess.runtime.Bus.Publish(bus.MessageStarted{
 		SessionID: sess.ID,
+		Message:   core.AgentMessage{Message: core.Message{Role: "assistant", Provider: "xai"}},
+	})
+	sess.runtime.Bus.Drain(time.Second)
+	sess.mu.Lock()
+	warmed := !sess.lastRunAt.IsZero()
+	sess.mu.Unlock()
+	if warmed {
+		t.Error("an xAI request warmed the cache clock")
+	}
+
+	sess.runtime.Bus.Publish(bus.MessageStarted{
+		SessionID: sess.ID,
 		Message:   core.AgentMessage{Message: core.Message{Role: "assistant", Provider: "openai"}},
 	})
 	sess.runtime.Bus.Drain(time.Second)
-
-	sess.mu.Lock()
-	defer sess.mu.Unlock()
-	if !sess.lastRunAt.IsZero() {
-		t.Error("a non-Anthropic request warmed the Anthropic cache clock")
+	if got := sess.info().CacheExpiresAt; !got.IsZero() {
+		t.Errorf("an OpenAI request surfaced an expiry on an Anthropic session: %v", got)
 	}
 }
 
@@ -168,5 +178,102 @@ func TestCacheClock_RestoredOnResume(t *testing.T) {
 	want := time.Unix(last.Timestamp, 0).Add(resumed.cacheTTL)
 	if got := resumed.info().CacheExpiresAt; !got.Equal(want) {
 		t.Fatalf("resumed expiry = %v, want %v", got, want)
+	}
+}
+
+// Scenario: the warning appears 30 minutes after the last OpenAI request —
+// what OpenAI guarantees. xAI documents none at all: no warning.
+func TestCacheClock_ProviderWindows(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider())
+
+	cases := []struct {
+		model, provider string
+		window          time.Duration
+	}{
+		{"openai/gpt-5.6-sol", "openai", 30 * time.Minute},
+		{"xai/grok-4.6", "xai", 0},
+	}
+	for _, tc := range cases {
+		sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir(), Model: tc.model})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.model, err)
+		}
+		if got := sess.info().Provider; got != tc.provider {
+			t.Fatalf("%s resolved to provider %q", tc.model, got)
+		}
+		before := time.Now()
+		sess.runtime.Bus.Publish(bus.MessageStarted{
+			SessionID: sess.ID,
+			Message:   core.AgentMessage{Message: core.Message{Role: "assistant", Provider: tc.provider}},
+		})
+		sess.runtime.Bus.Drain(time.Second)
+		got := sess.info().CacheExpiresAt
+		if tc.window == 0 {
+			if !got.IsZero() {
+				t.Errorf("%s: expiry %v, want none", tc.provider, got)
+			}
+			continue
+		}
+		if got.Before(before.Add(tc.window)) || got.After(time.Now().Add(tc.window)) {
+			t.Errorf("%s: expiry %v, want last request + %v", tc.provider, got, tc.window)
+		}
+	}
+}
+
+// The restored clock takes the last response of any provider with a window,
+// skipping one that has none.
+func TestCacheClock_LastCachedResponse(t *testing.T) {
+	msgs := []core.AgentMessage{
+		{Message: core.Message{Role: "assistant", Provider: "anthropic", Timestamp: 100}},
+		{Message: core.Message{Role: "assistant", Provider: "openai", Timestamp: 200}},
+		{Message: core.Message{Role: "assistant", Provider: "xai", Timestamp: 300}},
+		{Message: core.Message{Role: "user", Timestamp: 400}},
+	}
+	at, provider := lastCachedResponse(msgs, 5*time.Minute)
+	if provider != "openai" || at.Unix() != 200 {
+		t.Fatalf("restored %s at %d, want openai at 200", provider, at.Unix())
+	}
+	if _, provider := lastCachedResponse(msgs[2:], 5*time.Minute); provider != "" {
+		t.Fatalf("restored %q from a provider without a window", provider)
+	}
+}
+
+// The "Start fresh" action is spent from the cut until the next request warms
+// the cache, and a restart remembers it from the transcript.
+func TestCacheClock_StartedFreshUntilNextRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newTestManager(t, ctx, newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	warm := func() {
+		sess.runtime.Bus.Publish(bus.MessageStarted{SessionID: sess.ID, Message: core.AgentMessage{Message: core.Message{Role: "assistant", Provider: "anthropic"}}})
+		sess.runtime.Bus.Drain(time.Second)
+	}
+	warm()
+	if sess.info().StartedFresh {
+		t.Fatal("started fresh before any cut")
+	}
+	sess.runtime.Bus.Publish(bus.ContextFreshStarted{SessionID: sess.ID})
+	sess.runtime.Bus.Drain(time.Second)
+	if !sess.info().StartedFresh {
+		t.Fatal("cut not reported")
+	}
+	warm()
+	if sess.info().StartedFresh {
+		t.Fatal("still reported after a request warmed the cache")
+	}
+
+	transcript := []core.AgentMessage{
+		{Message: core.Message{Role: "assistant", Provider: "anthropic", Timestamp: 100}},
+		{Message: core.Message{Role: "session_event", Timestamp: 200}, Custom: map[string]any{"type": "fresh_marker"}},
+		{Message: core.Message{Role: "user", Timestamp: 150}},
+	}
+	if got := lastFreshAt(transcript); got.Unix() != 200 {
+		t.Fatalf("restored cut at %d, want 200", got.Unix())
 	}
 }

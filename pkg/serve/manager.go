@@ -107,11 +107,17 @@ type ManagedSession struct {
 	// briefLastAttempt rate-limits brief generation after noisy events or
 	// provider failures. Protected by mu; see briefCooldown in brief.go.
 	briefLastAttempt time.Time
-	// lastRunAt is when the most recent run finished. For Anthropic models the
-	// prompt cache is refreshed on every request, so it stays warm until
-	// lastRunAt + cacheTTL; the UI uses this to warn when writing would incur a
-	// fresh cache-write cost. Zero means "no run yet".
-	lastRunAt time.Time
+	// lastRunAt is when the last request that warmed a prompt cache reached the
+	// provider, and lastRunProvider which provider that was. The cache stays
+	// warm until lastRunAt + cacheWindow(lastRunProvider); the UI uses this to
+	// warn when writing would incur a fresh cache-write cost. Zero means "no
+	// run yet".
+	lastRunAt       time.Time
+	lastRunProvider string
+	// startedFreshAt is when the context was last cut with start fresh. Once
+	// no request has warmed the cache since, the action is spent: a second
+	// cut would cut nothing.
+	startedFreshAt time.Time
 	// runStartedAt is when the current run began (set on RunStarted, cleared on
 	// RunEnded). The UI turns this into the elapsed-time counter on the activity
 	// indicator; surfacing it from the server keeps the counter correct across
@@ -361,11 +367,14 @@ type SessionInfo struct {
 	PermissionMode string                     `json:"permission_mode"` // "yolo", "ask", "auto"
 	CostUSD        float64                    `json:"cost_usd"`        // accumulated session spend (main run + subagents)
 	Activity       *attention.SessionActivity `json:"activity,omitempty"`
-	// CacheExpiresAt is when the Anthropic prompt cache for this session goes
-	// cold (last run + cache TTL). Zero/omitted when not applicable (no run yet,
-	// or a non-Anthropic model that doesn't use TTL-based prompt caching). The
-	// UI warns once this time has passed that a new message pays a cache write.
+	// CacheExpiresAt is when the prompt cache for this session goes cold (last
+	// request + the provider's window, see cacheWindow). Zero/omitted when not
+	// applicable (no run yet, or a provider without a known window). The UI
+	// warns once this time has passed that a new message pays a cache write.
 	CacheExpiresAt time.Time `json:"cache_expires_at,omitzero"`
+	// StartedFresh reports that the context was already cut since the last
+	// request warmed the cache, so the UI stops offering "Start fresh".
+	StartedFresh bool `json:"started_fresh,omitempty"`
 	// RunStartedAt is when the in-progress run began; zero/omitted when idle.
 	// The UI anchors the activity-indicator elapsed counter to it so the counter
 	// stays correct across reconnects. Only meaningful while State is running or
@@ -479,7 +488,9 @@ func (s *ManagedSession) info() SessionInfo {
 
 	s.mu.Lock()
 	lastRun := s.lastRunAt
-	cacheTTL := s.cacheTTL
+	cacheWindow := cacheWindow(s.lastRunProvider, s.cacheTTL)
+	cacheProvider := s.lastRunProvider
+	startedFresh := s.startedFreshAt
 	info := SessionInfo{
 		ID:             s.ID,
 		Title:          s.Title,
@@ -512,10 +523,14 @@ func (s *ManagedSession) info() SessionInfo {
 		BriefUpdated:    s.briefUpdated,
 	}
 	s.mu.Unlock()
-	// Prompt caching with a refreshable TTL is Anthropic-specific; only surface
-	// an expiry for those models and only once a run has warmed the cache.
-	if !lastRun.IsZero() && cacheTTL > 0 && model.Provider == "anthropic" {
-		info.CacheExpiresAt = lastRun.Add(cacheTTL)
+	// Only surface an expiry once a request has warmed the cache, for a
+	// provider with a known window, and while the session still uses that
+	// provider: another provider's cache is not this model's.
+	if !lastRun.IsZero() && cacheWindow > 0 && model.Provider == cacheProvider {
+		info.CacheExpiresAt = lastRun.Add(cacheWindow)
+		if !startedFresh.Before(lastRun) {
+			info.StartedFresh = true
+		}
 	}
 	// Surface the run-start time only while a run is in flight so the client can
 	// show (and keep) an accurate elapsed counter across reconnects.

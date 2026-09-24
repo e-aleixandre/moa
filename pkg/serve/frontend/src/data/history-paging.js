@@ -3,6 +3,7 @@
 import { api, retryHistoryHydration } from './api.js';
 import { normalizeHistory } from './ws-handlers.js';
 import { store, updateSession } from './store.js';
+import { settleFreshMarkers } from './start-fresh.js';
 
 const PAGE_SIZE = 100;
 
@@ -49,7 +50,9 @@ export async function loadOlderHistory(id, beforePrepend) {
     const current = store.get().sessions[id];
     const now = stateFor(current);
     if (!current || now.epoch !== epoch) return false;
-    const messages = prependDeduped(normalizeHistory(result.messages || []), current.messages || []);
+    // A marker drawn at the end because its cut was not loaded moves to the
+    // cut once the page that holds it arrives.
+    const messages = settleFreshMarkers(prependDeduped(normalizeHistory(result.messages || []), current.messages || []));
     beforePrepend?.();
     updateSession(id, {
       messages,

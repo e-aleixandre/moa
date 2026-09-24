@@ -441,7 +441,6 @@
 /* The optional action beside the warning: a quiet text button, not a call to
    action. Neutral ink, so the yellow stays the warning's alone. */
 .zl-composer .cache-warn-action {
-  margin-left: auto;
   min-height: 28px;
   padding: 2px 8px;
   border: 0;

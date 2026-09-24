@@ -15,18 +15,6 @@ export function placeFreshMarker(messages, row) {
   return [...messages.slice(0, at), row, ...messages.slice(at)];
 }
 
-// startedFreshSinceExpiry reports whether the conversation was already cut
-// after the cache expired: no run has happened since (a run would move the
-// expiry past the marker), so starting fresh again would cut nothing.
-export function startedFreshSinceExpiry(messages, cacheExpiresAt) {
-  if (!cacheExpiresAt) return false;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m?.systemType === 'fresh_marker' && Number(m.timestamp) * 1000 >= cacheExpiresAt) return true;
-  }
-  return false;
-}
-
 // settleFreshMarkers moves fresh markers that arrived in a history delta (the
 // server appends them where the cut entry was recorded, because the cut point
 // is older than the delta) to their place before the first kept message.

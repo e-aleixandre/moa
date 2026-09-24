@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { placeFreshMarker, settleFreshMarkers, startedFreshSinceExpiry } from './start-fresh.js';
+import { placeFreshMarker, settleFreshMarkers } from './start-fresh.js';
 import { normalizeHistory } from './ws/history.js';
 
 const rows = [
@@ -41,13 +41,11 @@ describe('start fresh marker', () => {
     expect(settleFreshMarkers([...rows, row]).map(m => m._msg_id)).toEqual(['u1', 'a1', 'f1', 'u2', 'a2']);
   });
 
-  test('the action is spent until a run warms the cache again', () => {
+  test('paging in the cut moves a marker that fell back to the end', () => {
     const [row] = normalizeHistory([wire]);
-    const withMarker = placeFreshMarker(rows, row);
-    // Cut at t=2000s, cache expired at t=1000s: already started fresh.
-    expect(startedFreshSinceExpiry(withMarker, 1000 * 1000)).toBe(true);
-    // A later run moved the expiry past the marker: available again.
-    expect(startedFreshSinceExpiry(withMarker, 3000 * 1000)).toBe(false);
-    expect(startedFreshSinceExpiry(rows, 1000 * 1000)).toBe(false);
+    const tail = placeFreshMarker(rows.slice(3), row);
+    expect(tail.map(m => m._msg_id)).toEqual(['a2', 'f1']);
+    const paged = settleFreshMarkers([...rows.slice(0, 3), ...tail]);
+    expect(paged.map(m => m._msg_id)).toEqual(['u1', 'a1', 'f1', 'u2', 'a2']);
   });
 });

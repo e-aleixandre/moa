@@ -73,7 +73,7 @@ func (t TrimData) IsEmpty() bool { return t.WatermarkEntryID == "" }
 // compaction boundary, but without a summary. The token counters are
 // telemetry; they reconstruct nothing.
 type FreshData struct {
-	FirstKeptEntryID string `json:"first_kept_entry_id"`
+	FirstKeptEntryID string `json:"first_kept_entry_id,omitempty"`
 	TokensBefore     int    `json:"tokens_before,omitempty"`
 	TokensAfter      int    `json:"tokens_after,omitempty"`
 }

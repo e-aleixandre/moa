@@ -33,7 +33,6 @@ import {
   compositionSubmitted, newCompositionState, shouldDiscardLateCompositionInput,
   valueBeforeLateCompositionInput,
 } from "../../data/composer-composition.js";
-import { startedFreshSinceExpiry } from "../../data/start-fresh.js";
 import "./Composer.css";
 
 // Composer — the conversation input. Markup and CSS are the catalogue's
@@ -1054,9 +1053,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // Cache-expiry warning: the prompt cache goes cold `cacheExpiresAt` ms after
   // the last run. We tick a clock while idle so the warning appears on its own
   // once the cache has expired (writing then pays a fresh cache-write). Only
-  // relevant when the backend reported an expiry (Anthropic models). Ported
-  // from InputBar; the original SPA's copy is in Spanish — this one is in
-  // English per the project's UI-text convention.
+  // relevant when the backend reported an expiry (Anthropic and OpenAI; see
+  // cacheWindow in pkg/serve/cacheclock.go). Ported from InputBar; the
+  // original SPA's copy is in Spanish — this one is in English per the
+  // project's UI-text convention.
   const cacheExpiresAt = session?.cacheExpiresAt || 0;
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
@@ -1069,7 +1069,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // "Start fresh" rides the warning: optional, no confirmation. Once used it
   // stays spent until a run warms the cache again — a second cut would cut
   // nothing.
-  const canStartFresh = cacheExpired && !steer && !startedFreshSinceExpiry(session?.messages || [], cacheExpiresAt);
+  const canStartFresh = cacheExpired && !steer && !session?.startedFresh;
   const [startingFresh, setStartingFresh] = useState(false);
   const handleStartFresh = useCallback(async () => {
     if (!sessionId || startingFresh) return;
@@ -1077,6 +1077,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     try {
       const res = await execCommand(sessionId, "/start-fresh");
       if (!res || !res.ok) throw new Error(res?.message || "start fresh failed");
+      // The server says the same on the next poll; until then, stop offering it.
+      updateSession(sessionId, { startedFresh: true });
       if (res.message && res.message !== "started fresh") {
         addToast({ title: "Nothing to cut", detail: "This conversation is already short.", type: "info" });
       }
