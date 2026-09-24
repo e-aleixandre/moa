@@ -116,6 +116,8 @@ type LiveToolInitData struct {
 	// encoding as RunStartedAtMs), so the row's elapsed timer resumes instead
 	// of restarting at zero.
 	StartedAtMs int64 `json:"started_at_ms,omitempty"`
+	// Result is the text result of a terminal call, bounded like history.
+	Result string `json:"result,omitempty"`
 }
 
 // SubagentInitData describes one live subagent job for reconnecting clients

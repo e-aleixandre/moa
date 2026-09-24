@@ -176,6 +176,26 @@ func TestBridgeEvent_LiveToolTerminalOnRejection(t *testing.T) {
 	}
 }
 
+// A call that ended ahead of its batch has its result nowhere else until the
+// batch is collected, so the registry keeps it: a reconnect restoring the row
+// without it loses the download card of a send_file or the "Queued" of a
+// sessions send.
+func TestBridgeEvent_LiveToolKeepsResultOfEndedCall(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContext(b, nil)
+
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecStart, ToolCallID: "tc1", ToolName: "send_file"})
+	result := core.Result{Content: []core.Content{core.TextContent("Sent a.md\n"), core.TextContent(`{"file_id":"f1"}`)}}
+	bridgeEvent(sctx, core.AgentEvent{
+		Type: core.AgentEventToolExecEnd, ToolCallID: "tc1", ToolName: "send_file", Result: &result,
+	})
+	got := sctx.LiveTools()
+	if len(got) != 1 || got[0].Result != "Sent a.md\n{\"file_id\":\"f1\"}" {
+		t.Fatalf("after tool_end: %+v, want the result text kept", got)
+	}
+}
+
 // Concurrent calls (executeTools runs tools in parallel) each keep their own
 // row, and only the one that ends turns terminal — the case of a quick call
 // batched with a long wait, which a reconnect must not restore as running.

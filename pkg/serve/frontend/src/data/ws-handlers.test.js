@@ -1820,6 +1820,32 @@ test('handleWsInit restores a call that ended ahead of its batch as finished', a
   expect(ledger.rows[0].live).toBeUndefined();
 });
 
+// Its result reaches history only with the whole batch, so a reconnect in
+// between restores it from the registry: without it a send_file lost its
+// download card and a sessions send stopped saying it was queued.
+test('handleWsInit restores the result of a call that ended ahead of its batch', async () => {
+  seedSession('s1');
+  const sent = ['Sent a.md', JSON.stringify({ file_id: 'f1', name: 'a.md', size: 3, mime: 'text/markdown', url: '/api/sessions/s1/files/f1' })].join('\n');
+  handleWsInit('s1', {
+    messages: [{
+      role: 'assistant',
+      content: [
+        { type: 'tool_call', tool_call_id: 'tc1', tool_name: 'send_file', arguments: { path: 'a.md' } },
+        { type: 'tool_call', tool_call_id: 'tc2', tool_name: 'sessions', arguments: { action: 'send', session_id: 's2', text: 'go' } },
+        { type: 'tool_call', tool_call_id: 'tc3', tool_name: 'subagent_wait', arguments: { job_id: 'sa-1' } },
+      ],
+    }],
+    live_tools: [
+      { tool_call_id: 'tc1', tool_name: 'send_file', status: 'done', result: sent },
+      { tool_call_id: 'tc2', tool_name: 'sessions', status: 'done', result: 'Queued for s2.' },
+      { tool_call_id: 'tc3', tool_name: 'subagent_wait', status: 'running' },
+    ],
+  });
+  const blocks = projectStream(store.get().sessions.s1).flatMap(b => b.blocks || []);
+  expect(blocks.find(b => b.type === 'file')).toBeTruthy();
+  expect(blocks.find(b => b.type === 'session_message')).toMatchObject({ queued: true });
+});
+
 test('a terminal registry entry never overwrites a result already in history', async () => {
   seedSession('s1');
   handleWsInit('s1', {

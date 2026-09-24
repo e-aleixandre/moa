@@ -705,13 +705,28 @@ func (sctx *SessionContext) upsertLiveToolLocked(call LiveToolCall) {
 	sctx.liveTools = append(sctx.liveTools, call)
 }
 
-// endLiveToolLocked records a finished tool call's terminal phase. The row
+// resultText joins the text content of a tool result.
+func resultText(r *core.Result) string {
+	if r == nil {
+		return ""
+	}
+	var text string
+	for _, c := range r.Content {
+		if c.Type == "text" {
+			text += c.Text
+		}
+	}
+	return text
+}
+
+// endLiveToolLocked records a finished tool call's terminal phase and result. The row
 // stays until the turn ends, because its result reaches history only when the
 // whole batch is collected. Caller must hold streamMu.
 func (sctx *SessionContext) endLiveToolLocked(call LiveToolCall) {
 	for i := range sctx.liveTools {
 		if sctx.liveTools[i].ToolCallID == call.ToolCallID {
 			sctx.liveTools[i].Phase = call.Phase
+			sctx.liveTools[i].Result = call.Result
 			return
 		}
 	}
@@ -1156,14 +1171,14 @@ func liveToolDelta(e core.AgentEvent) (liveToolMutation, bool) {
 	case core.AgentEventToolExecEnd:
 		// Covers every terminal path — success, error, permission rejection,
 		// blocked/validation rejection — because the loop emits ToolExecEnd for
-		// all of them (see rejectToolCall).
+		// all of them (see endRejectedToolCall).
 		phase := LiveToolPhaseDone
 		if e.Rejected {
 			phase = LiveToolPhaseRejected
 		} else if e.IsError {
 			phase = LiveToolPhaseError
 		}
-		return liveToolMutation{kind: liveToolKindEnd, call: LiveToolCall{ToolCallID: e.ToolCallID, Phase: phase}}, true
+		return liveToolMutation{kind: liveToolKindEnd, call: LiveToolCall{ToolCallID: e.ToolCallID, Phase: phase, Result: resultText(e.Result)}}, true
 
 	case core.AgentEventTurnEnd, core.AgentEventEnd, core.AgentEventError:
 		return liveToolMutation{kind: liveToolKindReset}, true
@@ -1274,20 +1289,12 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		}}
 
 	case core.AgentEventToolExecEnd:
-		var resultText string
-		if e.Result != nil {
-			for _, c := range e.Result.Content {
-				if c.Type == "text" {
-					resultText += c.Text
-				}
-			}
-		}
 		events := []any{ToolExecEnded{
 			SessionID:  sid,
 			RunGen:     gen,
 			ToolCallID: e.ToolCallID,
 			ToolName:   e.ToolName,
-			Result:     resultText,
+			Result:     resultText(e.Result),
 			IsError:    e.IsError,
 			Rejected:   e.Rejected,
 		}}

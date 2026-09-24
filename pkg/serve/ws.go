@@ -973,6 +973,7 @@ func liveToolInitData(calls []bus.LiveToolCall) []LiveToolInitData {
 			ToolName:   c.ToolName,
 			Args:       boundedLiveToolArgs(c.Args),
 			Status:     c.Phase,
+			Result:     truncateHistoryString(c.Result),
 		}
 		if !c.StartedAt.IsZero() {
 			d.StartedAtMs = c.StartedAt.UnixMilli()

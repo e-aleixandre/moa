@@ -1139,3 +1139,16 @@ func TestBuildInitDataCarriesLiveTools(t *testing.T) {
 		t.Fatalf("InitData.LiveTools = %+v, want the live bash call", data.LiveTools)
 	}
 }
+
+func TestLiveToolInitDataCarriesBoundedResult(t *testing.T) {
+	got := liveToolInitData([]bus.LiveToolCall{
+		{ToolCallID: "tc1", ToolName: "sessions", Phase: bus.LiveToolPhaseDone, Result: "Queued for s1."},
+		{ToolCallID: "tc2", ToolName: "read", Phase: bus.LiveToolPhaseDone, Result: strings.Repeat("x", historyContentMaxBytes+100)},
+	})
+	if len(got) != 2 || got[0].Result != "Queued for s1." {
+		t.Fatalf("liveToolInitData = %+v, want the ended call's result", got)
+	}
+	if !strings.HasSuffix(got[1].Result, truncationNotice) || len(got[1].Result) > historyContentMaxBytes+len(truncationNotice)+2 {
+		t.Fatalf("result not bounded like history: %d bytes", len(got[1].Result))
+	}
+}

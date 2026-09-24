@@ -1,7 +1,7 @@
 // WebSocket init snapshot handling.
 
 import { wsState } from './shared.js';
-import { appendNormalizedHistoryDelta, normalizeHistory } from './history.js';
+import { appendNormalizedHistoryDelta, extractToolNote, normalizeHistory } from './history.js';
 import { attentionNamespaceFromInit, attentionNamespaceTransition } from './attention.js';
 import { chronologicalSubagentOutcomes, upsertTerminalSubagentOutcome } from './subagents.js';
 import { canAppendHistoryDelta, finishHistoryHydration } from '../history-hydration.js';
@@ -232,6 +232,10 @@ export function withLiveToolsInPlace(messages, liveTools) {
 const LIVE_TOOL_STATUSES = new Set(['generating', 'running', 'done', 'error', 'rejected']);
 
 export function liveToolRow(t) {
+  const status = LIVE_TOOL_STATUSES.has(t.status) ? t.status : 'running';
+  const ended = status !== 'running' && status !== 'generating';
+  // An ended call's result travels with it, since history has none yet.
+  const result = ended && typeof t.result === 'string' ? t.result : null;
   return {
     _type: 'tool_start',
     tool_call_id: t.tool_call_id,
@@ -239,8 +243,9 @@ export function liveToolRow(t) {
     args: t.args || {},
     // A call that ended while a sibling in its batch still runs is terminal
     // here, although its result reaches history only with the whole batch.
-    status: LIVE_TOOL_STATUSES.has(t.status) ? t.status : 'running',
-    result: null,
+    status,
+    result,
+    note: extractToolNote(result, status === 'rejected'),
     // Server-anchored so the row's elapsed timer resumes from the real start
     // instead of restarting at the moment this pane reconnected.
     startedAt: t.started_at_ms || Date.now(),
