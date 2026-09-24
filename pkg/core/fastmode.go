@@ -1,23 +1,40 @@
 package core
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
+
+// openAIFastMultipliers lists the catalogue's OpenAI models that OpenAI's
+// pricing page ("Fast mode" tab) offers in fast mode, with the multiplier over
+// the Standard price. It is keyed by exact ID because the tier does not follow
+// the naming: gpt-5.4-mini has it while gpt-5.4-nano and the -pro models do
+// not. A catalogue model missing here is not offered fast mode.
+var openAIFastMultipliers = map[string]float64{
+	"gpt-6-astra":   2,
+	"gpt-6-sol":     2,
+	"gpt-6-luna":    2,
+	"gpt-5.6-sol":   2,
+	"gpt-5.6-terra": 2,
+	"gpt-5.6-luna":  2,
+	"gpt-5.5":       2.5,
+	"gpt-5.4-mini":  2,
+}
 
 // FastCostMultiplier returns the premium-tier token-price multiplier for a
-// model. Anthropic's fast-mode documentation table lists Opus 5 / 4.8 at
-// $10 input / $50 output versus $5 / $25 standard. GPT-6 Astra's documented
-// fast rate differs from the older OpenAI GPT-5 generation.
+// model, or 1 when the model has no fast tier. Anthropic's fast-mode
+// documentation table lists Opus 5 / 4.8 at $10 input / $50 output versus
+// $5 / $25 standard.
 func FastCostMultiplier(model Model) float64 {
 	switch model.Provider {
 	case "anthropic", "xai":
 		return 2
 	case "openai":
-		if model.ID == "gpt-6-astra" {
-			return 2
+		if m, ok := openAIFastMultipliers[model.ID]; ok {
+			return m
 		}
-		return 2.5
-	default:
-		return 1
 	}
+	return 1
 }
 
 // SupportsFast reports whether a model can be served in fast mode.
@@ -27,7 +44,7 @@ func FastCostMultiplier(model Model) float64 {
 //
 //   - Anthropic serves it on Opus only; every other model rejects the `speed`
 //     field outright ("does not support the `speed` parameter").
-//   - OpenAI offers it on the GPT-5.4 generation and later.
+//   - OpenAI offers it per model; see openAIFastMultipliers.
 //   - xAI accepts the priority tier across its catalogue.
 //
 // An unknown model is reported as unsupported: offering a switch that the API
@@ -45,12 +62,8 @@ func supportsFastModel(m Model) bool {
 	case "anthropic":
 		return strings.Contains(m.ID, "opus")
 	case "openai":
-		// Reasoning-era models only; the mini and codex variants price
-		// differently and are not offered a tier.
-		return strings.HasPrefix(m.ID, "gpt-5.4") ||
-			strings.HasPrefix(m.ID, "gpt-5.5") ||
-			strings.HasPrefix(m.ID, "gpt-5.6") ||
-			m.ID == "gpt-6-astra"
+		_, ok := openAIFastMultipliers[m.ID]
+		return ok
 	case "xai":
 		return true
 	}
@@ -75,10 +88,11 @@ func FastNote(modelID string) string {
 	case "anthropic":
 		return "2.5× faster · billed as separate usage credits"
 	case "openai":
-		if m.ID == "gpt-6-astra" {
-			return "Fast mode · 2× the token rate"
+		rate := strconv.FormatFloat(FastCostMultiplier(m), 'f', -1, 64) + "×"
+		if strings.HasPrefix(m.ID, "gpt-6-") {
+			return "Fast mode · " + rate + " the token rate"
 		}
-		return "1.5× faster · burns credits 2.5×"
+		return "1.5× faster · burns credits " + rate
 	case "xai":
 		return "Priority queue · 2× the token rate"
 	}
