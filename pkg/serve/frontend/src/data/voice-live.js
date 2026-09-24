@@ -229,6 +229,7 @@ export class VoiceLiveController {
     // emitting items, which of its function calls still lack an output, and
     // whether any output was sent since the last response.create.
     this.delegations = new Map();
+    this.wantsContinue = false;
   }
 
   setCallbacks({ onState, onResult, onError } = {}) {
@@ -797,10 +798,24 @@ export class VoiceLiveController {
   // "Missing function call outputs for: call_…"), which is what reached the
   // owner as an error toast. A response still open may emit more calls, so
   // the round waits for its terminal event too.
-  maybeContinue(round) {
-    if (round.open || round.calls.size > 0 || !round.answered) return;
-    round.answered = false;
+  // response.create names no response, so it also waits for every other round
+  // to settle: the hang-up's request for minutes must not resume a response
+  // that still owes tool outputs.
+  maybeContinue(round = null) {
+    if (round && !round.open && round.calls.size === 0 && round.answered) {
+      round.answered = false;
+      this.wantsContinue = true;
+    }
+    if (!this.wantsContinue || this.backendBusy()) return;
+    this.wantsContinue = false;
     this.send({ type: 'response.create' });
+  }
+
+  backendBusy() {
+    for (const round of this.delegations.values()) {
+      if (round.open || round.calls.size > 0) return true;
+    }
+    return false;
   }
 
   appendThinking(content) {
@@ -1062,15 +1077,28 @@ export class VoiceLiveController {
     }, CLOSE_BACKSTOP_MS);
   }
 
-  // Asks the delegate to write the minutes now, waits a bounded moment, then
-  // closes either way. The instruction is application-authored context, not
-  // something to say aloud: the owner has already left the conversation.
+  // Asks the backend for the minutes now, waits a bounded moment, then closes
+  // either way. The request goes to the backend directly, as a queued message
+  // plus response.create: asking the voice model to delegate it instead (an
+  // instructions append) was measured against the live service and the voice
+  // model never delegated in 42s, while the direct request had end_call back
+  // in about 2s. The voice model may still say something as it happens, and
+  // the owner has already left the conversation, so its audio is muted.
   async closeAfterMinutes(reason) {
+    if (this.audio) this.audio.muted = true;
     this.send({
-      type: 'session.instructions.append',
-      delegation_id: null,
-      content: 'The owner has just hung up. Do not speak. Call end_call now with the minutes of this call, written in the language of the call.',
+      type: 'response.item.create',
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [{
+          type: 'input_text',
+          text: 'The owner has just hung up. Call end_call now with the minutes of this call, written in the language of the call.',
+        }],
+      },
     });
+    this.wantsContinue = true;
+    this.maybeContinue();
     await this.waitForMinutes();
     if (this.phase === 'ended' || this.phase === 'idle') return;
     if (this.minutes) {

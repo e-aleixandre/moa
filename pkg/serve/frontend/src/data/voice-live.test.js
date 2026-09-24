@@ -881,12 +881,19 @@ test('a hangup before end_call asks the delegate for the minutes and delivers th
   const fixture = setup();
   const channel = await connected(fixture);
   channel.deliver({ type: 'session.output_transcript.delta', delta: 'We agreed on the plan. ' });
+  fixture.controller.attachRemoteAudio({ streams: [{ id: 'remote' }] });
 
   const hangup = fixture.controller.hangup();
   await flush();
-  const request = channel.sent.find((message) => message.type === 'session.instructions.append');
-  expect(request.content).toContain('end_call');
-  expect(request.delegation_id).toBe(null);
+  // Asked of the backend directly, not of the voice model: measured against
+  // the live service, an instructions append never got the voice model to
+  // delegate, while a queued message + response.create had end_call in ~2s.
+  const request = channel.sent.find((message) => message.type === 'response.item.create');
+  expect(request.item).toMatchObject({ type: 'message', role: 'user' });
+  expect(request.item.content[0].text).toContain('end_call');
+  expect(channel.typesSent()).toEqual(['response.item.create', 'response.create']);
+  // The owner has left: whatever the voice model says now is not for him.
+  expect(fixture.controller.audio.muted).toBe(true);
   // Still not closed: the delegate is being given its bounded moment.
   expect(channel.typesSent()).not.toContain('session.close');
   expect(fixture.controller.state().endedReason).toBe('hangup');
@@ -902,6 +909,33 @@ test('a hangup before end_call asks the delegate for the minutes and delivers th
 
   expect(fixture.results[0].text).toBe('Decided: ship it.');
   expect(fixture.results[0].meta).toMatchObject({ minutes: true, reason: 'completed' });
+});
+
+test('the hang-up asks for minutes only once a backend round owing tool outputs has them', async () => {
+  const gate = deferred();
+  const fixture = setup({
+    routes: {
+      '/api/owners/owner-1/book': async () => { await gate.promise; return jsonResponse({ files: [] }); },
+    },
+  });
+  const channel = await connected(fixture);
+  const wrapped = (event) => channel.deliver({ type: 'response.event', delegation_id: 'item_1', event });
+  wrapped({ type: 'response.created', response: { id: 'resp_1', output: [] } });
+  wrapped({ type: 'response.output_item.done', item: { type: 'function_call', call_id: 'c1', name: 'book_list', arguments: '{}' } });
+  wrapped({ type: 'response.completed', response: { id: 'resp_1', output: [] } });
+
+  const hangup = fixture.controller.hangup();
+  await flush();
+  // The request is queued, but resuming now would be rejected for c1.
+  expect(channel.typesSent()).toEqual(['response.item.create']);
+
+  gate.resolve();
+  await flush();
+  expect(channel.typesSent()).toEqual(['response.item.create', 'response.item.create', 'response.create']);
+
+  await fixture.clock.advance(MINUTES_ON_HANGUP_MS);
+  channel.deliver({ type: 'session.closed', reason: 'close_requested', usage: { seconds: 20 } });
+  await hangup;
 });
 
 test('duplicate end_call events keep the first minutes and close only once', async () => {
@@ -949,7 +983,7 @@ test('an ending that is not a hangup closes immediately, without asking for minu
   fixture.track.onmute();
   await fixture.clock.advance(MIC_GRACE_MS);
   expect(channel.typesSent()).toContain('session.close');
-  expect(channel.typesSent()).not.toContain('session.instructions.append');
+  expect(channel.typesSent()).not.toContain('response.item.create');
 });
 
 // Finding 5.
