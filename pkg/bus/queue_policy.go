@@ -55,6 +55,9 @@ var queuePolicyByName = map[string]QueuePolicy{
 	// Rebuilds the system prompt, which the agent captures when a run starts.
 	"reload":  PolicyQueue,
 	"handoff": PolicyReject,
+	// Offered only while idle, when the prompt cache has expired. Queued
+	// behind a run it would cut a context the run just made warm again.
+	"start-fresh": PolicyReject,
 
 	// Mode transitions / destructive rewind — refused while busy.
 	"undo":   PolicyReject,

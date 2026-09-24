@@ -9,6 +9,7 @@ import { acknowledgeVisibleAttentionThrough } from '../api.js';
 import { store, updateSession, visibleSessionIds } from '../store.js';
 import { seedOlderHistory } from '../history-paging.js';
 import { refreshArtifactsAfterReconnect } from '../artifacts.js';
+import { settleFreshMarkers } from '../start-fresh.js';
 
 export function mergeSteers(snapshot, local) {
   // Snapshot steers are authoritative and already accepted by the server, so
@@ -82,7 +83,7 @@ export function handleWsInit(id, data) {
     : null;
   const canAppendDelta = !!data.delta_base && canAppendHistoryDelta(prev.messages || [], data.delta_base);
   let messages = canAppendDelta
-    ? withLiveToolsInPlace(appendNormalizedHistoryDelta(prev.messages, data.messages || [], data.subagents), data.live_tools)
+    ? withLiveToolsInPlace(settleFreshMarkers(appendNormalizedHistoryDelta(prev.messages, data.messages || [], data.subagents)), data.live_tools)
     : withLiveTools(normalizeHistory(data.messages || [], data.subagents), data.live_tools);
   // The live init snapshot cannot contain terminal jobs, so restore their
   // persisted lifecycle cards separately. Upserting by job ID also upgrades

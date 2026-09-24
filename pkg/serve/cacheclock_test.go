@@ -123,3 +123,50 @@ func TestCacheClock_ModelSwitchDoesNotLeakExpiry(t *testing.T) {
 		return !sess.info().CacheExpiresAt.IsZero()
 	})
 }
+
+// The clock lives in memory. A resumed session restores it from the last
+// Anthropic response in its history, so an idle session still says its cache
+// expired after a restart — before the next message pays for it.
+func TestCacheClock_RestoredOnResume(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// The real Anthropic provider stamps its responses; the mock does too.
+	anthropicReply := func(_ context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 2)
+		msg := core.Message{Role: "assistant", Provider: "anthropic", Content: []core.Content{core.TextContent("hi")}, StopReason: "end_turn", Timestamp: time.Now().Unix()}
+		ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+		ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		close(ch)
+		return ch, nil
+	}
+	mgr := newTestManager(t, ctx, newMockProvider(anthropicReply))
+	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(sess.ID, "hello", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "run finished", func() bool { return sessState(sess) == StateIdle && len(sess.runtime.Context().Agent.Messages()) >= 2 })
+	sess.runtime.Bus.Drain(2 * time.Second)
+	msgs := sess.runtime.Context().Agent.Messages()
+	last := msgs[len(msgs)-1]
+	if last.Role != "assistant" || last.Provider != "anthropic" || last.Timestamp == 0 {
+		t.Fatalf("last message = %s/%s/%d, want a dated Anthropic response", last.Role, last.Provider, last.Timestamp)
+	}
+
+	id := sess.ID
+	mgr.mu.Lock()
+	delete(mgr.sessions, id)
+	mgr.mu.Unlock()
+	sess.runtime.Close()
+	resumed, err := mgr.ResumeSession(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Unix(last.Timestamp, 0).Add(resumed.cacheTTL)
+	if got := resumed.info().CacheExpiresAt; !got.Equal(want) {
+		t.Fatalf("resumed expiry = %v, want %v", got, want)
+	}
+}

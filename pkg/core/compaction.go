@@ -88,6 +88,15 @@ type CompactionPayload struct {
 	Pricing *Pricing `json:"-"`
 }
 
+// FreshPayload is the result of starting fresh: the conversation was cut at
+// the same point a compaction would keep from, and nothing replaced what came
+// before it — no summary, no model call.
+type FreshPayload struct {
+	FirstKeptMsgID string `json:"first_kept_msg_id"`
+	TokensBefore   int    `json:"tokens_before"`
+	TokensAfter    int    `json:"tokens_after"`
+}
+
 // compactionTailMargin is the extra headroom (≈2× the summary-message estimate)
 // the effective window must leave above ReserveTokens + KeepRecent so that, after
 // a compaction, the retained tail sits BELOW the threshold. Without it a very low

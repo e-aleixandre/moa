@@ -63,6 +63,12 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 			}
 			ts.handleTrim(e)
 			b.Publish(TreeSynced{SessionID: sctx.SessionID})
+		case ContextFreshStarted:
+			if e.Payload == nil {
+				return
+			}
+			ts.handleFresh(e)
+			b.Publish(TreeSynced{SessionID: sctx.SessionID})
 		case CommandExecuted:
 			switch e.Command {
 			case "clear":
@@ -328,21 +334,7 @@ func (ts *TreeSyncer) handleTrim(e ContextTrimmed) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
-	for i, msg := range e.Originals {
-		id := messageSyncID(msg, i)
-		if _, ok := ts.synced[id]; ok {
-			continue
-		}
-		if isHiddenInternalPrompt(msg) {
-			ts.synced[id] = struct{}{}
-			continue
-		}
-		ts.tree.Append(session.Entry{
-			Type:    session.EntryMessage,
-			Message: msg,
-		})
-		ts.synced[id] = struct{}{}
-	}
+	ts.appendOriginalsLocked(e.Originals)
 
 	marker := core.AgentMessage{}
 	if e.Marker != nil {
@@ -359,4 +351,54 @@ func (ts *TreeSyncer) handleTrim(e ContextTrimmed) {
 			Results:           e.Payload.Results,
 		},
 	})
+}
+
+// handleFresh records a fresh start in the tree. The session is idle, so the
+// messages are normally all synced already; the originals are appended first
+// anyway, as in handleTrim, so a cut that lands between a run's end and its
+// sync cannot lose the messages it dropped from the agent's state.
+func (ts *TreeSyncer) handleFresh(e ContextFreshStarted) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	ts.appendOriginalsLocked(e.Originals)
+
+	marker := core.AgentMessage{}
+	if e.Marker != nil {
+		marker = session.DeepCopyMessage(*e.Marker)
+	}
+	var at time.Time
+	if marker.Timestamp != 0 {
+		at = time.Unix(marker.Timestamp, 0)
+	}
+	ts.tree.Append(session.Entry{
+		Type:      session.EntryFresh,
+		Timestamp: at,
+		Message:   marker,
+		Fresh: session.FreshData{
+			FirstKeptEntryID: e.Payload.FirstKeptMsgID,
+			TokensBefore:     e.Payload.TokensBefore,
+			TokensAfter:      e.Payload.TokensAfter,
+		},
+	})
+}
+
+// appendOriginalsLocked appends the messages of a pre-edit view that are not
+// in the tree yet. Caller holds ts.mu.
+func (ts *TreeSyncer) appendOriginalsLocked(originals []core.AgentMessage) {
+	for i, msg := range originals {
+		id := messageSyncID(msg, i)
+		if _, ok := ts.synced[id]; ok {
+			continue
+		}
+		if isHiddenInternalPrompt(msg) {
+			ts.synced[id] = struct{}{}
+			continue
+		}
+		ts.tree.Append(session.Entry{
+			Type:    session.EntryMessage,
+			Message: msg,
+		})
+		ts.synced[id] = struct{}{}
+	}
 }

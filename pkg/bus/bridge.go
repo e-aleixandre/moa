@@ -59,6 +59,7 @@ type AgentController interface {
 	SetMaxBudget(v float64) error
 	Reset() error
 	Compact(ctx context.Context, focus string) (*core.CompactionPayload, error)
+	StartFresh() (*core.FreshPayload, error)
 	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
 	SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error)
 	SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)

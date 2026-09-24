@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Paperclip, X, Mic, Loader2, PhoneCall } from "lucide-preact";
+import { Paperclip, X, Mic, Loader2, PhoneCall, TriangleAlert } from "lucide-preact";
 import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
@@ -33,6 +33,7 @@ import {
   compositionSubmitted, newCompositionState, shouldDiscardLateCompositionInput,
   valueBeforeLateCompositionInput,
 } from "../../data/composer-composition.js";
+import { startedFreshSinceExpiry } from "../../data/start-fresh.js";
 import "./Composer.css";
 
 // Composer — the conversation input. Markup and CSS are the catalogue's
@@ -1065,6 +1066,26 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     return () => clearInterval(t);
   }, [cacheExpiresAt, busy]);
   const cacheExpired = cacheExpiresAt > 0 && !busy && nowTick >= cacheExpiresAt;
+  // "Start fresh" rides the warning: optional, no confirmation. Once used it
+  // stays spent until a run warms the cache again — a second cut would cut
+  // nothing.
+  const canStartFresh = cacheExpired && !steer && !startedFreshSinceExpiry(session?.messages || [], cacheExpiresAt);
+  const [startingFresh, setStartingFresh] = useState(false);
+  const handleStartFresh = useCallback(async () => {
+    if (!sessionId || startingFresh) return;
+    setStartingFresh(true);
+    try {
+      const res = await execCommand(sessionId, "/start-fresh");
+      if (!res || !res.ok) throw new Error(res?.message || "start fresh failed");
+      if (res.message && res.message !== "started fresh") {
+        addToast({ title: "Nothing to cut", detail: "This conversation is already short.", type: "info" });
+      }
+    } catch (e) {
+      addToast({ title: "Could not start fresh", detail: String(e.message || e), type: "error" });
+    } finally {
+      setStartingFresh(false);
+    }
+  }, [sessionId, startingFresh]);
 
   const short = compact || shortPlaceholder;
   // "Message moa" everywhere. The keyboard hints used to be printed here — 71
@@ -1095,8 +1116,19 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     <div class={`zl-composer${busy ? " is-busy" : ""}${armed ? " is-armed" : ""}`}>
       {cacheExpired && (
         <div class="cache-warn" title="Cache expired: your next message costs more">
-          <span class="cache-warn-dot" />
-          Prompt cache expired · your next message pays a cache write
+          <TriangleAlert class="cache-warn-icon" size={14} strokeWidth={1.75} aria-hidden="true" />
+          <span class="cache-warn-text">Prompt cache expired</span>
+          {canStartFresh && (
+            <button
+              type="button"
+              class="cache-warn-action"
+              disabled={startingFresh}
+              onClick={handleStartFresh}
+              title="Stop sending older messages to the model. The transcript keeps them."
+            >
+              Start fresh
+            </button>
+          )}
         </div>
       )}
       {/* The call is a flat row inside this slab, not a card: the input stays

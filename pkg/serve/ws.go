@@ -439,6 +439,18 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 		}
 		return projected
 	}
+	if marker, _ := custom["type"].(string); marker == "fresh_marker" {
+		projected := map[string]any{"type": marker}
+		if id, ok := custom["first_kept_msg_id"].(string); ok {
+			projected["first_kept_msg_id"] = id
+		}
+		for _, key := range []string{"tokens_before", "tokens_after"} {
+			if n, ok := custom[key].(int); ok {
+				projected[key] = n
+			}
+		}
+		return projected
+	}
 	if marker, _ := custom["type"].(string); marker == "compaction_marker" {
 		projected := map[string]any{"type": marker}
 		if summary, ok := custom["summary"].(string); ok {

@@ -87,6 +87,12 @@ func FormatTranscript(entries []Entry) string {
 			writeHeading(&b, e, "trim")
 			fmt.Fprintf(&b, "Older tool outputs were removed from the parent's model context here (%d results, ~%d tokens). The outputs above remain in this file.\n",
 				e.Trim.Results, e.Trim.TokensRemoved)
+		case EntryFresh:
+			if e.Fresh.IsEmpty() {
+				continue
+			}
+			writeHeading(&b, e, "fresh")
+			b.WriteString("The parent started fresh here: from this point its model context begins at a recent message, without a summary of what came before. The messages above remain in this file.\n")
 		case EntryConfig:
 			writeHeading(&b, e, "config")
 			if e.Config.Model != "" {

@@ -373,13 +373,22 @@ func entriesToContext(path []Entry) ([]core.AgentMessage, int) {
 	// counter for both (a trim invalidates the anchored usage exactly as a
 	// compaction does), so a reload that counted only compactions would stamp
 	// assistants with an epoch no restored message matches.
-	var lastCompaction *Entry
+	//
+	// A fresh cut is a boundary like a compaction, only without a summary:
+	// whichever of the two came last decides where the context starts.
+	var lastBoundary *Entry
 	var trims []core.TrimSpan
 	epoch := 0
 	for i := range path {
 		switch path[i].Type {
 		case EntryCompaction:
-			lastCompaction = &path[i]
+			lastBoundary = &path[i]
+			epoch++
+		case EntryFresh:
+			if path[i].Fresh.IsEmpty() {
+				continue
+			}
+			lastBoundary = &path[i]
 			epoch++
 		case EntryTrim:
 			trims = append(trims, core.TrimSpan{
@@ -390,26 +399,28 @@ func entriesToContext(path []Entry) ([]core.AgentMessage, int) {
 		}
 	}
 
-	if lastCompaction == nil {
+	if lastBoundary == nil {
 		// No compaction: emit all message entries
 		return core.ApplyTrims(collectMessages(path), trims), epoch
 	}
 
-	// With compaction: summary + messages from firstKeptEntryID onward
 	var msgs []core.AgentMessage
-
-	// Emit compaction summary as first message
-	msgs = append(msgs, core.AgentMessage{
-		Message: core.Message{
-			Role:    "compaction_summary",
-			Content: []core.Content{core.TextContent(lastCompaction.Compaction.Summary)},
-		},
-	})
+	firstKept := lastBoundary.Fresh.FirstKeptEntryID
+	if lastBoundary.Type == EntryCompaction {
+		// With compaction: summary + messages from firstKeptEntryID onward
+		firstKept = lastBoundary.Compaction.FirstKeptEntryID
+		msgs = append(msgs, core.AgentMessage{
+			Message: core.Message{
+				Role:    "compaction_summary",
+				Content: []core.Content{core.TextContent(lastBoundary.Compaction.Summary)},
+			},
+		})
+	}
 
 	// Find firstKeptEntryID in the path and emit from there
 	collecting := false
 	for _, e := range path {
-		if e.ID == lastCompaction.Compaction.FirstKeptEntryID {
+		if e.ID == firstKept {
 			collecting = true
 		}
 		if collecting && e.Type == EntryMessage && isLLMRole(e.Message.Role) {
@@ -466,10 +477,29 @@ func (t *Tree) DisplayMessagesSince(entryID string) ([]core.AgentMessage, bool) 
 // displayMessages projects tree entries for display: messages pass through and
 // compactions become synthetic status markers.
 func displayMessages(entries []Entry) []core.AgentMessage {
+	// A fresh marker is drawn at the cut, right before the first message the
+	// model still sees, not where the entry was appended: the line has to say
+	// "the model's context starts here". When the cut point is not in this
+	// slice (a resume suffix), it falls back to the entry's own position.
+	freshAt := map[string][]Entry{}
+	present := map[string]bool{}
+	for _, e := range entries {
+		if e.Type == EntryMessage {
+			present[e.ID] = true
+		}
+	}
+	for _, e := range entries {
+		if e.Type == EntryFresh && !e.Fresh.IsEmpty() && present[e.Fresh.FirstKeptEntryID] {
+			freshAt[e.Fresh.FirstKeptEntryID] = append(freshAt[e.Fresh.FirstKeptEntryID], e)
+		}
+	}
 	var msgs []core.AgentMessage
 	for _, e := range entries {
 		switch e.Type {
 		case EntryMessage:
+			for _, f := range freshAt[e.ID] {
+				msgs = append(msgs, freshMarker(f))
+			}
 			msgs = append(msgs, e.Message)
 		case EntryCompaction:
 			text := fmt.Sprintf("✂ Context compacted (%dK tokens summarized)", e.Compaction.TokensBefore/1000)
@@ -495,10 +525,35 @@ func displayMessages(entries []Entry) []core.AgentMessage {
 				},
 				Custom: map[string]any{"type": "trim_marker", "results": e.Trim.Results, "tokens_removed": e.Trim.TokensRemoved},
 			})
+		case EntryFresh:
+			if e.Fresh.IsEmpty() || present[e.Fresh.FirstKeptEntryID] {
+				continue
+			}
+			msgs = append(msgs, freshMarker(e))
 		}
 	}
 	return msgs
 }
+
+// freshMarker is the display projection of a fresh entry. The messages above
+// it stay readable; the model only sees from FirstKeptEntryID on. The client
+// uses first_kept_msg_id to draw a live or resumed marker at the same place a
+// full reload does.
+func freshMarker(e Entry) core.AgentMessage {
+	return core.AgentMessage{
+		Message: core.Message{
+			Role:      "session_event",
+			MsgID:     e.ID,
+			Content:   []core.Content{core.TextContent(FreshMarkerText)},
+			Timestamp: e.Timestamp.Unix(),
+		},
+		Custom: map[string]any{"type": "fresh_marker", "first_kept_msg_id": e.Fresh.FirstKeptEntryID, "tokens_before": e.Fresh.TokensBefore, "tokens_after": e.Fresh.TokensAfter},
+	}
+}
+
+// FreshMarkerText is the line the transcript shows where the user started
+// fresh. Shared by the live marker and the durable entry, like TrimMarkerText.
+const FreshMarkerText = "Started fresh — earlier messages are no longer sent to the model"
 
 // TrimMarkerText is the one line the transcript shows where a trim happened.
 // Exported so the live event and the durable entry render identically: two

@@ -138,6 +138,40 @@ func registerHistoryHandlers(sctx *SessionContext) {
 		return nil
 	})
 
+	b.OnCommand(func(cmd StartFreshSession) error {
+		var (
+			payload *core.FreshPayload
+			before  []core.AgentMessage
+			err     error
+		)
+		cut := func() {
+			before = sctx.Agent.Messages()
+			payload, err = sctx.Agent.StartFresh()
+		}
+		// Idle is checked and the cut applied under the state lock, so a run
+		// cannot start between the check and the cut. The cut itself is an
+		// in-memory slice, so holding the lock is cheap.
+		if sctx.State != nil {
+			if !sctx.State.DoIfIdle(cut) {
+				return ErrSessionBusy
+			}
+		} else {
+			cut()
+		}
+		if err != nil {
+			return err
+		}
+		if payload == nil {
+			return ErrNothingToCut
+		}
+		marker := NewFreshMarker(payload)
+		sctx.Bus.Publish(ContextFreshStarted{SessionID: sctx.SessionID, Payload: payload, Marker: marker, Originals: before})
+		// The marker rides the command event so clients draw it live, and the
+		// event refreshes the context reading.
+		sctx.Bus.Publish(CommandExecuted{SessionID: sctx.SessionID, Command: "start-fresh", Messages: []core.AgentMessage{*marker}})
+		return nil
+	})
+
 	b.OnCommand(func(cmd PrepareCompactSession) error {
 		if err := reserveRunSlot(sctx); err != nil {
 			return fmt.Errorf("cannot prepare compact: %w", err)

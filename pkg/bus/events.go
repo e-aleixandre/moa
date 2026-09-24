@@ -194,6 +194,20 @@ type ContextTrimmed struct {
 	Originals []core.AgentMessage
 }
 
+// ContextFreshStarted is published when the user started fresh: the model's
+// context now begins at Payload.FirstKeptMsgID. The transcript is untouched.
+type ContextFreshStarted struct {
+	SessionID string
+	Payload   *core.FreshPayload
+	// Marker is the display projection TreeSyncer persists as the fresh
+	// entry; its MsgID is the durable entry ID.
+	Marker *core.AgentMessage
+	// Originals is the conversation before the cut, so the syncer can persist
+	// any message not in the tree yet before recording the cut (see
+	// ContextTrimmed.Originals).
+	Originals []core.AgentMessage
+}
+
 // ---------------------------------------------------------------------------
 // Steering
 // ---------------------------------------------------------------------------

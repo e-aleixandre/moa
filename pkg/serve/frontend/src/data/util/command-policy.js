@@ -14,7 +14,7 @@ export const POLICY_REJECT = 'reject';
 // Rewrite/reconfigure the run — must wait for idle (enqueued as a barrier).
 const QUEUE = new Set(['compact', 'prepare-compact', 'clear', 'model', 'thinking', 'verify', 'reload']);
 // Mode transitions / destructive rewind — refused while busy.
-const REJECT = new Set(['handoff', 'undo', 'branch', 'back', 'plan']);
+const REJECT = new Set(['handoff', 'start-fresh', 'undo', 'branch', 'back', 'plan']);
 
 // splitCommand normalizes a raw slash line into [name, rest]. A leading slash is
 // optional; surrounding whitespace is trimmed. The name/rest boundary is the

@@ -1,5 +1,5 @@
 import { useRef, useLayoutEffect, useCallback } from "preact/hooks";
-import { ArrowDown, Scissors } from "lucide-preact";
+import { ArrowDown, ListRestart, Scissors } from "lucide-preact";
 import {
   UserWaypoint,
   AssistantDocument,
@@ -134,6 +134,14 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
           <div class="zl-sys zl-sys--trim">
             <Scissors class="zl-sys-icon" size={14} strokeWidth={1.75} aria-hidden="true" />
             {block.text.replace(/^\s*✂\s*/, "")}
+          </div>
+        );
+      }
+      if (block.systemType === "fresh_marker") {
+        return (
+          <div class="zl-sys zl-sys--trim">
+            <ListRestart class="zl-sys-icon" size={14} strokeWidth={1.75} aria-hidden="true" />
+            {block.text}
           </div>
         );
       }

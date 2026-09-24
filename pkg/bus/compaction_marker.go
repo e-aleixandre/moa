@@ -2,6 +2,7 @@ package bus
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
@@ -48,6 +49,30 @@ func NewCompactionMarker(payload *core.CompactionPayload) *core.AgentMessage {
 			"tokens_before":  payload.TokensBefore,
 			"read_files":     append([]string(nil), payload.ReadFiles...),
 			"modified_files": append([]string(nil), payload.ModifiedFiles...),
+		},
+	}
+}
+
+// NewFreshMarker returns the durable display projection for a fresh start.
+// TreeSyncer uses its MsgID as the entry ID, as with the other markers.
+func NewFreshMarker(payload *core.FreshPayload) *core.AgentMessage {
+	if payload == nil {
+		return nil
+	}
+	return &core.AgentMessage{
+		Message: core.Message{
+			Role:    "session_event",
+			MsgID:   core.NewMsgID(),
+			Content: []core.Content{core.TextContent(session.FreshMarkerText)},
+			// Dated, unlike the other markers: the composer compares it with
+			// the cache expiry to know the action is already spent.
+			Timestamp: time.Now().Unix(),
+		},
+		Custom: map[string]any{
+			"type":              "fresh_marker",
+			"first_kept_msg_id": payload.FirstKeptMsgID,
+			"tokens_before":     payload.TokensBefore,
+			"tokens_after":      payload.TokensAfter,
 		},
 	}
 }

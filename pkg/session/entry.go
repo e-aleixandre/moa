@@ -14,8 +14,11 @@ const (
 	EntryMessage    EntryType = "message"
 	EntryCompaction EntryType = "compaction"
 	EntryTrim       EntryType = "trim"
-	EntryConfig     EntryType = "config"
-	EntryLabel      EntryType = "label"
+	// EntryFresh cuts the model's context without a summary. Versions that
+	// predate it skip the entry and rebuild the full context.
+	EntryFresh  EntryType = "fresh"
+	EntryConfig EntryType = "config"
+	EntryLabel  EntryType = "label"
 )
 
 // Entry is a single immutable unit in the session log.
@@ -30,6 +33,7 @@ type Entry struct {
 	Message    core.AgentMessage `json:"message,omitempty"`
 	Compaction CompactionData    `json:"compaction,omitempty"`
 	Trim       TrimData          `json:"trim,omitempty"`
+	Fresh      FreshData         `json:"fresh,omitempty"`
 	Config     ConfigChangeData  `json:"config,omitempty"`
 	Label      string            `json:"label,omitempty"`
 }
@@ -63,6 +67,21 @@ type TrimData struct {
 
 // IsEmpty returns true if the TrimData has no watermark (zero value).
 func (t TrimData) IsEmpty() bool { return t.WatermarkEntryID == "" }
+
+// FreshData records a "start fresh": from here on the model's context starts
+// at FirstKeptEntryID and nothing stands in for what came before. Like a
+// compaction boundary, but without a summary. The token counters are
+// telemetry; they reconstruct nothing.
+type FreshData struct {
+	FirstKeptEntryID string `json:"first_kept_entry_id"`
+	TokensBefore     int    `json:"tokens_before,omitempty"`
+	TokensAfter      int    `json:"tokens_after,omitempty"`
+}
+
+// IsEmpty returns true if the FreshData has no cut point (zero value). An
+// empty fresh entry is ignored: it is what an older version leaves behind when
+// it rewrites a session it does not fully understand.
+func (f FreshData) IsEmpty() bool { return f.FirstKeptEntryID == "" }
 
 // ConfigChangeData records a configuration change (model, thinking, etc.).
 type ConfigChangeData struct {

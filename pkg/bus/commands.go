@@ -18,6 +18,10 @@ var ErrSteerQueueFull = errors.New("steer queue full")
 // pending.
 var ErrSessionBusy = errors.New("session is busy")
 
+// ErrNothingToCut is returned by StartFreshSession when the conversation is
+// already no longer than what a fresh start keeps.
+var ErrNothingToCut = errors.New("nothing to cut")
+
 // ErrVerifyRunning is returned by RunManualVerify when a manual verify is
 // already in progress for the session.
 var ErrVerifyRunning = errors.New("verify already running")
@@ -240,6 +244,11 @@ type CompactSession struct {
 // PrepareCompactSession runs a short internal preparation turn then compacts
 // without releasing the session slot between the two phases.
 type PrepareCompactSession struct{ SessionID string }
+
+// StartFreshSession cuts the model's context at the point a compaction would
+// keep from, without summarizing what came before. Only allowed while idle.
+// Returns ErrNothingToCut when the conversation is already short enough.
+type StartFreshSession struct{ SessionID string }
 
 // HandoffSession generates an ephemeral brief from this conversation. Its
 // frontend creates and starts the destination session when HandoffReady arrives.

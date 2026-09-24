@@ -1290,6 +1290,53 @@ func (a *Agent) Compact(ctx context.Context, focus string) (*core.CompactionPayl
 	return a.CompactWithCheckpoint(ctx, "", focus)
 }
 
+// StartFresh drops the older part of the conversation from the model's
+// context without summarizing it. It keeps exactly what a compaction would
+// keep verbatim (compaction.FindCutPoint with the session's KeepRecent), so
+// the cut lands on a user or assistant message and never orphans a
+// tool_result. Returns nil when there is nothing to cut.
+//
+// It never calls a model: the point is to avoid paying a cache write for old
+// context when the prompt cache has already expired.
+func (a *Agent) StartFresh() (*core.FreshPayload, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		return nil, fmt.Errorf("cannot start fresh while agent is running")
+	}
+	model := a.config.Model
+	if model.MaxInput <= 0 {
+		return nil, fmt.Errorf("model has no context window configured")
+	}
+	settings := a.config.Compaction
+	if settings == nil {
+		defaults := core.DefaultCompactionSettings
+		settings = &defaults
+	}
+	msgs := a.state.Messages
+	before := core.EstimateContextTokens(msgs, a.config.SystemPrompt, a.tools.Specs(), a.state.CompactionEpoch)
+	cut := compaction.FindCutPoint(msgs, before.Tokens, settings.EffectiveWindow(model.MaxInput), *settings)
+	if cut <= 0 || cut >= len(msgs) {
+		return nil, nil
+	}
+	kept := append([]core.AgentMessage(nil), msgs[cut:]...)
+	// The kept messages must be addressable in the session tree, which is
+	// where the cut is persisted.
+	for i := range kept {
+		kept[i].EnsureMsgID()
+	}
+	a.state.Messages = kept
+	// Same invalidation as a compaction or a trim: the anchored usage describes
+	// a request that no longer exists.
+	a.state.CompactionEpoch++
+	after := core.EstimateContextTokens(kept, a.config.SystemPrompt, a.tools.Specs(), a.state.CompactionEpoch)
+	return &core.FreshPayload{
+		FirstKeptMsgID: kept[0].MsgID,
+		TokensBefore:   before.Tokens,
+		TokensAfter:    after.Tokens,
+	}, nil
+}
+
 func (a *Agent) SnapshotConversation() ([]core.AgentMessage, int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

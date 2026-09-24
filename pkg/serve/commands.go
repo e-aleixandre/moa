@@ -25,6 +25,7 @@ var commandRegistry = map[string]commandHandler{
 	"clear":           cmdClear,
 	"handoff":         cmdHandoff,
 	"compact":         cmdCompact,
+	"start-fresh":     cmdStartFresh,
 	"prepare-compact": cmdPrepareCompact,
 	"model":           cmdModel,
 	"thinking":        cmdThinking,
@@ -257,6 +258,25 @@ func cmdCompact(_ *Manager, sess *ManagedSession, args []string) (*CommandResult
 	// Queued without an ID: the command was started, not enqueued behind a run,
 	// so no command_dequeued will ever retire an optimistic chip for it.
 	return &CommandResult{OK: true, Queued: true, Message: "compaction started"}, nil
+}
+
+// cmdStartFresh cuts the model's context at the point a compaction would keep
+// from, without a summary and without calling a model. The transcript keeps
+// everything; the cut is persisted as a tree entry.
+func cmdStartFresh(_ *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
+	if err := requireIdle(sess); err != nil {
+		return nil, err
+	}
+	err := sess.runtime.Bus.Execute(bus.StartFreshSession{})
+	switch {
+	case errors.Is(err, bus.ErrSessionBusy):
+		return nil, ErrBusy
+	case errors.Is(err, bus.ErrNothingToCut):
+		return &CommandResult{OK: true, Message: "nothing to cut: the conversation is already short"}, nil
+	case err != nil:
+		return &CommandResult{OK: false, Message: "start fresh failed: " + err.Error()}, nil
+	}
+	return &CommandResult{OK: true, Message: "started fresh"}, nil
 }
 
 // cmdPrepareCompact runs a preparation turn and then compacts. Its handler is

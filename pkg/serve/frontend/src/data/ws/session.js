@@ -4,6 +4,7 @@ import { triggerAttention, triggerDone, addToast } from '../notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from '../store.js';
 import { resetOlderHistory } from '../history-paging.js';
 import { normalizeHistory } from './history.js';
+import { placeFreshMarker } from '../start-fresh.js';
 import { nextRunEpoch } from './init.js';
 import { markUnseen, acknowledgeVisibleLiveAttention, flashSession } from './attention.js';
 
@@ -277,6 +278,15 @@ export function handleWsCommand(id, data) {
       const known = new Set(sess.messages.map(message => message?._msg_id).filter(Boolean));
       const fresh = markers.filter(marker => marker._msg_id && !known.has(marker._msg_id));
       if (fresh.length > 0) updateSession(id, { messages: [...sess.messages, ...fresh] });
+    }
+  } else if (data.command === 'start-fresh') {
+    // The transcript is untouched; only the marker is new, and it belongs at
+    // the cut rather than at the end.
+    const sess = store.get().sessions[id];
+    const [marker] = normalizeHistory(data.messages || []).filter(row => row.systemType === 'fresh_marker');
+    if (sess && marker) {
+      const next = placeFreshMarker(sess.messages, marker);
+      if (next !== sess.messages) updateSession(id, { messages: next });
     }
   } else if (data.command === 'skill') {
     // A skill loaded by the user is an ordinary message appended to the

@@ -109,6 +109,18 @@ export function normalizeHistory(raw, liveSubagents = []) {
         systemType: 'trim_marker',
         text: (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join(''),
       });
+    } else if (msg.role === 'session_event' && msg.custom?.type === 'fresh_marker') {
+      // Start fresh: the model's context begins at first_kept_msg_id. The
+      // server places the row right before that message; the id travels so a
+      // live or resumed row can be placed the same way (data/start-fresh.js).
+      result.push({
+        _type: 'system',
+        _msg_id: msg.msg_id,
+        timestamp: msg.timestamp,
+        systemType: 'fresh_marker',
+        firstKept: typeof msg.custom.first_kept_msg_id === 'string' ? msg.custom.first_kept_msg_id : '',
+        text: (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join(''),
+      });
     } else if (msg.role === 'session_event' && msg.custom?.type === 'compaction_marker') {
       // Compaction entries are durable tree events, rather than conversational
       // messages. Preserve their complete payload as a first-class normalized

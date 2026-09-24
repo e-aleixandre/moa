@@ -437,10 +437,26 @@
      for "you wrote this". */
   color: var(--yellow, #f9e2af);
 }
-.zl-composer .cache-warn-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--yellow, #f9e2af);
-  flex-shrink: 0;
+.zl-composer .cache-warn-icon { flex: none; }
+/* The optional action beside the warning: a quiet text button, not a call to
+   action. Neutral ink, so the yellow stays the warning's alone. */
+.zl-composer .cache-warn-action {
+  margin-left: auto;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t2);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .zl-composer .cache-warn-action:hover:not(:disabled) { background: var(--zl-raised); color: var(--zl-t1); }
+}
+.zl-composer .cache-warn-action:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+.zl-composer .cache-warn-action:disabled { opacity: 0.5; cursor: default; }
+@media (pointer: coarse) {
+  .zl-composer .cache-warn-action { min-height: 36px; }
 }
