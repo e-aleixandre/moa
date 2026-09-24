@@ -125,9 +125,13 @@
 /* 6px and not less: a live mic draws its halo at `inset: -4px` below, and any
    tighter would push that ring into Send — the halo is what says "live". */
 .zl-controls-spring { flex: 1 1 auto; }
-/* And the mic gets a little more than that from Send specifically, because the
-   two are adjacent: at exactly 6px the resting ring kisses Send's corner. */
-.zl-controls .zl-mic { margin-right: 4px; }
+/* The right-hand cluster (mic · call · send) keeps one pitch: 10px between
+   every pair, whichever of them is present. The mic needs more than 6px from
+   its right neighbour (at 6px the resting ring kisses it), and giving that to
+   the mic alone left call→send 4px tighter than mic→call — which read as the
+   call button stuck to Send, worst in a call when both are filled. */
+.zl-controls .zl-mic,
+.zl-controls .zl-call { margin-right: 4px; }
 
 .zl-attach,
 .zl-send {

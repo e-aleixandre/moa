@@ -1,4 +1,4 @@
-import { PhoneOff, Loader2 } from 'lucide-preact';
+import { Loader2 } from 'lucide-preact';
 import './VoiceLivePanel.css';
 
 // VoiceLivePanel — what a live call shows while it runs. Deliberately minimal:
@@ -7,14 +7,16 @@ import './VoiceLivePanel.css';
 // listening is shown instead: whether the call is connected, whether the
 // microphone is really live, how many of the five questions are spent, whether
 // the delegate is right now waiting for an answer from this conversation, how
-// long it has been running, and a way out.
+// long it has been running. The way out is not here: the composer's call
+// button turns into the hang-up while a call runs, and a second hang-up in
+// this row was one button too many for the same action.
 //
 // ONE FLAT ROW, not a card. It used to be a filled, rimmed block inside the
 // composer's slab — a plane inside a plane, three lines tall in its normal
 // state, pushing the box the owner types in down the screen. A call in its
 // ordinary state is one line now:
 //
-//   ● On a call   1:24        $0.42  2/5  ⌫
+//   ● On a call   1:24        $0.42  2/5
 //
 // and only the two things that need the owner earn a line of their own: the
 // delegate blocked on THIS conversation (amber, unmistakable), and a
@@ -74,7 +76,7 @@ function callCost({ costUSD, cost }) {
 }
 
 export function VoiceLivePanel({
-  phase, endedReason, micState, questionsUsed, maxQuestions, pendingAsks, elapsed, onHangup,
+  phase, endedReason, micState, questionsUsed, maxQuestions, pendingAsks, elapsed,
   // The spend so far. Drawn whenever it arrives and absent when it does not, so
   // a branch whose hook does not report it keeps the same row.
   costUSD, cost,
@@ -97,16 +99,6 @@ export function VoiceLivePanel({
         <span class="voice-live-questions" title="Questions the delegate may ask this conversation during the call">
           {questionsUsed}/{maxQuestions}
         </span>
-        <button
-          type="button"
-          class="voice-live-hangup"
-          aria-label="End call"
-          title="End call"
-          disabled={phase === 'closing'}
-          onClick={onHangup}
-        >
-          <PhoneOff size={16} aria-hidden="true" />
-        </button>
       </div>
       {pendingAsks > 0 && (
         /* Unmistakable on purpose: the delegate is blocked on THIS

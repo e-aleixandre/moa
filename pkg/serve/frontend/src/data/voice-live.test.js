@@ -289,6 +289,70 @@ test('a tool call wrapped in response.event is executed and answered with output
   expect(channel.sent.every((message) => typeof message.event_id === 'string' && message.event_id)).toBe(true);
 });
 
+// Recorded against the real service (gpt-live-1 delegating to gpt-5.6-terra):
+// one backend response emitted two book_read calls, and resuming it after the
+// first output was rejected with `function_call_outputs_required` — "Missing
+// function call outputs for: call_…" — which surfaced as an error toast.
+test('parallel tool calls of one backend response are resumed once, after every output and the response end', async () => {
+  const gate = deferred();
+  const fixture = setup({
+    routes: {
+      '/api/owners/owner-1/book/a.md': () => jsonResponse({ content: 'A' }),
+      '/api/owners/owner-1/book/b.md': async () => { await gate.promise; return jsonResponse({ content: 'B' }); },
+    },
+  });
+  const channel = await connected(fixture);
+  const wrapped = (event) => channel.deliver({ type: 'response.event', delegation_id: 'item_1', event });
+  const call = (callId, path) => wrapped({
+    type: 'response.output_item.done',
+    item: { type: 'function_call', call_id: callId, name: 'book_read', arguments: JSON.stringify({ path }) },
+  });
+
+  wrapped({ type: 'response.created', response: { id: 'resp_1', output: [] } });
+  call('call_a', 'a.md');
+  await flush();
+  // a.md is answered, but the response is still emitting calls.
+  expect(channel.typesSent()).toEqual(['response.item.create']);
+
+  call('call_b', 'b.md');
+  wrapped({ type: 'response.completed', response: { id: 'resp_1', output: [] } });
+  await flush();
+  // The response ended, but call_b's output is still being fetched.
+  expect(channel.typesSent()).toEqual(['response.item.create']);
+
+  gate.resolve();
+  await flush();
+  expect(channel.typesSent()).toEqual(['response.item.create', 'response.item.create', 'response.create']);
+  expect(channel.sent.slice(0, 2).map((message) => message.item.call_id)).toEqual(['call_a', 'call_b']);
+
+  // The continuation is a new response of the same delegation: its own tool
+  // round resumes on its own.
+  wrapped({ type: 'response.created', response: { id: 'resp_2', output: [] } });
+  call('call_c', 'a.md');
+  wrapped({ type: 'response.completed', response: { id: 'resp_2', output: [] } });
+  await flush();
+  expect(channel.typesSent()).toEqual([
+    'response.item.create', 'response.item.create', 'response.create',
+    'response.item.create', 'response.create',
+  ]);
+  expect(fixture.errors).toEqual([]);
+});
+
+test('a tool whose request fails still answers its call, so the response can resume', async () => {
+  const fixture = setup({
+    routes: { '/api/owners/owner-1/book': async () => { throw new Error('offline'); } },
+  });
+  const channel = await connected(fixture);
+  const wrapped = (event) => channel.deliver({ type: 'response.event', delegation_id: 'item_1', event });
+  wrapped({ type: 'response.created', response: { id: 'resp_1', output: [] } });
+  wrapped({ type: 'response.output_item.done', item: { type: 'function_call', call_id: 'c1', name: 'book_list', arguments: '{}' } });
+  wrapped({ type: 'response.completed', response: { id: 'resp_1', output: [] } });
+  await flush();
+  expect(channel.typesSent()).toEqual(['response.item.create', 'response.create']);
+  expect(channel.outputs()[0]).toMatchObject({ status: 'error' });
+  expect(channel.outputs()[0].message).toContain('offline');
+});
+
 test('the book is reported unavailable, never fabricated, when the session has no owner', async () => {
   const fixture = setup({
     routes: {
@@ -832,12 +896,19 @@ test('a hangup before end_call asks the delegate for the minutes and delivers th
   const fixture = setup();
   const channel = await connected(fixture);
   channel.deliver({ type: 'session.output_transcript.delta', delta: 'We agreed on the plan. ' });
+  fixture.controller.attachRemoteAudio({ streams: [{ id: 'remote' }] });
 
   const hangup = fixture.controller.hangup();
   await flush();
-  const request = channel.sent.find((message) => message.type === 'session.instructions.append');
-  expect(request.content).toContain('end_call');
-  expect(request.delegation_id).toBe(null);
+  // Asked of the backend directly, not of the voice model: measured against
+  // the live service, an instructions append never got the voice model to
+  // delegate, while a queued message + response.create had end_call in ~2s.
+  const request = channel.sent.find((message) => message.type === 'response.item.create');
+  expect(request.item).toMatchObject({ type: 'message', role: 'user' });
+  expect(request.item.content[0].text).toContain('end_call');
+  expect(channel.typesSent()).toEqual(['response.item.create', 'response.create']);
+  // The owner has left: whatever the voice model says now is not for him.
+  expect(fixture.controller.audio.muted).toBe(true);
   // Still not closed: the delegate is being given its bounded moment.
   expect(channel.typesSent()).not.toContain('session.close');
   expect(fixture.controller.state().endedReason).toBe('hangup');
@@ -853,6 +924,33 @@ test('a hangup before end_call asks the delegate for the minutes and delivers th
 
   expect(fixture.results[0].text).toBe('Decided: ship it.');
   expect(fixture.results[0].meta).toMatchObject({ minutes: true, reason: 'completed' });
+});
+
+test('the hang-up asks for minutes only once a backend round owing tool outputs has them', async () => {
+  const gate = deferred();
+  const fixture = setup({
+    routes: {
+      '/api/owners/owner-1/book': async () => { await gate.promise; return jsonResponse({ files: [] }); },
+    },
+  });
+  const channel = await connected(fixture);
+  const wrapped = (event) => channel.deliver({ type: 'response.event', delegation_id: 'item_1', event });
+  wrapped({ type: 'response.created', response: { id: 'resp_1', output: [] } });
+  wrapped({ type: 'response.output_item.done', item: { type: 'function_call', call_id: 'c1', name: 'book_list', arguments: '{}' } });
+  wrapped({ type: 'response.completed', response: { id: 'resp_1', output: [] } });
+
+  const hangup = fixture.controller.hangup();
+  await flush();
+  // The request is queued, but resuming now would be rejected for c1.
+  expect(channel.typesSent()).toEqual(['response.item.create']);
+
+  gate.resolve();
+  await flush();
+  expect(channel.typesSent()).toEqual(['response.item.create', 'response.item.create', 'response.create']);
+
+  await fixture.clock.advance(MINUTES_ON_HANGUP_MS);
+  channel.deliver({ type: 'session.closed', reason: 'close_requested', usage: { seconds: 20 } });
+  await hangup;
 });
 
 test('duplicate end_call events keep the first minutes and close only once', async () => {
@@ -900,7 +998,7 @@ test('an ending that is not a hangup closes immediately, without asking for minu
   fixture.track.onmute();
   await fixture.clock.advance(MIC_GRACE_MS);
   expect(channel.typesSent()).toContain('session.close');
-  expect(channel.typesSent()).not.toContain('session.instructions.append');
+  expect(channel.typesSent()).not.toContain('response.item.create');
 });
 
 // Finding 5.
