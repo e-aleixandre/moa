@@ -19,11 +19,11 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Queue commands and messages while the agent is working (strict send order)
 - Per-session cost readout (main run + subagents)
 - Account plan-usage panel when a supported subscription OAuth login is active
-- Rename (`/rename <title>`) and delete sessions from the overview
-- Group the mobile drawer and desktop session spine by recency or folder; the choice is saved locally
+- Rename (`/rename <title>`), save for later and delete sessions from the [session panel](#session-panel)
+- A [session list](#session-list) ordered by recency or grouped by project; the choice is saved locally
 - Unread result badges on sessions whose successful run finished while you were
-  away; they are held only in Moa's process memory and appear first under **New
-  results** in the mobile drawer. Selecting a session marks the result read
+  away; they are held only in Moa's process memory and rise into **Needs
+  attention** in the session list. Selecting a session marks the result read
   after its authoritative transcript snapshot arrives while the tab is in the
   foreground. When that completed unread result is opened, the transcript starts
   at the last reply's reading position rather than jumping to its tail; live
@@ -34,10 +34,13 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - [Artifacts](#files-sent-by-the-agent): reopen files delivered by the agent without searching the conversation
 - Multi-pane tiled layouts
 - Keyboard-first navigation
-- Voice input
+- [Voice input](#voice-input), and [live calls](#talk-live) with a voice delegate that hands back minutes
+- Session IDs the agent writes in its replies become chips that open that session
+- Share a file from another app into a conversation (installed web app)
 - Stage short-lived secrets for the agent without putting their values in chat
-- Pair a Pulse device by scanning a **QR code** (or manual code), created from the top bar (`POST /api/pulse/pairings`)
-- **Version indicator** in the top bar that links to the latest release when an update is available
+- [Project owners](./owners.md): a standing agent per codebase, shown at the top of the session list
+- Pair a Pulse device by scanning a **QR code** (or manual code) from **Settings → Devices → Pair a device…** or the palette's **Pair Pulse…** (`POST /api/pulse/pairings`)
+- **Version indicator** in the session list's foot that links to the latest release when an update is available
 
 ## Live Preview
 
@@ -63,16 +66,26 @@ own URL (stored in the browser, per session).
 - **In a pane grid** — each pane has its own preview button and its own preview,
   so two sessions can watch two different apps side by side.
 
-The first time, the panel asks for the URL of your development server
-(`http://localhost:5173`, or just `localhost:5173` — a bare `host:port` typed on
-a phone keyboard is accepted and prefixed with `http://`). After that the URL
-row is gone: changing it is a rare action and lives in the `⋮` menu of the
-panel, next to **Reload**.
+The first time, the panel asks you to **Open your app**: type the URL of your
+development server (`http://localhost:5173`, or just `localhost:5173` — a bare
+`host:port` typed on a phone keyboard is accepted and prefixed with `http://`).
+Addresses you already previewed in other sessions are offered below the field,
+so on a phone you can tap one instead of typing it. To change the URL later,
+click the address in the preview's header on desktop, or pick it from the
+dock's `⋯` menu on a phone.
 
 ### Looking at the app
 
-The bar above the app carries four viewport widths — **390**, **768**, **1280**
-and **Fit**. The first three render the app at that CSS width and scale it down
+Four viewport widths are offered — **Phone · 390px**, **Tablet · 768px**,
+**Desktop · 1280px** and **Fit to pane**. On desktop they sit in the preview's
+header row, next to **Back**, the address, **Reload**, **Inspect** and close.
+On a phone the app takes the whole screen once it loads, and every control
+lives in a floating **dock**: close, back, a `⋯` menu (address, **Reload**, the
+four widths), **Inspect** and **Write to Moa**. Drag the dock by its grip to
+any edge, or tap the grip to send it to the other side; it remembers where you
+left it on that device.
+
+The first three widths render the app at that CSS width and scale it down
 to whatever room the panel has, which is how you check a phone layout from a
 desktop pane, or a desktop layout from a phone. **Fit** simply gives the app the
 panel's own size.
@@ -97,10 +110,13 @@ not expire: a run parked on a question or a permission stays until you answer
 it. Tapping a prose card opens the full message; **Go to chat** closes the
 preview and returns to the transcript.
 
-Use **←** beside the preview menu to go back after following a link. If the
+Use **←** (Back in preview) to go back after following a link. If the
 browser blocks native history traversal for security reasons, the same click
 reloads the URL you originally configured instead. This reload can discard
-temporary app state. On browsers without the Navigation API, use **⋮ → Reload**.
+temporary app state. On browsers without the Navigation API, use **Reload**.
+
+To write to the agent without leaving the app, use **Write to Moa**: the
+conversation's own composer opens over the preview.
 
 If an external page cannot load or no longer connects to Moa, choose **Return
 to app** to reload the configured URL. Live Preview does not bypass external
@@ -111,18 +127,19 @@ websites' framing restrictions.
 <p align="center">
   <img
     src="./assets/serve-live-preview-inspect.png"
-    alt="Live Preview on a phone with Inspect on: a button in the previewed app is highlighted and a popover asks what should change"
+    alt="Live Preview on a phone with Inspect on: a button in the previewed app is highlighted and the composer opens with it as the reference"
     width="320"
   />
   <br/>
   <em>Inspect mode: tap an element in your app and write (or dictate) what should change.</em>
 </p>
 
-**Inspect** is the reason the panel exists. Turn it on in the bar and tap any
-element of your app: it is outlined, and a popover opens next to it with the
-element's short selector, its visible text, and a box for your comment. You can
-type it, or hold the microphone and dictate it — the same voice input the
-composer uses (hold to talk, slide up to lock).
+**Inspect** is the reason the panel exists. Turn it on and tap (or click) any
+element of your app: it is outlined, and the composer opens over the app with
+that element named in its head. Type what should change, or tap the microphone
+and dictate it — the same [voice input](#voice-input) the conversation uses.
+On desktop, **Done** in the hint ends Inspect; on a phone, tap **Inspect** in
+the dock again.
 
 **Send** posts an ordinary user message into the conversation. The agent
 receives your comment plus an unambiguous handle on the element:
@@ -157,8 +174,9 @@ Moa by `postMessage` only. There are two ways to get it there:
   Copy `pkg/serve/frontend/src/components/LivePreview/inspector.js` into it and
   load it with `<script src="/inspector.js" data-moa-origin="<your moa origin>">`.
 
-Without the script the preview still shows and reloads your app, but a notice
-appears: tap-to-inspect and touch gestures are unavailable until it is there.
+Without the script the preview still shows and reloads your app, but the panel
+says **Inspect isn’t available on this page**; tap-to-inspect and touch
+gestures stay unavailable until the script is there.
 
 ### The Live Preview proxy
 
@@ -205,9 +223,11 @@ What the proxy does to the traffic:
   and `<meta>`) so the page can be framed, and replaces it with one allowing
   only Moa's origin as a frame ancestor.
 - Rewrites the dev server's origin to the public URL in HTML, CSS, JavaScript
-  and JSON bodies up to 8 MB, and in `Location`, `Refresh` and `Link` headers.
+  and JSON bodies of any size, and in `Location`, `Refresh` and `Link` headers.
 - Namespaces the previewed app's cookies per target and clears them when you
   switch target, so two apps previewed in turn never see each other's state.
+- Refuses service worker scripts and unregisters any the page already has, so
+  a worker cannot outlive the preview or intercept a later target.
 - Refuses a redirect that leaves the validated target.
 
 Only one target is active at a time, across all browsers and paired devices.
@@ -286,33 +306,92 @@ row.
 | `⌘K` / `Ctrl+K` | Open session palette |
 | `⌘G` / `Ctrl+G` | Open the pane grid (desktop) |
 | `⌘1..9` / `Alt+1..9` | Focus pane by number |
-| `⌘.` / `Alt+.` | Toggle voice input |
-| `Esc` | Close palette / go back |
-| `[` / `]` | Cycle sibling subagents while viewing one |
+| `⌘.` / `Alt+.` | Start or stop dictation in the focused composer |
+| `Alt+↑` | Bring the whole message queue back to the composer |
+| `←` / `→` | Previous / next file in the artifact reader |
+| `Esc` | Close palette / go back; in the composer, stop the run (or discard a recording) |
 
 On non-Mac platforms the labels show `Alt` instead of `⌘`; the palette and grid
 chords also accept `Ctrl`.
 
 ## Session palette
 
-The session palette (`⌘K`) lets you search sessions, jump to open ones, resume saved sessions, or create new ones with a chosen project path.
+The session palette (`⌘K`, or the search button at the top of the session list) lets you search sessions, jump to open ones, resume saved sessions, or create new ones with a chosen project path. It also carries actions such as **Go to grid** and **Pair Pulse…**.
+
+## Session list
+
+On desktop the session list is the left column; on a phone it is a drawer you
+open with the sessions button in the header or by dragging from the left edge
+of the screen. The
+head holds search (`⌘K`), **+** for a new session, and the two orders:
+
+- **Recent** — **Owners** first, then **Needs attention** (a permission or
+  question waiting, an error, or an unread result), **Active** and **Saved**.
+  Owners, Active and Saved fold with their heading; Needs attention never does.
+- **By project** — one group per project, its owner as the first row. A
+  folded group still shows its most urgent state.
+
+Each row says why a session wants you in words, not only in colour. Use a row's
+menu to close or reopen it, copy its ID, or delete it. The foot holds the
+[inbox](#event-inbox), the version and **Settings** (compaction, notification
+sound and push, subagent models, paired devices).
+
+On a phone, every panel opens as a bottom sheet: swipe it down from anywhere on
+its surface, or tap the scrim, to dismiss it. A step opened from inside a sheet
+opens as a page of that same sheet, with a back button, rather than a second
+sheet on top.
+
+## Session panel
+
+Click the conversation's title (tap it on a phone) to open its panel: the name,
+which you can edit in place, the folder, and rows for **Usage**, **MCP** and
+**Artifacts**. At its foot:
+
+- **Detach from ‹owner›** / **Reattach to ‹owner›** — only on a session you
+  opened in a project that has an [owner](./owners.md). A detached session
+  sends that owner no reports and is out of its reach; the choice survives a
+  restart.
+- **Save for later** — stops the agent; **Reopen session** picks it up again.
+- **Delete session…** — click twice to confirm.
+
+The status line under the composer opens the same places directly: the model
+and thinking picker, the permission mode, MCP, and the context and cost gauge
+(→ Usage).
+
+## Model and thinking
+
+Open the model from the status line. The picker names the model you are on,
+then shows **Pinned** models, **All models** grouped by provider, the
+**Thinking** levels the current model accepts, and **Fast** where it is
+supported. To change your pinned models, tap **Edit** on the Pinned heading and
+tap models to pin or unpin them (inside a provider's page too); tap **Done**
+when you are finished. Pins are saved in your global preferences.
 
 ## Panes
 
-On desktop, you can split panes horizontally or vertically, switch focus by keyboard, and apply layout presets from the top bar.
+On desktop, you can split panes horizontally or vertically, switch focus by keyboard, and apply layout presets from the grid toolbar.
+
+## Reading the transcript
+
+- A compaction and a finished wave of subagents fold to one line; tap it to
+  open the details.
+- When Moa frees context by trimming old tool output instead of compacting, a
+  thin line says how much it freed.
+- A session ID written by the agent becomes a chip showing that session's name
+  and state; tap it to open the session.
 
 ## Voice input
 
-Requires `moa --login openai-transcribe`. Browser microphone access usually needs HTTPS, so it works best on localhost, Tailscale, or behind your own HTTPS setup.
+Requires `moa --login openai-transcribe`. Browser microphone access usually needs HTTPS, so it works best on localhost or behind your own HTTPS setup.
 
-Hold the send button to record, release to transcribe, or slide up while
-holding to keep recording hands-free. This also works when text or attachments
-are already present: a short tap sends them, while a hold appends the
-transcript at the cursor. `⌘.` / `Alt+.` also starts and stops a hands-free
-recording.
+Tap the microphone (**Dictate**) to record and tap it again to stop; the
+transcript lands at the cursor, so you can dictate, fix a word and dictate
+more. `Esc` discards a recording. `⌘.` / `Alt+.` does the same as a tap.
+Dictation also works when steering a subagent.
 
-Agent questions (`ask_user`) take dictation the same way: hold their answer
-button, or use the shortcut while the question is on screen. Speech is appended
+Agent questions (`ask_user`) take dictation the same way: with the free answer
+empty, its button is a microphone; or use the shortcut while the question is on
+screen. Speech is appended
 to whatever the answer already contains, so a long reply can be dictated in
 several passes; dictating over a chosen option replaces it.
 
@@ -320,21 +399,43 @@ If it keeps mangling a name or a piece of jargon, add that word to
 [`stt_vocabulary`](configuration.md#features). The model and the language hint
 are configurable there too.
 
+### Talk live
+
+When Moa has a plain OpenAI API key (the `openai-transcribe` credential, or an
+API-key `OPENAI_API_KEY` / `openai` credential — never OpenAI OAuth), the
+composer shows a phone button, **Talk live**. It hands the conversation in front
+of you to a voice delegate you talk to:
+
+- The delegate gets this conversation as its brief, can read the project
+  owner's book, and can ask this session up to five questions during the call.
+  It cannot write to other sessions, create sessions or approve permissions.
+- While the call runs, one line shows its state, time, voice cost so far and
+  questions used. If the delegate is waiting on this session, the line says so;
+  answer it in the composer.
+- Hang up with **End call**. The minutes land in the composer as a draft —
+  nothing is sent until you send it. If the call drops, you still get the
+  minutes, or the raw transcript.
+- The questions and answers stay in the transcript as one call block.
+
+The cost shown counts voice time only; the model behind the delegate is billed
+separately and is not included.
+
 ## Attachments
 
-The composer accepts file attachments (paperclip icon, drag-and-drop, or paste). How each file is handled depends on its type:
+Attach files from the composer's **+** menu (**Attach files**) or by pasting an image. With Moa installed as a web app, you can also share a file from another app: Moa asks which conversation it belongs to and puts it in that composer, unsent. How each file is handled depends on its type:
 
 - **Images** (`jpeg/png/gif/webp`) are sent to the model natively as vision input. Large photos are downscaled in the browser before upload. The server validates the file's magic bytes against the declared type — a binary mislabeled as an image is saved to disk instead of being forwarded to the provider.
 - **PDFs** are sent to the model natively as a `document` block **when the active provider supports it AND the bytes are actually a PDF** (`%PDF-` magic; Anthropic always supports documents, OpenAI on the API-key path). xAI Grok currently supports images but not native document/PDF input in Moa. If the active provider does not support native documents — the PDF exceeds the size limit, or the content isn't a real PDF — it is saved to disk as a fallback (see below) and the agent is told where to find it. Because Moa is provider-agnostic and you can switch models mid-conversation, this decision is made per message against whichever provider is active at send time; a `document` already in the history is degraded to a text note if you later switch to a provider that can't accept it.
 - **Small UTF-8 text** (≤256 KiB: `.txt/.md/.csv/.json`, source code, etc.) is inlined directly into the message, wrapped in an `<attachment>` marker.
 - **Everything else** (`.xlsx/.docx/.zip`, binaries, and text larger than 256 KiB) is **saved to disk** under `/tmp/moa-<uid>/<session-id>/`, and that directory is added to the session's path allowlist so the agent can process the file with its own tools (`bash`, `read`, etc.). Moa itself does not parse Office/archive formats — the agent decides how, on demand.
 
-In the conversation history, images render as thumbnails you can open full-size, and every other attachment renders as a chip that downloads the stored file.
+In the conversation history, attachments are listed at the foot of your message: image rows open full-size, and every other row downloads the stored file.
 
 ### Files sent by the agent
 
-Ask the agent to send a file, then open its card or choose **Artifacts** from the
-conversation's actions to find it again. Every file delivered through `send_file`
+Ask the agent to send a file, then open its card, or use the **Artifacts** button
+in the conversation header (or the Artifacts row of the session panel) to find it
+again. Every file delivered through `send_file`
 appears in that conversation's collection; creating or editing a file alone does
 not add it. Search the collection by title or filename.
 
@@ -344,6 +445,10 @@ pane's collection switches its contents; merely changing pane focus does not. On
 mobile, tap **+** in the composer and pick **Artifacts**; the reader fills the
 screen. Use Back to return and Share to download the file or open the OS share
 sheet where supported.
+
+The reader shows the file's position in the collection (`2 of 5`). Move to the
+previous or next file with the arrows beside its name, the `←` / `→` keys, or a
+sideways swipe on a phone.
 
 Markdown, text and images can be read in the viewer. HTML supports interactive
 reports inside a sandboxed iframe, without access to Moa's DOM, cookies or storage.
@@ -428,14 +533,14 @@ value there, rotate that credential.
 
 You don't have to wait for a run to finish before lining up your next move. What you type while the agent is working is handled in **strict send order** — the order you sent things is the order the agent sees them.
 
-- **Messages** typed mid-run are *steered* onto a queue and delivered to the agent between steps of the current run (or, if they arrive after the run ends, they start the next one). If the agent is blocked in `bash_wait` or `subagent_wait`, a message wakes that wait immediately while its background job continues. They show up as a **queued** chip above the composer.
+- **Messages** typed mid-run are *steered* onto a queue and delivered to the agent between steps of the current run (or, if they arrive after the run ends, they start the next one). If the agent is blocked in `bash_wait` or `subagent_wait`, a message wakes that wait immediately while its background job continues. They show up at the end of the transcript as one line — `N queued · read at the next step` — with a short trace of each message.
 - **Slash commands** typed mid-run are classified by what they do:
-  - **Queued** (`/compact`, `/prepare-compact`, `/clear`, `/model`, `/thinking`, `/verify`, `/reload`, `/goal <objective>`) — these rewrite or reconfigure the conversation, so they can't run in the middle of a live turn. They wait in the queue as a **command** chip and run at the next idle point, in order relative to your messages. So `message → /compact → message` compacts *after* the first message lands and *before* the second.
+  - **Queued** (`/compact`, `/prepare-compact`, `/clear`, `/model`, `/thinking`, `/verify`, `/reload`, `/goal <objective>`) — these rewrite or reconfigure the conversation, so they can't run in the middle of a live turn. They wait in the queue (their trace shows the command) and run at the next idle point, in order relative to your messages. So `message → /compact → message` compacts *after* the first message lands and *before* the second.
   - **Instant** (`/rename`, `/permissions`, `/path`, `/tasks`, `/schedule`, `/goal status`, `/goal stop`) — these only touch side state, so they run immediately without waiting.
   - **Rejected** (`/handoff`, `/undo`, `/branch`, `/back`, `/plan`) — these only make sense against a settled conversation and are rejected while the agent is working (the `reject` queue policy); stop the run first. `/handoff` also requires an empty message queue so its generated brief cannot omit queued context.
-- **Attachments** can be added to a mid-run message too (the paperclip is no longer disabled while a run is in flight); the image/file rides along with the steered message.
-- **Editing the queue**: click the queued chip (or `Alt+↑`) to pull everything back into the composer for editing — this cancels the not-yet-delivered items so you don't get both the originals and your edit. Queued images can't be pulled back (only their count is tracked client-side), so re-attach them if needed.
-- **Stopping**: pressing Stop/`Esc` while a run is in flight dumps whatever was queued back into the composer, so nothing you lined up is silently lost.
+- **Attachments** can be added to a mid-run message too (**Attach files** stays available while a run is in flight); the image/file rides along with the steered message.
+- **Editing the queue**: press the queued line (or `Alt+↑`) to bring the whole queue back into the composer, in order — this cancels the not-yet-delivered items so you don't get both the originals and your edit. Individual items can't be edited in place. Queued images can't be brought back, so re-attach them if needed.
+- **Stopping**: press **Stop** in the live bar (tap it twice to confirm) or `Esc` in the composer. Whatever was still queued comes back into the composer, so nothing you lined up is silently lost.
 
 `/clear` while a run is queued behind it starts a fresh conversation but keeps the items queued after it — they belong to the new conversation.
 
@@ -530,15 +635,25 @@ changed in each session, and does nothing at all when the files are unchanged.
 
 ## MCP servers
 
-A session lists its configured [MCP servers](configuration.md#mcp-servers) in
-the MCP panel, with each server's state, tool count and error, and buttons to
-enable, disable or restart it.
+A session lists its configured [MCP servers](configuration.md#mcp-servers) on
+the MCP page of its [session panel](#session-panel) (also reachable from the
+status line), with each server's state, tool count and error, a switch to
+enable or disable it, and **Restart**.
+
+A remote server that needs sign-in shows **Connect** (**Reconnect** once a
+sign-in has expired). Sign in on the page that opens; it ends on an address
+that does not load — paste that address into the panel. **Sign out** forgets
+the server's token. See [MCP servers](configuration.md#mcp-servers) for what is
+supported.
 
 Opening a session does **not** wait for the MCP handshake: servers connect in
 the background (in parallel, with a 15-second start timeout each), so one slow
 server — Playwright spawning Chromium, for example — cannot delay reopening a
 saved session. Consequences worth knowing:
 
+- The first message of a new conversation waits up to 16 seconds for servers
+  still connecting, so its first turn already has their tools. A server that
+  fails or is still slow does not hold the turn beyond that.
 - A server's tools appear once its handshake finishes. If that lands mid-turn,
   registration is deferred to the next idle point, so the tool set never changes
   underneath a running request — the tools arrive for the following turn.
@@ -586,7 +701,7 @@ The route has the same Host, CSRF,
 TLS/loopback, revocation, concurrency, and rate-limit protections as other
 paired-device operations.
 
-An emparejado Pulse device represents the owner on Serve's **generic API**:
+A paired Pulse device represents the owner on Serve's **generic API**:
 it can read sessions, conversations and activity and use the same generic
 actions as the web client. This is deliberate: Pulse is a client of Moa, not a
 separate restricted product surface. The exceptions are pairing administration:
@@ -685,18 +800,20 @@ By default an event is sent straight to a live session in the target project,
 so the work continues without you opening moa. When routing cannot pick one
 session (none, several, a missing/errored target, a busy session with autorun
 off, or a rate-limited source), the event waits in the **Inbox** — its own
-surface, not a group inside the session list. Its door is the inbox button in
-the session list (the spine's header on desktop, the session drawer on mobile);
-on a phone the count also rides on the title chip, so waiting events are visible
+surface, not a group inside the session list. Its door is the **Inbox** button
+in the session list's foot, which appears once any event has arrived; on a
+phone the count also rides on the title chip, so waiting events are visible
 without opening the drawer. Each waiting row says **why** it is there, and opens
 its payload on the same code surface the transcript uses, so you can read what
 actually arrived before deciding:
 
-- **Send to ‹session›** — inject it into a live session of that project. The
+- **Send it to** — pick a live session of that project to inject it into. The
   sessions offered are exactly the ones the server will accept.
 - **New session** — open a session in that project and inject it there, using
-  the source's configured model and thinking unless you override it.
-- **Dismiss** — drop it. Nothing is sent anywhere.
+  the source's configured model and thinking unless you change them with
+  **Change…**.
+- **Ignore** — drop it. Nothing is sent anywhere. **Ignore all from ‹source›**
+  drops every waiting event from the same source.
 
 Choosing a destination starts a turn on it: placing an event by hand *is* the
 instruction to act on it, whatever the source's unattended `autorun` setting
@@ -742,6 +859,11 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |
 | `GET /api/preview/target` · `PUT /api/preview/target` | Whether the [Live Preview proxy](#the-live-preview-proxy) is listening right now, at what address, and which dev server it points at. `PUT` with a `url` starts the listener and points it; `PUT {"enabled": false}` shuts it down |
 | `GET /api/events` · `POST /api/events/{id}/route` · `.../dismiss` · `POST /api/events/dismiss` | The [event inbox](#event-inbox): history, sending or dropping one, or dismissing a source |
+| `POST /api/sessions/{id}/steers/cancel` | Cancel every queued, not-yet-delivered message; with the header `X-Moa-Steers-Cancel-Response: discarded` the reply lists exactly what was discarded |
+| `POST /api/sessions/{id}/mcp/{server}/oauth/start` · `.../oauth/finish` · `.../oauth/signout` | Sign a session's remote MCP server in or out |
+| `POST /api/sessions/{id}/owner` | Detach a session from its project owner (`{"detached": true}`) or reattach it |
+| `/api/owners/...` | [Project owners](./owners.md#api) and their books |
+| `POST /api/voice/live/session` · `.../heartbeat` · `.../close` · `GET`/`POST .../ask` | A [live call](#talk-live): start it, keep it alive, end it, and relay the delegate's questions to the session |
 
 The web transcript initially opens on the recent conversation and automatically
 loads older history as you scroll upwards. Each older page is prepended while
@@ -765,7 +887,7 @@ is not in the binary. It is a separate frontend:
 
 ```bash
 cd pkg/serve/frontend && npm run catalog
-# http://127.0.0.1:7300/?view=desktop  — also binds Tailscale
+# http://127.0.0.1:7300/?view=desktop  — listens on all interfaces
 ```
 
 A change to ChatHead or the status strip shows up there on reload because the

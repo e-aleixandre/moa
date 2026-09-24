@@ -192,12 +192,14 @@ overflow stays in the inbox and a single push says the source is rate-limited.
 
 **When it waits, it says why.** An event left in the inbox records a
 `pending_reason` — `inbox`, `no_session`, `many_sessions`, `session_unavailable`,
-`session_busy` or `rate_limited` — so the row explains itself instead of leaving
-you to guess whether the project had no session or too many. Those are stable
-API tokens; the web client turns them into readable copy.
+`session_busy`, `rate_limited` or `owner_unavailable` — so the row explains
+itself instead of leaving you to guess whether the project had no session or
+too many. Those are stable API tokens; the web client turns them into readable
+copy.
 
-**Deciding by hand** is the owner's job: `GET /api/events`,
-`POST /api/events/{id}/route` (`{session_id}` or `{new:true, model, thinking}`),
+**Deciding by hand** is yours: `GET /api/events`,
+`POST /api/events/{id}/route` (`{session_id}`, `{owner_id}` or
+`{new:true, model, thinking}`),
 `POST /api/events/{id}/dismiss`, and `POST /api/events/dismiss` (`{source}`) sit
 on ordinary browser authentication. `model` and `thinking` are optional
 overrides: a session created from an event otherwise uses the source's own
@@ -206,7 +208,9 @@ overrides: a session created from an event otherwise uses the source's own
 Routing by hand **always starts a turn**, whatever the source's `autorun` says:
 choosing a destination for an event is itself the instruction to act on it, and
 `autorun` governs unattended delivery only. Only an event still in state `new`
-can be routed or dismissed; one already settled answers `409`. Delivery claims
+can be routed or dismissed; one already settled answers `409`. A project
+owner's conversation is reached with `owner_id`, never with `session_id`: that
+answers `409` and leaves the event in the inbox. Delivery claims
 the event (`new` → `routing`) before sending, so two concurrent decisions cannot
 deliver it twice.
 
@@ -215,32 +219,35 @@ The Inbox keeps settled events as read-only details: an ignored event says
 whose destination session is no longer available says so alongside its source,
 arrival time and payload. Only events still in state `new` can be routed again.
 
-**Exposing the path.** Serve itself stays on the tailnet. To let a provider
-reach only `/hooks`, put Tailscale Funnel on a second port that mounts that
-prefix:
+**Exposing the path.** Keep Serve itself private and expose only `/hooks` to
+the provider. With Tailscale Funnel, for example, mount just that prefix on a
+second port:
 
 ```bash
 tailscale funnel --bg --https=8443 --set-path=/hooks http://127.0.0.1:<port>/hooks
 ```
 
-**A mail reply as an event.** The AgentMail wrapper blocks on one thread, so a
-skill that waits for a reply keeps a session occupied. Launch a detached watcher
-instead and end the turn; when the reply arrives it posts the hook:
+**A mail reply as an event.** Skip polling: point the provider's own webhook at
+the hook URL and let it wake moa when the reply lands, no session held open and
+no watcher to keep alive. [AgentMail](https://docs.agentmail.to/webhook-setup),
+used here as an example, delivers a `message.received`
+[webhook](https://docs.agentmail.to/api-reference/webhooks/events/message-received)
+for every inbound message; any other provider with webhooks works the same way.
+Register the hook URL from `moa hooks add` (`/hooks/<source>/<secret>`, see
+above) as the webhook endpoint for `message.received`.
 
-```bash
-setsid nohup sh -c '
-  id=$(moa-agentmail wait-reply --from "$ALIAS" --thread-id "$THREAD" \
-        --after "$SENT_AT" --timeout 86400 --interval 60) || exit 0
-  body=$(moa-agentmail get "$id")
-  curl -sS -X POST "$MOA_HOOK_URL" \
-    -H "Content-Type: application/json" \
-    --data "$(jq -n --arg b "$body" --arg s "$SUBJECT" --arg k "$id" \
-      '"'"'{title:("Re: "+$s),body:$b,id:$k}'"'"')"
-' >/dev/null 2>&1 &
-```
+AgentMail's payload nests the subject and body under `message` (`{"type":
+"event", "event_type": "message.received", "message": {"subject": …, "text":
+…, …}}`), not at the top level, so moa's title lookup (`title`, `subject`,
+`summary`, `event`, `message`) won't find it there: the event lands with the
+default title `<source> event`, and `message.subject` / `message.text` stay
+readable inside the pretty-printed body. If the provider lets you shape the
+outgoing payload, put `subject` at the top level; otherwise leave it, the reply
+is still delivered in full.
 
-Known limit: restarting the machine kills the watcher, and the thread has to be
-watched again by hand.
+AgentMail signs each request with [Svix headers](https://docs.agentmail.to/webhook-verification)
+(`svix-id`, `svix-timestamp`, `svix-signature`); moa's own hook secret already
+authenticates the URL, so no extra verification is required on this end.
 
 ## Idempotency
 
@@ -455,7 +462,10 @@ to stay behind a person, do not relay permission requests: relay only
 A run can carry its own tools. Pass `mcp_servers` and Moa connects the session to
 those [MCP](configuration.md#mcp-servers) endpoints for the life of the session,
 alongside whatever is configured locally. The agent sees them as ordinary tools,
-and they show up in the session's MCP panel like any other server.
+and they show up in the session's MCP panel like any other server. The run's
+first turn waits up to 16 seconds for its MCP servers to finish connecting, so
+their tools are there from the first request; a server still connecting after
+that joins mid-run.
 
 ```json
 {

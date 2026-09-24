@@ -68,11 +68,11 @@ finished, and what needs you.
 <p align="center">
   <img
     src="docs/assets/readme-grid-live-dock.png"
-    alt="Moa multi-session grid with telemetry and the Live Dock showing delegated agents"
+    alt="Moa multi-session grid with telemetry and a live bar showing delegated agents"
     width="1050"
   />
   <br/>
-  <em>Parallel sessions with live telemetry and delegated work visible in the Live Dock.</em>
+  <em>Parallel sessions with live telemetry and delegated work visible in the live bar.</em>
 </p>
 
 ## Look at the app, not only at the diff
@@ -90,17 +90,18 @@ handle on the element you meant, page and selector included.
 <p align="center">
   <img
     src="docs/assets/serve-live-preview-inspect.png"
-    alt="Live Preview on a phone: a button in the previewed app is highlighted and a popover asks what should change"
+    alt="Live Preview on a phone: a button in the previewed app is highlighted and the composer opens with it as the reference"
     width="320"
   />
   <br/>
   <em>Point at the button, say what is wrong with it. The agent gets the element, not a description of it.</em>
 </p>
 
-Optionally, `moa serve --preview-port …` proxies your dev server so
-the inspector is injected without touching your project. It is for **your own development
-servers**: the previewed app runs at the proxy's origin, and only loopback, private and
-tailnet addresses are accepted. See the [Live Preview guide](docs/serve.md#live-preview).
+When you load a URL in the panel, Moa starts a proxy that injects the inspector, so your
+project needs no changes and Moa needs no restart; `moa serve --preview-port …` only
+presets its port. It is for **your own development servers**: the previewed app runs at
+the proxy's origin, and only loopback, private and tailnet addresses are accepted. See the
+[Live Preview guide](docs/serve.md#live-preview).
 
 ## Why self-host the agent?
 
@@ -131,8 +132,9 @@ policies and use Moa's permission and path controls for the level of access you 
 - **Exchange real artifacts.** Attach images, PDFs, source files, and other inputs; the agent
   can return downloadable files as [Artifacts](docs/serve.md#files-sent-by-the-agent), rich
   Markdown, images, and sandboxed HTML previews.
-- **Bring your own workflow.** Add MCP servers, custom script tools, verification commands,
-  reusable skills, and project instructions through `AGENTS.md`.
+- **Bring your own workflow.** Add MCP servers (remote ones can sign in with OAuth), custom
+  script tools, verification commands, reusable skills, and project instructions through
+  `AGENTS.md`.
 
 <p align="center">
   <img
@@ -264,7 +266,9 @@ the same markdown that lives in `docs/` here, so either place works:
 | [Configuration](docs/configuration.md) | Config files, permissions, sandboxing, models, and MCP |
 | [Tools](docs/tools.md) | Built-in tools, custom tools, subagents, and verification |
 | [Automation](docs/automation.md) | Inbound HTTP API for webhooks, cron and CI, with callbacks |
+| [Project owners](docs/owners.md) | A standing agent per codebase that keeps its book and directs its sessions |
 | [Pulse](docs/pulse.md) | The iOS voice companion and the Serve contract behind it |
+| [Recipe: Linear](docs/recipes/linear.md) | Assign a Linear issue to Moa and get the result back as a comment |
 | [Architecture](docs/architecture.md) | Package map, event bus, and runtime design |
 | [Releases](docs/releases.md) | Versioning, release process, and update checks |
 

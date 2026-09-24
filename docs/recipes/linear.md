@@ -134,7 +134,9 @@ headers are stored in the session file).
 The recipe above only needs the relay to touch Linear. If you want the *agent*
 to interact with Linear itself mid-run (read linked issues, update estimates),
 add a Linear MCP server to the project's MCP config — that's the outbound
-direction, and it needs nothing from this API.
+direction, and it needs nothing from this API. If the server asks you to sign
+in, connect it once from a session's MCP panel; see
+[MCP servers](../configuration.md#mcp-servers).
 
 The same shape works for GitHub Issues, Jira, a cron job or an email hook:
 swap step 1 and the two vendor calls in the relay.

@@ -87,7 +87,7 @@ switched off for a project — is kept separately, in
 | `compact_model` | string | `session` | Model that writes compaction summaries. `session` (or unset) = the session's own model, which is how compaction has always behaved. Any model spec (`terra`, `sonnet`…) makes that model summarize instead. The summarizer request shares no cached prefix with the conversation. The chosen model needs its provider's credentials; when they are missing the session's model summarizes instead and the transcript says so. Editable from the web Settings sheet |
 | `trim_disabled` | bool | `false` | Turn off the tool-result elision that runs *before* a compaction. On by default: when context crosses the threshold, older tool outputs are replaced by short placeholders that name what was elided, and the conversation continues without a summary; only when that no longer frees enough does the summarizer run. The transcript keeps the original outputs — the elision applies to what the model is sent. Set `true` to go straight to compaction as before |
 | `update_check` | bool | `true` | Check GitHub for a newer stable Moa release (six-hour ETag cache); set `false` to opt out |
-| `events` | object | absent | Wake-on-event sources (`events.sources.<name>`). Each source is a webhook with its own `secret`, a `target` (`{project:dir}`, `{session:id}`, or `"inbox"`), `when_none` (`inbox`/`create`), `when_many` (`inbox`/`latest`), `create` (`model`, `thinking`, `yolo`, `title`), `autorun` (default false; set true to start a turn), and `rate` (auto-deliveries and session creations per rolling hour, default 10). **Global-only** — secrets live in `~/.config/moa/config.json`. See [Event hooks](./automation.md#event-hooks) and `moa hooks` |
+| `events` | object | absent | Wake-on-event sources (`events.sources.<name>`). Each source is a webhook with its own `secret`, a `target` (`{project:dir}`, `{session:id}`, `{owner:id\|name}`, or `"inbox"`), `when_none` (`inbox`/`create`), `when_many` (`inbox`/`latest`), `create` (`model`, `thinking`, `yolo`, `title`), `autorun` (default false; set true to start a turn), and `rate` (auto-deliveries and session creations per rolling hour, default 10). **Global-only** — secrets live in `~/.config/moa/config.json`. See [Event hooks](./automation.md#event-hooks) and `moa hooks` |
 | `preview` | object | absent | The [Live Preview proxy](./serve.md#the-live-preview-proxy) listener `port` is remembered after activation. The web UI derives the public address separately for each browser; old configs may still contain `public_url` as an API fallback. Running state is in memory, so restarting `moa serve` never reopens the port. **Global-only** — a repository must not be able to tell Moa where to publish a proxy |
 
 Start `stt_vocabulary` empty and add words only once you catch the transcriber
@@ -113,7 +113,7 @@ global config and a project's jargon in its `.moa/config.json`:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `pinned_models` | []string | Models shown as shortcuts in the web selector. **Global-only.** |
+| `pinned_models` | []string | Models shown as shortcuts in the web selector. Pinning or unpinning a model there updates this list. **Global-only.** |
 | `auto_title_model` | string | Model for automatic session titles: `auto` (default), `off`, or a valid model spec/alias. After a new conversation accepts its first prompt, Auto sends that prompt to the selected available auxiliary provider; it does not retitle conversations restored with history. If the process stops while generation is in flight, the provisional title remains after restart. OpenAI Luna is selected when normal OpenAI completion credentials exist, otherwise Anthropic Haiku. Thus an Anthropic/xAI session can be sent to OpenAI, or an OpenAI/xAI session to Anthropic when Haiku is the fallback. Privacy-sensitive users should choose an explicit same-provider model or `off`. |
 | `session_brief_model` | string | Model for web/Pulse session status briefs: `auto` (default), `off`, or a valid model spec/alias. Auto has the same cross-provider behavior as titles: a snippet of any session transcript can be sent to Luna, or to Haiku when it is the available fallback. Choose an explicit same-provider model or `off` when that is not acceptable. |
 
@@ -185,7 +185,9 @@ opens; it ends on a `127.0.0.1` address that does not load — paste that addres
 into the panel. Tokens are kept in `mcp-oauth.json` in the config directory
 (mode `0600`), shared by every session, and renewed automatically. Once signed
 in, the OAuth token replaces any static `Authorization` header for that server.
-Servers that require a pre-registered OAuth client are not supported.
+Servers that require a pre-registered OAuth client are not supported. To drop a
+sign-in, use **Sign out** on the server in the MCP panel: the server goes back to
+needing sign-in in every open session.
 
 Redirects are never followed: `headers` would be re-sent to whatever origin a
 `30x` points at, so a redirecting endpoint fails the request instead.
@@ -196,6 +198,11 @@ connection. If the connection is lost the server is reported as exited and can b
 restarted. The endpoint is an outbound connection to an address **you**
 configured — Moa applies no network policy beyond the scheme check, exactly as
 with automation `callback_url`s.
+
+In `moa serve`, the first prompt of a new session waits up to 16 seconds for
+its MCP servers to finish starting, so their tools are there from the first
+turn. A server that fails, or is still starting after that, does not hold the
+turn: its tools join once it is ready.
 
 ## Project directory: `.moa/`
 

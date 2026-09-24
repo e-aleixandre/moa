@@ -10,11 +10,11 @@ Always registered:
 | `bash_status` | Check a background bash job's status and output |
 | `bash_wait` | Block until a background bash job finishes and return its result |
 | `bash_cancel` | Cancel a running background bash job |
-| `read` | Read text/image files with offset/limit |
+| `read` | Read text, image and PDF files with offset/limit (PDF needs `pdftotext`) |
 | `write` | Create or overwrite files (atomic: temp file + rename) |
-| `edit` | Exact-text replacement (single match enforced, atomic write) |
+| `edit` | Text replacement that tolerates whitespace/indentation differences; the match must be unique unless `replaceAll` is set (atomic write) |
 | `multiedit` | Atomic batch of edits to a single file |
-| `apply_patch` | Apply multi-file unified diffs |
+| `apply_patch` | Add, delete and update several files in one `*** Begin Patch` block |
 | `grep` | Search file content (prefers `rg` if installed) |
 | `find` | Search files by glob (prefers `fd` if installed) |
 | `ls` | List directory contents |
@@ -43,10 +43,16 @@ as showing its download card in the chat. Custom
 [script tools](#custom-script-tools) and [MCP](./configuration.md#mcp-servers)
 tools are registered on top of all of this.
 
+In a codebase that has a [project owner](./owners.md), every session also gets
+`book`, read-only, to read the owner's book. The owner's own conversation gets
+`book` with write access, `sessions` to list, read, message, start and answer
+the sessions of its codebase, and the built-in skills its role relies on
+through `load_skill`.
+
 ## Tool selection guidance
 
 - Use `grep`, `find`, `ls` for exploration
-- Use `read` before editing — `edit` warns if the file wasn't read first
+- Use `read` before editing — `edit` and `multiedit` refuse a file that wasn't read first
 - Use `edit` for surgical changes, `multiedit` for several changes in one file
 - Use `apply_patch` for coordinated changes across multiple files
 - Use `write` for new files or complete rewrites
@@ -241,18 +247,24 @@ the parent's numbers, and have **no** budget/`$` cap of their own):
 | Max concurrent async jobs | 5 | `subagent_max_concurrent_async` |
 
 Context compaction is enabled for children, with the same threshold as the main
-session, so a long-running child won't fail by exhausting its turn budget. What
+session, so a long-running child won't fail by exhausting its turn budget.
+Tool-result trimming is not: a child goes straight to compaction. What
 a child never gets is the pre-compaction step (`compact_strategy`): it has
 neither `memory` nor the ephemeral checkpoint to write to, so a warning could
 only produce stray files, and its findings already travel back in its report.
 
-Children cannot spawn their own subagents, use `memory`, call `ask_user`, or
-use `checkpoint`. A child started by a forked skill has that same denylist.
+Children cannot spawn their own subagents, use `memory`, call `ask_user`, use
+`checkpoint`, or direct other sessions with `sessions`; a child of the project
+owner reads the `book` but cannot write it. A child started by a forked skill
+has that same denylist.
 
 ### Cost & persistence
 
 `subagent_status` reports a running/finished job's token usage and cost
 (computed with the *child* model's pricing, which may differ from the parent).
+In `moa serve` it also answers for a job that has already left memory, reading
+its outcome from the saved transcript; a transcript left unfinished by a
+restart is reported as interrupted and can be continued with `resume`.
 The web UI shows each agent's cost separately from the session total.
 
 Finished subagent transcripts are persisted to a side directory next to the

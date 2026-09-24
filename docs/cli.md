@@ -4,13 +4,13 @@
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-p` | | Prompt text, or `@file` to read from file |
+| `-p` | | Prompt text, or `@file` to read from file. Without it, the prompt is read from piped stdin |
 | `-model` | `sonnet` | Model alias or `provider/model-id` |
 | `-thinking` | `medium` | `off`, `low`, `medium`, `high`, `xhigh` — see [Thinking levels](#thinking-levels) |
-| `-max-turns` | 0 (unlimited) | Max agent turns per run |
+| `-max-turns` | 0 | Max agent turns per run. `0` uses `max_turns` from config (unlimited if unset) |
 | `-max-budget` | from config | Max USD spend per run (`-1` sentinel = use `config.json`; an explicit `0` means unlimited) |
 | `-yolo` | false | Disable sandbox and all permissions |
-| `-permissions` | from config | `yolo`, `ask`, `auto` |
+| `-permissions` | from config | `yolo`, `ask`, `auto`. A one-shot run has nobody to approve, so a call that would ask is denied: cover what the run needs with `-allow` |
 | `-permissions-model` | | Model for `auto` mode evaluator |
 | `-path-scope` | derived | `workspace` or `unrestricted` |
 | `-allow` | | Permission pattern (repeatable), e.g. `"Bash(go:*)"` |
@@ -97,6 +97,7 @@ See [Web UI](./serve.md) for details.
 ```bash
 moa hooks add <source> --project DIR [--when-none inbox|create] [--when-many inbox|latest] [--model M --thinking T --yolo] [--autorun]
 moa hooks add <source> --session ID
+moa hooks add <source> --owner ID_OR_NAME
 moa hooks add <source> --inbox
 moa hooks list [--show-secrets]
 moa hooks rm <source>
@@ -104,9 +105,10 @@ moa hooks rm <source>
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--project` | | Target a project directory (`{project: DIR}`). Mutually exclusive with `--session` and `--inbox` |
-| `--session` | | Target a live session id. Mutually exclusive with `--project` and `--inbox` |
-| `--inbox` | false | Leave events in the inbox. Mutually exclusive with `--project` and `--session` |
+| `--project` | | Target a project directory (`{project: DIR}`) |
+| `--session` | | Target a live session id (`{session: ID}`) |
+| `--owner` | | Target a [project owner](./owners.md) by id or name (`{owner: ID_OR_NAME}`): events go to the owner's conversation |
+| `--inbox` | false | Leave events in the inbox |
 | `--when-none` | `inbox` | When the project has no live session: `inbox` or `create` |
 | `--when-many` | `inbox` | When the project has several live sessions: `inbox` or `latest` |
 | `--model` | | Model for `when-none=create` |
@@ -114,6 +116,8 @@ moa hooks rm <source>
 | `--yolo` | false | Create sessions in yolo permission mode |
 | `--autorun` | false | Start a turn on delivery to an idle session. Off by default: the event is recorded without running |
 | `--show-secrets` | false | `list` only: print the full `/hooks/<source>/<secret>` path |
+
+`add` needs exactly one of `--project`, `--session`, `--owner` or `--inbox`.
 
 `add` generates a 32-byte url-safe secret, writes it to the global config, and
 prints the hook path on its own line, preceded by `Hook URL path (contains the
@@ -146,7 +150,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | `gpt5.5` | `gpt-5.5` |
 | `gpt5-mini` | `gpt-5.4-mini` |
 
-You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-5`, `claude-opus-4-8`, `grok-4.5`, `grok-4.6`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
+You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-5`, `claude-opus-4-8`, `gpt-5.6-luna`, `grok-4.5`, `grok-4.6`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
 
 ## Thinking levels
 
@@ -155,10 +159,12 @@ model does with them differs:
 
 - **xAI Grok** requires reasoning: `off`/`low` collapse to `low`, `xhigh` to
   `high`. Only `low`, `medium`, `high` are distinct there.
-- **Claude Fable 5.1** thinks on every turn. `off` is not a real setting for it
-  and is promoted to `high`; the web selector hides the option.
-- **`xhigh`** only reaches a higher tier on Anthropic Opus models. Every other
-  Anthropic model caps it at `high`. OpenAI models accept `xhigh` as its own
+- **Meta Muse Spark** always reasons: `off` becomes `low`.
+- **Claude Fable 5, Fable 5.1 and Opus 5.5** think on every turn. `off` is not a
+  real setting for them: it runs at the model's default effort (`high` on
+  Fable, `medium` on Opus 5.5), and the web selector hides the option.
+- **`xhigh`** is its own effort level on every Anthropic model except Haiku
+  4.5, which caps it at `high`. OpenAI models accept `xhigh` as its own
   effort level. On **GPT-6 Astra**, the five UI positions map to `low`,
   `medium`, `high`, `xhigh`, and `max` respectively, so `off` is Astra's
   lowest reasoning effort rather than disabled reasoning.
@@ -172,8 +178,9 @@ CLI flag, and only some models can serve it:
 | Provider | Models that support it | What it costs |
 |---|---|---|
 | Anthropic | Opus models only | 2.5× faster, billed as separate usage credits |
-| OpenAI | GPT-6 Astra | Fast mode, 2× the token rate |
-| OpenAI | `gpt-5.4`, `gpt-5.5` and `gpt-5.6` generations (not the codex or mini variants) | 1.5× faster, burns credits 2.5× |
+| OpenAI | `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna` | Fast mode, 2× the token rate |
+| OpenAI | `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.4-mini`, `gpt-5.3-codex` | 1.5× faster, burns credits 2× |
+| OpenAI | `gpt-5.5` | 1.5× faster, burns credits 2.5× |
 | xAI | the whole catalogue | priority queue, 2× the token rate |
 
 Turning it on for a model that cannot serve it is not an error: the setting is
@@ -181,8 +188,8 @@ not stored, and the session stays at standard speed.
 
 The session cost (`cost_usd`, the budget guardrail) charges a fast request at
 the provider's premium: 2× on Anthropic ($10/$50 per MTok on Opus, cache
-multipliers on top), 2× on GPT-6 Astra, 2.5× on earlier supported OpenAI GPT
-models, and 2× on xAI. The multiplier applies only
+multipliers on top), 2.5× on `gpt-5.5` and 2× on every other supported OpenAI
+model, and 2× on xAI. The multiplier applies only
 to turns the provider actually served at the premium tier — Anthropic reports
 `usage.speed`, OpenAI and xAI echo `service_tier` — so a turn that fell back to
 standard speed is billed as standard.
@@ -196,17 +203,17 @@ moa -p "fix flaky tests"
 # explicit provider/model
 moa -model openai/gpt-5.3-codex -p "optimize this query"
 
-# Grok 4.6 with its supported thinking levels
+# Grok 4.7 with its supported thinking levels
 moa -model grok -thinking high -p "review this change"
 
 # budget-limited run
 moa -max-budget 0.50 -p "refactor auth module"
 
 # permissions with allow patterns
-moa -permissions ask -allow "Bash(go:*)" -allow "Write(*.go)"
+moa -permissions ask -allow "Bash(go:*)" -allow "Write(*.go)" -p "fix the build"
 
 # allow access to extra directory
-moa -allow-path /tmp/shared-data
+moa -allow-path /tmp/shared-data -p "summarize the reports in /tmp/shared-data"
 
 # web UI on the network
 moa serve --host 0.0.0.0 --port 8080
