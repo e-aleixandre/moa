@@ -258,7 +258,7 @@ export function catalogResponse(method, path, body = null, sessions = CATALOG_SE
   }
   if (m === "GET" && p === "/api/fs/complete") {
     const dir = (queryOf(path).get("path") || "").replace(/\/+$/, "") || "/";
-    return { entries: FS_ENTRIES[dir] || [] };
+    return { path: dir, exists: true, isDir: true, entries: FS_ENTRIES[dir] || [] };
   }
   if (m === "POST" && p === "/api/sessions") {
     created += 1;

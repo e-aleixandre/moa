@@ -18,6 +18,7 @@ import { openSession } from "../../data/tile-actions.js";
 import { setSessionPanelPage } from "../../data/session-panel.js";
 import { addToast } from "../../data/notifications.js";
 import { EditOwner } from "./EditOwner.jsx";
+import { folderListing, startingFolder } from "./owner-folder.js";
 import { OwnerIdentityPicker } from "./OwnerIdentityPicker.jsx";
 
 import "./OwnerAvatar.css";
@@ -131,6 +132,7 @@ function Group({ label, n, attn }) {
 // as a debt, and a third implementation would be a third place to fix.
 function useDirEntries(dir) {
   const [entries, setEntries] = useState([]);
+  const [problem, setProblem] = useState("");
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     if (!dir) return undefined;
@@ -140,14 +142,36 @@ function useDirEntries(dir) {
       api("GET", `/api/fs/complete?path=${encodeURIComponent(dir + "/")}`)
         .then((data) => {
           if (cancelled) return;
-          setEntries(Array.isArray(data?.entries) ? data.entries : []);
+          const listing = folderListing(data);
+          setEntries(listing.entries);
+          setProblem(listing.problem);
           setLoading(false);
         })
-        .catch(() => { if (!cancelled) { setEntries([]); setLoading(false); } });
+        .catch(() => {
+          if (cancelled) return;
+          const listing = folderListing(null);
+          setEntries(listing.entries);
+          setProblem(listing.problem);
+          setLoading(false);
+        });
     }, 130);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [dir]);
-  return { entries, loading };
+  return { entries, loading, problem };
+}
+
+// useStartingFolder seeds an empty folder field with startingFolder(caps). It
+// only fills a field that is still empty, so a path typed while
+// /api/capabilities is in flight is not overwritten.
+function useStartingFolder(dir, setDir) {
+  useEffect(() => {
+    if (dir) return undefined;
+    let live = true;
+    api("GET", "/api/capabilities")
+      .catch(() => ({}))
+      .then((caps) => { if (live) setDir((current) => current || startingFolder(caps)); });
+    return () => { live = false; };
+  }, []);
 }
 
 // useOwnerModels answers two things the model row needs: the catalogue of
@@ -235,7 +259,8 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated, 
   const [filter, setFilter] = useState("");
   const [name, setName] = useState("");
   const [touchedName, setTouchedName] = useState(false);
-  const { entries, loading } = useDirEntries(dir);
+  useStartingFolder(dir, setDir);
+  const { entries, loading, problem } = useDirEntries(dir);
   const { models, defaultModel } = useOwnerModels();
   /* The model, and where it is chosen. This used to be a list of every model
      stacked in the form plus a Segmented for thinking — a second model picker
@@ -388,7 +413,8 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated, 
         </div>
         <div class="ow-browse-list" role="listbox" aria-label="Subfolders">
           {loading && <p class="ow-quiet">Reading…</p>}
-          {!loading && shown.length === 0 && <p class="ow-quiet">No subfolders — the owner is created here.</p>}
+          {!loading && problem && <p class="ow-quiet" role="alert">{problem}</p>}
+          {!loading && !problem && shown.length === 0 && <p class="ow-quiet">No subfolders — the owner is created here.</p>}
           {!loading && shown.map((entry) => (
             <button type="button" class="ow-entry" key={entry} onClick={() => enter(entry)}>
               <FolderIcon />
