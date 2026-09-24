@@ -178,8 +178,9 @@ CLI flag, and only some models can serve it:
 | Provider | Models that support it | What it costs |
 |---|---|---|
 | Anthropic | Opus models only | 2.5× faster, billed as separate usage credits |
-| OpenAI | GPT-6 Astra | Fast mode, 2× the token rate |
-| OpenAI | `gpt-5.4`, `gpt-5.5` and `gpt-5.6` generations (not the codex or mini variants) | 1.5× faster, burns credits 2.5× |
+| OpenAI | `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna` | Fast mode, 2× the token rate |
+| OpenAI | `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.4-mini` | 1.5× faster, burns credits 2× |
+| OpenAI | `gpt-5.5` | 1.5× faster, burns credits 2.5× |
 | xAI | the whole catalogue | priority queue, 2× the token rate |
 
 Turning it on for a model that cannot serve it is not an error: the setting is
@@ -187,8 +188,8 @@ not stored, and the session stays at standard speed.
 
 The session cost (`cost_usd`, the budget guardrail) charges a fast request at
 the provider's premium: 2× on Anthropic ($10/$50 per MTok on Opus, cache
-multipliers on top), 2× on GPT-6 Astra, 2.5× on earlier supported OpenAI GPT
-models, and 2× on xAI. The multiplier applies only
+multipliers on top), 2.5× on `gpt-5.5` and 2× on every other supported OpenAI
+model, and 2× on xAI. The multiplier applies only
 to turns the provider actually served at the premium tier — Anthropic reports
 `usage.speed`, OpenAI and xAI echo `service_tier` — so a turn that fell back to
 standard speed is billed as standard.
