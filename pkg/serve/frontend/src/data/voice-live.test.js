@@ -289,6 +289,55 @@ test('a tool call wrapped in response.event is executed and answered with output
   expect(channel.sent.every((message) => typeof message.event_id === 'string' && message.event_id)).toBe(true);
 });
 
+// Recorded against the real service (gpt-live-1 delegating to gpt-5.6-terra):
+// one backend response emitted two book_read calls, and resuming it after the
+// first output was rejected with `function_call_outputs_required` — "Missing
+// function call outputs for: call_…" — which surfaced as an error toast.
+test('parallel tool calls of one backend response are resumed once, after every output and the response end', async () => {
+  const gate = deferred();
+  const fixture = setup({
+    routes: {
+      '/api/owners/owner-1/book/a.md': () => jsonResponse({ content: 'A' }),
+      '/api/owners/owner-1/book/b.md': async () => { await gate.promise; return jsonResponse({ content: 'B' }); },
+    },
+  });
+  const channel = await connected(fixture);
+  const wrapped = (event) => channel.deliver({ type: 'response.event', delegation_id: 'item_1', event });
+  const call = (callId, path) => wrapped({
+    type: 'response.output_item.done',
+    item: { type: 'function_call', call_id: callId, name: 'book_read', arguments: JSON.stringify({ path }) },
+  });
+
+  wrapped({ type: 'response.created', response: { id: 'resp_1', output: [] } });
+  call('call_a', 'a.md');
+  await flush();
+  // a.md is answered, but the response is still emitting calls.
+  expect(channel.typesSent()).toEqual(['response.item.create']);
+
+  call('call_b', 'b.md');
+  wrapped({ type: 'response.completed', response: { id: 'resp_1', output: [] } });
+  await flush();
+  // The response ended, but call_b's output is still being fetched.
+  expect(channel.typesSent()).toEqual(['response.item.create']);
+
+  gate.resolve();
+  await flush();
+  expect(channel.typesSent()).toEqual(['response.item.create', 'response.item.create', 'response.create']);
+  expect(channel.sent.slice(0, 2).map((message) => message.item.call_id)).toEqual(['call_a', 'call_b']);
+
+  // The continuation is a new response of the same delegation: its own tool
+  // round resumes on its own.
+  wrapped({ type: 'response.created', response: { id: 'resp_2', output: [] } });
+  call('call_c', 'a.md');
+  wrapped({ type: 'response.completed', response: { id: 'resp_2', output: [] } });
+  await flush();
+  expect(channel.typesSent()).toEqual([
+    'response.item.create', 'response.item.create', 'response.create',
+    'response.item.create', 'response.create',
+  ]);
+  expect(fixture.errors).toEqual([]);
+});
+
 test('the book is reported unavailable, never fabricated, when the session has no owner', async () => {
   const fixture = setup({
     routes: {

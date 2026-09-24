@@ -225,6 +225,10 @@ export class VoiceLiveController {
     this.channelOpenWaiters = [];
     this.minutesWaiters = [];
     this.connectAborts = [];
+    // Backend tool rounds, by delegation id: whether its response is still
+    // emitting items, which of its function calls still lack an output, and
+    // whether any output was sent since the last response.create.
+    this.delegations = new Map();
   }
 
   setCallbacks({ onState, onResult, onError } = {}) {
@@ -596,7 +600,7 @@ export class VoiceLiveController {
     this.handleEvent(event);
   }
 
-  handleEvent(event) {
+  handleEvent(event, delegationId = '') {
     if (!event || typeof event !== 'object') return;
     // Any event other than the error itself proves the session is still alive.
     if (event.type !== 'error') this.clearSessionErrorWatchdog();
@@ -612,10 +616,24 @@ export class VoiceLiveController {
       // an arguments-done event is not a finished call: only
       // response.output_item.done carries call_id + name + arguments.
       case 'response.event':
-        this.handleEvent(event.event);
+        this.handleEvent(event.event, event.delegation_id || '');
         break;
+      case 'response.created':
+        this.delegation(delegationId).open = true;
+        break;
+      case 'response.completed':
+      case 'response.incomplete':
+      case 'response.failed': {
+        const round = this.delegation(delegationId);
+        round.open = false;
+        this.maybeContinue(round);
+        break;
+      }
       case 'response.output_item.done':
-        if (event.item?.type === 'function_call') void this.dispatchTool(event.item);
+        if (event.item?.type === 'function_call') {
+          if (event.item.call_id) this.delegation(delegationId).calls.add(event.item.call_id);
+          void this.dispatchTool(event.item, delegationId);
+        }
         break;
       case 'session.input_transcript.delta':
         this.appendTranscript('owner', event.delta);
@@ -722,42 +740,66 @@ export class VoiceLiveController {
 
   // --- tools --------------------------------------------------------------
 
-  async dispatchTool(item) {
+  async dispatchTool(item, delegationId = '') {
     const callId = item.call_id;
+    const respond = (output) => this.respondTool(callId, output, delegationId);
     let args = {};
     try {
       args = item.arguments ? JSON.parse(item.arguments) : {};
     } catch {
-      this.respondTool(callId, { error: 'arguments were not valid JSON' });
+      respond({ error: 'arguments were not valid JSON' });
       return;
     }
     switch (item.name) {
       case 'book_list':
-        this.respondTool(callId, await this.bookList());
+        respond(await this.bookList());
         break;
       case 'book_read':
-        this.respondTool(callId, await this.bookRead(args.path));
+        respond(await this.bookRead(args.path));
         break;
       case 'ask_session':
-        this.respondTool(callId, await this.askSession(args.question));
+        respond(await this.askSession(args.question));
         break;
       case 'end_call':
-        this.respondTool(callId, { status: 'ok', message: 'Minutes received. Closing the call.' });
+        respond({ status: 'ok', message: 'Minutes received. Closing the call.' });
         await this.endCall(args);
         break;
       default:
-        this.respondTool(callId, { error: `unknown tool ${item.name}` });
+        respond({ error: `unknown tool ${item.name}` });
     }
   }
 
-  respondTool(callId, output) {
+  delegation(id) {
+    let round = this.delegations.get(id);
+    if (!round) {
+      round = { open: false, calls: new Set(), answered: false };
+      this.delegations.set(id, round);
+    }
+    return round;
+  }
+
+  respondTool(callId, output, delegationId = '') {
     if (!callId) return;
     this.send({
       type: 'response.item.create',
       item: { type: 'function_call_output', call_id: callId, output: JSON.stringify(output) },
     });
-    // The backend response is suspended on this output; response.create is
-    // what resumes it.
+    const round = this.delegation(delegationId);
+    round.calls.delete(callId);
+    round.answered = true;
+    this.maybeContinue(round);
+  }
+
+  // The backend response is suspended on its function calls, and
+  // response.create is what resumes it — but only once EVERY call of that
+  // response has its output. The backend runs tools in parallel, so resuming
+  // after the first output is rejected (`function_call_outputs_required`,
+  // "Missing function call outputs for: call_…"), which is what reached the
+  // owner as an error toast. A response still open may emit more calls, so
+  // the round waits for its terminal event too.
+  maybeContinue(round) {
+    if (round.open || round.calls.size > 0 || !round.answered) return;
+    round.answered = false;
     this.send({ type: 'response.create' });
   }
 
