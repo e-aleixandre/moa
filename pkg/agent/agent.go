@@ -1290,6 +1290,36 @@ func (a *Agent) Compact(ctx context.Context, focus string) (*core.CompactionPayl
 	return a.CompactWithCheckpoint(ctx, "", focus)
 }
 
+// CanStartFresh reports whether StartFresh would drop anything now. Cheap:
+// FindCutPoint walks back only as far as what a cut keeps.
+func (a *Agent) CanStartFresh() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.cancel == nil && a.freshCutLocked() > 0
+}
+
+// freshCutLocked is the index StartFresh would keep from, or 0 when there is
+// nothing to cut. Caller holds a.mu.
+func (a *Agent) freshCutLocked() int {
+	model := a.config.Model
+	if model.MaxInput <= 0 {
+		return 0
+	}
+	settings := a.config.Compaction
+	if settings == nil {
+		defaults := core.DefaultCompactionSettings
+		settings = &defaults
+	}
+	msgs := a.state.Messages
+	// FindCutPoint does not read contextTokens; the estimate is only needed
+	// for the payload, so it is not computed here.
+	cut := compaction.FindCutPoint(msgs, 0, settings.EffectiveWindow(model.MaxInput), *settings)
+	if cut <= 0 || cut >= len(msgs) {
+		return 0
+	}
+	return cut
+}
+
 // StartFresh drops the older part of the conversation from the model's
 // context without summarizing it. It keeps exactly what a compaction would
 // keep verbatim (compaction.FindCutPoint with the session's KeepRecent), so
@@ -1304,21 +1334,15 @@ func (a *Agent) StartFresh() (*core.FreshPayload, error) {
 	if a.cancel != nil {
 		return nil, fmt.Errorf("cannot start fresh while agent is running")
 	}
-	model := a.config.Model
-	if model.MaxInput <= 0 {
+	if a.config.Model.MaxInput <= 0 {
 		return nil, fmt.Errorf("model has no context window configured")
 	}
-	settings := a.config.Compaction
-	if settings == nil {
-		defaults := core.DefaultCompactionSettings
-		settings = &defaults
-	}
 	msgs := a.state.Messages
-	before := core.EstimateContextTokens(msgs, a.config.SystemPrompt, a.tools.Specs(), a.state.CompactionEpoch)
-	cut := compaction.FindCutPoint(msgs, before.Tokens, settings.EffectiveWindow(model.MaxInput), *settings)
-	if cut <= 0 || cut >= len(msgs) {
+	cut := a.freshCutLocked()
+	if cut <= 0 {
 		return nil, nil
 	}
+	before := core.EstimateContextTokens(msgs, a.config.SystemPrompt, a.tools.Specs(), a.state.CompactionEpoch)
 	kept := append([]core.AgentMessage(nil), msgs[cut:]...)
 	// The kept messages must be addressable in the session tree, which is
 	// where the cut is persisted.

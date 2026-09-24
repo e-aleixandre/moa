@@ -1066,10 +1066,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     return () => clearInterval(t);
   }, [cacheExpiresAt, busy]);
   const cacheExpired = cacheExpiresAt > 0 && !busy && nowTick >= cacheExpiresAt;
-  // "Start fresh" rides the warning: optional, no confirmation. Once used it
-  // stays spent until a run warms the cache again — a second cut would cut
-  // nothing.
-  const canStartFresh = cacheExpired && !steer && !session?.startedFresh;
+  // "Start fresh" rides the warning: optional, no confirmation. The server
+  // offers it only when a cut would drop something, so a short or already
+  // cut conversation shows the warning alone.
+  const canStartFresh = cacheExpired && !steer && !!session?.canStartFresh;
   const [startingFresh, setStartingFresh] = useState(false);
   const handleStartFresh = useCallback(async () => {
     if (!sessionId || startingFresh) return;
@@ -1078,7 +1078,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       const res = await execCommand(sessionId, "/start-fresh");
       if (!res || !res.ok) throw new Error(res?.message || "start fresh failed");
       // The server says the same on the next poll; until then, stop offering it.
-      updateSession(sessionId, { startedFresh: true });
+      updateSession(sessionId, { canStartFresh: false });
       if (res.message && res.message !== "started fresh") {
         addToast({ title: "Nothing to cut", detail: "This conversation is already short.", type: "info" });
       }

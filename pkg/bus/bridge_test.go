@@ -333,6 +333,8 @@ func (f *fakeAgent) Reset() error {
 
 func (f *fakeAgent) StartFresh() (*core.FreshPayload, error) { return nil, nil }
 
+func (f *fakeAgent) CanStartFresh() bool { return false }
+
 func (f *fakeAgent) Compact(ctx context.Context, focus string) (*core.CompactionPayload, error) {
 	f.mu.Lock()
 	f.compactCalled = true

@@ -142,6 +142,9 @@ func TestStartFresh_CutsModelContextKeepsTranscriptAndSurvivesRestart(t *testing
 	for i := range 6 {
 		sendAndWait(t, mgr, sess, turn(i))
 	}
+	if info := sess.info(); info.CacheExpiresAt.IsZero() || !info.CanStartFresh {
+		t.Fatalf("before the cut: expiry %v, can start fresh %v; want the action offered", info.CacheExpiresAt, info.CanStartFresh)
+	}
 	beforePct := sess.info().ContextPercent
 	callsBefore := prov.count()
 
@@ -189,8 +192,8 @@ func TestStartFresh_CutsModelContextKeepsTranscriptAndSurvivesRestart(t *testing
 	if agentMsgs[0].MsgID != firstKept {
 		t.Fatalf("agent context starts at %s, want %s", agentMsgs[0].MsgID, firstKept)
 	}
-	if sess.info().CacheExpiresAt.IsZero() || !sess.info().StartedFresh {
-		t.Fatalf("info after the cut: expiry %v, started fresh %v; want the action spent", sess.info().CacheExpiresAt, sess.info().StartedFresh)
+	if sess.info().CanStartFresh {
+		t.Fatal("after the cut the action is still offered")
 	}
 	afterPct := sess.info().ContextPercent
 	if afterPct >= beforePct {
@@ -198,9 +201,7 @@ func TestStartFresh_CutsModelContextKeepsTranscriptAndSurvivesRestart(t *testing
 	}
 
 	sendAndWait(t, mgr, sess, "after the cut")
-	if sess.info().StartedFresh {
-		t.Fatal("a run warmed the cache again, but the action is still reported spent")
-	}
+
 	req := prov.last()
 	tag := firstUserTag(req)
 	if tag == "" || tag == "turn-A" || tag == "turn-B" {
@@ -273,6 +274,11 @@ func TestStartFresh_NothingToCut(t *testing.T) {
 		t.Fatal(err)
 	}
 	sendAndWait(t, mgr, sess, "hello")
+	// Scenario: a short conversation with the cache expired shows the warning
+	// without the action.
+	if info := sess.info(); info.CacheExpiresAt.IsZero() || info.CanStartFresh {
+		t.Fatalf("short conversation: expiry %v, can start fresh %v; want the warning without the action", info.CacheExpiresAt, info.CanStartFresh)
+	}
 	before := len(sess.runtime.Context().Agent.Messages())
 	res, err := mgr.ExecCommand(sess.ID, "/start-fresh", "")
 	if err != nil || !res.OK || !strings.HasPrefix(res.Message, "nothing to cut") {

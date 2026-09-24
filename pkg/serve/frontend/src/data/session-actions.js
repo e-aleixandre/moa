@@ -101,7 +101,8 @@ function normalizeSessionInfo(info, existing, visible) {
     created: info.created ? Date.parse(info.created) : (existing ? existing.created : 0),
     updated: info.updated ? Date.parse(info.updated) : (existing ? existing.updated : 0),
     cacheExpiresAt: cacheExpiresAtMs(info.cache_expires_at),
-    startedFresh: !!info.started_fresh,
+    // Server-decided: a cut would drop something (see SessionInfo.CanStartFresh).
+    canStartFresh: !!info.can_start_fresh,
     error: wsOwns ? existing.error : (info.error || null),
     untrustedMcp: info.untrusted_mcp || false,
     // Who created the session: server-owned, omitted for ordinary user

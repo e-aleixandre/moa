@@ -240,34 +240,9 @@ func TestCacheClock_LastCachedResponse(t *testing.T) {
 	}
 }
 
-// The "Start fresh" action is spent from the cut until the next request warms
-// the cache, and a restart remembers it from the transcript.
-func TestCacheClock_StartedFreshUntilNextRequest(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	mgr := newTestManager(t, ctx, newMockProvider())
-	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	warm := func() {
-		sess.runtime.Bus.Publish(bus.MessageStarted{SessionID: sess.ID, Message: core.AgentMessage{Message: core.Message{Role: "assistant", Provider: "anthropic"}}})
-		sess.runtime.Bus.Drain(time.Second)
-	}
-	warm()
-	if sess.info().StartedFresh {
-		t.Fatal("started fresh before any cut")
-	}
-	sess.runtime.Bus.Publish(bus.ContextFreshStarted{SessionID: sess.ID})
-	sess.runtime.Bus.Drain(time.Second)
-	if !sess.info().StartedFresh {
-		t.Fatal("cut not reported")
-	}
-	warm()
-	if sess.info().StartedFresh {
-		t.Fatal("still reported after a request warmed the cache")
-	}
-
+// A restart remembers the last cut from the transcript's fresh markers, so
+// the action stays spent until a request warms the cache again.
+func TestCacheClock_LastFreshAt(t *testing.T) {
 	transcript := []core.AgentMessage{
 		{Message: core.Message{Role: "assistant", Provider: "anthropic", Timestamp: 100}},
 		{Message: core.Message{Role: "session_event", Timestamp: 200}, Custom: map[string]any{"type": "fresh_marker"}},

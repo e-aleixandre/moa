@@ -372,9 +372,11 @@ type SessionInfo struct {
 	// applicable (no run yet, or a provider without a known window). The UI
 	// warns once this time has passed that a new message pays a cache write.
 	CacheExpiresAt time.Time `json:"cache_expires_at,omitzero"`
-	// StartedFresh reports that the context was already cut since the last
-	// request warmed the cache, so the UI stops offering "Start fresh".
-	StartedFresh bool `json:"started_fresh,omitempty"`
+	// CanStartFresh reports that "Start fresh" would drop something: the
+	// context was not already cut since the last request warmed the cache and
+	// FindCutPoint finds a cut. Only computed while a cache expiry is known and
+	// the session is idle; the UI shows the action once the expiry has passed.
+	CanStartFresh bool `json:"can_start_fresh,omitempty"`
 	// RunStartedAt is when the in-progress run began; zero/omitted when idle.
 	// The UI anchors the activity-indicator elapsed counter to it so the counter
 	// stays correct across reconnects. Only meaningful while State is running or
@@ -528,8 +530,13 @@ func (s *ManagedSession) info() SessionInfo {
 	// provider: another provider's cache is not this model's.
 	if !lastRun.IsZero() && cacheWindow > 0 && model.Provider == cacheProvider {
 		info.CacheExpiresAt = lastRun.Add(cacheWindow)
-		if !startedFresh.Before(lastRun) {
-			info.StartedFresh = true
+		// Offered only when a cut would drop something: not already cut since
+		// the cache was last warmed, and FindCutPoint finds a cut. Decided
+		// here so a reload or another device agrees.
+		if startedFresh.Before(lastRun) && info.State == StateIdle {
+			if agent := s.runtime.Context().Agent; agent != nil && agent.CanStartFresh() {
+				info.CanStartFresh = true
+			}
 		}
 	}
 	// Surface the run-start time only while a run is in flight so the client can
