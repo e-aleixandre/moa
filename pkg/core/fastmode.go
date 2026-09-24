@@ -19,6 +19,7 @@ var openAIFastMultipliers = map[string]float64{
 	"gpt-5.6-luna":  2,
 	"gpt-5.5":       2.5,
 	"gpt-5.4-mini":  2,
+	"gpt-5.3-codex": 2,
 }
 
 // FastCostMultiplier returns the premium-tier token-price multiplier for a

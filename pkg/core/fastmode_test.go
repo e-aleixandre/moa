@@ -92,8 +92,8 @@ func TestOpenAIFastCatalogue(t *testing.T) {
 		{"gpt-5.6-luna", true, 2},
 		{"gpt-5.5", true, 2.5},
 		{"gpt-5.4-mini", true, 2},
+		{"gpt-5.3-codex", true, 2},
 		// Not verified against the pricing page's multiplier: no fast tier.
-		{"gpt-5.3-codex", false, 1},
 		{"gpt-5.3-codex-spark", false, 1},
 		{"gpt-5.2-codex", false, 1},
 		{"gpt-daybreak-blue-latest", false, 1},
