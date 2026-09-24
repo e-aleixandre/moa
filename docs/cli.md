@@ -179,16 +179,17 @@ CLI flag, and only some models can serve it:
 |---|---|---|
 | Anthropic | Opus models only | 2.5× faster, billed as separate usage credits |
 | OpenAI | `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna` | Fast mode, 2× the token rate |
-| OpenAI | `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.4-mini`, `gpt-5.3-codex` | 1.5× faster, burns credits 2× |
-| OpenAI | `gpt-5.5` | 1.5× faster, burns credits 2.5× |
+| OpenAI | `gpt-5.6-sol` | up to 2.5× faster, burns credits 2× |
+| OpenAI | `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.4-mini`, `gpt-5.3-codex` | Fast mode, burns credits 2× |
+| OpenAI | `gpt-5.5` | Fast mode, burns credits 2.5× |
 | xAI | the whole catalogue | priority queue, 2× the token rate |
 
 Turning it on for a model that cannot serve it is not an error: the setting is
 not stored, and the session stays at standard speed.
 
 The session cost (`cost_usd`, the budget guardrail) charges a fast request at
-the provider's premium: 2× on Anthropic ($10/$50 per MTok on Opus, cache
-multipliers on top), 2.5× on `gpt-5.5` and 2× on every other supported OpenAI
+the provider's premium: 2× the standard rate on Anthropic (for example $8/$40 per MTok on
+Opus 5.5 and $10/$50 on Opus 5 and 4.8, cache multipliers on top), 2.5× on `gpt-5.5` and 2× on every other supported OpenAI
 model, and 2× on xAI. The multiplier applies only
 to turns the provider actually served at the premium tier — Anthropic reports
 `usage.speed`, OpenAI and xAI echo `service_tier` — so a turn that fell back to

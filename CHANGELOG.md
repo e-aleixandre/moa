@@ -5,6 +5,84 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.0] - 2026-09-24
+
+### Added
+
+- **Project owners.** An owner is a standing agent for one codebase. It keeps
+  the project's book (what the project is, what was decided and why, who asks
+  for what), starts and directs the sessions working on that codebase, receives
+  their reports, and answers what the book already answers. Every session in the
+  codebase starts with the book's index and a read-only `book` tool, and reports
+  to its owner when its run ends, fails or stops to ask; a session you opened
+  yourself can be detached. Owners live in the new **Owners** mode of the
+  sidebar, each drawn with its own animated face, and event hooks can wake an
+  owner (`owner` target). The owner and its book are
+  stored under `~/.config/moa/codebases/<key>/`. See
+  [Project owners](docs/owners.md).
+- **Talk live.** With a plain OpenAI API key, the composer shows a phone button
+  that hands the conversation in front of you to a voice delegate. The delegate
+  gets the conversation as its brief, can read the owner's book and can ask the
+  session up to five questions during the call. When you hang up, the minutes
+  land in the composer as an unsent draft, and the call stays in the transcript
+  as one block. The cost shown counts voice time only; the delegate's model is
+  billed separately.
+- **Sign in to remote MCP servers with OAuth.** A remote server that answers
+  `401` shows **Connect** in the MCP panel. Moa follows the MCP authorization
+  spec (discovery, dynamic registration, PKCE), keeps tokens in
+  `mcp-oauth.json` (mode `0600`) shared by every session, renews them
+  automatically, and offers **Sign out** per server. Servers that require a
+  pre-registered OAuth client are not supported. The first turn of a session now
+  waits for its MCP servers to be ready.
+- **Change model, thinking and permissions while the agent is running.** The
+  new setting applies from the next request of the run instead of waiting for
+  the turn to end.
+- **Context trim before compaction.** When the context crosses the compaction
+  threshold, older tool outputs are first replaced by short placeholders that
+  name what was elided; the summarizer runs only when that does not free enough
+  room. The transcript keeps the originals and shows a line where a trim
+  happened. See the change of behavior below.
+- Share files into Moa from other apps when it is installed as a web app or on
+  iOS; Moa asks which conversation they belong to and leaves them unsent in its
+  composer.
+- The artifact reader moves between the files of a conversation with arrows,
+  the `←`/`→` keys or a swipe on a phone.
+- Session IDs written by the agent become chips with that session's name and
+  state.
+- Dictation also works in agent questions and when steering a subagent.
+
+### Changed
+
+- **Behavior change: context trim is on by default.** Sessions that reach the
+  compaction threshold now trim old tool outputs before summarizing. Set
+  `"trim_disabled": true` to go straight to compaction as before.
+- **Redesigned web interface.** New layout for sessions, the transcript and
+  its tool ledger, permission and question cards, pickers, settings, the grid
+  and the mobile app, with a live bar for delegated and background work.
+- **Live Preview** opens from the conversation (the preview button on desktop,
+  **+ → Live preview** on a phone), works from a paired phone without setting
+  up a public proxy address, and lets you tap an element to reference it in the
+  composer. `--preview-public-url` is now optional, including with
+  `--preview-port`: the web UI derives the address from each browser's host,
+  and the flag remains as a fallback for API clients.
+- **Thinking levels per model.** Anthropic models receive the levels their
+  documentation lists: `xhigh` is sent as `xhigh` effort on Opus instead of
+  `max`; Fable 5.1 and Sonnet 5 gain `xhigh`, Haiku 4.5 loses it; Fable 5
+  uses adaptive thinking; on models that always think (Opus 5.5, Fable 5.1)
+  `off` maps to the documented default effort.
+- **OpenAI fast mode** is offered and priced per model from OpenAI's table:
+  2× on `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`,
+  `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.4-mini` and `gpt-5.3-codex`, and
+  2.5× on `gpt-5.5`. It is no longer offered on `gpt-5.4-nano` or the `-pro`
+  models, and GPT-6 Sol and Luna now support it.
+
+### Fixed
+
+- Anthropic thinking blocks that carry only a signature are replayed in later
+  requests instead of being dropped, so a turn keeps its reasoning across tool
+  calls.
+- OpenAI fast mode no longer charges 2.5× on models whose premium is 2×.
+
 ## [0.40.0] - 2026-09-22
 
 ### Added

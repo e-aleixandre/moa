@@ -90,10 +90,14 @@ func FastNote(modelID string) string {
 		return "2.5× faster · billed as separate usage credits"
 	case "openai":
 		rate := strconv.FormatFloat(FastCostMultiplier(m), 'f', -1, 64) + "×"
-		if strings.HasPrefix(m.ID, "gpt-6-") {
+		switch {
+		case strings.HasPrefix(m.ID, "gpt-6-"):
 			return "Fast mode · " + rate + " the token rate"
+		case m.ID == "gpt-5.6-sol":
+			// OpenAI's Fast mode guide quotes this speedup for gpt-5.6-sol only.
+			return "Up to 2.5× faster · burns credits " + rate
 		}
-		return "1.5× faster · burns credits " + rate
+		return "Fast mode · burns credits " + rate
 	case "xai":
 		return "Priority queue · 2× the token rate"
 	}
