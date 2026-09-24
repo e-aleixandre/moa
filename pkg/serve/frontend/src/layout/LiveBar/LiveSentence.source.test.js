@@ -43,3 +43,14 @@ test('leaving positions, exiting moves -- they are not one class', () => {
   expect(exit[1]).toContain('opacity: 0');
   expect(exit[1]).toContain('translateY');
 });
+
+test('the swap effect does not re-run on its own state change', () => {
+  // Measured in a real session: the bar kept showing "Reading files…" for a
+  // whole subagent wait. With `shown` as a dependency, setShown re-ran the
+  // effect at once and its cleanup cancelled the frame and the timer that
+  // finish the swap, so the old phrase stayed at full opacity and the new one
+  // stayed invisible below it until the next change.
+  const effect = jsx.match(/useEffect\(\(\) => \{\s*const previous[\s\S]*?\}, \[([^\]]*)\]\);/);
+  expect(effect).not.toBeNull();
+  expect(effect[1].split(',').map(s => s.trim())).toEqual(['text']);
+});

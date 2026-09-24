@@ -20,6 +20,12 @@ import { MOTION, prefersReducedMotion } from "../../hooks/motion.js";
 // never changes height mid-swap.
 export function LiveSentence({ text, shimmer = false, class: cls = "" }) {
   const [shown, setShown] = useState(text);
+  // The phrase on screen, read by the swap effect without being one of its
+  // dependencies: were `shown` a dependency, the setShown below would re-run
+  // the effect at once, and its cleanup would cancel the frame and the timer
+  // that finish the swap -- leaving the old phrase on screen and the new one
+  // invisible until the next change.
+  const shownRef = useRef(text);
   const [leaving, setLeaving] = useState(null);
   // One flag per line, and BOTH are needed for the same reason: a line must
   // spend one frame in its starting state before it is given its end state,
@@ -38,10 +44,12 @@ export function LiveSentence({ text, shimmer = false, class: cls = "" }) {
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
   useEffect(() => {
-    if (text === shown) return undefined;
+    const previous = shownRef.current;
+    if (text === previous) return undefined;
+    shownRef.current = text;
     if (prefersReducedMotion()) { setShown(text); return undefined; }
 
-    setLeaving(shown);
+    setLeaving(previous);
     setShown(text);
     setEntering(true);
     setExiting(false);
@@ -56,7 +64,7 @@ export function LiveSentence({ text, shimmer = false, class: cls = "" }) {
     const done = setTimeout(() => { setLeaving(null); setExiting(false); }, MOTION.fast + SWAP_GAP);
     timers.current.push(done);
     return () => { cancelAnimationFrame(raf); clearTimeout(done); };
-  }, [text, shown]);
+  }, [text]);
 
   return (
     <span class={`live-sentence${cls ? ` ${cls}` : ""}`}>
