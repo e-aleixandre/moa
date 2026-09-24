@@ -86,7 +86,7 @@ func voiceLiveLogSnippet(body []byte, secrets ...string) string {
 
 const (
 	voiceLiveModel        = "gpt-live-1"
-	voiceLiveBackendModel = "gpt-5.6-terra"
+	voiceLiveBackendModel = "gpt-6-sol"
 	// Published rate for gpt-live-1 voice duration, billed per second. It is
 	// absent from core's model table because that table prices tokens, and a
 	// Live voice session is not billed in tokens at all.

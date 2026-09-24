@@ -204,7 +204,7 @@ func TestVoiceLiveSessionPostsDocumentedShape(t *testing.T) {
 			t.Fatal("audio.format must be absent")
 		}
 		delegation := session["delegation"].(map[string]any)
-		if delegation["type"] != "responses" || delegation["responses"].(map[string]any)["model"] != "gpt-5.6-terra" {
+		if delegation["type"] != "responses" || delegation["responses"].(map[string]any)["model"] != "gpt-6-sol" {
 			t.Fatalf("delegation = %#v", delegation)
 		}
 		tools := delegation["responses"].(map[string]any)["tools"].([]any)
