@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -714,6 +716,64 @@ func TestNeedsInputIsReportedEvenForAnAlreadyReportedTurn(t *testing.T) {
 	}
 	if got[1].Status != callbackStatusNeedsInput || got[1].Pending == nil || got[1].Pending.ID != "ask-9" {
 		t.Fatalf("the question did not reach the owner: %+v", got[1])
+	}
+}
+
+// A long run that asks, is answered, keeps working and asks again is the
+// incident (session f0b0c72f…, 25-sep): the second and third questions of the
+// same run never reached the owner. Prompts open at the same time are still one
+// report.
+func TestEveryNewBlockOfALongRunIsReported(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+	ownerWithSession(t, mgr, root, "Winerim")
+	child := ownerChild(t, mgr, root, "the child")
+	// Recorded at the emit boundary: a needs_input is delivered to the owner at
+	// once and leaves the outbox, so the outbox cannot count them.
+	var mu sync.Mutex
+	var asked []string
+	child.ownerObserver.emit = func(out runOutcome) {
+		if out.Status == callbackStatusNeedsInput && out.Pending != nil {
+			mu.Lock()
+			asked = append(asked, out.Pending.ID)
+			mu.Unlock()
+		}
+	}
+	emitted := func(n int) []string {
+		t.Helper()
+		child.ownerObserver.sync()
+		var got []string
+		pollUntil(t, 5*time.Second, "needs_input reports", func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			got = append([]string(nil), asked...)
+			return len(got) >= n
+		})
+		return got
+	}
+
+	publishRunStart(child, 1, bus.RunOrigin{Explicit: true})
+	child.runtime.Bus.Publish(bus.AskUserRequested{SessionID: child.ID, RunGen: 1, ID: "ask_1"})
+	emitted(1)
+	child.runtime.Bus.Publish(bus.AskUserResolved{SessionID: child.ID, ID: "ask_1"})
+
+	// Same run, later: a permission and a question open together.
+	child.runtime.Bus.Publish(bus.PermissionRequested{SessionID: child.ID, RunGen: 1, ID: "perm_1", ToolName: "bash"})
+	child.runtime.Bus.Publish(bus.AskUserRequested{SessionID: child.ID, RunGen: 1, ID: "ask_2"})
+	child.runtime.Bus.Publish(bus.PermissionResolved{SessionID: child.ID, ID: "perm_1"})
+	child.runtime.Bus.Publish(bus.AskUserResolved{SessionID: child.ID, ID: "ask_2"})
+
+	child.runtime.Bus.Publish(bus.AskUserRequested{SessionID: child.ID, RunGen: 1, ID: "ask_3"})
+	emitted(3)
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	got := append([]string(nil), asked...)
+	mu.Unlock()
+	// Each report is emitted from its own worker, so their order is not fixed.
+	sort.Strings(got)
+	if want := []string{"ask_1", "ask_3", "perm_1"}; !slices.Equal(got, want) {
+		t.Fatalf("needs_input reports = %v, want %v", got, want)
 	}
 }
 

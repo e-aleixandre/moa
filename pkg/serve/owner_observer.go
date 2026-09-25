@@ -148,29 +148,36 @@ func newOwnerReportObserver(sess *ManagedSession, emit func(runOutcome)) *ownerR
 		ctx:         ctx,
 		cancel:      cancel,
 	}
-	// needsInputSent is per-run, touched only from the subscriber goroutine
-	// below, in publication order — the same guard subscribeRunOutcomes uses
-	// and for the same reason.
-	var needsInputSent bool
+	// openPrompts holds the prompts the session is blocked on, touched only
+	// from the subscriber goroutine below, in publication order. The owner is
+	// told when the session goes from not blocked to blocked: prompts open at
+	// the same time are one report, but a long run that is answered and asks
+	// again later is blocked again and must say so. A once-per-run guard
+	// silenced every question after the first of a run that lasted hours.
+	openPrompts := map[string]struct{}{}
+	block := func(key string, runGen uint64, pending *CallbackPending) {
+		if len(openPrompts) == 0 {
+			o.blocked(runGen, pending)
+		}
+		openPrompts[key] = struct{}{}
+	}
 	sess.pushUnsubs = append(sess.pushUnsubs, sess.runtime.Bus.SubscribeAll(func(event any) {
 		switch e := event.(type) {
 		case bus.RunStarted:
-			needsInputSent = false
+			clear(openPrompts)
 			o.beginRun(e.RunGen, e.Origin)
 		case bus.SubagentStarted:
 			o.attachJob(e.JobID)
 		case bus.BashJobStarted:
 			o.attachJob(e.JobID)
 		case bus.PermissionRequested:
-			if !needsInputSent {
-				needsInputSent = true
-				o.blocked(e.RunGen, permissionPending(e))
-			}
+			block("permission:"+e.ID, e.RunGen, permissionPending(e))
+		case bus.PermissionResolved:
+			delete(openPrompts, "permission:"+e.ID)
 		case bus.AskUserRequested:
-			if !needsInputSent {
-				needsInputSent = true
-				o.blocked(e.RunGen, askPending(e))
-			}
+			block("ask:"+e.ID, e.RunGen, askPending(e))
+		case bus.AskUserResolved:
+			delete(openPrompts, "ask:"+e.ID)
 		case bus.RunEnded:
 			o.runEnded(e)
 		case ownerObserverBarrier:
