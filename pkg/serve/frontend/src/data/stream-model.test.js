@@ -361,6 +361,25 @@ test('two live subagents form a delegation block, one running agent row each', (
   expect(doc.blocks.some(b => b.type === 'fanout')).toBe(false);
 });
 
+// The card offers "to background" exactly where the subagent view does: a
+// sync job that is still running. Cancelling is refused by the backend, and an
+// async job never reaches the inline block (it lives in the dock).
+test('only a running sync subagent row is promotable', () => {
+  const s = session([assistant('Delegating.')], {
+    subagents: {
+      j1: { jobId: 'j1', task: 'Sync running', status: 'running', messages: [] },
+      j2: { jobId: 'j2', task: 'Sync cancelling', status: 'cancelling', messages: [] },
+      j3: { jobId: 'j3', task: 'Async running', status: 'running', async: true, messages: [] },
+    },
+  });
+  const blocks = projectStream(s);
+  const delegation = blocks[blocks.length - 1].blocks.find(b => b.type === 'delegation');
+  const byId = Object.fromEntries(delegation.agents.map(a => [a.id, a]));
+  expect(byId.j1.promotable).toBe(true);
+  expect(byId.j2.promotable).toBe(false);
+  expect(byId.j3).toBeUndefined();
+});
+
 test('a single live subagent is a delegation block with one agent, no header caseness', () => {
   const s = session([assistant('Delegating.')], {
     subagents: {

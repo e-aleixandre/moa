@@ -124,8 +124,8 @@ function DoneAgentRow({ agent, onOpenAgent }) {
   );
 }
 
-function OutcomeAgentRow({ agent, onOpenAgent }) {
-	const { id, name, accent = "sky", state, action, chip, result, error, excerpt, time, openable = true } = agent;
+function OutcomeAgentRow({ agent, onOpenAgent, onPromoteAgent }) {
+	const { id, name, accent = "sky", state, action, chip, result, error, excerpt, time, openable = true, promotable = false } = agent;
   const terminal = state !== "running";
   const failed = state === "failed";
   const cancelled = state === "cancelled";
@@ -141,6 +141,12 @@ function OutcomeAgentRow({ agent, onOpenAgent }) {
   // A button that cannot reach a conversation is a bug, not an affordance: an
   // id that names no child the server can serve gets no Conversation action.
   const openAgent = openable ? onOpenAgent : null;
+  // The subagent view's "to background", offered where the sync child is
+  // already on screen so promoting it does not take a trip into its view.
+  const promote = state === "running" && promotable && onPromoteAgent
+    ? (e) => { e.stopPropagation(); onPromoteAgent(id); }
+    : null;
+  const actionCount = (canExpand ? 1 : 0) + (promote ? 1 : 0) + (openAgent ? 1 : 0);
 
   return (
     <div class={`dlg-outcome-card${failed ? " failed" : ""}${cancelled ? " cancelled" : ""}`} style={{ "--a": `var(--${accent})` }}>
@@ -158,7 +164,8 @@ function OutcomeAgentRow({ agent, onOpenAgent }) {
         </span>
         <span class="outcome-preview">{state === "running" && "▸ "}{preview}</span>
       </SummaryTag>
-		{(canExpand || openAgent) && <div class={`dlg-outcome-actions${canExpand && openAgent ? "" : " single"}`}>
+		{actionCount > 0 && <div class={`dlg-outcome-actions${actionCount > 1 ? "" : " single"}`}>
+			{promote && <button type="button" class="dlg-promote" onClick={promote}>to background</button>}
 			{canExpand && <button type="button" onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}>{outcomeLabel} <ChevronDown class={expanded ? "open" : ""} size={13} aria-hidden="true" /></button>}
 			{openAgent && <button type="button" onClick={() => openAgent(id)} aria-label={`Open ${name} conversation`}>Conversation <ChevronRight size={14} aria-hidden="true" /></button>}
 		</div>}
@@ -174,8 +181,9 @@ function OutcomeAgentRow({ agent, onOpenAgent }) {
 // { id, name, accent, state:'running'|'done'|'failed'|'cancelled', action?,
 // time?, chip?, result?, bashJobs:[] } as emitted by stream-model.js. `summary` is
 // { total, done, failed }; `settled` is true once no agent is running.
-// `onOpenAgent(id)` opens the subagent's detail view on row click.
-export function DelegationBlock({ agents = [], summary, settled, onOpenAgent, variant = "outcome" }) {
+// `onOpenAgent(id)` opens the subagent's detail view on row click;
+// `onPromoteAgent(id)` sends a running sync agent to the background.
+export function DelegationBlock({ agents = [], summary, settled, onOpenAgent, onPromoteAgent, variant = "outcome" }) {
   const total = summary?.total ?? agents.length;
   const showHeader = total > 1;
   // Settled blocks start collapsed to the header line (spec §1.3.4); live
@@ -216,7 +224,7 @@ export function DelegationBlock({ agents = [], summary, settled, onOpenAgent, va
       {!collapsed &&
         agents.map((a) =>
           variant === "outcome" ? (
-            <OutcomeAgentRow key={a.id ?? a.name} agent={a} onOpenAgent={onOpenAgent} />
+            <OutcomeAgentRow key={a.id ?? a.name} agent={a} onOpenAgent={onOpenAgent} onPromoteAgent={onPromoteAgent} />
           ) : a.state === "running" ? (
             <RunningAgentRow key={a.id ?? a.name} agent={a} onOpenAgent={onOpenAgent} />
           ) : (

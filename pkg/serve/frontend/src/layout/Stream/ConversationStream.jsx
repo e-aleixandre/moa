@@ -32,7 +32,7 @@ import {
 } from "../../data/stream-read-anchor.js";
 // The queue lives at the end of the thread: what the owner already said, with
 // the one gesture that brings it back to the input.
-import { recallQueuedSteers } from "../../data/session-actions.js";
+import { recallQueuedSteers, promoteSubagent } from "../../data/session-actions.js";
 
 // Stream — the scrollable conversation area. It renders the REAL
 // projected block list from stream-model.js (projectStream), mapping each
@@ -53,7 +53,7 @@ import { recallQueuedSteers } from "../../data/session-actions.js";
 // the markdown pipeline through DOMPurify, so the output is safe to inject; the
 // component's own sanitizeHtml pass is a second, allowlist-based guard. No raw
 // user/assistant text ever reaches innerHTML unsanitized.
-function docChildren(blocks, onOpenSubagent, visibleDone, sessionId, onExpandBlock) {
+export function docChildren(blocks, onOpenSubagent, visibleDone, sessionId, onExpandBlock) {
   const out = [];
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
@@ -116,6 +116,7 @@ function docChildren(blocks, onOpenSubagent, visibleDone, sessionId, onExpandBlo
             summary={b.summary}
             settled={b.settled}
             onOpenAgent={onOpenSubagent}
+            onPromoteAgent={sessionId ? (jobId) => { promoteSubagent(sessionId, jobId).catch(() => {}); } : undefined}
           />
         );
         break;

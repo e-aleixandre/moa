@@ -507,3 +507,7 @@
 }
 .dlg-outcome-summary:focus-visible, .dlg-outcome-actions button:focus-visible, .dlg-copy:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--focus-ring-width)); }
 .dlg-outcome-actions .open { transform: rotate(180deg); }
+.dlg-outcome-actions .dlg-promote { color: var(--zl-t2); }
+@media (hover: hover) {
+  .dlg-outcome-actions .dlg-promote:hover { color: var(--zl-t1); }
+}

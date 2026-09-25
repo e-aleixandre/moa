@@ -1327,6 +1327,9 @@ function delegationRunningAgent(sub, accentIdx) {
     bashJobs: [],
     // A live job is always addressable: it is the session's own entry.
     openable: true,
+    // Same rule as the subagent view's canPromote: the backend only accepts a
+    // promote while a sync job is exactly 'running' ('cancelling' is refused).
+    promotable: sub.status === 'running' && sub.async !== true,
   };
   const action = agentAction(sub);
   if (action) agent.action = action;
