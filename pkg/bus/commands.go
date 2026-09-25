@@ -63,13 +63,18 @@ type SendPrompt struct {
 	// AcceptedSteerID is written per accepted prompt, so a caller learns the
 	// effective action ("send" vs "steer") from which one came back non-empty.
 	AcceptedSteerID *string
-	// IdleOnly starts a run or fails: the prompt is never converted into a
-	// steer. It exists for producers whose text only makes sense as a turn of
-	// its own — the project owner's reports, spliced into the middle of the
-	// owner's reasoning, would be worse than arriving late. The decision is
-	// taken under the same lock that converts prompts into steers and that
-	// starts runs, so "idle" cannot go stale between the check and the run.
+	// IdleOnly starts a run or fails instead of joining a working run. The
+	// decision is taken under the same lock that converts prompts into steers
+	// and starts runs, so "idle" cannot go stale between the check and the run.
 	IdleOnly bool
+	// AllowBackgroundWork lets an idle-only prompt start a foreground run while
+	// asynchronous work continues. Only owner reports opt in; other producers
+	// retain the quiescence requirement.
+	AllowBackgroundWork bool
+	// InterruptWait lets an idle-only prompt join a run only while its foreground
+	// tool is an interruptible wait. It wakes that wait like a user steer, without
+	// injecting the prompt into a run that is actively reasoning or executing.
+	InterruptWait bool
 }
 
 // SendPromptWithContent starts an agent run with structured content (e.g. images).

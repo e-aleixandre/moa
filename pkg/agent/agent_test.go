@@ -1047,6 +1047,33 @@ func TestSteerInterruptsWaitToolWithoutStoppingParentRun(t *testing.T) {
 	}
 }
 
+func TestReportSteerInterruptsWaitThatRegistersAfterAdmission(t *testing.T) {
+	ag := newTestAgent(NewMockProvider())
+	first, cancelFirst := context.WithCancelCause(context.Background())
+	defer cancelFirst(nil)
+	unregisterFirst := ag.registerSteerWait(cancelFirst, true)
+	defer unregisterFirst()
+	accepted, err := ag.TrySteerIfWaiting(core.SteerItem{
+		ID: "batch", Text: "report", Internal: true, Custom: map[string]any{"source": "report"},
+	})
+	if err != nil || !accepted {
+		t.Fatalf("report admission = %v, %v", accepted, err)
+	}
+	if !errors.Is(context.Cause(first), core.ErrWaitInterruptedBySteer) {
+		t.Fatalf("first wait cause = %v", context.Cause(first))
+	}
+	second, cancelSecond := context.WithCancelCause(context.Background())
+	defer cancelSecond(nil)
+	unregisterSecond := ag.registerSteerWait(cancelSecond, true)
+	defer unregisterSecond()
+	if !errors.Is(context.Cause(second), core.ErrWaitInterruptedBySteer) {
+		t.Fatalf("late wait cause = %v", context.Cause(second))
+	}
+	if got := ag.PendingSteers(); len(got) != 0 {
+		t.Fatalf("internal report exposed as a user steer: %+v", got)
+	}
+}
+
 func TestAgent_CancelSteer_DrainsQueuedSteers(t *testing.T) {
 	ag := newTestAgent(NewMockProvider())
 

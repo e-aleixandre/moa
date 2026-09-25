@@ -3,6 +3,8 @@ package serve
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -196,6 +198,245 @@ func TestReportsWaitForABusyOwnerInsteadOfSteeringIt(t *testing.T) {
 	got := waitForOwnerReports(t, ownerSess, 1)[0]
 	if !strings.Contains(got, "status: failed") || !strings.Contains(got, "build broke") {
 		t.Fatalf("the retained batch arrived incomplete:\n%s", got)
+	}
+}
+
+func TestReportsReachIdleOwnerWithBackgroundSubagent(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	mgr := newOwnerTestManager(t, context.Background())
+	info, ownerSess := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	ownerSess.runtime.Bus.Publish(bus.SubagentStarted{SessionID: ownerSess.ID, JobID: "sa-active", Async: true})
+	ownerSess.runtime.Bus.Drain(time.Second)
+	if state := ownerSess.info().State; state != StateIdle {
+		t.Fatalf("owner state = %s, want idle", state)
+	}
+	if count := ownerSess.runtime.BackgroundWork(); count != 1 {
+		t.Fatalf("background work = %d, want 1", count)
+	}
+
+	mgr.reports.add(info.CodebaseKey, owner.Report{ID: "child:1:failed", SessionID: "child", Status: callbackStatusFailed, FinalText: "failed"})
+	pollUntil(t, 2*time.Second, "report delivered while subagent runs", func() bool {
+		return len(ownerReportText(ownerSess)) == 1
+	})
+	if count := ownerSess.runtime.BackgroundWork(); count != 1 {
+		t.Fatalf("report stopped the background subagent: %d", count)
+	}
+	ownerSess.runtime.Bus.Publish(bus.SubagentEnded{SessionID: ownerSess.ID, JobID: "sa-active", Status: "completed"})
+	ownerSess.runtime.Bus.Drain(time.Second)
+	if got := ownerReportText(ownerSess); len(got) != 1 {
+		t.Fatalf("report was delivered more than once after subagent completion: %v", got)
+	}
+}
+
+func TestConfirmedReportBatchIsNotSentAgainOnRetry(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	info, ownerSess := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	batch := []owner.Report{doneReport("child:1:done", "child", "finished")}
+	if err := mgr.deliverReportsIfIdle(info.Owner, batch); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "first report run settles", func() bool {
+		return ownerSess.info().State == StateIdle
+	})
+	if err := mgr.deliverReportsIfIdle(info.Owner, batch); err != nil {
+		t.Fatal(err)
+	}
+	if got := ownerReportText(ownerSess); len(got) != 1 {
+		t.Fatalf("retry duplicated a confirmed batch: %v", got)
+	}
+}
+
+func TestReportRetryWithNewArrivalDoesNotRepeatDeliveredPrefix(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	info, ownerSess := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	first := doneReport("child-x:1:done", "child-x", "finished x")
+	second := doneReport("child-y:1:done", "child-y", "finished y")
+	if err := mgr.deliverReportsIfIdle(info.Owner, []owner.Report{first}); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "first report run settles", func() bool {
+		return ownerSess.info().State == StateIdle
+	})
+	if err := mgr.deliverReportsIfIdle(info.Owner, []owner.Report{first, second}); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "second report run settles", func() bool {
+		return ownerSess.info().State == StateIdle
+	})
+	if err := mgr.deliverReportsIfIdle(info.Owner, []owner.Report{first, second}); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(ownerReportText(ownerSess), "\n")
+	if strings.Count(got, "child-x —") != 1 || strings.Count(got, "child-y —") != 1 {
+		t.Fatalf("retry repeated a report or lost the new one:\n%s", got)
+	}
+}
+
+func TestReportsInterruptOwnerWaitWithoutStoppingItsJob(t *testing.T) {
+	for _, toolName := range []string{"bash_wait", "subagent_wait"} {
+		t.Run(toolName, func(t *testing.T) {
+			shortReportWindow(t, time.Hour)
+			started := make(chan struct{})
+			interrupted := make(chan error, 1)
+			release := make(chan struct{})
+			resume := make(chan struct{}, 1)
+			defer close(release)
+			defer func() {
+				select {
+				case resume <- struct{}{}:
+				default:
+				}
+			}()
+			provider := newMockProvider(toolCallHandlerFor("tc-wait", toolName, nil), simpleResponseHandler("handled report"))
+			t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+			mgr := newTestManager(t, context.Background(), provider)
+			info, ownerSess := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+			appended := make(chan bus.UserMessageAppended, 2)
+			ownerSess.runtime.Bus.Subscribe(func(e bus.UserMessageAppended) {
+				if e.Custom["source"] == reportSource {
+					appended <- e
+				}
+			})
+			if toolName == "bash_wait" {
+				ownerSess.runtime.Bus.Publish(bus.BashJobStarted{SessionID: ownerSess.ID, JobID: "job-active"})
+			} else {
+				ownerSess.runtime.Bus.Publish(bus.SubagentStarted{SessionID: ownerSess.ID, JobID: "job-active", Async: true})
+			}
+			ownerSess.runtime.Bus.Drain(time.Second)
+			ownerSess.infra.toolReg.Unregister(toolName)
+			if err := ownerSess.infra.toolReg.Register(core.Tool{
+				Name: toolName, Parameters: json.RawMessage(`{"type":"object"}`),
+				Execute: func(ctx context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+					close(started)
+					select {
+					case <-ctx.Done():
+						interrupted <- context.Cause(ctx)
+						<-resume
+					case <-release:
+					}
+					return core.TextResult("wait finished"), nil
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, _, err := mgr.Send(ownerSess.ID, "wait for the job", nil, "", ""); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("owner did not enter the wait")
+			}
+
+			added := make(chan struct{})
+			go func() {
+				mgr.reports.add(info.CodebaseKey, owner.Report{ID: "child:1:failed", SessionID: "child", Status: callbackStatusFailed, FinalText: "failed"})
+				close(added)
+			}()
+			select {
+			case cause := <-interrupted:
+				if !errors.Is(cause, core.ErrWaitInterruptedBySteer) {
+					t.Fatalf("wait interrupted with %v", cause)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("report did not interrupt the wait")
+			}
+			if steers := ownerSess.runtime.Context().Agent.PendingSteers(); len(steers) != 0 {
+				t.Fatalf("report exposed as a user-owned queued steer: %+v", steers)
+			}
+			resume <- struct{}{}
+			select {
+			case <-added:
+			case <-time.After(3 * time.Second):
+				t.Fatal("report delivery did not confirm after wait interruption")
+			}
+			pollUntil(t, 2*time.Second, "report delivered while job remains active", func() bool {
+				return len(ownerReportText(ownerSess)) == 1
+			})
+			select {
+			case <-appended:
+			case <-time.After(time.Second):
+				t.Fatal("report did not announce its user message live")
+			}
+			if count := ownerSess.runtime.BackgroundWork(); count != 1 {
+				t.Fatalf("wait interruption stopped the background job: %d", count)
+			}
+			if toolName == "bash_wait" {
+				ownerSess.runtime.Bus.Publish(bus.BashJobSettled{SessionID: ownerSess.ID, JobID: "job-active"})
+			} else {
+				ownerSess.runtime.Bus.Publish(bus.SubagentEnded{SessionID: ownerSess.ID, JobID: "job-active", Status: "completed"})
+			}
+			ownerSess.runtime.Bus.Drain(time.Second)
+			if state := ownerSess.info().State; state != StateRunning && state != StateIdle {
+				t.Fatalf("owner state after report = %s", state)
+			}
+		})
+	}
+}
+
+func TestReportsDoNotInterruptAWaitAlongsideActiveTool(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	waitStarted := make(chan struct{})
+	workStarted := make(chan struct{})
+	releaseWait := make(chan struct{})
+	releaseWork := make(chan struct{})
+	defer close(releaseWait)
+	defer close(releaseWork)
+	provider := newMockProvider(func(_ context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 2)
+		go func() {
+			defer close(ch)
+			msg := core.Message{Role: "assistant", StopReason: "tool_use", Timestamp: time.Now().Unix(), Content: []core.Content{
+				core.ToolCallContent("tc-wait", "bash_wait", nil),
+				core.ToolCallContent("tc-work", "read", nil),
+			}}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		}()
+		return ch, nil
+	}, simpleResponseHandler("done"))
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	mgr := newTestManager(t, context.Background(), provider)
+	info, ownerSess := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	for _, spec := range []struct {
+		name    string
+		started chan struct{}
+		release chan struct{}
+	}{
+		{"bash_wait", waitStarted, releaseWait},
+		{"read", workStarted, releaseWork},
+	} {
+		ownerSess.infra.toolReg.Unregister(spec.name)
+		if err := ownerSess.infra.toolReg.Register(core.Tool{
+			Name: spec.name, Effect: core.EffectReadOnly, Parameters: json.RawMessage(`{"type":"object"}`),
+			Execute: func(ctx context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+				close(spec.started)
+				select {
+				case <-spec.release:
+				case <-ctx.Done():
+				}
+				return core.TextResult("done"), nil
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, _, err := mgr.Send(ownerSess.ID, "do two things", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, started := range []<-chan struct{}{waitStarted, workStarted} {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("owner did not enter both tool calls")
+		}
+	}
+	mgr.reports.add(info.CodebaseKey, owner.Report{ID: "child:1:failed", SessionID: "child", Status: callbackStatusFailed})
+	if got := ownerReportText(ownerSess); len(got) != 0 {
+		t.Fatalf("report interrupted active tool: %v", got)
+	}
+	if ql, _ := bus.QueryTyped[bus.GetQueueLen, int](ownerSess.runtime.Bus, bus.GetQueueLen{}); ql != 0 {
+		t.Fatalf("report was steered while a sibling tool was active: queue length %d", ql)
 	}
 }
 

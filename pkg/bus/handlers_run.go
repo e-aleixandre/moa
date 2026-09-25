@@ -159,13 +159,34 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 		// caller checking idleness from outside could only observe a snapshot
 		// that a concurrent send invalidates before its own Execute lands.
 		if cmd.IdleOnly {
-			if sctx.Agent.QueueLen() > 0 || sctx.hasBackgroundWork() {
+			if sctx.Agent.QueueLen() > 0 {
 				return ErrNotIdle
 			}
 			if sctx.State != nil {
-				if state := sctx.State.Current(); state == StateRunning || state == StatePermission {
+				if state := sctx.State.Current(); state == StateRunning && cmd.InterruptWait {
+					id := cmd.SteerID
+					if id == "" {
+						id = core.NewSteerID()
+					}
+					accepted, err := sctx.Agent.TrySteerIfWaiting(core.SteerItem{ID: id, Text: cmd.Text, Custom: cmd.Custom, Internal: true})
+					if err != nil {
+						return err
+					}
+					if !accepted {
+						return ErrNotIdle
+					}
+					if cmd.AcceptedSteerID != nil {
+						*cmd.AcceptedSteerID = id
+					}
+					requestPump(sctx)
+					return nil
+				} else if state == StateRunning || state == StatePermission {
 					return ErrNotIdle
 				}
+			}
+			if (cmd.AllowBackgroundWork && (sctx.AutoVerifying() || sctx.GoalVerifying())) ||
+				(!cmd.AllowBackgroundWork && sctx.hasBackgroundWork()) {
+				return ErrNotIdle
 			}
 		}
 		// Strict-order gate (INV-2): a genuine user prompt must not start a run

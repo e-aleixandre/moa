@@ -69,3 +69,28 @@ func TestSendPromptIdleOnlyRunsWhenIdle(t *testing.T) {
 		t.Fatal("the prompt did not start a run")
 	}
 }
+
+func TestSendPromptIdleOnlyKeepsVerifiersRunningDespiteBackgroundExemption(t *testing.T) {
+	for _, verifier := range []string{"auto", "goal"} {
+		t.Run(verifier, func(t *testing.T) {
+			b := NewLocalBus()
+			defer b.Close()
+			fa := &fakeAgent{}
+			sctx := newTestSessionContextWithState(b, fa)
+			RegisterHandlers(sctx)
+			if verifier == "auto" {
+				sctx.beginAutoVerify()
+				defer sctx.endAutoVerify()
+			} else {
+				sctx.beginGoalVerify()
+				defer sctx.endGoalVerify()
+			}
+			if err := b.Execute(SendPrompt{Text: "reports", IdleOnly: true, AllowBackgroundWork: true}); !errors.Is(err, ErrNotIdle) {
+				t.Fatalf("SendPrompt during %s verification = %v, want ErrNotIdle", verifier, err)
+			}
+			if fa.sendCalled {
+				t.Fatal("the report interrupted verification")
+			}
+		})
+	}
+}

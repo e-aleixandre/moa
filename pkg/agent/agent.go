@@ -78,17 +78,22 @@ type steerQueue struct {
 type steerWaitInterrupts struct {
 	mu      sync.Mutex
 	nextID  uint64
-	cancels map[uint64]context.CancelCauseFunc
+	cancels map[uint64]steerWaitCancel
 }
 
-func (w *steerWaitInterrupts) register(cancel context.CancelCauseFunc) func() {
+type steerWaitCancel struct {
+	cancel         context.CancelCauseFunc
+	reportEligible bool
+}
+
+func (w *steerWaitInterrupts) register(cancel context.CancelCauseFunc, reportEligible bool) func() {
 	w.mu.Lock()
 	if w.cancels == nil {
-		w.cancels = make(map[uint64]context.CancelCauseFunc)
+		w.cancels = make(map[uint64]steerWaitCancel)
 	}
 	w.nextID++
 	id := w.nextID
-	w.cancels[id] = cancel
+	w.cancels[id] = steerWaitCancel{cancel: cancel, reportEligible: reportEligible}
 	w.mu.Unlock()
 
 	return func() {
@@ -101,8 +106,8 @@ func (w *steerWaitInterrupts) register(cancel context.CancelCauseFunc) func() {
 func (w *steerWaitInterrupts) interrupt() {
 	w.mu.Lock()
 	cancels := make([]context.CancelCauseFunc, 0, len(w.cancels))
-	for _, cancel := range w.cancels {
-		cancels = append(cancels, cancel)
+	for _, entry := range w.cancels {
+		cancels = append(cancels, entry.cancel)
 	}
 	w.mu.Unlock()
 	for _, cancel := range cancels {
@@ -240,11 +245,11 @@ func (q *steerQueue) len() int {
 	return len(q.items)
 }
 
-func (q *steerQueue) hasUserSteer() bool {
+func (q *steerQueue) hasWaitInterruptingSteer() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for _, item := range q.items {
-		if !item.Internal && !item.IsBarrier() {
+		if !item.IsBarrier() && (!item.Internal || item.Custom["source"] == "report") {
 			return true
 		}
 	}
@@ -1516,11 +1521,47 @@ func (a *Agent) TrySteer(it core.SteerItem) error {
 	return nil
 }
 
-func (a *Agent) registerSteerWait(cancel context.CancelCauseFunc) func() {
-	unregister := a.waitSteers.register(cancel)
+// TrySteerIfWaiting admits a message only while an interruptible foreground
+// wait is registered. Holding the wait registry lock through admission keeps
+// a report from being steered into an unrelated active step after the wait
+// unregisters. The same steer wakes the wait without stopping its job.
+func (a *Agent) TrySteerIfWaiting(it core.SteerItem) (bool, error) {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	if a.aborting || a.runTerminal {
+		return false, ErrSteerAdmissionClosed
+	}
+	a.waitSteers.mu.Lock()
+	if len(a.waitSteers.cancels) == 0 {
+		a.waitSteers.mu.Unlock()
+		return false, nil
+	}
+	for _, entry := range a.waitSteers.cancels {
+		if !entry.reportEligible {
+			a.waitSteers.mu.Unlock()
+			return false, nil
+		}
+	}
+	if !a.steers.push(ownItem(it)) {
+		a.waitSteers.mu.Unlock()
+		return false, ErrSteerQueueFull
+	}
+	cancels := make([]context.CancelCauseFunc, 0, len(a.waitSteers.cancels))
+	for _, entry := range a.waitSteers.cancels {
+		cancels = append(cancels, entry.cancel)
+	}
+	a.waitSteers.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel(core.ErrWaitInterruptedBySteer)
+	}
+	return true, nil
+}
+
+func (a *Agent) registerSteerWait(cancel context.CancelCauseFunc, reportEligible bool) func() {
+	unregister := a.waitSteers.register(cancel, reportEligible)
 	// Cover a steer that arrived between the model choosing a wait tool and the
 	// tool registering itself as interruptible.
-	if a.steers.hasUserSteer() {
+	if a.steers.hasWaitInterruptingSteer() {
 		cancel(core.ErrWaitInterruptedBySteer)
 	}
 	return unregister

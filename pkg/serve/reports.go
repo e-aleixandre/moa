@@ -795,17 +795,15 @@ func (c *reportCoordinator) deliver(key string, pending []owner.Report) error {
 }
 
 // deliverReportsIfIdle injects a batch as one message in the owner's
-// conversation, and only when the owner is free.
+// conversation, when the owner is free or waiting for background work.
 //
 // It is deliberately NOT Manager.Send: that one turns into a steer whenever the
-// session is busy or has a queue, and steering an owner would splice a batch of
-// reports into the middle of whatever it was reasoning about. An owner that is
-// working keeps its batch until it is quiescent.
+// session is busy or has a queue. A report may interrupt a blocking wait,
+// but must never be steered into an owner actively reasoning or executing.
 //
 // bus.SendPrompt{IdleOnly} is what makes that exact: the bus decides idleness
 // under the same lock in which it would otherwise convert the prompt into a
-// steer, so there is no window for a concurrent send to turn this batch into
-// one. bus.ErrNotIdle means the owner is working; the batch is retained and
+// steer. bus.ErrNotIdle means the owner is working; the batch is retained and
 // tried again when the owner's own run ends.
 func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) error {
 	sess, ok := m.Get(own.SessionID)
@@ -820,6 +818,26 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 		sess = resumed
 	}
 
+	// A previously accepted batch can reach the transcript after the bounded
+	// confirmation timed out. It may now be a prefix of pending if new reports
+	// arrived meanwhile. Reconcile the longest delivered prefix (possibly more
+	// than once) before sending only the reports still absent from history.
+	for len(pending) > 0 {
+		delivered := 0
+		for n := len(pending); n > 0; n-- {
+			if customInTranscript(sess, "batch", reportBatchID(pending[:n])) {
+				delivered = n
+				break
+			}
+		}
+		if delivered == 0 {
+			break
+		}
+		pending = pending[delivered:]
+	}
+	if len(pending) == 0 {
+		return sess.runtime.Flush()
+	}
 	text := reportsMessage(own, pending)
 	batchID := reportBatchID(pending)
 	sessions := make([]map[string]string, 0, len(pending))
@@ -827,7 +845,6 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 		sessions = append(sessions, map[string]string{"id": rep.SessionID, "title": rep.Title, "status": rep.Status, "origin": rep.Origin})
 	}
 	custom := map[string]any{"source": reportSource, "batch": batchID, "count": len(pending), "sessions": sessions}
-
 	if err := func() error {
 		sess.lifecycle.RLock()
 		defer sess.lifecycle.RUnlock()
@@ -835,10 +852,12 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 			return ErrNotFound
 		}
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{
-			SessionID: sess.ID,
-			Text:      text,
-			Custom:    custom,
-			IdleOnly:  true,
+			SessionID:           sess.ID,
+			Text:                text,
+			Custom:              custom,
+			IdleOnly:            true,
+			AllowBackgroundWork: true,
+			InterruptWait:       true,
 		}); err != nil {
 			if errors.Is(err, bus.ErrNotIdle) {
 				return fmt.Errorf("%w: %v", ErrBusy, err)
@@ -870,14 +889,8 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 func (m *Manager) awaitCustomInTranscript(sess *ManagedSession, field, value string) bool {
 	deadline := time.Now().Add(reportConfirmTimeout)
 	for {
-		msgs := sess.History()
-		for i := len(msgs) - 1; i >= 0; i-- {
-			if msgs[i].Custom == nil {
-				continue
-			}
-			if msgs[i].Custom[field] == value {
-				return true
-			}
+		if customInTranscript(sess, field, value) {
+			return true
 		}
 		if time.Now().After(deadline) {
 			return false
@@ -888,6 +901,16 @@ func (m *Manager) awaitCustomInTranscript(sess *ManagedSession, field, value str
 			return false
 		}
 	}
+}
+
+func customInTranscript(sess *ManagedSession, field, value string) bool {
+	msgs := sess.History()
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Custom != nil && msgs[i].Custom[field] == value {
+			return true
+		}
+	}
+	return false
 }
 
 // subscribeOwnerReports wires a session into the reports loop, according to
@@ -931,8 +954,8 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 				"owner", own.ID, "status", "run_ended", "run_gen", e.RunGen, "batch", "", "n", 0)
 			reports.advisoryNudge(key)
 		}))
-		// Background work settling is the other moment the owner becomes
-		// deliverable: IdleOnly refuses a batch while the owner has any.
+		// Background work settling may wake an owner run or leave the foreground
+		// free to accept a previously retained batch.
 		sess.pushUnsubs = append(sess.pushUnsubs, sess.runtime.Bus.Subscribe(func(e bus.BashJobSettled) {
 			reports.advisoryNudge(key)
 		}))

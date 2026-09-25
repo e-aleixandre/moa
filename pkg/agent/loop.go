@@ -149,9 +149,10 @@ type loopConfig struct {
 	// settleSteers settles a drained batch's inflight native-content bytes once
 	// the batch's messages are appended to history (paired with drainSteers).
 	settleSteers func([]core.SteerItem)
-	// registerSteerWait makes one interruptible wait tool wake when a user steer
-	// arrives. It returns the cleanup that removes the tool's cancellation hook.
-	registerSteerWait func(context.CancelCauseFunc) func()
+	// registerSteerWait wakes interruptible wait tools for user steers; a report
+	// may also wake one when the batch has no other active tool calls.
+	// It returns the cleanup that removes the tool's cancellation hook.
+	registerSteerWait func(context.CancelCauseFunc, bool) func()
 	// steerMu makes cancellation and the post-tool delivery boundary atomic.
 	steerMu *sync.Mutex
 }
@@ -1243,6 +1244,13 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 			endRejectedToolCall(cfg, &slots[i])
 		}
 	}
+	onlyWaits := true
+	for i := range slots {
+		if slots[i].approved && !steerInterruptibleWaitTools[slots[i].tc.ToolName] {
+			onlyWaits = false
+			break
+		}
+	}
 
 	// Phase 2: execute with conflict-aware scheduling.
 	//
@@ -1288,7 +1296,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				pending++
 				go func(idx int) {
 					defer func() { finished <- idx }()
-					slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
+					slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, onlyWaits)
 				}(i)
 				break
 			}
@@ -1306,7 +1314,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				if wShell != nil {
 					<-wShell
 				}
-				slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
+				slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, onlyWaits)
 			}(i, waitForPath, waitForShell)
 
 		case core.EffectWritePath:
@@ -1325,7 +1333,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				if wShell != nil {
 					<-wShell
 				}
-				slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
+				slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, onlyWaits)
 			}(i, waitForPath, waitForShell)
 
 		default: // EffectShell, EffectUnknown, EffectInteractive
@@ -1345,7 +1353,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				for _, w := range waits {
 					<-w
 				}
-				slots[idx].result, slots[idx].isError = runTool(ctx, cfg, slots[idx].tc)
+				slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, onlyWaits)
 			}(i, waits)
 			// Shell becomes the new barrier; reset path tracking.
 			lastShell = done
@@ -1399,6 +1407,10 @@ func appendPermissionFeedback(result core.Result, feedback string) core.Result {
 // No lifecycle events — the caller controls event ordering.
 // Panics in Execute are recovered and returned as error results.
 func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (result core.Result, isError bool) {
+	return runToolInBatch(ctx, cfg, tc, false)
+}
+
+func runToolInBatch(ctx context.Context, cfg *loopConfig, tc core.Content, reportEligible bool) (result core.Result, isError bool) {
 	t, ok := cfg.tools.Get(tc.ToolName)
 	if !ok {
 		return core.ErrorResult(fmt.Sprintf("unknown tool: %s", tc.ToolName)), true
@@ -1428,7 +1440,7 @@ func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (result core
 	if steerInterruptibleWaitTools[tc.ToolName] && cfg.registerSteerWait != nil {
 		var cancel context.CancelCauseFunc
 		ctx, cancel = context.WithCancelCause(ctx)
-		defer cfg.registerSteerWait(cancel)()
+		defer cfg.registerSteerWait(cancel, reportEligible)()
 	}
 	result, err := t.Execute(ctx, tc.Arguments, onUpdate)
 	if err != nil {

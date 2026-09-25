@@ -32,6 +32,7 @@ type AgentController interface {
 	// Commands
 	Abort()
 	Steer(it core.SteerItem) bool
+	TrySteerIfWaiting(it core.SteerItem) (bool, error)
 	CancelSteer() []core.SteerItem
 	DrainSteers() []core.SteerItem
 	DrainUntilBarrier() []core.SteerItem
@@ -991,6 +992,11 @@ func Bridge(sctx *SessionContext, subscriber AgentSubscriber) func() {
 // cancellations and the steer filter (which needs sctx.SteerFilter, not just
 // data) — everything else defers to TranslateAgentEvent.
 func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
+	// A report that woke an interruptible wait has no user-owned queue chip.
+	// Announce its appended message like a direct machine prompt, not a steer.
+	if e.Type == core.AgentEventSteer && e.Message.Custom["source"] == "report" {
+		e.Type = core.AgentEventUserMessage
+	}
 	if e.Type == core.AgentEventSteer && sctx.SteerFilter != nil && !sctx.SteerFilter(e.Text) {
 		return
 	}

@@ -122,6 +122,10 @@ func (f *fakeAgent) Steer(it core.SteerItem) bool {
 	return true
 }
 
+func (f *fakeAgent) TrySteerIfWaiting(core.SteerItem) (bool, error) {
+	return false, nil
+}
+
 func (f *fakeAgent) CancelSteer() []core.SteerItem {
 	f.mu.Lock()
 	defer f.mu.Unlock()
