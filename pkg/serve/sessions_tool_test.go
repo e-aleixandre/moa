@@ -558,16 +558,13 @@ func (s *ManagedSession) ownerOfTest(t *testing.T) owner.Owner {
 	return own
 }
 
-// A session blocked on ask_user does not read steers until the question is
-// answered, so a send would sit unread: the owner is told to answer instead.
-func TestSessionsToolSendRefusesASessionWaitingOnAQuestion(t *testing.T) {
+// A send to a session blocked on ask_user skips the question exactly as the
+// user's Skip does, and the message reaches the session's next model turn once.
+func TestSessionsToolSendSkipsAPendingQuestion(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
-	mgr := newTestManager(t, ctx, newMockProvider(
-		toolCallHandlerFor("tc-ask", "ask_user", map[string]any{
-			"questions": []any{map[string]any{"question": "which branch?", "options": []any{"main", "dev"}}},
-		}),
-		simpleResponseHandler("done")))
+	nextTurn := make(chan []core.Message, 1)
+	mgr := newTestManager(t, ctx, askingProvider{nextTurn: nextTurn})
 	root := t.TempDir()
 	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
 
@@ -575,7 +572,6 @@ func TestSessionsToolSendRefusesASessionWaitingOnAQuestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// An idle session still takes a send: this one makes it ask.
 	res := runSessionsTool(t, ownerSess, map[string]any{"action": "send", "session_id": child.ID, "text": "ask me"})
 	if res.IsError {
 		t.Fatalf("send to an idle session failed: %s", toolText(res))
@@ -591,22 +587,62 @@ func TestSessionsToolSendRefusesASessionWaitingOnAQuestion(t *testing.T) {
 	})
 
 	res = runSessionsTool(t, ownerSess, map[string]any{"action": "send", "session_id": child.ID, "text": "use main"})
-	if !res.IsError {
-		t.Fatalf("send to a session waiting on a question succeeded: %s", toolText(res))
+	if res.IsError {
+		t.Fatalf("send to a session waiting on a question failed: %s", toolText(res))
 	}
-	text := toolText(res)
-	for _, want := range []string{askID, "which branch?", "action=answer"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("error %q does not mention %q", text, want)
+	if text := toolText(res); !strings.Contains(text, "Skipped the pending question") || !strings.Contains(text, askID) {
+		t.Fatalf("result %q does not report the skipped question %s", text, askID)
+	}
+	pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](child.runtime.Bus, bus.GetPendingApproval{})
+	if pending.Ask != nil {
+		t.Fatalf("the question is still pending: %+v", pending.Ask)
+	}
+
+	var msgs []core.Message
+	select {
+	case msgs = <-nextTurn:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the session never took its next model turn")
+	}
+	skippedAt, sentAt, sends := -1, -1, 0
+	for i, msg := range msgs {
+		for _, c := range msg.Content {
+			if msg.Role == "tool_result" && strings.Contains(c.Text, "(skipped)") {
+				skippedAt = i
+			}
+			if msg.Role == "user" && strings.Contains(c.Text, "use main") {
+				sentAt = i
+				sends++
+			}
 		}
 	}
-	steers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](child.runtime.Bus, bus.GetPendingSteers{SessionID: child.ID})
-	if len(steers) != 0 {
-		t.Fatalf("the refused send was queued: %+v", steers)
+	if skippedAt == -1 {
+		t.Fatalf("the next turn does not carry the skipped answer: %+v", msgs)
 	}
-	for _, msg := range child.History() {
-		if strings.Contains(assistantText(msg), "use main") {
-			t.Fatal("the refused send reached the session")
+	if sends != 1 || sentAt < skippedAt {
+		t.Fatalf("the message reached the next turn %d times (at %d, skip at %d), want once after the skip: %+v", sends, sentAt, skippedAt, msgs)
+	}
+}
+
+// askingProvider serves a child that asks on "ask me" and records the model
+// turn that follows the ask's tool result. It dispatches on the request, not
+// on call order, because the owner's own report turn shares the provider.
+type askingProvider struct{ nextTurn chan<- []core.Message }
+
+func (p askingProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	for _, msg := range req.Messages {
+		if msg.Role == "tool_result" && msg.ToolCallID == "tc-ask" {
+			select { // only the first turn after the answer is the one under test
+			case p.nextTurn <- append([]core.Message(nil), req.Messages...):
+			default:
+			}
+			return simpleResponse("done"), nil
 		}
 	}
+	if last := req.Messages[len(req.Messages)-1]; last.Role == "user" && len(last.Content) > 0 && last.Content[0].Text == "ask me" {
+		return toolCallHandlerFor("tc-ask", "ask_user", map[string]any{
+			"questions": []any{map[string]any{"question": "which branch?", "options": []any{"main", "dev"}}},
+		})(ctx, req)
+	}
+	return simpleResponse("done"), nil
 }

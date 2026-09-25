@@ -91,7 +91,7 @@ func newSessionsTool(mgr *Manager, codebaseKey string) core.Tool {
 				"action": {
 					"type": "string",
 					"enum": ["list", "read", "send", "new", "answer"],
-					"description": "list, read, send, new or answer. send does not answer a pending question: use answer."
+					"description": "list, read, send, new or answer. send skips a pending question; to answer it, use answer."
 				},
 				"session_id": {"type": "string", "description": "Target session (read, send, answer)."},
 				"text": {"type": "string", "description": "Message to send (send), or the prompt for a new session (new)."},
@@ -367,26 +367,38 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 		}
 	}
 	// A session blocked on ask_user reads no steer until the question is
-	// answered, so a send would sit unread. Checked after the resume above:
-	// pending asks live only in memory, so a just-reopened session has none.
-	if sess, ok := m.Get(id); ok {
+	// resolved, so send skips it exactly as the user's Skip does: the same
+	// ResolveAskUser the UI posts (POST /api/sessions/{id}/ask), every answer
+	// the '(skipped)' sentinel. Checked after the resume above: pending asks
+	// live only in memory, so a just-reopened session has none.
+	//
+	// The message is queued before the skip: the run steps again as soon as
+	// the ask resolves, so a steer queued after it could miss that step, while
+	// one queued before is drained right after the skipped answer. Target
+	// validation runs inside the send, so a refused send skips nothing.
+	var ask *bus.PendingAskInfo
+	sess, loaded := m.Get(id)
+	if loaded {
 		pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](sess.runtime.Bus, bus.GetPendingApproval{})
-		if pending.Ask != nil {
-			questions := make([]string, 0, len(pending.Ask.Questions))
-			for _, q := range pending.Ask.Questions {
-				questions = append(questions, q.Text)
-			}
-			return core.ErrorResult(fmt.Sprintf("session %s is waiting on a question (ask_id %s): %s. "+
-				"Reply with action=answer, session_id=%s, ask_id=%s, answers=[...], one answer per question; "+
-				"a send would sit unread until the question is answered.",
-				id, pending.Ask.ID, strings.Join(questions, " | "), id, pending.Ask.ID))
-		}
+		ask = pending.Ask
 	}
 	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", ownerPromptCustom(own), func(sess *ManagedSession) error {
 		return ownerTargetError(own, sess.ID, sess.Kind, sess.CWD, sess.ownerDetached.Load())
 	})
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot send to %s: %v", id, err))
+	}
+	if ask != nil {
+		skip := make([]string, len(ask.Questions))
+		for i := range skip {
+			skip[i] = "(skipped)"
+		}
+		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: ask.ID, Answers: skip}); err != nil {
+			// Only a question already resolved or withdrawn fails here; the
+			// session is then moving on its own and reads the message anyway.
+			return core.ErrorResult(fmt.Sprintf("cannot skip the pending question (ask_id %s) of %s: %v (it may already have been answered); your message is queued and it will read it at its next step", ask.ID, id, err))
+		}
+		return core.TextResult(fmt.Sprintf("Skipped the pending question (ask_id %s) and queued your message for %s.", ask.ID, id))
 	}
 	if action == "steer" {
 		return core.TextResult(fmt.Sprintf("Queued for %s (it is working; it will read this at its next step).", id))
