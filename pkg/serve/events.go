@@ -133,6 +133,9 @@ type SubagentInitData struct {
 	Status           string              `json:"status"`
 	Async            bool                `json:"async"`
 	Messages         []core.AgentMessage `json:"messages"`
+	// LiveTools are the child's calls that ended while a sibling in their
+	// batch still runs, with their results: Messages has neither yet.
+	LiveTools []LiveToolInitData `json:"live_tools,omitempty"`
 	// StartedAtMs is the child's start time as epoch milliseconds (same
 	// encoding as InitData.RunStartedAtMs), so a reconnecting client resumes
 	// its live elapsed timer instead of restarting it. Omitted when unknown.

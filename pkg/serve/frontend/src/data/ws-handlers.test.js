@@ -1859,6 +1859,31 @@ test('a terminal registry entry never overwrites a result already in history', a
   expect(row).toMatchObject({ status: 'error', result: 'a.go' });
 });
 
+// The same batch inside a subagent: opening the session mid-batch restored the
+// child's quick calls as running, so their rows could not be opened.
+test('handleWsInit restores a subagent call that ended ahead of its batch as finished, with its result', async () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    messages: [],
+    subagents: [{
+      job_id: 'sa-1', task: 'inventory', model: 'luna', status: 'running', async: true,
+      messages: [{
+        role: 'assistant',
+        content: [
+          { type: 'tool_call', tool_call_id: 'tc1', tool_name: 'ls', arguments: { path: '.' } },
+          { type: 'tool_call', tool_call_id: 'tc2', tool_name: 'bash', arguments: { command: 'sleep 90' } },
+        ],
+      }],
+      live_tools: [{ tool_call_id: 'tc1', tool_name: 'ls', status: 'done', result: 'a.go\nb.go' }],
+    }],
+  });
+  const rows = store.get().sessions.s1.subagents['sa-1'].messages.filter(m => m._type === 'tool_start');
+  expect(rows.map(r => [r.tool_call_id, r.status, r.result])).toEqual([
+    ['tc1', 'done', 'a.go\nb.go'],
+    ['tc2', 'running', null],
+  ]);
+});
+
 test('a live event arriving after the snapshot updates the restored row instead of duplicating it', async () => {
   seedSession('s1');
   handleWsInit('s1', {

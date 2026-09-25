@@ -1175,21 +1175,26 @@ func liveToolDelta(e core.AgentEvent) (liveToolMutation, bool) {
 		}}, true
 
 	case core.AgentEventToolExecEnd:
-		// Covers every terminal path — success, error, permission rejection,
-		// blocked/validation rejection — because the loop emits ToolExecEnd for
-		// all of them (see endRejectedToolCall).
-		phase := LiveToolPhaseDone
-		if e.Rejected {
-			phase = LiveToolPhaseRejected
-		} else if e.IsError {
-			phase = LiveToolPhaseError
-		}
-		return liveToolMutation{kind: liveToolKindEnd, call: LiveToolCall{ToolCallID: e.ToolCallID, Phase: phase, Result: resultText(e.Result)}}, true
+		return liveToolMutation{kind: liveToolKindEnd, call: EndedLiveToolCall(e)}, true
 
 	case core.AgentEventTurnEnd, core.AgentEventEnd, core.AgentEventError:
 		return liveToolMutation{kind: liveToolKindReset}, true
 	}
 	return liveToolMutation{}, false
+}
+
+// EndedLiveToolCall is the terminal registry entry for a ToolExecEnd event. It
+// covers every terminal path — success, error, permission rejection,
+// blocked/validation rejection — because the loop emits ToolExecEnd for all of
+// them (see endRejectedToolCall).
+func EndedLiveToolCall(e core.AgentEvent) LiveToolCall {
+	phase := LiveToolPhaseDone
+	if e.Rejected {
+		phase = LiveToolPhaseRejected
+	} else if e.IsError {
+		phase = LiveToolPhaseError
+	}
+	return LiveToolCall{ToolCallID: e.ToolCallID, ToolName: e.ToolName, Phase: phase, Result: resultText(e.Result)}
 }
 
 // TranslateAgentEvent translates a single core.AgentEvent into 0..n typed bus

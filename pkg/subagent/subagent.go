@@ -942,6 +942,10 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		if e.Type == core.AgentEventUserMessage {
 			jobs.setMessages(j.id, child.Messages())
 		}
+		// Same ordering for a call that ends ahead of its batch.
+		if e.Type == core.AgentEventToolExecEnd {
+			jobs.endTool(j.id, bus.EndedLiveToolCall(e))
+		}
 		forwardChildEvent(cfg, j.id, e)
 		if e.Type == core.AgentEventMessageEnd {
 			msgs := child.Messages()

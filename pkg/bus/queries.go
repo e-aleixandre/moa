@@ -283,6 +283,9 @@ type SubagentSnapshot struct {
 	Status           string
 	Async            bool
 	Messages         []core.AgentMessage
+	// LiveTools are the child's calls that ended while their batch still runs:
+	// Messages shows them without a result until the whole batch lands.
+	LiveTools []LiveToolCall
 	// StartedAt is when the child began running, so a reconnecting client can
 	// keep computing live elapsed time. Zero when unknown.
 	StartedAt time.Time

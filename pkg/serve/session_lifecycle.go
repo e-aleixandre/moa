@@ -541,7 +541,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		if bs.BashJobs != nil {
 			bashInfos = bs.BashJobs.Snapshot()
 		}
-		return initSubagentSnapshots(bs.Subagents.Snapshot(), bashInfos, bs.Subagents.Messages), nil
+		return initSubagentSnapshots(bs.Subagents.Snapshot(), bashInfos, bs.Subagents.Messages, bs.Subagents.EndedTools), nil
 	})
 	rt.Bus.OnQuery(func(q bus.GetBashJobs) ([]bus.BashJobSnapshot, error) {
 		if bs.BashJobs == nil {
@@ -682,7 +682,7 @@ func discardCancelledNotification(texts *sync.Map, status, text string) bool {
 // still contains a bash job it owns. Without its real owner, clients can only
 // manufacture a running placeholder and incorrectly surface the owned job as
 // root activity.
-func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInfo, messages func(string) []core.AgentMessage) []bus.SubagentSnapshot {
+func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInfo, messages func(string) []core.AgentMessage, endedTools func(string) []bus.LiveToolCall) []bus.SubagentSnapshot {
 	owners := make(map[string]struct{})
 	for _, bash := range bashInfos {
 		if bash.OwnerAgentID != "" {
@@ -708,6 +708,7 @@ func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInf
 			Status:           info.Status,
 			Async:            info.Async,
 			Messages:         messages(info.JobID),
+			LiveTools:        endedTools(info.JobID),
 			StartedAt:        info.StartedAt,
 			Usage:            info.Usage,
 			CostUSD:          info.CostUSD,

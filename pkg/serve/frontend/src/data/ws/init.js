@@ -271,7 +271,9 @@ export function initSubagents(raw) {
       thinking: sa.thinking || 'off',
       status: sa.status || 'running',
       async: !!sa.async,
-      messages: normalizeHistory(sa.messages || []),
+      // A call that ended while a sibling in its batch still runs has no
+      // result in the child's history yet; the snapshot sends it apart.
+      messages: withLiveTools(normalizeHistory(sa.messages || []), sa.live_tools),
       streamingText: null,
       thinkingText: null,
       // Reconnect-safe: preserve the started-at anchor and accumulated usage

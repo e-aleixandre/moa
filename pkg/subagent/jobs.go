@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/agent"
+	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 )
@@ -73,6 +74,11 @@ type job struct {
 	// from the subagent's position in a Go map (non-deterministic order,
 	// and finished subagents are dropped from the reconnect snapshot).
 	accentIndex int
+	// endedTools are the child's calls that ended while a sibling in their
+	// batch still runs: their results reach messages only with the whole
+	// batch, so a client rebuilding the child from messages alone would show
+	// them as still running.
+	endedTools []bus.LiveToolCall
 }
 
 type jobSnapshot struct {
@@ -275,7 +281,56 @@ func (s *jobStore) setMessages(id string, msgs []core.AgentMessage) {
 	}
 	j.mu.Lock()
 	j.messages = copied
+	j.endedTools = withoutLandedResults(j.endedTools, copied)
 	j.mu.Unlock()
+}
+
+// endTool records a child call that ended; setMessages drops it once its
+// result is in the stored history.
+func (s *jobStore) endTool(id string, call bus.LiveToolCall) {
+	j, ok := s.get(id)
+	if !ok || call.ToolCallID == "" {
+		return
+	}
+	j.mu.Lock()
+	j.endedTools = append(j.endedTools, call)
+	j.mu.Unlock()
+}
+
+// endedTools returns a copy of the calls that ended ahead of their batch.
+func (s *jobStore) endedTools(id string) []bus.LiveToolCall {
+	j, ok := s.get(id)
+	if !ok {
+		return nil
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if len(j.endedTools) == 0 {
+		return nil
+	}
+	return append([]bus.LiveToolCall(nil), j.endedTools...)
+}
+
+func withoutLandedResults(calls []bus.LiveToolCall, msgs []core.AgentMessage) []bus.LiveToolCall {
+	if len(calls) == 0 {
+		return calls
+	}
+	landed := make(map[string]bool)
+	for _, m := range msgs {
+		if m.Role == "tool_result" {
+			landed[m.ToolCallID] = true
+		}
+	}
+	kept := calls[:0]
+	for _, c := range calls {
+		if !landed[c.ToolCallID] {
+			kept = append(kept, c)
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 // messages returns a defensive deep copy of the stored message list for id.
@@ -639,6 +694,15 @@ func (j *Jobs) Messages(jobID string) []core.AgentMessage {
 		return nil
 	}
 	return j.store.messages(jobID)
+}
+
+// EndedTools returns the child's calls that ended while their batch still
+// runs, which the stored transcript does not show as ended yet.
+func (j *Jobs) EndedTools(jobID string) []bus.LiveToolCall {
+	if j == nil || j.store == nil {
+		return nil
+	}
+	return j.store.endedTools(jobID)
 }
 
 // Cancel requests cancellation of a running job. Returns false if no job with

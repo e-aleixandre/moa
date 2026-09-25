@@ -936,6 +936,7 @@ func liveSubagentInitData(subagents []bus.SubagentSnapshot) []SubagentInitData {
 			Status:           sa.Status,
 			Async:            sa.Async,
 			Messages:         messages,
+			LiveTools:        liveToolInitData(sa.LiveTools),
 			ContextPercent:   sa.ContextPercent,
 			AccentIndex:      sa.AccentIndex,
 		}

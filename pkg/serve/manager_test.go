@@ -421,6 +421,7 @@ func TestInitSubagentSnapshotsRetainsTerminalBashOwner(t *testing.T) {
 			}
 			return nil
 		},
+		func(string) []bus.LiveToolCall { return nil },
 	)
 	if len(snapshots) != 1 {
 		t.Fatalf("snapshot count = %d, want 1: %+v", len(snapshots), snapshots)
@@ -431,6 +432,31 @@ func TestInitSubagentSnapshotsRetainsTerminalBashOwner(t *testing.T) {
 	}
 	if len(got.Messages) != 1 || got.Messages[0].Content[0].Text != "Child finished its analysis." {
 		t.Fatalf("terminal owner transcript = %+v", got.Messages)
+	}
+}
+
+// A child's call that ended while its batch still runs has no result in the
+// child's transcript yet, so the reconnect snapshot carries it: without it the
+// client restores the call as running and cannot open its result.
+func TestSubagentInitCarriesCallsEndedAheadOfTheirBatch(t *testing.T) {
+	snapshots := initSubagentSnapshots(
+		[]subagent.JobInfo{{JobID: "child", Status: "running", Async: true}},
+		nil,
+		func(string) []core.AgentMessage { return nil },
+		func(jobID string) []bus.LiveToolCall {
+			if jobID != "child" {
+				return nil
+			}
+			return []bus.LiveToolCall{{ToolCallID: "call-ls", ToolName: "ls", Phase: bus.LiveToolPhaseDone, Result: "a.go"}}
+		},
+	)
+	data := liveSubagentInitData(snapshots)
+	if len(data) != 1 || len(data[0].LiveTools) != 1 {
+		t.Fatalf("subagent init = %+v, want one ended call", data)
+	}
+	got := data[0].LiveTools[0]
+	if got.ToolCallID != "call-ls" || got.ToolName != "ls" || got.Status != "done" || got.Result != "a.go" {
+		t.Fatalf("ended call in init = %+v", got)
 	}
 }
 
