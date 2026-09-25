@@ -26,12 +26,14 @@ export const CHILD_GROUPS = [
 
 // childGroup — which group one child belongs to. The precedence matters: a
 // session that needs a permission AND has an unread result is still, first,
-// something that has stopped. Reading it does not unblock it.
+// something that has stopped. Reading it does not unblock it. Likewise a
+// session that still runs is working even with an unread result; its dot keeps
+// saying unseen. `state` is the display dot, so the real run state is `running`.
 export function childGroup(child) {
   const state = child?.state || "idle";
   if (waitsOnYou(state)) return "waiting";
+  if (child?.running ?? state === "running") return "working";
   if (child?.unseen) return "unread";
-  if (state === "running") return "working";
   return "idle";
 }
 

@@ -21,7 +21,6 @@ test("a stopped child is waiting even when it also has an unread result", () => 
 
 test("unread, working and idle fall in that order", () => {
   expect(childGroup(child({ state: "idle", unseen: true }))).toBe("unread");
-  expect(childGroup(child({ state: "running", unseen: true }))).toBe("unread");
   expect(childGroup(child({ state: "running" }))).toBe("working");
   expect(childGroup(child({ state: "idle" }))).toBe("idle");
   expect(childGroup(child({ state: "saved" }))).toBe("idle");
@@ -134,6 +133,19 @@ test("the working count includes running children with an unread result", () => 
   expect(childrenSummary(winerim.children).working).toBe(2);
   expect(ownerLine(winerim).lead).toEqual({ tone: "blue", text: "2 working" });
   expect(ownerLine(iread).lead).toEqual({ tone: "blue", text: "1 working" });
+});
+
+test("a working child with an unread result stays under working, with its unread dot", () => {
+  const [row] = ownerRows([{ id: "own_1", name: "W" }], {
+    a: { id: "a", title: "busy", state: "running", unseen: true, ownerId: "own_1", updated: 300 },
+    b: { id: "b", title: "done", state: "idle", unseen: true, ownerId: "own_1", updated: 200 },
+  });
+  const busy = row.children.find((c) => c.id === "a");
+  expect(busy.state).toBe("unseen");
+  expect(childGroup(busy)).toBe("working");
+  expect(childGroup(row.children.find((c) => c.id === "b"))).toBe("unread");
+  expect(groupChildren(row.children).map((g) => [g.key, g.children.map((c) => c.id)]))
+    .toEqual([["unread", ["b"]], ["working", ["a"]]]);
 });
 
 test("a running child that waits on you is counted as waiting, not working", () => {
