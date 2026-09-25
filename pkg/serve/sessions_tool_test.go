@@ -557,3 +557,56 @@ func (s *ManagedSession) ownerOfTest(t *testing.T) owner.Owner {
 	}
 	return own
 }
+
+// A session blocked on ask_user does not read steers until the question is
+// answered, so a send would sit unread: the owner is told to answer instead.
+func TestSessionsToolSendRefusesASessionWaitingOnAQuestion(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	mgr := newTestManager(t, ctx, newMockProvider(
+		toolCallHandlerFor("tc-ask", "ask_user", map[string]any{
+			"questions": []any{map[string]any{"question": "which branch?", "options": []any{"main", "dev"}}},
+		}),
+		simpleResponseHandler("done")))
+	root := t.TempDir()
+	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+
+	child, err := mgr.CreateSession(CreateOpts{CWD: root, Origin: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An idle session still takes a send: this one makes it ask.
+	res := runSessionsTool(t, ownerSess, map[string]any{"action": "send", "session_id": child.ID, "text": "ask me"})
+	if res.IsError {
+		t.Fatalf("send to an idle session failed: %s", toolText(res))
+	}
+	var askID string
+	pollUntil(t, 5*time.Second, "the pending question", func() bool {
+		pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](child.runtime.Bus, bus.GetPendingApproval{})
+		if pending.Ask == nil {
+			return false
+		}
+		askID = pending.Ask.ID
+		return true
+	})
+
+	res = runSessionsTool(t, ownerSess, map[string]any{"action": "send", "session_id": child.ID, "text": "use main"})
+	if !res.IsError {
+		t.Fatalf("send to a session waiting on a question succeeded: %s", toolText(res))
+	}
+	text := toolText(res)
+	for _, want := range []string{askID, "which branch?", "action=answer"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("error %q does not mention %q", text, want)
+		}
+	}
+	steers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](child.runtime.Bus, bus.GetPendingSteers{SessionID: child.ID})
+	if len(steers) != 0 {
+		t.Fatalf("the refused send was queued: %+v", steers)
+	}
+	for _, msg := range child.History() {
+		if strings.Contains(assistantText(msg), "use main") {
+			t.Fatal("the refused send reached the session")
+		}
+	}
+}

@@ -91,7 +91,7 @@ func newSessionsTool(mgr *Manager, codebaseKey string) core.Tool {
 				"action": {
 					"type": "string",
 					"enum": ["list", "read", "send", "new", "answer"],
-					"description": "list, read, send, new or answer."
+					"description": "list, read, send, new or answer. send does not answer a pending question: use answer."
 				},
 				"session_id": {"type": "string", "description": "Target session (read, send, answer)."},
 				"text": {"type": "string", "description": "Message to send (send), or the prompt for a new session (new)."},
@@ -364,6 +364,22 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 			if _, loaded := m.Get(id); !errors.Is(err, ErrBusy) || !loaded {
 				return core.ErrorResult(fmt.Sprintf("cannot reopen session %s: %v", id, err))
 			}
+		}
+	}
+	// A session blocked on ask_user reads no steer until the question is
+	// answered, so a send would sit unread. Checked after the resume above:
+	// pending asks live only in memory, so a just-reopened session has none.
+	if sess, ok := m.Get(id); ok {
+		pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](sess.runtime.Bus, bus.GetPendingApproval{})
+		if pending.Ask != nil {
+			questions := make([]string, 0, len(pending.Ask.Questions))
+			for _, q := range pending.Ask.Questions {
+				questions = append(questions, q.Text)
+			}
+			return core.ErrorResult(fmt.Sprintf("session %s is waiting on a question (ask_id %s): %s. "+
+				"Reply with action=answer, session_id=%s, ask_id=%s, answers=[...], one answer per question; "+
+				"a send would sit unread until the question is answered.",
+				id, pending.Ask.ID, strings.Join(questions, " | "), id, pending.Ask.ID))
 		}
 	}
 	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", ownerPromptCustom(own), func(sess *ManagedSession) error {
