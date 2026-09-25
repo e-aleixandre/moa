@@ -22,6 +22,24 @@ const indexSrc = readFileSync(resolve(here, "src/index.html"), "utf8")
   .replace("<title>moa</title>", "<title>moa · catalog</title>");
 writeFileSync(resolve(outdir, "index.html"), indexSrc);
 
+// ?view=composer-wave has to show the shipped Composer recording and on a
+// call, states only a microphone and a WebRTC call can reach. Only for the
+// Composer's own imports, its two voice hooks resolve to lab doubles; the
+// doubles call the real hook and override it only under the lab's provider,
+// so every other view still gets the real behaviour.
+function labVoiceDoubles() {
+  return {
+    name: "lab-voice-doubles",
+    setup(build) {
+      build.onResolve({ filter: /hooks\/useVoice(Gesture|Live)\.js$/ }, (args) => {
+        if (!/layout[\\/]Composer[\\/]Composer\.jsx$/.test(args.importer)) return undefined;
+        const which = args.path.includes("Gesture") ? "gesture" : "live";
+        return { path: resolve(here, `src/catalog/composer-wave/voice-${which}-double.js`) };
+      });
+    },
+  };
+}
+
 const ctx = await context({
   absWorkingDir: here,
   entryPoints: ["src/catalog-app.jsx"],
@@ -32,6 +50,7 @@ const ctx = await context({
   jsxImportSource: "preact",
   sourcemap: true,
   minify: false,
+  plugins: [labVoiceDoubles()],
 });
 await ctx.watch();
 await ctx.serve({ servedir: outdir, host, port });

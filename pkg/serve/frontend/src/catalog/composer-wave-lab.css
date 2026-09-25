@@ -1,0 +1,115 @@
+/* Composer wave lab (?view=composer-wave). The page, the frames and the one
+   rule that matters: .cw-fx, the wash behind the lower half of the composer. */
+
+.cw {
+  position: relative;
+  overflow-x: clip;
+  min-height: 100vh;
+  padding: 32px 24px 96px;
+  background: var(--zl-canvas);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+}
+.cw .zl-aurora { position: fixed; inset: 0; pointer-events: none; opacity: 0.45;
+  background:
+    radial-gradient(60% 55% at 12% 18%, rgba(180, 190, 254, 0.52), transparent 68%),
+    radial-gradient(55% 60% at 88% 12%, rgba(203, 166, 247, 0.60), transparent 68%),
+    radial-gradient(70% 55% at 62% 92%, rgba(137, 180, 250, 0.58), transparent 70%);
+  filter: blur(22px); }
+
+.cw-ctl { align-items: center; }
+.cw-meter {
+  display: inline-block;
+  width: 96px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--zl-sheet);
+  box-shadow: var(--zl-rim);
+  overflow: hidden;
+}
+.cw-meter > span { display: block; height: 100%; background: var(--zl-accent); transform-origin: left; transform: scaleX(0); }
+.cw-error { position: relative; text-align: center; color: var(--zl-red); margin: -16px 0 24px; }
+
+.cw-stage {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 40px;
+  justify-content: center;
+  align-items: flex-start;
+}
+.cw-col { display: flex; flex-direction: column; gap: 28px; }
+.cw-col.is-desk { width: min(760px, 100%); }
+.cw-col.is-phone { width: min(390px, 100%); }
+/* Opened on a phone, the phone frames come first. */
+@media (max-width: 800px) { .cw { padding-inline: 0; } .cw-col.is-phone { order: -1; } }
+.cw-frame-label {
+  margin: 0 0 8px;
+  font: 500 var(--zl-fs-small, 12px) / 1.4 var(--mono, monospace);
+  color: var(--zl-t3);
+  letter-spacing: 0.02em;
+}
+.cw-dock { padding: 18px 22px 10px; border-radius: var(--zl-r-lg); background: linear-gradient(to bottom, transparent, rgba(16, 16, 24, 0.8) 32%); }
+.cw-frame.is-phone .cw-dock { padding: 18px 12px 8px; }
+
+.cw-solo { display: flex; align-items: center; justify-content: center; padding: 24px 0; }
+.cw-solo .cw-frame { width: var(--cw-w); }
+.cw-solo .cw-frame-label { display: none; }
+
+/* ── The composer and its wash ─────────────────────────────────────────
+   The host paints the slab's fill so the wash can sit between the fill and
+   the composer's content; the shipped composer is made transparent on top of
+   it and otherwise untouched. The wash covers the lower half, edge to edge,
+   and fades out upward so there is no line at the middle. */
+.cw-host {
+  position: relative;
+  isolation: isolate;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-raised);
+}
+.cw-host .zl-composer { background: transparent; z-index: 1; }
+.cw-fx {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 55%;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: 0 0 var(--zl-r-lg) var(--zl-r-lg);
+  -webkit-mask-image: linear-gradient(to top, #000 35%, transparent);
+  mask-image: linear-gradient(to top, #000 35%, transparent);
+}
+.cwfx-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* A · Aurora: the clouds drift on the compositor; JS only scales their parent. */
+.cwfx-aurora {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 100%;
+  will-change: transform, opacity;
+}
+.cwfx-blob {
+  position: absolute;
+  bottom: -55%;
+  width: 62%;
+  height: 150%;
+  border-radius: 50%;
+  will-change: transform;
+  animation: cwfx-drift 11s ease-in-out infinite alternate;
+}
+.cwfx-blob.b0 { left: -15%; background: radial-gradient(closest-side, rgba(180, 190, 254, 0.85), transparent); animation-duration: 9s; }
+.cwfx-blob.b1 { left: 12%;  background: radial-gradient(closest-side, rgba(203, 166, 247, 0.9), transparent); animation-duration: 13s; animation-delay: -4s; animation-name: cwfx-drift-b; }
+.cwfx-blob.b2 { left: 38%;  background: radial-gradient(closest-side, rgba(137, 180, 250, 0.85), transparent); animation-duration: 10s; animation-delay: -7s; }
+.cwfx-blob.b3 { left: 60%;  background: radial-gradient(closest-side, rgba(148, 226, 213, 0.7), transparent); animation-duration: 14s; animation-delay: -2s; animation-name: cwfx-drift-b; }
+.cwfx-blob.b4 { left: 82%;  background: radial-gradient(closest-side, rgba(203, 166, 247, 0.65), transparent); animation-duration: 12s; animation-delay: -9s; }
+@keyframes cwfx-drift {
+  from { transform: translate3d(-18%, 6%, 0) scale(0.9, 1); }
+  to   { transform: translate3d(22%, -8%, 0) scale(1.15, 1.1); }
+}
+@keyframes cwfx-drift-b {
+  from { transform: translate3d(20%, -4%, 0) scale(1.1, 0.95); }
+  to   { transform: translate3d(-24%, 8%, 0) scale(0.92, 1.12); }
+}
+.cwfx-aurora.is-still { transform: scaleY(0.9); }
+.cwfx-aurora.is-still .cwfx-blob { animation: none; will-change: auto; }
