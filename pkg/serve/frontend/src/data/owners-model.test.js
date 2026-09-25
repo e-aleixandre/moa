@@ -121,6 +121,28 @@ test("ownerRows attaches each owner's children out of the roster", () => {
   expect(groupChildren(rows[0].children).map((g) => g.key)).toEqual(["waiting", "working"]);
 });
 
+test("the working count includes running children with an unread result", () => {
+  // Two running children, one of them unseen: its dot is mauve, but it is still
+  // running, and the owner's conversation tray counts it among the sessions.
+  const sessions = {
+    a: { id: "a", title: "incident", state: "running", unseen: true, ownerId: "own_1", updated: 300 },
+    b: { id: "b", title: "feature", state: "running", ownerId: "own_1", updated: 200 },
+    c: { id: "c", title: "review", state: "idle", unseen: true, ownerId: "own_1", updated: 100 },
+    d: { id: "d", title: "iread", state: "running", unseen: true, ownerId: "own_2", updated: 100 },
+  };
+  const [winerim, iread] = ownerRows([{ id: "own_1", name: "Winerim" }, { id: "own_2", name: "iRead" }], sessions);
+  expect(childrenSummary(winerim.children).working).toBe(2);
+  expect(ownerLine(winerim).lead).toEqual({ tone: "blue", text: "2 working" });
+  expect(ownerLine(iread).lead).toEqual({ tone: "blue", text: "1 working" });
+});
+
+test("a running child that waits on you is counted as waiting, not working", () => {
+  const [row] = ownerRows([{ id: "own_1", name: "W" }], {
+    a: { id: "a", title: "asks", state: "running", pendingAsk: { id: "q" }, ownerId: "own_1", updated: 1 },
+  });
+  expect(childrenSummary(row.children)).toMatchObject({ working: 0, waiting: 1 });
+});
+
 test("a session detached from its owner is not in its row nor its tally", () => {
   const sessions = {
     a: { id: "a", title: "kept", state: "running", ownerId: "own_1", updated: 200 },

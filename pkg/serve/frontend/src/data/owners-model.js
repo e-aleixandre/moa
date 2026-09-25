@@ -1,4 +1,4 @@
-import { sessionDisplayDotState, sessionTitle } from "./util/format.js";
+import { sessionDisplayDotState, sessionDotState, sessionTitle } from "./util/format.js";
 import { sessionRowReason } from "../layout/Sidebar/sessions.js";
 
 // owners-model — the only logic the Owners surface needs, kept out of the
@@ -61,8 +61,10 @@ export function childrenSummary(children = []) {
   const waiting = children.filter((c) => childGroup(c) === "waiting");
   const unread = children.filter((c) => childGroup(c) === "unread");
   // Working counts every child that runs, read or not: an unseen result on a
-  // running session does not stop it moving.
-  const working = children.filter((c) => (c.state || "idle") === "running");
+  // running session does not stop it moving. `state` is the display dot, which
+  // folds running+unseen into "unseen", so the row carries `running` apart.
+  const working = children.filter((c) =>
+    childGroup(c) !== "waiting" && (c.running ?? (c.state || "idle") === "running"));
   return {
     live: live.length,
     working: working.length,
@@ -240,6 +242,7 @@ export function ownerChildRow(sess, now = Date.now()) {
     id: sess.id,
     title: sessionTitle(sess),
     state: sessionDisplayDotState(sess),
+    running: sessionDotState(sess) === "running",
     unseen: !!sess.unseen,
     when: relAge(sess.updated, now),
     brief: reason?.text || "",
