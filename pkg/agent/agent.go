@@ -128,6 +128,28 @@ func (q *steerQueue) push(it core.SteerItem) bool {
 	return true
 }
 
+// pushAfterNotifications preserves FIFO when a report wakes an owner waiting
+// behind completion notifications. A user steer, barrier, or other internal
+// work must still run before any new report can join the current turn.
+func (q *steerQueue) pushAfterNotifications(it core.SteerItem) (bool, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, queued := range q.items {
+		if !queued.Internal || queued.IsBarrier() {
+			return false, nil
+		}
+		source, _ := queued.Custom["source"].(string)
+		if source != "subagent" && source != "bash_job" {
+			return false, nil
+		}
+	}
+	if len(q.items) >= steerBufferSize {
+		return false, ErrSteerQueueFull
+	}
+	q.items = append(q.items, it)
+	return true, nil
+}
+
 // pushFront re-inserts items at the head of the queue, preserving their order.
 // Used to hand back items that were drained but then lost the race to start a
 // run (the pump's reserve-then-drain): the concurrent run that won the slot drains them on
@@ -1521,10 +1543,10 @@ func (a *Agent) TrySteer(it core.SteerItem) error {
 	return nil
 }
 
-// TrySteerIfWaiting admits a message only while an interruptible foreground
-// wait is registered. Holding the wait registry lock through admission keeps
-// a report from being steered into an unrelated active step after the wait
-// unregisters. The same steer wakes the wait without stopping its job.
+// TrySteerIfWaiting admits a message only while the foreground is waiting,
+// behind completion notifications but never behind user work or barriers.
+// steerMu serializes admission with the post-tool delivery boundary, so a
+// wait ending during admission cannot redirect the report into a later turn.
 func (a *Agent) TrySteerIfWaiting(it core.SteerItem) (bool, error) {
 	a.steerMu.Lock()
 	defer a.steerMu.Unlock()
@@ -1542,15 +1564,15 @@ func (a *Agent) TrySteerIfWaiting(it core.SteerItem) (bool, error) {
 			return false, nil
 		}
 	}
-	if !a.steers.push(ownItem(it)) {
-		a.waitSteers.mu.Unlock()
-		return false, ErrSteerQueueFull
-	}
 	cancels := make([]context.CancelCauseFunc, 0, len(a.waitSteers.cancels))
 	for _, entry := range a.waitSteers.cancels {
 		cancels = append(cancels, entry.cancel)
 	}
 	a.waitSteers.mu.Unlock()
+	accepted, err := a.steers.pushAfterNotifications(ownItem(it))
+	if !accepted || err != nil {
+		return accepted, err
+	}
 	for _, cancel := range cancels {
 		cancel(core.ErrWaitInterruptedBySteer)
 	}

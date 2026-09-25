@@ -609,7 +609,7 @@ func newSubagentWait(jobs *jobStore) core.Tool {
 			snap, delivered, err := jobs.wait(ctx, jobID, timeout)
 			if err != nil {
 				if errors.Is(context.Cause(ctx), core.ErrWaitInterruptedBySteer) {
-					return core.TextResult("Wait interrupted by a user message; the subagent is still running."), nil
+					return core.TextResult("Wait interrupted by a new message; the subagent is still running."), nil
 				}
 				if errors.Is(err, ErrUnknownJob) {
 					return core.ErrorResult("unknown job ID: " + jobID), nil

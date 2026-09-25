@@ -609,9 +609,9 @@ func (c *reportCoordinator) disarm(batch *reportBatch) {
 }
 
 // flush attempts one delivery of everything pending for a codebase. A busy
-// owner keeps its batch: the owner is never steered, so the reports wait for it
-// to be idle (its own run outcomes nudge this coordinator) and the timer is
-// re-armed as a backstop in case no further run ever happens.
+// owner keeps its batch until its run ends, except when it is blocked in an
+// interruptible wait. Its own run outcomes nudge the coordinator; the timer
+// is re-armed as a backstop in case no further run ever happens.
 func (c *reportCoordinator) flush(key string, batch *reportBatch) {
 	c.disarm(batch)
 	if len(batch.pending) == 0 {

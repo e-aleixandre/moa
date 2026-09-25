@@ -1074,6 +1074,58 @@ func TestReportSteerInterruptsWaitThatRegistersAfterAdmission(t *testing.T) {
 	}
 }
 
+func TestReportWaitAdmissionKeepsUserAndBarrierQueueOrder(t *testing.T) {
+	for _, queued := range []core.SteerItem{
+		{ID: "user", Text: "user message"},
+		{ID: "barrier", Command: "/compact"},
+		{ID: "other", Text: "other internal work", Internal: true},
+	} {
+		t.Run(queued.ID, func(t *testing.T) {
+			ag := newTestAgent(NewMockProvider())
+			_, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
+			unregister := ag.registerSteerWait(cancel, true)
+			defer unregister()
+			if err := ag.TrySteer(queued); err != nil {
+				t.Fatal(err)
+			}
+			accepted, err := ag.TrySteerIfWaiting(core.SteerItem{ID: "report", Internal: true, Custom: map[string]any{"source": "report"}})
+			if err != nil || accepted {
+				t.Fatalf("report admission behind %s = %v, %v; want refused", queued.ID, accepted, err)
+			}
+			if got := ag.QueueLen(); got != 1 {
+				t.Fatalf("queue length = %d, want only the original item", got)
+			}
+		})
+	}
+}
+
+func TestReportWaitAdmissionBehindCompletionNotifications(t *testing.T) {
+	for _, source := range []string{"subagent", "bash_job"} {
+		t.Run(source, func(t *testing.T) {
+			ag := newTestAgent(NewMockProvider())
+			ctx, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
+			unregister := ag.registerSteerWait(cancel, true)
+			defer unregister()
+			if err := ag.TrySteer(core.SteerItem{ID: "completion", Internal: true, Custom: map[string]any{"source": source}}); err != nil {
+				t.Fatal(err)
+			}
+			accepted, err := ag.TrySteerIfWaiting(core.SteerItem{ID: "report", Internal: true, Custom: map[string]any{"source": "report"}})
+			if err != nil || !accepted {
+				t.Fatalf("report behind %s completion = %v, %v", source, accepted, err)
+			}
+			if !errors.Is(context.Cause(ctx), core.ErrWaitInterruptedBySteer) {
+				t.Fatalf("wait cause = %v, want report interruption", context.Cause(ctx))
+			}
+			items := ag.DrainSteers()
+			if len(items) != 2 || items[0].ID != "completion" || items[1].ID != "report" {
+				t.Fatalf("delivery order = %+v", items)
+			}
+		})
+	}
+}
+
 func TestAgent_CancelSteer_DrainsQueuedSteers(t *testing.T) {
 	ag := newTestAgent(NewMockProvider())
 

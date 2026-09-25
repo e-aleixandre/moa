@@ -374,6 +374,80 @@ func TestReportsInterruptOwnerWaitWithoutStoppingItsJob(t *testing.T) {
 	}
 }
 
+func TestReportInterruptsWaitBehindInternalNotification(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	started := make(chan struct{})
+	interrupted := make(chan error, 1)
+	release := make(chan struct{})
+	defer close(release)
+	provider := newMockProvider(toolCallHandlerFor("tc-wait", "bash_wait", nil), simpleResponseHandler("handled both"))
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	mgr := newTestManager(t, context.Background(), provider)
+	info, ownerSess := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	ownerSess.infra.toolReg.Unregister("bash_wait")
+	if err := ownerSess.infra.toolReg.Register(core.Tool{
+		Name: "bash_wait", Parameters: json.RawMessage(`{"type":"object"}`),
+		Execute: func(ctx context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
+			close(started)
+			select {
+			case <-ctx.Done():
+				interrupted <- context.Cause(ctx)
+			case <-release:
+			}
+			return core.TextResult("wait interrupted"), nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(ownerSess.ID, "wait for A", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("owner did not enter the wait")
+	}
+	if err := ownerSess.runtime.Bus.Execute(bus.SteerAgent{
+		SessionID: ownerSess.ID, ID: "notification-b", Text: "B completed",
+		Custom: map[string]any{"source": "subagent"}, Internal: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ql, _ := bus.QueryTyped[bus.GetQueueLen, int](ownerSess.runtime.Bus, bus.GetQueueLen{}); ql != 1 {
+		t.Fatalf("notification queue length = %d, want 1", ql)
+	}
+	added := make(chan struct{})
+	go func() {
+		mgr.reports.add(info.CodebaseKey, owner.Report{ID: "child:1:failed", SessionID: "child", Status: callbackStatusFailed})
+		close(added)
+	}()
+	select {
+	case cause := <-interrupted:
+		if !errors.Is(cause, core.ErrWaitInterruptedBySteer) {
+			t.Fatalf("wait interruption cause = %v", cause)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("report did not wake the wait behind an internal notification")
+	}
+	select {
+	case <-added:
+	case <-time.After(3 * time.Second):
+		t.Fatal("report was not delivered behind the notification")
+	}
+	var sources []string
+	for _, msg := range ownerSess.History() {
+		if msg.Role != "user" || msg.Custom == nil {
+			continue
+		}
+		if source, ok := msg.Custom["source"].(string); ok && (source == "subagent" || source == reportSource) {
+			sources = append(sources, source)
+		}
+	}
+	if len(sources) != 2 || sources[0] != "subagent" || sources[1] != reportSource {
+		t.Fatalf("notification and report order = %v, want [subagent report]", sources)
+	}
+}
+
 func TestReportsDoNotInterruptAWaitAlongsideActiveTool(t *testing.T) {
 	shortReportWindow(t, time.Hour)
 	waitStarted := make(chan struct{})

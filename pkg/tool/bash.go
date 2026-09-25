@@ -351,7 +351,7 @@ func NewBashWait(cfg ToolConfig) core.Tool {
 			job, delivered, err := cfg.BashJobs.Wait(ctx, jobID, timeout)
 			if err != nil {
 				if errors.Is(context.Cause(ctx), core.ErrWaitInterruptedBySteer) {
-					return core.TextResult("Wait interrupted by a user message; the background job is still running."), nil
+					return core.TextResult("Wait interrupted by a new message; the background job is still running."), nil
 				}
 				if err == ErrUnknownBashJob {
 					return core.ErrorResult("unknown bash job ID: " + jobID), nil

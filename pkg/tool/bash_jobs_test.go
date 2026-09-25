@@ -511,7 +511,7 @@ func TestNewBashWaitSteerInterruptKeepsJobRunning(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancel(core.ErrWaitInterruptedBySteer)
 	res, err := NewBashWait(ToolConfig{BashJobs: jobs}).Execute(ctx, map[string]any{"job_id": job.JobID}, nil)
-	if err != nil || res.IsError || !strings.Contains(bashResultText(res), "interrupted by a user message") {
+	if err != nil || res.IsError || !strings.Contains(bashResultText(res), "interrupted by a new message") {
 		t.Fatalf("steer-interrupted wait = %+v, %v", res, err)
 	}
 	info, ok := jobs.Get(job.JobID)

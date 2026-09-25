@@ -159,9 +159,6 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 		// caller checking idleness from outside could only observe a snapshot
 		// that a concurrent send invalidates before its own Execute lands.
 		if cmd.IdleOnly {
-			if sctx.Agent.QueueLen() > 0 {
-				return ErrNotIdle
-			}
 			if sctx.State != nil {
 				if state := sctx.State.Current(); state == StateRunning && cmd.InterruptWait {
 					id := cmd.SteerID
@@ -183,6 +180,9 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 				} else if state == StateRunning || state == StatePermission {
 					return ErrNotIdle
 				}
+			}
+			if sctx.Agent.QueueLen() > 0 {
+				return ErrNotIdle
 			}
 			if (cmd.AllowBackgroundWork && (sctx.AutoVerifying() || sctx.GoalVerifying())) ||
 				(!cmd.AllowBackgroundWork && sctx.hasBackgroundWork()) {
