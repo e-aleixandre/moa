@@ -37,7 +37,12 @@ index.
 `list` (which also names live sessions in other directories that no owner
 watches), `read`, `send` (message or steer), `new` (create a child in a
 directory of the codebase and send its first prompt), and `answer` (resolve a
-pending `ask_user` of a child). There is deliberately no permission action:
+pending `ask_user` of a child). A session waiting on a question reads no message
+until the question is resolved, so `send` treats it by origin: in a session the
+owner started, it skips the question (the same answers as the **Skip** button)
+and delivers the message; in a session you started, it is refused and names
+your question, because the owner does not answer for you. To reply to a
+question, the owner uses `answer`. There is deliberately no permission action:
 approving what a session wants to do stays yours. That is policy for a
 cooperative agent, not a security barrier — the owner has bash like any
 session; what bounds it is the session's permission mode and allowed paths.
@@ -58,7 +63,9 @@ finished turn does not wait indefinitely for the session to go quiet: it waits
 up to 15 s for background work (subagents, background shell jobs), then
 reports anyway and says how many jobs are still running. A background job that
 finishes later belongs to the same turn and is not reported twice. Reports are
-batched per owner over 60 s; `failed` and `needs_input` flush at once. A report is
+batched per owner over 60 s; `failed` and `needs_input` flush at once. A long
+run reports `needs_input` every time it becomes blocked again, not only the
+first time; questions raised together are one report. A report is
 written to `codebases/<key>/reports.json` before it is queued, and removed
 only once it is in the owner's transcript on disk, so a restart re-delivers
 rather than loses it.
@@ -147,8 +154,9 @@ same row twice.
 An owner's row says its own state and its children's as two clauses, because
 they are two different conversations. The lead is the owner's own state (amber
 when it asks, blue when it works, mauve when it wrote something unread); an idle
-owner's lead is its children's state in words — `N working` in blue — and is
-omitted when none of them work. `N waiting on you` is always amber, because it
+owner's lead is its children's state in words — `N working` in blue, counting
+a running child even when it has an unread result — and is omitted when none
+of them work. `N waiting on you` is always amber, because it
 is the number that stops work. A parked owner's row is its name alone. An
 owner **never** rises into Needs attention: it is standing, and a permanent
 row that moves between sections is a row you have to find again every time it

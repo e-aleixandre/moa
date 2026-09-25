@@ -377,6 +377,23 @@ On desktop, you can split panes horizontally or vertically, switch focus by keyb
   open the details.
 - When Moa frees context by trimming old tool output instead of compacting, a
   thin line says how much it freed.
+- A line marks where **Start fresh** cut the model's context; the messages
+  above it stay in the transcript but are no longer sent to the model.
+
+## Prompt cache expiry and Start fresh
+
+When the prompt cache of a conversation has expired, the composer shows
+**Prompt cache expired**: your next message re-sends the whole context at the
+uncached price. Moa warns only where the provider documents a cache lifetime:
+on Anthropic after the configured [`cache_ttl`](./configuration.md#features) (1 hour by
+default, or 5 minutes), on OpenAI 30 minutes after the last request, and never
+on other providers. The warning survives a reload or a restart.
+
+Next to it, **Start fresh** stops sending the older part of the conversation
+to the model without summarizing it: the model keeps exactly the recent
+messages a compaction would keep verbatim, no model is called, and the
+transcript keeps everything. It appears only when the agent is idle and a cut
+would actually drop something, and at most once per expiry.
 - A session ID written by the agent becomes a chip showing that session's name
   and state; tap it to open the session.
 

@@ -5,6 +5,43 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.0] - 2026-09-25
+
+### Added
+
+- **Start fresh.** When a conversation's prompt cache has expired, the composer
+  says so and offers **Start fresh**: the older part of the conversation stops
+  being sent to the model, without a summary and without calling a model, so
+  the next message does not pay to re-cache all of it. The model keeps the same
+  recent messages a compaction would keep; the transcript keeps everything and
+  marks where the cut happened. It is offered only when a cut would drop
+  something, once per expiry. See
+  [Prompt cache expiry and Start fresh](docs/serve.md#prompt-cache-expiry-and-start-fresh).
+
+### Changed
+
+- The prompt-cache expiry warning is shorter and now also appears on OpenAI,
+  30 minutes after the last request; on Anthropic it still follows `cache_ttl`,
+  and other providers show none. It survives a reload or a restart.
+- An owner's `send` to a session waiting on a question: in a session the owner
+  started, it skips the question the way **Skip** does and delivers the
+  message; in a session you started, it is refused and the owner is told the
+  question is yours. Previously the message was queued and sat unread.
+
+### Fixed
+
+- A quick tool call running alongside a long wait (such as a subagent or a
+  background job) shows as finished when it finishes, instead of running until
+  the slowest call of its batch returns; a denied tool call ends at once.
+- A tool call that finished before the rest of its batch keeps its result
+  after a reconnect, so a file download card or a queued-message notice is no
+  longer lost.
+- The live bar no longer freezes halfway through changing its phrase, which
+  could leave it saying "Reading files…" during a whole wait.
+- An owner is told every time a long run stops to ask again, not only the
+  first time.
+- An owner's `N working` counts running sessions that have an unread result.
+
 ## [0.41.0] - 2026-09-24
 
 ### Added
