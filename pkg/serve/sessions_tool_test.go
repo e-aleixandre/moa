@@ -646,3 +646,45 @@ func (p askingProvider) Stream(ctx context.Context, req core.Request) (<-chan co
 	}
 	return simpleResponse("done"), nil
 }
+
+func TestSessionsToolSendRefusesAQuestionInTheUsersSession(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	nextTurn := make(chan []core.Message, 1)
+	mgr := newTestManager(t, ctx, askingProvider{nextTurn: nextTurn})
+	root := t.TempDir()
+	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+
+	child, err := mgr.CreateSession(CreateOpts{CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.send(child.ID, "ask me", nil, "", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	var askID string
+	pollUntil(t, 5*time.Second, "the pending question", func() bool {
+		pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](child.runtime.Bus, bus.GetPendingApproval{})
+		if pending.Ask == nil {
+			return false
+		}
+		askID = pending.Ask.ID
+		return true
+	})
+
+	res := runSessionsTool(t, ownerSess, map[string]any{"action": "send", "session_id": child.ID, "text": "use main"})
+	if !res.IsError {
+		t.Fatalf("send to the user's asking session succeeded: %s", toolText(res))
+	}
+	if text := toolText(res); !strings.Contains(text, "started by the user") || !strings.Contains(text, askID) {
+		t.Fatalf("result %q does not name the user's question %s", text, askID)
+	}
+	pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](child.runtime.Bus, bus.GetPendingApproval{})
+	if pending.Ask == nil || pending.Ask.ID != askID {
+		t.Fatalf("the question is no longer pending: %+v", pending.Ask)
+	}
+	steers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](child.runtime.Bus, bus.GetPendingSteers{})
+	if len(steers) != 0 {
+		t.Fatalf("send queued %d messages, want none: %+v", len(steers), steers)
+	}
+}

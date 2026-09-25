@@ -91,7 +91,7 @@ func newSessionsTool(mgr *Manager, codebaseKey string) core.Tool {
 				"action": {
 					"type": "string",
 					"enum": ["list", "read", "send", "new", "answer"],
-					"description": "list, read, send, new or answer. send skips a pending question; to answer it, use answer."
+					"description": "list, read, send, new or answer. send skips a pending question in the owner's own sessions and is refused in the user's; to answer it, use answer."
 				},
 				"session_id": {"type": "string", "description": "Target session (read, send, answer)."},
 				"text": {"type": "string", "description": "Message to send (send), or the prompt for a new session (new)."},
@@ -381,6 +381,16 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 	if loaded {
 		pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](sess.runtime.Bus, bus.GetPendingApproval{})
 		ask = pending.Ask
+	}
+	// In the user's sessions the owner may not answer for them (the same
+	// Origin gate as answer), so skipping is refused too, before anything is
+	// queued: a message would sit unread until the user answers.
+	if ask != nil && sess.Origin != "owner" {
+		questions := make([]string, len(ask.Questions))
+		for i, q := range ask.Questions {
+			questions[i] = q.Text
+		}
+		return core.ErrorResult(fmt.Sprintf("session %s was started by the user and is waiting on their question (ask_id %s): %q. Ask the user to answer it; a send would sit unread until they do.", id, ask.ID, strings.Join(questions, " / ")))
 	}
 	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", ownerPromptCustom(own), func(sess *ManagedSession) error {
 		return ownerTargetError(own, sess.ID, sess.Kind, sess.CWD, sess.ownerDetached.Load())
