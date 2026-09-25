@@ -33,7 +33,7 @@ export function useVoiceGesture({ onTranscript, onError, onRecordingStart } = {}
   const forwardVoiceError = useCallback((msg) => voiceErrorRef.current?.(msg), []);
   const {
     recording, transcribing, start: startVoice, stop: stopVoice,
-    cancel: cancelVoice, completion, supported,
+    cancel: cancelVoice, completion, supported, getStream,
   } = useVoice(onTranscript, forwardVoiceError);
 
   // The reducer state lives in a ref (read fresh inside handlers without stale
@@ -123,5 +123,6 @@ export function useVoiceGesture({ onTranscript, onError, onRecordingStart } = {}
     supported,
     cancel,
     toggleFromShortcut,
+    getStream,
   };
 }

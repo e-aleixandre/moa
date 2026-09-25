@@ -240,6 +240,10 @@
   --breath-running:   1800ms;
   --breath-attention: 1100ms;
   --shimmer:          1400ms;
+  /* The composer's voice wash (layout/Composer): one slow drift period the
+     clouds derive theirs from, so they never fall into step. Ambient, not UI
+     motion: nothing waits for it, and reduced motion stills it entirely. */
+  --aurora-drift:     11s;
   /* Token heartbeat pulse (TokenFlow): the wash flash + its color fade-back.
      --token-pulse must match PULSE_MS in TokenFlow.jsx. */
   --token-pulse:      900ms;

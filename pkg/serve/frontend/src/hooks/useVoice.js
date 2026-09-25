@@ -32,6 +32,7 @@ export function useVoice(onTranscript, onError) {
   const start = useCallback(() => controllerRef.current.start(), []);
   const stop = useCallback(() => controllerRef.current.stop(), []);
   const cancel = useCallback(() => controllerRef.current.cancel(), []);
+  const getStream = useCallback(() => controllerRef.current.currentStream(), []);
   const toggle = useCallback(() => {
     if (recording) stop();
     else start();
@@ -45,5 +46,5 @@ export function useVoice(onTranscript, onError) {
 
   const supported = typeof MediaRecorder !== 'undefined'
     && !!globalThis.navigator?.mediaDevices?.getUserMedia;
-  return { recording, transcribing, completion, start, stop, cancel, toggle, supported };
+  return { recording, transcribing, completion, start, stop, cancel, toggle, supported, getStream };
 }

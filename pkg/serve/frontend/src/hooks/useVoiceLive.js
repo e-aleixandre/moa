@@ -53,11 +53,13 @@ export function useVoiceLive(sessionId, { onResult, onError } = {}) {
 
   const start = useCallback(() => controllerRef.current.start(), []);
   const hangup = useCallback(() => controllerRef.current.hangup(), []);
+  // The call's own microphone, for a level meter. Read-only: the call owns it.
+  const getStream = useCallback(() => controllerRef.current.stream || null, []);
 
   useEffect(() => () => controllerRef.current.dispose(), []);
 
   const supported = typeof RTCPeerConnection !== 'undefined'
     && !!globalThis.navigator?.mediaDevices?.getUserMedia;
 
-  return { ...state, elapsed, start, hangup, supported };
+  return { ...state, elapsed, start, hangup, supported, getStream };
 }

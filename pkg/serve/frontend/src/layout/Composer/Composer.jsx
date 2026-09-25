@@ -6,6 +6,7 @@ import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import { useVoiceLive } from "../../hooks/useVoiceLive.js";
 import { appendCallResult, callSpendNotice } from "../../data/voice-live.js";
 import { VoiceLivePanel } from "../../components/VoiceLivePanel/VoiceLivePanel.jsx";
+import { ComposerAurora, auroraActive } from "./ComposerAurora.jsx";
 import { useStore } from "../../hooks/useStore.js";
 import {
   sendMessage, stopRun, execCommand, execShell, newSteerId,
@@ -778,6 +779,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   const {
     handlers: voiceHandlers, recording, transcribing,
     supported: voiceSupported, toggleFromShortcut, cancel: cancelVoice,
+    getStream: getRecordingStream,
   } = useVoiceGesture({
     onTranscript: insertAtCursor,
     onError: onVoiceError,
@@ -1109,13 +1111,17 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       decorating an empty box. Attachments count: a photo with no caption is
       as sendable as a sentence. */
   const armed = hasText || attachments.length > 0;
+  const voiceLit = auroraActive({ recording, callPhase: voiceLive.phase });
 
   /* The composer draws NO queue: what has been said belongs to the thread,
      and the marker at the end of the transcript is where it is seen and
      recalled (components/QueuedTail). This slab holds what is about to be
      said. */
   return (
-    <div class={`zl-composer${busy ? " is-busy" : ""}${armed ? " is-armed" : ""}`}>
+    <div class={`zl-composer${busy ? " is-busy" : ""}${armed ? " is-armed" : ""}${voiceLit ? " is-voice" : ""}`}>
+      {/* First child on purpose: the slab's content is positioned after it
+          while the voice is live (Composer.css), so it paints above the wash. */}
+      {voiceLit && <ComposerAurora getStream={recording ? getRecordingStream : voiceLive.getStream} />}
       {cacheExpired && (
         <div class="cache-warn" title="Cache expired: your next message costs more">
           <TriangleAlert class="cache-warn-icon" size={14} strokeWidth={1.75} aria-hidden="true" />

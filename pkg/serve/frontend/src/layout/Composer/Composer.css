@@ -310,6 +310,79 @@
   .zl-call .spin { animation: none; }
 }
 
+/* ── The voice wash ──────────────────────────────────────────────────────
+   While your voice is live (dictating, or on a call) the lower half of the
+   slab fills with the aurora's colours, edge to edge, rising and brightening
+   as you speak (ComposerAurora.jsx, aurora-wash.js). It is the first child
+   and absolutely positioned; the slab's own content is positioned too, so in
+   tree order it paints above the wash without a stacking context that would
+   trap the suggestion popovers.
+
+   The clouds are radial gradients, not a blur filter, and they drift on
+   keyframes the compositor runs; script only scales and fades their parent.
+   Colours are the page aurora's (tokens/shell.css), no peach. */
+.zl-composer.is-voice > :is(.zl-ta, .zl-controls, .voice-live, .attach-preview-strip, .cache-warn, .steer-hint) {
+  position: relative;
+}
+.zl-aurora-wash {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 55%;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: 0 0 var(--zl-r-lg) var(--zl-r-lg);
+  -webkit-mask-image: linear-gradient(to top, #000 35%, transparent);
+  mask-image: linear-gradient(to top, #000 35%, transparent);
+}
+.zl-aurora-wash-body {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 100%;
+  transform: scaleY(0.5);
+  opacity: 0.5;
+  will-change: transform, opacity;
+}
+.zl-aurora-cloud {
+  position: absolute;
+  bottom: -55%;
+  width: 62%;
+  height: 150%;
+  border-radius: 50%;
+  will-change: transform;
+  animation: zl-aurora-drift var(--aurora-drift) ease-in-out infinite alternate;
+}
+.zl-aurora-cloud.c0 { left: -15%; background: radial-gradient(closest-side, rgba(180, 190, 254, 0.85), transparent); animation-duration: calc(var(--aurora-drift) * 0.82); }
+.zl-aurora-cloud.c1 { left: 12%; background: radial-gradient(closest-side, rgba(203, 166, 247, 0.9), transparent); animation-name: zl-aurora-drift-b; animation-duration: calc(var(--aurora-drift) * 1.18); animation-delay: calc(var(--aurora-drift) * -0.36); }
+.zl-aurora-cloud.c2 { left: 38%; background: radial-gradient(closest-side, rgba(137, 180, 250, 0.85), transparent); animation-duration: calc(var(--aurora-drift) * 0.91); animation-delay: calc(var(--aurora-drift) * -0.64); }
+.zl-aurora-cloud.c3 { left: 60%; background: radial-gradient(closest-side, rgba(148, 226, 213, 0.7), transparent); animation-name: zl-aurora-drift-b; animation-duration: calc(var(--aurora-drift) * 1.27); animation-delay: calc(var(--aurora-drift) * -0.18); }
+.zl-aurora-cloud.c4 { left: 82%; background: radial-gradient(closest-side, rgba(203, 166, 247, 0.75), transparent); animation-duration: calc(var(--aurora-drift) * 1.09); animation-delay: calc(var(--aurora-drift) * -0.82); }
+@keyframes zl-aurora-drift {
+  from { transform: translate3d(-18%, 6%, 0) scale(0.9, 1); }
+  to { transform: translate3d(22%, -8%, 0) scale(1.15, 1.1); }
+}
+@keyframes zl-aurora-drift-b {
+  from { transform: translate3d(20%, -4%, 0) scale(1.1, 0.95); }
+  to { transform: translate3d(-24%, 8%, 0) scale(0.92, 1.12); }
+}
+/* Off screen or in a background tab the loop is already stopped; the drift
+   stops with it. */
+.zl-aurora-wash.is-paused .zl-aurora-cloud { animation-play-state: paused; }
+/* Reduced motion: a still picture. No drift, no rise, no loop. The global
+   reduced-motion rule would only shorten the drift to one 0.01ms pass; the
+   wash drops it outright. */
+.zl-aurora-wash.is-still .zl-aurora-wash-body { transform: scaleY(0.85); opacity: 0.75; will-change: auto; }
+.zl-aurora-wash.is-still .zl-aurora-cloud { animation: none; will-change: auto; }
+
+/* Contrast: the quiet controls are transparent glyphs on the slab, and the
+   wash is brightest exactly where they sit. While it is on they stand on a
+   plate of the slab's own fill, so + and the call button keep their contrast
+   however loud the voice gets. Hover keeps its own face. */
+.zl-composer.is-voice .zl-controls .zl-attach:not(.recording):not(:hover) {
+  background: color-mix(in srgb, var(--zl-raised) 86%, transparent);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+.zl-composer.is-voice .zl-controls .zl-attach:not(.recording):not(.in-call):not(:hover) { color: var(--zl-t2); }
+
 /* Send is always Send now, so the mic-mode / gesture / recording faces it
    used to borrow on the phone are gone with the takeover that needed them.
    Only its own pending spinner is left. */

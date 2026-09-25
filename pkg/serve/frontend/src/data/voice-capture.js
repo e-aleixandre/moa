@@ -227,6 +227,14 @@ export class VoiceCaptureController {
     this.finish(false);
   }
 
+  // The live microphone while a recording runs, for a level meter that reads
+  // it alongside the recorder. Readers must not stop its tracks: the capture
+  // owns them.
+  currentStream() {
+    const attempt = this.attempt;
+    return attempt?.phase === 'recording' ? attempt.stream : null;
+  }
+
   cancel() {
     this.finish(true);
   }

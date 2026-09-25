@@ -19,6 +19,11 @@ const recalled = [];
 let sendResult;
 
 let voiceOptions;
+// What the voice hooks report, so a test can put the composer in the
+// dictating or on-a-call state without a microphone.
+let voiceRecording = false;
+const recordingStream = () => "recording-stream";
+let callOverride = null;
 
 // Spread the real hooks first. bun's mock.module replaces the module for the
 // whole process and never restores it, so a factory listing only some hooks
@@ -48,9 +53,23 @@ mock.module("../../hooks/useVoiceGesture.js", () => ({
   useVoiceGesture: (options) => {
     voiceOptions = options;
     return ({
-    handlers: {}, recording: false, transcribing: false,
+    handlers: {}, recording: voiceRecording, transcribing: false,
     supported: false, toggleFromShortcut() {}, cancel() {},
+    getStream: recordingStream,
     });
+  },
+}));
+
+// Delegates to the real hook unless a test pins a call state, so any other
+// file loaded after this one still gets the real useVoiceLive.
+const realVoiceLive = await import("../../hooks/useVoiceLive.js");
+// Held apart: bun rewrites the imported namespace in place once mocked.
+const realUseVoiceLive = realVoiceLive.useVoiceLive;
+mock.module("../../hooks/useVoiceLive.js", () => ({
+  ...realVoiceLive,
+  useVoiceLive: (...args) => {
+    const real = realUseVoiceLive(...args);
+    return callOverride ? { ...real, ...callOverride } : real;
   },
 }));
 
@@ -80,6 +99,7 @@ mock.module("../../data/session-actions.js", () => ({
 }));
 
 const { Composer, keepCommandSuggestionVisible } = await import("./Composer.jsx");
+const { ComposerAurora } = await import("./ComposerAurora.jsx");
 // The real store: the recall reads pendingSteers from it, so seeding it is
 // closer to the running app than faking the module.
 const { updateSession, setState, store } = await import("../../data/store.js");
@@ -592,4 +612,45 @@ test("plusActions turn + into a menu whose first entry is still Attach files", (
   expect(clicked).toBe(1);
   menu.props.actions[1].onClick();
   expect(previewed).toBe(1);
+});
+
+test("the voice wash is drawn only while dictating or during a live call", () => {
+  const wash = () => {
+    refs.length = 0;
+    const tree = Composer({ sessionId: "s1", session: { state: "idle" } });
+    return {
+      aurora: descendants(tree).find((node) => node.type === ComposerAurora),
+      voiceClass: tree.props.class.includes("is-voice"),
+      firstChild: [].concat(tree.props.children).find(Boolean),
+    };
+  };
+  const callStream = () => "call-stream";
+  try {
+    let w = wash();
+    expect(w.aurora).toBeUndefined();
+    expect(w.voiceClass).toBe(false);
+
+    voiceRecording = true;
+    w = wash();
+    expect(w.aurora).toBeDefined();
+    expect(w.voiceClass).toBe(true);
+    // The wash reads the recorder's own microphone.
+    expect(w.aurora.props.getStream()).toBe("recording-stream");
+    voiceRecording = false;
+
+    for (const phase of ["connecting", "closing"]) {
+      callOverride = { phase, active: true, getStream: callStream };
+      expect(wash().aurora).toBeUndefined();
+    }
+    callOverride = { phase: "live", active: true, getStream: callStream };
+    w = wash();
+    expect(w.aurora).toBeDefined();
+    expect(w.aurora.props.getStream()).toBe("call-stream");
+    // The wash is the slab's first child: the positioned content after it
+    // paints above it (Composer.css).
+    expect(w.firstChild.type).toBe(ComposerAurora);
+  } finally {
+    voiceRecording = false;
+    callOverride = null;
+  }
 });
