@@ -55,7 +55,8 @@ import "./LiveBar.css";
 // nothing to stop from here. Two steps, like the subagent head's Stop: the
 // first tap asks, the second stops, and it disarms on its own.
 //
-// A pending ask_user can be stopped; a permission approval keeps Stop hidden.
+// A pending ask_user or permission approval can be stopped: the run ends
+// without a model call and the pending tool gets a stopped result.
 
 // foregroundLine decides WHAT the foreground says: the phrase, whether the run
 // is parked on the user, and the elapsed counter (empty unless the agent is
@@ -70,16 +71,13 @@ export function foregroundLine(session, nowMs) {
   if (!text) return null;
 
   const waiting = phase === "waiting";
-  // Both kinds of prompt set state to 'permission'; pendingAsk distinguishes
-  // the question without changing the permission approval's Stop affordance.
-  const waitingOnPermission = !!session.pendingPerm || (session.state === "permission" && !session.pendingAsk);
   // Elapsed only for the running phases; waiting parks the run, so no
   // elapsed-as-work counter (mirrors the app's timerless "Waiting for you").
   const runStartedAtMs = session.runStartedAtMs || 0;
   const showTimer = !waiting && runStartedAtMs > 0 && (phase === "thinking" || phase === "working");
   const elapsed = showTimer ? formatElapsed(Math.max(0, nowMs - runStartedAtMs)) : "";
 
-  return { text, waiting, waitingOnPermission, elapsed, phase };
+  return { text, waiting, elapsed, phase };
 }
 
 // liveBarModel decides the WHOLE bar: the foreground run owns its sentence.
@@ -93,14 +91,7 @@ export function liveBarModel(session, agents, nowMs) {
 
   let sentence = null;
   if (fg) {
-    sentence = {
-      kind: "foreground",
-      text: fg.text,
-      waiting: fg.waiting,
-      waitingOnPermission: fg.waitingOnPermission,
-      elapsed: fg.elapsed,
-      phase: fg.phase,
-    };
+    sentence = { kind: "foreground", text: fg.text, waiting: fg.waiting, elapsed: fg.elapsed, phase: fg.phase };
   } else if (list.length) {
     sentence = { kind: "ended", waiting: false, elapsed: "" };
   }
@@ -118,7 +109,7 @@ export function panelHasOverflow({ scrollHeight, clientHeight }) {
 
 export function canStopForeground(session, sentence) {
   return sentence?.kind === "foreground"
-    && (!sentence.waiting || (session?.state === "permission" && !sentence.waitingOnPermission));
+    && (!sentence.waiting || session?.state === "permission");
 }
 
 export function LiveBar({

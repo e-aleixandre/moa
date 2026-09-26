@@ -237,12 +237,18 @@ func (g *Gate) askUser(ctx context.Context, name string, args map[string]any) *c
 		}
 	}
 
+	// Checked first: select picks randomly among ready cases, and a stopped
+	// run must not prompt for the rest of its batch.
+	if ctx.Err() != nil {
+		return cancelledDecision(ctx)
+	}
+
 	respCh := make(chan Response, 1)
 
 	select {
 	case g.reqCh <- Request{ToolName: name, Args: args, Response: respCh}:
 	case <-ctx.Done():
-		return &core.ToolCallDecision{Block: true, Reason: "cancelled", Kind: core.ToolCallDecisionKindPermission}
+		return cancelledDecision(ctx)
 	}
 
 	select {
@@ -262,6 +268,14 @@ func (g *Gate) askUser(ctx context.Context, name string, args map[string]any) *c
 		}
 		return &core.ToolCallDecision{Block: true, Reason: reason, Kind: core.ToolCallDecisionKindPermission}
 	case <-ctx.Done():
-		return &core.ToolCallDecision{Block: true, Reason: "cancelled", Kind: core.ToolCallDecisionKindPermission}
+		return cancelledDecision(ctx)
 	}
+}
+
+func cancelledDecision(ctx context.Context) *core.ToolCallDecision {
+	reason := "cancelled"
+	if ctx.Err() == context.Canceled {
+		reason = "not executed: the user stopped the session before approving it."
+	}
+	return &core.ToolCallDecision{Block: true, Reason: reason, Kind: core.ToolCallDecisionKindPermission}
 }
