@@ -174,16 +174,6 @@ export function LiveBar({
 
   const model = liveBarModel(session, list, nowMs);
 
-  // A LiveBar is keyed by its host's current session. On entering an idle
-  // conversation with background work, unfold once; a later explicit fold is
-  // not revisited until the user enters the conversation again.
-  useEffect(() => {
-    if (!fgActive && list.length && !expanded) setExpanded(true);
-  // This is deliberately mount-only: live work starting while the user is
-  // already in the conversation must not reopen a panel they folded.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const [stopArmed, setStopArmed] = useState(false);
   useEffect(() => {
     if (!stopArmed) return undefined;
