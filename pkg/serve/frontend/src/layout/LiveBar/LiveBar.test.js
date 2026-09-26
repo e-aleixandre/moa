@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { foregroundLine, liveBarModel, panelHasOverflow } from './LiveBar.jsx';
+import { foregroundLine, liveBarModel, panelHasOverflow, canStopForeground } from './LiveBar.jsx';
 import { liveTrayAgents } from '../../data/stream-model.js';
 
 // The live bar is the ONE row of live work above the composer, the merge of the
@@ -221,6 +221,37 @@ test('the composer draws no Square: Stop is the live bar\'s, and a live mic is a
 });
 
 test('the bar offers Stop only for the agent\'s own foreground sentence', () => {
-  // Waiting on the user, or a background-only bar, has no run to stop from here.
-  expect(liveJsx).toMatch(/canStop = !!onStop && model\.sentence\.kind === "foreground" && !model\.sentence\.waiting/);
+  expect(canStopForeground({ state: 'running' }, { kind: 'foreground', waiting: false })).toBe(true);
+  expect(canStopForeground({ state: 'idle' }, { kind: 'ended', waiting: false })).toBe(false);
+  expect(liveJsx).toContain('!!onStop && canStopForeground(session, model.sentence)');
+});
+
+test('foregroundLine flags waitingOnPermission only for a permission prompt', () => {
+  const permission = { state: 'permission', runStartedAtMs: 1000 };
+  expect(foregroundLine(permission, 13000)).toMatchObject({ waiting: true, waitingOnPermission: true });
+
+  const askUser = { state: 'permission', runStartedAtMs: 1000, pendingAsk: { id: 'q1' } };
+  expect(foregroundLine(askUser, 13000)).toMatchObject({ waiting: true, waitingOnPermission: false });
+});
+
+test('Stop stays hidden for permission approvals and an already-ended ask, but is available for pending questions', () => {
+  const permissionModel = liveBarModel({ state: 'permission', runStartedAtMs: 1000 }, [], 13000);
+  expect(permissionModel.sentence.waiting).toBe(true);
+  expect(permissionModel.sentence.waitingOnPermission).toBe(true);
+  expect(canStopForeground({ state: 'permission' }, permissionModel.sentence)).toBe(false);
+
+  const askUserModel = liveBarModel(
+    { state: 'permission', runStartedAtMs: 1000, pendingAsk: { id: 'q1' } },
+    [],
+    13000,
+  );
+  expect(askUserModel.sentence.waiting).toBe(true);
+  expect(askUserModel.sentence.waitingOnPermission).toBe(false);
+  expect(canStopForeground({ state: 'permission', pendingAsk: { id: 'q1' } }, askUserModel.sentence)).toBe(true);
+
+  // RunEnded can reach the client before AskUserResolved; an idle session's
+  // stale pendingAsk must not resurrect Stop during that short gap.
+  const staleAsk = liveBarModel({ state: 'idle', pendingAsk: { id: 'q1' } }, [], 13000);
+  expect(staleAsk.sentence.waiting).toBe(true);
+  expect(canStopForeground({ state: 'idle', pendingAsk: { id: 'q1' } }, staleAsk.sentence)).toBe(false);
 });

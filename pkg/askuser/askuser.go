@@ -104,6 +104,9 @@ func NewTool(b *Bridge) core.Tool {
 			case answers := <-respCh:
 				return formatAnswers(questions, answers), nil
 			case <-ctx.Done():
+				if ctx.Err() == context.Canceled {
+					return core.ErrorResult("Question not answered: the user stopped this run. The answer will arrive in the next user message."), nil
+				}
 				return core.ErrorResult("cancelled"), nil
 			}
 		},

@@ -51,10 +51,11 @@ import "./LiveBar.css";
 // owner is about to say. It used to sit in the composer next to the mic,
 // where two red squares side by side meant opposite things. `onStop` is
 // passed only by hosts that have a run to stop; the button exists only while
-// the FOREGROUND sentence is the agent's own -- a parked run (waiting on you)
-// or a background-only bar has nothing to stop from here. Two steps, like the
-// subagent head's Stop: the first tap asks, the second stops, and it disarms
-// on its own.
+// the FOREGROUND sentence is the agent's own -- a background-only bar has
+// nothing to stop from here. Two steps, like the subagent head's Stop: the
+// first tap asks, the second stops, and it disarms on its own.
+//
+// A pending ask_user can be stopped; a permission approval keeps Stop hidden.
 
 // foregroundLine decides WHAT the foreground says: the phrase, whether the run
 // is parked on the user, and the elapsed counter (empty unless the agent is
@@ -69,13 +70,16 @@ export function foregroundLine(session, nowMs) {
   if (!text) return null;
 
   const waiting = phase === "waiting";
+  // Both kinds of prompt set state to 'permission'; pendingAsk distinguishes
+  // the question without changing the permission approval's Stop affordance.
+  const waitingOnPermission = !!session.pendingPerm || (session.state === "permission" && !session.pendingAsk);
   // Elapsed only for the running phases; waiting parks the run, so no
   // elapsed-as-work counter (mirrors the app's timerless "Waiting for you").
   const runStartedAtMs = session.runStartedAtMs || 0;
   const showTimer = !waiting && runStartedAtMs > 0 && (phase === "thinking" || phase === "working");
   const elapsed = showTimer ? formatElapsed(Math.max(0, nowMs - runStartedAtMs)) : "";
 
-  return { text, waiting, elapsed, phase };
+  return { text, waiting, waitingOnPermission, elapsed, phase };
 }
 
 // liveBarModel decides the WHOLE bar: the foreground run owns its sentence.
@@ -89,7 +93,14 @@ export function liveBarModel(session, agents, nowMs) {
 
   let sentence = null;
   if (fg) {
-    sentence = { kind: "foreground", text: fg.text, waiting: fg.waiting, elapsed: fg.elapsed, phase: fg.phase };
+    sentence = {
+      kind: "foreground",
+      text: fg.text,
+      waiting: fg.waiting,
+      waitingOnPermission: fg.waitingOnPermission,
+      elapsed: fg.elapsed,
+      phase: fg.phase,
+    };
   } else if (list.length) {
     sentence = { kind: "ended", waiting: false, elapsed: "" };
   }
@@ -103,6 +114,11 @@ export function liveBarModel(session, agents, nowMs) {
 
 export function panelHasOverflow({ scrollHeight, clientHeight }) {
   return scrollHeight > clientHeight;
+}
+
+export function canStopForeground(session, sentence) {
+  return sentence?.kind === "foreground"
+    && (!sentence.waiting || (session?.state === "permission" && !sentence.waitingOnPermission));
 }
 
 export function LiveBar({
@@ -186,7 +202,7 @@ export function LiveBar({
 
   if (!model) return null;
 
-  const canStop = !!onStop && model.sentence.kind === "foreground" && !model.sentence.waiting;
+  const canStop = !!onStop && canStopForeground(session, model.sentence);
   const stop = () => {
     if (!stopArmed) { setStopArmed(true); return; }
     setStopArmed(false);
