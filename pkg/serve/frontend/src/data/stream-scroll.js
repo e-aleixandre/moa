@@ -1,22 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import {
-  bottomScrollTop,
-  isAtBottom,
-  scrollTopAfterContentResize,
-} from "./stream-scroll-policy.js";
+import { bottomScrollTop, followsTail, isAtBottom } from "./stream-scroll-policy.js";
 import { loadOlderHistory, olderHistoryState } from "./history-paging.js";
 import { capturePrependAnchor, nearTranscriptTop, restorePrependAnchor } from "./stream-prepend-anchor.js";
 
 export function shouldLoadOlderHistory(el, paging, armed) {
   return armed && nearTranscriptTop(el) && paging.hasMore && !paging.loading;
-}
-
-export function restorePrependLayout(el, snapshot, stickToBottom, observedScrollHeight) {
-  const node = restorePrependAnchor(el, snapshot, stickToBottom);
-  // A prepend has already restored its reader position. Make its new height
-  // the baseline so the ordinary resize observer cannot treat it as tail growth.
-  observedScrollHeight.current = el.scrollHeight;
-  return node;
 }
 
 export function capturePrependForSession(currentSessionId, sessionId, el) {
@@ -35,7 +23,7 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
   const olderHistoryArmed = useRef(true);
   const stickToBottom = useRef(true);
   const programmaticScroll = useRef(false);
-  const observedScrollHeight = useRef(0);
+  const lastScrollTop = useRef(0);
   const currentSessionId = useRef(sessionId);
   currentSessionId.current = sessionId;
   const [showNewBtn, setShowNewBtn] = useState(false);
@@ -50,19 +38,34 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
     // guard for a browser that delivers a nested layout notification here.
     programmaticScroll.current = true;
     el.scrollTop = target;
+    // Read back the clamped value: a reader's move up from here must compare
+    // against this pin, not against the scroll event of an earlier one.
+    lastScrollTop.current = el.scrollTop;
     queueMicrotask(() => {
       programmaticScroll.current = false;
     });
   }, []);
 
+  // Also consulted before every pin, because iOS can move scrollTop under a
+  // momentum gesture before it delivers the scroll event.
+  const followTail = useCallback((el) => {
+    const following = followsTail(stickToBottom.current, lastScrollTop.current, el.scrollTop, el.scrollHeight, el.clientHeight);
+    lastScrollTop.current = el.scrollTop;
+    stickToBottom.current = following;
+    setShowNewBtn(!following);
+    return following;
+  }, []);
+
   const checkScroll = useCallback(() => {
     const el = containerRef.current;
-    // Session switches and follow-pins write scrollTop; those events must not
+    if (!el) return;
+    // Session switches and read anchors write scrollTop; those events must not
     // be read as the reader leaving the tail (iOS delivers them after the write).
-    if (!el || programmaticScroll.current) return;
-    const atBottom = isAtBottom(el.scrollTop, el.scrollHeight, el.clientHeight);
-    stickToBottom.current = atBottom;
-    setShowNewBtn(!atBottom);
+    if (programmaticScroll.current) {
+      lastScrollTop.current = el.scrollTop;
+      return;
+    }
+    followTail(el);
     const paging = olderHistoryState(session);
     if (!nearTranscriptTop(el)) {
       olderHistoryArmed.current = true;
@@ -75,7 +78,7 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
         if (snapshot) prependAnchor.current = { ...snapshot, sessionId };
       });
     }
-  }, [session, sessionId]);
+  }, [session, sessionId, followTail]);
 
   const setScrollEl = useCallback(
     (el) => {
@@ -88,15 +91,16 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
   // Position new streamed content before paint on both layouts. This also
   // avoids mobile briefly painting the previous session's scroll position.
   useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (el && !programmaticScroll.current) followTail(el);
     if (stickToBottom.current) scrollToBottomNow();
-  }, [scrollToBottomNow, ...followSignals]);
+  }, [scrollToBottomNow, followTail, ...followSignals]);
 
   useLayoutEffect(() => {
     stickToBottom.current = true;
     prependAnchor.current = null;
     prependVersion.current = 0;
     olderHistoryArmed.current = true;
-    observedScrollHeight.current = 0;
     setShowNewBtn(false);
     const el = containerRef.current;
     programmaticScroll.current = true;
@@ -105,6 +109,7 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
       // one's bottom. Both writes are programmatic so onScroll cannot unstick.
       el.scrollTop = 0;
       el.scrollTop = bottomScrollTop(el.scrollHeight, el.clientHeight);
+      lastScrollTop.current = el.scrollTop;
     }
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -123,7 +128,8 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
     if (!el) return undefined;
 
     const snapshot = prependAnchor.current?.sessionId === sessionId ? prependAnchor.current : null;
-    const node = restorePrependLayout(el, snapshot, stickToBottom.current, observedScrollHeight);
+    const node = restorePrependAnchor(el, snapshot, stickToBottom.current);
+    lastScrollTop.current = el.scrollTop;
     if (!node || !snapshot || typeof globalThis.ResizeObserver === "undefined") return undefined;
 
     let expected = el.scrollTop;
@@ -138,6 +144,7 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
       const offset = node.getBoundingClientRect().top - el.getBoundingClientRect().top;
       el.scrollTop += offset - snapshot.offset;
       expected = el.scrollTop;
+      lastScrollTop.current = el.scrollTop;
     });
     observer.observe(contentRef.current || node);
     const timer = globalThis.setTimeout(() => observer.disconnect(), 1500);
@@ -152,35 +159,14 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
     const el = containerRef.current;
     if (!content || !el || typeof globalThis.ResizeObserver === "undefined") return undefined;
 
-    observedScrollHeight.current = el.scrollHeight;
-
     const observer = new globalThis.ResizeObserver(() => {
       const scroller = containerRef.current;
-      if (!scroller) return;
-
-      const previousScrollHeight = observedScrollHeight.current;
-      observedScrollHeight.current = scroller.scrollHeight;
-      if (programmaticScroll.current) return;
-
-      const nextScrollTop = scrollTopAfterContentResize(
-        scroller.scrollTop,
-        previousScrollHeight,
-        scroller.scrollHeight,
-        scroller.clientHeight
-      );
-      const following = nextScrollTop !== scroller.scrollTop || isAtBottom(
-        scroller.scrollTop,
-        previousScrollHeight,
-        scroller.clientHeight
-      );
-      stickToBottom.current = following;
-      setShowNewBtn(!following);
-      if (!following) return;
-      scrollToBottomNow();
+      if (!scroller || programmaticScroll.current) return;
+      if (followTail(scroller)) scrollToBottomNow();
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, [scrollToBottomNow]);
+  }, [scrollToBottomNow, followTail]);
 
   useEffect(() => {
     if (!pendingAskId) return;
@@ -200,6 +186,7 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
     if (!el || !node) return;
     programmaticScroll.current = true;
     el.scrollTop += node.getBoundingClientRect().top - el.getBoundingClientRect().top - margin;
+    lastScrollTop.current = el.scrollTop;
     const following = isAtBottom(el.scrollTop, el.scrollHeight, el.clientHeight);
     stickToBottom.current = following;
     setShowNewBtn(!following);
