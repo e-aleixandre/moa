@@ -159,6 +159,17 @@ test('the tally chip draws the number and no mark per item', () => {
   expect(css).toMatch(/\.zl-live-tally\.is-waiting\s*\{[^}]*color:\s*var\(--zl-yellow\)/);
 });
 
+// The open panel covers the conversation, so it opens only on the user's tap
+// and entering a conversation shows it folded unless they left it open.
+test('only the toggle unfolds the panel', () => {
+  const src = readFileSync(new URL('./LiveBar.jsx', import.meta.url), 'utf8');
+  const start = src.indexOf('const toggle = () => {');
+  const toggle = src.slice(start, src.indexOf('\n  };', start));
+  const outside = src.slice(0, start) + src.slice(start + toggle.length);
+  expect(toggle).toContain('setExpanded(true)');
+  expect(outside).not.toMatch(/setExpanded\((true|!)/);
+});
+
 test('an ended turn never carries a background clock', () => {
   expect(liveBarModel(IDLE, AGENTS, 13000).sentence.elapsed).toBe('');
 });
