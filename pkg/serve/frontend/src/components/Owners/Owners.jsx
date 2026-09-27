@@ -12,7 +12,7 @@ import { useStore } from "../../hooks/useStore.js";
 import { modelCodename } from "../../data/util/format.js";
 import { api } from "../../data/api.js";
 import { bookTree, groupChildren, ownerLine, ownerRows, ownerState } from "../../data/owners-model.js";
-import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatar, OwnerAvatarFor, defaultAvatar } from "./OwnerAvatar.jsx";
+import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatar, OwnerAvatarFor, ownerAvatar, proposeAvatar, storedAvatar } from "./OwnerAvatar.jsx";
 import { loadOwnerBook, openBookFile, ownersSlice, saveBookFile, updateOwner } from "../../data/owners.js";
 import { openSession } from "../../data/tile-actions.js";
 import { setSessionPanelPage } from "../../data/session-panel.js";
@@ -286,15 +286,20 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated, 
   const suggested = basename(dir);
   const effectiveName = touchedName ? name : suggested;
 
-  /* The face. It already looks like itself before anything is pressed: the
-     default is the codebase's own deterministic mark, the one the server
-     would compute if the field were omitted (pkg/owner/avatar.go). It follows
-     the folder until you choose a shape or a colour — browsing to another
-     project and keeping the previous project's face would be a mark that says
-     the wrong thing. `codebase_key` is not known in the browser, so the
-     folder's basename stands in for it; the server stores what is sent, so
-     what you see here is what the owner keeps. */
-  const fallbackAvatar = defaultAvatar(basename(dir));
+  /* The face. It already looks like itself before anything is pressed: a
+     combination no existing owner wears, the one furthest from all of them
+     (proposeAvatar in avatar-identity.js), and today's deterministic default
+     when there are no owners yet or every combination is taken. It follows
+     the folder until you choose a shape, a colour or a tone — the folder
+     breaks ties between equally distinct faces, so another project gets
+     another proposal. The server stores what is sent, so what you see here
+     is what the owner keeps. */
+  const ownerList = useStore((s) => ownersSlice(s).list);
+  const folderKey = basename(dir);
+  const fallbackAvatar = useMemo(
+    () => proposeAvatar((ownerList || []).map(ownerAvatar), folderKey),
+    [ownerList, folderKey],
+  );
   const [chosenAvatar, setChosenAvatar] = useState(null);
   const avatar = chosenAvatar || fallbackAvatar;
 
@@ -380,9 +385,11 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated, 
         name={effectiveName}
         shape={avatar.shape}
         color={avatar.color}
+        tone={avatar.tone}
         seedKey={basename(dir)}
         onShape={(shape) => setChosenAvatar({ ...avatar, shape })}
         onColor={(color) => setChosenAvatar({ ...avatar, color })}
+        onTone={(tone) => setChosenAvatar({ ...avatar, tone })}
       />
       <label class="ow-field">
         <span class="ow-label">Project folder</span>
@@ -484,7 +491,7 @@ export function NewOwner({ defaultDir = "", onCreate, phone = false, onCreated, 
             setBusy(true);
             setFailure(null);
             try {
-              await onCreate?.({ root: dir, name: effectiveName, model: chosenModel, thinking, avatar });
+              await onCreate?.({ root: dir, name: effectiveName, model: chosenModel, thinking, avatar: storedAvatar(avatar) });
             } catch (error) {
               setFailure(createFailure(error));
             } finally {

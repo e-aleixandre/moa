@@ -142,7 +142,7 @@ func (s *Store) Create(root, name, model, thinking string, answerAsks bool, avat
 	if avatar.IsZero() {
 		avatar = DefaultAvatar(key)
 	} else if !avatar.Valid() {
-		return Owner{}, fmt.Errorf("owner avatar: shape must be one of %v and colour one of %v", AvatarShapes, AvatarColors)
+		return Owner{}, fmt.Errorf("owner avatar: shape must be one of %v, colour one of %v and tone one of %v", AvatarShapes, AvatarColors, AvatarTones)
 	}
 	own := Owner{
 		ID:          newOwnerID(),

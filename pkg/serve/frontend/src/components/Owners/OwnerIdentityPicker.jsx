@@ -1,7 +1,7 @@
-import { AVATAR_COLORS, AVATAR_SHAPES, OwnerAvatar } from "./OwnerAvatar.jsx";
+import { AVATAR_COLORS, AVATAR_SHAPES, AVATAR_TONES, OwnerAvatar } from "./OwnerAvatar.jsx";
 import { OwnerFace, faceBodyColor } from "./OwnerFace.jsx";
 
-/* OwnerIdentityPicker — the two rows that choose a face, in their own file.
+/* OwnerIdentityPicker — the three rows that choose a face, in their own file.
 
    It lives apart from Owners.jsx because BOTH the New owner form and the Edit
    owner sheet draw it, and the edit sheet is imported by Owners.jsx: leaving
@@ -10,13 +10,15 @@ import { OwnerFace, faceBodyColor } from "./OwnerFace.jsx";
    evaluated half-initialised and three unrelated palette tests failed. One
    definition, one direction. */
 /* ── The identity picker ──────────────────────────────────────────────────
-   The one new thing in the form: the face, above the two rows that change it.
+   The one new thing in the form: the face, above the rows that change it.
    Preview first and large, because what you are choosing is what you will see
    in the list for months; the rows under it are swatches at the touch floor
    (44px), not a dropdown — eight shapes and eight colours are fewer decisions
-   than a menu costs to open. The last two shapes (triangle, cloud) are only
-   ever chosen, never a default; they sit at the end of the row without a
-   badge, because to the person choosing they are just two more shapes.
+   than a menu costs to open. The shapes after the first six are only ever
+   chosen, never a default; they sit at the end of the grid without a badge,
+   because to the person choosing they are just more shapes. Fourteen shapes
+   are a 7 × 2 grid. The tone row shows the chosen colour at its three
+   lightnesses, and the colour dots follow the chosen tone.
 
    The preview is the live face, idle, seeded like the owner it will be (so
    it blinks here the way it will in the list) and watching the pointer. The
@@ -24,11 +26,11 @@ import { OwnerFace, faceBodyColor } from "./OwnerFace.jsx";
    performing instead of offering. Unchosen shapes are grey so the one in
    colour IS the choice, and the colour dots are the body colour the face
    actually wears, not the palette token behind it. */
-export function OwnerIdentityPicker({ name, shape, color, seedKey, onShape, onColor }) {
+export function OwnerIdentityPicker({ name, shape, color, tone = "deep", seedKey, onShape, onColor, onTone }) {
   return (
     <div class="ow-idp">
       <div class="ow-idp-preview">
-        <OwnerAvatar shape={shape} color={color} seedKey={seedKey} state="idle" size={64} follow />
+        <OwnerAvatar shape={shape} color={color} tone={tone} seedKey={seedKey} state="idle" size={64} follow />
         <span class="ow-idp-name">{name || "New owner"}</span>
       </div>
       <div class="ow-idp-field">
@@ -47,6 +49,7 @@ export function OwnerIdentityPicker({ name, shape, color, seedKey, onShape, onCo
               <OwnerFace
                 shape={s}
                 color={color}
+                tone={tone}
                 seedKey={seedKey}
                 muted={s !== shape}
                 gaze={[0, 0]}
@@ -69,7 +72,25 @@ export function OwnerIdentityPicker({ name, shape, color, seedKey, onShape, onCo
               key={c.id}
               onClick={() => onColor(c.id)}
             >
-              <span class="ow-swatch-c" style={`--ow-sw-c:${faceBodyColor(c.id)}`} aria-hidden="true" />
+              <span class="ow-swatch-c" style={`--ow-sw-c:${faceBodyColor(c.id, tone)}`} aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div class="ow-idp-field">
+        <span class="ow-idp-label">Tone</span>
+        <div class="ow-idp-row is-tones" role="radiogroup" aria-label="Avatar tone">
+          {AVATAR_TONES.map((t) => (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={t === tone}
+              aria-label={t}
+              class={`ow-swatch is-colour${t === tone ? " is-on" : ""}`}
+              key={t}
+              onClick={() => onTone(t)}
+            >
+              <span class="ow-swatch-c" style={`--ow-sw-c:${faceBodyColor(color, t)}`} aria-hidden="true" />
             </button>
           ))}
         </div>

@@ -15,7 +15,9 @@
 // are selectable only (AVATAR_SHAPES), never part of the pool. Both lists are
 // pkg/owner/avatar.go's DefaultAvatarShapes / AvatarShapes, in that order.
 export const DEFAULT_AVATAR_SHAPES = ["circle", "squircle", "blob", "hexagon", "drop", "pill"];
-export const AVATAR_SHAPES = [...DEFAULT_AVATAR_SHAPES, "triangle", "cloud"];
+export const AVATAR_SHAPES = [
+  ...DEFAULT_AVATAR_SHAPES, "triangle", "cloud", "flower", "ghost", "bean", "diamond", "shield", "bell",
+];
 
 // The identity palette. EIGHT HUES SPREAD ROUND THE WHEEL, not eight tints of
 // the theme: the first attempt derived them from `--peach` / `--mauve` /
@@ -41,16 +43,58 @@ export const AVATAR_SHAPES = [...DEFAULT_AVATAR_SHAPES, "triangle", "cloud"];
 //
 // The IDS are unchanged apart from sand→azure, so no owner.json is rewritten;
 // a stored `sand` is migrated in pkg/owner/avatar.go and below.
+//
+// `dark` and `pale` are the chroma each hue can carry at the two extra tones
+// (AVATAR_TONES below) without leaving sRGB, measured rather than guessed: a
+// chroma the screen cannot show is clipped per channel by the browser, which
+// is what turns a dark orange into brown.
 export const AVATAR_COLORS = [
-  { id: "peach", hex: "#f6aa73", oklch: "0.80 0.115 56" },
-  { id: "mauve", hex: "#d8a8f3", oklch: "0.80 0.115 313" },
-  { id: "sage", hex: "#aeca76", oklch: "0.80 0.115 124" },
-  { id: "sky", hex: "#4dd3de", oklch: "0.80 0.115 203" },
-  { id: "azure", hex: "#6ec9fe", oklch: "0.80 0.115 236" },
-  { id: "rose", hex: "#f39fcf", oklch: "0.80 0.115 345" },
-  { id: "mint", hex: "#71d5a8", oklch: "0.80 0.115 163" },
-  { id: "lilac", hex: "#b2b5ff", oklch: "0.80 0.109 282" },
+  { id: "peach", hex: "#f6aa73", oklch: "0.80 0.115 56", dark: 0.146, pale: 0.102 },
+  { id: "mauve", hex: "#d8a8f3", oklch: "0.80 0.115 313", dark: 0.17, pale: 0.11 },
+  { id: "sage", hex: "#aeca76", oklch: "0.80 0.115 124", dark: 0.148, pale: 0.11 },
+  { id: "sky", hex: "#4dd3de", oklch: "0.80 0.115 203", dark: 0.102, pale: 0.11 },
+  { id: "azure", hex: "#6ec9fe", oklch: "0.80 0.115 236", dark: 0.128, pale: 0.092 },
+  { id: "rose", hex: "#f39fcf", oklch: "0.80 0.115 345", dark: 0.17, pale: 0.11 },
+  { id: "mint", hex: "#71d5a8", oklch: "0.80 0.115 163", dark: 0.128, pale: 0.11 },
+  { id: "lilac", hex: "#b2b5ff", oklch: "0.80 0.109 282", dark: 0.17, pale: 0.08 },
 ];
+
+/* ── The tone: the same hue at three lightnesses ─────────────────────────
+   pkg/owner/avatar.go's AvatarTones. Absent means `deep`, the body every
+   owner had before tones existed, so a stored avatar without one is drawn
+   exactly as before. No new hue is added, so no tone can land on a state
+   colour; and there is no grey tone, because a grey owner reads as the
+   muted, parked mark.
+
+     deep — oklch L 0.68, C 0.12: today's body, white eyes (eye/body ≈ 2.8:1).
+     dark — L 0.60 at the most chroma the hue carries (≤ 0.17), white eyes
+            (≈ 4:1). The first try (L 0.50, C 0.11) turned peach into brown:
+            dark orange with little chroma IS brown, so the fix is chroma,
+            not a different hue. It also sank into the sidebar once saved's
+            opacity was applied, which is why a saved dark face steps back
+            less (OwnerFace.css) — measured to keep the same silhouette
+            contrast as a saved deep one (≈ 3.1–3.5:1 on --zl-sheet).
+     pale — L 0.84, C ≤ 0.11, INK eyes (≈ 10:1). White eyes cannot stand on
+            a pale body; ink ones are the same four drawings in a colour
+            that can. The closest pale pair (mauve/lilac, ΔE 0.058) is about
+            as far apart as the closest deep pair (0.064). */
+export const AVATAR_TONES = ["deep", "dark", "pale"];
+const TONE_L = { deep: 0.68, dark: 0.6, pale: 0.84 };
+
+// avatarTone answers the tone to draw: itself while it is listed, `deep`
+// otherwise (absent, or written by a build that knows more tones).
+export function avatarTone(tone) {
+  return AVATAR_TONES.includes(tone) ? tone : "deep";
+}
+
+// bodyOklch is the body the face wears, as the three oklch numbers. `deep`
+// keeps today's exact value (0.68 0.12 h).
+export function bodyOklch(colorId, tone) {
+  const c = avatarColor(colorId);
+  const h = Number(c.oklch.split(" ")[2]);
+  const t = avatarTone(tone);
+  return [TONE_L[t], t === "deep" ? 0.12 : c[t], h];
+}
 
 // RENAMED_COLORS is pkg/owner/avatar.go's `renamedAvatarColors`: an id that
 // left the list maps onto the surviving colour nearest the hue that owner
@@ -82,7 +126,28 @@ export const SHAPE_PATHS = {
   // corners, and a cloud whose flat base gives the eyes somewhere to sit.
   triangle: "M13.2 5.4Q16 .9 18.8 5.4L29.3 23.4Q31.9 28 26.6 28H5.4Q.1 28 2.7 23.4Z",
   cloud: "M9.2 27.2A6.4 6.4 0 0 1 7.7 14.6 8.4 8.4 0 0 1 24 12.1 7.5 7.5 0 0 1 24.4 27.2Z",
+  // Selectable only too. Each one changes the SILHOUETTE, which is what still
+  // reads at 20px: seven lobes, a wavy hem, a dent on top, a point on four
+  // sides, a flat top over a point, a flared base.
+  flower: flowerPath(),
+  ghost: "M16 2.5C23.2 2.5 28 7.8 28 15v13.4q-2-2.8-4 0t-4 0-4 0-4 0-4 0-4 0V15C4 7.8 8.8 2.5 16 2.5Z",
+  bean: "M10.4 4.3C14.6 2.8 17.4 6 21.6 5.4 26.8 4.8 30.2 9.4 29.8 15.6 29.4 23.4 23.8 28.6 16 28.6 7.6 28.6 2.4 23.2 2.4 15.2 2.4 9.6 5.8 6 10.4 4.3Z",
+  diamond: "M13.9 2.9Q16 .8 18.1 2.9L29.1 13.9Q31.2 16 29.1 18.1L18.1 29.1Q16 31.2 13.9 29.1L2.9 18.1Q.8 16 2.9 13.9Z",
+  shield: "M4 5.6Q4 3 6.6 3H25.4Q28 3 28 5.6V15C28 22.4 22.2 27.6 16 30.2 9.8 27.6 4 22.4 4 15Z",
+  bell: "M16 2.4C22 2.4 24.6 7.4 24.6 13V18.6C24.6 22.4 28.6 23.8 28.6 26.6 28.6 28.3 27.4 29 25.6 29H6.4C4.6 29 3.4 28.3 3.4 26.6 3.4 23.8 7.4 22.4 7.4 18.6V13C7.4 7.4 10 2.4 16 2.4Z",
 };
+
+// A scalloped outline, sampled from r(θ) rather than written by hand: seven
+// shallow lobes, so it is a flower and not a gear.
+function flowerPath() {
+  const pts = [];
+  for (let i = 0; i < 84; i++) {
+    const t = (i / 84) * Math.PI * 2;
+    const r = 12.6 + 1.9 * Math.cos(7 * t);
+    pts.push(`${(16 + r * Math.sin(t)).toFixed(2)} ${(16.4 - r * Math.cos(t)).toFixed(2)}`);
+  }
+  return `M${pts.join("L")}Z`;
+}
 
 // Where the eyes sit inside each outline. A drop is heavy at the bottom and a
 // pill has no top, so a single centre would have put eyes on an edge.
@@ -96,6 +161,13 @@ export const EYE_CENTER = {
   // Both are heavy at the bottom, like the drop.
   triangle: [16, 19.4],
   cloud: [16.4, 19],
+  flower: [16, 15.4],
+  ghost: [16, 14],
+  bean: [16, 16],
+  diamond: [16, 15],
+  shield: [16, 13.6],
+  // The bell's head is narrow and its flare is below: eyes in the head.
+  bell: [16, 12.6],
 };
 
 /* ── The one state axis: the eyes ────────────────────────────────────────
@@ -168,6 +240,69 @@ export function ownerAvatar(owner) {
   const color = COLOR_BY_ID.has(stored)
     ? stored
     : (RENAMED_COLORS[stored] || fallback.color);
-  return { shape, color };
+  return { shape, color, tone: avatarTone(owner?.avatar?.tone) };
+}
+
+// storedAvatar is what a client sends: the default tone is left out, so an
+// owner.json only grows a `tone` when one was actually chosen.
+export function storedAvatar({ shape, color, tone }) {
+  return avatarTone(tone) === "deep" ? { shape, color } : { shape, color, tone };
+}
+
+/* ── New owner's proposal: a face nobody has yet ─────────────────────────
+   The deterministic default is a hash, and a hash repeats: with a dozen
+   owners it had already drawn three mauve drops. New owner therefore proposes
+   a combination no existing owner uses, preferring the ones that stand
+   furthest from ALL of them: for each candidate, its distance to the nearest
+   existing face (a different shape counts 1; the body colours, tone
+   included, count their OKLab distance, saturating at 1 from ΔE 0.12 — the
+   gap between two hues nobody confuses). Highest nearest-distance wins; ties
+   go to the one furthest from the rest in total, then to a hash of the
+   folder, so the proposal is stable while the dialog is open and differs
+   from one project to the next. It is only a proposal: the user can change
+   any axis. With no owners yet, or with every combination taken, it is
+   today's default. */
+const bodyLab = (a) => {
+  const [l, c, h] = bodyOklch(a.color, a.tone);
+  const rad = (h * Math.PI) / 180;
+  return [l, c * Math.cos(rad), c * Math.sin(rad)];
+};
+const faceDistance = (a, b) => {
+  const la = bodyLab(a);
+  const lb = bodyLab(b);
+  const de = Math.hypot(la[0] - lb[0], la[1] - lb[1], la[2] - lb[2]);
+  return (a.shape === b.shape ? 0 : 1) + Math.min(1, de / 0.12);
+};
+const faceKey = (a) => `${a.shape}:${a.color}:${avatarTone(a.tone)}`;
+
+export function proposeAvatar(existing, seedKey) {
+  const fallback = { ...defaultAvatar(seedKey), tone: "deep" };
+  const taken = (existing || []).map((a) => ({ ...a, tone: avatarTone(a.tone) }));
+  if (taken.length === 0) return fallback;
+  const used = new Set(taken.map(faceKey));
+  let best = null;
+  for (const shape of AVATAR_SHAPES) {
+    for (const { id: color } of AVATAR_COLORS) {
+      for (const tone of AVATAR_TONES) {
+        const c = { shape, color, tone };
+        const key = faceKey(c);
+        if (used.has(key)) continue;
+        let near = Infinity;
+        let sum = 0;
+        for (const t of taken) {
+          const d = faceDistance(c, t);
+          near = Math.min(near, d);
+          sum += d;
+        }
+        const score = [Math.round(near * 1000), Math.round(sum * 1000), hash(`${seedKey}|${key}`, 2166136261)];
+        if (!best || score[0] > best.score[0]
+          || (score[0] === best.score[0] && (score[1] > best.score[1]
+            || (score[1] === best.score[1] && score[2] > best.score[2])))) {
+          best = { c, score };
+        }
+      }
+    }
+  }
+  return best ? best.c : fallback;
 }
 

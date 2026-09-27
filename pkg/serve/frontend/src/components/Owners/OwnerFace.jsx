@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "preact/hooks";
 import {
-  AVATAR_SHAPES, EYE_CENTER, SHAPE_PATHS, avatarColor, eyeStateFor, ownerAvatar,
+  AVATAR_SHAPES, EYE_CENTER, SHAPE_PATHS, avatarTone, bodyOklch, eyeStateFor, ownerAvatar,
 } from "./avatar-identity.js";
 import { facePersonality, faceMotion } from "./faceMotion.js";
 import "./OwnerAvatar.css";
@@ -47,6 +47,7 @@ export function combineGaze(eyes, gx, gy) {
 // on the rim — a drop narrows at eye height, a pill is wide.
 const HEAD_R = {
   circle: 11, squircle: 11.5, blob: 10.5, hexagon: 10.5, drop: 10, pill: 12.5, triangle: 8, cloud: 10,
+  flower: 10.5, ghost: 11, bean: 10.5, diamond: 9, shield: 11, bell: 8,
 };
 
 // poseVars turns a gaze (gx, gy in −1..1, already combined with the state)
@@ -77,14 +78,15 @@ export function poseVars(p, shape, gx, gy) {
   };
 }
 
-// Mirada's body: the identity hue one step DEEPER. The palette is L 0.80,
-// which white eyes cannot stand on (a lilac ball with white strokes is a blank
-// at 24px). Same hue, same chroma, lower lightness — computed from the
+// Mirada's body: the identity hue at the owner's tone (avatar-identity.js,
+// AVATAR_TONES). The default `deep` is the hue one step DEEPER than the
+// palette's L 0.80, which white eyes cannot stand on (a lilac ball with white
+// strokes is a blank at 24px). Same hue, lower lightness — computed from the
 // palette's own oklch so the eight stay as far apart as they were chosen to be.
 // Mixing with black was tried first and turned peach into brown.
-export function faceBodyColor(colorId) {
-  const [, , h] = avatarColor(colorId).oklch.split(" ");
-  return `oklch(0.68 0.12 ${h})`;
+export function faceBodyColor(colorId, tone) {
+  const [l, c, h] = bodyOklch(colorId, tone);
+  return `oklch(${l} ${c} ${h})`;
 }
 
 let faceSeq = 0;
@@ -126,6 +128,7 @@ export function OwnerFace({
   owner,
   shape,
   color,
+  tone,
   seedKey,
   state = "idle",
   size = 32,
@@ -135,7 +138,7 @@ export function OwnerFace({
   muted = false,
   title,
 }) {
-  const av = owner ? ownerAvatar(owner) : { shape: shape || "circle", color: color || "peach" };
+  const av = owner ? ownerAvatar(owner) : { shape: shape || "circle", color: color || "peach", tone: avatarTone(tone) };
   const key = seedKey ?? owner?.codebase_key ?? owner?.name ?? `${av.shape}:${av.color}`;
   const p = useMemo(() => facePersonality(key), [key]);
   const eyes = eyeStateFor(state);
@@ -153,7 +156,7 @@ export function OwnerFace({
   useFaceMotion(ref, { p, eyes, mode: eyes, follow, pinned: !!gaze, pose });
 
   const style = {
-    "--of-body": muted ? "#4a4b5c" : faceBodyColor(av.color),
+    "--of-body": muted ? "#4a4b5c" : faceBodyColor(av.color, av.tone),
     // One viewBox unit in CSS pixels: the HTML eyes move in the same units
     // the SVG was drawn in.
     "--of-u": `${size / 32}px`,
@@ -174,7 +177,7 @@ export function OwnerFace({
   return (
     <span
       ref={ref}
-      class={`of ow-av of-mirada is-${size} is-${eyes}${breathes ? " is-breathe" : ""}${sheen ? " has-sheen" : ""}`}
+      class={`of ow-av of-mirada is-${size} is-${eyes}${muted ? "" : ` is-tone-${av.tone}`}${breathes ? " is-breathe" : ""}${sheen ? " has-sheen" : ""}`}
       style={{ ...style, width: `${size}px`, height: `${size}px` }}
       role={title ? "img" : undefined}
       aria-label={title}

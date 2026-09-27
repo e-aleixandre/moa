@@ -281,9 +281,11 @@ test("live (the breath) is on only while the face is visible and running", () =>
   expect(lives()).toEqual([true, false, true, false]);
 });
 
-test("triangle and cloud are selectable but never a default; the pool is unchanged", () => {
+test("the added shapes are selectable but never a default; the pool is unchanged", () => {
   expect(DEFAULT_AVATAR_SHAPES).toEqual(["circle", "squircle", "blob", "hexagon", "drop", "pill"]);
-  expect(AVATAR_SHAPES).toEqual([...DEFAULT_AVATAR_SHAPES, "triangle", "cloud"]);
+  expect(AVATAR_SHAPES).toEqual([
+    ...DEFAULT_AVATAR_SHAPES, "triangle", "cloud", "flower", "ghost", "bean", "diamond", "shield", "bell",
+  ]);
   for (let i = 0; i < 2000; i++) {
     expect(DEFAULT_AVATAR_SHAPES).toContain(defaultAvatar(`k${i}`).shape);
   }
@@ -293,8 +295,8 @@ test("triangle and cloud are selectable but never a default; the pool is unchang
   expect(defaultAvatar("etiquetas-pdf")).toEqual({ shape: "pill", color: "peach" });
   expect(defaultAvatar("")).toEqual({ shape: "squircle", color: "sage" });
   // A stored opt-in shape is honoured, not sent back to the default.
-  for (const shape of ["triangle", "cloud"]) {
-    expect(ownerAvatar({ codebase_key: "moa", avatar: { shape, color: "sky" } })).toEqual({ shape, color: "sky" });
+  for (const shape of AVATAR_SHAPES.slice(DEFAULT_AVATAR_SHAPES.length)) {
+    expect(ownerAvatar({ codebase_key: "moa", avatar: { shape, color: "sky" } })).toEqual({ shape, color: "sky", tone: "deep" });
   }
   expect(ownerAvatar({ codebase_key: "moa", avatar: { shape: "star", color: "sky" } }).shape).toBe("circle");
 });

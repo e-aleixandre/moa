@@ -117,6 +117,14 @@
 }
 .of-mirada .of-m-shut { stroke: #fff; stroke-width: 2; }
 .of-mirada.is-saved { opacity: 0.66; }
+/* Pale: the same eyes in ink, because white ones vanish on a pale body. Every
+   state is the same drawing, so the eyes say it exactly as clearly. */
+.of-mirada.is-tone-pale .of-lid { background: var(--of-ink); }
+.of-mirada.is-tone-pale .of-m-shut { stroke: var(--of-ink); }
+/* Dark: at 0.66 a saved dark body sank into the sidebar (≈2.5:1 on
+   --zl-sheet). 0.8 gives it the silhouette a saved deep face has (≈3.2:1),
+   so it still steps back, as far as the others and no further. */
+.of-mirada.ow-av.is-tone-dark.is-saved { opacity: 0.8; }
 
 /* The system asked for stillness: no breath, and whatever pose is set is
    reached without travelling. The scheduler also stops sending events. */

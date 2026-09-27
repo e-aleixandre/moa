@@ -162,15 +162,34 @@ owner **never** rises into Needs attention: it is standing, and a permanent
 row that moves between sections is a row you have to find again every time it
 changes (`attentionKind` in `data/util/project-sessions.js`).
 
-Each owner carries an **avatar**: a shape × a colour, 48 combinations, chosen
-in New owner and stored as `avatar:{shape,color}` in `owner.json`. The field is
-additive — an owner without one gets a deterministic default derived from its
+Each owner carries an **avatar**: a shape × a colour × a tone — 14 shapes, 8
+colours and 3 tones, 336 combinations — chosen in New owner or Edit owner and
+stored as `avatar:{shape,color,tone?}` in `owner.json`. Every part is additive.
+An owner without an avatar gets a deterministic default derived from its
 `codebase_key`, computed identically in `pkg/owner/avatar.go` and
-`components/Owners/OwnerAvatar.jsx`, so old owners need no migration. Neither
-axis ever carries state: the palette has no amber, red or green in it, because
-those are the product's state dots. What moves with state is the eyes, and only
-the eyes — idle looks at you, working holds a glance aside, asks raises a brow,
-saved shuts them. Nothing animates.
+`components/Owners/avatar-identity.js`; it only ever picks from the first six
+shapes and the default tone, so adding shapes or tones never changes the face of
+an owner that never chose one. `tone` is optional and absent means `deep`, the
+body every owner had before tones existed: `deep` is the colour one step deeper
+than the palette, `dark` deeper still with the chroma kept up so it does not go
+brown, and `pale` light, with the eyes drawn in ink instead of white. None of the
+axes ever carries state: the palette has no amber, red or green in it, because
+those are the product's state dots, and every tone is one of the same eight hues.
+
+**New owner proposes a face nobody has.** Before you touch anything, the picker
+holds the combination no existing owner wears that stands furthest from all of
+them (a different shape counts most, then how far apart the two body colours
+are), with the project folder breaking ties. You can change any axis. With no
+owners yet, or with every combination taken, it falls back to the deterministic
+default.
+
+What moves with state is the eyes, and only the eyes, in every tone. Idle looks
+around, working narrows them on a point low and aside, asks opens them wider and
+looks straight at you, saved shuts them and dims the face. The faces are alive,
+in the list too: they blink, idle breathes, and asks gives a small nudge every
+few seconds. All of it runs on one shared timer that sleeps between events, each
+owner on its own slow rhythm, and nothing moves offscreen, in a hidden tab or
+under reduced motion.
 
 `+ New owner` sits at the end of the section and opens a dialog (a bottom
 sheet on a phone), so the list it was launched from stays in view. **Edit

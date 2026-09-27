@@ -28,12 +28,20 @@ import "slices"
 // DefaultAvatarShapes is the pool the deterministic default hashes over, and
 // it must never change: DefaultAvatar is `hash % len(pool)`, so appending to it
 // would silently re-face every owner that never chose one. Shapes added later
-// (triangle, cloud) are therefore selectable only — in AvatarShapes, never in
-// the pool.
+// (triangle, cloud, and the six after them) are therefore selectable only — in
+// AvatarShapes, never in the pool.
+//
+// AvatarTones is the third axis: the same eight hues at three lightnesses.
+// It is optional in owner.json and an empty tone means "deep", the body every
+// owner had before tones existed, so an owner.json without one is drawn
+// exactly as before. The default never picks a tone for the same reason the
+// shape pool never grows.
 var (
 	DefaultAvatarShapes = []string{"circle", "squircle", "blob", "hexagon", "drop", "pill"}
-	AvatarShapes        = append(slices.Clone(DefaultAvatarShapes), "triangle", "cloud")
-	AvatarColors        = []string{"peach", "mauve", "sage", "sky", "azure", "rose", "mint", "lilac"}
+	AvatarShapes        = append(slices.Clone(DefaultAvatarShapes),
+		"triangle", "cloud", "flower", "ghost", "bean", "diamond", "shield", "bell")
+	AvatarColors = []string{"peach", "mauve", "sage", "sky", "azure", "rose", "mint", "lilac"}
+	AvatarTones  = []string{"deep", "dark", "pale"}
 )
 
 // renamedAvatarColors maps an id that has LEFT the closed list onto the one an
@@ -59,19 +67,23 @@ func MigrateAvatarColor(id string) string {
 	return renamedAvatarColors[id]
 }
 
-// Avatar is the mark. Both fields are required once the value is non-empty;
-// a zero Avatar means "never chosen" and resolves to DefaultAvatar.
+// Avatar is the mark. Shape and colour are required once the value is
+// non-empty; a zero Avatar means "never chosen" and resolves to DefaultAvatar.
+// Tone is optional: empty is "deep".
 type Avatar struct {
 	Shape string `json:"shape"`
 	Color string `json:"color"`
+	Tone  string `json:"tone,omitempty"`
 }
 
 // IsZero reports whether nothing was chosen.
-func (a Avatar) IsZero() bool { return a.Shape == "" && a.Color == "" }
+func (a Avatar) IsZero() bool { return a.Shape == "" && a.Color == "" && a.Tone == "" }
 
-// Valid reports whether both axes are one of the closed lists.
+// Valid reports whether every axis is one of the closed lists (an empty tone
+// included, since it is the default one).
 func (a Avatar) Valid() bool {
-	return slices.Contains(AvatarShapes, a.Shape) && slices.Contains(AvatarColors, a.Color)
+	return slices.Contains(AvatarShapes, a.Shape) && slices.Contains(AvatarColors, a.Color) &&
+		(a.Tone == "" || slices.Contains(AvatarTones, a.Tone))
 }
 
 // hash is FNV-1a with a final avalanche, and it is the frontend's hash byte
@@ -118,10 +130,16 @@ func (o Owner) ResolvedAvatar() Avatar {
 	}
 	// A colour that only LEFT the list is migrated rather than discarded: an
 	// owner created before the palette was reworked keeps its shape and the
-	// nearest surviving tile, instead of changing face altogether.
+	// nearest surviving tile, instead of changing face altogether. An unknown
+	// tone falls back to the default tone the same way, rather than costing
+	// the owner its shape and colour.
 	if slices.Contains(AvatarShapes, o.Avatar.Shape) {
 		if color := MigrateAvatarColor(o.Avatar.Color); color != "" {
-			return Avatar{Shape: o.Avatar.Shape, Color: color}
+			tone := o.Avatar.Tone
+			if !slices.Contains(AvatarTones, tone) {
+				tone = ""
+			}
+			return Avatar{Shape: o.Avatar.Shape, Color: color, Tone: tone}
 		}
 	}
 	return DefaultAvatar(o.CodebaseKey)

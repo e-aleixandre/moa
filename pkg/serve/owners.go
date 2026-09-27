@@ -123,7 +123,7 @@ type UpdateOwnerOpts struct {
 
 func validateOwnerAvatar(avatar owner.Avatar) error {
 	if !avatar.Valid() {
-		return fmt.Errorf("%w: shape must be one of %v and colour one of %v", ErrInvalidAvatar, owner.AvatarShapes, owner.AvatarColors)
+		return fmt.Errorf("%w: shape must be one of %v, colour one of %v and tone one of %v", ErrInvalidAvatar, owner.AvatarShapes, owner.AvatarColors, owner.AvatarTones)
 	}
 	return nil
 }

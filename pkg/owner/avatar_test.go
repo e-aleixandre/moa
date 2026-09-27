@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -158,5 +159,74 @@ func TestDefaultAvatarNeverPicksAnOptInShape(t *testing.T) {
 		if !slices.Contains(DefaultAvatarShapes, got) {
 			t.Fatalf("DefaultAvatar picked %q", got)
 		}
+	}
+}
+
+// The six shapes and the tone axis are additive: they validate, an unknown
+// value of either is still refused, and the default pool does not grow.
+func TestAvatarAcceptsTheNewShapesAndTones(t *testing.T) {
+	for _, shape := range []string{"flower", "ghost", "bean", "diamond", "shield", "bell"} {
+		for _, tone := range []string{"", "deep", "dark", "pale"} {
+			if a := (Avatar{Shape: shape, Color: "sky", Tone: tone}); !a.Valid() {
+				t.Fatalf("%+v should be valid", a)
+			}
+		}
+	}
+	if (Avatar{Shape: "circle", Color: "sky", Tone: "neon"}).Valid() {
+		t.Fatal("an unknown tone was accepted")
+	}
+	if (Avatar{Tone: "pale"}).IsZero() {
+		t.Fatal("a tone alone is a (bad) choice, not the absence of one")
+	}
+	if len(DefaultAvatarShapes) != 6 {
+		t.Fatalf("default pool = %v; growing it re-faces every owner that never chose", DefaultAvatarShapes)
+	}
+	if _, err := NewStore(t.TempDir()).Create(t.TempDir(), "Winerim", "", "", true, Avatar{Shape: "ghost", Color: "rose", Tone: "neon"}); err == nil {
+		t.Fatal("create accepted an unknown tone")
+	}
+}
+
+// An owner.json written before tones existed has no "tone" and must read back
+// as the same face it always had; a chosen tone round-trips through disk; an
+// owner saved without one does not grow the key.
+func TestAvatarToneIsOptionalOnDisk(t *testing.T) {
+	var old Owner
+	if err := json.Unmarshal([]byte(`{"id":"own_1","name":"Glitxapp","codebase_key":"g","avatar":{"shape":"drop","color":"mauve"}}`), &old); err != nil {
+		t.Fatal(err)
+	}
+	if got := old.ResolvedAvatar(); got != (Avatar{Shape: "drop", Color: "mauve"}) {
+		t.Fatalf("old owner.json resolved to %+v", got)
+	}
+	raw, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "tone") {
+		t.Fatalf("an owner without a tone wrote one: %s", raw)
+	}
+
+	cfg := t.TempDir()
+	store := NewStore(cfg)
+	want := Avatar{Shape: "shield", Color: "peach", Tone: "dark"}
+	own, err := store.Create(t.TempDir(), "Facturas", "", "", true, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(cfg, "codebases", own.CodebaseKey, "owner.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var onDisk Owner
+	if err := json.Unmarshal(data, &onDisk); err != nil {
+		t.Fatal(err)
+	}
+	if onDisk.Avatar != want || onDisk.ResolvedAvatar() != want {
+		t.Fatalf("persisted avatar = %+v, want %+v", onDisk.Avatar, want)
+	}
+
+	// A tone this build does not know keeps the shape and colour.
+	future := Owner{CodebaseKey: "g", Avatar: Avatar{Shape: "drop", Color: "mauve", Tone: "neon"}}
+	if got := future.ResolvedAvatar(); got != (Avatar{Shape: "drop", Color: "mauve"}) {
+		t.Fatalf("unknown tone resolved to %+v", got)
 	}
 }

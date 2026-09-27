@@ -576,3 +576,37 @@ func TestOwnerAPIAcceptsTheSelectableShapes(t *testing.T) {
 		t.Fatalf("unknown shape PATCH = %d, want 400", response.Code)
 	}
 }
+
+// The new shapes and the tone go through the API on create and on PATCH and
+// survive a reload; an unknown tone is a 400, and a PATCH without a tone goes
+// back to the default one.
+func TestOwnerAPIAcceptsTheNewShapesAndTones(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	chosen := owner.Avatar{Shape: "ghost", Color: "mauve", Tone: "pale"}
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Glitxapp", Avatar: chosen})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Avatar != chosen {
+		t.Fatalf("created avatar = %+v", info.Avatar)
+	}
+	if response := patchOwner(t, mgr, info.ID, `{"avatar":{"shape":"bell","color":"peach","tone":"dark"}}`); response.Code != http.StatusOK {
+		t.Fatalf("tone PATCH = %d: %s", response.Code, response.Body.String())
+	}
+	got, err := mgr.GetOwner(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Avatar != (owner.Avatar{Shape: "bell", Color: "peach", Tone: "dark"}) {
+		t.Fatalf("reloaded avatar = %+v", got.Avatar)
+	}
+	if response := patchOwner(t, mgr, info.ID, `{"avatar":{"shape":"bell","color":"peach","tone":"neon"}}`); response.Code != http.StatusBadRequest {
+		t.Fatalf("unknown tone PATCH = %d, want 400", response.Code)
+	}
+	if response := patchOwner(t, mgr, info.ID, `{"avatar":{"shape":"bell","color":"peach"}}`); response.Code != http.StatusOK {
+		t.Fatalf("toneless PATCH = %d: %s", response.Code, response.Body.String())
+	}
+	if got, _ := mgr.GetOwner(info.ID); got.Avatar != (owner.Avatar{Shape: "bell", Color: "peach"}) {
+		t.Fatalf("toneless PATCH left %+v", got.Avatar)
+	}
+}

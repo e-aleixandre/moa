@@ -9,8 +9,8 @@ import { OwnerFace } from "./OwnerFace.jsx";
 // WHAT IT IS. An owner is a standing thing you recognise across modes. Two
 // owners of the same repository ("Winerim" and "Winerim Web") share a
 // monogram, so a two-letter tile cannot tell them apart — that is the whole
-// reason this exists. The mark is SHAPE × COLOUR (avatar-identity.js), two
-// independent axes with 6 × 8 = 48 combinations, and neither carries state.
+// reason this exists. The mark is SHAPE × COLOUR × TONE (avatar-identity.js),
+// independent axes with 14 × 8 × 3 = 336 combinations, and none carries state.
 //
 // WHAT IT LOOKS LIKE NOW. The "Mirada" face (OwnerFace.jsx, chosen in the
 // ?view=faces lab): a flat body in the identity colour and two short white
@@ -30,6 +30,7 @@ export * from "./avatar-identity.js";
 export function OwnerAvatar({
   shape = "circle",
   color = "peach",
+  tone,
   state = "idle",
   size = 32,
   seedKey,
@@ -41,6 +42,7 @@ export function OwnerAvatar({
       variant="mirada"
       shape={shape}
       color={color}
+      tone={tone}
       seedKey={seedKey}
       state={state}
       size={size}
@@ -53,11 +55,12 @@ export function OwnerAvatar({
 // OwnerAvatarFor is the one-argument form every surface actually calls. The
 // owner's codebase_key seeds its rhythm, so it blinks the same way everywhere.
 export function OwnerAvatarFor({ owner, state, size = 32, title }) {
-  const { shape, color } = ownerAvatar(owner);
+  const { shape, color, tone } = ownerAvatar(owner);
   return (
     <OwnerAvatar
       shape={shape}
       color={color}
+      tone={tone}
       seedKey={owner?.codebase_key || owner?.name}
       state={state}
       size={size}
