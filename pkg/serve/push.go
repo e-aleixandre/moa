@@ -11,6 +11,7 @@ import (
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/push"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 // minRunForPush gates the "finished" notification: a run must take at least this
@@ -48,8 +49,16 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 	// args/commands, paths, diffs, final text or error detail. E2E encryption
 	// hides the payload from the push service but NOT from the lock screen, so
 	// the content is dropped here; open the app to see it.
+	//
+	// A session an owner launched (origin "owner", not the owner's own
+	// conversation) never pushes: its owner hears about it through its
+	// reports. Origin and Kind are assigned after the session is built, so they
+	// are read here, when an event arrives, not at subscription time.
 	notify := func(title string) {
 		if sess.deleted.Load() {
+			return
+		}
+		if sess.Origin == "owner" && sess.Kind != session.KindOwner {
 			return
 		}
 		m.pushDispatcher.Notify(push.Notification{

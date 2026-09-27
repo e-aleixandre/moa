@@ -1,6 +1,6 @@
 // WebSocket session-level event handling.
 
-import { triggerAttention, triggerDone, addToast } from '../notifications.js';
+import { triggerAttention, triggerDone, addSessionToast } from '../notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from '../store.js';
 import { resetOlderHistory } from '../history-paging.js';
 import { normalizeHistory } from './history.js';
@@ -53,7 +53,7 @@ export function handleWsStateChange(id, data, seq = 0) {
         let title = 'Run failed';
         if (isQuota) title = 'Usage limit reached';
         else if (wasCompacting) title = 'Compaction failed';
-        addToast({
+        addSessionToast(prev, {
           sessionId: id,
           title,
           detail: data.error,
@@ -255,7 +255,7 @@ export function handleWsCommandDequeued(id, data) {
   const steers = (sess.pendingSteers || []).filter(s => s.id !== data.id);
   updateSession(id, { pendingSteers: steers.length > 0 ? steers : null });
   if (!data.executed && data.err) {
-    addToast({ sessionId: id, title: 'Queued command failed', detail: `${data.raw}: ${data.err}`, type: 'error' });
+    addSessionToast(sess, { sessionId: id, title: 'Queued command failed', detail: `${data.raw}: ${data.err}`, type: 'error' });
   }
 }
 

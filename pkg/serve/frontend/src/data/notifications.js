@@ -24,6 +24,15 @@ export function addToast(toast) {
   return id;
 }
 
+// addSessionToast raises a toast for an event of a session, and is the one
+// place that decides whether that session speaks to the user at all: a session
+// an owner launched (origin "owner", not the owner's own conversation) reports
+// to its owner instead. Returns null when nothing was raised.
+export function addSessionToast(session, toast) {
+  if (session?.origin === 'owner' && session?.kind !== 'owner') return null;
+  return addToast(toast);
+}
+
 export function removeToast(id) {
   toasts = toasts.filter(t => t.id !== id);
   notifyToastListeners();
@@ -71,7 +80,7 @@ export function triggerAttention(session, toolName, soundEnabled) {
     ? `${toolName} — needs permission`
     : 'needs attention';
 
-  addToast({ sessionId: session.id, title, detail, type: 'attention' });
+  if (addSessionToast(session, { sessionId: session.id, title, detail, type: 'attention' }) === null) return;
 
   if (soundEnabled) {
     initAudio().then(playBeep);
@@ -90,7 +99,7 @@ export function triggerAttention(session, toolName, soundEnabled) {
 export function triggerDone(session, soundEnabled) {
   const title = session.title || 'Untitled';
 
-  addToast({ sessionId: session.id, title, detail: 'finished', type: 'done' });
+  if (addSessionToast(session, { sessionId: session.id, title, detail: 'finished', type: 'done' }) === null) return;
 
   if (document.hidden) {
     if (soundEnabled) initAudio().then(playBeep);

@@ -3,7 +3,7 @@
 import { wsState } from './shared.js';
 import { newBuffers, applyNestedEvent } from '../conversation-reducer.js';
 import { truncateText } from '../util/format.js';
-import { addToast } from '../notifications.js';
+import { addSessionToast } from '../notifications.js';
 import { store, updateSession } from '../store.js';
 import { isSessionAway, markUnseen } from './attention.js';
 import { noteArtifactDelivery } from './tools.js';
@@ -29,7 +29,7 @@ export function handleWsSubagentComplete(id, data) {
   // delegation block already reports the outcome (SUBAGENTS-REDESIGN-SPEC §4).
   const taskLine = (data.task || data.job_id || '').split('\n')[0];
   if (isSessionAway(id)) {
-    addToast({
+    addSessionToast(store.get().sessions[id], {
       sessionId: id,
       title: `Subagent ${statusIcon} ${data.status}`,
       detail: truncateText(taskLine, 140),

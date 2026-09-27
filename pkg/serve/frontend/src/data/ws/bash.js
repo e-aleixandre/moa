@@ -2,7 +2,7 @@
 
 import { wsState } from './shared.js';
 import { truncateText } from '../util/format.js';
-import { addToast } from '../notifications.js';
+import { addSessionToast } from '../notifications.js';
 import { store, updateSession } from '../store.js';
 import { isSessionAway } from './attention.js';
 import { markUnseen } from './attention.js';
@@ -33,7 +33,7 @@ export function handleWsBashComplete(id, data) {
   // Only toast when the session isn't on screen — a visible background block
   // already reports the outcome (SUBAGENTS-REDESIGN-SPEC §4).
   if (isSessionAway(id)) {
-    addToast({
+    addSessionToast(sess, {
       sessionId: id,
       title: `Bash ${statusIcon} ${data.status}`,
       detail: truncateText(cmdLine, 140),
