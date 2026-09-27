@@ -2,7 +2,7 @@
 
 import { api, retryHistoryHydration } from './api.js';
 import { attentionNamespaceTransition, normalizeConversationProjection, normalizeHistory } from './ws-handlers.js';
-import { triggerAttention, addToast } from './notifications.js';
+import { triggerAttention, triggerFailed, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
   assignToTile, setActiveSession, afterVisibilityChange, autoFillTiles,
@@ -292,7 +292,8 @@ export async function loadSessions() {
       if (prevSess && prevSess.state !== sess.state) {
         if (sess.state === 'permission' || sess.state === 'error') {
           if (!visible.has(id)) {
-            triggerAttention(sess, null, state.soundEnabled);
+            if (sess.state === 'error') triggerFailed(sess, sess.error, state.soundEnabled);
+            else triggerAttention(sess, null, state.soundEnabled);
           }
         }
       }
@@ -452,7 +453,7 @@ export async function closeSession(id) {
       detail: busy
         ? 'Cancel the run (or wait for background work to finish) before closing it.'
         : String(e.message || e),
-      type: busy ? 'attention' : 'error',
+      type: busy ? 'info' : 'error',
     });
     throw e;
   }
@@ -494,7 +495,7 @@ export async function cancelBashJob(sessionId, jobId) {
       detail: String(e.message || e).startsWith('404')
         ? 'It already finished.'
         : String(e.message || e),
-      type: 'attention',
+      type: 'error',
     });
     throw e;
   }
@@ -805,7 +806,7 @@ export async function stopRun(id) {
   }));
   const dropped = restored.reduce((n, s) => n + (s.images || 0), 0);
   if (dropped > 0) {
-    addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'attention' });
+    addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'info' });
   }
   const current = store.get().sessions[id];
   if (current?.pendingSteers) {
@@ -868,7 +869,7 @@ export function recallQueuedSteers(id) {
 
         const dropped = droppedImageCount(restored);
         if (dropped > 0) {
-          addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'attention' });
+          addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'info' });
         }
       }
 
@@ -893,7 +894,7 @@ export function recallQueuedSteers(id) {
         }));
         const dropped = droppedImageCount(fallback);
         if (dropped > 0) {
-          addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'attention' });
+          addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'info' });
         }
       }
       console.error('cancelSteers failed:', e);

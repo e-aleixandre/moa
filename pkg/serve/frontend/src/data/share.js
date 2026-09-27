@@ -89,7 +89,7 @@ export async function openShare(shareId, { read = readShare } = {}) {
     addToast({
       title: 'Nothing arrived from the share',
       detail: 'The shared item was no longer available. Share it again from the other app.',
-      type: 'attention',
+      type: 'info',
     });
     return true;
   }

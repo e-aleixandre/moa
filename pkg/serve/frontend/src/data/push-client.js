@@ -138,7 +138,7 @@ export async function enablePush() {
     // Surface the failure instead of silently reporting success: a browser-side
     // subscription can exist even when the server never stored it.
     console.error('[push] enable failed', e);
-    addToast({ title: 'Could not enable notifications', detail: String((e && e.message) || e), type: 'attention' });
+    addToast({ title: 'Could not enable notifications', detail: String((e && e.message) || e), type: 'error' });
     setPushState('default');
   }
 }

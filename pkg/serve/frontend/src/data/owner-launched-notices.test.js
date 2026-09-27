@@ -61,9 +61,9 @@ test('a session the owner launched raises no toast', () => {
 });
 
 test('a user session in an owner codebase still raises its toasts', () => {
-  expect(raiseEveryNotice('userInOwner')).toBe(8);
+  expect(raiseEveryNotice('userInOwner')).toBe(7);
 });
 
 test('the owner asking in its own conversation still raises its toasts', () => {
-  expect(raiseEveryNotice('owner')).toBe(8);
+  expect(raiseEveryNotice('owner')).toBe(7);
 });

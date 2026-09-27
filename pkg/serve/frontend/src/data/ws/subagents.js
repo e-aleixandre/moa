@@ -33,7 +33,7 @@ export function handleWsSubagentComplete(id, data) {
       sessionId: id,
       title: `Subagent ${statusIcon} ${data.status}`,
       detail: truncateText(taskLine, 140),
-      type: data.status === 'completed' ? 'done' : 'attention',
+      type: data.status === 'completed' ? 'done' : data.status === 'failed' ? 'error' : 'info',
     });
   }
 

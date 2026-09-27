@@ -1,6 +1,6 @@
 // WebSocket session-level event handling.
 
-import { triggerAttention, triggerDone, addSessionToast } from '../notifications.js';
+import { triggerFailed, triggerDone, addSessionToast } from '../notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from '../store.js';
 import { resetOlderHistory } from '../history-paging.js';
 import { normalizeHistory } from './history.js';
@@ -48,25 +48,20 @@ export function handleWsStateChange(id, data, seq = 0) {
       // Surface the reason for an error end so it's visible even when the tile
       // isn't focused — parity with the TUI's run-end error block. A usage/quota
       // limit reads as an actionable "resets in X" line rather than a fault.
-      if (data.state === 'error' && data.error) {
-        const isQuota = /quota exceeded|usage limit/i.test(data.error);
-        let title = 'Run failed';
-        if (isQuota) title = 'Usage limit reached';
-        else if (wasCompacting) title = 'Compaction failed';
-        addSessionToast(prev, {
-          sessionId: id,
-          title,
-          detail: data.error,
-          type: 'attention',
-        });
-      }
-      const visible = visibleSessionIds(store.get());
-      if (!visible.includes(id) && sess) {
-        if (data.state === 'error') {
-          triggerAttention(sess, null, store.get().soundEnabled);
-        } else {
-          triggerDone(sess, store.get().soundEnabled);
+      // One toast per failure: a session on screen gets what failed and why;
+      // one away from it gets its own title and the alert of a blocking event.
+      const away = !visibleSessionIds(store.get()).includes(id) && sess;
+      if (data.state === 'error') {
+        let kind = 'Run failed';
+        if (/quota exceeded|usage limit/i.test(data.error || '')) kind = 'Usage limit reached';
+        else if (wasCompacting) kind = 'Compaction failed';
+        if (away) {
+          triggerFailed(sess, data.error ? `${kind} — ${data.error}` : kind, store.get().soundEnabled);
+        } else if (data.error) {
+          addSessionToast(prev, { sessionId: id, title: kind, detail: data.error, type: 'error' });
         }
+      } else if (away) {
+        triggerDone(sess, store.get().soundEnabled);
       }
     }
   }

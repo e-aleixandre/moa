@@ -73,23 +73,31 @@ function browserNotify(title, body) {
   }
 }
 
-// Question/permission/error — called for non-visible sessions. `detail` says
-// what the session waits on; without one the toast only says it needs attention.
+// alertAway adds what a toast alone does not: a session the user is not
+// looking at reached a point that matters. Toasts that answer the user's own
+// action never come through here.
+function alertAway(title, body, soundEnabled) {
+  if (soundEnabled) initAudio().then(playBeep);
+  browserNotify(title, body);
+  if (navigator.vibrate) navigator.vibrate(200);
+}
+
+// Question/permission — called for non-visible sessions. `detail` says what
+// the session waits on; without one the toast only says it needs attention.
 export function triggerAttention(session, detail, soundEnabled) {
   const title = session.title || 'Untitled';
   detail ||= 'needs attention';
-
   if (addSessionToast(session, { sessionId: session.id, title, detail, type: 'attention' }) === null) return;
+  alertAway(title, detail, soundEnabled);
+}
 
-  if (soundEnabled) {
-    initAudio().then(playBeep);
-  }
-
-  browserNotify(title, detail);
-
-  if (navigator.vibrate) {
-    navigator.vibrate(200);
-  }
+// A run of a non-visible session failed: one Failed toast that names the
+// session, with the same alert as a question.
+export function triggerFailed(session, detail, soundEnabled) {
+  const title = session.title || 'Untitled';
+  detail ||= 'Run failed';
+  if (addSessionToast(session, { sessionId: session.id, title, detail, type: 'error' }) === null) return;
+  alertAway(title, detail, soundEnabled);
 }
 
 // Turn done — called from state.js when a non-visible session finishes.
@@ -98,7 +106,7 @@ export function triggerAttention(session, detail, soundEnabled) {
 export function triggerDone(session, soundEnabled) {
   const title = session.title || 'Untitled';
 
-  if (addSessionToast(session, { sessionId: session.id, title, detail: 'finished', type: 'done' }) === null) return;
+  if (addSessionToast(session, { sessionId: session.id, title, type: 'done' }) === null) return;
 
   if (document.hidden) {
     if (soundEnabled) initAudio().then(playBeep);

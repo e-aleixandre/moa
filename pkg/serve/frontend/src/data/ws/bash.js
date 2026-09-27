@@ -37,7 +37,7 @@ export function handleWsBashComplete(id, data) {
       sessionId: id,
       title: `Bash ${statusIcon} ${data.status}`,
       detail: truncateText(cmdLine, 140),
-      type: data.status === 'completed' ? 'done' : 'attention',
+      type: data.status === 'completed' ? 'done' : data.status === 'failed' ? 'error' : 'info',
     });
   }
 

@@ -366,12 +366,12 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     // MAX_ATTACHMENTS.
     const room = MAX_ATTACHMENTS - attachments.length - attachInFlightRef.current;
     if (room <= 0) {
-      addToast({ title: 'Too many attachments', detail: `Max ${MAX_ATTACHMENTS} per message`, type: 'attention' });
+      addToast({ title: 'Too many attachments', detail: `Max ${MAX_ATTACHMENTS} per message`, type: 'info' });
       return;
     }
     const toProcess = files.slice(0, room);
     if (files.length > toProcess.length) {
-      addToast({ title: 'Too many attachments', detail: `Max ${MAX_ATTACHMENTS} per message`, type: 'attention' });
+      addToast({ title: 'Too many attachments', detail: `Max ${MAX_ATTACHMENTS} per message`, type: 'info' });
     }
 
     attachInFlightRef.current += toProcess.length;
@@ -489,7 +489,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       setFileSuggestions(null);
       autoResize();
       if (atts.length > 0) {
-        addToast({ title: 'Cannot attach files here', detail: 'Remove the attachments before storing secrets', type: 'attention' });
+        addToast({ title: 'Cannot attach files here', detail: 'Remove the attachments before storing secrets', type: 'info' });
         return;
       }
       if (steer) {
@@ -540,7 +540,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     }
 
     if ((text.startsWith('/') || text.startsWith('!')) && atts.length > 0) {
-      addToast({ title: 'Cannot attach files here', detail: 'Remove the attachments first, or send them in a separate message', type: 'attention' });
+      addToast({ title: 'Cannot attach files here', detail: 'Remove the attachments first, or send them in a separate message', type: 'info' });
       return;
     }
 
@@ -599,7 +599,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       if (occupied || queueNonEmpty) {
         const policy = classifyCommand(normalized, skills);
         if (policy === POLICY_REJECT) {
-          addToast({ title: 'Cannot run this now', detail: `${normalized.split(/\s+/)[0]} can't run while the agent is working — stop it first.`, type: 'attention' });
+          addToast({ title: 'Cannot run this now', detail: `${normalized.split(/\s+/)[0]} can't run while the agent is working — stop it first.`, type: 'info' });
           return;
         }
         if (policy === POLICY_QUEUE) {
@@ -649,7 +649,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           addToast({
             title: result.ok ? 'Verify passed' : 'Verify failed',
             detail: result.message,
-            type: result.ok ? 'done' : 'attention',
+            type: result.ok ? 'done' : 'error',
           });
         } else if (text.startsWith('/rename') && result && result.ok) {
           // Reflect the new title immediately; the poll would otherwise lag
@@ -726,7 +726,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       setContentSendPending(true);
       void Promise.resolve(handleSend()).finally(finishContentSend);
     } else if (contentSendActivationRef.current.sendInFlight) {
-      addToast({ sessionId, title: 'Message is still sending', detail: 'Wait for the request to finish before sending again.', type: 'attention' });
+      addToast({ sessionId, title: 'Message is still sending', detail: 'Wait for the request to finish before sending again.', type: 'info' });
     }
   }, [handleSend, finishContentSend, sessionId]);
   dispatchContentSendRef.current = dispatchContentSendActivation;
