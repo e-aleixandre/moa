@@ -159,6 +159,7 @@ func TestReportsWaitForABusyOwnerInsteadOfSteeringIt(t *testing.T) {
 	mgr := newTestManager(t, ctx, provider)
 	root := t.TempDir()
 	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	enableHeartbeat(t, mgr, info)
 	store, err := mgr.ownerStore()
 	if err != nil {
 		t.Fatal(err)

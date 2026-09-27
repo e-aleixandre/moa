@@ -18,9 +18,11 @@ import (
 // what the user refused to pay for, so the evaluation is deterministic Go and
 // the model is woken only when there is a NEW fact. No facts, no turn, no cost.
 
-// HeartbeatDefaults are the thresholds an owner.json without a heartbeat block
-// gets. The field is additive: every owner written before it existed keeps
-// working, with these numbers.
+// HeartbeatDefaults are the thresholds an owner.json that turns the heartbeat
+// on gets when it does not name its own numbers. They only apply once
+// "enabled" is explicitly true (see HeartbeatSettings): the evaluator only
+// looks at a file's mtime and cannot tell a job that stalled from one that was
+// deliberately parked or already finished, so it stays off until asked for.
 const (
 	DefaultHeartbeatIdleMinutes = 30
 	DefaultHeartbeatStaleDays   = 7
@@ -29,8 +31,12 @@ const (
 	HeartbeatInterval = 5 * time.Minute
 )
 
-// Heartbeat is the per-owner configuration. Enabled is a pointer so "absent"
-// (default on) is distinguishable from an explicit false.
+// Heartbeat is the per-owner configuration. Enabled is a pointer so an owner
+// that never mentions it, one with the block but no "enabled" key, and an
+// explicit false all read the same: off. The evaluator only sees a file's
+// mtime, not whether the work behind it stopped, was parked on purpose, or is
+// simply done, so it only runs when the owner.json asks for it with
+// "enabled": true.
 type Heartbeat struct {
 	Enabled     *bool `json:"enabled,omitempty"`
 	IdleMinutes int   `json:"idle_minutes,omitempty"`
@@ -47,7 +53,7 @@ type HeartbeatSettings struct {
 // HeartbeatSettings resolves the owner's configuration.
 func (o Owner) HeartbeatSettings() HeartbeatSettings {
 	settings := HeartbeatSettings{
-		Enabled:     true,
+		Enabled:     false,
 		IdleMinutes: DefaultHeartbeatIdleMinutes,
 		StaleDays:   DefaultHeartbeatStaleDays,
 	}

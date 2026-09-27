@@ -26,6 +26,26 @@ func defaultHeartbeatSettings() owner.HeartbeatSettings {
 	return owner.Owner{}.HeartbeatSettings()
 }
 
+// enableHeartbeat turns the heartbeat on for an owner already created in a
+// test: the default is off, and these tests exercise the evaluator itself, not
+// the opt-in.
+func enableHeartbeat(t *testing.T, mgr *Manager, info OwnerInfo) {
+	t.Helper()
+	store, err := mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	own, ok, err := store.FindByID(info.ID)
+	if err != nil || !ok {
+		t.Fatalf("owner lookup: %v (found=%v)", err, ok)
+	}
+	enabled := true
+	own.Heartbeat = &owner.Heartbeat{Enabled: &enabled}
+	if err := store.Save(own); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The whole point of a deterministic heartbeat is that a quiet project costs
 // nothing: no facts, no prompt, no model.
 func TestHeartbeatSaysNothingWhenNothingIsTrue(t *testing.T) {
@@ -109,6 +129,7 @@ func TestHeartbeatRepeatsNothingAndWakesOnNewFacts(t *testing.T) {
 	mgr := newOwnerTestManager(t, ctx)
 	root := t.TempDir()
 	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	enableHeartbeat(t, mgr, info)
 
 	store, err := mgr.ownerStore()
 	if err != nil {
@@ -150,6 +171,7 @@ func TestHeartbeatDefersToAPendingReport(t *testing.T) {
 	mgr := newOwnerTestManager(t, context.Background())
 	root := t.TempDir()
 	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	enableHeartbeat(t, mgr, info)
 	store, err := mgr.ownerStore()
 	if err != nil {
 		t.Fatal(err)
@@ -178,6 +200,7 @@ func TestRecoveredOutboxBeatsImmediateHeartbeatAfterConstructorReady(t *testing.
 	root := t.TempDir()
 	first := newRestartableManager(t, ctx, sessionDir)
 	info, _ := ownerWithSession(t, first, root, "Winerim")
+	enableHeartbeat(t, first, info)
 	store, err := first.ownerStore()
 	if err != nil {
 		t.Fatal(err)
@@ -215,6 +238,7 @@ func TestRecoveredRecoveryLaneBeatsImmediateHeartbeatAfterConstructorReady(t *te
 	root := t.TempDir()
 	first := newRestartableManager(t, ctx, sessionDir)
 	info, _ := ownerWithSession(t, first, root, "Winerim")
+	enableHeartbeat(t, first, info)
 	store, err := first.ownerStore()
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +277,8 @@ func TestHeartbeatWithNoFactsSendsNothingToTheOwner(t *testing.T) {
 	ctx := context.Background()
 	mgr := newOwnerTestManager(t, ctx)
 	root := t.TempDir()
-	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	enableHeartbeat(t, mgr, info)
 
 	before := len(ownerSess.History())
 	service := newHeartbeatService(mgr)
@@ -283,6 +308,7 @@ func TestHeartbeatDoesNotRepeatAfterAManagerRestart(t *testing.T) {
 
 	mgr := newRestartableManager(t, ctx, sessionDir)
 	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	enableHeartbeat(t, mgr, info)
 	store, err := mgr.ownerStore()
 	if err != nil {
 		t.Fatal(err)
@@ -343,6 +369,7 @@ func TestCorruptHeartbeatStateIsTreatedAsEmpty(t *testing.T) {
 	mgr := newOwnerTestManager(t, ctx)
 	root := t.TempDir()
 	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	enableHeartbeat(t, mgr, info)
 	store, err := mgr.ownerStore()
 	if err != nil {
 		t.Fatal(err)
@@ -399,9 +426,26 @@ func TestHeartbeatRespectsConfiguration(t *testing.T) {
 	if facts := heartbeatFacts(now, settings, sessions, nil); len(facts) != 1 {
 		t.Fatalf("lowered idle threshold ignored: %+v", facts)
 	}
-	// Defaults apply to an owner.json written before the field existed.
+	// An owner.json without a heartbeat block is off.
 	def := owner.Owner{}.HeartbeatSettings()
-	if !def.Enabled || def.IdleMinutes != owner.DefaultHeartbeatIdleMinutes || def.StaleDays != owner.DefaultHeartbeatStaleDays {
+	if def.Enabled || def.IdleMinutes != owner.DefaultHeartbeatIdleMinutes || def.StaleDays != owner.DefaultHeartbeatStaleDays {
 		t.Fatalf("defaults = %+v", def)
 	}
+	// A heartbeat block without "enabled" is still off.
+	unset := owner.Owner{Heartbeat: &owner.Heartbeat{}}.HeartbeatSettings()
+	if unset.Enabled {
+		t.Fatalf("a heartbeat block without enabled turned itself on: %+v", unset)
+	}
+	// "enabled": true with no thresholds gets the 30/7 defaults.
+	on := true
+	turnedOn := owner.Owner{Heartbeat: &owner.Heartbeat{Enabled: &on}}.HeartbeatSettings()
+	if !turnedOn.Enabled || turnedOn.IdleMinutes != owner.DefaultHeartbeatIdleMinutes || turnedOn.StaleDays != owner.DefaultHeartbeatStaleDays {
+		t.Fatalf("enabled with defaults = %+v", turnedOn)
+	}
+	// "enabled": true with its own stale_days overrides only that threshold.
+	customStale := owner.Owner{Heartbeat: &owner.Heartbeat{Enabled: &on, StaleDays: 3}}.HeartbeatSettings()
+	if !customStale.Enabled || customStale.IdleMinutes != owner.DefaultHeartbeatIdleMinutes || customStale.StaleDays != 3 {
+		t.Fatalf("enabled with custom stale_days = %+v", customStale)
+	}
 }
+

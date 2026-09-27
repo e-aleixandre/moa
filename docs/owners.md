@@ -273,9 +273,27 @@ budget in the test suite.
 
 ## Heartbeat
 
-A project keeps moving when nobody is talking to the owner. Every 5 minutes a
-**deterministic** evaluator (Go, no model) looks for facts that are new since
-the last beat:
+The heartbeat is **off by default**. The evaluator only reads a file's mtime —
+it cannot tell a job that stalled from one that was deliberately parked or
+already finished — so it stays quiet until the owner asks for it. Turn it on
+in `owner.json`:
+
+```json
+"heartbeat": { "enabled": true }
+```
+
+`idle_minutes` (30) and `stale_days` (7) are the defaults once it is on; set
+them explicitly to override:
+
+```json
+"heartbeat": { "enabled": true, "idle_minutes": 30, "stale_days": 7 }
+```
+
+An owner without a `heartbeat` block, or with the block but no `enabled` key,
+stays off.
+
+When enabled, every 5 minutes a **deterministic** evaluator (Go, no model)
+looks for facts that are new since the last beat:
 
 - a session blocked on the user for longer than `idle_minutes`, counted from
   when the question or the permission was actually raised — not from the last
@@ -297,12 +315,6 @@ owner's transcript **and** the transcript is flushed to disk, so a crash in that
 window retries instead of losing the notice. A busy owner is never steered: the
 facts stay unannounced and the next tick tries again. Reports come first: a beat
 that finds reports waiting delivers them instead and wakes the owner no further.
-
-Thresholds live in `owner.json`, additive and optional:
-
-```json
-"heartbeat": { "enabled": true, "idle_minutes": 30, "stale_days": 7 }
-```
 
 ## OWNER.md
 
