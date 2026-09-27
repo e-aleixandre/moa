@@ -84,7 +84,7 @@ export function handleWsAskUser(id, data, seq = 0) {
   if (!visibleSessionIds(state).includes(id)) {
     flashSession(id, 'attention');
     const sess = state.sessions[id];
-    if (sess) triggerAttention(sess, 'ask_user', state.soundEnabled);
+    if (sess) triggerAttention(sess, 'Asks you a question', state.soundEnabled);
   }
 }
 
@@ -104,7 +104,7 @@ export function handleWsPermissionRequest(id, data, seq = 0) {
   const state = store.get();
   if (!visibleSessionIds(state).includes(id)) {
     const sess = state.sessions[id];
-    if (sess) triggerAttention(sess, data.tool_name, state.soundEnabled);
+    if (sess) triggerAttention(sess, data.tool_name && `${data.tool_name} — needs permission`, state.soundEnabled);
   }
 }
 

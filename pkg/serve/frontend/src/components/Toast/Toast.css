@@ -1,121 +1,148 @@
+/* Toast — the LiveBar sentence lifted onto a sheet: dot, word, title. No icon
+   and no tinted fill; the only colour is the dot and the word. */
+
+.toast.is-info { --tone: var(--blue); }
+.toast.is-success { --tone: var(--zl-green); }
+.toast.is-error { --tone: var(--zl-red); }
+.toast.is-attention { --tone: var(--zl-yellow); }
+
 .toast {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  background: var(--mantle);
-  border: 1px solid var(--surface1);
-  border-radius: var(--radius-lg);
-  padding: var(--space-3) var(--space-4);
-  box-shadow: var(--shadow-md);
-  font-size: var(--text-base);
-  border-left-width: 3px;
   max-width: 380px;
-}
-
-.toast .ic {
-  flex: none;
-  margin-top: 1px;
-  display: inline-flex;
-}
-
-.toast .toast-body {
   min-width: 0;
+  padding: 6px 6px 10px 12px;
+  border-radius: var(--zl-r-md);
+  background: color-mix(in srgb, var(--zl-sheet) 94%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--zl-rim-2), var(--zl-shadow-pop);
+  color: var(--zl-t1);
+  font-size: var(--zl-fs-body);
+  line-height: 1.35;
 }
 
-.toast .tt {
-  font-weight: var(--weight-semibold);
-  margin-bottom: 1px;
+.toast-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
 }
-
-.toast .tm {
-  font-size: var(--text-sm);
-  color: var(--overlay1);
-}
-
-.toast .tm b {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--subtext0);
-  font-weight: var(--weight-normal);
-}
-
-.toast .x {
-  margin-left: auto;
-  color: var(--overlay0);
-  cursor: pointer;
+.toast-dot {
   flex: none;
-  background: none;
-  border: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tone);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 20%, transparent);
+}
+.toast-word {
+  flex: none;
+  color: var(--tone);
+  font-weight: 600;
+}
+.toast-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.toast-sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px 0 15px;
+}
+.toast-detail {
+  flex: 1;
+  min-width: 0;
+  color: var(--zl-t3);
+  font-size: 13px;
+}
+
+.toast-x {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  position: relative;
-}
-.toast .x::after {
-  content: "";
-  position: absolute;
-  inset: -15.5px -10.5px;
-}
-@media (hover: hover) {
-
-
-.toast .x:hover {
-  color: var(--text);
-}
-}
-
-.toast .x:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.toast .act {
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  color: var(--peach);
-  cursor: pointer;
-  margin-top: var(--space-1);
-  display: inline-block;
-  background: none;
-  border: none;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   padding: 0;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t3);
+  cursor: pointer;
 }
+
+/* An action is a control-tone chip, the LiveBar's Stop; on a toast that is
+   waiting on the user it wears the LiveBar tally's amber. */
+.toast-act {
+  --act-bg: var(--zl-control);
+  --act-rim: var(--zl-rim);
+  --act-fg: var(--zl-t1);
+  flex: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  margin-left: auto;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--act-bg);
+  box-shadow: var(--act-rim);
+  color: var(--act-fg);
+  font-family: inherit;
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: background var(--motion-hover) ease;
+}
+.toast.is-attention .toast-act {
+  --act-bg: color-mix(in srgb, var(--zl-yellow) 14%, var(--zl-control));
+  --act-rim: 0 0 0 1px color-mix(in srgb, var(--zl-yellow) 40%, transparent);
+  --act-fg: var(--zl-yellow);
+}
+
 @media (hover: hover) {
-
-
-.toast .act:hover {
-  text-decoration: underline;
-}
-}
-
-.toast .act:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
+  .toast-x:hover { color: var(--zl-t1); background: var(--zl-hi); }
+  .toast-act:hover { --act-bg: var(--zl-raised); --act-rim: var(--zl-rim-2); }
+  .toast.is-attention .toast-act:hover {
+    --act-bg: color-mix(in srgb, var(--zl-yellow) 22%, var(--zl-control));
+  }
 }
 
-.toast.ok {
-  border-left-color: var(--green);
-}
-.toast.ok .ic {
-  color: var(--green);
-}
-
-.toast.attn {
-  border-left-color: var(--yellow);
-}
-.toast.attn .ic {
-  color: var(--yellow);
+.toast-x:focus-visible,
+.toast-act:focus-visible {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
 }
 
-.toast.err {
-  border-left-color: var(--red);
-}
-.toast.err .ic {
-  color: var(--red);
-}
+/* Phone: Dismiss and the action are real 44px buttons; the visible chip is an
+   inset ::before, because a transparent halo does not take the tap. */
+@media (max-width: 768px) {
+  .toast { max-width: none; }
 
-.toast.info {
-  border-left-color: var(--blue);
-}
-.toast.info .ic {
-  color: var(--blue);
+  .toast-x { width: 44px; height: 44px; margin: -8px -6px -8px -4px; }
+
+  .toast-act {
+    height: 44px;
+    margin: -8px 0 -10px auto;
+    padding: 0 14px;
+    background: transparent;
+    box-shadow: none;
+    font-size: 13px;
+  }
+  .toast-act::before {
+    content: "";
+    position: absolute;
+    inset: 5px 0;
+    border-radius: var(--zl-r-md);
+    background: var(--act-bg);
+    box-shadow: var(--act-rim);
+  }
+  .toast-act > span { position: relative; }
 }

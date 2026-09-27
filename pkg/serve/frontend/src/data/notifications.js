@@ -73,12 +73,11 @@ function browserNotify(title, body) {
   }
 }
 
-// Permission/error — called from state.js for non-visible sessions
-export function triggerAttention(session, toolName, soundEnabled) {
+// Question/permission/error — called for non-visible sessions. `detail` says
+// what the session waits on; without one the toast only says it needs attention.
+export function triggerAttention(session, detail, soundEnabled) {
   const title = session.title || 'Untitled';
-  const detail = toolName
-    ? `${toolName} — needs permission`
-    : 'needs attention';
+  detail ||= 'needs attention';
 
   if (addSessionToast(session, { sessionId: session.id, title, detail, type: 'attention' }) === null) return;
 

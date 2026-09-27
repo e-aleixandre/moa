@@ -9,8 +9,6 @@ import {
   Card,
   Sheet,
   Toast,
-  ToastTitle,
-  ToastMessage,
 } from "../components/index.js";
 import { Button } from "../primitives/index.js";
 import { parsePreviewReference, feedbackMessage } from "../data/util/preview-reference.js";
@@ -290,24 +288,26 @@ function AskUserCardDemo() {
 function ToastDemo() {
   return (
     <div class="molecule-col toasts-demo">
-      <Toast tone="success" onDismiss={() => {}}>
-        <ToastTitle>frontend polish finished</ToastTitle>
-        <ToastMessage>3 commits pushed · all checks green</ToastMessage>
-      </Toast>
+      <Toast tone="info" onDismiss={() => {}} title="Nothing to cut" detail="This conversation is already short." />
+      <Toast
+        tone="success"
+        onDismiss={() => {}}
+        title="Refactor the owner sidebar so the dossier opens from the chip in every density"
+        detail="finished"
+      />
+      <Toast
+        tone="error"
+        onDismiss={() => {}}
+        title="Could not open that session"
+        detail="The session was deleted on another device."
+      />
       <Toast
         tone="attention"
         onDismiss={() => {}}
-        action={{ label: "Review →", onClick: () => {} }}
-      >
-        <ToastTitle>deploy pulse api needs you</ToastTitle>
-        <ToastMessage>
-          wants to run <b>systemctl --user restart…</b>
-        </ToastMessage>
-      </Toast>
-      <Toast tone="error" onDismiss={() => {}}>
-        <ToastTitle>migrate sqlite errored</ToastTitle>
-        <ToastMessage>provider 429 · retrying (3/5)</ToastMessage>
-      </Toast>
+        title="deploy pulse api"
+        detail="bash — needs permission"
+        action={{ label: "Review", onClick: () => {} }}
+      />
     </div>
   );
 }

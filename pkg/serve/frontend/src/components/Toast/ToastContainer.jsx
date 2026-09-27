@@ -3,15 +3,16 @@ import { usePresenceList } from "../../hooks/usePresence.js";
 import { useFlip } from "../../hooks/useFlip.js";
 import { getToasts, subscribeToasts, removeToast } from "../../data/notifications.js";
 import { openSession } from "../../data/tile-actions.js";
-import { Toast, ToastTitle, ToastMessage } from "./Toast.jsx";
+import { Toast } from "./Toast.jsx";
 import "./ToastContainer.css";
 
 // TONE maps the notification `type` carried on a toast (attention / done /
-// error / info — set by notifications.js) to the Toast primitive's tone
-// (attention / success / error / info). `done` → success is the only rename.
+// success / error / info — set by notifications.js) to the Toast primitive's
+// tone (attention / success / error / info). `done` → success is the only rename.
 const TONE = {
   attention: "attention",
   done: "success",
+  success: "success",
   error: "error",
   info: "info",
 };
@@ -47,6 +48,8 @@ export function ToastContainer() {
           class={leaving ? "is-leaving" : undefined}
           aria-hidden={leaving || undefined}
           tone={TONE[t.type] || "info"}
+          title={t.title}
+          detail={t.detail}
           action={t.action ? {
             ...t.action,
             onClick: (event) => {
@@ -57,10 +60,7 @@ export function ToastContainer() {
           onDismiss={() => removeToast(t.id)}
           onClick={t.sessionId || t.onOpen ? () => handleClick(t) : undefined}
           style={t.sessionId || t.onOpen ? "cursor:pointer" : undefined}
-        >
-          <ToastTitle>{t.title}</ToastTitle>
-          {t.detail && <ToastMessage>{t.detail}</ToastMessage>}
-        </Toast>
+        />
       ))}
     </div>
   );

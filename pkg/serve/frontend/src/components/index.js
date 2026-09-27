@@ -10,7 +10,7 @@ export { AskUserPrompt } from "./AskUserCard/AskUserPrompt.jsx";
 export { McpBanner } from "./McpBanner/McpBanner.jsx";
 export { Card } from "./Card/Card.jsx";
 export { Sheet } from "./Sheet/Sheet.jsx";
-export { Toast, ToastTitle, ToastMessage } from "./Toast/Toast.jsx";
+export { Toast } from "./Toast/Toast.jsx";
 export { UserWaypoint } from "./UserWaypoint/UserWaypoint.jsx";
 export { AssistantDocument, Prose } from "./AssistantDocument/AssistantDocument.jsx";
 export { ActivityLedger, LedgerDiff } from "./ActivityLedger/ActivityLedger.jsx";
