@@ -190,6 +190,7 @@ export function Sidebar({
   onInbox,
   onRetryInbox,
   onRouteEvent,
+  onRouteEventOwner,
   onNewSessionForEvent,
   onDismissEvent,
   onDismissEventSource,
@@ -364,6 +365,7 @@ export function Sidebar({
             health={inboxHealth}
             onRetry={onRetryInbox}
             onSend={onRouteEvent}
+            onSendOwner={onRouteEventOwner}
             onNewSession={onNewSessionForEvent}
             onIgnore={onDismissEvent}
             onIgnoreSource={onDismissEventSource}

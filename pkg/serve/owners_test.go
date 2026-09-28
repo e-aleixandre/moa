@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/book"
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -227,6 +228,130 @@ func TestOwnerHookIdleRecordsWithoutAutorun(t *testing.T) {
 	}
 	if sess.runtime.State.Current() != bus.StateIdle {
 		t.Fatalf("autorun false started owner: %s", sess.runtime.State.Current())
+	}
+}
+
+// The four cells below exercise routeEventToOwner now that it calls
+// deliverEvent directly instead of the old deliverOwnerEvent: an owner's
+// conversation follows the exact busy/idle × autorun/no-autorun rule any
+// other session follows. There is no historical "never steer an owner"
+// invariant for events — that policy applies only to report delivery
+// (see TestEventSteerDoesNotBreakIdleOnlyReportDelivery in reports_test.go).
+
+func TestEventOwnerIdleAutorunStartsATurn(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	info, ownerSess := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+
+	ev, _, err := mgr.events.Add(events.Event{Source: "ci", Title: "build ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routed, err := mgr.routeEventToOwner(ev, info.SessionID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if routed.State != events.StateRouted {
+		t.Fatalf("state = %q, want routed", routed.State)
+	}
+	pollUntil(t, 5*time.Second, "owner run started by the event", func() bool {
+		return eventReached(ownerSess)
+	})
+}
+
+func TestEventOwnerIdleNoAutorunAppendsWithoutRunning(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	info, ownerSess := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+
+	ev, _, err := mgr.events.Add(events.Event{Source: "ci", Title: "build ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routed, err := mgr.routeEventToOwner(ev, info.SessionID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if routed.State != events.StateRouted {
+		t.Fatalf("state = %q, want routed", routed.State)
+	}
+	if !eventReached(ownerSess) {
+		t.Fatal("event was not appended to the owner's conversation")
+	}
+	if ownerSess.runtime.State.Current() != bus.StateIdle {
+		t.Fatalf("autorun false started a turn on the owner: %s", ownerSess.runtime.State.Current())
+	}
+}
+
+func TestEventOwnerBusyAutorunSteers(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	info, ownerSess := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	ownerSess.runtime.State.ForceState(bus.StateRunning)
+	t.Cleanup(func() { ownerSess.runtime.State.ForceState(bus.StateIdle) })
+
+	ev, _, err := mgr.events.Add(events.Event{Source: "ci", Title: "build failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routed, err := mgr.routeEventToOwner(ev, info.SessionID, true)
+	if err != nil {
+		t.Fatalf("routeEventToOwner = %v", err)
+	}
+	if routed.State != events.StateRouted {
+		t.Fatalf("state = %q, want routed", routed.State)
+	}
+	if ql, _ := bus.QueryTyped[bus.GetQueueLen, int](ownerSess.runtime.Bus, bus.GetQueueLen{}); ql != 1 {
+		t.Fatalf("autorun did not steer a busy owner: queue length %d", ql)
+	}
+}
+
+func TestEventOwnerBusyNoAutorunStaysInInbox(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	info, ownerSess := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	ownerSess.runtime.State.ForceState(bus.StateRunning)
+	t.Cleanup(func() { ownerSess.runtime.State.ForceState(bus.StateIdle) })
+
+	ev, _, err := mgr.events.Add(events.Event{Source: "ci", Title: "build failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routed, err := mgr.routeEventToOwner(ev, info.SessionID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if routed.State != events.StateNew || routed.PendingReason != events.PendingSessionBusy {
+		t.Fatalf("routed = %+v, want new/session_busy", routed)
+	}
+	if eventReached(ownerSess) {
+		t.Fatal("event reached a busy owner despite autorun off")
+	}
+}
+
+// A manual route from the inbox always starts a turn, exactly like a manual
+// route to any other session: choosing the owner as the destination IS the
+// instruction to act, whatever the source's autorun says.
+func TestManualRouteToOwnerSteersABusyOwner(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	info, ownerSess := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	ownerSess.runtime.State.ForceState(bus.StateRunning)
+	t.Cleanup(func() { ownerSess.runtime.State.ForceState(bus.StateIdle) })
+
+	ev, _, err := mgr.events.Add(events.Event{Source: "ci", Title: "build failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routed, err := mgr.RouteEventToOwner(ev.ID, info.ID)
+	if err != nil {
+		t.Fatalf("RouteEventToOwner = %v", err)
+	}
+	if routed.State != events.StateRouted {
+		t.Fatalf("state = %q, want routed", routed.State)
+	}
+	if ql, _ := bus.QueryTyped[bus.GetQueueLen, int](ownerSess.runtime.Bus, bus.GetQueueLen{}); ql != 1 {
+		t.Fatalf("manual route did not steer a busy owner: queue length %d", ql)
 	}
 }
 

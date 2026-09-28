@@ -11,7 +11,7 @@ import { createOwner, openOwnerConversation } from "../../../data/owners.js";
 import { openPalette } from "../../../data/palette.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, rewindToMessage, stopRun } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
-import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, openInbox, retryEvents, routeEvent, routeEventToNewSession } from "../../../data/events.js";
+import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, openInbox, retryEvents, routeEvent, routeEventToNewSession, routeEventToOwner } from "../../../data/events.js";
 import { PermissionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
 import { SessionRow } from "../../../components/SessionRow/SessionRow.jsx";
 import { OwnerAvatarFor } from "../../../components/Owners/OwnerAvatar.jsx";
@@ -524,6 +524,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
           onRetry={() => { retryEvents().catch(() => {}); }}
           onBack={closeInbox}
           onSend={(id, sessionId) => { routeEvent(id, sessionId).catch(() => {}); }}
+          onSendOwner={(id, ownerId) => { routeEventToOwner(id, ownerId).catch(() => {}); }}
           onNewSession={(id, spec) => { routeEventToNewSession(id, spec).catch(() => {}); }}
           onIgnore={(id) => { dismissEvent(id).catch(() => {}); }}
           onIgnoreSource={(source) => { dismissSource(source).catch(() => {}); }}

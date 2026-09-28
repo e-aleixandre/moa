@@ -216,7 +216,7 @@ export function selectMobileChrome(state, forceMobile = false) {
     // The Recent list's own accordion, beside the folder one.
     collapsedSections: state.collapsedSections,
     soundEnabled: !!state.soundEnabled,
-    inbox: inboxCards(state.sessions, state.events), // wake-on-event
+    inbox: inboxCards(state.sessions, state.events, owners), // wake-on-event
     inboxHealth: inboxHealth(state), // wake-on-event
     inboxOpen: !!state.inboxOpen, // wake-on-event
     projects: drawerProjects(state.sessions),

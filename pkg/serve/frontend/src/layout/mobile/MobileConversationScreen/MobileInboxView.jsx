@@ -11,7 +11,7 @@ import "./MobileInboxView.css";
 // The list itself is the shared InboxView (variant="sheet"), so the phone and
 // the desktop cannot drift about what a row says. The head lives inside that
 // component; this wrapper is only the push chrome and the edge-swipe.
-export function MobileInboxView({ cards, health, onRetry, onBack, onSend, onNewSession, onIgnore, onIgnoreSource, onOpenSession }) {
+export function MobileInboxView({ cards, health, onRetry, onBack, onSend, onSendOwner, onNewSession, onIgnore, onIgnoreSource, onOpenSession }) {
   const { screenRef, dragging, swipeBind } = useEdgeSwipeBack({ onBack });
   return (
     <div class={dragging ? "minbox is-swiping" : "minbox"} ref={screenRef} {...swipeBind}>
@@ -21,6 +21,7 @@ export function MobileInboxView({ cards, health, onRetry, onBack, onSend, onNewS
         health={health}
         onRetry={onRetry}
         onSend={onSend}
+        onSendOwner={onSendOwner}
         onNewSession={onNewSession}
         onIgnore={onIgnore}
         onIgnoreSource={onIgnoreSource}

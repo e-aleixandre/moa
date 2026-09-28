@@ -161,7 +161,8 @@ pretty-printed JSON (or the raw text), capped at 256 KiB.
 | `session:id` | live, not error, not waiting on a permission | deliver |
 | `session:id` | missing / error / permission | inbox + push |
 | `owner:id\|name` | idle | deliver to the owner's conversation |
-| `owner:id\|name` | busy / unavailable | inbox + push (`session_busy` / `owner_unavailable`) |
+| `owner:id\|name` | busy | `autorun: true` steers it; `autorun: false` (default) inbox + push (`session_busy`) |
+| `owner:id\|name` | unavailable | inbox + push (`owner_unavailable`) |
 | `project` | 1 | deliver |
 | `project` | 0 | `when_none`: inbox, or create with `create.*` then deliver |
 | `project` | >1 | `when_many`: inbox, or latest `Updated` |
@@ -170,7 +171,9 @@ pretty-printed JSON (or the raw text), capped at 256 KiB.
 "Open" means live in Serve — not saved on disk, not in error, not waiting on a
 permission. A busy session is still open. With `autorun: true` the event steers
 it; with `autorun: false` (the default) a busy or queued session leaves the
-event in the inbox.
+event in the inbox. An owner's conversation follows the same rule as any other
+target — there is no separate never-steer policy for events, only for
+[reports](./owners.md#loops), which stay idle-only regardless of `autorun`.
 
 **What the agent reads.** The body arrives as a user message carrying
 `custom.source = "event"` (so the web client renders an event block, not a

@@ -4,7 +4,7 @@
 // event, and an arrival can only be announced when it is really news, so both
 // are decided here — in the projection, not in a component — and pinned.
 import { afterEach, expect, test } from "bun:test";
-import { __resetEventAnnouncementsForTests, announceArrivals, dismissSource, eventCreateActionLabel, eventCreateSpec, inboxCards, inboxGroups, inboxHealth, inboxHealthSig, inboxPendingCount, inboxSig, inboxStatus, isOpenEventCandidate, loadEvents, pendingReasonLabel, retryEvents, routeEvent } from "./events.js";
+import { __resetEventAnnouncementsForTests, announceArrivals, dismissSource, eventCreateActionLabel, eventCreateSpec, inboxCards, inboxGroups, inboxHealth, inboxHealthSig, inboxPendingCount, inboxSig, inboxStatus, isOpenEventCandidate, loadEvents, pendingReasonLabel, retryEvents, routeEvent, routeEventToOwner } from "./events.js";
 import { getToasts, removeToast } from "./notifications.js";
 import { setState, store } from "./store.js";
 import { allSessionIds, createTile, initIds } from "./tileTree.js";
@@ -21,6 +21,11 @@ const sessions = {
 const event = (extra = {}) => ({
   id: "ev_1", source: "sentry-tienda", project: "/home/u/tienda",
   title: "Checkout 500s", state: "new", created: Date.now(), ...extra,
+});
+
+const owner = (extra = {}) => ({
+  id: "own_1", name: "Tienda", root: "/home/u/tienda", codebase_key: "tienda",
+  session_id: "own-sess", session_state: "idle", ...extra,
 });
 
 afterEach(() => {
@@ -80,6 +85,26 @@ test("a project-less event offers every open session, newest first, still exclud
 test("a project with nothing open yields no targets, so the sheet falls back to New session", () => {
   const [card] = inboxCards(sessions, [event({ project: "/home/u/empty" })]);
   expect(card.sessions).toEqual([]);
+});
+
+test("the project's owner is offered as a destination once it has its own conversation", () => {
+  const [card] = inboxCards(sessions, [event()], [owner()]);
+  expect(card.owner).toMatchObject({ id: "own_1", name: "Tienda" });
+});
+
+test("an owner with no conversation yet is not offered", () => {
+  const [card] = inboxCards(sessions, [event()], [owner({ session_id: "" })]);
+  expect(card.owner).toBeNull();
+});
+
+test("an owner of a different project is not offered", () => {
+  const [card] = inboxCards(sessions, [event()], [owner({ root: "/home/u/moa" })]);
+  expect(card.owner).toBeNull();
+});
+
+test("a project-less event offers no owner destination", () => {
+  const [card] = inboxCards(sessions, [event({ project: "" })], [owner()]);
+  expect(card.owner).toBeNull();
 });
 
 test("a delivered event names the session it went to", () => {
@@ -169,6 +194,13 @@ test("the signature changes when the sessions the sheet would offer change", () 
 test("an unchanged inbox keeps its signature, so the roster poll does not repaint", () => {
   const ev = event();
   expect(inboxSig(inboxCards(sessions, [ev]))).toBe(inboxSig(inboxCards(sessions, [ev])));
+});
+
+test("the signature changes when the owner destination appears", () => {
+  const ev = event();
+  const before = inboxSig(inboxCards(sessions, [ev]));
+  const after = inboxSig(inboxCards(sessions, [ev], [owner()]));
+  expect(after).not.toBe(before);
 });
 
 // ── arrival announcements ───────────────────────────────────────────────────
@@ -277,6 +309,33 @@ test("routing an event opens its destination in the focused desktop tile", async
   await routeEvent("ev_1", "b");
 
   expect(allSessionIds(store.get().tileTree)).toEqual(["b"]);
+  expect(store.get().inboxOpen).toBe(false);
+});
+
+test("routing an event to the owner posts owner_id on the existing route endpoint and opens its conversation", async () => {
+  const tile = createTile();
+  initIds(tile);
+  const roster = [{ id: "a", title: "Current", cwd: "/home/u/tienda", state: "idle" }];
+  setState({
+    sessions: Object.fromEntries(roster.map((session) => [session.id, { ...session, messages: [], subagents: {} }])),
+    tileTree: { ...tile, sessionId: "a" },
+    focusedTile: tile.id,
+    isMobile: false,
+    inboxOpen: true,
+    events: [event()],
+  });
+  const requests = [];
+  globalThis.fetch = async (path, opts) => {
+    requests.push({ path, opts });
+    if (path === "/api/sessions") return new Response(JSON.stringify(roster), { status: 200 });
+    return new Response(JSON.stringify(event({ state: "routed", routed_to: "own-sess" })), { status: 200 });
+  };
+
+  await routeEventToOwner("ev_1", "own_1");
+
+  const routeRequest = requests.find((r) => r.path === "/api/events/ev_1/route");
+  expect(routeRequest.opts.method).toBe("POST");
+  expect(JSON.parse(routeRequest.opts.body)).toEqual({ owner_id: "own_1" });
   expect(store.get().inboxOpen).toBe(false);
 });
 

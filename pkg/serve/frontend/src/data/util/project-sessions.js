@@ -143,6 +143,16 @@ export function defaultProjectCollapsed(section) {
   return section.openCount === 0 && !section.hasOwner;
 }
 
+// ownerForProject finds the owner whose root IS a project, the same match
+// groupProjectSessions falls back to for a project with no open session of
+// its own. Used by the inbox to offer "send to the owner" as a destination
+// beside the sessions already open there.
+export function ownerForProject(owners = [], project) {
+  if (!project) return null;
+  const key = projectKey(project);
+  return owners.find((o) => o.root && projectKey(o.root) === key) || null;
+}
+
 export function projectCollapsed(section, drawerCollapsed, searching) {
   if (searching) return false;
   return Object.hasOwn(drawerCollapsed, section.key)

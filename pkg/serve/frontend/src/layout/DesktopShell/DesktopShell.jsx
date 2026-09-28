@@ -9,7 +9,7 @@ import { openPalette } from "../../data/palette.js";
 import { setDrawerProjectCollapsed, setSectionCollapsed, setSidebarMode } from "../../data/drawer.js";
 import { createOwner, openOwnerConversation } from "../../data/owners.js";
 import { closeSession, deleteSession, resumeSession } from "../../data/session-actions.js";
-import { dismissEvent, dismissSource, retryEvents, routeEvent, routeEventToNewSession, toggleInbox } from "../../data/events.js"; // wake-on-event
+import { dismissEvent, dismissSource, retryEvents, routeEvent, routeEventToNewSession, routeEventToOwner, toggleInbox } from "../../data/events.js"; // wake-on-event
 import { selectDesktopChrome } from "../Sidebar/sessions.js";
 import "./DesktopShell.css";
 
@@ -49,6 +49,7 @@ export function DesktopShell({ version, children }) {
         onInbox={toggleInbox}
         onRetryInbox={() => { retryEvents().catch(() => {}); }}
         onRouteEvent={(id, sessionId) => { routeEvent(id, sessionId).catch(() => {}); }}
+        onRouteEventOwner={(id, ownerId) => { routeEventToOwner(id, ownerId).catch(() => {}); }}
         onNewSessionForEvent={(id, spec) => { routeEventToNewSession(id, spec).catch(() => {}); }}
         onDismissEvent={(id) => { dismissEvent(id).catch(() => {}); }}
         onDismissEventSource={(source) => { dismissSource(source).catch(() => {}); }}

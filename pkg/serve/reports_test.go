@@ -14,6 +14,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/events"
 	"github.com/e-aleixandre/moa/pkg/owner"
 )
 
@@ -199,6 +200,86 @@ func TestReportsWaitForABusyOwnerInsteadOfSteeringIt(t *testing.T) {
 	got := waitForOwnerReports(t, ownerSess, 1)[0]
 	if !strings.Contains(got, "status: failed") || !strings.Contains(got, "build broke") {
 		t.Fatalf("the retained batch arrived incomplete:\n%s", got)
+	}
+}
+
+// Owner event delivery now steers a busy owner exactly like any other
+// session (routeEventToOwner calls deliverEvent, not a separate
+// deliverOwnerEvent). This is a regression test for the one thing that must
+// NOT change: report delivery has its own idle-only path
+// (deliverReportsIfIdle / bus.SendPrompt{IdleOnly:true}) and stays idle-only
+// even while an event steer is queued ahead of it on the same session.
+func TestEventSteerDoesNotBreakIdleOnlyReportDelivery(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	release := make(chan struct{})
+	held := make(chan struct{}, 1)
+	provider := newMockProvider(func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		if !requestMentions(req, "hold the owner") {
+			return simpleResponse("ok"), nil
+		}
+		select {
+		case held <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return simpleResponse("done holding"), nil
+	})
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	mgr := newTestManager(t, ctx, provider)
+	root := t.TempDir()
+	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+
+	if _, _, _, err := mgr.Send(ownerSess.ID, "hold the owner", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the owner never started its run")
+	}
+
+	// An event with autorun on steers the busy owner: the new behaviour this
+	// change introduces (routeEventToOwner now follows deliverEvent's rule
+	// instead of the old owner-only deliverOwnerEvent).
+	ev, _, err := mgr.events.Add(events.Event{Source: "ci", Title: "build failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.routeEventToOwner(ev, info.SessionID, true); err != nil {
+		t.Fatalf("routeEventToOwner = %v", err)
+	}
+	if ql, _ := bus.QueryTyped[bus.GetQueueLen, int](ownerSess.runtime.Bus, bus.GetQueueLen{}); ql != 1 {
+		t.Fatalf("event did not steer the busy owner: queue length %d", ql)
+	}
+
+	// A report arriving while the owner is still busy, with the event's steer
+	// already queued ahead of it, must still wait for idle: it must neither
+	// reach the transcript now nor add its own entry to the queue rail.
+	mgr.reports.add(info.CodebaseKey, owner.Report{
+		ID: "sess-a:1:failed", SessionID: "sess-a", Status: callbackStatusFailed, FinalText: "build broke",
+	})
+	if got := ownerReportText(ownerSess); len(got) != 0 {
+		t.Fatalf("report reached a busy owner: %v", got)
+	}
+	if ql, _ := bus.QueryTyped[bus.GetQueueLen, int](ownerSess.runtime.Bus, bus.GetQueueLen{}); ql != 1 {
+		t.Fatalf("the report added itself to the queue rail: queue length %d", ql)
+	}
+
+	close(release)
+
+	// Once the owner's own run ends, the queued event steer runs first, then
+	// the deferred report batch is delivered.
+	pollUntil(t, 10*time.Second, "event and report both delivered", func() bool {
+		return eventReached(ownerSess) && len(ownerReportText(ownerSess)) == 1
+	})
+	got := ownerReportText(ownerSess)[0]
+	if !strings.Contains(got, "status: failed") || !strings.Contains(got, "build broke") {
+		t.Fatalf("report content wrong:\n%s", got)
 	}
 }
 

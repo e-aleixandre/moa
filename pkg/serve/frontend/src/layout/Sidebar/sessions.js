@@ -166,7 +166,12 @@ export function selectDesktopChrome(state) {
   const inGrid = state.view === "grid";
   const paneOf = inGrid ? paneBadges(state.tileTree) : undefined;
   const { active, saved } = spineSessions(state.sessions, paneOf);
-  const inbox = inboxCards(state.sessions, state.events); // wake-on-event
+  // The owners, joined with their children out of the roster this same
+  // snapshot holds: one projection, so the dossier, the list and the inbox's
+  // "send to the owner" destination can never disagree about which session
+  // is waiting.
+  const owners = ownerRows(ownersSlice(state).list, state.sessions);
+  const inbox = inboxCards(state.sessions, state.events, owners); // wake-on-event
   const next = {
     active,
     saved,
@@ -181,10 +186,7 @@ export function selectDesktopChrome(state) {
     // would make the door and the list disagree.
     inboxPending: inboxPendingCount(inbox), // wake-on-event
     activeId: inGrid ? focusedTileSessionId(state) : focusedSessionId(state),
-    // The owners, joined with their children out of the roster this same
-    // snapshot holds: one projection, so the dossier and the list can never
-    // disagree about which session is waiting.
-    owners: ownerRows(ownersSlice(state).list, state.sessions),
+    owners,
     ownersHealth: ownersHealth(state),
     // Which owner's conversation is in the pane, so its row is marked.
     activeOwnerId: activeOwnerIdOf(state),

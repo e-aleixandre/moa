@@ -15,7 +15,7 @@ import { loadSessions } from './session-actions.js';
 import { openSession } from './tile-actions.js';
 import { addToast, removeToast } from './notifications.js';
 import { basename, modelCodename, projectKey, projectLabel, sessionTitle } from './util/format.js';
-import { ordinarySessions } from './util/project-sessions.js';
+import { ordinarySessions, ownerForProject } from './util/project-sessions.js';
 
 // relAge is the session list's clock, kept identical to Sidebar/sessions.js and
 // the mobile chrome's: an event's age must not read like a different clock.
@@ -305,6 +305,28 @@ export async function routeEventToNewSession(id, spec) {
   }
 }
 
+// routeEventToOwner sends an event straight to the project's owner
+// conversation — the same POST /api/events/{id}/route convention as
+// routeEvent, with {owner_id} instead of {session_id}. The owner steers or
+// starts a turn exactly like a session route does (pkg/serve/inbox.go
+// RouteEventToOwner).
+export async function routeEventToOwner(id, ownerId) {
+  try {
+    const event = await api('POST', `/api/events/${encodeURIComponent(id)}/route`, { owner_id: ownerId });
+    if (event) settleEvent(id, event);
+    await loadSessions();
+    const target = event?.routed_to;
+    if (target) {
+      closeInbox();
+      openSession(target);
+    }
+    return event;
+  } catch (e) {
+    routeFailureToast(e);
+    throw e;
+  }
+}
+
 export async function dismissEvent(id) {
   settleEvent(id, { state: 'dismissed' });
   await api('POST', `/api/events/${encodeURIComponent(id)}/dismiss`);
@@ -336,8 +358,10 @@ export async function dismissSource(source) {
 //
 // Saved sessions are not candidates: an event delivered to a session nobody is
 // running would sit unread with no turn behind it.
-export function inboxCards(sessions, events) {
-  // An owner is never a routing destination (the backend refuses one too).
+export function inboxCards(sessions, events, owners = []) {
+  // An owner's own conversation is never a SESSION destination (the backend
+  // refuses one too) — it is offered separately below, as the project's
+  // standing agent rather than one more session in the list.
   const all = ordinarySessions(Object.values(sessions || {}));
   return (events || []).map((event) => {
     const project = projectKey(event.project);
@@ -359,11 +383,26 @@ export function inboxCards(sessions, events) {
     // A settled event names where it went; if that session is gone from the
     // roster the row falls back to a generic phrase rather than an empty name.
     const routedTo = event.routed_to ? sessions?.[event.routed_to] : null;
+    // The project's owner, offered as a destination only once it has a
+    // conversation of its own to receive the event (resolveEventOwner on the
+    // server requires the same thing).
+    const projectOwner = project ? ownerForProject(owners, project) : null;
+    const owner = projectOwner && projectOwner.session_id
+      ? {
+        id: projectOwner.id,
+        name: projectOwner.name,
+        avatar: projectOwner.avatar,
+        codebase_key: projectOwner.codebase_key,
+        session_state: projectOwner.session_state,
+        unseen: projectOwner.unseen,
+      }
+      : null;
     return {
       event,
       age: relAge(event.created),
       pending: (event.state || 'new') === 'new',
       sessions: targets,
+      owner,
       project,
       projectLabel: projectLabel(event.project),
       // Last path segment: the row's meta line, so "moa/main" in a 272px
@@ -408,6 +447,7 @@ export function inboxSig(cards) {
       c.routedToTitle || '',
       c.routedToAvailable ? 'available' : 'unavailable',
       c.sessions.map((s) => `${s.id}:${s.state}:${s.when}:${s.brief || ''}:${s.path || ''}:${s.origin || ''}`).join(','),
+      c.owner ? `${c.owner.id}:${c.owner.name}:${c.owner.session_state || ''}:${c.owner.unseen ? '1' : '0'}` : '',
     ].join('\0'))
     .join('\n');
 }

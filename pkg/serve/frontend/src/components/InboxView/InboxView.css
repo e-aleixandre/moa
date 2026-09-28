@@ -325,6 +325,7 @@
 .zi-dest > svg { flex: none; width: 16px; height: 16px; color: var(--zl-t3); }
 .zi-dest.is-new { padding-left: 10px; }
 .zi-dest.is-new > svg { margin: 0 -3px 0 -1px; }
+.zi-dest.is-owner { padding-left: 10px; }
 .zi-dest-pair { display: flex; align-items: stretch; }
 .zi-dest-pair .zi-dest.is-new { flex: 1; min-width: 0; }
 .zi-dest.is-change {

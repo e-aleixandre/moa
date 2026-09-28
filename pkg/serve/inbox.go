@@ -571,6 +571,8 @@ func (m *Manager) routeEventTo(ev events.Event, sessionID string, run bool) (eve
 	return m.deliverAndSettle(claimed, sessionID, run)
 }
 
+// Owner events use the ordinary session delivery rules; reports still use
+// their separate idle-only path.
 func (m *Manager) routeEventToOwner(ev events.Event, sessionID string, run bool) (events.Event, error) {
 	claimed, err := m.events.MarkRouting(ev.ID)
 	if err != nil {
@@ -582,7 +584,7 @@ func (m *Manager) routeEventToOwner(ev events.Event, sessionID string, run bool)
 			return events.Event{}, err
 		}
 	}
-	if err := m.deliverOwnerEvent(sessionID, claimed, run); err != nil {
+	if err := m.deliverEvent(sessionID, claimed, run); err != nil {
 		m.releaseRouting(ev.ID)
 		if errors.Is(err, errEventSessionBusy) {
 			return m.notePending(ev.ID, events.PendingSessionBusy), nil
@@ -683,40 +685,6 @@ func (m *Manager) deliverEvent(sessionID string, ev events.Event, autorun bool) 
 		return nil
 	}
 	err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text, Custom: custom})
-	if err == nil {
-		sess.sendGeneration.Add(1)
-	}
-	return err
-}
-
-// deliverOwnerEvent preserves the owner invariant: automation never steers an
-// owner. An idle autorun uses IdleOnly, while an idle non-autorun appends the
-// event block without starting a turn.
-func (m *Manager) deliverOwnerEvent(sessionID string, ev events.Event, autorun bool) error {
-	sess, ok := m.Get(sessionID)
-	if !ok {
-		return ErrNotFound
-	}
-	sess.lifecycle.RLock()
-	defer sess.lifecycle.RUnlock()
-	if sess.closing.Load() {
-		return ErrNotFound
-	}
-	state := sess.runtime.State.Current()
-	if state == bus.StateRunning || state == bus.StatePermission || sess.runtime.Context().Agent.IsRunning() {
-		return errEventSessionBusy
-	}
-	ql, _ := bus.QueryTyped[bus.GetQueueLen, int](sess.runtime.Bus, bus.GetQueueLen{})
-	if ql > 0 {
-		return errEventSessionBusy
-	}
-	if !autorun {
-		return m.deliverEvent(sessionID, ev, false)
-	}
-	err := sess.runtime.Bus.Execute(bus.SendPrompt{SessionID: sess.ID, Text: m.eventMessage(ev), Custom: eventCustom(ev, true, false), IdleOnly: true})
-	if errors.Is(err, bus.ErrNotIdle) {
-		return errEventSessionBusy
-	}
 	if err == nil {
 		sess.sendGeneration.Add(1)
 	}

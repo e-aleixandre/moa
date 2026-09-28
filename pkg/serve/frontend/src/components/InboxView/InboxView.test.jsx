@@ -49,6 +49,7 @@ const CARD = {
   age: "6m",
   pending: true,
   sessions: [{ id: "s1", title: "ws race fix", state: "idle", when: "1m", path: "/home/x/dev/moa/main" }],
+  owner: null,
   project: "moa/main",
   projectLabel: "moa/main",
   projectName: "main",
@@ -149,6 +150,39 @@ test("the decision offers open sessions as destinations and sends the event to o
   expect(text(dests[0])).toContain("ws race fix");
   dests[0].props.onClick();
   expect(onSend).toHaveBeenCalledWith(EVENT.id, "s1");
+});
+
+const OWNER = { id: "own_1", name: "Tienda", codebase_key: "tienda", session_state: "idle" };
+const CARD_WITH_OWNER = { ...CARD, owner: OWNER };
+
+test("the project's owner is offered as a destination, shown by name and face", () => {
+  const nodes = render(OPEN, { cards: [CARD_WITH_OWNER] });
+  const [owner] = byClasses(nodes, "zi-dest", "is-owner");
+  expect(owner).toBeTruthy();
+  expect(text(owner)).toContain("Tienda");
+  // OwnerAvatarFor renders through to an svg mark identifying the owner's face.
+  expect(nodes.some((node) => node.type === "svg")).toBe(true);
+});
+
+test("an owner destination replaces the no-session hint with an action", () => {
+  const card = { ...CARD_WITH_OWNER, sessions: [], event: { ...EVENT, pending_reason: "no_session" } };
+  const nodes = render(OPEN, { cards: [card] });
+  expect(text(nodes)).toContain("Choose where to send it");
+  expect(text(nodes)).not.toContain("Nothing open in");
+  expect(text(nodes)).not.toContain("no session open in this project");
+});
+
+test("sending an event to the owner posts owner_id, not a session_id", () => {
+  const onSendOwner = mock(() => {});
+  const nodes = render(OPEN, { cards: [CARD_WITH_OWNER], onSendOwner });
+  const [owner] = byClasses(nodes, "zi-dest", "is-owner");
+  owner.props.onClick();
+  expect(onSendOwner).toHaveBeenCalledWith(EVENT.id, "own_1");
+});
+
+test("an event with no owner offers no owner destination", () => {
+  const nodes = render(OPEN);
+  expect(byClasses(nodes, "zi-dest", "is-owner")).toHaveLength(0);
 });
 
 test("candidates of a project event drop the path the decision already states", () => {

@@ -19,6 +19,8 @@ import { api } from "../../data/api.js";
 import { deriveModelSpecs } from "../../data/selectors.js";
 import { defaultModelSpec } from "../CommandPalette/command-palette-model.js";
 import { eventCreateSpec, inboxGroups, pendingReasonLabel } from "../../data/events.js";
+import { ownerState } from "../../data/owners-model.js";
+import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
 import { modelCodename } from "../../data/util/format.js";
 import "./InboxView.css";
 
@@ -130,6 +132,11 @@ function Group({ label, n, attn }) {
   );
 }
 
+function destinationReason(card) {
+  if (card.owner && card.event.pending_reason === "no_session") return "Choose where to send it";
+  return pendingReasonLabel(card.event.pending_reason);
+}
+
 function InboxRow({ card, onOpen }) {
   const { event } = card;
   const pending = card.pending;
@@ -137,7 +144,7 @@ function InboxRow({ card, onOpen }) {
   const routed = state === "routed";
   const unavailable = routed && !card.routedToAvailable;
   let sub = null;
-  if (pending) sub = <span class="zi-row-sub">{pendingReasonLabel(event.pending_reason)}</span>;
+  if (pending) sub = <span class="zi-row-sub">{destinationReason(card)}</span>;
   else if (state === "routing") sub = <span class="zi-row-sub is-live"><span class="zi-dot is-running" aria-hidden="true" />Delivering to {card.routedToTitle || "session"}…</span>;
   else if (unavailable) sub = <span class="zi-row-sub is-broken"><ArrowRight size={14} aria-hidden="true" /> destination unavailable</span>;
   else if (routed) sub = <span class="zi-row-sub is-dest"><ArrowRight size={14} aria-hidden="true" /> {card.routedToTitle}</span>;
@@ -246,7 +253,7 @@ function EventHead({ card }) {
     <div class="zi-ev">
       <span class="zi-ev-from zi-data">{event.source}{card.projectLabel && event.project && ` · ${card.projectLabel}`}</span>
       <span class="zi-ev-title">{event.title}</span>
-      {card.pending && pendingReasonLabel(event.pending_reason) && <span class="zi-ev-reason">{pendingReasonLabel(event.pending_reason)}</span>}
+      {card.pending && destinationReason(card) && <span class="zi-ev-reason">{destinationReason(card)}</span>}
       {!card.pending && <span class="zi-ev-reason">Arrived {card.age} ago</span>}
       {event.body && <pre class="zi-payload zi-data">{event.body}</pre>}
     </div>
@@ -264,8 +271,19 @@ function Decide({ card, sameSource, models, defaultModel, override, onChange, on
   return (
     <div class="zi-decide">
       <EventHead card={card} />
-      <Group label="Send it to" n={card.sessions.length + (hasProject ? 1 : 0)} />
+      <Group label="Send it to" n={card.sessions.length + (hasProject ? 1 : 0) + (card.owner ? 1 : 0)} />
       <div class="zi-dests">
+        {card.owner && (
+          <button type="button" class="zi-dest is-owner" onClick={() => onAct("owner")}>
+            <OwnerAvatarFor owner={card.owner} state={ownerState(card.owner)} size={28} />
+            <span class="zi-dest-main">
+              <span class="zi-dest-l1">
+                <span class="zi-dest-t">{card.owner.name}</span>
+              </span>
+              <span class="zi-dest-b zi-data">Project owner</span>
+            </span>
+          </button>
+        )}
         {card.sessions.map((s) => (
           <button type="button" class="zi-dest" key={s.id} onClick={() => onAct("send", s.id)}>
             <span class={`zi-dot is-${s.state}`} aria-hidden="true" />
@@ -279,7 +297,7 @@ function Decide({ card, sameSource, models, defaultModel, override, onChange, on
             </span>
           </button>
         ))}
-        {card.sessions.length === 0 && (
+        {card.sessions.length === 0 && !card.owner && (
           <p class="zi-quiet">{hasProject ? `Nothing open in ${card.projectLabel}` : "Nothing open."}</p>
         )}
         {hasProject && (
@@ -392,6 +410,7 @@ export function InboxView({
   health,
   onRetry,
   onSend,
+  onSendOwner,
   onNewSession,
   onIgnore,
   onIgnoreSource,
@@ -432,11 +451,12 @@ export function InboxView({
     const event = card?.event;
     if (!event) return;
     const run = kind === "send" ? onSend?.(event.id, arg)
-      : kind === "new" ? onNewSession?.(event.id, eventCreateSpec(override
-        ? { ...event, create_model: override.model, create_thinking: override.thinking }
-        : event))
-        : kind === "ignore" ? onIgnore?.(event.id)
-          : onIgnoreSource?.(event.source);
+      : kind === "owner" ? onSendOwner?.(event.id, card.owner?.id)
+        : kind === "new" ? onNewSession?.(event.id, eventCreateSpec(override
+          ? { ...event, create_model: override.model, create_thinking: override.thinking }
+          : event))
+          : kind === "ignore" ? onIgnore?.(event.id)
+            : onIgnoreSource?.(event.source);
     Promise.resolve(run).then(() => close()).catch(() => {});
   };
 
