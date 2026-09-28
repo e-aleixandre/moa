@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -32,6 +33,27 @@ func imageTurns(t *testing.T, images []string) []core.Message {
 func smallImages(t *testing.T, n int) []string {
 	t.Helper()
 	img := jpegB64(t, 100, 200)
+	out := make([]string, n)
+	for i := range out {
+		out[i] = img
+	}
+	return out
+}
+
+// largeImages makes payloads comparable to the screenshots from the reported
+// 413: roughly 1.3 MB decoded, or 1.7 MB once base64 encoded. The JPEG header
+// stays valid so the normal dimension guard accepts it.
+func largeImages(t *testing.T, n, decodedBytes int) []string {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString(jpegB64(t, 100, 200))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) > decodedBytes {
+		t.Fatalf("JPEG fixture is %d bytes, exceeds requested %d", len(raw), decodedBytes)
+	}
+	raw = append(raw, bytes.Repeat([]byte{0}, decodedBytes-len(raw))...)
+	img := base64.StdEncoding.EncodeToString(raw)
 	out := make([]string, n)
 	for i := range out {
 		out[i] = img
@@ -97,6 +119,106 @@ func TestConvertMessages_TwentyImagesUntouched(t *testing.T) {
 	}
 }
 
+// Twenty screenshots can stay below the count limit while exceeding
+// Anthropic's 32 MB request cap after base64 encoding. The oldest batch must
+// step aside until their payload fits the conservative image budget.
+func TestConvertMessages_TotalImageBudgetRetiresOldestBatch(t *testing.T) {
+	const (
+		screenshotBytes    = 1_300_000
+		requestImageBudget = 28 * 1024 * 1024
+	)
+	result := convertMessages(imageTurns(t, largeImages(t, 20, screenshotBytes)), false)
+
+	outcomes := imageOutcomes(result)
+	images, notes := countImages(outcomes)
+	if images != 12 || notes != imageRetireBatch {
+		t.Fatalf("got %d images and %d notes, want 12 and %d", images, notes, imageRetireBatch)
+	}
+	for i := 0; i < imageRetireBatch; i++ {
+		if outcomes[i] == "image" {
+			t.Fatalf("image %d should be retired", i)
+		}
+	}
+	if got := imageBase64Bytes(result); got > requestImageBudget {
+		t.Fatalf("image payload is %d bytes, exceeds budget %d", got, requestImageBudget)
+	}
+	if got := serializedRequestBytes(t, imageTurns(t, largeImages(t, 20, screenshotBytes))); got > 32*1024*1024 {
+		t.Fatalf("request body is %d bytes, exceeds Anthropic's 32 MiB limit", got)
+	}
+}
+
+func TestConvertMessages_TotalImageBudgetLeavesSmallRequestUntouched(t *testing.T) {
+	const (
+		screenshotBytes    = 1_300_000
+		requestImageBudget = 28 * 1024 * 1024
+	)
+	result := convertMessages(imageTurns(t, largeImages(t, 16, screenshotBytes)), false)
+
+	images, notes := countImages(imageOutcomes(result))
+	if images != 16 || notes != 0 {
+		t.Fatalf("got %d images and %d notes, want 16 and 0", images, notes)
+	}
+	if got := imageBase64Bytes(result); got > requestImageBudget {
+		t.Fatalf("image payload is %d bytes, exceeds budget %d", got, requestImageBudget)
+	}
+}
+
+// Once a payload-triggered batch is retired, appending one more comparable
+// screenshot must not move the cutoff and invalidate the cached prefix.
+func TestConvertMessages_TotalImageBudgetRetirementIsBatched(t *testing.T) {
+	const screenshotBytes = 1_300_000
+	for _, n := range []int{20, 21} {
+		outcomes := imageOutcomes(convertMessages(imageTurns(t, largeImages(t, n, screenshotBytes)), false))
+		images, notes := countImages(outcomes)
+		if images != n-imageRetireBatch || notes != imageRetireBatch {
+			t.Errorf("n=%d: got %d images and %d notes, want %d and %d", n, images, notes, n-imageRetireBatch, imageRetireBatch)
+		}
+		for i := 0; i < imageRetireBatch; i++ {
+			if outcomes[i] == "image" {
+				t.Errorf("n=%d: image %d should stay retired", n, i)
+			}
+		}
+	}
+}
+
+func imageBase64Bytes(msgs []map[string]any) int {
+	total := 0
+	for _, m := range msgs {
+		content, _ := m["content"].([]any)
+		total += contentImageBase64Bytes(content)
+	}
+	return total
+}
+
+func contentImageBase64Bytes(content []any) int {
+	total := 0
+	for _, raw := range content {
+		block, _ := raw.(map[string]any)
+		switch block["type"] {
+		case "image":
+			source, _ := block["source"].(map[string]any)
+			data, _ := source["data"].(string)
+			total += len(data)
+		case "tool_result":
+			inner, _ := block["content"].([]any)
+			total += contentImageBase64Bytes(inner)
+		}
+	}
+	return total
+}
+
+func serializedRequestBytes(t *testing.T, messages []core.Message) int {
+	t.Helper()
+	body, err := buildRequestBody(core.Request{
+		Model:    core.Model{ID: "claude-sonnet-4-6"},
+		Messages: messages,
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(body)
+}
+
 // One image over the threshold retires a whole batch of the oldest, regardless
 // of how small those images are: the rule is count and age, not size.
 func TestConvertMessages_TwentyOneRetiresOldestBatch(t *testing.T) {
@@ -114,8 +236,8 @@ func TestConvertMessages_TwentyOneRetiresOldestBatch(t *testing.T) {
 			t.Fatalf("image %d should survive, got %q", i, o)
 		}
 	}
-	if note := outcomes[0]; !strings.Contains(note, "100x200") || !strings.Contains(note, "2000 px") {
-		t.Fatalf("note should name the size and the cap: %q", note)
+	if note := outcomes[0]; !strings.Contains(note, "100x200") || !strings.Contains(note, "Anthropic's image limits") {
+		t.Fatalf("note should name the size and recovery action: %q", note)
 	}
 }
 

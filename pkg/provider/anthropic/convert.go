@@ -186,20 +186,19 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 }
 
 // manyImageThreshold is the number of image blocks in a single request above
-// which Anthropic drops the per-side size cap from MaxImageDimension to
-// manyImageMaxDimension. Requests at or below it may carry full-size images.
+// which Anthropic drops the per-side size cap from MaxImageDimension to 2000
+// px. Requests at or below it may carry full-size images.
 const manyImageThreshold = 20
 
-// manyImageMaxDimension is the per-side cap that applies once a request carries
-// more than manyImageThreshold images. It is not enforced by measuring: any
-// image can breach it, so retirement is by age, not by size.
-const manyImageMaxDimension = 2000
+// maxRequestImageBase64Bytes leaves 4 MiB of Anthropic's 32 MiB request cap
+// for the JSON envelope, system prompt, tools, and text content.
+const maxRequestImageBase64Bytes = 28 * 1024 * 1024
 
 // imageRetireBatch is how many images are retired at a time. Retiring exactly
 // the overflow would change the retired set on every new image and invalidate
 // the prompt cache each turn; rounding up to a batch keeps the request bytes
-// stable until the count crosses the next boundary, and history is append-only,
-// so between crossings the cached prefix survives.
+// stable until the count or payload crosses the next boundary, and history is
+// append-only, so between crossings the cached prefix survives.
 const imageRetireBatch = 8
 
 // imageRetirer tracks how many of the oldest image blocks still have to be
@@ -211,22 +210,26 @@ type imageRetirer struct {
 	remaining int
 }
 
-// newImageRetirer counts the image blocks the request would put on the wire and
-// decides how many of the oldest to retire.
+// newImageRetirer counts the image blocks and base64 payload bytes the request
+// would put on the wire and decides how many of the oldest to retire.
 //
 // Anthropic applies a stricter 2000 px per-side cap once a request carries more
 // than 20 images, and rejects the whole request with a 400 when any image
-// breaches it. History is replayed every turn, so one 1170x2532 screenshot in a
-// long session poisons every following turn permanently. Retiring the oldest
-// images brings the count back to the threshold, which restores the full-size
-// allowance for the ones that are left; it also un-poisons a conversation that
-// is already stuck, on its next turn, with no user action.
+// breaches it. It also rejects requests above 32 MiB, so image payloads leave
+// room for the rest of the JSON body. History is replayed every turn, so one
+// 1170x2532 screenshot in a long session poisons every following turn
+// permanently. Retiring the oldest images brings the count back to the
+// threshold and keeps the base64 payload below the request budget; it also
+// un-poisons a conversation that is already stuck, on its next turn, with no
+// user action.
 //
-// Only images count here. Documents do not count toward the threshold on the
-// direct API, which is the only one moa talks to; Bedrock and Vertex do count
-// them, so this is the place to adjust if either is ever supported.
+// Only images count here. Documents do not count toward Anthropic's image
+// threshold on the direct API, which is the only one moa talks to; Bedrock and
+// Vertex do count them, so this is the place to adjust if either is ever
+// supported.
 func newImageRetirer(msgs []core.Message) *imageRetirer {
-	count := 0
+	var imageBytes []int
+	totalBytes := 0
 	for _, msg := range msgs {
 		// Assistant content never carries images (convertAssistantContent
 		// drops them), and unknown roles are skipped entirely.
@@ -246,14 +249,25 @@ func newImageRetirer(msgs []core.Message) *imageRetirer {
 			if _, _, tooBig := core.ImageExceedsMaxDimension(b.Data); tooBig {
 				continue
 			}
-			count++
+			imageBytes = append(imageBytes, len(b.Data))
+			totalBytes += len(b.Data)
 		}
 	}
-	if count <= manyImageThreshold {
+	retire := 0
+	if count := len(imageBytes); count > manyImageThreshold {
+		retire = count - manyImageThreshold
+		for i := 0; i < retire; i++ {
+			totalBytes -= imageBytes[i]
+		}
+	}
+	for totalBytes > maxRequestImageBase64Bytes && retire < len(imageBytes) {
+		totalBytes -= imageBytes[retire]
+		retire++
+	}
+	if retire == 0 {
 		return nil
 	}
-	overflow := count - manyImageThreshold
-	batches := (overflow + imageRetireBatch - 1) / imageRetireBatch
+	batches := (retire + imageRetireBatch - 1) / imageRetireBatch
 	return &imageRetirer{remaining: batches * imageRetireBatch}
 }
 
@@ -377,9 +391,10 @@ func convertContentBlocks(blocks []core.Content, retire *imageRetirer) []any {
 				})
 				continue
 			}
-			// Too many images in one request: the oldest ones step aside so the
-			// newest keep their full resolution. Retirement is by age, not by
-			// size, so the note says nothing about the limit being breached.
+			// Image count or total request payload is too high: the oldest ones
+			// step aside so the newest keep their full resolution. Retirement is
+			// by age, not by size, so the note describes recovery rather than a
+			// particular limit.
 			if retire.takeOldest() {
 				result = append(result, map[string]any{
 					"type": "text",
@@ -419,15 +434,11 @@ func convertContentBlocks(blocks []core.Content, retire *imageRetirer) []any {
 // missing. Dimensions of 0x0 mean the header was unreadable, not a tiny image.
 func retiredImageNote(w, h int) string {
 	if w > 0 && h > 0 {
-		return fmt.Sprintf("[image omitted: this %dx%d px image was retired because the conversation "+
-			"holds more than %d images, which caps every image at %d px per side; "+
-			"read the file again if you still need it]",
-			w, h, manyImageThreshold, manyImageMaxDimension)
+		return fmt.Sprintf("[image omitted: this %dx%d px image was retired to keep the conversation within Anthropic's image limits; "+
+			"read the file again if you still need it]", w, h)
 	}
-	return fmt.Sprintf("[image omitted: an older image was retired because the conversation "+
-		"holds more than %d images, which caps every image at %d px per side; "+
-		"read the file again if you still need it]",
-		manyImageThreshold, manyImageMaxDimension)
+	return "[image omitted: an older image was retired to keep the conversation within Anthropic's image limits; " +
+		"read the file again if you still need it]"
 }
 
 // foreignThinking reports whether a message's thinking signatures were minted
