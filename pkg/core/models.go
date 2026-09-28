@@ -40,6 +40,11 @@ var knownModels = map[string]Model{
 		Name: "Claude Opus 4.8", MaxInput: 1_000_000, MaxOutput: 131072,
 		Pricing: &Pricing{Input: 5, Output: 25, CacheRead: 0.5, CacheWrite: 6.25, CacheWrite1h: 10},
 	},
+	"claude-sonnet-5-5": {
+		ID: "claude-sonnet-5-5", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Sonnet 5.5", MaxInput: 1_000_000, MaxOutput: 131072,
+		Pricing: &Pricing{Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5, CacheWrite1h: 4},
+	},
 	"claude-sonnet-5": {
 		ID: "claude-sonnet-5", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Sonnet 5", MaxInput: 1_000_000, MaxOutput: 131072,
@@ -252,7 +257,7 @@ func init() {
 // Short aliases → full model ID.
 var modelAliases = map[string]string{
 	// Anthropic
-	"sonnet": "claude-sonnet-5",
+	"sonnet": "claude-sonnet-5-5",
 	"opus":   "claude-opus-5-5",
 	"haiku":  "claude-haiku-4-5-20251001",
 	"fable":  "claude-fable-5-1",
@@ -426,6 +431,7 @@ var modelDisplayOrder = []string{
 	"claude-fable-5",
 	"claude-opus-5-5",
 	"claude-opus-5",
+	"claude-sonnet-5-5",
 	"claude-sonnet-5",
 	"claude-opus-4-8",
 	"claude-haiku-4-5-20251001",

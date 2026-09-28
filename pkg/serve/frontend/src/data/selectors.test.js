@@ -89,6 +89,7 @@ test('thinkingLevelsFor: each Anthropic model offers only the levels it accepts'
     'claude-opus-5-5': alwaysOn,
     'claude-opus-5': undefined,
     'claude-opus-4-8': undefined,
+    'claude-sonnet-5-5': undefined,
     'claude-sonnet-5': undefined,
     'claude-haiku-4-5-20251001': ['off', 'low', 'medium', 'high'],
   };

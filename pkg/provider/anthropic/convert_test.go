@@ -228,6 +228,8 @@ func TestBuildRequestBody_ThinkingPerModelAndLevel(t *testing.T) {
 		"opus":                      {"adaptive/medium", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
 		"claude-opus-5":             {"disabled", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
 		"claude-opus-4-8":           {"-", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
+		"claude-sonnet-5-5":         {"between_tools", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
+		"sonnet":                    {"between_tools", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
 		"claude-sonnet-5":           {"disabled", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
 		"claude-haiku-4-5-20251001": {"-", "enabled/4096", "enabled/10000", "enabled/30976", "enabled/30976"}, // budget capped by the default max_tokens,
 	}
@@ -838,20 +840,25 @@ func TestConvertAssistantContent_ForeignEmptyThinkingDropped(t *testing.T) {
 func TestBuildRequestBody_BlockBindingOnBindingModels(t *testing.T) {
 	cases := []struct {
 		model string
+		level string
 		want  bool
 	}{
-		{"claude-fable-5-1", true},
-		{"claude-fable-5", false},
-		{"claude-opus-5", false},
-		{"claude-sonnet-4-5", false},
+		{"claude-fable-5-1", "high", true},
+		{"claude-fable-5", "high", false},
+		{"claude-opus-5", "high", false},
+		{"claude-sonnet-4-5", "high", false},
+		{"claude-sonnet-5", "high", false},
+		{"claude-sonnet-5-5", "high", true},
+		// between_tools rejects block_binding with a 400.
+		{"claude-sonnet-5-5", "off", false},
 	}
 	for _, tc := range cases {
-		t.Run(tc.model, func(t *testing.T) {
+		t.Run(tc.model+"/"+tc.level, func(t *testing.T) {
 			maxTokens := 4096
 			body, err := buildRequestBody(core.Request{
 				Model:    core.Model{ID: tc.model},
 				Messages: []core.Message{core.NewUserMessage("hi")},
-				Options:  core.StreamOptions{ThinkingLevel: "high", MaxTokens: &maxTokens},
+				Options:  core.StreamOptions{ThinkingLevel: tc.level, MaxTokens: &maxTokens},
 			}, false)
 			if err != nil {
 				t.Fatal(err)

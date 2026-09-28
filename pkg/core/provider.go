@@ -271,6 +271,7 @@ func ThinkingLevelOptions() string {
 //	Fable 5.1   adaptive, always on low medium high xhigh  high
 //	Fable 5     adaptive, always on low medium high xhigh  high
 //	Opus 5.5    adaptive, always on low medium high xhigh  medium
+//	Sonnet 5.5  adaptive, on        off low … xhigh        high  (off = between_tools)
 //	Opus 5      adaptive, on        off low … xhigh        high
 //	Opus 4.8    adaptive, off       off low … xhigh        high
 //	Sonnet 5    adaptive, on        off low … xhigh        high
@@ -283,6 +284,11 @@ type AnthropicThinking struct {
 	// OnByDefault models think when the request omits thinking, so off must
 	// send thinking disabled explicitly.
 	OnByDefault bool
+	// OffType is the thinking type off sends on an OnByDefault model. Empty
+	// means "disabled". Sonnet 5.5 rejects disabled; its lowest setting is
+	// "between_tools" (no up-front thinking), accepted at high effort or below,
+	// so off sends it without an effort and the API applies its default, high.
+	OffType string
 	// DefaultEffort is the effort the API applies when the request omits it.
 	DefaultEffort string
 	// XHigh reports whether effort "xhigh" exists for the model.
@@ -290,7 +296,8 @@ type AnthropicThinking struct {
 }
 
 // anthropicThinking is ordered: a prefix that is a substring of a later ID
-// (opus-5 in opus-5-5, fable-5 in fable-5-1) must come after it.
+// (opus-5 in opus-5-5, fable-5 in fable-5-1, sonnet-5 in sonnet-5-5) must
+// come after it.
 var anthropicThinking = []struct {
 	ids  []string
 	spec AnthropicThinking
@@ -300,6 +307,7 @@ var anthropicThinking = []struct {
 	{[]string{"opus-5-5", "opus-5.5"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "medium", XHigh: true}},
 	{[]string{"opus-5"}, AnthropicThinking{Adaptive: true, OnByDefault: true, DefaultEffort: "high", XHigh: true}},
 	{[]string{"opus-4-8", "opus-4.8"}, AnthropicThinking{Adaptive: true, DefaultEffort: "high", XHigh: true}},
+	{[]string{"sonnet-5-5", "sonnet-5.5"}, AnthropicThinking{Adaptive: true, OnByDefault: true, OffType: "between_tools", DefaultEffort: "high", XHigh: true}},
 	{[]string{"sonnet-5"}, AnthropicThinking{Adaptive: true, OnByDefault: true, DefaultEffort: "high", XHigh: true}},
 	{[]string{"haiku-4-5", "haiku-4.5"}, AnthropicThinking{}},
 }

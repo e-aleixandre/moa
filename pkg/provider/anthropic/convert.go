@@ -10,7 +10,7 @@ import (
 
 // Claude Code identity — required for OAuth tokens (Claude Max).
 const (
-	claudeCodeVersion        = "2.1.280"
+	claudeCodeVersion        = "2.1.284"
 	claudeCodeSystemPreamble = "You are Claude Code, Anthropic's official CLI for Claude."
 )
 
@@ -146,7 +146,11 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 			ar.OutputConfig = &outputConfig{Effort: spec.DefaultEffort}
 		case spec.OnByDefault:
 			// Omitting thinking would still think; off has to say so.
-			ar.Thinking = &thinkingConfig{Type: "disabled"}
+			offType := spec.OffType
+			if offType == "" {
+				offType = "disabled"
+			}
+			ar.Thinking = &thinkingConfig{Type: offType}
 		}
 	} else if t := resolveThinking(req); t != nil {
 		ar.Thinking = t
@@ -171,7 +175,8 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 	// Ask the API to drop thinking blocks whose prefix no longer matches
 	// rather than reject the request. Only meaningful once a thinking config
 	// survived the branches above: with no config there are no blocks to bind.
-	if ar.Thinking != nil && bindsThinkingPrefix(req.Model.ID) {
+	// Only adaptive takes the field; between_tools rejects it with a 400.
+	if ar.Thinking != nil && ar.Thinking.Type == "adaptive" && bindsThinkingPrefix(req.Model.ID) {
 		ar.Thinking.BlockBinding = &blockBinding{PrefixMismatchBehavior: "drop_block"}
 	}
 
@@ -562,12 +567,14 @@ func resolveMaxTokens(req core.Request) int {
 }
 
 // bindsThinkingPrefix reports whether the model validates a thinking block's
-// signature against everything sent before it. Claude Fable 5.1 is the first
-// to do so; Mythos 5.1 does not, and older models reject the block_binding
-// field outright, so the check stays narrow rather than "5.1 and up".
+// signature against everything sent before it. Claude Fable 5.1 was the first
+// to do so, and Claude Sonnet 5.5 does too; Mythos 5.1 does not, and older
+// models reject the block_binding field outright, so the check stays narrow
+// rather than "5.1 and up".
 func bindsThinkingPrefix(modelID string) bool {
 	id := strings.ToLower(modelID)
-	return strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1")
+	return strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1") ||
+		strings.Contains(id, "sonnet-5-5") || strings.Contains(id, "sonnet-5.5")
 }
 
 // resolveEffort maps our thinking levels to Anthropic adaptive effort. An

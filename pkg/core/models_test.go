@@ -12,11 +12,24 @@ func TestResolveModel_Alias(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok")
 	}
-	if m.ID != "claude-sonnet-5" {
+	if m.ID != "claude-sonnet-5-5" {
 		t.Fatalf("got %s", m.ID)
 	}
 	if m.Provider != "anthropic" {
 		t.Fatalf("provider: %s", m.Provider)
+	}
+}
+
+func TestResolveModel_Sonnet55(t *testing.T) {
+	for _, spec := range []string{"sonnet", "claude-sonnet-5-5", "anthropic/claude-sonnet-5-5", "Claude Sonnet 5.5"} {
+		m, ok := ResolveModel(spec)
+		if !ok || m.ID != "claude-sonnet-5-5" || m.Provider != "anthropic" {
+			t.Errorf("ResolveModel(%q) = %+v, %v", spec, m, ok)
+		}
+	}
+	// Sonnet 5 stays reachable by its ID.
+	if m, ok := ResolveModel("claude-sonnet-5"); !ok || m.ID != "claude-sonnet-5" {
+		t.Errorf("ResolveModel(claude-sonnet-5) = %+v, %v", m, ok)
 	}
 }
 
@@ -166,6 +179,22 @@ func TestOpus55Pricing(t *testing.T) {
 	}
 	if got, want := p.Cost(Usage{Input: 1_000, CacheRead: 2_000, CacheWrite: 7_000, CacheWrite1h: 4_000, Output: 5_000}), 0.1514; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("Opus 5.5 cost = %v, want %v", got, want)
+	}
+}
+
+func TestSonnet55Pricing(t *testing.T) {
+	model, ok := ResolveModel("sonnet")
+	if !ok || model.ID != "claude-sonnet-5-5" || model.Pricing == nil {
+		t.Fatalf("sonnet alias = %+v, %v; want claude-sonnet-5-5", model, ok)
+	}
+	p := model.Pricing
+	if model.MaxInput != 1_000_000 || model.MaxOutput != 131072 ||
+		p.Input != 2 || p.Output != 10 || p.CacheRead != 0.2 ||
+		p.CacheWrite != 2.5 || p.CacheWrite1h != 4 {
+		t.Fatalf("Sonnet 5.5 definition = %+v, pricing = %+v", model, p)
+	}
+	if got, want := p.Cost(Usage{Input: 1_000, CacheRead: 2_000, CacheWrite: 7_000, CacheWrite1h: 4_000, Output: 5_000}), 0.0759; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("Sonnet 5.5 cost = %v, want %v", got, want)
 	}
 }
 
@@ -333,6 +362,8 @@ func TestThinkingAlwaysOn_PerModel(t *testing.T) {
 		"opus":                      true,
 		"claude-opus-5":             false,
 		"claude-opus-4-8":           false,
+		"claude-sonnet-5-5":         false,
+		"sonnet":                    false,
 		"claude-sonnet-5":           false,
 		"claude-haiku-4-5-20251001": false,
 		"gpt-6-sol":                 false,
@@ -354,6 +385,7 @@ func TestEffectiveThinkingLevel_AnthropicPerModel(t *testing.T) {
 		"claude-opus-5-5":           {"medium", "low", "medium", "high", "xhigh", "xhigh"},
 		"claude-opus-5":             {"off", "low", "medium", "high", "xhigh", "xhigh"},
 		"claude-opus-4-8":           {"off", "low", "medium", "high", "xhigh", "xhigh"},
+		"claude-sonnet-5-5":         {"off", "low", "medium", "high", "xhigh", "xhigh"},
 		"claude-sonnet-5":           {"off", "low", "medium", "high", "xhigh", "xhigh"},
 		"claude-haiku-4-5-20251001": {"off", "low", "medium", "high", "high", "high"},
 	}
@@ -399,7 +431,7 @@ func TestResolveModel_ProviderPrefixAlias(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok for provider/alias")
 	}
-	if m.ID != "claude-sonnet-5" {
+	if m.ID != "claude-sonnet-5-5" {
 		t.Fatalf("id: %s", m.ID)
 	}
 }

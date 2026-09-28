@@ -127,7 +127,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 
 | Alias | Resolves to |
 |-------|------------|
-| `sonnet` | `claude-sonnet-5` |
+| `sonnet` | `claude-sonnet-5-5` |
 | `opus` | `claude-opus-5-5` |
 | `haiku` | `claude-haiku-4-5-20251001` |
 | `fable` | `claude-fable-5-1` |
@@ -150,7 +150,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | `gpt5.5` | `gpt-5.5` |
 | `gpt5-mini` | `gpt-5.4-mini` |
 
-You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-5`, `claude-opus-4-8`, `gpt-5.6-luna`, `grok-4.5`, `grok-4.6`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
+You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `gpt-5.6-luna`, `grok-4.5`, `grok-4.6`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
 
 ## Thinking levels
 
@@ -163,6 +163,9 @@ model does with them differs:
 - **Claude Fable 5, Fable 5.1 and Opus 5.5** think on every turn. `off` is not a
   real setting for them: it runs at the model's default effort (`high` on
   Fable, `medium` on Opus 5.5), and the web selector hides the option.
+- **Claude Sonnet 5.5** cannot turn thinking fully off. `off` sends its lowest
+  setting, `between_tools`: no up-front thinking, only short progress notes
+  between tool calls, at the default `high` effort.
 - **`xhigh`** is its own effort level on every Anthropic model except Haiku
   4.5, which caps it at `high`. OpenAI models accept `xhigh` as its own
   effort level. On **GPT-6 Astra**, the five UI positions map to `low`,

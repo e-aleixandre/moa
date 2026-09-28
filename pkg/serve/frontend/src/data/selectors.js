@@ -134,8 +134,8 @@ export function nextThinkingLevel(level, levels = THINKING_CYCLE) {
 // Meta cannot disable reasoning at all, so off is not offered either.
 // Anthropic mirrors core.AnthropicThinking, from
 // https://platform.claude.com/docs/en/build-with-claude/effort: Fable 5 and
-// 5.1 and Opus 5.5 always think, so off is not a real setting; Haiku 4.5 has
-// no xhigh.
+// 5.1 and Opus 5.5 always think, so off is not a real setting; Sonnet 5.5 keeps
+// off (sent as between_tools); Haiku 4.5 has no xhigh.
 export function thinkingLevelsFor(spec, sessionProvider) {
   const provider = spec?.provider || sessionProvider;
   if (provider === "xai") return ["low", "medium", "high"];
