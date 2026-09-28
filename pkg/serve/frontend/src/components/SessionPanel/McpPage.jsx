@@ -18,6 +18,7 @@ const SCOPE_NAME = { session: "Session", project: "Project", global: "Global" };
 
 const MCP_STATE = {
   ready: ["running", "is-ok"],
+  idle: ["idle", "is-ok"],
   failed: ["failed", "is-bad"],
   exited: ["exited", "is-bad"],
   disabled: ["off", "is-off"],
@@ -59,6 +60,7 @@ function verdictFor(server) {
       return { text: "On everywhere, waiting for you to sign in.", names: [] };
     }
     if (server.state === "ready") return { text: "On everywhere and running.", names: [] };
+    if (server.state === "idle") return { text: "On everywhere. Ask moa to use a tool to start it.", names: [] };
     return { text: "On everywhere.", names: [] };
   }
   const names = off.map((s) => SCOPE_NAME[s] || s);
@@ -389,12 +391,12 @@ export function McpPage({ sessionId, mcpTick, servers: fixtureServers, inline = 
   const servers = data.servers || [];
   if (servers.length === 0) return <p class="zl-page-sum">No MCP servers for this session.</p>;
 
-  const up = servers.filter((s) => s.state === "ready").length;
+  const available = servers.filter((s) => s.state === "ready" || s.state === "idle").length;
 
   return (
     <div class="zl-page">
       <p class="zl-page-sum">
-        <span class="zl-data">{up}</span> of <span class="zl-data">{servers.length}</span> running. A server runs only when every scope has it on.
+        <span class="zl-data">{available}</span> of <span class="zl-data">{servers.length}</span> available. A server runs only when every scope has it on.
       </p>
       <div class="zl-kv">
         {servers.map((s) => {

@@ -1471,7 +1471,7 @@ func (s *ManagedSession) mcpSummary() *MCPSummary {
 		switch st.State {
 		case mcp.StateDisabled:
 			sum.Disabled++
-		case mcp.StateReady:
+		case mcp.StateReady, mcp.StateIdle:
 			sum.Ready++
 		case mcp.StateStarting, mcp.StateRestarting, mcp.StateDisabling:
 			sum.Pending++
@@ -1520,7 +1520,7 @@ func (s *ManagedSession) wireMCPRefresh() {
 		mgr.OnChange(func(st mcp.ServerStatus) {
 			s.publishMCPChanged()
 			switch st.State {
-			case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled, mcp.StateAuthRequired:
+			case mcp.StateReady, mcp.StateIdle, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled, mcp.StateAuthRequired:
 				name := st.Name
 				go s.scheduleMCPToolSync(name)
 			}
@@ -1530,7 +1530,7 @@ func (s *ManagedSession) wireMCPRefresh() {
 		// observes transitions after it is registered.
 		for _, st := range mgr.Status() {
 			switch st.State {
-			case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled, mcp.StateAuthRequired:
+			case mcp.StateReady, mcp.StateIdle, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled, mcp.StateAuthRequired:
 				go s.scheduleMCPToolSync(st.Name)
 			}
 		}
@@ -1612,7 +1612,7 @@ func (s *ManagedSession) waitForInitialMCP(runCtx context.Context) error {
 			return runCtx.Err()
 		}
 		switch st.State {
-		case mcp.StateReady, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled, mcp.StateAuthRequired:
+		case mcp.StateReady, mcp.StateIdle, mcp.StateFailed, mcp.StateExited, mcp.StateDisabled, mcp.StateAuthRequired:
 			ctrl.SyncServer(st.Name)
 		}
 	}

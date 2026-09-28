@@ -188,6 +188,164 @@ func newOAuthManager(t *testing.T, f *oauthFixture, cfg core.MCPServer, onChange
 	return mgr
 }
 
+func TestLazyRemoteOAuthReconnectAndSignOut(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	f := newOAuthFixture(t, true)
+	f.setAccept("Bearer at-1")
+	f.seed(t, "at-1", time.Minute)
+	cfg := core.MCPServer{URL: f.url(), Lazy: true, IdleTimeout: "40ms"}
+	first := newOAuthManager(t, f, cfg, nil)
+	waitServerState(t, first, StateIdle)
+	first.Close()
+	before := len(f.seenHeaders())
+
+	mgr := newOAuthManager(t, f, cfg, nil)
+	if len(mgr.Tools()) != 1 || len(f.seenHeaders()) == before {
+		t.Fatal("authenticated lazy start must rediscover tools for its identity")
+	}
+	before = len(f.seenHeaders())
+	res, err := mgr.Tools()[0].Execute(context.Background(), map[string]any{"text": "hello"}, nil)
+	if err != nil || res.IsError || res.Content[0].Text != "echo: hello" {
+		t.Fatalf("OAuth reconnect: %+v %v", res, err)
+	}
+	if len(f.seenHeaders()) == before {
+		t.Fatal("tool call did not reconnect")
+	}
+	if err := mgr.OAuthStore().SignOut(context.Background(), f.url()); err != nil {
+		t.Fatal(err)
+	}
+	if st := waitServerState(t, mgr, StateAuthRequired); st.ToolCount != 0 || len(mgr.Tools()) != 0 {
+		t.Fatalf("signed-out server still exposes tools: %+v", st)
+	}
+	mgr.Close()
+	signedOut := newOAuthManager(t, f, cfg, nil)
+	if st := waitServerState(t, signedOut, StateAuthRequired); st.ToolCount != 0 || len(signedOut.Tools()) != 0 {
+		t.Fatalf("cached tools bypass signed-out credentials: %+v", st)
+	}
+}
+
+func TestLazyRemoteCacheNotSharedWithOAuthIdentity(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	f := newOAuthFixture(t, false)
+	cfg := core.MCPServer{URL: f.url(), Lazy: true}
+	anonymous := NewManager(nil, t.TempDir())
+	anonymous.SetOAuthStore(auth.MCPOAuthStoreAt(filepath.Join(t.TempDir(), "anonymous.json")))
+	startWait(t, anonymous, map[string]core.MCPServer{"remote": cfg}, nil)
+	if anonymous.Status()[0].State != StateIdle || len(anonymous.Tools()) != 1 {
+		t.Fatal("anonymous discovery failed")
+	}
+	path := anonymous.toolsCachePath("remote", cfg)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("anonymous cache: %v", err)
+	}
+	cwd := anonymous.cwd
+	anonymous.Close()
+
+	f.seed(t, "at-1", time.Minute)
+	f.setAccept("Bearer at-1")
+	before := len(f.seenHeaders())
+	authenticated := NewManager(nil, cwd)
+	authenticated.SetOAuthStore(f.store())
+	startWait(t, authenticated, map[string]core.MCPServer{"remote": cfg}, nil)
+	defer authenticated.Close()
+	if len(f.seenHeaders()) == before || authenticated.Status()[0].State != StateIdle {
+		t.Fatal("OAuth identity reused anonymous metadata instead of discovering")
+	}
+	if len(authenticated.Tools()) != 1 {
+		t.Fatal("authenticated discovery lost tools")
+	}
+	// A second authenticated manager still probes: the store does not expose an
+	// offline identity with which to safely partition cached schemas.
+	before = len(f.seenHeaders())
+	second := NewManager(nil, cwd)
+	second.SetOAuthStore(f.store())
+	startWait(t, second, map[string]core.MCPServer{"remote": cfg}, nil)
+	defer second.Close()
+	if len(f.seenHeaders()) == before {
+		t.Fatal("OAuth credentials reused unpartitioned cache")
+	}
+}
+
+func TestLazyWakeAuthRequiredDropsCachedTools(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	f := newOAuthFixture(t, false)
+	mgr := newOAuthManager(t, f, core.MCPServer{URL: f.url(), Lazy: true}, nil)
+	waitServerState(t, mgr, StateIdle)
+	tool := mgr.Tools()[0]
+	f.setAccept() // previously anonymous endpoint now demands authorization
+	res, err := tool.Execute(context.Background(), nil, nil)
+	if err != nil || !res.IsError {
+		t.Fatalf("unauthorized wake: %+v, %v", res, err)
+	}
+	if st := waitServerState(t, mgr, StateAuthRequired); st.ToolCount != 0 || len(mgr.Tools()) != 0 {
+		t.Fatalf("auth-required retained cached tools: %+v", st)
+	}
+}
+
+func TestLazyAnonymousCacheInvalidatedOnSignOut(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	f := newOAuthFixture(t, false)
+	cfg := core.MCPServer{URL: f.url(), Lazy: true}
+	mgr := newOAuthManager(t, f, cfg, nil)
+	waitServerState(t, mgr, StateIdle)
+	if err := mgr.OAuthStore().SignOut(context.Background(), f.url()); err != nil {
+		t.Fatal(err)
+	}
+	if st := waitServerState(t, mgr, StateAuthRequired); st.ToolCount != 0 || len(mgr.Tools()) != 0 {
+		t.Fatalf("sign-out retained anonymous cache: %+v", st)
+	}
+	before := len(f.seenHeaders())
+	mgr.Close()
+	again := newOAuthManager(t, f, cfg, nil)
+	if st := waitServerState(t, again, StateAuthRequired); st.ToolCount != 0 || len(again.Tools()) != 0 || len(f.seenHeaders()) != before {
+		t.Fatalf("sign-out reused disk cache or probed server: %+v", st)
+	}
+}
+
+func TestLazyAuthorizationNotificationRediscoversIdleTools(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	f := newOAuthFixture(t, false)
+	cfg := core.MCPServer{URL: f.url(), Lazy: true, IdleTimeout: "1h"}
+	mgr := newOAuthManager(t, f, cfg, nil)
+	waitServerState(t, mgr, StateIdle)
+	before := len(f.seenHeaders())
+	mgr.onOAuthAuthorized(auth.MCPOAuthKey(f.url()))
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(f.seenHeaders()) > before && mgr.Status()[0].State == StateIdle {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("authorization did not refresh idle metadata: %+v", mgr.Status())
+}
+
+func TestLazyOAuthAuthorizationImmediatelyParks(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	f := newOAuthFixture(t, true)
+	f.seed(t, "at-1", time.Minute)
+	f.setAccept("Bearer at-1")
+	cfg := core.MCPServer{URL: f.url(), Lazy: true, IdleTimeout: "1h"}
+	mgr := newOAuthManager(t, f, cfg, nil)
+	waitServerState(t, mgr, StateIdle)
+	// Exercise the same reconnect path an OAuth authorization notification uses
+	// when a manager had previously been waiting for sign-in.
+	sess := mgr.byName["remote"]
+	sess.mu.Lock()
+	sess.state = StateAuthRequired
+	sess.tools = nil
+	sess.mu.Unlock()
+	mgr.onOAuthAuthorized(auth.MCPOAuthKey(f.url()))
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if st := mgr.Status()[0]; st.State == StateIdle && st.ToolCount == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("OAuth reconnect did not park immediately: %+v", mgr.Status())
+}
+
 func waitServerState(t *testing.T, mgr *Manager, want ServerState) ServerStatus {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)

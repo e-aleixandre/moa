@@ -399,6 +399,12 @@ type MCPServer struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args"`
 	Env     map[string]string `json:"env"`
+	// Lazy delays the connection until a tool is called, using previously
+	// discovered tool metadata to advertise tools in the meantime.
+	Lazy bool `json:"lazy,omitempty"`
+	// IdleTimeout closes an unused connection after a Go duration (e.g. "15m").
+	// Empty means the connection stays open until the session ends.
+	IdleTimeout string `json:"idle_timeout,omitempty"`
 	// URL is the streamable-HTTP endpoint of a remote MCP server. Only http and
 	// https are accepted. It is an outbound connection to an endpoint the
 	// operator configured, so it carries the same trust as the rest of the file.
@@ -415,6 +421,12 @@ func (s MCPServer) IsRemote() bool { return s.URL != "" }
 // Validate checks that the entry describes exactly one transport, and that a
 // remote one points at an absolute http(s) URL.
 func (s MCPServer) Validate() error {
+	if s.IdleTimeout != "" {
+		d, err := time.ParseDuration(s.IdleTimeout)
+		if err != nil || d <= 0 {
+			return errors.New(`"idle_timeout" must be a positive Go duration (e.g. "15m")`)
+		}
+	}
 	if s.Command != "" && s.URL != "" {
 		return errors.New(`set either "command" or "url", not both`)
 	}

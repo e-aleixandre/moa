@@ -59,10 +59,31 @@ func TestMCPServerHelper(t *testing.T) {
 		}
 	}
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "ping-helper", Version: "0.1"}, nil)
+	toolName := "ping"
+	if schema := os.Getenv("MCP_SCHEMA_FILE"); schema != "" {
+		if data, err := os.ReadFile(schema); err == nil && len(data) > 0 {
+			toolName = string(data)
+		}
+	}
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "ping",
+		Name:        toolName,
 		Description: "Replies pong",
 	}, func(ctx context.Context, req *sdkmcp.CallToolRequest, input any) (*sdkmcp.CallToolResult, any, error) {
+		if marker := os.Getenv("MCP_CALL_MARKER"); marker != "" {
+			_ = os.WriteFile(marker, []byte("started"), 0o600)
+			if release := os.Getenv("MCP_CALL_RELEASE"); release != "" {
+				for {
+					if _, err := os.Stat(release); err == nil {
+						break
+					}
+					select {
+					case <-ctx.Done():
+						return nil, nil, ctx.Err()
+					case <-time.After(10 * time.Millisecond):
+					}
+				}
+			}
+		}
 		return &sdkmcp.CallToolResult{
 			Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "pong"}},
 		}, nil, nil
@@ -764,8 +785,8 @@ func TestWrapMCPTool_InMemory(t *testing.T) {
 
 	// Wrap as core.Tool via the manager's routing wrapper.
 	m := NewManager(nil, "")
-	sess := &serverSession{name: "test-server", session: session, state: StateReady}
 	ti := toolInfo{name: list.Tools[0].Name, description: list.Tools[0].Description}
+	sess := &serverSession{name: "test-server", session: session, state: StateReady, tools: []toolInfo{ti}}
 	tool := m.wrapTool(sess, ti)
 
 	// Verify metadata
@@ -815,7 +836,7 @@ func TestWrapMCPTool_ErrorResult(t *testing.T) {
 
 	list, _ := session.ListTools(ctx, nil)
 	m := NewManager(nil, "")
-	sess := &serverSession{name: "test-server", session: session, state: StateReady}
+	sess := &serverSession{name: "test-server", session: session, state: StateReady, tools: []toolInfo{{name: list.Tools[0].Name}}}
 	tool := m.wrapTool(sess, toolInfo{name: list.Tools[0].Name})
 
 	result, err := tool.Execute(ctx, map[string]any{}, nil)

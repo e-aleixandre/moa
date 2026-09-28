@@ -152,9 +152,8 @@ func (m *Manager) handleAuthLost(sess *serverSession, h *oauthHandler) {
 	m.notify(st)
 }
 
-// onOAuthAuthorized reconnects every server of this manager that was waiting
-// for the authorization just stored for key — in whichever session it was
-// done — through the same path as an enable.
+// onOAuthAuthorized reconnects servers waiting for authorization, and replaces
+// anonymous idle metadata when credentials change.
 func (m *Manager) onOAuthAuthorized(key string) {
 	m.mu.Lock()
 	if m.closed {
@@ -222,9 +221,11 @@ func (m *Manager) signOut(sess *serverSession) {
 	oldSession := sess.session
 	sess.session = nil
 	sess.client = nil
+	stopIdleLocked(sess)
 	sess.oauth = nil
 	sess.oauthAuthenticated = false
 	sess.tools = nil
+	sess.pendingTools = nil
 	sess.state = StateAuthRequired
 	sess.authAction = "connect"
 	sess.err = authRequiredMessage
@@ -248,7 +249,11 @@ func (m *Manager) reconnectAfterAuth(ctx context.Context, sess *serverSession, c
 		return
 	}
 	sess.mu.Lock()
-	waiting := sess.state == StateAuthRequired
+	waiting := sess.state == StateAuthRequired || (cfg.Lazy && sess.state == StateIdle)
+	if waiting {
+		sess.tools = nil
+		sess.pendingTools = nil
+	}
 	sess.mu.Unlock()
 	if !waiting {
 		return

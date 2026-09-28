@@ -254,7 +254,9 @@ func TestLoadMCPFile_Valid(t *testing.T) {
 			"db": {
 				"command": "mcp-sqlite",
 				"args": ["/path/to.db"],
-				"env": {"DEBUG": "1"}
+				"env": {"DEBUG": "1"},
+				"lazy": true,
+				"idle_timeout": "15m"
 			},
 			"fs": {
 				"command": "mcp-filesystem",
@@ -282,6 +284,9 @@ func TestLoadMCPFile_Valid(t *testing.T) {
 	if db.Env["DEBUG"] != "1" {
 		t.Fatalf("db.Env = %v", db.Env)
 	}
+	if !db.Lazy || db.IdleTimeout != "15m" {
+		t.Fatalf("db lifecycle options = %+v", db)
+	}
 	fs := servers["fs"]
 	if fs.Command != "mcp-filesystem" {
 		t.Fatalf("fs.Command = %q", fs.Command)
@@ -298,6 +303,19 @@ func TestLoadMCPFile_Invalid(t *testing.T) {
 	_, err := LoadMCPFile(path)
 	if err == nil {
 		t.Fatal("expected error for malformed JSON")
+	}
+}
+
+func TestMCPServerIdleTimeoutValidation(t *testing.T) {
+	for _, timeout := range []string{"nope", "0s", "-1m"} {
+		if err := (MCPServer{Command: "server", IdleTimeout: timeout}).Validate(); err == nil {
+			t.Errorf("idle_timeout %q accepted", timeout)
+		}
+	}
+	for _, timeout := range []string{"", "15m", "1h30m"} {
+		if err := (MCPServer{Command: "server", IdleTimeout: timeout}).Validate(); err != nil {
+			t.Errorf("idle_timeout %q: %v", timeout, err)
+		}
 	}
 }
 

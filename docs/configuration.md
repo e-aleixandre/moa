@@ -139,6 +139,8 @@ position selects Astra's lowest reasoning effort rather than disabling reasoning
 | Field | Type | Description |
 |-------|------|-------------|
 | `mcp_servers` | map | MCP server definitions (see example above) |
+| `mcp_servers.<name>.lazy` | bool | Delay connecting until the first tool call after tool metadata has been discovered (default `false`) |
+| `mcp_servers.<name>.idle_timeout` | string | Close the server after this much time without tool calls; reconnect on the next call (Go duration, e.g. `"15m"`; default unset = never) |
 | `disabled_mcp_servers` | []string | Server names vetoed at this config level: the server stays configured but is never started. In a project file this is legacy — moa now records your vetoes in [your project state](#your-project-state) |
 | `trusted_mcp_paths` | []string | Project dirs whose `.mcp.json` is trusted. **Global-only.** |
 | `trusted_project_paths` | []string | Project dirs whose `.moa/config.json` and `.moa/tools/*` are auto-loaded without a trust prompt. **Global-only.** |
@@ -156,6 +158,41 @@ A server entry declares **exactly one** transport:
   subprocess.
 - `url` (+ optional `headers`) — streamable HTTP: Moa connects to a remote
   endpoint. Only `http` and `https` are accepted.
+
+Both transports also accept `lazy` and `idle_timeout`, independently for each
+server. For example, in `~/.config/moa/config.json`:
+
+```json
+{
+  "mcp_servers": {
+    "playwright": {
+      "command": "bun",
+      "args": ["x", "@playwright/mcp@latest", "--headless", "--isolated"],
+      "lazy": true,
+      "idle_timeout": "15m"
+    }
+  }
+}
+```
+
+Servers without these keys still start when a session opens and stay connected
+until it closes. An `idle_timeout` alone retains eager initial discovery; `lazy`
+alone stays connected once used. A lazy server needs its tool names, schemas and
+descriptions before the model can call it. On a cache miss (for instance a new
+server or a changed command), Moa connects once to discover its tools, then
+closes it; subsequent sessions can advertise those tools without starting it.
+The first call after a lazy start or idle close waits for the server to reconnect.
+The metadata cache is in the OS user cache directory (`moa/mcp-tools`); it
+contains tool definitions, not tool results or config credentials. Its key
+includes the server name, working directory, transport, command, arguments,
+environment and headers. Changing those invalidates its cached metadata.
+If a server changes its tools without a config change (for example an `@latest`
+package update), use **Restart** in the MCP panel to rediscover its tools; new
+tools cannot be advertised from an old cached list before that. Servers with
+stored OAuth credentials discover on each session start rather than share
+tool metadata across different signed-in accounts. These keys work
+in both config levels and in the global or trusted project `.mcp.json` (under
+`mcpServers` there); same-name entries replace rather than extend one another.
 
 ```json
 {
