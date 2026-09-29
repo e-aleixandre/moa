@@ -14,6 +14,17 @@ import (
 	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
+// reloadPromptAfterCut re-reads the prompt sources once the model's context has
+// been cut (compaction or Start fresh). The cached prefix is already lost at
+// that point, so picking up edited AGENTS.md, skills or memory is free. Silent,
+// like /reload. Must run with the agent idle: it is called right after the cut,
+// while the session still holds its busy state.
+func reloadPromptAfterCut(sctx *SessionContext) {
+	if sctx.ReloadPrompt != nil {
+		sctx.ReloadPrompt()
+	}
+}
+
 func registerHistoryHandlers(sctx *SessionContext) {
 	b := sctx.Bus
 	// Serializes the short start and terminal sections of manual compactions.
@@ -130,6 +141,9 @@ func registerHistoryHandlers(sctx *SessionContext) {
 			}()
 
 			result, err = sctx.Agent.Compact(sctx.SessionCtx, cmd.Focus)
+			if err == nil && result != nil {
+				reloadPromptAfterCut(sctx)
+			}
 			if err == nil {
 				messages = sctx.Agent.Messages()
 				marker = NewCompactionMarker(result)
@@ -147,6 +161,9 @@ func registerHistoryHandlers(sctx *SessionContext) {
 		cut := func() {
 			before = sctx.Agent.Messages()
 			payload, err = sctx.Agent.StartFresh()
+			if err == nil && payload != nil {
+				reloadPromptAfterCut(sctx)
+			}
 		}
 		// Idle is checked and the cut applied under the state lock, so a run
 		// cannot start between the check and the cut. The cut itself is an
@@ -229,6 +246,7 @@ func registerHistoryHandlers(sctx *SessionContext) {
 				sctx.Bus.Publish(CommandExecuted{SessionID: sctx.SessionID, Command: "prepare-compact-noop", Messages: sctx.Agent.Messages()})
 				return sctx.Agent.Messages(), nil
 			}
+			reloadPromptAfterCut(sctx)
 			sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Payload: payload, Marker: NewCompactionMarker(payload)})
 			sctx.Bus.Drain(2 * time.Second)
 			if sctx.PersistNow != nil {

@@ -385,8 +385,9 @@ What it does:
 
 - Only `PROJECT.md` is editable from the interface; the rest of the book is
   edited on disk.
-- A live session sees a changed `PROJECT.md` or `OWNER.md` only after
-  `/reload`; new sessions always see the current one.
+- A live session sees a changed `PROJECT.md` or `OWNER.md` after `/reload`,
+  or when it next compacts or starts fresh; new sessions always see the
+  current one.
 - Reports carry the session's final message, not the session brief: its
   beginning and end, with a notice of what was cut and how to read it whole.
   A turn that ends without a final message is reported as such, not as a bare

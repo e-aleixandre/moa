@@ -651,6 +651,12 @@ The reload is silent — the agent gets the new instructions, not an announcemen
 about them — and a busy session applies it as soon as it settles. It reports what
 changed in each session, and does nothing at all when the files are unchanged.
 
+A session also re-reads these files, on its own and only for itself, whenever it
+compacts (manually or automatically) or you use **Start fresh**: the cached
+prompt prefix is lost at that point anyway, so refreshing it costs nothing.
+Subagents it launches afterwards see the new files. Nothing changes if the files
+did not.
+
 ## MCP servers
 
 A session lists its configured [MCP servers](configuration.md#mcp-servers) on

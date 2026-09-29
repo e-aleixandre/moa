@@ -502,6 +502,16 @@ func (r *SessionRuntime) RefreshBaseSystemPrompt(base string) error {
 	return rebuildSystemPrompt(r.sctx)
 }
 
+// RebasePrompt records base as the session's base system prompt and returns the
+// full prompt to run with (base plus any active goal directive), without
+// touching the agent. It exists for a caller that cannot use
+// RefreshBaseSystemPrompt because a run is in flight — the agent loop installs
+// the returned prompt itself, at its own boundary.
+func (r *SessionRuntime) RebasePrompt(base string) string {
+	r.sctx.BaseSystemPrompt = base
+	return composeSystemPrompt(r.sctx)
+}
+
 // restoreTrimWatermark tells the agent how far context trimming already reached
 // on the tree's current branch. It travels beside the messages rather than
 // inside them because it is a property of the BRANCH: without it, a reloaded or

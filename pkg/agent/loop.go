@@ -105,10 +105,13 @@ type loopConfig struct {
 	// compactSummarizer optionally supplies the model that writes compaction
 	// summaries, instead of the session's own (see Config.CompactSummarizer).
 	// nil = summarize with the session's model.
-	compactSummarizer   func(core.Model) (core.Provider, core.Model, string)
-	systemPrompt        string
-	streamOpts          core.StreamOptions
-	streamRepairBackoff []time.Duration
+	compactSummarizer func(core.Model) (core.Provider, core.Model, string)
+	systemPrompt      string
+	// promptAfterCompaction supplies a re-read system prompt once a compaction
+	// has landed (nil = keep the run's prompt).
+	promptAfterCompaction func() (string, bool)
+	streamOpts            core.StreamOptions
+	streamRepairBackoff   []time.Duration
 	// fast is read per provider request because a provider can disable the
 	// session setting while this run is still processing tool calls.
 	fast func() bool
@@ -454,6 +457,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					cfg.state.Messages = compacted
 					cfg.state.CompactionEpoch++
 					cfg.stateMu.Unlock()
+					if cfg.promptAfterCompaction != nil {
+						if prompt, ok := cfg.promptAfterCompaction(); ok {
+							cfg.systemPrompt = prompt
+						}
+					}
 					if consumeCheckpoint != nil {
 						consumeCheckpoint()
 					}

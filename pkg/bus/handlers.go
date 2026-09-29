@@ -15,13 +15,19 @@ func rebuildSystemPrompt(sctx *SessionContext) error {
 	if sctx.Goal == nil {
 		return nil
 	}
+	prompt := composeSystemPrompt(sctx)
+	// Returned rather than dropped: SetSystemPrompt refuses mid-run, and a
+	// caller that already recorded the new state has to know it did not take.
+	return sctx.Agent.SetSystemPrompt(prompt)
+}
+
+// composeSystemPrompt is the base prompt plus the active goal directive.
+func composeSystemPrompt(sctx *SessionContext) string {
 	prompt := sctx.BaseSystemPrompt
 	if sctx.Goal != nil && sctx.Goal.Active() {
 		prompt += "\n\n" + goal.GoalDirective(sctx.Goal.Info())
 	}
-	// Returned rather than dropped: SetSystemPrompt refuses mid-run, and a
-	// caller that already recorded the new state has to know it did not take.
-	return sctx.Agent.SetSystemPrompt(prompt)
+	return prompt
 }
 
 // RegisterHandlers registers command and query handlers for a session on its bus.

@@ -63,6 +63,25 @@ func (s *ManagedSession) reloadSession() []string {
 	return labels
 }
 
+// promptAfterCompaction is the agent's hook for an automatic compaction, which
+// lands in the middle of a run: the agent refuses SetSystemPrompt then, so
+// instead of applying the rebuilt prompt this hands it to the loop, which
+// installs it before its next request. Same rules as reloadSession — silent,
+// and untouched when no source changed.
+func (s *ManagedSession) promptAfterCompaction() (string, bool) {
+	src := s.infra.promptSources
+	build := s.infra.buildBasePrompt
+	reg := s.infra.toolReg
+	if src == nil || build == nil || reg == nil || s.runtime == nil {
+		return "", false
+	}
+	changed, _ := src.Reload()
+	if len(changed) == 0 {
+		return "", false
+	}
+	return s.runtime.RebasePrompt(build(reg.Specs())), true
+}
+
 // formatReloadReport turns per-session outcomes into the message the user reads.
 //
 // A reload applies to every live session, so the report has to say what happened

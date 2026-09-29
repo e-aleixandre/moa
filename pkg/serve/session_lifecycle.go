@@ -618,6 +618,14 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// point: the serve layer owns the tool registry and the prompt builder, the
 	// bus only knows it has to ask.
 	sess.runtime.Context().ReloadPrompt = sess.reloadSession
+	// Manual compaction and Start fresh call ReloadPrompt themselves; an
+	// automatic compaction happens inside a run, so the agent asks for the
+	// prompt instead.
+	if a, ok := sess.runtime.Context().Agent.(interface {
+		SetPromptAfterCompaction(func() (string, bool))
+	}); ok {
+		a.SetPromptAfterCompaction(sess.promptAfterCompaction)
+	}
 	if opts != nil {
 		sess.TitleSource = opts.titleSource
 		// A resumed session that already has history, or that already carries an

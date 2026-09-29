@@ -466,6 +466,13 @@ type AgentConfig struct {
 	// grows until it hits the window, which is worse than a costlier summary.
 	CompactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)
 
+	// PromptAfterCompaction, when set, is asked for a fresh system prompt each
+	// time an automatic compaction lands, and its answer replaces the prompt for
+	// the requests that follow. A compaction already loses the cached prefix,
+	// so re-reading the prompt's sources there costs nothing. ok=false keeps the
+	// current prompt. Not called for subagents or the prepare-compact turn.
+	PromptAfterCompaction func() (prompt string, ok bool)
+
 	// SessionCheckpoint is the ephemeral handoff slot. When set, automatic
 	// compaction appends its contents to the summary and clears it, matching
 	// the manual CompactWithCheckpoint path.
@@ -1233,6 +1240,34 @@ func (a *Agent) SetSystemPrompt(prompt string) error {
 	return nil
 }
 
+// SetPromptAfterCompaction installs the hook described on
+// AgentConfig.PromptAfterCompaction. It applies from the next run.
+func (a *Agent) SetPromptAfterCompaction(fn func() (string, bool)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.config.PromptAfterCompaction = fn
+}
+
+// promptAfterCompactionHook wraps the configured hook so that its answer also
+// becomes the agent's stored prompt: the loop only holds a per-run copy, and a
+// later run must start from the refreshed one. Nil when there is no hook.
+func (a *Agent) promptAfterCompactionHook() func() (string, bool) {
+	hook := a.config.PromptAfterCompaction
+	if hook == nil {
+		return nil
+	}
+	return func() (string, bool) {
+		prompt, ok := hook()
+		if !ok {
+			return "", false
+		}
+		a.mu.Lock()
+		a.config.SystemPrompt = prompt
+		a.mu.Unlock()
+		return prompt, true
+	}
+}
+
 // PermissionCheck returns the current permission callback.
 func (a *Agent) PermissionCheck() func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 	a.mu.Lock()
@@ -1896,6 +1931,14 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 				return nil
 			}
 			return a.config.SessionCheckpoint
+		}(),
+		// Not for the prepare-compact turn: its conversation is restored
+		// afterwards and the real compaction refreshes the prompt.
+		promptAfterCompaction: func() func() (string, bool) {
+			if allowCheckpoint {
+				return nil
+			}
+			return a.promptAfterCompactionHook()
 		}(),
 		drainSteers:       a.steers.drainUntilBarrier,
 		settleSteers:      a.steers.settle,
