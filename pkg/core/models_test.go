@@ -245,7 +245,7 @@ func TestGPT6AstraPricing(t *testing.T) {
 }
 
 func TestGPT6SolPricing(t *testing.T) {
-	model, ok := ResolveModel("sol")
+	model, ok := ResolveModel("gpt-6-sol")
 	if !ok || model.ID != "gpt-6-sol" || model.Pricing == nil {
 		t.Fatalf("sol = %+v, %v; want gpt-6-sol", model, ok)
 	}
@@ -259,6 +259,40 @@ func TestGPT6SolPricing(t *testing.T) {
 	}
 	if got, want := p.Cost(Usage{Input: 272_000, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 1.1130004; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("long GPT-6 Sol cost = %v, want %v", got, want)
+	}
+}
+
+func TestGPT61SolPricingAndAlias(t *testing.T) {
+	model, ok := ResolveModel("sol")
+	if !ok || model.ID != "gpt-6.1-sol" || model.Pricing == nil {
+		t.Fatalf("sol = %+v, %v; want gpt-6.1-sol", model, ok)
+	}
+	p := model.Pricing
+	if got, want := *p, (Pricing{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_000, Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5}}}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pricing = %+v, want %+v", got, want)
+	}
+	// 269_998*2 + 1*0.1 + 2000*2.5 + 1000*10 per MTok.
+	if got, want := p.Cost(Usage{Input: 269_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 0.5549961; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("short cost = %v, want %v", got, want)
+	}
+	// 272_000*4 + 1*0.2 + 2000*5 + 1000*15 per MTok.
+	if got, want := p.Cost(Usage{Input: 272_000, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 1.1130002; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("long cost = %v, want %v", got, want)
+	}
+}
+
+func TestEffectiveThinkingLevel_GPT61SolNeverNone(t *testing.T) {
+	model, _ := ResolveModel("gpt-6.1-sol")
+	for input, want := range map[string]string{
+		"off": "low", "low": "medium", "medium": "high", "high": "xhigh", "xhigh": "max",
+	} {
+		got, err := EffectiveThinkingLevel(model, input)
+		if err != nil || got != want || got == "none" || got == "minimal" {
+			t.Errorf("EffectiveThinkingLevel(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	if got := ReasoningEffortsForModel(model); !reflect.DeepEqual(got, []string{"low", "medium", "high", "xhigh", "max"}) {
+		t.Errorf("efforts = %v", got)
 	}
 }
 
@@ -745,15 +779,15 @@ func TestKnownModels_PricingIsExplicit(t *testing.T) {
 // the exact lowercase form resolved and everything else failed.
 func TestResolveModel_CaseAndSpaceInsensitive(t *testing.T) {
 	cases := map[string]string{
-		"Sol":             "gpt-6-sol",
-		"SOL":             "gpt-6-sol",
+		"Sol":             "gpt-6.1-sol",
+		"SOL":             "gpt-6.1-sol",
 		"Terra":           "gpt-5.6-terra",
 		"Luna":            "gpt-6-luna",
 		"Astra":           "gpt-6-astra",
 		"Opus":            "claude-opus-5-5",
 		"Fable":           "claude-fable-5-1",
-		" sol ":           "gpt-6-sol",
-		"openai/Sol":      "gpt-6-sol",
+		" sol ":           "gpt-6.1-sol",
+		"openai/Sol":      "gpt-6.1-sol",
 		"ANTHROPIC/Opus":  "claude-opus-5-5",
 		"Claude-Sonnet-5": "claude-sonnet-5",
 		"Claude Sonnet 5": "claude-sonnet-5",

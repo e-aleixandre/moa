@@ -96,6 +96,18 @@ var knownModels = map[string]Model{
 			},
 		},
 	},
+	"gpt-6.1-sol": {
+		ID: "gpt-6.1-sol", Provider: "openai", API: "openai-chat",
+		Name: "GPT-6.1 Sol", MaxInput: 1_050_000, MaxOutput: 128_000,
+		// Short-context (under 272K tokens) pricing is $2/$10 input/output.
+		// OpenAI bills the whole request at its long-context rates above it.
+		Pricing: &Pricing{
+			Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5,
+			Tiers: []PricingTier{
+				{Threshold: 272_000, Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5},
+			},
+		},
+	},
 	"gpt-5.6-sol": {
 		ID: "gpt-5.6-sol", Provider: "openai", API: "openai-chat",
 		Name: "GPT-5.6 Sol", MaxInput: 1_050_000, MaxOutput: 128_000,
@@ -240,7 +252,7 @@ var knownModels = map[string]Model{
 // accepts. A nil result preserves the Responses API's existing behavior for
 // models without an explicit capability declaration.
 func ReasoningEffortsForModel(model Model) []string {
-	if strings.EqualFold(model.ID, "gpt-6-astra") {
+	if strings.EqualFold(model.ID, "gpt-6-astra") || strings.EqualFold(model.ID, "gpt-6.1-sol") {
 		return gpt6AstraReasoningEfforts
 	}
 	return nil
@@ -267,7 +279,7 @@ var modelAliases = map[string]string{
 	"codex-5.2":   "gpt-5.2-codex",
 	"astra":       "gpt-6-astra",
 	"gpt-6":       "gpt-6-astra",
-	"sol":         "gpt-6-sol",
+	"sol":         "gpt-6.1-sol",
 	"daybreak":    "gpt-daybreak-blue-latest",
 	"terra":       "gpt-5.6-terra",
 	"luna":        "gpt-6-luna",
@@ -440,6 +452,7 @@ var modelDisplayOrder = []string{
 	"muse-spark-1.3-contributor",
 	// OpenAI
 	"gpt-6-astra",
+	"gpt-6.1-sol",
 	"gpt-6-sol",
 	"gpt-6-luna",
 	"gpt-5.6-sol",

@@ -86,6 +86,7 @@ func TestOpenAIFastCatalogue(t *testing.T) {
 	}{
 		{"gpt-6-astra", true, 2},
 		{"gpt-6-sol", true, 2},
+		{"gpt-6.1-sol", true, 2},
 		{"gpt-6-luna", true, 2},
 		{"gpt-5.6-sol", true, 2},
 		{"gpt-5.6-terra", true, 2},

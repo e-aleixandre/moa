@@ -367,7 +367,7 @@ func EffectiveThinkingLevel(model Model, level string) (string, error) {
 			return "", fmt.Errorf("invalid Meta thinking level %q (choose: low, medium, high, xhigh)", level)
 		}
 	}
-	if strings.EqualFold(model.ID, "gpt-6-astra") {
+	if strings.EqualFold(model.ID, "gpt-6-astra") || strings.EqualFold(model.ID, "gpt-6.1-sol") {
 		switch level {
 		case "off":
 			return "low", nil
@@ -380,7 +380,7 @@ func EffectiveThinkingLevel(model Model, level string) (string, error) {
 		case "xhigh", "max":
 			return "max", nil
 		default:
-			return "", fmt.Errorf("invalid GPT-6 Astra thinking level %q (choose: off, low, medium, high, xhigh)", level)
+			return "", fmt.Errorf("invalid %s thinking level %q (choose: off, low, medium, high, xhigh)", model.Name, level)
 		}
 	}
 	// "max" is persisted only while Astra is active. Translate it back to the
