@@ -5,6 +5,76 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.0] - 2026-09-29
+
+### Added
+
+- **MCP servers on demand.** A local MCP server (one with `command`) can set
+  `lazy: true` to start only when the model first calls one of its tools, and
+  `idle_timeout` (a Go duration such as `"15m"`) to close after that long
+  without tool calls and reconnect on the next one. Moa caches each server's
+  tool list so a lazy server's tools are advertised without starting it; use
+  **Restart** in the MCP panel if a server changes its tools without a config
+  change. After an idle close, the first result notes that state held by the
+  old process (open browser pages, logins) is gone. Both keys are rejected on
+  remote `url` servers. Servers without them behave as before. See
+  [MCP servers](docs/configuration.md#mcp-servers).
+- **Claude Sonnet 5.5** (`claude-sonnet-5-5`). It cannot turn thinking fully
+  off: `off` sends its lowest setting, with no up-front thinking and only short
+  notes between tool calls. See [Model aliases](docs/cli.md#model-aliases) and
+  [Thinking levels](docs/cli.md#thinking-levels).
+- **Choose the owner in the Inbox.** An event pending for a project with an
+  owner offers that owner as a destination alongside its open sessions.
+- **Send a subagent to the background from its card.** A running blocking
+  subagent's card in the conversation offers the same action as its own view,
+  without opening it.
+- **More owner faces.** Six more avatar shapes and a tone (deep, dark or pale)
+  bring the choices to 336, and New owner proposes a face no existing owner
+  wears. Owners that never chose a face keep the one they have. See
+  [The interface](docs/owners.md#the-interface).
+- **Composer aurora.** While dictating or on a call, the lower half of the
+  composer glows with the page's aurora colours and rises with your voice. With
+  reduced motion it is a still picture.
+
+### Changed
+
+- The `sonnet` alias, and with it the default model of `moa` and `moa serve`,
+  now points at Claude Sonnet 5.5. Claude Sonnet 5 is still available as
+  `claude-sonnet-5`.
+- Events sent to an owner follow the same rules as any session: with
+  `autorun: true` a busy owner is steered; with `autorun: false` (the default)
+  the event waits in the Inbox. Reports to an owner are still delivered only
+  when it is idle. See [Event hooks](docs/automation.md#event-hooks).
+- **The heartbeat is off by default.** An owner only runs it when `owner.json`
+  sets `"heartbeat": { "enabled": true }`. See [Heartbeat](docs/owners.md#heartbeat).
+- A toast is one line: a state word (Note, Finished, Failed, Needs you) before
+  the title. **Needs you** is used only when a session asks you something; a
+  failed run raises one Failed toast instead of two, and toasts that answer your
+  own action never vibrate or notify.
+- Sessions an owner launched no longer notify you (toast, sound, system
+  notification or push); the owner hears about them through its reports. Your
+  own sessions in an owner's project, and the owner's conversation, still do.
+- **Stop** works while a run waits on a question or a permission approval: the
+  run ends without another model call, and your next message carries the
+  answer.
+- Opening a conversation keeps the live panel folded, even when it has
+  background work; it opens when you tap it.
+- The Claude Code identity sent to Anthropic is updated to 2.1.284.
+
+### Fixed
+
+- Scrolling up in a conversation always leaves the live tail, with a normal
+  gesture, and only reaching the bottom rejoins it; content that shrinks no
+  longer shows **Latest** while you are at the bottom.
+- An owner receives its reports while it waits on a subagent, a background job
+  or a wait, including behind completions already queued, instead of only once
+  its whole run ends.
+- A subagent call that finished before the rest of its batch keeps its result
+  when you open or reconnect to the session mid-batch, instead of showing as
+  running forever.
+- Long Anthropic conversations with many large images no longer fail for
+  exceeding the request size limit: the oldest images are left out as needed.
+
 ## [0.42.0] - 2026-09-25
 
 ### Added
