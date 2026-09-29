@@ -1578,7 +1578,7 @@ func writeJSONConditional(w http.ResponseWriter, r *http.Request, v any) {
 	// no-cache = "store it, but revalidate every time": browsers then send
 	// If-None-Match themselves and hand the page the cached body on a 304.
 	h.Set("Cache-Control", "no-cache")
-	if etagMatches(r.Header.Get("If-None-Match"), etag) {
+	if etagMatches(strings.Join(r.Header.Values("If-None-Match"), ", "), etag) {
 		if gz, ok := w.(*gzipResponseWriter); ok {
 			gz.skipBody()
 		}
@@ -1590,18 +1590,57 @@ func writeJSONConditional(w http.ResponseWriter, r *http.Request, v any) {
 	_, _ = w.Write(body)
 }
 
-// etagMatches implements the weak comparison of If-None-Match.
+// etagMatches implements the weak comparison of If-None-Match against etag.
+// The header is parsed as a list of entity tags, not split on commas, because
+// a quoted opaque tag may itself contain commas or '*'. '*' matches only when
+// it is the whole header. Empty list elements are tolerated; any other
+// malformed list never matches, even if it contains the current tag.
 func etagMatches(header, etag string) bool {
-	if header == "" {
-		return false
+	header = strings.Trim(header, " \t")
+	if header == "*" {
+		return true
 	}
-	for _, candidate := range strings.Split(header, ",") {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "*" || strings.TrimPrefix(candidate, "W/") == strings.TrimPrefix(etag, "W/") {
-			return true
+	want := strings.TrimPrefix(etag, "W/")
+	matched := false
+	for {
+		header = strings.TrimLeft(header, " \t,")
+		if header == "" {
+			return matched
+		}
+		tag, rest, ok := scanETag(header)
+		if !ok {
+			return false
+		}
+		if strings.TrimPrefix(tag, "W/") == want {
+			matched = true
+		}
+		header = strings.TrimLeft(rest, " \t")
+		if header != "" && header[0] != ',' {
+			return false
 		}
 	}
-	return false
+}
+
+// scanETag reads one [W/]"opaque-tag" from the start of s, as net/http does
+// for its own conditional requests.
+func scanETag(s string) (tag, remain string, ok bool) {
+	start := 0
+	if strings.HasPrefix(s, "W/") {
+		start = 2
+	}
+	if len(s) < start+2 || s[start] != '"' {
+		return "", "", false
+	}
+	for i := start + 1; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == 0x21 || c >= 0x23 && c <= 0x7E || c >= 0x80:
+		case c == '"':
+			return s[:i+1], s[i+1:], true
+		default:
+			return "", "", false
+		}
+	}
+	return "", "", false
 }
 
 // wsAcceptOptions is the upgrade configuration shared by every WebSocket this

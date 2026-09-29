@@ -3,6 +3,7 @@ package serve
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -113,6 +114,104 @@ func TestSessionRosterETag(t *testing.T) {
 			etag = next
 			if again := getWithETag(t, srv, path, etag, ""); again.StatusCode != http.StatusNotModified {
 				t.Fatalf("after %q the new tag does not settle: %d", m.name, again.StatusCode)
+			}
+		})
+	}
+}
+
+func TestETagMatches(t *testing.T) {
+	const cur = `W/"abc"`
+	cases := []struct {
+		header string
+		want   bool
+	}{
+		{``, false},
+		{`*`, true},
+		{` * `, true},
+		{`W/"abc"`, true},
+		{`"abc"`, true},
+		{`"x", W/"abc"`, true},
+		{`"x" ,"abc" , "y"`, true},
+		{`"x"`, false},
+		{`W/"x", "y"`, false},
+		{`"foreign,*,tag"`, false},
+		{`"a,W/\"abc\"",`, false},
+		{`"foreign,*,tag", W/"abc"`, true},
+		{`"foreign,"abc"`, false},
+		{`abc`, false},
+		{`*x`, false},
+		{`"x" "abc"`, false},
+		{`W/"abc"garbage`, false},
+		{`W/"abc" garbage`, false},
+		{`"x", W/"abc"garbage`, false},
+		{`garbage, W/"abc"`, false},
+		{`*, "foreign"`, false},
+		{`"foreign", *`, false},
+		{`*, W/"abc"`, false},
+		{`, ,W/"abc",, `, true},
+		{`"x",,"y"`, false},
+		{`,`, false},
+	}
+	for _, c := range cases {
+		if got := etagMatches(c.header, cur); got != c.want {
+			t.Errorf("etagMatches(%q) = %v, want %v", c.header, got, c.want)
+		}
+	}
+}
+
+func TestSessionRosterETagHeaderForms(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	const path = "/api/sessions?include=owners"
+	if _, err := mgr.CreateSession(CreateOpts{Title: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	first := getWithETag(t, srv, path, "", "")
+	firstBody := readMaybeGzipBody(t, first)
+	etag := first.Header.Get("ETag")
+
+	get := func(lines ...string) (int, string) {
+		req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Moa-Request", "1")
+		for _, l := range lines {
+			req.Header.Add("If-None-Match", l)
+		}
+		resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp.StatusCode, readMaybeGzipBody(t, resp)
+	}
+
+	tests := []struct {
+		name  string
+		lines []string
+		want  int
+	}{
+		{"quoted comma/star tag", []string{`"foreign,*,tag"`}, http.StatusOK},
+		{"foreign then current on separate lines", []string{`"foreign"`, etag}, http.StatusNotModified},
+		{"quoted comma/star then foreign on separate lines", []string{`"foreign,*,tag"`, `"other"`}, http.StatusOK},
+		{"wildcard", []string{"*"}, http.StatusNotModified},
+		{"wildcard with foreign tag", []string{`*, "foreign"`}, http.StatusOK},
+		{"weak tag", []string{etag}, http.StatusNotModified},
+		{"strong form of the tag", []string{strings.TrimPrefix(etag, "W/")}, http.StatusNotModified},
+		{"list containing the tag", []string{`"x", ` + etag}, http.StatusNotModified},
+		{"current tag with trailing garbage", []string{etag + "garbage"}, http.StatusOK},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body := get(tc.lines...)
+			if code != tc.want {
+				t.Fatalf("If-None-Match %q: status=%d, want %d", tc.lines, code, tc.want)
+			}
+			if tc.want == http.StatusOK && body != firstBody {
+				t.Fatalf("200 body differs from the first response")
+			}
+			if tc.want == http.StatusNotModified && body != "" {
+				t.Fatalf("304 carries body %q", body)
 			}
 		})
 	}
