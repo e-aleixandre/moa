@@ -8,8 +8,8 @@ import {
   loadTask, loadTaskProjects, markTasksSeen, patchTask, selectSessionDirectory, setTasksAgents, tasksSlice,
 } from "../../data/tasks.js";
 import { errorText, groupTasks, movePatch, projectOptions } from "../../data/tasks-model.js";
-import { BackIcon, EmptyState, Filters, MoveList, TaskGroups, useRowChecks, completesInline } from "./parts.jsx";
-import { TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
+import { BackIcon, EmptyState, Filters, MoveList, TaskGroups, useEscape, useRowChecks, completesInline } from "./parts.jsx";
+import { DepsPage, TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
 import "../../layout/mobile/MobileConversationScreen/MobileInboxView.css";
 
 // MobileTasksView — the Tasks screen on the phone: a full-screen push, like
@@ -31,6 +31,9 @@ export function MobileTasksView({ onBack }) {
   const pop = () => setStack(stack.slice(0, -1));
   const back = top ? pop : onBack;
   const { screenRef, dragging, swipeBind } = useEdgeSwipeBack({ onBack: back });
+  // Escape walks back one page, like ‹ (a decision line on a page answers
+  // first: it is newer on the escape stack).
+  useEscape(!!top, pop);
 
   const groups = useMemo(
     () => groupTasks(slice.list, { agents: slice.agents, project, sessions }),
@@ -66,7 +69,10 @@ export function MobileTasksView({ onBack }) {
     );
   } else if (top.kind === "new") {
     title = "New task";
-    body = <TaskDetail isNew phone onCreated={(id) => setStack(id ? [{ kind: "task", id }] : [])} />;
+    body = <TaskDetail isNew phone onPushDeps={() => push({ kind: "deps", id: null })} onCreated={(id) => setStack(id ? [{ kind: "task", id }] : [])} />;
+  } else if (top.kind === "deps") {
+    title = "Waits for";
+    body = <DepsPage taskId={top.id} onBack={pop} />;
   } else if (top.kind === "move") {
     title = "Move to";
     const task = slice.details[top.id];
@@ -100,6 +106,7 @@ export function MobileTasksView({ onBack }) {
         onOpenTask={(id) => push({ kind: "task", id })}
         onOpenSession={(id) => { if (openSession(id)) onBack(); }}
         onPushMove={() => push({ kind: "move", id: top.id })}
+        onPushDeps={() => push({ kind: "deps", id: top.id })}
         onClose={pop}
       />
     );

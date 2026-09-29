@@ -27,6 +27,7 @@ export const PANEL_PAGES = {
   mcp: 'MCP',
   tasks: 'Tasks',
   taskNew: 'New task',
+  taskNewDeps: 'Waits for',
 };
 
 // Pages that carry an id: one task of the session, and Move for that task.
@@ -37,10 +38,11 @@ export const PANEL_PAGES = {
 const PANEL_PAGE_KINDS = {
   task: { title: 'Task', parent: () => 'tasks' },
   taskMove: { title: 'Move to', parent: (id) => `task:${id}` },
+  taskDeps: { title: 'Waits for', parent: (id) => `task:${id}` },
 };
 
 export function parsePanelPage(page) {
-  const m = /^(task|taskMove):(\d+)$/.exec(String(page || ''));
+  const m = /^(task|taskMove|taskDeps):(\d+)$/.exec(String(page || ''));
   if (m) return { kind: m[1], id: Number(m[2]) };
   return { kind: page || 'root', id: null };
 }
@@ -51,6 +53,10 @@ export function taskPanelPage(id) {
 
 export function taskMovePanelPage(id) {
   return `taskMove:${id}`;
+}
+
+export function taskDepsPanelPage(id) {
+  return `taskDeps:${id}`;
 }
 
 export function isPanelPage(page) {
@@ -72,6 +78,7 @@ export function panelPageTitle(page) {
 export const PANEL_PAGE_PARENT = {
   ownerEdit: 'overview',
   taskNew: 'tasks',
+  taskNewDeps: 'taskNew',
 };
 
 // panelPageParent — where "back" goes from a page. The root's parent is the

@@ -70,6 +70,20 @@ export function startNotifyGesture(recipient, perform, ask) {
   return 'ran';
 }
 
+// deliverOptions — the ONE line of decision a gesture that tells a session
+// shows. A loaded session just hears it; a saved one offers waking it and
+// holding the notice as two answers of equal weight, each of which IS the
+// gesture (no second confirmation after it).
+export function deliverOptions(verb, recipient) {
+  if (needsDeliverChoice(recipient)) {
+    return [
+      { choice: 'wake', label: `${verb} and wake` },
+      { choice: 'hold', label: `${verb}, notify when opened` },
+    ];
+  }
+  return [{ choice: null, label: `${verb} and notify` }];
+}
+
 // deliverFields turns the owner's choice into the request field. There is no
 // default: without an explicit choice nothing is sent, and the server holds.
 export function deliverFields(choice) {
@@ -448,4 +462,60 @@ export function projectOptions(projects, list) {
 // The count beside the view's title: what is open in You and the backlogs.
 export function openOwnCount(list) {
   return (list || []).filter((t) => isOpen(t) && t.place !== 'agent').length;
+}
+
+// ── Dependencies ──────────────────────────────────────────────────────────
+
+// waitersOf — every task that already waits for `taskId`, directly or
+// through others. Making the task wait for any of them would close a cycle,
+// so the "Waits for" picker leaves them out. The graph is whatever the client
+// holds: each task's waits_for, plus the unblocks a detail read carries.
+export function waitersOf(taskId, records) {
+  const waiters = new Map();
+  const edge = (waiter, waited) => {
+    if (waiter == null || waited == null || waiter === waited) return;
+    if (!waiters.has(waited)) waiters.set(waited, new Set());
+    waiters.get(waited).add(waiter);
+  };
+  for (const t of records || []) {
+    if (!t) continue;
+    for (const w of t.waits_for || t.depends_on || []) edge(t.id, w);
+    for (const u of t.unblocks || []) edge(u, t.id);
+  }
+  const out = new Set();
+  const queue = [taskId];
+  while (queue.length) {
+    for (const w of waiters.get(queue.shift()) || []) {
+      if (w === taskId || out.has(w)) continue;
+      out.add(w);
+      queue.push(w);
+    }
+  }
+  return out;
+}
+
+// depCandidates — the open tasks "Waits for" can offer: not this one, not
+// one it already waits for, and none that would close a cycle.
+export function depCandidates(taskId, records, current = [], query = '') {
+  const closers = taskId != null ? waitersOf(taskId, records) : new Set();
+  const needle = query.trim().toLowerCase();
+  const seen = new Set();
+  const out = [];
+  for (const t of records || []) {
+    if (!t || seen.has(t.id)) continue;
+    seen.add(t.id);
+    if (!isOpen(t) || t.id === taskId || current.includes(t.id) || closers.has(t.id)) continue;
+    if (needle && !String(t.title || '').toLowerCase().includes(needle)) continue;
+    out.push(t);
+  }
+  return out;
+}
+
+// nameTaskRefs — the server names tasks as "#8"; the owner knows them by
+// their titles.
+export function nameTaskRefs(text, lookup) {
+  return String(text || '').replace(/#(\d+)/g, (ref, id) => {
+    const t = lookup?.(Number(id));
+    return t?.title ? `“${t.title}”` : ref;
+  });
 }

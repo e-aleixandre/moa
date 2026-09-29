@@ -9,6 +9,7 @@
 
 import { api } from './api.js';
 import { store, setState, TASKS_INITIAL } from './store.js';
+import { sessionRecords } from './tasks-model.js';
 
 export { TASKS_INITIAL };
 
@@ -268,4 +269,45 @@ export function selectSessionDirectory(state) {
 
 export function selectSessionTasks(state, sessionId) {
   return tasksSlice(state).bySession[sessionId] || null;
+}
+
+// knownTasks — every task the client holds, freshest read first: the details
+// (they carry unblocks), the global list, and the sessions' own lists. The
+// dependency picker offers from it and checks cycles against it.
+export function knownTasks(slice) {
+  const out = [];
+  for (const t of Object.values(slice.details || {})) if (t && !t.gone) out.push(t);
+  out.push(...(slice.list || []));
+  for (const [sid, data] of Object.entries(slice.bySession || {})) {
+    const { requests, checklist } = sessionRecords(data, sid);
+    out.push(...requests, ...checklist);
+  }
+  return out;
+}
+
+// ── An editor's draft across its own pages ───────────────────────────────
+// On the phone "Waits for" is a page of the same sheet, so the editor is
+// unmounted while it shows. Its unsaved draft waits here and is taken back
+// when the editor mounts again. Keyed by task id, or 'new'.
+
+const drafts = new Map();
+
+export function stashDraft(key, entry) {
+  drafts.set(String(key), entry);
+}
+
+export function peekDraft(key) {
+  return drafts.get(String(key)) || null;
+}
+
+export function takeDraft(key) {
+  const entry = drafts.get(String(key)) || null;
+  drafts.delete(String(key));
+  return entry;
+}
+
+export function addDraftWait(key, id) {
+  const entry = drafts.get(String(key));
+  if (!entry || entry.draft.waits_for.includes(id)) return;
+  drafts.set(String(key), { ...entry, draft: { ...entry.draft, waits_for: [...entry.draft.waits_for, id] } });
 }

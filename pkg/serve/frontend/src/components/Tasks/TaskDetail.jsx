@@ -4,10 +4,11 @@ import { useStore } from "../../hooks/useStore.js";
 import { hasBlockingOverlay } from "../../data/overlays.js";
 import { addToast } from "../../data/notifications.js";
 import {
-  createTask, deleteTaskAt, deliverNotice, loadTask, loadTaskProjects, patchTask, selectSessionDirectory, tasksSlice, watchTask,
+  createTask, deleteTaskAt, deliverNotice, knownTasks, loadTask, loadTaskProjects, patchTask, selectSessionDirectory,
+  addDraftWait, peekDraft, stashDraft, takeDraft, tasksSlice, watchTask,
 } from "../../data/tasks.js";
 import {
-  completeNotifies, conflictCurrent, createBody, deleteNotifies, deletePath, draftDirty, editorActions, editorDraft,
+  completeNotifies, conflictCurrent, createBody, depCandidates, nameTaskRefs, needsDeliverChoice, deleteNotifies, deletePath, draftDirty, editorActions, editorDraft,
   errorText, isOpen, isRequest, isTypingTarget, latestUndelivered, movePatch, noticeLine, placeLabel, projectLabelOf,
   projectOptions, rebaseDraft, recipientFor, relAge, reopenPatch, savePatch, sessionName, sessionNoticeState, taskProjectName, completePatch,
 } from "../../data/tasks-model.js";
@@ -15,8 +16,8 @@ import {
   CheckRing, CloseIcon, CompletionFlow, DeliverChoice, Keycap, MOD_ENTER, MoveList, useEscape, useNotifyGesture,
 } from "./parts.jsx";
 
-function failed(title, error) {
-  addToast({ title, detail: errorText(error), type: "error" });
+function failed(title, error, lookup) {
+  addToast({ title, detail: nameTaskRefs(errorText(error), lookup), type: "error" });
 }
 
 // useTaskLookup — a task by id from whatever the client already holds: the
@@ -52,28 +53,36 @@ function autosize(el) {
   el.style.height = `${el.scrollHeight}px`;
 }
 
-// DepPicker — "Add a task it waits for": open tasks the client holds, with a
-// field to find one.
-function DepPicker({ exclude, lookupList, sessions, onPick, onClose }) {
+// DepList — "Add a task it waits for": the open tasks the client holds that
+// would not close a cycle (depCandidates), with a field to find one. The field
+// takes the focus. On the desktop it opens in the detail's own flow, scrolled
+// into view, so the pinned foot can never cover it; on the phone it is a page
+// of the same sheet (DepsPage).
+export function DepList({ taskId, current, phone, onPick, onClose }) {
+  const slice = useStore(tasksSlice);
+  const sessions = useStore(selectSessionDirectory);
   const [q, setQ] = useState("");
-  useEscape(true, onClose);
-  const needle = q.trim().toLowerCase();
-  const candidates = lookupList
-    .filter((t) => isOpen(t) && !exclude.includes(t.id) && (!needle || t.title.toLowerCase().includes(needle)))
-    .slice(0, 8);
+  const box = useRef(null);
+  const field = useRef(null);
+  useEscape(!!onClose, () => onClose?.());
+  useEffect(() => {
+    field.current?.focus({ preventScroll: true });
+    if (!phone) box.current?.scrollIntoView({ block: "nearest" });
+  }, []);
+  const candidates = depCandidates(taskId, knownTasks(slice), current, q).slice(0, phone ? 30 : 8);
   return (
-    <div class="tk-pop is-dep" role="menu" onClick={(e) => e.stopPropagation()}>
-      <label class="tk-search">
-        <Search size={14} aria-hidden="true" />
-        <input class="tk-field" placeholder="Find a task" aria-label="Find a task" value={q} onInput={(e) => setQ(e.currentTarget.value)} autoFocus />
+    <div class={phone ? "tk-move is-phone" : "tk-pop is-dep is-inline"} role="menu" ref={box} onClick={(e) => e.stopPropagation()}>
+      <label class={`tk-search${phone ? " is-phone" : ""}`}>
+        <Search size={phone ? 15 : 14} aria-hidden="true" />
+        <input ref={field} class="tk-field" placeholder="Find a task" aria-label="Find a task" value={q} onInput={(e) => setQ(e.currentTarget.value)} />
       </label>
       {candidates.map((c) => (
-        <button key={c.id} type="button" class="tk-pop-item is-two" onClick={() => onPick(c.id)}>
+        <button key={c.id} type="button" class={`tk-pop-item is-two${phone ? " is-phone" : ""}`} onClick={() => onPick(c.id)}>
           <span class="tk-pop-t">{c.title}</span>
           <span class="tk-pop-sub">{placeLabel(c, sessions)}</span>
         </button>
       ))}
-      {candidates.length === 0 && <div class="tk-pop-none">No open task matches.</div>}
+      {candidates.length === 0 && <div class="tk-pop-none">No open task it could wait for.</div>}
     </div>
   );
 }
@@ -85,7 +94,7 @@ function DepPicker({ exclude, lookupList, sessions, onPick, onClose }) {
 // the task as it is now and keeps what was typed.
 export function TaskDetail({
   taskId, isNew = false, newDest = null, phone = false, keys = false,
-  onOpenTask, onOpenSession, onPushMove, onClose, onCreated, init = {},
+  onOpenTask, onOpenSession, onPushMove, onPushDeps, onClose, onCreated, init = {},
 }) {
   const slice = useStore(tasksSlice);
   const sessions = useStore(selectSessionDirectory);
@@ -93,9 +102,13 @@ export function TaskDetail({
 
   useEffect(() => (isNew ? undefined : watchTask(taskId)), [taskId, isNew]);
 
-  const [base, setBase] = useState(rec);
-  const [draft, setDraft] = useState(() => editorDraft(rec));
-  const [dest, setDest] = useState(newDest || { place: "you" });
+  // Back from the "Waits for" page (phone): the draft the editor left there
+  // comes back with the chosen task added.
+  const draftKey = isNew ? "new" : taskId;
+  const [stashed] = useState(() => takeDraft(draftKey));
+  const [base, setBase] = useState(stashed?.base || rec);
+  const [draft, setDraft] = useState(() => stashed?.draft || editorDraft(rec));
+  const [dest, setDest] = useState(stashed?.dest || newDest || { place: "you" });
   const [menu, setMenu] = useState(!!init.menu);
   const [dep, setDep] = useState(false);
   const [sub, setSub] = useState("");
@@ -117,13 +130,14 @@ export function TaskDetail({
   // revision the edits started from (base), which is what makes a 409 honest.
   const task = isNew ? null : (rec || base);
   const lookup = useTaskLookup([...(draft.waits_for || []), ...(task?.unblocks || [])]);
+  const fail = (title, error) => failed(title, error, lookup);
   const recipient = task ? recipientFor(task, sessions) : null;
   const done = !!task && task.status === "done";
 
   const startDone = () => {
     if (!task || !isOpen(task) || busy) return;
     if (isRequest(task) || completeNotifies(task)) { setMode("completing"); return; }
-    patchTask(task.id, completePatch(task)).catch((error) => failed("Could not complete the task", error));
+    patchTask(task.id, completePatch(task)).catch((error) => fail("Could not complete the task", error));
   };
   const openMove = () => (onPushMove && !isNew ? onPushMove() : setMenu(true));
 
@@ -161,7 +175,7 @@ export function TaskDetail({
       if (current) {
         setDraft(rebaseDraft(draft, base, current)); setBase(current); setConflict(true);
       } else {
-        failed("Could not save the task", error);
+        fail("Could not save the task", error);
       }
     } finally {
       setBusy(false);
@@ -173,29 +187,37 @@ export function TaskDetail({
     if (isNew) { setDest(to); return; }
     patchTask(task.id, movePatch(task, to, choice)).catch((error) => {
       if (error?.status === 409) loadTask(task.id);
-      failed("Could not move the task", error);
+      fail("Could not move the task", error);
     });
   };
 
   const remove = () => {
     const run = (choice) => deleteTaskAt(deletePath(task, choice), task.id)
       .then(() => onClose?.())
-      .catch((error) => failed("Could not delete the task", error));
-    if (deleteNotifies(task)) gesture.run(recipient, run);
+      .catch((error) => fail("Could not delete the task", error));
+    if (deleteNotifies(task)) gesture.run(recipient, run, "Delete");
     else run(null);
   };
 
-  const create = () => {
-    if (!draft.title.trim() || busy) return;
-    const run = (choice) => {
-      setBusy(true);
-      createTask(createBody(draft, dest, choice))
-        .then((r) => onCreated?.(r?.id))
-        .catch((error) => failed("Could not add the task", error))
-        .finally(() => setBusy(false));
-    };
-    if (dest.place === "agent") gesture.run({ session_id: dest.sessionId, state: sessionNoticeState(sessions[dest.sessionId]) }, run);
-    else run(null);
+  // Creating for a saved session: the foot's two answers ARE the create
+  // button, so there is never a confirmation after it — and ⌘↵, which has
+  // no answer to give, does nothing there.
+  const createSaved = dest.place === "agent" && needsDeliverChoice({ state: sessionNoticeState(sessions[dest.sessionId]) });
+  const create = (choice = null) => {
+    if (!draft.title.trim() || busy || (createSaved && choice == null)) return;
+    setBusy(true);
+    createTask(createBody(draft, dest, choice))
+      .then((r) => onCreated?.(r?.id))
+      .catch((error) => fail("Could not add the task", error))
+      .finally(() => setBusy(false));
+  };
+  const addWait = () => {
+    if (phone && onPushDeps) {
+      stashDraft(draftKey, { base, draft, dest });
+      onPushDeps();
+      return;
+    }
+    setDep(!dep);
   };
 
   const whereText = isNew
@@ -211,12 +233,24 @@ export function TaskDetail({
 
   let foot;
   if (gesture.pending) {
-    foot = <DeliverChoice name={sessionName(sessions, gesture.pending.recipient.session_id)} phone={phone} onChoose={gesture.choose} onCancel={gesture.cancel} />;
+    foot = <DeliverChoice name={sessionName(sessions, gesture.pending.recipient.session_id)} verb={gesture.pending.verb} phone={phone} onChoose={gesture.choose} onCancel={gesture.cancel} />;
+  } else if (isNew && createSaved) {
+    foot = (
+      <DeliverChoice
+        key={dest.sessionId}
+        name={sessionName(sessions, dest.sessionId)}
+        verb="Assign"
+        phone={phone}
+        autoFocus={false}
+        busy={busy || !draft.title.trim()}
+        onChoose={create}
+      />
+    );
   } else if (isNew) {
     foot = (
       <>
         <span class="tk-grow" />
-        <button type="button" class="zl-ask-btn is-primary" disabled={!draft.title.trim() || busy} onClick={create}>
+        <button type="button" class="zl-ask-btn is-primary" disabled={!draft.title.trim() || busy} onClick={() => create(null)}>
           {dest.place === "agent" ? "Assign and notify" : "Add task"}{!phone && <Keycap>{MOD_ENTER}</Keycap>}
         </button>
       </>
@@ -233,7 +267,7 @@ export function TaskDetail({
             class="zl-ask-btn is-primary"
             disabled={busy || !draft.title.trim()}
             title={`Tells ${sessionName(sessions, recipient.session_id)}`}
-            onClick={() => gesture.run(recipient, (choice) => save(true, choice))}
+            onClick={() => gesture.run(recipient, (choice) => save(true, choice), "Save")}
           >
             Save and notify
           </button>
@@ -247,7 +281,7 @@ export function TaskDetail({
       <>
         <span class="tk-foot-fact">Done{task.completed_at ? ` ${relAge(task.completed_at) === "now" ? "just now" : `${relAge(task.completed_at)} ago`}` : ""}</span>
         <span class="tk-grow" />
-        <button type="button" class="zl-ask-btn" onClick={() => patchTask(task.id, reopenPatch(task)).catch((error) => failed("Could not reopen the task", error))}>Reopen</button>
+        <button type="button" class="zl-ask-btn" onClick={() => patchTask(task.id, reopenPatch(task)).catch((error) => fail("Could not reopen the task", error))}>Reopen</button>
       </>
     );
   } else {
@@ -340,7 +374,7 @@ export function TaskDetail({
           <div class={`tk-notice${line.action ? "" : " is-failed"}`} role="status">
             <span>{line.text}</span>
             {line.action && (
-              <button type="button" class="tk-link is-accent" onClick={() => deliverNotice(notice.id).catch((error) => failed("Could not notify the session", error))}>
+              <button type="button" class="tk-link is-accent" onClick={() => deliverNotice(notice.id).catch((error) => fail("Could not notify the session", error))}>
                 {line.action}
               </button>
             )}
@@ -389,14 +423,13 @@ export function TaskDetail({
             </div>
           ))}
           <div class="tk-anchor">
-            <button type="button" class="tk-sub is-add is-btn" aria-expanded={dep} onClick={() => setDep(!dep)}>
+            <button type="button" class="tk-sub is-add is-btn" aria-expanded={dep} onClick={addWait}>
               <Plus size={14} aria-hidden="true" /><span>Add a task it waits for</span>
             </button>
             {dep && (
-              <DepPicker
-                exclude={[task?.id, ...draft.waits_for]}
-                lookupList={slice.list}
-                sessions={sessions}
+              <DepList
+                taskId={task?.id ?? null}
+                current={draft.waits_for}
                 onClose={() => setDep(false)}
                 onPick={(id) => { set({ waits_for: [...draft.waits_for, id] }); setDep(false); }}
               />
@@ -430,4 +463,22 @@ export function taskEyebrow(task) {
   if (task.place === "agent") return "Agent task";
   if (task.place === "backlog") return "Backlog";
   return "Your task";
+}
+
+// DepsPage — "Waits for" as a page of the phone's sheet, after the task it
+// belongs to. The editor left its draft behind (stashDraft); picking adds to
+// that draft and goes back, where the editor takes it up again unsaved.
+export function DepsPage({ taskId = null, onBack }) {
+  const key = taskId == null ? "new" : taskId;
+  const current = peekDraft(key)?.draft?.waits_for || [];
+  return (
+    <div class="tk-phone-body tk-root">
+      <DepList
+        phone
+        taskId={taskId}
+        current={current}
+        onPick={(id) => { addDraftWait(key, id); onBack(); }}
+      />
+    </div>
+  );
 }

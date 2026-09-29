@@ -216,3 +216,14 @@ test('task pages carry their id, are valid pages and are titled', () => {
   expect(panelPageTitle('task:7')).toBe('Task');
   expect(panelPageTitle('taskMove:7')).toBe('Move to');
 });
+
+test('Waits for is a page after its task, and back returns to that task', async () => {
+  const { taskDepsPanelPage } = await import('../data/session-panel.js');
+  expect(isPanelPage(taskDepsPanelPage(12))).toBe(true);
+  expect(panelPageParent(taskDepsPanelPage(12))).toBe('task:12');
+  expect(panelPageTitle(taskDepsPanelPage(12))).toBe('Waits for');
+  expect(panelPageParent('taskNewDeps')).toBe('taskNew');
+  openSessionPanel('A', taskDepsPanelPage(12));
+  sessionPanelBack(sessionPanelSlice(store.get()).page)();
+  expect(sessionPanelSlice(store.get()).page).toBe('task:12');
+});

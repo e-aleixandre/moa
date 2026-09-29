@@ -300,3 +300,7 @@ button.tk-group:hover { color: var(--zl-t2); }
 @media (prefers-reduced-motion: reduce) {
   .tk-pop, .tk-pin, .tk-page { animation: none; }
 }
+
+/* "Waits for" on the desktop opens in the detail's own flow, not over it:
+   floating, it slid under the pinned foot and needed a scroll to reach. */
+.tk-pop.is-inline { position: static; width: auto; max-height: none; margin: 4px 0 0; }

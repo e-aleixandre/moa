@@ -6,7 +6,7 @@ import { projectName } from "../../data/util/format.js";
 import { addToast } from "../../data/notifications.js";
 import { loadTask, patchTask, isNewRequest } from "../../data/tasks.js";
 import {
-  completeNotifies, completePatch, errorText, isHere, isOpen, isRequest, needsDeliverChoice, noticeStateWords,
+  completeNotifies, completePatch, deliverOptions, errorText, isHere, isOpen, isRequest, needsDeliverChoice, noticeStateWords,
   projectLabelOf, recipientFor, relAge, sessionName, startNotifyGesture, taskProjectName,
 } from "../../data/tasks-model.js";
 import { TasksGlyph } from "./TasksGlyph.jsx";
@@ -56,31 +56,43 @@ export function CheckRing({ title, status, onToggle, big, disabled }) {
 }
 
 // useEscape — while a transient piece of a gesture is showing, Escape backs
-// out of THAT piece and nothing under it (a panel, the detail) hears the key.
+// out of THAT piece and nothing under it (a page, the detail, a panel) hears
+// the key. Pieces nest (a page, and a decision line on it), so the handlers
+// are a stack and only the newest one answers: one key, one step back.
+const escapeStack = [];
+function onEscapeKey(e) {
+  if (e.key !== "Escape" || !escapeStack.length) return;
+  e.preventDefault();
+  e.stopPropagation();
+  escapeStack[escapeStack.length - 1].current();
+}
+
 export function useEscape(active, onEscape) {
   const ref = useRef(onEscape);
   ref.current = onEscape;
   useEffect(() => {
     if (!active) return undefined;
-    const onKey = (e) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      ref.current();
+    if (!escapeStack.length) document.addEventListener("keydown", onEscapeKey, true);
+    escapeStack.push(ref);
+    return () => {
+      const i = escapeStack.lastIndexOf(ref);
+      if (i >= 0) escapeStack.splice(i, 1);
+      if (!escapeStack.length) document.removeEventListener("keydown", onEscapeKey, true);
     };
-    document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
   }, [active]);
 }
 
-// DeliverChoice — the notice is for a session saved on disk, so the owner
-// says what happens to it: wake the session now, or tell it when it is next
-// opened. Two answers of equal weight, in the place the gesture was made; no
-// default, and Escape backs out of the gesture.
-export function DeliverChoice({ name, onChoose, onCancel, phone, inline }) {
+// DeliverChoice — the gesture tells a session saved on disk, so its
+// confirmation IS the owner's answer about the notice: "<verb> and wake" or
+// "<verb>, notify when opened". Two answers of equal weight, in the place the
+// gesture was made, with no default and no second step after either; Escape
+// (or ✕) backs out of the gesture. Without onCancel there is nothing to back
+// out of (a new task's foot), so there is no ✕ either.
+export function DeliverChoice({ name, verb = "Notify", onChoose, onCancel, phone, inline, busy, autoFocus = true }) {
   const ref = useRef(null);
-  useEffect(() => { ref.current?.focus({ preventScroll: true }); }, []);
-  useEscape(true, onCancel);
+  useEffect(() => { if (autoFocus) ref.current?.focus({ preventScroll: true }); }, []);
+  useEscape(!!onCancel, () => onCancel?.());
+  const options = deliverOptions(verb, { state: "saved" });
   return (
     <div
       class={`tk-choice${inline ? " is-inline" : ""}${phone ? " is-phone" : ""}`}
@@ -92,22 +104,24 @@ export function DeliverChoice({ name, onChoose, onCancel, phone, inline }) {
     >
       <div class="tk-choice-q">
         <span><b>{name}</b> is saved</span>
-        <button type="button" class="tk-icon is-quiet" aria-label="Cancel" onClick={onCancel}><CloseIcon /></button>
+        {onCancel && <button type="button" class="tk-icon is-quiet" aria-label="Cancel" onClick={onCancel}><CloseIcon /></button>}
       </div>
       <div class="tk-choice-acts">
-        <button type="button" class="zl-ask-btn" onClick={() => onChoose("wake")}>Wake and notify</button>
-        <button type="button" class="zl-ask-btn" onClick={() => onChoose("hold")}>Notify when opened</button>
+        {options.map((o) => (
+          <button key={o.choice} type="button" class="zl-ask-btn" disabled={busy} onClick={() => onChoose(o.choice)}>{o.label}</button>
+        ))}
       </div>
     </div>
   );
 }
 
 // useNotifyGesture — run a gesture that tells a session. When that session is
-// saved it first asks (DeliverChoice); otherwise it runs at once, with no
-// delivery choice at all.
+// saved, the gesture's one confirmation is DeliverChoice ("<verb> and wake" /
+// "<verb>, notify when opened"); otherwise it runs at once, with no delivery
+// choice at all.
 export function useNotifyGesture() {
   const [pending, setPending] = useState(null);
-  const run = (recipient, perform) => startNotifyGesture(recipient, perform, () => setPending({ recipient, perform }));
+  const run = (recipient, perform, verb = "Notify") => startNotifyGesture(recipient, perform, () => setPending({ recipient, perform, verb }));
   const cancel = () => setPending(null);
   const choose = (choice) => {
     const p = pending;
@@ -117,7 +131,10 @@ export function useNotifyGesture() {
   return { pending, run, cancel, choose };
 }
 
-export function CompleteNote({ who, onCancel, onDone, inline, phone, preset = "", busy }) {
+// CompleteNote — Done with an optional note. When the session that hears it
+// is saved, Done itself becomes the two answers (DeliverChoice's labels), so
+// the note and the wake/hold choice are one line of decision, not two.
+export function CompleteNote({ who, saved = false, onCancel, onDone, inline, phone, preset = "", busy }) {
   const [note, setNote] = useState(preset);
   const ref = useRef(null);
   useEffect(() => { ref.current?.focus({ preventScroll: true }); }, []);
@@ -133,15 +150,30 @@ export function CompleteNote({ who, onCancel, onDone, inline, phone, preset = ""
         value={note}
         onInput={(e) => setNote(e.currentTarget.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.altKey || e.ctrlKey)) { e.preventDefault(); onDone(note); }
+          // A saved session has no default answer, so ⌘↵ does nothing there.
+          if (e.key === "Enter" && (e.metaKey || e.altKey || e.ctrlKey) && !saved) { e.preventDefault(); onDone(note, null); }
         }}
       />
-      <div class="tk-note-acts">
-        <button type="button" class="zl-ask-btn is-quiet" onClick={onCancel}>Cancel</button>
-        <button type="button" class="zl-ask-btn is-primary" disabled={busy} onClick={() => onDone(note)}>
-          Done{!phone && <Keycap>{MOD_ENTER}</Keycap>}
-        </button>
-      </div>
+      {saved ? (
+        <>
+          <div class="tk-choice-q"><span><b>{who}</b> is saved</span></div>
+          <div class="tk-choice-acts">
+            {deliverOptions("Done", { state: "saved" }).map((o) => (
+              <button key={o.choice} type="button" class="zl-ask-btn" disabled={busy} onClick={() => onDone(note, o.choice)}>{o.label}</button>
+            ))}
+          </div>
+          <div class="tk-note-acts">
+            <button type="button" class="zl-ask-btn is-quiet" onClick={onCancel}>Cancel</button>
+          </div>
+        </>
+      ) : (
+        <div class="tk-note-acts">
+          <button type="button" class="zl-ask-btn is-quiet" onClick={onCancel}>Cancel</button>
+          <button type="button" class="zl-ask-btn is-primary" disabled={busy} onClick={() => onDone(note, null)}>
+            Done{!phone && <Keycap>{MOD_ENTER}</Keycap>}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -150,62 +182,86 @@ function failed(title, error) {
   addToast({ title, detail: errorText(error), type: "error" });
 }
 
-// CompletionFlow — completing a task that tells someone: a request asks for
-// an optional note first; then, if the session to tell is saved, the owner
-// picks wake or hold. The task is read fresh first, for its revision and for
-// whether that session is loaded right now.
+// CompletionFlow — completing a task that tells someone. The task is read
+// fresh at once (its revision, and whether the session to tell is loaded right
+// now), while a request already shows its note. When that session is saved,
+// the confirmation is the wake/hold answer itself: one line of decision.
 export function CompletionFlow({ task, sessions, phone, inline, preset, onDone, onCancel }) {
   const request = isRequest(task);
-  const [stage, setStage] = useState(request ? "note" : "loading");
+  const [fresh, setFresh] = useState(null);
   const [busy, setBusy] = useState(false);
-  const note = useRef(preset || "");
-  const rec = useRef(null);
+  const loading = useRef(null);
+  const read = () => {
+    if (!loading.current) {
+      loading.current = loadTask(task.id).then((rec) => {
+        if (rec) setFresh(rec);
+        return rec;
+      });
+    }
+    return loading.current;
+  };
+  useEffect(() => { read(); }, []);
 
-  const finish = async (choice) => {
+  const recipient = recipientFor(fresh || task, sessions);
+  const saved = needsDeliverChoice(recipient);
+
+  const finish = async (note, choice) => {
     setBusy(true);
+    const rec = await read();
+    if (!rec) {
+      addToast({ title: "Could not complete the task", detail: "It is no longer available.", type: "error" });
+      onCancel?.();
+      return;
+    }
+    // Answered before the fresh read said the session is saved: never pick
+    // for the owner. Stay, now showing the two answers.
+    if (choice == null && needsDeliverChoice(recipientFor(rec, sessions))) {
+      setBusy(false);
+      return;
+    }
     try {
-      await patchTask(rec.current.id, completePatch(rec.current, { note: note.current, choice }));
+      await patchTask(rec.id, completePatch(rec, { note, choice }));
       onDone?.();
     } catch (error) {
       failed("Could not complete the task", error);
       onCancel?.();
     }
   };
-  const proceed = async () => {
-    setBusy(true);
-    const fresh = await loadTask(task.id);
-    if (!fresh) {
-      addToast({ title: "Could not complete the task", detail: "It is no longer available.", type: "error" });
-      onCancel?.();
-      return;
-    }
-    rec.current = fresh;
-    if (needsDeliverChoice(recipientFor(fresh, sessions))) {
-      setBusy(false);
-      setStage("choice");
-      return;
-    }
-    finish(null);
-  };
-  useEffect(() => { if (!request) proceed(); }, []);
 
-  if (stage === "note") {
+  if (request) {
     return (
       <CompleteNote
         who={sessionName(sessions, task.requester_session_id)}
+        saved={saved}
         inline={inline}
         phone={phone}
         preset={preset}
         busy={busy}
         onCancel={onCancel}
-        onDone={(text) => { note.current = text; proceed(); }}
+        onDone={finish}
       />
     );
   }
-  if (stage === "choice") {
-    const r = recipientFor(rec.current, sessions);
-    return <DeliverChoice name={sessionName(sessions, r?.session_id)} inline={inline} phone={phone} onChoose={finish} onCancel={onCancel} />;
+  if (!fresh) return null;
+  if (saved) {
+    return (
+      <DeliverChoice
+        name={sessionName(sessions, recipient.session_id)}
+        verb="Done"
+        inline={inline}
+        phone={phone}
+        busy={busy}
+        onChoose={(choice) => finish("", choice)}
+        onCancel={onCancel}
+      />
+    );
   }
+  return <AutoRun run={() => finish("", null)} />;
+}
+
+// AutoRun — nothing to ask: the gesture runs once, as soon as it is known.
+function AutoRun({ run }) {
+  useEffect(() => { run(); }, []);
   return null;
 }
 
@@ -448,22 +504,25 @@ export function MoveList({ task, projects, sessions, phone, onPick, direct = fal
   const [q, setQ] = useState("");
   const [pending, setPending] = useState(pending0);
   const target = pending ? sessions[pending] : null;
-  const gesture = useNotifyGesture();
-  const confirm = () => {
-    if (!pending) return;
-    gesture.run({ session_id: pending, state: target?.state === "saved" ? "saved" : "live" }, (choice) => onPick({ place: "agent", sessionId: pending }, choice));
+  const savedTarget = needsDeliverChoice({ state: target?.state === "saved" ? "saved" : "live" });
+  // A loaded session: Assign and notify confirms. A saved one: the
+  // confirmation already offers wake or hold (DeliverChoice), nothing after.
+  const confirm = (choice = null) => {
+    if (!pending || (savedTarget && choice == null)) return;
+    onPick({ place: "agent", sessionId: pending }, choice);
   };
+  useEscape(!!pending && !direct, () => setPending(null));
   useEffect(() => {
     if (!pending || phone) return undefined;
     const onKey = (e) => {
-      if (e.key !== "Enter" || e.metaKey || e.altKey || gesture.pending) return;
+      if (e.key !== "Enter" || e.metaKey || e.altKey || savedTarget) return;
       if (String(e.target?.tagName).toUpperCase() === "BUTTON") return;
       e.preventDefault();
       confirm();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [pending, phone, gesture.pending]);
+  }, [pending, phone, savedTarget]);
   const Item = ({ dest, label, sub }) => (
     <button
       type="button"
@@ -501,10 +560,18 @@ export function MoveList({ task, projects, sessions, phone, onPick, direct = fal
       {q && list.length === 0 && <div class="tk-pop-none">No session matches.</div>}
       {pending && (
         <div class="tk-move-confirm">
-          {gesture.pending ? (
-            <DeliverChoice name={target?.title || "The session"} phone={phone} onChoose={gesture.choose} onCancel={gesture.cancel} />
+          {savedTarget ? (
+            <DeliverChoice
+              key={pending}
+              name={target?.title || "The session"}
+              verb="Assign"
+              phone={phone}
+              autoFocus={false}
+              onChoose={confirm}
+              onCancel={() => setPending(null)}
+            />
           ) : (
-            <button type="button" class="zl-ask-btn is-primary tk-wide" onClick={confirm}>
+            <button type="button" class="zl-ask-btn is-primary tk-wide" onClick={() => confirm(null)}>
               Assign and notify{!phone && <Keycap>↵</Keycap>}
             </button>
           )}

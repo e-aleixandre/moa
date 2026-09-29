@@ -49,7 +49,7 @@ const PANEL_ICONS = {
 // The pages that belong to the session's tasks: the list, a task, Move, and
 // a new task. They draw their own body (lists and the editor scroll on their
 // own, with the editor's foot pinned), so they are not wrapped like the rest.
-const TASK_PAGE_KINDS = new Set(["tasks", "task", "taskMove", "taskNew"]);
+const TASK_PAGE_KINDS = new Set(["tasks", "task", "taskMove", "taskDeps", "taskNew", "taskNewDeps"]);
 
 function BackIcon() {
   return (

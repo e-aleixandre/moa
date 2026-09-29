@@ -166,3 +166,52 @@ test("You lists requests above notes, agents stay behind their filter, done is f
   expect(groups[2].collapsed).toBe(true);
   expect(groupTasks(list, { agents: true }).map((g) => g.id)).toContain("agent:A");
 });
+
+// ── One line of decision for a saved session ────────────────────────────
+
+import { deliverOptions, depCandidates, nameTaskRefs, waitersOf } from "./tasks-model.js";
+
+test("a saved recipient's confirmation already is the wake/hold answer", () => {
+  const saved = deliverOptions("Assign", { session_id: "S", state: "saved" });
+  expect(saved.map((o) => o.choice)).toEqual(["wake", "hold"]);
+  expect(saved.map((o) => o.label)).toEqual(["Assign and wake", "Assign, notify when opened"]);
+  // No plain "notify" step is left to confirm before or after them.
+  expect(saved.some((o) => o.choice == null)).toBe(false);
+});
+
+test("a live recipient confirms once and never carries a delivery choice", () => {
+  expect(deliverOptions("Assign", { session_id: "S", state: "live" })).toEqual([{ choice: null, label: "Assign and notify" }]);
+  expect(deliverOptions("Done", { session_id: "S", state: "live" })[0].choice).toBeNull();
+});
+
+// ── Waits for never offers a cycle ──────────────────────────────────────
+
+test("the Waits for picker leaves out every task that already waits for this one, transitively", () => {
+  const records = [
+    T({ id: 1, title: "this" }),
+    T({ id: 2, title: "waits for 1", waits_for: [1] }),
+    T({ id: 3, title: "waits for 2", waits_for: [2] }),
+    T({ id: 4, title: "free" }),
+    T({ id: 5, title: "done", status: "done" }),
+    T({ id: 6, title: "already waited", }),
+  ];
+  expect([...waitersOf(1, records)].sort()).toEqual([2, 3]);
+  expect(depCandidates(1, records, [6]).map((t) => t.id)).toEqual([4]);
+});
+
+test("a waiter known only through a detail's unblocks is also left out", () => {
+  const records = [T({ id: 1, unblocks: [7] }), T({ id: 7 }), T({ id: 8, waits_for: [7] }), T({ id: 9 })];
+  expect(depCandidates(1, records).map((t) => t.id)).toEqual([9]);
+});
+
+test("a new task (no id yet) can wait for any open task", () => {
+  const records = [T({ id: 1 }), T({ id: 2, waits_for: [1] })];
+  expect(depCandidates(null, records).map((t) => t.id)).toEqual([1, 2]);
+});
+
+test("a server error about #8 names the task by its title", () => {
+  const lookup = (id) => (id === 8 ? { id: 8, title: "Deploy staging" } : null);
+  expect(nameTaskRefs("invalid task: waiting for #8 would close a dependency cycle", lookup))
+    .toBe("invalid task: waiting for “Deploy staging” would close a dependency cycle");
+  expect(nameTaskRefs("waiting for #9", lookup)).toBe("waiting for #9");
+});

@@ -2,11 +2,11 @@ import { useEffect, useMemo } from "preact/hooks";
 import { useStore } from "../../hooks/useStore.js";
 import { openSession } from "../../data/tile-actions.js";
 import { addToast } from "../../data/notifications.js";
-import { parsePanelPage, taskMovePanelPage, taskPanelPage } from "../../data/session-panel.js";
+import { parsePanelPage, taskDepsPanelPage, taskMovePanelPage, taskPanelPage } from "../../data/session-panel.js";
 import { loadTask, loadTaskProjects, patchTask, selectSessionDirectory, tasksSlice, watchSessionTasks } from "../../data/tasks.js";
 import { errorText, movePatch, projectOptions, sessionGroups } from "../../data/tasks-model.js";
 import { EmptyState, MoveList, TaskGroups, useRowChecks, completesInline } from "./parts.jsx";
-import { TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
+import { DepsPage, TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
 
 // SessionTasksPage — the session panel's Tasks pages. Tasks lists what this
 // session asked of you and its own checklist; a task opens as the next page,
@@ -55,8 +55,18 @@ export function SessionTasksPage({ session, page, sheet, goPage }) {
           isNew
           phone={sheet}
           newDest={{ place: "agent", sessionId: session.id }}
+          onPushDeps={sheet ? () => goPage("taskNewDeps") : undefined}
           onCreated={() => goPage("tasks")}
         />
+      </div>
+    );
+  }
+
+  if (kind === "taskDeps" || kind === "taskNewDeps") {
+    const back = kind === "taskDeps" ? () => goPage(taskPanelPage(id)) : () => goPage("taskNew");
+    return (
+      <div class="zl-panel-body is-sub tk-panel-body">
+        <DepsPage taskId={kind === "taskDeps" ? id : null} onBack={back} />
       </div>
     );
   }
@@ -95,6 +105,7 @@ export function SessionTasksPage({ session, page, sheet, goPage }) {
         onOpenTask={(tid) => goPage(taskPanelPage(tid))}
         onOpenSession={openOther}
         onPushMove={sheet ? () => goPage(taskMovePanelPage(id)) : undefined}
+        onPushDeps={sheet ? () => goPage(taskDepsPanelPage(id)) : undefined}
         onClose={() => goPage("tasks")}
       />
     </div>
