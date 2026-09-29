@@ -9,7 +9,8 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState, SESSION_PANEL_CLOSED } from '../data/store.js';
 import {
-  PANEL_PAGES, artifactsVerdict, closeSessionPanel, closeSessionPanelForSession, mcpVerdict,
+  PANEL_PAGES, artifactsVerdict, closeSessionPanel, closeSessionPanelForSession, isPanelPage, mcpVerdict,
+  panelPageTitle, parsePanelPage, sessionPanelBack, taskMovePanelPage, taskPanelPage,
   openSessionPanel, panelPageParent, runFacts, sessionPanelSlice, sessionPanelView,
   setSessionPanelPage, toggleSessionPanel, usageVerdict,
 } from '../data/session-panel.js';
@@ -190,4 +191,28 @@ test('the artifacts verdict counts files and never colours', () => {
   expect(artifactsVerdict(1, 'ready').text).toBe('1 file');
   expect(artifactsVerdict(3, 'ready')).toEqual({ text: '3 files', warn: false });
   expect(artifactsVerdict(0, 'loading').text).toBe('…');
+});
+
+test('Tasks → task → Move: back walks one level at a time to the root', () => {
+  expect(panelPageParent('tasks')).toBe('root');
+  expect(panelPageParent(taskPanelPage(12))).toBe('tasks');
+  expect(panelPageParent(taskMovePanelPage(12))).toBe('task:12');
+  expect(panelPageParent('taskNew')).toBe('tasks');
+
+  openSessionPanel('A', taskMovePanelPage(12));
+  const visited = [];
+  for (let back = sessionPanelBack(sessionPanelSlice(store.get()).page); back; back = sessionPanelBack(sessionPanelSlice(store.get()).page)) {
+    back();
+    visited.push(sessionPanelSlice(store.get()).page);
+  }
+  expect(visited).toEqual(['task:12', 'tasks', 'root']);
+  expect(sessionPanelSlice(store.get()).open).toBe(true);
+});
+
+test('task pages carry their id, are valid pages and are titled', () => {
+  expect(parsePanelPage('taskMove:7')).toEqual({ kind: 'taskMove', id: 7 });
+  expect(isPanelPage('task:7')).toBe(true);
+  expect(isPanelPage('task:x')).toBe(false);
+  expect(panelPageTitle('task:7')).toBe('Task');
+  expect(panelPageTitle('taskMove:7')).toBe('Move to');
 });
